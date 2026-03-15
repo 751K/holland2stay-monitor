@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+{% block title %}统计图表 · Holland2Stay{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block extra_style %}
+.chart-card  { border: 1px solid var(--h2s-border); background: var(--h2s-bg-surface);
+               border-radius: .5rem; }
+.chart-title { font-size: .75rem; font-weight: 700; text-transform: uppercase;
+               letter-spacing: .08em; color: var(--h2s-muted); margin-bottom: .5rem; }
+.chart-wrap  { position: relative; }
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h5 class="fw-bold mb-0"><i class="bi bi-bar-chart-line me-2 text-info"></i>数据统计</h5>
+  <div class="d-flex align-items-center gap-2">
+    <span class="text-muted small">时间范围：</span>
+    <select id="days-select" class="form-select form-select-sm" style="width:auto;"
+            onchange="loadCharts(this.value)">
+      <option value="7">近 7 天</option>
+      <option value="30" selected>近 30 天</option>
+      <option value="90">近 90 天</option>
+    </select>
+  </div>
+</div>
+
+<!-- 顶部 KPI 卡片 -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-lg-3">
+    <div class="card stat-card h-100 p-3">
+      <div class="stat-number text-body-emphasis">{{ total }}</div>
+      <div class="stat-label mt-1">数据库房源</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card stat-card h-100 p-3">
+      <div class="stat-number text-success">{{ new_24h }}</div>
+      <div class="stat-label mt-1">今日新增</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card stat-card h-100 p-3">
+      <div class="stat-number text-primary">{{ new_7d }}</div>
+      <div class="stat-label mt-1">近 7 天新增</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card stat-card h-100 p-3">
+      <div class="stat-number text-warning">{{ changes_24h }}</div>
+      <div class="stat-label mt-1">今日状态变更</div>
+    </div>
+  </div>
+</div>
+
+<!-- 趋势折线图：新增 + 变更 -->
+<div class="row g-4 mb-4">
+  <div class="col-12 col-xl-7">
+    <div class="chart-card p-3 h-100">
+      <div class="chart-title"><i class="bi bi-graph-up me-1 text-success"></i>新增房源趋势</div>
+      <div class="chart-wrap" style="height:220px;">
+        <canvas id="chartDailyNew"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-xl-5">
+    <div class="chart-card p-3 h-100">
+      <div class="chart-title"><i class="bi bi-arrow-left-right me-1 text-warning"></i>状态变更趋势</div>
+      <div class="chart-wrap" style="height:220px;">
+        <canvas id="chartDailyChanges"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 分布图：城市 + 状态 + 价格 -->
+<div class="row g-4">
+  <div class="col-12 col-md-4">
+    <div class="chart-card p-3 h-100">
+      <div class="chart-title"><i class="bi bi-geo-alt me-1 text-info"></i>城市分布</div>
+      <div class="chart-wrap" style="height:220px;">
+        <canvas id="chartCity"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-4">
+    <div class="chart-card p-3 h-100">
+      <div class="chart-title"><i class="bi bi-tag me-1 text-primary"></i>状态分布</div>
+      <div class="chart-wrap" style="height:220px;">
+        <canvas id="chartStatus"></canvas>
+      </div>
+    </div>
+  </div>
+  <div class="col-12 col-md-4">
+    <div class="chart-card p-3 h-100">
+      <div class="chart-title"><i class="bi bi-currency-euro me-1 text-success"></i>租金分布</div>
+      <div class="chart-wrap" style="height:220px;">
+        <canvas id="chartPrice"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ─── 主题感知颜色工具 ───────────────────────────────────────────────
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function themeColors() {
+  const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+  return {
+    text:    cssVar('--h2s-text')    || (isDark ? '#e6edf3' : '#1f2328'),
+    muted:   cssVar('--h2s-muted')   || (isDark ? '#8b949e' : '#656d76'),
+    border:  cssVar('--h2s-border')  || (isDark ? '#30363d' : '#d0d7de'),
+    surface: cssVar('--h2s-bg-surface') || (isDark ? '#161b22' : '#ffffff'),
+  };
+}
+
+// Bootstrap 调色板
+const PALETTE = [
+  '#2da44e','#388bfd','#e3b341','#f78166','#a5d6ff',
+  '#56d364','#ffa657','#ff7b72','#79c0ff','#d2a8ff',
+];
+
+// 状态 → 颜色
+function statusColor(s) {
+  const sl = (s || '').toLowerCase();
+  if (sl.includes('book'))    return '#2da44e';
+  if (sl.includes('lottery')) return '#e3b341';
+  return '#8b949e';
+}
+
+// ─── Chart 实例管理 ─────────────────────────────────────────────────
+const charts = {};
+
+function destroyChart(id) {
+  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+}
+
+// ─── 折线图 ─────────────────────────────────────────────────────────
+function buildLineChart(id, label, data, color) {
+  destroyChart(id);
+  const c = themeColors();
+
+  // 填充空白日期
+  const dateMap = {};
+  data.forEach(d => { dateMap[d.date] = d.count; });
+
+  Chart.defaults.color = c.muted;
+  charts[id] = new Chart(document.getElementById(id), {
+    type: 'line',
+    data: {
+      labels: data.map(d => d.date),
+      datasets: [{
+        label,
+        data: data.map(d => d.count),
+        borderColor: color,
+        backgroundColor: color + '22',
+        fill: true,
+        tension: 0.35,
+        pointRadius: data.length > 20 ? 2 : 4,
+        pointHoverRadius: 6,
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: c.surface,
+          titleColor: c.muted,
+          bodyColor: c.text,
+          borderColor: c.border,
+          borderWidth: 1,
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: c.border + '55' },
+          ticks: {
+            color: c.muted,
+            maxTicksLimit: 8,
+            font: { size: 11 },
+          },
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: c.border + '55' },
+          ticks: {
+            color: c.muted,
+            precision: 0,
+            font: { size: 11 },
+          },
+        },
+      },
+    },
+  });
+}
+
+// ─── 环形图 ─────────────────────────────────────────────────────────
+function buildDoughnutChart(id, labels, data, colors) {
+  destroyChart(id);
+  const c = themeColors();
+  Chart.defaults.color = c.muted;
+  charts[id] = new Chart(document.getElementById(id), {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: colors,
+        borderColor: c.surface,
+        borderWidth: 3,
+        hoverOffset: 8,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '62%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: {
+            color: c.text,
+            boxWidth: 10,
+            padding: 10,
+            font: { size: 11 },
+          },
+        },
+        tooltip: {
+          backgroundColor: c.surface,
+          titleColor: c.muted,
+          bodyColor: c.text,
+          borderColor: c.border,
+          borderWidth: 1,
+        },
+      },
+    },
+  });
+}
+
+// ─── 条形图 ─────────────────────────────────────────────────────────
+function buildBarChart(id, labels, data, color) {
+  destroyChart(id);
+  const c = themeColors();
+  Chart.defaults.color = c.muted;
+  charts[id] = new Chart(document.getElementById(id), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: color + 'bb',
+        borderColor: color,
+        borderWidth: 1,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: c.surface,
+          titleColor: c.muted,
+          bodyColor: c.text,
+          borderColor: c.border,
+          borderWidth: 1,
+        },
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: c.muted, font: { size: 11 } },
+        },
+        y: {
+          beginAtZero: true,
+          grid: { color: c.border + '55' },
+          ticks: { color: c.muted, precision: 0, font: { size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+// ─── 数据加载 & 渲染 ────────────────────────────────────────────────
+let _cachedData = null;
+
+function renderCharts(d) {
+  if (!d) return;
+  _cachedData = d;
+
+  buildLineChart('chartDailyNew',     '新增房源', d.daily_new,     '#2da44e');
+  buildLineChart('chartDailyChanges', '状态变更', d.daily_changes, '#e3b341');
+
+  // 城市分布
+  const cityLabels = d.city_dist.map(r => r.city);
+  const cityCounts = d.city_dist.map(r => r.count);
+  buildDoughnutChart('chartCity', cityLabels, cityCounts,
+    PALETTE.slice(0, cityLabels.length));
+
+  // 状态分布
+  const stLabels = d.status_dist.map(r => r.status);
+  const stCounts = d.status_dist.map(r => r.count);
+  buildDoughnutChart('chartStatus', stLabels, stCounts,
+    stLabels.map(statusColor));
+
+  // 价格分布
+  const prLabels = d.price_dist.map(r => r.range);
+  const prCounts = d.price_dist.map(r => r.count);
+  buildBarChart('chartPrice', prLabels, prCounts, '#388bfd');
+}
+
+function loadCharts(days) {
+  fetch('/api/charts?days=' + (days || 30))
+    .then(r => r.json())
+    .then(d => renderCharts(d))
+    .catch(err => console.error('图表数据加载失败:', err));
+}
+
+// 页面加载
+loadCharts(30);
+
+// ─── 主题变更时重绘 ─────────────────────────────────────────────────
+new MutationObserver(mutations => {
+  for (const m of mutations) {
+    if (m.attributeName === 'data-bs-theme') {
+      renderCharts(_cachedData);
+    }
+  }
+}).observe(document.documentElement, { attributes: true });
+</script>
+{% endblock %}

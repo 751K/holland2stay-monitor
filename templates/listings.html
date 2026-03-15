@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}房源列表 · Holland2Stay{% endblock %}
+
+{% block content %}
+
+<!-- 过滤栏 -->
+<form method="get" class="row g-2 mb-4 align-items-end">
+  <div class="col-12 col-sm-5 col-lg-3">
+    <label class="form-label small text-muted mb-1">状态</label>
+    <select name="status" class="form-select form-select-sm">
+      <option value="">全部状态</option>
+      {% for s in statuses %}
+        <option value="{{ s }}" {% if s == status_filter %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-12 col-sm-5 col-lg-4">
+    <label class="form-label small text-muted mb-1">搜索（名称 / 城市）</label>
+    <input type="text" name="q" class="form-control form-control-sm"
+           placeholder="e.g. Strijp" value="{{ search }}">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-sm btn-primary">筛选</button>
+    {% if status_filter or search %}
+      <a href="{{ url_for('listings') }}" class="btn btn-sm btn-outline-secondary ms-1">清除</a>
+    {% endif %}
+  </div>
+  <div class="col-auto ms-auto align-self-end">
+    <span class="text-muted small">共 {{ listings | length }} 条</span>
+  </div>
+</form>
+
+<!-- 房源表格 -->
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover mb-0">
+      <thead>
+        <tr>
+          <th>房源名称</th>
+          <th>状态</th>
+          <th>租金</th>
+          <th>面积</th>
+          <th>楼层</th>
+          <th>户型</th>
+          <th>入住</th>
+          <th>可入住</th>
+          <th>城市</th>
+          <th>首次发现</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for l in listings %}
+        {% set fm = l.features | parse_features %}
+        <tr>
+          <td>
+            <a href="{{ l.url }}" target="_blank" class="fw-medium">{{ l.name }}</a>
+          </td>
+          <td>
+            <span class="badge bg-{{ status_badge(l.status) }}">{{ l.status }}</span>
+          </td>
+          <td class="text-nowrap">{{ l.price_raw | price_short }}</td>
+          <td class="text-nowrap text-muted small">{{ fm.area or '—' }}</td>
+          <td class="text-muted small">{{ fm.floor or '—' }}</td>
+          <td class="text-muted small">{{ fm.type or '—' }}</td>
+          <td class="text-muted small text-nowrap">{{ fm.occupancy or '—' }}</td>
+          <td class="text-muted small text-nowrap">{{ l.available_from or '—' }}</td>
+          <td class="text-muted small">{{ l.city or '—' }}</td>
+          <td class="text-muted small text-nowrap">{{ l.first_seen | time_ago }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="10" class="text-center text-muted py-5">暂无房源数据</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

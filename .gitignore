@@ -1,0 +1,15 @@
+# environment variables
+.env
+
+# python cache
+__pycache__/
+*.pyc
+
+# data
+data/
+
+# tool config
+.claude/
+
+# mac
+.DS_Store

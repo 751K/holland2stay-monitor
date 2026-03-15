@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="zh" data-bs-theme="dark">
+<head>
+  <!-- Anti-FOUC -->
+  <script>
+    (function () {
+      var t = localStorage.getItem('h2s-theme');
+      if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-bs-theme', t);
+    })();
+  </script>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · Holland2Stay 监控</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+  <style>
+    :root, [data-bs-theme="dark"] {
+      --h2s-bg-body:    #0d1117;
+      --h2s-bg-surface: #161b22;
+      --h2s-bg-raised:  #1c2128;
+      --h2s-border:     #30363d;
+      --h2s-muted:      #8b949e;
+      --h2s-text:       #e6edf3;
+      --h2s-link:       #58a6ff;
+    }
+    [data-bs-theme="light"] {
+      --h2s-bg-body:    #f6f8fa;
+      --h2s-bg-surface: #ffffff;
+      --h2s-bg-raised:  #f6f8fa;
+      --h2s-border:     #d0d7de;
+      --h2s-muted:      #656d76;
+      --h2s-text:       #1f2328;
+      --h2s-link:       #0969da;
+    }
+
+    body {
+      background: var(--h2s-bg-body);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .login-card {
+      width: 100%;
+      max-width: 380px;
+      background: var(--h2s-bg-surface);
+      border: 1px solid var(--h2s-border);
+      border-radius: .75rem;
+      padding: 2rem 2rem 1.75rem;
+    }
+
+    .login-logo {
+      width: 44px; height: 44px;
+      background: linear-gradient(135deg, #388bfd 0%, #1a7ae8 100%);
+      border-radius: .5rem;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.3rem; color: #fff;
+      margin: 0 auto 1rem;
+    }
+
+    .login-title {
+      font-size: 1.1rem; font-weight: 700;
+      color: var(--h2s-text);
+      text-align: center; margin-bottom: .25rem;
+    }
+
+    .login-sub {
+      font-size: .75rem; color: var(--h2s-muted);
+      text-align: center; margin-bottom: 1.5rem;
+    }
+
+    .form-label {
+      font-size: .78rem; font-weight: 600;
+      color: var(--h2s-muted); margin-bottom: .3rem;
+    }
+
+    .form-control {
+      background: var(--h2s-bg-raised);
+      border: 1px solid var(--h2s-border);
+      color: var(--h2s-text);
+      font-size: .875rem;
+    }
+    .form-control:focus {
+      background: var(--h2s-bg-raised);
+      border-color: #388bfd;
+      color: var(--h2s-text);
+      box-shadow: 0 0 0 3px rgba(56,139,253,.15);
+    }
+
+    [data-bs-theme="light"] .form-control {
+      background: #fff;
+      border-color: var(--h2s-border);
+      color: var(--h2s-text);
+    }
+    [data-bs-theme="light"] .form-control:focus {
+      background: #fff;
+      border-color: #0969da;
+      box-shadow: 0 0 0 3px rgba(9,105,218,.12);
+    }
+
+    .btn-login {
+      background: #238636;
+      border-color: #238636;
+      font-weight: 600; font-size: .875rem;
+      width: 100%; padding: .5rem;
+    }
+    .btn-login:hover { background: #2ea043; border-color: #2ea043; }
+
+    .divider {
+      border-top: 1px solid var(--h2s-border);
+      margin: 1.25rem 0 1rem;
+    }
+
+    .footer-note {
+      font-size: .7rem; color: var(--h2s-muted);
+      text-align: center; line-height: 1.5;
+    }
+
+    /* 主题切换按钮 */
+    .theme-toggle-btn {
+      position: fixed; top: 1rem; right: 1rem;
+      background: var(--h2s-bg-surface);
+      border: 1px solid var(--h2s-border);
+      color: var(--h2s-muted);
+      border-radius: .375rem;
+      width: 2rem; height: 2rem;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; font-size: .9rem; transition: all .15s;
+    }
+    .theme-toggle-btn:hover { color: var(--h2s-text); }
+
+    /* 输入框密码眼睛 */
+    .input-pw-wrap { position: relative; }
+    .input-pw-wrap .form-control { padding-right: 2.5rem; }
+    .pw-eye {
+      position: absolute; right: .7rem; top: 50%; transform: translateY(-50%);
+      cursor: pointer; color: var(--h2s-muted); font-size: .95rem;
+      transition: color .15s;
+    }
+    .pw-eye:hover { color: var(--h2s-text); }
+  </style>
+</head>
+<body>
+
+<!-- 主题切换 -->
+<button class="theme-toggle-btn" onclick="toggleTheme()" title="切换主题">
+  <i id="theme-icon" class="bi bi-sun"></i>
+</button>
+
+<div class="login-card">
+  <div class="login-logo"><i class="bi bi-house-door-fill"></i></div>
+  <div class="login-title">Holland2Stay 监控</div>
+  <div class="login-sub">请登录以继续访问</div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+      <div class="alert alert-{{ cat }} py-2 px-3 mb-3" style="font-size:.8rem;" role="alert">
+        <i class="bi bi-exclamation-circle me-1"></i>{{ msg }}
+      </div>
+    {% endfor %}
+  {% endwith %}
+
+  <form method="POST" action="{{ url_for('login') }}" autocomplete="on">
+    <input type="hidden" name="next" value="{{ next }}">
+
+    <div class="mb-3">
+      <label for="username" class="form-label">用户名</label>
+      <input id="username" type="text" name="username" class="form-control"
+             placeholder="admin" autocomplete="username" required autofocus>
+    </div>
+
+    <div class="mb-4">
+      <label for="password" class="form-label">密码</label>
+      <div class="input-pw-wrap">
+        <input id="password" type="password" name="password" class="form-control"
+               placeholder="••••••••" autocomplete="current-password" required>
+        <i class="bi bi-eye pw-eye" id="pw-eye" onclick="togglePw()"></i>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-success btn-login">
+      <i class="bi bi-box-arrow-in-right me-1"></i>登录
+    </button>
+  </form>
+
+  <div class="divider"></div>
+  <div class="footer-note">
+    通过 <code style="font-size:.68rem;">WEB_USERNAME</code> /
+    <code style="font-size:.68rem;">WEB_PASSWORD</code> 在 .env 中配置凭据
+  </div>
+</div>
+
+<script>
+  function _applyTheme(t) {
+    document.documentElement.setAttribute('data-bs-theme', t);
+    document.getElementById('theme-icon').className =
+      t === 'dark' ? 'bi bi-sun' : 'bi bi-moon';
+  }
+
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute('data-bs-theme') || 'dark';
+    const next = cur === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('h2s-theme', next);
+    _applyTheme(next);
+  }
+
+  function togglePw() {
+    const inp = document.getElementById('password');
+    const eye = document.getElementById('pw-eye');
+    if (inp.type === 'password') {
+      inp.type = 'text';
+      eye.className = 'bi bi-eye-slash pw-eye';
+    } else {
+      inp.type = 'password';
+      eye.className = 'bi bi-eye pw-eye';
+    }
+  }
+
+  // 同步主题图标
+  _applyTheme(document.documentElement.getAttribute('data-bs-theme') || 'dark');
+</script>
+</body>
+</html>

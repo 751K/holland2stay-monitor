@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}用户管理 · Holland2Stay{% endblock %}
+
+{% block extra_style %}
+.user-card { border: 1px solid var(--h2s-border); border-radius: .5rem;
+             background: var(--h2s-bg-surface); transition: border-color .15s; }
+.user-card:hover { border-color: #388bfd; }
+.user-card.disabled-user { opacity: .55; }
+.channel-badge { font-size: .68rem; padding: .2em .55em; }
+.filter-tag { font-size: .7rem; color: var(--h2s-muted); }
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h5 class="fw-bold mb-0"><i class="bi bi-people me-2"></i>用户管理</h5>
+  <a href="{{ url_for('user_new') }}" class="btn btn-primary btn-sm px-3">
+    <i class="bi bi-plus-lg me-1"></i>新增用户
+  </a>
+</div>
+
+{% if not users %}
+<div class="alert alert-warning d-flex align-items-start gap-3">
+  <i class="bi bi-exclamation-triangle fs-5 mt-1"></i>
+  <div>
+    <strong>暂无用户</strong><br>
+    点击「新增用户」添加第一个用户，配置通知渠道和房源过滤条件。<br>
+    <span class="small text-muted">提示：启动 monitor.py 时若 users.json 为空，会自动从 .env 迁移旧配置。</span>
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-3">
+{% for user in users %}
+<div class="col-12 col-lg-6">
+  <div class="user-card p-3 {% if not user.enabled %}disabled-user{% endif %}">
+
+    <!-- 用户头部 -->
+    <div class="d-flex align-items-start justify-content-between mb-2">
+      <div class="d-flex align-items-center gap-2">
+        <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold"
+             style="width:2.2rem;height:2.2rem;background:#21262d;font-size:.9rem;color:#8b949e;">
+          {{ user.name[0].upper() }}
+        </div>
+        <div>
+          <div class="fw-semibold">{{ user.name }}</div>
+          <div class="text-muted" style="font-size:.7rem;">ID: {{ user.id }}</div>
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-2">
+        {% if user.enabled %}
+          <span class="badge bg-success">启用</span>
+        {% else %}
+          <span class="badge bg-secondary">停用</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 通知渠道 -->
+    <div class="mb-2">
+      {% if not user.notifications_enabled %}
+        <span class="badge bg-danger channel-badge me-1">通知已关闭</span>
+      {% elif user.notification_channels %}
+        {% for ch in user.notification_channels %}
+          {% if ch == 'imessage' %}
+            <span class="badge bg-primary channel-badge me-1">
+              <i class="bi bi-apple me-1"></i>iMessage
+            </span>
+          {% elif ch == 'telegram' %}
+            <span class="badge bg-info text-dark channel-badge me-1">
+              <i class="bi bi-telegram me-1"></i>Telegram
+            </span>
+          {% elif ch == 'whatsapp' %}
+            <span class="badge bg-success channel-badge me-1">
+              <i class="bi bi-whatsapp me-1"></i>WhatsApp
+            </span>
+          {% else %}
+            <span class="badge bg-secondary channel-badge me-1">{{ ch }}</span>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <span class="text-muted small">无通知渠道</span>
+      {% endif %}
+    </div>
+
+    <!-- 过滤条件摘要 -->
+    <div class="mb-2 filter-tag">
+      {% set lf = user.listing_filter %}
+      {% if lf.is_empty() %}
+        <i class="bi bi-funnel me-1"></i>无过滤条件（所有房源均通知）
+      {% else %}
+        <i class="bi bi-funnel-fill me-1"></i>
+        {% if lf.max_rent %}€{{ lf.max_rent | int }}/月以下&nbsp;{% endif %}
+        {% if lf.min_area %}≥{{ lf.min_area | int }}m²&nbsp;{% endif %}
+        {% if lf.max_area %}≤{{ lf.max_area | int }}m²&nbsp;{% endif %}
+        {% if lf.min_floor %}≥{{ lf.min_floor }}层&nbsp;{% endif %}
+        {% if lf.allowed_types %}户型: {{ lf.allowed_types | join('/') }}&nbsp;{% endif %}
+        {% if lf.allowed_neighborhoods %}片区: {{ lf.allowed_neighborhoods | join('/') }}{% endif %}
+      {% endif %}
+    </div>
+
+    <!-- 自动预订状态 -->
+    <div class="mb-3 filter-tag">
+      {% if user.auto_book.enabled %}
+        <i class="bi bi-cart-check text-success me-1"></i>
+        自动预订已开启
+        {% if user.auto_book.dry_run %}
+          <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem;">试运行</span>
+        {% endif %}
+        {% if user.auto_book.email %}
+          · {{ user.auto_book.email }}
+        {% endif %}
+      {% else %}
+        <i class="bi bi-cart-x text-muted me-1"></i>自动预订未开启
+      {% endif %}
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <a href="{{ url_for('user_edit', user_id=user.id) }}"
+         class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-pencil me-1"></i>编辑
+      </a>
+      <button type="button" class="btn btn-outline-info btn-sm"
+              onclick="sendTestNotify('{{ user.id }}', '{{ user.name }}', this)"
+              {% if not user.notification_channels %}disabled title="未配置任何通知渠道"{% endif %}>
+        <i class="bi bi-send me-1"></i>测试通知
+      </button>
+      <form action="{{ url_for('user_toggle', user_id=user.id) }}" method="post" class="d-inline">
+        <button type="submit" class="btn btn-sm {% if user.enabled %}btn-outline-secondary{% else %}btn-outline-success{% endif %}">
+          <i class="bi bi-{% if user.enabled %}pause{% else %}play{% endif %}-fill me-1"></i>
+          {% if user.enabled %}停用{% else %}启用{% endif %}
+        </button>
+      </form>
+      <button type="button" class="btn btn-outline-danger btn-sm ms-auto"
+              onclick="confirmDelete('{{ user.id }}', '{{ user.name }}')">
+        <i class="bi bi-trash me-1"></i>删除
+      </button>
+    </div>
+
+  </div>
+</div>
+{% endfor %}
+</div>
+
+<!-- 删除确认弹窗 -->
+<div class="modal fade" id="deleteModal" tabindex="-1">
+  <div class="modal-dialog modal-sm">
+    <div class="modal-content border border-danger">
+      <div class="modal-header border-danger py-2">
+        <h6 class="modal-title text-danger">
+          <i class="bi bi-exclamation-triangle me-2"></i>确认删除
+        </h6>
+      </div>
+      <div class="modal-body py-3">
+        确定要删除用户 <strong id="deleteUserName"></strong> 吗？
+        <div class="text-muted small mt-1">此操作无法撤销。</div>
+      </div>
+      <div class="modal-footer border-0 py-2">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <form id="deleteForm" method="post">
+          <button type="submit" class="btn btn-danger btn-sm">确认删除</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+<!-- 通知测试 Toast -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:9999;">
+  <div id="testToast" class="toast align-items-center border-0" role="alert"
+       style="min-width:280px; background: var(--h2s-bg-surface); border: 1px solid var(--h2s-border) !important;">
+    <div class="d-flex">
+      <div class="toast-body" id="testToastBody" style="font-size:.82rem; color: var(--h2s-text);"></div>
+      <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="关闭"></button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function confirmDelete(userId, userName) {
+  document.getElementById('deleteUserName').textContent = userName;
+  document.getElementById('deleteForm').action = '/users/' + userId + '/delete';
+  new bootstrap.Modal(document.getElementById('deleteModal')).show();
+}
+
+function sendTestNotify(userId, userName, btn) {
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;"></span>发送中';
+
+  fetch('/users/' + userId + '/test', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      let html = '';
+      if (data.error && !data.results?.length) {
+        html = `<i class="bi bi-exclamation-circle text-warning me-1"></i><b>${userName}</b>：${data.error}`;
+      } else {
+        html = `<b>${userName}</b> 通知测试结果：<ul class="mb-0 mt-1 ps-3">`;
+        (data.results || []).forEach(r => {
+          const icon = r.ok
+            ? '<i class="bi bi-check-circle-fill text-success me-1"></i>'
+            : '<i class="bi bi-x-circle-fill text-danger me-1"></i>';
+          html += `<li>${icon}${r.channel}${r.error ? ' — <span class="text-danger">' + r.error + '</span>' : ''}</li>`;
+        });
+        html += '</ul>';
+      }
+      document.getElementById('testToastBody').innerHTML = html;
+      const toast = new bootstrap.Toast(document.getElementById('testToast'), { delay: 6000 });
+      toast.show();
+    })
+    .catch(e => {
+      document.getElementById('testToastBody').innerHTML =
+        `<i class="bi bi-exclamation-triangle text-danger me-1"></i>请求失败：${e.message}`;
+      new bootstrap.Toast(document.getElementById('testToast'), { delay: 5000 }).show();
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    });
+}
+</script>
+{% endblock %}

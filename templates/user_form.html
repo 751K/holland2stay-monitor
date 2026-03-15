@@ -1,0 +1,390 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Holland2Stay{% endblock %}
+
+{% block extra_style %}
+.section-title { font-size:.7rem; font-weight:700; text-transform:uppercase;
+                 letter-spacing:.1em; color:var(--h2s-muted); margin-bottom:.75rem; }
+.channel-card { border:2px solid var(--h2s-border); border-radius:.5rem; padding:1rem;
+                transition:border-color .15s; cursor:pointer; }
+.channel-card:has(input:checked) { border-color:#388bfd; background:var(--h2s-bg-raised); }
+.toggle-section { display:none; }
+{% endblock %}
+
+{% block content %}
+
+{% set u = user %}
+{% set is_edit = u is not none %}
+
+<!-- 面包屑 -->
+<nav aria-label="breadcrumb" class="mb-3">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{{ url_for('users_list') }}">用户管理</a></li>
+    <li class="breadcrumb-item active">{{ title }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h5 class="fw-bold mb-0">
+    <i class="bi bi-person-{% if is_edit %}gear{% else %}plus{% endif %} me-2"></i>{{ title }}
+  </h5>
+</div>
+
+<form method="post" action="{{ action }}">
+
+  <!-- ── 基本信息 ──────────────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header py-2 px-3">
+      <span class="fw-semibold"><i class="bi bi-person me-2 text-primary"></i>基本信息</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-12 col-sm-6">
+          <label class="form-label small text-muted">用户名称</label>
+          <input type="text" class="form-control form-control-sm" name="name" required
+                 value="{{ u.name if is_edit else '' }}" placeholder="例：Alice">
+        </div>
+        <div class="col-12 col-sm-6">
+          <label class="form-label small text-muted">账户状态</label>
+          <div class="form-check form-switch mt-2">
+            <input class="form-check-input" type="checkbox" id="enabled_chk"
+                   {% if not is_edit or u.enabled %}checked{% endif %}
+                   onchange="document.getElementById('enabled_h').value=this.checked?'true':'false'">
+            <label class="form-check-label" for="enabled_chk">启用此用户</label>
+            <input type="hidden" id="enabled_h" name="enabled"
+                   value="{{ 'true' if not is_edit or u.enabled else 'false' }}">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 通知渠道 ──────────────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header py-2 px-3">
+      <span class="fw-semibold"><i class="bi bi-bell me-2 text-primary"></i>通知渠道</span>
+    </div>
+    <div class="card-body">
+
+      <div class="mb-3">
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="notif_enabled"
+                 {% if not is_edit or u.notifications_enabled %}checked{% endif %}
+                 onchange="document.getElementById('notif_enabled_h').value=this.checked?'true':'false'">
+          <label class="form-check-label" for="notif_enabled">开启通知</label>
+          <input type="hidden" id="notif_enabled_h" name="NOTIFICATIONS_ENABLED"
+                 value="{{ 'true' if not is_edit or u.notifications_enabled else 'false' }}">
+        </div>
+      </div>
+
+      <div class="section-title mt-3">选择渠道（可多选）</div>
+      <input type="hidden" id="channels_hidden" name="NOTIFICATION_CHANNELS"
+             value="{{ u.notification_channels | join(',') if is_edit else '' }}">
+
+      <div class="row g-3 mb-3">
+
+        <!-- iMessage -->
+        <div class="col-12 col-md-4">
+          <label class="channel-card d-block" onclick="toggleChannel('imessage')">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <input type="checkbox" class="form-check-input channel-chk" data-ch="imessage"
+                     {% if is_edit and 'imessage' in u.notification_channels %}checked{% endif %}>
+              <span class="fw-semibold">iMessage</span>
+              <span class="badge bg-secondary ms-auto">macOS 专属</span>
+            </div>
+            <div class="text-muted small">通过 Messages.app 发送</div>
+          </label>
+          <div id="sec_imessage" class="toggle-section mt-2 px-1"
+               {% if is_edit and 'imessage' in u.notification_channels %}style="display:block"{% endif %}>
+            <label class="form-label small mb-1">收件人（手机号或 Apple ID）</label>
+            <input type="text" class="form-control form-control-sm" name="IMESSAGE_RECIPIENT"
+                   value="{{ u.imessage_recipient if is_edit else '' }}"
+                   placeholder="+31612345678">
+          </div>
+        </div>
+
+        <!-- Telegram -->
+        <div class="col-12 col-md-4">
+          <label class="channel-card d-block" onclick="toggleChannel('telegram')">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <input type="checkbox" class="form-check-input channel-chk" data-ch="telegram"
+                     {% if is_edit and 'telegram' in u.notification_channels %}checked{% endif %}>
+              <span class="fw-semibold">Telegram</span>
+              <span class="badge bg-info text-dark ms-auto">免费</span>
+            </div>
+            <div class="text-muted small">通过 Bot API 发送消息</div>
+          </label>
+          <div id="sec_telegram" class="toggle-section mt-2 px-1"
+               {% if is_edit and 'telegram' in u.notification_channels %}style="display:block"{% endif %}>
+            <label class="form-label small mb-1">Bot Token</label>
+            <input type="text" class="form-control form-control-sm mb-2" name="TELEGRAM_BOT_TOKEN"
+                   value="{{ u.telegram_token if is_edit else '' }}"
+                   placeholder="123456:ABC-DEF...">
+            <label class="form-label small mb-1">Chat ID</label>
+            <input type="text" class="form-control form-control-sm" name="TELEGRAM_CHAT_ID"
+                   value="{{ u.telegram_chat_id if is_edit else '' }}"
+                   placeholder="123456789">
+          </div>
+        </div>
+
+        <!-- WhatsApp -->
+        <div class="col-12 col-md-4">
+          <label class="channel-card d-block" onclick="toggleChannel('whatsapp')">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <input type="checkbox" class="form-check-input channel-chk" data-ch="whatsapp"
+                     {% if is_edit and 'whatsapp' in u.notification_channels %}checked{% endif %}>
+              <span class="fw-semibold">WhatsApp</span>
+              <span class="badge bg-warning text-dark ms-auto">Twilio 付费</span>
+            </div>
+            <div class="text-muted small">通过 Twilio REST API 发送</div>
+          </label>
+          <div id="sec_whatsapp" class="toggle-section mt-2 px-1"
+               {% if is_edit and 'whatsapp' in u.notification_channels %}style="display:block"{% endif %}>
+            <label class="form-label small mb-1">Account SID</label>
+            <input type="text" class="form-control form-control-sm mb-2" name="TWILIO_ACCOUNT_SID"
+                   value="{{ u.twilio_sid if is_edit else '' }}">
+            <label class="form-label small mb-1">Auth Token</label>
+            <input type="password" class="form-control form-control-sm mb-2" name="TWILIO_AUTH_TOKEN"
+                   value="{{ u.twilio_token if is_edit else '' }}">
+            <label class="form-label small mb-1">From</label>
+            <input type="text" class="form-control form-control-sm mb-2" name="TWILIO_FROM"
+                   value="{{ u.twilio_from if is_edit else 'whatsapp:+14155238886' }}"
+                   placeholder="whatsapp:+14155238886">
+            <label class="form-label small mb-1">To</label>
+            <input type="text" class="form-control form-control-sm" name="TWILIO_TO"
+                   value="{{ u.twilio_to if is_edit else '' }}"
+                   placeholder="whatsapp:+31612345678">
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 房源过滤条件 ──────────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header py-2 px-3">
+      <span class="fw-semibold"><i class="bi bi-funnel me-2 text-warning"></i>通知过滤条件</span>
+      <span class="text-muted small ms-2">留空 = 不限制，所有房源均通知</span>
+    </div>
+    <div class="card-body">
+      {% set lf = u.listing_filter if is_edit else none %}
+      <div class="row g-3">
+        <div class="col-6 col-sm-3">
+          <label class="form-label small text-muted">最高月租（€）</label>
+          <input type="number" class="form-control form-control-sm" name="MAX_RENT"
+                 value="{{ lf.max_rent | int if lf and lf.max_rent else '' }}"
+                 placeholder="1500">
+        </div>
+        <div class="col-6 col-sm-3">
+          <label class="form-label small text-muted">最小面积（m²）</label>
+          <input type="number" class="form-control form-control-sm" name="MIN_AREA"
+                 value="{{ lf.min_area | int if lf and lf.min_area else '' }}"
+                 placeholder="20">
+        </div>
+        <div class="col-6 col-sm-3">
+          <label class="form-label small text-muted">最大面积（m²）</label>
+          <input type="number" class="form-control form-control-sm" name="MAX_AREA"
+                 value="{{ lf.max_area | int if lf and lf.max_area else '' }}">
+        </div>
+        <div class="col-6 col-sm-3">
+          <label class="form-label small text-muted">最低楼层</label>
+          <input type="number" class="form-control form-control-sm" name="MIN_FLOOR"
+                 value="{{ lf.min_floor if lf and lf.min_floor is not none else '' }}"
+                 placeholder="0">
+        </div>
+        <div class="col-12 col-sm-4">
+          <label class="form-label small text-muted">允许入住类型</label>
+          <input type="text" class="form-control form-control-sm" name="ALLOWED_OCCUPANCY"
+                 value="{{ lf.allowed_occupancy | join(',') if lf and lf.allowed_occupancy else '' }}"
+                 placeholder="One,Two (only couples)">
+        </div>
+        <div class="col-12 col-sm-4">
+          <label class="form-label small text-muted">允许户型</label>
+          <input type="text" class="form-control form-control-sm" name="ALLOWED_TYPES"
+                 value="{{ lf.allowed_types | join(',') if lf and lf.allowed_types else '' }}"
+                 placeholder="Studio,1">
+        </div>
+        <div class="col-12 col-sm-4">
+          <label class="form-label small text-muted">允许片区</label>
+          <input type="text" class="form-control form-control-sm" name="ALLOWED_NEIGHBORHOODS"
+                 value="{{ lf.allowed_neighborhoods | join(',') if lf and lf.allowed_neighborhoods else '' }}"
+                 placeholder="Strijp,Centrum">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 自动预订 ──────────────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header py-2 px-3">
+      <span class="fw-semibold"><i class="bi bi-cart-check me-2 text-success"></i>自动预订</span>
+    </div>
+    <div class="card-body">
+      {% set ab = u.auto_book if is_edit else none %}
+      <div class="row g-3 mb-3">
+        <div class="col-auto">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="ab_enabled"
+                   {% if ab and ab.enabled %}checked{% endif %}
+                   onchange="document.getElementById('ab_enabled_h').value=this.checked?'true':'false'">
+            <label class="form-check-label" for="ab_enabled">开启自动预订</label>
+            <input type="hidden" id="ab_enabled_h" name="AUTO_BOOK_ENABLED"
+                   value="{{ 'true' if ab and ab.enabled else 'false' }}">
+          </div>
+        </div>
+        <div class="col-auto">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="ab_dry"
+                   {% if not ab or ab.dry_run %}checked{% endif %}
+                   onchange="document.getElementById('ab_dry_h').value=this.checked?'true':'false'">
+            <label class="form-check-label" for="ab_dry">
+              试运行模式
+              <span class="badge bg-warning text-dark ms-1">推荐先开启</span>
+            </label>
+            <input type="hidden" id="ab_dry_h" name="AUTO_BOOK_DRY_RUN"
+                   value="{{ 'false' if ab and not ab.dry_run else 'true' }}">
+          </div>
+        </div>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-sm-6">
+          <label class="form-label small text-muted">Holland2Stay 账号邮箱</label>
+          <input type="email" class="form-control form-control-sm" name="AUTO_BOOK_EMAIL"
+                 value="{{ ab.email if ab else '' }}">
+        </div>
+        <div class="col-12 col-sm-6">
+          <label class="form-label small text-muted">密码</label>
+          <input type="password" class="form-control form-control-sm" name="AUTO_BOOK_PASSWORD"
+                 value="{{ ab.password if ab else '' }}">
+        </div>
+      </div>
+
+      <div class="section-title mt-2">自动预订专用过滤（独立于通知过滤）</div>
+      {% set ab_lf = ab.listing_filter if ab else none %}
+      <div class="row g-3">
+        <div class="col-6 col-sm-3">
+          <label class="form-label small text-muted">最高月租（€）</label>
+          <input type="number" class="form-control form-control-sm" name="AUTO_BOOK_MAX_RENT"
+                 value="{{ ab_lf.max_rent | int if ab_lf and ab_lf.max_rent else '' }}">
+        </div>
+        <div class="col-6 col-sm-3">
+          <label class="form-label small text-muted">最小面积（m²）</label>
+          <input type="number" class="form-control form-control-sm" name="AUTO_BOOK_MIN_AREA"
+                 value="{{ ab_lf.min_area | int if ab_lf and ab_lf.min_area else '' }}">
+        </div>
+        <div class="col-6 col-sm-3">
+          <label class="form-label small text-muted">最低楼层</label>
+          <input type="number" class="form-control form-control-sm" name="AUTO_BOOK_MIN_FLOOR"
+                 value="{{ ab_lf.min_floor if ab_lf and ab_lf.min_floor is not none else '' }}">
+        </div>
+        <div class="col-6 col-sm-3">
+          <label class="form-label small text-muted">允许入住类型</label>
+          <input type="text" class="form-control form-control-sm" name="AUTO_BOOK_ALLOWED_OCCUPANCY"
+                 value="{{ ab_lf.allowed_occupancy | join(',') if ab_lf and ab_lf.allowed_occupancy else '' }}">
+        </div>
+        <div class="col-12 col-sm-6">
+          <label class="form-label small text-muted">允许户型</label>
+          <input type="text" class="form-control form-control-sm" name="AUTO_BOOK_ALLOWED_TYPES"
+                 value="{{ ab_lf.allowed_types | join(',') if ab_lf and ab_lf.allowed_types else '' }}">
+        </div>
+        <div class="col-12 col-sm-6">
+          <label class="form-label small text-muted">允许片区</label>
+          <input type="text" class="form-control form-control-sm" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS"
+                 value="{{ ab_lf.allowed_neighborhoods | join(',') if ab_lf and ab_lf.allowed_neighborhoods else '' }}">
+        </div>
+      </div>
+
+      <div class="alert alert-secondary mt-3 py-2 small mb-0">
+        <i class="bi bi-shield-check me-1 text-success"></i>
+        安全设计：自动预订只执行到「加入购物车」，不会自动付款。完成后通知你确认。
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <button type="submit" class="btn btn-primary px-4">
+      <i class="bi bi-save me-1"></i>{{ '保存修改' if is_edit else '创建用户' }}
+    </button>
+    <a href="{{ url_for('users_list') }}" class="btn btn-outline-secondary">取消</a>
+    {% if is_edit %}
+    <button type="button" class="btn btn-outline-info btn-sm"
+            id="testBtn"
+            onclick="sendTestNotify('{{ u.id }}', this)">
+      <i class="bi bi-send me-1"></i>发送测试通知
+    </button>
+    <!-- 测试结果内联显示 -->
+    <div id="testResult" class="w-100 mt-2" style="display:none;"></div>
+    <span class="text-muted small ms-auto">
+      <i class="bi bi-info-circle me-1"></i>保存后点击「立即生效」按钮通知 monitor.py 热重载。
+    </span>
+    {% endif %}
+  </div>
+
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateChannelsInput() {
+  const checked = [...document.querySelectorAll('.channel-chk:checked')].map(el => el.dataset.ch);
+  document.getElementById('channels_hidden').value = checked.join(',');
+}
+
+function toggleChannel(ch) {
+  const chk = document.querySelector(`.channel-chk[data-ch="${ch}"]`);
+  const sec = document.getElementById(`sec_${ch}`);
+  setTimeout(() => {
+    sec.style.display = chk.checked ? 'block' : 'none';
+    updateChannelsInput();
+  }, 0);
+}
+
+document.getElementById('notif_enabled').addEventListener('change', function() {
+  document.getElementById('notif_enabled_h').value = this.checked ? 'true' : 'false';
+});
+
+updateChannelsInput();
+
+function sendTestNotify(userId, btn) {
+  const origHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;"></span>发送中…';
+
+  const resultDiv = document.getElementById('testResult');
+  resultDiv.style.display = 'none';
+
+  fetch('/users/' + userId + '/test', { method: 'POST' })
+    .then(r => r.json())
+    .then(data => {
+      let rows = '';
+      if (data.error && !data.results?.length) {
+        rows = `<span class="text-warning"><i class="bi bi-exclamation-circle me-1"></i>${data.error}</span>`;
+      } else {
+        rows = (data.results || []).map(r => {
+          const icon = r.ok
+            ? '<i class="bi bi-check-circle-fill text-success me-1"></i>'
+            : '<i class="bi bi-x-circle-fill text-danger me-1"></i>';
+          const err = r.error ? ` <span class="text-danger small">— ${r.error}</span>` : '';
+          return `<div class="mb-1">${icon}<span class="small">${r.channel}${err}</span></div>`;
+        }).join('');
+      }
+      resultDiv.innerHTML = `
+        <div class="p-2 rounded" style="background:var(--h2s-bg-raised);border:1px solid var(--h2s-border);">
+          <div class="small fw-semibold mb-1" style="color:var(--h2s-muted);">
+            <i class="bi bi-bell me-1"></i>测试结果
+          </div>
+          ${rows}
+        </div>`;
+      resultDiv.style.display = 'block';
+    })
+    .catch(e => {
+      resultDiv.innerHTML = `<div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>请求失败：${e.message}</div>`;
+      resultDiv.style.display = 'block';
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    });
+}
+</script>
+{% endblock %}

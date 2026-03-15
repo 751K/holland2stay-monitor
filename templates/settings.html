@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}设置 · Holland2Stay{% endblock %}
+
+{% block extra_style %}
+.section-title { font-size:.7rem; font-weight:700; text-transform:uppercase;
+                 letter-spacing:.1em; color:var(--h2s-muted); margin-bottom:.75rem; }
+{% endblock %}
+
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h5 class="fw-bold mb-0"><i class="bi bi-gear me-2"></i>全局设置</h5>
+  <span class="text-muted small">影响所有用户的抓取行为</span>
+</div>
+
+<!-- 提示条 -->
+<div class="alert alert-secondary d-flex align-items-center gap-2 py-2 mb-4">
+  <i class="bi bi-people text-primary"></i>
+  <span class="small">
+    通知渠道、过滤条件和自动预订请前往
+    <a href="{{ url_for('users_list') }}" class="fw-semibold">用户管理</a>
+    页面按用户独立配置。
+  </span>
+</div>
+
+<form method="post">
+
+  <!-- ── 抓取配置 ─────────────────────────────── -->
+  <div class="card mb-4">
+    <div class="card-header py-2 px-3">
+      <span class="fw-semibold"><i class="bi bi-clock me-2 text-info"></i>抓取配置</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-6">
+          <label class="form-label small text-muted">常规轮询间隔（秒）</label>
+          <input type="number" class="form-control form-control-sm" name="CHECK_INTERVAL"
+                 value="{{ env.get('CHECK_INTERVAL','300') }}" min="30">
+          <div class="form-text">非高峰期的正常轮询间隔，默认 300 秒（5 分钟）</div>
+        </div>
+        <div class="col-12 col-sm-6">
+          <label class="form-label small text-muted">日志级别</label>
+          <select class="form-select form-select-sm" name="LOG_LEVEL">
+            {% for lvl in ['DEBUG','INFO','WARNING','ERROR'] %}
+              <option {% if env.get('LOG_LEVEL','INFO') == lvl %}selected{% endif %}>{{ lvl }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <!-- 智能轮询 -->
+      <div class="section-title mt-3">
+        <i class="bi bi-graph-up me-1"></i>智能轮询（高峰期自动加速）
+      </div>
+      <div class="row g-3 mb-4">
+        <div class="col-12 col-sm-4">
+          <label class="form-label small text-muted">
+            高峰期间隔（秒）<span class="text-muted" style="font-weight:400;">— 默认 60</span>
+          </label>
+          <input type="number" class="form-control form-control-sm" name="PEAK_INTERVAL"
+                 value="{{ env.get('PEAK_INTERVAL','60') }}" min="10" max="300">
+        </div>
+        <div class="col-6 col-sm-4">
+          <label class="form-label small text-muted">高峰开始（荷兰时间）</label>
+          <input type="time" class="form-control form-control-sm" name="PEAK_START"
+                 value="{{ env.get('PEAK_START','08:30') }}">
+        </div>
+        <div class="col-6 col-sm-4">
+          <label class="form-label small text-muted">高峰结束（荷兰时间）</label>
+          <input type="time" class="form-control form-control-sm" name="PEAK_END"
+                 value="{{ env.get('PEAK_END','10:00') }}">
+        </div>
+        <div class="col-12">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="peak_weekdays"
+                   {% if env.get('PEAK_WEEKDAYS_ONLY','true') != 'false' %}checked{% endif %}
+                   onchange="document.getElementById('peak_weekdays_h').value=this.checked?'true':'false'">
+            <label class="form-check-label small" for="peak_weekdays">仅工作日启用高峰轮询</label>
+            <input type="hidden" id="peak_weekdays_h" name="PEAK_WEEKDAYS_ONLY"
+                   value="{{ env.get('PEAK_WEEKDAYS_ONLY','true') }}">
+          </div>
+          <div class="form-text">
+            <i class="bi bi-info-circle me-1"></i>
+            荷兰早 8:30–10:00 新房源上架最集中，期间自动缩短轮询间隔以提高抢房成功率。
+          </div>
+        </div>
+      </div>
+
+      <!-- 城市选择 -->
+      <div class="section-title">监控城市</div>
+      <div class="row g-2">
+        {% for city in known_cities %}
+        <div class="col-6 col-sm-4 col-md-3 col-lg-2">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox"
+                   name="city_selected"
+                   value="{{ city.name }},{{ city.id }}"
+                   id="city_{{ city.id }}"
+                   {% if city.id in selected_city_ids %}checked{% endif %}>
+            <label class="form-check-label small" for="city_{{ city.id }}">
+              {{ city.name }}
+            </label>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="form-text mt-2">
+        <i class="bi bi-info-circle me-1"></i>
+        至少选一个城市。监控多个城市会略增加抓取时间。
+      </div>
+    </div>
+  </div>
+
+  <div class="d-flex align-items-center gap-2 flex-wrap">
+    <button type="submit" class="btn btn-primary px-4">
+      <i class="bi bi-save me-1"></i>保存配置
+    </button>
+    <button type="button" id="btn-reload" class="btn btn-success px-4"
+            onclick="reloadMonitor(this)">
+      <i class="bi bi-arrow-clockwise me-1"></i>立即生效
+    </button>
+    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">取消</a>
+  </div>
+
+</form>
+
+<!-- Toast -->
+<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+  <div id="reload-toast" class="toast align-items-center border-0" role="alert" aria-live="assertive">
+    <div class="d-flex">
+      <div class="toast-body fw-medium" id="reload-toast-body"></div>
+      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function reloadMonitor(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>发送中...';
+
+  fetch('/api/reload', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      const toast = new bootstrap.Toast(document.getElementById('reload-toast'), { delay: 4000 });
+      const body  = document.getElementById('reload-toast-body');
+      if (d.ok) {
+        document.getElementById('reload-toast').className =
+          'toast align-items-center border-0 text-bg-success';
+        body.innerHTML = '✅ ' + d.message;
+      } else {
+        document.getElementById('reload-toast').className =
+          'toast align-items-center border-0 text-bg-danger';
+        body.innerHTML = '❌ ' + (d.error || '未知错误');
+      }
+      toast.show();
+    })
+    .catch(() => {
+      document.getElementById('reload-toast').className =
+        'toast align-items-center border-0 text-bg-danger';
+      document.getElementById('reload-toast-body').innerHTML = '❌ 请求失败，请检查 web.py 是否运行';
+      new bootstrap.Toast(document.getElementById('reload-toast'), { delay: 4000 }).show();
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh" data-bs-theme="dark">
+<head>
+  <!--
+    Anti-FOUC：在任何 CSS 加载前立即应用保存的主题，防止白屏闪烁。
+    脚本必须保持内联且在所有 <link> 之前。
+  -->
+  <script>
+    (function () {
+      var t = localStorage.getItem('h2s-theme');
+      if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-bs-theme', t);
+    })();
+  </script>
+
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Holland2Stay 监控{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+  <style>
+    /* ── CSS 自定义属性：深色主题（默认）──────────────────────────── */
+    :root,
+    [data-bs-theme="dark"] {
+      --h2s-bg-body:    #0d1117;
+      --h2s-bg-surface: #161b22;
+      --h2s-bg-raised:  #1c2128;
+      --h2s-border:     #30363d;
+      --h2s-border-sub: #21262d;
+      --h2s-muted:      #8b949e;
+      --h2s-text:       #e6edf3;
+      --h2s-link:       #58a6ff;
+      --h2s-hover:      #1c2128;
+      --h2s-navbar-bg:  #161b22;
+    }
+
+    /* ── CSS 自定义属性：浅色主题 ──────────────────────────────────── */
+    [data-bs-theme="light"] {
+      --h2s-bg-body:    #f6f8fa;
+      --h2s-bg-surface: #ffffff;
+      --h2s-bg-raised:  #f6f8fa;
+      --h2s-border:     #d0d7de;
+      --h2s-border-sub: #e1e4e8;
+      --h2s-muted:      #656d76;
+      --h2s-text:       #1f2328;
+      --h2s-link:       #0969da;
+      --h2s-hover:      #f6f8fa;
+      --h2s-navbar-bg:  #ffffff;
+    }
+
+    /* ── 全局 ──────────────────────────────────────────────────────── */
+    body { background: var(--h2s-bg-body); }
+
+    .h2s-navbar {
+      background: var(--h2s-navbar-bg) !important;
+      border-bottom: 1px solid var(--h2s-border) !important;
+    }
+    .navbar-brand { font-weight: 700; letter-spacing: -.5px; }
+
+    /* ── 统计卡片 ──────────────────────────────────────────────────── */
+    .stat-card   { border: 1px solid var(--h2s-border); background: var(--h2s-bg-surface); }
+    .stat-number { font-size: 2rem; font-weight: 700; line-height: 1; }
+    .stat-label  { font-size: .75rem; color: var(--h2s-muted);
+                   text-transform: uppercase; letter-spacing: .05em; }
+
+    /* ── 表格 ──────────────────────────────────────────────────────── */
+    .table { --bs-table-bg: transparent; }
+    .table th { color: var(--h2s-muted); font-size: .75rem; text-transform: uppercase;
+                letter-spacing: .05em; font-weight: 500; border-color: var(--h2s-border); }
+    .table td { border-color: var(--h2s-border-sub); vertical-align: middle; }
+    .table-hover tbody tr:hover td { background: var(--h2s-hover); }
+    .badge { font-weight: 500; }
+
+    /* ── 表单（浅色主题用 Bootstrap 原生样式，深色主题需要覆写）────── */
+    [data-bs-theme="dark"] .form-control,
+    [data-bs-theme="dark"] .form-select {
+      background: var(--h2s-bg-surface);
+      border-color: var(--h2s-border);
+      color: var(--h2s-text);
+    }
+    [data-bs-theme="dark"] .form-control:focus,
+    [data-bs-theme="dark"] .form-select:focus {
+      background: var(--h2s-bg-surface);
+      border-color: #388bfd;
+      color: var(--h2s-text);
+      box-shadow: 0 0 0 3px rgba(56,139,253,.1);
+    }
+
+    /* ── 卡片 ──────────────────────────────────────────────────────── */
+    .card        { border-color: var(--h2s-border); background: var(--h2s-bg-surface); }
+    .card-header { border-color: var(--h2s-border); background: var(--h2s-bg-raised); }
+
+    /* ── 链接 & 导航 ──────────────────────────────────────────────── */
+    a { color: var(--h2s-link); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .nav-link.active { color: var(--h2s-text) !important; font-weight: 600; }
+
+    /* ── 主题切换按钮 ──────────────────────────────────────────────── */
+    #theme-toggle { color: var(--h2s-muted); transition: color .15s, transform .2s; background: transparent; }
+    #theme-toggle:hover { color: var(--h2s-text); transform: rotate(20deg); }
+
+    {% block extra_style %}{% endblock %}
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+<nav class="navbar navbar-expand-lg h2s-navbar">
+  <div class="container-fluid px-4">
+    <a class="navbar-brand text-body-emphasis" href="/">
+      <i class="bi bi-house-door-fill text-success me-2"></i>Holland2Stay
+    </a>
+    <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="nav">
+
+      <!-- 监控状态 + 主题切换 + 退出 -->
+      <ul class="navbar-nav ms-auto gap-1 me-2 align-items-center">
+        <li class="nav-item">
+          <span id="monitor-badge" class="badge bg-secondary small py-1 px-2">
+            <span class="spinner-border spinner-border-sm me-1" style="width:.6rem;height:.6rem;"></span>检测中
+          </span>
+        </li>
+        <li class="nav-item">
+          <button id="theme-toggle" class="btn btn-sm border-0 px-2 py-1"
+                  onclick="toggleTheme()" title="切换日间/夜间模式" aria-label="切换主题">
+            <i id="theme-icon" class="bi bi-sun fs-6"></i>
+          </button>
+        </li>
+        {% if auth_enabled %}
+        <li class="nav-item">
+          <form method="POST" action="{{ url_for('logout') }}" class="d-inline">
+            <button type="submit" class="btn btn-sm border-0 px-2 py-1"
+                    style="color:var(--h2s-muted);" title="退出登录">
+              <i class="bi bi-box-arrow-right fs-6"></i>
+            </button>
+          </form>
+        </li>
+        {% endif %}
+      </ul>
+
+      <!-- 页面导航 -->
+      <ul class="navbar-nav gap-1">
+        <li class="nav-item">
+          <a class="nav-link px-3 rounded {% if request.endpoint == 'index' %}active{% endif %}"
+             href="{{ url_for('index') }}">
+            <i class="bi bi-speedometer2 me-1"></i>仪表盘
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link px-3 rounded {% if request.endpoint == 'listings' %}active{% endif %}"
+             href="{{ url_for('listings') }}">
+            <i class="bi bi-list-ul me-1"></i>房源列表
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link px-3 rounded {% if request.endpoint == 'calendar' %}active{% endif %}"
+             href="{{ url_for('calendar') }}">
+            <i class="bi bi-calendar3 me-1"></i>日历
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link px-3 rounded {% if request.endpoint == 'stats' %}active{% endif %}"
+             href="{{ url_for('stats') }}">
+            <i class="bi bi-bar-chart-line me-1"></i>统计
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link px-3 rounded {% if request.endpoint in ['users_list','user_new','user_edit'] %}active{% endif %}"
+             href="{{ url_for('users_list') }}">
+            <i class="bi bi-people me-1"></i>用户
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link px-3 rounded {% if request.endpoint == 'settings' %}active{% endif %}"
+             href="{{ url_for('settings') }}">
+            <i class="bi bi-gear me-1"></i>设置
+          </a>
+        </li>
+      </ul>
+    </div>
+  </div>
+</nav>
+
+<div class="container-fluid px-4 py-4" style="max-width:1400px;">
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+    <div class="alert alert-{{ 'success' if cat == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
+      {{ msg }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ── 监控状态徽章 ────────────────────────────────────────────────────
+function refreshMonitorStatus() {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('monitor-badge');
+      if (!el) return;
+      if (d.running) {
+        el.className = 'badge bg-success small py-1 px-2';
+        el.innerHTML = '<i class="bi bi-circle-fill me-1" style="font-size:.5rem;vertical-align:middle;"></i>监控运行中';
+      } else {
+        el.className = 'badge bg-danger small py-1 px-2';
+        el.innerHTML = '<i class="bi bi-circle me-1" style="font-size:.5rem;vertical-align:middle;"></i>监控未启动';
+      }
+    })
+    .catch(() => {});
+}
+refreshMonitorStatus();
+setInterval(refreshMonitorStatus, 15000);
+
+// ── 主题切换 ────────────────────────────────────────────────────────
+function _applyTheme(theme) {
+  document.documentElement.setAttribute('data-bs-theme', theme);
+  const icon = document.getElementById('theme-icon');
+  if (icon) {
+    icon.className = 'bi fs-6 ' + (theme === 'dark' ? 'bi-sun' : 'bi-moon-stars-fill');
+  }
+}
+
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+  _applyTheme(next);
+  localStorage.setItem('h2s-theme', next);
+}
+
+// 页面加载后同步图标（主题已由 <head> 内脚本设置好了）
+_applyTheme(document.documentElement.getAttribute('data-bs-theme') || 'dark');
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
