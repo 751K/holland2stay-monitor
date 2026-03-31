@@ -2,6 +2,8 @@
 
 > 自动监控荷兰租房平台 [Holland2Stay](https://www.holland2stay.com)，第一时间向多个用户推送新房源和状态变更，并支持对符合条件的房源自动完成预订流程。
 
+**个人开发，严禁商业使用，欢迎 Star 和 Fork！如有任何问题或建议，请随时提交 Issue 或 Pull Request**
+
 ---
 
 ## 项目状态
