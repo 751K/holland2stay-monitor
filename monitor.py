@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import signal
 import sys
 from datetime import datetime, timezone
@@ -97,6 +98,16 @@ def _get_interval(cfg) -> tuple[int, bool]:
     if sh * 60 + sm <= cur <= eh * 60 + em:
         return cfg.peak_interval, True
     return cfg.check_interval, False
+
+
+# 抖动比例：实际等待时间在基准值的 ±JITTER_RATIO 范围内随机浮动
+# 例如基准 300s → 实际 240~360s；基准 60s → 实际 48~72s
+_JITTER_RATIO = 0.20
+
+def _apply_jitter(seconds: int) -> int:
+    """在 seconds 基础上加 ±JITTER_RATIO 的随机抖动，最小保留 5 秒。"""
+    delta = seconds * _JITTER_RATIO
+    return max(5, int(seconds + random.uniform(-delta, delta)))
 
 
 # ------------------------------------------------------------------ #
@@ -256,40 +267,58 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
 
     while True:
         round_count += 1
-        interval, is_peak = _get_interval(cfg)
-        peak_tag = "【高峰期】" if is_peak else ""
-        logger.info("===== 第 %d 轮 %s=====", round_count, peak_tag)
-
-        await run_once(cfg, storage, user_notifiers)
-
-        if round_count % HEARTBEAT_EVERY == 0:
-            total = storage.count_all()
-            for _, notifier in user_notifiers:
-                await notifier.send_heartbeat(total_in_db=total, fresh_count=round_count)
-
-        logger.info("等待 %d 秒...%s", interval, "（高峰期加速）" if is_peak else "")
         try:
-            await asyncio.wait_for(_reload_event.wait(), timeout=interval)
-        except asyncio.TimeoutError:
-            pass
-        else:
-            # 被 SIGHUP 唤醒 → 热重载
-            _reload_event.clear()
-            logger.info("热重载中...")
-            load_dotenv(override=True)
+            interval, is_peak = _get_interval(cfg)
+            peak_tag = "【高峰期】" if is_peak else ""
+            logger.info("===== 第 %d 轮 %s=====", round_count, peak_tag)
+
+            await run_once(cfg, storage, user_notifiers)
+
+            if round_count % HEARTBEAT_EVERY == 0:
+                total = storage.count_all()
+                for _, notifier in user_notifiers:
+                    await notifier.send_heartbeat(total_in_db=total, fresh_count=round_count)
+
+            actual = _apply_jitter(interval)
+            logger.info(
+                "等待 %d 秒（基准 %d s，±%.0f%% 抖动）%s",
+                actual, interval, _JITTER_RATIO * 100,
+                "（高峰期加速）" if is_peak else "",
+            )
+
+            # 等待下一轮：超时正常继续；SIGHUP/事件触发则热重载
+            # 同时 catch TimeoutError（builtin）以兼容 Windows SelectorEventLoop
+            reload_triggered = False
             try:
-                cfg = load_config()
-                users = load_users()
-                for _, n in user_notifiers:
-                    await n.close()
-                user_notifiers = _build_user_notifiers(users)
-                logger.info(
-                    "配置已热重载：城市=%s  用户=%d  间隔=%ds  高峰=%ds(%s–%s)",
-                    [c.name for c in cfg.cities], len(user_notifiers),
-                    cfg.check_interval, cfg.peak_interval, cfg.peak_start, cfg.peak_end,
-                )
-            except Exception as e:
-                logger.error("热重载失败，继续使用旧配置: %s", e)
+                await asyncio.wait_for(_reload_event.wait(), timeout=float(actual))
+                reload_triggered = True
+            except (asyncio.TimeoutError, TimeoutError):
+                pass
+
+            if reload_triggered:
+                _reload_event.clear()
+                logger.info("热重载中...")
+                load_dotenv(override=True)
+                try:
+                    cfg = load_config()
+                    users = load_users()
+                    for _, n in user_notifiers:
+                        await n.close()
+                    user_notifiers = _build_user_notifiers(users)
+                    logger.info(
+                        "配置已热重载：城市=%s  用户=%d  间隔=%ds  高峰=%ds(%s–%s)",
+                        [c.name for c in cfg.cities], len(user_notifiers),
+                        cfg.check_interval, cfg.peak_interval, cfg.peak_start, cfg.peak_end,
+                    )
+                except Exception as e:
+                    logger.error("热重载失败，继续使用旧配置: %s", e)
+
+        except asyncio.CancelledError:
+            raise  # 允许正常关闭（KeyboardInterrupt 等）
+        except Exception as e:
+            # 任何未预期异常：记录并等待 10 秒后继续，而不是静默退出
+            logger.exception("主循环出现异常，10 秒后继续: %s", e)
+            await asyncio.sleep(10)
 
 
 # ------------------------------------------------------------------ #
@@ -350,6 +379,11 @@ async def _async_main() -> None:
 
 
 def main() -> None:
+    # Windows 默认 ProactorEventLoop 与 asyncio.wait_for + Event.wait() 有兼容问题，
+    # 切换为 SelectorEventLoop 可避免超时时意外抛出 CancelledError。
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
     try:
         asyncio.run(_async_main())
     except KeyboardInterrupt:
