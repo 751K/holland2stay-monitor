@@ -96,18 +96,21 @@ def add_to_cart(
     cart_id: str,
     sku: str,
     contract_start_date: Optional[str],
+    contract_id: Optional[int] = None,
 ) -> bool:
     """
     调用 addNewBooking，将房源加入购物车。
     contract_start_date 格式: "2026-04-08"（ISO date）。
+    contract_id: 合同类型 ID（来自 type_of_contract 属性），不传会导致 Internal server error。
     返回 True 表示成功。
     """
     date_arg = f', contract_startDate: "{contract_start_date}"' if contract_start_date else ""
+    cid_arg  = f', contract_id: {contract_id}' if contract_id is not None else ""
     query = f'''
     mutation {{
       addNewBooking(
         cart_id: "{cart_id}",
-        sku: "{sku}"{date_arg}
+        sku: "{sku}"{date_arg}{cid_arg}
       ) {{
         cart {{
           id
@@ -167,23 +170,25 @@ def try_book(
         logger.info("[DRY RUN] 跳过实际预订: %s", listing.name)
         return BookingResult(listing, True, "DRY RUN - 未实际操作", dry_run=True)
 
-    sku = listing.id  # url_key 即 sku slug，但实际 sku 需要从 GraphQL 额外查询
-    # sku 在 scraper 里用 url_key 作 id，实际 Magento sku 格式不同（如 r-onx-781）
-    # 需要先查询真实 sku
     with req.Session(impersonate="chrome110") as session:
         try:
-            # 1. 查询真实 sku
-            sku = _fetch_sku(session, listing.id)
-            logger.info("[%s] 真实 SKU: %s", listing.name, sku)
+            # 1. 查询真实 SKU + contract_id
+            sku, contract_id = _fetch_sku_and_contract(session, listing.id)
+            logger.info("[%s] SKU: %s  contract_id: %s", listing.name, sku, contract_id)
 
             # 2. 登录
+            logger.debug("[%s] 登录中...", listing.name)
             token = login(session, email, password)
+            logger.info("[%s] 登录成功", listing.name)
 
             # 3. 获取购物车
+            logger.debug("[%s] 获取购物车...", listing.name)
             cart_id = get_or_create_cart(session, token)
+            logger.info("[%s] 购物车 ID: %s", listing.name, cart_id)
 
             # 4. 加入购物车
-            add_to_cart(session, token, cart_id, sku, listing.available_from)
+            logger.debug("[%s] 加入购物车 (contract_id=%s)...", listing.name, contract_id)
+            add_to_cart(session, token, cart_id, sku, listing.available_from, contract_id)
 
             msg = f"已加入购物车，请前往付款完成预订：{CHECKOUT_URL}"
             logger.info("[%s] 预订成功: %s", listing.name, msg)
@@ -194,11 +199,49 @@ def try_book(
             return BookingResult(listing, False, str(e))
 
 
-def _fetch_sku(session: req.Session, url_key: str) -> str:
-    """通过 url_key 查询真实 Magento SKU。"""
-    query = f'{{ products(filter: {{ url_key: {{ eq: "{url_key}" }} }}) {{ items {{ sku }} }} }}'
+def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Optional[int]]:
+    """
+    通过 url_key 查询真实 Magento SKU 以及合同类型 ID (contract_id)。
+    返回 (sku, contract_id)；contract_id 取自 type_of_contract 属性，可能为 None。
+    """
+    query = f'''
+    {{
+      products(filter: {{
+        category_uid: {{ eq: "Nw==" }}
+        url_key: {{ eq: "{url_key}" }}
+      }}) {{
+        items {{
+          sku
+          custom_attributesV2 {{
+            items {{
+              code
+              ... on AttributeSelectedOptions {{
+                selected_options {{ label value }}
+              }}
+            }}
+          }}
+        }}
+      }}
+    }}
+    '''
     data = _gql(session, query)
     items = data.get("products", {}).get("items") or []
     if not items:
         raise RuntimeError(f"未找到房源: {url_key}")
-    return items[0]["sku"]
+
+    item = items[0]
+    sku = item["sku"]
+
+    # 从 type_of_contract 属性取 contract_id（整数）
+    contract_id: Optional[int] = None
+    for attr in item.get("custom_attributesV2", {}).get("items", []):
+        if attr.get("code") == "type_of_contract":
+            opts = attr.get("selected_options") or []
+            if opts:
+                try:
+                    contract_id = int(opts[0]["value"])
+                except (KeyError, ValueError, TypeError):
+                    pass
+            break
+
+    return sku, contract_id
