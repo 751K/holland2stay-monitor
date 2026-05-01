@@ -16,7 +16,7 @@ Note: Personal project — not for commercial use. Contributions, issues and PRs
 | Multi-city monitoring | ✅ Done | Supports 26 Dutch cities; select cities in the web UI |
 | Multi-channel notifications | ✅ Done | iMessage / Telegram / WhatsApp (Twilio) |
 | Notification filters | ✅ Done | Per-user filters: rent, area, floor, layout, district |
-| Auto-booking | ✅ Done | Adds to cart, stops before payment for manual confirmation |
+| Auto-booking | ✅ Done | Full flow: add to cart → place order → generate direct payment URL, push via notification |
 | Web admin panel | ✅ Done | Dashboard, listings, users, global settings |
 | Hot config reload | ✅ Done | SIGHUP-based reload, no restart required |
 | Smart polling | ✅ Done | Peak hours (08:30–10:00 CET) accelerate polling to 60s |
@@ -35,7 +35,7 @@ Note: Personal project — not for commercial use. Contributions, issues and PRs
 - Detects new listings and status changes (e.g. lottery → available to book)
 - Persists all listings to local SQLite; deduplicates notifications for the same listing
 - Per-user notification channels and filters (stored in data/users.json)
-- Auto-booking: logs in, checks cart, calls addNewBooking (stops before placeOrder)
+- Auto-booking: logs in, cancels pending orders, calls addNewBooking → placeOrder → idealCheckOut, sends direct payment URL (no login required to pay)
 - Web UI (Flask + Bootstrap) for dashboard, users, settings, charts
 - Smart polling: configurable peak window and shorter interval during high-traffic times
 
@@ -52,7 +52,7 @@ Holland2Stay frontend (Next.js + Magento)
   └─> storage.py (SQLite diffing)
        ├─> New listing / status change → loop enabled users in data/users.json
        │     ├─> ListingFilter.passes() → notifier.py (iMessage / Telegram / WhatsApp)
-       │     └─> AutoBookConfig.passes() → booker.py (login → cart → addNewBooking)
+       │     └─> AutoBookConfig.passes() → booker.py (login → cancel pending → addNewBooking → placeOrder → idealCheckOut → payment URL)
        └─> web.py (read-only queries for UI) → /api/charts
 
 Modules (responsibilities):
@@ -61,7 +61,7 @@ Modules (responsibilities):
 - storage.py: SQLite persistence, diff detection, chart aggregation
 - models.py: Listing dataclass and helpers
 - notifier.py: BaseNotifier + implementations (iMessage, Telegram, WhatsApp)
-- booker.py: login / cart / addNewBooking flow (no payment)
+- booker.py: login / cancel pending orders / addNewBooking / placeOrder / idealCheckOut → direct payment URL
 - config.py: global config, KNOWN_CITIES, ListingFilter, AutoBookConfig
 - users.py: user config dataclass and data/users.json management
 - web.py: Flask admin UI and API endpoints
@@ -177,16 +177,20 @@ Status change (lottery → available to book):
 🔗 https://www.holland2stay.com/residences/beukenlaan-89-11.html
 ```
 
-Auto-booking (added to cart):
+Auto-booking success:
 
 ```
-🛒 Auto-booking (added to cart)
+🛒 Auto-booking success!
 
 🏠 Kastanjelaan 1-529
 💰 Rent: €1,680/mo
 📅 Move-in: 2026-04-01
 
-✅ Added to cart, please complete payment manually
+⚡ Tap to pay now (time-limited):
+
+https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
+
+⚠️ Direct payment link — no login required.
 ```
 
 ---

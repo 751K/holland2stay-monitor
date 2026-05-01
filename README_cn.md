@@ -1,4 +1,3 @@
-```markdown
 # Holland2Stay 房源监控
 
 > 自动监控荷兰租房平台 [Holland2Stay](https://www.holland2stay.com)，第一时间向多个用户推送新房源和状态变更，并支持对符合条件的房源自动完成预订流程。
@@ -15,7 +14,7 @@
 | 多城市监控 | ✅ 已完成 | 26 个荷兰城市，Web 面板复选框选择 |
 | 多通知渠道 | ✅ 已完成 | iMessage / Telegram / WhatsApp，可同时启用 |
 | 通知过滤 | ✅ 已完成 | 租金、面积、楼层、户型、片区，按用户独立设置 |
-| 自动预订 | ✅ 已完成 | 加入购物车，安全边界在付款前，手动确认 |
+| 自动预订 | ✅ 已完成 | 全流程：加入购物车 → 下单 → 生成直链付款 URL，iMessage 推送 |
 | Web 管理面板 | ✅ 已完成 | 仪表盘、房源列表、用户管理、全局设置 |
 | 配置热重载 | ✅ 已完成 | SIGHUP 信号，修改后无需重启监控进程 |
 | 智能轮询 | ✅ 已完成 | 荷兰时间 8:30–10:00 自动加速至 60 秒间隔 |
@@ -57,11 +56,15 @@
 - **通知测试**：用户配置页一键发送测试消息，逐渠道返回成功 / 失败原因
 
 ### 自动预订
-- 检测到符合条件的 "Available to book" 房源时，自动完成：登录 → 查询购物车 → `addNewBooking`
+- 检测到符合条件的 "Available to book" 房源时，自动完成完整流程：
+  1. 登录账号，取消遗留的 pending 订单（避免冲突）
+  2. `addNewBooking` 将房源加入购物车
+  3. `placeOrder` 下单（押金订单）
+  4. `idealCheckOut` 生成直链付款 URL
+  5. iMessage / Telegram 推送通知，含直链，用户点击即进入付款页，**无需登录**
 - 多套候选时按面积从大到小选择
-- **安全边界**：只执行到加入购物车，不执行付款（`placeOrder`），付款须用户手动确认
 - 每用户可设置独立的预订过滤条件（可比通知条件更严格）
-- 支持 Dry Run 模式，走完流程但不实际调用接口，用于验证配置
+- 支持 Dry Run 模式，走完登录/购物车验证但不实际提交，用于验证配置
 
 ### Web 管理面板
 - **仪表盘**：总房源 / 今日新增 / 今日变更 / 最近抓取时间，加最新房源列表与近 48h 变更记录
@@ -102,7 +105,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
         │                 │     └── iMessage / Telegram / WhatsApp
         │                 │
         │                 └── AutoBookConfig.passes() → booker.py
-        │                       └── 登录 → customerCart → addNewBooking
+        │                       └── 登录 → 取消 pending 订单 → addNewBooking → placeOrder → idealCheckOut → 付款直链
         │
         └── Web 面板只读查询 → web.py（Flask + Bootstrap 5）
                  └── /api/charts → stats.html（Chart.js CDN）
@@ -117,7 +120,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `storage.py` | SQLite 持久化，diff 检测，chart 聚合查询，meta 键值存储 |
 | `models.py` | Listing dataclass，price_display，feature_map |
 | `notifier.py` | BaseNotifier ABC，IMessage / Telegram / WhatsApp / MultiNotifier |
-| `booker.py` | 登录鉴权 → 购物车 → addNewBooking |
+| `booker.py` | 登录 → 取消 pending 订单 → addNewBooking → placeOrder → idealCheckOut → 付款直链 |
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
 | `users.py` | UserConfig dataclass，users.json 读写，.env 配置迁移 |
 | `web.py` | Flask 面板，用户 CRUD，Session 鉴权，/api/charts，/api/reload |
@@ -248,13 +251,17 @@ DB_PATH=data/listings.db    # SQLite 路径
 
 **自动预订成功**
 ```
-🛒 自动预订成功
+🛒 自动预订成功！
 
 🏠 Kastanjelaan 1-529
 💰 租金：€1,680/月
 📅 入住：2026-04-01
 
-✅ 已加入购物车，请登录付款
+⚡ 点击链接立即付款（有时限，请尽快）：
+
+https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
+
+⚠️ 链接直达支付页面，无需登录。
 ```
 
 ---
@@ -307,7 +314,7 @@ scraper.py          GraphQL 抓取，curl_cffi，自动翻页，多城市
 storage.py          SQLite：listings / status_changes / meta，chart 聚合查询
 models.py           Listing dataclass，price_display，feature_map
 notifier.py         BaseNotifier → IMessage / Telegram / WhatsApp / Multi
-booker.py           登录鉴权 → 购物车 → addNewBooking
+booker.py           登录 → 取消 pending 订单 → addNewBooking → placeOrder → idealCheckOut → 付款直链
 config.py           全局配置加载，KNOWN_CITIES（26 城市），ListingFilter
 users.py            UserConfig，users.json 读写，.env 配置迁移
 web.py              Flask 面板，Session 鉴权，用户 CRUD，/api/charts，/api/reload
@@ -328,8 +335,3 @@ data/               运行时自动生成
   users.json        用户配置（通知渠道 / 过滤 / 预订账号）
   monitor.pid       监控进程 PID，供热重载使用
 ```
-
-
-```
-
-``` 
