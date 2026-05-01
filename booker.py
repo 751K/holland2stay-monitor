@@ -22,7 +22,10 @@ from models import Listing
 logger = logging.getLogger(__name__)
 
 GQL_URL = "https://api.holland2stay.com/graphql/"
+# 购物车通过 API 加入，绑定到账号服务端。浏览器需要先登录才能看到购物车。
+# 直接打开 /checkout 会显示登录框，登录后自动跳转付款页
 CHECKOUT_URL = "https://www.holland2stay.com/checkout"
+CART_URL     = CHECKOUT_URL          # 两个 URL 相同，登录后自动显示购物车
 
 _BASE_HEADERS = {
     "Content-Type": "application/json",
@@ -76,14 +79,98 @@ def login(session: req.Session, email: str, password: str) -> str:
 # ------------------------------------------------------------------ #
 
 def get_or_create_cart(session: req.Session, token: str) -> str:
-    """返回 customer 购物车 ID。"""
-    query = "{ customerCart { id } }"
+    """返回 customer 购物车 ID，同时清空购物车内的旧预订项目。"""
+    # 先取购物车 ID 和当前条目（用于清理）
+    query = '''
+    {
+      customerCart {
+        id
+        itemsV2 { items { uid } }
+      }
+    }
+    '''
     data = _gql(session, query, token=token)
-    cart_id = data.get("customerCart", {}).get("id")
+    cart_info = data.get("customerCart", {})
+    cart_id = cart_info.get("id")
     if not cart_id:
         raise RuntimeError("无法获取购物车 ID")
+
+    # 清空旧条目，避免 "cart already has booking" 类错误
+    items = (cart_info.get("itemsV2") or {}).get("items") or []
+    if items:
+        logger.debug("购物车有 %d 个旧项目，正在清空...", len(items))
+        _truncate_cart(session, token, cart_id)
+
     logger.debug("购物车 ID: %s", cart_id)
     return cart_id
+
+
+def _truncate_cart(session: req.Session, token: str, cart_id: str) -> None:
+    """清空购物车内所有条目（TruncateCartOutput 只有 status: Boolean）。"""
+    query = f'mutation {{ truncateCart(cart_id: "{cart_id}") {{ status }} }}'
+    try:
+        data = _gql(session, query, token=token)
+        ok = (data.get("truncateCart") or {}).get("status")
+        logger.debug("购物车已清空 status=%s", ok)
+    except Exception as e:
+        # 清空失败不阻断流程，记录警告即可
+        logger.warning("清空购物车失败（忽略）: %s", e)
+
+
+# ------------------------------------------------------------------ #
+# 取消 pending 订单（清除"already reserved"锁）
+# ------------------------------------------------------------------ #
+
+def cancel_pending_orders(session: req.Session, token: str) -> int:
+    """
+    查询账号下所有 pending/reserved 状态的订单并逐一取消。
+    返回成功取消的订单数。这是避免 "you have another unit reserved" 错误的必要步骤。
+    """
+    # 查询近 10 笔订单，筛选出待取消的状态
+    query = '''
+    {
+      customer {
+        orders(pageSize: 10, currentPage: 1) {
+          items {
+            number
+            status
+          }
+        }
+      }
+    }
+    '''
+    try:
+        data = _gql(session, query, token=token)
+    except Exception as e:
+        logger.warning("查询订单列表失败（忽略）: %s", e)
+        return 0
+
+    items = (data.get("customer") or {}).get("orders", {}).get("items") or []
+    # 需要取消的状态（大小写不敏感）
+    CANCEL_STATUSES = {"pending", "pending_payment", "reserved", "processing"}
+    to_cancel = [o["number"] for o in items if o.get("status", "").lower() in CANCEL_STATUSES]
+
+    if not to_cancel:
+        logger.debug("无 pending 订单，无需取消")
+        return 0
+
+    logger.info("发现 %d 笔 pending 订单，准备取消: %s", len(to_cancel), to_cancel)
+    cancelled = 0
+    for order_number in to_cancel:
+        try:
+            q = f'mutation {{ cancelOrder(input: {{ order_id: "{order_number}" }}) {{ error errorV2 {{ message code }} }} }}'
+            result = _gql(session, q, token=token)
+            cancel_result = result.get("cancelOrder") or {}
+            err = cancel_result.get("error") or (cancel_result.get("errorV2") or {}).get("message")
+            if err:
+                logger.warning("取消订单 #%s 失败: %s", order_number, err)
+            else:
+                logger.info("已取消订单 #%s", order_number)
+                cancelled += 1
+        except Exception as e:
+            logger.warning("取消订单 #%s 异常（忽略）: %s", order_number, e)
+
+    return cancelled
 
 
 # ------------------------------------------------------------------ #
@@ -101,8 +188,13 @@ def add_to_cart(
     """
     调用 addNewBooking，将房源加入购物车。
     contract_start_date 格式: "2026-04-08"（ISO date，必须是未来日期）。
-    contract_id: 合同类型 ID（来自 type_of_contract 属性），不传会导致 Internal server error。
-    返回 True 表示成功。
+    contract_id: 合同类型 ID（来自 type_of_contract 属性）。
+
+    关键设计：
+    - 响应只请求 user_errors，不请求 cart{}。
+      因为 AddProductsToCartOutput.cart 是 NON_NULL——若服务端处理异常导致 cart=null，
+      GraphQL 会把它上升为顶层 "Internal server error"，掩盖真正的错误原因。
+      只请求 user_errors 可以绕过这个问题，拿到可读的错误描述。
     """
     date_arg = f', contract_startDate: "{contract_start_date}"' if contract_start_date else ""
     cid_arg  = f', contract_id: {contract_id}' if contract_id is not None else ""
@@ -112,27 +204,106 @@ def add_to_cart(
         cart_id: "{cart_id}",
         sku: "{sku}"{date_arg}{cid_arg}
       ) {{
-        cart {{
-          id
-          total_quantity
-          itemsV2 {{ items {{ uid quantity }} }}
-        }}
         user_errors {{ code message }}
       }}
     }}
     '''
-    data = _gql(session, query, token=token)
-    result = data.get("addNewBooking", {})
+    resp = session.post(
+        GQL_URL,
+        json={"query": query},
+        headers={**_BASE_HEADERS, "Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    raw = resp.json()
 
+    # 详细记录原始响应（仅 DEBUG 级别）
+    logger.debug("addNewBooking raw response: %s", raw)
+
+    # GraphQL 层错误（比如字段不存在、类型错误）
+    if "errors" in raw:
+        msgs = "; ".join(e.get("message", "") for e in raw["errors"])
+        # 若同时含有 data，说明是 partial error，先看 user_errors
+        if not raw.get("data"):
+            raise RuntimeError(f"GraphQL 错误: {msgs}")
+
+    result = (raw.get("data") or {}).get("addNewBooking") or {}
     user_errors = result.get("user_errors") or []
     if user_errors:
-        msgs = "; ".join(e.get("message", "") for e in user_errors)
+        msgs = "; ".join(
+            f"[{e.get('code','?')}] {e.get('message','')}" for e in user_errors
+        )
         raise RuntimeError(f"加入购物车失败: {msgs}")
 
-    cart = result.get("cart", {})
-    total = cart.get("total_quantity", 0)
-    logger.info("加入购物车成功，当前购物车共 %.0f 项", total)
+    logger.info("加入购物车成功")
     return True
+
+
+# ------------------------------------------------------------------ #
+# 下单 + 生成支付链接
+# ------------------------------------------------------------------ #
+
+def place_order_and_pay(
+    session: req.Session,
+    token: str,
+    cart_id: str,
+    payment_method: str = "idealcheckout_ideal",
+) -> str:
+    """
+    完成结账流程，返回直接可用的支付跳转 URL。
+    流程：setPaymentMethodOnCart → placeOrder → idealCheckOut → redirect URL
+    支付域名在 account.holland2stay.com（不是 www），所以不能用前端路由。
+    """
+    auth_header = {**_BASE_HEADERS, "Authorization": f"Bearer {token}"}
+
+    # 1. 设置支付方式
+    q = f'''
+    mutation {{
+      setPaymentMethodOnCart(input: {{
+        cart_id: "{cart_id}",
+        payment_method: {{ code: "{payment_method}" }}
+      }}) {{
+        cart {{ selected_payment_method {{ code }} }}
+      }}
+    }}
+    '''
+    _gql(session, q, token=token)
+    logger.debug("支付方式已设置: %s", payment_method)
+
+    # 2. 下单
+    q = f'''
+    mutation {{
+      placeOrder(input: {{ cart_id: "{cart_id}" }}) {{
+        errors {{ message code }}
+        orderV2 {{ number status }}
+      }}
+    }}
+    '''
+    data = _gql(session, q, token=token)
+    order_result = (data.get("placeOrder") or {})
+    errs = order_result.get("errors") or []
+    if errs:
+        msgs = "; ".join(e.get("message","") for e in errs)
+        raise RuntimeError(f"下单失败: {msgs}")
+    order_number = (order_result.get("orderV2") or {}).get("number")
+    if not order_number:
+        raise RuntimeError("下单失败：未获取到订单号")
+    logger.info("订单创建成功: #%s", order_number)
+
+    # 3. 生成 iDEAL/idealcheckout 支付跳转链接
+    q = f'''
+    mutation {{
+      idealCheckOut(order_id: "{order_number}", plateform: "web") {{
+        redirect
+      }}
+    }}
+    '''
+    data = _gql(session, q, token=token)
+    pay_url = (data.get("idealCheckOut") or {}).get("redirect")
+    if not pay_url:
+        raise RuntimeError(f"未能获取支付链接 (order #{order_number})")
+    logger.info("支付链接: %s", pay_url)
+    return pay_url
 
 
 # ------------------------------------------------------------------ #
@@ -146,11 +317,13 @@ class BookingResult:
         success: bool,
         message: str,
         dry_run: bool = False,
+        pay_url: str = "",
     ):
         self.listing = listing
         self.success = success
         self.message = message
         self.dry_run = dry_run
+        self.pay_url = pay_url
 
 
 def try_book(
@@ -193,12 +366,31 @@ def try_book(
                 logger.info("[%s] %s", listing.name, msg)
                 return BookingResult(listing, True, msg, dry_run=True)
 
+            # 4b. 取消账号下所有 pending 订单，避免 "already reserved" 冲突
+            logger.debug("[%s] 检查并取消 pending 订单...", listing.name)
+            cancel_pending_orders(session, token)
+
             logger.debug("[%s] 加入购物车 (contract_id=%s, start_date=%s)...", listing.name, contract_id, start_date)
             add_to_cart(session, token, cart_id, sku, start_date, contract_id)
 
-            msg = f"已加入购物车，请前往付款完成预订：{CHECKOUT_URL}"
-            logger.info("[%s] 预订成功: %s", listing.name, msg)
-            return BookingResult(listing, True, msg)
+            # 5. 下单并生成直接支付链接
+            logger.debug("[%s] 生成支付链接...", listing.name)
+            pay_url = place_order_and_pay(session, token, cart_id)
+
+            msg = (
+                f"✅ 自动预订成功！\n"
+                f"\n"
+                f"🏠 {listing.name}\n"
+                f"📅 入住：{start_date or '待定'}\n"
+                f"\n"
+                f"⚡ 点击链接立即付款（有时限，请尽快）：\n"
+                f"\n"
+                f"{pay_url}\n"
+                f"\n"
+                f"⚠️ 链接直达支付页面，无需登录。"
+            )
+            logger.info("[%s] 预订成功  pay_url=%s  入住:%s", listing.name, pay_url, start_date)
+            return BookingResult(listing, True, msg, pay_url=pay_url)
 
         except Exception as e:
             logger.error("[%s]%s 预订失败: %s", listing.name, " [DRY RUN]" if dry_run else "", e)

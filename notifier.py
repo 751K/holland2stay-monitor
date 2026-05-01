@@ -38,8 +38,8 @@ class BaseNotifier(ABC):
     async def send_error(self, message: str) -> bool:
         return await self._send(f"⚠️ 监控异常\n{message}")
 
-    async def send_booking_success(self, listing: Listing, detail: str) -> bool:
-        return await self._send(_format_booking_success(listing, detail))
+    async def send_booking_success(self, listing: Listing, detail: str, pay_url: str = "") -> bool:
+        return await self._send(_format_booking_success(listing, detail, pay_url))
 
     async def send_booking_failed(self, listing: Listing, reason: str) -> bool:
         return await self._send(_format_booking_failed(listing, reason))
@@ -298,16 +298,21 @@ def _format_status_change(l: Listing, old: str, new: str) -> str:
     ])
 
 
-def _format_booking_success(l: Listing, detail: str) -> str:
-    return "\n".join([
-        f"🛒 自动预订成功",
+def _format_booking_success(l: Listing, detail: str, pay_url: str = "") -> str:
+    lines = [
+        f"🛒 自动预订成功！",
         f"",
         f"🏠 {l.name}",
         f"💰 租金：{l.price_display}/月",
-        f"📅 入住：{l.available_from or '未知'}",
+        f"📅 入住：{l.available_from or '待定'}",
         f"",
-        f"✅ {detail}",
-    ])
+        f"⚡ 点击链接立即付款（有时限，请尽快）：",
+        f"",
+        pay_url if pay_url else detail,
+        f"",
+        f"⚠️ 链接直达支付页面，无需登录。",
+    ]
+    return "\n".join(lines)
 
 
 def _format_booking_failed(l: Listing, reason: str) -> str:

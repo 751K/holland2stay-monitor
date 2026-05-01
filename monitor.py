@@ -238,7 +238,7 @@ async def run_once(
         if result.dry_run:
             logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, target.name)
         elif result.success:
-            await notifier.send_booking_success(target, result.message)
+            await notifier.send_booking_success(target, result.message, result.pay_url)
         else:
             await notifier.send_booking_failed(target, result.message)
 
