@@ -55,7 +55,7 @@ from config import load_config
 from notifier import BaseNotifier, create_user_notifier
 from scraper import scrape_all
 from storage import Storage
-from users import UserConfig, load_users, migrate_from_env, save_users
+from users import USERS_FILE, UserConfig, load_users, migrate_from_env, save_users
 
 
 def _setup_logging(level: str) -> None:
@@ -454,9 +454,16 @@ async def _async_main() -> None:
 
     storage = Storage(cfg.db_path)
 
-    # 加载用户；若第一次运行且 .env 有旧配置，自动迁移
-    users = load_users()
-    if not users:
+    # 加载用户配置；文件损坏时硬停止，避免迁移逻辑覆盖现有数据
+    try:
+        users = load_users()
+    except RuntimeError as e:
+        logger.critical("❌ 无法加载用户配置，进程终止以防数据丢失:\n  %s", e)
+        sys.exit(1)
+
+    # 仅在文件完全不存在时（真正的首次运行）才执行 .env 迁移。
+    # users 为空列表但文件已存在，说明是有意清空，不触发迁移。
+    if not USERS_FILE.exists():
         migrated = migrate_from_env()
         if migrated:
             save_users([migrated])
@@ -464,9 +471,14 @@ async def _async_main() -> None:
             logger.info("✅ 已从 .env 迁移旧配置，创建默认用户「%s」", migrated.name)
         else:
             logger.warning(
-                "⚠️  users.json 为空且 .env 无通知配置。"
+                "⚠️  users.json 不存在且 .env 无通知配置。"
                 "请在 Web 面板（python web.py）的「用户」页面添加用户。"
             )
+    elif not users:
+        logger.warning(
+            "⚠️  users.json 为空列表，通知和自动预订不可用。"
+            "请在 Web 面板添加用户。"
+        )
 
     user_notifiers = _build_user_notifiers(users)
     if not user_notifiers:

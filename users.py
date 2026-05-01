@@ -143,12 +143,16 @@ def load_users() -> list[UserConfig]:
 
     Returns
     -------
-    list[UserConfig]，文件不存在时返回空列表
+    list[UserConfig]
+    - 文件不存在 → 返回空列表（首次运行，调用方可执行 .env 迁移）
+    - 文件存在且合法 → 返回解析结果（可能为空列表，表示有意清空）
 
-    错误处理
-    --------
-    文件存在但 JSON 解析失败（损坏/截断）时记录警告并返回空列表，
-    不会抛出异常（调用方应检查返回是否为空并提示用户）。
+    Raises
+    ------
+    RuntimeError
+        文件存在但 JSON 解析失败（损坏/截断/写入中断）时抛出，
+        而不是静默返回 []。调用方必须显式处理此异常，
+        禁止在此情况下用迁移逻辑覆盖文件（会导致数据丢失）。
     """
     if not USERS_FILE.exists():
         return []
@@ -156,8 +160,10 @@ def load_users() -> list[UserConfig]:
         data = json.loads(USERS_FILE.read_text(encoding="utf-8"))
         return [_user_from_dict(u) for u in data]
     except Exception as e:
-        logger.warning("加载 %s 失败，返回空列表: %s", USERS_FILE, e)
-        return []
+        raise RuntimeError(
+            f"{USERS_FILE} 存在但解析失败，请手动修复或从备份恢复后重启。\n"
+            f"原因: {e}"
+        ) from e
 
 
 def save_users(users: list[UserConfig]) -> None:
