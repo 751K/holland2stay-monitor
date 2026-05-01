@@ -1,104 +1,135 @@
 <!doctype html>
-<html lang="zh" data-bs-theme="dark">
+<html lang="zh">
 <head>
-  <!--
-    Anti-FOUC：在任何 CSS 加载前立即应用保存的主题，防止白屏闪烁。
-    脚本必须保持内联且在所有 <link> 之前。
-  -->
-  <script>
-    (function () {
-      var t = localStorage.getItem('h2s-theme');
-      if (!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      document.documentElement.setAttribute('data-bs-theme', t);
-    })();
-  </script>
-
+  <script>(function(){var t=localStorage.getItem('h2s-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-bs-theme',t);document.documentElement.style.colorScheme=t;})();</script>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}Holland2Stay 监控{% endblock %}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-
   <style>
-    /* ── CSS 自定义属性：深色主题（默认）──────────────────────────── */
-    :root,
-    [data-bs-theme="dark"] {
-      --h2s-bg-body:    #0d1117;
-      --h2s-bg-surface: #161b22;
-      --h2s-bg-raised:  #1c2128;
-      --h2s-border:     #30363d;
-      --h2s-border-sub: #21262d;
-      --h2s-muted:      #8b949e;
-      --h2s-text:       #e6edf3;
-      --h2s-link:       #58a6ff;
-      --h2s-hover:      #1c2128;
-      --h2s-navbar-bg:  #161b22;
+    :root,[data-bs-theme="dark"]{--bg-body:#000;--bg-surface:#1c1c1e;--bg-raised:#2c2c2e;--bg-elevated:#3a3a3c;--border:rgba(84,84,88,.48);--border-hard:#48484a;--text:#fff;--text2:rgba(235,235,245,.6);--text3:rgba(235,235,245,.28);--muted:rgba(235,235,245,.55);--link:#0a84ff;--accent:#0a84ff;--success:#32d74b;--warning:#ff9f0a;--danger:#ff453a;--nav-bg:rgba(28,28,30,.88);--shadow-sm:0 2px 12px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.4);--shadow-md:0 6px 28px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.3);--h2s-bg-body:#000;--h2s-bg-surface:#1c1c1e;--h2s-bg-raised:#2c2c2e;--h2s-border:rgba(84,84,88,.48);--h2s-border-sub:#2c2c2e;--h2s-muted:rgba(235,235,245,.55);--h2s-text:#fff;--h2s-link:#0a84ff;--h2s-hover:#2c2c2e;}
+    [data-bs-theme="light"]{--bg-body:#f2f2f7;--bg-surface:#fff;--bg-raised:#f2f2f7;--bg-elevated:#e5e5ea;--border:rgba(60,60,67,.16);--border-hard:#c6c6c8;--text:#000;--text2:rgba(60,60,67,.6);--text3:rgba(60,60,67,.28);--muted:rgba(60,60,67,.56);--link:#007aff;--accent:#007aff;--success:#34c759;--warning:#ff9500;--danger:#ff3b30;--nav-bg:rgba(242,242,247,.88);--shadow-sm:0 2px 12px rgba(0,0,0,.07),0 1px 3px rgba(0,0,0,.04);--shadow-md:0 6px 28px rgba(0,0,0,.1),0 2px 8px rgba(0,0,0,.05);--h2s-bg-body:#f2f2f7;--h2s-bg-surface:#fff;--h2s-bg-raised:#f2f2f7;--h2s-border:rgba(60,60,67,.16);--h2s-border-sub:#e5e5ea;--h2s-muted:rgba(60,60,67,.56);--h2s-text:#000;--h2s-link:#007aff;--h2s-hover:#f2f2f7;}
+    *,*::before,*::after{box-sizing:border-box;}
+    html{scroll-behavior:smooth;}
+    body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;background:var(--bg-body);color:var(--text);margin:0;min-height:100vh;font-size:15px;line-height:1.55;}
+    h1,h2,h3,h4,h5,h6{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Helvetica Neue',Arial,sans-serif;letter-spacing:-.028em;}
+
+    /* Page transition */
+    @keyframes appleIn{from{opacity:0;transform:translateY(14px) scale(.99);}to{opacity:1;transform:translateY(0) scale(1);}}
+    @keyframes appleOut{from{opacity:1;transform:translateY(0);}to{opacity:0;transform:translateY(-6px);}}
+    #app-content{animation:appleIn .38s cubic-bezier(.25,.46,.45,.94) both;}
+    #app-content.leaving{animation:appleOut .2s cubic-bezier(.55,0,1,.45) forwards;pointer-events:none;}
+
+    /* Navbar */
+    .apple-nav{position:sticky;top:0;z-index:1000;height:52px;background:var(--nav-bg);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom:.5px solid var(--border);}
+    .nav-inner{display:flex;align-items:center;height:100%;max-width:1400px;margin:0 auto;padding:0 24px;}
+    .nav-brand{font-weight:600;font-size:.98rem;letter-spacing:-.022em;color:var(--text)!important;text-decoration:none!important;margin-right:24px;white-space:nowrap;flex-shrink:0;}
+    .nav-links{display:flex;align-items:center;gap:2px;}
+    .nav-links a{font-size:.84rem;font-weight:500;color:var(--muted);text-decoration:none!important;padding:5px 11px;border-radius:8px;transition:color .14s,background .14s;white-space:nowrap;}
+    .nav-links a:hover{color:var(--text);background:rgba(128,128,128,.1);}
+    .nav-links a.active{color:var(--text);font-weight:600;background:rgba(128,128,128,.14);}
+    .nav-right{display:flex;align-items:center;gap:6px;margin-left:auto;}
+
+    /* Monitor badge */
+    #mon-badge{display:inline-flex;align-items:center;gap:5px;font-size:.7rem;font-weight:500;padding:3px 10px;border-radius:20px;background:var(--bg-raised);color:var(--muted);border:.5px solid var(--border);transition:color .3s;white-space:nowrap;}
+    #mon-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0;}
+    @keyframes breathe{0%,100%{opacity:1}50%{opacity:.3}}
+    #mon-badge.is-running{color:var(--success);}
+    #mon-badge.is-running #mon-dot{animation:breathe 2s ease-in-out infinite;}
+    #mon-badge.is-stopped{color:var(--danger);}
+
+    /* Icon button */
+    .icon-btn{width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:.95rem;transition:color .14s,background .14s;}
+    .icon-btn:hover{background:rgba(128,128,128,.12);color:var(--text);}
+
+    /* Mobile */
+    .ham-btn{display:none;}
+    @media(max-width:768px){
+      .ham-btn{display:inline-flex;}
+      .nav-links{display:none;flex-direction:column;gap:2px;position:absolute;top:52px;left:0;right:0;padding:10px 14px 14px;background:var(--nav-bg);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom:.5px solid var(--border);z-index:999;}
+      .nav-links.open{display:flex;}
+      #app-content{padding:20px 16px 36px!important;}
     }
 
-    /* ── CSS 自定义属性：浅色主题 ──────────────────────────────────── */
-    [data-bs-theme="light"] {
-      --h2s-bg-body:    #f6f8fa;
-      --h2s-bg-surface: #ffffff;
-      --h2s-bg-raised:  #f6f8fa;
-      --h2s-border:     #d0d7de;
-      --h2s-border-sub: #e1e4e8;
-      --h2s-muted:      #656d76;
-      --h2s-text:       #1f2328;
-      --h2s-link:       #0969da;
-      --h2s-hover:      #f6f8fa;
-      --h2s-navbar-bg:  #ffffff;
-    }
+    /* Layout */
+    #app-content{max-width:1400px;margin:0 auto;padding:36px 24px 56px;}
 
-    /* ── 全局 ──────────────────────────────────────────────────────── */
-    body { background: var(--h2s-bg-body); }
+    /* Page header */
+    .page-hdr{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:28px;gap:12px;}
+    .page-hdr h1{font-size:1.75rem;font-weight:700;letter-spacing:-.038em;margin:0;}
+    .page-hdr .ph-meta{font-size:.76rem;color:var(--muted);}
 
-    .h2s-navbar {
-      background: var(--h2s-navbar-bg) !important;
-      border-bottom: 1px solid var(--h2s-border) !important;
-    }
-    .navbar-brand { font-weight: 700; letter-spacing: -.5px; }
+    /* Cards */
+    .card,.apple-card{background:var(--bg-surface)!important;border:.5px solid var(--border)!important;border-radius:16px!important;box-shadow:var(--shadow-sm)!important;overflow:hidden;}
+    .card-header{background:transparent!important;border-bottom:.5px solid var(--border)!important;padding:13px 18px!important;}
 
-    /* ── 统计卡片 ──────────────────────────────────────────────────── */
-    .stat-card   { border: 1px solid var(--h2s-border); background: var(--h2s-bg-surface); }
-    .stat-number { font-size: 2rem; font-weight: 700; line-height: 1; }
-    .stat-label  { font-size: .75rem; color: var(--h2s-muted);
-                   text-transform: uppercase; letter-spacing: .05em; }
+    /* KPI */
+    .kpi-wrap{padding:20px 22px;display:flex;align-items:center;gap:16px;}
+    .kpi-icon{width:46px;height:46px;border-radius:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:1.15rem;color:#fff;}
+    .kpi-num{font-size:1.75rem;font-weight:700;letter-spacing:-.04em;line-height:1;}
+    .kpi-lbl{font-size:.66rem;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-top:4px;}
 
-    /* ── 表格 ──────────────────────────────────────────────────────── */
-    .table { --bs-table-bg: transparent; }
-    .table th { color: var(--h2s-muted); font-size: .75rem; text-transform: uppercase;
-                letter-spacing: .05em; font-weight: 500; border-color: var(--h2s-border); }
-    .table td { border-color: var(--h2s-border-sub); vertical-align: middle; }
-    .table-hover tbody tr:hover td { background: var(--h2s-hover); }
-    .badge { font-weight: 500; }
+    /* Section header */
+    .sec-hdr{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:13px 18px;border-bottom:.5px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
 
-    /* ── 表单（浅色主题用 Bootstrap 原生样式，深色主题需要覆写）────── */
-    [data-bs-theme="dark"] .form-control,
-    [data-bs-theme="dark"] .form-select {
-      background: var(--h2s-bg-surface);
-      border-color: var(--h2s-border);
-      color: var(--h2s-text);
-    }
-    [data-bs-theme="dark"] .form-control:focus,
-    [data-bs-theme="dark"] .form-select:focus {
-      background: var(--h2s-bg-surface);
-      border-color: #388bfd;
-      color: var(--h2s-text);
-      box-shadow: 0 0 0 3px rgba(56,139,253,.1);
-    }
+    /* Tables */
+    .table{--bs-table-bg:transparent;margin:0;}
+    .table th{font-size:.63rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);border:none!important;padding:10px 18px!important;border-bottom:.5px solid var(--border)!important;white-space:nowrap;}
+    .table td{font-size:.875rem;border:none!important;border-bottom:.5px solid var(--border)!important;padding:13px 18px!important;vertical-align:middle;}
+    .table tbody tr:last-child td{border-bottom:none!important;}
+    .table-hover tbody tr{transition:background .1s;}
+    .table-hover tbody tr:hover td{background:var(--bg-raised)!important;}
 
-    /* ── 卡片 ──────────────────────────────────────────────────────── */
-    .card        { border-color: var(--h2s-border); background: var(--h2s-bg-surface); }
-    .card-header { border-color: var(--h2s-border); background: var(--h2s-bg-raised); }
+    /* Badges */
+    .badge{font-weight:500;font-size:.67rem;border-radius:6px;padding:3px 8px;}
+    .badge-book{background:rgba(52,199,89,.13);color:var(--success);}
+    .badge-lottery{background:rgba(255,149,0,.13);color:var(--warning);}
+    [data-bs-theme="dark"] .badge-book{background:rgba(50,215,75,.14);}
+    [data-bs-theme="dark"] .badge-lottery{background:rgba(255,159,10,.14);}
 
-    /* ── 链接 & 导航 ──────────────────────────────────────────────── */
-    a { color: var(--h2s-link); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .nav-link.active { color: var(--h2s-text) !important; font-weight: 600; }
+    /* Buttons */
+    .btn{font-size:.875rem;font-weight:500;border-radius:10px;transition:all .15s;}
+    .btn-sm{font-size:.8rem;padding:5px 13px;}
+    .btn-primary{background:var(--accent);border-color:var(--accent);}
+    .btn-primary:hover{background:color-mix(in srgb,var(--accent) 80%,#000);border-color:color-mix(in srgb,var(--accent) 80%,#000);}
+    .btn-outline-secondary{border-radius:10px;color:var(--muted);border-color:var(--border-hard);}
+    .btn-danger{border-radius:10px;}
 
-    /* ── 主题切换按钮 ──────────────────────────────────────────────── */
-    #theme-toggle { color: var(--h2s-muted); transition: color .15s, transform .2s; background: transparent; }
-    #theme-toggle:hover { color: var(--h2s-text); transform: rotate(20deg); }
+    /* Forms */
+    .form-control,.form-select{border-radius:10px;font-size:.875rem;border:.5px solid var(--border-hard);transition:border-color .14s,box-shadow .14s;}
+    [data-bs-theme="dark"] .form-control,[data-bs-theme="dark"] .form-select{background:var(--bg-raised);border-color:var(--border-hard);color:var(--text);}
+    .form-control:focus,.form-select:focus{border-color:var(--accent)!important;box-shadow:0 0 0 3px rgba(0,122,255,.18)!important;}
+    [data-bs-theme="dark"] .form-control:focus,[data-bs-theme="dark"] .form-select:focus{background:var(--bg-raised);color:var(--text);box-shadow:0 0 0 3px rgba(10,132,255,.2)!important;}
+    .form-label{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:6px;}
+    .form-check-input:checked{background-color:var(--accent);border-color:var(--accent);}
+    .form-text{font-size:.75rem;color:var(--muted);}
+
+    /* Alerts */
+    .alert{border-radius:14px;border:none;font-size:.875rem;}
+    .alert-success{background:rgba(52,199,89,.1);color:var(--success);}
+    .alert-danger{background:rgba(255,59,48,.1);color:var(--danger);}
+    .alert-warning{background:rgba(255,149,0,.1);color:var(--warning);}
+    .alert-info{background:rgba(0,122,255,.1);color:var(--accent);}
+    [data-bs-theme="dark"] .alert-success{background:rgba(50,215,75,.1);}
+    [data-bs-theme="dark"] .alert-danger{background:rgba(255,69,58,.1);}
+    [data-bs-theme="dark"] .alert-warning{background:rgba(255,159,10,.1);}
+    [data-bs-theme="dark"] .alert-info{background:rgba(10,132,255,.1);}
+
+    /* Modals */
+    .modal-content{background:var(--bg-surface)!important;border:.5px solid var(--border)!important;border-radius:18px!important;box-shadow:var(--shadow-md)!important;}
+    .modal-header{border-bottom:.5px solid var(--border)!important;}
+    .modal-footer{border-top:.5px solid var(--border)!important;}
+
+    /* Links */
+    a{color:var(--link);text-decoration:none;}
+    a:hover{color:var(--link);text-decoration:underline;}
+
+    /* Scrollbar */
+    ::-webkit-scrollbar{width:6px;height:6px;}
+    ::-webkit-scrollbar-track{background:transparent;}
+    ::-webkit-scrollbar-thumb{background:var(--border-hard);border-radius:3px;}
+    ::-webkit-scrollbar-thumb:hover{background:var(--muted);}
 
     {% block extra_style %}{% endblock %}
   </style>
@@ -106,137 +137,83 @@
 </head>
 <body>
 
-<nav class="navbar navbar-expand-lg h2s-navbar">
-  <div class="container-fluid px-4">
-    <a class="navbar-brand text-body-emphasis" href="/">
-      <i class="bi bi-house-door-fill text-success me-2"></i>Holland2Stay
-    </a>
-    <button class="navbar-toggler border-0" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
-      <span class="navbar-toggler-icon"></span>
-    </button>
-    <div class="collapse navbar-collapse" id="nav">
-
-      <!-- 监控状态 + 主题切换 + 退出 -->
-      <ul class="navbar-nav ms-auto gap-1 me-2 align-items-center">
-        <li class="nav-item">
-          <span id="monitor-badge" class="badge bg-secondary small py-1 px-2">
-            <span class="spinner-border spinner-border-sm me-1" style="width:.6rem;height:.6rem;"></span>检测中
-          </span>
-        </li>
-        <li class="nav-item">
-          <button id="theme-toggle" class="btn btn-sm border-0 px-2 py-1"
-                  onclick="toggleTheme()" title="切换日间/夜间模式" aria-label="切换主题">
-            <i id="theme-icon" class="bi bi-sun fs-6"></i>
-          </button>
-        </li>
-        {% if auth_enabled %}
-        <li class="nav-item">
-          <form method="POST" action="{{ url_for('logout') }}" class="d-inline">
-            <button type="submit" class="btn btn-sm border-0 px-2 py-1"
-                    style="color:var(--h2s-muted);" title="退出登录">
-              <i class="bi bi-box-arrow-right fs-6"></i>
-            </button>
-          </form>
-        </li>
-        {% endif %}
-      </ul>
-
-      <!-- 页面导航 -->
-      <ul class="navbar-nav gap-1">
-        <li class="nav-item">
-          <a class="nav-link px-3 rounded {% if request.endpoint == 'index' %}active{% endif %}"
-             href="{{ url_for('index') }}">
-            <i class="bi bi-speedometer2 me-1"></i>仪表盘
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link px-3 rounded {% if request.endpoint == 'listings' %}active{% endif %}"
-             href="{{ url_for('listings') }}">
-            <i class="bi bi-list-ul me-1"></i>房源列表
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link px-3 rounded {% if request.endpoint == 'calendar' %}active{% endif %}"
-             href="{{ url_for('calendar') }}">
-            <i class="bi bi-calendar3 me-1"></i>日历
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link px-3 rounded {% if request.endpoint == 'stats' %}active{% endif %}"
-             href="{{ url_for('stats') }}">
-            <i class="bi bi-bar-chart-line me-1"></i>统计
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link px-3 rounded {% if request.endpoint in ['users_list','user_new','user_edit'] %}active{% endif %}"
-             href="{{ url_for('users_list') }}">
-            <i class="bi bi-people me-1"></i>用户
-          </a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link px-3 rounded {% if request.endpoint == 'settings' %}active{% endif %}"
-             href="{{ url_for('settings') }}">
-            <i class="bi bi-gear me-1"></i>设置
-          </a>
-        </li>
-      </ul>
+<nav class="apple-nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-brand">🏠 Holland2Stay</a>
+    <div class="nav-links" id="nav-links">
+      <a href="{{ url_for('index') }}" class="{% if request.endpoint=='index' %}active{% endif %}">仪表盘</a>
+      <a href="{{ url_for('listings') }}" class="{% if request.endpoint=='listings' %}active{% endif %}">房源列表</a>
+      <a href="{{ url_for('calendar') }}" class="{% if request.endpoint=='calendar' %}active{% endif %}">日历</a>
+      <a href="{{ url_for('stats') }}" class="{% if request.endpoint=='stats' %}active{% endif %}">统计</a>
+      <a href="{{ url_for('users_list') }}" class="{% if request.endpoint in ['users_list','user_new','user_edit'] %}active{% endif %}">用户</a>
+      <a href="{{ url_for('settings') }}" class="{% if request.endpoint=='settings' %}active{% endif %}">设置</a>
+    </div>
+    <div class="nav-right">
+      <div id="mon-badge"><span id="mon-dot"></span><span id="mon-text">检测中</span></div>
+      <button class="icon-btn" onclick="toggleTheme()" title="切换主题"><i id="theme-icon" class="bi bi-sun"></i></button>
+      {% if auth_enabled %}
+      <form method="POST" action="{{ url_for('logout') }}" class="m-0 p-0">
+        <button type="submit" class="icon-btn" title="退出登录"><i class="bi bi-box-arrow-right"></i></button>
+      </form>
+      {% endif %}
+      <button class="icon-btn ham-btn" onclick="toggleNav()"><i class="bi bi-list"></i></button>
     </div>
   </div>
 </nav>
 
-<div class="container-fluid px-4 py-4" style="max-width:1400px;">
-
+<div id="app-content">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% for cat, msg in messages %}
-    <div class="alert alert-{{ 'success' if cat == 'success' else 'danger' }} alert-dismissible fade show" role="alert">
-      {{ msg }}
-      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    <div class="alert alert-{{ 'success' if cat=='success' else ('warning' if cat=='warning' else 'danger') }} alert-dismissible fade show mb-4">
+      {{ msg }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
     {% endfor %}
   {% endwith %}
-
   {% block content %}{% endblock %}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-// ── 监控状态徽章 ────────────────────────────────────────────────────
-function refreshMonitorStatus() {
-  fetch('/api/status')
-    .then(r => r.json())
-    .then(d => {
-      const el = document.getElementById('monitor-badge');
-      if (!el) return;
-      if (d.running) {
-        el.className = 'badge bg-success small py-1 px-2';
-        el.innerHTML = '<i class="bi bi-circle-fill me-1" style="font-size:.5rem;vertical-align:middle;"></i>监控运行中';
-      } else {
-        el.className = 'badge bg-danger small py-1 px-2';
-        el.innerHTML = '<i class="bi bi-circle me-1" style="font-size:.5rem;vertical-align:middle;"></i>监控未启动';
-      }
-    })
-    .catch(() => {});
-}
-refreshMonitorStatus();
-setInterval(refreshMonitorStatus, 15000);
+// Page transitions
+document.addEventListener('click', function(e) {
+  const a = e.target.closest('a[href]');
+  if (!a) return;
+  const href = a.getAttribute('href');
+  if (!href || href.startsWith('#') || href.startsWith('http') || href.startsWith('mailto') ||
+      a.target==='_blank' || a.hasAttribute('data-bs-toggle') || a.hasAttribute('data-bs-dismiss') ||
+      e.ctrlKey || e.metaKey || e.shiftKey) return;
+  e.preventDefault();
+  document.getElementById('app-content').classList.add('leaving');
+  setTimeout(() => { window.location.href = href; }, 200);
+});
 
-// ── 主题切换 ────────────────────────────────────────────────────────
-function _applyTheme(theme) {
-  document.documentElement.setAttribute('data-bs-theme', theme);
-  const icon = document.getElementById('theme-icon');
-  if (icon) {
-    icon.className = 'bi fs-6 ' + (theme === 'dark' ? 'bi-sun' : 'bi-moon-stars-fill');
-  }
+// Monitor badge
+function refreshStatus() {
+  fetch('/api/status').then(r=>r.json()).then(d=>{
+    const b=document.getElementById('mon-badge'), t=document.getElementById('mon-text');
+    if(!b) return;
+    b.classList.remove('is-running','is-stopped');
+    if(d.running){b.classList.add('is-running');t.textContent='监控运行中';}
+    else{b.classList.add('is-stopped');t.textContent='监控未启动';}
+  }).catch(()=>{});
 }
+refreshStatus(); setInterval(refreshStatus,15000);
 
-function toggleTheme() {
-  const next = document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
-  _applyTheme(next);
-  localStorage.setItem('h2s-theme', next);
+// Theme
+function _applyTheme(t){
+  document.documentElement.setAttribute('data-bs-theme',t);
+  document.documentElement.style.colorScheme=t;
+  const i=document.getElementById('theme-icon');
+  if(i) i.className='bi '+(t==='dark'?'bi-sun':'bi-moon-stars-fill');
 }
+function toggleTheme(){
+  const n=document.documentElement.getAttribute('data-bs-theme')==='dark'?'light':'dark';
+  _applyTheme(n); localStorage.setItem('h2s-theme',n);
+}
+_applyTheme(document.documentElement.getAttribute('data-bs-theme')||'dark');
 
-// 页面加载后同步图标（主题已由 <head> 内脚本设置好了）
-_applyTheme(document.documentElement.getAttribute('data-bs-theme') || 'dark');
+// Mobile nav
+function toggleNav(){document.getElementById('nav-links').classList.toggle('open');}
 </script>
 {% block scripts %}{% endblock %}
 </body>

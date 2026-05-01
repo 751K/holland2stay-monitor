@@ -1,38 +1,68 @@
 {% extends "base.html" %}
 {% block title %}仪表盘 · Holland2Stay{% endblock %}
-
-{% block head %}
-  <meta http-equiv="refresh" content="60">
-{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="60">{% endblock %}
 
 {% block content %}
 
-<!-- 统计卡片 -->
+<div class="page-hdr">
+  <h1>仪表盘</h1>
+  <span class="ph-meta"><i class="bi bi-arrow-clockwise me-1"></i>每 60 秒自动刷新</span>
+</div>
+
+<!-- KPI -->
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3">
-    <div class="card stat-card h-100 p-3">
-      <div class="stat-number text-body-emphasis">{{ stats.total }}</div>
-      <div class="stat-label mt-1">数据库房源</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card stat-card h-100 p-3">
-      <div class="stat-number text-success">{{ stats.new_24h }}</div>
-      <div class="stat-label mt-1">今日新增</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card stat-card h-100 p-3">
-      <div class="stat-number text-warning">{{ stats.changes_24h }}</div>
-      <div class="stat-label mt-1">今日状态变更</div>
-    </div>
-  </div>
-  <div class="col-6 col-lg-3">
-    <div class="card stat-card h-100 p-3">
-      <div class="stat-number text-info" style="font-size:1.1rem; padding-top:.45rem;">
-        {{ stats.last_scrape | time_ago }}
+    <div class="card">
+      <div class="kpi-wrap">
+        <div class="kpi-icon" style="background:linear-gradient(135deg,#bf5af2,#9b59d0);">
+          <i class="bi bi-database-fill"></i>
+        </div>
+        <div>
+          <div class="kpi-num">{{ stats.total }}</div>
+          <div class="kpi-lbl">数据库房源</div>
+        </div>
       </div>
-      <div class="stat-label mt-1">最近抓取 · {{ stats.last_count }} 条</div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card">
+      <div class="kpi-wrap">
+        <div class="kpi-icon" style="background:linear-gradient(135deg,#32d74b,#1a9e30);">
+          <i class="bi bi-house-add-fill"></i>
+        </div>
+        <div>
+          <div class="kpi-num" style="color:var(--success);">{{ stats.new_24h }}</div>
+          <div class="kpi-lbl">今日新增</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card">
+      <div class="kpi-wrap">
+        <div class="kpi-icon" style="background:linear-gradient(135deg,#ff9f0a,#cc7a00);">
+          <i class="bi bi-arrow-left-right"></i>
+        </div>
+        <div>
+          <div class="kpi-num" style="color:var(--warning);">{{ stats.changes_24h }}</div>
+          <div class="kpi-lbl">今日状态变更</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-6 col-lg-3">
+    <div class="card">
+      <div class="kpi-wrap">
+        <div class="kpi-icon" style="background:linear-gradient(135deg,#0a84ff,#0060cc);">
+          <i class="bi bi-clock-fill"></i>
+        </div>
+        <div>
+          <div class="kpi-num" style="color:var(--accent);font-size:1rem;padding-top:.3rem;">
+            {{ stats.last_scrape | time_ago }}
+          </div>
+          <div class="kpi-lbl">最近抓取 · {{ stats.last_count }} 条</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -41,41 +71,36 @@
 
   <!-- 最新房源 -->
   <div class="col-12 col-xl-7">
-    <div class="card">
-      <div class="card-header d-flex justify-content-between align-items-center py-2 px-3">
-        <span class="fw-semibold"><i class="bi bi-house me-2 text-success"></i>最新房源</span>
-        <a href="{{ url_for('listings') }}" class="small">查看全部 →</a>
+    <div class="card h-100">
+      <div class="sec-hdr">
+        <span>最新房源</span>
+        <a href="{{ url_for('listings') }}" style="font-size:.78rem;font-weight:500;text-transform:none;letter-spacing:0;color:var(--link);">
+          查看全部 <i class="bi bi-arrow-right ms-1"></i>
+        </a>
       </div>
       <div class="table-responsive">
         <table class="table table-hover mb-0">
-          <thead>
-            <tr>
-              <th>房源</th>
-              <th>状态</th>
-              <th>租金</th>
-              <th>可入住</th>
-              <th>发现时间</th>
-            </tr>
-          </thead>
+          <thead><tr><th>房源</th><th>状态</th><th>租金</th><th>入住</th><th>发现</th></tr></thead>
           <tbody>
           {% for l in recent %}
             {% set fm = l.features | parse_features %}
             <tr>
               <td>
-                <a href="{{ l.url }}" target="_blank" class="fw-medium">{{ l.name }}</a>
-                {% if fm.area %}
-                  <span class="text-muted small ms-1">{{ fm.area }}</span>
-                {% endif %}
+                <a href="{{ l.url }}" target="_blank" style="color:var(--text);font-weight:500;">{{ l.name }}</a>
+                {% if fm.area %}<span style="font-size:.75rem;color:var(--muted);margin-left:6px;">{{ fm.area }}</span>{% endif %}
               </td>
               <td>
-                <span class="badge bg-{{ status_badge(l.status) }}">{{ l.status }}</span>
+                {% set sl = l.status | lower %}
+                {% if 'book' in sl %}<span class="badge badge-book">{{ l.status }}</span>
+                {% elif 'lottery' in sl %}<span class="badge badge-lottery">{{ l.status }}</span>
+                {% else %}<span class="badge bg-secondary">{{ l.status }}</span>{% endif %}
               </td>
-              <td class="text-nowrap">{{ l.price_raw | price_short }}</td>
-              <td class="text-muted small text-nowrap">{{ l.available_from or '—' }}</td>
-              <td class="text-muted small text-nowrap">{{ l.first_seen | time_ago }}</td>
+              <td style="font-weight:500;white-space:nowrap;">{{ l.price_raw | price_short }}</td>
+              <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ l.available_from or '—' }}</td>
+              <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ l.first_seen | time_ago }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="5" class="text-center text-muted py-4">暂无数据</td></tr>
+            <tr><td colspan="5" class="text-center py-5" style="color:var(--muted);">暂无数据</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -85,34 +110,24 @@
 
   <!-- 状态变更 -->
   <div class="col-12 col-xl-5">
-    <div class="card">
-      <div class="card-header py-2 px-3">
-        <span class="fw-semibold"><i class="bi bi-arrow-left-right me-2 text-warning"></i>近 48h 状态变更</span>
-      </div>
+    <div class="card h-100">
+      <div class="sec-hdr"><span>近 48h 状态变更</span></div>
       <div class="table-responsive">
         <table class="table table-hover mb-0">
-          <thead>
-            <tr>
-              <th>房源</th>
-              <th>变更</th>
-              <th>时间</th>
-            </tr>
-          </thead>
+          <thead><tr><th>房源</th><th>变更</th><th>时间</th></tr></thead>
           <tbody>
           {% for c in changes %}
             <tr>
-              <td>
-                <a href="{{ c.url }}" target="_blank" class="fw-medium small">{{ c.name }}</a>
-              </td>
-              <td class="small">
+              <td><a href="{{ c.url }}" target="_blank" style="font-size:.82rem;color:var(--text);font-weight:500;">{{ c.name }}</a></td>
+              <td style="font-size:.78rem;">
                 <span class="badge bg-{{ status_badge(c.old_status) }}">{{ c.old_status }}</span>
-                <i class="bi bi-arrow-right mx-1 text-muted"></i>
+                <i class="bi bi-arrow-right mx-1" style="color:var(--muted);"></i>
                 <span class="badge bg-{{ status_badge(c.new_status) }}">{{ c.new_status }}</span>
               </td>
-              <td class="text-muted small text-nowrap">{{ c.changed_at | time_ago }}</td>
+              <td style="font-size:.78rem;color:var(--muted);white-space:nowrap;">{{ c.changed_at | time_ago }}</td>
             </tr>
           {% else %}
-            <tr><td colspan="3" class="text-center text-muted py-4">暂无变更</td></tr>
+            <tr><td colspan="3" class="text-center py-5" style="color:var(--muted);">暂无变更</td></tr>
           {% endfor %}
           </tbody>
         </table>
@@ -121,7 +136,4 @@
   </div>
 
 </div>
-
-<p class="text-muted small mt-3"><i class="bi bi-arrow-clockwise me-1"></i>页面每 60 秒自动刷新</p>
-
 {% endblock %}

@@ -2,18 +2,53 @@
 {% block title %}用户管理 · Holland2Stay{% endblock %}
 
 {% block extra_style %}
-.user-card { border: 1px solid var(--h2s-border); border-radius: .5rem;
-             background: var(--h2s-bg-surface); transition: border-color .15s; }
-.user-card:hover { border-color: #388bfd; }
-.user-card.disabled-user { opacity: .55; }
-.channel-badge { font-size: .68rem; padding: .2em .55em; }
-.filter-tag { font-size: .7rem; color: var(--h2s-muted); }
+.user-card {
+  border: .5px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+  transition: border-color .15s, box-shadow .15s;
+}
+.user-card:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm), 0 0 0 1px rgba(0,122,255,.2);
+}
+.user-card.disabled-user { opacity: .5; }
+.filter-tag { font-size: .72rem; color: var(--muted); }
+
+.ch-badge {
+  display: inline-flex; align-items: center;
+  font-size: .68rem; font-weight: 500;
+  padding: 3px 9px; border-radius: 6px;
+}
+
+.action-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px;
+  border: .5px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  transition: all .15s;
+  cursor: pointer;
+  font-size: .85rem;
+}
+.action-btn:hover { background: var(--bg-raised); color: var(--text); border-color: var(--border-hard); }
+.action-btn.danger:hover { background: rgba(255,69,58,.12); color: var(--danger); border-color: var(--danger); }
+.action-btn.info:hover  { background: rgba(90,200,250,.1); color: #5ac8fa; border-color: #5ac8fa; }
+.action-btn.primary:hover { background: rgba(10,132,255,.1); color: var(--accent); border-color: var(--accent); }
+
+.user-avatar {
+  width: 34px; height: 34px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .9rem; font-weight: 700; color: #fff;
+  flex-shrink: 0;
+}
 {% endblock %}
 
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h5 class="fw-bold mb-0"><i class="bi bi-people me-2"></i>用户管理</h5>
+<div class="page-hdr">
+  <h1><i class="bi bi-people me-2" style="color:var(--accent);"></i>用户管理</h1>
   <a href="{{ url_for('user_new') }}" class="btn btn-primary btn-sm px-3">
     <i class="bi bi-plus-lg me-1"></i>新增用户
   </a>
@@ -25,7 +60,7 @@
   <div>
     <strong>暂无用户</strong><br>
     点击「新增用户」添加第一个用户，配置通知渠道和房源过滤条件。<br>
-    <span class="small text-muted">提示：启动 monitor.py 时若 users.json 为空，会自动从 .env 迁移旧配置。</span>
+    <span class="small" style="color:var(--muted);">提示：启动 monitor.py 时若 users.json 为空，会自动从 .env 迁移旧配置。</span>
   </div>
 </div>
 {% endif %}
@@ -36,50 +71,53 @@
   <div class="user-card p-3 {% if not user.enabled %}disabled-user{% endif %}">
 
     <!-- 用户头部 -->
-    <div class="d-flex align-items-start justify-content-between mb-2">
+    <div class="d-flex align-items-start justify-content-between mb-3">
       <div class="d-flex align-items-center gap-2">
-        <div class="rounded-circle d-flex align-items-center justify-content-center fw-bold"
-             style="width:2.2rem;height:2.2rem;background:#21262d;font-size:.9rem;color:#8b949e;">
+        <!-- 彩色头像圆角方块 -->
+        <div class="user-avatar"
+             style="background: linear-gradient(135deg,
+               hsl({{ (loop.index0 * 67) % 360 }},70%,45%) 0%,
+               hsl({{ (loop.index0 * 67 + 40) % 360 }},70%,35%) 100%);">
           {{ user.name[0].upper() }}
         </div>
         <div>
-          <div class="fw-semibold">{{ user.name }}</div>
-          <div class="text-muted" style="font-size:.7rem;">ID: {{ user.id }}</div>
+          <div class="fw-semibold" style="font-size:.9rem;">{{ user.name }}</div>
+          <div style="font-size:.68rem; color:var(--muted);">ID: {{ user.id }}</div>
         </div>
       </div>
       <div class="d-flex align-items-center gap-2">
         {% if user.enabled %}
-          <span class="badge bg-success">启用</span>
+          <span class="badge" style="background:#052e16; color:#86efac;">启用</span>
         {% else %}
           <span class="badge bg-secondary">停用</span>
         {% endif %}
       </div>
     </div>
 
-    <!-- 通知渠道 -->
-    <div class="mb-2">
+    <!-- 通知渠道 pills -->
+    <div class="mb-2 d-flex flex-wrap gap-1">
       {% if not user.notifications_enabled %}
-        <span class="badge bg-danger channel-badge me-1">通知已关闭</span>
+        <span class="ch-badge bg-danger bg-opacity-20 text-danger">通知已关闭</span>
       {% elif user.notification_channels %}
         {% for ch in user.notification_channels %}
           {% if ch == 'imessage' %}
-            <span class="badge bg-primary channel-badge me-1">
+            <span class="ch-badge" style="background:rgba(10,132,255,.15); color:var(--accent);">
               <i class="bi bi-apple me-1"></i>iMessage
             </span>
           {% elif ch == 'telegram' %}
-            <span class="badge bg-info text-dark channel-badge me-1">
+            <span class="ch-badge" style="background:rgba(90,200,250,.15); color:#5ac8fa;">
               <i class="bi bi-telegram me-1"></i>Telegram
             </span>
           {% elif ch == 'whatsapp' %}
-            <span class="badge bg-success channel-badge me-1">
+            <span class="ch-badge" style="background:rgba(50,215,75,.15); color:var(--success);">
               <i class="bi bi-whatsapp me-1"></i>WhatsApp
             </span>
           {% else %}
-            <span class="badge bg-secondary channel-badge me-1">{{ ch }}</span>
+            <span class="ch-badge bg-secondary bg-opacity-20 text-secondary">{{ ch }}</span>
           {% endif %}
         {% endfor %}
       {% else %}
-        <span class="text-muted small">无通知渠道</span>
+        <span style="font-size:.72rem; color:var(--muted);">无通知渠道</span>
       {% endif %}
     </div>
 
@@ -89,7 +127,7 @@
       {% if lf.is_empty() %}
         <i class="bi bi-funnel me-1"></i>无过滤条件（所有房源均通知）
       {% else %}
-        <i class="bi bi-funnel-fill me-1"></i>
+        <i class="bi bi-funnel-fill me-1" style="color:#f59e0b;"></i>
         {% if lf.max_rent %}€{{ lf.max_rent | int }}/月以下&nbsp;{% endif %}
         {% if lf.min_area %}≥{{ lf.min_area | int }}m²&nbsp;{% endif %}
         {% if lf.max_area %}≤{{ lf.max_area | int }}m²&nbsp;{% endif %}
@@ -102,39 +140,40 @@
     <!-- 自动预订状态 -->
     <div class="mb-3 filter-tag">
       {% if user.auto_book.enabled %}
-        <i class="bi bi-cart-check text-success me-1"></i>
+        <i class="bi bi-cart-check me-1" style="color:var(--success);"></i>
         自动预订已开启
         {% if user.auto_book.dry_run %}
-          <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem;">试运行</span>
+          <span class="badge ms-1" style="background:#422006; color:#fcd34d; font-size:.6rem;">试运行</span>
         {% endif %}
         {% if user.auto_book.email %}
           · {{ user.auto_book.email }}
         {% endif %}
       {% else %}
-        <i class="bi bi-cart-x text-muted me-1"></i>自动预订未开启
+        <i class="bi bi-cart-x me-1" style="color:var(--muted);"></i>自动预订未开启
       {% endif %}
     </div>
 
     <!-- 操作按钮 -->
-    <div class="d-flex gap-2 flex-wrap align-items-center">
+    <div class="d-flex gap-2 flex-wrap align-items-center pt-2" style="border-top:1px solid var(--border);">
       <a href="{{ url_for('user_edit', user_id=user.id) }}"
-         class="btn btn-outline-primary btn-sm">
-        <i class="bi bi-pencil me-1"></i>编辑
+         class="action-btn primary" title="编辑">
+        <i class="bi bi-pencil"></i>
       </a>
-      <button type="button" class="btn btn-outline-info btn-sm"
+      <button type="button" class="action-btn info"
               onclick="sendTestNotify('{{ user.id }}', '{{ user.name }}', this)"
-              {% if not user.notification_channels %}disabled title="未配置任何通知渠道"{% endif %}>
-        <i class="bi bi-send me-1"></i>测试通知
+              title="测试通知"
+              {% if not user.notification_channels %}disabled{% endif %}>
+        <i class="bi bi-send"></i>
       </button>
       <form action="{{ url_for('user_toggle', user_id=user.id) }}" method="post" class="d-inline">
-        <button type="submit" class="btn btn-sm {% if user.enabled %}btn-outline-secondary{% else %}btn-outline-success{% endif %}">
-          <i class="bi bi-{% if user.enabled %}pause{% else %}play{% endif %}-fill me-1"></i>
-          {% if user.enabled %}停用{% else %}启用{% endif %}
+        <button type="submit" class="action-btn" title="{% if user.enabled %}停用{% else %}启用{% endif %}">
+          <i class="bi bi-{% if user.enabled %}pause{% else %}play{% endif %}-fill"></i>
         </button>
       </form>
-      <button type="button" class="btn btn-outline-danger btn-sm ms-auto"
-              onclick="confirmDelete('{{ user.id }}', '{{ user.name }}')">
-        <i class="bi bi-trash me-1"></i>删除
+      <button type="button" class="action-btn danger ms-auto"
+              onclick="confirmDelete('{{ user.id }}', '{{ user.name }}')"
+              title="删除">
+        <i class="bi bi-trash"></i>
       </button>
     </div>
 
@@ -146,15 +185,15 @@
 <!-- 删除确认弹窗 -->
 <div class="modal fade" id="deleteModal" tabindex="-1">
   <div class="modal-dialog modal-sm">
-    <div class="modal-content border border-danger">
-      <div class="modal-header border-danger py-2">
-        <h6 class="modal-title text-danger">
+    <div class="modal-content" style="border:.5px solid var(--danger)!important;">
+      <div class="modal-header py-2" style="border-color:var(--danger)!important;">
+        <h6 class="modal-title" style="color:var(--danger);">
           <i class="bi bi-exclamation-triangle me-2"></i>确认删除
         </h6>
       </div>
       <div class="modal-body py-3">
         确定要删除用户 <strong id="deleteUserName"></strong> 吗？
-        <div class="text-muted small mt-1">此操作无法撤销。</div>
+        <div class="mt-1" style="font-size:.78rem; color:var(--muted);">此操作无法撤销。</div>
       </div>
       <div class="modal-footer border-0 py-2">
         <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
@@ -169,9 +208,9 @@
 <!-- 通知测试 Toast -->
 <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:9999;">
   <div id="testToast" class="toast align-items-center border-0" role="alert"
-       style="min-width:280px; background: var(--h2s-bg-surface); border: 1px solid var(--h2s-border) !important;">
+       style="min-width:280px; background: var(--bg-surface); border: .5px solid var(--border) !important; border-radius:14px; box-shadow:var(--shadow-md);">
     <div class="d-flex">
-      <div class="toast-body" id="testToastBody" style="font-size:.82rem; color: var(--h2s-text);"></div>
+      <div class="toast-body" id="testToastBody" style="font-size:.82rem; color: var(--text);"></div>
       <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast" aria-label="关闭"></button>
     </div>
   </div>
@@ -190,7 +229,7 @@ function confirmDelete(userId, userName) {
 function sendTestNotify(userId, userName, btn) {
   const origHtml = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;"></span>发送中';
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.6rem;height:.6rem;"></span>';
 
   fetch('/users/' + userId + '/test', { method: 'POST' })
     .then(r => r.json())

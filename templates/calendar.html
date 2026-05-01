@@ -6,47 +6,50 @@
 .city-filter-bar {
   display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
   padding: .5rem .75rem;
-  background: var(--h2s-bg-raised);
-  border: 1px solid var(--h2s-border);
-  border-radius: .5rem;
+  background: var(--bg-surface);
+  border: .5px solid var(--border);
+  border-radius: 12px;
   margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
 }
 .city-btn {
   display: inline-flex; align-items: center; gap: .3rem;
   font-size: .72rem; font-weight: 600;
-  padding: .2rem .6rem;
+  padding: .22rem .65rem;
   border-radius: 2rem;
-  border: 1px solid var(--h2s-border);
-  background: var(--h2s-bg-surface);
-  color: var(--h2s-muted);
+  border: .5px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--muted);
   cursor: pointer; transition: all .15s; white-space: nowrap;
   user-select: none;
 }
-.city-btn:hover { border-color: #388bfd; color: #388bfd; }
+.city-btn:hover { border-color: var(--accent); color: var(--accent); }
 .city-btn.active {
-  background: #388bfd;
-  border-color: #388bfd;
+  background: var(--accent);
+  border-color: var(--accent);
   color: #fff;
 }
 .city-btn .dot {
   display: inline-block; width: 6px; height: 6px;
   border-radius: 50%; background: currentColor; flex-shrink: 0;
 }
-.city-btn-all.active { background: var(--h2s-text); border-color: var(--h2s-text); color: var(--h2s-bg-body); }
+.city-btn-all.active { background: var(--text); border-color: var(--text); color: var(--bg-body); }
 
-/* ── 日历容器 ───────────────────────────────────────────────────── */
+/* ── 日历导航 ───────────────────────────────────────────────────── */
 .cal-header {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 1rem;
 }
 .cal-nav-btn {
-  background: var(--h2s-bg-raised); border: 1px solid var(--h2s-border);
-  color: var(--h2s-text); border-radius: .375rem;
-  width: 2rem; height: 2rem;
+  background: var(--bg-surface); border: .5px solid var(--border);
+  color: var(--muted); border-radius: 10px;
+  width: 2.2rem; height: 2.2rem;
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; font-size: .9rem; transition: background .15s;
+  cursor: pointer; font-size: .9rem;
+  transition: color .14s, border-color .14s, background .14s;
+  box-shadow: var(--shadow-sm);
 }
-.cal-nav-btn:hover { background: var(--h2s-hover); }
+.cal-nav-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-raised); }
 
 /* ── 星期行 ─────────────────────────────────────────────────────── */
 .cal-grid {
@@ -54,119 +57,113 @@
   gap: 4px;
 }
 .cal-dow {
-  text-align: center; font-size: .68rem; font-weight: 700;
+  text-align: center; font-size: .65rem; font-weight: 700;
   text-transform: uppercase; letter-spacing: .08em;
-  color: var(--h2s-muted); padding: .25rem 0;
+  color: var(--muted); padding: .25rem 0;
 }
-.cal-dow:first-child { color: #f78166; }   /* 周日红色 */
-.cal-dow:last-child  { color: #79c0ff; }   /* 周六蓝色 */
+.cal-dow:first-child { color: var(--danger); }
+.cal-dow:last-child  { color: var(--accent); }
 
 /* ── 日期格 ─────────────────────────────────────────────────────── */
 .cal-day {
   min-height: 80px;
-  border: 1px solid var(--h2s-border);
-  border-radius: .375rem;
-  background: var(--h2s-bg-surface);
+  border: .5px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
   padding: .3rem .35rem;
   cursor: default;
-  transition: border-color .15s, background .15s;
+  transition: border-color .15s, background .15s, box-shadow .15s;
   position: relative;
 }
-.cal-day.has-listings {
-  cursor: pointer;
-  border-color: var(--h2s-border);
-}
+.cal-day.has-listings { cursor: pointer; }
 .cal-day.has-listings:hover {
-  border-color: #388bfd;
-  background: var(--h2s-hover);
+  border-color: rgba(0,122,255,.4);
+  background: var(--bg-raised);
 }
 .cal-day.today {
-  border-color: #388bfd;
-  background: #388bfd11;
+  border-color: var(--accent);
+  background: rgba(0,122,255,.06);
 }
-.cal-day.other-month {
-  opacity: .35;
-}
+[data-bs-theme="dark"] .cal-day.today { background: rgba(10,132,255,.08); }
+.cal-day.other-month { opacity: .3; }
 .cal-day.selected {
-  border-color: #388bfd !important;
-  box-shadow: 0 0 0 2px #388bfd44;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(0,122,255,.22);
 }
+[data-bs-theme="dark"] .cal-day.selected { box-shadow: 0 0 0 2px rgba(10,132,255,.28); }
 
 .day-num {
   font-size: .78rem; font-weight: 600;
-  color: var(--h2s-muted); line-height: 1;
+  color: var(--muted); line-height: 1;
   margin-bottom: .3rem;
 }
-.cal-day.today .day-num {
-  color: #388bfd;
-}
-/* 周日/周六数字颜色 */
-.cal-day.is-sun .day-num { color: #f78166; }
-.cal-day.is-sat .day-num { color: #79c0ff; }
-.cal-day.today  .day-num { color: #388bfd; }
+.cal-day.today .day-num  { color: var(--accent); font-weight: 700; }
+.cal-day.is-sun .day-num { color: var(--danger); }
+.cal-day.is-sat .day-num { color: var(--accent); }
 
 /* ── 房源小徽章 ─────────────────────────────────────────────────── */
 .cal-pill {
   display: block;
   font-size: .62rem; line-height: 1.3;
-  border-radius: .2rem;
+  border-radius: 3px;
   padding: .05rem .3rem;
   margin-bottom: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 100%;
+  border-left: 2px solid transparent;
 }
-.cal-pill.book    { background: #2da44e22; color: #2da44e; border-left: 2px solid #2da44e; }
-.cal-pill.lottery { background: #e3b34122; color: #c9910e; border-left: 2px solid #e3b341; }
-[data-bs-theme="light"] .cal-pill.lottery { color: #9a6e00; }
-.cal-pill.more    { background: transparent; color: var(--h2s-muted);
-                    font-style: italic; border-left: none; }
+.cal-pill.book    { background: rgba(50,215,75,.12); color: var(--success); border-left-color: var(--success); }
+.cal-pill.lottery { background: rgba(255,159,10,.12); color: var(--warning); border-left-color: var(--warning); }
+[data-bs-theme="light"] .cal-pill.book    { background: rgba(52,199,89,.12); }
+[data-bs-theme="light"] .cal-pill.lottery { background: rgba(255,149,0,.12); }
+.cal-pill.more    { background: transparent; color: var(--muted); font-style: italic; border-left: none; }
 
 /* ── 侧边详情面板 ───────────────────────────────────────────────── */
 #detail-panel {
-  position: sticky; top: 1rem;
-  background: var(--h2s-bg-surface);
-  border: 1px solid var(--h2s-border);
-  border-radius: .5rem;
+  position: sticky; top: 5rem;
+  background: var(--bg-surface);
+  border: .5px solid var(--border);
+  border-radius: 16px;
   min-height: 160px;
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
 }
 .detail-empty {
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  height: 160px; color: var(--h2s-muted);
+  height: 160px; color: var(--muted);
   font-size: .85rem; gap: .5rem;
 }
 .listing-row {
-  border-bottom: 1px solid var(--h2s-border-sub);
-  padding: .6rem .75rem;
+  border-bottom: .5px solid var(--border);
+  padding: .65rem .85rem;
   transition: background .12s;
 }
 .listing-row:last-child { border-bottom: none; }
-.listing-row:hover { background: var(--h2s-hover); }
+.listing-row:hover { background: var(--bg-raised); }
 {% endblock %}
 
 {% block content %}
 
 <!-- 页眉 -->
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <h5 class="fw-bold mb-0">
-    <i class="bi bi-calendar3 me-2 text-primary"></i>入住日历
-  </h5>
+<div class="page-hdr">
+  <h1><i class="bi bi-calendar3 me-2" style="color:var(--accent);"></i>入住日历</h1>
   <!-- 图例 -->
   <div class="d-flex gap-3 align-items-center">
-    <span class="d-flex align-items-center gap-1 small">
-      <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2da44e;"></span>
-      <span class="text-muted">可直订</span>
+    <span class="d-flex align-items-center gap-1 small" style="color:var(--muted);">
+      <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--success);opacity:.7;"></span>
+      可直订
     </span>
-    <span class="d-flex align-items-center gap-1 small">
-      <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#e3b341;"></span>
-      <span class="text-muted">摇号</span>
+    <span class="d-flex align-items-center gap-1 small" style="color:var(--muted);">
+      <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--warning);opacity:.7;"></span>
+      摇号
     </span>
   </div>
 </div>
 
 <!-- 城市筛选栏（JS 动态填充） -->
 <div class="city-filter-bar" id="city-filter-bar">
-  <span class="text-muted" style="font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; margin-right:.25rem;">
+  <span style="font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-right:.25rem;">
     <i class="bi bi-geo-alt me-1"></i>城市
   </span>
   <!-- 按钮由 JS 注入 -->
@@ -208,7 +205,7 @@
   <div class="col-12 col-xl-4">
     <div id="detail-panel" class="p-0">
       <div class="d-flex justify-content-between align-items-center px-3 py-2"
-           style="border-bottom:1px solid var(--h2s-border);">
+           style="border-bottom:.5px solid var(--border);">
         <span class="fw-semibold small" id="detail-title">请选择日期</span>
         <span class="badge bg-secondary" id="detail-count" style="display:none;"></span>
       </div>
@@ -251,10 +248,10 @@ function statusClass(s) {
   return 'lottery';
 }
 
-// ─── 调色板（城市颜色循环）──────────────────────────────────────────
+// ─── 调色板（城市颜色循环，Apple system colors）─────────────────────
 const CITY_COLORS = [
-  '#388bfd','#2da44e','#e3b341','#f78166','#a5d6ff',
-  '#56d364','#ffa657','#ff7b72','#79c0ff','#d2a8ff',
+  '#0a84ff','#32d74b','#ff9f0a','#ff453a','#bf5af2',
+  '#5ac8fa','#30d158','#ffd60a','#ff6961','#63e6e2',
 ];
 
 // ─── 状态 ───────────────────────────────────────────────────────────
@@ -491,19 +488,19 @@ function selectDate(ymd, listings) {
     row.className = 'listing-row';
 
     const sc = statusClass(l.status);
-    const badgeCls = sc === 'book' ? 'bg-success' : 'bg-warning text-dark';
+    const badgeCls = sc === 'book' ? 'badge-book' : 'badge-lottery';
     const cityColor = cityColorMap[l.city] || '#8b949e';
 
     row.innerHTML = `
       <div class="d-flex justify-content-between align-items-start gap-2">
         <a href="${l.url}" target="_blank" class="fw-medium small flex-grow-1"
-           style="word-break:break-word;">${l.name}</a>
+           style="word-break:break-word; color:var(--text);">${l.name}</a>
         <span class="badge ${badgeCls} flex-shrink-0" style="font-size:.6rem;">
           ${sc === 'book' ? '直订' : '摇号'}
         </span>
       </div>
       <div class="d-flex gap-3 mt-1">
-        <span class="text-muted" style="font-size:.72rem;">
+        <span style="font-size:.72rem; color:var(--muted);">
           <i class="bi bi-currency-euro me-1 opacity-75"></i>${priceShort(l.price_raw)}/月
         </span>
         <span style="font-size:.72rem; color:${cityColor};">

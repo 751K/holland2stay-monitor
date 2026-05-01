@@ -1,21 +1,16 @@
 {% extends "base.html" %}
 {% block title %}设置 · Holland2Stay{% endblock %}
 
-{% block extra_style %}
-.section-title { font-size:.7rem; font-weight:700; text-transform:uppercase;
-                 letter-spacing:.1em; color:var(--h2s-muted); margin-bottom:.75rem; }
-{% endblock %}
-
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h5 class="fw-bold mb-0"><i class="bi bi-gear me-2"></i>全局设置</h5>
-  <span class="text-muted small">影响所有用户的抓取行为</span>
+<div class="page-hdr">
+  <h1><i class="bi bi-gear me-2" style="color:var(--accent);"></i>全局设置</h1>
+  <span class="ph-meta">影响所有用户的抓取行为</span>
 </div>
 
 <!-- 提示条 -->
-<div class="alert alert-secondary d-flex align-items-center gap-2 py-2 mb-4">
-  <i class="bi bi-people text-primary"></i>
+<div class="alert alert-info d-flex align-items-center gap-2 py-2 mb-4">
+  <i class="bi bi-people" style="color:var(--accent);"></i>
   <span class="small">
     通知渠道、过滤条件和自动预订请前往
     <a href="{{ url_for('users_list') }}" class="fw-semibold">用户管理</a>
@@ -25,21 +20,23 @@
 
 <form method="post">
 
-  <!-- ── 抓取配置 ─────────────────────────────── -->
+  <!-- ── Section 1: 抓取配置 ─────────────────────────── -->
   <div class="card mb-4">
-    <div class="card-header py-2 px-3">
-      <span class="fw-semibold"><i class="bi bi-clock me-2 text-info"></i>抓取配置</span>
+    <div class="sec-hdr">
+      <i class="bi bi-clock me-2" style="color:var(--accent);"></i>抓取配置
     </div>
     <div class="card-body">
+
+      <!-- 基础间隔 + 日志 -->
       <div class="row g-3 mb-4">
         <div class="col-12 col-sm-6">
-          <label class="form-label small text-muted">常规轮询间隔（秒）</label>
+          <label class="form-label small" style="color:var(--muted); font-weight:600;">常规轮询间隔（秒）</label>
           <input type="number" class="form-control form-control-sm" name="CHECK_INTERVAL"
                  value="{{ env.get('CHECK_INTERVAL','300') }}" min="30">
           <div class="form-text">非高峰期的正常轮询间隔，默认 300 秒（5 分钟）</div>
         </div>
         <div class="col-12 col-sm-6">
-          <label class="form-label small text-muted">日志级别</label>
+          <label class="form-label small" style="color:var(--muted); font-weight:600;">日志级别</label>
           <select class="form-select form-select-sm" name="LOG_LEVEL">
             {% for lvl in ['DEBUG','INFO','WARNING','ERROR'] %}
               <option {% if env.get('LOG_LEVEL','INFO') == lvl %}selected{% endif %}>{{ lvl }}</option>
@@ -48,25 +45,30 @@
         </div>
       </div>
 
-      <!-- 智能轮询 -->
-      <div class="section-title mt-3">
-        <i class="bi bi-graph-up me-1"></i>智能轮询（高峰期自动加速）
+      <!-- 分隔线 -->
+      <div class="d-flex align-items-center gap-2 mb-3" style="color:var(--muted);">
+        <div style="height:1px; flex:1; background:var(--border);"></div>
+        <span style="font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em;">
+          <i class="bi bi-graph-up me-1"></i>智能轮询（高峰期自动加速）
+        </span>
+        <div style="height:1px; flex:1; background:var(--border);"></div>
       </div>
-      <div class="row g-3 mb-4">
+
+      <div class="row g-3 mb-3">
         <div class="col-12 col-sm-4">
-          <label class="form-label small text-muted">
-            高峰期间隔（秒）<span class="text-muted" style="font-weight:400;">— 默认 60</span>
+          <label class="form-label small" style="color:var(--muted); font-weight:600;">
+            高峰期间隔（秒）<span style="font-weight:400; color:var(--muted);"> — 默认 60</span>
           </label>
           <input type="number" class="form-control form-control-sm" name="PEAK_INTERVAL"
                  value="{{ env.get('PEAK_INTERVAL','60') }}" min="10" max="300">
         </div>
         <div class="col-6 col-sm-4">
-          <label class="form-label small text-muted">高峰开始（荷兰时间）</label>
+          <label class="form-label small" style="color:var(--muted); font-weight:600;">高峰开始（荷兰时间）</label>
           <input type="time" class="form-control form-control-sm" name="PEAK_START"
                  value="{{ env.get('PEAK_START','08:30') }}">
         </div>
         <div class="col-6 col-sm-4">
-          <label class="form-label small text-muted">高峰结束（荷兰时间）</label>
+          <label class="form-label small" style="color:var(--muted); font-weight:600;">高峰结束（荷兰时间）</label>
           <input type="time" class="form-control form-control-sm" name="PEAK_END"
                  value="{{ env.get('PEAK_END','10:00') }}">
         </div>
@@ -86,8 +88,15 @@
         </div>
       </div>
 
-      <!-- 城市选择 -->
-      <div class="section-title">监控城市</div>
+    </div>
+  </div>
+
+  <!-- ── Section 2: 监控城市 ─────────────────────────── -->
+  <div class="card mb-4">
+    <div class="sec-hdr">
+      <i class="bi bi-geo-alt me-2" style="color:var(--success);"></i>监控城市
+    </div>
+    <div class="card-body">
       <div class="row g-2">
         {% for city in known_cities %}
         <div class="col-6 col-sm-4 col-md-3 col-lg-2">
@@ -126,7 +135,8 @@
 
 <!-- Toast -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
-  <div id="reload-toast" class="toast align-items-center border-0" role="alert" aria-live="assertive">
+  <div id="reload-toast" class="toast align-items-center border-0" role="alert" aria-live="assertive"
+       style="border-radius:10px;">
     <div class="d-flex">
       <div class="toast-body fw-medium" id="reload-toast-body"></div>
       <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>

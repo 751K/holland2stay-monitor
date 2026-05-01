@@ -6,19 +6,30 @@
 {% endblock %}
 
 {% block extra_style %}
-.chart-card  { border: 1px solid var(--h2s-border); background: var(--h2s-bg-surface);
-               border-radius: .5rem; }
-.chart-title { font-size: .75rem; font-weight: 700; text-transform: uppercase;
-               letter-spacing: .08em; color: var(--h2s-muted); margin-bottom: .5rem; }
-.chart-wrap  { position: relative; }
+/* chart-card: same visual as .card but no overflow:hidden (tooltip safety) */
+.chart-card {
+  background: var(--bg-surface);
+  border: .5px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.chart-title {
+  font-size: .63rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.chart-wrap { position: relative; }
 {% endblock %}
 
 {% block content %}
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-  <h5 class="fw-bold mb-0"><i class="bi bi-bar-chart-line me-2 text-info"></i>数据统计</h5>
+<div class="page-hdr">
+  <h1><i class="bi bi-bar-chart-line me-2" style="color:var(--accent);"></i>数据统计</h1>
   <div class="d-flex align-items-center gap-2">
-    <span class="text-muted small">时间范围：</span>
+    <span style="font-size:.75rem; color:var(--muted);">时间范围：</span>
     <select id="days-select" class="form-select form-select-sm" style="width:auto;"
             onchange="loadCharts(this.value)">
       <option value="7">近 7 天</option>
@@ -28,30 +39,58 @@
   </div>
 </div>
 
-<!-- 顶部 KPI 卡片 -->
+<!-- KPI 卡片 -->
 <div class="row g-3 mb-4">
   <div class="col-6 col-lg-3">
-    <div class="card stat-card h-100 p-3">
-      <div class="stat-number text-body-emphasis">{{ total }}</div>
-      <div class="stat-label mt-1">数据库房源</div>
+    <div class="card h-100">
+      <div class="kpi-wrap">
+        <div class="kpi-icon" style="background: linear-gradient(135deg, #bf5af2, #9b59d0);">
+          <i class="bi bi-database-fill"></i>
+        </div>
+        <div>
+          <div class="kpi-num">{{ total }}</div>
+          <div class="kpi-lbl">数据库房源</div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="col-6 col-lg-3">
-    <div class="card stat-card h-100 p-3">
-      <div class="stat-number text-success">{{ new_24h }}</div>
-      <div class="stat-label mt-1">今日新增</div>
+    <div class="card h-100">
+      <div class="kpi-wrap">
+        <div class="kpi-icon" style="background: linear-gradient(135deg, #32d74b, #1a9e30);">
+          <i class="bi bi-house-add-fill"></i>
+        </div>
+        <div>
+          <div class="kpi-num" style="color:var(--success);">{{ new_24h }}</div>
+          <div class="kpi-lbl">今日新增</div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="col-6 col-lg-3">
-    <div class="card stat-card h-100 p-3">
-      <div class="stat-number text-primary">{{ new_7d }}</div>
-      <div class="stat-label mt-1">近 7 天新增</div>
+    <div class="card h-100">
+      <div class="kpi-wrap">
+        <div class="kpi-icon" style="background: linear-gradient(135deg, #5ac8fa, #0a84ff);">
+          <i class="bi bi-calendar-week-fill"></i>
+        </div>
+        <div>
+          <div class="kpi-num" style="color:var(--accent);">{{ new_7d }}</div>
+          <div class="kpi-lbl">近 7 天新增</div>
+        </div>
+      </div>
     </div>
   </div>
   <div class="col-6 col-lg-3">
-    <div class="card stat-card h-100 p-3">
-      <div class="stat-number text-warning">{{ changes_24h }}</div>
-      <div class="stat-label mt-1">今日状态变更</div>
+    <div class="card h-100">
+      <div class="kpi-wrap">
+        <div class="kpi-icon" style="background: linear-gradient(135deg, #ff9f0a, #cc7a00);">
+          <i class="bi bi-arrow-left-right"></i>
+        </div>
+        <div>
+          <div class="kpi-num" style="color:var(--warning);">{{ changes_24h }}</div>
+          <div class="kpi-lbl">今日状态变更</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -60,7 +99,7 @@
 <div class="row g-4 mb-4">
   <div class="col-12 col-xl-7">
     <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-graph-up me-1 text-success"></i>新增房源趋势</div>
+      <div class="chart-title"><i class="bi bi-graph-up me-1" style="color:var(--success);"></i>新增房源趋势</div>
       <div class="chart-wrap" style="height:220px;">
         <canvas id="chartDailyNew"></canvas>
       </div>
@@ -68,7 +107,7 @@
   </div>
   <div class="col-12 col-xl-5">
     <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-arrow-left-right me-1 text-warning"></i>状态变更趋势</div>
+      <div class="chart-title"><i class="bi bi-arrow-left-right me-1" style="color:var(--warning);"></i>状态变更趋势</div>
       <div class="chart-wrap" style="height:220px;">
         <canvas id="chartDailyChanges"></canvas>
       </div>
@@ -80,7 +119,7 @@
 <div class="row g-4">
   <div class="col-12 col-md-4">
     <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-geo-alt me-1 text-info"></i>城市分布</div>
+      <div class="chart-title"><i class="bi bi-geo-alt me-1" style="color:var(--accent);"></i>城市分布</div>
       <div class="chart-wrap" style="height:220px;">
         <canvas id="chartCity"></canvas>
       </div>
@@ -88,7 +127,7 @@
   </div>
   <div class="col-12 col-md-4">
     <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-tag me-1 text-primary"></i>状态分布</div>
+      <div class="chart-title"><i class="bi bi-tag me-1" style="color:var(--accent);"></i>状态分布</div>
       <div class="chart-wrap" style="height:220px;">
         <canvas id="chartStatus"></canvas>
       </div>
@@ -96,7 +135,7 @@
   </div>
   <div class="col-12 col-md-4">
     <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-currency-euro me-1 text-success"></i>租金分布</div>
+      <div class="chart-title"><i class="bi bi-currency-euro me-1" style="color:var(--success);"></i>租金分布</div>
       <div class="chart-wrap" style="height:220px;">
         <canvas id="chartPrice"></canvas>
       </div>
@@ -116,25 +155,25 @@ function cssVar(name) {
 function themeColors() {
   const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
   return {
-    text:    cssVar('--h2s-text')    || (isDark ? '#e6edf3' : '#1f2328'),
-    muted:   cssVar('--h2s-muted')   || (isDark ? '#8b949e' : '#656d76'),
-    border:  cssVar('--h2s-border')  || (isDark ? '#30363d' : '#d0d7de'),
-    surface: cssVar('--h2s-bg-surface') || (isDark ? '#161b22' : '#ffffff'),
+    text:    cssVar('--h2s-text')    || (isDark ? '#fafafa' : '#09090b'),
+    muted:   cssVar('--h2s-muted')   || (isDark ? '#71717a' : '#71717a'),
+    border:  cssVar('--h2s-border')  || (isDark ? '#3f3f46' : '#e4e4e7'),
+    surface: cssVar('--h2s-bg-surface') || (isDark ? '#18181b' : '#ffffff'),
   };
 }
 
-// Bootstrap 调色板
+// Apple system color palette
 const PALETTE = [
-  '#2da44e','#388bfd','#e3b341','#f78166','#a5d6ff',
-  '#56d364','#ffa657','#ff7b72','#79c0ff','#d2a8ff',
+  '#32d74b','#0a84ff','#ff9f0a','#ff453a','#bf5af2',
+  '#5ac8fa','#30d158','#ffd60a','#ff6961','#63e6e2',
 ];
 
 // 状态 → 颜色
 function statusColor(s) {
   const sl = (s || '').toLowerCase();
-  if (sl.includes('book'))    return '#2da44e';
-  if (sl.includes('lottery')) return '#e3b341';
-  return '#8b949e';
+  if (sl.includes('book'))    return '#32d74b';
+  if (sl.includes('lottery')) return '#ff9f0a';
+  return 'rgba(128,128,128,.6)';
 }
 
 // ─── Chart 实例管理 ─────────────────────────────────────────────────
@@ -302,8 +341,8 @@ function renderCharts(d) {
   if (!d) return;
   _cachedData = d;
 
-  buildLineChart('chartDailyNew',     '新增房源', d.daily_new,     '#2da44e');
-  buildLineChart('chartDailyChanges', '状态变更', d.daily_changes, '#e3b341');
+  buildLineChart('chartDailyNew',     '新增房源', d.daily_new,     '#32d74b');
+  buildLineChart('chartDailyChanges', '状态变更', d.daily_changes, '#ff9f0a');
 
   // 城市分布
   const cityLabels = d.city_dist.map(r => r.city);
@@ -320,7 +359,7 @@ function renderCharts(d) {
   // 价格分布
   const prLabels = d.price_dist.map(r => r.range);
   const prCounts = d.price_dist.map(r => r.count);
-  buildBarChart('chartPrice', prLabels, prCounts, '#388bfd');
+  buildBarChart('chartPrice', prLabels, prCounts, '#0a84ff');
 }
 
 function loadCharts(days) {

@@ -3,32 +3,42 @@
 
 {% block content %}
 
+<div class="page-hdr">
+  <h1><i class="bi bi-list-ul me-2" style="color:var(--accent);"></i>房源列表</h1>
+  <span class="ph-meta">共 {{ listings | length }} 条</span>
+</div>
+
 <!-- 过滤栏 -->
-<form method="get" class="row g-2 mb-4 align-items-end">
-  <div class="col-12 col-sm-5 col-lg-3">
-    <label class="form-label small text-muted mb-1">状态</label>
-    <select name="status" class="form-select form-select-sm">
-      <option value="">全部状态</option>
-      {% for s in statuses %}
-        <option value="{{ s }}" {% if s == status_filter %}selected{% endif %}>{{ s }}</option>
-      {% endfor %}
-    </select>
+<div class="card mb-4">
+  <div class="card-body py-3">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-12 col-sm-5 col-lg-3">
+        <label class="form-label small mb-1" style="color:var(--muted); font-weight:600;">状态</label>
+        <select name="status" class="form-select form-select-sm">
+          <option value="">全部状态</option>
+          {% for s in statuses %}
+            <option value="{{ s }}" {% if s == status_filter %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-12 col-sm-5 col-lg-4">
+        <label class="form-label small mb-1" style="color:var(--muted); font-weight:600;">搜索（名称 / 城市）</label>
+        <input type="text" name="q" class="form-control form-control-sm"
+               placeholder="e.g. Strijp" value="{{ search }}">
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-sm btn-primary">
+          <i class="bi bi-search me-1"></i>筛选
+        </button>
+        {% if status_filter or search %}
+          <a href="{{ url_for('listings') }}" class="btn btn-sm btn-outline-secondary ms-1">
+            <i class="bi bi-x me-1"></i>清除
+          </a>
+        {% endif %}
+      </div>
+    </form>
   </div>
-  <div class="col-12 col-sm-5 col-lg-4">
-    <label class="form-label small text-muted mb-1">搜索（名称 / 城市）</label>
-    <input type="text" name="q" class="form-control form-control-sm"
-           placeholder="e.g. Strijp" value="{{ search }}">
-  </div>
-  <div class="col-auto">
-    <button type="submit" class="btn btn-sm btn-primary">筛选</button>
-    {% if status_filter or search %}
-      <a href="{{ url_for('listings') }}" class="btn btn-sm btn-outline-secondary ms-1">清除</a>
-    {% endif %}
-  </div>
-  <div class="col-auto ms-auto align-self-end">
-    <span class="text-muted small">共 {{ listings | length }} 条</span>
-  </div>
-</form>
+</div>
 
 <!-- 房源表格 -->
 <div class="card">
@@ -51,24 +61,31 @@
       <tbody>
       {% for l in listings %}
         {% set fm = l.features | parse_features %}
+        {% set sl = l.status | lower %}
         <tr>
           <td>
-            <a href="{{ l.url }}" target="_blank" class="fw-medium">{{ l.name }}</a>
+            <a href="{{ l.url }}" target="_blank" class="fw-medium" style="color:var(--text);">{{ l.name }}</a>
           </td>
           <td>
-            <span class="badge bg-{{ status_badge(l.status) }}">{{ l.status }}</span>
+            {% if 'book' in sl %}
+              <span class="badge badge-book">{{ l.status }}</span>
+            {% elif 'lottery' in sl %}
+              <span class="badge badge-lottery">{{ l.status }}</span>
+            {% else %}
+              <span class="badge bg-{{ status_badge(l.status) }}">{{ l.status }}</span>
+            {% endif %}
           </td>
-          <td class="text-nowrap">{{ l.price_raw | price_short }}</td>
-          <td class="text-nowrap text-muted small">{{ fm.area or '—' }}</td>
-          <td class="text-muted small">{{ fm.floor or '—' }}</td>
-          <td class="text-muted small">{{ fm.type or '—' }}</td>
-          <td class="text-muted small text-nowrap">{{ fm.occupancy or '—' }}</td>
-          <td class="text-muted small text-nowrap">{{ l.available_from or '—' }}</td>
-          <td class="text-muted small">{{ l.city or '—' }}</td>
-          <td class="text-muted small text-nowrap">{{ l.first_seen | time_ago }}</td>
+          <td class="text-nowrap fw-medium">{{ l.price_raw | price_short }}</td>
+          <td class="text-nowrap" style="font-size:.78rem; color:var(--muted);">{{ fm.area or '—' }}</td>
+          <td style="font-size:.78rem; color:var(--muted);">{{ fm.floor or '—' }}</td>
+          <td style="font-size:.78rem; color:var(--muted);">{{ fm.type or '—' }}</td>
+          <td style="font-size:.78rem; color:var(--muted);" class="text-nowrap">{{ fm.occupancy or '—' }}</td>
+          <td style="font-size:.78rem; color:var(--muted);" class="text-nowrap">{{ l.available_from or '—' }}</td>
+          <td style="font-size:.78rem; color:var(--muted);">{{ l.city or '—' }}</td>
+          <td style="font-size:.78rem; color:var(--muted);" class="text-nowrap">{{ l.first_seen | time_ago }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="10" class="text-center text-muted py-5">暂无房源数据</td></tr>
+        <tr><td colspan="10" class="text-center py-5" style="color:var(--muted);">暂无房源数据</td></tr>
       {% endfor %}
       </tbody>
     </table>
