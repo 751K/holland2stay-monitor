@@ -167,30 +167,32 @@ def try_book(
     if listing.status.lower() not in ("available to book",):
         return BookingResult(listing, False, f"状态不是 Available to book: {listing.status}")
 
-    if dry_run:
-        logger.info("[DRY RUN] 跳过实际预订: %s", listing.name)
-        return BookingResult(listing, True, "DRY RUN - 未实际操作", dry_run=True)
-
     with req.Session(impersonate="chrome110") as session:
         try:
             # 1. 查询真实 SKU + contract_id + 入住日期
             sku, contract_id, start_date = _fetch_sku_and_contract(session, listing.id)
             logger.info(
-                "[%s] SKU: %s  contract_id: %s  start_date: %s",
-                listing.name, sku, contract_id, start_date or "(不传，由服务端决定)",
+                "[%s]%s SKU: %s  contract_id: %s  start_date: %s",
+                listing.name, " [DRY RUN]" if dry_run else "",
+                sku, contract_id, start_date or "(不传，由服务端决定)",
             )
 
-            # 2. 登录
+            # 2. 登录验证账号
             logger.debug("[%s] 登录中...", listing.name)
             token = login(session, email, password)
-            logger.info("[%s] 登录成功", listing.name)
+            logger.info("[%s]%s 登录成功", listing.name, " [DRY RUN]" if dry_run else "")
 
-            # 3. 获取购物车
+            # 3. 获取购物车 ID
             logger.debug("[%s] 获取购物车...", listing.name)
             cart_id = get_or_create_cart(session, token)
-            logger.info("[%s] 购物车 ID: %s", listing.name, cart_id)
+            logger.info("[%s]%s 购物车 ID: %s", listing.name, " [DRY RUN]" if dry_run else "", cart_id)
 
-            # 4. 加入购物车
+            # 4. 加入购物车（dry_run 时跳过此步）
+            if dry_run:
+                msg = f"[DRY RUN] 验证通过（SKU/登录/购物车均正常），未实际提交预订"
+                logger.info("[%s] %s", listing.name, msg)
+                return BookingResult(listing, True, msg, dry_run=True)
+
             logger.debug("[%s] 加入购物车 (contract_id=%s, start_date=%s)...", listing.name, contract_id, start_date)
             add_to_cart(session, token, cart_id, sku, start_date, contract_id)
 
@@ -199,7 +201,7 @@ def try_book(
             return BookingResult(listing, True, msg)
 
         except Exception as e:
-            logger.error("[%s] 预订失败: %s", listing.name, e)
+            logger.error("[%s]%s 预订失败: %s", listing.name, " [DRY RUN]" if dry_run else "", e)
             return BookingResult(listing, False, str(e))
 
 

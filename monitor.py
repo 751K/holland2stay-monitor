@@ -264,6 +264,17 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
         cfg.check_interval, cfg.peak_interval, cfg.peak_start, cfg.peak_end,
         [c.name for c in cfg.cities], len(user_notifiers),
     )
+    # 启动时打印每个用户的自动预订状态，避免误以为已开启/关闭
+    for user, _ in user_notifiers:
+        ab = user.auto_book
+        if ab.enabled:
+            mode = "⚠️  试运行（dry_run）" if ab.dry_run else "🚀 真实预订"
+            logger.info(
+                "自动预订 [%s]: %s  账号: %s",
+                user.name, mode, ab.email or "(未设置)",
+            )
+        else:
+            logger.info("自动预订 [%s]: 已关闭", user.name)
 
     while True:
         round_count += 1
