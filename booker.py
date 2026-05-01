@@ -132,6 +132,7 @@ def cancel_pending_orders(session: req.Session, token: str) -> int:
       customer {
         orders(pageSize: 10, currentPage: 1) {
           items {
+            id
             number
             status
           }
@@ -148,27 +149,67 @@ def cancel_pending_orders(session: req.Session, token: str) -> int:
     items = (data.get("customer") or {}).get("orders", {}).get("items") or []
     # 需要取消的状态（大小写不敏感）
     CANCEL_STATUSES = {"pending", "pending_payment", "reserved", "processing"}
-    to_cancel = [o["number"] for o in items if o.get("status", "").lower() in CANCEL_STATUSES]
+    to_cancel = [
+        (o["id"], o["number"])
+        for o in items
+        if o.get("status", "").lower() in CANCEL_STATUSES
+    ]
 
     if not to_cancel:
         logger.debug("无 pending 订单，无需取消")
         return 0
 
-    logger.info("发现 %d 笔 pending 订单，准备取消: %s", len(to_cancel), to_cancel)
+    logger.info("发现 %d 笔 pending 订单，准备取消: %s", len(to_cancel), [n for _, n in to_cancel])
+
+    # 先内省 schema，找出实际可用的取消/预订相关 mutation
+    try:
+        intro = _gql(session, '{ __schema { mutationType { fields { name } } } }', token=token)
+        all_mutations = [f["name"] for f in (intro.get("__schema", {}).get("mutationType") or {}).get("fields", [])]
+        relevant = [m for m in all_mutations if any(kw in m.lower() for kw in ("cancel", "booking", "order", "reserv"))]
+        logger.debug("Schema 相关 mutation: %s", relevant)
+    except Exception:
+        relevant = []
+
+    # 优先尝试 Holland2Stay 自定义取消 mutation，降级到标准 cancelOrder
+    cancel_mutations = [m for m in relevant if "cancel" in m.lower()]
+    logger.debug("候选取消 mutation: %s", cancel_mutations)
+
     cancelled = 0
-    for order_number in to_cancel:
-        try:
-            q = f'mutation {{ cancelOrder(input: {{ order_id: "{order_number}" }}) {{ error errorV2 {{ message code }} }} }}'
-            result = _gql(session, q, token=token)
-            cancel_result = result.get("cancelOrder") or {}
-            err = cancel_result.get("error") or (cancel_result.get("errorV2") or {}).get("message")
-            if err:
-                logger.warning("取消订单 #%s 失败: %s", order_number, err)
-            else:
-                logger.info("已取消订单 #%s", order_number)
+    for order_uid, order_number in to_cancel:
+        success = False
+        for mut in cancel_mutations:
+            try:
+                # 先尝试只传 order_id（Holland2Stay 自定义 mutation 可能不需要 reason）
+                q = f'mutation {{ {mut}(input: {{ order_id: "{order_uid}" }}) {{ error errorV2 {{ message code }} }} }}'
+                result = _gql(session, q, token=token)
+                cancel_result = result.get(mut) or {}
+                err = cancel_result.get("error") or (cancel_result.get("errorV2") or {}).get("message")
+                if err:
+                    logger.debug("%s #%s 失败（忽略，尝试下一个）: %s", mut, order_number, err)
+                    continue
+                logger.info("已取消订单 #%s (via %s)", order_number, mut)
                 cancelled += 1
-        except Exception as e:
-            logger.warning("取消订单 #%s 异常（忽略）: %s", order_number, e)
+                success = True
+                break
+            except Exception as e:
+                err_str = str(e)
+                # 如果缺少 reason 字段，补上重试
+                if "reason" in err_str.lower():
+                    try:
+                        q = f'mutation {{ {mut}(input: {{ order_id: "{order_uid}", reason: "Replaced by new booking" }}) {{ error errorV2 {{ message code }} }} }}'
+                        result = _gql(session, q, token=token)
+                        cancel_result = result.get(mut) or {}
+                        err2 = cancel_result.get("error") or (cancel_result.get("errorV2") or {}).get("message")
+                        if not err2:
+                            logger.info("已取消订单 #%s (via %s + reason)", order_number, mut)
+                            cancelled += 1
+                            success = True
+                            break
+                    except Exception:
+                        pass
+                logger.debug("%s #%s 异常（尝试下一个）: %s", mut, order_number, e)
+        if not success:
+            logger.warning("订单 #%s 无法自动取消（所有 mutation 均失败），继续尝试预订", order_number)
 
     return cancelled
 
