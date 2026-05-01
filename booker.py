@@ -100,7 +100,7 @@ def add_to_cart(
 ) -> bool:
     """
     调用 addNewBooking，将房源加入购物车。
-    contract_start_date 格式: "2026-04-08"（ISO date）。
+    contract_start_date 格式: "2026-04-08"（ISO date，必须是未来日期）。
     contract_id: 合同类型 ID（来自 type_of_contract 属性），不传会导致 Internal server error。
     返回 True 表示成功。
     """
@@ -114,7 +114,8 @@ def add_to_cart(
       ) {{
         cart {{
           id
-          items {{ uid quantity }}
+          total_quantity
+          itemsV2 {{ items {{ uid quantity }} }}
         }}
         user_errors {{ code message }}
       }}
@@ -129,8 +130,8 @@ def add_to_cart(
         raise RuntimeError(f"加入购物车失败: {msgs}")
 
     cart = result.get("cart", {})
-    items = cart.get("items") or []
-    logger.info("加入购物车成功，当前购物车 %d 项", len(items))
+    total = cart.get("total_quantity", 0)
+    logger.info("加入购物车成功，当前购物车共 %.0f 项", total)
     return True
 
 
@@ -172,9 +173,12 @@ def try_book(
 
     with req.Session(impersonate="chrome110") as session:
         try:
-            # 1. 查询真实 SKU + contract_id
-            sku, contract_id = _fetch_sku_and_contract(session, listing.id)
-            logger.info("[%s] SKU: %s  contract_id: %s", listing.name, sku, contract_id)
+            # 1. 查询真实 SKU + contract_id + 入住日期
+            sku, contract_id, start_date = _fetch_sku_and_contract(session, listing.id)
+            logger.info(
+                "[%s] SKU: %s  contract_id: %s  start_date: %s",
+                listing.name, sku, contract_id, start_date or "(不传，由服务端决定)",
+            )
 
             # 2. 登录
             logger.debug("[%s] 登录中...", listing.name)
@@ -187,8 +191,8 @@ def try_book(
             logger.info("[%s] 购物车 ID: %s", listing.name, cart_id)
 
             # 4. 加入购物车
-            logger.debug("[%s] 加入购物车 (contract_id=%s)...", listing.name, contract_id)
-            add_to_cart(session, token, cart_id, sku, listing.available_from, contract_id)
+            logger.debug("[%s] 加入购物车 (contract_id=%s, start_date=%s)...", listing.name, contract_id, start_date)
+            add_to_cart(session, token, cart_id, sku, start_date, contract_id)
 
             msg = f"已加入购物车，请前往付款完成预订：{CHECKOUT_URL}"
             logger.info("[%s] 预订成功: %s", listing.name, msg)
@@ -199,10 +203,13 @@ def try_book(
             return BookingResult(listing, False, str(e))
 
 
-def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Optional[int]]:
+def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Optional[int], Optional[str]]:
     """
-    通过 url_key 查询真实 Magento SKU 以及合同类型 ID (contract_id)。
-    返回 (sku, contract_id)；contract_id 取自 type_of_contract 属性，可能为 None。
+    通过 url_key 查询真实 Magento SKU、合同类型 ID 及下一个可用入住日期。
+    返回 (sku, contract_id, next_start_date)。
+    - contract_id: 来自 type_of_contract.value，不传会导致 Internal server error
+    - next_start_date: 优先取 next_contract_startdate（格式 "YYYY-MM-DD"），
+                       其次取 available_startdate；过去的日期会被置为 None
     """
     query = f'''
     {{
@@ -215,6 +222,7 @@ def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Op
           custom_attributesV2 {{
             items {{
               code
+              ... on AttributeValue {{ value }}
               ... on AttributeSelectedOptions {{
                 selected_options {{ label value }}
               }}
@@ -232,16 +240,33 @@ def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Op
     item = items[0]
     sku = item["sku"]
 
-    # 从 type_of_contract 属性取 contract_id（整数）
     contract_id: Optional[int] = None
+    next_start_date: Optional[str] = None
+    avail_date: Optional[str] = None
+
     for attr in item.get("custom_attributesV2", {}).get("items", []):
-        if attr.get("code") == "type_of_contract":
+        code = attr.get("code", "")
+        if code == "type_of_contract":
             opts = attr.get("selected_options") or []
             if opts:
                 try:
                     contract_id = int(opts[0]["value"])
                 except (KeyError, ValueError, TypeError):
                     pass
-            break
+        elif code == "next_contract_startdate":
+            raw = (attr.get("value") or "").strip()[:10]  # "YYYY-MM-DD"
+            if raw:
+                next_start_date = raw
+        elif code == "available_startdate":
+            raw = (attr.get("value") or "").strip()[:10]
+            if raw:
+                avail_date = raw
 
-    return sku, contract_id
+    # 选择入住日期：优先 next_contract_startdate，其次 available_startdate
+    # 过去的日期不传（传过去日期服务端会 Internal server error）
+    from datetime import date
+    today_str = date.today().isoformat()
+    candidate = next_start_date or avail_date
+    start_date = candidate if (candidate and candidate >= today_str) else None
+
+    return sku, contract_id, start_date
