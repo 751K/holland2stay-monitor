@@ -1,3 +1,57 @@
+"""
+storage.py — SQLite 持久化层
+==============================
+职责
+----
+1. 维护 `listings` 表：记录历史上见过的所有房源快照（全量写入）
+2. 维护 `status_changes` 表：记录每次状态变更事件
+3. 维护 `meta` 表：键值存储，供面板显示最近抓取时间等运行时状态
+4. `diff()` 是核心方法：对比本次抓取结果与库中现有状态，返回需要通知的事件
+5. 提供 Web 面板所需的各类聚合查询
+
+数据库 Schema
+-------------
+listings
+    id              TEXT PRIMARY KEY   -- URL slug，e.g. "kastanjelaan-1-108"
+    name            TEXT               -- 展示名
+    status          TEXT               -- 当前可用性状态
+    price_raw       TEXT               -- 原始价格字符串
+    available_from  TEXT               -- 入住日期 YYYY-MM-DD
+    features        TEXT               -- JSON 数组，["Type: Studio", ...]
+    url             TEXT               -- 房源详情页 URL
+    city            TEXT               -- 城市名
+    first_seen      TEXT               -- UTC ISO 时间戳，首次入库时间
+    last_seen       TEXT               -- UTC ISO 时间戳，最近一次抓到的时间
+    notified        INTEGER DEFAULT 0  -- 是否已发送新房源通知（0/1）
+    last_status     TEXT               -- 上一次已知状态，用于检测变更
+
+status_changes
+    id          INTEGER PRIMARY KEY AUTOINCREMENT
+    listing_id  TEXT    -- 关联 listings.id
+    old_status  TEXT
+    new_status  TEXT
+    changed_at  TEXT    -- UTC ISO 时间戳
+    notified    INTEGER DEFAULT 0
+
+meta
+    key     TEXT PRIMARY KEY
+    value   TEXT
+
+常用 meta key
+-------------
+"last_scrape_at"    → 最近一次抓取完成的 UTC ISO 时间
+"last_scrape_count" → 最近一次抓取到的房源总数
+
+线程安全
+--------
+`Storage` 实例假定在单线程（asyncio 事件循环）中使用。
+`check_same_thread=False` 仅为允许在 executor 线程中构造实例，
+不意味着多线程并发安全。web.py 每个请求独立创建 Storage 实例。
+
+依赖
+----
+仅标准库 + models.Listing，无其他内部依赖。
+"""
 from __future__ import annotations
 
 import json
@@ -13,18 +67,39 @@ logger = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
+    """返回当前 UTC 时间的 ISO 8601 字符串，用于 first_seen / last_seen / changed_at。"""
     return datetime.now(timezone.utc).isoformat()
 
 
 class Storage:
     """
-    SQLite 持久化层。负责：
-    1. 记录历史上见过的所有房源快照
-    2. 跟踪哪些房源已经发过通知
-    3. 检测新房源 & 状态变更
+    SQLite 持久化层，封装所有数据库操作。
+
+    生命周期
+    --------
+    monitor.py 在进程启动时创建一个实例，进程退出时调用 `close()`。
+    web.py 在每个请求中按需创建独立实例（只读查询）。
+
+    使用示例
+    --------
+    ::
+
+        storage = Storage(Path("data/listings.db"))
+        new_listings, status_changes = storage.diff(scraped_listings)
+        for listing in new_listings:
+            # 发送通知...
+            storage.mark_notified(listing.id)
+        storage.close()
     """
 
     def __init__(self, db_path: Path) -> None:
+        """
+        打开（或创建）SQLite 数据库，自动执行 schema 迁移。
+
+        Parameters
+        ----------
+        db_path : 数据库文件路径，父目录不存在时自动创建
+        """
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -32,10 +107,15 @@ class Storage:
         logger.debug("Storage 已连接: %s", db_path)
 
     # ------------------------------------------------------------------ #
-    # Schema
+    # Schema 管理
     # ------------------------------------------------------------------ #
 
     def _migrate(self) -> None:
+        """
+        执行幂等的 schema 初始化/迁移。
+        使用 `CREATE TABLE IF NOT EXISTS` 保证多次调用安全。
+        未来需要修改 schema 时在此处添加 ALTER TABLE 语句。
+        """
         cur = self._conn.cursor()
         cur.executescript("""
             CREATE TABLE IF NOT EXISTS listings (
@@ -70,18 +150,42 @@ class Storage:
         self._conn.commit()
 
     # ------------------------------------------------------------------ #
-    # 核心：对比本次抓取结果与已知状态，返回需要通知的事件
+    # 核心：diff
     # ------------------------------------------------------------------ #
 
     def diff(
         self, fresh: list[Listing]
     ) -> tuple[list[Listing], list[tuple[Listing, str, str]]]:
         """
-        将本次抓取结果与数据库对比，返回：
-          new_listings    : 全新房源（从未见过）
-          status_changes  : [(listing, old_status, new_status), ...]
+        将本次抓取结果与数据库对比，识别新房源和状态变更。
 
-        同时更新数据库快照。
+        处理逻辑
+        --------
+        对 `fresh` 中的每条房源：
+        - 若 id 不在库中 → 插入新记录，加入 new_listings
+        - 若 id 已存在   → 更新快照字段（name/status/price/features/last_seen）
+                          若 status 与库中 last_status 不同 → 记录变更，加入 status_changes
+
+        副作用
+        ------
+        - 将 fresh 中所有房源写入/更新 listings 表（全量 upsert）
+        - 新增状态变更记录到 status_changes 表
+        - 提交事务（单次 commit）
+
+        Parameters
+        ----------
+        fresh : 本次抓取到的 Listing 列表（来自 scraper.scrape_all()）
+
+        Returns
+        -------
+        new_listings   : 本轮全新发现的房源列表（notified=0，待通知）
+        status_changes : [(listing, old_status, new_status), ...]
+                         列表中的 listing 对象已含最新状态
+
+        注意
+        ----
+        - 已在库但本次未抓到的房源不会被删除（历史保留）
+        - 通知回执需调用方在发送成功后单独调用 mark_notified() / mark_status_change_notified()
         """
         now = _now_iso()
         new_listings: list[Listing] = []
@@ -96,7 +200,6 @@ class Storage:
             ).fetchone()
 
             if row is None:
-                # 全新房源
                 cur.execute(
                     """INSERT INTO listings
                        (id, name, status, price_raw, available_from,
@@ -111,7 +214,6 @@ class Storage:
                 )
                 new_listings.append(listing)
             else:
-                # 已知房源：更新快照，检测状态变更
                 old_status = row["status"]
                 cur.execute(
                     """UPDATE listings
@@ -142,12 +244,34 @@ class Storage:
     # ------------------------------------------------------------------ #
 
     def mark_notified(self, listing_id: str) -> None:
+        """
+        标记指定房源的新房源通知已发送。
+
+        Parameters
+        ----------
+        listing_id : listings.id（URL slug）
+
+        副作用
+        ------
+        设置 listings.notified = 1 并立即 commit。
+        """
         self._conn.execute(
             "UPDATE listings SET notified=1 WHERE id=?", (listing_id,)
         )
         self._conn.commit()
 
     def mark_status_change_notified(self, listing_id: str) -> None:
+        """
+        标记指定房源所有未通知的状态变更记录为已通知。
+
+        Parameters
+        ----------
+        listing_id : status_changes.listing_id（同 listings.id）
+
+        副作用
+        ------
+        批量更新该 listing_id 下 notified=0 的记录为 notified=1，立即 commit。
+        """
         self._conn.execute(
             """UPDATE status_changes SET notified=1
                WHERE listing_id=? AND notified=0""",
@@ -156,21 +280,29 @@ class Storage:
         self._conn.commit()
 
     # ------------------------------------------------------------------ #
-    # 查询工具（供 monitor.py 日志 / 统计使用）
+    # 基础查询（monitor.py 内部使用）
     # ------------------------------------------------------------------ #
 
     def count_all(self) -> int:
+        """返回 listings 表总行数（数据库中见过的房源总数）。"""
         row = self._conn.execute("SELECT COUNT(*) FROM listings").fetchone()
         return row[0] if row else 0
 
     def get_listing(self, listing_id: str) -> Optional[dict]:
+        """
+        按 id 查询单条房源。
+
+        Returns
+        -------
+        dict（含所有字段）或 None（不存在时）
+        """
         row = self._conn.execute(
             "SELECT * FROM listings WHERE id=?", (listing_id,)
         ).fetchone()
         return dict(row) if row else None
 
     # ------------------------------------------------------------------ #
-    # 查询（Web 面板用）
+    # Web 面板查询
     # ------------------------------------------------------------------ #
 
     def get_all_listings(
@@ -179,6 +311,19 @@ class Storage:
         search: Optional[str] = None,
         limit: int = 500,
     ) -> list[dict]:
+        """
+        查询房源列表，支持状态筛选和关键词搜索，供 Web 面板房源页使用。
+
+        Parameters
+        ----------
+        status : 精确匹配 listings.status，None 表示不限
+        search : 在 name 和 city 字段中做 LIKE 模糊匹配，None 表示不限
+        limit  : 最多返回条数，默认 500
+
+        Returns
+        -------
+        list[dict]，按 first_seen DESC 排序
+        """
         q = "SELECT * FROM listings WHERE 1=1"
         params: list = []
         if status:
@@ -192,6 +337,18 @@ class Storage:
         return [dict(r) for r in self._conn.execute(q, params).fetchall()]
 
     def get_recent_changes(self, hours: int = 48) -> list[dict]:
+        """
+        查询最近 N 小时内的状态变更记录，关联 listings 表获取房源名称。
+
+        Parameters
+        ----------
+        hours : 时间窗口（小时），默认 48
+
+        Returns
+        -------
+        list[dict]，含 status_changes 全部字段 + listings.name / url / price_raw，
+        按 changed_at DESC 排序
+        """
         from datetime import timedelta
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         rows = self._conn.execute(
@@ -205,6 +362,13 @@ class Storage:
         return [dict(r) for r in rows]
 
     def count_new_since(self, hours: int = 24) -> int:
+        """
+        统计最近 N 小时内新入库的房源数量，供仪表盘「今日新增」指标使用。
+
+        Parameters
+        ----------
+        hours : 时间窗口（小时），默认 24
+        """
         from datetime import timedelta
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         row = self._conn.execute(
@@ -213,6 +377,13 @@ class Storage:
         return row[0] if row else 0
 
     def count_changes_since(self, hours: int = 24) -> int:
+        """
+        统计最近 N 小时内的状态变更次数，供仪表盘「今日变更」指标使用。
+
+        Parameters
+        ----------
+        hours : 时间窗口（小时），默认 24
+        """
         from datetime import timedelta
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         row = self._conn.execute(
@@ -221,33 +392,72 @@ class Storage:
         return row[0] if row else 0
 
     def get_distinct_statuses(self) -> list[str]:
+        """
+        返回 listings 表中所有不重复的状态值，供面板过滤下拉菜单使用。
+        """
         rows = self._conn.execute(
             "SELECT DISTINCT status FROM listings ORDER BY status"
         ).fetchall()
         return [r[0] for r in rows]
 
     # ------------------------------------------------------------------ #
-    # Meta（键值存储，供面板显示最近抓取时间等）
+    # Meta 键值存储
     # ------------------------------------------------------------------ #
 
     def get_meta(self, key: str, default: str = "—") -> str:
+        """
+        读取 meta 表中的键值。
+
+        Parameters
+        ----------
+        key     : 元数据键，e.g. "last_scrape_at"
+        default : 键不存在时的默认值
+
+        Returns
+        -------
+        存储的字符串值，或 default
+        """
         row = self._conn.execute(
             "SELECT value FROM meta WHERE key=?", (key,)
         ).fetchone()
         return row[0] if row else default
 
     def set_meta(self, key: str, value: str) -> None:
+        """
+        写入 meta 表（UPSERT 语义）。
+
+        Parameters
+        ----------
+        key   : 元数据键
+        value : 字符串值
+        """
         self._conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value)
         )
         self._conn.commit()
 
     # ------------------------------------------------------------------ #
-    # 图表数据（Chart.js）
+    # 图表数据
     # ------------------------------------------------------------------ #
 
     def chart_daily_new(self, days: int = 30) -> list[dict]:
-        """近 N 天每天新增房源数，补零保证天数连续。"""
+        """
+        统计近 N 天每天新增房源数，供「新增趋势」折线图使用。
+
+        Parameters
+        ----------
+        days : 统计天数，默认 30
+
+        Returns
+        -------
+        list[{"date": "YYYY-MM-DD", "count": int}]，按日期升序，仅包含有数据的日期
+        （Chart.js 侧负责补零）
+
+        注意
+        ----
+        first_seen 存储为 UTC，此处使用 'localtime' 修饰符转换为服务器本地时间。
+        若服务器时区不在 CET/CEST（荷兰时间），日期边界可能偏移 1-2 小时。
+        """
         rows = self._conn.execute(
             """
             SELECT date(first_seen) AS day, COUNT(*) AS cnt
@@ -261,7 +471,17 @@ class Storage:
         return [{"date": r["day"], "count": r["cnt"]} for r in rows]
 
     def chart_daily_changes(self, days: int = 30) -> list[dict]:
-        """近 N 天每天状态变更数。"""
+        """
+        统计近 N 天每天状态变更次数，供「变更趋势」折线图使用。
+
+        Parameters
+        ----------
+        days : 统计天数，默认 30
+
+        Returns
+        -------
+        list[{"date": "YYYY-MM-DD", "count": int}]，按日期升序
+        """
         rows = self._conn.execute(
             """
             SELECT date(changed_at) AS day, COUNT(*) AS cnt
@@ -275,7 +495,13 @@ class Storage:
         return [{"date": r["day"], "count": r["cnt"]} for r in rows]
 
     def chart_city_dist(self) -> list[dict]:
-        """按城市统计当前房源数量。"""
+        """
+        按城市统计当前库中所有房源数量，供「城市分布」饼图使用。
+
+        Returns
+        -------
+        list[{"city": str, "count": int}]，按数量降序
+        """
         rows = self._conn.execute(
             """
             SELECT COALESCE(NULLIF(city,''), '未知') AS city, COUNT(*) AS cnt
@@ -287,7 +513,13 @@ class Storage:
         return [{"city": r["city"], "count": r["cnt"]} for r in rows]
 
     def chart_status_dist(self) -> list[dict]:
-        """按状态统计当前房源数量。"""
+        """
+        按状态统计当前库中所有房源数量，供「状态分布」饼图使用。
+
+        Returns
+        -------
+        list[{"status": str, "count": int}]，按数量降序
+        """
         rows = self._conn.execute(
             """
             SELECT COALESCE(NULLIF(status,''), '未知') AS status, COUNT(*) AS cnt
@@ -299,7 +531,19 @@ class Storage:
         return [{"status": r["status"], "count": r["cnt"]} for r in rows]
 
     def chart_price_dist(self) -> list[dict]:
-        """按租金区间统计房源数量（Python 端解析 price_raw）。"""
+        """
+        按租金区间统计房源数量，供「价格分布」柱状图使用。
+
+        区间划分（固定）：<€600 / €600-700 / €700-800 / €800-900 / €900-1000 / >€1000
+
+        Returns
+        -------
+        list[{"range": str, "count": int}]，按区间顺序排列（非降序）
+
+        注意
+        ----
+        price_raw 在 Python 端解析，无法利用 SQLite 索引。数据量大时性能较差。
+        """
         import re as _re
         rows = self._conn.execute(
             "SELECT price_raw FROM listings WHERE price_raw IS NOT NULL AND price_raw != ''"
@@ -337,4 +581,5 @@ class Storage:
         return [{"range": k, "count": v} for k, v in buckets.items()]
 
     def close(self) -> None:
+        """关闭数据库连接。进程退出时由 monitor.py 调用。"""
         self._conn.close()

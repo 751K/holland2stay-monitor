@@ -1,10 +1,38 @@
 """
-Holland2Stay 房源监控主程序
-============================
-运行方式：
-    python monitor.py           # 持续监控
-    python monitor.py --once    # 只跑一次（适合 cron）
-    python monitor.py --test    # 抓取并打印，不发送通知，不写数据库
+monitor.py — 监控主程序
+========================
+程序入口，协调抓取、存储、通知、自动预订的完整流程。
+
+运行方式
+--------
+    python monitor.py           持续监控（默认，带智能轮询和 SIGHUP 热重载）
+    python monitor.py --once    单次运行后退出（适合 cron 任务）
+    python monitor.py --test    抓取并打印 JSON，不写库不发通知（用于验证抓取）
+
+核心流程（每轮）
+----------------
+1. `scrape_all()`（sync，在 executor 线程中运行）抓取所有城市房源
+2. `storage.diff()` 对比库中快照，产出 new_listings / status_changes
+3. 遍历启用的用户：
+   a. 按 listing_filter 决定是否发送通知
+   b. 若 auto_book 启用且房源符合条件，调用 `try_book()` 完成自动预订
+4. 写 meta（last_scrape_at）；每 HEARTBEAT_EVERY 轮发心跳
+
+智能轮询
+--------
+_get_interval() 根据荷兰本地时间判断是否处于高峰期（默认 8:30-10:00 工作日）。
+高峰期使用 PEAK_INTERVAL（默认 60s），其余时间使用 CHECK_INTERVAL（默认 300s）。
+实际等待时间在基准值 ±20% 随机抖动，避免多实例同步。
+
+热重载
+------
+收到 SIGHUP 信号后，在本轮结束时重载 .env + users.json，无需重启进程。
+Web 面板的「立即应用」按钮通过发送 SIGHUP（`kill -HUP <PID>`）触发。
+
+依赖模块
+--------
+scraper → storage → notifier → booker（单向，无循环）
+config / users：被各模块按需 import
 """
 from __future__ import annotations
 
@@ -83,8 +111,19 @@ def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
 
 def _get_interval(cfg) -> tuple[int, bool]:
     """
-    根据荷兰本地时间判断当前是否处于高峰期。
-    返回 (interval_seconds, is_peak)。
+    根据荷兰本地时间（Europe/Amsterdam）判断当前是否处于高峰期。
+
+    高峰期判断逻辑
+    --------------
+    1. 若 cfg.peak_weekdays_only=True 且当天是周末 → 非高峰
+    2. 解析 cfg.peak_start / cfg.peak_end（HH:MM 格式）
+    3. 当前分钟数落在 [start, end] 区间内 → 高峰
+
+    Returns
+    -------
+    (interval_seconds, is_peak)
+    interval_seconds : 本轮应等待的基准秒数（抖动前）
+    is_peak          : True 表示当前处于高峰期
     """
     now = datetime.now(_AMS)
     if cfg.peak_weekdays_only and now.weekday() >= 5:
@@ -105,7 +144,17 @@ def _get_interval(cfg) -> tuple[int, bool]:
 _JITTER_RATIO = 0.20
 
 def _apply_jitter(seconds: int) -> int:
-    """在 seconds 基础上加 ±JITTER_RATIO 的随机抖动，最小保留 5 秒。"""
+    """
+    在基准等待时间上叠加随机抖动，避免多实例在同一秒发起请求。
+
+    Parameters
+    ----------
+    seconds : 基准等待时间（秒）
+
+    Returns
+    -------
+    实际等待时间（秒），在 [seconds*(1-JITTER), seconds*(1+JITTER)] 范围内，最小 5 秒
+    """
     delta = seconds * _JITTER_RATIO
     return max(5, int(seconds + random.uniform(-delta, delta)))
 
@@ -115,7 +164,13 @@ def _apply_jitter(seconds: int) -> int:
 # ------------------------------------------------------------------ #
 
 def _area_key(listing) -> float:
-    """从 feature_map 里提取面积数值，用于自动预订候选排序。"""
+    """
+    从 Listing.feature_map() 提取面积数值，用于多套候选时按面积降序选最大。
+
+    Returns
+    -------
+    float 面积值（m²）；无法解析时返回 0.0（排在最后）
+    """
     import re
     area_str = listing.feature_map().get("area", "")
     m = re.search(r"[\d]+\.?\d*", area_str)
@@ -129,7 +184,27 @@ async def run_once(
     *,
     dry_run: bool = False,
 ) -> None:
-    """执行一次完整的抓取→对比→按用户分发通知/预订流程。"""
+    """
+    执行一次完整的「抓取 → 对比 → 通知 → 自动预订」流程。
+
+    Parameters
+    ----------
+    cfg            : 当前全局配置（Config 实例）
+    storage        : SQLite 持久化层
+    user_notifiers : [(UserConfig, BaseNotifier), ...]，启用的用户列表
+    dry_run        : True 时（--test 模式）只打印结果，不写库不发通知
+
+    流程说明
+    --------
+    1. scrape_all() 在 executor 线程中运行（同步 → 异步桥接）
+    2. storage.diff() 识别 new_listings 和 status_changes
+    3. 遍历 new_listings：
+       - 若用户 listing_filter 通过 → 发送 send_new_listing 通知
+       - 若 auto_book 启用且房源为 "Available to book" 且符合预订过滤 → 加入候选
+    4. 遍历 status_changes：同上逻辑
+    5. 每个用户：从候选列表中选面积最大的房源，调用 try_book()
+    6. 更新 meta（last_scrape_at / last_scrape_count）
+    """
     city_tasks, availability_ids = cfg.scrape_tasks()
     logger.info("开始抓取，城市数: %d，活跃用户数: %d", len(city_tasks), len(user_notifiers))
 
@@ -249,12 +324,35 @@ async def run_once(
 
 
 def _build_user_notifiers(users: list[UserConfig]) -> UserNotifiers:
-    """为所有启用的用户创建通知器。"""
+    """
+    为所有 enabled=True 的用户创建对应的 MultiNotifier。
+
+    Returns
+    -------
+    UserNotifiers = list[(UserConfig, BaseNotifier)]
+    """
     return [(u, create_user_notifier(u)) for u in users if u.enabled]
 
 
 async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> None:
-    """持续运行的主循环，支持 SIGHUP 热重载配置 + 智能轮询。"""
+    """
+    持续运行的主循环（`python monitor.py` 默认入口）。
+
+    循环结构
+    --------
+    while True:
+        1. run_once()           执行一轮抓取+通知
+        2. 每 HEARTBEAT_EVERY 轮发一次心跳
+        3. asyncio.wait_for(_reload_event, timeout=actual_interval)
+           - 超时：正常进入下一轮
+           - 事件触发（SIGHUP）：热重载 cfg + users，重建 user_notifiers
+        4. 未预期异常：记录并 sleep 10s，不退出进程
+
+    热重载
+    ------
+    SIGHUP 信号处理器通过 loop.call_soon_threadsafe 设置 _reload_event，
+    使 wait_for 提前返回。热重载完成后清除事件，继续下一轮。
+    """
     global _reload_event
     _reload_event = asyncio.Event()
 

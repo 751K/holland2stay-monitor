@@ -1,16 +1,41 @@
+"""
+booker.py — 自动预订模块
+==========================
+对 "Available to book" 的房源执行完整的自动化预订流程，最终生成可直接支付的链接。
+
+完整流程（try_book 内部）
+--------------------------
+1. _fetch_sku_and_contract()
+       通过 url_key 查询 Magento SKU + type_of_contract ID + 下一个入住日期
+2. login()
+       generateCustomerToken mutation → Bearer token
+3. get_or_create_cart()
+       customerCart query → cart_id；若购物车有旧条目则 truncateCart 清空
+4. cancel_pending_orders()
+       查询近 10 笔订单，取消所有 pending/reserved 状态的订单，
+       避免 "you have another unit reserved" 错误
+5. add_to_cart()
+       addNewBooking mutation → 将押金项（Deposit €200）加入购物车
+       注意：只请求 user_errors，不请求 cart{}（NON_NULL 传播 bug，见函数注释）
+6. place_order_and_pay()
+       setPaymentMethodOnCart → placeOrder → idealCheckOut → 返回直链付款 URL
+       支付域名在 account.holland2stay.com（不是 www），链接无需登录即可直接付款
+
+GraphQL API
+-----------
+端点：https://api.holland2stay.com/graphql/（Magento 后端）
+认证：generateCustomerToken 换取 Bearer token，后续请求附加 Authorization 头
+
+对外接口
+--------
+- try_book(listing, email, password, *, dry_run) → BookingResult
+- CHECKOUT_URL：常量，通知消息中备用引用
+
+依赖
+----
+curl_cffi.requests（绕过 Cloudflare），models.Listing
+"""
 from __future__ import annotations
-
-"""
-Holland2Stay 自动预订模块
-=========================
-针对 "Available to book" 的房源，自动完成以下步骤：
-  1. 登录账号，获取 Bearer token
-  2. 获取购物车 ID
-  3. 调用 addNewBooking 将房源加入购物车（相当于"锁定"位置）
-  4. 发送 iMessage 通知，附带付款链接，由用户手动完成支付
-
-注意：placeOrder（下单/支付）步骤不会自动执行，需要用户手动操作。
-"""
 
 import logging
 from typing import Optional
@@ -22,10 +47,11 @@ from models import Listing
 logger = logging.getLogger(__name__)
 
 GQL_URL = "https://api.holland2stay.com/graphql/"
-# 购物车通过 API 加入，绑定到账号服务端。浏览器需要先登录才能看到购物车。
-# 直接打开 /checkout 会显示登录框，登录后自动跳转付款页
+
+# www.holland2stay.com/checkout 是 Next.js 前端路由，
+# 未登录时显示登录框，登录后自动展示绑定到账号的购物车。
+# 实际付款链接由 idealCheckOut mutation 生成，域名在 account.holland2stay.com。
 CHECKOUT_URL = "https://www.holland2stay.com/checkout"
-CART_URL     = CHECKOUT_URL          # 两个 URL 相同，登录后自动显示购物车
 
 _BASE_HEADERS = {
     "Content-Type": "application/json",
@@ -39,6 +65,29 @@ _BASE_HEADERS = {
 # ------------------------------------------------------------------ #
 
 def _gql(session: req.Session, query: str, token: Optional[str] = None) -> dict:
+    """
+    执行 GraphQL 查询/变更并返回 data 字段。
+
+    Parameters
+    ----------
+    session : curl_cffi Session（由调用方管理生命周期）
+    query   : GraphQL 查询或 mutation 字符串
+    token   : Bearer token，传入时附加 Authorization 头
+
+    Returns
+    -------
+    响应 JSON 的 data 字段（dict）
+
+    Raises
+    ------
+    requests.HTTPError    HTTP 4xx/5xx 时
+    RuntimeError          响应含 errors 字段时（GraphQL 层错误）
+
+    注意
+    ----
+    此函数不处理 partial error（同时含 errors 和 data 的情况）。
+    add_to_cart() 因为 NON_NULL 传播问题，不使用此函数而是直接调用 session.post。
+    """
     headers = dict(_BASE_HEADERS)
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -56,7 +105,28 @@ def _gql(session: req.Session, query: str, token: Optional[str] = None) -> dict:
 # ------------------------------------------------------------------ #
 
 def login(session: req.Session, email: str, password: str) -> str:
-    """返回 customer token。"""
+    """
+    调用 generateCustomerToken mutation 登录，返回 Bearer token。
+
+    Parameters
+    ----------
+    session  : curl_cffi Session
+    email    : Holland2Stay 账号邮箱
+    password : Holland2Stay 账号密码
+
+    Returns
+    -------
+    Bearer token 字符串，用于后续所有需要鉴权的 GraphQL 请求
+
+    Raises
+    ------
+    RuntimeError 登录失败或响应中无 token
+
+    注意
+    ----
+    邮箱和密码通过字符串转义后直接内嵌在 GraphQL query 中。
+    建议未来改用 GraphQL variables 消除注入风险。
+    """
     escaped_email = email.replace('"', '\\"')
     escaped_pw = password.replace('"', '\\"').replace('\\', '\\\\')
     query = f'''
@@ -79,7 +149,22 @@ def login(session: req.Session, email: str, password: str) -> str:
 # ------------------------------------------------------------------ #
 
 def get_or_create_cart(session: req.Session, token: str) -> str:
-    """返回 customer 购物车 ID，同时清空购物车内的旧预订项目。"""
+    """
+    获取当前账号的购物车 ID，并清空购物车内的旧条目。
+
+    流程
+    ----
+    1. customerCart query 获取 cart_id 和现有条目（itemsV2）
+    2. 若有旧条目 → 调用 _truncate_cart() 清空，避免重复预订错误
+
+    Returns
+    -------
+    cart_id 字符串（Magento 购物车唯一标识）
+
+    Raises
+    ------
+    RuntimeError 无法获取 cart_id 时
+    """
     # 先取购物车 ID 和当前条目（用于清理）
     query = '''
     {
@@ -106,7 +191,14 @@ def get_or_create_cart(session: req.Session, token: str) -> str:
 
 
 def _truncate_cart(session: req.Session, token: str, cart_id: str) -> None:
-    """清空购物车内所有条目（TruncateCartOutput 只有 status: Boolean）。"""
+    """
+    清空购物车内所有条目。
+
+    使用 truncateCart mutation，该 mutation 的返回类型 TruncateCartOutput
+    只有 `status: Boolean` 字段（不含 cart{}，因此不会触发 NON_NULL 传播问题）。
+
+    失败不抛出异常，只记录 warning，不阻断后续预订流程。
+    """
     query = f'mutation {{ truncateCart(cart_id: "{cart_id}") {{ status }} }}'
     try:
         data = _gql(session, query, token=token)
@@ -123,8 +215,31 @@ def _truncate_cart(session: req.Session, token: str, cart_id: str) -> None:
 
 def cancel_pending_orders(session: req.Session, token: str) -> int:
     """
-    查询账号下所有 pending/reserved 状态的订单并逐一取消。
-    返回成功取消的订单数。这是避免 "you have another unit reserved" 错误的必要步骤。
+    查询账号近 10 笔订单，取消所有 pending/reserved 状态的订单。
+
+    背景
+    ----
+    Holland2Stay 的 placeOrder 会检查账号下是否已有预留单，若有则返回：
+    "Sorry, at the moment you have another unit reserved."
+    在新预订前必须取消旧的 pending 订单才能成功下单。
+
+    实现策略
+    --------
+    1. 先内省 GraphQL schema，找出所有含 "cancel" 的 mutation 名称
+    2. 对每个候选 mutation 依次尝试（先不带 reason，失败后补 reason 重试）
+    3. 任一 mutation 成功即停止尝试下一个
+    4. 所有尝试均失败时只记 warning，不中断预订流程
+
+    注意
+    ----
+    标准 Magento cancelOrder mutation 在此平台被禁用
+    （"Order cancellation is not enabled for requested store"）。
+    通过 schema 内省动态发现可用 mutation 以适应平台定制。
+    内省结果未缓存，每次预订都会额外发一次 schema 查询请求。
+
+    Returns
+    -------
+    成功取消的订单数（0 表示无需取消或取消失败）
     """
     # 查询近 10 笔订单，筛选出待取消的状态
     query = '''
@@ -227,15 +342,39 @@ def add_to_cart(
     contract_id: Optional[int] = None,
 ) -> bool:
     """
-    调用 addNewBooking，将房源加入购物车。
-    contract_start_date 格式: "2026-04-08"（ISO date，必须是未来日期）。
-    contract_id: 合同类型 ID（来自 type_of_contract 属性）。
+    调用 addNewBooking mutation，将押金项加入购物车（相当于锁定预订位置）。
 
-    关键设计：
-    - 响应只请求 user_errors，不请求 cart{}。
-      因为 AddProductsToCartOutput.cart 是 NON_NULL——若服务端处理异常导致 cart=null，
-      GraphQL 会把它上升为顶层 "Internal server error"，掩盖真正的错误原因。
-      只请求 user_errors 可以绕过这个问题，拿到可读的错误描述。
+    Parameters
+    ----------
+    session             : curl_cffi Session
+    token               : Bearer token
+    cart_id             : get_or_create_cart() 返回的购物车 ID
+    sku                 : 房源的 Magento SKU（由 _fetch_sku_and_contract 获取）
+    contract_start_date : 入住日期，格式 "YYYY-MM-DD"，必须是未来日期；
+                          None 时不传，由服务端决定（可能导致 Internal server error）
+    contract_id         : 合同类型 ID，来自 type_of_contract 属性；
+                          None 时不传，可能导致 Internal server error
+
+    Returns
+    -------
+    True（成功）
+
+    Raises
+    ------
+    RuntimeError 含 user_errors 时（如 "cart already has booking"）
+
+    关键设计：NON_NULL 传播绕过
+    ---------------------------
+    此函数不使用 _gql() 而是直接调用 session.post()。
+    原因：AddProductsToCartOutput.cart 字段是 NON_NULL 类型。
+    若请求 cart{} 且服务端处理失败（cart=null），GraphQL 会将 null 上升为
+    顶层 "Internal server error"，掩盖 user_errors 中的真实错误原因。
+    只请求 user_errors 可绕过此问题，直接获得可读的业务错误信息。
+
+    注意
+    ----
+    addNewBooking 实际上往购物车加入的是押金项（Deposit €200），
+    不是房源本身。后续需调用 placeOrder 才能真正产生订单。
     """
     date_arg = f', contract_startDate: "{contract_start_date}"' if contract_start_date else ""
     cid_arg  = f', contract_id: {contract_id}' if contract_id is not None else ""
@@ -291,9 +430,35 @@ def place_order_and_pay(
     payment_method: str = "idealcheckout_ideal",
 ) -> str:
     """
-    完成结账流程，返回直接可用的支付跳转 URL。
-    流程：setPaymentMethodOnCart → placeOrder → idealCheckOut → redirect URL
-    支付域名在 account.holland2stay.com（不是 www），所以不能用前端路由。
+    执行完整的结账流程，返回可直接跳转的 iDEAL 支付链接。
+
+    流程
+    ----
+    1. setPaymentMethodOnCart：设置支付方式为 idealcheckout_ideal
+    2. placeOrder：将购物车转化为正式订单，获取 order_number
+    3. idealCheckOut：根据 order_number 生成支付链接
+
+    Parameters
+    ----------
+    session        : curl_cffi Session
+    token          : Bearer token
+    cart_id        : 含押金项的购物车 ID
+    payment_method : 支付方式代码，默认 "idealcheckout_ideal"（iDEAL 银行转账）
+
+    Returns
+    -------
+    支付链接，形如：
+    https://account.holland2stay.com/idealcheckout/setup.php?order_id=XXX&order_code=YYY
+    该链接无需登录即可访问，有效期有限，需尽快完成支付。
+
+    Raises
+    ------
+    RuntimeError 任何步骤失败时（含下单失败、支付链接获取失败）
+
+    注意
+    ----
+    支付域名是 account.holland2stay.com（后端 PHP），
+    不是 www.holland2stay.com（Next.js 前端），两者是完全不同的系统。
     """
     auth_header = {**_BASE_HEADERS, "Authorization": f"Bearer {token}"}
 
@@ -352,6 +517,18 @@ def place_order_and_pay(
 # ------------------------------------------------------------------ #
 
 class BookingResult:
+    """
+    try_book() 的返回值，封装预订结果。
+
+    Attributes
+    ----------
+    listing : 被尝试预订的房源
+    success : True 表示流程全部成功（或 dry_run 验证通过）
+    message : 发送给用户的通知消息（含付款链接或失败原因）
+    dry_run : True 表示是 dry_run 模式产生的结果（未实际提交）
+    pay_url : place_order_and_pay() 返回的直链付款 URL；
+              失败时为空字符串；dry_run 时也为空字符串
+    """
     def __init__(
         self,
         listing: Listing,
@@ -375,8 +552,31 @@ def try_book(
     dry_run: bool = False,
 ) -> BookingResult:
     """
-    对单个 "Available to book" 房源执行自动预订流程。
-    dry_run=True 时只登录验证，不实际加入购物车。
+    对单个 "Available to book" 房源执行完整的自动预订流程。
+
+    Parameters
+    ----------
+    listing  : 目标房源（status 必须为 "Available to book"，否则立即返回失败）
+    email    : Holland2Stay 账号邮箱
+    password : Holland2Stay 账号密码
+    dry_run  : True 时只完成 SKU 查询/登录/购物车验证，不提交预订，
+               用于配置验证（AutoBookConfig.dry_run）
+
+    Returns
+    -------
+    BookingResult：
+    - success=True, pay_url 非空  → 预订成功，message 含直链付款 URL
+    - success=True, dry_run=True  → dry_run 验证通过
+    - success=False               → 任何步骤失败，message 含错误原因
+
+    调用方式
+    --------
+    由 monitor.py 的 run_once() 通过 run_in_executor 在线程池中调用
+    （此函数是同步的，使用 curl_cffi 同步 HTTP，不能直接在事件循环中 await）。
+
+    异常处理
+    --------
+    所有内部异常均被捕获并转化为 BookingResult(success=False)，不向上传播。
     """
     if listing.status.lower() not in ("available to book",):
         return BookingResult(listing, False, f"状态不是 Available to book: {listing.status}")
@@ -440,11 +640,27 @@ def try_book(
 
 def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Optional[int], Optional[str]]:
     """
-    通过 url_key 查询真实 Magento SKU、合同类型 ID 及下一个可用入住日期。
-    返回 (sku, contract_id, next_start_date)。
-    - contract_id: 来自 type_of_contract.value，不传会导致 Internal server error
-    - next_start_date: 优先取 next_contract_startdate（格式 "YYYY-MM-DD"），
-                       其次取 available_startdate；过去的日期会被置为 None
+    通过 url_key 查询 addNewBooking 所需的三个关键参数。
+
+    Parameters
+    ----------
+    session  : curl_cffi Session（无需鉴权，公开接口）
+    url_key  : 房源 URL slug，即 Listing.id，e.g. "kastanjelaan-1-108"
+
+    Returns
+    -------
+    (sku, contract_id, start_date)
+
+    sku           : Magento 内部 SKU，addNewBooking 的主要参数
+    contract_id   : type_of_contract 属性的 value（int）；
+                    不传会导致 addNewBooking 返回 Internal server error
+    start_date    : 下一个可用入住日期，格式 "YYYY-MM-DD"；
+                    优先取 next_contract_startdate，其次取 available_startdate；
+                    若日期早于今日则置为 None（传过期日期服务端会报错）
+
+    Raises
+    ------
+    RuntimeError 未找到该 url_key 对应的房源时
     """
     query = f'''
     {{

@@ -1,3 +1,11 @@
+"""
+models.py — 核心数据模型
+========================
+定义 `Listing` dataclass，是整个系统唯一的房源数据载体。
+Scraper 生成、Storage 存储、Notifier 格式化、Booker 预订都以此为输入。
+
+不依赖任何其他项目模块（零内部依赖），可单独 import。
+"""
 from __future__ import annotations
 
 import re
@@ -5,24 +13,66 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
+# key_map：将 GraphQL 属性名映射为 feature_map() 返回的标准 key。
+# scraper.py 在构建 features 列表时用 "Type: Studio" 这样的格式，
+# feature_map() 再把 "Type" 还原成 "type" 等内部 key。
+# 注意：config.py 的 ListingFilter.passes() 以及 web.py 的 parse_features
+# 过滤器也依赖相同的 key 名，三者必须保持一致。
+_KEY_MAP: dict[str, str] = {
+    "Type":         "type",         # 房型，e.g. "Studio" / "1" / "Loft (open bedroom area)"
+    "Area":         "area",         # 面积，e.g. "26.0 m²"
+    "Occupancy":    "occupancy",    # 入住人数，e.g. "Single" / "Two (only couples)"
+    "Floor":        "floor",        # 楼层数字字符串，e.g. "3"
+    "Finishing":    "furnishing",   # 装修类型，e.g. "Upholstered" / "Shell"
+    "Energy":       "energy_label", # 能耗标签，e.g. "A" / "B"
+    "Neighborhood": "neighborhood", # 片区，e.g. "Strijp-S"
+    "Building":     "building",     # 楼盘名，e.g. "The Docks"
+}
+
+
 @dataclass
 class Listing:
-    """单个房源的完整快照。"""
+    """
+    单个房源的完整快照。
 
-    id: str                        # URL slug，全局唯一，e.g. "pastoor-petersstraat-170-6"
-    name: str                      # "Pastoor Petersstraat 170-6, Eindhoven"
-    status: str                    # "Lottery" | "Book directly" | "Occupied"
-    price_raw: Optional[str]       # "€780.00 per month excl.*"
-    available_from: Optional[str]  # "Mar 13, 2026"
-    features: list[str]            # ["Studio", "26.0 m²", "Single", ...]
-    url: str                       # 完整页面 URL
-    city: str = ""                 # 来源城市名，方便多城市场景区分
+    字段说明
+    --------
+    id              URL slug，全局唯一，同时用作数据库主键和 GraphQL url_key。
+                    e.g. "kastanjelaan-1-108"
+    name            展示名，e.g. "Kastanjelaan 1-108, Eindhoven"
+    status          可用性状态，直接来自 GraphQL `available_to_book` 属性的 label。
+                    常见值："Available to book" | "Available in lottery" | "Not available"
+    price_raw       原始价格字符串，e.g. "€707"（由 scraper 从 basic_rent 属性格式化）
+    available_from  入住日期，ISO 格式 "YYYY-MM-DD"，来自 available_startdate 属性
+    features        特征列表，格式 ["Type: Studio", "Area: 26.0 m²", "Floor: 3", ...]
+                    由 scraper 从多个 custom_attributesV2 属性拼装而来
+    url             房源详情页完整 URL
+    city            来源城市名，用于多城市监控时区分，e.g. "Eindhoven"
+    """
 
+    id: str
+    name: str
+    status: str
+    price_raw: Optional[str]
+    available_from: Optional[str]
+    features: list[str]
+    url: str
+    city: str = ""
+
+    # ------------------------------------------------------------------ #
+    # 计算属性
     # ------------------------------------------------------------------ #
 
     @property
     def price_value(self) -> Optional[float]:
-        """从 price_raw 中解析出数字部分，方便排序/过滤。"""
+        """
+        从 price_raw 中解析出数字，用于过滤条件比较和排序。
+
+        Returns
+        -------
+        float 或 None（price_raw 为 None 或无法解析时）
+        例：price_raw="€707" → 707.0
+        """
         if not self.price_raw:
             return None
         m = re.search(r"[\d]+[,\d]*\.?\d*", self.price_raw.replace(",", ""))
@@ -30,40 +80,66 @@ class Listing:
 
     @property
     def price_display(self) -> str:
+        """
+        提取 price_raw 中的 "€xxx" 部分，供通知消息和 UI 显示使用。
+
+        Returns
+        -------
+        如 "€707"；无法解析时返回原始字符串或 "价格未知"
+        """
         if not self.price_raw:
             return "价格未知"
-        # 只保留 "€780.00" 部分
         m = re.search(r"€[\d,\.]+", self.price_raw)
         return m.group() if m else self.price_raw
 
     @property
     def is_available(self) -> bool:
+        """True 表示该房源处于可报名状态（lottery 或可直接预订）。"""
         return self.status.lower() in ("lottery", "book directly")
 
     def feature_map(self) -> dict[str, str]:
         """
-        将 features 列表解析为 {key: value} 字典。
-        features 格式为 "Key: Value"，例如 "Type: Studio"、"Area: 20 m²"。
+        将 features 列表解析为结构化字典，供过滤条件和消息格式化使用。
+
+        解析规则
+        --------
+        features 中每条格式为 "RawKey: Value"，例如 "Type: Studio"。
+        RawKey 通过 _KEY_MAP 映射为标准 key；未知 key 保留小写原样。
+
+        Returns
+        -------
+        dict，可能包含的 key：
+            "type"         → 房型
+            "area"         → 面积字符串，含单位，e.g. "26.0 m²"
+            "occupancy"    → 入住人数描述
+            "floor"        → 楼层，纯数字字符串
+            "furnishing"   → 装修类型
+            "energy_label" → 能耗标签
+            "neighborhood" → 所属片区
+            "building"     → 楼盘名
+
+        注意
+        ----
+        此方法每次调用都会遍历 features 列表，高频调用场景可考虑缓存结果。
+        config.py 的 ListingFilter.passes() 和 web.py 的 parse_features
+        过滤器都依赖本方法返回的 key 名，修改 _KEY_MAP 时需同步检查。
         """
         result = {}
-        key_map = {
-            "Type": "type",
-            "Area": "area",
-            "Occupancy": "occupancy",
-            "Floor": "floor",
-            "Finishing": "furnishing",
-            "Energy": "energy_label",
-            "Neighborhood": "neighborhood",
-            "Building": "building",
-        }
         for feat in self.features:
             if ": " in feat:
                 raw_key, value = feat.split(": ", 1)
-                mapped = key_map.get(raw_key, raw_key.lower())
+                mapped = _KEY_MAP.get(raw_key, raw_key.lower())
                 result[mapped] = value
         return result
 
     def to_dict(self) -> dict:
+        """
+        序列化为纯 Python dict，供 JSON 输出（--test 模式）使用。
+
+        Returns
+        -------
+        包含所有字段的 dict，features 保持 list[str] 格式。
+        """
         return {
             "id": self.id,
             "name": self.name,

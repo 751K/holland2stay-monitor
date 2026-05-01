@@ -1,20 +1,39 @@
 """
-多用户管理模块
-==============
-每个用户独立拥有：通知渠道 + 凭证、房源过滤条件、自动预订账号。
-全局配置（轮询间隔、城市、数据库路径等）仍在 config.py / .env 中管理。
+users.py — 多用户配置管理
+==========================
+职责
+----
+- 定义 `UserConfig` dataclass，包含单个用户的全部配置：
+  通知渠道凭证、房源过滤条件、自动预订配置
+- 提供 `data/users.json` 的读写接口
+- 首次启动时从旧版 .env 单用户配置迁移（向后兼容）
 
-存储格式：data/users.json（UTF-8 JSON 数组）
+存储格式
+--------
+`data/users.json`：JSON 数组，每个元素对应一个 UserConfig 的 asdict() 序列化结果。
+文件不存在时视为无用户（空列表），首次写入时自动创建父目录。
+
+与 config.py 的分工
+--------------------
+- config.py / .env  → 全局参数（轮询间隔、城市、数据库路径）
+- users.py / users.json → 每用户独立配置（通知、过滤、预订）
+
+依赖
+----
+标准库 + config.py（ListingFilter, AutoBookConfig），无其他内部依赖。
 """
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from config import AutoBookConfig, ListingFilter
+
+logger = logging.getLogger(__name__)
 
 USERS_FILE = Path("data/users.json")
 
@@ -25,38 +44,62 @@ USERS_FILE = Path("data/users.json")
 
 @dataclass
 class UserConfig:
-    """单个用户的全部配置。"""
+    """
+    单个用户的全部配置。
+
+    字段说明
+    --------
+    name                  : 用户显示名，仅用于日志和 Web 面板
+    id                    : 8 位十六进制 UUID 前缀，自动生成，作为内部唯一标识
+    enabled               : False 时该用户的通知和自动预订全部跳过
+
+    通知配置
+    --------
+    notifications_enabled : 该用户的通知总开关（独立于 enabled）
+    notification_channels : 启用的渠道列表，支持 "imessage" / "telegram" / "whatsapp"
+    imessage_recipient    : iMessage 收件人（手机号或 Apple ID 邮箱，macOS only）
+    telegram_token        : Telegram Bot Token（格式 "123456789:AAB..."）
+    telegram_chat_id      : Telegram Chat ID（数字字符串，向 bot 发消息后从 getUpdates 获取）
+    twilio_sid            : Twilio Account SID（WhatsApp 渠道）
+    twilio_token          : Twilio Auth Token
+    twilio_from           : 发送方 WhatsApp 号码，格式 "whatsapp:+14155238886"
+    twilio_to             : 接收方 WhatsApp 号码，格式 "whatsapp:+31612345678"
+
+    过滤条件
+    --------
+    listing_filter        : 通知过滤条件，不满足的房源不发通知
+                            is_empty() 时所有房源都通知
+
+    自动预订
+    --------
+    auto_book             : 自动预订配置，enabled=False 时不触发预订
+                            内含独立的 listing_filter（可比通知条件更严格）
+    """
 
     name: str
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     enabled: bool = True
 
-    # ── 通知 ──────────────────────────────────────────────────────── #
     notifications_enabled: bool = True
     notification_channels: list[str] = field(default_factory=list)
-    # iMessage
     imessage_recipient: str = ""
-    # Telegram
     telegram_token: str = ""
     telegram_chat_id: str = ""
-    # WhatsApp（Twilio）
     twilio_sid: str = ""
     twilio_token: str = ""
     twilio_from: str = ""
     twilio_to: str = ""
 
-    # ── 过滤条件（影响通知，不影响抓取/写库）──────────────────────── #
     listing_filter: ListingFilter = field(default_factory=ListingFilter)
-
-    # ── 自动预订 ──────────────────────────────────────────────────── #
     auto_book: AutoBookConfig = field(default_factory=AutoBookConfig)
 
 
 # ------------------------------------------------------------------ #
-# 序列化 / 反序列化
+# 内部：反序列化辅助
 # ------------------------------------------------------------------ #
 
 def _lf_from_dict(d: dict) -> ListingFilter:
+    """从 dict 构造 ListingFilter，缺失字段使用默认值。"""
     return ListingFilter(
         max_rent=d.get("max_rent"),
         min_area=d.get("min_area"),
@@ -69,6 +112,7 @@ def _lf_from_dict(d: dict) -> ListingFilter:
 
 
 def _ab_from_dict(d: dict) -> AutoBookConfig:
+    """从 dict 构造 AutoBookConfig，内含 listing_filter 嵌套反序列化。"""
     return AutoBookConfig(
         enabled=d.get("enabled", False),
         dry_run=d.get("dry_run", True),
@@ -79,6 +123,10 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
 
 
 def _user_from_dict(d: dict) -> UserConfig:
+    """
+    从 dict 构造 UserConfig，处理嵌套的 listing_filter 和 auto_book。
+    兼容旧版本数据（缺失字段使用 dataclass 默认值）。
+    """
     d = dict(d)
     lf = _lf_from_dict(d.pop("listing_filter", {}))
     ab = _ab_from_dict(d.pop("auto_book", {}))
@@ -86,22 +134,46 @@ def _user_from_dict(d: dict) -> UserConfig:
 
 
 # ------------------------------------------------------------------ #
-# 读写
+# 读写接口
 # ------------------------------------------------------------------ #
 
 def load_users() -> list[UserConfig]:
-    """从 data/users.json 加载用户列表。文件不存在时返回空列表。"""
+    """
+    从 `data/users.json` 加载用户列表。
+
+    Returns
+    -------
+    list[UserConfig]，文件不存在时返回空列表
+
+    错误处理
+    --------
+    文件存在但 JSON 解析失败（损坏/截断）时记录警告并返回空列表，
+    不会抛出异常（调用方应检查返回是否为空并提示用户）。
+    """
     if not USERS_FILE.exists():
         return []
     try:
         data = json.loads(USERS_FILE.read_text(encoding="utf-8"))
         return [_user_from_dict(u) for u in data]
-    except Exception:
+    except Exception as e:
+        logger.warning("加载 %s 失败，返回空列表: %s", USERS_FILE, e)
         return []
 
 
 def save_users(users: list[UserConfig]) -> None:
-    """将用户列表序列化写入 data/users.json。"""
+    """
+    将用户列表序列化写入 `data/users.json`（完整覆盖）。
+
+    Parameters
+    ----------
+    users : 要持久化的用户列表，空列表会写入 "[]"
+
+    副作用
+    ------
+    创建父目录（data/）如不存在；覆盖已有文件。
+    写入非原子（直接覆盖），进程 kill 可能导致文件损坏，
+    未来可改为 write-tmp + os.replace() 原子写。
+    """
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
     USERS_FILE.write_text(
         json.dumps([asdict(u) for u in users], indent=2, ensure_ascii=False),
@@ -110,17 +182,50 @@ def save_users(users: list[UserConfig]) -> None:
 
 
 def get_user(users: list[UserConfig], user_id: str) -> Optional[UserConfig]:
+    """
+    在用户列表中按 id 查找单个用户。
+
+    Parameters
+    ----------
+    users   : 已加载的用户列表
+    user_id : UserConfig.id（8 位十六进制字符串）
+
+    Returns
+    -------
+    对应的 UserConfig，不存在时返回 None
+    """
     return next((u for u in users if u.id == user_id), None)
 
 
 # ------------------------------------------------------------------ #
-# 迁移：从旧 .env 单用户配置创建第一个用户
+# 迁移：从旧版 .env 单用户配置创建默认用户
 # ------------------------------------------------------------------ #
 
 def migrate_from_env() -> Optional[UserConfig]:
     """
-    读取旧版 .env 中的通知/过滤/预订配置，生成一个 "默认用户"。
-    若 .env 没有任何通知配置，返回 None（用户自行在 Web 面板添加）。
+    读取旧版 .env 单用户配置，生成一个「默认用户」。
+
+    触发条件
+    --------
+    仅在 `data/users.json` 不存在或为空时由 `monitor.py` 调用一次。
+    若 .env 没有任何通知配置（IMESSAGE_RECIPIENT 和 NOTIFICATION_CHANNELS 均为空），
+    返回 None，提示用户在 Web 面板手动添加。
+
+    读取的 .env 键（完整列表）
+    --------------------------
+    通知：NOTIFICATION_CHANNELS, IMESSAGE_RECIPIENT,
+          TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+          TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, TWILIO_TO,
+          NOTIFICATIONS_ENABLED
+    过滤：MAX_RENT, MIN_AREA, MAX_AREA, MIN_FLOOR,
+          ALLOWED_OCCUPANCY, ALLOWED_TYPES, ALLOWED_NEIGHBORHOODS
+    预订：AUTO_BOOK_ENABLED, AUTO_BOOK_DRY_RUN, AUTO_BOOK_EMAIL, AUTO_BOOK_PASSWORD,
+          AUTO_BOOK_MAX_RENT, AUTO_BOOK_MIN_AREA, AUTO_BOOK_MAX_AREA, AUTO_BOOK_MIN_FLOOR,
+          AUTO_BOOK_ALLOWED_OCCUPANCY, AUTO_BOOK_ALLOWED_TYPES, AUTO_BOOK_ALLOWED_NEIGHBORHOODS
+
+    Returns
+    -------
+    UserConfig（name="默认用户"）或 None
     """
     import os
 

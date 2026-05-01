@@ -1,3 +1,23 @@
+"""
+config.py — 全局配置与过滤条件
+================================
+职责
+----
+1. 定义全局运行参数（轮询间隔、监控城市、数据库路径、日志级别、智能轮询）
+2. 提供 `ListingFilter` / `AutoBookConfig` dataclass，供 users.py 引用
+3. `load_config()` 从 .env / 环境变量读取并构造 `Config` 实例
+
+分层说明
+--------
+- **全局配置**（Config）：影响整个进程，存于 .env，在 Web 面板「全局设置」页修改
+- **用户级配置**（ListingFilter / AutoBookConfig）：每用户独立，存于 data/users.json，
+  在 Web 面板「用户管理」页修改
+
+依赖关系
+--------
+仅依赖标准库和 python-dotenv，无内部模块依赖。
+users.py 和 web.py 都会 import 本模块中的 dataclass。
+"""
 from __future__ import annotations
 
 import os
@@ -14,7 +34,9 @@ load_dotenv()
 
 BASE_URL = "https://www.holland2stay.com/residences"
 
-# 所有可用城市（从 Holland2Stay GraphQL aggregations 获取，按名称排序）
+# 所有已知城市及其 GraphQL filter ID。
+# ID 来自 Holland2Stay GraphQL aggregations 接口，city filter 使用字符串形式。
+# 新增城市需同时在此处添加，并在 Web 面板城市列表中选择。
 KNOWN_CITIES: list[dict] = [
     {"name": "Amersfoort",              "id": "6249"},
     {"name": "Amsterdam",               "id": "24"},
@@ -47,32 +69,73 @@ KNOWN_CITIES: list[dict] = [
 
 @dataclass
 class CityFilter:
-    name: str   # "Eindhoven"
-    id: int     # 29
+    """GraphQL city filter 的单个城市条目。"""
+    name: str   # 显示名，e.g. "Eindhoven"
+    id: int     # GraphQL filter 数值 ID，e.g. 29
 
 
 @dataclass
 class AvailabilityFilter:
-    label: str  # "Available to book"
-    id: int     # 179
+    """
+    GraphQL available_to_book filter 的单个可用性条目。
+
+    已知 ID
+    -------
+    179 → "Available to book"（可直接预订）
+    336 → "Available in lottery"（摇号中）
+    """
+    label: str  # 可读标签，e.g. "Available to book"
+    id: int     # GraphQL filter 数值 ID，e.g. 179
 
 
 @dataclass
 class ListingFilter:
     """
-    可选的通知过滤条件。所有字段留空/None 表示不限制。
-    过滤只影响通知，所有房源仍会写入数据库。
+    房源过滤条件。用于决定某条房源是否向用户发送通知，或是否触发自动预订。
+
+    过滤逻辑
+    --------
+    所有条件之间为 AND 关系：房源必须满足全部已设条件才会放行。
+    某字段为 None / 空列表时该条件不生效。
+    `is_empty()` 返回 True 时所有房源都放行。
+
+    注意
+    ----
+    过滤只影响通知和自动预订触发，不影响数据库写入（所有房源都会入库）。
+    面积/楼层数据来自 `Listing.feature_map()`，若 API 返回格式变化可能导致过滤失效。
     """
-    max_rent: Optional[float] = None          # 最高月租，e.g. 1200.0
-    min_area: Optional[float] = None          # 最小面积（m²），e.g. 20.0
-    max_area: Optional[float] = None          # 最大面积（m²）
-    min_floor: Optional[int] = None           # 最低楼层（0=地面层），e.g. 1
-    allowed_occupancy: list[str] = field(default_factory=list)   # e.g. ["One", "Two (only couples)"]
-    allowed_types: list[str] = field(default_factory=list)       # e.g. ["Studio", "1", "Loft (open bedroom area)"]
-    allowed_neighborhoods: list[str] = field(default_factory=list)  # e.g. ["Strijp", "Centrum"]
+    max_rent: Optional[float] = None
+    """最高月租（€/月）。超出此值的房源不通知。e.g. 1200.0"""
+
+    min_area: Optional[float] = None
+    """最小面积（m²）。低于此值的房源不通知。e.g. 20.0"""
+
+    max_area: Optional[float] = None
+    """最大面积（m²）。高于此值的房源不通知。"""
+
+    min_floor: Optional[int] = None
+    """最低楼层（0=地面层）。低于此楼层的房源不通知。e.g. 1"""
+
+    allowed_occupancy: list[str] = field(default_factory=list)
+    """
+    入住人数白名单（子串匹配，大小写不敏感）。非空时只通知列表中的类型。
+    e.g. ["Single", "Two (only couples)"]
+    """
+
+    allowed_types: list[str] = field(default_factory=list)
+    """
+    房型白名单（子串匹配，大小写不敏感）。非空时只通知列表中的户型。
+    e.g. ["Studio", "1", "Loft (open bedroom area)"]
+    """
+
+    allowed_neighborhoods: list[str] = field(default_factory=list)
+    """
+    片区白名单（子串匹配，大小写不敏感）。非空时只通知指定片区的房源。
+    e.g. ["Strijp", "Centrum"]
+    """
 
     def is_empty(self) -> bool:
-        """没有设置任何条件，全部放行。"""
+        """所有条件均未设置时返回 True，表示全部放行。"""
         return (
             self.max_rent is None
             and self.min_area is None
@@ -84,16 +147,26 @@ class ListingFilter:
         )
 
     def passes(self, listing: "Listing") -> bool:
-        """返回 True 表示该房源满足过滤条件，应当发送通知。"""
+        """
+        判断房源是否通过过滤条件。
+
+        Parameters
+        ----------
+        listing : Listing
+            待判断的房源快照
+
+        Returns
+        -------
+        True  → 满足所有过滤条件，应发送通知
+        False → 不满足至少一项条件，跳过
+        """
         fm = listing.feature_map()
 
-        # 租金
         if self.max_rent is not None:
             price = listing.price_value
             if price is not None and price > self.max_rent:
                 return False
 
-        # 面积
         area_str = fm.get("area", "")
         area = _parse_float(area_str)
         if area is not None:
@@ -102,25 +175,21 @@ class ListingFilter:
             if self.max_area is not None and area > self.max_area:
                 return False
 
-        # 楼层
         if self.min_floor is not None:
             floor = _parse_int(fm.get("floor", ""))
             if floor is not None and floor < self.min_floor:
                 return False
 
-        # 入住人数类型
         if self.allowed_occupancy:
             occ = fm.get("occupancy", "")
             if not any(a.lower() in occ.lower() for a in self.allowed_occupancy):
                 return False
 
-        # 户型
         if self.allowed_types:
             rtype = fm.get("type", "")
             if not any(a.lower() in rtype.lower() for a in self.allowed_types):
                 return False
 
-        # 片区
         if self.allowed_neighborhoods:
             nbhd = fm.get("neighborhood", "")
             if not any(a.lower() in nbhd.lower() for a in self.allowed_neighborhoods):
@@ -130,13 +199,22 @@ class ListingFilter:
 
 
 def _parse_float(s: str) -> Optional[float]:
-    """从 "20 m²" / "29.1 m²" 中解析出数字。"""
+    """
+    从含单位的字符串中提取浮点数。
+
+    e.g. "26.0 m²" → 26.0，"" → None
+    """
     import re
     m = re.search(r"[\d]+\.?\d*", s.replace(",", "."))
     return float(m.group()) if m else None
 
 
 def _parse_int(s: str) -> Optional[int]:
+    """
+    从字符串中提取第一个整数。
+
+    e.g. "3" → 3，"Ground floor" → None
+    """
     import re
     m = re.search(r"\d+", s)
     return int(m.group()) if m else None
@@ -145,13 +223,20 @@ def _parse_int(s: str) -> Optional[int]:
 @dataclass
 class AutoBookConfig:
     """
-    自动预订配置。
-    enabled=False 时整个自动预订功能关闭。
-    dry_run=True 时走完流程但不实际调用 addNewBooking（用于测试）。
-    listing_filter 独立于通知过滤，可以设置更严格的条件。
+    单个用户的自动预订配置。
+
+    字段说明
+    --------
+    enabled         : 总开关。False 时整个自动预订跳过，不登录也不调用任何 API
+    dry_run         : 试运行模式。True 时只做登录/购物车验证，不执行 addNewBooking；
+                      默认 True，需显式设为 False 才真正提交预订
+    email           : Holland2Stay 账号邮箱
+    password        : Holland2Stay 账号密码（明文存储于 data/users.json）
+    listing_filter  : 独立于通知过滤的预订条件，可以设置比通知更严格的门槛；
+                      is_empty() 为 True 时对所有 Available to book 房源都会触发
     """
     enabled: bool = False
-    dry_run: bool = True          # 默认 dry_run，需显式设置 AUTO_BOOK_DRY_RUN=false 才真正执行
+    dry_run: bool = True
     email: str = ""
     password: str = ""
     listing_filter: ListingFilter = field(default_factory=ListingFilter)
@@ -159,30 +244,73 @@ class AutoBookConfig:
 
 @dataclass
 class Config:
-    """全局配置：轮询、城市、数据库。通知/过滤/预订移至 users.py / data/users.json。"""
+    """
+    全局运行配置，从 .env 加载，影响整个监控进程。
+
+    字段说明
+    --------
+    check_interval      : 常规轮询间隔（秒），对应 .env CHECK_INTERVAL
+    cities              : 要监控的城市列表，对应 .env CITIES（格式 "城市名,ID|..."）
+    availability_filters: GraphQL available_to_book filter 列表，
+                          对应 .env AVAILABILITY_FILTERS（格式 "标签,ID|..."）
+    db_path             : SQLite 数据库文件路径，对应 .env DB_PATH
+    log_level           : 日志级别字符串，对应 .env LOG_LEVEL
+
+    智能轮询（荷兰高峰期加速）
+    --------------------------
+    peak_interval       : 高峰期轮询间隔（秒），对应 .env PEAK_INTERVAL
+    peak_start          : 高峰开始时间（荷兰本地时间 HH:MM），对应 .env PEAK_START
+    peak_end            : 高峰结束时间（荷兰本地时间 HH:MM），对应 .env PEAK_END
+    peak_weekdays_only  : True 表示仅工作日启用高峰轮询，对应 .env PEAK_WEEKDAYS_ONLY
+    """
     check_interval: int
     cities: list[CityFilter]
     availability_filters: list[AvailabilityFilter]
     db_path: Path
     log_level: str
-    # 智能轮询（荷兰时区高峰期加速）
-    peak_interval: int = 60           # 高峰期轮询间隔（秒）
-    peak_start: str = "08:30"         # 高峰期开始时间（荷兰本地时间，HH:MM）
-    peak_end: str = "10:00"           # 高峰期结束时间（荷兰本地时间，HH:MM）
-    peak_weekdays_only: bool = True   # 仅工作日启用高峰轮询
-
-    # ------------------------------------------------------------------ #
+    peak_interval: int = 60
+    peak_start: str = "08:30"
+    peak_end: str = "10:00"
+    peak_weekdays_only: bool = True
 
     def scrape_tasks(self) -> tuple[list[tuple[str, str]], list[str]]:
+        """
+        将配置展开为 scraper.scrape_all() 所需的参数格式。
+
+        Returns
+        -------
+        city_tasks       : [(city_name, city_id_str), ...]
+                           e.g. [("Eindhoven", "29"), ("Amsterdam", "24")]
+        availability_ids : [id_str, ...]
+                           e.g. ["179", "336"]
+        """
         city_tasks = [(c.name, str(c.id)) for c in self.cities]
         availability_ids = [str(af.id) for af in self.availability_filters]
         return city_tasks, availability_ids
 
 
 def load_config() -> Config:
+    """
+    从环境变量（已由 dotenv 加载）构造并返回 Config 实例。
+
+    读取的 .env 键
+    --------------
+    CHECK_INTERVAL          int，默认 300
+    CITIES                  格式 "城市名,ID|城市名,ID"，默认 "Eindhoven,29"
+    AVAILABILITY_FILTERS    格式 "标签,ID|标签,ID"，默认包含 179 和 336
+    DB_PATH                 str，默认 "data/listings.db"
+    LOG_LEVEL               str，默认 "INFO"
+    PEAK_INTERVAL           int，默认 60
+    PEAK_START              str HH:MM，默认 "08:30"
+    PEAK_END                str HH:MM，默认 "10:00"
+    PEAK_WEEKDAYS_ONLY      "true"/"false"，默认 "true"
+
+    Raises
+    ------
+    ValueError  若 CITIES 或 AVAILABILITY_FILTERS 中的 ID 不是合法整数
+    """
     interval = int(os.environ.get("CHECK_INTERVAL", "300"))
 
-    # 城市列表，格式: "Eindhoven,29|Amsterdam,1"
     cities: list[CityFilter] = []
     raw_cities = os.environ.get("CITIES", "Eindhoven,29")
     for entry in raw_cities.split("|"):
@@ -190,7 +318,6 @@ def load_config() -> Config:
         if len(parts) == 2:
             cities.append(CityFilter(name=parts[0].strip(), id=int(parts[1].strip())))
 
-    # 可用性过滤，格式: "Available to book,179|Available in lottery,336"
     availability_filters: list[AvailabilityFilter] = []
     raw_filters = os.environ.get(
         "AVAILABILITY_FILTERS", "Available to book,179|Available in lottery,336"
@@ -211,7 +338,6 @@ def load_config() -> Config:
         availability_filters=availability_filters,
         db_path=db_path,
         log_level=log_level,
-        # 智能轮询
         peak_interval=int(os.environ.get("PEAK_INTERVAL", "60")),
         peak_start=os.environ.get("PEAK_START", "08:30"),
         peak_end=os.environ.get("PEAK_END", "10:00"),
