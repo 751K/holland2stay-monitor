@@ -166,6 +166,7 @@
         <i class="bi bi-send"></i>
       </button>
       <form action="{{ url_for('user_toggle', user_id=user.id) }}" method="post" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="action-btn" title="{% if user.enabled %}停用{% else %}启用{% endif %}">
           <i class="bi bi-{% if user.enabled %}pause{% else %}play{% endif %}-fill"></i>
         </button>
@@ -198,6 +199,7 @@
       <div class="modal-footer border-0 py-2">
         <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
         <form id="deleteForm" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button type="submit" class="btn btn-danger btn-sm">确认删除</button>
         </form>
       </div>
@@ -231,7 +233,10 @@ function sendTestNotify(userId, userName, btn) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:.6rem;height:.6rem;"></span>';
 
-  fetch('/users/' + userId + '/test', { method: 'POST' })
+  fetch('/users/' + userId + '/test', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content }
+  })
     .then(r => r.json())
     .then(data => {
       let html = '';

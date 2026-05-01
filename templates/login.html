@@ -103,6 +103,7 @@
 
     <form method="POST" action="{{ url_for('login') }}" autocomplete="on">
       <input type="hidden" name="next" value="{{ next }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
       <div class="field">
         <label for="username">用户名</label>

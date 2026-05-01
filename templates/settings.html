@@ -19,6 +19,7 @@
 </div>
 
 <form method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   <!-- ── Section 1: 抓取配置 ─────────────────────────── -->
   <div class="card mb-4">
@@ -152,7 +153,10 @@ function reloadMonitor(btn) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>发送中...';
 
-  fetch('/api/reload', { method: 'POST' })
+  fetch('/api/reload', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content }
+  })
     .then(r => r.json())
     .then(d => {
       const toast = new bootstrap.Toast(document.getElementById('reload-toast'), { delay: 4000 });

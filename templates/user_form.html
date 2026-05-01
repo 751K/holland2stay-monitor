@@ -59,6 +59,7 @@
 </div>
 
 <form method="post" action="{{ action }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   <!-- ── Step 1: 基本信息 ──────────────────────────────── -->
   <div class="card mb-4">
@@ -389,7 +390,10 @@ function sendTestNotify(userId, btn) {
   const resultDiv = document.getElementById('testResult');
   resultDiv.style.display = 'none';
 
-  fetch('/users/' + userId + '/test', { method: 'POST' })
+  fetch('/users/' + userId + '/test', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content }
+  })
     .then(r => r.json())
     .then(data => {
       let rows = '';
