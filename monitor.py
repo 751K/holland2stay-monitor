@@ -50,8 +50,8 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from booker import try_book
-from config import load_config
+from booker import CHECKOUT_URL, try_book
+from config import DATA_DIR, ENV_PATH, load_config
 from notifier import BaseNotifier, create_user_notifier
 from scraper import scrape_all
 from storage import Storage
@@ -68,7 +68,8 @@ logger = logging.getLogger("monitor")
 
 HEARTBEAT_EVERY = 12   # 默认 5min * 12 = 1h
 
-_PID_FILE = Path("data/monitor.pid")
+_PID_FILE = DATA_DIR / "monitor.pid"
+_RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
 _AMS = ZoneInfo("Europe/Amsterdam")
 
 # 热重载事件（SIGHUP → 唤醒 main_loop 中的 sleep，立即重载配置）
@@ -90,6 +91,29 @@ def _write_pid() -> None:
 
 def _remove_pid() -> None:
     _PID_FILE.unlink(missing_ok=True)
+
+
+def _consume_reload_request_file() -> bool:
+    """
+    消费一次文件触发的热重载请求。
+
+    Returns
+    -------
+    True  : 检测到请求并已删除请求文件
+    False : 当前没有待处理请求
+
+    说明
+    ----
+    这是 Windows 上 Web 面板「立即生效」的主要通信方式。
+    在 Unix 上也作为 SIGHUP 失败时的回退方案。
+    """
+    if not _RELOAD_REQUEST_FILE.exists():
+        return False
+    try:
+        _RELOAD_REQUEST_FILE.unlink()
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
@@ -258,7 +282,7 @@ async def run_once(
 
             # 通知过滤
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
-                logger.debug("[%s] 跳过通知（过滤条件不符）: %s", user.name, listing.name)
+                logger.info("[%s] 跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
 
             logger.info("[%s] 新房源: %s (%s)", user.name, listing.name, listing.status)
@@ -283,7 +307,7 @@ async def run_once(
                 ab_candidates[user.id].append(listing)
 
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
-                logger.debug("[%s] 状态变更跳过通知: %s", user.name, listing.name)
+                logger.info("[%s] 状态变更跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
 
             logger.info("[%s] 状态变更: %s  %s → %s", user.name, listing.name, old_status, new_status)
@@ -313,7 +337,18 @@ async def run_once(
         if result.dry_run:
             logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, target.name)
         elif result.success:
-            await notifier.send_booking_success(target, result.message, result.pay_url)
+            sent = await notifier.send_booking_success(
+                target, result.message, result.pay_url, result.contract_start_date
+            )
+            if not sent:
+                # 通知发送失败（渠道关闭/配置错误/网络问题），付款链接必须保留在日志中
+                # 使用 CRITICAL 级别确保即使 LOG_LEVEL=WARNING 也能被看到
+                logger.critical(
+                    "❌ [%s] 自动预订成功但通知发送失败，付款链接已记录于此，请立即操作：\n"
+                    "  房源：%s\n"
+                    "  付款：%s",
+                    user.name, target.name, result.pay_url or CHECKOUT_URL,
+                )
         else:
             await notifier.send_booking_failed(target, result.message)
 
@@ -362,8 +397,8 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
         cfg.check_interval, cfg.peak_interval, cfg.peak_start, cfg.peak_end,
         [c.name for c in cfg.cities], len(user_notifiers),
     )
-    # 启动时打印每个用户的自动预订状态，避免误以为已开启/关闭
-    for user, _ in user_notifiers:
+    # 启动时打印每个用户的自动预订状态，并检查通知渠道是否可用
+    for user, notifier in user_notifiers:
         ab = user.auto_book
         if ab.enabled:
             mode = "⚠️  试运行（dry_run）" if ab.dry_run else "🚀 真实预订"
@@ -371,6 +406,19 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
                 "自动预订 [%s]: %s  账号: %s",
                 user.name, mode, ab.email or "(未设置)",
             )
+            # 自动预订开启时，通知渠道必须可用，否则付款链接无法送达
+            if not user.notifications_enabled:
+                logger.warning(
+                    "⚠️  [%s] 自动预订已开启，但该用户通知已关闭（notifications_enabled=false）！"
+                    "预订成功后付款链接将无法送达，请开启通知或在日志中查找 CRITICAL 行。",
+                    user.name,
+                )
+            elif not user.notification_channels:
+                logger.warning(
+                    "⚠️  [%s] 自动预订已开启，但未配置任何通知渠道！"
+                    "预订成功后付款链接将无法送达，请添加 iMessage/Telegram/WhatsApp 渠道。",
+                    user.name,
+                )
         else:
             logger.info("自动预订 [%s]: 已关闭", user.name)
 
@@ -395,19 +443,33 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
                 "（高峰期加速）" if is_peak else "",
             )
 
-            # 等待下一轮：超时正常继续；SIGHUP/事件触发则热重载
-            # 同时 catch TimeoutError（builtin）以兼容 Windows SelectorEventLoop
+            # 等待下一轮：超时正常继续；SIGHUP 或 reload 文件触发则热重载。
+            # Windows 不支持可靠的 SIGHUP，因此每秒轮询一次 reload 请求文件。
             reload_triggered = False
-            try:
-                await asyncio.wait_for(_reload_event.wait(), timeout=float(actual))
-                reload_triggered = True
-            except (asyncio.TimeoutError, TimeoutError):
-                pass
+            loop = asyncio.get_event_loop()
+            deadline = loop.time() + float(actual)
+
+            while True:
+                if _consume_reload_request_file():
+                    logger.info("检测到文件触发的热重载请求")
+                    reload_triggered = True
+                    break
+
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    break
+
+                try:
+                    await asyncio.wait_for(_reload_event.wait(), timeout=min(1.0, remaining))
+                    reload_triggered = True
+                    break
+                except (asyncio.TimeoutError, TimeoutError):
+                    pass
 
             if reload_triggered:
                 _reload_event.clear()
                 logger.info("热重载中...")
-                load_dotenv(override=True)
+                load_dotenv(dotenv_path=ENV_PATH, override=True)
                 try:
                     cfg = load_config()
                     users = load_users()

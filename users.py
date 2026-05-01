@@ -31,11 +31,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from config import AutoBookConfig, ListingFilter
+from config import AutoBookConfig, DATA_DIR, ListingFilter
 
 logger = logging.getLogger(__name__)
 
-USERS_FILE = Path("data/users.json")
+USERS_FILE = DATA_DIR / "users.json"
 
 
 # ------------------------------------------------------------------ #

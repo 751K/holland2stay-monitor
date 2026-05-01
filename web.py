@@ -24,8 +24,16 @@ from typing import Any
 from dotenv import dotenv_values, set_key
 from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
 
-sys.path.insert(0, str(Path(__file__).parent))
-from config import KNOWN_CITIES, AutoBookConfig, ListingFilter  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from config import (  # noqa: E402
+    BASE_DIR,
+    DATA_DIR,
+    ENV_PATH,
+    KNOWN_CITIES,
+    AutoBookConfig,
+    ListingFilter,
+    resolve_project_path,
+)
 from storage import Storage                                      # noqa: E402
 from users import UserConfig, get_user, load_users, save_users  # noqa: E402
 
@@ -33,10 +41,9 @@ from users import UserConfig, get_user, load_users, save_users  # noqa: E402
 # 常量
 # ------------------------------------------------------------------ #
 
-BASE_DIR = Path(__file__).parent
-ENV_PATH = BASE_DIR / ".env"
-DB_PATH  = Path(os.environ.get("DB_PATH", "data/listings.db"))
-PID_FILE = BASE_DIR / "data/monitor.pid"
+DB_PATH  = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
+PID_FILE = DATA_DIR / "monitor.pid"
+RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
 
 # 全局配置可写入的 .env 键（通知/过滤/预订已移至 users.json）
 _SETTINGS_KEYS = [
@@ -50,6 +57,11 @@ _SETTINGS_KEYS = [
 # ------------------------------------------------------------------ #
 
 app = Flask(__name__, template_folder="templates")
+
+# SameSite=Lax：阻止跨站 POST 请求携带 session cookie（主要 CSRF 防护层）。
+# HttpOnly=True：禁止 JS 读取 session cookie（Flask 默认已是 True，此处显式声明）。
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 
 # 稳定的 secret key：优先读 .env，不存在则自动生成并写入，保证重启后 session 不失效
 def _ensure_secret_key() -> str:
@@ -95,6 +107,50 @@ def api_login_required(f):
             return jsonify({"error": "unauthorized"}), 401
         return f(*args, **kwargs)
     return decorated
+
+
+# ------------------------------------------------------------------ #
+# CSRF 防护（纵深防御，配合 SameSite=Lax 双重保障）
+# ------------------------------------------------------------------ #
+
+def _get_csrf_token() -> str:
+    """
+    获取（或首次生成）绑定到当前 session 的 CSRF token。
+
+    token 存储在 Flask session 中，随 session cookie 一起管理。
+    每个 session 生成一次，不随请求更换（fixed-token 模式，足以防御 CSRF）。
+    """
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return session["csrf_token"]
+
+
+def csrf_required(f):
+    """
+    路由装饰器：对 POST 请求验证 CSRF token。
+
+    token 来源（任一即可）：
+    - 表单字段  : csrf_token
+    - 请求头    : X-CSRF-Token（fetch/XHR 调用使用）
+
+    校验使用 hmac.compare_digest 防时序攻击。
+    校验失败时返回 403，不泄露具体原因。
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if request.method == "POST":
+            token = (request.form.get("csrf_token")
+                     or request.headers.get("X-CSRF-Token", ""))
+            expected = session.get("csrf_token", "")
+            if not token or not expected or not hmac.compare_digest(token, expected):
+                from flask import abort
+                abort(403)
+        return f(*args, **kwargs)
+    return decorated
+
+
+# 注册为 Jinja2 全局函数，模板中直接调用 csrf_token()
+app.jinja_env.globals["csrf_token"] = _get_csrf_token
 
 
 def _storage() -> Storage:
@@ -166,6 +222,7 @@ def status_badge(status: str) -> str:
 # ------------------------------------------------------------------ #
 
 @app.route("/login", methods=["GET", "POST"])
+@csrf_required
 def login() -> Any:
     # 如果鉴权未启用，直接跳首页
     if not _auth_enabled():
@@ -196,6 +253,7 @@ def login() -> Any:
 
 
 @app.route("/logout", methods=["POST"])
+@csrf_required
 def logout() -> Any:
     session.clear()
     return redirect(url_for("login"))
@@ -249,6 +307,7 @@ def listings() -> str:
 
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
+@csrf_required
 def settings() -> Any:
     if request.method == "POST":
         if not ENV_PATH.exists():
@@ -354,6 +413,7 @@ def users_list() -> str:
 
 @app.route("/users/new", methods=["GET", "POST"])
 @login_required
+@csrf_required
 def user_new() -> Any:
     if request.method == "POST":
         user = _user_from_form(request.form)
@@ -369,6 +429,7 @@ def user_new() -> Any:
 
 @app.route("/users/<user_id>", methods=["GET", "POST"])
 @login_required
+@csrf_required
 def user_edit(user_id: str) -> Any:
     users = load_users()
     user = get_user(users, user_id)
@@ -390,6 +451,7 @@ def user_edit(user_id: str) -> Any:
 
 @app.route("/users/<user_id>/delete", methods=["POST"])
 @login_required
+@csrf_required
 def user_delete(user_id: str) -> Any:
     users = load_users()
     user = get_user(users, user_id)
@@ -402,6 +464,7 @@ def user_delete(user_id: str) -> Any:
 
 @app.route("/users/<user_id>/test", methods=["POST"])
 @login_required
+@csrf_required
 def user_test_notify(user_id: str) -> Any:
     """逐渠道发送一条测试消息，返回每个渠道的成功/失败详情。"""
     import asyncio
@@ -467,6 +530,7 @@ def user_test_notify(user_id: str) -> Any:
 
 @app.route("/users/<user_id>/toggle", methods=["POST"])
 @login_required
+@csrf_required
 def user_toggle(user_id: str) -> Any:
     """快速开关用户启用状态。"""
     users = load_users()
@@ -561,15 +625,72 @@ def api_charts():
 # API
 # ------------------------------------------------------------------ #
 
+def _pid_exists(pid: int) -> bool:
+    """
+    跨平台检查 PID 是否仍然存活。
+
+    - POSIX: 使用 `os.kill(pid, 0)`
+    - Windows: 使用 Win32 `OpenProcess + GetExitCodeProcess`
+
+    说明
+    ----
+    Windows 上 `os.kill(pid, 0)` 并不可靠，某些场景会抛出
+    `OSError: [WinError 11]`（截图中的问题），因此需要单独走 WinAPI。
+    """
+    if pid <= 0:
+        return False
+
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except (ProcessLookupError, PermissionError):
+            return False
+        except OSError:
+            return False
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            exit_code = wintypes.DWORD()
+            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+            return bool(ok and exit_code.value == STILL_ACTIVE)
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+
 def _monitor_pid() -> int | None:
     if not PID_FILE.exists():
         return None
     try:
         pid = int(PID_FILE.read_text().strip())
-        os.kill(pid, 0)
-        return pid
-    except (ValueError, ProcessLookupError, PermissionError):
+        return pid if _pid_exists(pid) else None
+    except ValueError:
         return None
+
+
+def _write_reload_request() -> None:
+    """写入文件触发的热重载请求，供 Windows 和信号失败场景使用。"""
+    RELOAD_REQUEST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    RELOAD_REQUEST_FILE.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
 
 
 @app.route("/api/status")
@@ -587,15 +708,31 @@ def api_status():
 
 @app.route("/api/reload", methods=["POST"])
 @api_login_required
+@csrf_required
 def api_reload():
     pid = _monitor_pid()
     if pid is None:
         return jsonify({"ok": False, "error": "监控程序未运行，请先启动 monitor.py"}), 400
+
+    # Windows 没有可靠的 SIGHUP 语义，统一改为写入 reload 请求文件。
+    # 监控进程会在等待间隙轮询该文件并提前热重载。
+    if os.name == "nt" or not hasattr(signal, "SIGHUP"):
+        try:
+            _write_reload_request()
+            return jsonify({"ok": True, "message": "已写入重载请求，配置将在 1 秒内检测并生效"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+
     try:
         os.kill(pid, signal.SIGHUP)
         return jsonify({"ok": True, "message": "重载信号已发送，配置将在本轮抓取结束后生效"})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    except Exception:
+        # 回退到文件触发机制，避免因信号发送失败导致 Web 面板无法应用配置。
+        try:
+            _write_reload_request()
+            return jsonify({"ok": True, "message": "信号发送失败，已回退为文件触发重载"})
+        except Exception as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ------------------------------------------------------------------ #

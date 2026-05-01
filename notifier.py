@@ -92,17 +92,28 @@ class BaseNotifier(ABC):
         """发送监控异常告警（抓取失败等）。"""
         return await self._send(f"⚠️ 监控异常\n{message}")
 
-    async def send_booking_success(self, listing: Listing, detail: str, pay_url: str = "") -> bool:
+    async def send_booking_success(
+        self,
+        listing: Listing,
+        detail: str,
+        pay_url: str = "",
+        contract_start_date: str = "",
+    ) -> bool:
         """
         发送自动预订成功通知。
 
         Parameters
         ----------
-        listing : 已预订的房源
-        detail  : 备用消息文本（pay_url 为空时作为兜底显示）
-        pay_url : idealCheckOut 返回的直链付款 URL（account.holland2stay.com）
+        listing               : 已预订的房源
+        detail                : 备用消息文本（pay_url 为空时作为兜底显示）
+        pay_url               : idealCheckOut 返回的直链付款 URL
+        contract_start_date   : try_book() 从 API 获取的实际合同开始日期（"YYYY-MM-DD"）；
+                                优先于 listing.available_from 展示；
+                                为空时回退到 listing.available_from
         """
-        return await self._send(_format_booking_success(listing, detail, pay_url))
+        return await self._send(
+            _format_booking_success(listing, detail, pay_url, contract_start_date)
+        )
 
     async def send_booking_failed(self, listing: Listing, reason: str) -> bool:
         """发送自动预订失败通知，含失败原因和手动预订链接。"""
@@ -454,13 +465,23 @@ def _format_status_change(l: Listing, old: str, new: str) -> str:
     ])
 
 
-def _format_booking_success(l: Listing, detail: str, pay_url: str = "") -> str:
+def _format_booking_success(
+    l: Listing,
+    detail: str,
+    pay_url: str = "",
+    contract_start_date: str = "",
+) -> str:
+    # 优先使用 try_book() 预订时 API 返回的实际合同日期，
+    # 回退顺序：contract_start_date → listing.available_from → "待定"
+    # 不直接使用 l.available_from 作为第一选择：
+    # 因为 listing 是监控轮询时的快照，可能与预订时 API 返回的日期存在差异。
+    start = contract_start_date or l.available_from or "待定"
     lines = [
         f"🛒 自动预订成功！",
         f"",
         f"🏠 {l.name}",
         f"💰 租金：{l.price_display}/月",
-        f"📅 入住：{l.available_from or '待定'}",
+        f"📅 入住：{start}",
         f"",
         f"⚡ 点击链接立即付款（有时限，请尽快）：",
         f"",

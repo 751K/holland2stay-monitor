@@ -20,6 +20,7 @@ users.py 和 web.py 都会 import 本模块中的 dataclass。
 """
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,7 +31,30 @@ from dotenv import load_dotenv
 if TYPE_CHECKING:
     from models import Listing
 
-load_dotenv()
+logger = logging.getLogger(__name__)
+
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+ENV_PATH = BASE_DIR / ".env"
+
+
+def resolve_project_path(path_str: str | os.PathLike[str]) -> Path:
+    """
+    将路径解析为稳定的绝对路径。
+
+    规则
+    ----
+    - 绝对路径：原样保留
+    - 相对路径：统一解释为相对项目根目录（BASE_DIR）
+
+    这样无论在 macOS / Windows、终端 / IDE / 双击脚本下运行，
+    `data/...` 和 `.env` 都会落到同一个项目目录，不受当前工作目录影响。
+    """
+    path = Path(path_str).expanduser()
+    return path if path.is_absolute() else (BASE_DIR / path).resolve()
+
+
+load_dotenv(dotenv_path=ENV_PATH)
 
 BASE_URL = "https://www.holland2stay.com/residences"
 
@@ -96,8 +120,19 @@ class ListingFilter:
     过滤逻辑
     --------
     所有条件之间为 AND 关系：房源必须满足全部已设条件才会放行。
-    某字段为 None / 空列表时该条件不生效。
-    `is_empty()` 返回 True 时所有房源都放行。
+    过滤条件字段为 None / 空列表时，该条件不生效（全部放行）。
+    `is_empty()` 返回 True 时整个过滤器不生效。
+
+    fail-closed 原则（数值字段）
+    -----------------------------
+    max_rent / min_area / max_area / min_floor 均采用 fail-closed：
+    若过滤条件已设置，但房源对应字段缺失（API 未返回或无法解析），
+    则视为不满足条件，返回 False。
+    理由：无法核验时放行（fail-open）对自动预订是危险的——
+    可能误触发价格未知或面积未知房源的自动预订。
+
+    字符串白名单字段（allowed_occupancy / allowed_types / allowed_neighborhoods）
+    本身已是 fail-closed：字段缺失时为空字符串，白名单匹配必然失败。
 
     注意
     ----
@@ -162,22 +197,56 @@ class ListingFilter:
         """
         fm = listing.feature_map()
 
+        # 数值过滤采用 fail-closed 原则：
+        # 过滤条件已设置但字段缺失（无法核验）时，视为不满足条件，返回 False。
+        # 这对自动预订尤为重要——不能因数据缺失而误触发高价/不合适房源的预订。
+        #
+        # 拒绝原因细分（便于用户排查）：
+        #   字段缺失 → WARNING（API 未返回该字段，但过滤条件已设置）
+        #   值不符   → 静默返回 False（正常过滤，无需提示）
+
         if self.max_rent is not None:
             price = listing.price_value
-            if price is not None and price > self.max_rent:
+            if price is None:
+                logger.warning(
+                    "过滤拒绝 [%s]: 已设 max_rent=%.0f 但价格字段缺失（API 未返回）",
+                    listing.name, self.max_rent,
+                )
+                return False
+            if price > self.max_rent:
                 return False
 
         area_str = fm.get("area", "")
         area = _parse_float(area_str)
-        if area is not None:
-            if self.min_area is not None and area < self.min_area:
+        if self.min_area is not None:
+            if area is None:
+                logger.warning(
+                    "过滤拒绝 [%s]: 已设 min_area=%.0f 但面积字段缺失（API 未返回）",
+                    listing.name, self.min_area,
+                )
                 return False
-            if self.max_area is not None and area > self.max_area:
+            if area < self.min_area:
+                return False
+        if self.max_area is not None:
+            if area is None:
+                logger.warning(
+                    "过滤拒绝 [%s]: 已设 max_area=%.0f 但面积字段缺失（API 未返回）",
+                    listing.name, self.max_area,
+                )
+                return False
+            if area > self.max_area:
                 return False
 
         if self.min_floor is not None:
-            floor = _parse_int(fm.get("floor", ""))
-            if floor is not None and floor < self.min_floor:
+            floor_str = fm.get("floor", "")
+            floor = _parse_int(floor_str)
+            if floor is None:
+                logger.warning(
+                    "过滤拒绝 [%s]: 已设 min_floor=%d 但楼层字段缺失（API 返回: %r）",
+                    listing.name, self.min_floor, floor_str,
+                )
+                return False
+            if floor < self.min_floor:
                 return False
 
         if self.allowed_occupancy:
@@ -329,7 +398,7 @@ def load_config() -> Config:
                 AvailabilityFilter(label=parts[0].strip(), id=int(parts[1].strip()))
             )
 
-    db_path = Path(os.environ.get("DB_PATH", "data/listings.db"))
+    db_path = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 
     return Config(

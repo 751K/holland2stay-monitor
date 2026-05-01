@@ -15,8 +15,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
-DB_PATH  = Path("data/listings.db")
-PID_FILE = Path("data/monitor.pid")
+from config import DATA_DIR, resolve_project_path
+
+DB_PATH  = DATA_DIR / "listings.db"
+PID_FILE = DATA_DIR / "monitor.pid"
 
 
 def _check_monitor_running() -> None:
@@ -108,7 +110,7 @@ def main() -> None:
     parser.add_argument("--db",      default=str(DB_PATH),  help=f"数据库路径（默认: {DB_PATH}）")
     args = parser.parse_args()
 
-    db_path = Path(args.db)
+    db_path = resolve_project_path(args.db)
 
     if not args.dry_run:
         _check_monitor_running()

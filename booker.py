@@ -64,15 +64,22 @@ _BASE_HEADERS = {
 # GraphQL helpers
 # ------------------------------------------------------------------ #
 
-def _gql(session: req.Session, query: str, token: Optional[str] = None) -> dict:
+def _gql(
+    session: req.Session,
+    query: str,
+    token: Optional[str] = None,
+    variables: Optional[dict] = None,
+) -> dict:
     """
     执行 GraphQL 查询/变更并返回 data 字段。
 
     Parameters
     ----------
-    session : curl_cffi Session（由调用方管理生命周期）
-    query   : GraphQL 查询或 mutation 字符串
-    token   : Bearer token，传入时附加 Authorization 头
+    session   : curl_cffi Session（由调用方管理生命周期）
+    query     : GraphQL 查询或 mutation 字符串
+    token     : Bearer token，传入时附加 Authorization 头
+    variables : GraphQL variables dict，由 json.dumps 序列化后传输；
+                含用户输入时必须使用此参数，不得将用户数据直接拼入 query 字符串
 
     Returns
     -------
@@ -91,7 +98,10 @@ def _gql(session: req.Session, query: str, token: Optional[str] = None) -> dict:
     headers = dict(_BASE_HEADERS)
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    resp = session.post(GQL_URL, json={"query": query}, headers=headers, timeout=30)
+    payload: dict = {"query": query}
+    if variables:
+        payload["variables"] = variables
+    resp = session.post(GQL_URL, json=payload, headers=headers, timeout=30)
     resp.raise_for_status()
     data = resp.json()
     if "errors" in data:
@@ -124,19 +134,17 @@ def login(session: req.Session, email: str, password: str) -> str:
 
     注意
     ----
-    邮箱和密码通过字符串转义后直接内嵌在 GraphQL query 中。
-    建议未来改用 GraphQL variables 消除注入风险。
+    邮箱和密码通过 GraphQL variables 传递（而非拼入 query 字符串），
+    由 json.dumps 负责转义，含 "、\、控制字符的密码均可正确处理。
     """
-    escaped_email = email.replace('"', '\\"')
-    escaped_pw = password.replace('"', '\\"').replace('\\', '\\\\')
-    query = f'''
-    mutation {{
-      generateCustomerToken(email: "{escaped_email}", password: "{escaped_pw}") {{
+    query = '''
+    mutation GenerateCustomerToken($email: String!, $password: String!) {
+      generateCustomerToken(email: $email, password: $password) {
         token
-      }}
-    }}
+      }
+    }
     '''
-    data = _gql(session, query)
+    data = _gql(session, query, variables={"email": email, "password": password})
     token = data.get("generateCustomerToken", {}).get("token")
     if not token:
         raise RuntimeError("登录失败：未获取到 token")
@@ -508,7 +516,7 @@ def place_order_and_pay(
     pay_url = (data.get("idealCheckOut") or {}).get("redirect")
     if not pay_url:
         raise RuntimeError(f"未能获取支付链接 (order #{order_number})")
-    logger.info("支付链接: %s", pay_url)
+    logger.debug("支付链接已生成（见通知消息）")
     return pay_url
 
 
@@ -522,12 +530,18 @@ class BookingResult:
 
     Attributes
     ----------
-    listing : 被尝试预订的房源
-    success : True 表示流程全部成功（或 dry_run 验证通过）
-    message : 发送给用户的通知消息（含付款链接或失败原因）
-    dry_run : True 表示是 dry_run 模式产生的结果（未实际提交）
-    pay_url : place_order_and_pay() 返回的直链付款 URL；
-              失败时为空字符串；dry_run 时也为空字符串
+    listing               : 被尝试预订的房源
+    success               : True 表示流程全部成功（或 dry_run 验证通过）
+    message               : 发送给用户的通知消息（含付款链接或失败原因）
+    dry_run               : True 表示是 dry_run 模式产生的结果（未实际提交）
+    pay_url               : place_order_and_pay() 返回的直链付款 URL；
+                            失败时为空字符串；dry_run 时也为空字符串
+    contract_start_date   : _fetch_sku_and_contract() 从 API 获取的实际合同开始日期，
+                            格式 "YYYY-MM-DD"；未知时为空字符串。
+                            此值可能与抓取时记录的 Listing.available_from 不同——
+                            API 在预订时返回 next_contract_startdate，
+                            而 available_from 是监控轮询时抓取到的快照，
+                            两者在时间差内可能出现不一致。
     """
     def __init__(
         self,
@@ -536,12 +550,14 @@ class BookingResult:
         message: str,
         dry_run: bool = False,
         pay_url: str = "",
+        contract_start_date: str = "",
     ):
         self.listing = listing
         self.success = success
         self.message = message
         self.dry_run = dry_run
         self.pay_url = pay_url
+        self.contract_start_date = contract_start_date
 
 
 def try_book(
@@ -630,8 +646,9 @@ def try_book(
                 f"\n"
                 f"⚠️ 链接直达支付页面，无需登录。"
             )
-            logger.info("[%s] 预订成功  pay_url=%s  入住:%s", listing.name, pay_url, start_date)
-            return BookingResult(listing, True, msg, pay_url=pay_url)
+            logger.info("[%s] 预订成功  入住:%s（付款链接已发送通知）", listing.name, start_date)
+            return BookingResult(listing, True, msg, pay_url=pay_url,
+                                 contract_start_date=start_date or "")
 
         except Exception as e:
             logger.error("[%s]%s 预订失败: %s", listing.name, " [DRY RUN]" if dry_run else "", e)
