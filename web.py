@@ -34,6 +34,7 @@ from config import (  # noqa: E402
     ListingFilter,
     resolve_project_path,
 )
+from models import LISTING_KEY_MAP                               # noqa: E402
 from storage import Storage                                      # noqa: E402
 from users import UserConfig, get_user, load_users, save_users  # noqa: E402
 
@@ -196,16 +197,11 @@ def parse_features(features_json: str) -> dict[str, str]:
         items = json.loads(features_json or "[]")
     except Exception:
         return {}
-    key_map = {
-        "Type": "type", "Area": "area", "Occupancy": "occupancy",
-        "Floor": "floor", "Finishing": "furnishing", "Energy": "energy_label",
-        "Neighborhood": "neighborhood", "Building": "building",
-    }
     result: dict[str, str] = {}
     for feat in items:
         if ": " in feat:
             raw_key, val = feat.split(": ", 1)
-            result[key_map.get(raw_key, raw_key.lower())] = val
+            result[LISTING_KEY_MAP.get(raw_key, raw_key.lower())] = val
     return result
 
 
@@ -395,6 +391,13 @@ def _user_from_form(form, user_id: str | None = None) -> UserConfig:
         imessage_recipient=form.get("IMESSAGE_RECIPIENT", ""),
         telegram_token=form.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=form.get("TELEGRAM_CHAT_ID", ""),
+        email_smtp_host=form.get("EMAIL_SMTP_HOST", "").strip(),
+        email_smtp_port=_iv("EMAIL_SMTP_PORT") or 587,
+        email_smtp_security=form.get("EMAIL_SMTP_SECURITY", "starttls").strip().lower() or "starttls",
+        email_username=form.get("EMAIL_USERNAME", "").strip(),
+        email_password=form.get("EMAIL_PASSWORD", ""),
+        email_from=form.get("EMAIL_FROM", "").strip(),
+        email_to=form.get("EMAIL_TO", "").strip(),
         twilio_sid=form.get("TWILIO_ACCOUNT_SID", ""),
         twilio_token=form.get("TWILIO_AUTH_TOKEN", ""),
         twilio_from=form.get("TWILIO_FROM", ""),
@@ -469,7 +472,7 @@ def user_test_notify(user_id: str) -> Any:
     """逐渠道发送一条测试消息，返回每个渠道的成功/失败详情。"""
     import asyncio
     from datetime import datetime as _dt
-    from notifier import IMessageNotifier, TelegramNotifier, WhatsAppNotifier
+    from notifier import EmailNotifier, IMessageNotifier, TelegramNotifier, WhatsAppNotifier
 
     users = load_users()
     user = get_user(users, user_id)
@@ -501,6 +504,25 @@ def user_test_notify(user_id: str) -> Any:
                 continue
             notifier_obj = TelegramNotifier(user.telegram_token, user.telegram_chat_id)
             label = f"Telegram → {user.telegram_chat_id}"
+
+        elif ch == "email":
+            has_auth = bool(user.email_username or user.email_password)
+            if not user.email_smtp_host or not user.email_to or not (user.email_from or user.email_username):
+                results.append({"channel": "Email", "ok": False, "error": "SMTP 主机、发件人或收件人未配置"})
+                continue
+            if has_auth and not (user.email_username and user.email_password):
+                results.append({"channel": "Email", "ok": False, "error": "SMTP 用户名和密码需要同时填写"})
+                continue
+            notifier_obj = EmailNotifier(
+                user.email_smtp_host,
+                user.email_smtp_port,
+                user.email_smtp_security,
+                user.email_username,
+                user.email_password,
+                user.email_from,
+                user.email_to,
+            )
+            label = f"Email → {user.email_to}"
 
         elif ch == "whatsapp":
             if not all([user.twilio_sid, user.twilio_token, user.twilio_from, user.twilio_to]):
@@ -558,26 +580,9 @@ def api_calendar():
     """返回所有有入住日期的房源，供日历前端渲染。"""
     storage = _storage()
     try:
-        rows = storage._conn.execute(
-            """SELECT id, name, status, price_raw, available_from, url, city, features
-               FROM listings
-               WHERE available_from IS NOT NULL AND available_from != ''
-               ORDER BY available_from"""
-        ).fetchall()
+        listings = storage.get_calendar_listings()
     finally:
         storage.close()
-
-    listings = []
-    for r in rows:
-        listings.append({
-            "id":             r["id"],
-            "name":           r["name"],
-            "status":         r["status"],
-            "price_raw":      r["price_raw"] or "",
-            "available_from": r["available_from"],
-            "url":            r["url"] or "",
-            "city":           r["city"] or "",
-        })
     return jsonify({"listings": listings})
 
 
@@ -606,7 +611,11 @@ def stats() -> str:
 @api_login_required
 def api_charts():
     """所有图表数据的 JSON API，供前端 Chart.js 调用。"""
-    days = int(request.args.get("days", 30))
+    try:
+        days = int(request.args.get("days", 30))
+    except (TypeError, ValueError):
+        days = 30
+    days = max(1, min(days, 365))  # 限制在 [1, 365]，防止超大查询
     storage = _storage()
     try:
         data = {
