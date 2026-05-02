@@ -1,0 +1,29 @@
+# 运行时数据（通过 volume 挂载，不打包进镜像）
+data/
+logs/
+
+# 密钥（绝对不能打包进镜像）
+.env
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+
+# 版本控制
+.git/
+.gitignore
+
+# 文档
+README*.md
+
+# macOS 垃圾文件
+.DS_Store
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
