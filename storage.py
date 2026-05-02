@@ -391,6 +391,34 @@ class Storage:
         ).fetchone()
         return row[0] if row else 0
 
+    def get_calendar_listings(self) -> list[dict]:
+        """
+        查询所有含入住日期的房源，供日历视图渲染使用。
+
+        Returns
+        -------
+        list[dict]，含 id / name / status / price_raw / available_from / url / city，
+        按 available_from 升序排列，仅包含 available_from 非空的记录
+        """
+        rows = self._conn.execute(
+            """SELECT id, name, status, price_raw, available_from, url, city
+               FROM listings
+               WHERE available_from IS NOT NULL AND available_from != ''
+               ORDER BY available_from"""
+        ).fetchall()
+        return [
+            {
+                "id":             r["id"],
+                "name":           r["name"],
+                "status":         r["status"],
+                "price_raw":      r["price_raw"] or "",
+                "available_from": r["available_from"],
+                "url":            r["url"] or "",
+                "city":           r["city"] or "",
+            }
+            for r in rows
+        ]
+
     def get_distinct_statuses(self) -> list[str]:
         """
         返回 listings 表中所有不重复的状态值，供面板过滤下拉菜单使用。
