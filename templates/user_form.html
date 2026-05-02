@@ -115,13 +115,13 @@
       <div class="row g-3 mb-3">
 
         <!-- iMessage -->
-        <div class="col-12 col-md-4">
+        <div class="col-12 col-md-6 col-xl-3">
           <label class="channel-card" onclick="toggleChannel('imessage')">
             <div class="d-flex align-items-center gap-2 mb-1">
               <input type="checkbox" class="form-check-input channel-chk" data-ch="imessage"
                      {% if is_edit and 'imessage' in u.notification_channels %}checked{% endif %}>
               <span class="fw-semibold" style="font-size:.88rem;">iMessage</span>
-              <span class="badge ms-auto" style="background:#27272a; color:var(--muted); font-size:.62rem;">macOS 专属</span>
+              <span class="badge ms-auto" style="background:var(--bg-elevated); color:var(--muted); font-size:.62rem;">macOS 专属</span>
             </div>
             <div style="font-size:.78rem; color:var(--muted);">通过 Messages.app 发送</div>
           </label>
@@ -135,7 +135,7 @@
         </div>
 
         <!-- Telegram -->
-        <div class="col-12 col-md-4">
+        <div class="col-12 col-md-6 col-xl-3">
           <label class="channel-card" onclick="toggleChannel('telegram')">
             <div class="d-flex align-items-center gap-2 mb-1">
               <input type="checkbox" class="form-check-input channel-chk" data-ch="telegram"
@@ -158,8 +158,63 @@
           </div>
         </div>
 
+        <!-- Email -->
+        <div class="col-12 col-md-6 col-xl-3">
+          <label class="channel-card" onclick="toggleChannel('email')">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <input type="checkbox" class="form-check-input channel-chk" data-ch="email"
+                     {% if is_edit and 'email' in u.notification_channels %}checked{% endif %}>
+              <span class="fw-semibold" style="font-size:.88rem;">Email</span>
+              <span class="badge ms-auto" style="background:#172554; color:#93c5fd; font-size:.62rem;">跨平台</span>
+            </div>
+            <div style="font-size:.78rem; color:var(--muted);">通过 SMTP 发送纯文本邮件</div>
+          </label>
+          <div id="sec_email" class="toggle-section mt-2 px-1"
+               {% if is_edit and 'email' in u.notification_channels %}style="display:block"{% endif %}>
+            <label class="form-label small mb-1" style="color:var(--muted);">SMTP Host</label>
+            <input type="text" class="form-control form-control-sm mb-2" name="EMAIL_SMTP_HOST"
+                   value="{{ u.email_smtp_host if is_edit else '' }}"
+                   placeholder="smtp.gmail.com">
+            <div class="row g-2 mb-2">
+              <div class="col-6">
+                <label class="form-label small mb-1" style="color:var(--muted);">Port</label>
+                <input type="number" class="form-control form-control-sm" name="EMAIL_SMTP_PORT"
+                       value="{{ u.email_smtp_port if is_edit and u.email_smtp_port else 587 }}"
+                       placeholder="587">
+              </div>
+              <div class="col-6">
+                <label class="form-label small mb-1" style="color:var(--muted);">Security</label>
+                {% set email_security = u.email_smtp_security if is_edit and u.email_smtp_security else 'starttls' %}
+                <select class="form-select form-select-sm" name="EMAIL_SMTP_SECURITY">
+                  <option value="starttls" {% if email_security == 'starttls' %}selected{% endif %}>STARTTLS</option>
+                  <option value="ssl" {% if email_security == 'ssl' %}selected{% endif %}>SSL/TLS</option>
+                  <option value="none" {% if email_security == 'none' %}selected{% endif %}>None</option>
+                </select>
+              </div>
+            </div>
+            <label class="form-label small mb-1" style="color:var(--muted);">SMTP Username（可选）</label>
+            <input type="text" class="form-control form-control-sm mb-2" name="EMAIL_USERNAME"
+                   value="{{ u.email_username if is_edit else '' }}"
+                   placeholder="your@email.com">
+            <label class="form-label small mb-1" style="color:var(--muted);">SMTP Password / App Password</label>
+            <input type="password" class="form-control form-control-sm mb-2" name="EMAIL_PASSWORD"
+                   value="{{ u.email_password if is_edit else '' }}">
+            <label class="form-label small mb-1" style="color:var(--muted);">From</label>
+            <input type="email" class="form-control form-control-sm mb-2" name="EMAIL_FROM"
+                   value="{{ u.email_from if is_edit else '' }}"
+                   placeholder="alerts@example.com">
+            <label class="form-label small mb-1" style="color:var(--muted);">To</label>
+            <input type="text" class="form-control form-control-sm" name="EMAIL_TO"
+                   value="{{ u.email_to if is_edit else '' }}"
+                   placeholder="alice@example.com,bob@example.com">
+            <div class="small mt-2" style="color:var(--muted);">
+              常见配置：Gmail `smtp.gmail.com:587` + STARTTLS
+            </div>
+          </div>
+        </div>
+
         <!-- WhatsApp -->
-        <div class="col-12 col-md-4">
+        <div class="col-12 col-md-6 col-xl-3">
           <label class="channel-card" onclick="toggleChannel('whatsapp')">
             <div class="d-flex align-items-center gap-2 mb-1">
               <input type="checkbox" class="form-check-input channel-chk" data-ch="whatsapp"
