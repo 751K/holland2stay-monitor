@@ -55,13 +55,29 @@
         <div style="height:1px; flex:1; background:var(--border);"></div>
       </div>
 
+      <!-- 自适应说明 -->
+      <div class="alert alert-secondary py-2 px-3 mb-3" style="font-size:.82rem; border-radius:8px;">
+        <i class="bi bi-lightning-charge me-1" style="color:var(--accent);"></i>
+        <strong>自适应轮询：</strong>高峰期从「最大间隔」出发，每轮成功后自动缩短 5%，逼近「最小间隔」；
+        遭遇 429 限流后立即翻倍退避，再缓慢恢复。非高峰时重置为最大间隔。
+      </div>
+
       <div class="row g-3 mb-3">
         <div class="col-6 col-sm-3">
           <label class="form-label small" style="color:var(--muted); font-weight:600;">
-            高峰期间隔（秒）<span style="font-weight:400; color:var(--muted);"> — 默认 60</span>
+            高峰期最大间隔（秒）<span style="font-weight:400; color:var(--muted);"> — 默认 60</span>
           </label>
           <input type="number" class="form-control form-control-sm" name="PEAK_INTERVAL"
                  value="{{ env.get('PEAK_INTERVAL','60') }}" min="1" max="300">
+          <div class="form-text">自适应起点，也是限流退避后的恢复目标</div>
+        </div>
+        <div class="col-6 col-sm-3">
+          <label class="form-label small" style="color:var(--muted); font-weight:600;">
+            高峰期最小间隔（秒）<span style="font-weight:400; color:var(--muted);"> — 默认 15</span>
+          </label>
+          <input type="number" class="form-control form-control-sm" name="MIN_INTERVAL"
+                 value="{{ env.get('MIN_INTERVAL','15') }}" min="5" max="300">
+          <div class="form-text">自适应下限，建议 ≥ 15s，过低易触发 429</div>
         </div>
         <div class="col-6 col-sm-3">
           <label class="form-label small" style="color:var(--muted); font-weight:600;">高峰开始（荷兰时间）</label>
@@ -83,6 +99,7 @@
                    min="0" max="0.5" step="0.05">
             <span class="input-group-text" style="font-size:.75rem;">±%</span>
           </div>
+          <div class="form-text">破坏机械规律性，避免模式识别</div>
         </div>
         <div class="col-12">
           <div class="form-check form-switch">
@@ -95,8 +112,7 @@
           </div>
           <div class="form-text">
             <i class="bi bi-info-circle me-1"></i>
-            荷兰早 8:30–10:00 新房源上架最集中，期间自动缩短轮询间隔以提高抢房成功率。
-            抖动比例控制实际等待时间的随机浮动范围：0.20 表示在基准值 ±20% 内随机，避免多实例同步。
+            荷兰早 8:30–10:00 新房源上架最集中，高峰期结束后自动重置为最大间隔，方便下次峰期重新探测极限。
           </div>
         </div>
       </div>
