@@ -29,7 +29,6 @@ GraphQL API
 对外接口
 --------
 - try_book(listing, email, password, *, dry_run) → BookingResult
-- CHECKOUT_URL：常量，通知消息中备用引用
 
 依赖
 ----
@@ -47,11 +46,6 @@ from models import Listing
 logger = logging.getLogger(__name__)
 
 GQL_URL = "https://api.holland2stay.com/graphql/"
-
-# www.holland2stay.com/checkout 是 Next.js 前端路由，
-# 未登录时显示登录框，登录后自动展示绑定到账号的购物车。
-# 实际付款链接由 idealCheckOut mutation 生成，域名在 account.holland2stay.com。
-CHECKOUT_URL = "https://www.holland2stay.com/checkout"
 
 _BASE_HEADERS = {
     "Content-Type": "application/json",

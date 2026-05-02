@@ -13,12 +13,12 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 
-# key_map：将 GraphQL 属性名映射为 feature_map() 返回的标准 key。
+# LISTING_KEY_MAP：将 GraphQL 属性名映射为 feature_map() 返回的标准 key。
 # scraper.py 在构建 features 列表时用 "Type: Studio" 这样的格式，
 # feature_map() 再把 "Type" 还原成 "type" 等内部 key。
-# 注意：config.py 的 ListingFilter.passes() 以及 web.py 的 parse_features
-# 过滤器也依赖相同的 key 名，三者必须保持一致。
-_KEY_MAP: dict[str, str] = {
+# 公开导出，供 web.py 的 parse_features 过滤器复用，
+# 避免维护多份副本。修改此处即同步所有依赖方。
+LISTING_KEY_MAP: dict[str, str] = {
     "Type":         "type",         # 房型，e.g. "Studio" / "1" / "Loft (open bedroom area)"
     "Area":         "area",         # 面积，e.g. "26.0 m²"
     "Occupancy":    "occupancy",    # 入住人数，e.g. "Single" / "Two (only couples)"
@@ -58,6 +58,11 @@ class Listing:
     features: list[str]
     url: str
     city: str = ""
+
+    # feature_map() 解析结果缓存，排除在 __repr__ / __eq__ / __init__ 之外
+    _feature_map_cache: Optional[dict[str, str]] = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     # ------------------------------------------------------------------ #
     # 计算属性
@@ -104,7 +109,7 @@ class Listing:
         解析规则
         --------
         features 中每条格式为 "RawKey: Value"，例如 "Type: Studio"。
-        RawKey 通过 _KEY_MAP 映射为标准 key；未知 key 保留小写原样。
+        RawKey 通过 LISTING_KEY_MAP 映射为标准 key；未知 key 保留小写原样。
 
         Returns
         -------
@@ -120,17 +125,18 @@ class Listing:
 
         注意
         ----
-        此方法每次调用都会遍历 features 列表，高频调用场景可考虑缓存结果。
+        结果在首次调用后缓存于 _feature_map_cache，后续调用直接返回缓存。
         config.py 的 ListingFilter.passes() 和 web.py 的 parse_features
-        过滤器都依赖本方法返回的 key 名，修改 _KEY_MAP 时需同步检查。
+        过滤器都依赖本方法返回的 key 名，修改 LISTING_KEY_MAP 时需同步检查。
         """
-        result = {}
-        for feat in self.features:
-            if ": " in feat:
-                raw_key, value = feat.split(": ", 1)
-                mapped = _KEY_MAP.get(raw_key, raw_key.lower())
-                result[mapped] = value
-        return result
+        if self._feature_map_cache is None:
+            result: dict[str, str] = {}
+            for feat in self.features:
+                if ": " in feat:
+                    raw_key, value = feat.split(": ", 1)
+                    result[LISTING_KEY_MAP.get(raw_key, raw_key.lower())] = value
+            self._feature_map_cache = result
+        return self._feature_map_cache
 
     def to_dict(self) -> dict:
         """

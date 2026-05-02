@@ -3,7 +3,7 @@ notifier.py — 多渠道通知系统
 ==============================
 职责
 ----
-格式化通知消息并通过指定渠道发送。支持 iMessage、Telegram Bot、WhatsApp（Twilio）。
+格式化通知消息并通过指定渠道发送。支持 iMessage、Telegram Bot、Email、WhatsApp（Twilio）。
 
 设计模式
 --------
@@ -20,6 +20,7 @@ monitor.py 通过 `create_user_notifier(user)` 工厂函数为每个用户创建
 ------------
 - **iMessage**：通过 macOS `osascript` 调用 Messages.app，仅限 macOS，异步 subprocess
 - **Telegram** ：同步 curl_cffi POST，通过 `run_in_executor` 在线程池中执行
+- **Email**    ：标准库 smtplib + SMTP / STARTTLS / SMTP_SSL，同步发送
 - **WhatsApp** ：Twilio REST API，同步 curl_cffi POST，同上
 
 依赖
@@ -32,8 +33,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import smtplib
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from email.message import EmailMessage
 
 import curl_cffi.requests as req
 
@@ -72,19 +75,19 @@ class BaseNotifier(ABC):
         """发送房源状态变更通知（如 lottery → 可直接预订）。"""
         return await self._send(_format_status_change(listing, old_status, new_status))
 
-    async def send_heartbeat(self, total_in_db: int, fresh_count: int) -> bool:
+    async def send_heartbeat(self, total_in_db: int, round_count: int) -> bool:
         """
         发送监控心跳消息，默认每 HEARTBEAT_EVERY 轮发一次。
 
         Parameters
         ----------
-        total_in_db  : 数据库当前房源总数
-        fresh_count  : 自监控启动以来累计的轮询轮数
+        total_in_db : 数据库当前房源总数
+        round_count : 自监控启动以来累计的轮询轮数
         """
         msg = (
             f"💓 监控心跳\n"
             f"数据库房源总数：{total_in_db}\n"
-            f"本次累计轮询：{fresh_count} 轮"
+            f"本次累计轮询：{round_count} 轮"
         )
         return await self._send(msg)
 
@@ -141,7 +144,7 @@ class MultiNotifier(BaseNotifier):
 
     Parameters
     ----------
-    notifiers : 子渠道列表（IMessageNotifier / TelegramNotifier / WhatsAppNotifier）
+    notifiers : 子渠道列表（IMessageNotifier / TelegramNotifier / EmailNotifier / WhatsAppNotifier）
     enabled   : 对应 UserConfig.notifications_enabled，False 时静默丢弃所有消息
     """
 
@@ -236,7 +239,8 @@ class TelegramNotifier(BaseNotifier):
     实现方式
     --------
     `_send()` 通过 `run_in_executor` 将同步 `_post()` 转为异步。
-    每次发送都新建 curl_cffi Session（TCP 连接不复用）。
+    curl_cffi Session 在 `__init__` 中创建并持有，`close()` 时关闭，
+    复用底层 TCP 连接，避免每条消息重新握手。
 
     Parameters
     ----------
@@ -249,11 +253,12 @@ class TelegramNotifier(BaseNotifier):
     def __init__(self, token: str, chat_id: str) -> None:
         self._token = token
         self._chat_id = chat_id
+        self._session = req.Session(impersonate="chrome110")
 
     async def _send(self, text: str) -> bool:
         url = self._API.format(token=self._token)
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             ok = await loop.run_in_executor(None, lambda: self._post(url, text))
             return ok
         except Exception as e:
@@ -261,17 +266,104 @@ class TelegramNotifier(BaseNotifier):
             return False
 
     def _post(self, url: str, text: str) -> bool:
-        with req.Session(impersonate="chrome110") as session:
-            resp = session.post(
-                url,
-                json={"chat_id": self._chat_id, "text": text},
-                timeout=15,
-            )
-            if not resp.ok:
-                logger.error("Telegram 发送失败 %d: %s", resp.status_code, resp.text[:200])
-                return False
-            logger.debug("Telegram 发送成功 → %s", self._chat_id)
+        resp = self._session.post(
+            url,
+            json={"chat_id": self._chat_id, "text": text},
+            timeout=15,
+        )
+        if not resp.ok:
+            logger.error("Telegram 发送失败 %d: %s", resp.status_code, resp.text[:200])
+            return False
+        logger.debug("Telegram 发送成功 → %s", self._chat_id)
+        return True
+
+    async def close(self) -> None:
+        self._session.close()
+
+
+# ------------------------------------------------------------------ #
+# Email（SMTP）
+# ------------------------------------------------------------------ #
+
+class EmailNotifier(BaseNotifier):
+    """
+    通过 SMTP 发送纯文本邮件。
+
+    支持的安全模式
+    --------------
+    - `starttls`：先明文连接，再升级到 TLS（常见端口 587）
+    - `ssl`      ：直接使用 SMTPS（常见端口 465）
+    - `none`     ：不加密，仅适合可信内网或本地中继
+    """
+
+    def __init__(
+        self,
+        smtp_host: str,
+        smtp_port: int,
+        security: str,
+        username: str,
+        password: str,
+        from_addr: str,
+        to_addrs: str,
+    ) -> None:
+        self._host = smtp_host.strip()
+        self._port = int(smtp_port or 587)
+        self._security = _normalize_email_security(security)
+        self._username = username.strip()
+        self._password = password
+        self._from = from_addr.strip()
+        self._to = to_addrs.strip()
+
+    async def _send(self, text: str) -> bool:
+        try:
+            loop = asyncio.get_running_loop()
+            ok = await loop.run_in_executor(None, lambda: self._post(text))
+            return ok
+        except Exception as e:
+            logger.error("Email 发送异常: %s", e)
+            return False
+
+    def _post(self, text: str) -> bool:
+        recipients = _split_email_recipients(self._to)
+        if not self._host:
+            logger.error("Email 发送失败: SMTP host 为空")
+            return False
+        if not recipients:
+            logger.error("Email 发送失败: 收件人为空")
+            return False
+
+        from_addr = self._from or self._username
+        if not from_addr:
+            logger.error("Email 发送失败: 发件人为空")
+            return False
+
+        msg = EmailMessage()
+        msg["Subject"] = _format_email_subject(text)
+        msg["From"] = from_addr
+        msg["To"] = ", ".join(recipients)
+        msg.set_content(text)
+
+        try:
+            if self._security == "ssl":
+                with smtplib.SMTP_SSL(self._host, self._port, timeout=15) as client:
+                    self._deliver(client, msg, recipients)
+            else:
+                with smtplib.SMTP(self._host, self._port, timeout=15) as client:
+                    client.ehlo()
+                    if self._security == "starttls":
+                        client.starttls()
+                        client.ehlo()
+                    self._deliver(client, msg, recipients)
+            logger.debug("Email 发送成功 → %s", ", ".join(recipients))
             return True
+        except Exception as e:
+            logger.error("Email 发送失败: %s", e)
+            return False
+
+    def _deliver(self, client, msg: EmailMessage, recipients: list[str]) -> None:
+        if self._username:
+            client.login(self._username, self._password)
+        client.send_message(msg, to_addrs=recipients)
 
     async def close(self) -> None:
         pass
@@ -308,11 +400,12 @@ class WhatsAppNotifier(BaseNotifier):
         self._token = auth_token
         self._from = from_number
         self._to = to_number
+        self._session = req.Session(impersonate="chrome110")
 
     async def _send(self, text: str) -> bool:
         url = f"https://api.twilio.com/2010-04-01/Accounts/{self._sid}/Messages.json"
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             ok = await loop.run_in_executor(None, lambda: self._post(url, text))
             return ok
         except Exception as e:
@@ -320,21 +413,20 @@ class WhatsAppNotifier(BaseNotifier):
             return False
 
     def _post(self, url: str, text: str) -> bool:
-        with req.Session(impersonate="chrome110") as session:
-            resp = session.post(
-                url,
-                data={"From": self._from, "To": self._to, "Body": text},
-                auth=(self._sid, self._token),
-                timeout=15,
-            )
-            if not resp.ok:
-                logger.error("WhatsApp 发送失败 %d: %s", resp.status_code, resp.text[:200])
-                return False
-            logger.debug("WhatsApp 发送成功 → %s", self._to)
-            return True
+        resp = self._session.post(
+            url,
+            data={"From": self._from, "To": self._to, "Body": text},
+            auth=(self._sid, self._token),
+            timeout=15,
+        )
+        if not resp.ok:
+            logger.error("WhatsApp 发送失败 %d: %s", resp.status_code, resp.text[:200])
+            return False
+        logger.debug("WhatsApp 发送成功 → %s", self._to)
+        return True
 
     async def close(self) -> None:
-        pass
+        self._session.close()
 
 
 # ------------------------------------------------------------------ #
@@ -359,7 +451,6 @@ def create_user_notifier(user) -> BaseNotifier:
     --------
     monitor.py 启动时以及 SIGHUP 热重载后调用一次；web.py 通知测试路由按需调用。
     """
-    from users import UserConfig  # 延迟导入避免循环
     notifiers: list[BaseNotifier] = []
 
     for channel in user.notification_channels:
@@ -376,6 +467,28 @@ def create_user_notifier(user) -> BaseNotifier:
                 logger.info("[%s] 通知渠道: Telegram → chat_id=%s", user.name, user.telegram_chat_id)
             else:
                 logger.warning("[%s] Telegram 渠道 TOKEN 或 CHAT_ID 为空，跳过", user.name)
+        elif ch == "email":
+            has_auth = bool(user.email_username or user.email_password)
+            if (
+                user.email_smtp_host
+                and user.email_to
+                and (user.email_from or user.email_username)
+                and ((not has_auth) or (user.email_username and user.email_password))
+            ):
+                notifiers.append(
+                    EmailNotifier(
+                        user.email_smtp_host,
+                        user.email_smtp_port,
+                        user.email_smtp_security,
+                        user.email_username,
+                        user.email_password,
+                        user.email_from,
+                        user.email_to,
+                    )
+                )
+                logger.info("[%s] 通知渠道: Email → %s", user.name, user.email_to)
+            else:
+                logger.warning("[%s] Email 渠道 SMTP 参数不完整，跳过", user.name)
         elif ch == "whatsapp":
             if user.twilio_sid and user.twilio_token and user.twilio_from and user.twilio_to:
                 notifiers.append(
@@ -419,6 +532,29 @@ def _build_applescript(recipient: str, message: str) -> str:
         f' of (first service whose service type = iMessage)\n'
         f'end tell'
     )
+
+
+def _normalize_email_security(security: str) -> str:
+    value = (security or "starttls").strip().lower()
+    aliases = {
+        "tls": "starttls",
+        "smtps": "ssl",
+        "plain": "none",
+    }
+    value = aliases.get(value, value)
+    return value if value in {"starttls", "ssl", "none"} else "starttls"
+
+
+def _split_email_recipients(value: str) -> list[str]:
+    return [part.strip() for part in re.split(r"[,;\n]+", value or "") if part.strip()]
+
+
+def _format_email_subject(text: str) -> str:
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "Holland2Stay 通知")
+    first_line = re.sub(r"\s+", " ", first_line)
+    if len(first_line) > 80:
+        first_line = first_line[:77].rstrip() + "..."
+    return f"[Holland2Stay] {first_line}"
 
 
 # ------------------------------------------------------------------ #

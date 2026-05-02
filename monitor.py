@@ -50,7 +50,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from booker import CHECKOUT_URL, try_book
+from booker import try_book
 from config import DATA_DIR, ENV_PATH, load_config
 from notifier import BaseNotifier, create_user_notifier
 from scraper import scrape_all
@@ -233,7 +233,7 @@ async def run_once(
     logger.info("开始抓取，城市数: %d，活跃用户数: %d", len(city_tasks), len(user_notifiers))
 
     try:
-        fresh = await asyncio.get_event_loop().run_in_executor(
+        fresh = await asyncio.get_running_loop().run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
         )
     except Exception as e:
@@ -329,7 +329,7 @@ async def run_once(
                 "[%s] 自动预订候选 %d 套，选面积最大: %s (%.1f m²)",
                 user.name, len(candidates), target.name, _area_key(target),
             )
-        result = await asyncio.get_event_loop().run_in_executor(
+        result = await asyncio.get_running_loop().run_in_executor(
             None,
             lambda: try_book(target, user.auto_book.email, user.auto_book.password,
                              dry_run=user.auto_book.dry_run),
@@ -347,7 +347,7 @@ async def run_once(
                     "❌ [%s] 自动预订成功但通知发送失败，付款链接已记录于此，请立即操作：\n"
                     "  房源：%s\n"
                     "  付款：%s",
-                    user.name, target.name, result.pay_url or CHECKOUT_URL,
+                    user.name, target.name, result.pay_url,
                 )
         else:
             await notifier.send_booking_failed(target, result.message)
@@ -416,7 +416,7 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
             elif not user.notification_channels:
                 logger.warning(
                     "⚠️  [%s] 自动预订已开启，但未配置任何通知渠道！"
-                    "预订成功后付款链接将无法送达，请添加 iMessage/Telegram/WhatsApp 渠道。",
+                    "预订成功后付款链接将无法送达，请添加 iMessage/Telegram/Email/WhatsApp 渠道。",
                     user.name,
                 )
         else:
@@ -434,7 +434,7 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
             if round_count % HEARTBEAT_EVERY == 0:
                 total = storage.count_all()
                 for _, notifier in user_notifiers:
-                    await notifier.send_heartbeat(total_in_db=total, fresh_count=round_count)
+                    await notifier.send_heartbeat(total_in_db=total, round_count=round_count)
 
             actual = _apply_jitter(interval)
             logger.info(
@@ -446,7 +446,7 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
             # 等待下一轮：超时正常继续；SIGHUP 或 reload 文件触发则热重载。
             # Windows 不支持可靠的 SIGHUP，因此每秒轮询一次 reload 请求文件。
             reload_triggered = False
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             deadline = loop.time() + float(actual)
 
             while True:
@@ -508,7 +508,7 @@ async def _async_main() -> None:
     if args.test:
         logger.info("TEST 模式：只抓取，不发通知")
         city_tasks, availability_ids = cfg.scrape_tasks()
-        fresh = await asyncio.get_event_loop().run_in_executor(
+        fresh = await asyncio.get_running_loop().run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
         )
         print(json.dumps([l.to_dict() for l in fresh], ensure_ascii=False, indent=2))
@@ -547,7 +547,7 @@ async def _async_main() -> None:
         logger.warning("没有启用的用户，通知功能不可用（监控仍会写库）")
 
     _write_pid()
-    _setup_signals(asyncio.get_event_loop())
+    _setup_signals(asyncio.get_running_loop())
 
     try:
         if args.once:
