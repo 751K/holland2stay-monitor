@@ -37,6 +37,7 @@ curl_cffi.requests（绕过 Cloudflare），models.Listing
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 import curl_cffi.requests as req
@@ -591,7 +592,9 @@ def try_book(
     if listing.status.lower() not in ("available to book",):
         return BookingResult(listing, False, f"状态不是 Available to book: {listing.status}")
 
-    with req.Session(impersonate="chrome110") as session:
+    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+    proxies = {"https": proxy, "http": proxy} if proxy else {}
+    with req.Session(impersonate="chrome110", proxies=proxies) as session:
         try:
             # 1. 查询真实 SKU + contract_id + 入住日期
             sku, contract_id, start_date = _fetch_sku_and_contract(session, listing.id)
