@@ -132,6 +132,29 @@
     ::-webkit-scrollbar-thumb{background:var(--border-hard);border-radius:3px;}
     ::-webkit-scrollbar-thumb:hover{background:var(--muted);}
 
+    /* Notification bell */
+    .notif-wrap{position:relative;}
+    .notif-badge{position:absolute;top:2px;right:2px;min-width:16px;height:16px;border-radius:8px;background:var(--danger);color:#fff;font-size:.58rem;font-weight:700;line-height:16px;text-align:center;padding:0 3px;pointer-events:none;display:none;}
+    .notif-panel{position:absolute;top:42px;right:-8px;width:340px;max-width:calc(100vw - 32px);background:var(--bg-surface);border:.5px solid var(--border);border-radius:14px;box-shadow:var(--shadow-md);z-index:1050;display:none;overflow:hidden;}
+    .notif-panel.open{display:block;}
+    .notif-panel-hdr{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:.5px solid var(--border);font-size:.8rem;font-weight:600;}
+    .notif-list{max-height:380px;overflow-y:auto;}
+    .notif-item{display:flex;flex-direction:column;gap:2px;padding:11px 16px;border-bottom:.5px solid var(--border);cursor:pointer;transition:background .12s;color:inherit!important;text-decoration:none!important;}
+    .notif-item:last-child{border-bottom:none;}
+    .notif-item:hover{background:var(--bg-raised);}
+    .notif-item.unread{background:rgba(0,122,255,.05);}
+    [data-bs-theme="dark"] .notif-item.unread{background:rgba(10,132,255,.07);}
+    .notif-item-title{font-size:.84rem;font-weight:500;}
+    .notif-item-body{font-size:.75rem;color:var(--muted);}
+    .notif-item-time{font-size:.68rem;color:var(--text3);margin-top:2px;}
+    .notif-empty{padding:32px 16px;text-align:center;font-size:.8rem;color:var(--muted);}
+    /* Toast */
+    .notif-toast-wrap{position:fixed;top:64px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;}
+    .notif-toast{background:var(--bg-surface);border:.5px solid var(--border);border-radius:12px;box-shadow:var(--shadow-md);padding:12px 16px;min-width:260px;max-width:340px;pointer-events:all;animation:toastIn .25s cubic-bezier(.25,.46,.45,.94);}
+    @keyframes toastIn{from{opacity:0;transform:translateX(20px);}to{opacity:1;transform:translateX(0);}}
+    .notif-toast-title{font-size:.84rem;font-weight:600;}
+    .notif-toast-body{font-size:.76rem;color:var(--muted);margin-top:2px;}
+
     {% block extra_style %}{% endblock %}
   </style>
   {% block head %}{% endblock %}
@@ -151,6 +174,22 @@
     </div>
     <div class="nav-right">
       <div id="mon-badge"><span id="mon-dot"></span><span id="mon-text">检测中</span></div>
+      <div class="notif-wrap" id="notif-wrap">
+        <button class="icon-btn" id="notif-btn" onclick="toggleNotifications()" title="通知">
+          <i class="bi bi-bell"></i>
+        </button>
+        <span id="notif-badge" class="notif-badge">0</span>
+        <div class="notif-panel" id="notif-panel">
+          <div class="notif-panel-hdr">
+            <span><i class="bi bi-bell me-1"></i>通知</span>
+            <button class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.72rem;"
+                    onclick="markAllRead(event)">全部已读</button>
+          </div>
+          <div class="notif-list" id="notif-list">
+            <div class="notif-empty"><i class="bi bi-bell-slash me-1"></i>暂无通知</div>
+          </div>
+        </div>
+      </div>
       <button class="icon-btn" onclick="toggleTheme()" title="切换主题"><i id="theme-icon" class="bi bi-sun"></i></button>
       {% if auth_enabled %}
       <form method="POST" action="{{ url_for('logout') }}" class="m-0 p-0">
@@ -217,6 +256,155 @@ _applyTheme(document.documentElement.getAttribute('data-bs-theme')||'dark');
 // Mobile nav
 function toggleNav(){document.getElementById('nav-links').classList.toggle('open');}
 </script>
+
+<!-- Toast 容器（全局固定，最高层级） -->
+<div class="notif-toast-wrap" id="notif-toast-wrap"></div>
+
+<script>
+// ── 通知系统 ────────────────────────────────────────────────────── //
+let _notifLastId    = 0;
+let _notifUnread    = 0;
+let _notifPanelOpen = false;
+
+function _esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function _timeAgo(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+    const s = Math.floor((Date.now() - d) / 1000);
+    if (s < 60)    return s + '秒前';
+    if (s < 3600)  return Math.floor(s / 60) + '分钟前';
+    if (s < 86400) return Math.floor(s / 3600) + '小时前';
+    return Math.floor(s / 86400) + '天前';
+  } catch(e) { return iso; }
+}
+
+function updateBadge(count) {
+  const b = document.getElementById('notif-badge');
+  if (!b) return;
+  _notifUnread = Math.max(0, count);
+  if (_notifUnread > 0) {
+    b.style.display = 'block';
+    b.textContent = _notifUnread > 99 ? '99+' : _notifUnread;
+  } else {
+    b.style.display = 'none';
+  }
+}
+
+function showToast(n) {
+  const wrap = document.getElementById('notif-toast-wrap');
+  if (!wrap) return;
+  const d = document.createElement('div');
+  d.className = 'notif-toast';
+  const body = n.body ? `<div class="notif-toast-body">${_esc(n.body)}</div>` : '';
+  d.innerHTML = `<div class="notif-toast-title">${_esc(n.title)}</div>${body}`;
+  if (n.url) { d.style.cursor = 'pointer'; d.onclick = () => window.open(n.url, '_blank'); }
+  wrap.appendChild(d);
+  setTimeout(() => {
+    d.style.transition = 'opacity .3s';
+    d.style.opacity = '0';
+    setTimeout(() => d.remove(), 300);
+  }, 5000);
+}
+
+function renderNotifications(items) {
+  const list = document.getElementById('notif-list');
+  if (!list) return;
+  if (!items || !items.length) {
+    list.innerHTML = '<div class="notif-empty"><i class="bi bi-bell-slash me-1"></i>暂无通知</div>';
+    return;
+  }
+  list.innerHTML = items.map(n => {
+    const cls  = n.read ? '' : ' unread';
+    const body = n.body ? `<div class="notif-item-body">${_esc(n.body)}</div>` : '';
+    const tag  = n.url ? 'a' : 'div';
+    const attr = n.url ? ` href="${_esc(n.url)}" target="_blank"` : '';
+    return `<${tag} class="notif-item${cls}"${attr}>
+      <div class="notif-item-title">${_esc(n.title)}</div>
+      ${body}
+      <div class="notif-item-time">${_timeAgo(n.created_at)}</div>
+    </${tag}>`;
+  }).join('');
+}
+
+function loadNotifications() {
+  fetch('/api/notifications?limit=20')
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) return;
+      renderNotifications(d.notifications);
+      updateBadge(d.unread);
+      if (d.notifications.length)
+        _notifLastId = Math.max(...d.notifications.map(n => n.id));
+    })
+    .catch(() => {});
+}
+
+function toggleNotifications() {
+  const panel = document.getElementById('notif-panel');
+  if (!panel) return;
+  _notifPanelOpen = !_notifPanelOpen;
+  if (_notifPanelOpen) {
+    panel.classList.add('open');
+    loadNotifications();
+  } else {
+    panel.classList.remove('open');
+  }
+}
+
+function markAllRead(e) {
+  if (e) e.stopPropagation();
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  fetch('/api/notifications/read', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+    .then(r => r.json())
+    .then(() => { updateBadge(0); loadNotifications(); })
+    .catch(() => {});
+}
+
+// 点击面板外部时关闭
+document.addEventListener('click', function(e) {
+  const wrap = document.getElementById('notif-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    const panel = document.getElementById('notif-panel');
+    if (panel) panel.classList.remove('open');
+    _notifPanelOpen = false;
+  }
+});
+
+// SSE 实时推送
+function connectSSE() {
+  if (!window.EventSource) return;
+  const src = new EventSource('/api/events?last_id=' + _notifLastId);
+  src.onmessage = function(e) {
+    let items;
+    try { items = JSON.parse(e.data); } catch(_) { return; }
+    if (!items || !items.length) return;
+    _notifLastId = items[items.length - 1].id;
+    _notifUnread += items.length;
+    updateBadge(_notifUnread);
+    // 弹出 Toast（最多 3 条，避免轰炸）
+    items.slice(0, 3).forEach(showToast);
+    // 若通知面板已打开，刷新列表
+    if (_notifPanelOpen) loadNotifications();
+  };
+  src.onerror = function() {
+    src.close();
+    setTimeout(connectSSE, 10000);  // 10 秒后重连
+  };
+}
+
+// 初始化：加载最新通知 + 启动 SSE
+loadNotifications();
+connectSSE();
+</script>
+
 {% block scripts %}{% endblock %}
 </body>
 </html>
