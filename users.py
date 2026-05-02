@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -56,10 +57,17 @@ class UserConfig:
     通知配置
     --------
     notifications_enabled : 该用户的通知总开关（独立于 enabled）
-    notification_channels : 启用的渠道列表，支持 "imessage" / "telegram" / "whatsapp"
+    notification_channels : 启用的渠道列表，支持 "imessage" / "telegram" / "whatsapp" / "email"
     imessage_recipient    : iMessage 收件人（手机号或 Apple ID 邮箱，macOS only）
     telegram_token        : Telegram Bot Token（格式 "123456789:AAB..."）
     telegram_chat_id      : Telegram Chat ID（数字字符串，向 bot 发消息后从 getUpdates 获取）
+    email_smtp_host       : SMTP 主机（如 smtp.gmail.com）
+    email_smtp_port       : SMTP 端口（常见：587 / 465）
+    email_smtp_security   : SMTP 安全模式：starttls / ssl / none
+    email_username        : SMTP 登录用户名（可选；若留空则不登录）
+    email_password        : SMTP 登录密码 / App Password
+    email_from            : 发件人邮箱
+    email_to              : 收件人邮箱，支持逗号分隔多个地址
     twilio_sid            : Twilio Account SID（WhatsApp 渠道）
     twilio_token          : Twilio Auth Token
     twilio_from           : 发送方 WhatsApp 号码，格式 "whatsapp:+14155238886"
@@ -85,6 +93,13 @@ class UserConfig:
     imessage_recipient: str = ""
     telegram_token: str = ""
     telegram_chat_id: str = ""
+    email_smtp_host: str = ""
+    email_smtp_port: int = 587
+    email_smtp_security: str = "starttls"
+    email_username: str = ""
+    email_password: str = ""
+    email_from: str = ""
+    email_to: str = ""
     twilio_sid: str = ""
     twilio_token: str = ""
     twilio_from: str = ""
@@ -176,15 +191,18 @@ def save_users(users: list[UserConfig]) -> None:
 
     副作用
     ------
-    创建父目录（data/）如不存在；覆盖已有文件。
-    写入非原子（直接覆盖），进程 kill 可能导致文件损坏，
-    未来可改为 write-tmp + os.replace() 原子写。
+    创建父目录（data/）如不存在；以原子方式覆盖已有文件。
+    写入流程：先写 .tmp 临时文件，成功后用 os.replace() 原子替换目标文件。
+    os.replace() 在同一文件系统上是原子操作（POSIX rename 语义），
+    进程在写入中途被 kill 时只会丢失 .tmp，已有 users.json 不受影响。
     """
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USERS_FILE.write_text(
+    tmp = USERS_FILE.with_suffix(".tmp")
+    tmp.write_text(
         json.dumps([asdict(u) for u in users], indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
+    os.replace(tmp, USERS_FILE)
 
 
 def get_user(users: list[UserConfig], user_id: str) -> Optional[UserConfig]:
@@ -221,6 +239,8 @@ def migrate_from_env() -> Optional[UserConfig]:
     --------------------------
     通知：NOTIFICATION_CHANNELS, IMESSAGE_RECIPIENT,
           TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+          EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, EMAIL_SMTP_SECURITY,
+          EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM, EMAIL_TO,
           TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, TWILIO_TO,
           NOTIFICATIONS_ENABLED
     过滤：MAX_RENT, MIN_AREA, MAX_AREA, MIN_FLOOR,
@@ -286,6 +306,13 @@ def migrate_from_env() -> Optional[UserConfig]:
         imessage_recipient=recipient,
         telegram_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
+        email_smtp_host=os.environ.get("EMAIL_SMTP_HOST", ""),
+        email_smtp_port=_i("EMAIL_SMTP_PORT") or 587,
+        email_smtp_security=os.environ.get("EMAIL_SMTP_SECURITY", "starttls"),
+        email_username=os.environ.get("EMAIL_USERNAME", ""),
+        email_password=os.environ.get("EMAIL_PASSWORD", ""),
+        email_from=os.environ.get("EMAIL_FROM", ""),
+        email_to=os.environ.get("EMAIL_TO", ""),
         twilio_sid=os.environ.get("TWILIO_ACCOUNT_SID", ""),
         twilio_token=os.environ.get("TWILIO_AUTH_TOKEN", ""),
         twilio_from=os.environ.get("TWILIO_FROM", ""),
