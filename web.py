@@ -50,7 +50,7 @@ RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
 _SETTINGS_KEYS = [
     "CHECK_INTERVAL", "LOG_LEVEL",
     # 智能轮询
-    "PEAK_INTERVAL", "PEAK_START", "PEAK_END", "PEAK_WEEKDAYS_ONLY", "JITTER_RATIO",
+    "PEAK_INTERVAL", "MIN_INTERVAL", "PEAK_START", "PEAK_END", "PEAK_WEEKDAYS_ONLY", "JITTER_RATIO",
 ]
 
 # ------------------------------------------------------------------ #
