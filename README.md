@@ -18,7 +18,7 @@ Note: Personal project — not for commercial use. Contributions, issues and PRs
 | Notification filters | ✅ Done | Per-user filters: rent, area, floor, layout, district |
 | Auto-booking | ✅ Done | Full flow: add to cart → place order → generate direct payment URL, push via notification |
 | Web admin panel | ✅ Done | Dashboard, listings, users, global settings |
-| Hot config reload | ✅ Done | SIGHUP-based reload, no restart required |
+| Hot config reload | ✅ Done | Cross-platform reload, no restart required |
 | Smart polling | ✅ Done | Peak hours (08:30–10:00 CET) accelerate polling to 60s |
 | Multi-user support | ✅ Done | Each user has independent channels/filters/booker settings |
 | Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
@@ -29,63 +29,139 @@ Note: Personal project — not for commercial use. Contributions, issues and PRs
 
 ---
 
-## Key features
+## Core features
 
-- Polls Holland2Stay GraphQL API every N seconds (default 5 minutes)
-- Detects new listings and status changes (e.g. lottery → available to book)
-- Persists all listings to local SQLite; deduplicates notifications for the same listing
-- Per-user notification channels and filters (stored in data/users.json)
-- Auto-booking: logs in, cancels pending orders, calls addNewBooking → placeOrder → idealCheckOut, sends direct payment URL (no login required to pay)
-- Web UI (Flask + Bootstrap) for dashboard, users, settings, charts
-- Smart polling: configurable peak window and shorter interval during high-traffic times
+### Data scraping
+
+- Polls the Holland2Stay GraphQL API every N seconds (default: 5 minutes)
+- Supports multi-city monitoring; cities can be selected in the web UI
+- Detects both new listings and status changes, such as lottery → available to book
+- Stores all listings in local SQLite so history remains queryable and duplicate notifications are avoided
+
+### Smart polling
+
+- Speeds up polling during the Dutch morning release window (default: 08:30-10:00 CET)
+- Falls back to the normal interval outside the peak window to balance freshness and resource usage
+- Peak interval, start/end time, and weekday-only behavior can all be configured in the web UI
+
+### Multi-user support
+
+- Each user has independent channels, credentials, filters, and auto-book settings
+- One scrape run is shared across all users, so adding users does not multiply API traffic
+- User data is stored in `data/users.json` and can be managed entirely from the web UI
+- On first run, legacy notification env vars can be migrated into a default user automatically
+
+### Notifications
+
+- Supports iMessage, Telegram Bot, and WhatsApp via Twilio
+- Each user can enable one or more channels at the same time
+- Notification content includes status, rent, area, floor, energy label, move-in date, and listing link
+- Per-user filters allow users to receive only listings that match their own criteria
+- The web UI provides one-click per-channel notification testing with success or failure details
+
+### Auto-booking
+
+- When a qualifying "Available to book" listing appears, the monitor can complete the booking workflow automatically
+- Flow: login → cancel pending orders → `addNewBooking` → `placeOrder` → `idealCheckOut`
+- Sends a direct payment URL to the user so payment can be completed without logging in again
+- Supports stricter booking filters than notification filters, plus a dry-run mode for validation
+
+### Web admin panel
+
+- Dashboard with totals, today's new listings, recent changes, and latest scrape info
+- Listings page with status filters and keyword search
+- Calendar and chart views for move-in dates, city distribution, status distribution, and price ranges
+- User management with CRUD, enable/disable, per-user config, and test notifications
+- Global settings for polling, smart polling, and monitored cities without editing `.env`
+- Save-and-reload workflow so monitor settings can be applied without restarting the process
 
 ---
 
-## Architecture overview
+## Technical architecture
 
-Data flow:
+### Data flow
 
-Holland2Stay frontend (Next.js + Magento)
-  └─> GraphQL endpoint: POST https://api.holland2stay.com/graphql/
-       (scraper uses curl_cffi with impersonate="chrome110" to bypass Cloudflare)
-  └─> scraper.py → models.py (Listing dataclass)
-  └─> storage.py (SQLite diffing)
-       ├─> New listing / status change → loop enabled users in data/users.json
-       │     ├─> ListingFilter.passes() → notifier.py (iMessage / Telegram / WhatsApp)
-       │     └─> AutoBookConfig.passes() → booker.py (login → cancel pending → addNewBooking → placeOrder → idealCheckOut → payment URL)
-       └─> web.py (read-only queries for UI) → /api/charts
+```text
+Holland2Stay website (Next.js + Magento)
+        |
+        |  Page data is loaded through Apollo GraphQL requests
+        v
+api.holland2stay.com/graphql/   <- Magento GraphQL backend
+        |
+        |  curl_cffi impersonate="chrome110" bypasses Cloudflare WAF
+        v
+   scraper.py  ->  models.py (Listing dataclass)
+        |
+        v
+   storage.py (SQLite diffing between old and new snapshots)
+        |
+        +-- New listing / status change
+        |        |
+        |        +-- Loop through enabled users in users.json
+        |                 |
+        |                 +-- ListingFilter.passes() -> notifier.py
+        |                 |     -> iMessage / Telegram / WhatsApp
+        |                 |
+        |                 +-- AutoBookConfig.passes() -> booker.py
+        |                       -> login -> cancel pending orders -> addNewBooking
+        |                          -> placeOrder -> idealCheckOut -> payment URL
+        |
+        +-- Read-only web queries -> web.py (Flask + Bootstrap)
+                 -> /api/charts
+```
 
-Modules (responsibilities):
-- monitor.py: main scheduler, smart polling, SIGHUP hot reload, PID management
-- scraper.py: GraphQL scraping using curl_cffi, pagination, multi-city
-- storage.py: SQLite persistence, diff detection, chart aggregation
-- models.py: Listing dataclass and helpers
-- notifier.py: BaseNotifier + implementations (iMessage, Telegram, WhatsApp)
-- booker.py: login / cancel pending orders / addNewBooking / placeOrder / idealCheckOut → direct payment URL
-- config.py: global config, KNOWN_CITIES, ListingFilter, AutoBookConfig
-- users.py: user config dataclass and data/users.json management
-- web.py: Flask admin UI and API endpoints
+### Module responsibilities
 
-Key design notes:
-- Cloudflare bypass: curl_cffi impersonate="chrome110" to emulate Chrome TLS fingerprint without a browser
-- Single scrape feed, per-user filtering: one scrape powers notifications and bookings for all users (no Nx API calls)
-- Hot reload: SIGHUP triggers an asyncio.Event to wake the scheduler and apply new settings
-- Per-user channels: supports multiple channels simultaneously; MultiNotifier aggregates results
+| File | Responsibility |
+|---|---|
+| `monitor.py` | Main scheduler, smart polling, hot reload, PID management |
+| `scraper.py` | GraphQL scraping, `curl_cffi`, pagination, multi-city fetching |
+| `storage.py` | SQLite persistence, diff detection, chart aggregation, meta storage |
+| `models.py` | `Listing` dataclass and formatting helpers |
+| `notifier.py` | Base notifier abstractions plus iMessage, Telegram, WhatsApp, and multi-channel dispatch |
+| `booker.py` | Login, pending-order cleanup, `addNewBooking`, `placeOrder`, `idealCheckOut`, payment URL generation |
+| `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
+| `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
+| `web.py` | Flask admin panel, user CRUD, session auth, charts, reload endpoints |
+| `templates/` | Bootstrap UI, theme switching, Chart.js views, calendar view |
+
+### Key technical decisions
+
+| Problem | Solution | Why |
+|---|---|---|
+| Cloudflare 403 | `curl_cffi` + `impersonate="chrome110"` | Emulates a Chrome TLS fingerprint without launching a browser |
+| No useful listing HTML in page source | Call the GraphQL API directly | Holland2Stay uses Next.js + Apollo client-side data loading |
+| Sync scraping with async notifications | `run_in_executor` bridge | Keeps `curl_cffi` scraping simple while async notifiers still work |
+| Multi-channel notifications | `BaseNotifier` + `MultiNotifier` | Shared formatting logic, per-channel send implementations |
+| Hot reload across platforms | Signals on Unix, reload request file fallback on Windows | Lets monitor settings be applied without restarting the process |
+| Multi-user storage | `data/users.json` | No extra dependency, simple structure, easy web-based CRUD |
+| Theme switching without flicker | Inline `<head>` script + CSS custom properties | Ensures the correct theme is applied before CSS paint |
+| Optional panel auth | Skip auth when `WEB_PASSWORD` is empty | Keeps local use frictionless while still allowing protection when exposed |
+
+### GraphQL API parameters
+
+| Parameter | Value |
+|---|---|
+| Endpoint | `POST https://api.holland2stay.com/graphql/` |
+| Category UID | `category_uid: "Nw=="` (Residences) |
+| Available to book | `available_to_book: { in: ["179"] }` |
+| Available in lottery | `available_to_book: { in: ["336"] }` |
+| Custom fields | `custom_attributesV2` -> `basic_rent`, `living_area`, `floor`, `available_startdate`, and more |
 
 ---
 
 ## Quick start
 
-Requirements: Python 3.11+
+### Install
 
-Install:
+Requirements: Python 3.11+
 
 ```bash
 pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Run:
+### Run
 
 ```bash
 # 1) Test scraping only (no DB writes, no notifications)
@@ -102,14 +178,15 @@ python monitor.py
 nohup python monitor.py > logs/monitor.log 2>&1 &
 ```
 
-Tip: On first run, if `data/users.json` does not exist and old `.env` notification env vars are present, the tool will auto-migrate them into a default user.
+Tip: On first run, if `data/users.json` does not exist and old `.env` notification env vars are present, the tool can auto-migrate them into a default user.
 
 ---
 
 ## Configuration
 
-User-level settings (notification channels, filters, auto-booking) are managed in the Web UI and stored in `data/users.json`.
-Global settings can be updated in the Web UI or via `.env`.
+User-level settings for notifications, filters, and auto-booking are managed in the web UI and stored in `data/users.json`.
+
+Global settings can be changed either in the web UI or by editing `.env`.
 
 Important envs (see `.env.example`):
 
@@ -134,7 +211,7 @@ PEAK_WEEKDAYS_ONLY=true
 DB_PATH=data/listings.db
 ```
 
-## Telegram Bot setup
+### Telegram Bot setup
 
 1. Create a bot with @BotFather and keep the token
 2. Send any message to your bot
@@ -195,31 +272,41 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 
 ---
 
-## Roadmap (high level)
+## Roadmap
 
-Priority items:
-- Dockerize the app and remove macOS-only iMessage dependency so the service can run 24/7 on a small VPS
-- Automate lottery registration via GraphQL mutations (exploratory, needs auth/rate-limit caution)
-- Daily digest push, Discord webhook channel, price history tracking
+### High priority
+
+- Dockerize the app and remove the macOS-only iMessage dependency so the service can run 24/7 on a small VPS
+
+### Medium priority
+
+- Automate lottery registration through GraphQL mutations, with extra care around auth and rate limits
+- Add daily digest notifications instead of only real-time pushes
+- Add a Discord webhook notification channel
+- Track price history for the same listing and alert on drops
+
+### Exploratory / low priority
+
+- Add an email notification channel as a fallback to iMessage or Telegram
 
 ---
 
 ## File structure
 
-(See codebase root)
-
-- monitor.py — scheduler and hot-reload
-- scraper.py — GraphQL scraping (curl_cffi)
-- storage.py — SQLite persistence and diffs
-- models.py — Listing dataclass and helpers
-- notifier.py — iMessage / Telegram / WhatsApp implementations
-- booker.py — login / cart / addNewBooking flow
-- config.py — known cities and filters
-- users.py — data/users.json management
-- web.py — Flask admin UI
-- templates/ — Jinja2 templates for the web UI
-- requirements.txt — Python dependencies
-- data/ — runtime data (listings.db, users.json)
+```text
+monitor.py          Main scheduler, smart polling, hot reload, PID management
+scraper.py          GraphQL scraping with curl_cffi, pagination, multi-city fetching
+storage.py          SQLite listings, status changes, chart aggregation, meta storage
+models.py           Listing dataclass and formatting helpers
+notifier.py         BaseNotifier plus iMessage, Telegram, WhatsApp, and multi-dispatch
+booker.py           Login, cart flow, addNewBooking, placeOrder, idealCheckOut
+config.py           Global config loading, known cities, filters
+users.py            UserConfig, users.json management, legacy env migration
+web.py              Flask admin panel, session auth, user CRUD, charts, reload endpoints
+templates/          Jinja2 templates for the web UI
+requirements.txt    Python dependencies
+data/               Runtime data such as listings.db and users.json
+```
 
 ---
 
