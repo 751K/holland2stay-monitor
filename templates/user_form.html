@@ -125,6 +125,13 @@
             </div>
             <div style="font-size:.78rem; color:var(--muted);">通过 Messages.app 发送</div>
           </label>
+          <!-- 非 macOS 警告（由 JS 动态显示） -->
+          <div id="imessage-platform-warn" class="alert alert-warning py-2 px-3 mt-2 mb-0 small" style="display:none;border-radius:10px;">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            服务器非 macOS（<span id="imessage-platform-name"></span>），
+            iMessage 无法发送。请改用 <strong>Telegram</strong> 或 <strong>Email</strong>，
+            或通过 <strong>Web 面板</strong>查看实时通知。
+          </div>
           <div id="sec_imessage" class="toggle-section mt-2 px-1"
                {% if is_edit and 'imessage' in u.notification_channels %}style="display:block"{% endif %}>
             <label class="form-label small mb-1" style="color:var(--muted);">收件人（手机号或 Apple ID）</label>
@@ -436,6 +443,19 @@ document.getElementById('notif_enabled').addEventListener('change', function() {
 });
 
 updateChannelsInput();
+
+// 检查服务器平台，非 macOS 时对 iMessage 渠道显示警告
+fetch('/api/platform')
+  .then(r => r.json())
+  .then(d => {
+    if (!d.macos) {
+      const warn   = document.getElementById('imessage-platform-warn');
+      const nameEl = document.getElementById('imessage-platform-name');
+      if (warn)   warn.style.display = 'block';
+      if (nameEl) nameEl.textContent = d.platform || '非 macOS';
+    }
+  })
+  .catch(() => {});
 
 function sendTestNotify(userId, btn) {
   const origHtml = btn.innerHTML;
