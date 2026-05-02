@@ -327,10 +327,14 @@ class Config:
 
     智能轮询（荷兰高峰期加速）
     --------------------------
-    peak_interval       : 高峰期轮询间隔（秒），对应 .env PEAK_INTERVAL
+    peak_interval       : 高峰期轮询间隔初始值（秒），对应 .env PEAK_INTERVAL；
+                          也是自适应轮询的起点，被限流后会在此值上翻倍退避
     peak_start          : 高峰开始时间（荷兰本地时间 HH:MM），对应 .env PEAK_START
     peak_end            : 高峰结束时间（荷兰本地时间 HH:MM），对应 .env PEAK_END
     peak_weekdays_only  : True 表示仅工作日启用高峰轮询，对应 .env PEAK_WEEKDAYS_ONLY
+    min_interval        : 自适应轮询的下限（秒），对应 .env MIN_INTERVAL；
+                          高峰期连续成功时间隔会逐步压低，但不会低于此值；
+                          建议 ≥ 15s，过低容易触发 429
     jitter_ratio        : 轮询间隔随机抖动比例（0–0.5），对应 .env JITTER_RATIO；
                           e.g. 0.20 表示实际等待时间在基准值 ±20% 范围内随机浮动，
                           避免多实例在同一时刻集中发起请求
@@ -344,6 +348,7 @@ class Config:
     peak_start: str = "08:30"
     peak_end: str = "10:00"
     peak_weekdays_only: bool = True
+    min_interval: int = 15
     jitter_ratio: float = 0.20
 
     def scrape_tasks(self) -> tuple[list[tuple[str, str]], list[str]]:
@@ -377,6 +382,7 @@ def load_config() -> Config:
     PEAK_START              str HH:MM，默认 "08:30"
     PEAK_END                str HH:MM，默认 "10:00"
     PEAK_WEEKDAYS_ONLY      "true"/"false"，默认 "true"
+    MIN_INTERVAL            int ≥ 5，默认 "15"（自适应下限，不低于此值）
     JITTER_RATIO            float 0–0.5，默认 "0.20"
 
     Raises
@@ -416,5 +422,6 @@ def load_config() -> Config:
         peak_start=os.environ.get("PEAK_START", "08:30"),
         peak_end=os.environ.get("PEAK_END", "10:00"),
         peak_weekdays_only=os.environ.get("PEAK_WEEKDAYS_ONLY", "true").lower() != "false",
+        min_interval=max(5, int(os.environ.get("MIN_INTERVAL", "15"))),
         jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO", "0.20")))),
     )
