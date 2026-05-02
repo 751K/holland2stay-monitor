@@ -56,22 +56,33 @@
       </div>
 
       <div class="row g-3 mb-3">
-        <div class="col-12 col-sm-4">
+        <div class="col-6 col-sm-3">
           <label class="form-label small" style="color:var(--muted); font-weight:600;">
             高峰期间隔（秒）<span style="font-weight:400; color:var(--muted);"> — 默认 60</span>
           </label>
           <input type="number" class="form-control form-control-sm" name="PEAK_INTERVAL"
                  value="{{ env.get('PEAK_INTERVAL','60') }}" min="1" max="300">
         </div>
-        <div class="col-6 col-sm-4">
+        <div class="col-6 col-sm-3">
           <label class="form-label small" style="color:var(--muted); font-weight:600;">高峰开始（荷兰时间）</label>
           <input type="time" class="form-control form-control-sm" name="PEAK_START"
                  value="{{ env.get('PEAK_START','08:30') }}">
         </div>
-        <div class="col-6 col-sm-4">
+        <div class="col-6 col-sm-3">
           <label class="form-label small" style="color:var(--muted); font-weight:600;">高峰结束（荷兰时间）</label>
           <input type="time" class="form-control form-control-sm" name="PEAK_END"
                  value="{{ env.get('PEAK_END','10:00') }}">
+        </div>
+        <div class="col-6 col-sm-3">
+          <label class="form-label small" style="color:var(--muted); font-weight:600;">
+            抖动比例<span style="font-weight:400; color:var(--muted);"> — 默认 0.20</span>
+          </label>
+          <div class="input-group input-group-sm">
+            <input type="number" class="form-control form-control-sm" name="JITTER_RATIO"
+                   value="{{ env.get('JITTER_RATIO','0.20') }}"
+                   min="0" max="0.5" step="0.05">
+            <span class="input-group-text" style="font-size:.75rem;">±%</span>
+          </div>
         </div>
         <div class="col-12">
           <div class="form-check form-switch">
@@ -85,6 +96,7 @@
           <div class="form-text">
             <i class="bi bi-info-circle me-1"></i>
             荷兰早 8:30–10:00 新房源上架最集中，期间自动缩短轮询间隔以提高抢房成功率。
+            抖动比例控制实际等待时间的随机浮动范围：0.20 表示在基准值 ±20% 内随机，避免多实例同步。
           </div>
         </div>
       </div>

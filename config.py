@@ -331,6 +331,9 @@ class Config:
     peak_start          : 高峰开始时间（荷兰本地时间 HH:MM），对应 .env PEAK_START
     peak_end            : 高峰结束时间（荷兰本地时间 HH:MM），对应 .env PEAK_END
     peak_weekdays_only  : True 表示仅工作日启用高峰轮询，对应 .env PEAK_WEEKDAYS_ONLY
+    jitter_ratio        : 轮询间隔随机抖动比例（0–0.5），对应 .env JITTER_RATIO；
+                          e.g. 0.20 表示实际等待时间在基准值 ±20% 范围内随机浮动，
+                          避免多实例在同一时刻集中发起请求
     """
     check_interval: int
     cities: list[CityFilter]
@@ -341,6 +344,7 @@ class Config:
     peak_start: str = "08:30"
     peak_end: str = "10:00"
     peak_weekdays_only: bool = True
+    jitter_ratio: float = 0.20
 
     def scrape_tasks(self) -> tuple[list[tuple[str, str]], list[str]]:
         """
@@ -373,6 +377,7 @@ def load_config() -> Config:
     PEAK_START              str HH:MM，默认 "08:30"
     PEAK_END                str HH:MM，默认 "10:00"
     PEAK_WEEKDAYS_ONLY      "true"/"false"，默认 "true"
+    JITTER_RATIO            float 0–0.5，默认 "0.20"
 
     Raises
     ------
@@ -411,4 +416,5 @@ def load_config() -> Config:
         peak_start=os.environ.get("PEAK_START", "08:30"),
         peak_end=os.environ.get("PEAK_END", "10:00"),
         peak_weekdays_only=os.environ.get("PEAK_WEEKDAYS_ONLY", "true").lower() != "false",
+        jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO", "0.20")))),
     )

@@ -163,23 +163,21 @@ def _get_interval(cfg) -> tuple[int, bool]:
     return cfg.check_interval, False
 
 
-# 抖动比例：实际等待时间在基准值的 ±JITTER_RATIO 范围内随机浮动
-# 例如基准 300s → 实际 240~360s；基准 60s → 实际 48~72s
-_JITTER_RATIO = 0.20
-
-def _apply_jitter(seconds: int) -> int:
+def _apply_jitter(seconds: int, ratio: float = 0.20) -> int:
     """
     在基准等待时间上叠加随机抖动，避免多实例在同一秒发起请求。
 
     Parameters
     ----------
     seconds : 基准等待时间（秒）
+    ratio   : 抖动比例（0–0.5），来自 cfg.jitter_ratio；
+              e.g. 0.20 → 实际时间在 [seconds*0.8, seconds*1.2] 内随机
 
     Returns
     -------
-    实际等待时间（秒），在 [seconds*(1-JITTER), seconds*(1+JITTER)] 范围内，最小 5 秒
+    实际等待时间（秒），最小 5 秒
     """
-    delta = seconds * _JITTER_RATIO
+    delta = seconds * ratio
     return max(5, int(seconds + random.uniform(-delta, delta)))
 
 
@@ -222,12 +220,24 @@ async def run_once(
     --------
     1. scrape_all() 在 executor 线程中运行（同步 → 异步桥接）
     2. storage.diff() 识别 new_listings 和 status_changes
-    3. 遍历 new_listings：
-       - 若用户 listing_filter 通过 → 发送 send_new_listing 通知
-       - 若 auto_book 启用且房源为 "Available to book" 且符合预订过滤 → 加入候选
-    4. 遍历 status_changes：同上逻辑
-    5. 每个用户：从候选列表中选面积最大的房源，调用 try_book()
-    6. 更新 meta（last_scrape_at / last_scrape_count）
+    3. 快速候选预扫描（纯内存，无网络）：
+       - 同时扫描 new_listings 和 status_changes，收集每个用户的自动预订候选
+       - 记录"状态变更 → Available to book"（快速通道），与普通新上线房源加以区分
+       - 立即将 try_book() 提交到线程池（run_in_executor），预订与通知并行执行
+    4. 遍历 new_listings：发送新房源通知（预订已在后台运行）
+    5. 遍历 status_changes：发送状态变更通知（预订已在后台运行）
+    6. await 预订 Future，发送预订成功/失败通知
+    7. 更新 meta（last_scrape_at / last_scrape_count）
+
+    并行策略
+    --------
+    try_book() 是同步函数，通过 run_in_executor 在线程池中运行。
+    它在步骤 3 末尾立即提交，步骤 4/5 的通知网络调用（send_*）与之并行进行。
+    到步骤 6 await 时，booking 往往已经完成，几乎零额外等待。
+
+    对于"Reserved / Not available → Available to book"这类高竞争变更，
+    预订请求会在发出状态变更通知之前就已进入 Holland2Stay 服务器，
+    相比原先"通知发完再预订"的顺序执行，可节省 1-3 秒。
     """
     city_tasks, availability_ids = cfg.scrape_tasks()
     logger.info("开始抓取，城市数: %d，活跃用户数: %d", len(city_tasks), len(user_notifiers))
@@ -263,15 +273,15 @@ async def run_once(
 
     new_listings, status_changes = storage.diff(fresh)
 
-    # 每个用户的自动预订候选（房源列表）
+    # ── 快速候选预扫描：立即收集候选，抢在发通知之前提交预订 ──────── #
+    # 此处只做过滤判断（纯内存），不发任何通知
     ab_candidates: dict[str, list] = {u.id: [] for u, _ in user_notifiers}
 
-    # ── 新房源通知 ──────────────────────────────────────────────── #
-    total_notified = 0
+    # listing.id → (old_status, new_status)：记录状态变更触发的候选，用于日志区分
+    status_transition: dict[str, tuple[str, str]] = {}
+
     for listing in new_listings:
-        notified_this = False
-        for user, notifier in user_notifiers:
-            # 收集自动预订候选
+        for user, _ in user_notifiers:
             if (
                 user.auto_book.enabled
                 and listing.status.lower() == "available to book"
@@ -280,7 +290,57 @@ async def run_once(
             ):
                 ab_candidates[user.id].append(listing)
 
-            # 通知过滤
+    for listing, old_status, new_status in status_changes:
+        if new_status.lower() == "available to book":
+            status_transition[listing.id] = (old_status, new_status)
+        for user, _ in user_notifiers:
+            if (
+                user.auto_book.enabled
+                and new_status.lower() == "available to book"
+                and (user.auto_book.listing_filter.is_empty()
+                     or user.auto_book.listing_filter.passes(listing))
+            ):
+                ab_candidates[user.id].append(listing)
+
+    # 立即将 try_book() 提交到线程池，返回 Future（非阻塞）
+    # ab_futures: list of (user, notifier, target_listing, Future[BookingResult])
+    ab_futures: list[tuple] = []
+    loop = asyncio.get_running_loop()
+
+    for user, notifier in user_notifiers:
+        candidates = ab_candidates.get(user.id, [])
+        if not (user.auto_book.enabled and candidates):
+            continue
+        target = max(candidates, key=_area_key)
+        if len(candidates) > 1:
+            logger.info(
+                "[%s] 自动预订候选 %d 套，选面积最大: %s (%.1f m²)",
+                user.name, len(candidates), target.name, _area_key(target),
+            )
+        # 区分：状态变更触发（快速通道）vs 新上线房源
+        if target.id in status_transition:
+            old_s, new_s = status_transition[target.id]
+            logger.info(
+                "[%s] 🚀 快速预订通道 (%s → %s)，立即提交: %s",
+                user.name, old_s, new_s, target.name,
+            )
+        else:
+            logger.info("[%s] 🔖 自动预订（新上线可预订），立即提交: %s", user.name, target.name)
+
+        future = loop.run_in_executor(
+            None,
+            lambda t=target, u=user: try_book(
+                t, u.auto_book.email, u.auto_book.password,
+                dry_run=u.auto_book.dry_run,
+            ),
+        )
+        ab_futures.append((user, notifier, target, future))
+
+    # ── 新房源通知（预订任务已在后台并行运行）────────────────────── #
+    total_notified = 0
+    for listing in new_listings:
+        notified_this = False
+        for user, notifier in user_notifiers:
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
                 logger.info("[%s] 跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
@@ -294,18 +354,10 @@ async def run_once(
         if notified_this:
             storage.mark_notified(listing.id)
 
-    # ── 状态变更通知 ──────────────────────────────────────────────── #
+    # ── 状态变更通知（预订任务已在后台并行运行）──────────────────── #
     for listing, old_status, new_status in status_changes:
         notified_this = False
         for user, notifier in user_notifiers:
-            if (
-                user.auto_book.enabled
-                and new_status.lower() == "available to book"
-                and (user.auto_book.listing_filter.is_empty()
-                     or user.auto_book.listing_filter.passes(listing))
-            ):
-                ab_candidates[user.id].append(listing)
-
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
                 logger.info("[%s] 状态变更跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
@@ -318,22 +370,9 @@ async def run_once(
         if notified_this:
             storage.mark_status_change_notified(listing.id)
 
-    # ── 自动预订（每个用户独立判断）─────────────────────────────── #
-    for user, notifier in user_notifiers:
-        candidates = ab_candidates.get(user.id, [])
-        if not (user.auto_book.enabled and candidates):
-            continue
-        target = max(candidates, key=_area_key)
-        if len(candidates) > 1:
-            logger.info(
-                "[%s] 自动预订候选 %d 套，选面积最大: %s (%.1f m²)",
-                user.name, len(candidates), target.name, _area_key(target),
-            )
-        result = await asyncio.get_running_loop().run_in_executor(
-            None,
-            lambda: try_book(target, user.auto_book.email, user.auto_book.password,
-                             dry_run=user.auto_book.dry_run),
-        )
+    # ── 等待预订结果，发送成功/失败通知 ──────────────────────────── #
+    for user, notifier, target, future in ab_futures:
+        result = await future
         if result.dry_run:
             logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, target.name)
         elif result.success:
@@ -436,10 +475,10 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
                 for _, notifier in user_notifiers:
                     await notifier.send_heartbeat(total_in_db=total, round_count=round_count)
 
-            actual = _apply_jitter(interval)
+            actual = _apply_jitter(interval, cfg.jitter_ratio)
             logger.info(
                 "等待 %d 秒（基准 %d s，±%.0f%% 抖动）%s",
-                actual, interval, _JITTER_RATIO * 100,
+                actual, interval, cfg.jitter_ratio * 100,
                 "（高峰期加速）" if is_peak else "",
             )
 
