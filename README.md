@@ -14,7 +14,7 @@ Note: Personal project — not for commercial use. Contributions, issues and PRs
 |---|---:|---|
 | Data scraping | ✅ Done | Uses GraphQL + curl_cffi to bypass Cloudflare WAF |
 | Multi-city monitoring | ✅ Done | Supports 26 Dutch cities; select cities in the web UI |
-| Multi-channel notifications | ✅ Done | iMessage / Telegram / WhatsApp (Twilio) |
+| Multi-channel notifications | ✅ Done | iMessage / Telegram / Email / WhatsApp (Twilio) |
 | Notification filters | ✅ Done | Per-user filters: rent, area, floor, layout, district |
 | Auto-booking | ✅ Done | Full flow: add to cart → place order → generate direct payment URL, push via notification |
 | Web admin panel | ✅ Done | Dashboard, listings, users, global settings |
@@ -53,7 +53,7 @@ Note: Personal project — not for commercial use. Contributions, issues and PRs
 
 ### Notifications
 
-- Supports iMessage, Telegram Bot, and WhatsApp via Twilio
+- Supports iMessage, Telegram Bot, SMTP email, and WhatsApp via Twilio
 - Each user can enable one or more channels at the same time
 - Notification content includes status, rent, area, floor, energy label, move-in date, and listing link
 - Per-user filters allow users to receive only listings that match their own criteria
@@ -100,7 +100,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
         |        +-- Loop through enabled users in users.json
         |                 |
         |                 +-- ListingFilter.passes() -> notifier.py
-        |                 |     -> iMessage / Telegram / WhatsApp
+        |                 |     -> iMessage / Telegram / Email / WhatsApp
         |                 |
         |                 +-- AutoBookConfig.passes() -> booker.py
         |                       -> login -> cancel pending orders -> addNewBooking
@@ -118,7 +118,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `scraper.py` | GraphQL scraping, `curl_cffi`, pagination, multi-city fetching |
 | `storage.py` | SQLite persistence, diff detection, chart aggregation, meta storage |
 | `models.py` | `Listing` dataclass and formatting helpers |
-| `notifier.py` | Base notifier abstractions plus iMessage, Telegram, WhatsApp, and multi-channel dispatch |
+| `notifier.py` | Base notifier abstractions plus iMessage, Telegram, Email, WhatsApp, and multi-channel dispatch |
 | `booker.py` | Login, pending-order cleanup, `addNewBooking`, `placeOrder`, `idealCheckOut`, payment URL generation |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
 | `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
@@ -285,12 +285,6 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 - Add a Discord webhook notification channel
 - Track price history for the same listing and alert on drops
 
-### Exploratory / low priority
-
-- Add an email notification channel as a fallback to iMessage or Telegram
-
----
-
 ## File structure
 
 ```text
@@ -298,7 +292,7 @@ monitor.py          Main scheduler, smart polling, hot reload, PID management
 scraper.py          GraphQL scraping with curl_cffi, pagination, multi-city fetching
 storage.py          SQLite listings, status changes, chart aggregation, meta storage
 models.py           Listing dataclass and formatting helpers
-notifier.py         BaseNotifier plus iMessage, Telegram, WhatsApp, and multi-dispatch
+notifier.py         BaseNotifier plus iMessage, Telegram, Email, WhatsApp, and multi-dispatch
 booker.py           Login, cart flow, addNewBooking, placeOrder, idealCheckOut
 config.py           Global config loading, known cities, filters
 users.py            UserConfig, users.json management, legacy env migration
