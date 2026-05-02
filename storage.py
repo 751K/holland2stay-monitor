@@ -37,6 +37,16 @@ meta
     key     TEXT PRIMARY KEY
     value   TEXT
 
+web_notifications
+    id          INTEGER PRIMARY KEY AUTOINCREMENT
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    type        TEXT NOT NULL              -- "new_listing" | "status_change" | "heartbeat" | "booking" | "error"
+    title       TEXT NOT NULL
+    body        TEXT NOT NULL DEFAULT ''
+    url         TEXT NOT NULL DEFAULT ''   -- 房源详情页 URL（可为空）
+    listing_id  TEXT NOT NULL DEFAULT ''   -- 关联 listings.id（可为空）
+    read        INTEGER NOT NULL DEFAULT 0
+
 常用 meta key
 -------------
 "last_scrape_at"    → 最近一次抓取完成的 UTC ISO 时间
@@ -118,6 +128,8 @@ class Storage:
         """
         cur = self._conn.cursor()
         cur.executescript("""
+            PRAGMA journal_mode=WAL;
+
             CREATE TABLE IF NOT EXISTS listings (
                 id              TEXT PRIMARY KEY,
                 name            TEXT,
@@ -146,6 +158,20 @@ class Storage:
                 key     TEXT PRIMARY KEY,
                 value   TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS web_notifications (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                type        TEXT NOT NULL,
+                title       TEXT NOT NULL,
+                body        TEXT NOT NULL DEFAULT '',
+                url         TEXT NOT NULL DEFAULT '',
+                listing_id  TEXT NOT NULL DEFAULT '',
+                read        INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_web_notif_created
+                ON web_notifications (created_at DESC);
         """)
         self._conn.commit()
 
@@ -607,6 +633,141 @@ class Storage:
                 buckets[">€1000"] += 1
 
         return [{"range": k, "count": v} for k, v in buckets.items()]
+
+    # ------------------------------------------------------------------ #
+    # Web 通知
+    # ------------------------------------------------------------------ #
+
+    def add_web_notification(
+        self,
+        *,
+        type: str,
+        title: str,
+        body: str = "",
+        url: str = "",
+        listing_id: str = "",
+    ) -> int:
+        """
+        写入一条 Web 通知记录。
+
+        Parameters
+        ----------
+        type       : 通知类型，"new_listing" / "status_change" / "heartbeat" /
+                     "booking" / "error"
+        title      : 通知标题（短句，显示在铃铛弹框首行）
+        body       : 详细文字（可为空）
+        url        : 关联房源详情页 URL（可为空）
+        listing_id : 关联 listings.id（可为空）
+
+        Returns
+        -------
+        新记录的 id（整数）
+        """
+        cur = self._conn.execute(
+            """INSERT INTO web_notifications (type, title, body, url, listing_id)
+               VALUES (?, ?, ?, ?, ?)""",
+            (type, title, body, url, listing_id),
+        )
+        self._conn.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    def get_notifications(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """
+        分页查询 Web 通知，按 created_at 倒序（最新在前）。
+
+        Parameters
+        ----------
+        limit  : 每页条数
+        offset : 跳过前 offset 条
+
+        Returns
+        -------
+        list[dict]，含 web_notifications 表全部字段
+        """
+        rows = self._conn.execute(
+            """SELECT * FROM web_notifications
+               ORDER BY created_at DESC
+               LIMIT ? OFFSET ?""",
+            (limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_notifications_since(self, last_id: int) -> list[dict]:
+        """
+        查询 id > last_id 的通知（SSE 增量推送用）。
+
+        Parameters
+        ----------
+        last_id : 客户端已知的最大 id，传 0 表示拉取全部
+
+        Returns
+        -------
+        list[dict]，按 id 升序（方便客户端按序处理）
+        """
+        rows = self._conn.execute(
+            """SELECT * FROM web_notifications
+               WHERE id > ?
+               ORDER BY id ASC""",
+            (last_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_unread_notifications(self) -> int:
+        """返回未读通知数量，供铃铛角标使用。"""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM web_notifications WHERE read=0"
+        ).fetchone()
+        return row[0] if row else 0
+
+    def mark_notifications_read(self, ids: list[int] | None = None) -> None:
+        """
+        标记通知为已读。
+
+        Parameters
+        ----------
+        ids : 要标记的 id 列表；传 None 则标记全部未读通知
+        """
+        if ids is None:
+            self._conn.execute(
+                "UPDATE web_notifications SET read=1 WHERE read=0"
+            )
+        else:
+            if not ids:
+                return
+            placeholders = ",".join("?" * len(ids))
+            self._conn.execute(
+                f"UPDATE web_notifications SET read=1 WHERE id IN ({placeholders})",
+                ids,
+            )
+        self._conn.commit()
+
+    def prune_notifications(self, keep: int = 500) -> int:
+        """
+        保留最新 keep 条通知，删除多余的旧记录。
+
+        Parameters
+        ----------
+        keep : 最多保留的记录数，默认 500
+
+        Returns
+        -------
+        删除的行数
+        """
+        cur = self._conn.execute(
+            """DELETE FROM web_notifications
+               WHERE id NOT IN (
+                   SELECT id FROM web_notifications
+                   ORDER BY id DESC
+                   LIMIT ?
+               )""",
+            (keep,),
+        )
+        self._conn.commit()
+        return cur.rowcount
 
     def close(self) -> None:
         """关闭数据库连接。进程退出时由 monitor.py 调用。"""

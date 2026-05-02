@@ -35,14 +35,28 @@ import asyncio
 import logging
 import re
 import smtplib
+import sys
 from abc import ABC, abstractmethod
 from email.message import EmailMessage
+from typing import TYPE_CHECKING
 
 import curl_cffi.requests as req
 
 from models import Listing
 
+if TYPE_CHECKING:
+    from storage import Storage
+
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------ #
+# 平台检测
+# ------------------------------------------------------------------ #
+
+def is_macos() -> bool:
+    """返回 True 当且仅当当前平台为 macOS。"""
+    return sys.platform == "darwin"
 
 
 # ------------------------------------------------------------------ #
@@ -430,6 +444,110 @@ class WhatsAppNotifier(BaseNotifier):
 
 
 # ------------------------------------------------------------------ #
+# Web 面板通知（平台无关）
+# ------------------------------------------------------------------ #
+
+class WebNotifier(BaseNotifier):
+    """
+    将通知写入 SQLite `web_notifications` 表，由 Web 面板 SSE 端点推送给浏览器。
+
+    与 iMessage/Telegram 等渠道不同，WebNotifier 是全局单例（monitor.py 持有），
+    不对应某个具体用户，所有事件都写入同一张表，面板统一展示。
+
+    Parameters
+    ----------
+    storage : Storage 实例（monitor.py 的全局实例，而非 web.py 的只读副本）
+
+    平台
+    ----
+    在 macOS / Linux / Windows / Docker 中均可运行，无系统依赖。
+    """
+
+    def __init__(self, storage: "Storage") -> None:
+        self._storage = storage
+
+    # 覆盖高层方法，直接构造结构化通知，不走 _format_*() 纯文本路径
+
+    async def send_new_listing(self, listing: Listing) -> bool:
+        status_icon = "🎰" if "lottery" in listing.status.lower() else "✅"
+        self._storage.add_web_notification(
+            type="new_listing",
+            title=f"{status_icon} 新房源：{listing.name}",
+            body=(
+                f"{listing.status} · {listing.price_display}/月"
+                f" · 入住 {listing.available_from or '待定'}"
+            ),
+            url=listing.url,
+            listing_id=listing.id,
+        )
+        return True
+
+    async def send_status_change(
+        self, listing: Listing, old_status: str, new_status: str
+    ) -> bool:
+        icon = "🚀" if "book" in new_status.lower() else "🔄"
+        self._storage.add_web_notification(
+            type="status_change",
+            title=f"{icon} 状态变更：{listing.name}",
+            body=f"{old_status} → {new_status} · {listing.price_display}/月",
+            url=listing.url,
+            listing_id=listing.id,
+        )
+        return True
+
+    async def send_heartbeat(self, total_in_db: int, round_count: int) -> bool:
+        self._storage.add_web_notification(
+            type="heartbeat",
+            title=f"💓 监控心跳 #{round_count}",
+            body=f"数据库房源总数：{total_in_db}",
+        )
+        return True
+
+    async def send_error(self, message: str) -> bool:
+        self._storage.add_web_notification(
+            type="error",
+            title="⚠️ 监控异常",
+            body=message,
+        )
+        return True
+
+    async def send_booking_success(
+        self,
+        listing: Listing,
+        detail: str,
+        pay_url: str = "",
+        contract_start_date: str = "",
+    ) -> bool:
+        start = contract_start_date or listing.available_from or "待定"
+        self._storage.add_web_notification(
+            type="booking",
+            title=f"🛒 预订成功：{listing.name}",
+            body=f"入住 {start} · {listing.price_display}/月",
+            url=pay_url or listing.url,
+            listing_id=listing.id,
+        )
+        return True
+
+    async def send_booking_failed(self, listing: Listing, reason: str) -> bool:
+        self._storage.add_web_notification(
+            type="booking",
+            title=f"❌ 预订失败：{listing.name}",
+            body=reason,
+            url=listing.url,
+            listing_id=listing.id,
+        )
+        return True
+
+    async def _send(self, text: str) -> bool:
+        # 兜底：直接调用 _send() 时写入通用通知
+        self._storage.add_web_notification(type="error", title="通知", body=text)
+        return True
+
+    async def close(self) -> None:
+        pass
+
+
+# ------------------------------------------------------------------ #
 # 工厂函数
 # ------------------------------------------------------------------ #
 
@@ -456,7 +574,13 @@ def create_user_notifier(user) -> BaseNotifier:
     for channel in user.notification_channels:
         ch = channel.strip().lower()
         if ch == "imessage":
-            if user.imessage_recipient:
+            if not is_macos():
+                logger.warning(
+                    "[%s] iMessage 仅支持 macOS，当前平台（%s）已跳过。"
+                    " 请改用 Telegram / Email 等渠道，或通过 Web 面板查看通知。",
+                    user.name, sys.platform,
+                )
+            elif user.imessage_recipient:
                 notifiers.append(IMessageNotifier(user.imessage_recipient))
                 logger.info("[%s] 通知渠道: iMessage → %s", user.name, user.imessage_recipient)
             else:

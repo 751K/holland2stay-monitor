@@ -52,7 +52,7 @@ from dotenv import load_dotenv
 
 from booker import try_book
 from config import DATA_DIR, ENV_PATH, load_config
-from notifier import BaseNotifier, create_user_notifier
+from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from scraper import RateLimitError, scrape_all
 from storage import Storage
 from users import USERS_FILE, UserConfig, load_users, migrate_from_env, save_users
@@ -210,6 +210,7 @@ async def run_once(
     storage: Storage,
     user_notifiers: UserNotifiers,
     *,
+    web_notifier: WebNotifier | None = None,
     dry_run: bool = False,
 ) -> None:
     """
@@ -256,16 +257,20 @@ async def run_once(
         # 429 需要更长冷却，上传给 main_loop 单独处理（不走普通 10s 恢复路径）
         logger.warning("⚠️  抓取被限流: %s", e)
         if not dry_run:
+            err_msg = f"⚠️ 抓取被限流（429）\n{e}\n监控将暂停 5 分钟后继续。"
             for _, notifier in user_notifiers:
-                await notifier.send_error(
-                    f"⚠️ 抓取被限流（429）\n{e}\n监控将暂停 5 分钟后继续。"
-                )
+                await notifier.send_error(err_msg)
+            if web_notifier:
+                await web_notifier.send_error(err_msg)
         raise
     except Exception as e:
         logger.error("抓取全部失败: %s", e, exc_info=True)
         if not dry_run:
+            err_msg = f"抓取失败: {e}"
             for _, notifier in user_notifiers:
-                await notifier.send_error(f"抓取失败: {e}")
+                await notifier.send_error(err_msg)
+            if web_notifier:
+                await web_notifier.send_error(err_msg)
         return
 
     logger.info("本次抓取共 %d 条房源", len(fresh))
@@ -366,6 +371,10 @@ async def run_once(
                 notified_this = True
                 total_notified += 1
 
+        # Web 面板通知（每条新房源写一次，与用户过滤无关）
+        if web_notifier:
+            await web_notifier.send_new_listing(listing)
+
         if notified_this:
             storage.mark_notified(listing.id)
 
@@ -382,6 +391,10 @@ async def run_once(
             if ok:
                 notified_this = True
 
+        # Web 面板通知（每次状态变更写一次，与用户过滤无关）
+        if web_notifier:
+            await web_notifier.send_status_change(listing, old_status, new_status)
+
         if notified_this:
             storage.mark_status_change_notified(listing.id)
 
@@ -394,6 +407,10 @@ async def run_once(
             sent = await notifier.send_booking_success(
                 target, result.message, result.pay_url, result.contract_start_date
             )
+            if web_notifier:
+                await web_notifier.send_booking_success(
+                    target, result.message, result.pay_url, result.contract_start_date
+                )
             if not sent:
                 # 通知发送失败（渠道关闭/配置错误/网络问题），付款链接必须保留在日志中
                 # 使用 CRITICAL 级别确保即使 LOG_LEVEL=WARNING 也能被看到
@@ -405,6 +422,8 @@ async def run_once(
                 )
         else:
             await notifier.send_booking_failed(target, result.message)
+            if web_notifier:
+                await web_notifier.send_booking_failed(target, result.message)
 
     logger.info(
         "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
@@ -423,7 +442,12 @@ def _build_user_notifiers(users: list[UserConfig]) -> UserNotifiers:
     return [(u, create_user_notifier(u)) for u in users if u.enabled]
 
 
-async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> None:
+async def main_loop(
+    cfg,
+    storage: Storage,
+    user_notifiers: UserNotifiers,
+    web_notifier: WebNotifier | None = None,
+) -> None:
     """
     持续运行的主循环（`python monitor.py` 默认入口）。
 
@@ -499,7 +523,7 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
 
             logger.info("===== 第 %d 轮 %s=====", round_count, peak_tag)
 
-            await run_once(cfg, storage, user_notifiers)
+            await run_once(cfg, storage, user_notifiers, web_notifier=web_notifier)
 
             # 成功：高峰期将自适应间隔缩短 5%（逐步逼近 min_interval）
             if is_peak:
@@ -515,6 +539,8 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
                 total = storage.count_all()
                 for _, notifier in user_notifiers:
                     await notifier.send_heartbeat(total_in_db=total, round_count=round_count)
+                if web_notifier:
+                    await web_notifier.send_heartbeat(total_in_db=total, round_count=round_count)
 
             actual = _apply_jitter(effective_interval, cfg.jitter_ratio)
             logger.info(
@@ -639,14 +665,18 @@ async def _async_main() -> None:
     if not user_notifiers:
         logger.warning("没有启用的用户，通知功能不可用（监控仍会写库）")
 
+    # Web 面板通知：与平台无关，始终创建
+    web_notifier = WebNotifier(storage)
+    logger.info("Web 面板通知已启用（所有事件将写入 web_notifications 表）")
+
     _write_pid()
     _setup_signals(asyncio.get_running_loop())
 
     try:
         if args.once:
-            await run_once(cfg, storage, user_notifiers)
+            await run_once(cfg, storage, user_notifiers, web_notifier=web_notifier)
         else:
-            await main_loop(cfg, storage, user_notifiers)
+            await main_loop(cfg, storage, user_notifiers, web_notifier=web_notifier)
     finally:
         storage.close()
         for _, n in user_notifiers:

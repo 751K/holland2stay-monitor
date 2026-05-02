@@ -15,6 +15,7 @@ import re
 import secrets
 import signal
 import sys
+import time as _time
 import uuid
 from datetime import datetime, timezone
 from functools import wraps
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values, set_key
-from flask import Flask, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, url_for
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (  # noqa: E402
@@ -745,6 +746,114 @@ def api_reload():
 
 
 # ------------------------------------------------------------------ #
+# API — Web 通知
+# ------------------------------------------------------------------ #
+
+@app.route("/api/notifications")
+@api_login_required
+def api_notifications():
+    """
+    分页查询 Web 通知列表。
+
+    Query params
+    ------------
+    limit  : 每页条数，默认 50，最大 200
+    offset : 分页偏移，默认 0
+    """
+    try:
+        limit  = min(int(request.args.get("limit",  50)), 200)
+        offset = max(int(request.args.get("offset",  0)),   0)
+    except (TypeError, ValueError):
+        limit, offset = 50, 0
+
+    storage = _storage()
+    try:
+        rows   = storage.get_notifications(limit=limit, offset=offset)
+        unread = storage.count_unread_notifications()
+    finally:
+        storage.close()
+
+    return jsonify({"ok": True, "notifications": rows, "unread": unread})
+
+
+@app.route("/api/notifications/read", methods=["POST"])
+@api_login_required
+@csrf_required
+def api_notifications_read():
+    """标记所有通知为已读（或指定 ids 数组）。"""
+    data = request.get_json(silent=True) or {}
+    ids  = data.get("ids")  # None → 全部；list[int] → 指定
+
+    storage = _storage()
+    try:
+        storage.mark_notifications_read(ids=ids)
+    finally:
+        storage.close()
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/events")
+@api_login_required
+def api_events():
+    """
+    SSE（Server-Sent Events）端点，每 5 秒推送增量通知给浏览器。
+
+    浏览器通过 EventSource('/api/events?last_id=N') 订阅。
+    若有新通知，发送 `data: <JSON数组>\n\n`；否则发送保活注释 `: keepalive\n\n`。
+    浏览器断连后，在下次 yield 时捕获 GeneratorExit 静默退出。
+
+    注意
+    ----
+    Flask 开发服务器启用 threaded=True（见 main()）才能同时服务多个 SSE 连接。
+    在 Gunicorn 等生产 WSGI 中，应使用 gevent/eventlet worker 或 --workers=1。
+    """
+    try:
+        last_id = int(request.args.get("last_id", 0))
+    except (TypeError, ValueError):
+        last_id = 0
+
+    def _generate():
+        nonlocal last_id
+        try:
+            while True:
+                st = _storage()
+                try:
+                    rows = st.get_notifications_since(last_id)
+                finally:
+                    st.close()
+
+                if rows:
+                    last_id = rows[-1]["id"]
+                    payload = json.dumps(rows, ensure_ascii=False)
+                    yield f"data: {payload}\n\n"
+                else:
+                    yield ": keepalive\n\n"
+
+                _time.sleep(5)
+        except GeneratorExit:
+            pass
+
+    return Response(
+        _generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",   # 禁用 Nginx 缓冲，确保实时推送
+            "Connection": "keep-alive",
+        },
+    )
+
+
+@app.route("/api/platform")
+@api_login_required
+def api_platform():
+    """返回服务器平台信息，用于面板判断 iMessage 是否可用。"""
+    import sys as _sys
+    return jsonify({"macos": _sys.platform == "darwin", "platform": _sys.platform})
+
+
+# ------------------------------------------------------------------ #
 # 入口
 # ------------------------------------------------------------------ #
 
@@ -754,7 +863,8 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
     print(f"Web 面板运行中 → http://{args.host}:{args.port}")
-    app.run(host=args.host, port=args.port, debug=False)
+    # threaded=True：允许多个 SSE 连接并发（每个连接占用一个线程）
+    app.run(host=args.host, port=args.port, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
