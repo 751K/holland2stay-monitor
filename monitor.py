@@ -53,7 +53,7 @@ from dotenv import load_dotenv
 from booker import try_book
 from config import DATA_DIR, ENV_PATH, load_config
 from notifier import BaseNotifier, create_user_notifier
-from scraper import scrape_all
+from scraper import RateLimitError, scrape_all
 from storage import Storage
 from users import USERS_FILE, UserConfig, load_users, migrate_from_env, save_users
 
@@ -67,6 +67,12 @@ def _setup_logging(level: str) -> None:
 logger = logging.getLogger("monitor")
 
 HEARTBEAT_EVERY = 12   # 默认 5min * 12 = 1h
+
+# 自适应轮询参数（固定，不需要用户配置）
+# 每轮成功后将当前间隔乘以此系数（5% 缩短），缓慢逼近 min_interval
+_ADAPTIVE_DECREASE = 0.95
+# 遭遇 429 后将当前间隔乘以此系数（翻倍），快速退避
+_ADAPTIVE_INCREASE = 2.0
 
 _PID_FILE = DATA_DIR / "monitor.pid"
 _RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
@@ -246,6 +252,15 @@ async def run_once(
         fresh = await asyncio.get_running_loop().run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
         )
+    except RateLimitError as e:
+        # 429 需要更长冷却，上传给 main_loop 单独处理（不走普通 10s 恢复路径）
+        logger.warning("⚠️  抓取被限流: %s", e)
+        if not dry_run:
+            for _, notifier in user_notifiers:
+                await notifier.send_error(
+                    f"⚠️ 抓取被限流（429）\n{e}\n监控将暂停 5 分钟后继续。"
+                )
+        raise
     except Exception as e:
         logger.error("抓取全部失败: %s", e, exc_info=True)
         if not dry_run:
@@ -431,9 +446,15 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
     _reload_event = asyncio.Event()
 
     round_count = 0
+
+    # 自适应高峰间隔：从 peak_interval 出发，成功则缩短，限流则翻倍退避。
+    # 非高峰时重置，确保下次高峰期从 peak_interval 重新开始探测。
+    adaptive_peak: float = float(cfg.peak_interval)
+
     logger.info(
-        "监控启动，常规间隔 %d 秒，高峰期间隔 %d 秒（%s–%s 荷兰时间），城市: %s，用户: %d 个",
-        cfg.check_interval, cfg.peak_interval, cfg.peak_start, cfg.peak_end,
+        "监控启动，常规间隔 %d 秒，高峰期自适应 %d–%d 秒（%s–%s 荷兰时间），城市: %s，用户: %d 个",
+        cfg.check_interval, cfg.min_interval, cfg.peak_interval,
+        cfg.peak_start, cfg.peak_end,
         [c.name for c in cfg.cities], len(user_notifiers),
     )
     # 启动时打印每个用户的自动预订状态，并检查通知渠道是否可用
@@ -464,22 +485,42 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
     while True:
         round_count += 1
         try:
-            interval, is_peak = _get_interval(cfg)
-            peak_tag = "【高峰期】" if is_peak else ""
+            base_interval, is_peak = _get_interval(cfg)
+
+            if is_peak:
+                # 高峰期：使用自适应间隔，在 [min_interval, peak_interval] 范围内浮动
+                effective_interval = max(cfg.min_interval, int(adaptive_peak))
+                peak_tag = f"【高峰期 {effective_interval}s】"
+            else:
+                # 非高峰期：使用常规间隔，同时重置自适应（为下次高峰期做准备）
+                effective_interval = base_interval
+                adaptive_peak = float(cfg.peak_interval)
+                peak_tag = ""
+
             logger.info("===== 第 %d 轮 %s=====", round_count, peak_tag)
 
             await run_once(cfg, storage, user_notifiers)
+
+            # 成功：高峰期将自适应间隔缩短 5%（逐步逼近 min_interval）
+            if is_peak:
+                prev = adaptive_peak
+                adaptive_peak = max(float(cfg.min_interval), adaptive_peak * _ADAPTIVE_DECREASE)
+                if int(prev) != int(adaptive_peak):
+                    logger.info(
+                        "🔽 自适应间隔: %d → %d 秒（下限 %d 秒）",
+                        int(prev), int(adaptive_peak), cfg.min_interval,
+                    )
 
             if round_count % HEARTBEAT_EVERY == 0:
                 total = storage.count_all()
                 for _, notifier in user_notifiers:
                     await notifier.send_heartbeat(total_in_db=total, round_count=round_count)
 
-            actual = _apply_jitter(interval, cfg.jitter_ratio)
+            actual = _apply_jitter(effective_interval, cfg.jitter_ratio)
             logger.info(
                 "等待 %d 秒（基准 %d s，±%.0f%% 抖动）%s",
-                actual, interval, cfg.jitter_ratio * 100,
-                "（高峰期加速）" if is_peak else "",
+                actual, effective_interval, cfg.jitter_ratio * 100,
+                "（高峰期自适应）" if is_peak else "",
             )
 
             # 等待下一轮：超时正常继续；SIGHUP 或 reload 文件触发则热重载。
@@ -515,16 +556,29 @@ async def main_loop(cfg, storage: Storage, user_notifiers: UserNotifiers) -> Non
                     for _, n in user_notifiers:
                         await n.close()
                     user_notifiers = _build_user_notifiers(users)
+                    # 热重载后重置自适应间隔（用户可能改了 peak_interval / min_interval）
+                    adaptive_peak = float(cfg.peak_interval)
                     logger.info(
-                        "配置已热重载：城市=%s  用户=%d  间隔=%ds  高峰=%ds(%s–%s)",
+                        "配置已热重载：城市=%s  用户=%d  间隔=%ds  高峰自适应=%d–%ds(%s–%s)",
                         [c.name for c in cfg.cities], len(user_notifiers),
-                        cfg.check_interval, cfg.peak_interval, cfg.peak_start, cfg.peak_end,
+                        cfg.check_interval, cfg.min_interval, cfg.peak_interval,
+                        cfg.peak_start, cfg.peak_end,
                     )
                 except Exception as e:
                     logger.error("热重载失败，继续使用旧配置: %s", e)
 
         except asyncio.CancelledError:
             raise  # 允许正常关闭（KeyboardInterrupt 等）
+        except RateLimitError:
+            # 被限流：自适应间隔翻倍退避，然后冷却 5 分钟
+            prev = adaptive_peak
+            adaptive_peak = min(float(cfg.check_interval), adaptive_peak * _ADAPTIVE_INCREASE)
+            cooldown = _apply_jitter(300, cfg.jitter_ratio)
+            logger.warning(
+                "⚠️  触发限流，自适应间隔 %d → %d 秒，冷却 %d 秒后继续",
+                int(prev), int(adaptive_peak), cooldown,
+            )
+            await asyncio.sleep(cooldown)
         except Exception as e:
             # 任何未预期异常：记录并等待 10 秒后继续，而不是静默退出
             logger.exception("主循环出现异常，10 秒后继续: %s", e)
