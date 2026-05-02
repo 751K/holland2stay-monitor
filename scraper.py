@@ -26,7 +26,9 @@ scraper.py — Holland2Stay 房源抓取
 from __future__ import annotations
 
 import logging
+import os
 import re
+import time
 from typing import Optional
 
 import curl_cffi.requests as req
@@ -36,6 +38,20 @@ from models import Listing
 logger = logging.getLogger(__name__)
 
 GQL_URL = "https://api.holland2stay.com/graphql/"
+
+
+class RateLimitError(Exception):
+    """
+    Holland2Stay API 持续返回 429 Too Many Requests，所有重试均已耗尽。
+
+    由 _post_gql() 抛出，经 _scrape_city_pages() / scrape_all() 上传，
+    最终由 monitor.py 的 main_loop 捕获并触发冷却期。
+    """
+
+
+# 429 退避策略：依次等待这些秒数后重试。
+# 两次重试 = 最多额外等待 90 秒后才放弃并抛出 RateLimitError。
+_RATE_LIMIT_BACKOFF: tuple[int, ...] = (30, 60)
 
 # GraphQL 查询模板。
 # %s → city/availability filter 字符串（由 _build_filter 生成）
@@ -78,6 +94,45 @@ _HEADERS = {
     "Referer": "https://www.holland2stay.com/",
     "Accept": "application/json",
 }
+
+
+def _post_gql(session: req.Session, query: str) -> dict:
+    """
+    发送单次 GraphQL POST 请求，遇 429 自动退避重试。
+
+    重试策略
+    --------
+    依次等待 _RATE_LIMIT_BACKOFF 中各值后重试，全部耗尽仍 429 则抛 RateLimitError。
+    sleep 在 executor 线程中执行，不阻塞 asyncio 事件循环。
+
+    Returns
+    -------
+    resp.json() 返回的完整 dict（含 data / errors 字段，由调用方检查）
+
+    Raises
+    ------
+    RateLimitError  重试耗尽仍 429
+    HTTPError       其他 4xx/5xx
+    Exception       网络超时、JSON 解析失败等
+    """
+    for attempt, wait in enumerate([0] + list(_RATE_LIMIT_BACKOFF)):
+        if wait:
+            logger.warning(
+                "收到 429 Too Many Requests，第 %d/%d 次退避，等待 %d 秒…",
+                attempt, len(_RATE_LIMIT_BACKOFF), wait,
+            )
+            time.sleep(wait)
+        resp = session.post(GQL_URL, json={"query": query}, headers=_HEADERS, timeout=30)
+        if resp.status_code == 429:
+            continue          # 触发下一次重试
+        resp.raise_for_status()
+        return resp.json()
+
+    raise RateLimitError(
+        f"API 持续返回 429（已退避重试 {len(_RATE_LIMIT_BACKOFF)} 次）。"
+        "请降低轮询频率（CHECK_INTERVAL / PEAK_INTERVAL）或配置 HTTPS_PROXY。"
+    )
+
 
 # 只提取这些属性，其余忽略，减少处理量。
 # 增加新属性时需同时更新 _to_listing() 中的解析逻辑。
@@ -267,14 +322,9 @@ def _scrape_city_pages(
 
         logger.info("[%s] 抓取第 %d 页", city_name, current_page)
         try:
-            resp = session.post(
-                GQL_URL,
-                json={"query": query},
-                headers=_HEADERS,
-                timeout=30,
-            )
-            resp.raise_for_status()
-            data = resp.json()
+            data = _post_gql(session, query)
+        except RateLimitError:
+            raise   # 直接上传，不降级为普通失败
         except Exception as e:
             logger.error("[%s] 请求失败: %s", city_name, e)
             break
@@ -328,13 +378,24 @@ def scrape_all(
     副作用
     ------
     每次调用都创建一个新的 curl_cffi Session（TCP 连接不跨调用复用）。
+    代理通过 HTTPS_PROXY / HTTP_PROXY 环境变量控制，热重载时自动生效。
+
+    Raises
+    ------
+    RateLimitError  任意城市遭遇持续 429（已退避重试仍失败），直接上传给 monitor
     """
     if availability_ids is None:
         availability_ids = ["179", "336"]
 
+    # 代理：读取环境变量（HTTPS_PROXY 优先），支持 socks5:// 和 http:// 格式
+    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+    proxies = {"https": proxy, "http": proxy} if proxy else {}
+    if proxy:
+        logger.debug("使用代理: %s", proxy)
+
     all_listings: list[Listing] = []
 
-    with req.Session(impersonate="chrome110") as session:
+    with req.Session(impersonate="chrome110", proxies=proxies) as session:
         for city_name, city_id in city_tasks:
             try:
                 listings = _scrape_city_pages(
@@ -344,6 +405,8 @@ def scrape_all(
                     availability_ids=availability_ids,
                 )
                 all_listings.extend(listings)
+            except RateLimitError:
+                raise   # 429 是 IP 级别的，不是单城市失败，直接上传
             except Exception as e:
                 logger.error("[%s] 抓取失败: %s", city_name, e, exc_info=True)
 
