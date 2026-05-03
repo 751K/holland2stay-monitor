@@ -307,6 +307,7 @@ FLASK_SECRET=          # auto-generated and written to .env on first run
 CHECK_INTERVAL=300     # normal polling interval (seconds)
 CITIES=Eindhoven,29    # monitored cities (use | to separate multiple)
 LOG_LEVEL=INFO
+TIMEZONE=Europe/Amsterdam  # IANA timezone for chart day boundaries & peak-hour clock
 
 # Adaptive smart polling (peak hours)
 PEAK_INTERVAL=60       # peak starting interval / backoff target (seconds)

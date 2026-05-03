@@ -312,6 +312,7 @@ FLASK_SECRET=               # 留空则自动生成并写入 .env
 CHECK_INTERVAL=300          # 常规轮询间隔（秒）
 CITIES=Eindhoven,29         # 监控城市，多城市用 | 分隔，建议在 Web 面板勾选
 LOG_LEVEL=INFO              # DEBUG / INFO / WARNING / ERROR
+TIMEZONE=Europe/Amsterdam     # IANA 时区，用于图表天边界对齐和高峰时段判定
 
 # ── 自适应智能轮询（高峰期）──────────────────────────────────────
 PEAK_INTERVAL=60            # 高峰期起始间隔 / 退避目标（秒）
