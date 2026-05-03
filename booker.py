@@ -421,15 +421,16 @@ def add_to_cart(
     resp.raise_for_status()
     raw = resp.json()
 
-    # 详细记录原始响应（仅 DEBUG 级别）
+    # 记录原始响应
     logger.debug("addNewBooking raw response: %s", raw)
 
     # GraphQL 层错误（比如字段不存在、类型错误）
     if "errors" in raw:
         msgs = "; ".join(e.get("message", "") for e in raw["errors"])
+        logger.error("addNewBooking GraphQL 层错误: %s", msgs)
         # 若同时含有 data，说明是 partial error，先看 user_errors
         if not raw.get("data"):
-            raise RuntimeError(f"GraphQL 错误: {msgs}")
+            raise RuntimeError(f"addNewBooking GraphQL 错误: {msgs}")
 
     result = (raw.get("data") or {}).get("addNewBooking") or {}
     user_errors = result.get("user_errors") or []
@@ -437,6 +438,7 @@ def add_to_cart(
         msgs = "; ".join(
             f"[{e.get('code','?')}] {e.get('message','')}" for e in user_errors
         )
+        logger.error("addNewBooking 业务错误: %s", msgs)
         raise RuntimeError(f"加入购物车失败: {msgs}")
 
     logger.info("加入购物车成功")
@@ -496,7 +498,11 @@ def place_order_and_pay(
       }
     }
     '''
-    _gql(session, q, token=token, variables={"cartId": cart_id, "code": payment_method})
+    try:
+        _gql(session, q, token=token, variables={"cartId": cart_id, "code": payment_method})
+    except Exception as e:
+        logger.error("setPaymentMethodOnCart 失败 (%.2fs): %s", time.monotonic() - tp0, e)
+        raise
     t_setpay = time.monotonic() - tp0
     logger.debug("支付方式已设置: %s  (%.2fs)", payment_method, t_setpay)
 
@@ -510,14 +516,22 @@ def place_order_and_pay(
       }
     }
     '''
-    data = _gql(session, q, token=token, variables={"cartId": cart_id})
+    try:
+        data = _gql(session, q, token=token, variables={"cartId": cart_id})
+    except Exception as e:
+        logger.error("placeOrder GraphQL 层失败 (%.2fs): %s", time.monotonic() - tp1, e)
+        raise
     order_result = (data.get("placeOrder") or {})
     errs = order_result.get("errors") or []
     if errs:
+        t_place = time.monotonic() - tp1
         msgs = "; ".join(e.get("message","") for e in errs)
+        logger.error("placeOrder 业务错误 (%.2fs): %s", t_place, msgs)
         raise RuntimeError(f"下单失败: {msgs}")
     order_number = (order_result.get("orderV2") or {}).get("number")
     if not order_number:
+        t_place = time.monotonic() - tp1
+        logger.error("placeOrder 未返回订单号 (%.2fs)", t_place)
         raise RuntimeError("下单失败：未获取到订单号")
     t_place = time.monotonic() - tp1
     logger.info("订单创建成功: #%s  (%.2fs)", order_number, t_place)
@@ -532,9 +546,15 @@ def place_order_and_pay(
       }
     }
     '''
-    data = _gql(session, q, token=token, variables={"orderId": order_number})
+    try:
+        data = _gql(session, q, token=token, variables={"orderId": order_number})
+    except Exception as e:
+        logger.error("idealCheckOut 失败 (%.2fs): %s", time.monotonic() - tp2, e)
+        raise
     pay_url = (data.get("idealCheckOut") or {}).get("redirect")
     if not pay_url:
+        t_ideal = time.monotonic() - tp2
+        logger.error("idealCheckOut 未返回支付链接 (%.2fs)", t_ideal)
         raise RuntimeError(f"未能获取支付链接 (order #{order_number})")
     t_ideal = time.monotonic() - tp2
     logger.info(
@@ -719,12 +739,13 @@ def try_book(
                 elif _is_reserved_by_user(err_str):
                     if not cancel_enabled:
                         phase = "reserved_conflict"
-                        logger.info(
-                            "[%s] 账号已有预留单且 cancel_enabled=false，直接通知用户",
-                            listing.name,
+                        logger.warning(
+                            "[%s] 预留单冲突，原始错误: %s",
+                            listing.name, err_str,
                         )
                         raise RuntimeError(
                             "该账号尚有未完成的预留订单，请登录 Holland2Stay 手动取消后再试。\n\n"
+                            f"📋 原始错误：{err_str}\n\n"
                             f"💡 手动预订入口：\n{booking_url}"
                         ) from order_err
 
@@ -772,8 +793,10 @@ def try_book(
         except Exception as e:
             total = time.monotonic() - t0
             logger.error(
-                "[%s]%s 预订失败 (%s) | 耗时 total=%.1fs",
-                listing.name, " [DRY RUN]" if dry_run else "", phase, total,
+                "[%s]%s 预订失败 (%s) | 耗时 total=%.1fs | 原始错误: %s",
+                listing.name, " [DRY RUN]" if dry_run else "",
+                phase, total, e,
+                exc_info=True,
             )
             return BookingResult(listing, False, str(e))
 
