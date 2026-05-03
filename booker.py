@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Optional
 
 import curl_cffi.requests as req
@@ -49,6 +50,11 @@ import curl_cffi.requests as req
 from models import Listing
 
 logger = logging.getLogger(__name__)
+
+# GraphQL 标识符合法字符集（field/mutation 名称只能含 [A-Za-z_][A-Za-z0-9_]*）
+# 用于校验 cancel_pending_orders 中从 schema 内省取回的 mutation 名称，
+# 防止服务端返回畸形名称时被插入 mutation 字符串。
+_GQL_IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 GQL_URL = "https://api.holland2stay.com/graphql/"
 
@@ -235,9 +241,9 @@ def _truncate_cart(session: req.Session, token: str, cart_id: str) -> None:
 
     失败不抛出异常，只记录 warning，不阻断后续预订流程。
     """
-    query = f'mutation {{ truncateCart(cart_id: "{cart_id}") {{ status }} }}'
+    query = 'mutation TruncateCart($cartId: String!) { truncateCart(cart_id: $cartId) { status } }'
     try:
-        data = _gql(session, query, token=token)
+        data = _gql(session, query, token=token, variables={"cartId": cart_id})
         ok = (data.get("truncateCart") or {}).get("status")
         logger.debug("购物车已清空 status=%s", ok)
     except Exception as e:
@@ -329,10 +335,16 @@ def cancel_pending_orders(session: req.Session, token: str) -> int:
     for order_uid, order_number in to_cancel:
         success = False
         for mut in cancel_mutations:
+            # mutation 名称来自 schema 内省，必须通过标识符校验，
+            # 才允许插入 mutation 字符串（名称本身不能用 GraphQL variable 传递）
+            if not _GQL_IDENT_RE.match(mut):
+                logger.warning("跳过非法 mutation 名称: %r", mut)
+                continue
             try:
                 # 先尝试只传 order_id（Holland2Stay 自定义 mutation 可能不需要 reason）
-                q = f'mutation {{ {mut}(input: {{ order_id: "{order_uid}" }}) {{ error errorV2 {{ message code }} }} }}'
-                result = _gql(session, q, token=token)
+                # order_id 值通过 variables 传递，不插入 mutation 字符串
+                q = f'mutation Cancel($orderId: String!) {{ {mut}(input: {{ order_id: $orderId }}) {{ error errorV2 {{ message code }} }} }}'
+                result = _gql(session, q, token=token, variables={"orderId": order_uid})
                 cancel_result = result.get(mut) or {}
                 err = cancel_result.get("error") or (cancel_result.get("errorV2") or {}).get("message")
                 if err:
@@ -344,11 +356,11 @@ def cancel_pending_orders(session: req.Session, token: str) -> int:
                 break
             except Exception as e:
                 err_str = str(e)
-                # 如果缺少 reason 字段，补上重试
+                # 如果缺少 reason 字段，补上重试（reason 为常量字符串，直接内联）
                 if "reason" in err_str.lower():
                     try:
-                        q = f'mutation {{ {mut}(input: {{ order_id: "{order_uid}", reason: "Replaced by new booking" }}) {{ error errorV2 {{ message code }} }} }}'
-                        result = _gql(session, q, token=token)
+                        q = f'mutation Cancel($orderId: String!) {{ {mut}(input: {{ order_id: $orderId, reason: "Replaced by new booking" }}) {{ error errorV2 {{ message code }} }} }}'
+                        result = _gql(session, q, token=token, variables={"orderId": order_uid})
                         cancel_result = result.get(mut) or {}
                         err2 = cancel_result.get("error") or (cancel_result.get("errorV2") or {}).get("message")
                         if not err2:
@@ -412,21 +424,34 @@ def add_to_cart(
     addNewBooking 实际上往购物车加入的是押金项（Deposit €200），
     不是房源本身。后续需调用 placeOrder 才能真正产生订单。
     """
-    date_arg = f', contract_startDate: "{contract_start_date}"' if contract_start_date else ""
-    cid_arg  = f', contract_id: {contract_id}' if contract_id is not None else ""
+    # 所有用户数据（cart_id、sku、日期、合同 ID）通过 GraphQL variables 传递，
+    # 不插入 mutation 字符串，防止注入。
+    # optional 参数需要条件性地出现在 mutation 签名和参数列表中，
+    # 因此用 f-string 控制"有哪些参数"，但参数的值始终来自 variables dict。
+    var_decls = "$cartId: String!, $sku: String!"
+    arg_uses  = "cart_id: $cartId, sku: $sku"
+    variables: dict = {"cartId": cart_id, "sku": sku}
+
+    if contract_start_date:
+        var_decls += ", $startDate: String!"
+        arg_uses  += ", contract_startDate: $startDate"
+        variables["startDate"] = contract_start_date
+
+    if contract_id is not None:
+        var_decls += ", $contractId: Int!"
+        arg_uses  += ", contract_id: $contractId"
+        variables["contractId"] = contract_id
+
     query = f'''
-    mutation {{
-      addNewBooking(
-        cart_id: "{cart_id}",
-        sku: "{sku}"{date_arg}{cid_arg}
-      ) {{
+    mutation AddNewBooking({var_decls}) {{
+      addNewBooking({arg_uses}) {{
         user_errors {{ code message }}
       }}
     }}
     '''
     resp = session.post(
         GQL_URL,
-        json={"query": query},
+        json={"query": query, "variables": variables},
         headers={**_BASE_HEADERS, "Authorization": f"Bearer {token}"},
         timeout=30,
     )
@@ -496,32 +521,30 @@ def place_order_and_pay(
     支付域名是 account.holland2stay.com（后端 PHP），
     不是 www.holland2stay.com（Next.js 前端），两者是完全不同的系统。
     """
-    auth_header = {**_BASE_HEADERS, "Authorization": f"Bearer {token}"}
-
-    # 1. 设置支付方式
-    q = f'''
-    mutation {{
-      setPaymentMethodOnCart(input: {{
-        cart_id: "{cart_id}",
-        payment_method: {{ code: "{payment_method}" }}
-      }}) {{
-        cart {{ selected_payment_method {{ code }} }}
-      }}
-    }}
+    # 1. 设置支付方式（cart_id、payment_method 均通过 variables 传递）
+    q = '''
+    mutation SetPayment($cartId: String!, $code: String!) {
+      setPaymentMethodOnCart(input: {
+        cart_id: $cartId,
+        payment_method: { code: $code }
+      }) {
+        cart { selected_payment_method { code } }
+      }
+    }
     '''
-    _gql(session, q, token=token)
+    _gql(session, q, token=token, variables={"cartId": cart_id, "code": payment_method})
     logger.debug("支付方式已设置: %s", payment_method)
 
-    # 2. 下单
-    q = f'''
-    mutation {{
-      placeOrder(input: {{ cart_id: "{cart_id}" }}) {{
-        errors {{ message code }}
-        orderV2 {{ number status }}
-      }}
-    }}
+    # 2. 下单（cart_id 通过 variable 传递）
+    q = '''
+    mutation PlaceOrder($cartId: String!) {
+      placeOrder(input: { cart_id: $cartId }) {
+        errors { message code }
+        orderV2 { number status }
+      }
+    }
     '''
-    data = _gql(session, q, token=token)
+    data = _gql(session, q, token=token, variables={"cartId": cart_id})
     order_result = (data.get("placeOrder") or {})
     errs = order_result.get("errors") or []
     if errs:
@@ -532,15 +555,16 @@ def place_order_and_pay(
         raise RuntimeError("下单失败：未获取到订单号")
     logger.info("订单创建成功: #%s", order_number)
 
-    # 3. 生成 iDEAL/idealcheckout 支付跳转链接
-    q = f'''
-    mutation {{
-      idealCheckOut(order_id: "{order_number}", plateform: "web") {{
+    # 3. 生成 iDEAL/idealcheckout 支付跳转链接（order_number 通过 variable 传递）
+    # plateform: "web" 是 H2S API 要求的常量字符串，直接内联
+    q = '''
+    mutation IdealCheckOut($orderId: String!) {
+      idealCheckOut(order_id: $orderId, plateform: "web") {
         redirect
-      }}
-    }}
+      }
+    }
     '''
-    data = _gql(session, q, token=token)
+    data = _gql(session, q, token=token, variables={"orderId": order_number})
     pay_url = (data.get("idealCheckOut") or {}).get("redirect")
     if not pay_url:
         raise RuntimeError(f"未能获取支付链接 (order #{order_number})")
@@ -748,28 +772,28 @@ def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Op
     ------
     RuntimeError 未找到该 url_key 对应的房源时
     """
-    query = f'''
-    {{
-      products(filter: {{
-        category_uid: {{ eq: "Nw==" }}
-        url_key: {{ eq: "{url_key}" }}
-      }}) {{
-        items {{
+    query = '''
+    query GetProduct($urlKey: String!) {
+      products(filter: {
+        category_uid: { eq: "Nw==" }
+        url_key: { eq: $urlKey }
+      }) {
+        items {
           sku
-          custom_attributesV2 {{
-            items {{
+          custom_attributesV2 {
+            items {
               code
-              ... on AttributeValue {{ value }}
-              ... on AttributeSelectedOptions {{
-                selected_options {{ label value }}
-              }}
-            }}
-          }}
-        }}
-      }}
-    }}
+              ... on AttributeValue { value }
+              ... on AttributeSelectedOptions {
+                selected_options { label value }
+              }
+            }
+          }
+        }
+      }
+    }
     '''
-    data = _gql(session, query)
+    data = _gql(session, query, variables={"urlKey": url_key})
     items = data.get("products", {}).get("items") or []
     if not items:
         raise RuntimeError(f"未找到房源: {url_key}")
