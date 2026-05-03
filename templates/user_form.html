@@ -204,8 +204,11 @@
                    value="{{ u.email_username if is_edit else '' }}"
                    placeholder="your@email.com">
             <label class="form-label small mb-1" style="color:var(--muted);">SMTP Password / App Password</label>
+            {# 安全：密码字段不回填 value，防止明文出现在 HTML 源码。
+               有已保存密码时仅通过 placeholder 提示，留空提交 = 保留旧值。 #}
             <input type="password" class="form-control form-control-sm mb-2" name="EMAIL_PASSWORD"
-                   value="{{ u.email_password if is_edit else '' }}">
+                   placeholder="{{ '(已保存，留空保留原密码)' if is_edit and u.email_password else '' }}"
+                   autocomplete="new-password">
             <label class="form-label small mb-1" style="color:var(--muted);">From</label>
             <input type="email" class="form-control form-control-sm mb-2" name="EMAIL_FROM"
                    value="{{ u.email_from if is_edit else '' }}"
@@ -237,8 +240,10 @@
             <input type="text" class="form-control form-control-sm mb-2" name="TWILIO_ACCOUNT_SID"
                    value="{{ u.twilio_sid if is_edit else '' }}">
             <label class="form-label small mb-1" style="color:var(--muted);">Auth Token</label>
+            {# 安全：不回填 value，留空提交 = 保留旧值。 #}
             <input type="password" class="form-control form-control-sm mb-2" name="TWILIO_AUTH_TOKEN"
-                   value="{{ u.twilio_token if is_edit else '' }}">
+                   placeholder="{{ '(已保存，留空保留原令牌)' if is_edit and u.twilio_token else '' }}"
+                   autocomplete="new-password">
             <label class="form-label small mb-1" style="color:var(--muted);">From</label>
             <input type="text" class="form-control form-control-sm mb-2" name="TWILIO_FROM"
                    value="{{ u.twilio_from if is_edit else 'whatsapp:+14155238886' }}"
@@ -352,8 +357,10 @@
         </div>
         <div class="col-12 col-sm-6">
           <label class="form-label small" style="color:var(--muted); font-weight:600;">密码</label>
+          {# 安全：不回填 value，留空提交 = 保留旧值。 #}
           <input type="password" class="form-control form-control-sm" name="AUTO_BOOK_PASSWORD"
-                 value="{{ ab.password if ab else '' }}">
+                 placeholder="{{ '(已保存，留空保留原密码)' if is_edit and ab and ab.password else '' }}"
+                 autocomplete="new-password">
         </div>
       </div>
 
