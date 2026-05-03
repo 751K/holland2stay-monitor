@@ -99,8 +99,14 @@ class Listing:
 
     @property
     def is_available(self) -> bool:
-        """True 表示该房源处于可报名状态（lottery 或可直接预订）。"""
-        return self.status.lower() in ("lottery", "book directly")
+        """
+        True 表示该房源处于可报名状态（可直接预订或抽签）。
+
+        对应 GraphQL available_to_book 属性的两个合法 label：
+          - "Available to book"    → 可直接预订（id=179）
+          - "Available in lottery" → 进入抽签池（id=336）
+        """
+        return self.status.lower() in ("available to book", "available in lottery")
 
     def feature_map(self) -> dict[str, str]:
         """
