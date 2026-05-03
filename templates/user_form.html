@@ -348,6 +348,21 @@
                    value="{{ 'false' if ab and not ab.dry_run else 'true' }}">
           </div>
         </div>
+        <div class="col-auto">
+          <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="ab_cancel"
+                   {% if ab and ab.cancel_enabled %}checked{% endif %}
+                   onchange="document.getElementById('ab_cancel_h').value=this.checked?'true':'false'">
+            <label class="form-check-label" for="ab_cancel">
+              启用自动取消旧订单
+            </label>
+            <input type="hidden" id="ab_cancel_h" name="AUTO_BOOK_CANCEL_ENABLED"
+                   value="{{ 'true' if ab and ab.cancel_enabled else 'false' }}">
+          </div>
+          <div class="form-text" style="font-size:.7rem; color:var(--muted);">
+            H2S 平台默认禁用 cancelOrder；开启前请先确认可用。
+          </div>
+        </div>
       </div>
       <div class="row g-3 mb-3">
         <div class="col-12 col-sm-6">
