@@ -288,10 +288,12 @@ async def run_once(
         print('='*60)
         return
 
+    new_listings, status_changes = storage.diff(fresh)
+
+    # diff() 成功后再写时间戳，确保面板显示的 last_scrape_at 对应一次完整的
+    # "抓取 + 入库" 操作；若 diff() 抛异常，时间戳不会被更新。
     storage.set_meta("last_scrape_at", datetime.now(timezone.utc).isoformat())
     storage.set_meta("last_scrape_count", str(len(fresh)))
-
-    new_listings, status_changes = storage.diff(fresh)
 
     # ── 快速候选预扫描：立即收集候选，抢在发通知之前提交预订 ──────── #
     # 此处只做过滤判断（纯内存），不发任何通知
@@ -633,7 +635,7 @@ async def _async_main() -> None:
         print(json.dumps([l.to_dict() for l in fresh], ensure_ascii=False, indent=2))
         return
 
-    storage = Storage(cfg.db_path)
+    storage = Storage(cfg.db_path, timezone_str=cfg.timezone)
 
     # 加载用户配置；文件损坏时硬停止，避免迁移逻辑覆盖现有数据
     try:

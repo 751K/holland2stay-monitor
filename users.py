@@ -28,7 +28,7 @@ import json
 import logging
 import os
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields as dc_fields
 from pathlib import Path
 from typing import Optional
 
@@ -141,10 +141,31 @@ def _user_from_dict(d: dict) -> UserConfig:
     """
     从 dict 构造 UserConfig，处理嵌套的 listing_filter 和 auto_book。
     兼容旧版本数据（缺失字段使用 dataclass 默认值）。
+
+    未知字段处理
+    ------------
+    直接用 `UserConfig(**d)` 展开时，任何 UserConfig 不认识的 key 都会抛
+    TypeError，导致整个 load_users() 失败（所有用户都无法加载）。
+
+    此处先用 `dataclasses.fields()` 取出合法字段集合，剔除多余 key 并
+    记录 WARNING，再展开剩余字段。典型场景：
+    - 旧版 users.json 存有已被删除的字段
+    - 未来版本新增字段后回滚到旧版代码
+    - 手动编辑 users.json 时误加了多余 key
     """
     d = dict(d)
     lf = _lf_from_dict(d.pop("listing_filter", {}))
     ab = _ab_from_dict(d.pop("auto_book", {}))
+
+    known   = {f.name for f in dc_fields(UserConfig)}
+    unknown = set(d) - known
+    if unknown:
+        logger.warning(
+            "用户 %r 包含未知字段，已忽略（可能来自旧版或新版 users.json）: %s",
+            d.get("name", "?"), sorted(unknown),
+        )
+        d = {k: v for k, v in d.items() if k in known}
+
     return UserConfig(**d, listing_filter=lf, auto_book=ab)
 
 

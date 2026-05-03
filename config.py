@@ -338,6 +338,8 @@ class Config:
     jitter_ratio        : 轮询间隔随机抖动比例（0–0.5），对应 .env JITTER_RATIO；
                           e.g. 0.20 表示实际等待时间在基准值 ±20% 范围内随机浮动，
                           避免多实例在同一时刻集中发起请求
+    timezone            : IANA 时区标识符，用于图表日期分组和智能轮询时段判定，
+                          对应 .env TIMEZONE；默认 Europe/Amsterdam（荷兰时间 CET/CEST）
     """
     check_interval: int
     cities: list[CityFilter]
@@ -350,6 +352,7 @@ class Config:
     peak_weekdays_only: bool = True
     min_interval: int = 15
     jitter_ratio: float = 0.20
+    timezone: str = "Europe/Amsterdam"
 
     def scrape_tasks(self) -> tuple[list[tuple[str, str]], list[str]]:
         """
@@ -384,10 +387,12 @@ def load_config() -> Config:
     PEAK_WEEKDAYS_ONLY      "true"/"false"，默认 "true"
     MIN_INTERVAL            int ≥ 5，默认 "15"（自适应下限，不低于此值）
     JITTER_RATIO            float 0–0.5，默认 "0.20"
+    TIMEZONE                IANA 时区，默认 "Europe/Amsterdam"（荷兰 CET/CEST）
 
     Raises
     ------
     ValueError  若 CITIES 或 AVAILABILITY_FILTERS 中的 ID 不是合法整数
+    ValueError  若 TIMEZONE 不是合法的 IANA 时区标识符
     """
     interval = int(os.environ.get("CHECK_INTERVAL", "300"))
 
@@ -412,6 +417,14 @@ def load_config() -> Config:
     db_path = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 
+    timezone_str = os.environ.get("TIMEZONE", "Europe/Amsterdam")
+    # 启动时校验时区标识符合法性，失败立即报错而非延迟到首次图表查询
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    try:
+        ZoneInfo(timezone_str)
+    except (ZoneInfoNotFoundError, KeyError):
+        raise ValueError(f"无效的 IANA 时区标识符: {timezone_str}")
+
     return Config(
         check_interval=interval,
         cities=cities,
@@ -424,4 +437,5 @@ def load_config() -> Config:
         peak_weekdays_only=os.environ.get("PEAK_WEEKDAYS_ONLY", "true").lower() != "false",
         min_interval=max(5, int(os.environ.get("MIN_INTERVAL", "15"))),
         jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO", "0.20")))),
+        timezone=timezone_str,
     )

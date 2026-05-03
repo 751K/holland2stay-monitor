@@ -67,7 +67,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional
 
@@ -102,17 +103,21 @@ class Storage:
         storage.close()
     """
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, timezone_str: str = "UTC") -> None:
         """
         打开（或创建）SQLite 数据库，自动执行 schema 迁移。
 
         Parameters
         ----------
-        db_path : 数据库文件路径，父目录不存在时自动创建
+        db_path      : 数据库文件路径，父目录不存在时自动创建
+        timezone_str : IANA 时区标识符，用于图表日期分组（默认 UTC）。
+                       部署在 Docker（UTC 时区）时应设为 Europe/Amsterdam
+                       以确保图表按荷兰本地时间划分天边界。
         """
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._tz = timezone_str
         self._migrate()
         logger.debug("Storage 已连接: %s", db_path)
 
@@ -381,7 +386,6 @@ class Storage:
         list[dict]，含 status_changes 全部字段 + listings.name / url / price_raw，
         按 changed_at DESC 排序
         """
-        from datetime import timedelta
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         rows = self._conn.execute(
             """SELECT sc.*, l.name, l.url, l.price_raw
@@ -401,7 +405,6 @@ class Storage:
         ----------
         hours : 时间窗口（小时），默认 24
         """
-        from datetime import timedelta
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         row = self._conn.execute(
             "SELECT COUNT(*) FROM listings WHERE first_seen > ?", (since,)
@@ -416,7 +419,6 @@ class Storage:
         ----------
         hours : 时间窗口（小时），默认 24
         """
-        from datetime import timedelta
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         row = self._conn.execute(
             "SELECT COUNT(*) FROM status_changes WHERE changed_at > ?", (since,)
@@ -510,25 +512,40 @@ class Storage:
 
         Returns
         -------
-        list[{"date": "YYYY-MM-DD", "count": int}]，按日期升序，仅包含有数据的日期
-        （Chart.js 侧负责补零）
+        list[{"date": "YYYY-MM-DD", "count": int}]，按日期升序，含所有日期（无数据的天 count=0）
 
         注意
         ----
-        first_seen 存储为 UTC，此处使用 'localtime' 修饰符转换为服务器本地时间。
-        若服务器时区不在 CET/CEST（荷兰时间），日期边界可能偏移 1-2 小时。
+        first_seen 存储为 UTC，日期分组使用构造时传入的 timezone_str
+        （默认 Europe/Amsterdam），确保 Docker UTC 容器下天边界仍按荷兰本地时间对齐。
         """
+        tz = ZoneInfo(self._tz)
+        now_local = datetime.now(tz)
+        today_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # 起始日期（本地时间 midnight），包含该日
+        start_local = today_local - timedelta(days=days)
+        # WHERE 用 UTC 时间，加 1 天缓冲避免 DST 过渡日遗漏
+        cutoff_utc = (start_local - timedelta(days=1)).isoformat()
+
         rows = self._conn.execute(
-            """
-            SELECT date(first_seen) AS day, COUNT(*) AS cnt
-            FROM listings
-            WHERE first_seen >= date('now', ?, 'localtime')
-            GROUP BY day
-            ORDER BY day
-            """,
-            (f"-{days} days",),
+            "SELECT first_seen FROM listings WHERE first_seen >= ?",
+            (cutoff_utc,),
         ).fetchall()
-        return [{"date": r["day"], "count": r["cnt"]} for r in rows]
+
+        # 按本地日期分组计数
+        day_counts: dict[str, int] = {}
+        for (ts,) in rows:
+            utc_dt = datetime.fromisoformat(ts)
+            local_date = utc_dt.astimezone(tz).strftime("%Y-%m-%d")
+            day_counts[local_date] = day_counts.get(local_date, 0) + 1
+
+        # 生成完整日期序列（旧→新），无数据天补零
+        result: list[dict] = []
+        for i in range(days, -1, -1):
+            d = (today_local - timedelta(days=i)).strftime("%Y-%m-%d")
+            result.append({"date": d, "count": day_counts.get(d, 0)})
+        return result
 
     def chart_daily_changes(self, days: int = 30) -> list[dict]:
         """
@@ -540,19 +557,36 @@ class Storage:
 
         Returns
         -------
-        list[{"date": "YYYY-MM-DD", "count": int}]，按日期升序
+        list[{"date": "YYYY-MM-DD", "count": int}]，按日期升序，含所有日期（无数据的天 count=0）
+
+        注意
+        ----
+        changed_at 存储为 UTC，日期分组使用构造时传入的 timezone_str
+        （默认 Europe/Amsterdam），确保 Docker UTC 容器下天边界仍按荷兰本地时间对齐。
         """
+        tz = ZoneInfo(self._tz)
+        now_local = datetime.now(tz)
+        today_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        start_local = today_local - timedelta(days=days)
+        cutoff_utc = (start_local - timedelta(days=1)).isoformat()
+
         rows = self._conn.execute(
-            """
-            SELECT date(changed_at) AS day, COUNT(*) AS cnt
-            FROM status_changes
-            WHERE changed_at >= date('now', ?, 'localtime')
-            GROUP BY day
-            ORDER BY day
-            """,
-            (f"-{days} days",),
+            "SELECT changed_at FROM status_changes WHERE changed_at >= ?",
+            (cutoff_utc,),
         ).fetchall()
-        return [{"date": r["day"], "count": r["cnt"]} for r in rows]
+
+        day_counts: dict[str, int] = {}
+        for (ts,) in rows:
+            utc_dt = datetime.fromisoformat(ts)
+            local_date = utc_dt.astimezone(tz).strftime("%Y-%m-%d")
+            day_counts[local_date] = day_counts.get(local_date, 0) + 1
+
+        result: list[dict] = []
+        for i in range(days, -1, -1):
+            d = (today_local - timedelta(days=i)).strftime("%Y-%m-%d")
+            result.append({"date": d, "count": day_counts.get(d, 0)})
+        return result
 
     def chart_city_dist(self) -> list[dict]:
         """

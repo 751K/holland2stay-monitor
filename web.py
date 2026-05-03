@@ -45,6 +45,7 @@ from users import UserConfig, get_user, load_users, save_users  # noqa: E402
 # ------------------------------------------------------------------ #
 
 DB_PATH  = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
+TZ       = os.environ.get("TIMEZONE", "Europe/Amsterdam")
 PID_FILE = DATA_DIR / "monitor.pid"
 RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
 
@@ -186,7 +187,7 @@ app.jinja_env.globals["csrf_token"] = _get_csrf_token
 
 
 def _storage() -> Storage:
-    return Storage(DB_PATH)
+    return Storage(DB_PATH, timezone_str=TZ)
 
 
 # ------------------------------------------------------------------ #
@@ -546,6 +547,13 @@ def user_test_notify(user_id: str) -> Any:
 
     results: list[dict] = []
 
+    async def _send_and_close(notifier_obj: Any, msg: str) -> bool:
+        """发送测试消息，无论成功与否都确保关闭 notifier（释放 curl_cffi Session 等）。"""
+        try:
+            return await notifier_obj._send(msg)
+        finally:
+            await notifier_obj.close()
+
     for channel in user.notification_channels:
         ch = channel.strip().lower()
 
@@ -596,7 +604,7 @@ def user_test_notify(user_id: str) -> Any:
             continue
 
         try:
-            ok = asyncio.run(notifier_obj._send(test_msg))
+            ok = asyncio.run(_send_and_close(notifier_obj, test_msg))
             results.append({"channel": label, "ok": ok,
                             "error": None if ok else "发送失败，请检查日志"})
         except Exception as e:
