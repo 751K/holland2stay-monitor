@@ -11,15 +11,19 @@ booker.py — 自动预订模块
        generateCustomerToken mutation → Bearer token
 3. get_or_create_cart()
        customerCart query → cart_id；若购物车有旧条目则 truncateCart 清空
-4. cancel_pending_orders()
-       查询近 10 笔订单，取消所有 pending/reserved 状态的订单，
-       避免 "you have another unit reserved" 错误
-5. add_to_cart()
+4. add_to_cart()
        addNewBooking mutation → 将押金项（Deposit €200）加入购物车
        注意：只请求 user_errors，不请求 cart{}（NON_NULL 传播 bug，见函数注释）
-6. place_order_and_pay()
+5. place_order_and_pay()
        setPaymentMethodOnCart → placeOrder → idealCheckOut → 返回直链付款 URL
        支付域名在 account.holland2stay.com（不是 www），链接无需登录即可直接付款
+       ┣ 若 placeOrder 返回「账号已有预留单」错误：
+       ┃   调用 cancel_pending_orders() 取消旧单，然后重试 place_order_and_pay()
+       ┗ 若 placeOrder 返回「房源已被他人预订」：竞争失败，通知用户含手动预订链接
+
+注意：cancel_pending_orders() 不再在 add_to_cart 之前预先调用。
+该操作涉及 2-5 次额外 HTTP 往返（查询订单 + schema 内省 + 取消 mutation），
+会给关键路径增加 5-15 秒，显著降低在高竞争房源中的成功率。
 
 GraphQL API
 -----------
@@ -53,6 +57,35 @@ _BASE_HEADERS = {
     "Origin": "https://www.holland2stay.com",
     "Referer": "https://www.holland2stay.com/",
 }
+
+
+# ------------------------------------------------------------------ #
+# 错误分类（placeOrder / addNewBooking 业务错误识别）
+# ------------------------------------------------------------------ #
+
+def _is_booked_by_other(msg: str) -> bool:
+    """
+    检查是否是「本房源已被他人抢先预订」错误（竞争失败，无法恢复）。
+
+    对应 H2S 返回：
+      "Sorry, the residence you have selected is already booked by someone else."
+    """
+    return "already booked by someone else" in msg.lower()
+
+
+def _is_reserved_by_user(msg: str) -> bool:
+    """
+    检查是否是「该账号已有其他预留单」错误（可通过取消旧单后重试恢复）。
+
+    对应 H2S 返回：
+      "Sorry, at the moment you have another unit reserved."
+    """
+    low = msg.lower()
+    return (
+        "another unit reserved" in low
+        or "you have another" in low
+        or "at the moment you have" in low
+    )
 
 
 # ------------------------------------------------------------------ #
@@ -585,6 +618,13 @@ def try_book(
     由 monitor.py 的 run_once() 通过 run_in_executor 在线程池中调用
     （此函数是同步的，使用 curl_cffi 同步 HTTP，不能直接在事件循环中 await）。
 
+    下单策略
+    --------
+    为缩短从「检测到 Available to book」到「placeOrder 提交」的时间窗口，
+    本函数不预先执行 cancel_pending_orders（该操作需额外 2-5 次 HTTP 往返）。
+    首次直接尝试 placeOrder；若返回「账号已有预留单」错误，才取消旧单并重试一次。
+    若返回「房源已被他人预订」错误，属竞争失败，不可恢复，直接通知用户。
+
     异常处理
     --------
     所有内部异常均被捕获并转化为 BookingResult(success=False)，不向上传播。
@@ -620,16 +660,48 @@ def try_book(
                 logger.info("[%s] %s", listing.name, msg)
                 return BookingResult(listing, True, msg, dry_run=True)
 
-            # 4b. 取消账号下所有 pending 订单，避免 "already reserved" 冲突
-            logger.debug("[%s] 检查并取消 pending 订单...", listing.name)
-            cancel_pending_orders(session, token)
+            # 注意：不在此处预先调用 cancel_pending_orders()。
+            # 原因：cancel_pending_orders 需要额外 2-5 次 HTTP 往返（查询订单 +
+            # schema 内省 + 取消 mutation），会在关键路径上增加 5-15 秒，
+            # 导致在高竞争房源上极大概率被他人抢先。
+            # 策略：先直接尝试下单；仅在 placeOrder 返回"账号已有预留单"时
+            # 才执行取消并重试（见下方异常处理）。
 
             logger.debug("[%s] 加入购物车 (contract_id=%s, start_date=%s)...", listing.name, contract_id, start_date)
             add_to_cart(session, token, cart_id, sku, start_date, contract_id)
 
             # 5. 下单并生成直接支付链接
-            logger.debug("[%s] 生成支付链接...", listing.name)
-            pay_url = place_order_and_pay(session, token, cart_id)
+            # 首次直接尝试；失败时按错误类型决定是否可重试
+            logger.debug("[%s] 尝试下单...", listing.name)
+            booking_url = f"https://www.holland2stay.com/residences/{listing.id}.html"
+            try:
+                pay_url = place_order_and_pay(session, token, cart_id)
+            except RuntimeError as order_err:
+                err_str = str(order_err)
+
+                if _is_booked_by_other(err_str):
+                    # 房源已被他人抢先占位 —— 竞争失败，无法恢复
+                    logger.warning(
+                        "[%s] 竞争失败：房源已被他人预订 (%s)", listing.name, err_str
+                    )
+                    raise RuntimeError(
+                        f"房源已被他人抢先预订，竞争失败。\n\n"
+                        f"💡 如房源重新开放，可尝试手动预订：\n{booking_url}"
+                    ) from order_err
+
+                elif _is_reserved_by_user(err_str):
+                    # 该账号已有其他预留单 —— 取消旧单后重试一次
+                    logger.info(
+                        "[%s] 账号已有预留单（%s），正在取消后重试...",
+                        listing.name, err_str,
+                    )
+                    cancelled = cancel_pending_orders(session, token)
+                    logger.info("[%s] 已取消 %d 笔旧订单，重新下单...", listing.name, cancelled)
+                    pay_url = place_order_and_pay(session, token, cart_id)
+
+                else:
+                    # 其他未知错误，原样向上传播
+                    raise
 
             msg = (
                 f"✅ 自动预订成功！\n"
