@@ -148,7 +148,9 @@ _RELEVANT_ATTRS = {
     "living_area",           # AttributeValue: "26.0"（m²，无单位）
     "maximum_number_of_persons",  # AttributeSelectedOptions: 入住人数描述
     "neighborhood",          # AttributeValue: 片区名
+    "next_contract_startdate",    # AttributeValue: "2026-06-01"，预订专用入住日期
     "no_of_rooms",           # AttributeSelectedOptions: 房间数 / 户型标签
+    "type_of_contract",      # AttributeSelectedOptions: [{label, value}]，合同类型 ID
 }
 
 
@@ -229,6 +231,9 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
         listing_id = url_key or item.get("sku", "")
         url = f"https://www.holland2stay.com/residences/{url_key}.html"
 
+        # 提取预订所需字段（方案 1：前置抓取，省去 try_book 中的独立查询）
+        sku = item.get("sku", "")
+
         attrs = _parse_attr(item.get("custom_attributesV2", {}).get("items", []))
 
         atb = attrs.get("available_to_book")
@@ -249,6 +254,21 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
 
         avail_date = attrs.get("available_startdate")
         available_from = avail_date.split(" ")[0] if avail_date else None
+
+        # contract_id：从 type_of_contract 属性的 selected_options[0].value 解析
+        contract_id: Optional[int] = None
+        toc = attrs.get("type_of_contract")
+        if isinstance(toc, list) and toc:
+            try:
+                contract_id = int(toc[0]["value"])
+            except (KeyError, ValueError, TypeError):
+                pass
+
+        # contract_start_date：预订专用，优先 next_contract_startdate
+        raw_next = attrs.get("next_contract_startdate")
+        contract_start_date: Optional[str] = None
+        if raw_next:
+            contract_start_date = raw_next.strip()[:10]  # "YYYY-MM-DD"
 
         def label(key: str) -> Optional[str]:
             """取属性的第一个 label（selected_options）或原始字符串值。"""
@@ -282,6 +302,9 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
             features=features,
             url=url,
             city=city_name,
+            sku=sku,
+            contract_id=contract_id,
+            contract_start_date=contract_start_date,
         )
     except Exception as e:
         logger.warning("解析房源失败: %s", e)

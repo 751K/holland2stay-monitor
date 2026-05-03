@@ -48,6 +48,13 @@ class Listing:
                     由 scraper 从多个 custom_attributesV2 属性拼装而来
     url             房源详情页完整 URL
     city            来源城市名，用于多城市监控时区分，e.g. "Eindhoven"
+    sku             Magento 内部 SKU，预订时用于 addNewBooking mutation；
+                    由 scraper 从 GraphQL 响应直接提取，省去 try_book 中的独立查询
+    contract_id     合同类型 ID（来自 type_of_contract 属性）；
+                    预订时必须传入，否则 addNewBooking 可能 Internal server error
+    contract_start_date  预订用的合同开始日期（来自 next_contract_startdate 属性）；
+                    与 available_from 不同：available_from 用于展示/日历，
+                    contract_start_date 用于预订 API 调用；可能为 None
     """
 
     id: str
@@ -58,6 +65,9 @@ class Listing:
     features: list[str]
     url: str
     city: str = ""
+    sku: str = ""
+    contract_id: Optional[int] = None
+    contract_start_date: Optional[str] = None
 
     # feature_map() 解析结果缓存，排除在 __repr__ / __eq__ / __init__ 之外
     _feature_map_cache: Optional[dict[str, str]] = field(
@@ -161,4 +171,7 @@ class Listing:
             "features": self.features,
             "url": self.url,
             "city": self.city,
+            "sku": self.sku,
+            "contract_id": self.contract_id,
+            "contract_start_date": self.contract_start_date,
         }

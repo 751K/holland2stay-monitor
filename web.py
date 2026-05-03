@@ -428,6 +428,7 @@ def _user_from_form(
     ab = AutoBookConfig(
         enabled=form.get("AUTO_BOOK_ENABLED") == "true",
         dry_run=form.get("AUTO_BOOK_DRY_RUN", "true") != "false",
+        cancel_enabled=form.get("AUTO_BOOK_CANCEL_ENABLED") == "true",
         email=form.get("AUTO_BOOK_EMAIL", ""),
         password=_secret("AUTO_BOOK_PASSWORD", ex_ab.password if ex_ab else ""),
         listing_filter=ListingFilter(

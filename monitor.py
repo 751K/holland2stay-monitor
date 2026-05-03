@@ -354,6 +354,7 @@ async def run_once(
             lambda t=target, u=user: try_book(
                 t, u.auto_book.email, u.auto_book.password,
                 dry_run=u.auto_book.dry_run,
+                cancel_enabled=u.auto_book.cancel_enabled,
             ),
         )
         ab_futures.append((user, notifier, target, future))

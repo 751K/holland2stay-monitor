@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 import os
-import re
+import time
 from typing import Optional
 
 import curl_cffi.requests as req
@@ -51,10 +51,6 @@ from models import Listing
 
 logger = logging.getLogger(__name__)
 
-# GraphQL 标识符合法字符集（field/mutation 名称只能含 [A-Za-z_][A-Za-z0-9_]*）
-# 用于校验 cancel_pending_orders 中从 schema 内省取回的 mutation 名称，
-# 防止服务端返回畸形名称时被插入 mutation 字符串。
-_GQL_IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 GQL_URL = "https://api.holland2stay.com/graphql/"
 
@@ -257,7 +253,8 @@ def _truncate_cart(session: req.Session, token: str, cart_id: str) -> None:
 
 def cancel_pending_orders(session: req.Session, token: str) -> int:
     """
-    查询账号近 10 笔订单，取消所有 pending/reserved 状态的订单。
+    查询账号近 10 笔订单，通过标准 Magento cancelOrder mutation 取消所有
+    pending/reserved 状态的订单。
 
     背景
     ----
@@ -267,23 +264,18 @@ def cancel_pending_orders(session: req.Session, token: str) -> int:
 
     实现策略
     --------
-    1. 先内省 GraphQL schema，找出所有含 "cancel" 的 mutation 名称
-    2. 对每个候选 mutation 依次尝试（先不带 reason，失败后补 reason 重试）
-    3. 任一 mutation 成功即停止尝试下一个
-    4. 所有尝试均失败时只记 warning，不中断预订流程
+    使用 Magento 标准 cancelOrder mutation（不再内省 schema）。
+    若平台未启用该 mutation（"not enabled for requested store"），
+    则抛出 RuntimeError 明确告知调用方：此账号无法自动取消旧订单。
 
-    注意
-    ----
-    标准 Magento cancelOrder mutation 在此平台被禁用
-    （"Order cancellation is not enabled for requested store"）。
-    通过 schema 内省动态发现可用 mutation 以适应平台定制。
-    内省结果未缓存，每次预订都会额外发一次 schema 查询请求。
+    Raises
+    ------
+    RuntimeError  平台未启用 cancelOrder 时（不可恢复，需人工处理）
 
     Returns
     -------
-    成功取消的订单数（0 表示无需取消或取消失败）
+    成功取消的订单数（0 表示无待取消订单）
     """
-    # 查询近 10 笔订单，筛选出待取消的状态
     query = '''
     {
       customer {
@@ -304,7 +296,6 @@ def cancel_pending_orders(session: req.Session, token: str) -> int:
         return 0
 
     items = (data.get("customer") or {}).get("orders", {}).get("items") or []
-    # 需要取消的状态（大小写不敏感）
     CANCEL_STATUSES = {"pending", "pending_payment", "reserved", "processing"}
     to_cancel = [
         (o["id"], o["number"])
@@ -318,61 +309,33 @@ def cancel_pending_orders(session: req.Session, token: str) -> int:
 
     logger.info("发现 %d 笔 pending 订单，准备取消: %s", len(to_cancel), [n for _, n in to_cancel])
 
-    # 先内省 schema，找出实际可用的取消/预订相关 mutation
-    try:
-        intro = _gql(session, '{ __schema { mutationType { fields { name } } } }', token=token)
-        all_mutations = [f["name"] for f in (intro.get("__schema", {}).get("mutationType") or {}).get("fields", [])]
-        relevant = [m for m in all_mutations if any(kw in m.lower() for kw in ("cancel", "booking", "order", "reserv"))]
-        logger.debug("Schema 相关 mutation: %s", relevant)
-    except Exception:
-        relevant = []
-
-    # 优先尝试 Holland2Stay 自定义取消 mutation，降级到标准 cancelOrder
-    cancel_mutations = [m for m in relevant if "cancel" in m.lower()]
-    logger.debug("候选取消 mutation: %s", cancel_mutations)
-
     cancelled = 0
+    cancel_disabled = False
     for order_uid, order_number in to_cancel:
-        success = False
-        for mut in cancel_mutations:
-            # mutation 名称来自 schema 内省，必须通过标识符校验，
-            # 才允许插入 mutation 字符串（名称本身不能用 GraphQL variable 传递）
-            if not _GQL_IDENT_RE.match(mut):
-                logger.warning("跳过非法 mutation 名称: %r", mut)
-                continue
-            try:
-                # 先尝试只传 order_id（Holland2Stay 自定义 mutation 可能不需要 reason）
-                # order_id 值通过 variables 传递，不插入 mutation 字符串
-                q = f'mutation Cancel($orderId: String!) {{ {mut}(input: {{ order_id: $orderId }}) {{ error errorV2 {{ message code }} }} }}'
-                result = _gql(session, q, token=token, variables={"orderId": order_uid})
-                cancel_result = result.get(mut) or {}
-                err = cancel_result.get("error") or (cancel_result.get("errorV2") or {}).get("message")
-                if err:
-                    logger.debug("%s #%s 失败（忽略，尝试下一个）: %s", mut, order_number, err)
-                    continue
-                logger.info("已取消订单 #%s (via %s)", order_number, mut)
-                cancelled += 1
-                success = True
-                break
-            except Exception as e:
-                err_str = str(e)
-                # 如果缺少 reason 字段，补上重试（reason 为常量字符串，直接内联）
-                if "reason" in err_str.lower():
-                    try:
-                        q = f'mutation Cancel($orderId: String!) {{ {mut}(input: {{ order_id: $orderId, reason: "Replaced by new booking" }}) {{ error errorV2 {{ message code }} }} }}'
-                        result = _gql(session, q, token=token, variables={"orderId": order_uid})
-                        cancel_result = result.get(mut) or {}
-                        err2 = cancel_result.get("error") or (cancel_result.get("errorV2") or {}).get("message")
-                        if not err2:
-                            logger.info("已取消订单 #%s (via %s + reason)", order_number, mut)
-                            cancelled += 1
-                            success = True
-                            break
-                    except Exception:
-                        pass
-                logger.debug("%s #%s 异常（尝试下一个）: %s", mut, order_number, e)
-        if not success:
-            logger.warning("订单 #%s 无法自动取消（所有 mutation 均失败），继续尝试预订", order_number)
+        try:
+            q = '''
+            mutation CancelOrder($orderId: String!) {
+              cancelOrder(input: { order_id: $orderId }) {
+                order { id status }
+              }
+            }
+            '''
+            _gql(session, q, token=token, variables={"orderId": order_uid})
+            logger.info("已取消订单 #%s", order_number)
+            cancelled += 1
+        except Exception as e:
+            err_str = str(e)
+            if "not enabled" in err_str.lower():
+                cancel_disabled = True
+                logger.warning("cancelOrder 未启用，无法取消订单 #%s: %s", order_number, err_str)
+            else:
+                logger.warning("取消订单 #%s 失败: %s", order_number, e)
+
+    if cancel_disabled and cancelled == 0:
+        raise RuntimeError(
+            "当前账号有旧预留单且平台未启用订单取消功能，无法自动取消。\n"
+            "请登录 Holland2Stay 手动取消旧订单后再试。"
+        )
 
     return cancelled
 
@@ -522,6 +485,7 @@ def place_order_and_pay(
     不是 www.holland2stay.com（Next.js 前端），两者是完全不同的系统。
     """
     # 1. 设置支付方式（cart_id、payment_method 均通过 variables 传递）
+    tp0 = time.monotonic()
     q = '''
     mutation SetPayment($cartId: String!, $code: String!) {
       setPaymentMethodOnCart(input: {
@@ -533,9 +497,11 @@ def place_order_and_pay(
     }
     '''
     _gql(session, q, token=token, variables={"cartId": cart_id, "code": payment_method})
-    logger.debug("支付方式已设置: %s", payment_method)
+    t_setpay = time.monotonic() - tp0
+    logger.debug("支付方式已设置: %s  (%.2fs)", payment_method, t_setpay)
 
     # 2. 下单（cart_id 通过 variable 传递）
+    tp1 = time.monotonic()
     q = '''
     mutation PlaceOrder($cartId: String!) {
       placeOrder(input: { cart_id: $cartId }) {
@@ -553,10 +519,12 @@ def place_order_and_pay(
     order_number = (order_result.get("orderV2") or {}).get("number")
     if not order_number:
         raise RuntimeError("下单失败：未获取到订单号")
-    logger.info("订单创建成功: #%s", order_number)
+    t_place = time.monotonic() - tp1
+    logger.info("订单创建成功: #%s  (%.2fs)", order_number, t_place)
 
     # 3. 生成 iDEAL/idealcheckout 支付跳转链接（order_number 通过 variable 传递）
     # plateform: "web" 是 H2S API 要求的常量字符串，直接内联
+    tp2 = time.monotonic()
     q = '''
     mutation IdealCheckOut($orderId: String!) {
       idealCheckOut(order_id: $orderId, plateform: "web") {
@@ -568,7 +536,11 @@ def place_order_and_pay(
     pay_url = (data.get("idealCheckOut") or {}).get("redirect")
     if not pay_url:
         raise RuntimeError(f"未能获取支付链接 (order #{order_number})")
-    logger.debug("支付链接已生成（见通知消息）")
+    t_ideal = time.monotonic() - tp2
+    logger.info(
+        "支付链接已生成 | pay 子步骤: setpay=%.2fs place=%.2fs ideal=%.2fs",
+        t_setpay, t_place, t_ideal,
+    )
     return pay_url
 
 
@@ -618,17 +590,19 @@ def try_book(
     password: str,
     *,
     dry_run: bool = False,
+    cancel_enabled: bool = False,
 ) -> BookingResult:
     """
     对单个 "Available to book" 房源执行完整的自动预订流程。
 
     Parameters
     ----------
-    listing  : 目标房源（status 必须为 "Available to book"，否则立即返回失败）
-    email    : Holland2Stay 账号邮箱
-    password : Holland2Stay 账号密码
-    dry_run  : True 时只完成 SKU 查询/登录/购物车验证，不提交预订，
-               用于配置验证（AutoBookConfig.dry_run）
+    listing        : 目标房源（status 必须为 "Available to book"，否则立即返回失败）
+    email          : Holland2Stay 账号邮箱
+    password       : Holland2Stay 账号密码
+    dry_run        : True 时只完成 SKU 查询/登录/购物车验证，不提交预订
+    cancel_enabled : True 时若 placeOrder 返回 "another unit reserved"，
+                     则自动取消旧订单后重试；False（默认）时直接通知用户
 
     Returns
     -------
@@ -644,10 +618,9 @@ def try_book(
 
     下单策略
     --------
-    为缩短从「检测到 Available to book」到「placeOrder 提交」的时间窗口，
-    本函数不预先执行 cancel_pending_orders（该操作需额外 2-5 次 HTTP 往返）。
-    首次直接尝试 placeOrder；若返回「账号已有预留单」错误，才取消旧单并重试一次。
-    若返回「房源已被他人预订」错误，属竞争失败，不可恢复，直接通知用户。
+    首次直接尝试 placeOrder；若返回「房源已被他人预订」则立即通知用户（竞争失败）。
+    若返回「账号已有预留单」且 cancel_enabled=True → 取消旧单后重试一次。
+    若返回「账号已有预留单」且 cancel_enabled=False → 直接通知用户（人工介入）。
 
     异常处理
     --------
@@ -656,55 +629,85 @@ def try_book(
     if listing.status.lower() not in ("available to book",):
         return BookingResult(listing, False, f"状态不是 Available to book: {listing.status}")
 
+    t0 = time.monotonic()
+    t_cancel = 0.0
+    phase = ""
+
+    # ---------------------------------------------------------------- #
+    # Step 1: 确定 SKU / contract_id / contract_start_date
+    # ---------------------------------------------------------------- #
+    # 方案 1（前置提取）：scraper 已在抓取时提取 sku/contract_id/contract_start_date，
+    # 直接使用 Listing 上的字段，省去一次独立 HTTP 查询（~0.5-1.5s）。
+    # 旧数据回退：若 Listing 无 sku（旧版抓取或 DB 回填），降级到 _fetch_sku_and_contract()。
+    # ---------------------------------------------------------------- #
+    if listing.sku:
+        t_sku = 0.0
+        sku = listing.sku
+        contract_id = listing.contract_id
+        from datetime import date as _date
+        candidate = listing.contract_start_date or listing.available_from
+        start_date = candidate if (candidate and candidate >= _date.today().isoformat()) else None
+        logger.info(
+            "[%s]%s SKU: %s  contract_id: %s  start_date: %s  (pre-extracted)",
+            listing.name, " [DRY RUN]" if dry_run else "",
+            sku, contract_id, start_date or "(不传，由服务端决定)",
+        )
+
     proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
     proxies = {"https": proxy, "http": proxy} if proxy else {}
     with req.Session(impersonate="chrome110", proxies=proxies) as session:
         try:
-            # 1. 查询真实 SKU + contract_id + 入住日期
-            sku, contract_id, start_date = _fetch_sku_and_contract(session, listing.id)
-            logger.info(
-                "[%s]%s SKU: %s  contract_id: %s  start_date: %s",
-                listing.name, " [DRY RUN]" if dry_run else "",
-                sku, contract_id, start_date or "(不传，由服务端决定)",
-            )
+            if not listing.sku:
+                t1 = time.monotonic()
+                sku, contract_id, start_date = _fetch_sku_and_contract(session, listing.id)
+                t_sku = time.monotonic() - t1
+                logger.info(
+                    "[%s]%s SKU: %s  contract_id: %s  start_date: %s  (%.2fs) [fallback]",
+                    listing.name, " [DRY RUN]" if dry_run else "",
+                    sku, contract_id, start_date or "(不传，由服务端决定)", t_sku,
+                )
 
             # 2. 登录验证账号
-            logger.debug("[%s] 登录中...", listing.name)
+            t2 = time.monotonic()
             token = login(session, email, password)
-            logger.info("[%s]%s 登录成功", listing.name, " [DRY RUN]" if dry_run else "")
+            t_login = time.monotonic() - t2
+            logger.info("[%s]%s 登录成功 (%.2fs)", listing.name, " [DRY RUN]" if dry_run else "", t_login)
 
             # 3. 获取购物车 ID
-            logger.debug("[%s] 获取购物车...", listing.name)
+            t3 = time.monotonic()
             cart_id = get_or_create_cart(session, token)
-            logger.info("[%s]%s 购物车 ID: %s", listing.name, " [DRY RUN]" if dry_run else "", cart_id)
+            t_cart = time.monotonic() - t3
+            logger.info("[%s]%s 购物车 ID: %s  (%.2fs)", listing.name, " [DRY RUN]" if dry_run else "", cart_id, t_cart)
 
             # 4. 加入购物车（dry_run 时跳过此步）
             if dry_run:
-                msg = f"[DRY RUN] 验证通过（SKU/登录/购物车均正常），未实际提交预订"
-                logger.info("[%s] %s", listing.name, msg)
+                total = time.monotonic() - t0
+                msg = "[DRY RUN] 验证通过（SKU/登录/购物车均正常），未实际提交预订"
+                logger.info(
+                    "[%s] %s | 耗时 total=%.1fs (sku=%.2fs login=%.2fs cart=%.2fs)",
+                    listing.name, msg, total, t_sku, t_login, t_cart,
+                )
                 return BookingResult(listing, True, msg, dry_run=True)
 
-            # 注意：不在此处预先调用 cancel_pending_orders()。
-            # 原因：cancel_pending_orders 需要额外 2-5 次 HTTP 往返（查询订单 +
-            # schema 内省 + 取消 mutation），会在关键路径上增加 5-15 秒，
-            # 导致在高竞争房源上极大概率被他人抢先。
-            # 策略：先直接尝试下单；仅在 placeOrder 返回"账号已有预留单"时
-            # 才执行取消并重试（见下方异常处理）。
-
             logger.debug("[%s] 加入购物车 (contract_id=%s, start_date=%s)...", listing.name, contract_id, start_date)
+            t4 = time.monotonic()
             add_to_cart(session, token, cart_id, sku, start_date, contract_id)
+            t_add = time.monotonic() - t4
 
             # 5. 下单并生成直接支付链接
-            # 首次直接尝试；失败时按错误类型决定是否可重试
             logger.debug("[%s] 尝试下单...", listing.name)
             booking_url = f"https://www.holland2stay.com/residences/{listing.id}.html"
+            t5 = time.monotonic()
             try:
                 pay_url = place_order_and_pay(session, token, cart_id)
+                t_pay = time.monotonic() - t5
+                phase = "success"
             except RuntimeError as order_err:
+                t_pay = time.monotonic() - t5
                 err_str = str(order_err)
 
                 if _is_booked_by_other(err_str):
-                    # 房源已被他人抢先占位 —— 竞争失败，无法恢复
+                    phase = "race_lost"
                     logger.warning(
                         "[%s] 竞争失败：房源已被他人预订 (%s)", listing.name, err_str
                     )
@@ -714,19 +717,36 @@ def try_book(
                     ) from order_err
 
                 elif _is_reserved_by_user(err_str):
-                    # 该账号已有其他预留单 —— 取消旧单后重试一次
+                    if not cancel_enabled:
+                        phase = "reserved_conflict"
+                        logger.info(
+                            "[%s] 账号已有预留单且 cancel_enabled=false，直接通知用户",
+                            listing.name,
+                        )
+                        raise RuntimeError(
+                            "该账号尚有未完成的预留订单，请登录 Holland2Stay 手动取消后再试。\n\n"
+                            f"💡 手动预订入口：\n{booking_url}"
+                        ) from order_err
+
+                    # cancel_enabled=True：取消旧单后重试一次
+                    phase = "cancel+retry"
                     logger.info(
                         "[%s] 账号已有预留单（%s），正在取消后重试...",
                         listing.name, err_str,
                     )
+                    tc1 = time.monotonic()
                     cancelled = cancel_pending_orders(session, token)
-                    logger.info("[%s] 已取消 %d 笔旧订单，重新下单...", listing.name, cancelled)
+                    t_cancel = time.monotonic() - tc1
+                    logger.info("[%s] 已取消 %d 笔旧订单 (%.2fs)，重新下单...", listing.name, cancelled, t_cancel)
+                    t5 = time.monotonic()
                     pay_url = place_order_and_pay(session, token, cart_id)
+                    t_pay = time.monotonic() - t5
 
                 else:
-                    # 其他未知错误，原样向上传播
+                    phase = "unknown_order_error"
                     raise
 
+            total = time.monotonic() - t0
             msg = (
                 f"✅ 自动预订成功！\n"
                 f"\n"
@@ -739,12 +759,22 @@ def try_book(
                 f"\n"
                 f"⚠️ 链接直达支付页面，无需登录。"
             )
-            logger.info("[%s] 预订成功  入住:%s（付款链接已发送通知）", listing.name, start_date)
+            parts = f"sku={t_sku:.2f}s login={t_login:.2f}s cart={t_cart:.2f}s add={t_add:.2f}s pay={t_pay:.2f}s"
+            if t_cancel:
+                parts += f" cancel={t_cancel:.2f}s"
+            logger.info(
+                "[%s] 预订成功  入住:%s | 耗时 total=%.1fs (%s)",
+                listing.name, start_date, total, parts,
+            )
             return BookingResult(listing, True, msg, pay_url=pay_url,
                                  contract_start_date=start_date or "")
 
         except Exception as e:
-            logger.error("[%s]%s 预订失败: %s", listing.name, " [DRY RUN]" if dry_run else "", e)
+            total = time.monotonic() - t0
+            logger.error(
+                "[%s]%s 预订失败 (%s) | 耗时 total=%.1fs",
+                listing.name, " [DRY RUN]" if dry_run else "", phase, total,
+            )
             return BookingResult(listing, False, str(e))
 
 
