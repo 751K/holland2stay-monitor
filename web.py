@@ -15,6 +15,7 @@ import re
 import secrets
 import signal
 import sys
+import threading
 import time as _time
 import uuid
 from datetime import datetime, timezone
@@ -23,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values, set_key
-from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (  # noqa: E402
@@ -856,23 +857,48 @@ def api_events():
     SSE（Server-Sent Events）端点，每 5 秒推送增量通知给浏览器。
 
     浏览器通过 EventSource('/api/events?last_id=N') 订阅。
-    若有新通知，发送 `data: <JSON数组>\n\n`；否则发送保活注释 `: keepalive\n\n`。
-    浏览器断连后，在下次 yield 时捕获 GeneratorExit 静默退出。
+    若有新通知，发送 `data: <JSON数组>\\n\\n`；否则发送保活注释 `: keepalive\\n\\n`。
 
-    注意
-    ----
-    Flask 开发服务器启用 threaded=True（见 main()）才能同时服务多个 SSE 连接。
-    在 Gunicorn 等生产 WSGI 中，应使用 gevent/eventlet worker 或 --workers=1。
+    线程泄漏防护（三层）
+    --------------------
+    Gunicorn sync worker 在客户端断连后不一定向生成器注入 GeneratorExit——
+    生成器阻塞在 time.sleep() 期间无法接收任何信号，线程因此永久堆积。
+
+    1. **yield 处捕获写入异常**
+       BrokenPipeError / ConnectionResetError / OSError 表示客户端已断连，
+       任一异常立即 return，不再进入下一轮循环。
+
+    2. **可中断 sleep（threading.Event.wait）**
+       用 stop.wait(5) 替代 time.sleep(5)：
+       当写入异常退出时，finally 块调用 stop.set()，
+       若此时另一个线程（或同一线程的其他路径）正在 wait()，立即唤醒。
+
+    3. **硬性最大连接时长（_SSE_MAXAGE = 300 s）**
+       到期后主动关闭连接；浏览器 EventSource 按 `retry: 2000`（2 s）
+       自动重连，对用户完全透明。
+
+    Gunicorn 推荐部署
+    -----------------
+    gevent/eventlet worker 可协作式处理断连，无需以上防护：
+        gunicorn -k gevent --worker-connections 1000 web:app
     """
+    _SSE_POLL   = 5    # 轮询间隔（秒）
+    _SSE_MAXAGE = 300  # 单次连接最大生命周期（秒），到期后让浏览器重连
+
     try:
         last_id = int(request.args.get("last_id", 0))
     except (TypeError, ValueError):
         last_id = 0
 
+    stop    = threading.Event()
+    expires = _time.monotonic() + _SSE_MAXAGE
+
     def _generate():
         nonlocal last_id
+        # 告知浏览器 2 s 后重连（连接到期或异常关闭时生效）
+        yield "retry: 2000\n\n"
         try:
-            while True:
+            while not stop.is_set() and _time.monotonic() < expires:
                 st = _storage()
                 try:
                     rows = st.get_notifications_since(last_id)
@@ -882,16 +908,25 @@ def api_events():
                 if rows:
                     last_id = rows[-1]["id"]
                     payload = json.dumps(rows, ensure_ascii=False)
-                    yield f"data: {payload}\n\n"
+                    chunk = f"data: {payload}\n\n"
                 else:
-                    yield ": keepalive\n\n"
+                    chunk = ": keepalive\n\n"
 
-                _time.sleep(5)
+                try:
+                    yield chunk
+                except (GeneratorExit, BrokenPipeError, ConnectionResetError, OSError):
+                    # 写入失败 = 客户端已断连，立即退出，不再轮询
+                    return
+
+                # 可中断 sleep：stop.set() 后立即唤醒，无需等满 _SSE_POLL 秒
+                stop.wait(_SSE_POLL)
         except GeneratorExit:
             pass
+        finally:
+            stop.set()  # 确保所有退出路径都能唤醒任何正在等待的 stop.wait()
 
     return Response(
-        _generate(),
+        stream_with_context(_generate()),
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
