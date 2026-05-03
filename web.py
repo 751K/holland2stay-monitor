@@ -91,6 +91,35 @@ def _auth_enabled() -> bool:
     return bool(os.environ.get("WEB_PASSWORD", "").strip())
 
 
+def _safe_next_url(candidate: str) -> str:
+    """
+    校验重定向目标，防止开放重定向（Open Redirect）攻击。
+
+    规则
+    ----
+    只允许同源相对路径：必须以 "/" 开头，且不以 "//" 开头。
+    - "/dashboard"         → ✅ 合法相对路径
+    - "//evil.com/phish"   → ❌ 协议相对 URL，仍指向外部域名
+    - "https://evil.com"   → ❌ 绝对 URL，指向外部域名
+    - "javascript:alert()" → ❌ 非路径，不以 "/" 开头
+
+    login_required 装饰器通过 next=request.path 注入，request.path
+    始终是纯路径（以 "/" 开头，不含 host），是安全来源，此函数用于
+    校验来自表单/查询参数（不可信来源）的 next 值。
+
+    Parameters
+    ----------
+    candidate : 从请求参数中读取的原始 next 字符串
+
+    Returns
+    -------
+    校验通过的路径原样返回；不通过时返回 "/" 首页路径
+    """
+    if candidate and candidate.startswith("/") and not candidate.startswith("//"):
+        return candidate
+    return url_for("index")
+
+
 def login_required(f):
     """页面路由装饰器：未登录时跳转到登录页。"""
     @wraps(f)
@@ -240,7 +269,7 @@ def login() -> Any:
         if user_ok and pass_ok:
             session.permanent = True
             session["authenticated"] = True
-            next_url = request.form.get("next") or url_for("index")
+            next_url = _safe_next_url(request.form.get("next", ""))
             return redirect(next_url)
 
         flash("用户名或密码错误", "danger")
@@ -342,8 +371,23 @@ def settings() -> Any:
 # 路由 — 用户管理
 # ------------------------------------------------------------------ #
 
-def _user_from_form(form, user_id: str | None = None) -> UserConfig:
-    """从表单数据构建 UserConfig。"""
+def _user_from_form(
+    form,
+    user_id: str | None = None,
+    existing: "UserConfig | None" = None,
+) -> "UserConfig":
+    """
+    从表单数据构建 UserConfig。
+
+    Parameters
+    ----------
+    form     : request.form（ImmutableMultiDict）
+    user_id  : 编辑模式时传入已有 ID，新建时传 None（自动生成）
+    existing : 编辑模式时传入当前 UserConfig 对象，用于在密码字段为空时
+               保留旧密码而不是将其清空。
+               密码字段在 GET 时不回填到 HTML，空提交 = "不修改"。
+               新建模式传 None，空密码字段即存为空字符串。
+    """
     def _fv(key: str):
         v = form.get(key, "").strip()
         return float(v) if v else None
@@ -355,6 +399,15 @@ def _user_from_form(form, user_id: str | None = None) -> UserConfig:
     def _lv(key: str) -> list[str]:
         v = form.get(key, "").strip()
         return [x.strip() for x in v.split(",") if x.strip()] if v else []
+
+    def _secret(key: str, old_val: str) -> str:
+        """
+        密码/令牌字段的安全读取：
+        - 表单字段非空 → 使用新值（用户正在更新密码）
+        - 表单字段为空 → 保留 old_val（用户未动密码字段，不清除已保存的值）
+        """
+        v = form.get(key, "").strip()
+        return v if v else old_val
 
     channels_raw = form.get("NOTIFICATION_CHANNELS", "")
     channels = [c.strip().lower() for c in channels_raw.split(",") if c.strip()]
@@ -368,11 +421,13 @@ def _user_from_form(form, user_id: str | None = None) -> UserConfig:
         allowed_types=_lv("ALLOWED_TYPES"),
         allowed_neighborhoods=_lv("ALLOWED_NEIGHBORHOODS"),
     )
+
+    ex_ab = existing.auto_book if existing else None
     ab = AutoBookConfig(
         enabled=form.get("AUTO_BOOK_ENABLED") == "true",
         dry_run=form.get("AUTO_BOOK_DRY_RUN", "true") != "false",
         email=form.get("AUTO_BOOK_EMAIL", ""),
-        password=form.get("AUTO_BOOK_PASSWORD", ""),
+        password=_secret("AUTO_BOOK_PASSWORD", ex_ab.password if ex_ab else ""),
         listing_filter=ListingFilter(
             max_rent=_fv("AUTO_BOOK_MAX_RENT"),
             min_area=_fv("AUTO_BOOK_MIN_AREA"),
@@ -396,11 +451,11 @@ def _user_from_form(form, user_id: str | None = None) -> UserConfig:
         email_smtp_port=_iv("EMAIL_SMTP_PORT") or 587,
         email_smtp_security=form.get("EMAIL_SMTP_SECURITY", "starttls").strip().lower() or "starttls",
         email_username=form.get("EMAIL_USERNAME", "").strip(),
-        email_password=form.get("EMAIL_PASSWORD", ""),
+        email_password=_secret("EMAIL_PASSWORD", existing.email_password if existing else ""),
         email_from=form.get("EMAIL_FROM", "").strip(),
         email_to=form.get("EMAIL_TO", "").strip(),
         twilio_sid=form.get("TWILIO_ACCOUNT_SID", ""),
-        twilio_token=form.get("TWILIO_AUTH_TOKEN", ""),
+        twilio_token=_secret("TWILIO_AUTH_TOKEN", existing.twilio_token if existing else ""),
         twilio_from=form.get("TWILIO_FROM", ""),
         twilio_to=form.get("TWILIO_TO", ""),
         listing_filter=lf,
@@ -442,7 +497,8 @@ def user_edit(user_id: str) -> Any:
         return redirect(url_for("users_list"))
 
     if request.method == "POST":
-        updated = _user_from_form(request.form, user_id=user_id)
+        # existing=user 确保空密码字段保留旧值，不会意外清除已保存的密码
+        updated = _user_from_form(request.form, user_id=user_id, existing=user)
         users = [updated if u.id == user_id else u for u in users]
         save_users(users)
         flash(f"✅ 用户「{updated.name}」已保存", "success")
