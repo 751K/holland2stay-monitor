@@ -196,7 +196,7 @@ class Storage:
         ------
         - 将 fresh 中所有房源写入/更新 listings 表（全量 upsert）
         - 新增状态变更记录到 status_changes 表
-        - 提交事务（单次 commit）
+        - 所有写操作在单个事务中原子提交
 
         Parameters
         ----------
@@ -212,6 +212,10 @@ class Storage:
         ----
         - 已在库但本次未抓到的房源不会被删除（历史保留）
         - 通知回执需调用方在发送成功后单独调用 mark_notified() / mark_status_change_notified()
+        - `with self._conn:` 保证原子性：正常退出自动 COMMIT，异常自动 ROLLBACK。
+          若不使用显式事务块，Python sqlite3 的隐式事务在 DML 语句触发时开始，
+          异常路径不会主动 ROLLBACK，导致下次 diff() 的 DML 被追加到前一次
+          未关闭的事务中，commit() 时合并两轮数据，产生重复通知。
         """
         now = _now_iso()
         new_listings: list[Listing] = []
@@ -219,50 +223,52 @@ class Storage:
 
         cur = self._conn.cursor()
 
-        for listing in fresh:
-            row = cur.execute(
-                "SELECT status, notified FROM listings WHERE id = ?",
-                (listing.id,),
-            ).fetchone()
+        # with self._conn 在正常退出时调用 commit()，异常时调用 rollback()，
+        # 确保本轮所有 INSERT/UPDATE 要么全部落库，要么全部回滚，不留半更新状态。
+        with self._conn:
+            for listing in fresh:
+                row = cur.execute(
+                    "SELECT status, notified FROM listings WHERE id = ?",
+                    (listing.id,),
+                ).fetchone()
 
-            if row is None:
-                cur.execute(
-                    """INSERT INTO listings
-                       (id, name, status, price_raw, available_from,
-                        features, url, city, first_seen, last_seen, notified, last_status)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,0,?)""",
-                    (
-                        listing.id, listing.name, listing.status,
-                        listing.price_raw, listing.available_from,
-                        json.dumps(listing.features, ensure_ascii=False),
-                        listing.url, listing.city, now, now, listing.status,
-                    ),
-                )
-                new_listings.append(listing)
-            else:
-                old_status = row["status"]
-                cur.execute(
-                    """UPDATE listings
-                       SET name=?, status=?, price_raw=?, available_from=?,
-                           features=?, last_seen=?, last_status=?
-                       WHERE id=?""",
-                    (
-                        listing.name, listing.status, listing.price_raw,
-                        listing.available_from,
-                        json.dumps(listing.features, ensure_ascii=False),
-                        now, listing.status, listing.id,
-                    ),
-                )
-                if old_status != listing.status:
+                if row is None:
                     cur.execute(
-                        """INSERT INTO status_changes
-                           (listing_id, old_status, new_status, changed_at)
-                           VALUES (?,?,?,?)""",
-                        (listing.id, old_status, listing.status, now),
+                        """INSERT INTO listings
+                           (id, name, status, price_raw, available_from,
+                            features, url, city, first_seen, last_seen, notified, last_status)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,0,?)""",
+                        (
+                            listing.id, listing.name, listing.status,
+                            listing.price_raw, listing.available_from,
+                            json.dumps(listing.features, ensure_ascii=False),
+                            listing.url, listing.city, now, now, listing.status,
+                        ),
                     )
-                    status_changes.append((listing, old_status, listing.status))
+                    new_listings.append(listing)
+                else:
+                    old_status = row["status"]
+                    cur.execute(
+                        """UPDATE listings
+                           SET name=?, status=?, price_raw=?, available_from=?,
+                               features=?, last_seen=?, last_status=?
+                           WHERE id=?""",
+                        (
+                            listing.name, listing.status, listing.price_raw,
+                            listing.available_from,
+                            json.dumps(listing.features, ensure_ascii=False),
+                            now, listing.status, listing.id,
+                        ),
+                    )
+                    if old_status != listing.status:
+                        cur.execute(
+                            """INSERT INTO status_changes
+                               (listing_id, old_status, new_status, changed_at)
+                               VALUES (?,?,?,?)""",
+                            (listing.id, old_status, listing.status, now),
+                        )
+                        status_changes.append((listing, old_status, listing.status))
 
-        self._conn.commit()
         return new_listings, status_changes
 
     # ------------------------------------------------------------------ #
