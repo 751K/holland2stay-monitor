@@ -100,7 +100,9 @@ This reduces the delay between detecting the availability change and reaching th
 ### Auto-booking
 
 - When a qualifying "Available to book" listing appears, the monitor can complete the booking workflow automatically
-- Flow: login → cancel pending orders → `addNewBooking` → `placeOrder` → `idealCheckOut`
+- Flow: login → `addNewBooking` → `placeOrder` → `idealCheckOut`
+- If `placeOrder` returns "another unit reserved" and `cancel_enabled` is on, auto-cancels the old order via `cancelOrder` mutation and retries once
+- If `cancel_enabled` is off (default), the "another unit reserved" error is forwarded directly to the user — no cancel attempt is made (H2S disables `cancelOrder` by default)
 - Sends a direct payment URL so payment can be completed without logging in again
 - Supports stricter booking filters than notification filters, plus a dry-run mode for validation
 - Booking runs concurrently with notifications (see Fast-path booking above)
@@ -145,7 +147,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
         |                 |     -> iMessage (macOS only) / Telegram / Email / WhatsApp
         |                 |
         |                 +-- AutoBookConfig.passes() -> booker.py  [concurrent]
-        |                       -> login -> cancel pending -> addNewBooking
+        |                       -> login -> addNewBooking
         |                          -> placeOrder -> idealCheckOut -> payment URL
         |
         +-- Read-only web queries -> web.py (Flask + Bootstrap)
@@ -163,7 +165,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `storage.py` | SQLite persistence, diff detection, chart aggregation, meta storage, web_notifications table |
 | `models.py` | `Listing` dataclass and formatting helpers |
 | `notifier.py` | `BaseNotifier` ABC; iMessage (macOS gate), Telegram, Email, WhatsApp, `WebNotifier`, multi-dispatch |
-| `booker.py` | Login, pending-order cleanup, `addNewBooking`, `placeOrder`, `idealCheckOut`, proxy support |
+| `booker.py` | Login, `addNewBooking`, `placeOrder`, `idealCheckOut`; optional `cancel_enabled` for auto-cancelling old orders, proxy support |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
 | `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
 | `web.py` | Flask admin panel, user CRUD, session auth, charts, SSE stream, notifications API, reload endpoint |
@@ -409,7 +411,7 @@ scraper.py          GraphQL scraping, curl_cffi, pagination, 429 retry, proxy su
 storage.py          SQLite: listings / status_changes / web_notifications / meta, chart queries
 models.py           Listing dataclass and formatting helpers
 notifier.py         BaseNotifier, iMessage (macOS gate), Telegram, Email, WhatsApp, WebNotifier
-booker.py           Login, cart flow, addNewBooking, placeOrder, idealCheckOut, proxy support
+booker.py           Login, addNewBooking, placeOrder, idealCheckOut (cancel_enabled opt-in), proxy support
 config.py           Global config loading, known cities, ListingFilter, AutoBookConfig
 users.py            UserConfig, users.json management, legacy env migration
 web.py              Flask admin panel, session auth, SSE stream, notifications API, reload endpoint
