@@ -637,19 +637,29 @@ def _build_applescript(recipient: str, message: str) -> str:
 
     转义规则
     --------
-    先转义反斜杠（\\ → \\\\），再转义双引号（" → \\"），
-    顺序不能颠倒，否则已转义的反斜杠会被二次处理。
+    按以下顺序处理，顺序不能颠倒：
+    1. 反斜杠：\\ → \\\\（必须最先处理，避免后续步骤二次转义）
+    2. 双引号：" → \\"
+    3. 换行符：\\n → " & return & "
+       AppleScript 字符串字面量必须在一行内，换行符需用内置常量 `return`
+       和字符串连接运算符 `&` 表达，例如：
+         send "Hello" & return & "World" to buddy "..."
 
     Parameters
     ----------
     recipient : iMessage 收件人（手机号或 Apple ID 邮箱）
-    message   : 要发送的纯文本消息
+    message   : 要发送的纯文本消息（可含换行符）
 
     Returns
     -------
     可直接传给 `osascript -e` 的 AppleScript 字符串
     """
-    escaped = message.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = (
+        message
+        .replace("\\", "\\\\")   # 1. 反斜杠（必须最先）
+        .replace('"', '\\"')      # 2. 双引号
+        .replace("\n", '" & return & "')  # 3. 换行符 → AppleScript return 常量
+    )
     return (
         f'tell application "Messages"\n'
         f'  send "{escaped}" to buddy "{recipient}"'
