@@ -99,8 +99,12 @@ _reload_event: asyncio.Event | None = None
 # 每轮 run_once 开始时，检查队列中的 ID 是否仍在本次抓取的 "Available to book"
 # 列表中，若是则直接加入 ab_candidates，触发新一轮预订尝试。
 #
-# 进程重启后队列清零（设计如此：陈旧的重试信息不如等下次正常触发更可靠）。
+# 持久化
+# ------
+# 队列通过 Storage.save_retry_queue() 落盘到 SQLite meta 表，
+# 进程重启后由 _async_main() 恢复，确保不会因重启错过重试窗口。
 _retry_queue: dict[str, set[str]] = {}
+_retry_queue_dirty = False
 
 # 类型别名：每个用户与其对应通知器的配对列表
 UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
@@ -341,6 +345,7 @@ async def run_once(
     预订请求会在发出状态变更通知之前就已进入 Holland2Stay 服务器，
     相比原先"通知发完再预订"的顺序执行，可节省 1-3 秒。
     """
+    global _retry_queue_dirty
     city_tasks, availability_ids = cfg.scrape_tasks()
     logger.info("开始抓取，城市数: %d，活跃用户数: %d", len(city_tasks), len(user_notifiers))
 
@@ -433,6 +438,7 @@ async def run_once(
         gone = user_retry - _fresh_avail.keys()
         if gone:
             user_retry -= gone          # set 原地修改，直接影响 _retry_queue[user.id]
+            _retry_queue_dirty = True
             logger.info(
                 "[%s] 🗑️  %d 套 race_lost 房源已不可预订，移出重试队列",
                 user.name, len(gone),
@@ -471,7 +477,6 @@ async def run_once(
     # ab_futures: list of (user, notifier, sorted_candidates, Future[BookingResult])
     # sorted_candidates 按面积降序排列；fallback 逻辑在线程内部按序尝试
     ab_pending: list[tuple] = []
-    ab_futures: list[tuple] = []
 
     for user, notifier in user_notifiers:
         candidates = ab_candidates.get(user.id, [])
@@ -501,6 +506,7 @@ async def run_once(
 
     # ── 新房源通知（预登录与通知并发进行）────────────────────────── #
     total_notified = 0
+    new_notified_ids: list[str] = []
     for listing in new_listings:
         notified_this = False
         for user, notifier in user_notifiers:
@@ -519,9 +525,12 @@ async def run_once(
             await web_notifier.send_new_listing(listing)
 
         if notified_this:
-            storage.mark_notified(listing.id)
+            new_notified_ids.append(listing.id)
+
+    storage.mark_notified_batch(new_notified_ids)
 
     # ── 状态变更通知（预登录与通知并发进行）──────────────────────── #
+    sc_notified_ids: list[str] = []
     for listing, old_status, new_status in status_changes:
         notified_this = False
         for user, notifier in user_notifiers:
@@ -539,7 +548,9 @@ async def run_once(
             await web_notifier.send_status_change(listing, old_status, new_status)
 
         if notified_this:
-            storage.mark_status_change_notified(listing.id)
+            sc_notified_ids.append(listing.id)
+
+    storage.mark_status_change_notified_batch(sc_notified_ids)
 
     # ── 汇集预登录结果，提交预订 Future ──────────────────────────── #
     # 到此处通知已全部发出（通常耗时 1-3s），预登录的 executor 任务
@@ -583,6 +594,7 @@ async def run_once(
             if result.phase == "race_lost":
                 # 本轮所有候选均竞争失败（或超时未及尝试）→ 下次扫描如仍可预订则重试
                 _retry_queue.setdefault(user.id, set()).update(c.id for c in sorted_cands)
+                _retry_queue_dirty = True
                 logger.info(
                     "[%s] 📝 %d 套候选加入重试队列（下次扫描仍可预订时将重试）",
                     user.name, len(sorted_cands),
@@ -593,6 +605,7 @@ async def run_once(
                 if user.id in _retry_queue:
                     for c in sorted_cands:
                         _retry_queue[user.id].discard(c.id)
+                    _retry_queue_dirty = True
 
         if result.dry_run:
             logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, booked_listing.name)
@@ -625,6 +638,12 @@ async def run_once(
             logger.debug("%s 预登录 session 已关闭", uid)
         except Exception:
             pass
+
+    # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
+    global _retry_queue_dirty
+    if _retry_queue_dirty:
+        storage.save_retry_queue(_retry_queue)
+        _retry_queue_dirty = False
 
     logger.info(
         "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
@@ -704,6 +723,20 @@ async def main_loop(
                     "预订成功后付款链接将无法送达，请添加 iMessage/Telegram/Email/WhatsApp 渠道。",
                     user.name,
                 )
+
+            # 检查自动预订账号密码是否填写
+            if not ab.email:
+                logger.warning(
+                    "⚠️  [%s] 自动预订已开启，但未填写 H2S 账号邮箱！"
+                    "请前往 Web 面板「用户管理」填写 AUTO_BOOK_EMAIL。",
+                    user.name,
+                )
+            if not ab.password:
+                logger.warning(
+                    "⚠️  [%s] 自动预订已开启，但未填写 H2S 账号密码！"
+                    "请前往 Web 面板「用户管理」填写 AUTO_BOOK_PASSWORD。",
+                    user.name,
+                )
         else:
             logger.info("自动预订 [%s]: 已关闭", user.name)
 
@@ -745,6 +778,10 @@ async def main_loop(
                     await notifier.send_heartbeat(total_in_db=total, round_count=round_count)
                 if web_notifier:
                     await web_notifier.send_heartbeat(total_in_db=total, round_count=round_count)
+                # 清理旧通知，防止 web_notifications 表无限增长
+                pruned = storage.prune_notifications(keep=500)
+                if pruned:
+                    logger.debug("已清理 %d 条旧通知", pruned)
 
             actual = _apply_jitter(effective_interval, cfg.jitter_ratio)
             logger.info(
@@ -855,6 +892,13 @@ async def _async_main() -> None:
         logger.warning("数据库已清空，所有历史记录已删除")
 
     storage = Storage(cfg.db_path, timezone_str=cfg.timezone)
+
+    # 恢复持久化的竞败重试队列（进程重启后不丢失）
+    global _retry_queue
+    _retry_queue = storage.load_retry_queue()
+    if _retry_queue:
+        total = sum(len(v) for v in _retry_queue.values())
+        logger.info("已恢复重试队列: %d 个用户, %d 套候选", len(_retry_queue), total)
 
     # 加载用户配置；文件损坏时硬停止，避免迁移逻辑覆盖现有数据
     try:

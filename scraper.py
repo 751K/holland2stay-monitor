@@ -7,7 +7,7 @@ scraper.py — Holland2Stay 房源抓取
 
 技术要点
 --------
-- **Cloudflare 绕过**：使用 `curl_cffi` 的 `impersonate="chrome110"` 在 TLS 层模拟
+- **Cloudflare 绕过**：使用 `curl_cffi` 的 `impersonate=CURL_IMPERSONATE` 在 TLS 层模拟
   Chrome 指纹，无需 headless 浏览器。直接请求 HTML 会得到 403。
 - **GraphQL 端点**：`https://api.holland2stay.com/graphql/`（Magento 后端）
   Holland2Stay 前端为 Next.js + Apollo Client CSR，页面 HTML 中无房源数据。
@@ -33,6 +33,7 @@ from typing import Optional
 
 import curl_cffi.requests as req
 
+from config import CURL_IMPERSONATE
 from models import Listing
 
 logger = logging.getLogger(__name__)
@@ -418,7 +419,7 @@ def scrape_all(
 
     all_listings: list[Listing] = []
 
-    with req.Session(impersonate="chrome110", proxies=proxies) as session:
+    with req.Session(impersonate=CURL_IMPERSONATE, proxies=proxies) as session:
         for city_name, city_id in city_tasks:
             try:
                 listings = _scrape_city_pages(

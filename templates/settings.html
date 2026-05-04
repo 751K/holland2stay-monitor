@@ -162,6 +162,54 @@
 
 </form>
 
+<!-- ── 危险操作区 ──────────────────────────────────────────────── -->
+<div class="mt-5 pt-4 border-top" style="border-color:var(--border)!important;">
+  <h5 class="mb-2" style="color:var(--danger);">
+    <i class="bi bi-exclamation-triangle me-1"></i>危险操作区
+  </h5>
+  <p class="small" style="color:var(--muted);">
+    清空数据库将删除所有历史房源记录、状态变更、通知和图表数据。此操作不可恢复。
+  </p>
+  <button type="button" class="btn btn-outline-danger btn-sm px-3"
+          data-bs-toggle="modal" data-bs-target="#resetDbModal">
+    <i class="bi bi-trash me-1"></i>清空数据库
+  </button>
+</div>
+
+<!-- 确认弹窗 -->
+<div class="modal fade" id="resetDbModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header border-0 pb-0">
+        <h5 class="modal-title" style="color:var(--danger);">
+          <i class="bi bi-exclamation-triangle me-2"></i>确认清空数据库
+        </h5>
+      </div>
+      <div class="modal-body pt-3">
+        <p class="mb-0">此操作将删除所有历史数据，包括：</p>
+        <ul class="small mt-2 mb-0" style="color:var(--muted);">
+          <li>房源列表及快照</li>
+          <li>状态变更记录</li>
+          <li>图表统计数据</li>
+          <li>Web 通知历史</li>
+          <li>竞败重试队列</li>
+        </ul>
+        <p class="small mt-3 mb-0 fw-bold" style="color:var(--danger);">
+          此操作不可恢复。是否继续？
+        </p>
+      </div>
+      <div class="modal-footer border-0 pt-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm"
+                data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-danger btn-sm" id="btn-reset-confirm"
+                onclick="resetDatabase(this)">
+          <i class="bi bi-trash me-1"></i>确认清空
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
   <div id="reload-toast" class="toast align-items-center border-0" role="alert" aria-live="assertive"
@@ -176,6 +224,46 @@
 
 {% block scripts %}
 <script>
+function resetDatabase(btn) {
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>清空中...';
+
+  fetch('/api/reset-db', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': '{{ csrf_token() }}',
+    },
+    body: JSON.stringify({ confirm: true }),
+  })
+    .then(r => r.json())
+    .then(d => {
+      const modal = bootstrap.Modal.getInstance(document.getElementById('resetDbModal'));
+      modal.hide();
+      const toast = document.getElementById('reload-toast');
+      const body  = document.getElementById('reload-toast-body');
+      if (d.ok) {
+        toast.className = 'toast align-items-center border-0 text-bg-success';
+        body.innerHTML = '✅ ' + d.message;
+      } else {
+        toast.className = 'toast align-items-center border-0 text-bg-danger';
+        body.innerHTML = '❌ ' + (d.error || '未知错误');
+      }
+      new bootstrap.Toast(toast, { delay: 5000 }).show();
+    })
+    .catch(() => {
+      const toast = document.getElementById('reload-toast');
+      toast.className = 'toast align-items-center border-0 text-bg-danger';
+      document.getElementById('reload-toast-body').innerHTML = '❌ 请求失败，请检查网络连接';
+      new bootstrap.Toast(toast, { delay: 5000 }).show();
+    })
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    });
+}
+
 function reloadMonitor(btn) {
   const orig = btn.innerHTML;
   btn.disabled = true;

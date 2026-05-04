@@ -821,6 +821,34 @@ def api_reload():
 
 
 # ------------------------------------------------------------------ #
+# API — 数据库重置
+# ------------------------------------------------------------------ #
+
+@app.route("/api/reset-db", methods=["POST"])
+@api_login_required
+@csrf_required
+def api_reset_db():
+    """
+    清空全部数据表（listings / status_changes / meta / web_notifications）。
+
+    需在请求体中传 {"confirm": true} 作为二次确认。
+    监控进程运行中也可执行——Storage 使用 WAL 模式，reset 事务与监控写入不冲突。
+    """
+    data = request.get_json(silent=True) or {}
+    if not data.get("confirm"):
+        return jsonify({"ok": False, "error": "缺少二次确认（confirm: true）"}), 400
+
+    st = _storage()
+    try:
+        st.reset_all()
+        return jsonify({"ok": True, "message": "数据库已清空（listings / status_changes / meta / 通知）"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    finally:
+        st.close()
+
+
+# ------------------------------------------------------------------ #
 # API — Web 通知
 # ------------------------------------------------------------------ #
 

@@ -58,6 +58,10 @@ load_dotenv(dotenv_path=ENV_PATH)
 
 BASE_URL = "https://www.holland2stay.com/residences"
 
+# curl_cffi TLS 指纹模拟目标，绕过 Cloudflare WAF。
+# 所有模块通过此常量引用，H2S 更新防护时只需改一处。
+CURL_IMPERSONATE = "chrome110"
+
 # 所有已知城市及其 GraphQL filter ID。
 # ID 来自 Holland2Stay GraphQL aggregations 接口，city filter 使用字符串形式。
 # 新增城市需同时在此处添加，并在 Web 面板城市列表中选择。
@@ -410,7 +414,7 @@ def load_config() -> Config:
     cities: list[CityFilter] = []
     raw_cities = os.environ.get("CITIES", "Eindhoven,29")
     for entry in raw_cities.split("|"):
-        parts = entry.strip().split(",")
+        parts = entry.strip().rsplit(",", 1)
         if len(parts) == 2:
             cities.append(CityFilter(name=parts[0].strip(), id=int(parts[1].strip())))
 

@@ -297,6 +297,19 @@ class Storage:
         )
         self._conn.commit()
 
+    def mark_notified_batch(self, listing_ids: list[str]) -> None:
+        """
+        批量标记新房源通知已发送，单次 commit。
+        在通知循环末尾调用，避免逐条 fsync。
+        """
+        if not listing_ids:
+            return
+        with self._conn:
+            for lid in listing_ids:
+                self._conn.execute(
+                    "UPDATE listings SET notified=1 WHERE id=?", (lid,)
+                )
+
     def mark_status_change_notified(self, listing_id: str) -> None:
         """
         标记指定房源所有未通知的状态变更记录为已通知。
@@ -315,6 +328,20 @@ class Storage:
             (listing_id,),
         )
         self._conn.commit()
+
+    def mark_status_change_notified_batch(self, listing_ids: list[str]) -> None:
+        """
+        批量标记状态变更通知已发送，单次 commit。
+        """
+        if not listing_ids:
+            return
+        with self._conn:
+            for lid in listing_ids:
+                self._conn.execute(
+                    """UPDATE status_changes SET notified=1
+                       WHERE listing_id=? AND notified=0""",
+                    (lid,),
+                )
 
     # ------------------------------------------------------------------ #
     # 基础查询（monitor.py 内部使用）
@@ -497,6 +524,44 @@ class Storage:
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value)
         )
         self._conn.commit()
+
+    def load_retry_queue(self) -> dict[str, set[str]]:
+        """
+        从 meta 表恢复持久化的竞败重试队列。
+
+        Returns
+        -------
+        dict[user_id, set[listing_id]]；无已保存队列时返回空 dict。
+
+        说明
+        ----
+        JSON 不支持 set，存储格式为 dict[str, list[str]]，加载时转为 set。
+        进程重启后队列不丢失，确保前一轮 race_lost 的房源在新一轮中继续重试。
+        """
+        raw = self.get_meta("retry_queue", "")
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+            return {uid: set(lids) for uid, lids in data.items()}
+        except Exception:
+            logger.warning("retry_queue 数据损坏，已清除并重置为空")
+            self.set_meta("retry_queue", "")
+            return {}
+
+    def save_retry_queue(self, queue: dict[str, set[str]]) -> None:
+        """
+        将竞败重试队列持久化到 meta 表。
+
+        Parameters
+        ----------
+        queue : user_id → {listing_id, ...}，空 dict 会清除已存储的队列
+        """
+        if queue:
+            data = {uid: list(lids) for uid, lids in queue.items()}
+            self.set_meta("retry_queue", json.dumps(data, ensure_ascii=False))
+        else:
+            self.set_meta("retry_queue", "")
 
     # ------------------------------------------------------------------ #
     # 图表数据
