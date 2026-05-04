@@ -809,6 +809,22 @@ class Storage:
         self._conn.commit()
         return cur.rowcount
 
+    def reset_all(self) -> None:
+        """
+        清空全部数据表（listings / status_changes / meta / web_notifications）。
+
+        副作用
+        ------
+        在单个事务中 DELETE 四张表的所有行并立即 commit。
+        不可逆操作，仅由 monitor.py 的 --reset-db 或交互式确认触发。
+        """
+        with self._conn:
+            self._conn.execute("DELETE FROM listings")
+            self._conn.execute("DELETE FROM status_changes")
+            self._conn.execute("DELETE FROM meta")
+            self._conn.execute("DELETE FROM web_notifications")
+        logger.info("数据库已清空（listings / status_changes / meta / web_notifications）")
+
     def close(self) -> None:
         """关闭数据库连接。进程退出时由 monitor.py 调用。"""
         self._conn.close()
