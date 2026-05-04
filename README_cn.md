@@ -67,7 +67,8 @@
 1. 对 diff 结果做纯内存预扫描（无网络请求）
 2. **立即**将 `try_book()` 提交到线程池，早于任何通知发送
 3. 预订 HTTP 请求与通知发送**并发执行**
-4. 通知发完后再 await 预订结果——此时预订往往已经完成
+4. **预登录（PrewarmedSession）**：通知发送期间，为每个已开启自动预订的用户提前换取 Bearer token——`try_book()` 直接复用，跳过 Session 创建 + 登录，每次节省约 0.7 秒
+5. 通知发完后再 await 预订结果——此时预订往往已经完成
 
 与原来"先发完通知再预订"的顺序执行相比，这套方案将预订请求到达服务器的延迟从 2–5 秒缩短到约 0–1 秒。
 
@@ -106,6 +107,7 @@
   4. `placeOrder` 下单（含 `store_id=54`，与官方前端一致）
   5. `idealCheckOut` 生成直链付款 URL（含 `plateform="h"`）
   6. 推送通知，含直链，用户点击即进入付款页，**无需登录**
+- Session 在通知阶段预登录（prewarm），预订时跳过创建 Session 和登录步骤，每次节省约 0.7 秒
 - 流程通过浏览器 DevTools 抓包验证，与 H2S 官方前端预订流程一致
 - 若 `placeOrder` 返回 "another unit reserved" 且用户开启了 `cancel_enabled`，通过 `cancelOrder` mutation 自动取消旧订单后重试整个流程
 - `cancel_enabled` 默认关闭：H2S 平台默认未启用 `cancelOrder`，开启前需确认平台支持
@@ -156,7 +158,8 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
         │                 │     └── iMessage（macOS）/ Telegram / Email / WhatsApp
         │                 │
         │                 └── AutoBookConfig.passes() → booker.py  [并发执行]
-        │                       └── 登录 → createEmptyCart → addNewBooking
+        │                       └── 预登录 session（与通知并行完成）
+        │                              → createEmptyCart → addNewBooking
         │                              → placeOrder (store_id=54) → idealCheckOut → 付款直链
         │
         └── Web 面板只读查询 → web.py（Flask + Bootstrap 5）
@@ -169,12 +172,12 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 
 | 文件 | 职责 |
 |------|------|
-| `monitor.py` | 主调度循环，自适应智能轮询，SIGHUP 热重载，PID 管理，并发预订 |
+| `monitor.py` | 主调度循环，自适应智能轮询，SIGHUP 热重载，PID 管理，预登录 Session，并发预订 |
 | `scraper.py` | GraphQL 抓取，curl_cffi，自动翻页，多城市，429 重试，代理支持 |
 | `storage.py` | SQLite 持久化，diff 检测，chart 聚合，meta 键值，web_notifications 表 |
 | `models.py` | Listing dataclass，price_display，feature_map |
 | `notifier.py` | BaseNotifier ABC，iMessage（macOS 检测），Telegram，Email，WhatsApp，WebNotifier，MultiNotifier |
-| `booker.py` | createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；cancel_enabled 可开启自动取消旧订单，代理支持 |
+| `booker.py` | PrewarmedSession 预登录复用；createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；cancel_enabled 代理支持 |
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
 | `users.py` | UserConfig dataclass，users.json 读写，.env 配置迁移 |
 | `web.py` | Flask 面板，Session 鉴权，用户 CRUD，SSE 流，通知 API，/api/reload |
@@ -187,6 +190,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | Cloudflare 403 | `curl_cffi` + `impersonate="chrome110"` | TLS 层模拟 Chrome 指纹，无需启动浏览器 |
 | 页面无房源数据 | 直接请求 GraphQL API | Next.js + Apollo CSR，HTML 中无房源 DOM |
 | 预订竞争条件 | 通知前先提交 `try_book()` 到线程池 | 预订与通知并发执行，早到服务器 2–4 秒 |
+| 重复登录开销 | `PrewarmedSession`：每轮只登录一次，多套候选复用 | 预登录与通知并发进行；每次预订节省约 0.7 秒（建连 + 登录往返） |
 | API 限流 | 429 退避重试（30s / 60s）+ 5 分钟冷却 + 自适应降速 | 三层防御：scraper 重试、monitor 冷却、自适应间隔守住安全阈值 |
 | 高峰期频率探测 | 自适应间隔：×0.95 成功，×2.0 限流，下限 MIN_INTERVAL | 自动发现最大安全频率，无需手动调参 |
 | 异步通知 + 同步抓取 | `run_in_executor` 桥接 | scraper 用 sync curl_cffi，notifier 用 async subprocess |

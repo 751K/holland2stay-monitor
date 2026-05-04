@@ -67,7 +67,8 @@ When a listing transitions from "Reserved" (or any other status) directly to "Av
 1. Pre-scans the diff result in memory (no network calls)
 2. Immediately submits `try_book()` to a thread pool, before any notification is sent
 3. Runs the booking HTTP flow concurrently while notification sends are in flight
-4. Awaits the booking result after notifications finish — in most cases the booking is already done
+4. **Prewarmed session**: a pre-authenticated `curl_cffi` session is prepared for each auto-book user during notification dispatch, so `try_book()` can skip session creation + login — saving ~0.7 s per booking attempt
+5. Awaits the booking result after notifications finish — in most cases the booking is already done
 
 This reduces the delay between detecting the availability change and reaching the server to approximately 0–1 second instead of the former 2–5 second notification-first approach.
 
@@ -101,6 +102,7 @@ This reduces the delay between detecting the availability change and reaching th
 
 - When a qualifying "Available to book" listing appears, the monitor can complete the booking workflow automatically
 - Flow: login → `createEmptyCart` → `addNewBooking` → `placeOrder` (with `store_id=54`) → `idealCheckOut` (with `plateform="h"`)
+- Sessions are pre-warmed (pre-logged-in) during the notification phase — each booking attempt skips session creation + login, saving ~0.7 s
 - Matches the official H2S frontend booking flow verified via browser DevTools
 - If `placeOrder` returns "another unit reserved" and `cancel_enabled` is on, auto-cancels the old order via `cancelOrder` mutation and retries the entire flow
 - If `cancel_enabled` is off (default), the "another unit reserved" error is forwarded directly to the user — no cancel attempt is made (H2S disables `cancelOrder` by default)
@@ -148,7 +150,8 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
         |                 |     -> iMessage (macOS only) / Telegram / Email / WhatsApp
         |                 |
         |                 +-- AutoBookConfig.passes() -> booker.py  [concurrent]
-        |                       -> login → createEmptyCart → addNewBooking
+        |                       -> prewarmed session (login done in parallel with notifs)
+        |                          → createEmptyCart → addNewBooking
         |                          → placeOrder (store_id=54) → idealCheckOut → payment URL
         |
         +-- Read-only web queries -> web.py (Flask + Bootstrap)
@@ -161,12 +164,12 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 
 | File | Responsibility |
 |---|---|
-| `monitor.py` | Main scheduler, adaptive smart polling, hot reload, PID management, concurrent booking |
+| `monitor.py` | Main scheduler, adaptive smart polling, hot reload, PID management, prewarmed sessions, concurrent booking |
 | `scraper.py` | GraphQL scraping, `curl_cffi`, pagination, multi-city, 429 retry, proxy support |
 | `storage.py` | SQLite persistence, diff detection, chart aggregation, meta storage, web_notifications table |
 | `models.py` | `Listing` dataclass and formatting helpers |
 | `notifier.py` | `BaseNotifier` ABC; iMessage (macOS gate), Telegram, Email, WhatsApp, `WebNotifier`, multi-dispatch |
-| `booker.py` | `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); optional `cancel_enabled` for auto-cancelling old orders, proxy support |
+| `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); optional `cancel_enabled` auto-cancel, proxy support |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
 | `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
 | `web.py` | Flask admin panel, user CRUD, session auth, charts, SSE stream, notifications API, reload endpoint |
@@ -180,6 +183,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | No useful listing HTML | Call the GraphQL API directly | Holland2Stay uses Next.js + Apollo client-side data loading |
 | Sync scraping + async notifications | `run_in_executor` bridge | Keeps `curl_cffi` scraping simple while async notifiers still work |
 | Booking race condition | Submit `try_book()` to thread pool before notifications send | Booking and notification network calls run concurrently; booking reaches the server ~2–4 s sooner |
+| Repeated login overhead | `PrewarmedSession`: log in once per round, reuse for all candidates | Prewarm runs in parallel with notifications; each booking saves ~0.7 s (session creation + login round-trip) |
 | API rate limits | 429 backoff (30 s / 60 s retry) + 5-min cooldown + adaptive decrease | Three-layer defence: scraper retries, monitor cools down, adaptive polling stays below the threshold |
 | Peak-hour probing | Adaptive interval: ×0.95 on success, ×2.0 on 429, floor at MIN_INTERVAL | Automatically discovers the maximum safe frequency without manual tuning |
 | Multi-channel notifications | `BaseNotifier` + `MultiNotifier` | Shared formatting logic, per-channel send implementations |
