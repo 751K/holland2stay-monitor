@@ -13,10 +13,13 @@ monitor.py — 监控主程序
 ----------------
 1. `scrape_all()`（sync，在 executor 线程中运行）抓取所有城市房源
 2. `storage.diff()` 对比库中快照，产出 new_listings / status_changes
-3. 遍历启用的用户：
-   a. 按 listing_filter 决定是否发送通知
-   b. 若 auto_book 启用且房源符合条件，调用 `try_book()` 完成自动预订
-4. 写 meta（last_scrape_at）；每 HEARTBEAT_EVERY 轮发心跳
+3. 遍历启用的用户，构建自动预订候选
+4. 预登录（create_prewarmed_session）：为有候选的用户提前换取 Bearer token
+   （与步骤 5 的通知发送并发进行）
+5. 发送新房源/状态变更通知
+6. 汇集预登录结果，以预认证 Session 提交 try_book() 到线程池
+7. 等待预订完成，推送预订结果通知，清理预登录 Session
+8. 写 meta（last_scrape_at）；每 HEARTBEAT_EVERY 轮发心跳
 
 智能轮询
 --------
@@ -51,7 +54,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from booker import try_book
+from booker import create_prewarmed_session, try_book
 from config import DATA_DIR, ENV_PATH, load_config
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from scraper import RateLimitError, scrape_all
@@ -227,6 +230,7 @@ def _book_with_fallback(
     sorted_candidates: list,
     user: "UserConfig",
     deadline: float,
+    prewarmed: "PrewarmedSession | None" = None,
 ) -> "BookingResult":
     """
     按面积降序依次对 sorted_candidates 中的房源尝试 try_book()。
@@ -248,6 +252,7 @@ def _book_with_fallback(
     sorted_candidates : 已按面积降序排列的候选房源列表（调用方保证非空）
     user              : 用户配置（含预订账号、密码、支付方式等）
     deadline          : time.monotonic() 截止时刻；超过则停止对下一套的尝试
+    prewarmed         : 预认证 Session，传入时跳过 try_book() 中的登录步骤
 
     Returns
     -------
@@ -279,6 +284,7 @@ def _book_with_fallback(
             dry_run=user.auto_book.dry_run,
             cancel_enabled=user.auto_book.cancel_enabled,
             payment_method=user.auto_book.payment_method,
+            prewarmed=prewarmed,
         )
         last_result = result
 
@@ -444,11 +450,28 @@ async def run_once(
                     user.name, listing.name,
                 )
 
+    # ── 预登录：为有候选房源的用户提前创建已认证 Session ────────── #
+    # 提交到 executor 后立即进入通知循环，预登录与通知的 HTTP 调用
+    # 并发进行（不同线程），在 await 预订结果之前汇集即可。
+    loop = asyncio.get_running_loop()
+    prewarm_futures: dict[str, asyncio.Future] = {}
+    for user, _ in user_notifiers:
+        if not (user.auto_book.enabled and ab_candidates.get(user.id)):
+            continue
+        prewarm_futures[user.id] = loop.run_in_executor(
+            None,
+            lambda u=user: create_prewarmed_session(u.auto_book.email, u.auto_book.password),
+        )
+        logger.debug("[%s] 预登录已提交到 executor", user.name)
+
     # 立即将 _book_with_fallback() 提交到线程池，返回 Future（非阻塞）
+    # 注意：预订 Future 与预登录 Future 共享同一个默认线程池。
+    # 若预登录尚未完成，booking 线程会在 try_book() 中按正常路径登录
+    # （prewarmed=None），不会等待。
     # ab_futures: list of (user, notifier, sorted_candidates, Future[BookingResult])
     # sorted_candidates 按面积降序排列；fallback 逻辑在线程内部按序尝试
+    ab_pending: list[tuple] = []
     ab_futures: list[tuple] = []
-    loop = asyncio.get_running_loop()
 
     for user, notifier in user_notifiers:
         candidates = ab_candidates.get(user.id, [])
@@ -472,13 +495,11 @@ async def run_once(
         else:
             logger.info("[%s] 🔖 自动预订（新上线可预订），立即提交: %s", user.name, primary.name)
 
-        future = loop.run_in_executor(
-            None,
-            lambda cs=sorted_cands, u=user, dl=booking_deadline: _book_with_fallback(cs, u, dl),
-        )
-        ab_futures.append((user, notifier, sorted_cands, future))
+        # 暂存候选数据，预登录完成后统一提交到 executor
+        # （预登录与下方通知循环并发进行，让 login 往返在通知发送期间完成）
+        ab_pending.append((user, notifier, sorted_cands))
 
-    # ── 新房源通知（预订任务已在后台并行运行）────────────────────── #
+    # ── 新房源通知（预登录与通知并发进行）────────────────────────── #
     total_notified = 0
     for listing in new_listings:
         notified_this = False
@@ -500,7 +521,7 @@ async def run_once(
         if notified_this:
             storage.mark_notified(listing.id)
 
-    # ── 状态变更通知（预订任务已在后台并行运行）──────────────────── #
+    # ── 状态变更通知（预登录与通知并发进行）──────────────────────── #
     for listing, old_status, new_status in status_changes:
         notified_this = False
         for user, notifier in user_notifiers:
@@ -519,6 +540,37 @@ async def run_once(
 
         if notified_this:
             storage.mark_status_change_notified(listing.id)
+
+    # ── 汇集预登录结果，提交预订 Future ──────────────────────────── #
+    # 到此处通知已全部发出（通常耗时 1-3s），预登录的 executor 任务
+    # 应已完成。若预登录失败（网络/凭据错误），记录警告并回退到
+    # try_book() 的内部登录路径（prewarmed=None），不阻塞预订。
+    prewarmed_sessions: dict[str, "PrewarmedSession"] = {}
+    for uid, f in prewarm_futures.items():
+        try:
+            prewarmed_sessions[uid] = await f
+            logger.debug("%s 预登录完成，session 可供复用", uid)
+        except Exception as e:
+            logger.warning(
+                "%s 预登录失败，try_book 将回退到正常登录路径: %s",
+                uid, e,
+            )
+
+    ab_futures: list[tuple] = []
+    for user, notifier, sorted_cands in ab_pending:
+        ps = prewarmed_sessions.get(user.id)
+        if ps:
+            logger.info(
+                "[%s] 🔓 使用预登录 session (email=%s)",
+                user.name, ps.email,
+            )
+
+        future = loop.run_in_executor(
+            None,
+            lambda cs=sorted_cands, u=user, dl=booking_deadline, p=ps:
+                _book_with_fallback(cs, u, dl, prewarmed=p),
+        )
+        ab_futures.append((user, notifier, sorted_cands, future))
 
     # ── 等待预订结果，发送成功/失败通知 ──────────────────────────── #
     for user, notifier, sorted_cands, future in ab_futures:
@@ -565,6 +617,14 @@ async def run_once(
             await notifier.send_booking_failed(booked_listing, result.message)
             if web_notifier:
                 await web_notifier.send_booking_failed(booked_listing, result.message)
+
+    # ── 清理预登录 Session ─────────────────────────────────────────── #
+    for uid, ps in prewarmed_sessions.items():
+        try:
+            ps.session.close()
+            logger.debug("%s 预登录 session 已关闭", uid)
+        except Exception:
+            pass
 
     logger.info(
         "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
@@ -763,6 +823,7 @@ async def _async_main() -> None:
     parser = argparse.ArgumentParser(description="Holland2Stay 房源监控")
     parser.add_argument("--once", action="store_true", help="只运行一次后退出")
     parser.add_argument("--test", action="store_true", help="抓取并打印，不写库不发通知")
+    parser.add_argument("--reset-db", action="store_true", help="启动前清空数据库（非交互式）")
     args = parser.parse_args()
 
     cfg = load_config()
@@ -776,6 +837,22 @@ async def _async_main() -> None:
         )
         print(json.dumps([l.to_dict() for l in fresh], ensure_ascii=False, indent=2))
         return
+
+    # ── 数据库重置 ────────────────────────────────────────────────── #
+    should_reset = args.reset_db
+    if not should_reset and sys.stdin.isatty():
+        try:
+            ans = input("是否清空数据库？这将删除所有历史记录 [y/N]: ").strip().lower()
+            should_reset = ans in ("y", "yes")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            should_reset = False
+
+    if should_reset:
+        db = Storage(cfg.db_path, timezone_str=cfg.timezone)
+        db.reset_all()
+        db.close()
+        logger.warning("数据库已清空，所有历史记录已删除")
 
     storage = Storage(cfg.db_path, timezone_str=cfg.timezone)
 

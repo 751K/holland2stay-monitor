@@ -36,7 +36,10 @@ GraphQL API
 
 对外接口
 --------
-- try_book(listing, email, password, *, dry_run) → BookingResult
+- create_prewarmed_session(email, password) → PrewarmedSession
+  提前创建已认证 Session，供 try_book() 复用，省去登录往返
+- try_book(listing, email, password, *, dry_run, prewarmed) → BookingResult
+  prewarmed 参数可选，传入时跳过 Session 创建 + 登录
 
 依赖
 ----
@@ -55,6 +58,28 @@ import curl_cffi.requests as req
 from models import Listing
 
 logger = logging.getLogger(__name__)
+
+
+class PrewarmedSession:
+    """
+    预认证的 curl_cffi Session，供 try_book() 直接复用，省去重复创建 Session
+    和登录（generateCustomerToken）的网络往返。
+
+    Attributes
+    ----------
+    session    : 已建立 TLS 连接的 curl_cffi Session（含 Authorization cookie）
+    token      : generateCustomerToken 返回的 Bearer token
+    created_at : time.monotonic() 创建时刻，供调用方判断是否过期
+    email      : 对应的 H2S 账号邮箱，用于校验是否匹配
+    """
+
+    __slots__ = ("session", "token", "created_at", "email")
+
+    def __init__(self, session, token: str, created_at: float, email: str):
+        self.session = session
+        self.token = token
+        self.created_at = created_at
+        self.email = email
 
 
 GQL_URL = "https://api.holland2stay.com/graphql/"
@@ -425,9 +450,12 @@ def add_to_cart(
 
     if "errors" in raw:
         msgs = "; ".join(e.get("message", "") for e in raw["errors"])
-        logger.error("addNewBooking GraphQL 层错误: %s", msgs)
         if not raw.get("data"):
+            logger.error("addNewBooking GraphQL 层致命错误（无 data）: %s", msgs)
             raise RuntimeError(f"addNewBooking GraphQL 错误: {msgs}")
+        # NON_NULL 传播 bug：cart=null 时 Magento 将 null 上升为顶层 errors，
+        # 但 data 仍存在且 user_errors 为空。代码已正确处理，无需报错。
+        logger.warning("addNewBooking 非致命 GraphQL 错误（NON_NULL 传播，已忽略）: %s", msgs)
 
     result = (raw.get("data") or {}).get("addNewBooking") or {}
     user_errors = result.get("user_errors") or []
@@ -488,12 +516,15 @@ def place_order(
     result = data.get("placeOrder") or {}
 
     # placeOrder 的业务错误通过 errors 数组返回（区别于 GraphQL 层 errors）
+    # 竞争失败（already booked by someone else）和预留单冲突（another unit
+    # reserved）均为预期的业务结果，不是代码缺陷，用 WARNING 级别记录；
+    # 调用方 try_book() 会按阶段分类并决定重试策略
     errors = result.get("errors") or []
     if errors:
         msgs = "; ".join(
             f"[{e.get('code','?')}] {e.get('message','')}" for e in errors
         )
-        logger.error("placeOrder 业务错误: %s", msgs)
+        logger.warning("placeOrder 业务错误: %s", msgs)
         raise RuntimeError(f"下单失败: {msgs}")
 
     order_number = (result.get("orderV2") or {}).get("order_number")
@@ -588,6 +619,43 @@ class BookingResult:
         self.phase = phase
 
 
+def create_prewarmed_session(email: str, password: str) -> PrewarmedSession:
+    """
+    创建已登录的 Session，供 try_book() 直接复用。
+
+    调用方负责在使用完毕后调用 ps.session.close() 释放连接。
+    登录失败时抛出异常（与原 login() 行为一致），调用方应捕获并回退到
+    try_book() 的正常登录路径。
+
+    Parameters
+    ----------
+    email    : Holland2Stay 账号邮箱
+    password : Holland2Stay 账号密码
+
+    Returns
+    -------
+    PrewarmedSession，含已认证的 session 和 token
+
+    Raises
+    ------
+    RuntimeError  登录失败（token 为空）
+    """
+    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+    proxies = {"https": proxy, "http": proxy} if proxy else {}
+    session = req.Session(impersonate="chrome110", proxies=proxies)
+    try:
+        token = login(session, email, password)
+    except Exception:
+        session.close()
+        raise
+    return PrewarmedSession(
+        session=session,
+        token=token,
+        created_at=time.monotonic(),
+        email=email,
+    )
+
+
 def try_book(
     listing: Listing,
     email: str,
@@ -596,6 +664,7 @@ def try_book(
     dry_run: bool = False,
     cancel_enabled: bool = False,
     payment_method: str = _PAYMENT_METHOD,
+    prewarmed: "PrewarmedSession | None" = None,
 ) -> BookingResult:
     """
     对单个 "Available to book" 房源执行完整的自动预订流程。
@@ -611,6 +680,10 @@ def try_book(
     payment_method : setPaymentMethodOnCart 使用的支付代码，
                      默认 "idealcheckout_ideal"（iDEAL），
                      可选 "idealcheckout_visa" / "idealcheckout_mastercard"
+    prewarmed      : 预认证 Session。提供时跳过 Session 创建和登录步骤，
+                     直接使用已有的 session + token。
+                     注意：传入的 session 不会被 try_book 关闭；
+                     关闭由调用方负责。
 
     Returns
     -------
@@ -634,6 +707,7 @@ def try_book(
 
     t0 = time.monotonic()
     t_cancel = 0.0
+    t_login = 0.0
     phase = ""
 
     # ---------------------------------------------------------------- #
@@ -652,145 +726,167 @@ def try_book(
             sku, contract_id, start_date or "(不传，由服务端决定)",
         )
 
-    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
-    proxies = {"https": proxy, "http": proxy} if proxy else {}
-    with req.Session(impersonate="chrome110", proxies=proxies) as session:
-        try:
-            # ---- Step 1 fallback: 没有预提取 SKU 时通过 API 查询 ---- #
-            if not listing.sku:
-                t1 = time.monotonic()
-                sku, contract_id, start_date = _fetch_sku_and_contract(session, listing.id)
-                t_sku = time.monotonic() - t1
-                logger.info(
-                    "[%s]%s SKU: %s  contract_id: %s  start_date: %s  (%.2fs) [fallback]",
-                    listing.name, " [DRY RUN]" if dry_run else "",
-                    sku, contract_id, start_date or "(不传，由服务端决定)", t_sku,
-                )
+    # 决定 Session 来源：预登录复用 or 按需创建
+    own_session = False
+    if prewarmed is not None:
+        session = prewarmed.session
+        token = prewarmed.token
+        logger.debug("复用预登录 session (email=%s)", email)
+    else:
+        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+        proxies = {"https": proxy, "http": proxy} if proxy else {}
+        session = req.Session(impersonate="chrome110", proxies=proxies)
+        own_session = True
 
-            # ---- Step 2: 登录 ---- #
+    try:
+        # ---- Step 1 fallback: 没有预提取 SKU 时通过 API 查询 ---- #
+        if not listing.sku:
+            t1 = time.monotonic()
+            sku, contract_id, start_date = _fetch_sku_and_contract(session, listing.id)
+            t_sku = time.monotonic() - t1
+            logger.info(
+                "[%s]%s SKU: %s  contract_id: %s  start_date: %s  (%.2fs) [fallback]",
+                listing.name, " [DRY RUN]" if dry_run else "",
+                sku, contract_id, start_date or "(不传，由服务端决定)", t_sku,
+            )
+
+        # ---- Step 2: 登录（预登录 session 已跳过） ---- #
+        if prewarmed is None:
             t2 = time.monotonic()
             token = login(session, email, password)
             t_login = time.monotonic() - t2
             logger.info("[%s]%s 登录成功 (%.2fs)", listing.name,
                         " [DRY RUN]" if dry_run else "", t_login)
 
-            # ---- dry_run：验证凭据即止，不提交任何预订 ---- #
-            if dry_run:
-                total = time.monotonic() - t0
-                msg = "[DRY RUN] 验证通过（SKU/登录均正常），未实际提交预订"
-                logger.info(
-                    "[%s] %s | 耗时 total=%.1fs (sku=%.2fs login=%.2fs)",
-                    listing.name, msg, total, t_sku, t_login,
-                )
-                return BookingResult(listing, True, msg, dry_run=True, phase="dry_run")
+        # ---- dry_run：验证凭据即止，不提交任何预订 ---- #
+        if dry_run:
+            total = time.monotonic() - t0
+            msg = "[DRY RUN] 验证通过（SKU/登录均正常），未实际提交预订"
+            logger.info(
+                "[%s] %s | 耗时 total=%.1fs (sku=%.2fs login=%.2fs)",
+                listing.name, msg, total, t_sku, t_login,
+            )
+            return BookingResult(listing, True, msg, dry_run=True, phase="dry_run")
 
-            booking_url = f"https://www.holland2stay.com/residences/{listing.id}.html"
+        booking_url = f"https://www.holland2stay.com/residences/{listing.id}.html"
 
-            def _do_book() -> tuple[str, float, float]:
-                """
-                createEmptyCart → addNewBooking → setPaymentMethodOnCart
-                → placeOrder → idealCheckOut。
-                每次调用都创建新购物车，保证重试路径也能干净执行。
-                """
-                ta = time.monotonic()
+        def _do_book() -> tuple[str, float, float]:
+            """
+            createEmptyCart → addNewBooking → setPaymentMethodOnCart
+            → placeOrder → idealCheckOut。
+            每次调用都创建新购物车，保证重试路径也能干净执行。
+            """
+            ta = time.monotonic()
 
-                # 3a. 新建购物车
-                new_cart_id = create_empty_cart(session, token)
+            # 3a. 新建购物车
+            new_cart_id = create_empty_cart(session, token)
 
-                # 3b. 加入购物车（addNewBooking）
-                add_to_cart(session, token, new_cart_id, sku, start_date, contract_id)
+            # 3b. 加入购物车（addNewBooking）
+            add_to_cart(session, token, new_cart_id, sku, start_date, contract_id)
 
-                # 3c. 设置支付方式（placeOrder 前必须调用，否则报 "payment not available"）
-                set_payment_method(session, token, new_cart_id, code=payment_method)
-                t_add_val = time.monotonic() - ta
+            # 3c. 设置支付方式（placeOrder 前必须调用，否则报 "payment not available"）
+            set_payment_method(session, token, new_cart_id, code=payment_method)
+            t_add_val = time.monotonic() - ta
 
-                # 3d. 下单 → 获取订单号
-                tp = time.monotonic()
-                order_number = place_order(session, token, new_cart_id)
+            # 3d. 下单 → 获取订单号
+            tp = time.monotonic()
+            order_number = place_order(session, token, new_cart_id)
 
-                # 3e. 生成支付链接
-                pay_url = _ideal_checkout(session, token, order_number)
-                t_pay_val = time.monotonic() - tp
+            # 3e. 生成支付链接
+            pay_url = _ideal_checkout(session, token, order_number)
+            t_pay_val = time.monotonic() - tp
 
-                logger.info("[%s] 订单 #%s 支付链接已生成 | add=%.2fs pay=%.2fs",
-                            listing.name, order_number, t_add_val, t_pay_val)
-                return pay_url, t_add_val, t_pay_val
+            logger.info("[%s] 订单 #%s 支付链接已生成 | add=%.2fs pay=%.2fs",
+                        listing.name, order_number, t_add_val, t_pay_val)
+            return pay_url, t_add_val, t_pay_val
 
-            # ---- Step 3: 执行预订（含错误分类重试） ---- #
-            try:
-                pay_url, t_add, t_pay = _do_book()
-                phase = "success"
-            except RuntimeError as book_err:
-                err_str = str(book_err)
+        # ---- Step 3: 执行预订（含错误分类重试） ---- #
+        try:
+            pay_url, t_add, t_pay = _do_book()
+            phase = "success"
+        except RuntimeError as book_err:
+            err_str = str(book_err)
 
-                if _is_booked_by_other(err_str):
-                    phase = "race_lost"
-                    logger.warning("[%s] 竞争失败：房源已被他人预订 (%s)",
+            if _is_booked_by_other(err_str):
+                phase = "race_lost"
+                logger.warning("[%s] 竞争失败：房源已被他人预订 (%s)",
+                               listing.name, err_str)
+                raise RuntimeError(
+                    f"房源已被他人抢先预订，竞争失败。\n\n"
+                    f"💡 如房源重新开放，可尝试手动预订：\n{booking_url}"
+                ) from book_err
+
+            elif _is_reserved_by_user(err_str):
+                if not cancel_enabled:
+                    phase = "reserved_conflict"
+                    logger.warning("[%s] 预留单冲突，原始错误: %s",
                                    listing.name, err_str)
                     raise RuntimeError(
-                        f"房源已被他人抢先预订，竞争失败。\n\n"
-                        f"💡 如房源重新开放，可尝试手动预订：\n{booking_url}"
+                        "该账号尚有未完成的预留订单，请登录 Holland2Stay 手动取消后再试。\n\n"
+                        f"📋 原始错误：{err_str}\n\n"
+                        f"💡 手动预订入口：\n{booking_url}"
                     ) from book_err
 
-                elif _is_reserved_by_user(err_str):
-                    if not cancel_enabled:
-                        phase = "reserved_conflict"
-                        logger.warning("[%s] 预留单冲突，原始错误: %s",
-                                       listing.name, err_str)
-                        raise RuntimeError(
-                            "该账号尚有未完成的预留订单，请登录 Holland2Stay 手动取消后再试。\n\n"
-                            f"📋 原始错误：{err_str}\n\n"
-                            f"💡 手动预订入口：\n{booking_url}"
-                        ) from book_err
+                # cancel_enabled=True：取消旧单后重试整个 _do_book（含新购物车）
+                phase = "cancel+retry"
+                logger.info("[%s] 账号已有预留单（%s），正在取消后重试...",
+                            listing.name, err_str)
+                tc1 = time.monotonic()
+                cancelled = cancel_pending_orders(session, token)
+                t_cancel = time.monotonic() - tc1
+                logger.info("[%s] 已取消 %d 笔旧订单 (%.2fs)，重新预订...",
+                            listing.name, cancelled, t_cancel)
+                pay_url, t_add, t_pay = _do_book()
 
-                    # cancel_enabled=True：取消旧单后重试整个 _do_book（含新购物车）
-                    phase = "cancel+retry"
-                    logger.info("[%s] 账号已有预留单（%s），正在取消后重试...",
-                                listing.name, err_str)
-                    tc1 = time.monotonic()
-                    cancelled = cancel_pending_orders(session, token)
-                    t_cancel = time.monotonic() - tc1
-                    logger.info("[%s] 已取消 %d 笔旧订单 (%.2fs)，重新预订...",
-                                listing.name, cancelled, t_cancel)
-                    pay_url, t_add, t_pay = _do_book()
+            else:
+                phase = "unknown_error"
+                raise
 
-                else:
-                    phase = "unknown_error"
-                    raise
+        total = time.monotonic() - t0
+        msg = (
+            f"✅ 自动预订成功！\n"
+            f"\n"
+            f"🏠 {listing.name}\n"
+            f"📅 入住：{start_date or '待定'}\n"
+            f"\n"
+            f"⚡ 点击链接立即付款（有时限，请尽快）：\n"
+            f"\n"
+            f"{pay_url}\n"
+            f"\n"
+            f"⚠️ 链接直达支付页面，无需登录。"
+        )
+        parts = (f"sku={t_sku:.2f}s login={t_login:.2f}s "
+                 f"add={t_add:.2f}s pay={t_pay:.2f}s")
+        if t_cancel:
+            parts += f" cancel={t_cancel:.2f}s"
+        logger.info(
+            "[%s] 预订成功  入住:%s | 耗时 total=%.1fs (%s)",
+            listing.name, start_date, total, parts,
+        )
+        return BookingResult(listing, True, msg, pay_url=pay_url,
+                             contract_start_date=start_date or "", phase="success")
 
-            total = time.monotonic() - t0
-            msg = (
-                f"✅ 自动预订成功！\n"
-                f"\n"
-                f"🏠 {listing.name}\n"
-                f"📅 入住：{start_date or '待定'}\n"
-                f"\n"
-                f"⚡ 点击链接立即付款（有时限，请尽快）：\n"
-                f"\n"
-                f"{pay_url}\n"
-                f"\n"
-                f"⚠️ 链接直达支付页面，无需登录。"
+    except Exception as e:
+        total = time.monotonic() - t0
+        # race_lost / reserved_conflict 是预期业务结果，不打 traceback；
+        # unknown_error 等才是需要排查的异常
+        if phase in ("race_lost", "reserved_conflict"):
+            logger.warning(
+                "[%s]%s 预订失败 (%s) | 耗时 total=%.1fs | %s",
+                listing.name, " [DRY RUN]" if dry_run else "",
+                phase, total, e,
             )
-            parts = (f"sku={t_sku:.2f}s login={t_login:.2f}s "
-                     f"add={t_add:.2f}s pay={t_pay:.2f}s")
-            if t_cancel:
-                parts += f" cancel={t_cancel:.2f}s"
-            logger.info(
-                "[%s] 预订成功  入住:%s | 耗时 total=%.1fs (%s)",
-                listing.name, start_date, total, parts,
-            )
-            return BookingResult(listing, True, msg, pay_url=pay_url,
-                                 contract_start_date=start_date or "", phase="success")
-
-        except Exception as e:
-            total = time.monotonic() - t0
+        else:
             logger.error(
                 "[%s]%s 预订失败 (%s) | 耗时 total=%.1fs | 原始错误: %s",
                 listing.name, " [DRY RUN]" if dry_run else "",
                 phase, total, e,
                 exc_info=True,
             )
-            return BookingResult(listing, False, str(e), phase=phase)
+        return BookingResult(listing, False, str(e), phase=phase)
+    finally:
+        if own_session:
+            session.close()
 
 
 def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Optional[int], Optional[str]]:
