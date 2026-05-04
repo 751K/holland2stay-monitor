@@ -5,25 +5,29 @@ booker.py — 自动预订模块
 
 完整流程（try_book 内部）
 --------------------------
-1. _fetch_sku_and_contract()
+1. _fetch_sku_and_contract() [fallback，pre-extracted 时跳过]
        通过 url_key 查询 Magento SKU + type_of_contract ID + 下一个入住日期
 2. login()
        generateCustomerToken mutation → Bearer token
-3. get_or_create_cart()
-       customerCart query → cart_id；若购物车有旧条目则 truncateCart 清空
-4. add_to_cart()
-       addNewBooking mutation → 将押金项（Deposit €200）加入购物车
-       注意：只请求 user_errors，不请求 cart{}（NON_NULL 传播 bug，见函数注释）
-5. place_order_and_pay()
-       setPaymentMethodOnCart → placeOrder → idealCheckOut → 返回直链付款 URL
-       支付域名在 account.holland2stay.com（不是 www），链接无需登录即可直接付款
-       ┣ 若 placeOrder 返回「账号已有预留单」错误：
-       ┃   调用 cancel_pending_orders() 取消旧单，然后重试 place_order_and_pay()
-       ┗ 若 placeOrder 返回「房源已被他人预订」：竞争失败，通知用户含手动预订链接
+3. _do_book()（内部子流程，失败时可重试）：
+   3a. create_empty_cart()
+           createEmptyCart mutation → 全新空购物车 cart_id
+   3b. add_to_cart()
+           addNewBooking mutation → 将押金项加入购物车并创建预订
+           注意：只请求 user_errors，不请求 cart{}（NON_NULL 传播 bug）
+   3c. set_payment_method()
+           setPaymentMethodOnCart mutation → code="idealcheckout_ideal"
+           placeOrder 前必须调用，否则报 "payment method not available"
+   3d. place_order()
+           placeOrder mutation（含 store_id）→ orderV2.order_number
+           ┣ 若返回「账号已有预留单」→ 按 cancel_enabled 处理
+           ┗ 若返回「房源已被他人预订」→ 竞争失败，通知用户
+   3d. _ideal_checkout()
+           idealCheckOut mutation → redirect（直链付款 URL）
+           支付域名在 account.holland2stay.com，链接无需登录可直接付款
 
-注意：cancel_pending_orders() 不再在 add_to_cart 之前预先调用。
-该操作涉及 2-5 次额外 HTTP 往返（查询订单 + schema 内省 + 取消 mutation），
-会给关键路径增加 5-15 秒，显著降低在高竞争房源中的成功率。
+cancel_pending_orders() 不在 add_to_cart 之前预先调用，仅在 placeOrder 返回
+"another unit reserved" 且 cancel_enabled=True 时才触发，作为一次性重试。
 
 GraphQL API
 -----------
@@ -43,6 +47,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from datetime import datetime as _dt
 from typing import Optional
 
 import curl_cffi.requests as req
@@ -55,14 +60,40 @@ logger = logging.getLogger(__name__)
 GQL_URL = "https://api.holland2stay.com/graphql/"
 
 _BASE_HEADERS = {
+    "Accept":       "application/graphql-response+json,application/json;q=0.9",
     "Content-Type": "application/json",
-    "Origin": "https://www.holland2stay.com",
-    "Referer": "https://www.holland2stay.com/",
+    "Origin":       "https://www.holland2stay.com",
+    "Referer":      "https://www.holland2stay.com/",
 }
+
+# Magento store_id，从浏览器抓包确认（placeOrder 的 store_id 参数）。
+# 多城市验证均为 54，视为全局常量。
+_H2S_STORE_ID = 54
+
+# setPaymentMethodOnCart 使用的支付方式代码。
+# 浏览器支持三种：idealcheckout_ideal / idealcheckout_visa / idealcheckout_mastercard。
+# 自动预订固定选 iDEAL：无需持卡信息，与 idealCheckOut mutation 对应。
+_PAYMENT_METHOD = "idealcheckout_ideal"
 
 
 # ------------------------------------------------------------------ #
-# 错误分类（placeOrder / addNewBooking 业务错误识别）
+# 日期格式转换
+# ------------------------------------------------------------------ #
+
+def _to_h2s_date(iso_date: str) -> str:
+    """
+    将 ISO 日期（YYYY-MM-DD）转换为 H2S API 要求的格式（DD-MM-YYYY）。
+
+    H2S 的 addNewBooking mutation 要求 contract_startDate 为 DD-MM-YYYY：
+      "2026-05-04" → "04-05-2026"
+
+    传入错误格式（如 YYYY-MM-DD）时 API 会返回服务端错误，因此此转换是必须的。
+    """
+    return _dt.strptime(iso_date, "%Y-%m-%d").strftime("%d-%m-%Y")
+
+
+# ------------------------------------------------------------------ #
+# 错误分类（placeOrder 业务错误识别）
 # ------------------------------------------------------------------ #
 
 def _is_booked_by_other(msg: str) -> bool:
@@ -148,24 +179,8 @@ def login(session: req.Session, email: str, password: str) -> str:
     """
     调用 generateCustomerToken mutation 登录，返回 Bearer token。
 
-    Parameters
-    ----------
-    session  : curl_cffi Session
-    email    : Holland2Stay 账号邮箱
-    password : Holland2Stay 账号密码
-
-    Returns
-    -------
-    Bearer token 字符串，用于后续所有需要鉴权的 GraphQL 请求
-
-    Raises
-    ------
-    RuntimeError 登录失败或响应中无 token
-
-    注意
-    ----
     邮箱和密码通过 GraphQL variables 传递（而非拼入 query 字符串），
-    由 json.dumps 负责转义，含 "、\、控制字符的密码均可正确处理。
+    由 json.dumps 负责转义，含 "、\\、控制字符的密码均可正确处理。
     """
     query = '''
     mutation GenerateCustomerToken($email: String!, $password: String!) {
@@ -183,72 +198,70 @@ def login(session: req.Session, email: str, password: str) -> str:
 
 
 # ------------------------------------------------------------------ #
-# 获取购物车
+# 购物车
 # ------------------------------------------------------------------ #
 
-def get_or_create_cart(session: req.Session, token: str) -> str:
+def create_empty_cart(session: req.Session, token: str) -> str:
     """
-    获取当前账号的购物车 ID，并清空购物车内的旧条目。
+    调用 createEmptyCart mutation 创建全新空购物车，返回 cart_id。
 
-    流程
-    ----
-    1. customerCart query 获取 cart_id 和现有条目（itemsV2）
-    2. 若有旧条目 → 调用 _truncate_cart() 清空，避免重复预订错误
-
-    Returns
-    -------
-    cart_id 字符串（Magento 购物车唯一标识）
-
-    Raises
-    ------
-    RuntimeError 无法获取 cart_id 时
+    每次预订前创建新购物车，避免旧条目干扰（与浏览器行为一致）。
+    重试 _do_book() 时也会调用本函数，保证购物车干净。
     """
-    # 先取购物车 ID 和当前条目（用于清理）
-    query = '''
-    {
-      customerCart {
-        id
-        itemsV2 { items { uid } }
-      }
-    }
-    '''
+    query = "mutation CreateEmptyCart { createEmptyCart }"
     data = _gql(session, query, token=token)
-    cart_info = data.get("customerCart", {})
-    cart_id = cart_info.get("id")
+    cart_id = data.get("createEmptyCart")
     if not cart_id:
-        raise RuntimeError("无法获取购物车 ID")
-
-    # 清空旧条目，避免 "cart already has booking" 类错误
-    items = (cart_info.get("itemsV2") or {}).get("items") or []
-    if items:
-        logger.debug("购物车有 %d 个旧项目，正在清空...", len(items))
-        _truncate_cart(session, token, cart_id)
-
-    logger.debug("购物车 ID: %s", cart_id)
+        raise RuntimeError("createEmptyCart 未返回购物车 ID")
+    logger.debug("新购物车 ID: %s", cart_id)
     return cart_id
 
 
-def _truncate_cart(session: req.Session, token: str, cart_id: str) -> None:
-    """
-    清空购物车内所有条目。
+# ------------------------------------------------------------------ #
+# 设置支付方式
+# ------------------------------------------------------------------ #
 
-    使用 truncateCart mutation，该 mutation 的返回类型 TruncateCartOutput
-    只有 `status: Boolean` 字段（不含 cart{}，因此不会触发 NON_NULL 传播问题）。
-
-    失败不抛出异常，只记录 warning，不阻断后续预订流程。
+def set_payment_method(
+    session: req.Session,
+    token: str,
+    cart_id: str,
+    code: str = _PAYMENT_METHOD,
+) -> None:
     """
-    query = 'mutation TruncateCart($cartId: String!) { truncateCart(cart_id: $cartId) { status } }'
-    try:
-        data = _gql(session, query, token=token, variables={"cartId": cart_id})
-        ok = (data.get("truncateCart") or {}).get("status")
-        logger.debug("购物车已清空 status=%s", ok)
-    except Exception as e:
-        # 清空失败不阻断流程，记录警告即可
-        logger.warning("清空购物车失败（忽略）: %s", e)
+    调用 setPaymentMethodOnCart mutation，在购物车上指定支付方式。
+
+    必须在 placeOrder 之前调用，否则 placeOrder 返回：
+    "The payment method you requested is not available."
+
+    浏览器抓包确认的三种支付代码：
+      idealcheckout_ideal      → iDEAL（默认，自动预订使用）
+      idealcheckout_visa       → Visa
+      idealcheckout_mastercard → Mastercard
+    """
+    query = '''
+    mutation SetPaymentMethodOnCart($cartId: String!, $paymentMethod: PaymentMethodInput!) {
+      setPaymentMethodOnCart(
+        input: {cart_id: $cartId, payment_method: $paymentMethod}
+      ) {
+        cart {
+          selected_payment_method { code title }
+        }
+      }
+    }
+    '''
+    data = _gql(session, query, token=token,
+                variables={"cartId": cart_id, "paymentMethod": {"code": code}})
+    selected = (
+        (data.get("setPaymentMethodOnCart") or {})
+        .get("cart", {})
+        .get("selected_payment_method", {})
+        .get("code")
+    )
+    logger.info("支付方式已设置: %s", selected or code)
 
 
 # ------------------------------------------------------------------ #
-# 取消 pending 订单（清除"already reserved"锁）
+# 取消 pending 订单（清除 "already reserved" 锁）
 # ------------------------------------------------------------------ #
 
 def cancel_pending_orders(session: req.Session, token: str) -> int:
@@ -258,13 +271,13 @@ def cancel_pending_orders(session: req.Session, token: str) -> int:
 
     背景
     ----
-    Holland2Stay 的 placeOrder 会检查账号下是否已有预留单，若有则返回：
+    placeOrder 会检查账号下是否已有预留单，若有则返回：
     "Sorry, at the moment you have another unit reserved."
     在新预订前必须取消旧的 pending 订单才能成功下单。
 
     实现策略
     --------
-    使用 Magento 标准 cancelOrder mutation（不再内省 schema）。
+    使用 Magento 标准 cancelOrder mutation。
     若平台未启用该 mutation（"not enabled for requested store"），
     则抛出 RuntimeError 明确告知调用方：此账号无法自动取消旧订单。
 
@@ -353,65 +366,52 @@ def add_to_cart(
     contract_id: Optional[int] = None,
 ) -> bool:
     """
-    调用 addNewBooking mutation，将押金项加入购物车（相当于锁定预订位置）。
+    调用 H2S 专用 addNewBooking mutation，将押金项加入购物车并创建预订。
 
-    Parameters
-    ----------
-    session             : curl_cffi Session
-    token               : Bearer token
-    cart_id             : get_or_create_cart() 返回的购物车 ID
-    sku                 : 房源的 Magento SKU（由 _fetch_sku_and_contract 获取）
-    contract_start_date : 入住日期，格式 "YYYY-MM-DD"，必须是未来日期；
-                          None 时不传，由服务端决定（可能导致 Internal server error）
-    contract_id         : 合同类型 ID，来自 type_of_contract 属性；
-                          None 时不传，可能导致 Internal server error
+    addNewBooking 是 H2S 的定制接口，负责：
+    1. 将押金项（Deposit €200）加入购物车
+    2. 创建预订（绑定 contract_id / contract_startDate）
 
-    Returns
-    -------
-    True（成功）
+    日期格式
+    --------
+    H2S API 要求 contract_startDate 为 DD-MM-YYYY（如 "04-05-2026"），
+    不是 ISO 格式。此函数内部调用 _to_h2s_date() 完成转换。
 
-    Raises
-    ------
-    RuntimeError 含 user_errors 时（如 "cart already has booking"）
+    NON_NULL 传播绕过
+    ----------------
+    不请求 cart{} 字段：若 cart=null，GraphQL 会将 null 上升为顶层
+    "Internal server error"，掩盖 user_errors。只查 user_errors 可避免此问题。
 
-    关键设计：NON_NULL 传播绕过
-    ---------------------------
-    此函数不使用 _gql() 而是直接调用 session.post()。
-    原因：AddProductsToCartOutput.cart 字段是 NON_NULL 类型。
-    若请求 cart{} 且服务端处理失败（cart=null），GraphQL 会将 null 上升为
-    顶层 "Internal server error"，掩盖 user_errors 中的真实错误原因。
-    只请求 user_errors 可绕过此问题，直接获得可读的业务错误信息。
-
-    注意
-    ----
-    addNewBooking 实际上往购物车加入的是押金项（Deposit €200），
-    不是房源本身。后续需调用 placeOrder 才能真正产生订单。
+    mutation 签名与变量名严格对齐官方前端（从浏览器 DevTools 抓包核实）：
+      $cart_id / $sku / $contract_startDate / $contract_id / $option_selected
     """
-    # 所有用户数据（cart_id、sku、日期、合同 ID）通过 GraphQL variables 传递，
-    # 不插入 mutation 字符串，防止注入。
-    # optional 参数需要条件性地出现在 mutation 签名和参数列表中，
-    # 因此用 f-string 控制"有哪些参数"，但参数的值始终来自 variables dict。
-    var_decls = "$cartId: String!, $sku: String!"
-    arg_uses  = "cart_id: $cartId, sku: $sku"
-    variables: dict = {"cartId": cart_id, "sku": sku}
-
-    if contract_start_date:
-        var_decls += ", $startDate: String!"
-        arg_uses  += ", contract_startDate: $startDate"
-        variables["startDate"] = contract_start_date
-
-    if contract_id is not None:
-        var_decls += ", $contractId: Int!"
-        arg_uses  += ", contract_id: $contractId"
-        variables["contractId"] = contract_id
-
-    query = f'''
-    mutation AddNewBooking({var_decls}) {{
-      addNewBooking({arg_uses}) {{
-        user_errors {{ code message }}
-      }}
-    }}
+    query = '''
+    mutation AddNewBooking(
+      $cart_id: String!,
+      $sku: String!,
+      $contract_startDate: String,
+      $contract_id: Int,
+      $option_selected: String
+    ) {
+      addNewBooking(
+        cart_id: $cart_id
+        sku: $sku
+        contract_startDate: $contract_startDate
+        contract_id: $contract_id
+        option_selected: $option_selected
+      ) {
+        user_errors { code message }
+      }
+    }
     '''
+
+    variables: dict = {"cart_id": cart_id, "sku": sku}
+    if contract_start_date:
+        # API 要求 DD-MM-YYYY，_to_h2s_date 负责从 ISO 格式转换
+        variables["contract_startDate"] = _to_h2s_date(contract_start_date)
+    if contract_id is not None:
+        variables["contract_id"] = contract_id
+
     resp = session.post(
         GQL_URL,
         json={"query": query, "variables": variables},
@@ -421,14 +421,11 @@ def add_to_cart(
     resp.raise_for_status()
     raw = resp.json()
 
-    # 记录原始响应
     logger.debug("addNewBooking raw response: %s", raw)
 
-    # GraphQL 层错误（比如字段不存在、类型错误）
     if "errors" in raw:
         msgs = "; ".join(e.get("message", "") for e in raw["errors"])
         logger.error("addNewBooking GraphQL 层错误: %s", msgs)
-        # 若同时含有 data，说明是 partial error，先看 user_errors
         if not raw.get("data"):
             raise RuntimeError(f"addNewBooking GraphQL 错误: {msgs}")
 
@@ -439,128 +436,109 @@ def add_to_cart(
             f"[{e.get('code','?')}] {e.get('message','')}" for e in user_errors
         )
         logger.error("addNewBooking 业务错误: %s", msgs)
-        raise RuntimeError(f"加入购物车失败: {msgs}")
+        raise RuntimeError(f"addNewBooking 失败: {msgs}")
 
-    logger.info("加入购物车成功")
+    logger.info("addNewBooking 成功（押金项已入购物车）")
     return True
 
 
 # ------------------------------------------------------------------ #
-# 下单 + 生成支付链接
+# 下单
 # ------------------------------------------------------------------ #
 
-def place_order_and_pay(
+def place_order(
     session: req.Session,
     token: str,
     cart_id: str,
-    payment_method: str = "idealcheckout_ideal",
+    store_id: int = _H2S_STORE_ID,
 ) -> str:
     """
-    执行完整的结账流程，返回可直接跳转的 iDEAL 支付链接。
+    调用 placeOrder mutation 将购物车转为正式订单，返回订单号。
 
-    流程
-    ----
-    1. setPaymentMethodOnCart：设置支付方式为 idealcheckout_ideal
-    2. placeOrder：将购物车转化为正式订单，获取 order_number
-    3. idealCheckOut：根据 order_number 生成支付链接
-
-    Parameters
-    ----------
-    session        : curl_cffi Session
-    token          : Bearer token
-    cart_id        : 含押金项的购物车 ID
-    payment_method : 支付方式代码，默认 "idealcheckout_ideal"（iDEAL 银行转账）
-
-    Returns
-    -------
-    支付链接，形如：
-    https://account.holland2stay.com/idealcheckout/setup.php?order_id=XXX&order_code=YYY
-    该链接无需登录即可访问，有效期有限，需尽快完成支付。
+    mutation 签名、响应字段与错误处理均从浏览器 DevTools 抓包核实：
+    - 参数：cartId + storeId（H2S 后端要求，默认 54）
+    - 成功响应：orderV2.order_number（不是 order.number）
+    - 业务错误：response.errors 数组（区别于 GraphQL 层 errors）
 
     Raises
     ------
-    RuntimeError 任何步骤失败时（含下单失败、支付链接获取失败）
+    RuntimeError  placeOrder 返回业务错误或未返回订单号时
 
-    注意
-    ----
-    支付域名是 account.holland2stay.com（后端 PHP），
-    不是 www.holland2stay.com（Next.js 前端），两者是完全不同的系统。
+    Notes
+    -----
+    "already booked by someone else" → _is_booked_by_other() → 竞争失败
+    "another unit reserved"          → _is_reserved_by_user() → 可取消重试
+    两类错误均由调用方（try_book）的 except 块识别并分别处理。
     """
-    # 1. 设置支付方式（cart_id、payment_method 均通过 variables 传递）
-    tp0 = time.monotonic()
-    q = '''
-    mutation SetPayment($cartId: String!, $code: String!) {
-      setPaymentMethodOnCart(input: {
-        cart_id: $cartId,
-        payment_method: { code: $code }
-      }) {
-        cart { selected_payment_method { code } }
+    query = '''
+    mutation PlaceOrder($cartId: String!, $storeId: Int) {
+      placeOrder(input: {cart_id: $cartId, store_id: $storeId}) {
+        orderV2 {
+          order_number
+        }
+        errors {
+          message
+          code
+        }
       }
     }
     '''
-    try:
-        _gql(session, q, token=token, variables={"cartId": cart_id, "code": payment_method})
-    except Exception as e:
-        logger.error("setPaymentMethodOnCart 失败 (%.2fs): %s", time.monotonic() - tp0, e)
-        raise
-    t_setpay = time.monotonic() - tp0
-    logger.debug("支付方式已设置: %s  (%.2fs)", payment_method, t_setpay)
+    data = _gql(session, query, token=token,
+                variables={"cartId": cart_id, "storeId": store_id})
+    result = data.get("placeOrder") or {}
 
-    # 2. 下单（cart_id 通过 variable 传递）
-    tp1 = time.monotonic()
-    q = '''
-    mutation PlaceOrder($cartId: String!) {
-      placeOrder(input: { cart_id: $cartId }) {
-        errors { message code }
-        orderV2 { number status }
-      }
-    }
-    '''
-    try:
-        data = _gql(session, q, token=token, variables={"cartId": cart_id})
-    except Exception as e:
-        logger.error("placeOrder GraphQL 层失败 (%.2fs): %s", time.monotonic() - tp1, e)
-        raise
-    order_result = (data.get("placeOrder") or {})
-    errs = order_result.get("errors") or []
-    if errs:
-        t_place = time.monotonic() - tp1
-        msgs = "; ".join(e.get("message","") for e in errs)
-        logger.error("placeOrder 业务错误 (%.2fs): %s", t_place, msgs)
+    # placeOrder 的业务错误通过 errors 数组返回（区别于 GraphQL 层 errors）
+    errors = result.get("errors") or []
+    if errors:
+        msgs = "; ".join(
+            f"[{e.get('code','?')}] {e.get('message','')}" for e in errors
+        )
+        logger.error("placeOrder 业务错误: %s", msgs)
         raise RuntimeError(f"下单失败: {msgs}")
-    order_number = (order_result.get("orderV2") or {}).get("number")
-    if not order_number:
-        t_place = time.monotonic() - tp1
-        logger.error("placeOrder 未返回订单号 (%.2fs)", t_place)
-        raise RuntimeError("下单失败：未获取到订单号")
-    t_place = time.monotonic() - tp1
-    logger.info("订单创建成功: #%s  (%.2fs)", order_number, t_place)
 
-    # 3. 生成 iDEAL/idealcheckout 支付跳转链接（order_number 通过 variable 传递）
-    # plateform: "web" 是 H2S API 要求的常量字符串，直接内联
-    tp2 = time.monotonic()
-    q = '''
-    mutation IdealCheckOut($orderId: String!) {
-      idealCheckOut(order_id: $orderId, plateform: "web") {
+    order_number = (result.get("orderV2") or {}).get("order_number")
+    if not order_number:
+        raise RuntimeError("placeOrder 未返回订单号（orderV2.order_number 为空）")
+
+    logger.info("订单已创建: #%s", order_number)
+    return order_number
+
+
+# ------------------------------------------------------------------ #
+# 生成支付链接
+# ------------------------------------------------------------------ #
+
+def _ideal_checkout(session: req.Session, token: str, order_number: str) -> str:
+    """
+    调用 idealCheckOut mutation 生成 iDEAL 直链付款 URL。
+
+    参数与变量名从浏览器 DevTools 抓包核实：
+    - 变量名：order_id（snake_case），plateform（注意拼写，官方如此）
+    - plateform 值："h"（浏览器实际传值，非 "web"）
+
+    付款域名是 account.holland2stay.com（PHP 后端），
+    不是 www.holland2stay.com（Next.js 前端）。
+    """
+    query = '''
+    mutation IdealCheckOut($order_id: String!, $plateform: String) {
+      idealCheckOut(order_id: $order_id, plateform: $plateform) {
         redirect
       }
     }
     '''
+    tp0 = time.monotonic()
     try:
-        data = _gql(session, q, token=token, variables={"orderId": order_number})
+        data = _gql(session, query, token=token,
+                    variables={"order_id": order_number, "plateform": "h"})
     except Exception as e:
-        logger.error("idealCheckOut 失败 (%.2fs): %s", time.monotonic() - tp2, e)
+        logger.error("idealCheckOut 失败 (%.2fs): %s", time.monotonic() - tp0, e)
         raise
     pay_url = (data.get("idealCheckOut") or {}).get("redirect")
     if not pay_url:
-        t_ideal = time.monotonic() - tp2
-        logger.error("idealCheckOut 未返回支付链接 (%.2fs)", t_ideal)
-        raise RuntimeError(f"未能获取支付链接 (order #{order_number})")
-    t_ideal = time.monotonic() - tp2
-    logger.info(
-        "支付链接已生成 | pay 子步骤: setpay=%.2fs place=%.2fs ideal=%.2fs",
-        t_setpay, t_place, t_ideal,
-    )
+        raise RuntimeError(
+            f"idealCheckOut 未返回支付链接 (order #{order_number})"
+        )
+    logger.info("支付链接已生成 (%.2fs)", time.monotonic() - tp0)
     return pay_url
 
 
@@ -578,14 +556,18 @@ class BookingResult:
     success               : True 表示流程全部成功（或 dry_run 验证通过）
     message               : 发送给用户的通知消息（含付款链接或失败原因）
     dry_run               : True 表示是 dry_run 模式产生的结果（未实际提交）
-    pay_url               : place_order_and_pay() 返回的直链付款 URL；
+    pay_url               : _ideal_checkout() 返回的直链付款 URL；
                             失败时为空字符串；dry_run 时也为空字符串
     contract_start_date   : _fetch_sku_and_contract() 从 API 获取的实际合同开始日期，
                             格式 "YYYY-MM-DD"；未知时为空字符串。
-                            此值可能与抓取时记录的 Listing.available_from 不同——
-                            API 在预订时返回 next_contract_startdate，
-                            而 available_from 是监控轮询时抓取到的快照，
-                            两者在时间差内可能出现不一致。
+    phase                 : 内部流程阶段标识，供调用方判断失败类型：
+                            "success"           → 预订成功
+                            "dry_run"           → dry_run 模式（未实际提交）
+                            "race_lost"         → 竞争失败（房源已被他人预订）
+                            "reserved_conflict" → 账号已有预留单且 cancel_enabled=False
+                            "cancel+retry"      → 取消旧单后重试（cancel_enabled=True）
+                            "unknown_error"     → 其他未预期错误
+                            ""                  → 未进入预订阶段（如状态不符合）
     """
     def __init__(
         self,
@@ -595,6 +577,7 @@ class BookingResult:
         dry_run: bool = False,
         pay_url: str = "",
         contract_start_date: str = "",
+        phase: str = "",
     ):
         self.listing = listing
         self.success = success
@@ -602,6 +585,7 @@ class BookingResult:
         self.dry_run = dry_run
         self.pay_url = pay_url
         self.contract_start_date = contract_start_date
+        self.phase = phase
 
 
 def try_book(
@@ -611,6 +595,7 @@ def try_book(
     *,
     dry_run: bool = False,
     cancel_enabled: bool = False,
+    payment_method: str = _PAYMENT_METHOD,
 ) -> BookingResult:
     """
     对单个 "Available to book" 房源执行完整的自动预订流程。
@@ -620,9 +605,12 @@ def try_book(
     listing        : 目标房源（status 必须为 "Available to book"，否则立即返回失败）
     email          : Holland2Stay 账号邮箱
     password       : Holland2Stay 账号密码
-    dry_run        : True 时只完成 SKU 查询/登录/购物车验证，不提交预订
+    dry_run        : True 时只完成 SKU 查询/登录验证，不提交预订
     cancel_enabled : True 时若 placeOrder 返回 "another unit reserved"，
                      则自动取消旧订单后重试；False（默认）时直接通知用户
+    payment_method : setPaymentMethodOnCart 使用的支付代码，
+                     默认 "idealcheckout_ideal"（iDEAL），
+                     可选 "idealcheckout_visa" / "idealcheckout_mastercard"
 
     Returns
     -------
@@ -631,20 +619,15 @@ def try_book(
     - success=True, dry_run=True  → dry_run 验证通过
     - success=False               → 任何步骤失败，message 含错误原因
 
-    调用方式
-    --------
-    由 monitor.py 的 run_once() 通过 run_in_executor 在线程池中调用
-    （此函数是同步的，使用 curl_cffi 同步 HTTP，不能直接在事件循环中 await）。
+    内部流程（每次 _do_book 调用）
+    --------------------------------
+    createEmptyCart → addNewBooking → setPaymentMethodOnCart → placeOrder → idealCheckOut
 
-    下单策略
+    重试策略
     --------
-    首次直接尝试 placeOrder；若返回「房源已被他人预订」则立即通知用户（竞争失败）。
-    若返回「账号已有预留单」且 cancel_enabled=True → 取消旧单后重试一次。
-    若返回「账号已有预留单」且 cancel_enabled=False → 直接通知用户（人工介入）。
-
-    异常处理
-    --------
-    所有内部异常均被捕获并转化为 BookingResult(success=False)，不向上传播。
+    placeOrder 返回「房源已被他人预订」→ 立即通知用户（竞争失败，不重试）。
+    placeOrder 返回「账号已有预留单」且 cancel_enabled=True
+      → cancel_pending_orders() 取消旧单 → 重新执行 _do_book()（含新购物车）。
     """
     if listing.status.lower() not in ("available to book",):
         return BookingResult(listing, False, f"状态不是 Available to book: {listing.status}")
@@ -655,10 +638,6 @@ def try_book(
 
     # ---------------------------------------------------------------- #
     # Step 1: 确定 SKU / contract_id / contract_start_date
-    # ---------------------------------------------------------------- #
-    # 方案 1（前置提取）：scraper 已在抓取时提取 sku/contract_id/contract_start_date，
-    # 直接使用 Listing 上的字段，省去一次独立 HTTP 查询（~0.5-1.5s）。
-    # 旧数据回退：若 Listing 无 sku（旧版抓取或 DB 回填），降级到 _fetch_sku_and_contract()。
     # ---------------------------------------------------------------- #
     if listing.sku:
         t_sku = 0.0
@@ -677,6 +656,7 @@ def try_book(
     proxies = {"https": proxy, "http": proxy} if proxy else {}
     with req.Session(impersonate="chrome110", proxies=proxies) as session:
         try:
+            # ---- Step 1 fallback: 没有预提取 SKU 时通过 API 查询 ---- #
             if not listing.sku:
                 t1 = time.monotonic()
                 sku, contract_id, start_date = _fetch_sku_and_contract(session, listing.id)
@@ -687,84 +667,95 @@ def try_book(
                     sku, contract_id, start_date or "(不传，由服务端决定)", t_sku,
                 )
 
-            # 2. 登录验证账号
+            # ---- Step 2: 登录 ---- #
             t2 = time.monotonic()
             token = login(session, email, password)
             t_login = time.monotonic() - t2
-            logger.info("[%s]%s 登录成功 (%.2fs)", listing.name, " [DRY RUN]" if dry_run else "", t_login)
+            logger.info("[%s]%s 登录成功 (%.2fs)", listing.name,
+                        " [DRY RUN]" if dry_run else "", t_login)
 
-            # 3. 获取购物车 ID
-            t3 = time.monotonic()
-            cart_id = get_or_create_cart(session, token)
-            t_cart = time.monotonic() - t3
-            logger.info("[%s]%s 购物车 ID: %s  (%.2fs)", listing.name, " [DRY RUN]" if dry_run else "", cart_id, t_cart)
-
-            # 4. 加入购物车（dry_run 时跳过此步）
+            # ---- dry_run：验证凭据即止，不提交任何预订 ---- #
             if dry_run:
                 total = time.monotonic() - t0
-                msg = "[DRY RUN] 验证通过（SKU/登录/购物车均正常），未实际提交预订"
+                msg = "[DRY RUN] 验证通过（SKU/登录均正常），未实际提交预订"
                 logger.info(
-                    "[%s] %s | 耗时 total=%.1fs (sku=%.2fs login=%.2fs cart=%.2fs)",
-                    listing.name, msg, total, t_sku, t_login, t_cart,
+                    "[%s] %s | 耗时 total=%.1fs (sku=%.2fs login=%.2fs)",
+                    listing.name, msg, total, t_sku, t_login,
                 )
-                return BookingResult(listing, True, msg, dry_run=True)
+                return BookingResult(listing, True, msg, dry_run=True, phase="dry_run")
 
-            logger.debug("[%s] 加入购物车 (contract_id=%s, start_date=%s)...", listing.name, contract_id, start_date)
-            t4 = time.monotonic()
-            add_to_cart(session, token, cart_id, sku, start_date, contract_id)
-            t_add = time.monotonic() - t4
-
-            # 5. 下单并生成直接支付链接
-            logger.debug("[%s] 尝试下单...", listing.name)
             booking_url = f"https://www.holland2stay.com/residences/{listing.id}.html"
-            t5 = time.monotonic()
+
+            def _do_book() -> tuple[str, float, float]:
+                """
+                createEmptyCart → addNewBooking → setPaymentMethodOnCart
+                → placeOrder → idealCheckOut。
+                每次调用都创建新购物车，保证重试路径也能干净执行。
+                """
+                ta = time.monotonic()
+
+                # 3a. 新建购物车
+                new_cart_id = create_empty_cart(session, token)
+
+                # 3b. 加入购物车（addNewBooking）
+                add_to_cart(session, token, new_cart_id, sku, start_date, contract_id)
+
+                # 3c. 设置支付方式（placeOrder 前必须调用，否则报 "payment not available"）
+                set_payment_method(session, token, new_cart_id, code=payment_method)
+                t_add_val = time.monotonic() - ta
+
+                # 3d. 下单 → 获取订单号
+                tp = time.monotonic()
+                order_number = place_order(session, token, new_cart_id)
+
+                # 3e. 生成支付链接
+                pay_url = _ideal_checkout(session, token, order_number)
+                t_pay_val = time.monotonic() - tp
+
+                logger.info("[%s] 订单 #%s 支付链接已生成 | add=%.2fs pay=%.2fs",
+                            listing.name, order_number, t_add_val, t_pay_val)
+                return pay_url, t_add_val, t_pay_val
+
+            # ---- Step 3: 执行预订（含错误分类重试） ---- #
             try:
-                pay_url = place_order_and_pay(session, token, cart_id)
-                t_pay = time.monotonic() - t5
+                pay_url, t_add, t_pay = _do_book()
                 phase = "success"
-            except RuntimeError as order_err:
-                t_pay = time.monotonic() - t5
-                err_str = str(order_err)
+            except RuntimeError as book_err:
+                err_str = str(book_err)
 
                 if _is_booked_by_other(err_str):
                     phase = "race_lost"
-                    logger.warning(
-                        "[%s] 竞争失败：房源已被他人预订 (%s)", listing.name, err_str
-                    )
+                    logger.warning("[%s] 竞争失败：房源已被他人预订 (%s)",
+                                   listing.name, err_str)
                     raise RuntimeError(
                         f"房源已被他人抢先预订，竞争失败。\n\n"
                         f"💡 如房源重新开放，可尝试手动预订：\n{booking_url}"
-                    ) from order_err
+                    ) from book_err
 
                 elif _is_reserved_by_user(err_str):
                     if not cancel_enabled:
                         phase = "reserved_conflict"
-                        logger.warning(
-                            "[%s] 预留单冲突，原始错误: %s",
-                            listing.name, err_str,
-                        )
+                        logger.warning("[%s] 预留单冲突，原始错误: %s",
+                                       listing.name, err_str)
                         raise RuntimeError(
                             "该账号尚有未完成的预留订单，请登录 Holland2Stay 手动取消后再试。\n\n"
                             f"📋 原始错误：{err_str}\n\n"
                             f"💡 手动预订入口：\n{booking_url}"
-                        ) from order_err
+                        ) from book_err
 
-                    # cancel_enabled=True：取消旧单后重试一次
+                    # cancel_enabled=True：取消旧单后重试整个 _do_book（含新购物车）
                     phase = "cancel+retry"
-                    logger.info(
-                        "[%s] 账号已有预留单（%s），正在取消后重试...",
-                        listing.name, err_str,
-                    )
+                    logger.info("[%s] 账号已有预留单（%s），正在取消后重试...",
+                                listing.name, err_str)
                     tc1 = time.monotonic()
                     cancelled = cancel_pending_orders(session, token)
                     t_cancel = time.monotonic() - tc1
-                    logger.info("[%s] 已取消 %d 笔旧订单 (%.2fs)，重新下单...", listing.name, cancelled, t_cancel)
-                    t5 = time.monotonic()
-                    pay_url = place_order_and_pay(session, token, cart_id)
-                    t_pay = time.monotonic() - t5
+                    logger.info("[%s] 已取消 %d 笔旧订单 (%.2fs)，重新预订...",
+                                listing.name, cancelled, t_cancel)
+                    pay_url, t_add, t_pay = _do_book()
 
                 else:
-                    phase = "unknown_order_error"
+                    phase = "unknown_error"
                     raise
 
             total = time.monotonic() - t0
@@ -780,7 +771,8 @@ def try_book(
                 f"\n"
                 f"⚠️ 链接直达支付页面，无需登录。"
             )
-            parts = f"sku={t_sku:.2f}s login={t_login:.2f}s cart={t_cart:.2f}s add={t_add:.2f}s pay={t_pay:.2f}s"
+            parts = (f"sku={t_sku:.2f}s login={t_login:.2f}s "
+                     f"add={t_add:.2f}s pay={t_pay:.2f}s")
             if t_cancel:
                 parts += f" cancel={t_cancel:.2f}s"
             logger.info(
@@ -788,7 +780,7 @@ def try_book(
                 listing.name, start_date, total, parts,
             )
             return BookingResult(listing, True, msg, pay_url=pay_url,
-                                 contract_start_date=start_date or "")
+                                 contract_start_date=start_date or "", phase="success")
 
         except Exception as e:
             total = time.monotonic() - t0
@@ -798,7 +790,7 @@ def try_book(
                 phase, total, e,
                 exc_info=True,
             )
-            return BookingResult(listing, False, str(e))
+            return BookingResult(listing, False, str(e), phase=phase)
 
 
 def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Optional[int], Optional[str]]:
@@ -820,6 +812,7 @@ def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Op
     start_date    : 下一个可用入住日期，格式 "YYYY-MM-DD"；
                     优先取 next_contract_startdate，其次取 available_startdate；
                     若日期早于今日则置为 None（传过期日期服务端会报错）
+                    注意：add_to_cart() 内部会调用 _to_h2s_date() 转为 DD-MM-YYYY
 
     Raises
     ------
@@ -877,7 +870,7 @@ def _fetch_sku_and_contract(session: req.Session, url_key: str) -> tuple[str, Op
                 avail_date = raw
 
     # 选择入住日期：优先 next_contract_startdate，其次 available_startdate
-    # 过去的日期不传（传过去日期服务端会 Internal server error）
+    # 过去的日期不传（传过期日期服务端会报错）
     from datetime import date
     today_str = date.today().isoformat()
     candidate = next_start_date or avail_date

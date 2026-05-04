@@ -425,12 +425,21 @@ def _user_from_form(
     )
 
     ex_ab = existing.auto_book if existing else None
+    _VALID_PAYMENT_METHODS = {
+        "idealcheckout_ideal",
+        "idealcheckout_visa",
+        "idealcheckout_mastercard",
+    }
+    raw_pm = form.get("AUTO_BOOK_PAYMENT_METHOD", "idealcheckout_ideal")
+    payment_method = raw_pm if raw_pm in _VALID_PAYMENT_METHODS else "idealcheckout_ideal"
+
     ab = AutoBookConfig(
         enabled=form.get("AUTO_BOOK_ENABLED") == "true",
         dry_run=form.get("AUTO_BOOK_DRY_RUN", "true") != "false",
         cancel_enabled=form.get("AUTO_BOOK_CANCEL_ENABLED") == "true",
         email=form.get("AUTO_BOOK_EMAIL", ""),
         password=_secret("AUTO_BOOK_PASSWORD", ex_ab.password if ex_ab else ""),
+        payment_method=payment_method,
         listing_filter=ListingFilter(
             max_rent=_fv("AUTO_BOOK_MAX_RENT"),
             min_area=_fv("AUTO_BOOK_MIN_AREA"),

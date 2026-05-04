@@ -378,6 +378,29 @@
                  autocomplete="new-password">
         </div>
       </div>
+      <div class="row g-3 mb-3">
+        <div class="col-12 col-sm-6">
+          <label class="form-label small" style="color:var(--muted); font-weight:600;">支付方式</label>
+          {% set cur_pm = ab.payment_method if ab else "idealcheckout_ideal" %}
+          <select class="form-select form-select-sm" name="AUTO_BOOK_PAYMENT_METHOD">
+            <option value="idealcheckout_ideal"
+                    {% if cur_pm == "idealcheckout_ideal" %}selected{% endif %}>
+              iDEAL（荷兰网银，推荐）
+            </option>
+            <option value="idealcheckout_visa"
+                    {% if cur_pm == "idealcheckout_visa" %}selected{% endif %}>
+              Visa 信用卡
+            </option>
+            <option value="idealcheckout_mastercard"
+                    {% if cur_pm == "idealcheckout_mastercard" %}selected{% endif %}>
+              Mastercard 信用卡
+            </option>
+          </select>
+          <div class="form-text" style="font-size:.7rem; color:var(--muted);">
+            Visa / Mastercard 需在 H2S 账号已绑定对应卡片。
+          </div>
+        </div>
+      </div>
 
       <div class="section-title mt-2">自动预订专用过滤（独立于通知过滤）</div>
       {% set ab_lf = ab.listing_filter if ab else none %}

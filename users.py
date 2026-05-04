@@ -135,6 +135,7 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         password=d.get("password", ""),
         listing_filter=_lf_from_dict(d.get("listing_filter", {})),
         cancel_enabled=d.get("cancel_enabled", False),
+        payment_method=d.get("payment_method", "idealcheckout_ideal"),
     )
 
 

@@ -306,6 +306,12 @@ class AutoBookConfig:
     cancel_enabled  : 是否启用自动取消旧订单功能。False 时 placeOrder 返回
                       "another unit reserved" 会直接通知用户（不尝试取消），
                       因为 H2S 平台的 cancelOrder mutation 默认未启用
+    payment_method  : setPaymentMethodOnCart 使用的支付方式代码。
+                      可选值（均来自浏览器抓包）：
+                        "idealcheckout_ideal"       → iDEAL（荷兰网银，推荐）
+                        "idealcheckout_visa"        → Visa 信用卡
+                        "idealcheckout_mastercard"  → Mastercard 信用卡
+                      注意：Visa / Mastercard 仅适用于已在 H2S 账号绑定对应卡的用户。
     """
     enabled: bool = False
     dry_run: bool = True
@@ -313,6 +319,7 @@ class AutoBookConfig:
     password: str = ""
     listing_filter: ListingFilter = field(default_factory=ListingFilter)
     cancel_enabled: bool = False
+    payment_method: str = "idealcheckout_ideal"
 
 
 @dataclass

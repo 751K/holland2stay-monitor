@@ -44,6 +44,7 @@ import os
 import random
 import signal
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -80,6 +81,23 @@ _AMS = ZoneInfo("Europe/Amsterdam")
 
 # 热重载事件（SIGHUP → 唤醒 main_loop 中的 sleep，立即重载配置）
 _reload_event: asyncio.Event | None = None
+
+# 竞争失败重试队列：user_id → {listing_id, ...}
+#
+# 背景
+# ----
+# storage.diff() 只产出"新增"和"状态变更"两类事件。如果一套房子在上轮就是
+# "Available to book" 且状态未变（如前一个预订者未付款、房子被重新放出），
+# 它既不进 new_listings 也不进 status_changes，自动预订永远不会重试。
+#
+# 解决方案
+# --------
+# try_book 竞争失败（race_lost）时，将候选 listing_id 加入此队列。
+# 每轮 run_once 开始时，检查队列中的 ID 是否仍在本次抓取的 "Available to book"
+# 列表中，若是则直接加入 ab_candidates，触发新一轮预订尝试。
+#
+# 进程重启后队列清零（设计如此：陈旧的重试信息不如等下次正常触发更可靠）。
+_retry_queue: dict[str, set[str]] = {}
 
 # 类型别名：每个用户与其对应通知器的配对列表
 UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
@@ -205,6 +223,73 @@ def _area_key(listing) -> float:
     return float(m.group()) if m else 0.0
 
 
+def _book_with_fallback(
+    sorted_candidates: list,
+    user: "UserConfig",
+    deadline: float,
+) -> "BookingResult":
+    """
+    按面积降序依次对 sorted_candidates 中的房源尝试 try_book()。
+
+    重试条件
+    --------
+    仅在 result.phase == "race_lost"（房源已被他人抢先预订）时继续尝试下一套。
+    其余失败类型（reserved_conflict / unknown_error 等）立即返回——这些错误
+    与具体房源无关，换一套也无法解决。
+
+    截止时间
+    --------
+    第一套无条件尝试，确保用户不会因截止超时而错过所有机会。
+    从第二套起，仅在 deadline 之前继续，避免占用下一轮扫描的时间窗口。
+    deadline = float('inf') 表示无限制（--once 模式或单轮模式）。
+
+    Parameters
+    ----------
+    sorted_candidates : 已按面积降序排列的候选房源列表（调用方保证非空）
+    user              : 用户配置（含预订账号、密码、支付方式等）
+    deadline          : time.monotonic() 截止时刻；超过则停止对下一套的尝试
+
+    Returns
+    -------
+    最后一次 try_book() 的 BookingResult（成功或最终失败）
+    """
+    last_result = None
+    for i, listing in enumerate(sorted_candidates):
+        # 第一套无条件尝试；备选套先检查截止时间
+        if i > 0:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "[%s] ⏰ 已到下次扫描截止，停止备选重试"
+                    "（已尝试 %d/%d，剩余 %d 套未试）",
+                    user.name, i, len(sorted_candidates), len(sorted_candidates) - i,
+                )
+                break
+            logger.info(
+                "[%s] 🔄 竞争失败，尝试备选 %d/%d: %s (%.1f m²)"
+                "，距截止还剩 %.0f 秒",
+                user.name, i + 1, len(sorted_candidates),
+                listing.name, _area_key(listing), remaining,
+            )
+
+        result = try_book(
+            listing,
+            user.auto_book.email,
+            user.auto_book.password,
+            dry_run=user.auto_book.dry_run,
+            cancel_enabled=user.auto_book.cancel_enabled,
+            payment_method=user.auto_book.payment_method,
+        )
+        last_result = result
+
+        if result.success or result.dry_run or result.phase != "race_lost":
+            return result
+        # race_lost → 继续下一套
+
+    # 所有候选均已尝试（均 race_lost）或截止时间到
+    return last_result  # type: ignore[return-value]  # sorted_candidates 非空保证非 None
+
+
 async def run_once(
     cfg,
     storage: Storage,
@@ -212,16 +297,20 @@ async def run_once(
     *,
     web_notifier: WebNotifier | None = None,
     dry_run: bool = False,
+    booking_deadline: float = float("inf"),
 ) -> None:
     """
     执行一次完整的「抓取 → 对比 → 通知 → 自动预订」流程。
 
     Parameters
     ----------
-    cfg            : 当前全局配置（Config 实例）
-    storage        : SQLite 持久化层
-    user_notifiers : [(UserConfig, BaseNotifier), ...]，启用的用户列表
-    dry_run        : True 时（--test 模式）只打印结果，不写库不发通知
+    cfg              : 当前全局配置（Config 实例）
+    storage          : SQLite 持久化层
+    user_notifiers   : [(UserConfig, BaseNotifier), ...]，启用的用户列表
+    dry_run          : True 时（--test 模式）只打印结果，不写库不发通知
+    booking_deadline : time.monotonic() 截止时刻，传给 _book_with_fallback()；
+                       超过截止时不再尝试备选房源。
+                       默认 float("inf") = 无限制（--once / --test 模式）。
 
     流程说明
     --------
@@ -324,8 +413,40 @@ async def run_once(
             ):
                 ab_candidates[user.id].append(listing)
 
-    # 立即将 try_book() 提交到线程池，返回 Future（非阻塞）
-    # ab_futures: list of (user, notifier, target_listing, Future[BookingResult])
+    # ── 重试队列检查：上次 race_lost 的候选，若仍 Available to book 则补入候选 ── #
+    # 这处理了"前一个预订者未付款、房子被重新放出"但状态未变的场景：
+    # storage.diff() 对此类房源不产出任何事件，必须从重试队列中手动补入。
+    _fresh_avail = {l.id: l for l in fresh if l.status.lower() == "available to book"}
+    for user, _ in user_notifiers:
+        if not user.auto_book.enabled:
+            continue
+        user_retry = _retry_queue.get(user.id)
+        if not user_retry:
+            continue
+        # 清理本次抓取中已不再可预订的房源（已被成功预订 / 状态变更为其他）
+        gone = user_retry - _fresh_avail.keys()
+        if gone:
+            user_retry -= gone          # set 原地修改，直接影响 _retry_queue[user.id]
+            logger.info(
+                "[%s] 🗑️  %d 套 race_lost 房源已不可预订，移出重试队列",
+                user.name, len(gone),
+            )
+        # 将仍可预订的重试房源加入候选（避免与 status_changes 路径重复）
+        existing_ids = {c.id for c in ab_candidates[user.id]}
+        for lid in user_retry & _fresh_avail.keys():
+            if lid in existing_ids:
+                continue  # 已经由 status_changes 路径加入，跳过
+            listing = _fresh_avail[lid]
+            if user.auto_book.listing_filter.is_empty() or user.auto_book.listing_filter.passes(listing):
+                ab_candidates[user.id].append(listing)
+                logger.info(
+                    "[%s] 🔁 重试 race_lost 房源（仍可预订）: %s",
+                    user.name, listing.name,
+                )
+
+    # 立即将 _book_with_fallback() 提交到线程池，返回 Future（非阻塞）
+    # ab_futures: list of (user, notifier, sorted_candidates, Future[BookingResult])
+    # sorted_candidates 按面积降序排列；fallback 逻辑在线程内部按序尝试
     ab_futures: list[tuple] = []
     loop = asyncio.get_running_loop()
 
@@ -333,31 +454,29 @@ async def run_once(
         candidates = ab_candidates.get(user.id, [])
         if not (user.auto_book.enabled and candidates):
             continue
-        target = max(candidates, key=_area_key)
-        if len(candidates) > 1:
+        sorted_cands = sorted(candidates, key=_area_key, reverse=True)
+        primary = sorted_cands[0]
+        if len(sorted_cands) > 1:
             logger.info(
-                "[%s] 自动预订候选 %d 套，选面积最大: %s (%.1f m²)",
-                user.name, len(candidates), target.name, _area_key(target),
+                "[%s] 自动预订候选 %d 套（含 %d 套备选），优先面积最大: %s (%.1f m²)",
+                user.name, len(sorted_cands), len(sorted_cands) - 1,
+                primary.name, _area_key(primary),
             )
         # 区分：状态变更触发（快速通道）vs 新上线房源
-        if target.id in status_transition:
-            old_s, new_s = status_transition[target.id]
+        if primary.id in status_transition:
+            old_s, new_s = status_transition[primary.id]
             logger.info(
                 "[%s] 🚀 快速预订通道 (%s → %s)，立即提交: %s",
-                user.name, old_s, new_s, target.name,
+                user.name, old_s, new_s, primary.name,
             )
         else:
-            logger.info("[%s] 🔖 自动预订（新上线可预订），立即提交: %s", user.name, target.name)
+            logger.info("[%s] 🔖 自动预订（新上线可预订），立即提交: %s", user.name, primary.name)
 
         future = loop.run_in_executor(
             None,
-            lambda t=target, u=user: try_book(
-                t, u.auto_book.email, u.auto_book.password,
-                dry_run=u.auto_book.dry_run,
-                cancel_enabled=u.auto_book.cancel_enabled,
-            ),
+            lambda cs=sorted_cands, u=user, dl=booking_deadline: _book_with_fallback(cs, u, dl),
         )
-        ab_futures.append((user, notifier, target, future))
+        ab_futures.append((user, notifier, sorted_cands, future))
 
     # ── 新房源通知（预订任务已在后台并行运行）────────────────────── #
     total_notified = 0
@@ -402,17 +521,36 @@ async def run_once(
             storage.mark_status_change_notified(listing.id)
 
     # ── 等待预订结果，发送成功/失败通知 ──────────────────────────── #
-    for user, notifier, target, future in ab_futures:
+    for user, notifier, sorted_cands, future in ab_futures:
         result = await future
+        # result.listing 是实际被尝试预订的那套房源（fallback 后可能不是 sorted_cands[0]）
+        booked_listing = result.listing
+
+        # 更新重试队列（dry_run 不改变队列状态，避免污染正式运行时的数据）
+        if not result.dry_run:
+            if result.phase == "race_lost":
+                # 本轮所有候选均竞争失败（或超时未及尝试）→ 下次扫描如仍可预订则重试
+                _retry_queue.setdefault(user.id, set()).update(c.id for c in sorted_cands)
+                logger.info(
+                    "[%s] 📝 %d 套候选加入重试队列（下次扫描仍可预订时将重试）",
+                    user.name, len(sorted_cands),
+                )
+            else:
+                # 成功 / 非竞争性失败（账号冲突、未知错误等）→ 清除这批候选的重试标记
+                # 不再重试：成功无需再试；其他错误换一套房也无法解决根本原因
+                if user.id in _retry_queue:
+                    for c in sorted_cands:
+                        _retry_queue[user.id].discard(c.id)
+
         if result.dry_run:
-            logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, target.name)
+            logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, booked_listing.name)
         elif result.success:
             sent = await notifier.send_booking_success(
-                target, result.message, result.pay_url, result.contract_start_date
+                booked_listing, result.message, result.pay_url, result.contract_start_date
             )
             if web_notifier:
                 await web_notifier.send_booking_success(
-                    target, result.message, result.pay_url, result.contract_start_date
+                    booked_listing, result.message, result.pay_url, result.contract_start_date
                 )
             if not sent:
                 # 通知发送失败（渠道关闭/配置错误/网络问题），付款链接必须保留在日志中
@@ -421,12 +559,12 @@ async def run_once(
                     "❌ [%s] 自动预订成功但通知发送失败，付款链接已记录于此，请立即操作：\n"
                     "  房源：%s\n"
                     "  付款：%s",
-                    user.name, target.name, result.pay_url,
+                    user.name, booked_listing.name, result.pay_url,
                 )
         else:
-            await notifier.send_booking_failed(target, result.message)
+            await notifier.send_booking_failed(booked_listing, result.message)
             if web_notifier:
-                await web_notifier.send_booking_failed(target, result.message)
+                await web_notifier.send_booking_failed(booked_listing, result.message)
 
     logger.info(
         "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
@@ -526,7 +664,10 @@ async def main_loop(
 
             logger.info("===== 第 %d 轮 %s=====", round_count, peak_tag)
 
-            await run_once(cfg, storage, user_notifiers, web_notifier=web_notifier)
+            # booking_deadline：在此时刻后不再尝试备选房源，让下一轮扫描优先进行
+            booking_deadline = time.monotonic() + effective_interval
+            await run_once(cfg, storage, user_notifiers, web_notifier=web_notifier,
+                           booking_deadline=booking_deadline)
 
             # 成功：高峰期将自适应间隔缩短 5%（逐步逼近 min_interval）
             if is_peak:

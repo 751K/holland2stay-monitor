@@ -101,11 +101,13 @@
 
 - 检测到符合条件的 "Available to book" 房源时，自动完成完整预订流程：
   1. 登录账号
-  2. `addNewBooking` 将房源加入购物车
-  3. `placeOrder` 下单（押金订单）
-  4. `idealCheckOut` 生成直链付款 URL
-  5. 推送通知，含直链，用户点击即进入付款页，**无需登录**
-- 若 `placeOrder` 返回 "another unit reserved" 且用户开启了 `cancel_enabled`，通过 `cancelOrder` mutation 自动取消旧订单后重试一次
+  2. `createEmptyCart` 创建全新购物车
+  3. `addNewBooking` 将房源加入购物车并创建预订
+  4. `placeOrder` 下单（含 `store_id=54`，与官方前端一致）
+  5. `idealCheckOut` 生成直链付款 URL（含 `plateform="h"`）
+  6. 推送通知，含直链，用户点击即进入付款页，**无需登录**
+- 流程通过浏览器 DevTools 抓包验证，与 H2S 官方前端预订流程一致
+- 若 `placeOrder` 返回 "another unit reserved" 且用户开启了 `cancel_enabled`，通过 `cancelOrder` mutation 自动取消旧订单后重试整个流程
 - `cancel_enabled` 默认关闭：H2S 平台默认未启用 `cancelOrder`，开启前需确认平台支持
 - 多套候选时按面积从大到小选择
 - 每用户可设置独立的预订过滤条件（可比通知条件更严格）
@@ -154,8 +156,8 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
         │                 │     └── iMessage（macOS）/ Telegram / Email / WhatsApp
         │                 │
         │                 └── AutoBookConfig.passes() → booker.py  [并发执行]
-        │                       └── 登录 → addNewBooking
-        │                              → placeOrder → idealCheckOut → 付款直链
+        │                       └── 登录 → createEmptyCart → addNewBooking
+        │                              → placeOrder (store_id=54) → idealCheckOut → 付款直链
         │
         └── Web 面板只读查询 → web.py（Flask + Bootstrap 5）
                  ├── /api/charts
@@ -172,7 +174,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `storage.py` | SQLite 持久化，diff 检测，chart 聚合，meta 键值，web_notifications 表 |
 | `models.py` | Listing dataclass，price_display，feature_map |
 | `notifier.py` | BaseNotifier ABC，iMessage（macOS 检测），Telegram，Email，WhatsApp，WebNotifier，MultiNotifier |
-| `booker.py` | 登录 → addNewBooking → placeOrder → idealCheckOut → 付款直链；cancel_enabled 可开启自动取消旧订单，代理支持 |
+| `booker.py` | createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；cancel_enabled 可开启自动取消旧订单，代理支持 |
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
 | `users.py` | UserConfig dataclass，users.json 读写，.env 配置迁移 |
 | `web.py` | Flask 面板，Session 鉴权，用户 CRUD，SSE 流，通知 API，/api/reload |
@@ -424,7 +426,7 @@ scraper.py          GraphQL 抓取，curl_cffi，自动翻页，429 重试，代
 storage.py          SQLite：listings / status_changes / web_notifications / meta，chart 聚合
 models.py           Listing dataclass，price_display，feature_map
 notifier.py         BaseNotifier → iMessage（macOS 检测）/ Telegram / Email / WhatsApp / WebNotifier
-booker.py           登录 → addNewBooking → placeOrder → idealCheckOut → 付款直链（cancel_enabled 可选取消旧订单）
+booker.py           登录 → createEmptyCart → addNewBooking → placeOrder (store_id=54) → idealCheckOut (plateform "h")
 config.py           全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig
 users.py            UserConfig，users.json 读写，.env 配置迁移
 web.py              Flask 面板，Session 鉴权，SSE 流，通知 API，用户 CRUD，/api/reload
