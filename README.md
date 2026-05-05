@@ -28,6 +28,8 @@ Note: Personal project — not for commercial use. Contributions, issues and PRs
 | Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
 | Visualization | ✅ Done | 30-day trends, city/status distribution, price histogram |
 | Move-in calendar | ✅ Done | Calendar view filtered by city |
+| Map view | ✅ Done | Leaflet.js + OpenStreetMap with auto-geocoding |
+| i18n (中/EN) | ✅ Done | One-click language switch, cookie-persisted |
 | Notification testing | ✅ Done | Per-channel test with result details |
 | Optional auth for web | ✅ Done | Session login enabled when password set |
 
@@ -112,12 +114,15 @@ This reduces the delay between detecting the availability change and reaching th
 
 ### Web admin panel
 
-- Dashboard with totals, today's new listings, recent changes, and latest scrape info
-- Listings page with status filters and keyword search
-- Calendar and chart views for move-in dates, city distribution, status distribution, and price ranges
-- User management with CRUD, enable/disable, per-user config, and test notifications
-- Global settings for polling, adaptive polling, and monitored cities without editing `.env`
-- Save-and-reload workflow — settings apply without restarting the monitor process
+- **Dashboard** — totals, today's new listings, recent changes, latest scrape info, auto-refresh
+- **Listings** — filter by status, keyword search, sortable table view
+- **Map** — Leaflet.js interactive map with auto-geocoding (Nominatim → cached coordinates), color-coded markers (green=direct book, orange=lottery, grey=other), popup details, dark/light tile filters
+- **Calendar** — month grid with city filter, click-to-expand date detail panel
+- **Stats** — Chart.js trends (new listings, status changes), doughnut distributions (city, status), price histogram, 7/30/90-day range selector
+- **Users** — CRUD, enable/disable, per-user notification channels & filters & auto-booking config, one-click per-channel test
+- **Global Settings** — polling intervals, adaptive smart-polling params, monitored cities, save-and-reload workflow
+- **i18n** — one-click Chinese / English switch in sidebar, cookie-persisted across sessions
+- **Minimal design** — borderless cards, shadow-based depth, dark/light theme (OS-aware, smooth CSS transition) with Inter typeface
 
 ---
 
@@ -154,8 +159,9 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
         |                          → createEmptyCart → addNewBooking
         |                          → placeOrder (store_id=54) → idealCheckOut → payment URL
         |
-        +-- Read-only web queries -> web.py (Flask + Bootstrap)
+        +-- Read-only web queries -> web.py (Flask + custom design system)
                  -> /api/charts
+                 -> /api/map    (auto-geocoding)
                  -> /api/events  (SSE stream)
                  -> /api/notifications
 ```
@@ -172,8 +178,11 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); optional `cancel_enabled` auto-cancel, proxy support |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
 | `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
-| `web.py` | Flask admin panel, user CRUD, session auth, charts, SSE stream, notifications API, reload endpoint |
-| `templates/` | Bootstrap UI, theme switching, Chart.js views, calendar view, SSE bell notifications |
+| `web.py` | Flask admin panel, user CRUD, session auth, charts, SSE stream, notifications API, reload endpoint, map auto-geocoding |
+| `translations.py` | 120+ UI translation keys (zh/en), template `_()` helper |
+| `geocode_all.py` | One-shot Nominatim geocoding to pre-warm the coordinate cache |
+| `static/` | `design.css` (borderless design system), `app.js` (theme / nav / SSE / i18n-aware) |
+| `templates/` | Jinja2 templates with `_()` i18n, Leaflet.js map, Chart.js stats, sidebar layout |
 
 ### Key technical decisions
 
@@ -399,12 +408,19 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 
 - **Docker packaging** — `Dockerfile` + `docker-compose.yml` + `supervisord.conf` ship the full stack (monitor + web panel) as a single container. iMessage is gracefully skipped on non-macOS; the web panel's SSE notifications take over. See [Run with Docker](#run-with-docker-vps--server) above.
 
+### ~~Medium priority~~ ✅ Done
+
+- Map view with Leaflet.js + OpenStreetMap, auto-geocoding, color-coded markers
+- i18n (Chinese / English) with one-click toggle and cookie persistence
+- Complete UI redesign — borderless minimal design system, sidebar layout, smooth theme transitions
+
 ### Medium priority
 
 - Automate lottery registration through GraphQL mutations, with extra care around auth and rate limits
 - Add daily digest notifications instead of only real-time pushes
 - Add a Discord webhook notification channel
 - Track price history for the same listing and alert on drops
+- PWA support for mobile home-screen install
 
 ---
 
@@ -413,23 +429,29 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 ```text
 monitor.py          Main scheduler, adaptive smart polling, hot reload, concurrent booking
 scraper.py          GraphQL scraping, curl_cffi, pagination, 429 retry, proxy support
-storage.py          SQLite: listings / status_changes / web_notifications / meta, chart queries
+storage.py          SQLite: listings / status_changes / web_notifications / meta / geocode_cache, chart queries
 models.py           Listing dataclass and formatting helpers
 notifier.py         BaseNotifier, iMessage (macOS gate), Telegram, Email, WhatsApp, WebNotifier
 booker.py           Login, createEmptyCart, addNewBooking, placeOrder (store_id=54), idealCheckOut (plateform "h"), proxy support
 config.py           Global config loading, known cities, ListingFilter, AutoBookConfig
 users.py            UserConfig, users.json management, legacy env migration
-web.py              Flask admin panel, session auth, SSE stream, notifications API, reload endpoint
+translations.py     UI translations (zh/en) — 120+ keys covering all pages
+geocode_all.py      One-shot script: pre-geocode all listing addresses via Nominatim
+web.py              Flask admin panel, session auth, SSE stream, notifications API, reload endpoint, map API
+static/
+  design.css        Complete design system (minimal, borderless, dark/light theme)
+  app.js            Frontend JS: theme toggle, mobile nav, SSE notifications, language-aware
 templates/
-  base.html         Layout, navbar, bell notifications (SSE + toasts), day/night theme
-  login.html        Login page
-  index.html        Dashboard
+  base.html         Sidebar layout, bell notifications (SSE + toasts), language switch
+  login.html        Login page (standalone, no sidebar)
+  index.html        Dashboard (KPI cards, recent listings, status changes)
   listings.html     Listing list (status filter + keyword search)
-  calendar.html     Move-in calendar (month view, city filter)
+  map.html          Map view (Leaflet.js + OpenStreetMap, auto-geocoding, color-coded markers)
+  calendar.html     Move-in calendar (month grid, city filter, detail panel)
   stats.html        Charts (Chart.js: trends / distribution / price buckets)
-  users.html        User management list
-  user_form.html    User add/edit form (platform warning for iMessage)
-  settings.html     Global settings (polling / cities / adaptive polling)
+  users.html        User management list (cards with channels / filters / actions)
+  user_form.html    User add/edit form (4-step: basic info, channels, filters, auto-booking)
+  settings.html     Global settings (scrape config, smart polling, cities, danger zone)
 Dockerfile          Single-container image (python:3.11-slim + supervisord)
 supervisord.conf    Runs monitor.py + web.py together, with log rotation and auto-restart
 docker-compose.yml  Volume mounts (data/, logs/, .env), port mapping, healthcheck

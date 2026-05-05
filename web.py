@@ -38,6 +38,7 @@ from config import (  # noqa: E402
 )
 from models import LISTING_KEY_MAP                               # noqa: E402
 from storage import Storage                                      # noqa: E402
+from translations import tr as _tr                                       # noqa: E402
 from users import UserConfig, get_user, load_users, save_users  # noqa: E402
 
 # ------------------------------------------------------------------ #
@@ -199,6 +200,22 @@ def _inject_auth():
     return {"auth_enabled": _auth_enabled()}
 
 
+def _get_lang() -> str:
+    """Detect language from cookie or query param. Default to zh."""
+    lang = request.args.get("lang", "") or request.cookies.get("h2s-lang", "zh")
+    return lang if lang in ("zh", "en") else "zh"
+
+
+@app.context_processor
+def _inject_translations():
+    lang = _get_lang()
+
+    def _(key: str) -> str:
+        return _tr(key, lang)
+
+    return {"_": _, "lang": lang}
+
+
 @app.template_filter("time_ago")
 def time_ago(iso_str: str) -> str:
     if not iso_str or iso_str == "—":
@@ -243,6 +260,20 @@ def status_badge(status: str) -> str:
     if "book" in s:    return "success"
     if "lottery" in s: return "warning"
     return "secondary"
+
+
+# ------------------------------------------------------------------ #
+# 路由 — 语言切换
+# ------------------------------------------------------------------ #
+
+@app.route("/set-lang")
+def set_lang() -> Any:
+    lang = request.args.get("lang", "zh")
+    if lang not in ("zh", "en"):
+        lang = "zh"
+    resp = redirect(request.args.get("next") or url_for("index"))
+    resp.set_cookie("h2s-lang", lang, max_age=60 * 60 * 24 * 365, samesite="Lax")
+    return resp
 
 
 # ------------------------------------------------------------------ #
@@ -638,6 +669,68 @@ def user_toggle(user_id: str) -> Any:
             break
     save_users(users)
     return redirect(url_for("users_list"))
+
+
+# ------------------------------------------------------------------ #
+# 路由 — 地图
+# ------------------------------------------------------------------ #
+
+@app.route("/map")
+@login_required
+def map_view() -> str:
+    return render_template("map.html")
+
+
+@app.route("/api/map")
+@api_login_required
+def api_map():
+    """返回所有房源坐标。首次查询时自动 geocode 未缓存的地址。"""
+    import time as _time
+    from urllib.request import Request, urlopen
+    from urllib.parse import quote
+
+    storage = _storage()
+    try:
+        listings = storage.get_map_listings()
+    finally:
+        storage.close()
+
+    results: list[dict] = []
+    need_geocode: list[dict] = []
+    st = _storage()
+    try:
+        for l in listings:
+            cached = st.get_cached_coords(l["address"])
+            if cached:
+                lat, lng = cached
+                results.append({**l, "lat": lat, "lng": lng})
+            else:
+                need_geocode.append(l)
+    finally:
+        st.close()
+
+    # Auto-geocode uncached addresses (typically 0 after initial run)
+    for l in need_geocode:
+        addr = l["address"]
+        try:
+            url = f"https://nominatim.openstreetmap.org/search?q={quote(addr)}&format=json&limit=1"
+            req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
+            resp = urlopen(req, timeout=5)
+            import json as _json
+            data = _json.loads(resp.read().decode())
+            if data:
+                lat, lng = float(data[0]["lat"]), float(data[0]["lon"])
+                st2 = _storage()
+                try:
+                    st2.cache_coords(addr, lat, lng)
+                finally:
+                    st2.close()
+                results.append({**l, "lat": lat, "lng": lng})
+        except Exception:
+            pass
+        _time.sleep(0.6)  # Nominatim rate limit
+
+    return jsonify({"listings": results})
 
 
 # ------------------------------------------------------------------ #

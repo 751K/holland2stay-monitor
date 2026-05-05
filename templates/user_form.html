@@ -1,466 +1,270 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} · Holland2Stay{% endblock %}
 
-{% block extra_style %}
-.step-label {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 7px;
-  background: var(--accent);
-  color: #fff; font-size: .7rem; font-weight: 700;
-  flex-shrink: 0;
-}
-.section-num-hdr {
-  display: flex; align-items: center; gap: .5rem;
-  font-size: .63rem; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .07em;
-  color: var(--muted);
-  padding: 13px 18px;
-  border-bottom: .5px solid var(--border);
-}
-.channel-card {
-  border: .5px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
-  transition: border-color .15s, background .15s, box-shadow .15s;
-  cursor: pointer;
-  display: block;
-}
-.channel-card:hover {
-  border-color: rgba(128,128,128,.5);
-}
-.channel-card:has(input:checked) {
-  border-color: var(--accent);
-  background: rgba(0,122,255,.07);
-  box-shadow: 0 0 0 1px var(--accent)33;
-}
-[data-bs-theme="dark"] .channel-card:has(input:checked) {
-  background: rgba(10,132,255,.08);
-}
-.toggle-section { display: none; }
-{% endblock %}
-
 {% block content %}
 
 {% set u = user %}
 {% set is_edit = u is not none %}
 
-<!-- 面包屑 -->
-<nav aria-label="breadcrumb" class="mb-3">
-  <ol class="breadcrumb" style="font-size:.8rem;">
-    <li class="breadcrumb-item"><a href="{{ url_for('users_list') }}" style="color:var(--muted);">用户管理</a></li>
-    <li class="breadcrumb-item active" style="color:var(--text);">{{ title }}</li>
-  </ol>
+<nav class="breadcrumb">
+  <a href="{{ url_for('users_list') }}">{{ _('users_title') }}</a>
+  <span class="sep">/</span>
+  <span>{{ title }}</span>
 </nav>
 
-<div class="page-hdr">
-  <h1>
-    <i class="bi bi-person-{% if is_edit %}gear{% else %}plus{% endif %} me-2" style="color:var(--accent);"></i>{{ title }}
-  </h1>
+<div class="page-header">
+  <h1>{{ title }}</h1>
 </div>
 
 <form method="post" action="{{ action }}">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-  <!-- ── Step 1: 基本信息 ──────────────────────────────── -->
+  <!-- Step 1: Basic info -->
   <div class="card mb-4">
-    <div class="section-num-hdr">
-      <span class="step-label">1</span>
-      基本信息
+    <div class="section-header">
+      <span class="step-num">1</span>
+      {{ _('user_form_section1') }}
     </div>
     <div class="card-body">
-      <div class="row g-3">
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">用户名称</label>
-          <input type="text" class="form-control form-control-sm" name="name" required
-                 value="{{ u.name if is_edit else '' }}" placeholder="例：Alice">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_name') }}</label>
+          <input type="text" class="form-input" name="name" required value="{{ u.name if is_edit else '' }}" placeholder="Alice">
         </div>
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">账户状态</label>
-          <div class="form-check form-switch mt-2">
-            <input class="form-check-input" type="checkbox" id="enabled_chk"
-                   {% if not is_edit or u.enabled %}checked{% endif %}
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_status') }}</label>
+          <label class="toggle">
+            <input type="checkbox" id="enabled_chk" {% if not is_edit or u.enabled %}checked{% endif %}
                    onchange="document.getElementById('enabled_h').value=this.checked?'true':'false'">
-            <label class="form-check-label" for="enabled_chk">启用此用户</label>
-            <input type="hidden" id="enabled_h" name="enabled"
-                   value="{{ 'true' if not is_edit or u.enabled else 'false' }}">
-          </div>
+            <span class="toggle-track"></span>
+            {{ _('user_form_enable') }}
+          </label>
+          <input type="hidden" id="enabled_h" name="enabled" value="{{ 'true' if not is_edit or u.enabled else 'false' }}">
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ── Step 2: 通知渠道 ──────────────────────────────── -->
+  <!-- Step 2: Notification channels -->
   <div class="card mb-4">
-    <div class="section-num-hdr">
-      <span class="step-label">2</span>
-      通知渠道
+    <div class="section-header">
+      <span class="step-num">2</span>
+      {{ _('user_form_section2') }}
     </div>
     <div class="card-body">
-
       <div class="mb-3">
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" id="notif_enabled"
-                 {% if not is_edit or u.notifications_enabled %}checked{% endif %}
+        <label class="toggle">
+          <input type="checkbox" id="notif_enabled" {% if not is_edit or u.notifications_enabled %}checked{% endif %}
                  onchange="document.getElementById('notif_enabled_h').value=this.checked?'true':'false'">
-          <label class="form-check-label" for="notif_enabled">开启通知</label>
-          <input type="hidden" id="notif_enabled_h" name="NOTIFICATIONS_ENABLED"
-                 value="{{ 'true' if not is_edit or u.notifications_enabled else 'false' }}">
-        </div>
+          <span class="toggle-track"></span>
+          {{ _('user_form_notif_on') }}
+        </label>
+        <input type="hidden" id="notif_enabled_h" name="NOTIFICATIONS_ENABLED" value="{{ 'true' if not is_edit or u.notifications_enabled else 'false' }}">
       </div>
 
-      <div class="section-title mt-3">选择渠道（可多选）</div>
-      <input type="hidden" id="channels_hidden" name="NOTIFICATION_CHANNELS"
-             value="{{ u.notification_channels | join(',') if is_edit else '' }}">
+      <input type="hidden" id="channels_hidden" name="NOTIFICATION_CHANNELS" value="{{ u.notification_channels | join(',') if is_edit else '' }}">
 
-      <div class="row g-3 mb-3">
-
+      <div class="form-row">
         <!-- iMessage -->
-        <div class="col-12 col-md-6 col-xl-3">
-          <label class="channel-card" onclick="toggleChannel('imessage')">
-            <div class="d-flex align-items-center gap-2 mb-1">
-              <input type="checkbox" class="form-check-input channel-chk" data-ch="imessage"
-                     {% if is_edit and 'imessage' in u.notification_channels %}checked{% endif %}>
-              <span class="fw-semibold" style="font-size:.88rem;">iMessage</span>
-              <span class="badge ms-auto" style="background:var(--bg-elevated); color:var(--muted); font-size:.62rem;">macOS 专属</span>
+        <div class="form-group">
+          <label class="channel-card {% if is_edit and 'imessage' in u.notification_channels %}selected{% endif %}" style="display:block;" onclick="toggleChannel('imessage')">
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <input type="checkbox" class="channel-chk" data-ch="imessage" {% if is_edit and 'imessage' in u.notification_channels %}checked{% endif %}>
+                <span class="font-medium text-sm">iMessage</span>
+              </div>
+              <span class="badge badge-neutral text-xs">{{ _('badge_macos') }}</span>
             </div>
-            <div style="font-size:.78rem; color:var(--muted);">通过 Messages.app 发送</div>
+            <div class="text-xs text-secondary">{{ _('user_form_notif_on') }}</div>
           </label>
-          <!-- 非 macOS 警告（由 JS 动态显示） -->
-          <div id="imessage-platform-warn" class="alert alert-warning py-2 px-3 mt-2 mb-0 small" style="display:none;border-radius:10px;">
-            <i class="bi bi-exclamation-triangle me-1"></i>
-            服务器非 macOS（<span id="imessage-platform-name"></span>），
-            iMessage 无法发送。请改用 <strong>Telegram</strong> 或 <strong>Email</strong>，
-            或通过 <strong>Web 面板</strong>查看实时通知。
-          </div>
-          <div id="sec_imessage" class="toggle-section mt-2 px-1"
-               {% if is_edit and 'imessage' in u.notification_channels %}style="display:block"{% endif %}>
-            <label class="form-label small mb-1" style="color:var(--muted);">收件人（手机号或 Apple ID）</label>
-            <input type="text" class="form-control form-control-sm" name="IMESSAGE_RECIPIENT"
-                   value="{{ u.imessage_recipient if is_edit else '' }}"
-                   placeholder="+31612345678">
+          <div id="sec_imessage" class="mt-2" style="{% if not is_edit or 'imessage' not in u.notification_channels %}display:none;{% endif %}">
+            <label class="form-label">{{ _('user_form_recipient') }}</label>
+            <input type="text" class="form-input" name="IMESSAGE_RECIPIENT" value="{{ u.imessage_recipient if is_edit else '' }}" placeholder="+31612345678">
           </div>
         </div>
 
         <!-- Telegram -->
-        <div class="col-12 col-md-6 col-xl-3">
-          <label class="channel-card" onclick="toggleChannel('telegram')">
-            <div class="d-flex align-items-center gap-2 mb-1">
-              <input type="checkbox" class="form-check-input channel-chk" data-ch="telegram"
-                     {% if is_edit and 'telegram' in u.notification_channels %}checked{% endif %}>
-              <span class="fw-semibold" style="font-size:.88rem;">Telegram</span>
-              <span class="badge ms-auto" style="background:#0c4a6e; color:#7dd3fc; font-size:.62rem;">免费</span>
+        <div class="form-group">
+          <label class="channel-card {% if is_edit and 'telegram' in u.notification_channels %}selected{% endif %}" style="display:block;" onclick="toggleChannel('telegram')">
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <input type="checkbox" class="channel-chk" data-ch="telegram" {% if is_edit and 'telegram' in u.notification_channels %}checked{% endif %}>
+                <span class="font-medium text-sm">Telegram</span>
+              </div>
+              <span class="badge badge-info text-xs">{{ _('badge_free') }}</span>
             </div>
-            <div style="font-size:.78rem; color:var(--muted);">通过 Bot API 发送消息</div>
+            <div class="text-xs text-secondary">Bot API</div>
           </label>
-          <div id="sec_telegram" class="toggle-section mt-2 px-1"
-               {% if is_edit and 'telegram' in u.notification_channels %}style="display:block"{% endif %}>
-            <label class="form-label small mb-1" style="color:var(--muted);">Bot Token</label>
-            <input type="text" class="form-control form-control-sm mb-2" name="TELEGRAM_BOT_TOKEN"
-                   value="{{ u.telegram_token if is_edit else '' }}"
-                   placeholder="123456:ABC-DEF...">
-            <label class="form-label small mb-1" style="color:var(--muted);">Chat ID</label>
-            <input type="text" class="form-control form-control-sm" name="TELEGRAM_CHAT_ID"
-                   value="{{ u.telegram_chat_id if is_edit else '' }}"
-                   placeholder="123456789">
+          <div id="sec_telegram" class="mt-2" style="{% if not is_edit or 'telegram' not in u.notification_channels %}display:none;{% endif %}">
+            <label class="form-label">{{ _('user_form_bot_token') }}</label>
+            <input type="text" class="form-input mb-2" name="TELEGRAM_BOT_TOKEN" value="{{ u.telegram_token if is_edit else '' }}" placeholder="123456:ABC-DEF...">
+            <label class="form-label">{{ _('user_form_chat_id') }}</label>
+            <input type="text" class="form-input" name="TELEGRAM_CHAT_ID" value="{{ u.telegram_chat_id if is_edit else '' }}" placeholder="123456789">
           </div>
         </div>
 
         <!-- Email -->
-        <div class="col-12 col-md-6 col-xl-3">
-          <label class="channel-card" onclick="toggleChannel('email')">
-            <div class="d-flex align-items-center gap-2 mb-1">
-              <input type="checkbox" class="form-check-input channel-chk" data-ch="email"
-                     {% if is_edit and 'email' in u.notification_channels %}checked{% endif %}>
-              <span class="fw-semibold" style="font-size:.88rem;">Email</span>
-              <span class="badge ms-auto" style="background:#172554; color:#93c5fd; font-size:.62rem;">跨平台</span>
-            </div>
-            <div style="font-size:.78rem; color:var(--muted);">通过 SMTP 发送纯文本邮件</div>
-          </label>
-          <div id="sec_email" class="toggle-section mt-2 px-1"
-               {% if is_edit and 'email' in u.notification_channels %}style="display:block"{% endif %}>
-            <label class="form-label small mb-1" style="color:var(--muted);">SMTP Host</label>
-            <input type="text" class="form-control form-control-sm mb-2" name="EMAIL_SMTP_HOST"
-                   value="{{ u.email_smtp_host if is_edit else '' }}"
-                   placeholder="smtp.gmail.com">
-            <div class="row g-2 mb-2">
-              <div class="col-6">
-                <label class="form-label small mb-1" style="color:var(--muted);">Port</label>
-                <input type="number" class="form-control form-control-sm" name="EMAIL_SMTP_PORT"
-                       value="{{ u.email_smtp_port if is_edit and u.email_smtp_port else 587 }}"
-                       placeholder="587">
+        <div class="form-group">
+          <label class="channel-card {% if is_edit and 'email' in u.notification_channels %}selected{% endif %}" style="display:block;" onclick="toggleChannel('email')">
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <input type="checkbox" class="channel-chk" data-ch="email" {% if is_edit and 'email' in u.notification_channels %}checked{% endif %}>
+                <span class="font-medium text-sm">Email</span>
               </div>
-              <div class="col-6">
-                <label class="form-label small mb-1" style="color:var(--muted);">Security</label>
+              <span class="badge badge-info text-xs">{{ _('badge_cross_platform') }}</span>
+            </div>
+            <div class="text-xs text-secondary">SMTP</div>
+          </label>
+          <div id="sec_email" class="mt-2" style="{% if not is_edit or 'email' not in u.notification_channels %}display:none;{% endif %}">
+            <label class="form-label">{{ _('user_form_smtp_host') }}</label>
+            <input type="text" class="form-input mb-2" name="EMAIL_SMTP_HOST" value="{{ u.email_smtp_host if is_edit else '' }}" placeholder="smtp.gmail.com">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">{{ _('user_form_port') }}</label>
+                <input type="number" class="form-input" name="EMAIL_SMTP_PORT" value="{{ u.email_smtp_port if is_edit and u.email_smtp_port else 587 }}" placeholder="587">
+              </div>
+              <div class="form-group">
+                <label class="form-label">{{ _('user_form_security') }}</label>
                 {% set email_security = u.email_smtp_security if is_edit and u.email_smtp_security else 'starttls' %}
-                <select class="form-select form-select-sm" name="EMAIL_SMTP_SECURITY">
-                  <option value="starttls" {% if email_security == 'starttls' %}selected{% endif %}>STARTTLS</option>
-                  <option value="ssl" {% if email_security == 'ssl' %}selected{% endif %}>SSL/TLS</option>
-                  <option value="none" {% if email_security == 'none' %}selected{% endif %}>None</option>
+                <select class="form-select" name="EMAIL_SMTP_SECURITY">
+                  <option value="starttls" {% if email_security=='starttls' %}selected{% endif %}>STARTTLS</option>
+                  <option value="ssl" {% if email_security=='ssl' %}selected{% endif %}>SSL/TLS</option>
+                  <option value="none" {% if email_security=='none' %}selected{% endif %}>None</option>
                 </select>
               </div>
             </div>
-            <label class="form-label small mb-1" style="color:var(--muted);">SMTP Username（可选）</label>
-            <input type="text" class="form-control form-control-sm mb-2" name="EMAIL_USERNAME"
-                   value="{{ u.email_username if is_edit else '' }}"
-                   placeholder="your@email.com">
-            <label class="form-label small mb-1" style="color:var(--muted);">SMTP Password / App Password</label>
-            {# 安全：密码字段不回填 value，防止明文出现在 HTML 源码。
-               有已保存密码时仅通过 placeholder 提示，留空提交 = 保留旧值。 #}
-            <input type="password" class="form-control form-control-sm mb-2" name="EMAIL_PASSWORD"
-                   placeholder="{{ '(已保存，留空保留原密码)' if is_edit and u.email_password else '' }}"
-                   autocomplete="new-password">
-            <label class="form-label small mb-1" style="color:var(--muted);">From</label>
-            <input type="email" class="form-control form-control-sm mb-2" name="EMAIL_FROM"
-                   value="{{ u.email_from if is_edit else '' }}"
-                   placeholder="alerts@example.com">
-            <label class="form-label small mb-1" style="color:var(--muted);">To</label>
-            <input type="text" class="form-control form-control-sm" name="EMAIL_TO"
-                   value="{{ u.email_to if is_edit else '' }}"
-                   placeholder="alice@example.com,bob@example.com">
-            <div class="small mt-2" style="color:var(--muted);">
-              常见配置：Gmail `smtp.gmail.com:587` + STARTTLS
-            </div>
+            <label class="form-label">{{ _('user_form_smtp_user') }}</label>
+            <input type="text" class="form-input mb-2" name="EMAIL_USERNAME" value="{{ u.email_username if is_edit else '' }}" placeholder="your@email.com">
+            <label class="form-label">{{ _('user_form_smtp_pass') }}</label>
+            <input type="password" class="form-input mb-2" name="EMAIL_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and u.email_password else '' }}" autocomplete="new-password">
+            <label class="form-label">{{ _('user_form_from') }}</label>
+            <input type="email" class="form-input mb-2" name="EMAIL_FROM" value="{{ u.email_from if is_edit else '' }}" placeholder="alerts@example.com">
+            <label class="form-label">{{ _('user_form_to') }}</label>
+            <input type="text" class="form-input" name="EMAIL_TO" value="{{ u.email_to if is_edit else '' }}" placeholder="alice@example.com">
+            <div class="form-help">{{ _('user_form_smtp_hint') }}</div>
           </div>
         </div>
 
         <!-- WhatsApp -->
-        <div class="col-12 col-md-6 col-xl-3">
-          <label class="channel-card" onclick="toggleChannel('whatsapp')">
-            <div class="d-flex align-items-center gap-2 mb-1">
-              <input type="checkbox" class="form-check-input channel-chk" data-ch="whatsapp"
-                     {% if is_edit and 'whatsapp' in u.notification_channels %}checked{% endif %}>
-              <span class="fw-semibold" style="font-size:.88rem;">WhatsApp</span>
-              <span class="badge ms-auto" style="background:#422006; color:#fcd34d; font-size:.62rem;">Twilio 付费</span>
+        <div class="form-group">
+          <label class="channel-card {% if is_edit and 'whatsapp' in u.notification_channels %}selected{% endif %}" style="display:block;" onclick="toggleChannel('whatsapp')">
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-2">
+                <input type="checkbox" class="channel-chk" data-ch="whatsapp" {% if is_edit and 'whatsapp' in u.notification_channels %}checked{% endif %}>
+                <span class="font-medium text-sm">WhatsApp</span>
+              </div>
+              <span class="badge badge-warning text-xs">{{ _('badge_twilio') }}</span>
             </div>
-            <div style="font-size:.78rem; color:var(--muted);">通过 Twilio REST API 发送</div>
+            <div class="text-xs text-secondary">Twilio REST API</div>
           </label>
-          <div id="sec_whatsapp" class="toggle-section mt-2 px-1"
-               {% if is_edit and 'whatsapp' in u.notification_channels %}style="display:block"{% endif %}>
-            <label class="form-label small mb-1" style="color:var(--muted);">Account SID</label>
-            <input type="text" class="form-control form-control-sm mb-2" name="TWILIO_ACCOUNT_SID"
-                   value="{{ u.twilio_sid if is_edit else '' }}">
-            <label class="form-label small mb-1" style="color:var(--muted);">Auth Token</label>
-            {# 安全：不回填 value，留空提交 = 保留旧值。 #}
-            <input type="password" class="form-control form-control-sm mb-2" name="TWILIO_AUTH_TOKEN"
-                   placeholder="{{ '(已保存，留空保留原令牌)' if is_edit and u.twilio_token else '' }}"
-                   autocomplete="new-password">
-            <label class="form-label small mb-1" style="color:var(--muted);">From</label>
-            <input type="text" class="form-control form-control-sm mb-2" name="TWILIO_FROM"
-                   value="{{ u.twilio_from if is_edit else 'whatsapp:+14155238886' }}"
-                   placeholder="whatsapp:+14155238886">
-            <label class="form-label small mb-1" style="color:var(--muted);">To</label>
-            <input type="text" class="form-control form-control-sm" name="TWILIO_TO"
-                   value="{{ u.twilio_to if is_edit else '' }}"
-                   placeholder="whatsapp:+31612345678">
+          <div id="sec_whatsapp" class="mt-2" style="{% if not is_edit or 'whatsapp' not in u.notification_channels %}display:none;{% endif %}">
+            <label class="form-label">{{ _('user_form_account_sid') }}</label>
+            <input type="text" class="form-input mb-2" name="TWILIO_ACCOUNT_SID" value="{{ u.twilio_sid if is_edit else '' }}">
+            <label class="form-label">{{ _('user_form_auth_token') }}</label>
+            <input type="password" class="form-input mb-2" name="TWILIO_AUTH_TOKEN" placeholder="{{ _('user_form_token_keep') if is_edit and u.twilio_token else '' }}" autocomplete="new-password">
+            <label class="form-label">{{ _('user_form_from') }}</label>
+            <input type="text" class="form-input mb-2" name="TWILIO_FROM" value="{{ u.twilio_from if is_edit else 'whatsapp:+14155238886' }}">
+            <label class="form-label">{{ _('user_form_to') }}</label>
+            <input type="text" class="form-input" name="TWILIO_TO" value="{{ u.twilio_to if is_edit else '' }}" placeholder="whatsapp:+31612345678">
           </div>
         </div>
-
       </div>
     </div>
   </div>
 
-  <!-- ── Step 3: 房源过滤条件 ──────────────────────────── -->
+  <!-- Step 3: Filter -->
   <div class="card mb-4">
-    <div class="section-num-hdr">
-      <span class="step-label">3</span>
-      通知过滤条件
-      <span style="font-size:.72rem; font-weight:400; text-transform:none; letter-spacing:0; color:var(--muted); margin-left:.5rem;">
-        留空 = 不限制，所有房源均通知
-      </span>
+    <div class="section-header">
+      <span class="step-num">3</span>
+      {{ _('user_form_section3') }}
+      <span class="text-xs" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3);margin-left:.5rem;">{{ _('user_form_filter_hint') }}</span>
     </div>
     <div class="card-body">
       {% set lf = u.listing_filter if is_edit else none %}
-      <div class="row g-3">
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">最高月租（€）</label>
-          <input type="number" class="form-control form-control-sm" name="MAX_RENT"
-                 value="{{ lf.max_rent | int if lf and lf.max_rent else '' }}"
-                 placeholder="1500">
-        </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">最小面积（m²）</label>
-          <input type="number" class="form-control form-control-sm" name="MIN_AREA"
-                 value="{{ lf.min_area | int if lf and lf.min_area else '' }}"
-                 placeholder="20">
-        </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">最大面积（m²）</label>
-          <input type="number" class="form-control form-control-sm" name="MAX_AREA"
-                 value="{{ lf.max_area | int if lf and lf.max_area else '' }}">
-        </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">最低楼层</label>
-          <input type="number" class="form-control form-control-sm" name="MIN_FLOOR"
-                 value="{{ lf.min_floor if lf and lf.min_floor is not none else '' }}"
-                 placeholder="0">
-        </div>
-        <div class="col-12 col-sm-4">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">允许入住类型</label>
-          <input type="text" class="form-control form-control-sm" name="ALLOWED_OCCUPANCY"
-                 value="{{ lf.allowed_occupancy | join(',') if lf and lf.allowed_occupancy else '' }}"
-                 placeholder="One,Two (only couples)">
-        </div>
-        <div class="col-12 col-sm-4">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">允许户型</label>
-          <input type="text" class="form-control form-control-sm" name="ALLOWED_TYPES"
-                 value="{{ lf.allowed_types | join(',') if lf and lf.allowed_types else '' }}"
-                 placeholder="Studio,1">
-        </div>
-        <div class="col-12 col-sm-4">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">允许片区</label>
-          <input type="text" class="form-control form-control-sm" name="ALLOWED_NEIGHBORHOODS"
-                 value="{{ lf.allowed_neighborhoods | join(',') if lf and lf.allowed_neighborhoods else '' }}"
-                 placeholder="Strijp,Centrum">
-        </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="MAX_RENT" value="{{ lf.max_rent | int if lf and lf.max_rent else '' }}" placeholder="1500"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="MIN_AREA" value="{{ lf.min_area | int if lf and lf.min_area else '' }}" placeholder="20"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_max_area') }}</label><input type="number" class="form-input" name="MAX_AREA" value="{{ lf.max_area | int if lf and lf.max_area else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="MIN_FLOOR" value="{{ lf.min_floor if lf and lf.min_floor is not none else '' }}" placeholder="0"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_occupancy') }}</label><input type="text" class="form-input" name="ALLOWED_OCCUPANCY" value="{{ lf.allowed_occupancy | join(',') if lf and lf.allowed_occupancy else '' }}" placeholder="One,Two"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_types') }}</label><input type="text" class="form-input" name="ALLOWED_TYPES" value="{{ lf.allowed_types | join(',') if lf and lf.allowed_types else '' }}" placeholder="Studio,1"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_hoods') }}</label><input type="text" class="form-input" name="ALLOWED_NEIGHBORHOODS" value="{{ lf.allowed_neighborhoods | join(',') if lf and lf.allowed_neighborhoods else '' }}" placeholder="Strijp,Centrum"></div>
       </div>
     </div>
   </div>
 
-  <!-- ── Step 4: 自动预订 ──────────────────────────────── -->
+  <!-- Step 4: Auto book -->
   <div class="card mb-4">
-    <div class="section-num-hdr">
-      <span class="step-label">4</span>
-      自动预订
+    <div class="section-header">
+      <span class="step-num">4</span>
+      {{ _('user_form_section4') }}
     </div>
     <div class="card-body">
       {% set ab = u.auto_book if is_edit else none %}
-      <div class="row g-3 mb-3">
-        <div class="col-auto">
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="ab_enabled"
-                   {% if ab and ab.enabled %}checked{% endif %}
-                   onchange="document.getElementById('ab_enabled_h').value=this.checked?'true':'false'">
-            <label class="form-check-label" for="ab_enabled">开启自动预订</label>
-            <input type="hidden" id="ab_enabled_h" name="AUTO_BOOK_ENABLED"
-                   value="{{ 'true' if ab and ab.enabled else 'false' }}">
-          </div>
-        </div>
-        <div class="col-auto">
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="ab_dry"
-                   {% if not ab or ab.dry_run %}checked{% endif %}
-                   onchange="document.getElementById('ab_dry_h').value=this.checked?'true':'false'">
-            <label class="form-check-label" for="ab_dry">
-              试运行模式
-              <span class="badge ms-1" style="background:#422006; color:#fcd34d; font-size:.62rem;">推荐先开启</span>
-            </label>
-            <input type="hidden" id="ab_dry_h" name="AUTO_BOOK_DRY_RUN"
-                   value="{{ 'false' if ab and not ab.dry_run else 'true' }}">
-          </div>
-        </div>
-        <div class="col-auto">
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="ab_cancel"
-                   {% if ab and ab.cancel_enabled %}checked{% endif %}
-                   onchange="document.getElementById('ab_cancel_h').value=this.checked?'true':'false'">
-            <label class="form-check-label" for="ab_cancel">
-              启用自动取消旧订单
-            </label>
-            <input type="hidden" id="ab_cancel_h" name="AUTO_BOOK_CANCEL_ENABLED"
-                   value="{{ 'true' if ab and ab.cancel_enabled else 'false' }}">
-          </div>
-          <div class="form-text" style="font-size:.7rem; color:var(--muted);">
-            H2S 平台默认禁用 cancelOrder；开启前请先确认可用。
-          </div>
-        </div>
+      <div class="flex flex-wrap gap-4 mb-3">
+        <label class="toggle">
+          <input type="checkbox" id="ab_enabled" {% if ab and ab.enabled %}checked{% endif %}
+                 onchange="document.getElementById('ab_enabled_h').value=this.checked?'true':'false'">
+          <span class="toggle-track"></span>{{ _('user_form_ab_enable') }}
+        </label>
+        <input type="hidden" id="ab_enabled_h" name="AUTO_BOOK_ENABLED" value="{{ 'true' if ab and ab.enabled else 'false' }}">
+        <label class="toggle">
+          <input type="checkbox" id="ab_dry" {% if not ab or ab.dry_run %}checked{% endif %}
+                 onchange="document.getElementById('ab_dry_h').value=this.checked?'true':'false'">
+          <span class="toggle-track"></span>{{ _('user_form_ab_dry') }}
+          <span class="badge badge-warning ml-1 text-xs">{{ _('badge_recommend') }}</span>
+        </label>
+        <input type="hidden" id="ab_dry_h" name="AUTO_BOOK_DRY_RUN" value="{{ 'false' if ab and not ab.dry_run else 'true' }}">
+        <label class="toggle">
+          <input type="checkbox" id="ab_cancel" {% if ab and ab.cancel_enabled %}checked{% endif %}
+                 onchange="document.getElementById('ab_cancel_h').value=this.checked?'true':'false'">
+          <span class="toggle-track"></span>{{ _('user_form_ab_cancel') }}
+        </label>
+        <input type="hidden" id="ab_cancel_h" name="AUTO_BOOK_CANCEL_ENABLED" value="{{ 'true' if ab and ab.cancel_enabled else 'false' }}">
       </div>
-      <div class="row g-3 mb-3">
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">Holland2Stay 账号邮箱</label>
-          <input type="email" class="form-control form-control-sm" name="AUTO_BOOK_EMAIL"
-                 value="{{ ab.email if ab else '' }}">
-        </div>
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">密码</label>
-          {# 安全：不回填 value，留空提交 = 保留旧值。 #}
-          <input type="password" class="form-control form-control-sm" name="AUTO_BOOK_PASSWORD"
-                 placeholder="{{ '(已保存，留空保留原密码)' if is_edit and ab and ab.password else '' }}"
-                 autocomplete="new-password">
-        </div>
-      </div>
-      <div class="row g-3 mb-3">
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">支付方式</label>
-          {% set cur_pm = ab.payment_method if ab else "idealcheckout_ideal" %}
-          <select class="form-select form-select-sm" name="AUTO_BOOK_PAYMENT_METHOD">
-            <option value="idealcheckout_ideal"
-                    {% if cur_pm == "idealcheckout_ideal" %}selected{% endif %}>
-              iDEAL（荷兰网银，推荐）
-            </option>
-            <option value="idealcheckout_visa"
-                    {% if cur_pm == "idealcheckout_visa" %}selected{% endif %}>
-              Visa 信用卡
-            </option>
-            <option value="idealcheckout_mastercard"
-                    {% if cur_pm == "idealcheckout_mastercard" %}selected{% endif %}>
-              Mastercard 信用卡
-            </option>
+
+      <div class="form-row mb-3">
+        <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_EMAIL" value="{{ ab.email if ab else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.password else '' }}" autocomplete="new-password"></div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_ab_payment') }}</label>
+          {% set cur_pm = ab.payment_method if ab else 'idealcheckout_ideal' %}
+          <select class="form-select" name="AUTO_BOOK_PAYMENT_METHOD">
+            <option value="idealcheckout_ideal" {% if cur_pm=='idealcheckout_ideal' %}selected{% endif %}>{{ _('user_form_ab_ideal') }}</option>
+            <option value="idealcheckout_visa" {% if cur_pm=='idealcheckout_visa' %}selected{% endif %}>{{ _('user_form_ab_visa') }}</option>
+            <option value="idealcheckout_mastercard" {% if cur_pm=='idealcheckout_mastercard' %}selected{% endif %}>{{ _('user_form_ab_mc') }}</option>
           </select>
-          <div class="form-text" style="font-size:.7rem; color:var(--muted);">
-            Visa / Mastercard 需在 H2S 账号已绑定对应卡片。
-          </div>
         </div>
       </div>
 
-      <div class="section-title mt-2">自动预订专用过滤（独立于通知过滤）</div>
+      <div class="text-xs font-semibold text-secondary mb-2">{{ _('user_form_ab_filter') }}</div>
       {% set ab_lf = ab.listing_filter if ab else none %}
-      <div class="row g-3">
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">最高月租（€）</label>
-          <input type="number" class="form-control form-control-sm" name="AUTO_BOOK_MAX_RENT"
-                 value="{{ ab_lf.max_rent | int if ab_lf and ab_lf.max_rent else '' }}">
-        </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">最小面积（m²）</label>
-          <input type="number" class="form-control form-control-sm" name="AUTO_BOOK_MIN_AREA"
-                 value="{{ ab_lf.min_area | int if ab_lf and ab_lf.min_area else '' }}">
-        </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">最低楼层</label>
-          <input type="number" class="form-control form-control-sm" name="AUTO_BOOK_MIN_FLOOR"
-                 value="{{ ab_lf.min_floor if ab_lf and ab_lf.min_floor is not none else '' }}">
-        </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">允许入住类型</label>
-          <input type="text" class="form-control form-control-sm" name="AUTO_BOOK_ALLOWED_OCCUPANCY"
-                 value="{{ ab_lf.allowed_occupancy | join(',') if ab_lf and ab_lf.allowed_occupancy else '' }}">
-        </div>
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">允许户型</label>
-          <input type="text" class="form-control form-control-sm" name="AUTO_BOOK_ALLOWED_TYPES"
-                 value="{{ ab_lf.allowed_types | join(',') if ab_lf and ab_lf.allowed_types else '' }}">
-        </div>
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">允许片区</label>
-          <input type="text" class="form-control form-control-sm" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS"
-                 value="{{ ab_lf.allowed_neighborhoods | join(',') if ab_lf and ab_lf.allowed_neighborhoods else '' }}">
-        </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MAX_RENT" value="{{ ab_lf.max_rent | int if ab_lf and ab_lf.max_rent else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_AREA" value="{{ ab_lf.min_area | int if ab_lf and ab_lf.min_area else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_FLOOR" value="{{ ab_lf.min_floor if ab_lf and ab_lf.min_floor is not none else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_occupancy') }}</label><input type="text" class="form-input" name="AUTO_BOOK_ALLOWED_OCCUPANCY" value="{{ ab_lf.allowed_occupancy | join(',') if ab_lf and ab_lf.allowed_occupancy else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_types') }}</label><input type="text" class="form-input" name="AUTO_BOOK_ALLOWED_TYPES" value="{{ ab_lf.allowed_types | join(',') if ab_lf and ab_lf.allowed_types else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_hoods') }}</label><input type="text" class="form-input" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS" value="{{ ab_lf.allowed_neighborhoods | join(',') if ab_lf and ab_lf.allowed_neighborhoods else '' }}"></div>
       </div>
 
-      <div class="alert alert-info mt-3 py-2 small mb-0">
-        <i class="bi bi-shield-check me-1" style="color:var(--success);"></i>
-        安全设计：自动预订只执行到「加入购物车」，不会自动付款。完成后通知你确认。
+      <div class="alert alert-info mt-4">
+        <i class="bi bi-shield-check mr-2" style="color:var(--success);"></i>{{ _('user_form_ab_safety') }}
       </div>
     </div>
   </div>
 
-  <div class="d-flex align-items-center gap-2 flex-wrap">
-    <button type="submit" class="btn btn-primary px-4">
-      <i class="bi bi-save me-1"></i>{{ '保存修改' if is_edit else '创建用户' }}
+  <div class="flex items-center gap-2 flex-wrap">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-save mr-1"></i>{{ _('user_form_save') if is_edit else _('user_form_create') }}
     </button>
-    <a href="{{ url_for('users_list') }}" class="btn btn-outline-secondary">取消</a>
+    <a href="{{ url_for('users_list') }}" class="btn btn-ghost">{{ _('user_form_cancel') }}</a>
     {% if is_edit %}
-    <button type="button" class="btn btn-sm"
-            style="border:.5px solid var(--border-hard);color:var(--muted);border-radius:10px;"
-            id="testBtn"
-            onclick="sendTestNotify('{{ u.id }}', this)">
-      <i class="bi bi-send me-1"></i>发送测试通知
+    <button type="button" class="btn btn-ghost btn-sm" id="testBtn" onclick="testNotify('{{ u.id }}', this)">
+      <i class="bi bi-send mr-1"></i>{{ _('user_form_test') }}
     </button>
-    <!-- 测试结果内联显示 -->
-    <div id="testResult" class="w-100 mt-2" style="display:none;"></div>
-    <span class="ms-auto" style="font-size:.75rem; color:var(--muted);">
-      <i class="bi bi-info-circle me-1"></i>保存后点击「立即生效」按钮通知 monitor.py 热重载。
-    </span>
+    <div id="testResult" class="w-full mt-2" style="display:none;"></div>
+    <span class="ml-auto text-xs text-secondary"><i class="bi bi-info-circle mr-1"></i>{{ _('user_form_reload_hint') }}</span>
     {% endif %}
   </div>
 
@@ -470,81 +274,62 @@
 {% block scripts %}
 <script>
 function updateChannelsInput() {
-  const checked = [...document.querySelectorAll('.channel-chk:checked')].map(el => el.dataset.ch);
+  var checked = [].map.call(document.querySelectorAll('.channel-chk:checked'), function(el){ return el.dataset.ch; });
   document.getElementById('channels_hidden').value = checked.join(',');
 }
-
 function toggleChannel(ch) {
-  const chk = document.querySelector(`.channel-chk[data-ch="${ch}"]`);
-  const sec = document.getElementById(`sec_${ch}`);
-  setTimeout(() => {
+  var chk = document.querySelector('.channel-chk[data-ch="' + ch + '"]');
+  var sec = document.getElementById('sec_' + ch);
+  var card = chk.closest('.channel-card');
+  setTimeout(function() {
     sec.style.display = chk.checked ? 'block' : 'none';
+    if(card) { if(chk.checked) card.classList.add('selected'); else card.classList.remove('selected'); }
     updateChannelsInput();
   }, 0);
 }
-
 document.getElementById('notif_enabled').addEventListener('change', function() {
   document.getElementById('notif_enabled_h').value = this.checked ? 'true' : 'false';
 });
-
 updateChannelsInput();
 
-// 检查服务器平台，非 macOS 时对 iMessage 渠道显示警告
-fetch('/api/platform')
-  .then(r => r.json())
-  .then(d => {
-    if (!d.macos) {
-      const warn   = document.getElementById('imessage-platform-warn');
-      const nameEl = document.getElementById('imessage-platform-name');
-      if (warn)   warn.style.display = 'block';
-      if (nameEl) nameEl.textContent = d.platform || '非 macOS';
-    }
-  })
-  .catch(() => {});
-
-function sendTestNotify(userId, btn) {
-  const origHtml = btn.innerHTML;
+function testNotify(userId, btn) {
+  var orig = btn.innerHTML;
+  var langMeta = document.querySelector('meta[name="lang"]');
+  var zh = langMeta && langMeta.getAttribute('content') === 'zh';
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" style="width:.7rem;height:.7rem;"></span>发送中…';
-
-  const resultDiv = document.getElementById('testResult');
-  resultDiv.style.display = 'none';
+  btn.innerHTML = '<span class="spinner mr-1"></span>' + (zh ? '发送中…' : 'Sending…');
+  var resultDiv = document.getElementById('testResult');
+  if(resultDiv) resultDiv.style.display = 'none';
 
   fetch('/users/' + userId + '/test', {
     method: 'POST',
-    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content }
+    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
   })
-    .then(r => r.json())
-    .then(data => {
-      let rows = '';
-      if (data.error && !data.results?.length) {
-        rows = `<span class="text-warning"><i class="bi bi-exclamation-circle me-1"></i>${data.error}</span>`;
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      var rows = '';
+      if(data.error && !data.results.length) {
+        rows = '<span style="color:var(--warning);"><i class="bi bi-exclamation-circle mr-1"></i>' + data.error + '</span>';
       } else {
-        rows = (data.results || []).map(r => {
-          const icon = r.ok
-            ? '<i class="bi bi-check-circle-fill text-success me-1"></i>'
-            : '<i class="bi bi-x-circle-fill text-danger me-1"></i>';
-          const err = r.error ? ` <span class="text-danger small">— ${r.error}</span>` : '';
-          return `<div class="mb-1">${icon}<span class="small">${r.channel}${err}</span></div>`;
+        rows = (data.results||[]).map(function(r) {
+          var icon = r.ok ? '<i class="bi bi-check-circle-fill mr-1" style="color:var(--success);"></i>' : '<i class="bi bi-x-circle-fill mr-1" style="color:var(--danger);"></i>';
+          var err = r.error ? ' <span class="text-xs" style="color:var(--danger);">— ' + r.error + '</span>' : '';
+          return '<div class="mb-1">' + icon + '<span class="text-sm">' + r.channel + err + '</span></div>';
         }).join('');
       }
-      resultDiv.innerHTML = `
-        <div class="p-2 rounded" style="background:var(--bg-raised);border:.5px solid var(--border);border-radius:10px!important;">
-          <div class="small fw-semibold mb-1" style="color:var(--muted);">
-            <i class="bi bi-bell me-1"></i>测试结果
-          </div>
-          ${rows}
-        </div>`;
-      resultDiv.style.display = 'block';
+      if(resultDiv) {
+        resultDiv.innerHTML = '<div class="p-2" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);">' +
+          '<div class="text-xs font-semibold text-secondary mb-1"><i class="bi bi-bell mr-1"></i>' + (zh ? '测试结果' : 'Test result') + '</div>' + rows + '</div>';
+        resultDiv.style.display = 'block';
+      }
     })
-    .catch(e => {
-      resultDiv.innerHTML = `<div class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>请求失败：${e.message}</div>`;
-      resultDiv.style.display = 'block';
+    .catch(function(e) {
+      if(resultDiv) {
+        resultDiv.innerHTML = '<div class="text-xs" style="color:var(--danger);"><i class="bi bi-exclamation-triangle mr-1"></i>' + (zh ? '请求失败：' : 'Request failed: ') + e.message + '</div>';
+        resultDiv.style.display = 'block';
+      }
     })
-    .finally(() => {
-      btn.disabled = false;
-      btn.innerHTML = origHtml;
-    });
+    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
 }
 </script>
 {% endblock %}

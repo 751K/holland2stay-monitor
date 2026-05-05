@@ -1,44 +1,37 @@
 {% extends "base.html" %}
-{% block title %}设置 · Holland2Stay{% endblock %}
+{% block title %}{{ _('settings') }} · Holland2Stay{% endblock %}
 
 {% block content %}
 
-<div class="page-hdr">
-  <h1><i class="bi bi-gear me-2" style="color:var(--accent);"></i>全局设置</h1>
-  <span class="ph-meta">影响所有用户的抓取行为</span>
+<div class="page-header">
+  <h1>{{ _('settings_title') }}</h1>
+  <span class="meta">{{ _('settings_meta') }}</span>
 </div>
 
-<!-- 提示条 -->
-<div class="alert alert-info d-flex align-items-center gap-2 py-2 mb-4">
-  <i class="bi bi-people" style="color:var(--accent);"></i>
-  <span class="small">
-    通知渠道、过滤条件和自动预订请前往
-    <a href="{{ url_for('users_list') }}" class="fw-semibold">用户管理</a>
-    页面按用户独立配置。
-  </span>
+<div class="alert alert-info mb-4">
+  <i class="bi bi-people mr-2"></i>
+  {{ _('settings_user_hint') }}<a href="{{ url_for('users_list') }}" style="color:var(--accent);font-weight:550;">{{ _('settings_user_link') }}</a>{{ _('settings_user_suffix') }}
 </div>
 
 <form method="post">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-  <!-- ── Section 1: 抓取配置 ─────────────────────────── -->
+  <!-- Section 1: Scrape config -->
   <div class="card mb-4">
-    <div class="sec-hdr">
-      <i class="bi bi-clock me-2" style="color:var(--accent);"></i>抓取配置
+    <div class="section-header">
+      <i class="bi bi-clock mr-2" style="color:var(--accent);"></i>{{ _('settings_scrape') }}
     </div>
     <div class="card-body">
 
-      <!-- 基础间隔 + 日志 -->
-      <div class="row g-3 mb-4">
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">常规轮询间隔（秒）</label>
-          <input type="number" class="form-control form-control-sm" name="CHECK_INTERVAL"
-                 value="{{ env.get('CHECK_INTERVAL','300') }}" min="1">
-          <div class="form-text">非高峰期的正常轮询间隔，默认 300 秒（5 分钟）。<span class="text-warning"><i class="bi bi-exclamation-triangle"></i> 低于 30 秒极易遇到频繁请求限制或封IP。</span></div>
+      <div class="form-row mb-4">
+        <div class="form-group">
+          <label class="form-label">{{ _('settings_interval') }}</label>
+          <input type="number" class="form-input" name="CHECK_INTERVAL" value="{{ env.get('CHECK_INTERVAL','300') }}" min="1">
+          <div class="form-help">{{ _('settings_interval_hint') }}<span style="color:var(--warning);"><i class="bi bi-exclamation-triangle mr-1"></i>{{ _('settings_interval_warn') }}</span></div>
         </div>
-        <div class="col-12 col-sm-6">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">日志级别</label>
-          <select class="form-select form-select-sm" name="LOG_LEVEL">
+        <div class="form-group">
+          <label class="form-label">{{ _('settings_log_level') }}</label>
+          <select class="form-select" name="LOG_LEVEL">
             {% for lvl in ['DEBUG','INFO','WARNING','ERROR'] %}
               <option {% if env.get('LOG_LEVEL','INFO') == lvl %}selected{% endif %}>{{ lvl }}</option>
             {% endfor %}
@@ -46,177 +39,107 @@
         </div>
       </div>
 
-      <!-- 分隔线 -->
-      <div class="d-flex align-items-center gap-2 mb-3" style="color:var(--muted);">
-        <div style="height:1px; flex:1; background:var(--border);"></div>
-        <span style="font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em;">
-          <i class="bi bi-graph-up me-1"></i>智能轮询（高峰期自动加速）
-        </span>
-        <div style="height:1px; flex:1; background:var(--border);"></div>
+      <!-- Smart poll -->
+      <div class="flex items-center gap-2 mb-3" style="color:var(--text3);">
+        <div style="height:1px;flex:1;background:var(--border);"></div>
+        <span class="text-xs font-semibold" style="text-transform:uppercase;letter-spacing:.06em;"><i class="bi bi-graph-up mr-1"></i>{{ _('settings_smart_poll') }}</span>
+        <div style="height:1px;flex:1;background:var(--border);"></div>
       </div>
 
-      <!-- 自适应说明 -->
-      <div class="alert alert-secondary py-2 px-3 mb-3" style="font-size:.82rem; border-radius:8px;">
-        <i class="bi bi-lightning-charge me-1" style="color:var(--accent);"></i>
-        <strong>自适应轮询：</strong>高峰期从「最大间隔」出发，每轮成功后自动缩短 5%，逼近「最小间隔」；
-        遭遇 429 限流后立即翻倍退避，再缓慢恢复。非高峰时重置为最大间隔。
+      <div class="alert" style="background:var(--accent-soft);color:var(--accent);margin-bottom:16px;">
+        <i class="bi bi-lightning-charge mr-1"></i>
+        <strong>{{ _('settings_smart_poll') }}：</strong>{{ _('settings_smart_desc') }}
       </div>
 
-      <div class="row g-3 mb-3">
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">
-            高峰期最大间隔（秒）<span style="font-weight:400; color:var(--muted);"> — 默认 60</span>
-          </label>
-          <input type="number" class="form-control form-control-sm" name="PEAK_INTERVAL"
-                 value="{{ env.get('PEAK_INTERVAL','60') }}" min="1" max="300">
-          <div class="form-text">自适应起点，也是限流退避后的恢复目标</div>
+      <div class="form-row mb-3">
+        <div class="form-group">
+          <label class="form-label">{{ _('settings_peak_max') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_peak_max_default') }}</span></label>
+          <input type="number" class="form-input" name="PEAK_INTERVAL" value="{{ env.get('PEAK_INTERVAL','60') }}" min="1" max="300">
+          <div class="form-help">{{ _('settings_peak_max_hint') }}</div>
         </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">
-            高峰期最小间隔（秒）<span style="font-weight:400; color:var(--muted);"> — 默认 15</span>
-          </label>
-          <input type="number" class="form-control form-control-sm" name="MIN_INTERVAL"
-                 value="{{ env.get('MIN_INTERVAL','15') }}" min="5" max="300">
-          <div class="form-text">自适应下限，建议 ≥ 15s，过低易触发 429</div>
+        <div class="form-group">
+          <label class="form-label">{{ _('settings_peak_min') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_peak_min_default') }}</span></label>
+          <input type="number" class="form-input" name="MIN_INTERVAL" value="{{ env.get('MIN_INTERVAL','15') }}" min="5" max="300">
+          <div class="form-help">{{ _('settings_peak_min_hint') }}</div>
         </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">高峰开始（荷兰时间）</label>
-          <input type="time" class="form-control form-control-sm" name="PEAK_START"
-                 value="{{ env.get('PEAK_START','08:30') }}">
+        <div class="form-group">
+          <label class="form-label">{{ _('settings_peak_start') }}</label>
+          <input type="time" class="form-input" name="PEAK_START" value="{{ env.get('PEAK_START','08:30') }}">
         </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">高峰结束（荷兰时间）</label>
-          <input type="time" class="form-control form-control-sm" name="PEAK_END"
-                 value="{{ env.get('PEAK_END','10:00') }}">
+        <div class="form-group">
+          <label class="form-label">{{ _('settings_peak_end') }}</label>
+          <input type="time" class="form-input" name="PEAK_END" value="{{ env.get('PEAK_END','10:00') }}">
         </div>
-        <div class="col-6 col-sm-3">
-          <label class="form-label small" style="color:var(--muted); font-weight:600;">
-            抖动比例<span style="font-weight:400; color:var(--muted);"> — 默认 0.20</span>
-          </label>
-          <div class="input-group input-group-sm">
-            <input type="number" class="form-control form-control-sm" name="JITTER_RATIO"
-                   value="{{ env.get('JITTER_RATIO','0.20') }}"
-                   min="0" max="0.5" step="0.05">
-            <span class="input-group-text" style="font-size:.75rem;">±%</span>
-          </div>
-          <div class="form-text">破坏机械规律性，避免模式识别</div>
+        <div class="form-group">
+          <label class="form-label">{{ _('settings_jitter') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_jitter_default') }}</span></label>
+          <input type="number" class="form-input" name="JITTER_RATIO" value="{{ env.get('JITTER_RATIO','0.20') }}" min="0" max="0.5" step="0.05">
+          <div class="form-help">{{ _('settings_jitter_hint') }}</div>
         </div>
-        <div class="col-12">
-          <div class="form-check form-switch">
-            <input class="form-check-input" type="checkbox" id="peak_weekdays"
-                   {% if env.get('PEAK_WEEKDAYS_ONLY','true') != 'false' %}checked{% endif %}
-                   onchange="document.getElementById('peak_weekdays_h').value=this.checked?'true':'false'">
-            <label class="form-check-label small" for="peak_weekdays">仅工作日启用高峰轮询</label>
-            <input type="hidden" id="peak_weekdays_h" name="PEAK_WEEKDAYS_ONLY"
-                   value="{{ env.get('PEAK_WEEKDAYS_ONLY','true') }}">
-          </div>
-          <div class="form-text">
-            <i class="bi bi-info-circle me-1"></i>
-            荷兰早 8:30–10:00 新房源上架最集中，高峰期结束后自动重置为最大间隔，方便下次峰期重新探测极限。
-          </div>
-        </div>
+      </div>
+
+      <div>
+        <label class="toggle">
+          <input type="checkbox" id="peak_weekdays" {% if env.get('PEAK_WEEKDAYS_ONLY','true') != 'false' %}checked{% endif %}
+                 onchange="document.getElementById('peak_weekdays_h').value=this.checked?'true':'false'">
+          <span class="toggle-track"></span>
+          {{ _('settings_weekdays') }}
+        </label>
+        <input type="hidden" id="peak_weekdays_h" name="PEAK_WEEKDAYS_ONLY" value="{{ env.get('PEAK_WEEKDAYS_ONLY','true') }}">
+        <div class="form-help mt-1"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_weekdays_hint') }}</div>
       </div>
 
     </div>
   </div>
 
-  <!-- ── Section 2: 监控城市 ─────────────────────────── -->
+  <!-- Section 2: Cities -->
   <div class="card mb-4">
-    <div class="sec-hdr">
-      <i class="bi bi-geo-alt me-2" style="color:var(--success);"></i>监控城市
+    <div class="section-header">
+      <i class="bi bi-geo-alt mr-2" style="color:var(--success);"></i>{{ _('settings_cities') }}
     </div>
     <div class="card-body">
-      <div class="row g-2">
+      <div class="form-row">
         {% for city in known_cities %}
-        <div class="col-6 col-sm-4 col-md-3 col-lg-2">
-          <div class="form-check">
-            <input class="form-check-input" type="checkbox"
-                   name="city_selected"
-                   value="{{ city.name }},{{ city.id }}"
-                   id="city_{{ city.id }}"
-                   {% if city.id in selected_city_ids %}checked{% endif %}>
-            <label class="form-check-label small" for="city_{{ city.id }}">
-              {{ city.name }}
-            </label>
-          </div>
-        </div>
+        <label class="checkbox">
+          <input type="checkbox" name="city_selected" value="{{ city.name }},{{ city.id }}" {% if city.id in selected_city_ids %}checked{% endif %}>
+          {{ city.name }}
+        </label>
         {% endfor %}
       </div>
-      <div class="form-text mt-2">
-        <i class="bi bi-info-circle me-1"></i>
-        至少选一个城市。监控多个城市会略增加抓取时间。
-      </div>
+      <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_cities_hint') }}</div>
     </div>
   </div>
 
-  <div class="d-flex align-items-center gap-2 flex-wrap">
-    <button type="submit" class="btn btn-primary px-4">
-      <i class="bi bi-save me-1"></i>保存配置
+  <div class="flex items-center gap-2 flex-wrap">
+    <button type="submit" class="btn btn-primary">
+      <i class="bi bi-save mr-1"></i>{{ _('settings_save') }}
     </button>
-    <button type="button" id="btn-reload" class="btn btn-success px-4"
-            onclick="reloadMonitor(this)">
-      <i class="bi bi-arrow-clockwise me-1"></i>立即生效
+    <button type="button" id="btn-reload" class="btn btn-ghost" onclick="reloadMonitor(this)">
+      <i class="bi bi-arrow-clockwise mr-1"></i>{{ _('settings_apply') }}
     </button>
-    <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">取消</a>
+    <a href="{{ url_for('index') }}" class="btn btn-ghost">{{ _('settings_cancel') }}</a>
   </div>
 
 </form>
 
-<!-- ── 危险操作区 ──────────────────────────────────────────────── -->
-<div class="mt-5 pt-4 border-top" style="border-color:var(--border)!important;">
-  <h5 class="mb-2" style="color:var(--danger);">
-    <i class="bi bi-exclamation-triangle me-1"></i>危险操作区
-  </h5>
-  <p class="small" style="color:var(--muted);">
-    清空数据库将删除所有历史房源记录、状态变更、通知和图表数据。此操作不可恢复。
-  </p>
-  <button type="button" class="btn btn-outline-danger btn-sm px-3"
-          data-bs-toggle="modal" data-bs-target="#resetDbModal">
-    <i class="bi bi-trash me-1"></i>清空数据库
+<!-- Danger zone -->
+<div class="danger-zone">
+  <h3><i class="bi bi-exclamation-triangle mr-2"></i>{{ _('settings_danger_zone') }}</h3>
+  <p class="text-sm text-secondary mb-3">{{ _('settings_danger_desc') }}</p>
+  <button type="button" class="btn btn-danger-ghost btn-sm" onclick="showResetModal()">
+    <i class="bi bi-trash mr-1"></i>{{ _('settings_reset_btn') }}
   </button>
 </div>
 
-<!-- 确认弹窗 -->
-<div class="modal fade" id="resetDbModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <div class="modal-header border-0 pb-0">
-        <h5 class="modal-title" style="color:var(--danger);">
-          <i class="bi bi-exclamation-triangle me-2"></i>确认清空数据库
-        </h5>
-      </div>
-      <div class="modal-body pt-3">
-        <p class="mb-0">此操作将删除所有历史数据，包括：</p>
-        <ul class="small mt-2 mb-0" style="color:var(--muted);">
-          <li>房源列表及快照</li>
-          <li>状态变更记录</li>
-          <li>图表统计数据</li>
-          <li>Web 通知历史</li>
-          <li>竞败重试队列</li>
-        </ul>
-        <p class="small mt-3 mb-0 fw-bold" style="color:var(--danger);">
-          此操作不可恢复。是否继续？
-        </p>
-      </div>
-      <div class="modal-footer border-0 pt-2">
-        <button type="button" class="btn btn-outline-secondary btn-sm"
-                data-bs-dismiss="modal">取消</button>
-        <button type="button" class="btn btn-danger btn-sm" id="btn-reset-confirm"
-                onclick="resetDatabase(this)">
-          <i class="bi bi-trash me-1"></i>确认清空
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Toast -->
-<div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
-  <div id="reload-toast" class="toast align-items-center border-0" role="alert" aria-live="assertive"
-       style="border-radius:10px;">
-    <div class="d-flex">
-      <div class="toast-body fw-medium" id="reload-toast-body"></div>
-      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+<!-- Reset confirm modal -->
+<div class="modal-overlay hidden" id="resetModal">
+  <div class="modal-box">
+    <h3 style="color:var(--danger);"><i class="bi bi-exclamation-triangle mr-2"></i>{{ _('settings_reset_confirm') }}</h3>
+    <p>{{ _('settings_reset_warn') }}</p>
+    <div class="modal-actions">
+      <button class="btn btn-ghost btn-sm" onclick="hideResetModal()">{{ _('settings_cancel') }}</button>
+      <button class="btn btn-danger btn-sm" id="btn-reset-confirm" onclick="resetDatabase(this)">
+        <i class="bi bi-trash mr-1"></i>{{ _('confirm') }}
+      </button>
     </div>
   </div>
 </div>
@@ -224,80 +147,54 @@
 
 {% block scripts %}
 <script>
-function resetDatabase(btn) {
-  const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>清空中...';
+function showResetModal() { document.getElementById('resetModal').classList.remove('hidden'); }
+function hideResetModal() { document.getElementById('resetModal').classList.add('hidden'); }
 
+function showResultToast(ok, msg) {
+  var wrap = document.getElementById('toast-container');
+  if(!wrap) return;
+  var div = document.createElement('div');
+  div.className = 'toast';
+  div.style.cssText = ok ? 'border-color:var(--success);' : 'border-color:var(--danger);';
+  div.innerHTML = (ok ? '<i class="bi bi-check-circle-fill mr-1" style="color:var(--success);"></i> ' : '<i class="bi bi-x-circle-fill mr-1" style="color:var(--danger);"></i> ') + msg;
+  wrap.appendChild(div);
+  setTimeout(function(){ div.style.opacity='0'; div.style.transition='opacity .3s'; setTimeout(function(){ div.remove(); }, 300); }, 4000);
+}
+
+function resetDatabase(btn) {
+  var lang = document.querySelector('meta[name="lang"]').getAttribute('content');
+  var resetting = lang === 'zh' ? '清空中...' : 'Resetting...';
+  var orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner mr-1"></span>' + resetting;
   fetch('/api/reset-db', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CSRF-Token': '{{ csrf_token() }}',
-    },
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token() }}' },
     body: JSON.stringify({ confirm: true }),
   })
-    .then(r => r.json())
-    .then(d => {
-      const modal = bootstrap.Modal.getInstance(document.getElementById('resetDbModal'));
-      modal.hide();
-      const toast = document.getElementById('reload-toast');
-      const body  = document.getElementById('reload-toast-body');
-      if (d.ok) {
-        toast.className = 'toast align-items-center border-0 text-bg-success';
-        body.innerHTML = '✅ ' + d.message;
-      } else {
-        toast.className = 'toast align-items-center border-0 text-bg-danger';
-        body.innerHTML = '❌ ' + (d.error || '未知错误');
-      }
-      new bootstrap.Toast(toast, { delay: 5000 }).show();
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      hideResetModal();
+      showResultToast(d.ok, d.ok ? d.message : (d.error || (lang === 'zh' ? '未知错误' : 'Unknown error')));
     })
-    .catch(() => {
-      const toast = document.getElementById('reload-toast');
-      toast.className = 'toast align-items-center border-0 text-bg-danger';
-      document.getElementById('reload-toast-body').innerHTML = '❌ 请求失败，请检查网络连接';
-      new bootstrap.Toast(toast, { delay: 5000 }).show();
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.innerHTML = orig;
-    });
+    .catch(function() { showResultToast(false, lang === 'zh' ? '请求失败' : 'Request failed'); })
+    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
 }
 
 function reloadMonitor(btn) {
-  const orig = btn.innerHTML;
+  var lang = document.querySelector('meta[name="lang"]').getAttribute('content');
+  var sending = lang === 'zh' ? '发送中...' : 'Sending...';
+  var orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>发送中...';
-
+  btn.innerHTML = '<span class="spinner mr-1"></span>' + sending;
   fetch('/api/reload', {
     method: 'POST',
-    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content }
+    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
   })
-    .then(r => r.json())
-    .then(d => {
-      const toast = new bootstrap.Toast(document.getElementById('reload-toast'), { delay: 4000 });
-      const body  = document.getElementById('reload-toast-body');
-      if (d.ok) {
-        document.getElementById('reload-toast').className =
-          'toast align-items-center border-0 text-bg-success';
-        body.innerHTML = '✅ ' + d.message;
-      } else {
-        document.getElementById('reload-toast').className =
-          'toast align-items-center border-0 text-bg-danger';
-        body.innerHTML = '❌ ' + (d.error || '未知错误');
-      }
-      toast.show();
-    })
-    .catch(() => {
-      document.getElementById('reload-toast').className =
-        'toast align-items-center border-0 text-bg-danger';
-      document.getElementById('reload-toast-body').innerHTML = '❌ 请求失败，请检查 web.py 是否运行';
-      new bootstrap.Toast(document.getElementById('reload-toast'), { delay: 4000 }).show();
-    })
-    .finally(() => {
-      btn.disabled = false;
-      btn.innerHTML = orig;
-    });
+    .then(function(r){ return r.json(); })
+    .then(function(d) { showResultToast(d.ok, d.ok ? d.message : (d.error || (lang === 'zh' ? '未知错误' : 'Unknown error'))); })
+    .catch(function() { showResultToast(false, lang === 'zh' ? '请求失败' : 'Request failed'); })
+    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
 }
 </script>
 {% endblock %}

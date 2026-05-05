@@ -640,7 +640,6 @@ async def run_once(
             pass
 
     # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
-    global _retry_queue_dirty
     if _retry_queue_dirty:
         storage.save_retry_queue(_retry_queue)
         _retry_queue_dirty = False

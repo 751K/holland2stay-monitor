@@ -177,6 +177,13 @@ class Storage:
 
             CREATE INDEX IF NOT EXISTS idx_web_notif_created
                 ON web_notifications (created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS geocode_cache (
+                address TEXT PRIMARY KEY,
+                lat     REAL NOT NULL,
+                lng     REAL NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            );
         """)
         self._conn.commit()
 
@@ -479,6 +486,52 @@ class Storage:
             }
             for r in rows
         ]
+
+    # ── Geocode cache ──────────────────────────────────────────────── #
+
+    def get_cached_coords(self, address: str) -> tuple[float, float] | None:
+        """Return (lat, lng) from cache, or None."""
+        row = self._conn.execute(
+            "SELECT lat, lng FROM geocode_cache WHERE address = ?", (address,)
+        ).fetchone()
+        return (row["lat"], row["lng"]) if row else None
+
+    def cache_coords(self, address: str, lat: float, lng: float) -> None:
+        self._conn.execute(
+            "INSERT OR REPLACE INTO geocode_cache (address, lat, lng) VALUES (?, ?, ?)",
+            (address, lat, lng),
+        )
+        self._conn.commit()
+
+    def get_map_listings(self) -> list[dict]:
+        """Return all listings with features for map display (geocoding done in route)."""
+        rows = self._conn.execute(
+            """SELECT id, name, status, price_raw, available_from, url, city, features
+               FROM listings ORDER BY city, name"""
+        ).fetchall()
+        results: list[dict] = []
+        for r in rows:
+            feats = json.loads(r["features"] or "[]")
+            feat_map: dict[str, str] = {}
+            for f in feats:
+                if ": " in f:
+                    k, v = f.split(": ", 1)
+                    feat_map[k.lower()] = v
+            address = f"{r['name']}, {r['city'] or ''}, {feat_map.get('neighborhood', '')}"
+            results.append({
+                "id": r["id"],
+                "name": r["name"],
+                "status": r["status"],
+                "price_raw": r["price_raw"] or "",
+                "available_from": r["available_from"] or "",
+                "url": r["url"] or "",
+                "city": r["city"] or "",
+                "neighborhood": feat_map.get("neighborhood", ""),
+                "building": feat_map.get("building", ""),
+                "area": feat_map.get("living_area", ""),
+                "address": address,
+            })
+        return results
 
     def get_distinct_statuses(self) -> list[str]:
         """

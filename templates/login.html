@@ -1,103 +1,41 @@
 <!doctype html>
-<html lang="zh">
+<html lang="{{ lang }}" data-theme="dark">
 <head>
-  <script>(function(){var t=localStorage.getItem('h2s-theme');if(!t)t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';document.documentElement.setAttribute('data-bs-theme',t);document.documentElement.style.colorScheme=t;})();</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>登录 · Holland2Stay 监控</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta name="lang" content="{{ lang }}">
+  <title>{{ _('login_title') }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <style>
-    :root,[data-bs-theme="dark"]{
-      --bg-body:#000;--bg-surface:#1c1c1e;--bg-raised:#2c2c2e;
-      --border:rgba(84,84,88,.48);--border-hard:#48484a;
-      --text:#fff;--muted:rgba(235,235,245,.55);--accent:#0a84ff;--danger:#ff453a;
-    }
-    [data-bs-theme="light"]{
-      --bg-body:#f2f2f7;--bg-surface:#fff;--bg-raised:#f2f2f7;
-      --border:rgba(60,60,67,.16);--border-hard:#c6c6c8;
-      --text:#000;--muted:rgba(60,60,67,.56);--accent:#007aff;--danger:#ff3b30;
-    }
-    *,*::before,*::after{box-sizing:border-box;}
-    body{
-      font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Helvetica Neue',Arial,sans-serif;
-      -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
-      background:var(--bg-body);color:var(--text);
-      min-height:100vh;display:flex;align-items:center;justify-content:center;
-      padding:24px 16px;margin:0;
-    }
-    @keyframes loginIn{from{opacity:0;transform:translateY(18px) scale(.98);}to{opacity:1;transform:none;}}
-    .login-wrap{animation:loginIn .42s cubic-bezier(.25,.46,.45,.94) both;width:100%;max-width:356px;}
-    .login-card{
-      background:var(--bg-surface);
-      border:.5px solid var(--border);
-      border-radius:22px;
-      padding:34px 28px 28px;
-      box-shadow:0 10px 48px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.1);
-    }
-    .login-icon{
-      width:52px;height:52px;border-radius:14px;
-      background:var(--accent);
-      display:flex;align-items:center;justify-content:center;
-      font-size:1.45rem;margin:0 auto 16px;
-    }
-    h1{font-size:1.1rem;font-weight:700;letter-spacing:-.028em;text-align:center;margin:0 0 5px;}
-    .sub{font-size:.76rem;color:var(--muted);text-align:center;margin-bottom:26px;}
-    .field{margin-bottom:15px;}
-    .field:last-of-type{margin-bottom:20px;}
-    label{display:block;font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.065em;color:var(--muted);margin-bottom:6px;}
-    input[type="text"],input[type="password"],input[type="email"]{
-      display:block;width:100%;padding:9px 12px;
-      background:var(--bg-raised);border:.5px solid var(--border-hard);
-      color:var(--text);font-size:.875rem;border-radius:10px;
-      outline:none;transition:border-color .14s,box-shadow .14s;
-      font-family:inherit;
-    }
-    input:focus{border-color:var(--accent)!important;box-shadow:0 0 0 3px rgba(0,122,255,.18)!important;}
-    [data-bs-theme="dark"] input:focus{box-shadow:0 0 0 3px rgba(10,132,255,.2)!important;}
-    .pw-wrap{position:relative;}
-    .pw-wrap input{padding-right:2.6rem;}
-    .pw-eye{position:absolute;right:.75rem;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--muted);font-size:.9rem;transition:color .15s;background:none;border:none;padding:0;}
-    .pw-eye:hover{color:var(--text);}
-    .btn-login{
-      display:block;width:100%;padding:10px;border-radius:12px;border:none;
-      background:var(--accent);color:#fff;font-weight:600;font-size:.9rem;
-      cursor:pointer;transition:opacity .15s,transform .1s;letter-spacing:-.01em;
-      font-family:inherit;
-    }
-    .btn-login:hover{opacity:.86;}
-    .btn-login:active{transform:scale(.98);}
-    .divider{border:none;border-top:.5px solid var(--border);margin:20px 0 16px;}
-    .footer{font-size:.68rem;color:var(--muted);text-align:center;line-height:1.65;}
-    code{font-size:.67rem;background:var(--bg-raised);padding:2px 6px;border-radius:4px;color:var(--muted);}
-    .err{padding:10px 13px;border-radius:12px;font-size:.82rem;margin-bottom:16px;background:rgba(255,69,58,.1);color:var(--danger);}
-    [data-bs-theme="light"] .err{background:rgba(255,59,48,.1);}
-    .theme-btn{
-      position:fixed;top:16px;right:16px;
-      background:var(--bg-surface);border:.5px solid var(--border);
-      color:var(--muted);border-radius:10px;
-      width:34px;height:34px;display:flex;align-items:center;justify-content:center;
-      cursor:pointer;font-size:.9rem;transition:color .15s,background .15s;
-    }
-    .theme-btn:hover{background:var(--bg-raised);color:var(--text);}
-  </style>
+  <link rel="stylesheet" href="/static/design.css?v=2">
 </head>
 <body>
 
-<button class="theme-btn" onclick="toggleTheme()" title="切换主题">
+<a href="{{ url_for('set_lang', lang='en' if lang=='zh' else 'zh', next=request.path) }}"
+   class="login-theme-btn" style="right:60px;" title="{{ 'English' if lang=='zh' else '中文' }}">
+  <i class="bi bi-translate"></i>
+</a>
+
+<button class="login-theme-btn" onclick="toggleTheme()" title="{{ _('toggle_theme') }}">
   <i id="theme-icon" class="bi bi-sun"></i>
 </button>
 
-<div class="login-wrap">
+<div class="login-page">
   <div class="login-card">
-    <div class="login-icon">🏠</div>
-    <h1>Holland2Stay 监控</h1>
-    <div class="sub">请登录以继续访问</div>
+    <div class="login-icon">H2</div>
+    <h1>{{ _('login_header') }}</h1>
+    <div class="sub">{{ _('login_subtitle') }}</div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
-        <div class="err" role="alert">
-          <i class="bi bi-exclamation-circle me-1"></i>{{ msg }}
-        </div>
+      <div class="alert alert-danger">
+        <i class="bi bi-exclamation-circle mr-1"></i>{{ msg }}
+      </div>
       {% endfor %}
     {% endwith %}
 
@@ -105,53 +43,56 @@
       <input type="hidden" name="next" value="{{ next }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-      <div class="field">
-        <label for="username">用户名</label>
-        <input id="username" type="text" name="username"
-               placeholder="admin" autocomplete="username" required autofocus>
+      <div class="login-field">
+        <label for="username">{{ _('login_username') }}</label>
+        <input id="username" type="text" name="username" placeholder="admin" autocomplete="username" required autofocus>
       </div>
 
-      <div class="field">
-        <label for="password">密码</label>
+      <div class="login-field">
+        <label for="password">{{ _('login_password') }}</label>
         <div class="pw-wrap">
-          <input id="password" type="password" name="password"
-                 placeholder="••••••••" autocomplete="current-password" required>
-          <button type="button" class="pw-eye" id="pw-eye-btn" onclick="togglePw()">
+          <input id="password" type="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+          <button type="button" class="pw-eye" onclick="togglePw()">
             <i class="bi bi-eye" id="pw-eye"></i>
           </button>
         </div>
       </div>
 
-      <button type="submit" class="btn-login">
-        登录
-      </button>
+      <button type="submit" class="login-btn">{{ _('login_btn') }}</button>
     </form>
 
-    <hr class="divider">
-    <div class="footer">
-      通过 <code>WEB_USERNAME</code> / <code>WEB_PASSWORD</code><br>在 .env 中配置凭据
-    </div>
+    <div class="login-footer">{{ _('login_footer') }}</div>
   </div>
 </div>
 
 <script>
-function _applyTheme(t){
-  document.documentElement.setAttribute('data-bs-theme',t);
-  document.documentElement.style.colorScheme=t;
-  const i=document.getElementById('theme-icon');
-  if(i) i.className='bi '+(t==='dark'?'bi-sun':'bi-moon-stars-fill');
+(function(){
+  var t = localStorage.getItem('h2s-theme');
+  if(!t) t = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  applyTheme(t);
+})();
+
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  var icon = document.getElementById('theme-icon');
+  if(icon) icon.className = 'bi ' + (t === 'dark' ? 'bi-sun' : 'bi-moon-stars-fill');
 }
-function toggleTheme(){
-  const n=document.documentElement.getAttribute('data-bs-theme')==='dark'?'light':'dark';
-  localStorage.setItem('h2s-theme',n);_applyTheme(n);
+
+function toggleTheme() {
+  var cur = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  var html = document.documentElement;
+  html.classList.add('theme-transitioning');
+  applyTheme(cur);
+  localStorage.setItem('h2s-theme', cur);
+  setTimeout(function(){ html.classList.remove('theme-transitioning'); }, 400);
 }
-function togglePw(){
-  const inp=document.getElementById('password');
-  const eye=document.getElementById('pw-eye');
-  if(inp.type==='password'){inp.type='text';eye.className='bi bi-eye-slash';}
-  else{inp.type='password';eye.className='bi bi-eye';}
+
+function togglePw() {
+  var inp = document.getElementById('password');
+  var eye = document.getElementById('pw-eye');
+  if(inp.type === 'password') { inp.type = 'text'; eye.className = 'bi bi-eye-slash'; }
+  else { inp.type = 'password'; eye.className = 'bi bi-eye'; }
 }
-_applyTheme(document.documentElement.getAttribute('data-bs-theme')||'dark');
 </script>
 </body>
 </html>

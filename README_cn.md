@@ -26,6 +26,8 @@
 | 日夜主题 | ✅ 已完成 | 浅色 / 深色，跟随系统偏好，无刷新闪烁 |
 | 数据可视化 | ✅ 已完成 | 30 天趋势、城市 / 状态分布、价格区间图表 |
 | 入住日历 | ✅ 已完成 | 月视图，按城市筛选 |
+| 地图视图 | ✅ 已完成 | Leaflet.js + OpenStreetMap，自动地理编码，颜色标记 |
+| i18n 中英切换 | ✅ 已完成 | 一键切换语言，cookie 持久化 |
 | 通知测试 | ✅ 已完成 | 一键逐渠道测试，返回成功 / 失败详情 |
 | 面板鉴权 | ✅ 已完成 | Session 登录，opt-in（设置密码后启用） |
 
@@ -120,12 +122,15 @@
 
 - **仪表盘**：总房源 / 今日新增 / 今日变更 / 最近抓取时间，加最新房源列表与近 48h 变更记录
 - **房源列表**：全量数据，支持按状态筛选 + 关键词搜索
+- **地图视图**：Leaflet.js 交互地图，Nominatim 自动地理编码 + 坐标缓存，颜色标记（绿=直订/橙=摇号/灰=其他），点击弹窗详情，亮色/暗色底图滤镜
 - **入住日历**：所有有入住日期的房源按月历展示，按城市筛选
-- **统计图表**：30 天新增趋势、状态变更趋势、城市分布、状态分布、价格区间直方图
+- **统计图表**：Chart.js 折线图 / 环形图 / 柱状图，7/30/90 天可切换
 - **用户管理**：多用户 CRUD，每用户独立配置通知 / 过滤 / 预订，一键启停，一键发送测试通知
 - **全局设置**：轮询间隔、自适应轮询参数、监控城市，可视化配置无需手动编辑 `.env`
-- **立即生效**：保存后点击按钮，通过 SIGHUP 热重载配置，监控进程不中断
-- **铃铛通知**：导航栏实时通知，Bell + Toast 弹窗，SSE 推送，点击标记已读
+- **立即生效**：保存后点击按钮热重载配置，监控进程不中断
+- **中英切换**：侧边栏一键切换中文 / English，cookie 持久化
+- **铃铛通知**：侧边栏实时通知 Bell + Toast 弹窗，SSE 推送，一键全部已读
+- **极简设计**：去边框设计系统，阴影层级区分，深色/浅色双主题 + 平滑过渡动画，Inter 字体
 
 ---
 
@@ -181,7 +186,10 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
 | `users.py` | UserConfig dataclass，users.json 读写，.env 配置迁移 |
 | `web.py` | Flask 面板，Session 鉴权，用户 CRUD，SSE 流，通知 API，/api/reload |
-| `templates/` | Bootstrap 5.3，铃铛通知（SSE + Toast），日夜主题，Chart.js，日历视图 |
+| `translations.py` | 120+ UI 翻译条目（中/英），模板 `_()` 函数 |
+| `geocode_all.py` | 一次性 Nominatim 地理编码，预热坐标缓存 |
+| `static/` | `design.css`（去边框设计系统），`app.js`（主题/导航/SSE/国际化） |
+| `templates/` | Jinja2 模板（`_()` 国际化），Leaflet.js 地图，Chart.js 图表，侧边栏布局 |
 
 ### 关键技术决策
 
@@ -427,23 +435,29 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 ```
 monitor.py          主调度循环，自适应智能轮询，热重载，并发预订
 scraper.py          GraphQL 抓取，curl_cffi，自动翻页，429 重试，代理支持
-storage.py          SQLite：listings / status_changes / web_notifications / meta，chart 聚合
+storage.py          SQLite：listings / status_changes / web_notifications / meta / geocode_cache，chart 聚合
 models.py           Listing dataclass，price_display，feature_map
 notifier.py         BaseNotifier → iMessage（macOS 检测）/ Telegram / Email / WhatsApp / WebNotifier
 booker.py           登录 → createEmptyCart → addNewBooking → placeOrder (store_id=54) → idealCheckOut (plateform "h")
 config.py           全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig
 users.py            UserConfig，users.json 读写，.env 配置迁移
-web.py              Flask 面板，Session 鉴权，SSE 流，通知 API，用户 CRUD，/api/reload
+translations.py     中/英翻译字典，120+ 键覆盖全部页面
+geocode_all.py      一次性脚本：通过 Nominatim 预加载所有房源坐标
+web.py              Flask 面板，Session 鉴权，SSE 流，通知 API，用户 CRUD，/api/reload，地图 API
+static/
+  design.css        极简设计系统（去边框，阴影层级，暗/亮双主题，Inter 字体）
+  app.js            前端交互：主题切换，移动端导航，SSE 通知，国际化
 templates/
-  base.html         布局，导航栏，铃铛通知（SSE + Toast），日夜主题（Anti-FOUC）
-  login.html        登录页
-  index.html        仪表盘
+  base.html         侧边栏布局，铃铛通知（SSE + Toast），语言切换，日夜主题
+  login.html        登录页（独立布局）
+  index.html        仪表盘（KPI 卡片 + 最新房源 + 变更记录）
   listings.html     房源列表（状态筛选 + 关键词搜索）
-  calendar.html     入住日历（月视图，城市筛选）
+  map.html          地图视图（Leaflet.js + OpenStreetMap，颜色标记）
+  calendar.html     入住日历（月视图，城市筛选，详情面板）
   stats.html        数据统计（Chart.js：趋势 / 分布 / 价格区间）
-  users.html        用户管理列表
-  user_form.html    用户新增 / 编辑表单（含 iMessage 平台警告）
-  settings.html     全局设置（轮询 / 城市 / 自适应智能轮询）
+  users.html        用户管理列表（卡片式，渠道 / 过滤 / 操作）
+  user_form.html    用户新增 / 编辑表单（4 步：基本信息 / 渠道 / 过滤 / 预订）
+  settings.html     全局设置（抓取配置 / 智能轮询 / 城市 / 危险操作区）
 Dockerfile          单容器镜像（python:3.11-slim + supervisord）
 supervisord.conf    同时管理 monitor.py + web.py，含日志轮转和自动重启
 docker-compose.yml  卷挂载（data/、logs/、.env），端口映射，健康检查

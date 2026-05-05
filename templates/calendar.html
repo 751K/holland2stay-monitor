@@ -1,542 +1,329 @@
 {% extends "base.html" %}
-{% block title %}入住日历 · Holland2Stay{% endblock %}
-
-{% block extra_style %}
-/* ── 城市筛选栏 ─────────────────────────────────────────────────── */
-.city-filter-bar {
-  display: flex; flex-wrap: wrap; gap: .4rem; align-items: center;
-  padding: .5rem .75rem;
-  background: var(--bg-surface);
-  border: .5px solid var(--border);
-  border-radius: 12px;
-  margin-bottom: 1rem;
-  box-shadow: var(--shadow-sm);
-}
-.city-btn {
-  display: inline-flex; align-items: center; gap: .3rem;
-  font-size: .72rem; font-weight: 600;
-  padding: .22rem .65rem;
-  border-radius: 2rem;
-  border: .5px solid var(--border);
-  background: var(--bg-raised);
-  color: var(--muted);
-  cursor: pointer; transition: all .15s; white-space: nowrap;
-  user-select: none;
-}
-.city-btn:hover { border-color: var(--accent); color: var(--accent); }
-.city-btn.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-.city-btn .dot {
-  display: inline-block; width: 6px; height: 6px;
-  border-radius: 50%; background: currentColor; flex-shrink: 0;
-}
-.city-btn-all.active { background: var(--text); border-color: var(--text); color: var(--bg-body); }
-
-/* ── 日历导航 ───────────────────────────────────────────────────── */
-.cal-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 1rem;
-}
-.cal-nav-btn {
-  background: var(--bg-surface); border: .5px solid var(--border);
-  color: var(--muted); border-radius: 10px;
-  width: 2.2rem; height: 2.2rem;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; font-size: .9rem;
-  transition: color .14s, border-color .14s, background .14s;
-  box-shadow: var(--shadow-sm);
-}
-.cal-nav-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-raised); }
-
-/* ── 星期行 ─────────────────────────────────────────────────────── */
-.cal-grid {
-  display: grid; grid-template-columns: repeat(7, 1fr);
-  gap: 4px;
-}
-.cal-dow {
-  text-align: center; font-size: .65rem; font-weight: 700;
-  text-transform: uppercase; letter-spacing: .08em;
-  color: var(--muted); padding: .25rem 0;
-}
-.cal-dow:first-child { color: var(--danger); }
-.cal-dow:last-child  { color: var(--accent); }
-
-/* ── 日期格 ─────────────────────────────────────────────────────── */
-.cal-day {
-  min-height: 80px;
-  border: .5px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-surface);
-  padding: .3rem .35rem;
-  cursor: default;
-  transition: border-color .15s, background .15s, box-shadow .15s;
-  position: relative;
-}
-.cal-day.has-listings { cursor: pointer; }
-.cal-day.has-listings:hover {
-  border-color: rgba(0,122,255,.4);
-  background: var(--bg-raised);
-}
-.cal-day.today {
-  border-color: var(--accent);
-  background: rgba(0,122,255,.06);
-}
-[data-bs-theme="dark"] .cal-day.today { background: rgba(10,132,255,.08); }
-.cal-day.other-month { opacity: .3; }
-.cal-day.selected {
-  border-color: var(--accent) !important;
-  box-shadow: 0 0 0 2px rgba(0,122,255,.22);
-}
-[data-bs-theme="dark"] .cal-day.selected { box-shadow: 0 0 0 2px rgba(10,132,255,.28); }
-
-.day-num {
-  font-size: .78rem; font-weight: 600;
-  color: var(--muted); line-height: 1;
-  margin-bottom: .3rem;
-}
-.cal-day.today .day-num  { color: var(--accent); font-weight: 700; }
-.cal-day.is-sun .day-num { color: var(--danger); }
-.cal-day.is-sat .day-num { color: var(--accent); }
-
-/* ── 房源小徽章 ─────────────────────────────────────────────────── */
-.cal-pill {
-  display: block;
-  font-size: .62rem; line-height: 1.3;
-  border-radius: 3px;
-  padding: .05rem .3rem;
-  margin-bottom: 2px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  max-width: 100%;
-  border-left: 2px solid transparent;
-}
-.cal-pill.book    { background: rgba(50,215,75,.12); color: var(--success); border-left-color: var(--success); }
-.cal-pill.lottery { background: rgba(255,159,10,.12); color: var(--warning); border-left-color: var(--warning); }
-[data-bs-theme="light"] .cal-pill.book    { background: rgba(52,199,89,.12); }
-[data-bs-theme="light"] .cal-pill.lottery { background: rgba(255,149,0,.12); }
-.cal-pill.more    { background: transparent; color: var(--muted); font-style: italic; border-left: none; }
-
-/* ── 侧边详情面板 ───────────────────────────────────────────────── */
-#detail-panel {
-  position: sticky; top: 5rem;
-  background: var(--bg-surface);
-  border: .5px solid var(--border);
-  border-radius: 16px;
-  min-height: 160px;
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
-}
-.detail-empty {
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  height: 160px; color: var(--muted);
-  font-size: .85rem; gap: .5rem;
-}
-.listing-row {
-  border-bottom: .5px solid var(--border);
-  padding: .65rem .85rem;
-  transition: background .12s;
-}
-.listing-row:last-child { border-bottom: none; }
-.listing-row:hover { background: var(--bg-raised); }
-{% endblock %}
+{% block title %}{{ _('calendar_title') }}{% endblock %}
 
 {% block content %}
 
-<!-- 页眉 -->
-<div class="page-hdr">
-  <h1><i class="bi bi-calendar3 me-2" style="color:var(--accent);"></i>入住日历</h1>
-  <!-- 图例 -->
-  <div class="d-flex gap-3 align-items-center">
-    <span class="d-flex align-items-center gap-1 small" style="color:var(--muted);">
-      <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--success);opacity:.7;"></span>
-      可直订
+<div class="page-header">
+  <h1>{{ _('calendar') }}</h1>
+  <div class="flex items-center gap-3">
+    <span class="flex items-center gap-1 text-sm text-secondary">
+      <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--success);"></span>
+      {{ _('cal_direct_book') }}
     </span>
-    <span class="d-flex align-items-center gap-1 small" style="color:var(--muted);">
-      <span style="display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--warning);opacity:.7;"></span>
-      摇号
+    <span class="flex items-center gap-1 text-sm text-secondary">
+      <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--warning);"></span>
+      {{ _('cal_lottery') }}
     </span>
   </div>
 </div>
 
-<!-- 城市筛选栏（JS 动态填充） -->
-<div class="city-filter-bar" id="city-filter-bar">
-  <span style="font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin-right:.25rem;">
-    <i class="bi bi-geo-alt me-1"></i>城市
+<!-- City filter -->
+<div class="city-filter" id="city-filter-bar">
+  <span class="text-xs font-semibold mr-1" style="text-transform:uppercase;letter-spacing:.06em;color:var(--text3);padding:5px 0;">
+    <i class="bi bi-geo-alt mr-1"></i>{{ _('cal_city_label') }}
   </span>
-  <!-- 按钮由 JS 注入 -->
 </div>
 
-<div class="row g-3">
+<div class="grid-7-5">
 
-  <!-- 左：日历 -->
-  <div class="col-12 col-xl-8">
-
-    <!-- 月份导航 -->
-    <div class="cal-header">
-      <button class="cal-nav-btn" id="btn-prev" title="上个月">
-        <i class="bi bi-chevron-left"></i>
-      </button>
-      <div class="fw-semibold" id="month-label" style="font-size:1rem; min-width:130px; text-align:center;"></div>
-      <button class="cal-nav-btn" id="btn-next" title="下个月">
-        <i class="bi bi-chevron-right"></i>
-      </button>
+  <!-- Calendar -->
+  <div>
+    <div class="cal-nav">
+      <button class="cal-nav-btn" id="btn-prev" title="{{ _('cal_prev_month') }}"><i class="bi bi-chevron-left"></i></button>
+      <div class="cal-month-label" id="month-label"></div>
+      <button class="cal-nav-btn" id="btn-next" title="{{ _('cal_next_month') }}"><i class="bi bi-chevron-right"></i></button>
     </div>
 
-    <!-- 星期标题 -->
-    <div class="cal-grid mb-1">
-      <div class="cal-dow">日</div>
-      <div class="cal-dow">一</div>
-      <div class="cal-dow">二</div>
-      <div class="cal-dow">三</div>
-      <div class="cal-dow">四</div>
-      <div class="cal-dow">五</div>
-      <div class="cal-dow">六</div>
+    <div class="cal-grid mb-1" id="cal-dow-row">
     </div>
 
-    <!-- 日期格（JS 动态填充）-->
     <div class="cal-grid" id="cal-body"></div>
-
   </div>
 
-  <!-- 右：详情 -->
-  <div class="col-12 col-xl-4">
-    <div id="detail-panel" class="p-0">
-      <div class="d-flex justify-content-between align-items-center px-3 py-2"
-           style="border-bottom:.5px solid var(--border);">
-        <span class="fw-semibold small" id="detail-title">请选择日期</span>
-        <span class="badge bg-secondary" id="detail-count" style="display:none;"></span>
+  <!-- Detail panel -->
+  <div>
+    <div class="detail-panel">
+      <div class="detail-header">
+        <span id="detail-title">{{ _('cal_select_date') }}</span>
+        <span class="badge badge-neutral" id="detail-count" style="display:none;"></span>
       </div>
       <div id="detail-body">
         <div class="detail-empty">
-          <i class="bi bi-calendar2 fs-3 opacity-50"></i>
-          <span>点击日历中有房源的日期</span>
+          <i class="bi bi-calendar2" style="font-size:28px;opacity:.3;"></i>
+          <span>{{ _('cal_click_hint') }}</span>
         </div>
       </div>
     </div>
   </div>
 
 </div>
-
 {% endblock %}
 
 {% block scripts %}
 <script>
-// ─── 工具函数 ───────────────────────────────────────────────────────
-const MONTHS_ZH = ['一月','二月','三月','四月','五月','六月',
-                   '七月','八月','九月','十月','十一月','十二月'];
+var LANG = '{{ lang }}';
+var zh = LANG === 'zh';
+var MONTHS = {{ _('cal_months') | tojson }};
+var DOW = {{ _('cal_dow') | tojson }};
+var DOW_FULL = {{ _('cal_dow_full') | tojson }};
+var T = {
+  all: zh ? '全部' : 'All',
+  units: zh ? ' 套' : ' units',
+  direct: zh ? '直订' : 'Direct',
+  lottery: zh ? '摇号' : 'Lottery',
+  perMonth: zh ? '/月' : '/mo',
+  loadError: zh ? '数据加载失败' : 'Failed to load data',
+  selectDate: zh ? '请选择日期' : 'Select a date',
+  clickHint: zh ? '点击日历中有房源的日期' : 'Click a date with listings',
+  prevMonth: zh ? '上个月' : 'Previous',
+  nextMonth: zh ? '下个月' : 'Next',
+};
+var CITY_COLORS = ['#5e6ad2','#10b981','#f59e0b','#ef4444','#8b5cf6','#38bdf8','#34d399','#fbbf24','#f87171','#2dd4bf'];
+
+var allListings = [];
+var byDate = {};
+var currentYear, currentMonth;
+var selectedDate = null;
+var selectedCities = new Set();
+var allCities = [];
+var cityColorMap = {};
 
 function toYMD(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
-  return `${y}-${m}-${dd}`;
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
 
 function priceShort(raw) {
-  if (!raw) return '—';
-  const m = raw.match(/€[\d,\.]+/);
+  if(!raw) return '—';
+  var m = raw.match(/€[\d,\.]+/);
   return m ? m[0] : raw;
 }
 
 function statusClass(s) {
-  const sl = (s||'').toLowerCase();
-  if (sl.includes('book'))    return 'book';
-  if (sl.includes('lottery')) return 'lottery';
+  var sl = (s||'').toLowerCase();
+  if(sl.indexOf('book') !== -1) return 'book';
+  if(sl.indexOf('lottery') !== -1) return 'lottery';
   return 'lottery';
 }
 
-// ─── 调色板（城市颜色循环，Apple system colors）─────────────────────
-const CITY_COLORS = [
-  '#0a84ff','#32d74b','#ff9f0a','#ff453a','#bf5af2',
-  '#5ac8fa','#30d158','#ffd60a','#ff6961','#63e6e2',
-];
-
-// ─── 状态 ───────────────────────────────────────────────────────────
-let allListings = [];           // 全量数据
-let byDate = {};                // 过滤后的 { "YYYY-MM-DD": [listing, ...] }
-let currentYear, currentMonth;  // 0-based month
-let selectedDate = null;
-let selectedCities = new Set(); // 当前选中城市；空集 = 全部
-let allCities = [];             // 所有城市名（排序后）
-let cityColorMap = {};          // { cityName: color }
-
-// ─── 构建 byDate（应用城市过滤）────────────────────────────────────
 function buildByDate() {
   byDate = {};
-  allListings.forEach(l => {
-    if (!l.available_from) return;
-    if (selectedCities.size > 0 && !selectedCities.has(l.city)) return;
-    const key = l.available_from.slice(0, 10);
-    if (!byDate[key]) byDate[key] = [];
+  allListings.forEach(function(l) {
+    if(!l.available_from) return;
+    if(selectedCities.size > 0 && !selectedCities.has(l.city)) return;
+    var key = l.available_from.slice(0,10);
+    if(!byDate[key]) byDate[key] = [];
     byDate[key].push(l);
   });
 }
 
-// ─── 渲染城市筛选栏 ─────────────────────────────────────────────────
 function renderCityFilter() {
-  const bar = document.getElementById('city-filter-bar');
-  // 保留第一个 <span> 标签（"城市"标签），清除其余
-  while (bar.children.length > 1) bar.removeChild(bar.lastChild);
+  var bar = document.getElementById('city-filter-bar');
+  while(bar.children.length > 1) bar.removeChild(bar.lastChild);
 
-  // "全部" 按钮
-  const allBtn = document.createElement('button');
-  allBtn.className = 'city-btn city-btn-all' + (selectedCities.size === 0 ? ' active' : '');
-  allBtn.innerHTML = `<span class="dot"></span>全部 (${allListings.length})`;
-  allBtn.addEventListener('click', () => {
-    selectedCities.clear();
-    applyFilter();
-  });
+  var allBtn = document.createElement('button');
+  allBtn.className = 'city-btn' + (selectedCities.size === 0 ? ' active' : '');
+  allBtn.innerHTML = T.all + ' (' + allListings.length + ')';
+  allBtn.addEventListener('click', function() { selectedCities.clear(); applyFilter(); });
   bar.appendChild(allBtn);
 
-  // 各城市按钮
-  allCities.forEach((city, idx) => {
-    const color = cityColorMap[city];
-    const count = allListings.filter(l => l.city === city).length;
-    const isActive = selectedCities.has(city);
+  allCities.forEach(function(city, i) {
+    var color = cityColorMap[city];
+    var count = allListings.filter(function(l) { return l.city === city; }).length;
+    var active = selectedCities.has(city);
 
-    const btn = document.createElement('button');
-    btn.className = 'city-btn' + (isActive ? ' active' : '');
-    btn.style.setProperty('--city-color', color);
-    if (isActive) {
-      btn.style.background    = color;
-      btn.style.borderColor   = color;
-      btn.style.color         = '#fff';
-    }
-    btn.innerHTML = `<span class="dot" style="background:${isActive ? '#fff' : color};"></span>${city} (${count})`;
-    btn.addEventListener('click', () => {
-      if (selectedCities.has(city)) {
-        selectedCities.delete(city);
-      } else {
-        selectedCities.add(city);
-      }
+    var btn = document.createElement('button');
+    btn.className = 'city-btn' + (active ? ' active' : '');
+    if(active) { btn.style.background = color; btn.style.borderColor = color; btn.style.color = '#fff'; }
+    btn.innerHTML = '<span class="city-dot" style="background:' + (active ? '#fff' : color) + ';"></span>' + city + ' (' + count + ')';
+    btn.addEventListener('click', function() {
+      if(selectedCities.has(city)) selectedCities.delete(city);
+      else selectedCities.add(city);
       applyFilter();
     });
     bar.appendChild(btn);
   });
 }
 
-// ─── 应用筛选并重渲 ─────────────────────────────────────────────────
 function applyFilter() {
   buildByDate();
   renderCityFilter();
-  // 若当前选中日期在过滤后无房源，清除选中
-  if (selectedDate && (!byDate[selectedDate] || byDate[selectedDate].length === 0)) {
-    selectedDate = null;
-    clearDetail();
+  if(selectedDate && (!byDate[selectedDate] || byDate[selectedDate].length === 0)) {
+    selectedDate = null; clearDetail();
   }
   renderCalendar();
 }
 
-// ─── 加载数据 ───────────────────────────────────────────────────────
-fetch('/api/calendar')
-  .then(r => r.json())
-  .then(d => {
-    allListings = d.listings || [];
-
-    // 提取城市列表并分配颜色
-    const citySet = new Set(allListings.map(l => l.city).filter(Boolean));
-    allCities = Array.from(citySet).sort();
-    allCities.forEach((c, i) => { cityColorMap[c] = CITY_COLORS[i % CITY_COLORS.length]; });
-
-    buildByDate();
-    renderCityFilter();
-
-    // 跳到最近有房源的月份（或本月）
-    const today = new Date();
-    let target = today;
-    const futureDates = Object.keys(byDate).filter(k => k >= toYMD(today)).sort();
-    if (futureDates.length) {
-      const parts = futureDates[0].split('-');
-      target = new Date(+parts[0], +parts[1]-1, 1);
-    }
-    currentYear  = target.getFullYear();
-    currentMonth = target.getMonth();
-    renderCalendar();
-  })
-  .catch(() => {
-    document.getElementById('cal-body').innerHTML =
-      '<div class="text-muted small py-4 text-center col-span-7">数据加载失败</div>';
+// Render day-of-week header
+(function(){
+  var row = document.getElementById('cal-dow-row');
+  DOW.forEach(function(d){
+    var div = document.createElement('div');
+    div.className = 'cal-dow';
+    div.textContent = d;
+    row.appendChild(div);
   });
+})();
 
-// ─── 渲染日历 ───────────────────────────────────────────────────────
 function renderCalendar() {
   document.getElementById('month-label').textContent =
-    `${currentYear} 年 ${MONTHS_ZH[currentMonth]}`;
+    currentYear + (zh ? ' 年 ' : ' ') + MONTHS[currentMonth];
 
-  const today = toYMD(new Date());
-  const body  = document.getElementById('cal-body');
+  var today = toYMD(new Date());
+  var body = document.getElementById('cal-body');
   body.innerHTML = '';
 
-  // 本月第 1 天是星期几（0=日）
-  const firstDay = new Date(currentYear, currentMonth, 1).getDay();
-  // 本月天数
-  const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-  // 上月天数
-  const daysInPrev  = new Date(currentYear, currentMonth, 0).getDate();
+  var firstDay = new Date(currentYear, currentMonth, 1).getDay();
+  var daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  var daysInPrev = new Date(currentYear, currentMonth, 0).getDate();
+  var totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
 
-  // 总格数：从上月末填补到整行 + 本月 + 下月补齐
-  const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
-
-  for (let i = 0; i < totalCells; i++) {
-    let date, month, year, otherMonth = false;
-    if (i < firstDay) {
-      // 上月
+  for(var i = 0; i < totalCells; i++) {
+    var date, month, year, otherMonth = false;
+    if(i < firstDay) {
       date = daysInPrev - firstDay + i + 1;
       month = currentMonth === 0 ? 11 : currentMonth - 1;
-      year  = currentMonth === 0 ? currentYear - 1 : currentYear;
+      year = currentMonth === 0 ? currentYear - 1 : currentYear;
       otherMonth = true;
-    } else if (i >= firstDay + daysInMonth) {
-      // 下月
+    } else if(i >= firstDay + daysInMonth) {
       date = i - firstDay - daysInMonth + 1;
       month = currentMonth === 11 ? 0 : currentMonth + 1;
-      year  = currentMonth === 11 ? currentYear + 1 : currentYear;
+      year = currentMonth === 11 ? currentYear + 1 : currentYear;
       otherMonth = true;
     } else {
       date = i - firstDay + 1;
-      month = currentMonth;
-      year  = currentYear;
+      month = currentMonth; year = currentYear;
     }
 
-    const ymd     = `${year}-${String(month+1).padStart(2,'0')}-${String(date).padStart(2,'0')}`;
-    const listings = byDate[ymd] || [];
-    const isToday  = ymd === today;
-    const isSun    = i % 7 === 0;
-    const isSat    = i % 7 === 6;
-    const isSelected = ymd === selectedDate;
+    var ymd = year + '-' + String(month+1).padStart(2,'0') + '-' + String(date).padStart(2,'0');
+    var listings = byDate[ymd] || [];
+    var isToday = ymd === today;
+    var isSelected = ymd === selectedDate;
 
-    const cell = document.createElement('div');
-    cell.className = [
-      'cal-day',
-      listings.length ? 'has-listings' : '',
-      otherMonth ? 'other-month' : '',
-      isToday    ? 'today' : '',
-      isSun      ? 'is-sun' : '',
-      isSat      ? 'is-sat' : '',
-      isSelected ? 'selected' : '',
-    ].filter(Boolean).join(' ');
-
+    var cell = document.createElement('div');
+    cell.className = 'cal-day' +
+      (listings.length ? ' has-listings' : '') +
+      (otherMonth ? ' other-month' : '') +
+      (isToday ? ' today' : '') +
+      (isSelected ? ' selected' : '');
     cell.dataset.ymd = ymd;
 
-    // 日期数字
-    const numEl = document.createElement('div');
+    var numEl = document.createElement('div');
     numEl.className = 'day-num';
     numEl.textContent = date;
     cell.appendChild(numEl);
 
-    // 最多显示 3 条房源小标签
-    const MAX_PILLS = 3;
-    listings.slice(0, MAX_PILLS).forEach(l => {
-      const pill = document.createElement('span');
-      // 多城市视图时用城市颜色，单城市时用状态颜色
-      if (selectedCities.size !== 1 && allCities.length > 1) {
-        const c = cityColorMap[l.city] || '#8b949e';
+    var MAX_PILLS = 3;
+    listings.slice(0, MAX_PILLS).forEach(function(l) {
+      var pill = document.createElement('span');
+      if(selectedCities.size !== 1 && allCities.length > 1) {
+        var c = cityColorMap[l.city] || '#8b949e';
         pill.className = 'cal-pill';
-        pill.style.borderLeftColor = c;
-        pill.style.background      = c + '22';
-        pill.style.color           = c;
+        pill.style.borderLeft = '2px solid ' + c;
+        pill.style.background = c + '22';
+        pill.style.color = c;
       } else {
-        pill.className = `cal-pill ${statusClass(l.status)}`;
+        pill.className = 'cal-pill ' + statusClass(l.status);
       }
       pill.textContent = l.name;
       cell.appendChild(pill);
     });
-    if (listings.length > MAX_PILLS) {
-      const more = document.createElement('span');
+    if(listings.length > MAX_PILLS) {
+      var more = document.createElement('span');
       more.className = 'cal-pill more';
-      more.textContent = `+${listings.length - MAX_PILLS} 套`;
+      more.textContent = '+' + (listings.length - MAX_PILLS) + T.units;
       cell.appendChild(more);
     }
 
-    if (listings.length) {
-      cell.addEventListener('click', () => selectDate(ymd, listings));
+    if(listings.length) {
+      cell.addEventListener('click', function(){ selectDate(ymd, listings); });
     }
 
     body.appendChild(cell);
   }
 }
 
-// ─── 选中日期，显示详情 ─────────────────────────────────────────────
 function selectDate(ymd, listings) {
-  // 取消旧选中
-  if (selectedDate) {
-    const old = document.querySelector(`.cal-day[data-ymd="${selectedDate}"]`);
-    if (old) old.classList.remove('selected');
+  if(selectedDate) {
+    var old = document.querySelector('.cal-day[data-ymd="' + selectedDate + '"]');
+    if(old) old.classList.remove('selected');
   }
   selectedDate = ymd;
-  const el = document.querySelector(`.cal-day[data-ymd="${ymd}"]`);
-  if (el) el.classList.add('selected');
+  var el = document.querySelector('.cal-day[data-ymd="' + ymd + '"]');
+  if(el) el.classList.add('selected');
 
-  // 格式化日期标题
-  const [y, m, d] = ymd.split('-').map(Number);
-  const dateObj = new Date(y, m-1, d);
-  const DOW = ['周日','周一','周二','周三','周四','周五','周六'];
-  document.getElementById('detail-title').textContent =
-    `${y}年${m}月${d}日 ${DOW[dateObj.getDay()]}`;
-
-  const countEl = document.getElementById('detail-count');
-  countEl.textContent = `${listings.length} 套`;
+  var parts = ymd.split('-').map(Number);
+  var d = new Date(parts[0], parts[1]-1, parts[2]);
+  var dateLabel = parts[0] + (zh ? '年' : '-') + parts[1] + (zh ? '月' : '-') + parts[2] + (zh ? '日 ' : ' ') + DOW_FULL[d.getDay()];
+  document.getElementById('detail-title').textContent = dateLabel;
+  var countEl = document.getElementById('detail-count');
+  countEl.textContent = listings.length + T.units;
   countEl.style.display = '';
 
-  const body = document.getElementById('detail-body');
+  var body = document.getElementById('detail-body');
   body.innerHTML = '';
 
-  listings.forEach(l => {
-    const row = document.createElement('div');
+  listings.forEach(function(l) {
+    var sc = statusClass(l.status);
+    var cityColor = cityColorMap[l.city] || '#8b949e';
+    var row = document.createElement('div');
     row.className = 'listing-row';
-
-    const sc = statusClass(l.status);
-    const badgeCls = sc === 'book' ? 'badge-book' : 'badge-lottery';
-    const cityColor = cityColorMap[l.city] || '#8b949e';
-
-    row.innerHTML = `
-      <div class="d-flex justify-content-between align-items-start gap-2">
-        <a href="${l.url}" target="_blank" class="fw-medium small flex-grow-1"
-           style="word-break:break-word; color:var(--text);">${l.name}</a>
-        <span class="badge ${badgeCls} flex-shrink-0" style="font-size:.6rem;">
-          ${sc === 'book' ? '直订' : '摇号'}
-        </span>
-      </div>
-      <div class="d-flex gap-3 mt-1">
-        <span style="font-size:.72rem; color:var(--muted);">
-          <i class="bi bi-currency-euro me-1 opacity-75"></i>${priceShort(l.price_raw)}/月
-        </span>
-        <span style="font-size:.72rem; color:${cityColor};">
-          <i class="bi bi-geo-alt me-1"></i>${l.city || '—'}
-        </span>
-      </div>
-    `;
+    row.innerHTML =
+      '<div class="flex justify-between items-start gap-2">' +
+        '<a href="' + l.url + '" target="_blank" class="font-medium text-sm" style="color:var(--text);">' + l.name + '</a>' +
+        '<span class="badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' text-xs">' + (sc === 'book' ? T.direct : T.lottery) + '</span>' +
+      '</div>' +
+      '<div class="flex gap-3 mt-1">' +
+        '<span class="text-xs text-secondary"><i class="bi bi-currency-euro mr-1"></i>' + priceShort(l.price_raw) + T.perMonth + '</span>' +
+        '<span class="text-xs" style="color:' + cityColor + ';"><i class="bi bi-geo-alt mr-1"></i>' + (l.city || '—') + '</span>' +
+      '</div>';
     body.appendChild(row);
   });
 }
 
-// ─── 月份导航 ───────────────────────────────────────────────────────
-document.getElementById('btn-prev').addEventListener('click', () => {
-  if (currentMonth === 0) { currentMonth = 11; currentYear--; }
-  else { currentMonth--; }
-  selectedDate = null;
-  renderCalendar();
-  clearDetail();
-});
-
-document.getElementById('btn-next').addEventListener('click', () => {
-  if (currentMonth === 11) { currentMonth = 0; currentYear++; }
-  else { currentMonth++; }
-  selectedDate = null;
-  renderCalendar();
-  clearDetail();
-});
-
 function clearDetail() {
-  document.getElementById('detail-title').textContent = '请选择日期';
+  document.getElementById('detail-title').textContent = T.selectDate;
   document.getElementById('detail-count').style.display = 'none';
-  document.getElementById('detail-body').innerHTML = `
-    <div class="detail-empty">
-      <i class="bi bi-calendar2 fs-3 opacity-50"></i>
-      <span>点击日历中有房源的日期</span>
-    </div>`;
+  document.getElementById('detail-body').innerHTML =
+    '<div class="detail-empty"><i class="bi bi-calendar2" style="font-size:28px;opacity:.3;"></i><span>' + T.clickHint + '</span></div>';
 }
+
+// ─── Init ──────────────────────────────────────────────────────────
+fetch('/api/calendar')
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    allListings = d.listings || [];
+    var citySet = {};
+    allListings.forEach(function(l) { if(l.city) citySet[l.city] = true; });
+    allCities = Object.keys(citySet).sort();
+    allCities.forEach(function(c, i) { cityColorMap[c] = CITY_COLORS[i % CITY_COLORS.length]; });
+
+    buildByDate();
+    renderCityFilter();
+
+    var today = new Date();
+    var target = today;
+    var futureDates = Object.keys(byDate).filter(function(k){ return k >= toYMD(today); }).sort();
+    if(futureDates.length) {
+      var parts = futureDates[0].split('-');
+      target = new Date(+parts[0], +parts[1]-1, 1);
+    }
+    currentYear = target.getFullYear();
+    currentMonth = target.getMonth();
+    renderCalendar();
+  })
+  .catch(function() {
+    document.getElementById('cal-body').innerHTML = '<div class="text-tertiary text-sm py-4 text-center">' + T.loadError + '</div>';
+  });
+
+document.getElementById('btn-prev').addEventListener('click', function() {
+  if(currentMonth === 0) { currentMonth = 11; currentYear--; }
+  else { currentMonth--; }
+  selectedDate = null; renderCalendar(); clearDetail();
+});
+document.getElementById('btn-next').addEventListener('click', function() {
+  if(currentMonth === 11) { currentMonth = 0; currentYear++; }
+  else { currentMonth++; }
+  selectedDate = null; renderCalendar(); clearDetail();
+});
 </script>
 {% endblock %}

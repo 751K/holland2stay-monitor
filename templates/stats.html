@@ -1,145 +1,69 @@
 {% extends "base.html" %}
-{% block title %}统计图表 · Holland2Stay{% endblock %}
+{% block title %}{{ _('stats_title') }} · Holland2Stay{% endblock %}
 
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 {% endblock %}
 
-{% block extra_style %}
-/* chart-card: same visual as .card but no overflow:hidden (tooltip safety) */
-.chart-card {
-  background: var(--bg-surface);
-  border: .5px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow-sm);
-}
-.chart-title {
-  font-size: .63rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .07em;
-  color: var(--muted);
-  margin-bottom: 12px;
-}
-.chart-wrap { position: relative; }
-{% endblock %}
-
 {% block content %}
 
-<div class="page-hdr">
-  <h1><i class="bi bi-bar-chart-line me-2" style="color:var(--accent);"></i>数据统计</h1>
-  <div class="d-flex align-items-center gap-2">
-    <span style="font-size:.75rem; color:var(--muted);">时间范围：</span>
-    <select id="days-select" class="form-select form-select-sm" style="width:auto;"
-            onchange="loadCharts(this.value)">
-      <option value="7">近 7 天</option>
-      <option value="30" selected>近 30 天</option>
-      <option value="90">近 90 天</option>
+<div class="page-header">
+  <h1>{{ _('stats_title') }}</h1>
+  <div class="flex items-center gap-2">
+    <span class="text-sm text-secondary">{{ _('stats_range') }}</span>
+    <select id="days-select" class="form-select" style="width:auto;font-size:12px;" onchange="loadCharts(this.value)">
+      <option value="7">{{ _('stats_7d') }}</option>
+      <option value="30" selected>{{ _('stats_30d') }}</option>
+      <option value="90">{{ _('stats_90d') }}</option>
     </select>
   </div>
 </div>
 
-<!-- KPI 卡片 -->
-<div class="row g-3 mb-4">
-  <div class="col-6 col-lg-3">
-    <div class="card h-100">
-      <div class="kpi-wrap">
-        <div class="kpi-icon" style="background: linear-gradient(135deg, #bf5af2, #9b59d0);">
-          <i class="bi bi-database-fill"></i>
-        </div>
-        <div>
-          <div class="kpi-num">{{ total }}</div>
-          <div class="kpi-lbl">数据库房源</div>
-        </div>
-      </div>
-    </div>
+<!-- KPI -->
+<div class="kpi-grid">
+  <div class="kpi-card accent-purple">
+    <div class="kpi-icon" style="background:linear-gradient(135deg,#bf5af2,#7c3aed);"><i class="bi bi-building-fill"></i></div>
+    <div><div class="kpi-num">{{ total }}</div><div class="kpi-label">{{ _('total_listings') }}</div></div>
   </div>
-  <div class="col-6 col-lg-3">
-    <div class="card h-100">
-      <div class="kpi-wrap">
-        <div class="kpi-icon" style="background: linear-gradient(135deg, #32d74b, #1a9e30);">
-          <i class="bi bi-house-add-fill"></i>
-        </div>
-        <div>
-          <div class="kpi-num" style="color:var(--success);">{{ new_24h }}</div>
-          <div class="kpi-lbl">今日新增</div>
-        </div>
-      </div>
-    </div>
+  <div class="kpi-card accent-green">
+    <div class="kpi-icon" style="background:linear-gradient(135deg,#10b981,#059669);"><i class="bi bi-lightning-charge-fill"></i></div>
+    <div><div class="kpi-num" style="color:var(--success);">{{ new_24h }}</div><div class="kpi-label">{{ _('new_today') }}</div></div>
   </div>
-  <div class="col-6 col-lg-3">
-    <div class="card h-100">
-      <div class="kpi-wrap">
-        <div class="kpi-icon" style="background: linear-gradient(135deg, #5ac8fa, #0a84ff);">
-          <i class="bi bi-calendar-week-fill"></i>
-        </div>
-        <div>
-          <div class="kpi-num" style="color:var(--accent);">{{ new_7d }}</div>
-          <div class="kpi-lbl">近 7 天新增</div>
-        </div>
-      </div>
-    </div>
+  <div class="kpi-card accent-blue">
+    <div class="kpi-icon" style="background:linear-gradient(135deg,#5e6ad2,#4f5ac2);"><i class="bi bi-graph-up"></i></div>
+    <div><div class="kpi-num" style="color:var(--accent);">{{ new_7d }}</div><div class="kpi-label">{{ _('stats_new_7d') }}</div></div>
   </div>
-  <div class="col-6 col-lg-3">
-    <div class="card h-100">
-      <div class="kpi-wrap">
-        <div class="kpi-icon" style="background: linear-gradient(135deg, #ff9f0a, #cc7a00);">
-          <i class="bi bi-arrow-left-right"></i>
-        </div>
-        <div>
-          <div class="kpi-num" style="color:var(--warning);">{{ changes_24h }}</div>
-          <div class="kpi-lbl">今日状态变更</div>
-        </div>
-      </div>
-    </div>
+  <div class="kpi-card accent-amber">
+    <div class="kpi-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);"><i class="bi bi-shuffle"></i></div>
+    <div><div class="kpi-num" style="color:var(--warning);">{{ changes_24h }}</div><div class="kpi-label">{{ _('changes_today') }}</div></div>
   </div>
 </div>
 
-<!-- 趋势折线图：新增 + 变更 -->
-<div class="row g-4 mb-4">
-  <div class="col-12 col-xl-7">
-    <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-graph-up me-1" style="color:var(--success);"></i>新增房源趋势</div>
-      <div class="chart-wrap" style="height:220px;">
-        <canvas id="chartDailyNew"></canvas>
-      </div>
-    </div>
+<!-- Trend charts -->
+<div class="grid-7-5 mb-4">
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-graph-up mr-1" style="color:var(--success);"></i>{{ _('stats_new_trend') }}</div>
+    <div class="chart-wrap" style="height:220px;"><canvas id="chartDailyNew"></canvas></div>
   </div>
-  <div class="col-12 col-xl-5">
-    <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-arrow-left-right me-1" style="color:var(--warning);"></i>状态变更趋势</div>
-      <div class="chart-wrap" style="height:220px;">
-        <canvas id="chartDailyChanges"></canvas>
-      </div>
-    </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-arrow-left-right mr-1" style="color:var(--warning);"></i>{{ _('stats_change_trend') }}</div>
+    <div class="chart-wrap" style="height:220px;"><canvas id="chartDailyChanges"></canvas></div>
   </div>
 </div>
 
-<!-- 分布图：城市 + 状态 + 价格 -->
-<div class="row g-4">
-  <div class="col-12 col-md-4">
-    <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-geo-alt me-1" style="color:var(--accent);"></i>城市分布</div>
-      <div class="chart-wrap" style="height:220px;">
-        <canvas id="chartCity"></canvas>
-      </div>
-    </div>
+<!-- Distribution charts -->
+<div class="grid-3 mb-4">
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-geo-alt mr-1" style="color:var(--accent);"></i>{{ _('stats_city_dist') }}</div>
+    <div class="chart-wrap" style="height:220px;"><canvas id="chartCity"></canvas></div>
   </div>
-  <div class="col-12 col-md-4">
-    <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-tag me-1" style="color:var(--accent);"></i>状态分布</div>
-      <div class="chart-wrap" style="height:220px;">
-        <canvas id="chartStatus"></canvas>
-      </div>
-    </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-tag mr-1" style="color:var(--accent);"></i>{{ _('stats_status_dist') }}</div>
+    <div class="chart-wrap" style="height:220px;"><canvas id="chartStatus"></canvas></div>
   </div>
-  <div class="col-12 col-md-4">
-    <div class="chart-card p-3 h-100">
-      <div class="chart-title"><i class="bi bi-currency-euro me-1" style="color:var(--success);"></i>租金分布</div>
-      <div class="chart-wrap" style="height:220px;">
-        <canvas id="chartPrice"></canvas>
-      </div>
-    </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-currency-euro mr-1" style="color:var(--success);"></i>{{ _('stats_price_dist') }}</div>
+    <div class="chart-wrap" style="height:220px;"><canvas id="chartPrice"></canvas></div>
   </div>
 </div>
 
@@ -147,237 +71,140 @@
 
 {% block scripts %}
 <script>
-// ─── 主题感知颜色工具 ───────────────────────────────────────────────
-function cssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
+var LANG = '{{ lang }}';
+var PALETTE = ['#10b981','#5e6ad2','#f59e0b','#ef4444','#8b5cf6','#38bdf8','#34d399','#fbbf24','#f87171','#2dd4bf'];
 
-function themeColors() {
-  const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
-  return {
-    text:    cssVar('--h2s-text')    || (isDark ? '#fafafa' : '#09090b'),
-    muted:   cssVar('--h2s-muted')   || (isDark ? '#71717a' : '#71717a'),
-    border:  cssVar('--h2s-border')  || (isDark ? '#3f3f46' : '#e4e4e7'),
-    surface: cssVar('--h2s-bg-surface') || (isDark ? '#18181b' : '#ffffff'),
-  };
-}
-
-// Apple system color palette
-const PALETTE = [
-  '#32d74b','#0a84ff','#ff9f0a','#ff453a','#bf5af2',
-  '#5ac8fa','#30d158','#ffd60a','#ff6961','#63e6e2',
-];
-
-// 状态 → 颜色
 function statusColor(s) {
-  const sl = (s || '').toLowerCase();
-  if (sl.includes('book'))    return '#32d74b';
-  if (sl.includes('lottery')) return '#ff9f0a';
+  var sl = (s||'').toLowerCase();
+  if(sl.indexOf('book') !== -1) return '#10b981';
+  if(sl.indexOf('lottery') !== -1) return '#f59e0b';
   return 'rgba(128,128,128,.6)';
 }
 
-// ─── Chart 实例管理 ─────────────────────────────────────────────────
-const charts = {};
-
-function destroyChart(id) {
-  if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+function themeColors() {
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  return {
+    text: isDark ? '#fafafa' : '#0a0a0a',
+    muted: isDark ? '#8b8b8b' : '#6b6b6b',
+    border: isDark ? '#2a2a2a' : '#e5e5e5',
+    surface: isDark ? '#1a1a1a' : '#ffffff',
+  };
 }
 
-// ─── 折线图 ─────────────────────────────────────────────────────────
+var charts = {};
+function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
 function buildLineChart(id, label, data, color) {
   destroyChart(id);
-  const c = themeColors();
-
-  // 填充空白日期
-  const dateMap = {};
-  data.forEach(d => { dateMap[d.date] = d.count; });
-
+  var c = themeColors();
   Chart.defaults.color = c.muted;
   charts[id] = new Chart(document.getElementById(id), {
     type: 'line',
     data: {
-      labels: data.map(d => d.date),
+      labels: data.map(function(d){ return d.date; }),
       datasets: [{
-        label,
-        data: data.map(d => d.count),
+        label: label,
+        data: data.map(function(d){ return d.count; }),
         borderColor: color,
-        backgroundColor: color + '22',
-        fill: true,
-        tension: 0.35,
+        backgroundColor: color + '18',
+        fill: true, tension: .35,
         pointRadius: data.length > 20 ? 2 : 4,
         pointHoverRadius: 6,
         borderWidth: 2,
       }],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: c.surface,
-          titleColor: c.muted,
-          bodyColor: c.text,
-          borderColor: c.border,
-          borderWidth: 1,
+          backgroundColor: c.surface, titleColor: c.muted, bodyColor: c.text,
+          borderColor: c.border, borderWidth: 1,
         },
       },
       scales: {
-        x: {
-          grid: { color: c.border + '55' },
-          ticks: {
-            color: c.muted,
-            maxTicksLimit: 8,
-            font: { size: 11 },
-          },
-        },
-        y: {
-          beginAtZero: true,
-          grid: { color: c.border + '55' },
-          ticks: {
-            color: c.muted,
-            precision: 0,
-            font: { size: 11 },
-          },
-        },
+        x: { grid: { color: c.border + '55' }, ticks: { color: c.muted, maxTicksLimit: 8, font: { size: 11 } } },
+        y: { beginAtZero: true, grid: { color: c.border + '55' }, ticks: { color: c.muted, precision: 0, font: { size: 11 } } },
       },
     },
   });
 }
 
-// ─── 环形图 ─────────────────────────────────────────────────────────
 function buildDoughnutChart(id, labels, data, colors) {
   destroyChart(id);
-  const c = themeColors();
+  var c = themeColors();
   Chart.defaults.color = c.muted;
   charts[id] = new Chart(document.getElementById(id), {
     type: 'doughnut',
     data: {
-      labels,
-      datasets: [{
-        data,
-        backgroundColor: colors,
-        borderColor: c.surface,
-        borderWidth: 3,
-        hoverOffset: 8,
-      }],
+      labels: labels,
+      datasets: [{ data: data, backgroundColor: colors, borderColor: c.surface, borderWidth: 3, hoverOffset: 8 }],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '62%',
+      responsive: true, maintainAspectRatio: false, cutout: '62%',
       plugins: {
-        legend: {
-          position: 'right',
-          labels: {
-            color: c.text,
-            boxWidth: 10,
-            padding: 10,
-            font: { size: 11 },
-          },
-        },
-        tooltip: {
-          backgroundColor: c.surface,
-          titleColor: c.muted,
-          bodyColor: c.text,
-          borderColor: c.border,
-          borderWidth: 1,
-        },
+        legend: { position: 'right', labels: { color: c.text, boxWidth: 10, padding: 10, font: { size: 11 } } },
+        tooltip: { backgroundColor: c.surface, titleColor: c.muted, bodyColor: c.text, borderColor: c.border, borderWidth: 1 },
       },
     },
   });
 }
 
-// ─── 条形图 ─────────────────────────────────────────────────────────
 function buildBarChart(id, labels, data, color) {
   destroyChart(id);
-  const c = themeColors();
+  var c = themeColors();
   Chart.defaults.color = c.muted;
   charts[id] = new Chart(document.getElementById(id), {
     type: 'bar',
     data: {
-      labels,
-      datasets: [{
-        data,
-        backgroundColor: color + 'bb',
-        borderColor: color,
-        borderWidth: 1,
-        borderRadius: 4,
-      }],
+      labels: labels,
+      datasets: [{ data: data, backgroundColor: color + 'bb', borderColor: color, borderWidth: 1, borderRadius: 4 }],
     },
     options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: c.surface,
-          titleColor: c.muted,
-          bodyColor: c.text,
-          borderColor: c.border,
-          borderWidth: 1,
-        },
-      },
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { backgroundColor: c.surface, titleColor: c.muted, bodyColor: c.text, borderColor: c.border, borderWidth: 1 } },
       scales: {
-        x: {
-          grid: { display: false },
-          ticks: { color: c.muted, font: { size: 11 } },
-        },
-        y: {
-          beginAtZero: true,
-          grid: { color: c.border + '55' },
-          ticks: { color: c.muted, precision: 0, font: { size: 11 } },
-        },
+        x: { grid: { display: false }, ticks: { color: c.muted, font: { size: 11 } } },
+        y: { beginAtZero: true, grid: { color: c.border + '55' }, ticks: { color: c.muted, precision: 0, font: { size: 11 } } },
       },
     },
   });
 }
 
-// ─── 数据加载 & 渲染 ────────────────────────────────────────────────
-let _cachedData = null;
-
+var _cachedData = null;
 function renderCharts(d) {
-  if (!d) return;
+  if(!d) return;
   _cachedData = d;
+  var zh = LANG === 'zh';
+  buildLineChart('chartDailyNew', zh ? '新增房源' : 'New listings', d.daily_new, '#10b981');
+  buildLineChart('chartDailyChanges', zh ? '状态变更' : 'Status changes', d.daily_changes, '#f59e0b');
 
-  buildLineChart('chartDailyNew',     '新增房源', d.daily_new,     '#32d74b');
-  buildLineChart('chartDailyChanges', '状态变更', d.daily_changes, '#ff9f0a');
+  var cityLabels = d.city_dist.map(function(r){ return r.city; });
+  var cityCounts = d.city_dist.map(function(r){ return r.count; });
+  buildDoughnutChart('chartCity', cityLabels, cityCounts, PALETTE.slice(0, cityLabels.length));
 
-  // 城市分布
-  const cityLabels = d.city_dist.map(r => r.city);
-  const cityCounts = d.city_dist.map(r => r.count);
-  buildDoughnutChart('chartCity', cityLabels, cityCounts,
-    PALETTE.slice(0, cityLabels.length));
+  var stLabels = d.status_dist.map(function(r){ return r.status; });
+  var stCounts = d.status_dist.map(function(r){ return r.count; });
+  buildDoughnutChart('chartStatus', stLabels, stCounts, stLabels.map(statusColor));
 
-  // 状态分布
-  const stLabels = d.status_dist.map(r => r.status);
-  const stCounts = d.status_dist.map(r => r.count);
-  buildDoughnutChart('chartStatus', stLabels, stCounts,
-    stLabels.map(statusColor));
-
-  // 价格分布
-  const prLabels = d.price_dist.map(r => r.range);
-  const prCounts = d.price_dist.map(r => r.count);
-  buildBarChart('chartPrice', prLabels, prCounts, '#0a84ff');
+  var prLabels = d.price_dist.map(function(r){ return r.range; });
+  var prCounts = d.price_dist.map(function(r){ return r.count; });
+  buildBarChart('chartPrice', prLabels, prCounts, '#5e6ad2');
 }
 
 function loadCharts(days) {
   fetch('/api/charts?days=' + (days || 30))
-    .then(r => r.json())
-    .then(d => renderCharts(d))
-    .catch(err => console.error('图表数据加载失败:', err));
+    .then(function(r){ return r.json(); })
+    .then(function(d){ renderCharts(d); })
+    .catch(function(err){ console.error('Charts load error:', err); });
 }
 
-// 页面加载
 loadCharts(30);
 
-// ─── 主题变更时重绘 ─────────────────────────────────────────────────
-new MutationObserver(mutations => {
-  for (const m of mutations) {
-    if (m.attributeName === 'data-bs-theme') {
-      renderCharts(_cachedData);
-    }
+new MutationObserver(function(mutations) {
+  for(var i = 0; i < mutations.length; i++) {
+    if(mutations[i].attributeName === 'data-theme') { renderCharts(_cachedData); }
   }
 }).observe(document.documentElement, { attributes: true });
 </script>
