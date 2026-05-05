@@ -404,31 +404,6 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 
 ---
 
-## 路线图
-
-### ~~🔴 高优先级~~ ✅ 已完成
-
-**Docker 打包部署**：`Dockerfile` + `docker-compose.yml` + `supervisord.conf` 已实现，monitor + Web 面板打包为单一容器，支持 VPS 24/7 不间断运行。iMessage 非 macOS 自动跳过，Web 面板 SSE 通知接管。详见上方「[Docker 部署](#docker-部署vps--服务器)」章节。
-
----
-
-### 🟡 中优先级
-
-**Lottery 摇号自动报名**
-- 对 "Available in lottery" 房源自动提交申请，探索 `registerInterest` 等 GraphQL mutation
-- 风险：需账号鉴权，平台规则可能限制频繁报名
-
-**每日摘要推送**
-- 每天定时推送汇总消息：当日新增 N 套、状态变更 M 套、数据库共 X 套
-- 替代心跳消息，信息密度更高，减少打扰
-
-**Discord 通知渠道**
-- Webhook 实现，零额外费用，适合多人共享（朋友 / 家人群组）
-
-**价格历史追踪**
-- 记录同一房源的租金变化（`price_history` 表），检测降价并推送通知
-
----
 
 ## 文件结构
 

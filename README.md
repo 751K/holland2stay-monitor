@@ -402,27 +402,6 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 
 ---
 
-## Roadmap
-
-### ~~High priority~~ ✅ Done
-
-- **Docker packaging** — `Dockerfile` + `docker-compose.yml` + `supervisord.conf` ship the full stack (monitor + web panel) as a single container. iMessage is gracefully skipped on non-macOS; the web panel's SSE notifications take over. See [Run with Docker](#run-with-docker-vps--server) above.
-
-### ~~Medium priority~~ ✅ Done
-
-- Map view with Leaflet.js + OpenStreetMap, auto-geocoding, color-coded markers
-- i18n (Chinese / English) with one-click toggle and cookie persistence
-- Complete UI redesign — borderless minimal design system, sidebar layout, smooth theme transitions
-
-### Medium priority
-
-- Automate lottery registration through GraphQL mutations, with extra care around auth and rate limits
-- Add daily digest notifications instead of only real-time pushes
-- Add a Discord webhook notification channel
-- Track price history for the same listing and alert on drops
-- PWA support for mobile home-screen install
-
----
 
 ## File structure
 
