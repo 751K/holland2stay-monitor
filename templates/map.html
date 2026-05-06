@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}{{ _('map_title') }} · Holland2Stay{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+{% endblock %}
+
+{% block extra_style %}
+#map-container{position:relative;border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm)}
+#map{height:calc(100vh - 160px);min-height:500px;background:#f0f0f0;z-index:0}
+/* Light mode: slight desaturation so markers stand out */
+#map .leaflet-tile{filter:saturate(60%) brightness(1.05)}
+/* Dark mode: no CSS hack — use proper dark tiles via JS */
+[data-theme="dark"] #map{background:#1a1a1a}
+.map-legend{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 3px rgba(0,0,0,.08)}
+.leaflet-popup-content-wrapper{background:var(--surface)!important;color:var(--text)!important;border-radius:var(--radius-lg)!important;box-shadow:var(--shadow-lg)!important;font-family:var(--font)!important}
+.leaflet-popup-tip{background:var(--surface)!important}
+.leaflet-popup-content{font-size:14px!important;margin:12px 16px!important;line-height:1.5!important}
+.leaflet-popup-content a{color:var(--accent)!important;font-weight:500}
+.leaflet-control-zoom a{background:var(--surface)!important;color:var(--text)!important;border:none!important;border-radius:var(--radius-sm)!important}
+.map-status{position:absolute;top:12px;right:12px;z-index:1000;background:var(--surface);padding:6px 12px;border-radius:100px;font-size:12px;color:var(--text2);box-shadow:var(--shadow-sm);pointer-events:none}
+{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1>{{ _('map_title') }}</h1>
+  <div class="flex items-center gap-2">
+    <span id="map-count" class="meta"></span>
+    <span class="meta" id="map-loading"><i class="bi bi-arrow-clockwise mr-1"></i>{{ '加载中…' if lang=='zh' else 'Loading…' }}</span>
+  </div>
+</div>
+
+<div class="map-legend mb-4">
+  <span class="flex items-center gap-1 text-sm text-secondary">
+    <span class="legend-dot" style="background:var(--success);"></span> {{ _('cal_direct_book') }}
+  </span>
+  <span class="flex items-center gap-1 text-sm text-secondary">
+    <span class="legend-dot" style="background:var(--warning);"></span> {{ _('cal_lottery') }}
+  </span>
+  <span class="flex items-center gap-1 text-sm text-secondary">
+    <span class="legend-dot" style="background:var(--text3);"></span> {{ '其他' if lang=='zh' else 'Other' }}
+  </span>
+</div>
+
+<div id="map-container">
+  <div class="map-status" id="map-status"></div>
+  <div id="map"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+var LANG = '{{ lang }}';
+var zh = LANG === 'zh';
+
+// City center coords for initial view
+var CITY_CENTERS = {
+  'Eindhoven': [51.4416, 5.4697],
+  'Amsterdam': [52.3676, 4.9041],
+  'Rotterdam': [51.9225, 4.4792],
+  'Den Haag': [52.0705, 4.3007],
+  'Utrecht': [52.0907, 5.1214],
+  'Maastricht': [50.8514, 5.6910],
+  'Groningen': [53.2194, 6.5665],
+  'Delft': [52.0116, 4.3571],
+  'Leiden': [52.1601, 4.4970],
+  'Tilburg': [51.5555, 5.0913],
+  'Breda': [51.5719, 4.7683],
+  'Nijmegen': [51.8126, 5.8372],
+  'Den Bosch': [51.6978, 5.3037],
+  'Dordrecht': [51.8133, 4.6901],
+  'Haarlem': [52.3874, 4.6462],
+};
+
+var map = L.map('map').setView([51.8, 5.0], 8);
+
+var tileLight = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap',
+  maxZoom: 19,
+});
+var tileDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  maxZoom: 19,
+});
+
+function useDarkTiles() { map.removeLayer(tileLight); tileDark.addTo(map); }
+function useLightTiles(){ map.removeLayer(tileDark); tileLight.addTo(map); }
+
+if(document.documentElement.getAttribute('data-theme') === 'dark') useDarkTiles();
+else useLightTiles();
+
+// Watch for theme changes
+new MutationObserver(function(ms){
+  ms.forEach(function(m){
+    if(m.attributeName === 'data-theme'){
+      if(document.documentElement.getAttribute('data-theme') === 'dark') useDarkTiles();
+      else useLightTiles();
+    }
+  });
+}).observe(document.documentElement, {attributes: true});
+
+var markers = [];
+var bounds = L.latLngBounds();
+
+function statusClass(s) {
+  var sl = (s||'').toLowerCase();
+  if(sl.indexOf('book') !== -1) return 'book';
+  if(sl.indexOf('lottery') !== -1) return 'lottery';
+  return 'other';
+}
+
+function priceShort(raw) {
+  if(!raw) return '—';
+  var m = raw.match(/€[\d,\.]+/);
+  return m ? m[0] : raw;
+}
+
+function getMarkerColor(sc) {
+  if(sc === 'book') return '#10b981';
+  if(sc === 'lottery') return '#f59e0b';
+  return '#9b9b9b';
+}
+
+function createMarkerIcon(color) {
+  return L.divIcon({
+    className: '',
+    html: '<div style="width:22px;height:22px;border-radius:50%;background:' + color + ';border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);"></div>',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+    popupAnchor: [0, -13],
+  });
+}
+
+fetch('/api/map')
+  .then(function(r){ return r.json(); })
+  .then(function(d) {
+    var listings = d.listings || [];
+    document.getElementById('map-count').textContent =
+      (zh ? '共 ' : '') + listings.length + (zh ? ' 套可展示房源' : ' listings shown');
+    document.getElementById('map-loading').style.display = 'none';
+
+    listings.forEach(function(l) {
+      var sc = statusClass(l.status);
+      var color = getMarkerColor(sc);
+      var marker = L.marker([l.lat, l.lng], { icon: createMarkerIcon(color) }).addTo(map);
+
+      var badge = sc === 'book' ? (zh ? '直订' : 'Direct')
+        : sc === 'lottery' ? (zh ? '摇号' : 'Lottery')
+        : l.status;
+
+      var popup =
+        '<strong><a href="' + l.url + '" target="_blank">' + l.name + '</a></strong><br>' +
+        '<span style="color:var(--text2);">' + priceShort(l.price_raw) + (zh ? '/月' : '/mo') + '</span><br>' +
+        (l.neighborhood ? '<span style="color:var(--text3);font-size:12px;">' + l.neighborhood + ' · </span>' : '') +
+        '<span style="color:var(--text3);font-size:12px;">' + l.city + '</span><br>' +
+        '<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:100px;font-size:11px;background:' + color + '18;color:' + color + ';">' + badge + '</span>';
+
+      marker.bindPopup(popup);
+      bounds.extend([l.lat, l.lng]);
+      markers.push(marker);
+    });
+
+    if(markers.length > 0) {
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+    }
+
+    // Hover on marker: show status bar
+    map.on('mousemove', function(e) {
+      var closest = null;
+      var minDist = 30;
+      map.eachLayer(function(layer) {
+        if(layer.getLatLng && (!closest || map.distance(layer.getLatLng(), e.latlng) < minDist)) {
+          if(layer.getLatLng) {
+            var d = map.distance(layer.getLatLng(), e.latlng);
+            if(d < minDist) { minDist = d; closest = layer; }
+          }
+        }
+      });
+      var statusEl = document.getElementById('map-status');
+      if(closest && closest.getPopup()) {
+        var content = closest.getPopup().getContent();
+        var nameMatch = content.match(/<strong>(.*?)<\/strong>/);
+        if(nameMatch) statusEl.textContent = nameMatch[1];
+      } else {
+        statusEl.textContent = '';
+      }
+    });
+
+    document.getElementById('map-status').textContent = '';
+  })
+  .catch(function() {
+    document.getElementById('map-loading').textContent = zh ? '地图数据加载失败' : 'Map data load failed';
+  });
+</script>
+{% endblock %}
