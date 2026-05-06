@@ -338,6 +338,8 @@ def _scrape_city_pages(
     单条房源解析失败（_to_listing 返回 None）不影响其他条目。
     """
     listings: list[Listing] = []
+    total_items = 0
+    skipped = 0
     current_page = 1
 
     while True:
@@ -366,6 +368,9 @@ def _scrape_city_pages(
             listing = _to_listing(item, city_name)
             if listing:
                 listings.append(listing)
+            else:
+                skipped += 1
+        total_items += len(items)
 
         logger.info("[%s] 第 %d/%d 页，本页 %d 条", city_name, current_page, total_pages, len(items))
 
@@ -373,7 +378,14 @@ def _scrape_city_pages(
             break
         current_page += 1
 
-    logger.info("[%s] 共抓取 %d 条房源", city_name, len(listings))
+    rate = skipped / total_items if total_items else 0
+    if skipped:
+        logger.warning(
+            "[%s] 共抓取 %d/%d 条房源，%d 条解析失败（%.0f%%）",
+            city_name, len(listings), total_items, skipped, rate * 100,
+        )
+    else:
+        logger.info("[%s] 共抓取 %d 条房源", city_name, len(listings))
     return listings
 
 

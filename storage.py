@@ -299,10 +299,10 @@ class Storage:
         ------
         设置 listings.notified = 1 并立即 commit。
         """
-        self._conn.execute(
-            "UPDATE listings SET notified=1 WHERE id=?", (listing_id,)
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                "UPDATE listings SET notified=1 WHERE id=?", (listing_id,)
+            )
 
     def mark_notified_batch(self, listing_ids: list[str]) -> None:
         """
@@ -329,12 +329,12 @@ class Storage:
         ------
         批量更新该 listing_id 下 notified=0 的记录为 notified=1，立即 commit。
         """
-        self._conn.execute(
-            """UPDATE status_changes SET notified=1
-               WHERE listing_id=? AND notified=0""",
-            (listing_id,),
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                """UPDATE status_changes SET notified=1
+                   WHERE listing_id=? AND notified=0""",
+                (listing_id,),
+            )
 
     def mark_status_change_notified_batch(self, listing_ids: list[str]) -> None:
         """
@@ -497,11 +497,11 @@ class Storage:
         return (row["lat"], row["lng"]) if row else None
 
     def cache_coords(self, address: str, lat: float, lng: float) -> None:
-        self._conn.execute(
-            "INSERT OR REPLACE INTO geocode_cache (address, lat, lng) VALUES (?, ?, ?)",
-            (address, lat, lng),
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO geocode_cache (address, lat, lng) VALUES (?, ?, ?)",
+                (address, lat, lng),
+            )
 
     def get_map_listings(self) -> list[dict]:
         """Return all listings with features for map display (geocoding done in route)."""
@@ -573,10 +573,10 @@ class Storage:
         key   : 元数据键
         value : 字符串值
         """
-        self._conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value)
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value)
+            )
 
     def load_retry_queue(self) -> dict[str, set[str]]:
         """
@@ -821,13 +821,13 @@ class Storage:
         -------
         新记录的 id（整数）
         """
-        cur = self._conn.execute(
-            """INSERT INTO web_notifications (type, title, body, url, listing_id)
-               VALUES (?, ?, ?, ?, ?)""",
-            (type, title, body, url, listing_id),
-        )
-        self._conn.commit()
-        return cur.lastrowid  # type: ignore[return-value]
+        with self._conn:
+            cur = self._conn.execute(
+                """INSERT INTO web_notifications (type, title, body, url, listing_id)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (type, title, body, url, listing_id),
+            )
+            return cur.lastrowid  # type: ignore[return-value]
 
     def get_notifications(
         self,
@@ -889,19 +889,19 @@ class Storage:
         ----------
         ids : 要标记的 id 列表；传 None 则标记全部未读通知
         """
-        if ids is None:
-            self._conn.execute(
-                "UPDATE web_notifications SET read=1 WHERE read=0"
-            )
-        else:
-            if not ids:
-                return
-            placeholders = ",".join("?" * len(ids))
-            self._conn.execute(
-                f"UPDATE web_notifications SET read=1 WHERE id IN ({placeholders})",
-                ids,
-            )
-        self._conn.commit()
+        if ids is not None and not ids:
+            return
+        with self._conn:
+            if ids is None:
+                self._conn.execute(
+                    "UPDATE web_notifications SET read=1 WHERE read=0"
+                )
+            else:
+                placeholders = ",".join("?" * len(ids))
+                self._conn.execute(
+                    f"UPDATE web_notifications SET read=1 WHERE id IN ({placeholders})",
+                    ids,
+                )
 
     def prune_notifications(self, keep: int = 500) -> int:
         """
@@ -915,17 +915,17 @@ class Storage:
         -------
         删除的行数
         """
-        cur = self._conn.execute(
-            """DELETE FROM web_notifications
-               WHERE id NOT IN (
-                   SELECT id FROM web_notifications
-                   ORDER BY id DESC
-                   LIMIT ?
-               )""",
-            (keep,),
-        )
-        self._conn.commit()
-        return cur.rowcount
+        with self._conn:
+            cur = self._conn.execute(
+                """DELETE FROM web_notifications
+                   WHERE id NOT IN (
+                       SELECT id FROM web_notifications
+                       ORDER BY id DESC
+                       LIMIT ?
+                   )""",
+                (keep,),
+            )
+            return cur.rowcount
 
     def reset_all(self) -> None:
         """

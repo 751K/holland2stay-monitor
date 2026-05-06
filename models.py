@@ -30,6 +30,36 @@ LISTING_KEY_MAP: dict[str, str] = {
 }
 
 
+# ------------------------------------------------------------------ #
+# 数字解析（模块级，供 config / monitor 复用，避免多处维护正则）
+# ------------------------------------------------------------------ #
+
+
+def parse_float(text: Optional[str]) -> Optional[float]:
+    """
+    从含单位的字符串中提取浮点数，容忍千分位逗号。
+
+    e.g. "€707" → 707.0, "1,200.50" → 1200.5, "26.0 m²" → 26.0,
+         "" → None, None → None
+    """
+    if not text:
+        return None
+    m = re.search(r"[\d]+[,\d]*\.?\d*", text.replace(",", ""))
+    return float(m.group()) if m else None
+
+
+def parse_int(text: Optional[str]) -> Optional[int]:
+    """
+    从字符串中提取第一个整数。
+
+    e.g. "3" → 3, "Ground floor" → None
+    """
+    if not text:
+        return None
+    m = re.search(r"\d+", text)
+    return int(m.group()) if m else None
+
+
 @dataclass
 class Listing:
     """
@@ -88,10 +118,7 @@ class Listing:
         float 或 None（price_raw 为 None 或无法解析时）
         例：price_raw="€707" → 707.0
         """
-        if not self.price_raw:
-            return None
-        m = re.search(r"[\d]+[,\d]*\.?\d*", self.price_raw.replace(",", ""))
-        return float(m.group()) if m else None
+        return parse_float(self.price_raw)
 
     @property
     def price_display(self) -> str:

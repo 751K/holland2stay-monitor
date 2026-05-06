@@ -114,8 +114,17 @@ def _to_h2s_date(iso_date: str) -> str:
       "2026-05-04" → "04-05-2026"
 
     传入错误格式（如 YYYY-MM-DD）时 API 会返回服务端错误，因此此转换是必须的。
+
+    Raises
+    ------
+    ValueError  iso_date 为空或不符合 YYYY-MM-DD 格式时
     """
-    return _dt.strptime(iso_date, "%Y-%m-%d").strftime("%d-%m-%Y")
+    if not iso_date:
+        raise ValueError("iso_date 不能为空")
+    try:
+        return _dt.strptime(iso_date, "%Y-%m-%d").strftime("%d-%m-%Y")
+    except ValueError:
+        raise ValueError(f"日期格式错误，期望 YYYY-MM-DD，实际为: {iso_date!r}") from None
 
 
 # ------------------------------------------------------------------ #

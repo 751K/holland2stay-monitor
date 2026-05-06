@@ -22,11 +22,14 @@ from __future__ import annotations
 
 import logging
 import os
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from dotenv import load_dotenv
+
+from models import parse_float, parse_int
 
 if TYPE_CHECKING:
     from models import Listing
@@ -221,7 +224,7 @@ class ListingFilter:
                 return False
 
         area_str = fm.get("area", "")
-        area = _parse_float(area_str)
+        area = parse_float(area_str)
         if self.min_area is not None:
             if area is None:
                 logger.warning(
@@ -243,7 +246,7 @@ class ListingFilter:
 
         if self.min_floor is not None:
             floor_str = fm.get("floor", "")
-            floor = _parse_int(floor_str)
+            floor = parse_int(floor_str)
             if floor is None:
                 logger.warning(
                     "过滤拒绝 [%s]: 已设 min_floor=%d 但楼层字段缺失（API 返回: %r）",
@@ -269,28 +272,6 @@ class ListingFilter:
                 return False
 
         return True
-
-
-def _parse_float(s: str) -> Optional[float]:
-    """
-    从含单位的字符串中提取浮点数。
-
-    e.g. "26.0 m²" → 26.0，"" → None
-    """
-    import re
-    m = re.search(r"[\d]+\.?\d*", s.replace(",", "."))
-    return float(m.group()) if m else None
-
-
-def _parse_int(s: str) -> Optional[int]:
-    """
-    从字符串中提取第一个整数。
-
-    e.g. "3" → 3，"Ground floor" → None
-    """
-    import re
-    m = re.search(r"\d+", s)
-    return int(m.group()) if m else None
 
 
 @dataclass

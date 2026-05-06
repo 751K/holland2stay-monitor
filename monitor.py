@@ -56,6 +56,7 @@ from dotenv import load_dotenv
 
 from booker import create_prewarmed_session, try_book
 from config import DATA_DIR, ENV_PATH, load_config
+from models import parse_float
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from scraper import RateLimitError, scrape_all
 from storage import Storage
@@ -224,10 +225,9 @@ def _area_key(listing) -> float:
     -------
     float 面积值（m²）；无法解析时返回 0.0（排在最后）
     """
-    import re
     area_str = listing.feature_map().get("area", "")
-    m = re.search(r"[\d]+\.?\d*", area_str)
-    return float(m.group()) if m else 0.0
+    val = parse_float(area_str)
+    return val if val is not None else 0.0
 
 
 def _book_with_fallback(
