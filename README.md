@@ -68,7 +68,11 @@ python web.py  # http://127.0.0.1:8088
 | Multi-city monitoring | ✅ Done | 26 Dutch cities; select cities in the web UI |
 | Multi-channel notifications | ✅ Done | iMessage / Telegram / Email / WhatsApp (Twilio) |
 | Web panel notifications | ✅ Done | Real-time bell + toasts via SSE, works on any platform |
-| Notification filters | ✅ Done | Per-user filters: rent, area, floor, layout, district |
+| Notification filters | ✅ Done | Per-user: rent, area, floor, type, occupancy, city, neighborhood, contract, tenant, promo |
+| Multi-select filter UI | ✅ Done | Dropdown checkboxes with i18n labels; city-dependent neighborhoods |
+| Short-stay detection | ✅ Done | Contract / Tenant / Offer tags extracted from GraphQL; per-user filters |
+| Cross-platform builds | ✅ Done | GitHub Actions builds macOS .dmg + Windows .exe on tag push |
+| Geocoding (Photon) | ✅ Done | Fast map geocoding via Komoot Photon API; manual trigger button |
 | Auto-booking | ✅ Done | Full flow: add to cart → place order → direct payment URL |
 | Fast-path booking | ✅ Done | Reserved → Available booking submitted before notifications send |
 | Web admin panel | ✅ Done | Dashboard, listings, users, global settings |
@@ -509,6 +513,7 @@ build_dmg.sh        macOS .dmg build script (PyInstaller + .app bundle + icon)
 build.bat           Windows build script (PyInstaller + ZIP)
 h2s_monitor.spec    PyInstaller spec file
 entrypoint.sh       Docker entrypoint (creates .env and directories on first run)
+.github/workflows/  GitHub Actions CI/CD (builds .dmg + .exe on tag/manual trigger)
 data/               Runtime data (auto-created)
   listings.db       SQLite database
   users.json        Per-user config (channels / filters / booking credentials)

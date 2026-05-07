@@ -66,7 +66,11 @@ python web.py  # http://127.0.0.1:8088
 | 多城市监控 | ✅ 已完成 | 26 个荷兰城市，Web 面板复选框选择 |
 | 多通知渠道 | ✅ 已完成 | iMessage / Telegram / Email / WhatsApp，可同时启用 |
 | Web 面板通知 | ✅ 已完成 | SSE 实时铃铛 + Toast 弹窗，与平台无关 |
-| 通知过滤 | ✅ 已完成 | 租金、面积、楼层、户型、片区，按用户独立设置 |
+| 通知过滤 | ✅ 已完成 | 租金、面积、楼层、户型、入住类型、城市、片区、合同、租客、促销 |
+| 多选下拉过滤 | ✅ 已完成 | 下拉多选 + 中英双语标签；片区根据城市动态加载 |
+| 短租识别 | ✅ 已完成 | Contract / Tenant / Offer 标签；按合同类型 / 租客要求 / 促销过滤 |
+| 跨平台构建 | ✅ 已完成 | GitHub Actions：推送 tag 自动构建 macOS .dmg + Windows .exe |
+| Photon 地理编码 | ✅ 已完成 | Komoot Photon API 快速解析地图坐标；支持手动触发按钮 |
 | 自动预订 | ✅ 已完成 | 全流程：加入购物车 → 下单 → 生成直链付款 URL |
 | 快速预订通道 | ✅ 已完成 | Reserved → Available 状态变更在发通知前即刻提交预订 |
 | Web 管理面板 | ✅ 已完成 | 仪表盘、房源列表、用户管理、全局设置 |
@@ -512,6 +516,7 @@ build_dmg.sh        macOS .dmg 构建脚本（PyInstaller + .app 打包 + 图标
 build.bat           Windows 构建脚本（PyInstaller + ZIP）
 h2s_monitor.spec    PyInstaller 打包配置
 entrypoint.sh       Docker 入口脚本（首次运行自动创建 .env 和目录）
+.github/workflows/  GitHub Actions CI/CD（推送 tag 或手动触发构建 .dmg + .exe）
 data/               运行时自动生成
   listings.db       SQLite 数据库
   users.json        用户配置（通知渠道 / 过滤 / 预订账号）
