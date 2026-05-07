@@ -4,7 +4,23 @@
 
 A personal project that monitors Holland2Stay (https://www.holland2stay.com) for new listings and status changes, pushes notifications to multiple users, and can automatically add qualifying listings to the booking cart (stops before payment).
 
-Note: Personal project — not for commercial use. Contributions, issues and PRs are welcome.
+> **Disclaimer:** This project is for personal, non-commercial use only. It is not affiliated with, endorsed by, or associated with Holland2Stay. Users are solely responsible for complying with Holland2Stay's Terms of Service and applicable laws. The author assumes no liability for any misuse or consequences arising from the use of this software.
+
+---
+
+## Quick start
+
+```bash
+# 1) Install
+pip install -r requirements.txt
+cp .env.example .env
+
+# 2) Launch — the only command you need
+python web.py  # open http://127.0.0.1:8088
+#    Dashboard → "Start monitor" to begin
+```
+
+[Full installation guide →](#run-locally)
 
 ---
 
