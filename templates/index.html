@@ -6,7 +6,12 @@
 
 <div class="page-header">
   <h1>{{ _('dashboard') }}</h1>
-  <span class="meta"><i class="bi bi-arrow-clockwise mr-1"></i>{{ _('auto_refresh') }}</span>
+  <span class="meta" style="display:flex;align-items:center;gap:12px;">
+    <span><i class="bi bi-arrow-clockwise mr-1"></i>{{ _('auto_refresh') }}</span>
+    <button onclick="shutdownAll()" class="btn btn-ghost btn-sm" style="color:var(--danger);" title="{{ _('shutdown_hint') }}">
+      <i class="bi bi-power mr-1"></i>{{ _('shutdown') }}
+    </button>
+  </span>
 </div>
 
 <!-- KPI -->
@@ -157,12 +162,15 @@ async function toggleMonitor(e) {
         card.className = 'kpi-card accent-red';
         card.querySelector('.kpi-icon').style.background = 'linear-gradient(135deg,#ef4444,#dc2626)';
         card.querySelector('.kpi-icon i').className = 'bi bi-stop-circle';
+        if (typeof updateMonitorBadge === 'function') updateMonitorBadge();
       } else {
         btn.innerText = '{{ _("stop_monitor") }}';
         statusEl.innerText = '{{ _("monitor_running") }}';
         card.className = 'kpi-card accent-green';
         card.querySelector('.kpi-icon').style.background = 'linear-gradient(135deg,#10b981,#059669)';
         card.querySelector('.kpi-icon i').className = 'bi bi-play-circle-fill';
+        // 启动后稍等 PID 文件写入再刷新侧边栏状态
+        setTimeout(function(){ if (typeof updateMonitorBadge === 'function') updateMonitorBadge(); }, 800);
       }
     } else {
       alert(data.error || '操作失败');
@@ -172,6 +180,16 @@ async function toggleMonitor(e) {
     alert('请求失败: ' + err.message);
     location.reload();
   }
+}
+
+async function shutdownAll() {
+  if(!confirm('{{ _("shutdown_confirm") }}')) return;
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  try {
+    await fetch('/api/shutdown', { method:'POST', headers:{'X-CSRF-Token':csrf} });
+  } catch(e) {}
+  // 页面会在 web.py 退出后断开连接
+  alert('{{ _("shutdown_done") }}');
 }
 </script>
 {% endblock %}

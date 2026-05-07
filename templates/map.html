@@ -10,7 +10,8 @@
 #map{height:calc(100vh - 160px);min-height:500px;background:#f0f0f0;z-index:0}
 /* Light mode: slight desaturation so markers stand out */
 #map .leaflet-tile{filter:saturate(60%) brightness(1.05)}
-/* Dark mode: no CSS hack — use proper dark tiles via JS */
+/* Dark mode: invert light tiles to create readable dark map */
+[data-theme="dark"] #map .leaflet-tile{filter:invert(1) hue-rotate(180deg) brightness(.85) saturate(80%)}
 [data-theme="dark"] #map{background:#1a1a1a}
 .map-legend{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
 .legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 3px rgba(0,0,0,.08)}
@@ -78,30 +79,10 @@ var CITY_CENTERS = {
 
 var map = L.map('map').setView([51.8, 5.0], 8);
 
-var tileLight = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap',
   maxZoom: 19,
-});
-var tileDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-  maxZoom: 19,
-});
-
-function useDarkTiles() { map.removeLayer(tileLight); tileDark.addTo(map); }
-function useLightTiles(){ map.removeLayer(tileDark); tileLight.addTo(map); }
-
-if(document.documentElement.getAttribute('data-theme') === 'dark') useDarkTiles();
-else useLightTiles();
-
-// Watch for theme changes
-new MutationObserver(function(ms){
-  ms.forEach(function(m){
-    if(m.attributeName === 'data-theme'){
-      if(document.documentElement.getAttribute('data-theme') === 'dark') useDarkTiles();
-      else useLightTiles();
-    }
-  });
-}).observe(document.documentElement, {attributes: true});
+}).addTo(map);
 
 var markers = [];
 var bounds = L.latLngBounds();

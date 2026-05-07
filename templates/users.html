@@ -98,19 +98,22 @@
 
   <!-- Actions -->
   <div class="user-card-actions">
-    <a href="{{ url_for('user_edit', user_id=user.id) }}" class="btn-icon" title="{{ _('users_edit') }}"><i class="bi bi-pencil"></i></a>
-    <button class="btn-icon" onclick="sendTestNotify('{{ user.id }}', '{{ user.name }}', this)"
-            title="{{ _('users_test_notif') }}" {% if not user.notification_channels %}disabled{% endif %}>
-      <i class="bi bi-send"></i>
+    <a href="{{ url_for('user_edit', user_id=user.id) }}" class="btn btn-ghost btn-sm">
+      <i class="bi bi-pencil mr-1"></i>{{ _('users_edit') }}
+    </a>
+    <button class="btn btn-ghost btn-sm" onclick="sendTestNotify('{{ user.id }}', '{{ user.name }}', this)"
+            {% if not user.notification_channels %}disabled{% endif %}>
+      <i class="bi bi-send mr-1"></i>{{ _('users_test_notif') }}
     </button>
     <form action="{{ url_for('user_toggle', user_id=user.id) }}" method="post" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn-icon" title="{{ _('users_toggle_on') if not user.enabled else _('users_toggle_off') }}">
-        <i class="bi bi-{% if user.enabled %}pause{% else %}play{% endif %}-fill"></i>
+      <button type="submit" class="btn btn-ghost btn-sm">
+        <i class="bi bi-{% if user.enabled %}pause{% else %}play{% endif %}-fill mr-1"></i>
+        {{ _('users_toggle_off') if user.enabled else _('users_toggle_on') }}
       </button>
     </form>
-    <button class="btn-icon danger ml-auto" onclick="confirmDelete('{{ user.id }}', '{{ user.name }}')" title="{{ _('users_delete') }}">
-      <i class="bi bi-trash"></i>
+    <button class="btn btn-ghost btn-sm danger ml-auto" onclick="confirmDelete('{{ user.id }}', '{{ user.name }}')">
+      <i class="bi bi-trash mr-1"></i>{{ _('users_delete') }}
     </button>
   </div>
 

@@ -11,6 +11,7 @@
       <input type="checkbox" id="pause-check" onchange="togglePause()">
       {{ _('pause') }}
     </label>
+    <button onclick="clearLogs()" class="btn btn-ghost btn-sm" style="color:var(--danger);">{{ _('clear_logs') }}</button>
   </span>
 </div>
 
@@ -62,6 +63,13 @@ async function fetchLogs() {
   } catch(err) {
     // silently retry
   }
+}
+
+async function clearLogs() {
+  if(!confirm('{{ _("clear_logs_confirm") }}')) return;
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  await fetch('/api/logs/clear', { method:'POST', headers:{'X-CSRF-Token':csrf} });
+  fetchLogs();
 }
 
 // Initial fetch + 3s poll
