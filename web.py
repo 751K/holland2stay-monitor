@@ -38,6 +38,7 @@ from config import (  # noqa: E402
     resolve_project_path,
 )
 from models import parse_features_list                           # noqa: E402
+from update_checker import check_for_updates
 from storage import Storage                                      # noqa: E402
 from translations import tr as _tr                                       # noqa: E402
 from users import UserConfig, get_user, load_users, save_users  # noqa: E402
@@ -1153,6 +1154,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
+    check_for_updates()
     print(f"Web 面板运行中 → http://{args.host}:{args.port}")
     # threaded=True：允许多个 SSE 连接并发（每个连接占用一个线程）
     app.run(host=args.host, port=args.port, debug=False, threaded=True)

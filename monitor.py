@@ -59,6 +59,7 @@ from config import DATA_DIR, ENV_PATH, load_config
 from models import STATUS_AVAILABLE, parse_float
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from scraper import RateLimitError, scrape_all
+from update_checker import check_for_updates
 from storage import Storage
 from users import USERS_FILE, UserConfig, load_users, migrate_from_env, save_users
 
@@ -868,6 +869,9 @@ async def _async_main() -> None:
 
     cfg = load_config()
     _setup_logging(cfg.log_level)
+
+    if not args.test:
+        check_for_updates()
 
     if args.test:
         logger.info("TEST 模式：只抓取，不发通知")
