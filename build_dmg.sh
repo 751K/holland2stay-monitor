@@ -1,12 +1,19 @@
 #!/bin/bash
 # Build Holland2Stay Monitor .dmg for macOS
-# Prerequisites: macOS, Python 3.11+, conda env "daily" with deps installed
+# Prerequisites: macOS, Python 3.11+
 set -e
 
 APP_NAME="H2S Monitor"
 DMG_NAME="Holland2Stay Monitor"
-PYTHON="conda run -n daily python"
-PIP="conda run -n daily pip"
+
+# Auto-detect Python: use conda env "daily" if available, otherwise plain python
+if conda run -n daily python --version &>/dev/null 2>&1; then
+    PYTHON="conda run -n daily python"
+    PIP="conda run -n daily pip"
+else
+    PYTHON="python3"
+    PIP="pip3"
+fi
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="$PROJECT_DIR/build"
 DIST_DIR="$PROJECT_DIR/dist"

@@ -22,7 +22,14 @@ jobs:
       - name: Build .dmg
         run: bash build_dmg.sh
 
-      - name: Upload DMG
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-dmg
+          path: dist/Holland2Stay Monitor.dmg
+
+      - name: Upload to Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/Holland2Stay Monitor.dmg
@@ -43,7 +50,14 @@ jobs:
         shell: cmd
         run: build.bat
 
-      - name: Upload ZIP
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/Holland2Stay Monitor.zip
+
+      - name: Upload to Release (tag only)
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/Holland2Stay Monitor.zip
