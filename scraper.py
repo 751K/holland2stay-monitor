@@ -139,7 +139,8 @@ def _post_gql(session: req.Session, query: str) -> dict:
 _RELEVANT_ATTRS = {
     "available_startdate",   # AttributeValue: "2026-04-08 00:00:00"
     "available_to_book",     # AttributeSelectedOptions: [{label, value}]，决定状态
-    "basic_rent",            # AttributeValue: "707.000000"，月租金
+    "basic_rent",            # AttributeValue: "707.000000"，基础租金（不含服务费）
+    "price",                 # AttributeValue: "1654.000000"，总租金（含所有附加费）
     "building_name",         # AttributeSelectedOptions: 楼盘名
     "city",                  # AttributeSelectedOptions: 城市
     "energy_label",          # AttributeValue: "A" / "B"
@@ -242,9 +243,10 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
         else:
             status = "Unknown"
 
-        rent_raw = attrs.get("basic_rent")
-        if rent_raw:
-            price_raw = f"€{float(rent_raw):.0f}"
+        # 优先取总价（含服务费/水电/管理费），其次基础租金，最后从 price_range 降级
+        raw = attrs.get("price") or attrs.get("basic_rent")
+        if raw:
+            price_raw = f"€{float(raw):.0f}"
         else:
             try:
                 val = item["price_range"]["minimum_price"]["regular_price"]["value"]

@@ -2,7 +2,7 @@
 Holland2Stay 监控 Web 面板
 ==========================
 运行方式：
-    python web.py               # 默认 http://localhost:5000
+    python web.py               # 默认 http://localhost:8088
     python web.py --port 8080   # 自定义端口
 """
 from __future__ import annotations
@@ -11,10 +11,12 @@ import argparse
 import asyncio
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
 import signal
+import subprocess
 import sys
 import threading
 import time as _time
@@ -42,6 +44,8 @@ from update_checker import check_for_updates
 from storage import Storage                                      # noqa: E402
 from translations import tr as _tr                                       # noqa: E402
 from users import UserConfig, get_user, load_users, save_users  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------ #
 # 常量
@@ -375,7 +379,8 @@ def index() -> str:
         changes = storage.get_recent_changes(hours=48)
     finally:
         storage.close()
-    return render_template("index.html", stats=stats, recent=recent, changes=changes)
+    return render_template("index.html", stats=stats, recent=recent, changes=changes,
+                           monitor_running=_monitor_pid() is not None)
 
 
 @app.route("/listings")
@@ -828,6 +833,103 @@ def stats() -> str:
     )
 
 
+@app.route("/system")
+@login_required
+def system_info():
+    import subprocess as _sp
+    info: dict = {}
+
+    # ── 进程 ──
+    pid = _monitor_pid()
+    info["monitor_running"] = pid is not None
+    info["monitor_pid"] = pid
+    info["web_pid"] = os.getpid()
+
+    # ── 数据库 ──
+    st = _storage()
+    try:
+        info["total_listings"] = st.count_all()
+        info["last_scrape"] = st.get_meta("last_scrape_at")
+        info["last_count"] = st.get_meta("last_scrape_count")
+        info["unread_notifications"] = st.count_unread_notifications()
+        info["total_changes"] = st._conn.execute("SELECT COUNT(*) FROM status_changes").fetchone()[0]
+        info["total_notifications"] = st._conn.execute("SELECT COUNT(*) FROM web_notifications").fetchone()[0]
+    finally:
+        st.close()
+
+    # ── 配置 ──
+    from config import load_config as _lc
+    cfg = _lc()
+    info["cities"] = [c.name for c in cfg.cities]
+    info["check_interval"] = cfg.check_interval
+    info["peak_interval"] = cfg.peak_interval
+    info["peak_start"] = cfg.peak_start
+    info["peak_end"] = cfg.peak_end
+    info["min_interval"] = cfg.min_interval
+    info["log_level"] = cfg.log_level
+
+    # ── 用户 ──
+    from users import load_users as _lu
+    users = _lu()
+    info["users_total"] = len(users)
+    info["users_active"] = sum(1 for u in users if u.enabled)
+
+    # ── 环境 ──
+    info["python"] = sys.version
+    info["platform"] = sys.platform
+    info["base_dir"] = str(BASE_DIR)
+    info["data_dir"] = str(DATA_DIR)
+
+    # git
+    try:
+        r = _sp.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=str(BASE_DIR))
+        info["git_hash"] = r.stdout.strip() if r.returncode == 0 else "—"
+    except Exception:
+        info["git_hash"] = "—"
+    try:
+        r = _sp.run(["git", "log", "-1", "--format=%ci"], capture_output=True, text=True, cwd=str(BASE_DIR))
+        info["git_date"] = r.stdout.strip() if r.returncode == 0 else "—"
+    except Exception:
+        info["git_date"] = "—"
+
+    return render_template("system.html", info=info)
+
+
+# ------------------------------------------------------------------ #
+# 日志查看
+# ------------------------------------------------------------------ #
+
+_LOG_PATH = DATA_DIR / "monitor.log"
+
+
+@app.route("/api/logs")
+@api_login_required
+def api_logs():
+    try:
+        lines_param = int(request.args.get("lines", 200))
+    except (TypeError, ValueError):
+        lines_param = 200
+    lines_param = max(1, min(lines_param, 2000))
+
+    if not _LOG_PATH.exists():
+        return jsonify({"lines": [], "size": 0, "note": "no log file yet"})
+
+    try:
+        size = _LOG_PATH.stat().st_size
+        with open(_LOG_PATH, encoding="utf-8") as f:
+            all_lines = f.readlines()
+        tail = all_lines[-lines_param:] if len(all_lines) > lines_param else all_lines
+        return jsonify({"lines": [line.rstrip("\n") for line in tail], "size": size})
+    except Exception as e:
+        return jsonify({"lines": [], "size": 0, "error": str(e)}), 500
+
+
+@app.route("/logs")
+@login_required
+def logs_view():
+    return render_template("logs.html")
+
+
 @app.route("/api/charts")
 @api_login_required
 def api_charts():
@@ -968,6 +1070,44 @@ def api_reload():
             return jsonify({"ok": True, "message": "信号发送失败，已回退为文件触发重载"})
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
+
+
+# ------------------------------------------------------------------ #
+# API — 监控进程启停
+# ------------------------------------------------------------------ #
+
+@app.route("/api/monitor/start", methods=["POST"])
+@api_login_required
+@csrf_required
+def api_monitor_start():
+    """启动后台监控进程（monitor.py）。"""
+    if _monitor_pid() is not None:
+        return jsonify({"ok": False, "error": "监控已在运行"}), 409
+    try:
+        subprocess.Popen(
+            [sys.executable, str(BASE_DIR / "monitor.py")],
+            cwd=str(BASE_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return jsonify({"ok": True, "message": "已启动"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/monitor/stop", methods=["POST"])
+@api_login_required
+@csrf_required
+def api_monitor_stop():
+    """停止后台监控进程。"""
+    pid = _monitor_pid()
+    if pid is None:
+        return jsonify({"ok": False, "error": "监控未在运行"}), 409
+    try:
+        os.kill(pid, signal.SIGTERM)
+        return jsonify({"ok": True, "message": "已发送停止信号"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 # ------------------------------------------------------------------ #
@@ -1151,7 +1291,7 @@ def api_platform():
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Holland2Stay Web 面板")
-    parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--port", type=int, default=8088)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
     check_for_updates()

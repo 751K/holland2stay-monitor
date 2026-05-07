@@ -519,7 +519,7 @@ class Storage:
         for r in rows:
             feats = json.loads(r["features"] or "[]")
             feat_map = parse_features_list(feats)
-            address = ", ".join(filter(None, [r["name"], r.get("city") or "", feat_map.get("neighborhood", "")]))
+            address = ", ".join(filter(None, [r["name"], r["city"] or "", feat_map.get("neighborhood", "")]))
             results.append({
                 "id": r["id"],
                 "name": r["name"],

@@ -69,6 +69,15 @@ def _setup_logging(level: str) -> None:
     logging.basicConfig(level=getattr(logging, level, "INFO"), format=fmt)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
 
+    # 日志持久化到文件，供 Web 面板查看（Docker / 本地均适用）
+    from logging.handlers import RotatingFileHandler
+    log_path = DATA_DIR / "monitor.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = RotatingFileHandler(str(log_path), maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
+    fh.setFormatter(logging.Formatter(fmt))
+    fh.setLevel(getattr(logging, level, "INFO"))
+    logging.getLogger().addHandler(fh)
+
 
 logger = logging.getLogger("monitor")
 
