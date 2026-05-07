@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}{{ _('log_viewer') }}{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1><i class="bi bi-terminal mr-2"></i>{{ _('log_viewer') }}</h1>
+  <span class="meta" style="display:flex;align-items:center;gap:12px;">
+    <span id="log-info">—</span>
+    <label style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;">
+      <input type="checkbox" id="pause-check" onchange="togglePause()">
+      {{ _('pause') }}
+    </label>
+  </span>
+</div>
+
+<div class="card" style="padding:0;overflow:hidden;">
+  <pre id="log-view" style="
+    background:#1e1e1e;color:#0f0;font-family:SF Mono,Menlo,Monaco,monospace;
+    font-size:12px;line-height:1.5;padding:16px;margin:0;overflow:auto;
+    max-height:calc(100vh - 180px);white-space:pre-wrap;word-break:break-all;
+  ">{{ _('loading') }}...</pre>
+</div>
+
+<script>
+let paused = false;
+let timer = null;
+let lastSize = 0;
+
+function togglePause() {
+  paused = document.getElementById('pause-check').checked;
+  if (!paused) fetchLogs();
+}
+
+async function fetchLogs() {
+  if (paused) return;
+  try {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const resp = await fetch('/api/logs?lines=300', {
+      headers: {'X-CSRF-Token': csrf}
+    });
+    const data = await resp.json();
+    const pre = document.getElementById('log-view');
+    const info = document.getElementById('log-info');
+
+    if (data.error) {
+      pre.textContent = 'Error: ' + data.error;
+      return;
+    }
+
+    const text = data.lines.length ? data.lines.join('\n') : '{{ _("no_logs_yet") }}';
+    // Only update if content changed
+    if (pre.textContent !== text) {
+      const wasAtBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 50;
+      pre.textContent = text;
+      if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
+    }
+
+    const kb = (data.size / 1024).toFixed(1);
+    info.textContent = data.lines.length + ' lines · ' + kb + ' KB';
+    lastSize = data.size;
+  } catch(err) {
+    // silently retry
+  }
+}
+
+// Initial fetch + 3s poll
+fetchLogs();
+timer = setInterval(fetchLogs, 3000);
+</script>
+{% endblock %}

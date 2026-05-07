@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}{{ _('system_info') }}{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="30">{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1><i class="bi bi-info-circle mr-2"></i>{{ _('system_info') }}</h1>
+  <span class="meta">{{ _('auto_refresh') }}</span>
+</div>
+
+<div class="grid-7-5">
+
+  <!-- 进程状态 -->
+  <div class="card">
+    <div class="card-header">{{ _('process_status') }}</div>
+    <table class="table-minimal">
+      <tr><td class="text-tertiary" style="width:140px;">{{ _('monitor_process') }}</td>
+        <td>
+          {% if info.monitor_running %}
+            <span class="badge badge-success">{{ _('monitor_running') }} (PID {{ info.monitor_pid }})</span>
+          {% else %}
+            <span class="badge badge-secondary">{{ _('monitor_stopped') }}</span>
+          {% endif %}
+        </td></tr>
+      <tr><td class="text-tertiary">{{ _('web_process') }}</td><td>PID {{ info.web_pid }}</td></tr>
+    </table>
+  </div>
+
+  <!-- 数据库 -->
+  <div class="card">
+    <div class="card-header">{{ _('database_stats') }}</div>
+    <table class="table-minimal">
+      <tr><td class="text-tertiary">{{ _('total_listings') }}</td><td>{{ info.total_listings }}</td></tr>
+      <tr><td class="text-tertiary">{{ _('last_scrape') }}</td><td>{{ info.last_scrape }}</td></tr>
+      <tr><td class="text-tertiary">{{ _('last_count') }}</td><td>{{ info.last_count }}</td></tr>
+      <tr><td class="text-tertiary">{{ _('status_changes') }}</td><td>{{ info.total_changes }}</td></tr>
+      <tr><td class="text-tertiary">{{ _('web_notifications') }}</td><td>{{ info.total_notifications }} ({{ info.unread_notifications }} {{ _('unread') }})</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="grid-7-5" style="margin-top:20px;">
+
+  <!-- 配置 -->
+  <div class="card">
+    <div class="card-header">{{ _('configuration') }}</div>
+    <table class="table-minimal">
+      <tr><td class="text-tertiary" style="width:140px;">{{ _('cities') }}</td><td>{{ info.cities | join(', ') }}</td></tr>
+      <tr><td class="text-tertiary">{{ _('check_interval') }}</td><td>{{ info.check_interval }}s</td></tr>
+      <tr><td class="text-tertiary">{{ _('peak_interval') }}</td><td>{{ info.peak_interval }}s ({{ info.peak_start }}–{{ info.peak_end }})</td></tr>
+      <tr><td class="text-tertiary">{{ _('min_interval') }}</td><td>{{ info.min_interval }}s</td></tr>
+      <tr><td class="text-tertiary">{{ _('log_level') }}</td><td>{{ info.log_level }}</td></tr>
+    </table>
+  </div>
+
+  <!-- 用户 -->
+  <div class="card">
+    <div class="card-header">{{ _('users') }}</div>
+    <table class="table-minimal">
+      <tr><td class="text-tertiary" style="width:140px;">{{ _('total_users') }}</td><td>{{ info.users_total }}</td></tr>
+      <tr><td class="text-tertiary">{{ _('active_users') }}</td><td>{{ info.users_active }}</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="grid-7-5" style="margin-top:20px;">
+
+  <!-- 环境 -->
+  <div class="card">
+    <div class="card-header">{{ _('environment') }}</div>
+    <table class="table-minimal">
+      <tr><td class="text-tertiary" style="width:140px;">Python</td><td>{{ info.python.split('\\n')[0] if info.python else '—' }}</td></tr>
+      <tr><td class="text-tertiary">{{ _('platform') }}</td><td>{{ info.platform }}</td></tr>
+      <tr><td class="text-tertiary">BASE_DIR</td><td style="font-size:12px;">{{ info.base_dir }}</td></tr>
+      <tr><td class="text-tertiary">DATA_DIR</td><td style="font-size:12px;">{{ info.data_dir }}</td></tr>
+      <tr><td class="text-tertiary">Git</td><td>{{ info.git_hash }} ({{ info.git_date }})</td></tr>
+    </table>
+  </div>
+</div>
+
+{% endblock %}
