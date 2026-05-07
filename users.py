@@ -32,6 +32,7 @@ from dataclasses import asdict, dataclass, field, fields as dc_fields
 from pathlib import Path
 
 from config import AutoBookConfig, DATA_DIR, ListingFilter
+from crypto import decrypt, encrypt
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         enabled=d.get("enabled", False),
         dry_run=d.get("dry_run", True),
         email=d.get("email", ""),
-        password=d.get("password", ""),
+        password=decrypt(d.get("password", "")),
         listing_filter=_lf_from_dict(d.get("listing_filter", {})),
         cancel_enabled=d.get("cancel_enabled", False),
         payment_method=d.get("payment_method", "idealcheckout_ideal"),
@@ -167,6 +168,10 @@ def _user_from_dict(d: dict) -> UserConfig:
         )
         d = {k: v for k, v in d.items() if k in known}
 
+    # 解密敏感字段（无 $F$ 前缀的旧明文数据原样通过）
+    for field in ("email_password", "telegram_token", "twilio_token"):
+        if d.get(field):
+            d[field] = decrypt(d[field])
     return UserConfig(**d, listing_filter=lf, auto_book=ab)
 
 
@@ -219,9 +224,21 @@ def save_users(users: list[UserConfig]) -> None:
     进程在写入中途被 kill 时只会丢失 .tmp，已有 users.json 不受影响。
     """
     USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    data = []
+    for u in users:
+        d = asdict(u)
+        # 加密敏感字段后再持久化
+        for field in ("email_password", "telegram_token", "twilio_token"):
+            if d.get(field):
+                d[field] = encrypt(d[field])
+        ab = d.get("auto_book", {})
+        if ab.get("password"):
+            ab["password"] = encrypt(ab["password"])
+        d["auto_book"] = ab
+        data.append(d)
     tmp = USERS_FILE.with_suffix(".tmp")
     tmp.write_text(
-        json.dumps([asdict(u) for u in users], indent=2, ensure_ascii=False),
+        json.dumps(data, indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
     os.replace(tmp, USERS_FILE)
