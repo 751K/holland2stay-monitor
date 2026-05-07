@@ -30,7 +30,6 @@ import os
 import uuid
 from dataclasses import asdict, dataclass, field, fields as dc_fields
 from pathlib import Path
-from typing import Optional
 
 from config import AutoBookConfig, DATA_DIR, ListingFilter
 

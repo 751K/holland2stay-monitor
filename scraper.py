@@ -29,7 +29,6 @@ import logging
 import os
 import re
 import time
-from typing import Optional
 
 import curl_cffi.requests as req
 
@@ -308,7 +307,7 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
             contract_start_date=contract_start_date,
         )
     except Exception as e:
-        logger.warning("解析房源失败: %s", e)
+        logger.warning("解析房源失败 [%s]: %s", item.get("url_key", "?"), e)
         return None
 
 

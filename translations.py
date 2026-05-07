@@ -2,6 +2,9 @@
 UI translations for Holland2Stay web panel.
 Add new strings as key: {zh, en} pairs. Templates use _(key) to look up.
 """
+import logging
+
+logger = logging.getLogger(__name__)
 
 TRANSLATIONS = {
     # ── Layout / Navigation ──────────────────────────────
@@ -269,5 +272,6 @@ def tr(key: str, lang: str) -> str:
     """Look up a translation key. Falls back to zh if key missing."""
     entry = TRANSLATIONS.get(key)
     if not entry:
+        logger.warning("Missing translation key: %s", key)
         return key
     return entry.get(lang, entry.get("zh", key))

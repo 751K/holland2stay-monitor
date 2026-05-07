@@ -70,9 +70,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Optional
 
-from models import Listing
+from models import Listing, parse_features_list, parse_float
 
 logger = logging.getLogger(__name__)
 
@@ -238,13 +237,21 @@ class Storage:
         # with self._conn 在正常退出时调用 commit()，异常时调用 rollback()，
         # 确保本轮所有 INSERT/UPDATE 要么全部落库，要么全部回滚，不留半更新状态。
         with self._conn:
-            for listing in fresh:
-                row = cur.execute(
-                    "SELECT status, notified FROM listings WHERE id = ?",
-                    (listing.id,),
-                ).fetchone()
+            # 批量查询所有已有记录，避免 N+1
+            ids = [l.id for l in fresh]
+            existing: dict[str, str] = {}  # listing_id → status
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                rows = cur.execute(
+                    f"SELECT id, status FROM listings WHERE id IN ({placeholders})",
+                    ids,
+                ).fetchall()
+                existing = {r["id"]: r["status"] for r in rows}
 
-                if row is None:
+            for listing in fresh:
+                old_status = existing.get(listing.id)
+
+                if old_status is None:
                     cur.execute(
                         """INSERT INTO listings
                            (id, name, status, price_raw, available_from,
@@ -259,7 +266,6 @@ class Storage:
                     )
                     new_listings.append(listing)
                 else:
-                    old_status = row["status"]
                     cur.execute(
                         """UPDATE listings
                            SET name=?, status=?, price_raw=?, available_from=?,
@@ -507,17 +513,13 @@ class Storage:
         """Return all listings with features for map display (geocoding done in route)."""
         rows = self._conn.execute(
             """SELECT id, name, status, price_raw, available_from, url, city, features
-               FROM listings ORDER BY city, name"""
+               FROM listings ORDER BY city, name LIMIT 2000"""
         ).fetchall()
         results: list[dict] = []
         for r in rows:
             feats = json.loads(r["features"] or "[]")
-            feat_map: dict[str, str] = {}
-            for f in feats:
-                if ": " in f:
-                    k, v = f.split(": ", 1)
-                    feat_map[k.lower()] = v
-            address = f"{r['name']}, {r['city'] or ''}, {feat_map.get('neighborhood', '')}"
+            feat_map = parse_features_list(feats)
+            address = ", ".join(filter(None, [r["name"], r.get("city") or "", feat_map.get("neighborhood", "")]))
             results.append({
                 "id": r["id"],
                 "name": r["name"],
@@ -756,7 +758,6 @@ class Storage:
         ----
         price_raw 在 Python 端解析，无法利用 SQLite 索引。数据量大时性能较差。
         """
-        import re as _re
         rows = self._conn.execute(
             "SELECT price_raw FROM listings WHERE price_raw IS NOT NULL AND price_raw != ''"
         ).fetchall()
@@ -770,12 +771,8 @@ class Storage:
             ">€1000":     0,
         }
         for (raw,) in rows:
-            m = _re.search(r"[\d]+[,\d]*\.?\d*", (raw or "").replace(",", ""))
-            if not m:
-                continue
-            try:
-                price = float(m.group())
-            except ValueError:
+            price = parse_float(raw)
+            if price is None:
                 continue
             if price < 600:
                 buckets["<€600"] += 1
@@ -941,7 +938,8 @@ class Storage:
             self._conn.execute("DELETE FROM status_changes")
             self._conn.execute("DELETE FROM meta")
             self._conn.execute("DELETE FROM web_notifications")
-        logger.info("数据库已清空（listings / status_changes / meta / web_notifications）")
+            self._conn.execute("DELETE FROM geocode_cache")
+        logger.info("数据库已清空（listings / status_changes / meta / web_notifications / geocode_cache）")
 
     def close(self) -> None:
         """关闭数据库连接。进程退出时由 monitor.py 调用。"""

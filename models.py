@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional
+
+STATUS_AVAILABLE = "available to book"
+STATUS_LOTTERY   = "available in lottery"
 
 
 # LISTING_KEY_MAP：将 GraphQL 属性名映射为 feature_map() 返回的标准 key。
@@ -44,7 +46,7 @@ def parse_float(text: Optional[str]) -> Optional[float]:
     """
     if not text:
         return None
-    m = re.search(r"[\d]+[,\d]*\.?\d*", text.replace(",", ""))
+    m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
     return float(m.group()) if m else None
 
 
@@ -58,6 +60,16 @@ def parse_int(text: Optional[str]) -> Optional[int]:
         return None
     m = re.search(r"\d+", text)
     return int(m.group()) if m else None
+
+
+def parse_features_list(features: list[str]) -> dict[str, str]:
+    """将 ["Type: Studio", "Area: 26.0 m²", ...] 解析为 {"type": "Studio", "area": "26.0 m²", ...}。"""
+    result: dict[str, str] = {}
+    for feat in features:
+        if ": " in feat:
+            raw_key, value = feat.split(": ", 1)
+            result[LISTING_KEY_MAP.get(raw_key, raw_key.lower())] = value
+    return result
 
 
 @dataclass
@@ -143,7 +155,7 @@ class Listing:
           - "Available to book"    → 可直接预订（id=179）
           - "Available in lottery" → 进入抽签池（id=336）
         """
-        return self.status.lower() in ("available to book", "available in lottery")
+        return self.status.lower() in (STATUS_AVAILABLE, STATUS_LOTTERY)
 
     def feature_map(self) -> dict[str, str]:
         """
@@ -173,12 +185,7 @@ class Listing:
         过滤器都依赖本方法返回的 key 名，修改 LISTING_KEY_MAP 时需同步检查。
         """
         if self._feature_map_cache is None:
-            result: dict[str, str] = {}
-            for feat in self.features:
-                if ": " in feat:
-                    raw_key, value = feat.split(": ", 1)
-                    result[LISTING_KEY_MAP.get(raw_key, raw_key.lower())] = value
-            self._feature_map_cache = result
+            self._feature_map_cache = parse_features_list(self.features)
         return self._feature_map_cache
 
     def to_dict(self) -> dict:

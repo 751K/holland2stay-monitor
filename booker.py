@@ -50,13 +50,14 @@ from __future__ import annotations
 import logging
 import os
 import time
+from dataclasses import dataclass
 from datetime import datetime as _dt
-from typing import Optional
+from typing import Literal
 
 import curl_cffi.requests as req
 
 from config import CURL_IMPERSONATE
-from models import Listing
+from models import STATUS_AVAILABLE, Listing
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +75,13 @@ class PrewarmedSession:
     email      : 对应的 H2S 账号邮箱，用于校验是否匹配
     """
 
-    __slots__ = ("session", "token", "created_at", "email")
+    __slots__ = ("session", "token", "created_at", "token_expiry", "email")
 
-    def __init__(self, session, token: str, created_at: float, email: str):
+    def __init__(self, session, token: str, created_at: float, token_expiry: float, email: str):
         self.session = session
         self.token = token
         self.created_at = created_at
+        self.token_expiry = token_expiry
         self.email = email
 
 
@@ -100,6 +102,10 @@ _H2S_STORE_ID = 54
 # 浏览器支持三种：idealcheckout_ideal / idealcheckout_visa / idealcheckout_mastercard。
 # 自动预订固定选 iDEAL：无需持卡信息，与 idealCheckOut mutation 对应。
 _PAYMENT_METHOD = "idealcheckout_ideal"
+
+# Magento token 有效期约 1 小时，设 55 分钟上限保留缓冲，
+# 超时预登录 session 退回正常登录路径避免 auth 错误。
+_TOKEN_MAX_AGE = 3300  # 55 分钟（秒）
 
 
 # ------------------------------------------------------------------ #
@@ -587,12 +593,19 @@ def _ideal_checkout(session: req.Session, token: str, order_number: str) -> str:
 # 主入口
 # ------------------------------------------------------------------ #
 
+BookingPhase = Literal[
+    "", "dry_run", "success", "race_lost",
+    "reserved_conflict", "cancel+retry", "unknown_error",
+]
+
+
+@dataclass
 class BookingResult:
     """
     try_book() 的返回值，封装预订结果。
 
-    Attributes
-    ----------
+    Fields
+    ------
     listing               : 被尝试预订的房源
     success               : True 表示流程全部成功（或 dry_run 验证通过）
     message               : 发送给用户的通知消息（含付款链接或失败原因）
@@ -610,23 +623,13 @@ class BookingResult:
                             "unknown_error"     → 其他未预期错误
                             ""                  → 未进入预订阶段（如状态不符合）
     """
-    def __init__(
-        self,
-        listing: Listing,
-        success: bool,
-        message: str,
-        dry_run: bool = False,
-        pay_url: str = "",
-        contract_start_date: str = "",
-        phase: str = "",
-    ):
-        self.listing = listing
-        self.success = success
-        self.message = message
-        self.dry_run = dry_run
-        self.pay_url = pay_url
-        self.contract_start_date = contract_start_date
-        self.phase = phase
+    listing: Listing
+    success: bool
+    message: str
+    dry_run: bool = False
+    pay_url: str = ""
+    contract_start_date: str = ""
+    phase: BookingPhase = ""
 
 
 def create_prewarmed_session(email: str, password: str) -> PrewarmedSession:
@@ -658,10 +661,12 @@ def create_prewarmed_session(email: str, password: str) -> PrewarmedSession:
     except Exception:
         session.close()
         raise
+    now = time.monotonic()
     return PrewarmedSession(
         session=session,
         token=token,
-        created_at=time.monotonic(),
+        created_at=now,
+        token_expiry=now + _TOKEN_MAX_AGE,
         email=email,
     )
 
@@ -712,19 +717,19 @@ def try_book(
     placeOrder 返回「账号已有预留单」且 cancel_enabled=True
       → cancel_pending_orders() 取消旧单 → 重新执行 _do_book()（含新购物车）。
     """
-    if listing.status.lower() not in ("available to book",):
+    if listing.status.lower() != STATUS_AVAILABLE:
         return BookingResult(listing, False, f"状态不是 Available to book: {listing.status}")
 
     t0 = time.monotonic()
     t_cancel = 0.0
     t_login = 0.0
-    phase = ""
+    t_sku = 0.0
+    phase: BookingPhase = ""
 
     # ---------------------------------------------------------------- #
     # Step 1: 确定 SKU / contract_id / contract_start_date
     # ---------------------------------------------------------------- #
     if listing.sku:
-        t_sku = 0.0
         sku = listing.sku
         contract_id = listing.contract_id
         from datetime import date as _date
@@ -738,11 +743,18 @@ def try_book(
 
     # 决定 Session 来源：预登录复用 or 按需创建
     own_session = False
-    if prewarmed is not None:
+    if prewarmed is not None and time.monotonic() < prewarmed.token_expiry:
         session = prewarmed.session
         token = prewarmed.token
         logger.debug("复用预登录 session (email=%s)", email)
     else:
+        if prewarmed is not None:
+            age = time.monotonic() - prewarmed.created_at
+            logger.warning(
+                "预登录 session 已过期 (%.0f 秒前创建，上限 %d 秒)，退回正常登录",
+                age, _TOKEN_MAX_AGE,
+            )
+            prewarmed.session.close()
         proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
         proxies = {"https": proxy, "http": proxy} if proxy else {}
         session = req.Session(impersonate=CURL_IMPERSONATE, proxies=proxies)

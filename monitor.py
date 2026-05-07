@@ -56,7 +56,7 @@ from dotenv import load_dotenv
 
 from booker import create_prewarmed_session, try_book
 from config import DATA_DIR, ENV_PATH, load_config
-from models import parse_float
+from models import STATUS_AVAILABLE, parse_float
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from scraper import RateLimitError, scrape_all
 from storage import Storage
@@ -349,6 +349,10 @@ async def run_once(
     city_tasks, availability_ids = cfg.scrape_tasks()
     logger.info("开始抓取，城市数: %d，活跃用户数: %d", len(city_tasks), len(user_notifiers))
 
+    if not city_tasks:
+        logger.warning("未配置任何目标城市（CITIES 为空），本轮不抓取。请检查 .env 中 CITIES 设置。")
+        return
+
     try:
         fresh = await asyncio.get_running_loop().run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
@@ -406,19 +410,19 @@ async def run_once(
         for user, _ in user_notifiers:
             if (
                 user.auto_book.enabled
-                and listing.status.lower() == "available to book"
+                and listing.status.lower() == STATUS_AVAILABLE
                 and (user.auto_book.listing_filter.is_empty()
                      or user.auto_book.listing_filter.passes(listing))
             ):
                 ab_candidates[user.id].append(listing)
 
     for listing, old_status, new_status in status_changes:
-        if new_status.lower() == "available to book":
+        if new_status.lower() == STATUS_AVAILABLE:
             status_transition[listing.id] = (old_status, new_status)
         for user, _ in user_notifiers:
             if (
                 user.auto_book.enabled
-                and new_status.lower() == "available to book"
+                and new_status.lower() == STATUS_AVAILABLE
                 and (user.auto_book.listing_filter.is_empty()
                      or user.auto_book.listing_filter.passes(listing))
             ):
@@ -427,7 +431,7 @@ async def run_once(
     # ── 重试队列检查：上次 race_lost 的候选，若仍 Available to book 则补入候选 ── #
     # 这处理了"前一个预订者未付款、房子被重新放出"但状态未变的场景：
     # storage.diff() 对此类房源不产出任何事件，必须从重试队列中手动补入。
-    _fresh_avail = {l.id: l for l in fresh if l.status.lower() == "available to book"}
+    _fresh_avail = {l.id: l for l in fresh if l.status.lower() == STATUS_AVAILABLE}
     for user, _ in user_notifiers:
         if not user.auto_book.enabled:
             continue
@@ -875,16 +879,7 @@ async def _async_main() -> None:
         return
 
     # ── 数据库重置 ────────────────────────────────────────────────── #
-    should_reset = args.reset_db
-    if not should_reset and sys.stdin.isatty():
-        try:
-            ans = input("是否清空数据库？这将删除所有历史记录 [y/N]: ").strip().lower()
-            should_reset = ans in ("y", "yes")
-        except (EOFError, KeyboardInterrupt):
-            print()
-            should_reset = False
-
-    if should_reset:
+    if args.reset_db:
         db = Storage(cfg.db_path, timezone_str=cfg.timezone)
         db.reset_all()
         db.close()

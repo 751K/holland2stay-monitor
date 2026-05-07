@@ -8,6 +8,7 @@ Holland2Stay 监控 Web 面板
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hmac
 import json
 import os
@@ -36,7 +37,7 @@ from config import (  # noqa: E402
     ListingFilter,
     resolve_project_path,
 )
-from models import LISTING_KEY_MAP                               # noqa: E402
+from models import parse_features_list                           # noqa: E402
 from storage import Storage                                      # noqa: E402
 from translations import tr as _tr                                       # noqa: E402
 from users import UserConfig, get_user, load_users, save_users  # noqa: E402
@@ -49,6 +50,12 @@ DB_PATH  = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
 TZ       = os.environ.get("TIMEZONE", "Europe/Amsterdam")
 PID_FILE = DATA_DIR / "monitor.pid"
 RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
+
+_VALID_PAYMENT_METHODS = {
+    "idealcheckout_ideal",
+    "idealcheckout_visa",
+    "idealcheckout_mastercard",
+}
 
 # 全局配置可写入的 .env 键（通知/过滤/预订已移至 users.json）
 _SETTINGS_KEYS = [
@@ -65,8 +72,10 @@ app = Flask(__name__, template_folder="templates")
 
 # SameSite=Lax：阻止跨站 POST 请求携带 session cookie（主要 CSRF 防护层）。
 # HttpOnly=True：禁止 JS 读取 session cookie（Flask 默认已是 True，此处显式声明）。
+# Secure=True：仅 HTTPS 下发送 cookie；本地开发通过 SESSION_COOKIE_SECURE=false 关闭。
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
 
 # 稳定的 secret key：优先读 .env，不存在则自动生成并写入，保证重启后 session 不失效
 def _ensure_secret_key() -> str:
@@ -89,9 +98,32 @@ app.secret_key = _ensure_secret_key()
 # 鉴权
 # ------------------------------------------------------------------ #
 
+# 登录爆破防护：按 IP 记录连续失败次数，超阈值后施加指数退避延迟
+_LOGIN_FAILURES: dict[str, list[float]] = {}
+_LOGIN_MAX_FAILURES = 5       # 连续失败 5 次后开始延迟
+_LOGIN_BASE_DELAY = 1.0       # 首次延迟 1 秒，之后指数增长
+
+def _check_login_rate(ip: str) -> float:
+    """返回当前 IP 应等待的秒数（0 表示无需等待）。"""
+    now = _time.monotonic()
+    window = [t for t in _LOGIN_FAILURES.get(ip, []) if now - t < 300]
+    _LOGIN_FAILURES[ip] = window
+    if len(window) < _LOGIN_MAX_FAILURES:
+        return 0.0
+    extra = len(window) - _LOGIN_MAX_FAILURES
+    return min(_LOGIN_BASE_DELAY * (2 ** extra), 30.0)
+
+def _record_login_failure(ip: str) -> None:
+    _LOGIN_FAILURES.setdefault(ip, []).append(_time.monotonic())
+
 def _auth_enabled() -> bool:
     """只有 WEB_PASSWORD 已设置才开启鉴权（向后兼容：未设置时无需登录）。"""
     return bool(os.environ.get("WEB_PASSWORD", "").strip())
+
+
+def _sanitize_dotenv(value: str) -> str:
+    """剥离换行符，防止 .env 注入攻击（\n 可伪造新键）。"""
+    return value.replace("\r", "").replace("\n", "")
 
 
 def _safe_next_url(candidate: str) -> str:
@@ -246,12 +278,7 @@ def parse_features(features_json: str) -> dict[str, str]:
         items = json.loads(features_json or "[]")
     except Exception:
         return {}
-    result: dict[str, str] = {}
-    for feat in items:
-        if ": " in feat:
-            raw_key, val = feat.split(": ", 1)
-            result[LISTING_KEY_MAP.get(raw_key, raw_key.lower())] = val
-    return result
+    return parse_features_list(items)
 
 
 @app.template_global()
@@ -271,7 +298,7 @@ def set_lang() -> Any:
     lang = request.args.get("lang", "zh")
     if lang not in ("zh", "en"):
         lang = "zh"
-    resp = redirect(request.args.get("next") or url_for("index"))
+    resp = redirect(_safe_next_url(request.args.get("next", "")))
     resp.set_cookie("h2s-lang", lang, max_age=60 * 60 * 24 * 365, samesite="Lax")
     return resp
 
@@ -291,20 +318,28 @@ def login() -> Any:
         return redirect(url_for("index"))
 
     if request.method == "POST":
+        # 爆破防护：连续失败超阈值后指数退避
+        client_ip = request.remote_addr or "0.0.0.0"
+        delay = _check_login_rate(client_ip)
+        if delay > 0:
+            _time.sleep(delay)
+
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        expected_user = os.environ.get("WEB_USERNAME", "admin")
+        expected_user = os.environ.get("WEB_USERNAME", "").strip() or "admin"
         expected_pass = os.environ.get("WEB_PASSWORD", "")
 
         # 用 hmac.compare_digest 防时序攻击
         user_ok = hmac.compare_digest(username, expected_user)
         pass_ok = hmac.compare_digest(password, expected_pass)
         if user_ok and pass_ok:
+            _LOGIN_FAILURES.pop(client_ip, None)  # 成功则清除失败记录
             session.permanent = True
             session["authenticated"] = True
             next_url = _safe_next_url(request.form.get("next", ""))
             return redirect(next_url)
 
+        _record_login_failure(client_ip)
         flash("用户名或密码错误", "danger")
 
     return render_template("login.html", next=request.args.get("next", ""),
@@ -375,11 +410,11 @@ def settings() -> Any:
         # 城市：复选框提交 "CityName,ID" 格式，用 | 拼接
         selected_cities = request.form.getlist("city_selected")
         cities_val = "|".join(selected_cities) if selected_cities else "Eindhoven,29"
-        set_key(str(ENV_PATH), "CITIES", cities_val, quote_mode="never")
+        set_key(str(ENV_PATH), "CITIES", _sanitize_dotenv(cities_val), quote_mode="never")
 
         for key in _SETTINGS_KEYS:
             val = request.form.get(key, "")
-            set_key(str(ENV_PATH), key, val, quote_mode="never")
+            set_key(str(ENV_PATH), key, _sanitize_dotenv(val), quote_mode="never")
 
         flash("✅ 全局配置已保存", "success")
         return redirect(url_for("settings"))
@@ -421,13 +456,33 @@ def _user_from_form(
                密码字段在 GET 时不回填到 HTML，空提交 = "不修改"。
                新建模式传 None，空密码字段即存为空字符串。
     """
-    def _fv(key: str):
+    def _fv(key: str, min_val: float = 0.01, max_val: float = 50000) -> Optional[float]:
         v = form.get(key, "").strip()
-        return float(v) if v else None
+        if not v:
+            return None
+        try:
+            val = float(v)
+        except ValueError:
+            logger.warning("表单 [%s] 值 %r 不是合法数字，已忽略", key, v)
+            return None
+        if not (min_val <= val <= max_val):
+            logger.warning("表单 [%s] 值 %.1f 超出范围 [%.1f, %.1f]，已忽略", key, val, min_val, max_val)
+            return None
+        return val
 
-    def _iv(key: str):
+    def _iv(key: str, min_val: int = 0, max_val: int = 200) -> Optional[int]:
         v = form.get(key, "").strip()
-        return int(v) if v else None
+        if not v:
+            return None
+        try:
+            val = int(v)
+        except ValueError:
+            logger.warning("表单 [%s] 值 %r 不是合法整数，已忽略", key, v)
+            return None
+        if not (min_val <= val <= max_val):
+            logger.warning("表单 [%s] 值 %d 超出范围 [%d, %d]，已忽略", key, val, min_val, max_val)
+            return None
+        return val
 
     def _lv(key: str) -> list[str]:
         v = form.get(key, "").strip()
@@ -456,11 +511,6 @@ def _user_from_form(
     )
 
     ex_ab = existing.auto_book if existing else None
-    _VALID_PAYMENT_METHODS = {
-        "idealcheckout_ideal",
-        "idealcheckout_visa",
-        "idealcheckout_mastercard",
-    }
     raw_pm = form.get("AUTO_BOOK_PAYMENT_METHOD", "idealcheckout_ideal")
     payment_method = raw_pm if raw_pm in _VALID_PAYMENT_METHODS else "idealcheckout_ideal"
 
@@ -570,7 +620,6 @@ def user_delete(user_id: str) -> Any:
 @csrf_required
 def user_test_notify(user_id: str) -> Any:
     """逐渠道发送一条测试消息，返回每个渠道的成功/失败详情。"""
-    import asyncio
     from datetime import datetime as _dt
     from notifier import EmailNotifier, IMessageNotifier, TelegramNotifier, WhatsAppNotifier
 
@@ -709,26 +758,28 @@ def api_map():
     finally:
         st.close()
 
-    # Auto-geocode uncached addresses (typically 0 after initial run)
-    for l in need_geocode:
-        addr = l["address"]
-        try:
-            url = f"https://nominatim.openstreetmap.org/search?q={quote(addr)}&format=json&limit=1"
-            req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
-            resp = urlopen(req, timeout=5)
-            import json as _json
-            data = _json.loads(resp.read().decode())
-            if data:
-                lat, lng = float(data[0]["lat"]), float(data[0]["lon"])
-                st2 = _storage()
-                try:
-                    st2.cache_coords(addr, lat, lng)
-                finally:
-                    st2.close()
-                results.append({**l, "lat": lat, "lng": lng})
-        except Exception:
-            pass
-        _time.sleep(0.6)  # Nominatim rate limit
+    # Auto-geocode uncached addresses in background daemon thread,
+    # so the API returns immediately without blocking.
+    if need_geocode:
+        def _geocode_worker():
+            st2 = _storage()
+            try:
+                for l in need_geocode:
+                    addr = l["address"]
+                    try:
+                        url = f"https://nominatim.openstreetmap.org/search?q={quote(addr)}&format=json&limit=1"
+                        req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
+                        resp = urlopen(req, timeout=5)
+                        data = json.loads(resp.read().decode())
+                        if data:
+                            lat, lng = float(data[0]["lat"]), float(data[0]["lon"])
+                            st2.cache_coords(addr, lat, lng)
+                    except Exception:
+                        pass
+                    _time.sleep(0.6)  # Nominatim rate limit
+            finally:
+                st2.close()
+        threading.Thread(target=_geocode_worker, daemon=True).start()
 
     return jsonify({"listings": results})
 
@@ -884,6 +935,11 @@ def api_status():
     })
 
 
+@app.route("/health")
+def health():
+    return jsonify({"ok": True})
+
+
 @app.route("/api/reload", methods=["POST"])
 @api_login_required
 @csrf_required
@@ -979,6 +1035,13 @@ def api_notifications_read():
     """标记所有通知为已读（或指定 ids 数组）。"""
     data = request.get_json(silent=True) or {}
     ids  = data.get("ids")  # None → 全部；list[int] → 指定
+    if ids is not None:
+        if not isinstance(ids, list):
+            return jsonify({"ok": False, "error": "ids 必须是数组"}), 400
+        try:
+            ids = [int(i) for i in ids]
+        except (ValueError, TypeError):
+            return jsonify({"ok": False, "error": "ids 元素必须是整数"}), 400
 
     storage = _storage()
     try:
@@ -1036,13 +1099,10 @@ def api_events():
         nonlocal last_id
         # 告知浏览器 2 s 后重连（连接到期或异常关闭时生效）
         yield "retry: 2000\n\n"
+        st = _storage()
         try:
             while not stop.is_set() and _time.monotonic() < expires:
-                st = _storage()
-                try:
-                    rows = st.get_notifications_since(last_id)
-                finally:
-                    st.close()
+                rows = st.get_notifications_since(last_id)
 
                 if rows:
                     last_id = rows[-1]["id"]
@@ -1062,6 +1122,7 @@ def api_events():
         except GeneratorExit:
             pass
         finally:
+            st.close()
             stop.set()  # 确保所有退出路径都能唤醒任何正在等待的 stop.wait()
 
     return Response(
