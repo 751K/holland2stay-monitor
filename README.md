@@ -236,15 +236,16 @@ cp .env.example .env
 # 1) Test scraping only (no DB writes, no notifications)
 python monitor.py --test
 
-# 2) Start the web admin panel and add your first user
+# 2) Start the web panel — the only command you need
 python web.py  # open http://127.0.0.1:8088
+#    Go to Dashboard and click "Start monitor" to begin monitoring.
+#    You can also start/stop the monitor from the web UI at any time.
 
-# 3) Run once to test full notification flow
+# 3) Or run monitor standalone (one-shot, CLI)
 python monitor.py --once
-
-# 4) Run continuous monitoring (background example)
-nohup python monitor.py > logs/monitor.log 2>&1 &
 ```
+
+The web panel dashboard includes **Start / Stop / Shutdown** buttons — no need to SSH in or manage background processes manually.
 
 Tip: On first run, if `data/users.json` does not exist and old `.env` notification env vars are present, the tool auto-migrates them into a default user.
 

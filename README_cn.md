@@ -242,15 +242,16 @@ cp .env.example .env
 # 1. 验证抓取是否正常（不写库、不发通知）
 python monitor.py --test
 
-# 2. 启动 Web 面板，在「用户管理」页面添加第一个用户
+# 2. 启动 Web 面板 — 唯一需要运行的命令
 python web.py              # http://127.0.0.1:8088
+#    进入 Dashboard 点击「启动监控」即可开始监控。
+#    监控的启停、关闭都可以在 Web 面板中操作，无需 SSH 或手动管理后台进程。
 
-# 3. 单次运行，验证完整通知流程
+# 3. 也可单独命令行运行（单次）
 python monitor.py --once
-
-# 4. 持续监控（后台运行）
-nohup python monitor.py > logs/monitor.log 2>&1 &
 ```
+
+Web 面板 Dashboard 提供 **启动监控 / 停止监控 / 关闭** 三个按钮，无需手动管理进程。
 
 > **提示**：首次启动时，若 `data/users.json` 不存在且 `.env` 中配置了旧版通知变量，会自动迁移为默认用户，无需手动配置。
 
