@@ -181,14 +181,61 @@
     </div>
     <div class="card-body">
       {% set lf = u.listing_filter if is_edit else none %}
-      <div class="form-row">
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
         <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="MAX_RENT" value="{{ lf.max_rent | int if lf and lf.max_rent else '' }}" placeholder="1500"></div>
         <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="MIN_AREA" value="{{ lf.min_area | int if lf and lf.min_area else '' }}" placeholder="20"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_max_area') }}</label><input type="number" class="form-input" name="MAX_AREA" value="{{ lf.max_area | int if lf and lf.max_area else '' }}"></div>
         <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="MIN_FLOOR" value="{{ lf.min_floor if lf and lf.min_floor is not none else '' }}" placeholder="0"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_occupancy') }}</label><input type="text" class="form-input" name="ALLOWED_OCCUPANCY" value="{{ lf.allowed_occupancy | join(',') if lf and lf.allowed_occupancy else '' }}" placeholder="One,Two"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_types') }}</label><input type="text" class="form-input" name="ALLOWED_TYPES" value="{{ lf.allowed_types | join(',') if lf and lf.allowed_types else '' }}" placeholder="Studio,1"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_hoods') }}</label><input type="text" class="form-input" name="ALLOWED_NEIGHBORHOODS" value="{{ lf.allowed_neighborhoods | join(',') if lf and lf.allowed_neighborhoods else '' }}" placeholder="Strijp,Centrum"></div>
+        <div class="form-group" style="grid-column:span 2;">
+          <label class="form-label">{{ _('user_form_occupancy') }}</label>
+          <div class="multi-select">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown">{% set sel_occ = lf.allowed_occupancy if lf else [] %}{% for val, label in occupancy_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_OCCUPANCY" value="{{ val }}"{% if val in sel_occ %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group" style="grid-column:span 2;">
+          <label class="form-label">{{ _('user_form_types') }}</label>
+          <div class="multi-select">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown">{% set sel_type = lf.allowed_types if lf else [] %}{% for val, label in type_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_TYPES" value="{{ val }}"{% if val in sel_type %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+          </div>
+        </div>
+      </div>
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_cities') }}</label>
+          <div class="multi-select">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown">{% set sel_city = lf.allowed_cities if lf else [] %}{% for c in city_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_CITIES" value="{{ c }}"{% if c in sel_city %} checked{% endif %}> {{ c }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_hoods') }}</label>
+          <div class="multi-select" id="ms-neighborhood">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown" id="neighborhood-dropdown">{% set sel_nbhd = lf.allowed_neighborhoods if lf else [] %}{% for n in sel_nbhd %}<label class="ms-option"><input type="checkbox" name="ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_offer') }}</label>
+          <div class="multi-select">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown">{% set sel_contract = lf.allowed_contract if lf else [] %}{% for val, label in contract_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_CONTRACT" value="{{ val }}"{% if val in sel_contract %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_tenant') }}</label>
+          <div class="multi-select">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown">{% set sel_tenant = lf.allowed_tenant if lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_TENANT" value="{{ val }}"{% if val in sel_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_promo') }}</label>
+          <div class="multi-select">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown">{% set sel_offer = lf.allowed_offer if lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_OFFER" value="{{ o }}"{% if o in sel_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -239,13 +286,37 @@
 
       <div class="text-xs font-semibold text-secondary mb-2">{{ _('user_form_ab_filter') }}</div>
       {% set ab_lf = ab.listing_filter if ab else none %}
-      <div class="form-row">
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
         <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MAX_RENT" value="{{ ab_lf.max_rent | int if ab_lf and ab_lf.max_rent else '' }}"></div>
         <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_AREA" value="{{ ab_lf.min_area | int if ab_lf and ab_lf.min_area else '' }}"></div>
         <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_FLOOR" value="{{ ab_lf.min_floor if ab_lf and ab_lf.min_floor is not none else '' }}"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_occupancy') }}</label><input type="text" class="form-input" name="AUTO_BOOK_ALLOWED_OCCUPANCY" value="{{ ab_lf.allowed_occupancy | join(',') if ab_lf and ab_lf.allowed_occupancy else '' }}"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_types') }}</label><input type="text" class="form-input" name="AUTO_BOOK_ALLOWED_TYPES" value="{{ ab_lf.allowed_types | join(',') if ab_lf and ab_lf.allowed_types else '' }}"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_hoods') }}</label><input type="text" class="form-input" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS" value="{{ ab_lf.allowed_neighborhoods | join(',') if ab_lf and ab_lf.allowed_neighborhoods else '' }}"></div>
+        <div class="form-group" style="grid-column:span 2;">
+          <label class="form-label">{{ _('user_form_occupancy') }}</label>
+          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_occ = ab_lf.allowed_occupancy if ab_lf else [] %}{% for val, label in occupancy_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OCCUPANCY" value="{{ val }}"{% if val in ab_occ %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+        <div class="form-group" style="grid-column:span 2;">
+          <label class="form-label">{{ _('user_form_types') }}</label>
+          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_type = ab_lf.allowed_types if ab_lf else [] %}{% for val, label in type_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TYPES" value="{{ val }}"{% if val in ab_type %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+      </div>
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_cities') }}</label>
+          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_city = ab_lf.allowed_cities if ab_lf else [] %}{% for c in city_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CITIES" value="{{ c }}"{% if c in ab_city %} checked{% endif %}> {{ c }}</label>{% endfor %}</div></div></div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_hoods') }}</label>
+          <div class="multi-select" id="ms-ab-neighborhood">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown" id="ab-neighborhood-dropdown">{% set ab_nbhd = ab_lf.allowed_neighborhoods if ab_lf else [] %}{% for n in ab_nbhd %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_offer') }}</label>
+          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_contract = ab_lf.allowed_contract if ab_lf else [] %}{% for val, label in contract_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CONTRACT" value="{{ val }}"{% if val in ab_contract %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_tenant') }}</label>
+          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_tenant = ab_lf.allowed_tenant if ab_lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TENANT" value="{{ val }}"{% if val in ab_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_promo') }}</label>
+          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_offer = ab_lf.allowed_offer if ab_lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OFFER" value="{{ o }}"{% if o in ab_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div></div></div>
       </div>
 
       <div class="alert alert-info mt-4">
@@ -330,6 +401,61 @@ function testNotify(userId, btn) {
       }
     })
     .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
+}
+
+// ── 片区动态加载（根据所选城市）──────────────────────────────
+var selNbh = {{ (lf.allowed_neighborhoods if lf else []) | tojson }};
+var selAbNbh = {{ (ab_lf.allowed_neighborhoods if ab_lf else []) | tojson }};
+
+function loadNeighborhoods() {
+  var cities = [];
+  document.querySelectorAll('input[name="ALLOWED_CITIES"]:checked').forEach(function(cb){ cities.push(cb.value); });
+  var url = '/api/neighborhoods';
+  if(cities.length > 0) url += '?cities=' + encodeURIComponent(cities.join(','));
+  fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    renderHoods('neighborhood-dropdown', 'ALLOWED_NEIGHBORHOODS', d.neighborhoods, selNbh);
+  }).catch(function(){});
+  // Auto-book
+  var abCities = [];
+  document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_CITIES"]:checked').forEach(function(cb){ abCities.push(cb.value); });
+  var abUrl = '/api/neighborhoods';
+  if(abCities.length > 0) abUrl += '?cities=' + encodeURIComponent(abCities.join(','));
+  fetch(abUrl).then(function(r){ return r.json(); }).then(function(d){
+    renderHoods('ab-neighborhood-dropdown', 'AUTO_BOOK_ALLOWED_NEIGHBORHOODS', d.neighborhoods, selAbNbh);
+  }).catch(function(){});
+}
+
+function renderHoods(dropId, inputName, hoods, selected) {
+  var drop = document.getElementById(dropId);
+  if(!drop) return;
+  var html = '';
+  hoods.forEach(function(h){
+    var checked = selected.indexOf(h) >= 0 ? ' checked' : '';
+    html += '<label class="ms-option"><input type="checkbox" name="' + inputName + '" value="' + h.replace(/"/g, '&quot;') + '"' + checked + '> ' + h + '</label>';
+  });
+  drop.innerHTML = html || '<div class="ms-option" style="color:var(--text3);cursor:default">' + (document.documentElement.lang === 'zh' ? '请先选择城市' : 'Select a city first') + '</div>';
+  // Re-init multi-select — retry once if not yet initialised
+  var ms = drop.closest('.multi-select');
+  if (ms) {
+    if (ms._update) { ms._update(); }
+    else { setTimeout(function(){ if(ms._update) ms._update(); }, 150); }
+  }
+}
+
+// Init when DOM is ready (no dependency on script execution order)
+function _initNeighborhoods() {
+  loadNeighborhoods();
+  ['ALLOWED_CITIES','AUTO_BOOK_ALLOWED_CITIES'].forEach(function(name){
+    document.querySelectorAll('input[name="' + name + '"]').forEach(function(cb){
+      cb.addEventListener('change', loadNeighborhoods);
+    });
+  });
+}
+// 使用 requestIdleCallback 延迟到多选组件初始化之后执行
+if (window.requestIdleCallback) {
+  requestIdleCallback(function() { _initNeighborhoods(); });
+} else {
+  setTimeout(function() { _initNeighborhoods(); }, 200);
 }
 </script>
 {% endblock %}

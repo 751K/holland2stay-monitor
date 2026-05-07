@@ -95,6 +95,7 @@
   <div class="card mb-4">
     <div class="section-header">
       <i class="bi bi-geo-alt mr-2" style="color:var(--success);"></i>{{ _('settings_cities') }}
+      <button type="button" class="btn btn-ghost btn-sm" onclick="var cbs=this.parentElement.nextElementSibling.querySelectorAll('input[type=checkbox]');var all=Array.from(cbs).every(c=>c.checked);cbs.forEach(c=>c.checked=!all);this.textContent=all?'{{ _('select_all') }}':'{{ _('deselect_all') }}'" style="margin-left:auto;">{{ _('select_all') }}</button>
     </div>
     <div class="card-body">
       <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
