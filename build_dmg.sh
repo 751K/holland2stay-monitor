@@ -92,6 +92,14 @@ else
 fi
 
 echo "=== Step 4: Create .dmg ==="
+
+# Eject any previously mounted DMG with the same volume name
+if hdiutil info | grep -q "$DMG_NAME"; then
+    echo "Ejecting existing mounted DMG..."
+    hdiutil detach "/Volumes/$DMG_NAME" -force 2>/dev/null || true
+    sleep 1
+fi
+
 rm -f "$DIST_DIR/$DMG_NAME.dmg"
 
 # Create a temporary folder for DMG contents
