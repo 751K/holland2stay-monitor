@@ -27,3 +27,7 @@ README*.md
 .vscode/
 .idea/
 *.swp
+
+# 工具脚本（不需要打包进镜像）
+geocode_all.py
+reset_db.py
