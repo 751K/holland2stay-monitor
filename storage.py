@@ -528,7 +528,7 @@ class Storage:
                 "city": r["city"] or "",
                 "neighborhood": feat_map.get("neighborhood", ""),
                 "building": feat_map.get("building", ""),
-                "area": feat_map.get("living_area", ""),
+                "area": feat_map.get("area", ""),
                 "address": address,
             })
         return results
