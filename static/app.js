@@ -211,9 +211,12 @@ function connectSSE() {
     try { items = JSON.parse(e.data); } catch(_) { return; }
     if(!items || !items.length) return;
     _notifLastId = items[items.length - 1].id;
-    _notifUnread += items.length;
-    updateNotifBadge(_notifUnread);
-    items.slice(0, 3).forEach(showToast);
+    // 只对未读通知弹 toast（新标签页不会重复弹已读的）
+    items.filter(function(n){ return !n.read; }).slice(0, 3).forEach(showToast);
+    // 从服务端同步真实未读数，避免本地计数不准
+    fetch('/api/notifications?limit=1').then(function(r){ return r.json(); }).then(function(d){
+      if(d.ok && typeof d.unread === 'number') updateNotifBadge(d.unread);
+    }).catch(function(){});
     if(_notifPanelOpen) loadNotifications();
   };
   src.onerror = function() {
@@ -235,5 +238,79 @@ document.addEventListener('DOMContentLoaded', function() {
   // Close sidebar on Escape
   document.addEventListener('keydown', function(e) {
     if(e.key === 'Escape') closeSidebar();
+  });
+
+  // ── Multi-select dropdown ──
+  document.querySelectorAll('.multi-select').forEach(function(ms) {
+    var trigger  = ms.querySelector('.ms-trigger');
+    var dropdown = ms.querySelector('.ms-dropdown');
+    var textEl   = ms.querySelector('.ms-text');
+    var checkboxes = ms.querySelectorAll('input[type="checkbox"]');
+
+    function position() {
+      var r = trigger.getBoundingClientRect();
+      dropdown.style.top  = (r.bottom + 4) + 'px';
+      dropdown.style.left = r.left + 'px';
+      dropdown.style.minWidth = r.width + 'px';
+    }
+
+    function update() {
+      var sel = [];
+      checkboxes.forEach(function(cb) {
+        if (cb.checked) sel.push(cb.parentElement.textContent.trim());
+      });
+      trigger.querySelectorAll('.ms-tag').forEach(function(t) { t.remove(); });
+      if (sel.length === 0) {
+        textEl.textContent = '';
+        textEl.style.display = '';
+      } else {
+        textEl.textContent = '';
+        textEl.style.display = 'none';
+        sel.forEach(function(label, i) {
+          var tag = document.createElement('span');
+          tag.className = 'ms-tag';
+          tag.textContent = label;
+          var rm = document.createElement('span');
+          rm.className = 'ms-rm';
+          rm.textContent = '×';
+          rm.onclick = function(e) {
+            e.stopPropagation();
+            // 找到对应的 checkbox 并取消勾选
+            checkboxes.forEach(function(cb) {
+              if (cb.parentElement.textContent.trim() === label) cb.checked = false;
+            });
+            update();
+          };
+          tag.appendChild(rm);
+          trigger.insertBefore(tag, textEl);
+        });
+      }
+    }
+
+    ms._update = function() {
+      checkboxes = ms.querySelectorAll('input[type="checkbox"]');
+      checkboxes.forEach(function(cb) { cb.addEventListener('change', update); });
+      update();
+    };
+
+    update();
+
+    trigger.addEventListener('click', function(e) {
+      e.stopPropagation();
+      position();
+      ms.classList.toggle('open');
+    });
+
+    window.addEventListener('resize', function() {
+      if (ms.classList.contains('open')) position();
+    });
+
+    checkboxes.forEach(function(cb) {
+      cb.addEventListener('change', update);
+    });
+
+    document.addEventListener('click', function(e) {
+      if (!ms.contains(e.target)) ms.classList.remove('open');
+    });
   });
 });
