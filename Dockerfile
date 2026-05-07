@@ -16,7 +16,11 @@ COPY *.py ./
 COPY templates/ templates/
 
 # 运行时目录（data/ 和 logs/ 会通过 volume 挂载覆盖，这里只是保证目录存在）
-RUN mkdir -p data logs
+RUN mkdir -p data logs \
+    && useradd -m appuser \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 COPY supervisord.conf /etc/supervisor/conf.d/app.conf
 

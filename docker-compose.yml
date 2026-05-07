@@ -4,6 +4,8 @@ services:
     image: h2s-monitor
     container_name: h2s
     restart: unless-stopped
+    mem_limit: 512M
+    cpus: 1.0
     ports:
       # 宿主机端口:容器端口，可改左边的数字来避免冲突
       - "5000:5000"
@@ -18,7 +20,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/api/status', timeout=5)\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/health', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 3
