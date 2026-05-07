@@ -924,6 +924,18 @@ def api_logs():
         return jsonify({"lines": [], "size": 0, "error": str(e)}), 500
 
 
+@app.route("/api/logs/clear", methods=["POST"])
+@api_login_required
+@csrf_required
+def api_logs_clear():
+    try:
+        if _LOG_PATH.exists():
+            _LOG_PATH.write_text("", encoding="utf-8")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/logs")
 @login_required
 def logs_view():
@@ -1108,6 +1120,29 @@ def api_monitor_stop():
         return jsonify({"ok": True, "message": "已发送停止信号"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/shutdown", methods=["POST"])
+@api_login_required
+@csrf_required
+def api_shutdown():
+    """关闭监控和 Web 面板。"""
+    # 先停监控
+    pid = _monitor_pid()
+    if pid is not None:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
+    # 延迟 300ms 后杀死 web 自身，保证响应能返回给前端
+    def _delayed():
+        import time as _t
+        _t.sleep(0.3)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=_delayed, daemon=True).start()
+    return jsonify({"ok": True, "message": "正在关闭..."})
 
 
 # ------------------------------------------------------------------ #

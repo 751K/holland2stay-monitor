@@ -51,6 +51,12 @@ TRANSLATIONS = {
     "pause":                {"zh": "暂停",                    "en": "Pause"},
     "loading":              {"zh": "加载中...",               "en": "Loading..."},
     "no_logs_yet":          {"zh": "暂无日志",                "en": "No logs yet"},
+    "clear_logs":           {"zh": "清空日志",                "en": "Clear logs"},
+    "clear_logs_confirm":   {"zh": "确定要清空日志吗？",        "en": "Clear all log entries?"},
+    "shutdown":             {"zh": "关闭",                    "en": "Shutdown"},
+    "shutdown_hint":        {"zh": "停止监控和 Web 面板",      "en": "Stop monitor and web panel"},
+    "shutdown_confirm":     {"zh": "确定要停止监控和 Web 面板吗？", "en": "Stop the monitor and web panel?"},
+    "shutdown_done":        {"zh": "已关闭，页面将断开连接。",    "en": "Shutdown complete. Connection will close."},
 
     # ── Dashboard ────────────────────────────────────────
     "dashboard_title":      {"zh": "仪表盘 · Holland2Stay",   "en": "Dashboard · Holland2Stay"},
