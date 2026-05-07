@@ -29,6 +29,9 @@ LISTING_KEY_MAP: dict[str, str] = {
     "Energy":       "energy_label", # 能耗标签，e.g. "A" / "B"
     "Neighborhood": "neighborhood", # 片区，e.g. "Strijp-S"
     "Building":     "building",     # 楼盘名，e.g. "The Docks"
+    "Offer":        "offer",        # 短租标签，e.g. "Short-stay"
+    "Contract":     "contract",     # 合同类型，e.g. "Indefinite" / "6 months max"
+    "Tenant":       "tenant",       # 租客要求，e.g. "student only" / "employed only"
 }
 
 
