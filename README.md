@@ -215,7 +215,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | Category UID | `category_uid: "Nw=="` (Residences) |
 | Available to book | `available_to_book: { in: ["179"] }` |
 | Available in lottery | `available_to_book: { in: ["336"] }` |
-| Custom fields | `custom_attributesV2` → `basic_rent`, `living_area`, `floor`, `available_startdate`, and more |
+| Custom fields | `custom_attributesV2` → `price` (total rent incl. service costs), `living_area`, `floor`, `available_startdate`, and more |
 
 ---
 
@@ -237,7 +237,7 @@ cp .env.example .env
 python monitor.py --test
 
 # 2) Start the web admin panel and add your first user
-python web.py  # open http://127.0.0.1:5000
+python web.py  # open http://127.0.0.1:8088
 
 # 3) Run once to test full notification flow
 python monitor.py --once
@@ -286,7 +286,7 @@ Set `SESSION_COOKIE_SECURE=true` in `.env` when using HTTPS. The docker-compose.
 `mem_limit: 512M` and `cpus: 1.0` to prevent runaway resource consumption.
 
 **First-time setup on a VPS:**
-1. After `docker compose up -d`, open `http://<server-ip>:5000` in your browser
+1. After `docker compose up -d`, open `http://<server-ip>:8088` in your browser
 2. Go to **Users** and add your first user with a Telegram or Email channel (iMessage is macOS-only and is skipped automatically)
 3. Go to **Settings** and choose which cities to monitor
 4. Click **立即生效 / Apply now** to hot-reload the config without restarting

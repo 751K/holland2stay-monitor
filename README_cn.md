@@ -222,7 +222,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | 分类 ID | `category_uid: "Nw=="` (Residences) |
 | 可直接预订 | `available_to_book: { in: ["179"] }` |
 | 摇号中 | `available_to_book: { in: ["336"] }` |
-| 自定义属性 | `custom_attributesV2` → `basic_rent` / `living_area` / `floor` / `available_startdate` 等 |
+| 自定义属性 | `custom_attributesV2` → `price`（总租金含服务费）/ `living_area` / `floor` / `available_startdate` 等 |
 
 ---
 
@@ -243,7 +243,7 @@ cp .env.example .env
 python monitor.py --test
 
 # 2. 启动 Web 面板，在「用户管理」页面添加第一个用户
-python web.py              # http://127.0.0.1:5000
+python web.py              # http://127.0.0.1:8088
 
 # 3. 单次运行，验证完整通知流程
 python monitor.py --once
@@ -293,7 +293,7 @@ gunicorn -w 2 -b 127.0.0.1:5000 web:app
 使用 HTTPS 时需在 `.env` 中设置 `SESSION_COOKIE_SECURE=true`。
 
 **VPS 首次配置流程：**
-1. `docker compose up -d` 后在浏览器打开 `http://<服务器IP>:5000`
+1. `docker compose up -d` 后在浏览器打开 `http://<服务器IP>:8088`
 2. 进入「用户管理」添加第一个用户，渠道选择 Telegram 或 Email（iMessage 需要 macOS，非 Mac 环境会自动跳过）
 3. 进入「设置」选择要监控的城市
 4. 点击「立即生效」热重载配置，无需重启容器
