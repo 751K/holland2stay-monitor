@@ -24,7 +24,7 @@ USER appuser
 
 COPY supervisord.conf /etc/supervisor/conf.d/app.conf
 
-EXPOSE 5000
+EXPOSE 8088
 
 # -n = nodaemon（前台运行，Docker 需要）
 CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/app.conf"]
