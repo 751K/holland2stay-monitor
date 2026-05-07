@@ -12,15 +12,17 @@ DB = Path("data/listings.db")
 
 
 def geocode_address(address: str) -> tuple[float, float] | None:
-    """Call Nominatim, return (lat, lng) or None."""
+    """Call Photon (Komoot), return (lat, lng) or None."""
     from urllib.request import Request
-    url = f"https://nominatim.openstreetmap.org/search?q={quote(address)}&format=json&limit=1"
+    url = f"https://photon.komoot.io/api/?q={quote(address)}&limit=1"
     req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
     try:
         resp = urlopen(req, timeout=8)
         data = json.loads(resp.read().decode())
-        if data:
-            return float(data[0]["lat"]), float(data[0]["lon"])
+        feats = data.get("features", [])
+        if feats:
+            coords = feats[0]["geometry"]["coordinates"]
+            return float(coords[1]), float(coords[0])  # [lng, lat] → (lat, lng)
     except Exception as e:
         print(f"  ⚠ Geocode failed: {e}")
     return None
@@ -70,7 +72,7 @@ def main() -> None:
             print("✗")
 
         if i < total:
-            time.sleep(0.6)  # Nominatim rate limit
+            time.sleep(0.15)
 
     print(f"\nDone: {cached_count} cached, {new_count} new, {failed} failed")
 
