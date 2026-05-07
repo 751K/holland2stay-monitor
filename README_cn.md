@@ -30,6 +30,9 @@
 | i18n 中英切换 | ✅ 已完成 | 一键切换语言，cookie 持久化 |
 | 通知测试 | ✅ 已完成 | 一键逐渠道测试，返回成功 / 失败详情 |
 | 面板鉴权 | ✅ 已完成 | Session 登录，opt-in（设置密码后启用） |
+| 登录爆破防护 | ✅ 已完成 | IP 级失败计数 + 指数退避延迟 |
+| 安全加固 | ✅ 已完成 | 开放重定向修复、.env 注入防护、Docker 非 root 运行 |
+| 代码质量 | ✅ 已完成 | Literal 类型、共享常量、解析逻辑去重 |
 
 ---
 
@@ -277,6 +280,17 @@ docker compose down
 ```
 
 容器内 `monitor.py` 和 `web.py` 由 supervisord 同时管理，进程崩溃会自动重启，日志写入宿主机的 `./logs/` 目录。
+
+容器以非 root 用户 `appuser` 运行，`docker-compose.yml` 已配置 `mem_limit: 512M` 和 `cpus: 1.0` 防止资源耗尽。
+
+**生产部署注意：** Flask 内置 Werkzeug 服务器仅适合内网/LAN 使用。如需对外暴露，请使用 Nginx/Caddy 反代 + Gunicorn：
+
+```bash
+pip install gunicorn
+gunicorn -w 2 -b 127.0.0.1:5000 web:app
+```
+
+使用 HTTPS 时需在 `.env` 中设置 `SESSION_COOKIE_SECURE=true`。
 
 **VPS 首次配置流程：**
 1. `docker compose up -d` 后在浏览器打开 `http://<服务器IP>:5000`

@@ -32,6 +32,9 @@ Note: Personal project — not for commercial use. Contributions, issues and PRs
 | i18n (中/EN) | ✅ Done | One-click language switch, cookie-persisted |
 | Notification testing | ✅ Done | Per-channel test with result details |
 | Optional auth for web | ✅ Done | Session login enabled when password set |
+| Login rate limiting | ✅ Done | IP-based exponential backoff after 5 failures |
+| Security hardening | ✅ Done | Open-redirect fix, .env injection prevention, non-root Docker |
+| Code quality | ✅ Done | Literal types, shared constants, dedup parse logic |
 
 ---
 
@@ -270,7 +273,17 @@ docker compose logs -f
 docker compose down
 ```
 
-The container runs `monitor.py` and `web.py` together under supervisord. Both processes log to `./logs/` on the host.
+The container runs `monitor.py` and `web.py` together under supervisord. Both processes log to `./logs/` on the host. The container runs as non-root user `appuser`.
+
+**Production deployment note:** The built-in Flask Werkzeug server is suitable only for internal/LAN use. For internet-facing deployments, place the app behind a reverse proxy (Nginx/Caddy) with HTTPS, and use Gunicorn:
+
+```bash
+pip install gunicorn
+gunicorn -w 2 -b 127.0.0.1:5000 web:app
+```
+
+Set `SESSION_COOKIE_SECURE=true` in `.env` when using HTTPS. The docker-compose.yml includes
+`mem_limit: 512M` and `cpus: 1.0` to prevent runaway resource consumption.
 
 **First-time setup on a VPS:**
 1. After `docker compose up -d`, open `http://<server-ip>:5000` in your browser
