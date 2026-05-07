@@ -18,22 +18,34 @@ docker compose up -d
 **macOS .dmg：**
 从 [Releases](../../releases) 下载最新 `.dmg`，拖入 Applications，双击启动即可自动打开浏览器。持久化数据存储在 `~/.h2s-monitor/`。
 
-自行构建 `.dmg`：
+**Windows：**
+从 [Releases](../../releases) 下载最新 `.zip`，解压后双击 `h2s-monitor.exe`。CMD 窗口会自动打开浏览器。持久化数据存储在 `%USERPROFILE%\.h2s-monitor\`。
+
+<details>
+<summary><b>自行构建（macOS / Windows / GitHub Actions）</b></summary>
+
+**本地构建 — macOS：**
 ```bash
-# 要求：macOS, Python 3.11+, conda 环境 "daily" 并安装依赖、将 app 图标放到 asset/image.png（1024x1024 PNG）
+# 要求：macOS, Python 3.11+
+# 将 app 图标放到 asset/image.png（1024x1024 PNG）
 bash build_dmg.sh
 # 输出：dist/Holland2Stay Monitor.dmg
 ```
 
-**Windows：**
-从 [Releases](../../releases) 下载最新 `.zip`，解压后双击 `h2s-monitor.exe`。CMD 窗口会自动打开浏览器。持久化数据存储在 `%USERPROFILE%\.h2s-monitor\`。
-
-自行构建：
+**本地构建 — Windows：**
 ```cmd
 REM 要求：Windows, Python 3.11+, pip
 build.bat
 REM 输出：dist\Holland2Stay Monitor.zip
 ```
+
+**通过 GitHub Actions 构建**（无需本地环境，同时产出 macOS + Windows）：
+1. 把代码 push 到 GitHub
+2. 打开 **Actions → Build → Run workflow**
+3. 构建完成后在 run 页面下载产物（macOS .dmg + Windows .zip）
+4. 或推送 `v` 开头 tag（如 `v1.0.0`）自动把产物挂到 Release 页面
+
+</details>
 
 **或本地运行：**
 ```bash

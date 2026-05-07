@@ -20,23 +20,34 @@ docker compose up -d
 **macOS .dmg:**
 Download the latest `.dmg` from [Releases](../../releases), mount and drag to Applications. Double-click to start — opens browser automatically. Persistent data is stored in `~/.h2s-monitor/`.
 
-To build the `.dmg` yourself:
+**Windows:**
+Download the latest `.zip` from [Releases](../../releases), extract and double-click `h2s-monitor.exe`. A CMD window opens and the browser launches automatically. Persistent data is stored in `%USERPROFILE%\.h2s-monitor\`.
+
+<details>
+<summary><b>Build from source (macOS / Windows / GitHub Actions)</b></summary>
+
+**Build locally — macOS:**
 ```bash
-# Requires: macOS, Python 3.11+, conda env "daily" with dependencies
+# Requires: macOS, Python 3.11+
 # Place your app icon at asset/image.png (1024x1024 PNG)
 bash build_dmg.sh
 # Output: dist/Holland2Stay Monitor.dmg
 ```
 
-**Windows:**
-Download the latest `.zip` from [Releases](../../releases), extract and double-click `h2s-monitor.exe`. A CMD window opens and the browser launches automatically. Persistent data is stored in `%USERPROFILE%\.h2s-monitor\`.
-
-To build yourself:
+**Build locally — Windows:**
 ```cmd
 REM Requires: Windows, Python 3.11+, pip
 build.bat
 REM Output: dist\Holland2Stay Monitor.zip
 ```
+
+**Build via GitHub Actions** (no local dev setup, builds both platforms):
+1. Push your code to GitHub
+2. Go to **Actions → Build → Run workflow**
+3. Download artifacts from the completed run (macOS .dmg + Windows .zip)
+4. Or push a `v` tag (e.g. `v1.0.0`) to auto-attach artifacts to a Release
+
+</details>
 
 **Or run locally:**
 ```bash
