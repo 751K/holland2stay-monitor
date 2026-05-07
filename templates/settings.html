@@ -97,9 +97,9 @@
       <i class="bi bi-geo-alt mr-2" style="color:var(--success);"></i>{{ _('settings_cities') }}
     </div>
     <div class="card-body">
-      <div class="form-row">
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
         {% for city in known_cities %}
-        <label class="checkbox">
+        <label class="checkbox" style="white-space:nowrap;">
           <input type="checkbox" name="city_selected" value="{{ city.name }},{{ city.id }}" {% if city.id in selected_city_ids %}checked{% endif %}>
           {{ city.name }}
         </label>

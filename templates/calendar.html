@@ -194,8 +194,8 @@ function renderCalendar() {
       month = currentMonth; year = currentYear;
     }
 
-    var ymd = year + '-' + String(month+1).padStart(2,'0') + '-' + String(date).padStart(2,'0');
-    var listings = byDate[ymd] || [];
+    let ymd = year + '-' + String(month+1).padStart(2,'0') + '-' + String(date).padStart(2,'0');
+    let listings = byDate[ymd] || [];
     var isToday = ymd === today;
     var isSelected = ymd === selectedDate;
 

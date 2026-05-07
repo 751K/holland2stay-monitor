@@ -58,6 +58,12 @@
       <a href="{{ url_for('settings') }}" class="{% if request.endpoint=='settings' %}active{% endif %}">
         <i class="bi bi-gear"></i> {{ _('settings') }}
       </a>
+      <a href="{{ url_for('system_info') }}" class="{% if request.endpoint=='system_info' %}active{% endif %}">
+        <i class="bi bi-info-circle"></i> {{ _('system_info') }}
+      </a>
+      <a href="{{ url_for('logs_view') }}" class="{% if request.endpoint=='logs_view' %}active{% endif %}">
+        <i class="bi bi-terminal"></i> {{ _('log_viewer') }}
+      </a>
     </nav>
 
     <div class="sidebar-footer">

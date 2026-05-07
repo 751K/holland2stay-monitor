@@ -50,6 +50,22 @@
       <div class="kpi-label">{{ _('last_scrape') }} · {{ stats.last_count }} {{ _('items_unit') }}</div>
     </div>
   </div>
+
+  <div class="kpi-card {% if monitor_running %}accent-green{% else %}accent-red{% endif %}" id="monitor-card">
+    <div class="kpi-icon" style="background:linear-gradient(135deg,{% if monitor_running %}#10b981,#059669{% else %}#ef4444,#dc2626{% endif %});">
+      <i class="bi {% if monitor_running %}bi-play-circle-fill{% else %}bi-stop-circle{% endif %}"></i>
+    </div>
+    <div>
+      <div class="kpi-num" style="font-size:14px;padding-top:4px;" id="monitor-status">
+        {% if monitor_running %}{{ _('monitor_running') }}{% else %}{{ _('monitor_stopped') }}{% endif %}
+      </div>
+      <div class="kpi-label">
+        <a href="#" onclick="toggleMonitor(event)" class="text-sm" style="color:var(--accent);" id="monitor-btn">
+          {% if monitor_running %}{{ _('stop_monitor') }}{% else %}{{ _('start_monitor') }}{% endif %}
+        </a>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- Two column layout -->
@@ -116,4 +132,46 @@
   </div>
 
 </div>
+
+<script>
+async function toggleMonitor(e) {
+  e.preventDefault();
+  const btn = document.getElementById('monitor-btn');
+  const statusEl = document.getElementById('monitor-status');
+  const card = document.getElementById('monitor-card');
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  const isRunning = btn.innerText.includes('停止') || btn.innerText.includes('Stop');
+
+  const action = isRunning ? 'stop' : 'start';
+  btn.innerText = '...';
+  try {
+    const resp = await fetch('/api/monitor/' + action, {
+      method: 'POST',
+      headers: {'X-CSRF-Token': csrf}
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      if (isRunning) {
+        btn.innerText = '{{ _("start_monitor") }}';
+        statusEl.innerText = '{{ _("monitor_stopped") }}';
+        card.className = 'kpi-card accent-red';
+        card.querySelector('.kpi-icon').style.background = 'linear-gradient(135deg,#ef4444,#dc2626)';
+        card.querySelector('.kpi-icon i').className = 'bi bi-stop-circle';
+      } else {
+        btn.innerText = '{{ _("stop_monitor") }}';
+        statusEl.innerText = '{{ _("monitor_running") }}';
+        card.className = 'kpi-card accent-green';
+        card.querySelector('.kpi-icon').style.background = 'linear-gradient(135deg,#10b981,#059669)';
+        card.querySelector('.kpi-icon i').className = 'bi bi-play-circle-fill';
+      }
+    } else {
+      alert(data.error || '操作失败');
+      location.reload();
+    }
+  } catch(err) {
+    alert('请求失败: ' + err.message);
+    location.reload();
+  }
+}
+</script>
 {% endblock %}
