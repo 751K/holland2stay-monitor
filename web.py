@@ -29,8 +29,10 @@ from typing import Any
 from dotenv import dotenv_values, set_key
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (  # noqa: E402
+    ASSETS_DIR,
     BASE_DIR,
     DATA_DIR,
     ENV_PATH,
@@ -73,7 +75,11 @@ _SETTINGS_KEYS = [
 # Flask app
 # ------------------------------------------------------------------ #
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(
+    __name__,
+    template_folder=str(ASSETS_DIR / "templates"),
+    static_folder=str(ASSETS_DIR / "static"),
+)
 
 # SameSite=Lax：阻止跨站 POST 请求携带 session cookie（主要 CSRF 防护层）。
 # HttpOnly=True：禁止 JS 读取 session cookie（Flask 默认已是 True，此处显式声明）。
@@ -1061,7 +1067,7 @@ def health():
 def api_reload():
     pid = _monitor_pid()
     if pid is None:
-        return jsonify({"ok": False, "error": "监控程序未运行，请先启动 monitor.py"}), 400
+        return jsonify({"ok": False, "error": "监控程序未运行，请先启动监控"}), 400
 
     # Windows 没有可靠的 SIGHUP 语义，统一改为写入 reload 请求文件。
     # 监控进程会在等待间隙轮询该文件并提前热重载。
@@ -1096,12 +1102,20 @@ def api_monitor_start():
     if _monitor_pid() is not None:
         return jsonify({"ok": False, "error": "监控已在运行"}), 409
     try:
-        subprocess.Popen(
-            [sys.executable, str(BASE_DIR / "monitor.py")],
-            cwd=str(BASE_DIR),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        if getattr(sys, "frozen", False):
+            subprocess.Popen(
+                [sys.executable, "--run-monitor"],
+                cwd=str(BASE_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(
+                [sys.executable, str(BASE_DIR / "monitor.py")],
+                cwd=str(BASE_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         return jsonify({"ok": True, "message": "已启动"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

@@ -13,3 +13,8 @@ data/
 
 # mac
 .DS_Store
+
+# build outputs
+build/
+dist/
+icon.icns

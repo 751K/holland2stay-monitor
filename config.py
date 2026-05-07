@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,7 +37,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    # 持久化数据存放到用户目录，保证 web 和 monitor 进程共享同一份数据
+    BASE_DIR = Path.home() / ".h2s-monitor"
+    ASSETS_DIR = Path(sys._MEIPASS).resolve()
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+    ASSETS_DIR = BASE_DIR
+
 DATA_DIR = BASE_DIR / "data"
 ENV_PATH = BASE_DIR / ".env"
 

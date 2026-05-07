@@ -14,17 +14,22 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 复制应用代码
 COPY *.py ./
 COPY templates/ templates/
+COPY static/ static/
 
-# 运行时目录（data/ 和 logs/ 会通过 volume 挂载覆盖，这里只是保证目录存在）
+# 复制 entrypoint 并加执行权限
+COPY entrypoint.sh /entrypoint.sh
+
+# 运行时目录
 RUN mkdir -p data logs \
     && useradd -m appuser \
-    && chown -R appuser:appuser /app
-
-USER appuser
+    && chown -R appuser:appuser /app \
+    && chmod +x /entrypoint.sh
 
 COPY supervisord.conf /etc/supervisor/conf.d/app.conf
 
+USER appuser
+
 EXPOSE 8088
 
-# -n = nodaemon（前台运行，Docker 需要）
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/app.conf"]

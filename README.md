@@ -10,14 +10,39 @@ A personal project that monitors Holland2Stay (https://www.holland2stay.com) for
 
 ## Quick start
 
+**Docker (recommended):**
 ```bash
-# 1) Install
+cp .env.example .env && mkdir -p data logs
+docker compose up -d
+# open http://localhost:8088 → Dashboard → "Start monitor"
+```
+
+**macOS .dmg:**
+Download the latest `.dmg` from [Releases](../../releases), mount and drag to Applications. Double-click to start — opens browser automatically. Persistent data is stored in `~/.h2s-monitor/`.
+
+To build the `.dmg` yourself:
+```bash
+# Requires: macOS, Python 3.11+, conda env "daily" with dependencies
+# Place your app icon at asset/image.png (1024x1024 PNG)
+bash build_dmg.sh
+# Output: dist/Holland2Stay Monitor.dmg
+```
+
+**Windows:**
+Download the latest `.zip` from [Releases](../../releases), extract and double-click `h2s-monitor.exe`. A CMD window opens and the browser launches automatically. Persistent data is stored in `%USERPROFILE%\.h2s-monitor\`.
+
+To build yourself:
+```cmd
+REM Requires: Windows, Python 3.11+, pip
+build.bat
+REM Output: dist\Holland2Stay Monitor.zip
+```
+
+**Or run locally:**
+```bash
 pip install -r requirements.txt
 cp .env.example .env
-
-# 2) Launch — the only command you need
-python web.py  # open http://127.0.0.1:8088
-#    Dashboard → "Start monitor" to begin
+python web.py  # http://127.0.0.1:8088
 ```
 
 [Full installation guide →](#run-locally)
@@ -467,6 +492,12 @@ docker-compose.yml  Volume mounts (data/, logs/, .env), port mapping, healthchec
 .dockerignore       Excludes .env, data/, logs/, __pycache__ from build context
 requirements.txt    Python dependencies
 .env.example        Configuration template
+asset/              App icon source (1024x1024 PNG)
+launcher.py         macOS .app entry point (imports web.app, handles --run-monitor)
+build_dmg.sh        macOS .dmg build script (PyInstaller + .app bundle + icon)
+build.bat           Windows build script (PyInstaller + ZIP)
+h2s_monitor.spec    PyInstaller spec file
+entrypoint.sh       Docker entrypoint (creates .env and directories on first run)
 data/               Runtime data (auto-created)
   listings.db       SQLite database
   users.json        Per-user config (channels / filters / booking credentials)

@@ -2,6 +2,11 @@
 data/
 logs/
 
+# 构建产物
+build/
+dist/
+*.spec
+
 # 密钥（绝对不能打包进镜像）
 .env
 
@@ -31,3 +36,6 @@ README*.md
 # 工具脚本（不需要打包进镜像）
 geocode_all.py
 reset_db.py
+launcher.py
+h2s_monitor.spec
+build_dmg.sh

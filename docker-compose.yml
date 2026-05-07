@@ -7,15 +7,10 @@ services:
     mem_limit: 512M
     cpus: 1.0
     ports:
-      # 宿主机端口:容器端口，可改左边的数字来避免冲突
       - "8088:8088"
     volumes:
-      # data/ 存放 listings.db 和 users.json，必须挂载才能持久化
       - ./data:/app/data
-      # logs/ 让宿主机可以直接 tail -f
       - ./logs:/app/logs
-      # .env 挂载为可写文件：Web 面板「保存设置」会通过 set_key() 写入此文件，
-      # 「立即生效」再通过 SIGHUP 热重载。注意：必须先在宿主机创建此文件（见 README）。
       - ./.env:/app/.env
     environment:
       - PYTHONUNBUFFERED=1
