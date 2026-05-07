@@ -267,10 +267,17 @@ def time_ago(iso_str: str) -> str:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
         diff = datetime.now(timezone.utc) - dt
         secs = int(diff.total_seconds())
-        if secs < 60:    return f"{secs}秒前"
-        if secs < 3600:  return f"{secs // 60}分钟前"
-        if secs < 86400: return f"{secs // 3600}小时前"
-        return f"{secs // 86400}天前"
+        zh = _get_lang() == "zh"
+        if secs < 60:
+            return f"{secs}秒前" if zh else f"{secs}s ago"
+        if secs < 3600:
+            m = secs // 60
+            return f"{m}分钟前" if zh else f"{m}m ago"
+        if secs < 86400:
+            h = secs // 3600
+            return f"{h}小时前" if zh else f"{h}h ago"
+        d = secs // 86400
+        return f"{d}天前" if zh else f"{d}d ago"
     except Exception:
         return iso_str
 
@@ -497,6 +504,11 @@ def _user_from_form(
         return val
 
     def _lv(key: str) -> list[str]:
+        # Checkbox 多选：有多个同名字段时用 getlist
+        vals = form.getlist(key)
+        if vals:
+            return [x.strip() for x in vals if x.strip()]
+        # 兼容旧的文本框输入（逗号分隔）
         v = form.get(key, "").strip()
         return [x.strip() for x in v.split(",") if x.strip()] if v else []
 
@@ -515,11 +527,14 @@ def _user_from_form(
     lf = ListingFilter(
         max_rent=_fv("MAX_RENT"),
         min_area=_fv("MIN_AREA"),
-        max_area=_fv("MAX_AREA"),
         min_floor=_iv("MIN_FLOOR"),
         allowed_occupancy=_lv("ALLOWED_OCCUPANCY"),
         allowed_types=_lv("ALLOWED_TYPES"),
         allowed_neighborhoods=_lv("ALLOWED_NEIGHBORHOODS"),
+        allowed_contract=_lv("ALLOWED_CONTRACT"),
+        allowed_tenant=_lv("ALLOWED_TENANT"),
+        allowed_offer=_lv("ALLOWED_OFFER"),
+        allowed_cities=_lv("ALLOWED_CITIES"),
     )
 
     ex_ab = existing.auto_book if existing else None
@@ -536,11 +551,14 @@ def _user_from_form(
         listing_filter=ListingFilter(
             max_rent=_fv("AUTO_BOOK_MAX_RENT"),
             min_area=_fv("AUTO_BOOK_MIN_AREA"),
-            max_area=_fv("AUTO_BOOK_MAX_AREA"),
             min_floor=_iv("AUTO_BOOK_MIN_FLOOR"),
             allowed_occupancy=_lv("AUTO_BOOK_ALLOWED_OCCUPANCY"),
+            allowed_contract=_lv("AUTO_BOOK_ALLOWED_CONTRACT"),
+            allowed_tenant=_lv("AUTO_BOOK_ALLOWED_TENANT"),
+            allowed_offer=_lv("AUTO_BOOK_ALLOWED_OFFER"),
             allowed_types=_lv("AUTO_BOOK_ALLOWED_TYPES"),
             allowed_neighborhoods=_lv("AUTO_BOOK_ALLOWED_NEIGHBORHOODS"),
+            allowed_cities=_lv("AUTO_BOOK_ALLOWED_CITIES"),
         ),
     )
     return UserConfig(
@@ -553,7 +571,7 @@ def _user_from_form(
         telegram_token=form.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=form.get("TELEGRAM_CHAT_ID", ""),
         email_smtp_host=form.get("EMAIL_SMTP_HOST", "").strip(),
-        email_smtp_port=_iv("EMAIL_SMTP_PORT") or 587,
+        email_smtp_port=_iv("EMAIL_SMTP_PORT", min_val=1, max_val=65535) or 587,
         email_smtp_security=form.get("EMAIL_SMTP_SECURITY", "starttls").strip().lower() or "starttls",
         email_username=form.get("EMAIL_USERNAME", "").strip(),
         email_password=_secret("EMAIL_PASSWORD", existing.email_password if existing else ""),
@@ -575,6 +593,85 @@ def users_list() -> str:
     return render_template("users.html", users=users)
 
 
+# 默认可选值（DB 为空时回退）
+_DEFAULT_OCCUPANCY = ["One", "Two (only couples)", "Family (parents with children)"]
+_DEFAULT_TYPES = ["Studio", "1", "2", "3", "Loft (open bedroom area)"]
+_DEFAULT_CONTRACT = ["Indefinite", "6 months max"]
+_DEFAULT_TENANT = ["student only", "student and employed", "employed only"]
+_DEFAULT_OFFER = ["Short-stay", "Parking included"]
+
+# 类别对应的回退默认值
+_DEFAULTS = {
+    "Occupancy": _DEFAULT_OCCUPANCY,
+    "Type": _DEFAULT_TYPES,
+    "Contract": _DEFAULT_CONTRACT,
+    "Offer": _DEFAULT_OFFER,
+    "Tenant": _DEFAULT_TENANT,
+}
+
+# 过滤选项显示名称 (zh, en)
+_LABELS: dict[str, dict[str, tuple[str, str]]] = {
+    "Type": {
+        "1":                       ("1 居室",           "1 bedroom"),
+        "2":                       ("2 居室",           "2 bedrooms"),
+        "3":                       ("3 居室",           "3 bedrooms"),
+        "4":                       ("4 居室",           "4 bedrooms"),
+        "Loft (open bedroom area)": ("Loft",            "Loft"),
+    },
+    "Occupancy": {
+        "One":                     ("单人",              "Single"),
+        "Two":                     ("双人",              "Two persons"),
+        "Two (only couples)":      ("双人/情侣",         "Two (couples)"),
+        "Family (parents with children)": ("家庭",       "Family"),
+    },
+    "Contract": {
+        "Indefinite":              ("长期",              "Indefinite"),
+        "6 months max":            ("短租(≤6月)",        "6 months max"),
+    },
+    "Tenant": {
+        "student only":            ("仅学生",            "Student only"),
+        "employed only":           ("仅上班族",          "Employed only"),
+        "student and employed":    ("学生/上班族",       "Student & employed"),
+        "custom":                  ("自定义",            "Custom"),
+    },
+}
+
+
+def _localize_options(category: str, options: list[str]) -> list[tuple[str, str]]:
+    """为选项附加显示标签（根据当前语言），返回 [(value, label), ...]，保持原始顺序"""
+    labels = _LABELS.get(category, {})
+    zh = _get_lang() == "zh"
+    result = []
+    for v in options:
+        if v in labels:
+            result.append((v, labels[v][0 if zh else 1]))
+        else:
+            result.append((v, v))
+    return result
+
+
+def _get_filter_options(category: str) -> list[str]:
+    """从 DB 获取所有可选的分类值，DB 为空时使用预设回退。"""
+    import sqlite3 as _sq
+
+    default = _DEFAULTS.get(category, [])
+    try:
+        conn = _sq.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+        pattern = f"{category}:%"
+        rows = conn.execute(
+            """SELECT DISTINCT ltrim(substr(value, instr(value, ':') + 1)) as val
+               FROM listings, json_each(features)
+               WHERE value LIKE ?
+               ORDER BY val""",
+            (pattern,),
+        ).fetchall()
+        conn.close()
+        db_vals = [r[0] for r in rows if r[0]]
+        return db_vals if db_vals else default
+    except Exception:
+        return default
+
+
 @app.route("/users/new", methods=["GET", "POST"])
 @login_required
 @csrf_required
@@ -587,8 +684,18 @@ def user_new() -> Any:
         flash(f"✅ 用户「{user.name}」已创建", "success")
         return redirect(url_for("users_list"))
     # GET：空白表单
+    city_names = sorted(c["name"] for c in KNOWN_CITIES)
+    contract_opts = _localize_options("Contract", _get_filter_options("Contract"))
+    tenant_opts = _localize_options("Tenant", _get_filter_options("Tenant"))
+    offer_opts = _get_filter_options("Offer")
     return render_template("user_form.html", user=None,
-                           action=url_for("user_new"), title="新增用户")
+                           action=url_for("user_new"), title="新增用户",
+                           occupancy_options=_localize_options("Occupancy", _get_filter_options("Occupancy")),
+                           type_options=_localize_options("Type", _get_filter_options("Type")),
+                           city_options=city_names,
+                           contract_options=contract_opts,
+                           tenant_options=tenant_opts,
+                           offer_options=offer_opts)
 
 
 @app.route("/users/<user_id>", methods=["GET", "POST"])
@@ -609,9 +716,19 @@ def user_edit(user_id: str) -> Any:
         flash(f"✅ 用户「{updated.name}」已保存", "success")
         return redirect(url_for("user_edit", user_id=user_id))
 
+    city_names = sorted(c["name"] for c in KNOWN_CITIES)
+    contract_opts = _localize_options("Contract", _get_filter_options("Contract"))
+    tenant_opts = _localize_options("Tenant", _get_filter_options("Tenant"))
+    offer_opts = _get_filter_options("Offer")
     return render_template("user_form.html", user=user,
                            action=url_for("user_edit", user_id=user_id),
-                           title=f"编辑用户 · {user.name}")
+                           title=f"编辑用户 · {user.name}",
+                           occupancy_options=_localize_options("Occupancy", _get_filter_options("Occupancy")),
+                           type_options=_localize_options("Type", _get_filter_options("Type")),
+                           city_options=city_names,
+                           contract_options=contract_opts,
+                           tenant_options=tenant_opts,
+                           offer_options=offer_opts)
 
 
 @app.route("/users/<user_id>/delete", methods=["POST"])
@@ -736,6 +853,10 @@ def user_toggle(user_id: str) -> Any:
 # 路由 — 地图
 # ------------------------------------------------------------------ #
 
+_geocode_lock = threading.Lock()
+_geocode_status = {"running": False, "total": 0, "done": 0, "failed": 0}
+
+
 @app.route("/map")
 @login_required
 def map_view() -> str:
@@ -772,6 +893,10 @@ def api_map():
 
     # Auto-geocode uncached addresses in background daemon thread,
     # so the API returns immediately without blocking.
+    # 如果手动地理编码正在运行则跳过，避免并发调用 Photon API。
+    with _geocode_lock:
+        if _geocode_status["running"]:
+            need_geocode = []
     if need_geocode:
         def _geocode_worker():
             st2 = _storage()
@@ -779,21 +904,138 @@ def api_map():
                 for l in need_geocode:
                     addr = l["address"]
                     try:
-                        url = f"https://nominatim.openstreetmap.org/search?q={quote(addr)}&format=json&limit=1"
+                        url = f"https://photon.komoot.io/api/?q={quote(addr)}&limit=1"
                         req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
                         resp = urlopen(req, timeout=5)
                         data = json.loads(resp.read().decode())
-                        if data:
-                            lat, lng = float(data[0]["lat"]), float(data[0]["lon"])
+                        feats = data.get("features", [])
+                        if feats:
+                            coords = feats[0]["geometry"]["coordinates"]
+                            lng, lat = float(coords[0]), float(coords[1])
                             st2.cache_coords(addr, lat, lng)
                     except Exception:
                         pass
-                    _time.sleep(0.6)  # Nominatim rate limit
+                    _time.sleep(0.15)
             finally:
                 st2.close()
         threading.Thread(target=_geocode_worker, daemon=True).start()
 
     return jsonify({"listings": results})
+
+
+@app.route("/api/map/geocode", methods=["POST"])
+@api_login_required
+@csrf_required
+def api_map_geocode():
+    """启动后台地理编码任务。进度通过 GET /api/map/geocode/status 查询。"""
+    with _geocode_lock:
+        if _geocode_status["running"]:
+            s = dict(_geocode_status)
+            return jsonify({"ok": True, "running": True, "total": s["total"], "done": s["done"], "failed": s["failed"]})
+
+    import time as _time
+    from urllib.request import Request, urlopen
+    from urllib.parse import quote
+
+    st = _storage()
+    try:
+        listings = st.get_map_listings()
+    finally:
+        st.close()
+
+    uncached = []
+    st2 = _storage()
+    try:
+        for l in listings:
+            if not st2.get_cached_coords(l["address"]):
+                uncached.append(l)
+    finally:
+        st2.close()
+
+    if not uncached:
+        return jsonify({"ok": True, "total": 0, "done": 0, "failed": 0, "running": False, "finished": True})
+
+    with _geocode_lock:
+        _geocode_status["running"] = True
+        _geocode_status["total"] = len(uncached)
+        _geocode_status["done"] = 0
+        _geocode_status["failed"] = 0
+
+    def _worker():
+        done, failed = 0, 0
+        st3 = _storage()
+        try:
+            for l in uncached:
+                addr = l["address"]
+                try:
+                    url = f"https://photon.komoot.io/api/?q={quote(addr)}&limit=1"
+                    req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
+                    resp = urlopen(req, timeout=5)
+                    data = json.loads(resp.read().decode())
+                    feats = data.get("features", [])
+                    if feats:
+                        coords = feats[0]["geometry"]["coordinates"]
+                        lng, lat = float(coords[0]), float(coords[1])
+                        st3.cache_coords(addr, lat, lng)
+                        done += 1
+                    else:
+                        failed += 1
+                except Exception:
+                    failed += 1
+                with _geocode_lock:
+                    _geocode_status["done"] = done
+                    _geocode_status["failed"] = failed
+                _time.sleep(0.15)
+        finally:
+            st3.close()
+            with _geocode_lock:
+                _geocode_status["running"] = False
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"ok": True, "running": True, "total": len(uncached), "done": 0, "failed": 0})
+
+
+@app.route("/api/map/geocode/status")
+@api_login_required
+def api_map_geocode_status():
+    """查询地理编码任务进度。"""
+    with _geocode_lock:
+        s = dict(_geocode_status)
+    return jsonify({"running": s["running"], "total": s["total"], "done": s["done"], "failed": s["failed"],
+                    "finished": not s["running"] and s["total"] > 0})
+
+
+@app.route("/api/neighborhoods")
+@api_login_required
+def api_neighborhoods():
+    """返回指定城市的所有片区（供用户过滤表单动态加载）。"""
+    cities = request.args.get("cities", "").split(",")
+    cities = [c.strip() for c in cities if c.strip()]
+    import sqlite3 as _sq
+    hoods: list[str] = []
+    try:
+        conn = _sq.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+        if cities:
+            placeholders = ",".join("?" * len(cities))
+            rows = conn.execute(
+                f"""SELECT DISTINCT ltrim(substr(value, instr(value, ':') + 1)) as val
+                    FROM listings, json_each(features)
+                    WHERE value LIKE 'Neighborhood:%' AND city IN ({placeholders})
+                    ORDER BY val""",
+                cities,
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT DISTINCT ltrim(substr(value, instr(value, ':') + 1)) as val
+                   FROM listings, json_each(features)
+                   WHERE value LIKE 'Neighborhood:%'
+                   ORDER BY val"""
+            ).fetchall()
+        conn.close()
+        hoods = [r[0] for r in rows if r[0]]
+    except Exception:
+        pass
+    return jsonify({"neighborhoods": hoods})
 
 
 # ------------------------------------------------------------------ #
@@ -865,6 +1107,9 @@ def system_info():
 
     # ── 配置 ──
     from config import load_config as _lc
+    # 强制从 .env 文件重新加载（override=True），因为 os.environ 可能仍是旧值
+    from dotenv import load_dotenv as _ld
+    _ld(dotenv_path=ENV_PATH, override=True)
     cfg = _lc()
     info["cities"] = [c.name for c in cfg.cities]
     info["check_interval"] = cfg.check_interval

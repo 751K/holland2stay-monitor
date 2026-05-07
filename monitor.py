@@ -876,6 +876,9 @@ async def _async_main() -> None:
     parser.add_argument("--reset-db", action="store_true", help="启动前清空数据库（非交互式）")
     args = parser.parse_args()
 
+    # 强制从 .env 文件重新加载（override=True 覆盖继承的环境变量），
+    # 确保子进程启动时使用最新的 .env 配置而非父进程的陈旧值。
+    load_dotenv(dotenv_path=ENV_PATH, override=True)
     cfg = load_config()
     _setup_logging(cfg.log_level)
 

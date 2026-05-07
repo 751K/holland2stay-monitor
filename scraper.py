@@ -95,6 +95,8 @@ _HEADERS = {
     "Accept": "application/json",
 }
 
+_MAX_PAGES = 50  # 安全上限：防止 API 返回异常 total_pages 导致无限翻页
+
 
 def _post_gql(session: req.Session, query: str) -> dict:
     """
@@ -151,6 +153,8 @@ _RELEVANT_ATTRS = {
     "neighborhood",          # AttributeValue: 片区名
     "next_contract_startdate",    # AttributeValue: "2026-06-01"，预订专用入住日期
     "no_of_rooms",           # AttributeSelectedOptions: 房间数 / 户型标签
+    "offer_text_two",        # AttributeValue: "Short-stay" / 空，区分短租和长租
+    "tenant_profile",        # AttributeSelectedOptions: [{label, value}]，租客要求
     "type_of_contract",      # AttributeSelectedOptions: [{label, value}]，合同类型 ID
 }
 
@@ -294,6 +298,16 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
             if v:
                 suffix = " m²" if key == "living_area" else ""
                 features.append(f"{prefix}: {v}{suffix}")
+        # 合同类型 / 短租标签
+        offer = attrs.get("offer_text_two", "")
+        if offer and offer.strip():
+            features.append(f"Offer: {offer.strip()}")
+        toc = attrs.get("type_of_contract")
+        if isinstance(toc, list) and toc:
+            features.append(f"Contract: {toc[0]['label']}")
+        tp = attrs.get("tenant_profile")
+        if isinstance(tp, list) and tp:
+            features.append(f"Tenant: {tp[0]['label']}")
 
         return Listing(
             id=listing_id,
@@ -375,7 +389,7 @@ def _scrape_city_pages(
 
         logger.info("[%s] 第 %d/%d 页，本页 %d 条", city_name, current_page, total_pages, len(items))
 
-        if current_page >= total_pages:
+        if current_page >= total_pages or current_page >= _MAX_PAGES:
             break
         current_page += 1
 

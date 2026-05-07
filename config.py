@@ -160,9 +160,6 @@ class ListingFilter:
     min_area: Optional[float] = None
     """最小面积（m²）。低于此值的房源不通知。e.g. 20.0"""
 
-    max_area: Optional[float] = None
-    """最大面积（m²）。高于此值的房源不通知。"""
-
     min_floor: Optional[int] = None
     """最低楼层（0=地面层）。低于此楼层的房源不通知。e.g. 1"""
 
@@ -184,16 +181,43 @@ class ListingFilter:
     e.g. ["Strijp", "Centrum"]
     """
 
+    allowed_cities: list[str] = field(default_factory=list)
+    """
+    城市白名单（精确匹配城市名，大小写不敏感）。非空时只通知指定城市的房源。
+    e.g. ["Eindhoven", "Amsterdam"]
+    """
+
+    allowed_contract: list[str] = field(default_factory=list)
+    """
+    合同类型白名单（子串匹配，大小写不敏感）。非空时只通知匹配的房源。
+    e.g. ["6 months max"] 只推送短租；["Indefinite"] 只推送长租。
+    """
+
+    allowed_tenant: list[str] = field(default_factory=list)
+    """
+    租客要求白名单（子串匹配，大小写不敏感）。非空时只通知匹配的房源。
+    e.g. ["student only"] 只推送学生房。
+    """
+
+    allowed_offer: list[str] = field(default_factory=list)
+    """
+    促销/标签白名单（子串匹配，大小写不敏感）。非空时只通知匹配的房源。
+    e.g. ["Short-stay"] / ["Parking included"]。
+    """
+
     def is_empty(self) -> bool:
         """所有条件均未设置时返回 True，表示全部放行。"""
         return (
             self.max_rent is None
             and self.min_area is None
-            and self.max_area is None
             and self.min_floor is None
             and not self.allowed_occupancy
             and not self.allowed_types
             and not self.allowed_neighborhoods
+            and not self.allowed_cities
+            and not self.allowed_contract
+            and not self.allowed_tenant
+            and not self.allowed_offer
         )
 
     def passes(self, listing: "Listing") -> bool:
@@ -242,16 +266,6 @@ class ListingFilter:
                 return False
             if area < self.min_area:
                 return False
-        if self.max_area is not None:
-            if area is None:
-                logger.warning(
-                    "过滤拒绝 [%s]: 已设 max_area=%.0f 但面积字段缺失（API 未返回）",
-                    listing.name, self.max_area,
-                )
-                return False
-            if area > self.max_area:
-                return False
-
         if self.min_floor is not None:
             floor_str = fm.get("floor", "")
             floor = parse_int(floor_str)
@@ -277,6 +291,26 @@ class ListingFilter:
         if self.allowed_neighborhoods:
             nbhd = fm.get("neighborhood", "")
             if not any(a.lower() in nbhd.lower() for a in self.allowed_neighborhoods):
+                return False
+
+        if self.allowed_cities:
+            city = listing.city or ""
+            if not any(a.lower() == city.lower() for a in self.allowed_cities):
+                return False
+
+        if self.allowed_contract:
+            contract = fm.get("contract", "")
+            if not any(a.lower() in contract.lower() for a in self.allowed_contract):
+                return False
+
+        if self.allowed_tenant:
+            tenant = fm.get("tenant", "")
+            if not any(a.lower() in tenant.lower() for a in self.allowed_tenant):
+                return False
+
+        if self.allowed_offer:
+            offer = fm.get("offer", "")
+            if not any(a.lower() in offer.lower() for a in self.allowed_offer):
                 return False
 
         return True

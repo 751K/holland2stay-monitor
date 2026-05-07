@@ -174,8 +174,23 @@ class MultiNotifier(BaseNotifier):
         if not self._notifiers:
             logger.debug("未配置任何通知渠道")
             return False
+
+        async def _send_with_retry(n):
+            try:
+                ok = await n._send(text)
+                if ok:
+                    return True
+            except Exception:
+                pass
+            # 失败后等待 3 秒重试一次
+            await asyncio.sleep(3)
+            try:
+                return await n._send(text)
+            except Exception:
+                return False
+
         results = await asyncio.gather(
-            *[n._send(text) for n in self._notifiers],
+            *[_send_with_retry(n) for n in self._notifiers],
             return_exceptions=True,
         )
         return any(r is True for r in results)

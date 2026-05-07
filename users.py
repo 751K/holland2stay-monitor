@@ -118,11 +118,14 @@ def _lf_from_dict(d: dict) -> ListingFilter:
     return ListingFilter(
         max_rent=d.get("max_rent"),
         min_area=d.get("min_area"),
-        max_area=d.get("max_area"),
         min_floor=d.get("min_floor"),
         allowed_occupancy=d.get("allowed_occupancy", []),
         allowed_types=d.get("allowed_types", []),
         allowed_neighborhoods=d.get("allowed_neighborhoods", []),
+        allowed_contract=d.get("allowed_contract", []),
+        allowed_tenant=d.get("allowed_tenant", []),
+        allowed_offer=d.get("allowed_offer", []),
+        allowed_cities=d.get("allowed_cities", []),
     )
 
 
@@ -282,10 +285,10 @@ def migrate_from_env() -> Optional[UserConfig]:
           EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM, EMAIL_TO,
           TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, TWILIO_TO,
           NOTIFICATIONS_ENABLED
-    过滤：MAX_RENT, MIN_AREA, MAX_AREA, MIN_FLOOR,
+    过滤：MAX_RENT, MIN_AREA, MIN_FLOOR,
           ALLOWED_OCCUPANCY, ALLOWED_TYPES, ALLOWED_NEIGHBORHOODS
     预订：AUTO_BOOK_ENABLED, AUTO_BOOK_DRY_RUN, AUTO_BOOK_EMAIL, AUTO_BOOK_PASSWORD,
-          AUTO_BOOK_MAX_RENT, AUTO_BOOK_MIN_AREA, AUTO_BOOK_MAX_AREA, AUTO_BOOK_MIN_FLOOR,
+          AUTO_BOOK_MAX_RENT, AUTO_BOOK_MIN_AREA, AUTO_BOOK_MIN_FLOOR,
           AUTO_BOOK_ALLOWED_OCCUPANCY, AUTO_BOOK_ALLOWED_TYPES, AUTO_BOOK_ALLOWED_NEIGHBORHOODS
 
     Returns
@@ -316,7 +319,6 @@ def migrate_from_env() -> Optional[UserConfig]:
     lf = ListingFilter(
         max_rent=_f("MAX_RENT"),
         min_area=_f("MIN_AREA"),
-        max_area=_f("MAX_AREA"),
         min_floor=_i("MIN_FLOOR"),
         allowed_occupancy=_l("ALLOWED_OCCUPANCY"),
         allowed_types=_l("ALLOWED_TYPES"),
@@ -330,7 +332,6 @@ def migrate_from_env() -> Optional[UserConfig]:
         listing_filter=ListingFilter(
             max_rent=_f("AUTO_BOOK_MAX_RENT"),
             min_area=_f("AUTO_BOOK_MIN_AREA"),
-            max_area=_f("AUTO_BOOK_MAX_AREA"),
             min_floor=_i("AUTO_BOOK_MIN_FLOOR"),
             allowed_occupancy=_l("AUTO_BOOK_ALLOWED_OCCUPANCY"),
             allowed_types=_l("AUTO_BOOK_ALLOWED_TYPES"),
