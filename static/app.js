@@ -232,9 +232,12 @@ function connectSSE() {
 
 // ── Init ──────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function() {
-  // Load notifications first, then connect SSE (avoids race where SSE
-  // uses _notifLastId=0 before loadNotifications updates it)
-  loadNotifications().then(function(){ connectSSE(); });
+  // 仅 admin 加载通知 + SSE（访客不显示通知，避免无意义的 403 请求）
+  if(window._isAdmin !== false) {
+    // Load notifications first, then connect SSE (avoids race where SSE
+    // uses _notifLastId=0 before loadNotifications updates it)
+    loadNotifications().then(function(){ connectSSE(); });
+  }
 
   // Close sidebar when clicking overlay
   var overlay = document.querySelector('.sidebar-overlay');

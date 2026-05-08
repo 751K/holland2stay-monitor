@@ -33,9 +33,11 @@
   <div class="flex items-center gap-2">
     <span id="map-count" class="meta"></span>
     <span class="meta" id="map-loading"><i class="bi bi-arrow-clockwise mr-1"></i>{{ _('map_loading') }}</span>
+    {% if is_admin %}
     <button type="button" class="btn btn-ghost btn-sm" id="btn-geocode" onclick="runGeocode()" title="{{ _('map_geocode_hint') }}">
       <i class="bi bi-geo-alt mr-1"></i>{{ _('map_geocode_btn') }}
     </button>
+    {% endif %}
   </div>
 </div>
 

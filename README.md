@@ -91,7 +91,7 @@ python web.py  # http://127.0.0.1:8088
 | Optional auth for web | ✅ Done | Session login enabled when password set; `WEB_GUEST_MODE` controls guest entry |
 | Login rate limiting | ✅ Done | IP-based exponential backoff after 5 failures |
 | HTTPS / Caddy | ✅ Done | Bundled Caddyfile + docker-compose Caddy service; auto Let's Encrypt |
-| Security hardening | ✅ Done | RBAC decorators, payment URL filtered for guests, CSRF, open-redirect fix |
+| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic |
 
 ---

@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.1.7 (2026-05-08)
+
+### 修复
+
+- **设置页保存报 500**：`dotenv.set_key()` 内部使用 `os.replace()`（原子 rename），在 Docker bind-mount 的 `.env` 文件上触发 `OSError [Errno 16] Device or resource busy`；改用自实现的 `_write_env_key()`（读取 → 内存修改 → 原地写回）彻底规避
+
+### 变更
+
+- **访客权限进一步收紧**：
+  - 铃铛通知按钮与通知面板对访客隐藏（`{% if is_admin %}`）
+  - `/api/notifications`、`/api/notifications/read`、`/api/events` 改为 `@admin_api_required`，访客无法轮询通知或订阅 SSE
+  - 地图页「解析地址」按钮对访客隐藏，防止触发 geocode 写入
+  - 前端通过 `window._isAdmin` 变量跳过通知初始化，避免产生无意义的 403 请求
+
+---
+
 ## v1.1.6 (2026-05-08)
 
 ### New

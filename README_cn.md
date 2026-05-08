@@ -89,7 +89,7 @@ python web.py  # http://127.0.0.1:8088
 | 面板鉴权 | ✅ 已完成 | Session 登录，opt-in（设置密码后启用）；`WEB_GUEST_MODE` 控制访客入口 |
 | 登录爆破防护 | ✅ 已完成 | IP 级失败计数 + 指数退避延迟 |
 | HTTPS / Caddy | ✅ 已完成 | 内置 Caddyfile + docker-compose Caddy 服务，自动签发 Let's Encrypt 证书 |
-| 安全加固 | ✅ 已完成 | RBAC 装饰器、付款 URL 访客过滤、CSRF 防护、开放重定向修复 |
+| 安全加固 | ✅ 已完成 | RBAC 装饰器、通知/SSE/geocode 访客屏蔽、CSRF 防护、开放重定向修复 |
 | 代码质量 | ✅ 已完成 | Literal 类型、共享常量、解析逻辑去重 |
 
 ---

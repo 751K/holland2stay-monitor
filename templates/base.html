@@ -74,11 +74,13 @@
         <span class="mon-text">{{ _('monitor_checking') }}</span>
       </div>
 
+      {% if is_admin %}
       <button onclick="toggleNotifications()" class="notif-trigger">
         <i class="bi bi-bell" style="font-size:15px;width:18px;text-align:center;"></i>
         {{ _('notifications') }}
         <span id="notif-badge" class="notif-badge">0</span>
       </button>
+      {% endif %}
 
       <button onclick="toggleTheme()">
         <i id="theme-icon" class="bi bi-sun" style="font-size:15px;width:18px;text-align:center;"></i>
@@ -120,6 +122,7 @@
 
 </div>
 
+{% if is_admin %}
 <!-- Notification panel (fixed, outside sidebar to avoid clipping) -->
 <div id="notif-wrap" class="notif-wrap">
   <div class="notif-panel" id="notif-panel">
@@ -132,10 +135,12 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
 
+<script>window._isAdmin = {{ 'true' if is_admin else 'false' }};</script>
 <script src="/static/app.js"></script>
 {% block scripts %}{% endblock %}
 </body>
