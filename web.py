@@ -26,7 +26,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, session, stream_with_context, url_for
 
 if not getattr(sys, "frozen", False):
@@ -98,7 +98,7 @@ def _ensure_secret_key() -> str:
     if ENV_PATH.exists() or not ENV_PATH.parent.exists():
         try:
             ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-            set_key(str(ENV_PATH), "FLASK_SECRET", key, quote_mode="never")
+            _write_env_key("FLASK_SECRET", key)
         except Exception:
             pass
     return key
@@ -156,6 +156,39 @@ def _is_admin() -> bool:
 def _sanitize_dotenv(value: str) -> str:
     """剥离换行符，防止 .env 注入攻击（\n 可伪造新键）。"""
     return value.replace("\r", "").replace("\n", "")
+
+
+def _write_env_key(key: str, value: str) -> None:
+    """
+    写入或更新 .env 文件中的单个键值对。
+
+    替代 dotenv.set_key()：后者内部使用 os.replace()（原子 rename），
+    在 Docker bind-mount 场景下会触发 OSError [Errno 16] Device or resource busy。
+    本函数直接读取 → 内存修改 → 原地写回，绕过 rename 限制。
+    """
+    path = ENV_PATH
+    if not path.exists():
+        path.touch()
+
+    content = path.read_text(encoding="utf-8")
+    lines = content.splitlines(keepends=True)
+
+    found = False
+    new_lines: list[str] = []
+    for line in lines:
+        if re.match(rf"^\s*{re.escape(key)}\s*=", line):
+            new_lines.append(f"{key}={value}\n")
+            found = True
+        else:
+            new_lines.append(line)
+
+    if not found:
+        # 文件末尾没有换行时补一个，再追加新键
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines.append("\n")
+        new_lines.append(f"{key}={value}\n")
+
+    path.write_text("".join(new_lines), encoding="utf-8")
 
 
 def _safe_next_url(candidate: str) -> str:
@@ -519,11 +552,11 @@ def settings() -> Any:
         # 城市：复选框提交 "CityName,ID" 格式，用 | 拼接
         selected_cities = request.form.getlist("city_selected")
         cities_val = "|".join(selected_cities) if selected_cities else "Eindhoven,29"
-        set_key(str(ENV_PATH), "CITIES", _sanitize_dotenv(cities_val), quote_mode="never")
+        _write_env_key("CITIES", _sanitize_dotenv(cities_val))
 
         for key in _SETTINGS_KEYS:
             val = request.form.get(key, "")
-            set_key(str(ENV_PATH), key, _sanitize_dotenv(val), quote_mode="never")
+            _write_env_key(key, _sanitize_dotenv(val))
 
         flash("✅ 全局配置已保存", "success")
         return redirect(url_for("settings"))
@@ -1513,7 +1546,7 @@ def api_reset_db():
 # ------------------------------------------------------------------ #
 
 @app.route("/api/notifications")
-@api_login_required
+@admin_api_required
 def api_notifications():
     """
     分页查询 Web 通知列表。
@@ -1546,7 +1579,7 @@ def api_notifications():
 
 
 @app.route("/api/notifications/read", methods=["POST"])
-@api_login_required
+@admin_api_required
 @csrf_required
 def api_notifications_read():
     """标记所有通知为已读（或指定 ids 数组）。"""
@@ -1570,7 +1603,7 @@ def api_notifications_read():
 
 
 @app.route("/api/events")
-@api_login_required
+@admin_api_required
 def api_events():
     """
     SSE（Server-Sent Events）端点，每 5 秒推送增量通知给浏览器。
