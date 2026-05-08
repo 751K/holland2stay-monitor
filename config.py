@@ -48,11 +48,6 @@ else:
 DATA_DIR = BASE_DIR / "data"
 ENV_PATH = BASE_DIR / ".env"
 
-# DB_PATH / TIMEZONE 在模块级定义，作为唯一来源。
-# load_config() 和 web.py 均从此处引用，不再各自读 os.environ。
-DB_PATH  = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
-TIMEZONE = os.environ.get("TIMEZONE", "Europe/Amsterdam")
-
 
 def write_env_key(key: str, value: str) -> None:
     """
@@ -103,6 +98,13 @@ def resolve_project_path(path_str: str | os.PathLike[str]) -> Path:
 
 
 load_dotenv(dotenv_path=ENV_PATH)
+
+# DB_PATH / TIMEZONE 在模块级定义，作为唯一来源。
+# load_config() 和 web.py 均从此处引用，不再各自读 os.environ。
+# 注意：必须在 load_dotenv() 和 resolve_project_path() 之后定义，
+# 确保 .env 已加载、函数已可用。
+DB_PATH  = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
+TIMEZONE = os.environ.get("TIMEZONE", "Europe/Amsterdam")
 
 BASE_URL = "https://www.holland2stay.com/residences"
 
