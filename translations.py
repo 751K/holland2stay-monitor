@@ -277,6 +277,9 @@ TRANSLATIONS = {
     "user_form_result":     {"zh": "测试结果",                "en": "Test result"},
     "user_form_reload_hint":{"zh": "保存后点击「立即生效」按钮通知 monitor.py 热重载。", "en": "After saving, click 'Apply Now' to hot-reload monitor.py."},
 
+    # ── Guest mode ───────────────────────────────────────
+    "guest_mode":           {"zh": "访客模式（只读）",            "en": "Guest mode (read-only)"},
+
     # ── Login ────────────────────────────────────────────
     "login_title":          {"zh": "登录 · Holland2Stay 监控",  "en": "Login · Holland2Stay Monitor"},
     "login_header":         {"zh": "Holland2Stay 监控",       "en": "Holland2Stay Monitor"},

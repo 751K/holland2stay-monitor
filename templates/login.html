@@ -61,6 +61,17 @@
       <button type="submit" class="login-btn">{{ _('login_btn') }}</button>
     </form>
 
+    {% if guest_mode %}
+    <div style="text-align:center;margin-top:16px;">
+      <a href="{{ url_for('guest_login') }}"
+         style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text3);text-decoration:none;padding:8px 16px;border-radius:8px;border:1px solid var(--border);transition:color .15s,background .15s;"
+         onmouseover="this.style.color='var(--text)';this.style.background='var(--surface2)'"
+         onmouseout="this.style.color='var(--text3)';this.style.background='transparent'">
+        <i class="bi bi-eye"></i> {{ _('guest_mode') }}
+      </a>
+    </div>
+    {% endif %}
+
     <div class="login-footer">{{ _('login_footer') }}</div>
   </div>
 </div>

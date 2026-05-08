@@ -39,3 +39,7 @@ reset_db.py
 launcher.py
 h2s_monitor.spec
 build_dmg.sh
+
+# 部署配置（宿主机用，不打包进镜像）
+Caddyfile
+docker-compose.yml

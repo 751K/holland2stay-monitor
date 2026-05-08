@@ -52,6 +52,7 @@
       <a href="{{ url_for('stats') }}" class="{% if request.endpoint=='stats' %}active{% endif %}">
         <i class="bi bi-bar-chart-line"></i> {{ _('stats') }}
       </a>
+      {% if is_admin %}
       <a href="{{ url_for('users_list') }}" class="{% if request.endpoint in ['users_list','user_new','user_edit'] %}active{% endif %}">
         <i class="bi bi-people"></i> {{ _('users') }}
       </a>
@@ -64,6 +65,7 @@
       <a href="{{ url_for('logs_view') }}" class="{% if request.endpoint=='logs_view' %}active{% endif %}">
         <i class="bi bi-terminal"></i> {{ _('log_viewer') }}
       </a>
+      {% endif %}
     </nav>
 
     <div class="sidebar-footer">

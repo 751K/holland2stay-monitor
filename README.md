@@ -87,9 +87,11 @@ python web.py  # http://127.0.0.1:8088
 | Map view | ✅ Done | Leaflet.js + OpenStreetMap with auto-geocoding |
 | i18n (中/EN) | ✅ Done | One-click language switch, cookie-persisted |
 | Notification testing | ✅ Done | Per-channel test with result details |
-| Optional auth for web | ✅ Done | Session login enabled when password set |
+| Guest mode (RBAC) | ✅ Done | Password-free read-only access; admin role required for settings/users/logs |
+| Optional auth for web | ✅ Done | Session login enabled when password set; `WEB_GUEST_MODE` controls guest entry |
 | Login rate limiting | ✅ Done | IP-based exponential backoff after 5 failures |
-| Security hardening | ✅ Done | Open-redirect fix, .env injection prevention, non-root Docker |
+| HTTPS / Caddy | ✅ Done | Bundled Caddyfile + docker-compose Caddy service; auto Let's Encrypt |
+| Security hardening | ✅ Done | RBAC decorators, payment URL filtered for guests, CSRF, open-redirect fix |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic |
 
 ---
@@ -180,6 +182,7 @@ This reduces the delay between detecting the availability change and reaching th
 - **Stats** — Chart.js trends (new listings, status changes), doughnut distributions (city, status), price histogram, 7/30/90-day range selector
 - **Users** — CRUD, enable/disable, per-user notification channels & filters & auto-booking config, one-click per-channel test
 - **Global Settings** — polling intervals, adaptive smart-polling params, monitored cities, save-and-reload workflow
+- **Guest mode** — login page "Guest mode" button lets anyone view the panel read-only without a password; set `WEB_GUEST_MODE=false` to disable; admin routes (Users / Settings / System / Logs) remain fully restricted
 - **i18n** — one-click Chinese / English switch in sidebar, cookie-persisted across sessions
 - **Minimal design** — borderless cards, shadow-based depth, dark/light theme (OS-aware, smooth CSS transition) with Inter typeface
 

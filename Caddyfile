@@ -1,0 +1,16 @@
+flatradar.app, www.flatradar.app {
+    reverse_proxy h2s:8088
+
+    # 安全响应头
+    header {
+        X-Frame-Options DENY
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+
+    # 访问日志
+    log {
+        output file /dev/null
+    }
+}

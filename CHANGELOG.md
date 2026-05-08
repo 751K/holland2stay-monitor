@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.1.6 (2026-05-08)
+
+### New
+
+- **访客模式（Guest Mode）** — 登录页新增"访客模式"按钮，无需密码以只读身份进入面板；可查看仪表盘、房源、日历、地图、统计；用户管理、设置、系统信息、日志查看仍需 admin 登录
+- **RBAC 角色鉴权** — `session["role"]` 区分 admin / guest；新增 `admin_required` / `admin_api_required` 装饰器，17 条路由按角色保护
+- `WEB_GUEST_MODE` 环境变量：默认 `true`，设为 `false` 关闭访客入口
+- **Caddy 反代 + HTTPS** — 新增 `Caddyfile`，`docker-compose.yml` 集成 Caddy 服务，自动签发 Let's Encrypt 证书；h2s 容器改为内部 `expose`，仅 Caddy 暴露 80/443
+
+### Fixed
+
+- 访客可见监控开关 / 关闭按钮 → Dashboard 相关控件对 guest 隐藏
+- 通知面板中自动预订付款 URL（idealCheckOut 直链）对访客可见 → API 层对 `booking` 类通知的 `url` 字段过滤，guest 无法获取付款链接
+- `/guest` 路由可将已登录 admin 静默降级为 guest → 增加角色保护，admin session 访问 `/guest` 直接跳首页
+
+### Changed
+
+- `.env.example` 新增 `WEB_GUEST_MODE`、`SESSION_COOKIE_SECURE`、`SESSION_LIFETIME_HOURS` 配置项
+- `NOTIFICATION_CHANNELS` 默认值由 `imessage` 改为 `telegram`（VPS 环境更通用）
+- `docker-compose.yml` 重构：Caddy 前置反代，仅 80/443 对外暴露
+
+---
+
 ## v1.1.5 (2026-05-08)
 
 ### New

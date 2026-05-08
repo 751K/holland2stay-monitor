@@ -16,9 +16,11 @@
       </select>
     </form>
     <span><i class="bi bi-arrow-clockwise mr-1"></i>{{ _('auto_refresh') }}</span>
+    {% if is_admin %}
     <button onclick="shutdownAll()" class="btn btn-ghost btn-sm" style="color:var(--danger);" title="{{ _('shutdown_hint') }}">
       <i class="bi bi-power mr-1"></i>{{ _('shutdown') }}
     </button>
+    {% endif %}
   </span>
 </div>
 
@@ -73,9 +75,13 @@
         {% if monitor_running %}{{ _('monitor_running') }}{% else %}{{ _('monitor_stopped') }}{% endif %}
       </div>
       <div class="kpi-label">
+        {% if is_admin %}
         <a href="#" onclick="toggleMonitor(event)" class="text-sm" style="color:var(--accent);" id="monitor-btn">
           {% if monitor_running %}{{ _('stop_monitor') }}{% else %}{{ _('start_monitor') }}{% endif %}
         </a>
+        {% else %}
+        <span class="text-sm" style="color:var(--text3);">{{ _('monitor_running') if monitor_running else _('monitor_stopped') }}</span>
+        {% endif %}
       </div>
     </div>
   </div>

@@ -141,6 +141,18 @@ def _auth_enabled() -> bool:
     return bool(os.environ.get("WEB_PASSWORD", "").strip())
 
 
+def _guest_mode_enabled() -> bool:
+    """访客模式开关：默认开启，设 WEB_GUEST_MODE=false 可关闭。"""
+    return os.environ.get("WEB_GUEST_MODE", "true").lower() != "false"
+
+
+def _is_admin() -> bool:
+    """当前 session 是否为管理员（鉴权未开启时默认视为管理员）。"""
+    if not _auth_enabled():
+        return True
+    return session.get("role") == "admin"
+
+
 def _sanitize_dotenv(value: str) -> str:
     """剥离换行符，防止 .env 注入攻击（\n 可伪造新键）。"""
     return value.replace("\r", "").replace("\n", "")
@@ -191,6 +203,32 @@ def api_login_required(f):
     def decorated(*args, **kwargs):
         if _auth_enabled() and not session.get("authenticated"):
             return jsonify({"error": "unauthorized"}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
+def admin_required(f):
+    """页面路由装饰器：仅 admin 角色可访问；访客/游客重定向到首页。"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if _auth_enabled():
+            if not session.get("authenticated"):
+                return redirect(url_for("login", next=request.path))
+            if session.get("role") != "admin":
+                return redirect(url_for("index"))
+        return f(*args, **kwargs)
+    return decorated
+
+
+def admin_api_required(f):
+    """API 路由装饰器：仅 admin 角色可访问，返回 401/403 JSON。"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if _auth_enabled():
+            if not session.get("authenticated"):
+                return jsonify({"error": "unauthorized"}), 401
+            if session.get("role") != "admin":
+                return jsonify({"error": "forbidden"}), 403
         return f(*args, **kwargs)
     return decorated
 
@@ -249,7 +287,11 @@ def _storage() -> Storage:
 
 @app.context_processor
 def _inject_auth():
-    return {"auth_enabled": _auth_enabled()}
+    return {
+        "auth_enabled":  _auth_enabled(),
+        "is_admin":      _is_admin(),
+        "guest_mode":    _guest_mode_enabled(),
+    }
 
 
 def _get_lang() -> str:
@@ -353,7 +395,8 @@ def login() -> Any:
 
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        expected_user = os.environ.get("WEB_USERNAME", "").strip()
+        # WEB_USERNAME 未设置时默认为 "admin"
+        expected_user = os.environ.get("WEB_USERNAME", "").strip() or "admin"
         expected_pass = os.environ.get("WEB_PASSWORD", "")
 
         # 用 hmac.compare_digest 防时序攻击
@@ -363,6 +406,7 @@ def login() -> Any:
             _LOGIN_FAILURES.pop(client_ip, None)  # 成功则清除失败记录
             session.permanent = True
             session["authenticated"] = True
+            session["role"] = "admin"
             next_url = _safe_next_url(request.form.get("next", ""))
             return redirect(next_url)
 
@@ -370,7 +414,24 @@ def login() -> Any:
         flash("用户名或密码错误", "danger")
 
     return render_template("login.html", next=request.args.get("next", ""),
-                           auth_enabled=_auth_enabled())
+                           auth_enabled=_auth_enabled(),
+                           guest_mode=_guest_mode_enabled())
+
+
+@app.route("/guest")
+def guest_login() -> Any:
+    """访客模式：无需密码，直接以只读身份进入面板。"""
+    if not _auth_enabled():
+        return redirect(url_for("index"))
+    if not _guest_mode_enabled():
+        return redirect(url_for("login"))
+    # 已登录的 admin 不允许被降级为 guest（防止误操作或 CSRF 降级攻击）
+    if session.get("role") == "admin":
+        return redirect(url_for("index"))
+    session.permanent = True
+    session["authenticated"] = True
+    session["role"] = "guest"
+    return redirect(url_for("index"))
 
 
 @app.route("/logout", methods=["POST"])
@@ -448,7 +509,7 @@ def listings() -> str:
 # ------------------------------------------------------------------ #
 
 @app.route("/settings", methods=["GET", "POST"])
-@login_required
+@admin_required
 @csrf_required
 def settings() -> Any:
     if request.method == "POST":
@@ -616,7 +677,7 @@ def _user_from_form(
 
 
 @app.route("/users")
-@login_required
+@admin_required
 def users_list() -> str:
     users = load_users()
     return render_template("users.html", users=users)
@@ -702,7 +763,7 @@ def _get_filter_options(category: str) -> list[str]:
 
 
 @app.route("/users/new", methods=["GET", "POST"])
-@login_required
+@admin_required
 @csrf_required
 def user_new() -> Any:
     if request.method == "POST":
@@ -728,7 +789,7 @@ def user_new() -> Any:
 
 
 @app.route("/users/<user_id>", methods=["GET", "POST"])
-@login_required
+@admin_required
 @csrf_required
 def user_edit(user_id: str) -> Any:
     users = load_users()
@@ -761,7 +822,7 @@ def user_edit(user_id: str) -> Any:
 
 
 @app.route("/users/<user_id>/delete", methods=["POST"])
-@login_required
+@admin_required
 @csrf_required
 def user_delete(user_id: str) -> Any:
     users = load_users()
@@ -774,7 +835,7 @@ def user_delete(user_id: str) -> Any:
 
 
 @app.route("/users/<user_id>/test", methods=["POST"])
-@login_required
+@admin_required
 @csrf_required
 def user_test_notify(user_id: str) -> Any:
     """逐渠道发送一条测试消息，返回每个渠道的成功/失败详情。"""
@@ -865,7 +926,7 @@ def user_test_notify(user_id: str) -> Any:
 
 
 @app.route("/users/<user_id>/toggle", methods=["POST"])
-@login_required
+@admin_required
 @csrf_required
 def user_toggle(user_id: str) -> Any:
     """快速开关用户启用状态。"""
@@ -971,7 +1032,7 @@ def api_map():
 
 
 @app.route("/api/map/geocode", methods=["POST"])
-@api_login_required
+@admin_api_required
 @csrf_required
 def api_map_geocode():
     """启动后台地理编码任务。进度通过 GET /api/map/geocode/status 查询。"""
@@ -1096,7 +1157,7 @@ def stats() -> str:
 
 
 @app.route("/system")
-@login_required
+@admin_required
 def system_info():
     import subprocess as _sp
     info: dict = {}
@@ -1168,7 +1229,7 @@ _LOG_PATH = DATA_DIR / "monitor.log"
 
 
 @app.route("/api/logs")
-@api_login_required
+@admin_api_required
 def api_logs():
     try:
         lines_param = int(request.args.get("lines", 200))
@@ -1190,7 +1251,7 @@ def api_logs():
 
 
 @app.route("/api/logs/clear", methods=["POST"])
-@api_login_required
+@admin_api_required
 @csrf_required
 def api_logs_clear():
     try:
@@ -1202,7 +1263,7 @@ def api_logs_clear():
 
 
 @app.route("/logs")
-@login_required
+@admin_required
 def logs_view():
     return render_template("logs.html")
 
@@ -1322,7 +1383,7 @@ def health():
 
 
 @app.route("/api/reload", methods=["POST"])
-@api_login_required
+@admin_api_required
 @csrf_required
 def api_reload():
     pid = _monitor_pid()
@@ -1355,7 +1416,7 @@ def api_reload():
 # ------------------------------------------------------------------ #
 
 @app.route("/api/monitor/start", methods=["POST"])
-@api_login_required
+@admin_api_required
 @csrf_required
 def api_monitor_start():
     """启动后台监控进程（monitor.py）。"""
@@ -1382,7 +1443,7 @@ def api_monitor_start():
 
 
 @app.route("/api/monitor/stop", methods=["POST"])
-@api_login_required
+@admin_api_required
 @csrf_required
 def api_monitor_stop():
     """停止后台监控进程。"""
@@ -1397,7 +1458,7 @@ def api_monitor_stop():
 
 
 @app.route("/api/shutdown", methods=["POST"])
-@api_login_required
+@admin_api_required
 @csrf_required
 def api_shutdown():
     """关闭监控和 Web 面板。"""
@@ -1424,7 +1485,7 @@ def api_shutdown():
 # ------------------------------------------------------------------ #
 
 @app.route("/api/reset-db", methods=["POST"])
-@api_login_required
+@admin_api_required
 @csrf_required
 def api_reset_db():
     """
@@ -1474,6 +1535,12 @@ def api_notifications():
         unread = storage.count_unread_notifications()
     finally:
         storage.close()
+
+    # 访客模式：抹去 booking 类通知的付款 URL，防止泄露 idealCheckOut 直链
+    if not _is_admin():
+        for row in rows:
+            if row.get("type") == "booking":
+                row["url"] = ""
 
     return jsonify({"ok": True, "notifications": rows, "unread": unread})
 
