@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.1.5 (2026-05-08)
+
+### New
+
+- **房源列表筛选拆分** — 状态、城市（下拉）、名称（文本）、最高租金、最小面积独立筛选
+- **Dashboard 城市过滤** — 仪表盘按城市过滤 KPI 和列表
+
+### Fixed
+
+- 自动预订跳过通知可用性检查 → 加 `notifications_enabled` + `has_channels` 三道防线
+- 快速预订并非立即执行 → 状态变更候选直接提交线程池
+- 地理编码 31 条失败（地址含 neighborhood 干扰 Photon）
+- 自动/手动地理编码并发冲突 → 统一 `_geocode_status` 管理
+- 通知 URL XSS（`renderNotifications` 改为 DOM `addEventListener`）
+- 加密密钥线程不安全（`_get_cipher` double-checked locking）
+- Session 默认 31 天 → 24 小时
+- Dockerfile 缺少 `.env.example` 导致首次部署崩溃
+- `admin` 硬编码默认用户名
+- `location =` JS 导航失效、房源时间中英切换等 UI 修复
+
+### Changed
+
+- 标签命名规范化：`allowed_offer` → `allowed_contract` / `allowed_promo` → `allowed_offer`
+- 地理编码 worker 重复代码抽取为 `_run_geocode_worker`
+- `status_changes` 表加索引、城市列表提取为 `get_distinct_cities()`
+- 安全头注入（`X-Frame-Options` 等）、supervisord 日志分离
+- 清理 `max_area` 残留引用、移除荷兰境外遮罩功能
+
+---
+
 ## v1.1.0 (2026-05-07)
 
 ### New

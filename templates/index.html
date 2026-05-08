@@ -7,6 +7,14 @@
 <div class="page-header">
   <h1>{{ _('dashboard') }}</h1>
   <span class="meta" style="display:flex;align-items:center;gap:12px;">
+    <form method="get" action="{{ url_for('index') }}" style="display:inline;">
+      <select name="city" class="form-select" style="font-size:12px;width:auto;padding:4px 28px 4px 10px;" onchange="this.form.submit()">
+        <option value="">{{ _('filter_all_cities') }}</option>
+        {% for c in all_cities %}
+          <option value="{{ c }}" {% if c == city_filter %}selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+    </form>
     <span><i class="bi bi-arrow-clockwise mr-1"></i>{{ _('auto_refresh') }}</span>
     <button onclick="shutdownAll()" class="btn btn-ghost btn-sm" style="color:var(--danger);" title="{{ _('shutdown_hint') }}">
       <i class="bi bi-power mr-1"></i>{{ _('shutdown') }}

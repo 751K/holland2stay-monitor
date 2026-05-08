@@ -9,6 +9,7 @@ crypto.py — 敏感字段加解密
 """
 import logging
 import os
+import threading
 
 from cryptography.fernet import Fernet
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _ENV_KEY = "DATA_ENCRYPTION_KEY"
 _CIPHER: Fernet | None = None
+_CIPHER_LOCK = threading.Lock()
 
 
 def _get_cipher() -> Fernet:
@@ -25,21 +27,26 @@ def _get_cipher() -> Fernet:
     if _CIPHER is not None:
         return _CIPHER
 
-    key = os.environ.get(_ENV_KEY, "").strip()
-    if not key:
-        from dotenv import set_key
-        key = Fernet.generate_key().decode()
-        if ENV_PATH.exists():
-            set_key(str(ENV_PATH), _ENV_KEY, key, quote_mode="always")
-        else:
-            ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-            ENV_PATH.touch()
-            set_key(str(ENV_PATH), _ENV_KEY, key, quote_mode="always")
-        os.environ[_ENV_KEY] = key
-        logger.info("已生成数据加密密钥并写入 .env")
+    with _CIPHER_LOCK:
+        # Double-checked locking：避免首次并发时生成多个不同密钥
+        if _CIPHER is not None:
+            return _CIPHER
 
-    _CIPHER = Fernet(key.encode())
-    return _CIPHER
+        key = os.environ.get(_ENV_KEY, "").strip()
+        if not key:
+            from dotenv import set_key
+            key = Fernet.generate_key().decode()
+            if ENV_PATH.exists():
+                set_key(str(ENV_PATH), _ENV_KEY, key, quote_mode="always")
+            else:
+                ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+                ENV_PATH.touch()
+                set_key(str(ENV_PATH), _ENV_KEY, key, quote_mode="always")
+            os.environ[_ENV_KEY] = key
+            logger.info("已生成数据加密密钥并写入 .env")
+
+        _CIPHER = Fernet(key.encode())
+        return _CIPHER
 
 
 def encrypt(plaintext: str) -> str:

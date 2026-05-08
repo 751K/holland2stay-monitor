@@ -87,6 +87,7 @@ app = Flask(
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
+app.config["PERMANENT_SESSION_LIFETIME"] = int(os.environ.get("SESSION_LIFETIME_HOURS", "24")) * 3600
 
 # 稳定的 secret key：优先读 .env，不存在则自动生成并写入，保证重启后 session 不失效
 def _ensure_secret_key() -> str:
@@ -103,6 +104,14 @@ def _ensure_secret_key() -> str:
     return key
 
 app.secret_key = _ensure_secret_key()
+
+
+@app.after_request
+def _add_security_headers(resp):
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return resp
 
 
 # ------------------------------------------------------------------ #
@@ -344,7 +353,7 @@ def login() -> Any:
 
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        expected_user = os.environ.get("WEB_USERNAME", "").strip() or "admin"
+        expected_user = os.environ.get("WEB_USERNAME", "").strip()
         expected_pass = os.environ.get("WEB_PASSWORD", "")
 
         # 用 hmac.compare_digest 防时序攻击
@@ -378,39 +387,59 @@ def logout() -> Any:
 @app.route("/")
 @login_required
 def index() -> str:
+    city_filter = request.args.get("city", "")
     storage = _storage()
     try:
+        all_cities = sorted({r["city"] for r in storage.get_all_listings(limit=2000) if r.get("city")})
         last_scrape = storage.get_meta("last_scrape_at")
         stats = {
-            "total":       storage.count_all(),
-            "new_24h":     storage.count_new_since(hours=24),
-            "changes_24h": storage.count_changes_since(hours=24),
+            "total":       storage.count_all(city=city_filter or None),
+            "new_24h":     storage.count_new_since(hours=24, city=city_filter or None),
+            "changes_24h": storage.count_changes_since(hours=24, city=city_filter or None),
             "last_scrape": last_scrape,
             "last_count":  storage.get_meta("last_scrape_count"),
         }
-        recent  = storage.get_all_listings(limit=15)
-        changes = storage.get_recent_changes(hours=48)
+        recent  = storage.get_all_listings(city=city_filter or None, limit=15)
+        changes = storage.get_recent_changes(hours=48, city=city_filter or None)
     finally:
         storage.close()
     return render_template("index.html", stats=stats, recent=recent, changes=changes,
-                           monitor_running=_monitor_pid() is not None)
+                           monitor_running=_monitor_pid() is not None,
+                           city_filter=city_filter, all_cities=all_cities)
 
 
 @app.route("/listings")
 @login_required
 def listings() -> str:
+    from models import parse_features_list, parse_float
+    import json as _json
     status_filter = request.args.get("status", "")
-    search        = request.args.get("q", "")
+    name_query    = request.args.get("q", "")
+    city_filter   = request.args.get("city", "")
+    max_rent_str  = request.args.get("max_rent", "")
+    min_area_str  = request.args.get("min_area", "")
+    max_rent = parse_float(max_rent_str) if max_rent_str.strip() else None
+    min_area = parse_float(min_area_str) if min_area_str.strip() else None
     storage = _storage()
     try:
-        rows     = storage.get_all_listings(status=status_filter or None, search=search or None, limit=500)
+        rows     = storage.get_all_listings(status=status_filter or None, search=name_query or None, city=city_filter or None, limit=500)
         statuses = storage.get_distinct_statuses()
+        city_list = storage.get_distinct_cities()
     finally:
         storage.close()
+    # Python 端租金/面积过滤（数据量小，无需 SQL 复杂度）
+    if max_rent is not None:
+        rows = [r for r in rows if (pv := parse_float(r.get("price_raw", ""))) is not None and pv <= max_rent]
+    if min_area is not None:
+        def _get_area(r):
+            fm = parse_features_list(_json.loads(r.get("features", "[]")))
+            return parse_float(fm.get("area", ""))
+        rows = [r for r in rows if (a := _get_area(r)) is not None and a >= min_area]
     return render_template(
         "listings.html",
         listings=rows, statuses=statuses,
-        status_filter=status_filter, search=search,
+        status_filter=status_filter, search=name_query, city_filter=city_filter,
+        cities=city_list, max_rent=max_rent_str, min_area=min_area_str,
     )
 
 
@@ -857,6 +886,41 @@ _geocode_lock = threading.Lock()
 _geocode_status = {"running": False, "total": 0, "done": 0, "failed": 0}
 
 
+def _run_geocode_worker(addresses: list[str]) -> None:
+    """后台线程：逐个地理编码地址列表，结果写入缓存，进度更新到全局状态。"""
+    import time as _time
+    from urllib.request import Request, urlopen
+    from urllib.parse import quote
+
+    st = _storage()
+    done, failed = 0, 0
+    try:
+        for addr in addresses:
+            try:
+                url = f"https://photon.komoot.io/api/?q={quote(addr)}&limit=1"
+                req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
+                resp = urlopen(req, timeout=5)
+                data = json.loads(resp.read().decode())
+                feats = data.get("features", [])
+                if feats:
+                    coords = feats[0]["geometry"]["coordinates"]
+                    lng, lat = float(coords[0]), float(coords[1])
+                    st.cache_coords(addr, lat, lng)
+                    done += 1
+                else:
+                    failed += 1
+            except Exception:
+                failed += 1
+            with _geocode_lock:
+                _geocode_status["done"] = done
+                _geocode_status["failed"] = failed
+            _time.sleep(0.15)
+    finally:
+        st.close()
+        with _geocode_lock:
+            _geocode_status["running"] = False
+
+
 @app.route("/map")
 @login_required
 def map_view() -> str:
@@ -867,10 +931,6 @@ def map_view() -> str:
 @api_login_required
 def api_map():
     """返回所有房源坐标。首次查询时自动 geocode 未缓存的地址。"""
-    import time as _time
-    from urllib.request import Request, urlopen
-    from urllib.parse import quote
-
     storage = _storage()
     try:
         listings = storage.get_map_listings()
@@ -893,32 +953,19 @@ def api_map():
 
     # Auto-geocode uncached addresses in background daemon thread,
     # so the API returns immediately without blocking.
-    # 如果手动地理编码正在运行则跳过，避免并发调用 Photon API。
-    with _geocode_lock:
-        if _geocode_status["running"]:
-            need_geocode = []
+    # 如果已有 geocode 任务在跑（手动或自动）则跳过，避免并发。
     if need_geocode:
-        def _geocode_worker():
-            st2 = _storage()
-            try:
-                for l in need_geocode:
-                    addr = l["address"]
-                    try:
-                        url = f"https://photon.komoot.io/api/?q={quote(addr)}&limit=1"
-                        req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
-                        resp = urlopen(req, timeout=5)
-                        data = json.loads(resp.read().decode())
-                        feats = data.get("features", [])
-                        if feats:
-                            coords = feats[0]["geometry"]["coordinates"]
-                            lng, lat = float(coords[0]), float(coords[1])
-                            st2.cache_coords(addr, lat, lng)
-                    except Exception:
-                        pass
-                    _time.sleep(0.15)
-            finally:
-                st2.close()
-        threading.Thread(target=_geocode_worker, daemon=True).start()
+        with _geocode_lock:
+            if _geocode_status["running"]:
+                need_geocode = []
+            else:
+                _geocode_status["running"] = True
+                _geocode_status["total"] = len(need_geocode)
+                _geocode_status["done"] = 0
+                _geocode_status["failed"] = 0
+    if need_geocode:
+        addrs = [l["address"] for l in need_geocode]
+        threading.Thread(target=_run_geocode_worker, args=(addrs,), daemon=True).start()
 
     return jsonify({"listings": results})
 
@@ -932,10 +979,6 @@ def api_map_geocode():
         if _geocode_status["running"]:
             s = dict(_geocode_status)
             return jsonify({"ok": True, "running": True, "total": s["total"], "done": s["done"], "failed": s["failed"]})
-
-    import time as _time
-    from urllib.request import Request, urlopen
-    from urllib.parse import quote
 
     st = _storage()
     try:
@@ -961,37 +1004,8 @@ def api_map_geocode():
         _geocode_status["done"] = 0
         _geocode_status["failed"] = 0
 
-    def _worker():
-        done, failed = 0, 0
-        st3 = _storage()
-        try:
-            for l in uncached:
-                addr = l["address"]
-                try:
-                    url = f"https://photon.komoot.io/api/?q={quote(addr)}&limit=1"
-                    req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
-                    resp = urlopen(req, timeout=5)
-                    data = json.loads(resp.read().decode())
-                    feats = data.get("features", [])
-                    if feats:
-                        coords = feats[0]["geometry"]["coordinates"]
-                        lng, lat = float(coords[0]), float(coords[1])
-                        st3.cache_coords(addr, lat, lng)
-                        done += 1
-                    else:
-                        failed += 1
-                except Exception:
-                    failed += 1
-                with _geocode_lock:
-                    _geocode_status["done"] = done
-                    _geocode_status["failed"] = failed
-                _time.sleep(0.15)
-        finally:
-            st3.close()
-            with _geocode_lock:
-                _geocode_status["running"] = False
-
-    threading.Thread(target=_worker, daemon=True).start()
+    addrs = [l["address"] for l in uncached]
+    threading.Thread(target=_run_geocode_worker, args=(addrs,), daemon=True).start()
     return jsonify({"ok": True, "running": True, "total": len(uncached), "done": 0, "failed": 0})
 
 
@@ -1303,7 +1317,8 @@ def api_status():
 
 @app.route("/health")
 def health():
-    return jsonify({"ok": True})
+    monitor_ok = _monitor_pid() is not None
+    return jsonify({"ok": True, "monitor": monitor_ok}), 200 if monitor_ok else 503
 
 
 @app.route("/api/reload", methods=["POST"])

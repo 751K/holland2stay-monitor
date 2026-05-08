@@ -140,7 +140,7 @@ class ListingFilter:
 
     fail-closed 原则（数值字段）
     -----------------------------
-    max_rent / min_area / max_area / min_floor 均采用 fail-closed：
+    max_rent / min_area / min_floor 均采用 fail-closed：
     若过滤条件已设置，但房源对应字段缺失（API 未返回或无法解析），
     则视为不满足条件，返回 False。
     理由：无法核验时放行（fail-open）对自动预订是危险的——

@@ -167,6 +167,11 @@ class MultiNotifier(BaseNotifier):
         self._notifiers = notifiers
         self._enabled = enabled
 
+    @property
+    def has_channels(self) -> bool:
+        """至少有一个可用的外部通知渠道。"""
+        return self._enabled and len(self._notifiers) > 0
+
     async def _send(self, text: str) -> bool:
         if not self._enabled:
             logger.debug("通知已全局关闭，跳过发送")

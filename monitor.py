@@ -417,9 +417,11 @@ async def run_once(
     status_transition: dict[str, tuple[str, str]] = {}
 
     for listing in new_listings:
-        for user, _ in user_notifiers:
+        for user, notifier in user_notifiers:
             if (
                 user.auto_book.enabled
+                and user.notifications_enabled
+                and notifier.has_channels
                 and listing.status.lower() == STATUS_AVAILABLE
                 and (user.auto_book.listing_filter.is_empty()
                      or user.auto_book.listing_filter.passes(listing))
@@ -429,9 +431,11 @@ async def run_once(
     for listing, old_status, new_status in status_changes:
         if new_status.lower() == STATUS_AVAILABLE:
             status_transition[listing.id] = (old_status, new_status)
-        for user, _ in user_notifiers:
+        for user, notifier in user_notifiers:
             if (
                 user.auto_book.enabled
+                and user.notifications_enabled
+                and notifier.has_channels
                 and new_status.lower() == STATUS_AVAILABLE
                 and (user.auto_book.listing_filter.is_empty()
                      or user.auto_book.listing_filter.passes(listing))
@@ -442,8 +446,8 @@ async def run_once(
     # 这处理了"前一个预订者未付款、房子被重新放出"但状态未变的场景：
     # storage.diff() 对此类房源不产出任何事件，必须从重试队列中手动补入。
     _fresh_avail = {l.id: l for l in fresh if l.status.lower() == STATUS_AVAILABLE}
-    for user, _ in user_notifiers:
-        if not user.auto_book.enabled:
+    for user, notifier in user_notifiers:
+        if not user.auto_book.enabled or not user.notifications_enabled or not notifier.has_channels:
             continue
         user_retry = _retry_queue.get(user.id)
         if not user_retry:
@@ -490,7 +494,8 @@ async def run_once(
     # （prewarmed=None），不会等待。
     # ab_futures: list of (user, notifier, sorted_candidates, Future[BookingResult])
     # sorted_candidates 按面积降序排列；fallback 逻辑在线程内部按序尝试
-    ab_pending: list[tuple] = []
+    ab_pending: list[tuple] = []      # 新上线房源候选（通知后提交）
+    ab_fast_futures: list[tuple] = [] # 快速通道：状态变更候选立即提交
 
     for user, notifier in user_notifiers:
         candidates = ab_candidates.get(user.id, [])
@@ -508,15 +513,19 @@ async def run_once(
         if primary.id in status_transition:
             old_s, new_s = status_transition[primary.id]
             logger.info(
-                "[%s] 🚀 快速预订通道 (%s → %s)，立即提交: %s",
+                "[%s] 🚀 快速预订通道 (%s → %s)，立即提交到 executor: %s",
                 user.name, old_s, new_s, primary.name,
             )
+            # 快速通道：不等通知，直接提交预订到线程池
+            f = loop.run_in_executor(
+                None,
+                lambda cs=sorted_cands, u=user: _book_with_fallback(cs, u, booking_deadline),
+            )
+            ab_fast_futures.append((user, notifier, sorted_cands, f))
         else:
-            logger.info("[%s] 🔖 自动预订（新上线可预订），立即提交: %s", user.name, primary.name)
-
-        # 暂存候选数据，预登录完成后统一提交到 executor
-        # （预登录与下方通知循环并发进行，让 login 往返在通知发送期间完成）
-        ab_pending.append((user, notifier, sorted_cands))
+            logger.info("[%s] 🔖 自动预订（新上线可预订），通知后提交: %s", user.name, primary.name)
+            # 新上线房源：等通知发完再提交（预登录在通知期间完成）
+            ab_pending.append((user, notifier, sorted_cands))
 
     # ── 新房源通知（预登录与通知并发进行）────────────────────────── #
     total_notified = 0
@@ -581,7 +590,7 @@ async def run_once(
                 uid, e,
             )
 
-    ab_futures: list[tuple] = []
+    ab_futures = list(ab_fast_futures)  # 快速通道已提前提交
     for user, notifier, sorted_cands in ab_pending:
         ps = prewarmed_sessions.get(user.id)
         if ps:

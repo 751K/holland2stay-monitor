@@ -183,6 +183,11 @@ class Storage:
                 lng     REAL NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
             );
+
+            CREATE INDEX IF NOT EXISTS idx_sc_listing_id
+                ON status_changes (listing_id);
+            CREATE INDEX IF NOT EXISTS idx_sc_changed_at
+                ON status_changes (changed_at);
         """)
         self._conn.commit()
 
@@ -360,9 +365,19 @@ class Storage:
     # 基础查询（monitor.py 内部使用）
     # ------------------------------------------------------------------ #
 
-    def count_all(self) -> int:
-        """返回 listings 表总行数（数据库中见过的房源总数）。"""
-        row = self._conn.execute("SELECT COUNT(*) FROM listings").fetchone()
+    def get_distinct_cities(self) -> list[str]:
+        """返回所有出现过的城市名，按字母排序。"""
+        rows = self._conn.execute(
+            "SELECT DISTINCT city FROM listings WHERE city != '' ORDER BY city"
+        ).fetchall()
+        return [r[0] for r in rows]
+
+    def count_all(self, city: Optional[str] = None) -> int:
+        """返回 listings 表总行数，可按城市过滤。"""
+        if city:
+            row = self._conn.execute("SELECT COUNT(*) FROM listings WHERE city = ?", (city,)).fetchone()
+        else:
+            row = self._conn.execute("SELECT COUNT(*) FROM listings").fetchone()
         return row[0] if row else 0
 
     def get_listing(self, listing_id: str) -> Optional[dict]:
@@ -386,15 +401,17 @@ class Storage:
         self,
         status: Optional[str] = None,
         search: Optional[str] = None,
+        city: Optional[str] = None,
         limit: int = 500,
     ) -> list[dict]:
         """
-        查询房源列表，支持状态筛选和关键词搜索，供 Web 面板房源页使用。
+        查询房源列表，支持状态/城市筛选和名称搜索，供 Web 面板房源页使用。
 
         Parameters
         ----------
         status : 精确匹配 listings.status，None 表示不限
-        search : 在 name 和 city 字段中做 LIKE 模糊匹配，None 表示不限
+        search : 在 name 字段中做 LIKE 模糊匹配，None 表示不限
+        city   : 精确匹配 listings.city，None 表示不限
         limit  : 最多返回条数，默认 500
 
         Returns
@@ -407,62 +424,75 @@ class Storage:
             q += " AND status = ?"
             params.append(status)
         if search:
-            q += " AND (name LIKE ? OR city LIKE ?)"
-            params.extend([f"%{search}%", f"%{search}%"])
+            q += " AND name LIKE ?"
+            params.append(f"%{search}%")
+        if city:
+            q += " AND city = ?"
+            params.append(city)
         q += " ORDER BY first_seen DESC LIMIT ?"
         params.append(limit)
         return [dict(r) for r in self._conn.execute(q, params).fetchall()]
 
-    def get_recent_changes(self, hours: int = 48) -> list[dict]:
+    def get_recent_changes(self, hours: int = 48, city: Optional[str] = None) -> list[dict]:
         """
-        查询最近 N 小时内的状态变更记录，关联 listings 表获取房源名称。
-
-        Parameters
-        ----------
-        hours : 时间窗口（小时），默认 48
-
-        Returns
-        -------
-        list[dict]，含 status_changes 全部字段 + listings.name / url / price_raw，
-        按 changed_at DESC 排序
+        查询最近 N 小时内的状态变更记录，关联 listings 表获取房源名称，可按城市过滤。
         """
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        rows = self._conn.execute(
-            """SELECT sc.*, l.name, l.url, l.price_raw
-               FROM status_changes sc
-               JOIN listings l ON l.id = sc.listing_id
-               WHERE sc.changed_at > ?
-               ORDER BY sc.changed_at DESC""",
-            (since,),
-        ).fetchall()
+        if city:
+            rows = self._conn.execute(
+                """SELECT sc.*, l.name, l.url, l.price_raw
+                   FROM status_changes sc
+                   JOIN listings l ON l.id = sc.listing_id
+                   WHERE sc.changed_at > ? AND l.city = ?
+                   ORDER BY sc.changed_at DESC""",
+                (since, city),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT sc.*, l.name, l.url, l.price_raw
+                   FROM status_changes sc
+                   JOIN listings l ON l.id = sc.listing_id
+                   WHERE sc.changed_at > ?
+                   ORDER BY sc.changed_at DESC""",
+                (since,),
+            ).fetchall()
         return [dict(r) for r in rows]
 
-    def count_new_since(self, hours: int = 24) -> int:
+    def count_new_since(self, hours: int = 24, city: Optional[str] = None) -> int:
         """
         统计最近 N 小时内新入库的房源数量，供仪表盘「今日新增」指标使用。
 
         Parameters
         ----------
         hours : 时间窗口（小时），默认 24
+        city  : 城市名，None 表示不限
         """
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM listings WHERE first_seen > ?", (since,)
-        ).fetchone()
+        if city:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM listings WHERE first_seen > ? AND city = ?", (since, city)
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM listings WHERE first_seen > ?", (since,)
+            ).fetchone()
         return row[0] if row else 0
 
-    def count_changes_since(self, hours: int = 24) -> int:
+    def count_changes_since(self, hours: int = 24, city: Optional[str] = None) -> int:
         """
-        统计最近 N 小时内的状态变更次数，供仪表盘「今日变更」指标使用。
-
-        Parameters
-        ----------
-        hours : 时间窗口（小时），默认 24
+        统计最近 N 小时内的状态变更次数，供仪表盘「今日变更」指标使用，可按城市过滤。
         """
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        row = self._conn.execute(
-            "SELECT COUNT(*) FROM status_changes WHERE changed_at > ?", (since,)
-        ).fetchone()
+        if city:
+            row = self._conn.execute(
+                """SELECT COUNT(*) FROM status_changes sc
+                   JOIN listings l ON l.id = sc.listing_id
+                   WHERE sc.changed_at > ? AND l.city = ?""", (since, city)
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM status_changes WHERE changed_at > ?", (since,)
+            ).fetchone()
         return row[0] if row else 0
 
     def get_calendar_listings(self) -> list[dict]:
@@ -519,7 +549,7 @@ class Storage:
         for r in rows:
             feats = json.loads(r["features"] or "[]")
             feat_map = parse_features_list(feats)
-            address = ", ".join(filter(None, [r["name"], r["city"] or "", feat_map.get("neighborhood", "")]))
+            address = ", ".join(filter(None, [r["name"], r["city"] or ""]))
             results.append({
                 "id": r["id"],
                 "name": r["name"],

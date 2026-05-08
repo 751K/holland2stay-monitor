@@ -143,6 +143,9 @@ def _is_booked_by_other(msg: str) -> bool:
 
     对应 H2S 返回：
       "Sorry, the residence you have selected is already booked by someone else."
+
+    注意：依赖 H2S 英文文案作子串匹配。上游改文案会导致本函数静默失效，
+    届时 booking 失败会落在 RuntimeError 通用处理中并被完整日志记录。
     """
     return "already booked by someone else" in msg.lower()
 
@@ -153,6 +156,9 @@ def _is_reserved_by_user(msg: str) -> bool:
 
     对应 H2S 返回：
       "Sorry, at the moment you have another unit reserved."
+
+    注意：依赖 H2S 英文文案作子串匹配。上游改文案会导致本函数静默失效，
+    届时 booking 失败会落在 RuntimeError 通用处理中并被完整日志记录。
     """
     low = msg.lower()
     return (

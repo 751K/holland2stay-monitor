@@ -523,4 +523,23 @@ logs/               Log files (auto-created; supervisord writes monitor.log + we
 
 ---
 
+## License
+
+Holland2Stay Monitor is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/).
+
+**Permitted:**
+- Personal use
+- Educational use
+- Research use
+- Non-commercial modification and redistribution
+
+**Not permitted without prior written permission:**
+- Commercial use
+- Use by a company or for-profit organization
+- Selling, sublicensing, hosting as a paid service, or integrating this project into a commercial product or workflow
+
+See the [LICENSE](./LICENSE) file for the full terms.
+
+---
+
 If you prefer to read the original Chinese README, it is available at [README_cn.md](README_cn.md).

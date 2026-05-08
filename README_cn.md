@@ -523,3 +523,22 @@ data/               运行时自动生成
   monitor.pid       监控进程 PID，供热重载使用
 logs/               日志文件（supervisord 写入 monitor.log + web.log）
 ```
+
+---
+
+## 许可证
+
+Holland2Stay Monitor 基于 [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) 许可。
+
+**允许：**
+- 个人使用
+- 教育用途
+- 研究用途
+- 非商业修改和再分发
+
+**未经事先书面许可禁止：**
+- 商业用途
+- 公司或营利性组织使用
+- 销售、再许可、作为付费服务托管，或将本项目集成到商业产品或工作流中
+
+完整条款见 [LICENSE](./LICENSE) 文件。

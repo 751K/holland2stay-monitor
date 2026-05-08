@@ -32,9 +32,9 @@
   <h1>{{ _('map_title') }}</h1>
   <div class="flex items-center gap-2">
     <span id="map-count" class="meta"></span>
-    <span class="meta" id="map-loading"><i class="bi bi-arrow-clockwise mr-1"></i>{{ '加载中…' if lang=='zh' else 'Loading…' }}</span>
-    <button type="button" class="btn btn-ghost btn-sm" id="btn-geocode" onclick="runGeocode()" title="{{ '解析所有未缓存地址' if lang=='zh' else 'Geocode all uncached addresses' }}">
-      <i class="bi bi-geo-alt mr-1"></i>{{ '解析地址' if lang=='zh' else 'Geocode' }}
+    <span class="meta" id="map-loading"><i class="bi bi-arrow-clockwise mr-1"></i>{{ _('map_loading') }}</span>
+    <button type="button" class="btn btn-ghost btn-sm" id="btn-geocode" onclick="runGeocode()" title="{{ _('map_geocode_hint') }}">
+      <i class="bi bi-geo-alt mr-1"></i>{{ _('map_geocode_btn') }}
     </button>
   </div>
 </div>
@@ -143,13 +143,13 @@ function loadMapData() {
 
       var badge = sc === 'book' ? (zh ? '直订' : 'Direct')
         : sc === 'lottery' ? (zh ? '摇号' : 'Lottery')
-        : l.status;
+        : escapeHtml(l.status);
 
       var popup =
-        '<strong><a href="' + l.url + '" target="_blank">' + l.name + '</a></strong><br>' +
-        '<span style="color:var(--text2);">' + priceShort(l.price_raw) + (zh ? '/月' : '/mo') + '</span><br>' +
-        (l.neighborhood ? '<span style="color:var(--text3);font-size:12px;">' + l.neighborhood + ' · </span>' : '') +
-        '<span style="color:var(--text3);font-size:12px;">' + l.city + '</span><br>' +
+        '<strong><a href="' + escapeHtml(l.url) + '" target="_blank">' + escapeHtml(l.name) + '</a></strong><br>' +
+        '<span style="color:var(--text2);">' + priceShort(escapeHtml(l.price_raw || '')) + (zh ? '/月' : '/mo') + '</span><br>' +
+        (l.neighborhood ? '<span style="color:var(--text3);font-size:12px;">' + escapeHtml(l.neighborhood) + ' · </span>' : '') +
+        '<span style="color:var(--text3);font-size:12px;">' + escapeHtml(l.city || '') + '</span><br>' +
         '<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:100px;font-size:11px;background:' + color + '18;color:' + color + ';">' + badge + '</span>';
 
       marker.bindPopup(popup);
@@ -215,9 +215,9 @@ loadMapData();
             if (s.finished) {
               clearInterval(timer);
               btn.disabled = false;
-              btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode');
+              btn.innerHTML = '<i class="bi bi-arrow-repeat mr-1"></i>' + (zh ? '刷新地图' : 'Refresh map');
+              btn.onclick = function(){ loadMapData(); btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode'); btn.onclick = runGeocode; };
               loading.textContent = (zh ? '完成 ' : 'Done ') + s.done + (s.failed > 0 ? (zh ? ' 失败 ' : ' fail ') + s.failed : '');
-              if (s.done > 0) setTimeout(function(){ loadMapData(); }, 800);
             }
           });
         }, 800);

@@ -91,8 +91,13 @@ TRANSLATIONS = {
     # ── Filter / Search ──────────────────────────────────
     "filter_status":        {"zh": "状态",                    "en": "Status"},
     "filter_all_status":    {"zh": "全部状态",                "en": "All statuses"},
+    "filter_city":          {"zh": "城市",                    "en": "City"},
+    "filter_name":          {"zh": "名称",                    "en": "Name"},
+    "filter_max_rent":      {"zh": "最高租金",                "en": "Max rent"},
+    "filter_min_area":      {"zh": "最小面积",                "en": "Min area"},
+    "filter_all_cities":    {"zh": "全部城市",                "en": "All cities"},
     "filter_search":        {"zh": "搜索",                    "en": "Search"},
-    "filter_placeholder":   {"zh": "名称 / 城市",             "en": "Name / City"},
+    "filter_placeholder":   {"zh": "搜索房源名称…",           "en": "Search name…"},
     "filter_btn":           {"zh": "筛选",                    "en": "Filter"},
     "filter_clear":         {"zh": "清除",                    "en": "Clear"},
     "filter_no_results":    {"zh": "暂无房源数据",            "en": "No listings found"},
@@ -106,6 +111,9 @@ TRANSLATIONS = {
 
     # ── Calendar ─────────────────────────────────────────
     "calendar_title":       {"zh": "入住日历 · Holland2Stay",  "en": "Calendar · Holland2Stay"},
+    "map_loading":          {"zh": "加载中…",                 "en": "Loading…"},
+    "map_geocode_btn":      {"zh": "解析地址",                 "en": "Geocode"},
+    "map_geocode_hint":     {"zh": "解析所有未缓存地址",       "en": "Geocode all uncached addresses"},
     "cal_direct_book":      {"zh": "可直订",                  "en": "Direct book"},
     "cal_lottery":          {"zh": "摇号",                    "en": "Lottery"},
     "cal_select_date":      {"zh": "请选择日期",              "en": "Select a date"},

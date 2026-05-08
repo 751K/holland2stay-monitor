@@ -148,15 +148,20 @@ function renderNotifications(items) {
     list.innerHTML = '<div class="notif-empty">' + noNotifs + '</div>';
     return;
   }
-  list.innerHTML = items.map(function(n) {
-    var cls = n.read ? '' : ' unread';
-    var bodyHtml = n.body ? '<div class="notif-item-body">' + escapeHtml(n.body) + '</div>' : '';
-    return '<div class="notif-item' + cls + '"' + (n.url ? ' onclick="window.open(\'' + escapeHtml(n.url) + '\',\'_blank\')"' : '') + '>' +
+  list.innerHTML = '';
+  items.forEach(function(n) {
+    var div = document.createElement('div');
+    div.className = 'notif-item' + (n.read ? '' : ' unread');
+    if (n.url) {
+      div.style.cursor = 'pointer';
+      div.addEventListener('click', function() { window.open(n.url, '_blank'); });
+    }
+    div.innerHTML =
       '<div class="notif-item-title">' + escapeHtml(n.title) + '</div>' +
-      bodyHtml +
-      '<div class="notif-item-time">' + timeAgo(n.created_at) + '</div>' +
-    '</div>';
-  }).join('');
+      (n.body ? '<div class="notif-item-body">' + escapeHtml(n.body) + '</div>' : '') +
+      '<div class="notif-item-time">' + timeAgo(n.created_at) + '</div>';
+    list.appendChild(div);
+  });
 }
 
 function loadNotifications() {
