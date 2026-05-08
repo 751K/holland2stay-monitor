@@ -165,35 +165,12 @@ def _write_env_key(key: str, value: str) -> None:
     """
     写入或更新 .env 文件中的单个键值对。
 
-    替代 dotenv.set_key()：后者内部使用 os.replace()（原子 rename），
-    在 Docker bind-mount 场景下会触发 OSError [Errno 16] Device or resource busy。
-    本函数直接读取 → 内存修改 → 原地写回，绕过 rename 限制。
     线程锁确保并发写入不会互相覆盖。
+    实际写入逻辑委托给 config.write_env_key()（供 crypto.py 共享）。
     """
-    path = ENV_PATH
     with _env_write_lock:
-        if not path.exists():
-            path.touch()
-
-        content = path.read_text(encoding="utf-8")
-        lines = content.splitlines(keepends=True)
-
-        found = False
-        new_lines: list[str] = []
-        for line in lines:
-            if re.match(rf"^\s*{re.escape(key)}\s*=", line):
-                new_lines.append(f"{key}={value}\n")
-                found = True
-            else:
-                new_lines.append(line)
-
-        if not found:
-            # 文件末尾没有换行时补一个，再追加新键
-            if new_lines and not new_lines[-1].endswith("\n"):
-                new_lines.append("\n")
-            new_lines.append(f"{key}={value}\n")
-
-        path.write_text("".join(new_lines), encoding="utf-8")
+        from config import write_env_key
+        write_env_key(key, value)
 
 
 def _safe_next_url(candidate: str) -> str:

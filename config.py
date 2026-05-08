@@ -49,6 +49,38 @@ DATA_DIR = BASE_DIR / "data"
 ENV_PATH = BASE_DIR / ".env"
 
 
+def write_env_key(key: str, value: str) -> None:
+    """
+    写入或更新 .env 文件中的单个键值对（不使用原子 rename）。
+
+    dotenv.set_key() 内部调用 os.replace()（原子 rename），在 Docker
+    bind-mount 的 .env 文件上会触发 OSError [Errno 16] Device or resource busy。
+    本函数直接读取 → 内存修改 → 原地写回，绕过该限制。
+
+    供 web.py / crypto.py 共享使用，避免重复实现。
+    """
+    import re as _re
+    if not ENV_PATH.exists():
+        ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ENV_PATH.touch()
+
+    content = ENV_PATH.read_text(encoding="utf-8")
+    lines = content.splitlines(keepends=True)
+    found = False
+    new_lines: list[str] = []
+    for line in lines:
+        if _re.match(rf"^\s*{_re.escape(key)}\s*=", line):
+            new_lines.append(f"{key}={value}\n")
+            found = True
+        else:
+            new_lines.append(line)
+    if not found:
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines.append("\n")
+        new_lines.append(f"{key}={value}\n")
+    ENV_PATH.write_text("".join(new_lines), encoding="utf-8")
+
+
 def resolve_project_path(path_str: str | os.PathLike[str]) -> Path:
     """
     将路径解析为稳定的绝对路径。

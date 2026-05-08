@@ -34,14 +34,9 @@ def _get_cipher() -> Fernet:
 
         key = os.environ.get(_ENV_KEY, "").strip()
         if not key:
-            from dotenv import set_key
+            from config import write_env_key
             key = Fernet.generate_key().decode()
-            if ENV_PATH.exists():
-                set_key(str(ENV_PATH), _ENV_KEY, key, quote_mode="always")
-            else:
-                ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-                ENV_PATH.touch()
-                set_key(str(ENV_PATH), _ENV_KEY, key, quote_mode="always")
+            write_env_key(_ENV_KEY, key)
             os.environ[_ENV_KEY] = key
             logger.info("已生成数据加密密钥并写入 .env")
 
