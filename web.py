@@ -2,8 +2,12 @@
 Holland2Stay 监控 Web 面板
 ==========================
 运行方式：
-    python web.py               # 默认 http://localhost:8088
+    python web.py               # 本地开发，默认 http://localhost:8088
     python web.py --port 8080   # 自定义端口
+
+Docker 容器中由 Gunicorn 启动（supervisord.conf）：
+    gunicorn --workers=1 --threads=8 --timeout=0 --bind=0.0.0.0:8088 web:app
+    （直接运行 python web.py 仅用于本地调试）
 """
 from __future__ import annotations
 
@@ -35,11 +39,12 @@ from config import (  # noqa: E402
     ASSETS_DIR,
     BASE_DIR,
     DATA_DIR,
+    DB_PATH,
     ENV_PATH,
     KNOWN_CITIES,
+    TIMEZONE,
     AutoBookConfig,
     ListingFilter,
-    resolve_project_path,
 )
 from models import parse_features_list                           # noqa: E402
 from update_checker import check_for_updates
@@ -53,8 +58,7 @@ logger = logging.getLogger(__name__)
 # 常量
 # ------------------------------------------------------------------ #
 
-DB_PATH  = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
-TZ       = os.environ.get("TIMEZONE", "Europe/Amsterdam")
+TZ       = TIMEZONE   # 本地别名，保持既有代码可读性
 PID_FILE = DATA_DIR / "monitor.pid"
 RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
 
@@ -757,24 +761,15 @@ def _localize_options(category: str, options: list[str]) -> list[tuple[str, str]
 
 def _get_filter_options(category: str) -> list[str]:
     """从 DB 获取所有可选的分类值，DB 为空时使用预设回退。"""
-    import sqlite3 as _sq
-
     default = _DEFAULTS.get(category, [])
+    st = _storage()
     try:
-        conn = _sq.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
-        pattern = f"{category}:%"
-        rows = conn.execute(
-            """SELECT DISTINCT ltrim(substr(value, instr(value, ':') + 1)) as val
-               FROM listings, json_each(features)
-               WHERE value LIKE ?
-               ORDER BY val""",
-            (pattern,),
-        ).fetchall()
-        conn.close()
-        db_vals = [r[0] for r in rows if r[0]]
+        db_vals = st.get_feature_values(category)
         return db_vals if db_vals else default
     except Exception:
         return default
+    finally:
+        st.close()
 
 
 @app.route("/users/new", methods=["GET", "POST"])
@@ -1101,30 +1096,13 @@ def api_neighborhoods():
     """返回指定城市的所有片区（供用户过滤表单动态加载）。"""
     cities = request.args.get("cities", "").split(",")
     cities = [c.strip() for c in cities if c.strip()]
-    import sqlite3 as _sq
-    hoods: list[str] = []
+    st = _storage()
     try:
-        conn = _sq.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
-        if cities:
-            placeholders = ",".join("?" * len(cities))
-            rows = conn.execute(
-                f"""SELECT DISTINCT ltrim(substr(value, instr(value, ':') + 1)) as val
-                    FROM listings, json_each(features)
-                    WHERE value LIKE 'Neighborhood:%' AND city IN ({placeholders})
-                    ORDER BY val""",
-                cities,
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """SELECT DISTINCT ltrim(substr(value, instr(value, ':') + 1)) as val
-                   FROM listings, json_each(features)
-                   WHERE value LIKE 'Neighborhood:%'
-                   ORDER BY val"""
-            ).fetchall()
-        conn.close()
-        hoods = [r[0] for r in rows if r[0]]
+        hoods = st.get_feature_values("Neighborhood", cities=cities or None)
     except Exception:
-        pass
+        hoods = []
+    finally:
+        st.close()
     return jsonify({"neighborhoods": hoods})
 
 
@@ -1393,8 +1371,11 @@ def api_status():
 
 @app.route("/health")
 def health():
+    # 只检查 Web 进程是否存活（能响应 HTTP 即代表存活）。
+    # monitor 运行状态通过 "monitor" 字段透出，供外部观测，
+    # 但不影响 HTTP 状态码——管理员主动停止监控不应让容器变 unhealthy。
     monitor_ok = _monitor_pid() is not None
-    return jsonify({"ok": True, "monitor": monitor_ok}), 200 if monitor_ok else 503
+    return jsonify({"ok": True, "monitor": monitor_ok}), 200
 
 
 @app.route("/api/reload", methods=["POST"])

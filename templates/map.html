@@ -143,18 +143,53 @@ function loadMapData() {
       var color = getMarkerColor(sc);
       var marker = L.marker([l.lat, l.lng], { icon: createMarkerIcon(color) }).addTo(map);
 
-      var badge = sc === 'book' ? (zh ? '直订' : 'Direct')
+      var badgeText = sc === 'book' ? (zh ? '直订' : 'Direct')
         : sc === 'lottery' ? (zh ? '摇号' : 'Lottery')
-        : escapeHtml(l.status);
+        : l.status;
 
-      var popup =
-        '<strong><a href="' + escapeHtml(l.url) + '" target="_blank">' + escapeHtml(l.name) + '</a></strong><br>' +
-        '<span style="color:var(--text2);">' + priceShort(escapeHtml(l.price_raw || '')) + (zh ? '/月' : '/mo') + '</span><br>' +
-        (l.neighborhood ? '<span style="color:var(--text3);font-size:12px;">' + escapeHtml(l.neighborhood) + ' · </span>' : '') +
-        '<span style="color:var(--text3);font-size:12px;">' + escapeHtml(l.city || '') + '</span><br>' +
-        '<span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:100px;font-size:11px;background:' + color + '18;color:' + color + ';">' + badge + '</span>';
+      // 使用 DOM 构造 popup，避免 innerHTML 字符串拼接带来的 XSS 风险
+      var popupEl = document.createElement('div');
 
-      marker.bindPopup(popup);
+      var strong = document.createElement('strong');
+      var a = document.createElement('a');
+      // 只允许 http(s) 协议，防止 javascript: 注入
+      a.href = (l.url && /^https?:\/\//i.test(l.url)) ? l.url : '#';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = l.name;
+      strong.appendChild(a);
+      popupEl.appendChild(strong);
+      popupEl.appendChild(document.createElement('br'));
+
+      var priceSpan = document.createElement('span');
+      priceSpan.style.color = 'var(--text2)';
+      priceSpan.textContent = priceShort(l.price_raw || '') + (zh ? '/月' : '/mo');
+      popupEl.appendChild(priceSpan);
+      popupEl.appendChild(document.createElement('br'));
+
+      if (l.neighborhood) {
+        var neighborSpan = document.createElement('span');
+        neighborSpan.style.color = 'var(--text3)';
+        neighborSpan.style.fontSize = '12px';
+        neighborSpan.textContent = l.neighborhood + ' · ';
+        popupEl.appendChild(neighborSpan);
+      }
+      var citySpan = document.createElement('span');
+      citySpan.style.color = 'var(--text3)';
+      citySpan.style.fontSize = '12px';
+      citySpan.textContent = l.city || '';
+      popupEl.appendChild(citySpan);
+      popupEl.appendChild(document.createElement('br'));
+
+      var badgeSpan = document.createElement('span');
+      badgeSpan.style.cssText = 'display:inline-block;margin-top:4px;padding:2px 8px;' +
+        'border-radius:100px;font-size:11px;background:' + color + '18;color:' + color + ';';
+      badgeSpan.textContent = badgeText;
+      popupEl.appendChild(badgeSpan);
+
+      // 将房源名称存到 marker 上，供 mousemove 状态栏直接读取
+      marker._listingName = l.name;
+      marker.bindPopup(popupEl);
       bounds.extend([l.lat, l.lng]);
       markers.push(marker);
     });
@@ -176,10 +211,8 @@ function loadMapData() {
         }
       });
       var statusEl = document.getElementById('map-status');
-      if(closest && closest.getPopup()) {
-        var content = closest.getPopup().getContent();
-        var nameMatch = content.match(/<strong>(.*?)<\/strong>/);
-        if(nameMatch) statusEl.textContent = nameMatch[1];
+      if(closest && closest._listingName) {
+        statusEl.textContent = closest._listingName;
       } else {
         statusEl.textContent = '';
       }

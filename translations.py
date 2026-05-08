@@ -246,7 +246,6 @@ TRANSLATIONS = {
     "user_form_filter_hint":{"zh": "留空 = 不限制",           "en": "Leave empty = no limit"},
     "user_form_max_rent":   {"zh": "最高月租（€）",           "en": "Max rent (€)"},
     "user_form_min_area":   {"zh": "最小面积（m²）",          "en": "Min area (m²)"},
-    "user_form_max_area":   {"zh": "最大面积（m²）",          "en": "Max area (m²)"},
     "user_form_min_floor":      {"zh": "最低楼层",                "en": "Min floor"},
     "multi_select_placeholder": {"zh": "点击选择...",            "en": "Click to select..."},
     "select_all":           {"zh": "全选",                    "en": "Select all"},

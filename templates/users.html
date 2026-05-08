@@ -76,7 +76,6 @@
       <i class="bi bi-funnel-fill mr-1" style="color:var(--warning);"></i>
       {% if lf.max_rent %}€{{ lf.max_rent | int }}{{ _('per_month') }}{{ _('users_filter_prefix') }} {% endif %}
       {% if lf.min_area %}≥{{ lf.min_area | int }}m² {% endif %}
-      {% if lf.max_area %}≤{{ lf.max_area | int }}m² {% endif %}
       {% if lf.min_floor %}≥{{ lf.min_floor }}{% if lang=='zh' %}层{% endif %} {% endif %}
       {% if lf.allowed_types %}{% if lang=='zh' %}户型{% else %}Type{% endif %}: {{ lf.allowed_types | join('/') }} {% endif %}
       {% if lf.allowed_neighborhoods %}{% if lang=='zh' %}片区{% else %}Area{% endif %}: {{ lf.allowed_neighborhoods | join('/') }}{% endif %}

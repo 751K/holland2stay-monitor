@@ -12,9 +12,11 @@ A personal project that monitors Holland2Stay (https://www.holland2stay.com) for
 
 **Docker (recommended):**
 ```bash
-cp .env.example .env && mkdir -p data logs
+cp .env.example .env && mkdir -p data logs logs/caddy
+# Edit Caddyfile: replace "your.domain.com" with your actual domain
+# Edit .env: set WEB_PASSWORD and SESSION_COOKIE_SECURE=true
 docker compose up -d
-# open http://localhost:8088 → Dashboard → "Start monitor"
+# open https://your.domain.com → Dashboard → "Start monitor"
 ```
 
 **macOS .dmg:**
@@ -91,8 +93,11 @@ python web.py  # http://127.0.0.1:8088
 | Optional auth for web | ✅ Done | Session login enabled when password set; `WEB_GUEST_MODE` controls guest entry |
 | Login rate limiting | ✅ Done | IP-based exponential backoff after 5 failures |
 | HTTPS / Caddy | ✅ Done | Bundled Caddyfile + docker-compose Caddy service; auto Let's Encrypt |
-| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix |
-| Code quality | ✅ Done | Literal types, shared constants, dedup parse logic |
+| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix, DOM XSS prevention |
+| Startup preflight | ✅ Done | Blocks container start if `WEB_PASSWORD` unset or Caddyfile domain is still a placeholder |
+| Production WSGI | ✅ Done | Gunicorn (1 worker × 8 threads, timeout=0) replaces Flask dev server in Docker |
+| Dependency pinning | ✅ Done | `requirements.lock` with exact `==` versions; Dockerfile installs from lock file |
+| Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, Storage abstraction enforced |
 
 ---
 
@@ -125,15 +130,14 @@ Normal intervals apply outside peak hours. During the Dutch morning release wind
 
 ### Fast-path booking
 
-When a listing transitions from "Reserved" (or any other status) directly to "Available to book", the window to claim it is measured in seconds. The monitor:
+For any qualifying "Available to book" listing — whether it just appeared for the first time or transitioned from another status — the window to claim it is measured in seconds. The monitor:
 
 1. Pre-scans the diff result in memory (no network calls)
-2. Immediately submits `try_book()` to a thread pool, before any notification is sent
+2. Immediately submits `try_book()` to a thread pool for **all** auto-book candidates, before any notification is sent
 3. Runs the booking HTTP flow concurrently while notification sends are in flight
-4. **Prewarmed session**: a pre-authenticated `curl_cffi` session is prepared for each auto-book user during notification dispatch, so `try_book()` can skip session creation + login — saving ~0.7 s per booking attempt
-5. Awaits the booking result after notifications finish — in most cases the booking is already done
+4. Awaits the booking result after notifications finish — in most cases the booking is already done
 
-This reduces the delay between detecting the availability change and reaching the server to approximately 0–1 second instead of the former 2–5 second notification-first approach.
+This reduces the delay between detecting availability and reaching the server to approximately 0–1 second instead of the former 2–5 second notification-first approach.
 
 ### Multi-user support
 
@@ -165,7 +169,6 @@ This reduces the delay between detecting the availability change and reaching th
 
 - When a qualifying "Available to book" listing appears, the monitor can complete the booking workflow automatically
 - Flow: login → `createEmptyCart` → `addNewBooking` → `placeOrder` (with `store_id=54`) → `idealCheckOut` (with `plateform="h"`)
-- Sessions are pre-warmed (pre-logged-in) during the notification phase — each booking attempt skips session creation + login, saving ~0.7 s
 - Matches the official H2S frontend booking flow verified via browser DevTools
 - If `placeOrder` returns "another unit reserved" and `cancel_enabled` is on, auto-cancels the old order via `cancelOrder` mutation and retries the entire flow
 - If `cancel_enabled` is off (default), the "another unit reserved" error is forwarded directly to the user — no cancel attempt is made (H2S disables `cancelOrder` by default)
@@ -312,70 +315,51 @@ Tip: On first run, if `data/users.json` does not exist and old `.env` notificati
 
 Requirements: Docker + Docker Compose v2
 
+The included `docker-compose.yml` runs **Caddy + h2s** together. Caddy handles HTTPS (Let's Encrypt) and is the only external entry point — port 8088 is internal to the Docker network and is **not** mapped to the host.
+
+**Before starting — two required steps:**
+
+1. **Edit `Caddyfile`**: replace `your.domain.com` with your actual domain:
+   ```
+   your.domain.com {
+       reverse_proxy h2s:8088
+       ...
+   }
+   ```
+
+2. **Edit `.env`**: set a password and enable secure cookies:
+   ```env
+   WEB_PASSWORD=yourpassword
+   SESSION_COOKIE_SECURE=true
+   ```
+
+Also point your domain's DNS A record to the VPS IP, and make sure ports 80 and 443 are open (needed for the ACME challenge).
+
+**Start:**
 ```bash
-# 1. Create .env from the template (Docker mounts this file at runtime)
-cp .env.example .env
-#    Edit .env to set WEB_PASSWORD and any other settings
-
-# 2. Create the runtime directories so Docker mounts them as directories, not files
+cp .env.example .env   # then edit as above
 mkdir -p data logs
-
-# 3. Build the image
-docker compose build
-
-# 4. Start in the background
 docker compose up -d
 
-# 5. Tail live logs
+# Tail logs
 docker compose logs -f
 
-# 6. Stop
+# Stop
 docker compose down
 ```
 
-The container runs `monitor.py` and `web.py` together under supervisord. Both processes log to `./logs/` on the host. The container runs as non-root user `appuser`.
+The container runs `monitor.py` and `web.py` together under supervisord. Logs go to `./logs/` on the host. The container runs as non-root user `appuser`. `mem_limit: 512M` and `cpus: 1.0` cap resource usage.
 
-**Production deployment note:** The built-in Flask Werkzeug server is suitable only for internal/LAN use. For internet-facing deployments, place the app behind a reverse proxy (Nginx/Caddy) with HTTPS, and use Gunicorn:
-
-```bash
-pip install gunicorn
-gunicorn -w 2 -b 127.0.0.1:5000 web:app
-```
-
-Set `SESSION_COOKIE_SECURE=true` in `.env` when using HTTPS. The docker-compose.yml includes
-`mem_limit: 512M` and `cpus: 1.0` to prevent runaway resource consumption.
-
-**First-time setup on a VPS:**
-1. After `docker compose up -d`, open `http://<server-ip>:8088` in your browser
-2. Go to **Users** and add your first user with a Telegram or Email channel (iMessage is macOS-only and is skipped automatically)
-3. Go to **Settings** and choose which cities to monitor
-4. Click **立即生效 / Apply now** to hot-reload the config without restarting
+**First-time setup:**
+1. Open `https://your.domain.com` and log in
+2. Go to **Users** → add your first user with a Telegram or Email channel (iMessage is macOS-only and skipped automatically on Linux/Docker)
+3. Go to **Settings** → choose which cities to monitor
+4. Click **立即生效 / Apply now** to hot-reload without restarting
 
 **Updating to a new version:**
 ```bash
 git pull
-docker compose build --no-cache
-docker compose up -d
-```
-
-**Exposing via HTTPS (optional but recommended):**
-Put an nginx reverse proxy in front on the VPS and terminate TLS there. A minimal nginx snippet:
-```nginx
-server {
-    listen 443 ssl;
-    server_name your.domain.com;
-    # ssl_certificate / ssl_certificate_key ...
-
-    location / {
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        # Required for SSE (disable buffering so notifications stream in real time)
-        proxy_buffering off;
-        proxy_cache off;
-        proxy_read_timeout 3600s;
-    }
-}
+docker compose up -d --build
 ```
 
 ---

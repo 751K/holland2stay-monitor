@@ -7,9 +7,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends supervisor \
     && rm -rf /var/lib/apt/lists/*
 
-# 先复制 requirements 利用 Docker layer cache
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 先复制依赖文件，利用 Docker layer cache
+# requirements.lock 锁定精确版本，保证构建可重复性
+# requirements.txt 保留 >= 约束，供本地开发 / 版本升级参考
+COPY requirements.txt requirements.lock ./
+RUN pip install --no-cache-dir -r requirements.lock
 
 # 复制应用代码
 COPY *.py ./

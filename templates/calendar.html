@@ -134,7 +134,11 @@ function renderCityFilter() {
     var btn = document.createElement('button');
     btn.className = 'city-btn' + (active ? ' active' : '');
     if(active) { btn.style.background = color; btn.style.borderColor = color; btn.style.color = '#fff'; }
-    btn.innerHTML = '<span class="city-dot" style="background:' + (active ? '#fff' : color) + ';"></span>' + city + ' (' + count + ')';
+    var dot = document.createElement('span');
+    dot.className = 'city-dot';
+    dot.style.background = active ? '#fff' : color;
+    btn.appendChild(dot);
+    btn.appendChild(document.createTextNode(city + ' (' + count + ')'));
     btn.addEventListener('click', function() {
       if(selectedCities.has(city)) selectedCities.delete(city);
       else selectedCities.add(city);
@@ -267,15 +271,49 @@ function selectDate(ymd, listings) {
     var cityColor = cityColorMap[l.city] || '#8b949e';
     var row = document.createElement('div');
     row.className = 'listing-row';
-    row.innerHTML =
-      '<div class="flex justify-between items-start gap-2">' +
-        '<a href="' + l.url + '" target="_blank" class="font-medium text-sm" style="color:var(--text);">' + l.name + '</a>' +
-        '<span class="badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' text-xs">' + (sc === 'book' ? T.direct : T.lottery) + '</span>' +
-      '</div>' +
-      '<div class="flex gap-3 mt-1">' +
-        '<span class="text-xs text-secondary"><i class="bi bi-currency-euro mr-1"></i>' + priceShort(l.price_raw) + T.perMonth + '</span>' +
-        '<span class="text-xs" style="color:' + cityColor + ';"><i class="bi bi-geo-alt mr-1"></i>' + (l.city || '—') + '</span>' +
-      '</div>';
+
+    // ── 上行：名称链接 + 状态徽章 ──
+    var topDiv = document.createElement('div');
+    topDiv.className = 'flex justify-between items-start gap-2';
+
+    var a = document.createElement('a');
+    // 只允许 http(s) 协议，防止 javascript: 注入
+    a.href = (l.url && /^https?:\/\//i.test(l.url)) ? l.url : '#';
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.className = 'font-medium text-sm';
+    a.style.color = 'var(--text)';
+    a.textContent = l.name;
+    topDiv.appendChild(a);
+
+    var badge = document.createElement('span');
+    badge.className = 'badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' text-xs';
+    badge.textContent = sc === 'book' ? T.direct : T.lottery;
+    topDiv.appendChild(badge);
+    row.appendChild(topDiv);
+
+    // ── 下行：价格 + 城市 ──
+    var bottomDiv = document.createElement('div');
+    bottomDiv.className = 'flex gap-3 mt-1';
+
+    var priceSpan = document.createElement('span');
+    priceSpan.className = 'text-xs text-secondary';
+    var priceIcon = document.createElement('i');
+    priceIcon.className = 'bi bi-currency-euro mr-1';
+    priceSpan.appendChild(priceIcon);
+    priceSpan.appendChild(document.createTextNode(priceShort(l.price_raw) + T.perMonth));
+    bottomDiv.appendChild(priceSpan);
+
+    var citySpan = document.createElement('span');
+    citySpan.className = 'text-xs';
+    citySpan.style.color = cityColor;
+    var cityIcon = document.createElement('i');
+    cityIcon.className = 'bi bi-geo-alt mr-1';
+    citySpan.appendChild(cityIcon);
+    citySpan.appendChild(document.createTextNode(l.city || '—'));
+    bottomDiv.appendChild(citySpan);
+
+    row.appendChild(bottomDiv);
     body.appendChild(row);
   });
 }

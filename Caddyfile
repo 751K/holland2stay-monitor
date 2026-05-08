@@ -1,4 +1,4 @@
-flatradar.app, www.flatradar.app {
+your.domain.com {
     reverse_proxy h2s:8088
 
     # 安全响应头
@@ -9,8 +9,13 @@ flatradar.app, www.flatradar.app {
         -Server
     }
 
-    # 访问日志
+    # 访问日志（挂载到宿主机 ./logs/caddy/access.log）
     log {
-        output file /dev/null
+        output file /var/log/caddy/access.log {
+            roll_size    10MiB
+            roll_keep    7
+            roll_keep_days 30
+        }
+        format json
     }
 }

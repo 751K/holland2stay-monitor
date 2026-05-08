@@ -13,13 +13,10 @@ monitor.py — 监控主程序
 ----------------
 1. `scrape_all()`（sync，在 executor 线程中运行）抓取所有城市房源
 2. `storage.diff()` 对比库中快照，产出 new_listings / status_changes
-3. 遍历启用的用户，构建自动预订候选
-4. 预登录（create_prewarmed_session）：为有候选的用户提前换取 Bearer token
-   （与步骤 5 的通知发送并发进行）
-5. 发送新房源/状态变更通知
-6. 汇集预登录结果，以预认证 Session 提交 try_book() 到线程池
-7. 等待预订完成，推送预订结果通知，清理预登录 Session
-8. 写 meta（last_scrape_at）；每 HEARTBEAT_EVERY 轮发心跳
+3. 遍历启用的用户，构建自动预订候选；立即将 try_book() 提交到线程池
+4. 发送新房源/状态变更通知（与步骤 3 中的预订并发进行）
+5. 等待预订完成，推送预订结果通知
+6. 写 meta（last_scrape_at）；每 HEARTBEAT_EVERY 轮发心跳
 
 智能轮询
 --------
@@ -54,7 +51,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from booker import create_prewarmed_session, try_book
+from booker import try_book
 from config import DATA_DIR, ENV_PATH, load_config
 from models import STATUS_AVAILABLE, parse_float
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
@@ -338,8 +335,8 @@ async def run_once(
     2. storage.diff() 识别 new_listings 和 status_changes
     3. 快速候选预扫描（纯内存，无网络）：
        - 同时扫描 new_listings 和 status_changes，收集每个用户的自动预订候选
-       - 记录"状态变更 → Available to book"（快速通道），与普通新上线房源加以区分
-       - 立即将 try_book() 提交到线程池（run_in_executor），预订与通知并行执行
+       - 无论来源（新上线 / 状态变更 → Available to book），立即提交 try_book()
+         到线程池（run_in_executor），预订与通知并行执行
     4. 遍历 new_listings：发送新房源通知（预订已在后台运行）
     5. 遍历 status_changes：发送状态变更通知（预订已在后台运行）
     6. await 预订 Future，发送预订成功/失败通知
@@ -348,12 +345,9 @@ async def run_once(
     并行策略
     --------
     try_book() 是同步函数，通过 run_in_executor 在线程池中运行。
-    它在步骤 3 末尾立即提交，步骤 4/5 的通知网络调用（send_*）与之并行进行。
+    所有候选在步骤 3 末尾立即提交，步骤 4/5 的通知网络调用（send_*）与之并行进行。
     到步骤 6 await 时，booking 往往已经完成，几乎零额外等待。
-
-    对于"Reserved / Not available → Available to book"这类高竞争变更，
-    预订请求会在发出状态变更通知之前就已进入 Holland2Stay 服务器，
-    相比原先"通知发完再预订"的顺序执行，可节省 1-3 秒。
+    预订请求在发出通知之前就已进入 Holland2Stay 服务器，可节省 1-3 秒。
     """
     global _retry_queue_dirty
     city_tasks, availability_ids = cfg.scrape_tasks()
@@ -474,28 +468,13 @@ async def run_once(
                     user.name, listing.name,
                 )
 
-    # ── 预登录：为有候选房源的用户提前创建已认证 Session ────────── #
-    # 提交到 executor 后立即进入通知循环，预登录与通知的 HTTP 调用
-    # 并发进行（不同线程），在 await 预订结果之前汇集即可。
-    loop = asyncio.get_running_loop()
-    prewarm_futures: dict[str, asyncio.Future] = {}
-    for user, _ in user_notifiers:
-        if not (user.auto_book.enabled and ab_candidates.get(user.id)):
-            continue
-        prewarm_futures[user.id] = loop.run_in_executor(
-            None,
-            lambda u=user: create_prewarmed_session(u.auto_book.email, u.auto_book.password),
-        )
-        logger.debug("[%s] 预登录已提交到 executor", user.name)
-
-    # 立即将 _book_with_fallback() 提交到线程池，返回 Future（非阻塞）
-    # 注意：预订 Future 与预登录 Future 共享同一个默认线程池。
-    # 若预登录尚未完成，booking 线程会在 try_book() 中按正常路径登录
-    # （prewarmed=None），不会等待。
+    # ── 立即将 _book_with_fallback() 提交到线程池（快速通道）──────── #
+    # 新上线可预订 / 状态变更 → Available to book 均立即提交 run_in_executor，
+    # 预订请求在发出通知之前就已进入 Holland2Stay 服务器（节省 1-3 秒）。
     # ab_futures: list of (user, notifier, sorted_candidates, Future[BookingResult])
     # sorted_candidates 按面积降序排列；fallback 逻辑在线程内部按序尝试
-    ab_pending: list[tuple] = []      # 新上线房源候选（通知后提交）
-    ab_fast_futures: list[tuple] = [] # 快速通道：状态变更候选立即提交
+    loop = asyncio.get_running_loop()
+    ab_futures: list[tuple] = []
 
     for user, notifier in user_notifiers:
         candidates = ab_candidates.get(user.id, [])
@@ -509,25 +488,24 @@ async def run_once(
                 user.name, len(sorted_cands), len(sorted_cands) - 1,
                 primary.name, _area_key(primary),
             )
-        # 区分：状态变更触发（快速通道）vs 新上线房源
         if primary.id in status_transition:
             old_s, new_s = status_transition[primary.id]
             logger.info(
                 "[%s] 🚀 快速预订通道 (%s → %s)，立即提交到 executor: %s",
                 user.name, old_s, new_s, primary.name,
             )
-            # 快速通道：不等通知，直接提交预订到线程池
-            f = loop.run_in_executor(
-                None,
-                lambda cs=sorted_cands, u=user: _book_with_fallback(cs, u, booking_deadline),
-            )
-            ab_fast_futures.append((user, notifier, sorted_cands, f))
         else:
-            logger.info("[%s] 🔖 自动预订（新上线可预订），通知后提交: %s", user.name, primary.name)
-            # 新上线房源：等通知发完再提交（预登录在通知期间完成）
-            ab_pending.append((user, notifier, sorted_cands))
+            logger.info(
+                "[%s] 🚀 自动预订（新上线可预订），立即提交到 executor: %s",
+                user.name, primary.name,
+            )
+        f = loop.run_in_executor(
+            None,
+            lambda cs=sorted_cands, u=user: _book_with_fallback(cs, u, booking_deadline),
+        )
+        ab_futures.append((user, notifier, sorted_cands, f))
 
-    # ── 新房源通知（预登录与通知并发进行）────────────────────────── #
+    # ── 新房源通知（预订已在后台线程并行运行）───────────────────── #
     total_notified = 0
     new_notified_ids: list[str] = []
     for listing in new_listings:
@@ -552,7 +530,7 @@ async def run_once(
 
     storage.mark_notified_batch(new_notified_ids)
 
-    # ── 状态变更通知（预登录与通知并发进行）──────────────────────── #
+    # ── 状态变更通知（预订已在后台线程并行运行）─────────────────── #
     sc_notified_ids: list[str] = []
     for listing, old_status, new_status in status_changes:
         notified_this = False
@@ -574,37 +552,6 @@ async def run_once(
             sc_notified_ids.append(listing.id)
 
     storage.mark_status_change_notified_batch(sc_notified_ids)
-
-    # ── 汇集预登录结果，提交预订 Future ──────────────────────────── #
-    # 到此处通知已全部发出（通常耗时 1-3s），预登录的 executor 任务
-    # 应已完成。若预登录失败（网络/凭据错误），记录警告并回退到
-    # try_book() 的内部登录路径（prewarmed=None），不阻塞预订。
-    prewarmed_sessions: dict[str, "PrewarmedSession"] = {}
-    for uid, f in prewarm_futures.items():
-        try:
-            prewarmed_sessions[uid] = await f
-            logger.debug("%s 预登录完成，session 可供复用", uid)
-        except Exception as e:
-            logger.warning(
-                "%s 预登录失败，try_book 将回退到正常登录路径: %s",
-                uid, e,
-            )
-
-    ab_futures = list(ab_fast_futures)  # 快速通道已提前提交
-    for user, notifier, sorted_cands in ab_pending:
-        ps = prewarmed_sessions.get(user.id)
-        if ps:
-            logger.info(
-                "[%s] 🔓 使用预登录 session (email=%s)",
-                user.name, ps.email,
-            )
-
-        future = loop.run_in_executor(
-            None,
-            lambda cs=sorted_cands, u=user, dl=booking_deadline, p=ps:
-                _book_with_fallback(cs, u, dl, prewarmed=p),
-        )
-        ab_futures.append((user, notifier, sorted_cands, future))
 
     # ── 等待预订结果，发送成功/失败通知 ──────────────────────────── #
     for user, notifier, sorted_cands, future in ab_futures:
@@ -653,14 +600,6 @@ async def run_once(
             await notifier.send_booking_failed(booked_listing, result.message)
             if web_notifier:
                 await web_notifier.send_booking_failed(booked_listing, result.message)
-
-    # ── 清理预登录 Session ─────────────────────────────────────────── #
-    for uid, ps in prewarmed_sessions.items():
-        try:
-            ps.session.close()
-            logger.debug("%s 预登录 session 已关闭", uid)
-        except Exception:
-            pass
 
     # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
     if _retry_queue_dirty:

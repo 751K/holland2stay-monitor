@@ -13,8 +13,12 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.env:/app/.env
+      # 只读挂入 Caddyfile，供 entrypoint 预检占位域名
+      - ./Caddyfile:/app/Caddyfile.check:ro
     environment:
       - PYTHONUNBUFFERED=1
+      # 本地/隔离网络部署时设为 1 可跳过安全预检
+      # - H2S_SKIP_PREFLIGHT=1
     networks:
       - web
     healthcheck:
@@ -36,6 +40,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - ./logs/caddy:/var/log/caddy
     networks:
       - web
     depends_on:

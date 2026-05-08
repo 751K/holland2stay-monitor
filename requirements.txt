@@ -1,5 +1,6 @@
 curl_cffi>=0.6.0
 python-dotenv>=1.0.0
 flask>=3.0.0
+gunicorn>=22.0.0
 tzdata>=2024.1
 cryptography>=42.0.0

@@ -574,6 +574,43 @@ class Storage:
         ).fetchall()
         return [r[0] for r in rows]
 
+    def get_feature_values(
+        self,
+        category: str,
+        cities: Optional[list[str]] = None,
+    ) -> list[str]:
+        """
+        从 features JSON 数组中提取指定分类的所有不重复值。
+
+        Parameters
+        ----------
+        category : features 元素的分类前缀（e.g. "Neighborhood"、"Type"）
+        cities   : 可选城市过滤列表；None 或空列表表示不限城市
+
+        Returns
+        -------
+        按字母排序的去重值列表（已去除前缀和首尾空格）
+        """
+        pattern = f"{category}:%"
+        if cities:
+            placeholders = ",".join("?" * len(cities))
+            rows = self._conn.execute(
+                f"""SELECT DISTINCT ltrim(substr(value, instr(value, ':') + 1)) AS val
+                    FROM listings, json_each(features)
+                    WHERE value LIKE ? AND city IN ({placeholders})
+                    ORDER BY val""",
+                [pattern, *cities],
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT DISTINCT ltrim(substr(value, instr(value, ':') + 1)) AS val
+                   FROM listings, json_each(features)
+                   WHERE value LIKE ?
+                   ORDER BY val""",
+                (pattern,),
+            ).fetchall()
+        return [r[0] for r in rows if r[0]]
+
     # ------------------------------------------------------------------ #
     # Meta 键值存储
     # ------------------------------------------------------------------ #
