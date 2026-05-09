@@ -56,7 +56,7 @@ from typing import Literal
 
 import curl_cffi.requests as req
 
-from config import CURL_IMPERSONATE
+from config import get_impersonate
 from models import STATUS_AVAILABLE, Listing
 
 logger = logging.getLogger(__name__)
@@ -661,7 +661,7 @@ def create_prewarmed_session(email: str, password: str) -> PrewarmedSession:
     """
     proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
     proxies = {"https": proxy, "http": proxy} if proxy else {}
-    session = req.Session(impersonate=CURL_IMPERSONATE, proxies=proxies)
+    session = req.Session(impersonate=get_impersonate(), proxies=proxies)
     try:
         token = login(session, email, password)
     except Exception:
@@ -763,7 +763,7 @@ def try_book(
             prewarmed.session.close()
         proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
         proxies = {"https": proxy, "http": proxy} if proxy else {}
-        session = req.Session(impersonate=CURL_IMPERSONATE, proxies=proxies)
+        session = req.Session(impersonate=get_impersonate(), proxies=proxies)
         own_session = True
 
     try:

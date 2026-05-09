@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 
 import curl_cffi.requests as req
 
-from config import CURL_IMPERSONATE
+from config import get_impersonate
 from models import Listing
 
 if TYPE_CHECKING:
@@ -288,7 +288,7 @@ class TelegramNotifier(BaseNotifier):
     def __init__(self, token: str, chat_id: str) -> None:
         self._token = token
         self._chat_id = chat_id
-        self._session = req.Session(impersonate=CURL_IMPERSONATE)
+        self._session = req.Session(impersonate=get_impersonate())
 
     async def _send(self, text: str) -> bool:
         url = self._API.format(token=self._token)
@@ -435,7 +435,7 @@ class WhatsAppNotifier(BaseNotifier):
         self._token = auth_token
         self._from = from_number
         self._to = to_number
-        self._session = req.Session(impersonate=CURL_IMPERSONATE)
+        self._session = req.Session(impersonate=get_impersonate())
 
     async def _send(self, text: str) -> bool:
         url = f"https://api.twilio.com/2010-04-01/Accounts/{self._sid}/Messages.json"

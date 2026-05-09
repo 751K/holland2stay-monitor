@@ -745,9 +745,10 @@ async def main_loop(
                     logger.debug("已清理 %d 条旧通知", pruned)
 
             actual = _apply_jitter(effective_interval, cfg.jitter_ratio)
+            dev_pct = (actual - effective_interval) / effective_interval * 100
             logger.info(
-                "等待 %d 秒（基准 %d s，±%.0f%% 抖动）%s",
-                actual, effective_interval, cfg.jitter_ratio * 100,
+                "等待 %d 秒（基准 %d s，%+.0f%%）%s",
+                actual, effective_interval, dev_pct,
                 "（高峰期自适应）" if is_peak else "",
             )
 

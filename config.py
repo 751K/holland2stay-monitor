@@ -108,9 +108,32 @@ TIMEZONE = os.environ.get("TIMEZONE", "Europe/Amsterdam")
 
 BASE_URL = "https://www.holland2stay.com/residences"
 
-# curl_cffi TLS 指纹模拟目标，绕过 Cloudflare WAF。
-# 所有模块通过此常量引用，H2S 更新防护时只需改一处。
-CURL_IMPERSONATE = "chrome110"
+# curl_cffi TLS 指纹模拟池，绕过 Cloudflare WAF。
+# 配合代理使用时每个 IP 随机选取不同指纹，模拟真实多用户浏览器分布。
+# 池中指纹均来自 curl_cffi 支持的现代浏览器版本，
+# 出现连续 Connection closed abruptly 时可更新或扩充列表。
+_CURL_IMPERSONATE_POOL = [
+    "chrome124",     # Chrome 124 (2024 Q2)
+    "chrome131",     # Chrome 131 (2024 Q4, 最新)
+    "safari17_0",    # Safari 17 (macOS/iOS)
+    "edge101",       # Edge 101 (Windows 默认浏览器)
+]
+_POOL_WEIGHTS = [3, 4, 2, 1]  # Chrome 占 70%，Safari 20%，Edge 10%
+
+_last_impersonate: Optional[str] = None
+
+
+def get_impersonate() -> str:
+    """从指纹池中随机选取一个 TLS 指纹（避免连续两次选同一个）。"""
+    import random
+    global _last_impersonate
+    pool = list(_CURL_IMPERSONATE_POOL)
+    # 如果上次选的值在池中且池大小 > 1，排除上次值，避免连续相同
+    if _last_impersonate is not None and _last_impersonate in pool and len(pool) > 1:
+        pool.remove(_last_impersonate)
+    choice = random.choices(pool, weights=None if _last_impersonate is not None and len(pool) < len(_CURL_IMPERSONATE_POOL) else _POOL_WEIGHTS[:len(pool)], k=1)[0]
+    _last_impersonate = choice
+    return choice
 
 # 所有已知城市及其 GraphQL filter ID。
 # ID 来自 Holland2Stay GraphQL aggregations 接口，city filter 使用字符串形式。
