@@ -15,18 +15,12 @@ import argparse
 import asyncio
 import hmac
 import json
-import logging
 import os
-import re
-import secrets
 import signal
 import subprocess
 import sys
 import threading
 import time as _time
-import uuid
-from datetime import datetime, timezone
-from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -43,30 +37,50 @@ from config import (  # noqa: E402
     ENV_PATH,
     KNOWN_CITIES,
     TIMEZONE,
-    AutoBookConfig,
-    ListingFilter,
 )
-from models import parse_features_list                           # noqa: E402
-from update_checker import check_for_updates
 from storage import Storage                                      # noqa: E402
 from translations import tr as _tr                                       # noqa: E402
-from users import UserConfig, get_user, load_users, save_users  # noqa: E402
+from users import get_user, load_users, save_users  # noqa: E402
 
-logger = logging.getLogger(__name__)
+# app/ 子包：Stage 1+2 抽离的内聚模块，无 Flask 耦合或仅依赖请求上下文
+from app import csrf as _csrf                                    # noqa: E402
+from app import jinja_filters                                    # noqa: E402
+from app.auth import (                                            # noqa: E402
+    admin_api_required,
+    admin_required,
+    api_login_required,
+    auth_enabled as _auth_enabled,
+    check_login_rate as _check_login_rate,
+    clear_login_failures as _clear_login_failures,
+    ensure_secret_key as _ensure_secret_key,
+    guest_mode_enabled as _guest_mode_enabled,
+    is_admin as _is_admin,
+    login_required,
+    record_login_failure as _record_login_failure,
+)
+from app.csrf import csrf_required, get_csrf_token as _get_csrf_token  # noqa: E402
+from app.env_writer import write_env_key as _write_env_key        # noqa: E402
+from app.forms.user_form import build_user_from_form as _user_from_form  # noqa: E402
+from app.i18n import (                                            # noqa: E402
+    DEFAULTS as _DEFAULTS,
+    get_lang as _get_lang,
+    localize_options as _localize_options,
+)
+from app.process_ctrl import (                                    # noqa: E402
+    PID_FILE,
+    RELOAD_REQUEST_FILE,
+    monitor_pid as _monitor_pid,
+    pid_exists as _pid_exists,
+    write_reload_request as _write_reload_request,
+)
+from app.safety import safe_next_url as _safe_next_url, sanitize_dotenv as _sanitize_dotenv  # noqa: E402
 
 # ------------------------------------------------------------------ #
 # 常量
 # ------------------------------------------------------------------ #
 
-TZ       = TIMEZONE   # 本地别名，保持既有代码可读性
-PID_FILE = DATA_DIR / "monitor.pid"
-RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
-
-_VALID_PAYMENT_METHODS = {
-    "idealcheckout_ideal",
-    "idealcheckout_visa",
-    "idealcheckout_mastercard",
-}
+TZ = TIMEZONE   # 本地别名，保持既有代码可读性
+# PID_FILE / RELOAD_REQUEST_FILE 由 app.process_ctrl 提供（已在顶部 import）
 
 # 全局配置可写入的 .env 键（通知/过滤/预订已移至 users.json）
 _SETTINGS_KEYS = [
@@ -93,20 +107,7 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
 app.config["PERMANENT_SESSION_LIFETIME"] = int(os.environ.get("SESSION_LIFETIME_HOURS", "24")) * 3600
 
-# 稳定的 secret key：优先读 .env，不存在则自动生成并写入，保证重启后 session 不失效
-def _ensure_secret_key() -> str:
-    key = os.environ.get("FLASK_SECRET", "")
-    if key:
-        return key
-    key = secrets.token_hex(32)
-    if ENV_PATH.exists() or not ENV_PATH.parent.exists():
-        try:
-            ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _write_env_key("FLASK_SECRET", key)
-        except Exception:
-            pass
-    return key
-
+# _write_env_key / _ensure_secret_key 由 app.env_writer / app.auth 提供（已在顶部 import）
 app.secret_key = _ensure_secret_key()
 
 
@@ -119,181 +120,9 @@ def _add_security_headers(resp):
 
 
 # ------------------------------------------------------------------ #
-# 鉴权
+# 鉴权 + CSRF：装饰器和状态查询函数由 app.auth / app.csrf 提供（已在顶部 import）
 # ------------------------------------------------------------------ #
-
-# 登录爆破防护：按 IP 记录连续失败次数，超阈值后施加指数退避延迟
-_LOGIN_FAILURES: dict[str, list[float]] = {}
-_LOGIN_MAX_FAILURES = 5       # 连续失败 5 次后开始延迟
-_LOGIN_BASE_DELAY = 1.0       # 首次延迟 1 秒，之后指数增长
-
-def _check_login_rate(ip: str) -> float:
-    """返回当前 IP 应等待的秒数（0 表示无需等待）。"""
-    now = _time.monotonic()
-    window = [t for t in _LOGIN_FAILURES.get(ip, []) if now - t < 300]
-    _LOGIN_FAILURES[ip] = window
-    if len(window) < _LOGIN_MAX_FAILURES:
-        return 0.0
-    extra = len(window) - _LOGIN_MAX_FAILURES
-    return min(_LOGIN_BASE_DELAY * (2 ** extra), 30.0)
-
-def _record_login_failure(ip: str) -> None:
-    _LOGIN_FAILURES.setdefault(ip, []).append(_time.monotonic())
-
-def _auth_enabled() -> bool:
-    """只有 WEB_PASSWORD 已设置才开启鉴权（向后兼容：未设置时无需登录）。"""
-    return bool(os.environ.get("WEB_PASSWORD", "").strip())
-
-
-def _guest_mode_enabled() -> bool:
-    """访客模式开关：默认开启，设 WEB_GUEST_MODE=false 可关闭。"""
-    return os.environ.get("WEB_GUEST_MODE", "true").lower() != "false"
-
-
-def _is_admin() -> bool:
-    """当前 session 是否为管理员（鉴权未开启时默认视为管理员）。"""
-    if not _auth_enabled():
-        return True
-    return session.get("role") == "admin"
-
-
-def _sanitize_dotenv(value: str) -> str:
-    """剥离换行符，防止 .env 注入攻击（\n 可伪造新键）。"""
-    return value.replace("\r", "").replace("\n", "")
-
-
-_env_write_lock = threading.Lock()
-
-
-def _write_env_key(key: str, value: str) -> None:
-    """
-    写入或更新 .env 文件中的单个键值对。
-
-    线程锁确保并发写入不会互相覆盖。
-    实际写入逻辑委托给 config.write_env_key()（供 crypto.py 共享）。
-    """
-    with _env_write_lock:
-        from config import write_env_key
-        write_env_key(key, value)
-
-
-def _safe_next_url(candidate: str) -> str:
-    """
-    校验重定向目标，防止开放重定向（Open Redirect）攻击。
-
-    规则
-    ----
-    只允许同源相对路径：必须以 "/" 开头，且不以 "//" 开头。
-    - "/dashboard"         → ✅ 合法相对路径
-    - "//evil.com/phish"   → ❌ 协议相对 URL，仍指向外部域名
-    - "https://evil.com"   → ❌ 绝对 URL，指向外部域名
-    - "javascript:alert()" → ❌ 非路径，不以 "/" 开头
-
-    login_required 装饰器通过 next=request.path 注入，request.path
-    始终是纯路径（以 "/" 开头，不含 host），是安全来源，此函数用于
-    校验来自表单/查询参数（不可信来源）的 next 值。
-
-    Parameters
-    ----------
-    candidate : 从请求参数中读取的原始 next 字符串
-
-    Returns
-    -------
-    校验通过的路径原样返回；不通过时返回 "/" 首页路径
-    """
-    if candidate and candidate.startswith("/") and not candidate.startswith("//"):
-        return candidate
-    return url_for("index")
-
-
-def login_required(f):
-    """页面路由装饰器：未登录时跳转到登录页。"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if _auth_enabled() and not session.get("authenticated"):
-            return redirect(url_for("login", next=request.path))
-        return f(*args, **kwargs)
-    return decorated
-
-
-def api_login_required(f):
-    """API 路由装饰器：未登录时返回 401 JSON。"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if _auth_enabled() and not session.get("authenticated"):
-            return jsonify({"error": "unauthorized"}), 401
-        return f(*args, **kwargs)
-    return decorated
-
-
-def admin_required(f):
-    """页面路由装饰器：仅 admin 角色可访问；访客/游客重定向到首页。"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if _auth_enabled():
-            if not session.get("authenticated"):
-                return redirect(url_for("login", next=request.path))
-            if session.get("role") != "admin":
-                return redirect(url_for("index"))
-        return f(*args, **kwargs)
-    return decorated
-
-
-def admin_api_required(f):
-    """API 路由装饰器：仅 admin 角色可访问，返回 401/403 JSON。"""
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if _auth_enabled():
-            if not session.get("authenticated"):
-                return jsonify({"error": "unauthorized"}), 401
-            if session.get("role") != "admin":
-                return jsonify({"error": "forbidden"}), 403
-        return f(*args, **kwargs)
-    return decorated
-
-
-# ------------------------------------------------------------------ #
-# CSRF 防护（纵深防御，配合 SameSite=Lax 双重保障）
-# ------------------------------------------------------------------ #
-
-def _get_csrf_token() -> str:
-    """
-    获取（或首次生成）绑定到当前 session 的 CSRF token。
-
-    token 存储在 Flask session 中，随 session cookie 一起管理。
-    每个 session 生成一次，不随请求更换（fixed-token 模式，足以防御 CSRF）。
-    """
-    if "csrf_token" not in session:
-        session["csrf_token"] = secrets.token_hex(32)
-    return session["csrf_token"]
-
-
-def csrf_required(f):
-    """
-    路由装饰器：对 POST 请求验证 CSRF token。
-
-    token 来源（任一即可）：
-    - 表单字段  : csrf_token
-    - 请求头    : X-CSRF-Token（fetch/XHR 调用使用）
-
-    校验使用 hmac.compare_digest 防时序攻击。
-    校验失败时返回 403，不泄露具体原因。
-    """
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if request.method == "POST":
-            token = (request.form.get("csrf_token")
-                     or request.headers.get("X-CSRF-Token", ""))
-            expected = session.get("csrf_token", "")
-            if not token or not expected or not hmac.compare_digest(token, expected):
-                from flask import abort
-                abort(403)
-        return f(*args, **kwargs)
-    return decorated
-
-
-# 注册为 Jinja2 全局函数，模板中直接调用 csrf_token()
-app.jinja_env.globals["csrf_token"] = _get_csrf_token
+_csrf.register(app)
 
 
 def _storage() -> Storage:
@@ -313,10 +142,10 @@ def _inject_auth():
     }
 
 
-def _get_lang() -> str:
-    """Detect language from cookie or query param. Default to zh."""
-    lang = request.args.get("lang", "") or request.cookies.get("h2s-lang", "zh")
-    return lang if lang in ("zh", "en") else "zh"
+# _get_lang 由 app.i18n 提供（已在顶部 as _get_lang 导入）。
+# Jinja 过滤器 time_ago / price_short / parse_features / status_badge
+# 现集中在 app.jinja_filters，并通过 jinja_filters.register(app) 一次性挂载。
+jinja_filters.register(app)
 
 
 @app.context_processor
@@ -327,54 +156,6 @@ def _inject_translations():
         return _tr(key, lang)
 
     return {"_": _, "lang": lang}
-
-
-@app.template_filter("time_ago")
-def time_ago(iso_str: str) -> str:
-    if not iso_str or iso_str == "—":
-        return "—"
-    try:
-        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-        diff = datetime.now(timezone.utc) - dt
-        secs = int(diff.total_seconds())
-        zh = _get_lang() == "zh"
-        if secs < 60:
-            return f"{secs}秒前" if zh else f"{secs}s ago"
-        if secs < 3600:
-            m = secs // 60
-            return f"{m}分钟前" if zh else f"{m}m ago"
-        if secs < 86400:
-            h = secs // 3600
-            return f"{h}小时前" if zh else f"{h}h ago"
-        d = secs // 86400
-        return f"{d}天前" if zh else f"{d}d ago"
-    except Exception:
-        return iso_str
-
-
-@app.template_filter("price_short")
-def price_short(price_raw: str) -> str:
-    if not price_raw:
-        return "—"
-    m = re.search(r"€[\d,\.]+", price_raw)
-    return m.group() if m else price_raw
-
-
-@app.template_filter("parse_features")
-def parse_features(features_json: str) -> dict[str, str]:
-    try:
-        items = json.loads(features_json or "[]")
-    except Exception:
-        return {}
-    return parse_features_list(items)
-
-
-@app.template_global()
-def status_badge(status: str) -> str:
-    s = status.lower()
-    if "book" in s:    return "success"
-    if "lottery" in s: return "warning"
-    return "secondary"
 
 
 # ------------------------------------------------------------------ #
@@ -422,7 +203,7 @@ def login() -> Any:
         user_ok = hmac.compare_digest(username, expected_user)
         pass_ok = hmac.compare_digest(password, expected_pass)
         if user_ok and pass_ok:
-            _LOGIN_FAILURES.pop(client_ip, None)  # 成功则清除失败记录
+            _clear_login_failures(client_ip)  # 成功则清除失败记录
             session.permanent = True
             session["authenticated"] = True
             session["role"] = "admin"
@@ -566,133 +347,7 @@ def settings() -> Any:
 # ------------------------------------------------------------------ #
 # 路由 — 用户管理
 # ------------------------------------------------------------------ #
-
-def _user_from_form(
-    form,
-    user_id: str | None = None,
-    existing: "UserConfig | None" = None,
-) -> "UserConfig":
-    """
-    从表单数据构建 UserConfig。
-
-    Parameters
-    ----------
-    form     : request.form（ImmutableMultiDict）
-    user_id  : 编辑模式时传入已有 ID，新建时传 None（自动生成）
-    existing : 编辑模式时传入当前 UserConfig 对象，用于在密码字段为空时
-               保留旧密码而不是将其清空。
-               密码字段在 GET 时不回填到 HTML，空提交 = "不修改"。
-               新建模式传 None，空密码字段即存为空字符串。
-    """
-    def _fv(key: str, min_val: float = 0.01, max_val: float = 50000) -> Optional[float]:
-        v = form.get(key, "").strip()
-        if not v:
-            return None
-        try:
-            val = float(v)
-        except ValueError:
-            logger.warning("表单 [%s] 值 %r 不是合法数字，已忽略", key, v)
-            return None
-        if not (min_val <= val <= max_val):
-            logger.warning("表单 [%s] 值 %.1f 超出范围 [%.1f, %.1f]，已忽略", key, val, min_val, max_val)
-            return None
-        return val
-
-    def _iv(key: str, min_val: int = 0, max_val: int = 200) -> Optional[int]:
-        v = form.get(key, "").strip()
-        if not v:
-            return None
-        try:
-            val = int(v)
-        except ValueError:
-            logger.warning("表单 [%s] 值 %r 不是合法整数，已忽略", key, v)
-            return None
-        if not (min_val <= val <= max_val):
-            logger.warning("表单 [%s] 值 %d 超出范围 [%d, %d]，已忽略", key, val, min_val, max_val)
-            return None
-        return val
-
-    def _lv(key: str) -> list[str]:
-        # Checkbox 多选：有多个同名字段时用 getlist
-        vals = form.getlist(key)
-        if vals:
-            return [x.strip() for x in vals if x.strip()]
-        # 兼容旧的文本框输入（逗号分隔）
-        v = form.get(key, "").strip()
-        return [x.strip() for x in v.split(",") if x.strip()] if v else []
-
-    def _secret(key: str, old_val: str) -> str:
-        """
-        密码/令牌字段的安全读取：
-        - 表单字段非空 → 使用新值（用户正在更新密码）
-        - 表单字段为空 → 保留 old_val（用户未动密码字段，不清除已保存的值）
-        """
-        v = form.get(key, "").strip()
-        return v if v else old_val
-
-    channels_raw = form.get("NOTIFICATION_CHANNELS", "")
-    channels = [c.strip().lower() for c in channels_raw.split(",") if c.strip()]
-
-    lf = ListingFilter(
-        max_rent=_fv("MAX_RENT"),
-        min_area=_fv("MIN_AREA"),
-        min_floor=_iv("MIN_FLOOR"),
-        allowed_occupancy=_lv("ALLOWED_OCCUPANCY"),
-        allowed_types=_lv("ALLOWED_TYPES"),
-        allowed_neighborhoods=_lv("ALLOWED_NEIGHBORHOODS"),
-        allowed_contract=_lv("ALLOWED_CONTRACT"),
-        allowed_tenant=_lv("ALLOWED_TENANT"),
-        allowed_offer=_lv("ALLOWED_OFFER"),
-        allowed_cities=_lv("ALLOWED_CITIES"),
-    )
-
-    ex_ab = existing.auto_book if existing else None
-    raw_pm = form.get("AUTO_BOOK_PAYMENT_METHOD", "idealcheckout_ideal")
-    payment_method = raw_pm if raw_pm in _VALID_PAYMENT_METHODS else "idealcheckout_ideal"
-
-    ab = AutoBookConfig(
-        enabled=form.get("AUTO_BOOK_ENABLED") == "true",
-        dry_run=form.get("AUTO_BOOK_DRY_RUN", "true") != "false",
-        cancel_enabled=form.get("AUTO_BOOK_CANCEL_ENABLED") == "true",
-        email=form.get("AUTO_BOOK_EMAIL", ""),
-        password=_secret("AUTO_BOOK_PASSWORD", ex_ab.password if ex_ab else ""),
-        payment_method=payment_method,
-        listing_filter=ListingFilter(
-            max_rent=_fv("AUTO_BOOK_MAX_RENT"),
-            min_area=_fv("AUTO_BOOK_MIN_AREA"),
-            min_floor=_iv("AUTO_BOOK_MIN_FLOOR"),
-            allowed_occupancy=_lv("AUTO_BOOK_ALLOWED_OCCUPANCY"),
-            allowed_contract=_lv("AUTO_BOOK_ALLOWED_CONTRACT"),
-            allowed_tenant=_lv("AUTO_BOOK_ALLOWED_TENANT"),
-            allowed_offer=_lv("AUTO_BOOK_ALLOWED_OFFER"),
-            allowed_types=_lv("AUTO_BOOK_ALLOWED_TYPES"),
-            allowed_neighborhoods=_lv("AUTO_BOOK_ALLOWED_NEIGHBORHOODS"),
-            allowed_cities=_lv("AUTO_BOOK_ALLOWED_CITIES"),
-        ),
-    )
-    return UserConfig(
-        id=user_id or uuid.uuid4().hex[:8],
-        name=form.get("name", "").strip() or "未命名用户",
-        enabled=form.get("enabled") == "true",
-        notifications_enabled=form.get("NOTIFICATIONS_ENABLED", "true") != "false",
-        notification_channels=channels,
-        imessage_recipient=form.get("IMESSAGE_RECIPIENT", ""),
-        telegram_token=form.get("TELEGRAM_BOT_TOKEN", ""),
-        telegram_chat_id=form.get("TELEGRAM_CHAT_ID", ""),
-        email_smtp_host=form.get("EMAIL_SMTP_HOST", "").strip(),
-        email_smtp_port=_iv("EMAIL_SMTP_PORT", min_val=1, max_val=65535) or 587,
-        email_smtp_security=form.get("EMAIL_SMTP_SECURITY", "starttls").strip().lower() or "starttls",
-        email_username=form.get("EMAIL_USERNAME", "").strip(),
-        email_password=_secret("EMAIL_PASSWORD", existing.email_password if existing else ""),
-        email_from=form.get("EMAIL_FROM", "").strip(),
-        email_to=form.get("EMAIL_TO", "").strip(),
-        twilio_sid=form.get("TWILIO_ACCOUNT_SID", ""),
-        twilio_token=_secret("TWILIO_AUTH_TOKEN", existing.twilio_token if existing else ""),
-        twilio_from=form.get("TWILIO_FROM", ""),
-        twilio_to=form.get("TWILIO_TO", ""),
-        listing_filter=lf,
-        auto_book=ab,
-    )
+# _user_from_form 由 app.forms.user_form 提供（已在顶部 import）
 
 
 @app.route("/users")
@@ -702,72 +357,21 @@ def users_list() -> str:
     return render_template("users.html", users=users)
 
 
-# 默认可选值（DB 为空时回退）
-_DEFAULT_OCCUPANCY = ["One", "Two (only couples)", "Family (parents with children)"]
-_DEFAULT_TYPES = ["Studio", "1", "2", "3", "Loft (open bedroom area)"]
-_DEFAULT_CONTRACT = ["Indefinite", "6 months max"]
-_DEFAULT_TENANT = ["student only", "student and employed", "employed only"]
-_DEFAULT_OFFER = ["Short-stay", "Parking included"]
-
-# 类别对应的回退默认值
-_DEFAULTS = {
-    "Occupancy": _DEFAULT_OCCUPANCY,
-    "Type": _DEFAULT_TYPES,
-    "Contract": _DEFAULT_CONTRACT,
-    "Offer": _DEFAULT_OFFER,
-    "Tenant": _DEFAULT_TENANT,
-}
-
-# 过滤选项显示名称 (zh, en)
-_LABELS: dict[str, dict[str, tuple[str, str]]] = {
-    "Type": {
-        "1":                       ("1 居室",           "1 bedroom"),
-        "2":                       ("2 居室",           "2 bedrooms"),
-        "3":                       ("3 居室",           "3 bedrooms"),
-        "4":                       ("4 居室",           "4 bedrooms"),
-        "Loft (open bedroom area)": ("Loft",            "Loft"),
-    },
-    "Occupancy": {
-        "One":                     ("单人",              "Single"),
-        "Two":                     ("双人",              "Two persons"),
-        "Two (only couples)":      ("双人/情侣",         "Two (couples)"),
-        "Family (parents with children)": ("家庭",       "Family"),
-    },
-    "Contract": {
-        "Indefinite":              ("长期",              "Indefinite"),
-        "6 months max":            ("短租(≤6月)",        "6 months max"),
-    },
-    "Tenant": {
-        "student only":            ("仅学生",            "Student only"),
-        "employed only":           ("仅上班族",          "Employed only"),
-        "student and employed":    ("学生/上班族",       "Student & employed"),
-        "custom":                  ("自定义",            "Custom"),
-    },
-}
+# _DEFAULTS / _LABELS / _localize_options 由 app.i18n 提供（已在顶部 import）。
+# 此处无需重复定义。
 
 
-def _localize_options(category: str, options: list[str]) -> list[tuple[str, str]]:
-    """为选项附加显示标签（根据当前语言），返回 [(value, label), ...]，保持原始顺序"""
-    labels = _LABELS.get(category, {})
-    zh = _get_lang() == "zh"
-    result = []
-    for v in options:
-        if v in labels:
-            result.append((v, labels[v][0 if zh else 1]))
-        else:
-            result.append((v, v))
-    return result
-
-
-def _get_filter_options(category: str) -> list[str]:
-    """从 DB 获取所有可选的分类值，DB 为空时使用预设回退。"""
-    default = _DEFAULTS.get(category, [])
+def _get_all_filter_options() -> dict[str, list[str]]:
+    """一次 Storage 调用取所有过滤分类值，DB 为空时按分类回退预设。
+    供 user_new / user_edit 使用，避免每个分类单独开关一次连接。"""
     st = _storage()
     try:
-        db_vals = st.get_feature_values(category)
-        return db_vals if db_vals else default
+        return {
+            cat: (st.get_feature_values(cat) or _DEFAULTS.get(cat, []))
+            for cat in _DEFAULTS
+        }
     except Exception:
-        return default
+        return {cat: vals for cat, vals in _DEFAULTS.items()}
     finally:
         st.close()
 
@@ -785,17 +389,15 @@ def user_new() -> Any:
         return redirect(url_for("users_list"))
     # GET：空白表单
     city_names = sorted(c["name"] for c in KNOWN_CITIES)
-    contract_opts = _localize_options("Contract", _get_filter_options("Contract"))
-    tenant_opts = _localize_options("Tenant", _get_filter_options("Tenant"))
-    offer_opts = _get_filter_options("Offer")
+    opts = _get_all_filter_options()
     return render_template("user_form.html", user=None,
                            action=url_for("user_new"), title="新增用户",
-                           occupancy_options=_localize_options("Occupancy", _get_filter_options("Occupancy")),
-                           type_options=_localize_options("Type", _get_filter_options("Type")),
+                           occupancy_options=_localize_options("Occupancy", opts["Occupancy"]),
+                           type_options=_localize_options("Type", opts["Type"]),
                            city_options=city_names,
-                           contract_options=contract_opts,
-                           tenant_options=tenant_opts,
-                           offer_options=offer_opts)
+                           contract_options=_localize_options("Contract", opts["Contract"]),
+                           tenant_options=_localize_options("Tenant", opts["Tenant"]),
+                           offer_options=opts["Offer"])
 
 
 @app.route("/users/<user_id>", methods=["GET", "POST"])
@@ -817,18 +419,16 @@ def user_edit(user_id: str) -> Any:
         return redirect(url_for("user_edit", user_id=user_id))
 
     city_names = sorted(c["name"] for c in KNOWN_CITIES)
-    contract_opts = _localize_options("Contract", _get_filter_options("Contract"))
-    tenant_opts = _localize_options("Tenant", _get_filter_options("Tenant"))
-    offer_opts = _get_filter_options("Offer")
+    opts = _get_all_filter_options()
     return render_template("user_form.html", user=user,
                            action=url_for("user_edit", user_id=user_id),
                            title=f"编辑用户 · {user.name}",
-                           occupancy_options=_localize_options("Occupancy", _get_filter_options("Occupancy")),
-                           type_options=_localize_options("Type", _get_filter_options("Type")),
+                           occupancy_options=_localize_options("Occupancy", opts["Occupancy"]),
+                           type_options=_localize_options("Type", opts["Type"]),
                            city_options=city_names,
-                           contract_options=contract_opts,
-                           tenant_options=tenant_opts,
-                           offer_options=offer_opts)
+                           contract_options=_localize_options("Contract", opts["Contract"]),
+                           tenant_options=_localize_options("Tenant", opts["Tenant"]),
+                           offer_options=opts["Offer"])
 
 
 @app.route("/users/<user_id>/delete", methods=["POST"])
@@ -1002,16 +602,11 @@ def map_view() -> str:
 @api_login_required
 def api_map():
     """返回所有房源坐标。首次查询时自动 geocode 未缓存的地址。"""
-    storage = _storage()
-    try:
-        listings = storage.get_map_listings()
-    finally:
-        storage.close()
-
     results: list[dict] = []
     need_geocode: list[dict] = []
     st = _storage()
     try:
+        listings = st.get_map_listings()
         for l in listings:
             cached = st.get_cached_coords(l["address"])
             if cached:
@@ -1054,17 +649,9 @@ def api_map_geocode():
     st = _storage()
     try:
         listings = st.get_map_listings()
+        uncached = [l for l in listings if not st.get_cached_coords(l["address"])]
     finally:
         st.close()
-
-    uncached = []
-    st2 = _storage()
-    try:
-        for l in listings:
-            if not st2.get_cached_coords(l["address"]):
-                uncached.append(l)
-    finally:
-        st2.close()
 
     if not uncached:
         return jsonify({"ok": True, "total": 0, "done": 0, "failed": 0, "running": False, "finished": True})
@@ -1288,72 +875,9 @@ def api_charts():
 # API
 # ------------------------------------------------------------------ #
 
-def _pid_exists(pid: int) -> bool:
-    """
-    跨平台检查 PID 是否仍然存活。
-
-    - POSIX: 使用 `os.kill(pid, 0)`
-    - Windows: 使用 Win32 `OpenProcess + GetExitCodeProcess`
-
-    说明
-    ----
-    Windows 上 `os.kill(pid, 0)` 并不可靠，某些场景会抛出
-    `OSError: [WinError 11]`（截图中的问题），因此需要单独走 WinAPI。
-    """
-    if pid <= 0:
-        return False
-
-    if os.name != "nt":
-        try:
-            os.kill(pid, 0)
-            return True
-        except (ProcessLookupError, PermissionError):
-            return False
-        except OSError:
-            return False
-
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        STILL_ACTIVE = 259
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        kernel32.OpenProcess.restype = wintypes.HANDLE
-        kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-        kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-        kernel32.CloseHandle.restype = wintypes.BOOL
-
-        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return False
-        try:
-            exit_code = wintypes.DWORD()
-            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
-            return bool(ok and exit_code.value == STILL_ACTIVE)
-        finally:
-            kernel32.CloseHandle(handle)
-    except Exception:
-        return False
-
-
-def _monitor_pid() -> int | None:
-    if not PID_FILE.exists():
-        return None
-    try:
-        pid = int(PID_FILE.read_text().strip())
-        return pid if _pid_exists(pid) else None
-    except ValueError:
-        return None
-
-
-def _write_reload_request() -> None:
-    """写入文件触发的热重载请求，供 Windows 和信号失败场景使用。"""
-    RELOAD_REQUEST_FILE.parent.mkdir(parents=True, exist_ok=True)
-    RELOAD_REQUEST_FILE.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+# 进程控制工具（_pid_exists / _monitor_pid / _write_reload_request +
+# PID_FILE / RELOAD_REQUEST_FILE 常量）已迁移到 app.process_ctrl，
+# 在文件顶部统一 import。
 
 
 @app.route("/api/status")
@@ -1656,6 +1180,10 @@ def api_platform():
 # ------------------------------------------------------------------ #
 
 def main() -> None:
+    # update_checker 触发一次网络请求，仅 CLI 直接运行时需要；
+    # gunicorn / launcher 启动 web:app 时不会经过 main()，避免无谓的启动开销。
+    from update_checker import check_for_updates
+
     parser = argparse.ArgumentParser(description="Holland2Stay Web 面板")
     parser.add_argument("--port", type=int, default=8088)
     parser.add_argument("--host", default="127.0.0.1")
