@@ -97,6 +97,7 @@ python web.py  # http://127.0.0.1:8088
 | Startup preflight | ✅ Done | Blocks container start if `WEB_PASSWORD` unset or Caddyfile domain is still a placeholder |
 | Production WSGI | ✅ Done | Gunicorn (1 worker × 8 threads, timeout=0) replaces Flask dev server in Docker |
 | Dependency pinning | ✅ Done | `requirements.lock` with exact `==` versions; Dockerfile installs from lock file |
+| Code modularization | ✅ Done | web.py split into `app/` with 9 route modules + 7 shared modules; 1,100→70 line bootstrap |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, Storage abstraction enforced |
 
 ---
@@ -243,7 +244,26 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); optional `cancel_enabled` auto-cancel, proxy support |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
 | `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
-| `web.py` | Flask admin panel, user CRUD, session auth, charts, SSE stream, notifications API, reload endpoint, map auto-geocoding |
+| `web.py` | Flask app bootstrap: instantiation, security headers, CSRF, Jinja filters, context processors, route registration |
+| `app/auth.py` | Session authentication, role decorators (`login_required`, `admin_required`, `admin_api_required`), guest mode, login rate limiting |
+| `app/csrf.py` | CSRF token generation and validation |
+| `app/db.py` | Database helper: `get_db()` connection factory |
+| `app/env_writer.py` | `.env` file in-place key writer (avoids `dotenv.set_key()` atomic-rename issues on Docker bind mounts) |
+| `app/forms/user_form.py` | User form data extraction and `UserConfig` construction |
+| `app/i18n.py` | Language detection, cookie persistence, option localisation |
+| `app/jinja_filters.py` | Jinja2 custom filters registered on the Flask app |
+| `app/process_ctrl.py` | Monitor process lifecycle: start / stop / reload / PID management |
+| `app/safety.py` | Security response helpers |
+| `app/routes/dashboard.py` | Dashboard: index, charts API, listing search |
+| `app/routes/calendar_routes.py` | Move-in calendar view and data API |
+| `app/routes/map_routes.py` | Map view, geocode cache API, neighbourhood API |
+| `app/routes/notifications.py` | Notification list, mark-read, SSE event stream |
+| `app/routes/control.py` | Monitor control: start / stop / shutdown / reload endpoints |
+| `app/routes/sessions.py` | Login / logout / guest entry |
+| `app/routes/settings.py` | Global settings: view, save, filter options API |
+| `app/routes/stats.py` | Statistics dashboard with Chart.js data API |
+| `app/routes/system.py` | System info, log tail, health endpoint |
+| `app/routes/users.py` | User CRUD, toggle enable/disable, notification test |
 | `translations.py` | 120+ UI translation keys (zh/en), template `_()` helper |
 | `geocode_all.py` | One-shot Nominatim geocoding to pre-warm the coordinate cache |
 | `static/` | `design.css` (borderless design system), `app.js` (theme / nav / SSE / i18n-aware) |
@@ -268,6 +288,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | Multi-user storage | `data/users.json` | No extra dependency, simple structure, easy web-based CRUD |
 | Theme switching without flicker | Inline `<head>` script + CSS custom properties | Ensures the correct theme is applied before CSS paint |
 | Optional panel auth | Skip auth when `WEB_PASSWORD` is empty | Keeps local use frictionless while allowing protection when exposed |
+| Monolithic web.py (1,100+ lines) | Split into `app/routes/` (9 route modules) + `app/` (auth, csrf, db, i18n, etc.) | Each module ~50–150 lines with single responsibility; `web.py` is now a ~70-line bootstrap; routes use `add_url_rule` to keep flat endpoint names so templates need zero changes |
 
 ### GraphQL API parameters
 
@@ -473,7 +494,31 @@ config.py           Global config loading, known cities, ListingFilter, AutoBook
 users.py            UserConfig, users.json management, legacy env migration
 translations.py     UI translations (zh/en) — 120+ keys covering all pages
 geocode_all.py      One-shot script: pre-geocode all listing addresses via Nominatim
-web.py              Flask admin panel, session auth, SSE stream, notifications API, reload endpoint, map API
+web.py              Flask app bootstrap — security headers, CSRF, i18n, route registration
+app/
+  __init__.py       Package init
+  auth.py           Session auth, RBAC decorators, guest mode, login rate limiting
+  csrf.py           CSRF token generation and validation
+  db.py             Database connection factory
+  env_writer.py     .env file in-place key writer
+  i18n.py           Language detection and cookie persistence
+  jinja_filters.py  Custom Jinja2 filters
+  process_ctrl.py   Monitor process lifecycle (start/stop/reload)
+  safety.py         Security response helpers
+  forms/
+    user_form.py    User form data extraction
+  routes/
+    __init__.py     Route registration coordinator
+    dashboard.py    Dashboard, charts API, listing search
+    calendar_routes.py  Calendar view and data
+    map_routes.py   Map, geocode cache, neighbourhoods
+    notifications.py    Notification list, mark-read, SSE stream
+    control.py      Monitor start/stop/shutdown/reload
+    sessions.py     Login, logout, guest entry
+    settings.py     Global settings view/save, filter options
+    stats.py        Chart.js data API
+    system.py       System info, log tail, health
+    users.py        User CRUD, enable/disable, notification test
 static/
   design.css        Complete design system (minimal, borderless, dark/light theme)
   app.js            Frontend JS: theme toggle, mobile nav, SSE notifications, language-aware

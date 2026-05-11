@@ -7,7 +7,16 @@ Build: pyinstaller --clean h2s_monitor.spec
 import sys
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 _base = Path(SPECPATH).resolve()
+
+# 自动收集 app/ 包下所有子模块作为 hiddenimports。
+# 原因：web.py 用 ``from app.routes import (calendar_routes, control, ...)``
+# 这种"包级批量导入子模块"的写法，部分 PyInstaller 版本的 modulegraph
+# 静态分析可能漏掉个别成员；显式 collect_submodules 是零风险的兜底。
+# 未来在 app/ 下新增模块也会被自动包含，不需要手动维护这份清单。
+_app_modules = collect_submodules("app")
 
 a = Analysis(
     [str(_base / "launcher.py")],
@@ -29,6 +38,7 @@ a = Analysis(
         "dotenv",
         "flask",
         "jinja2",
+        *_app_modules,
     ],
     hookspath=[],
     hooksconfig={},

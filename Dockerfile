@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.lock
 
 # 复制应用代码
 COPY *.py ./
+COPY app/ app/
 COPY .env.example ./
 COPY templates/ templates/
 COPY static/ static/

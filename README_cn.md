@@ -94,6 +94,7 @@ python web.py  # http://127.0.0.1:8088
 | 启动预检 | ✅ 已完成 | `WEB_PASSWORD` 未设置或 Caddyfile 仍为占位域名时阻止容器启动 |
 | 生产 WSGI | ✅ 已完成 | Docker 中 Gunicorn 替代 Flask 内置服务器（1 worker × 8 线程，timeout=0） |
 | 依赖版本锁定 | ✅ 已完成 | `requirements.lock` 精确版本，Dockerfile 从 lock 文件安装，构建可重复 |
+| 代码模块化 | ✅ 已完成 | web.py 拆分为 `app/` 子包（9 个路由模块 + 7 个共享模块），1,100 行精简至 70 行引导层 |
 | 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Storage 抽象统一、解析逻辑去重 |
 
 ---
@@ -249,7 +250,26 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `booker.py` | PrewarmedSession 预登录复用；createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；cancel_enabled 代理支持 |
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
 | `users.py` | UserConfig dataclass，users.json 读写，.env 配置迁移 |
-| `web.py` | Flask 面板，Session 鉴权，用户 CRUD，SSE 流，通知 API，/api/reload |
+| `web.py` | Flask app 引导层：实例化、安全头、CSRF、Jinja 过滤器、context processor、路由注册 |
+| `app/auth.py` | Session 鉴权、RBAC 装饰器（`login_required`、`admin_required`、`admin_api_required`）、访客模式、登录限流 |
+| `app/csrf.py` | CSRF token 生成与校验 |
+| `app/db.py` | 数据库连接工厂 `get_db()` |
+| `app/env_writer.py` | `.env` 文件原地写键（规避 `dotenv.set_key()` 在 Docker bind mount 上的 rename 错误） |
+| `app/forms/user_form.py` | 用户表单数据提取与 `UserConfig` 构造 |
+| `app/i18n.py` | 语言检测、cookie 持久化、选项本地化 |
+| `app/jinja_filters.py` | Jinja2 自定义过滤器 |
+| `app/process_ctrl.py` | 监控进程生命周期管理（启动/停止/重载/PID） |
+| `app/safety.py` | 安全响应辅助 |
+| `app/routes/dashboard.py` | 仪表盘：首页、图表 API、房源搜索 |
+| `app/routes/calendar_routes.py` | 入住日历视图与数据 API |
+| `app/routes/map_routes.py` | 地图视图、geocode 缓存 API、片区 API |
+| `app/routes/notifications.py` | 通知列表、全部已读、SSE 事件流 |
+| `app/routes/control.py` | 监控控制：启动/停止/关闭/重载 |
+| `app/routes/sessions.py` | 登录/登出/访客入口 |
+| `app/routes/settings.py` | 全局设置：查看、保存、过滤选项 API |
+| `app/routes/stats.py` | 统计图表数据 API |
+| `app/routes/system.py` | 系统信息、日志查看、健康检查 |
+| `app/routes/users.py` | 用户 CRUD、启停、通知测试 |
 | `translations.py` | 120+ UI 翻译条目（中/英），模板 `_()` 函数 |
 | `geocode_all.py` | 一次性 Nominatim 地理编码，预热坐标缓存 |
 | `static/` | `design.css`（去边框设计系统），`app.js`（主题/导航/SSE/国际化） |
@@ -274,6 +294,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | 多用户存储 | `data/users.json` | 无额外依赖，结构清晰，Web 面板直接 CRUD |
 | 主题切换无闪烁 | `<head>` 内联脚本 + CSS custom properties | 在 CSS 渲染前同步设置 `data-bs-theme`，避免 FOUC |
 | 面板鉴权 opt-in | `WEB_PASSWORD` 为空则跳过鉴权 | 本地运行无需配置，对外暴露时一行配置即可加锁 |
+| web.py 单体膨胀（1,100+ 行） | 拆分为 `app/routes/`（9 个路由模块）+ `app/`（auth、csrf、db、i18n 等） | 每个模块 50–150 行，职责单一；`web.py` 精简为约 70 行引导层；路由用 `add_url_rule` 保留扁平 endpoint 名，模板零改动 |
 
 ### GraphQL API 参数
 
@@ -473,7 +494,31 @@ config.py           全局配置加载，KNOWN_CITIES（26 城市），ListingFi
 users.py            UserConfig，users.json 读写，.env 配置迁移
 translations.py     中/英翻译字典，120+ 键覆盖全部页面
 geocode_all.py      一次性脚本：通过 Nominatim 预加载所有房源坐标
-web.py              Flask 面板，Session 鉴权，SSE 流，通知 API，用户 CRUD，/api/reload，地图 API
+web.py              Flask app 引导层 — 安全头、CSRF、i18n、路由注册
+app/
+  __init__.py       包初始化
+  auth.py           Session 鉴权，RBAC 装饰器，访客模式，登录限流
+  csrf.py           CSRF token 生成与校验
+  db.py             数据库连接工厂
+  env_writer.py     .env 文件原地写键
+  i18n.py           语言检测与 cookie 持久化
+  jinja_filters.py  Jinja2 自定义过滤器
+  process_ctrl.py   监控进程生命周期（启动/停止/重载）
+  safety.py         安全响应辅助
+  forms/
+    user_form.py    用户表单数据提取
+  routes/
+    __init__.py     路由注册协调器
+    dashboard.py    仪表盘、图表 API、房源搜索
+    calendar_routes.py  日历视图与数据
+    map_routes.py   地图、geocode 缓存、片区
+    notifications.py    通知列表、已读、SSE 流
+    control.py      监控启动/停止/关闭/重载
+    sessions.py     登录/登出/访客入口
+    settings.py     全局设置查看/保存、过滤选项
+    stats.py        图表数据 API
+    system.py       系统信息、日志查看、健康检查
+    users.py        用户 CRUD、启停、通知测试
 static/
   design.css        极简设计系统（去边框，阴影层级，暗/亮双主题，Inter 字体）
   app.js            前端交互：主题切换，移动端导航，SSE 通知，国际化
