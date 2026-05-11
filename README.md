@@ -6,6 +6,8 @@ A personal project that monitors Holland2Stay (https://www.holland2stay.com) for
 
 > **Disclaimer:** This project is for personal, non-commercial use only. It is not affiliated with, endorsed by, or associated with Holland2Stay. Users are solely responsible for complying with Holland2Stay's Terms of Service and applicable laws. The author assumes no liability for any misuse or consequences arising from the use of this software.
 
+**Live demo:** [flatradar.app](https://flatradar.app) — click "Guest mode" on the login page for read-only access.
+
 ---
 
 ## Quick start
