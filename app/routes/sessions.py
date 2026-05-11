@@ -57,9 +57,12 @@ def login() -> Any:
         expected_user = os.environ.get("WEB_USERNAME", "").strip() or "admin"
         expected_pass = os.environ.get("WEB_PASSWORD", "")
 
-        # 用 hmac.compare_digest 防时序攻击
-        user_ok = hmac.compare_digest(username, expected_user)
-        pass_ok = hmac.compare_digest(password, expected_pass)
+        # 用 hmac.compare_digest 防时序攻击。
+        # 必须先 .encode("utf-8")：hmac.compare_digest 对含非 ASCII 字符的
+        # str 参数会抛 TypeError —— 攻击者用中文/emoji 用户名能直接让 /login
+        # 返回 500。改用 bytes 形式，任意 unicode 都安全比较，且时序常数保留。
+        user_ok = hmac.compare_digest(username.encode("utf-8"), expected_user.encode("utf-8"))
+        pass_ok = hmac.compare_digest(password.encode("utf-8"), expected_pass.encode("utf-8"))
         if user_ok and pass_ok:
             clear_login_failures(client_ip)  # 成功则清除失败记录
             session.permanent = True

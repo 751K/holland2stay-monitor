@@ -473,7 +473,10 @@ def add_to_cart(
     if "errors" in raw:
         msgs = "; ".join(e.get("message", "") for e in raw["errors"])
         if not raw.get("data"):
-            logger.error("addNewBooking GraphQL 层致命错误（无 data）: %s", msgs)
+            logger.error(
+                "addNewBooking GraphQL 层致命错误 sku=%s contract_id=%s start=%s: %s",
+                sku, contract_id, contract_start_date, msgs,
+            )
             raise RuntimeError(f"addNewBooking GraphQL 错误: {msgs}")
         # NON_NULL 传播 bug：cart=null 时 Magento 将 null 上升为顶层 errors，
         # 但 data 仍存在且 user_errors 为空。代码已正确处理，无需报错。
@@ -485,7 +488,10 @@ def add_to_cart(
         msgs = "; ".join(
             f"[{e.get('code','?')}] {e.get('message','')}" for e in user_errors
         )
-        logger.error("addNewBooking 业务错误: %s", msgs)
+        logger.error(
+            "addNewBooking 业务错误 sku=%s contract_id=%s start=%s: %s",
+            sku, contract_id, contract_start_date, msgs,
+        )
         raise RuntimeError(f"addNewBooking 失败: {msgs}")
 
     logger.info("addNewBooking 成功（押金项已入购物车）")
@@ -546,7 +552,10 @@ def place_order(
         msgs = "; ".join(
             f"[{e.get('code','?')}] {e.get('message','')}" for e in errors
         )
-        logger.warning("placeOrder 业务错误: %s", msgs)
+        logger.warning(
+            "placeOrder 业务错误 cart_id=%s store_id=%d: %s",
+            cart_id, store_id, msgs,
+        )
         raise RuntimeError(f"下单失败: {msgs}")
 
     order_number = (result.get("orderV2") or {}).get("order_number")
@@ -896,19 +905,25 @@ def try_book(
 
     except Exception as e:
         total = time.monotonic() - t0
+        # 收集尽可能多的上下文：listing 标识 + 账号 + 时间分布 + prewarmed 来源
+        ctx = (
+            f"listing_id={listing.id} sku={listing.sku or 'N/A'} "
+            f"email={email} dry_run={dry_run} prewarmed={'yes' if prewarmed else 'no'} "
+            f"timings={{sku:{t_sku:.2f}s login:{t_login:.2f}s cancel:{t_cancel:.2f}s total:{total:.2f}s}}"
+        )
         # race_lost / reserved_conflict 是预期业务结果，不打 traceback；
         # unknown_error 等才是需要排查的异常
         if phase in ("race_lost", "reserved_conflict"):
             logger.warning(
-                "[%s]%s 预订失败 (%s) | 耗时 total=%.1fs | %s",
+                "[%s]%s 预订失败 phase=%s | %s | %s",
                 listing.name, " [DRY RUN]" if dry_run else "",
-                phase, total, e,
+                phase, ctx, e,
             )
         else:
             logger.error(
-                "[%s]%s 预订失败 (%s) | 耗时 total=%.1fs | 原始错误: %s",
+                "[%s]%s 预订失败 phase=%s | %s | 原始错误: %s",
                 listing.name, " [DRY RUN]" if dry_run else "",
-                phase, total, e,
+                phase, ctx, e,
                 exc_info=True,
             )
         return BookingResult(listing, False, str(e), phase=phase)

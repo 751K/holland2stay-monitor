@@ -51,7 +51,12 @@ def csrf_required(f: Callable) -> Callable:
             token = (request.form.get("csrf_token")
                      or request.headers.get("X-CSRF-Token", ""))
             expected = session.get("csrf_token", "")
-            if not token or not expected or not hmac.compare_digest(token, expected):
+            # 必须先 .encode("utf-8")：hmac.compare_digest 对含非 ASCII 字符
+            # 的 str 参数会抛 TypeError，攻击者用中文/emoji token 能让 POST
+            # 路由返回 500（非鉴权绕过，但 stability 问题）。改用 bytes。
+            if not token or not expected or not hmac.compare_digest(
+                token.encode("utf-8"), expected.encode("utf-8")
+            ):
                 abort(403)
         return f(*args, **kwargs)
     return decorated

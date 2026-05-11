@@ -1,5 +1,72 @@
 # Changelog
 
+## v1.2.1 (2026-05-11)
+
+### 测试套件（Pytest）
+
+v1.2.1 引入 10 个 pytest 测试模块，覆盖核心逻辑和安全边界：
+
+- **纯函数测试**（6 个）：
+  - `test_models_filter.py` — ListingFilter pass/reject 边界
+  - `test_crypto.py` — 加密/解密往返 + 密钥轮换
+  - `test_safety.py` — safe_next_url 开放重定向防护
+  - `test_storage_diff.py` — SQLite diff 检测（新增/变更/过期）
+  - `test_applescript_escape.py` — AppleScript 转义覆盖所有特殊字符组合
+  - `test_prewarm_cache.py` — Prewarm 缓存生命周期
+- **HTTP 集成测试**（3 个）：
+  - `test_auth_routes.py` — 登录/登出/访客/session 角色保护
+  - `test_user_routes.py` — 用户 CRUD RBAC 鉴权
+  - `test_log_routes.py` — 日志 API 文件白名单 / 清空 / 路径穿越防护
+- **表单测试**（1 个）：`test_user_form.py`
+- **共享 fixture**：`temp_db`（隔离 SQLite）、`client` / `admin_client` / `guest_client`（预注入 session）、`fresh_crypto`（隔离密钥状态）、`isolated_data_dir`（tmp_path 重定向）
+
+零外部网络依赖，可通过 `python -m pytest tests/ -v` 在任何环境运行。
+
+### 预登录缓存 v2 — Phase B 跨轮复用
+
+v1.2.0 的预登录（Phase A）在每轮 scrape 前并行建立 session，节省了 ~450ms，但**每轮都重新登录**，多轮无候选场景下浪费 `generateCustomerToken` 调用。
+
+Phase B 将预登录 session 缓存到进程级 `dict`，跨轮复用：
+
+- **命中**：直接同步取用，零网络 IO
+- **Token TTL 剩余 < 5 分钟**：在 executor 中后台刷新（与 scrape 并行，不额外等待）
+- **email 变更 / 用户被禁用 / 热重载**：自动失效并关闭旧 session
+- **booking 后保留缓存**；仅 `unknown_error` 失效（session 疑似损坏）
+- **Race 防护**：refresh margin（300 s）远大于一次 booking 耗时（~10 s），保证 try_book 内部不会触发 session 过期路径
+
+每轮无候选时也保留缓存供下轮复用，每天从 288 次登录（5 min 间隔）降至 ~4 次（4 小时 token + margin 刷新）。
+
+### 错误日志（errors.log）
+
+`monitor.log` 长跑下 INFO 噪音（轮询节奏、正常 diff 等）淹没真正的告警。v1.2.1 新增独立的错误日志：
+
+- **`data/errors.log`**：仅记录 WARNING / ERROR / CRITICAL，专用于事后排查
+- **详细 formatter**：`%(name)s.%(funcName)s:%(lineno)d`，一眼定位问题源
+- **更大保留**：`backupCount=5`（vs monitor.log 的 3），错误稀疏但时间窗口更长
+- **全局接管**：所有模块（scraper、booker、monitor、notifier）的 `logger.warning` / `logger.error` 均自动写入
+
+### 日志上下文增强
+
+所有关键路径的日志消息加入更多上下文信息，方便定位问题：
+
+- **scraper**：429 退避显示累计等待时间；网络异常含 traceback；非 429 HTTP 错误含响应片段；城市抓取失败含 city_id / proxy 状态
+- **booker**：`addNewBooking` / `placeOrder` 错误含 sku / contract_id / start_date / cart_id
+- **monitor**：限流告警含城市数/用户数/代理状态；抓取失败含城市名列表
+- **预订失败**：含 listing_id / sku / email / dry_run / prewarmed / 各阶段耗时
+
+### 修复
+
+- **`hmac.compare_digest` TypeError**：含非 ASCII 字符（中文/emoji）的 CSRF token 或登录用户名/密码会使 `hmac.compare_digest()` 抛出 `TypeError`，导致 POST 路由返回 500。`app/csrf.py` 和 `app/routes/sessions.py` 改用 `.encode("utf-8")` 后的 bytes 进行比较，任意 Unicode 安全比较且时序常数保留
+- **Dashboard 城市列表截断**：`get_all_listings(limit=2000)` 可能漏掉只在早期记录中出现的老城市；改用 `get_distinct_cities()`（`SELECT DISTINCT city`），无 LIMIT 截断风险
+- **AppleScript 注入防护**：`_build_applescript` 的 recipient 参数此前未转义，admin→admin 注入或多用户配置场景存在横向攻击面；抽取 `_escape_applescript_literal()`，recipient 和 message 统一转义
+- **日志查看器路径穿越**：`/api/logs` / `/api/logs/clear` 新增文件白名单（`monitor` / `errors`），拒绝任一 `file` 参数值，防止 `file=../../etc/passwd` 类路径穿越
+
+### 新增功能
+
+- **日志查看器支持切换文件**：`/api/logs?file=monitor|errors` 可在 Web 面板查看不同日志
+
+---
+
 ## v1.2.0 (2026-05-11)
 
 ### 重构：web.py 模块化拆分

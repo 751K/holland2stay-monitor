@@ -117,21 +117,39 @@ def _post_gql(session: req.Session, query: str) -> dict:
     HTTPError       其他 4xx/5xx
     Exception       网络超时、JSON 解析失败等
     """
+    total_wait = 0
     for attempt, wait in enumerate([0] + list(_RATE_LIMIT_BACKOFF)):
         if wait:
+            total_wait += wait
             logger.warning(
-                "收到 429 Too Many Requests，第 %d/%d 次退避，等待 %d 秒…",
-                attempt, len(_RATE_LIMIT_BACKOFF), wait,
+                "429 Too Many Requests，第 %d/%d 次退避，等待 %d 秒（累计 %ds）",
+                attempt, len(_RATE_LIMIT_BACKOFF), wait, total_wait,
             )
             time.sleep(wait)
-        resp = session.post(GQL_URL, json={"query": query}, headers=_HEADERS, timeout=30)
+        try:
+            resp = session.post(GQL_URL, json={"query": query}, headers=_HEADERS, timeout=30)
+        except Exception as e:
+            # 网络异常（连接超时、TLS 失败、读超时等）— 含 traceback 入 errors.log
+            logger.error(
+                "GraphQL POST 网络异常 attempt=%d url=%s timeout=30s: %s",
+                attempt, GQL_URL, e,
+                exc_info=True,
+            )
+            raise
         if resp.status_code == 429:
             continue          # 触发下一次重试
+        if not resp.ok:
+            # 非 429 的 4xx/5xx：记录 status + 响应片段（截断防止超大日志）
+            logger.error(
+                "GraphQL POST HTTP %d attempt=%d url=%s response=%r",
+                resp.status_code, attempt, GQL_URL, resp.text[:300],
+            )
         resp.raise_for_status()
         return resp.json()
 
     raise RateLimitError(
-        f"API 持续返回 429（已退避重试 {len(_RATE_LIMIT_BACKOFF)} 次）。"
+        f"API 持续返回 429（已退避重试 {len(_RATE_LIMIT_BACKOFF)} 次，"
+        f"累计等待 {total_wait}s）。"
         "请降低轮询频率（CHECK_INTERVAL / PEAK_INTERVAL）或配置 HTTPS_PROXY。"
     )
 
@@ -323,7 +341,12 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
             contract_start_date=contract_start_date,
         )
     except Exception as e:
-        logger.warning("解析房源失败 [%s]: %s", item.get("url_key", "?"), e)
+        # 含 city 上下文：哪个城市的哪个 url_key 解析失败，便于排查 API schema 变化
+        logger.warning(
+            "[%s] 解析房源失败 url_key=%s sku=%r: %s",
+            city_name, item.get("url_key", "?"), item.get("sku", "?"), e,
+            exc_info=True,
+        )
         return None
 
 
@@ -367,11 +390,18 @@ def _scrape_city_pages(
         except RateLimitError:
             raise   # 直接上传，不降级为普通失败
         except Exception as e:
-            logger.error("[%s] 请求失败: %s", city_name, e)
+            logger.error(
+                "[%s] 请求失败 page=%d city_ids=%s avail_ids=%s: %s",
+                city_name, current_page, city_ids, availability_ids, e,
+                exc_info=True,
+            )
             break
 
         if "errors" in data:
-            logger.error("[%s] GraphQL 错误: %s", city_name, data["errors"])
+            logger.error(
+                "[%s] GraphQL 错误 page=%d errors=%s",
+                city_name, current_page, data["errors"],
+            )
             break
 
         products = data.get("data", {}).get("products", {})
@@ -459,6 +489,11 @@ def scrape_all(
             except RateLimitError:
                 raise   # 429 是 IP 级别的，不是单城市失败，直接上传
             except Exception as e:
-                logger.error("[%s] 抓取失败: %s", city_name, e, exc_info=True)
+                logger.error(
+                    "[%s] 抓取失败 city_id=%s avail_ids=%s proxy=%s: %s",
+                    city_name, city_id, availability_ids,
+                    "yes" if proxy else "no", e,
+                    exc_info=True,
+                )
 
     return all_listings

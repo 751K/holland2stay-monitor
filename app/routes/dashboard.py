@@ -21,7 +21,9 @@ def index() -> str:
     city_filter = request.args.get("city", "")
     st = storage()
     try:
-        all_cities = sorted({r["city"] for r in st.get_all_listings(limit=2000) if r.get("city")})
+        # get_distinct_cities() 走 SELECT DISTINCT city，比拉 2000 行再 set
+        # 推 SQL 端做去重，且没有 LIMIT 截断导致老城市丢失的正确性 bug。
+        all_cities = st.get_distinct_cities()
         last_scrape = st.get_meta("last_scrape_at")
         stats = {
             "total":       st.count_all(city=city_filter or None),

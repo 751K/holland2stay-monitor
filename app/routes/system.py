@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import subprocess as _sp
 import sys
+from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 
@@ -28,6 +29,13 @@ from app.db import storage
 from app.process_ctrl import monitor_pid
 
 _LOG_PATH = DATA_DIR / "monitor.log"
+
+# /api/logs?file=<key> 允许查看的日志文件白名单。
+# 防止路径穿越（任意用户提交 file=../../etc/passwd 之类的 payload）。
+_LOG_FILES: dict[str, Path] = {
+    "monitor": DATA_DIR / "monitor.log",
+    "errors":  DATA_DIR / "errors.log",
+}
 
 
 @admin_required
@@ -105,15 +113,31 @@ def api_logs():
         lines_param = 200
     lines_param = max(1, min(lines_param, 2000))
 
-    if not _LOG_PATH.exists():
-        return jsonify({"lines": [], "size": 0, "note": "no log file yet"})
+    # file= 参数走白名单（防路径穿越），默认 monitor
+    file_key = request.args.get("file", "monitor")
+    log_path = _LOG_FILES.get(file_key)
+    if log_path is None:
+        return jsonify({
+            "lines": [], "size": 0,
+            "error": f"unknown log file: {file_key!r}, allowed: {list(_LOG_FILES)}",
+        }), 400
+
+    if not log_path.exists():
+        return jsonify({
+            "lines": [], "size": 0,
+            "note": f"{file_key} log file not yet created",
+        })
 
     try:
-        size = _LOG_PATH.stat().st_size
-        with open(_LOG_PATH, encoding="utf-8") as f:
+        size = log_path.stat().st_size
+        with open(log_path, encoding="utf-8") as f:
             all_lines = f.readlines()
         tail = all_lines[-lines_param:] if len(all_lines) > lines_param else all_lines
-        return jsonify({"lines": [line.rstrip("\n") for line in tail], "size": size})
+        return jsonify({
+            "lines": [line.rstrip("\n") for line in tail],
+            "size": size,
+            "file": file_key,
+        })
     except Exception as e:
         return jsonify({"lines": [], "size": 0, "error": str(e)}), 500
 
@@ -121,10 +145,15 @@ def api_logs():
 @admin_api_required
 @csrf_required
 def api_logs_clear():
+    """清空指定日志（file=monitor|errors，默认 monitor）。"""
+    file_key = request.args.get("file", "monitor")
+    log_path = _LOG_FILES.get(file_key)
+    if log_path is None:
+        return jsonify({"ok": False, "error": f"unknown log file: {file_key!r}"}), 400
     try:
-        if _LOG_PATH.exists():
-            _LOG_PATH.write_text("", encoding="utf-8")
-        return jsonify({"ok": True})
+        if log_path.exists():
+            log_path.write_text("", encoding="utf-8")
+        return jsonify({"ok": True, "file": file_key})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

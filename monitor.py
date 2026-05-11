@@ -51,7 +51,7 @@ from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from booker import try_book
+from booker import PrewarmedSession, create_prewarmed_session, try_book
 from config import DATA_DIR, ENV_PATH, load_config
 from models import STATUS_AVAILABLE, parse_float
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
@@ -62,18 +62,43 @@ from users import USERS_FILE, UserConfig, load_users, migrate_from_env, save_use
 
 
 def _setup_logging(level: str) -> None:
+    """
+    配置主日志（monitor.log，全量 INFO+）+ 错误日志（errors.log，仅 WARNING+）。
+
+    错误日志的存在意义
+    ------------------
+    monitor.log 长跑下 INFO 噪音淹没真正的告警；errors.log 单独保留
+    WARNING/ERROR/CRITICAL，便于事后排查抓取失败、下单异常、限流等问题。
+    - 更大的 backupCount：错误稀疏，保留更长时间窗口（10MB 历史）
+    - 更详细的 formatter：含 funcName:lineno，一眼定位问题源
+    - 全局 root logger 接管：所有模块的 logger.warning/error 自动入此文件
+    """
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     logging.basicConfig(level=getattr(logging, level, "INFO"), format=fmt)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
 
-    # 日志持久化到文件，供 Web 面板查看（Docker / 本地均适用）
     from logging.handlers import RotatingFileHandler
-    log_path = DATA_DIR / "monitor.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = RotatingFileHandler(str(log_path), maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8")
-    fh.setFormatter(logging.Formatter(fmt))
-    fh.setLevel(getattr(logging, level, "INFO"))
-    logging.getLogger().addHandler(fh)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 主日志（INFO+）：与之前一致，Web 面板默认查看
+    main_fh = RotatingFileHandler(
+        str(DATA_DIR / "monitor.log"),
+        maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8",
+    )
+    main_fh.setFormatter(logging.Formatter(fmt))
+    main_fh.setLevel(getattr(logging, level, "INFO"))
+    logging.getLogger().addHandler(main_fh)
+
+    # 错误日志（WARNING+）：抓取/下单异常的专用归档
+    error_fh = RotatingFileHandler(
+        str(DATA_DIR / "errors.log"),
+        maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8",
+    )
+    error_fh.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s.%(funcName)s:%(lineno)d %(message)s"
+    ))
+    error_fh.setLevel(logging.WARNING)
+    logging.getLogger().addHandler(error_fh)
 
 
 logger = logging.getLogger("monitor")
@@ -221,6 +246,85 @@ def _apply_jitter(seconds: int, ratio: float = 0.20) -> int:
 
 
 # ------------------------------------------------------------------ #
+# 预登录：模块级缓存 + 跨轮复用（Phase B）
+# ------------------------------------------------------------------ #
+# Phase A 把预登录与 scrape 并行化省下了 ~450ms，但每轮都重新登录，
+# 多轮无候选场景下浪费大量 generateCustomerToken 调用。
+#
+# Phase B 的核心：把 session+token 缓存到进程级 dict，跨轮复用。
+# - 命中：直接同步取用，无网络 IO
+# - TTL 剩余 <_TOKEN_REFRESH_MARGIN 秒：在 executor 中刷新（与 scrape 并行）
+# - email 变更 / 用户被禁用 / 进程退出 / 热重载：失效并关闭旧 session
+# - booking 后保留缓存；仅 unknown_error 失效（疑似 session 损坏）
+#
+# Race 防护：refresh margin 远大于一次 booking 的耗时（10s vs 300s），
+# 保证我们认为"有效"的 session 在 try_book 内部不会触发过期路径
+# （那条路径会 close session，导致下一轮缓存失效）。
+
+# user_id → 已缓存的 PrewarmedSession
+_prewarmed_cache: dict[str, "PrewarmedSession"] = {}
+
+# token 剩余寿命少于这么多秒时，提前刷新（_TOKEN_MAX_AGE=3300s，margin=300s
+# 留出充分时间完成一轮 booking 而不会让 try_book 自行 close 缓存中的 session）
+_TOKEN_REFRESH_MARGIN = 300
+
+
+def _safe_create_prewarmed(user: "UserConfig") -> "PrewarmedSession | None":
+    """
+    在 executor 线程中为单个用户建立预登录 session。失败时记录 WARNING
+    并返回 None，让 try_book() 走正常路径，避免预登录问题阻断下单。
+    """
+    try:
+        return create_prewarmed_session(user.auto_book.email, user.auto_book.password)
+    except Exception as e:
+        logger.warning(
+            "[%s] 预登录失败 (%s)，下单时将回退到正常登录路径",
+            user.name, e,
+        )
+        return None
+
+
+def _close_prewarmed_quietly(ps: "PrewarmedSession | None") -> None:
+    """幂等关闭预登录 session。None 或重复关闭均无副作用。"""
+    if not ps:
+        return
+    try:
+        ps.session.close()
+    except Exception:
+        pass
+
+
+def _is_cached_session_valid(
+    ps: "PrewarmedSession | None", expected_email: str,
+) -> bool:
+    """
+    缓存命中需同时满足：session 存在 / email 一致 / token TTL 余量充足。
+    余量阈值 = _TOKEN_REFRESH_MARGIN，避免 try_book 内部触发过期路径。
+    """
+    if ps is None:
+        return False
+    if ps.email != expected_email:
+        return False
+    return ps.token_expiry - time.monotonic() > _TOKEN_REFRESH_MARGIN
+
+
+def _invalidate_user_prewarm(user_id: str) -> None:
+    """从缓存移除该用户的 session 并关闭。已不在缓存中时为 no-op。"""
+    ps = _prewarmed_cache.pop(user_id, None)
+    _close_prewarmed_quietly(ps)
+
+
+def _clear_prewarm_cache() -> None:
+    """关闭所有缓存的 session。热重载和进程退出时调用。"""
+    if not _prewarmed_cache:
+        return
+    n = len(_prewarmed_cache)
+    for uid in list(_prewarmed_cache.keys()):
+        _invalidate_user_prewarm(uid)
+    logger.info("已清理 %d 个 prewarm 缓存", n)
+
+
+# ------------------------------------------------------------------ #
 # 核心逻辑
 # ------------------------------------------------------------------ #
 
@@ -357,13 +461,74 @@ async def run_once(
         logger.warning("未配置任何目标城市（CITIES 为空），本轮不抓取。请检查 .env 中 CITIES 设置。")
         return
 
+    loop = asyncio.get_running_loop()
+
+    # ── Phase B：缓存查询 → 命中复用 / 未命中刷新（与 scrape 并行）── #
+    # 优先复用 _prewarmed_cache 中仍然有效的 session；email 变更或
+    # token 余量不足时在 executor 中后台刷新（与抓取重叠）。
+    # 本轮无候选时也保留缓存供下轮复用，避免每轮都登录浪费。
+    prewarm_cached: dict[str, "PrewarmedSession"] = {}   # 命中：同步可用
+    prewarm_futures: dict[str, "asyncio.Future"] = {}    # 未命中：后台刷新
+
+    if not dry_run:
+        # 1) 失效不再合格的缓存（用户被禁用 / 移除自动预订 / 删除账号）
+        active_user_ids = set()
+        for user, _ in user_notifiers:
+            ab = user.auto_book
+            if ab.enabled and ab.email and ab.password:
+                active_user_ids.add(user.id)
+        for stale_uid in set(_prewarmed_cache.keys()) - active_user_ids:
+            _invalidate_user_prewarm(stale_uid)
+
+        # 2) 对合格用户：命中复用，未命中提交刷新
+        for user, _ in user_notifiers:
+            if user.id not in active_user_ids:
+                continue
+            cached = _prewarmed_cache.get(user.id)
+            if _is_cached_session_valid(cached, user.auto_book.email):
+                prewarm_cached[user.id] = cached
+            else:
+                # 失效原因：不存在 / email 变更 / TTL 不足。关闭旧的再刷新。
+                if cached:
+                    _invalidate_user_prewarm(user.id)
+                prewarm_futures[user.id] = loop.run_in_executor(
+                    None, _safe_create_prewarmed, user
+                )
+
+        if prewarm_cached or prewarm_futures:
+            logger.debug(
+                "prewarm 状态: 命中 %d / 刷新 %d",
+                len(prewarm_cached), len(prewarm_futures),
+            )
+
+    async def _stash_pending_prewarms() -> None:
+        """
+        等待所有 pending 刷新完成，把结果存入缓存供下轮复用。
+        错误路径（scrape 失败 / 无候选）调用：不能关闭 session，
+        否则就退化成 Phase A 的"每轮浪费"问题。
+        """
+        for user_id, fut in list(prewarm_futures.items()):
+            try:
+                ps = await fut
+            except Exception:
+                ps = None
+            if ps:
+                _prewarmed_cache[user_id] = ps
+        prewarm_futures.clear()
+
     try:
-        fresh = await asyncio.get_running_loop().run_in_executor(
+        fresh = await loop.run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
         )
     except RateLimitError as e:
         # 429 需要更长冷却，上传给 main_loop 单独处理（不走普通 10s 恢复路径）
-        logger.warning("⚠️  抓取被限流: %s", e)
+        await _stash_pending_prewarms()
+        logger.warning(
+            "⚠️  抓取被限流 cities=%d users=%d proxy=%s: %s",
+            len(city_tasks), len(user_notifiers),
+            "yes" if os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") else "no",
+            e,
+        )
         if not dry_run:
             err_msg = f"⚠️ 抓取被限流（429）\n{e}\n监控将暂停 5 分钟后继续。"
             for _, notifier in user_notifiers:
@@ -372,7 +537,12 @@ async def run_once(
                 await web_notifier.send_error(err_msg)
         raise
     except Exception as e:
-        logger.error("抓取全部失败: %s", e, exc_info=True)
+        await _stash_pending_prewarms()
+        logger.error(
+            "抓取全部失败 cities=%s users=%d: %s",
+            [c[0] for c in city_tasks], len(user_notifiers), e,
+            exc_info=True,
+        )
         if not dry_run:
             err_msg = f"抓取失败: {e}"
             for _, notifier in user_notifiers:
@@ -471,15 +641,45 @@ async def run_once(
     # ── 立即将 _book_with_fallback() 提交到线程池（快速通道）──────── #
     # 新上线可预订 / 状态变更 → Available to book 均立即提交 run_in_executor，
     # 预订请求在发出通知之前就已进入 Holland2Stay 服务器（节省 1-3 秒）。
-    # ab_futures: list of (user, notifier, sorted_candidates, Future[BookingResult])
+    # ab_futures: list of (user, notifier, sorted_candidates, Future, prewarmed)
     # sorted_candidates 按面积降序排列；fallback 逻辑在线程内部按序尝试
-    loop = asyncio.get_running_loop()
+    # prewarmed 是该用户的预登录 session（Phase B 缓存或新刷新），下单
+    # 完成后视 result.phase 决定是否保留在缓存中。
     ab_futures: list[tuple] = []
 
     for user, notifier in user_notifiers:
         candidates = ab_candidates.get(user.id, [])
         if not (user.auto_book.enabled and candidates):
             continue
+
+        # 取出该用户的预登录：优先命中缓存（同步），次取后台刷新结果
+        prewarmed: PrewarmedSession | None = prewarm_cached.pop(user.id, None)
+        cache_hit = prewarmed is not None
+        if prewarmed is None:
+            pre_fut = prewarm_futures.pop(user.id, None)
+            if pre_fut is not None:
+                try:
+                    prewarmed = await pre_fut
+                except Exception:
+                    prewarmed = None
+                if prewarmed:
+                    # 新刷出来的：存入缓存供下轮复用
+                    _prewarmed_cache[user.id] = prewarmed
+
+        if prewarmed:
+            age = time.monotonic() - prewarmed.created_at
+            remaining = prewarmed.token_expiry - time.monotonic()
+            logger.info(
+                "[%s] ✅ 复用 prewarm（%s，已 %.0fs，剩余 %.0f 分钟）",
+                user.name, "缓存命中" if cache_hit else "新刷新",
+                age, remaining / 60,
+            )
+        else:
+            logger.info(
+                "[%s] ⚠️  预登录未成功，下单时回退到正常登录路径",
+                user.name,
+            )
+
         sorted_cands = sorted(candidates, key=_area_key, reverse=True)
         primary = sorted_cands[0]
         if len(sorted_cands) > 1:
@@ -501,9 +701,13 @@ async def run_once(
             )
         f = loop.run_in_executor(
             None,
-            lambda cs=sorted_cands, u=user: _book_with_fallback(cs, u, booking_deadline),
+            lambda cs=sorted_cands, u=user, pw=prewarmed:
+                _book_with_fallback(cs, u, booking_deadline, prewarmed=pw),
         )
-        ab_futures.append((user, notifier, sorted_cands, f))
+        ab_futures.append((user, notifier, sorted_cands, f, prewarmed))
+
+    # 没有候选的用户的 prewarm（如果是新刷新的）存入缓存供下轮复用
+    await _stash_pending_prewarms()
 
     # ── 新房源通知（预订已在后台线程并行运行）───────────────────── #
     total_notified = 0
@@ -554,8 +758,15 @@ async def run_once(
     storage.mark_status_change_notified_batch(sc_notified_ids)
 
     # ── 等待预订结果，发送成功/失败通知 ──────────────────────────── #
-    for user, notifier, sorted_cands, future in ab_futures:
+    for user, notifier, sorted_cands, future, prewarmed in ab_futures:
         result = await future
+        # Phase B：booking 后保留 prewarm 在缓存中，下轮复用；
+        # 仅 unknown_error 失效（session 可能已损坏，如 auth 错误）。
+        # success / race_lost / reserved_conflict / cancel+retry 均视为
+        # session 健康，留在 _prewarmed_cache 中。
+        if prewarmed and result.phase == "unknown_error":
+            _invalidate_user_prewarm(user.id)
+            logger.info("[%s] 因 unknown_error 失效 prewarm 缓存", user.name)
         # result.listing 是实际被尝试预订的那套房源（fallback 后可能不是 sorted_cands[0]）
         booked_listing = result.listing
 
@@ -784,6 +995,9 @@ async def main_loop(
                     users = load_users()
                     for _, n in user_notifiers:
                         await n.close()
+                    # 用户可能改了密码/邮箱/账号 → 全量失效 prewarm 缓存。
+                    # 下一轮 run_once 会按需重建（命中策略已对齐 active_user_ids）。
+                    _clear_prewarm_cache()
                     user_notifiers = _build_user_notifiers(users)
                     # 热重载后重置自适应间隔（用户可能改了 peak_interval / min_interval）
                     adaptive_peak = float(cfg.peak_interval)
@@ -794,7 +1008,10 @@ async def main_loop(
                         cfg.peak_start, cfg.peak_end,
                     )
                 except Exception as e:
-                    logger.error("热重载失败，继续使用旧配置: %s", e)
+                    logger.error(
+                        "热重载失败，继续使用旧配置: %s",
+                        e, exc_info=True,
+                    )
 
         except asyncio.CancelledError:
             raise  # 允许正常关闭（KeyboardInterrupt 等）
@@ -905,6 +1122,7 @@ async def _async_main() -> None:
         storage.close()
         for _, n in user_notifiers:
             await n.close()
+        _clear_prewarm_cache()  # 关闭所有缓存的 prewarm session
         _remove_pid()
 
 

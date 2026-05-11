@@ -58,6 +58,12 @@ cp .env.example .env
 python web.py  # http://127.0.0.1:8088
 ```
 
+**Run tests:**
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/ -v
+```
+
 [Full installation guide →](#run-locally)
 
 ---
@@ -97,7 +103,10 @@ python web.py  # http://127.0.0.1:8088
 | Startup preflight | ✅ Done | Blocks container start if `WEB_PASSWORD` unset or Caddyfile domain is still a placeholder |
 | Production WSGI | ✅ Done | Gunicorn (1 worker × 8 threads, timeout=0) replaces Flask dev server in Docker |
 | Dependency pinning | ✅ Done | `requirements.lock` with exact `==` versions; Dockerfile installs from lock file |
-| Code modularization | ✅ Done | web.py split into `app/` with 9 route modules + 7 shared modules; 1,100→70 line bootstrap |
+| Code modularization | ✅ Done | web.py split into `app/` with 10 route modules + 8 shared modules; 1,200→154 line bootstrap |
+| Prewarm session cache | ✅ Done | Process-level cache across rounds; token TTL refresh; invalidated on user/config change |
+| Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; log viewer supports switching files |
+| Pytest test suite | ✅ Done | 10 test modules covering AppleScript escape, auth, crypto, logs, models, prewarm, safety, storage, user form/routes |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, Storage abstraction enforced |
 
 ---
@@ -236,17 +245,17 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 
 | File | Responsibility |
 |---|---|
-| `monitor.py` | Main scheduler, adaptive smart polling, hot reload, PID management, prewarmed sessions, concurrent booking |
-| `scraper.py` | GraphQL scraping, `curl_cffi`, pagination, multi-city, 429 retry, proxy support |
-| `storage.py` | SQLite persistence, diff detection, chart aggregation, meta storage, web_notifications table |
+| `monitor.py` | Main scheduler, adaptive smart polling, hot reload, PID management, prewarmed session cache (Phase B cross-round reuse), concurrent booking, dual logging (monitor.log + errors.log) |
+| `scraper.py` | GraphQL scraping, `curl_cffi`, pagination, multi-city, 429 retry with cumulative wait, proxy support, enhanced error context logging |
+| `storage.py` | SQLite persistence, diff detection, chart aggregation, meta storage, web_notifications table, `get_distinct_cities()` |
 | `models.py` | `Listing` dataclass and formatting helpers |
-| `notifier.py` | `BaseNotifier` ABC; iMessage (macOS gate), Telegram, Email, WhatsApp, `WebNotifier`, multi-dispatch |
-| `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); optional `cancel_enabled` auto-cancel, proxy support |
+| `notifier.py` | `BaseNotifier` ABC; iMessage (macOS gate, AppleScript escape hardened), Telegram, Email, WhatsApp, `WebNotifier`, multi-dispatch |
+| `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); enhanced error context (sku/contract_id/start_date); optional `cancel_enabled` auto-cancel, proxy support |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
 | `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
 | `web.py` | Flask app bootstrap: instantiation, security headers, CSRF, Jinja filters, context processors, route registration |
 | `app/auth.py` | Session authentication, role decorators (`login_required`, `admin_required`, `admin_api_required`), guest mode, login rate limiting |
-| `app/csrf.py` | CSRF token generation and validation |
+| `app/csrf.py` | CSRF token generation and validation (Unicode-safe via `.encode("utf-8")`) |
 | `app/db.py` | Database helper: `get_db()` connection factory |
 | `app/env_writer.py` | `.env` file in-place key writer (avoids `dotenv.set_key()` atomic-rename issues on Docker bind mounts) |
 | `app/forms/user_form.py` | User form data extraction and `UserConfig` construction |
@@ -254,7 +263,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `app/jinja_filters.py` | Jinja2 custom filters registered on the Flask app |
 | `app/process_ctrl.py` | Monitor process lifecycle: start / stop / reload / PID management |
 | `app/safety.py` | Security response helpers |
-| `app/routes/dashboard.py` | Dashboard: index, charts API, listing search |
+| `app/routes/dashboard.py` | Dashboard: index, charts API, listing search; `get_distinct_cities()` for correct city list |
 | `app/routes/calendar_routes.py` | Move-in calendar view and data API |
 | `app/routes/map_routes.py` | Map view, geocode cache API, neighbourhood API |
 | `app/routes/notifications.py` | Notification list, mark-read, SSE event stream |
@@ -262,7 +271,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `app/routes/sessions.py` | Login / logout / guest entry |
 | `app/routes/settings.py` | Global settings: view, save, filter options API |
 | `app/routes/stats.py` | Statistics dashboard with Chart.js data API |
-| `app/routes/system.py` | System info, log tail, health endpoint |
+| `app/routes/system.py` | System info, log viewer (monitor.log / errors.log with whitelist), log clear, health endpoint |
 | `app/routes/users.py` | User CRUD, toggle enable/disable, notification test |
 | `translations.py` | 120+ UI translation keys (zh/en), template `_()` helper |
 | `geocode_all.py` | One-shot Nominatim geocoding to pre-warm the coordinate cache |
@@ -288,7 +297,10 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | Multi-user storage | `data/users.json` | No extra dependency, simple structure, easy web-based CRUD |
 | Theme switching without flicker | Inline `<head>` script + CSS custom properties | Ensures the correct theme is applied before CSS paint |
 | Optional panel auth | Skip auth when `WEB_PASSWORD` is empty | Keeps local use frictionless while allowing protection when exposed |
-| Monolithic web.py (1,100+ lines) | Split into `app/routes/` (9 route modules) + `app/` (auth, csrf, db, i18n, etc.) | Each module ~50–150 lines with single responsibility; `web.py` is now a ~70-line bootstrap; routes use `add_url_rule` to keep flat endpoint names so templates need zero changes |
+| Monolithic web.py (1,200+ lines) | Split into `app/routes/` (10 route modules) + `app/` (auth, csrf, db, i18n, etc.) | Each module ~15–240 lines with single responsibility; `web.py` is now a 154-line bootstrap; routes use `add_url_rule` to keep flat endpoint names so templates need zero changes |
+| Prewarm session per-round waste | Process-level cache with TTL-aware refresh; cross-round reuse | Hit: zero network IO; TTL < 300 s: background refresh parallel to scrape; only invalidated on email change / unknown_error |
+| INFO noise drowning warnings | Separate `errors.log` (WARNING+) with `funcName:lineno` formatter, backupCount=5 | `monitor.log` stays INFO+ for operational view; `errors.log` captures sparse but actionable anomalies with precise source location |
+| No automated tests | 10 pytest modules with shared fixtures (`temp_db`, `client`, `admin_client`, etc.) | Pure-function tests for models/crypto/safety/storage; HTTP integration tests for auth/user/log routes; zero external network dependency |
 
 ### GraphQL API parameters
 
@@ -484,12 +496,12 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 ## File structure
 
 ```text
-monitor.py          Main scheduler, adaptive smart polling, hot reload, concurrent booking
-scraper.py          GraphQL scraping, curl_cffi, pagination, 429 retry, proxy support
-storage.py          SQLite: listings / status_changes / web_notifications / meta / geocode_cache, chart queries
+monitor.py          Main scheduler, adaptive smart polling, hot reload, prewarm cache (Phase B), dual logging
+scraper.py          GraphQL scraping, curl_cffi, pagination, 429 retry with cumulative wait, proxy support
+storage.py          SQLite: listings / status_changes / web_notifications / meta / geocode_cache, chart queries, get_distinct_cities()
 models.py           Listing dataclass and formatting helpers
-notifier.py         BaseNotifier, iMessage (macOS gate), Telegram, Email, WhatsApp, WebNotifier
-booker.py           Login, createEmptyCart, addNewBooking, placeOrder (store_id=54), idealCheckOut (plateform "h"), proxy support
+notifier.py         BaseNotifier, iMessage (AppleScript escape hardened), Telegram, Email, WhatsApp, WebNotifier
+booker.py           Login, createEmptyCart, addNewBooking, placeOrder (store_id=54), idealCheckOut (plateform "h"), proxy support; enhanced error context
 config.py           Global config loading, known cities, ListingFilter, AutoBookConfig
 users.py            UserConfig, users.json management, legacy env migration
 translations.py     UI translations (zh/en) — 120+ keys covering all pages
@@ -533,6 +545,20 @@ templates/
   users.html        User management list (cards with channels / filters / actions)
   user_form.html    User add/edit form (4-step: basic info, channels, filters, auto-booking)
   settings.html     Global settings (scrape config, smart polling, cities, danger zone)
+pytest.ini          Pytest configuration (strict markers, deprecation filters)
+requirements-dev.txt Pytest dev dependency (not needed in Docker)
+tests/
+  conftest.py       Shared fixtures: temp_db, app_ctx, fresh_crypto, test_app, client, admin_client, guest_client
+  test_applescript_escape.py   AppleScript escape hardening
+  test_auth_routes.py          Authentication routes (login/logout/guest/session)
+  test_crypto.py               Encryption / decryption round-trip
+  test_log_routes.py           Log viewer API (file whitelist, clear, path traversal)
+  test_models_filter.py        ListingFilter logic (pass/reject edge cases)
+  test_prewarm_cache.py        Prewarm session cache lifecycle
+  test_safety.py               safe_next_url / security redirect helpers
+  test_storage_diff.py         SQLite diff detection (new/change/stale)
+  test_user_form.py            User form data extraction
+  test_user_routes.py          User CRUD routes (RBAC enforcement)
 Dockerfile          Single-container image (python:3.11-slim + supervisord)
 supervisord.conf    Runs monitor.py + web.py together, with log rotation and auto-restart
 docker-compose.yml  Volume mounts (data/, logs/, .env), port mapping, healthcheck

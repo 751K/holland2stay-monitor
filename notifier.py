@@ -652,38 +652,47 @@ def create_user_notifier(user) -> BaseNotifier:
 # AppleScript 构建
 # ------------------------------------------------------------------ #
 
-def _build_applescript(recipient: str, message: str) -> str:
+def _escape_applescript_literal(value: str) -> str:
     """
-    构造用于 Messages.app 的 AppleScript 字符串。
+    AppleScript 字符串字面量转义（共享给 message 和 recipient）。
 
-    转义规则
-    --------
-    按以下顺序处理，顺序不能颠倒：
+    转义规则（顺序不能颠倒）
+    -----------------------
     1. 反斜杠：\\ → \\\\（必须最先处理，避免后续步骤二次转义）
     2. 双引号：" → \\"
     3. 换行符：\\n → " & return & "
        AppleScript 字符串字面量必须在一行内，换行符需用内置常量 `return`
        和字符串连接运算符 `&` 表达，例如：
-         send "Hello" & return & "World" to buddy "..."
+         "Hello" & return & "World"
+    """
+    return (
+        value
+        .replace("\\", "\\\\")   # 1. 反斜杠（必须最先）
+        .replace('"', '\\"')      # 2. 双引号
+        .replace("\n", '" & return & "')  # 3. 换行符 → AppleScript return 常量
+    )
+
+
+def _build_applescript(recipient: str, message: str) -> str:
+    """
+    构造用于 Messages.app 的 AppleScript 字符串。
 
     Parameters
     ----------
     recipient : iMessage 收件人（手机号或 Apple ID 邮箱）
+                即使 admin 才能从 Web 面板填写，也必须转义 —— 防止
+                后续 admin→admin 注入或多用户配置场景的横向攻击。
     message   : 要发送的纯文本消息（可含换行符）
 
     Returns
     -------
     可直接传给 `osascript -e` 的 AppleScript 字符串
     """
-    escaped = (
-        message
-        .replace("\\", "\\\\")   # 1. 反斜杠（必须最先）
-        .replace('"', '\\"')      # 2. 双引号
-        .replace("\n", '" & return & "')  # 3. 换行符 → AppleScript return 常量
-    )
+    msg_esc = _escape_applescript_literal(message)
+    recip_esc = _escape_applescript_literal(recipient)
     return (
         f'tell application "Messages"\n'
-        f'  send "{escaped}" to buddy "{recipient}"'
+        f'  send "{msg_esc}" to buddy "{recip_esc}"'
         f' of (first service whose service type = iMessage)\n'
         f'end tell'
     )

@@ -55,6 +55,12 @@ cp .env.example .env
 python web.py  # http://127.0.0.1:8088
 ```
 
+**运行测试：**
+```bash
+pip install -r requirements-dev.txt
+python -m pytest tests/ -v
+```
+
 [完整安装指南 →](#本地启动)
 
 ---
@@ -94,7 +100,10 @@ python web.py  # http://127.0.0.1:8088
 | 启动预检 | ✅ 已完成 | `WEB_PASSWORD` 未设置或 Caddyfile 仍为占位域名时阻止容器启动 |
 | 生产 WSGI | ✅ 已完成 | Docker 中 Gunicorn 替代 Flask 内置服务器（1 worker × 8 线程，timeout=0） |
 | 依赖版本锁定 | ✅ 已完成 | `requirements.lock` 精确版本，Dockerfile 从 lock 文件安装，构建可重复 |
-| 代码模块化 | ✅ 已完成 | web.py 拆分为 `app/` 子包（9 个路由模块 + 7 个共享模块），1,100 行精简至 70 行引导层 |
+| 代码模块化 | ✅ 已完成 | web.py 拆分为 `app/` 子包（10 个路由模块 + 8 个共享模块），1,200 行精简至 154 行引导层 |
+| Prewarm Session 缓存 | ✅ 已完成 | 进程级缓存跨轮复用；Token TTL 后台刷新；用户/配置变更时自动失效 |
+| 错误日志（errors.log）| ✅ 已完成 | 独立 WARNING+ 日志，含 `funcName:lineno` 格式；Web 面板日志查看器支持切换文件 |
+| Pytest 测试套件 | ✅ 已完成 | 10 个测试模块，覆盖 AppleScript 转义、认证、加密、日志、模型、缓存、安全、存储、用户表单/路由 |
 | 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Storage 抽象统一、解析逻辑去重 |
 
 ---
@@ -242,17 +251,17 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 
 | 文件 | 职责 |
 |------|------|
-| `monitor.py` | 主调度循环，自适应智能轮询，SIGHUP 热重载，PID 管理，预登录 Session，并发预订 |
-| `scraper.py` | GraphQL 抓取，curl_cffi，自动翻页，多城市，429 重试，代理支持 |
-| `storage.py` | SQLite 持久化，diff 检测，chart 聚合，meta 键值，web_notifications 表 |
+| `monitor.py` | 主调度循环，自适应智能轮询，热重载，prewarm 缓存（Phase B 跨轮复用），并发预订，双日志（monitor.log + errors.log） |
+| `scraper.py` | GraphQL 抓取，curl_cffi，自动翻页，多城市，429 退避含累计等待，代理支持，增强错误上下文日志 |
+| `storage.py` | SQLite 持久化，diff 检测，chart 聚合，meta 键值，web_notifications 表，`get_distinct_cities()` |
 | `models.py` | Listing dataclass，price_display，feature_map |
-| `notifier.py` | BaseNotifier ABC，iMessage（macOS 检测），Telegram，Email，WhatsApp，WebNotifier，MultiNotifier |
-| `booker.py` | PrewarmedSession 预登录复用；createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；cancel_enabled 代理支持 |
+| `notifier.py` | BaseNotifier ABC，iMessage（macOS 检测 + AppleScript 转义加固），Telegram，Email，WhatsApp，WebNotifier，MultiNotifier |
+| `booker.py` | PrewarmedSession；createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；增强错误上下文（sku/contract_id/start_date）；cancel_enabled 代理支持 |
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
 | `users.py` | UserConfig dataclass，users.json 读写，.env 配置迁移 |
 | `web.py` | Flask app 引导层：实例化、安全头、CSRF、Jinja 过滤器、context processor、路由注册 |
 | `app/auth.py` | Session 鉴权、RBAC 装饰器（`login_required`、`admin_required`、`admin_api_required`）、访客模式、登录限流 |
-| `app/csrf.py` | CSRF token 生成与校验 |
+| `app/csrf.py` | CSRF token 生成与校验（Unicode 安全，`.encode("utf-8")` 防 TypeError）|
 | `app/db.py` | 数据库连接工厂 `get_db()` |
 | `app/env_writer.py` | `.env` 文件原地写键（规避 `dotenv.set_key()` 在 Docker bind mount 上的 rename 错误） |
 | `app/forms/user_form.py` | 用户表单数据提取与 `UserConfig` 构造 |
@@ -260,7 +269,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `app/jinja_filters.py` | Jinja2 自定义过滤器 |
 | `app/process_ctrl.py` | 监控进程生命周期管理（启动/停止/重载/PID） |
 | `app/safety.py` | 安全响应辅助 |
-| `app/routes/dashboard.py` | 仪表盘：首页、图表 API、房源搜索 |
+| `app/routes/dashboard.py` | 仪表盘：首页、图表 API、房源搜索；`get_distinct_cities()` 修复城市列表截断 bug |
 | `app/routes/calendar_routes.py` | 入住日历视图与数据 API |
 | `app/routes/map_routes.py` | 地图视图、geocode 缓存 API、片区 API |
 | `app/routes/notifications.py` | 通知列表、全部已读、SSE 事件流 |
@@ -268,7 +277,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `app/routes/sessions.py` | 登录/登出/访客入口 |
 | `app/routes/settings.py` | 全局设置：查看、保存、过滤选项 API |
 | `app/routes/stats.py` | 统计图表数据 API |
-| `app/routes/system.py` | 系统信息、日志查看、健康检查 |
+| `app/routes/system.py` | 系统信息、日志查看器（monitor.log / errors.log 白名单切换）、清空日志、健康检查 |
 | `app/routes/users.py` | 用户 CRUD、启停、通知测试 |
 | `translations.py` | 120+ UI 翻译条目（中/英），模板 `_()` 函数 |
 | `geocode_all.py` | 一次性 Nominatim 地理编码，预热坐标缓存 |
@@ -294,7 +303,10 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | 多用户存储 | `data/users.json` | 无额外依赖，结构清晰，Web 面板直接 CRUD |
 | 主题切换无闪烁 | `<head>` 内联脚本 + CSS custom properties | 在 CSS 渲染前同步设置 `data-bs-theme`，避免 FOUC |
 | 面板鉴权 opt-in | `WEB_PASSWORD` 为空则跳过鉴权 | 本地运行无需配置，对外暴露时一行配置即可加锁 |
-| web.py 单体膨胀（1,100+ 行） | 拆分为 `app/routes/`（9 个路由模块）+ `app/`（auth、csrf、db、i18n 等） | 每个模块 50–150 行，职责单一；`web.py` 精简为约 70 行引导层；路由用 `add_url_rule` 保留扁平 endpoint 名，模板零改动 |
+| web.py 单体膨胀（1,200+ 行） | 拆分为 `app/routes/`（10 个路由模块）+ `app/`（auth、csrf、db、i18n 等） | 每个模块 15–240 行，职责单一；`web.py` 精简为 154 行引导层；路由用 `add_url_rule` 保留扁平 endpoint 名，模板零改动 |
+| Prewarm Session 每轮浪费 | 进程级缓存 + 智能 TTL 刷新；跨轮复用 | 命中：零网络 IO；TTL < 300 s：后台刷新（与抓取并行）；仅 email 变更 / unknown_error 失效 |
+| INFO 噪音淹没告警 | 独立 `errors.log`（WARNING+），含 `funcName:lineno` 格式，backupCount=5 | `monitor.log` 保留 INFO+ 运维视图；`errors.log` 归档稀疏但可操作的异常，精确定位源 |
+| 无自动化测试 | 10 个 pytest 模块，共享 fixture（`temp_db`、`client`、`admin_client` 等） | 纯函数测试覆盖 models/crypto/safety/storage；HTTP 集成测试覆盖 auth/user/log 路由；零外部网络依赖 |
 
 ### GraphQL API 参数
 
@@ -484,12 +496,12 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 ## 文件结构
 
 ```
-monitor.py          主调度循环，自适应智能轮询，热重载，并发预订
-scraper.py          GraphQL 抓取，curl_cffi，自动翻页，429 重试，代理支持
-storage.py          SQLite：listings / status_changes / web_notifications / meta / geocode_cache，chart 聚合
+monitor.py          主调度循环，自适应智能轮询，热重载，prewarm 缓存（Phase B），双日志
+scraper.py          GraphQL 抓取，curl_cffi，自动翻页，429 退避含累计等待，代理支持
+storage.py          SQLite：listings / status_changes / web_notifications / meta / geocode_cache，chart 聚合，get_distinct_cities()
 models.py           Listing dataclass，price_display，feature_map
-notifier.py         BaseNotifier → iMessage（macOS 检测）/ Telegram / Email / WhatsApp / WebNotifier
-booker.py           登录 → createEmptyCart → addNewBooking → placeOrder (store_id=54) → idealCheckOut (plateform "h")
+notifier.py         BaseNotifier → iMessage（AppleScript 转义加固）/ Telegram / Email / WhatsApp / WebNotifier
+booker.py           登录 → createEmptyCart → addNewBooking → placeOrder (store_id=54) → idealCheckOut (plateform "h")；增强错误上下文
 config.py           全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig
 users.py            UserConfig，users.json 读写，.env 配置迁移
 translations.py     中/英翻译字典，120+ 键覆盖全部页面
@@ -533,6 +545,20 @@ templates/
   users.html        用户管理列表（卡片式，渠道 / 过滤 / 操作）
   user_form.html    用户新增 / 编辑表单（4 步：基本信息 / 渠道 / 过滤 / 预订）
   settings.html     全局设置（抓取配置 / 智能轮询 / 城市 / 危险操作区）
+pytest.ini          Pytest 配置（strict markers、deprecation 过滤）
+requirements-dev.txt Pytest 开发依赖（Docker 镜像不需要）
+tests/
+  conftest.py       共享 fixture：temp_db、app_ctx、fresh_crypto、test_app、client、admin_client、guest_client
+  test_applescript_escape.py   AppleScript 转义加固
+  test_auth_routes.py          认证路由（登录/登出/访客/session）
+  test_crypto.py               加密/解密往返
+  test_log_routes.py           日志 API（文件白名单、清空、路径穿越防护）
+  test_models_filter.py        ListingFilter 过滤逻辑（pass/reject 边界）
+  test_prewarm_cache.py        Prewarm session 缓存生命周期
+  test_safety.py               safe_next_url / 安全跳转辅助
+  test_storage_diff.py         SQLite diff 检测（新增/变更/过期）
+  test_user_form.py            用户表单数据提取
+  test_user_routes.py          用户 CRUD 路由（RBAC 鉴权）
 Dockerfile          单容器镜像（python:3.11-slim + supervisord）
 supervisord.conf    同时管理 monitor.py + web.py，含日志轮转和自动重启
 docker-compose.yml  卷挂载（data/、logs/、.env），端口映射，健康检查
