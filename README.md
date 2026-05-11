@@ -89,6 +89,7 @@ python -m pytest tests/ -v
 | Hot config reload | ✅ Done | Cross-platform reload, no restart required |
 | Smart polling | ✅ Done | Peak hours auto-accelerate; adaptive interval probes rate limit |
 | Rate limit protection | ✅ Done | 429 exponential backoff + 5-minute cooldown + proxy support |
+| Cloudflare block detection | ✅ Done | 403 WAF detection, throttled alert, 15-min cooldown, actionable recovery steps |
 | Multi-user support | ✅ Done | Each user has independent channels / filters / booker settings |
 | VPS / Docker ready | ✅ Done | iMessage gracefully skipped on non-macOS; web panel takes over |
 | Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
@@ -108,7 +109,7 @@ python -m pytest tests/ -v
 | Code modularization | ✅ Done | web.py split into `app/` with 10 route modules + 8 shared modules; 1,200→154 line bootstrap |
 | Prewarm session cache | ✅ Done | Process-level cache across rounds; token TTL refresh; invalidated on user/config change |
 | Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; log viewer supports switching files |
-| Pytest test suite | ✅ Done | 10 test modules covering AppleScript escape, auth, crypto, logs, models, prewarm, safety, storage, user form/routes |
+| Pytest test suite | ✅ Done | 11 test modules covering AppleScript escape, auth, crypto, logs, models, prewarm, safety, scraper 403, storage, user form/routes |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, Storage abstraction enforced |
 
 ---
@@ -134,11 +135,20 @@ Normal intervals apply outside peak hours. During the Dutch morning release wind
 - Randomised ±`JITTER_RATIO` % jitter on every sleep to avoid mechanical fingerprinting
 - All parameters (PEAK_INTERVAL, MIN_INTERVAL, PEAK_START, PEAK_END, JITTER_RATIO, PEAK_WEEKDAYS_ONLY) configurable in the web UI
 
-### Rate limit protection
+### Rate limit & block protection
+
+**429 (rate limit)** — temporary, auto-recovers:
 
 - `scraper.py` retries a 429 response twice (waits 30 s then 60 s) before giving up
 - On persistent rate-limiting, `monitor.py` raises a `RateLimitError`, notifies all users, and sleeps 5 minutes before resuming
-- Optional proxy support: set `HTTPS_PROXY` or `HTTP_PROXY` in `.env` to route all scraping and booking traffic through a proxy; picked up at runtime so a hot reload applies the change without restart
+
+**403 (Cloudflare WAF block)** — permanent until you act:
+
+- `scraper.py` detects Cloudflare challenge pages (HTML signatures like `no-js ie6 oldie`) and immediately raises `BlockedError` — no retry, unlike 429
+- `monitor.py` catches `BlockedError`, notifies users (throttled to 1 alert per 30 min), and sleeps 15 minutes
+- Error message includes actionable recovery steps: switch proxy IP, restart monitor (new TLS fingerprint), or pause for a few hours
+
+**Proxy support:** set `HTTPS_PROXY` or `HTTP_PROXY` in `.env` to route all scraping and booking traffic through a proxy; picked up at runtime so a hot reload applies the change without restart
 
 ### Fast-path booking
 
@@ -290,6 +300,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | Booking race condition | Submit `try_book()` to thread pool before notifications send | Booking and notification network calls run concurrently; booking reaches the server ~2–4 s sooner |
 | Repeated login overhead | `PrewarmedSession`: log in once per round, reuse for all candidates | Prewarm runs in parallel with notifications; each booking saves ~0.7 s (session creation + login round-trip) |
 | API rate limits | 429 backoff (30 s / 60 s retry) + 5-min cooldown + adaptive decrease | Three-layer defence: scraper retries, monitor cools down, adaptive polling stays below the threshold |
+| Cloudflare 403 WAF block | Immediate `BlockedError` raise (no retry) + Cloudflare challenge detection + 15-min cooldown + throttled alert (max 1/30 min) | 403 is permanent — waiting won't help; actionable recovery steps included in error + notification |
 | Peak-hour probing | Adaptive interval: ×0.95 on success, ×2.0 on 429, floor at MIN_INTERVAL | Automatically discovers the maximum safe frequency without manual tuning |
 | Multi-channel notifications | `BaseNotifier` + `MultiNotifier` | Shared formatting logic, per-channel send implementations |
 | Platform-independent notifications | `WebNotifier` writes to SQLite; SSE pushes to browser | Works on VPS/Docker without any OS dependency |
@@ -382,6 +393,28 @@ docker compose logs -f
 # Stop
 docker compose down
 ```
+
+**Using a proxy with Docker:**
+
+If you need to route scraping and booking traffic through a proxy (e.g. residential proxy to avoid Cloudflare 403 blocks), you must pass the proxy variables into the container in **two places**:
+
+1. **`.env`** — set the proxy URL so the app can read it at runtime:
+   ```env
+   HTTPS_PROXY=http://user:pass@proxy-host:port
+   # or HTTP_PROXY if your proxy uses HTTP
+   ```
+
+2. **`docker-compose.yml`** — forward the variable from the host into the container by adding under `services.h2s.environment`:
+   ```yaml
+   environment:
+     - TZ=Europe/Amsterdam
+     - PYTHONUNBUFFERED=1
+     - HTTP_PROXY=${HTTP_PROXY}
+     - HTTPS_PROXY=${HTTPS_PROXY}
+     - ALL_PROXY=${ALL_PROXY}
+   ```
+
+   The `${VAR}` syntax pulls from your host shell or a `.env` file in the same directory (docker compose reads `.env` automatically). After editing, run `docker compose up -d` to recreate the container with the new variables.
 
 The container runs `monitor.py` and `web.py` together under supervisord. Logs go to `./logs/` on the host. The container runs as non-root user `appuser`. `mem_limit: 512M` and `cpus: 1.0` cap resource usage.
 

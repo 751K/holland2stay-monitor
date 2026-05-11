@@ -49,6 +49,23 @@ class RateLimitError(Exception):
     """
 
 
+class BlockedError(Exception):
+    """
+    Holland2Stay API 返回 403 — 通常是 Cloudflare WAF 屏蔽。
+
+    与 429 的区别
+    -------------
+    429 = "请求太快，等等就好"，退避后通常自动恢复。
+    403 = "我们不想服务你"，等待不会自动恢复，需要：
+      - 更换 HTTPS_PROXY 出口 IP（住宅代理换池）
+      - 重启 monitor（重建 curl_cffi session + 新 TLS 指纹）
+      - 临时关闭 monitor 让 Cloudflare 冷却该 IP/指纹组合
+
+    现象识别：响应体含 `<!DOCTYPE html>` + `no-js ie6 oldie` 等 Cloudflare
+    挑战页标志（HTML，不是预期的 JSON）。
+    """
+
+
 # 429 退避策略：依次等待这些秒数后重试。
 # 两次重试 = 最多额外等待 90 秒后才放弃并抛出 RateLimitError。
 _RATE_LIMIT_BACKOFF: tuple[int, ...] = (30, 60)
@@ -114,6 +131,7 @@ def _post_gql(session: req.Session, query: str) -> dict:
     Raises
     ------
     RateLimitError  重试耗尽仍 429
+    BlockedError    返回 403（Cloudflare WAF 屏蔽，等待无法恢复）
     HTTPError       其他 4xx/5xx
     Exception       网络超时、JSON 解析失败等
     """
@@ -136,6 +154,27 @@ def _post_gql(session: req.Session, query: str) -> dict:
                 exc_info=True,
             )
             raise
+        # 403 → Cloudflare WAF 屏蔽，等待无法恢复，立刻抛 BlockedError。
+        # 与 429（重试可能恢复）不同，403 需要换代理/重启来切 IP 或指纹。
+        if resp.status_code == 403:
+            body = resp.text[:500]
+            is_cf = (
+                "cloudflare" in body.lower()
+                or "no-js ie6 oldie" in body
+                or "challenge-platform" in body.lower()
+                or "<!DOCTYPE html>" in body[:50]
+            )
+            logger.error(
+                "GraphQL POST HTTP 403 (%s) url=%s body=%r",
+                "Cloudflare WAF" if is_cf else "其他 403", GQL_URL, body[:200],
+            )
+            reason = "Cloudflare WAF 屏蔽" if is_cf else "API 拒绝服务"
+            raise BlockedError(
+                f"{reason}（HTTP 403）。等待无法恢复。请尝试："
+                f"1) 更换 HTTPS_PROXY 出口 IP；"
+                f"2) 重启 monitor（重建 curl_cffi session + TLS 指纹）；"
+                f"3) 暂停几小时让 Cloudflare 冷却。"
+            )
         if resp.status_code == 429:
             continue          # 触发下一次重试
         if not resp.ok:
@@ -387,8 +426,8 @@ def _scrape_city_pages(
         logger.info("[%s] 抓取第 %d 页", city_name, current_page)
         try:
             data = _post_gql(session, query)
-        except RateLimitError:
-            raise   # 直接上传，不降级为普通失败
+        except (RateLimitError, BlockedError):
+            raise   # 直接上传：429 等待可恢复 / 403 需人工介入，monitor 各自处理
         except Exception as e:
             logger.error(
                 "[%s] 请求失败 page=%d city_ids=%s avail_ids=%s: %s",
@@ -486,8 +525,8 @@ def scrape_all(
                     availability_ids=availability_ids,
                 )
                 all_listings.extend(listings)
-            except RateLimitError:
-                raise   # 429 是 IP 级别的，不是单城市失败，直接上传
+            except (RateLimitError, BlockedError):
+                raise   # 429/403 都是 IP/指纹级别的问题，不是单城市失败，直接上传
             except Exception as e:
                 logger.error(
                     "[%s] 抓取失败 city_id=%s avail_ids=%s proxy=%s: %s",

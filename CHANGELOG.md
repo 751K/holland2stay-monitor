@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.2.2 (2026-05-11)
+
+### 403 / Cloudflare WAF 屏蔽处理
+
+当 Holland2Stay API 返回 403（Cloudflare WAF 屏蔽）时，旧代码将其当普通失败处理，monitor 每 3–5 分钟刷一轮 error log，用户不知情，无法行动。
+
+v1.2.2 将 403 提升为一等异常，与 429（可自动恢复）完全区分：
+
+- **scraper 层**：`_post_gql` 检测 403 响应（含 Cloudflare 挑战页签名识别：`no-js ie6 oldie`、`challenge-platform` 等），立刻抛出 `BlockedError`，不进入重试循环（与 429 不同）
+- **传播链**：`_scrape_city_pages` / `scrape_all` 将 `BlockedError` 透传，不被 `except Exception` 吞掉
+- **monitor.run_once**：捕获 `BlockedError` → ERROR 日志（含城市数/用户数/代理状态）→ 通过用户通知渠道推送告警 → re-raise
+- **monitor.main_loop**：捕获 `BlockedError` → 15 分钟冷却（vs 429 的 5 分钟），避免刷屏；恢复需换代理或重启进程
+- **通知节流**：30 分钟内最多发 1 条屏蔽告警，避免持续屏蔽时重复推送
+- **可操作建议**：错误消息包含三条恢复路径 — 换 HTTPS_PROXY 出口 IP / 重启 monitor 重建 session + TLS 指纹 / 暂停几小时让 Cloudflare 冷却
+
+### 测试
+
+- **`tests/test_scraper_403.py`**（15 个测试，4 个类）：
+  - `TestPostGqlBlockedError`（5 个）：403 立即抛 BlockedError + Cloudflare 识别 + 不重试 + 429 回归保护 + 200 回归保护
+  - `TestBlockedErrorPropagation`（2 个）：验证 BlockedError 不被中间层吞掉
+  - `TestMonitorBlockedHandling`（4 个）：run_once re-raise + 用户通知 + 30 分钟节流 + 节流后恢复
+  - `TestShouldNotifyBlock`（4 个）：节流函数单元测试（首次/二次/超时/间隔合理性）
+
+### 文档
+
+- README.md / README_cn.md 新增 [flatradar.app](https://flatradar.app) 在线演示链接
+
+---
+
 ## v1.2.1 (2026-05-11)
 
 ### 测试套件（Pytest）

@@ -55,7 +55,7 @@ from booker import PrewarmedSession, create_prewarmed_session, try_book
 from config import DATA_DIR, ENV_PATH, load_config
 from models import STATUS_AVAILABLE, parse_float
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
-from scraper import RateLimitError, scrape_all
+from scraper import BlockedError, RateLimitError, scrape_all
 from update_checker import check_for_updates
 from storage import Storage
 from users import USERS_FILE, UserConfig, load_users, migrate_from_env, save_users
@@ -110,6 +110,25 @@ HEARTBEAT_EVERY = 12   # 默认 5min * 12 = 1h
 _ADAPTIVE_DECREASE = 0.95
 # 遭遇 429 后将当前间隔乘以此系数（翻倍），快速退避
 _ADAPTIVE_INCREASE = 2.0
+
+# Cloudflare 403 屏蔽冷却时间（秒）。比 429 的 5 min 更长 —— 等待无法自动恢复，
+# 给用户/运维时间换代理或重启进程。
+_BLOCKED_COOLDOWN = 900   # 15 分钟
+
+# 屏蔽通知节流：避免每轮抓取都给用户推一次相同的告警。
+# 状态是模块级，进程重启后清零（重启后第一轮屏蔽会再发通知，符合预期）。
+_last_block_notify_at: float = 0.0
+_BLOCK_NOTIFY_INTERVAL = 1800   # 30 分钟
+
+
+def _should_notify_block() -> bool:
+    """是否该发屏蔽通知。30 分钟最多一次，避免持续屏蔽时刷屏。"""
+    global _last_block_notify_at
+    now = time.monotonic()
+    if now - _last_block_notify_at >= _BLOCK_NOTIFY_INTERVAL:
+        _last_block_notify_at = now
+        return True
+    return False
 
 _PID_FILE = DATA_DIR / "monitor.pid"
 _RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
@@ -520,6 +539,27 @@ async def run_once(
         fresh = await loop.run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
         )
+    except BlockedError as e:
+        # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。
+        # 给 main_loop 一个长 cooldown（15 min），并节流通知避免刷屏。
+        await _stash_pending_prewarms()
+        proxy_on = bool(os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY"))
+        logger.error(
+            "🚫 抓取被屏蔽 (HTTP 403) cities=%d users=%d proxy=%s: %s",
+            len(city_tasks), len(user_notifiers),
+            "yes" if proxy_on else "no", e,
+        )
+        if not dry_run and _should_notify_block():
+            err_msg = (
+                f"🚫 抓取被 403 屏蔽\n\n{e}\n\n"
+                f"代理状态: {'已启用' if proxy_on else '未启用'}\n"
+                f"30 分钟内不会重复通知。"
+            )
+            for _, notifier in user_notifiers:
+                await notifier.send_error(err_msg)
+            if web_notifier:
+                await web_notifier.send_error(err_msg)
+        raise
     except RateLimitError as e:
         # 429 需要更长冷却，上传给 main_loop 单独处理（不走普通 10s 恢复路径）
         await _stash_pending_prewarms()
@@ -1023,6 +1063,16 @@ async def main_loop(
             logger.warning(
                 "⚠️  触发限流，自适应间隔 %d → %d 秒，冷却 %d 秒后继续",
                 int(prev), int(adaptive_peak), cooldown,
+            )
+            await asyncio.sleep(cooldown)
+        except BlockedError:
+            # 被 Cloudflare 屏蔽：等待无法恢复，但仍然冷却 15 分钟以减少
+            # 错误日志刷屏。真正恢复要靠用户换代理或重启进程。
+            cooldown = _apply_jitter(_BLOCKED_COOLDOWN, cfg.jitter_ratio)
+            logger.error(
+                "🚫 被 Cloudflare 屏蔽，冷却 %d 秒后再试。"
+                "持续屏蔽请考虑：换 HTTPS_PROXY 出口 / 重启 monitor / 暂停几小时。",
+                cooldown,
             )
             await asyncio.sleep(cooldown)
         except Exception as e:

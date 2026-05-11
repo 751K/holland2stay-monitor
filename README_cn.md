@@ -86,6 +86,7 @@ python -m pytest tests/ -v
 | 配置热重载 | ✅ 已完成 | 跨平台，修改后无需重启监控进程 |
 | 智能轮询 | ✅ 已完成 | 高峰期自适应加速，自动逼近速率上限 |
 | 限流防护 | ✅ 已完成 | 429 指数退避重试 + 5 分钟冷却 + 代理支持 |
+| Cloudflare 屏蔽检测 | ✅ 已完成 | 403 WAF 识别、节流告警（30 分钟 1 次）、15 分钟冷却、可操作恢复建议 |
 | 多用户支持 | ✅ 已完成 | 每用户独立渠道 / 过滤 / 预订账号 |
 | VPS / Docker 兼容 | ✅ 已完成 | 非 macOS 自动跳过 iMessage，Web 面板接管通知 |
 | 日夜主题 | ✅ 已完成 | 浅色 / 深色，跟随系统偏好，无刷新闪烁 |
@@ -105,7 +106,7 @@ python -m pytest tests/ -v
 | 代码模块化 | ✅ 已完成 | web.py 拆分为 `app/` 子包（10 个路由模块 + 8 个共享模块），1,200 行精简至 154 行引导层 |
 | Prewarm Session 缓存 | ✅ 已完成 | 进程级缓存跨轮复用；Token TTL 后台刷新；用户/配置变更时自动失效 |
 | 错误日志（errors.log）| ✅ 已完成 | 独立 WARNING+ 日志，含 `funcName:lineno` 格式；Web 面板日志查看器支持切换文件 |
-| Pytest 测试套件 | ✅ 已完成 | 10 个测试模块，覆盖 AppleScript 转义、认证、加密、日志、模型、缓存、安全、存储、用户表单/路由 |
+| Pytest 测试套件 | ✅ 已完成 | 11 个测试模块，覆盖 AppleScript 转义、认证、加密、日志、模型、缓存、安全、scraper 403、存储、用户表单/路由 |
 | 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Storage 抽象统一、解析逻辑去重 |
 
 ---
@@ -131,11 +132,19 @@ python -m pytest tests/ -v
 - 每次等待都叠加 ±`JITTER_RATIO`% 随机抖动，破坏机械规律性
 - 所有参数（PEAK_INTERVAL、MIN_INTERVAL、PEAK_START、PEAK_END、JITTER_RATIO、PEAK_WEEKDAYS_ONLY）均可在 Web 面板配置
 
-### 限流防护（三层防御）
+### 限流与屏蔽防护
+
+**429（限流）— 临时，可自动恢复：**
 
 1. **scraper 层**：收到 429 后等 30 s 重试，再等 60 s 重试，仍失败则抛出 `RateLimitError`
 2. **monitor 层**：捕获 `RateLimitError`，通知所有用户，强制冷却 5 分钟后继续
 3. **自适应层**：自动将高峰间隔翻倍退避，从根源减少触发 429 的频率
+
+**403（Cloudflare WAF 屏蔽）— 持续，需人工介入：**
+
+- **scraper 层**：检测 Cloudflare 挑战页（HTML 特征如 `no-js ie6 oldie`），立即抛出 `BlockedError`，不重试（与 429 不同）
+- **monitor 层**：捕获 `BlockedError`，通知用户（节流至 30 分钟 1 次），冷却 15 分钟
+- **可操作建议**：错误消息含三条恢复路径 — 换代理 IP / 重启 monitor 重建 TLS 指纹 / 暂停几小时冷却
 
 **代理支持**：在 `.env` 中设置 `HTTPS_PROXY` / `HTTP_PROXY`，抓取和预订流量均通过代理路由；支持热重载，无需重启即可生效。
 
@@ -295,6 +304,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | 预订竞争条件 | 通知前先提交 `try_book()` 到线程池 | 预订与通知并发执行，早到服务器 2–4 秒 |
 | 重复登录开销 | `PrewarmedSession`：每轮只登录一次，多套候选复用 | 预登录与通知并发进行；每次预订节省约 0.7 秒（建连 + 登录往返） |
 | API 限流 | 429 退避重试（30s / 60s）+ 5 分钟冷却 + 自适应降速 | 三层防御：scraper 重试、monitor 冷却、自适应间隔守住安全阈值 |
+| Cloudflare 403 WAF 屏蔽 | 立即抛 `BlockedError`（不重试）+ Cloudflare 挑战页识别 + 15 分钟冷却 + 节流告警（最多 1 次/30 分钟） | 403 是持续性封禁，等待无效；错误消息含可操作的恢复步骤 |
 | 高峰期频率探测 | 自适应间隔：×0.95 成功，×2.0 限流，下限 MIN_INTERVAL | 自动发现最大安全频率，无需手动调参 |
 | 异步通知 + 同步抓取 | `run_in_executor` 桥接 | scraper 用 sync curl_cffi，notifier 用 async subprocess |
 | 多渠道通知 | `BaseNotifier` ABC + `MultiNotifier` 聚合 | 统一格式化逻辑，子类只实现 `_send()` |
@@ -387,6 +397,28 @@ docker compose logs -f
 # 停止
 docker compose down
 ```
+
+**Docker 环境启用代理：**
+
+如果需要通过代理路由抓取和预订流量（例如用住宅代理规避 Cloudflare 403 封禁），需要在**两个位置**传入代理变量：
+
+1. **`.env`** — 设置代理地址供程序运行时读取：
+   ```env
+   HTTPS_PROXY=http://user:pass@代理地址:端口
+   # 或 HTTP_PROXY（如果代理走 HTTP）
+   ```
+
+2. **`docker-compose.yml`** — 在 `services.h2s.environment` 下添加，将变量从宿主机传入容器：
+   ```yaml
+   environment:
+     - TZ=Europe/Amsterdam
+     - PYTHONUNBUFFERED=1
+     - HTTP_PROXY=${HTTP_PROXY}
+     - HTTPS_PROXY=${HTTPS_PROXY}
+     - ALL_PROXY=${ALL_PROXY}
+   ```
+
+   `${VAR}` 语法会从宿主机 shell 或同目录下的 `.env` 文件读取值（docker compose 默认读取 `.env`）。编辑后运行 `docker compose up -d` 重建容器即可生效。
 
 容器内 `monitor.py` 和 `web.py` 由 supervisord 同时管理，崩溃自动重启，日志写入宿主机 `./logs/`。容器以非 root 用户 `appuser` 运行，`mem_limit: 512M` + `cpus: 1.0` 防止资源耗尽。
 
