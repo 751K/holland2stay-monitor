@@ -1,5 +1,5 @@
 """
-/api/logs + /api/logs/clear 测试。
+/api/logs + /api/logs/files + /api/logs/clear 测试。
 
 最近的"分离错误日志"改造引入了 `?file=monitor|errors` 参数。
 关键安全契约：**白名单**，绝不允许任意路径。
@@ -9,6 +9,7 @@
 - ?file=errors 走另一个文件
 - ?file=../../etc/passwd 等路径穿越 → 400
 - ?file=unknown 未在白名单 → 400
+- /api/logs/files 返回可用文件列表
 - /api/logs/clear 也走同一套白名单
 - guest 被拦
 """
@@ -168,6 +169,31 @@ class TestLogRoutesAuth:
 
 
 # ─── 端到端：写入 errors.log → 通过 API 读出 ──────────────
+
+
+# ─── /api/logs/files ──────────────────────────────────────────
+
+
+class TestApiLogsFiles:
+    def test_returns_available_files(self, admin_client):
+        r = admin_client.get("/api/logs/files")
+        assert r.status_code == 200
+        body = r.get_json()
+        assert "files" in body
+        assert isinstance(body["files"], list)
+        keys = [f["key"] for f in body["files"]]
+        assert "monitor" in keys
+        assert "errors" in keys
+        for f in body["files"]:
+            assert "key" in f
+            assert "size" in f
+            assert "exists" in f
+
+    def test_anon_blocked_from_files(self, client):
+        assert client.get("/api/logs/files").status_code == 401
+
+    def test_guest_blocked_from_files(self, guest_client):
+        assert guest_client.get("/api/logs/files").status_code == 403
 
 
 class TestEndToEndLogReadback:

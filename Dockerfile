@@ -21,7 +21,7 @@ COPY templates/ templates/
 COPY static/ static/
 
 # 复制 entrypoint 并加执行权限
-COPY entrypoint.sh /entrypoint.sh
+COPY docker/entrypoint.sh /entrypoint.sh
 
 # 运行时目录
 RUN mkdir -p data logs \
@@ -29,7 +29,7 @@ RUN mkdir -p data logs \
     && chown -R appuser:appuser /app \
     && chmod +x /entrypoint.sh
 
-COPY supervisord.conf /etc/supervisor/conf.d/app.conf
+COPY docker/supervisord.conf /etc/supervisor/conf.d/app.conf
 
 USER appuser
 

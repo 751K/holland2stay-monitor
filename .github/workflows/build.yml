@@ -26,7 +26,7 @@ jobs:
         run: pip install -r requirements.txt pyinstaller
 
       - name: Build .dmg
-        run: bash build_dmg.sh
+        run: bash packaging/build_dmg.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -54,7 +54,7 @@ jobs:
 
       - name: Build .exe
         shell: cmd
-        run: build.bat
+        run: packaging/build.bat
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

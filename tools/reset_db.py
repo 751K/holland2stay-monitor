@@ -2,9 +2,9 @@
 reset_db.py — 清空数据库，用于测试
 =====================================
 用法：
-    python reset_db.py            # 清空 listings / status_changes / meta，保留表结构
-    python reset_db.py --all      # 直接删除整个 .db 文件后重建
-    python reset_db.py --dry-run  # 只打印将要执行的操作，不实际修改
+    python tools/reset_db.py           # 清空 listings / status_changes / meta，保留表结构
+    python tools/reset_db.py --all      # 直接删除整个 .db 文件后重建
+    python tools/reset_db.py --dry-run  # 只打印将要执行的操作，不实际修改
 
 清空后重新启动 monitor.py，所有房源会被视为"新房源"重新触发通知和自动预订。
 """
@@ -15,7 +15,10 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from config import DATA_DIR, resolve_project_path
+# 确保能从 tools/ 目录 import 项目根目录的模块
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from config import DATA_DIR, resolve_project_path  # noqa: E402
 
 DB_PATH  = DATA_DIR / "listings.db"
 PID_FILE = DATA_DIR / "monitor.pid"

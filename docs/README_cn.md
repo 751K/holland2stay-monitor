@@ -30,15 +30,15 @@ docker compose up -d
 **本地构建 — macOS：**
 ```bash
 # 要求：macOS, Python 3.11+
-# 将 app 图标放到 asset/image.png（1024x1024 PNG）
-bash build_dmg.sh
+# 将 app 图标放到 packaging/asset/image.png（1024x1024 PNG）
+bash packaging/build_dmg.sh
 # 输出：dist/Holland2Stay Monitor.dmg
 ```
 
 **本地构建 — Windows：**
 ```cmd
 REM 要求：Windows, Python 3.11+, pip
-build.bat
+packaging\build.bat
 REM 输出：dist\Holland2Stay Monitor.zip
 ```
 
@@ -105,7 +105,7 @@ python -m pytest tests/ -v
 | 依赖版本锁定 | ✅ 已完成 | `requirements.lock` 精确版本，Dockerfile 从 lock 文件安装，构建可重复 |
 | 代码模块化 | ✅ 已完成 | web.py 拆分为 `app/` 子包（10 个路由模块 + 8 个共享模块），1,200 行精简至 154 行引导层 |
 | Prewarm Session 缓存 | ✅ 已完成 | 进程级缓存跨轮复用；Token TTL 后台刷新；用户/配置变更时自动失效 |
-| 错误日志（errors.log）| ✅ 已完成 | 独立 WARNING+ 日志，含 `funcName:lineno` 格式；Web 面板日志查看器支持切换文件 |
+| 错误日志（errors.log）| ✅ 已完成 | 独立 WARNING+ 日志，含 `funcName:lineno` 格式；日志查看器支持文件 Tab 切换、行号、级别着色、关键词搜索、自动滚动 |
 | Pytest 测试套件 | ✅ 已完成 | 11 个测试模块，覆盖 AppleScript 转义、认证、加密、日志、模型、缓存、安全、scraper 403、存储、用户表单/路由 |
 | 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Storage 抽象统一、解析逻辑去重 |
 
@@ -288,10 +288,10 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `app/routes/sessions.py` | 登录/登出/访客入口 |
 | `app/routes/settings.py` | 全局设置：查看、保存、过滤选项 API |
 | `app/routes/stats.py` | 统计图表数据 API |
-| `app/routes/system.py` | 系统信息、日志查看器（monitor.log / errors.log 白名单切换）、清空日志、健康检查 |
+| `app/routes/system.py` | 系统信息、日志查看器（文件 Tab、行号、级别着色、关键词搜索）、清空日志、健康检查、日志文件列表 API |
 | `app/routes/users.py` | 用户 CRUD、启停、通知测试 |
 | `translations.py` | 120+ UI 翻译条目（中/英），模板 `_()` 函数 |
-| `geocode_all.py` | 一次性 Nominatim 地理编码，预热坐标缓存 |
+| `tools/geocode_all.py` | 一次性 Nominatim 地理编码，预热坐标缓存 |
 | `static/` | `design.css`（去边框设计系统），`app.js`（主题/导航/SSE/国际化） |
 | `templates/` | Jinja2 模板（`_()` 国际化），Leaflet.js 地图，Chart.js 图表，侧边栏布局 |
 
@@ -539,7 +539,9 @@ booker.py           登录 → createEmptyCart → addNewBooking → placeOrder 
 config.py           全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig
 users.py            UserConfig，users.json 读写，.env 配置迁移
 translations.py     中/英翻译字典，120+ 键覆盖全部页面
-geocode_all.py      一次性脚本：通过 Nominatim 预加载所有房源坐标
+tools/
+  geocode_all.py      一次性脚本：通过 Nominatim 预加载所有房源坐标
+  reset_db.py         一次性脚本：清空数据库用于测试
 web.py              Flask app 引导层 — 安全头、CSRF、i18n、路由注册
 app/
   __init__.py       包初始化
@@ -563,7 +565,7 @@ app/
     sessions.py     登录/登出/访客入口
     settings.py     全局设置查看/保存、过滤选项
     stats.py        图表数据 API
-    system.py       系统信息、日志查看、健康检查
+    system.py       系统信息、日志查看器（Tab、行号、级别着色、搜索）、健康检查
     users.py        用户 CRUD、启停、通知测试
 static/
   design.css        极简设计系统（去边框，阴影层级，暗/亮双主题，Inter 字体）
@@ -594,17 +596,19 @@ tests/
   test_user_form.py            用户表单数据提取
   test_user_routes.py          用户 CRUD 路由（RBAC 鉴权）
 Dockerfile          单容器镜像（python:3.11-slim + supervisord）
-supervisord.conf    同时管理 monitor.py + web.py，含日志轮转和自动重启
 docker-compose.yml  卷挂载（data/、logs/、.env），端口映射，健康检查
 .dockerignore       排除 .env、data/、logs/、__pycache__ 等不进镜像
+docker/
+  supervisord.conf    同时管理 monitor.py + web.py，含日志轮转和自动重启
+  entrypoint.sh       Docker 入口脚本（首次运行自动创建 .env 和目录）
 requirements.txt    curl_cffi, python-dotenv, flask, tzdata
 .env.example        配置模板
-asset/              应用图标源文件（1024x1024 PNG）
+packaging/
+  asset/              应用图标源文件（1024x1024 PNG）
+  build_dmg.sh        macOS .dmg 构建脚本（PyInstaller + .app 打包 + 图标生成）
+  build.bat           Windows 构建脚本（PyInstaller + ZIP）
+  h2s_monitor.spec    PyInstaller 打包配置
 launcher.py         macOS .app 入口（导入 web.app，处理 --run-monitor）
-build_dmg.sh        macOS .dmg 构建脚本（PyInstaller + .app 打包 + 图标生成）
-build.bat           Windows 构建脚本（PyInstaller + ZIP）
-h2s_monitor.spec    PyInstaller 打包配置
-entrypoint.sh       Docker 入口脚本（首次运行自动创建 .env 和目录）
 .github/workflows/  GitHub Actions CI/CD（推送 tag 或手动触发构建 .dmg + .exe）
 data/               运行时自动生成
   listings.db       SQLite 数据库
@@ -630,4 +634,4 @@ Holland2Stay Monitor 基于 [PolyForm Noncommercial License 1.0.0](https://polyf
 - 公司或营利性组织使用
 - 销售、再许可、作为付费服务托管，或将本项目集成到商业产品或工作流中
 
-完整条款见 [LICENSE](./LICENSE) 文件。
+完整条款见 [LICENSE](../LICENSE) 文件。

@@ -23,7 +23,7 @@ __pycache__/
 .gitignore
 
 # 文档
-README*.md
+docs/
 
 # macOS 垃圾文件
 .DS_Store
@@ -33,12 +33,10 @@ README*.md
 .idea/
 *.swp
 
-# 工具脚本（不需要打包进镜像）
-geocode_all.py
-reset_db.py
+# 工具脚本 + 打包（不需要进镜像）
+tools/
+packaging/
 launcher.py
-h2s_monitor.spec
-build_dmg.sh
 
 # 部署配置（宿主机用，不打包进镜像）
 Caddyfile

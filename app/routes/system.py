@@ -5,6 +5,7 @@
 - GET  /system          → system_info（页面）
 - GET  /logs            → logs_view（页面）
 - GET  /api/logs        → api_logs
+- GET  /api/logs/files  → api_logs_files
 - POST /api/logs/clear  → api_logs_clear
 - POST /api/reset-db    → api_reset_db（二次确认 confirm:true）
 - GET  /api/status      → api_status
@@ -103,6 +104,19 @@ def system_info():
 @admin_required
 def logs_view():
     return render_template("logs.html")
+
+
+@admin_api_required
+def api_logs_files():
+    """返回可用日志文件列表及各自大小，供前端渲染文件切换 tab。"""
+    files = []
+    for key, path in _LOG_FILES.items():
+        try:
+            size = path.stat().st_size if path.exists() else 0
+        except OSError:
+            size = 0
+        files.append({"key": key, "size": size, "exists": path.exists()})
+    return jsonify({"files": files})
 
 
 @admin_api_required
@@ -210,6 +224,7 @@ def health():
 def register(app: Flask) -> None:
     app.add_url_rule("/system",         endpoint="system_info",    view_func=system_info,    methods=["GET"])
     app.add_url_rule("/logs",           endpoint="logs_view",      view_func=logs_view,      methods=["GET"])
+    app.add_url_rule("/api/logs/files", endpoint="api_logs_files", view_func=api_logs_files, methods=["GET"])
     app.add_url_rule("/api/logs",       endpoint="api_logs",       view_func=api_logs,       methods=["GET"])
     app.add_url_rule("/api/logs/clear", endpoint="api_logs_clear", view_func=api_logs_clear, methods=["POST"])
     app.add_url_rule("/api/reset-db",   endpoint="api_reset_db",   view_func=api_reset_db,   methods=["POST"])

@@ -6,9 +6,11 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.parse import quote
 
-from storage import Storage
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-DB = Path("data/listings.db")
+from storage import Storage  # noqa: E402
+
+DB = Path(__file__).resolve().parent.parent / "data" / "listings.db"
 
 
 def geocode_address(address: str) -> tuple[float, float] | None:

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
-_base = Path(SPECPATH).resolve()
+_base = Path(SPECPATH).resolve().parent  # packaging/ → project root
 
 # 自动收集 app/ 包下所有子模块作为 hiddenimports。
 # 原因：web.py 用 ``from app.routes import (calendar_routes, control, ...)``

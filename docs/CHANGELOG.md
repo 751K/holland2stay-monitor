@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.2.3 (2026-05-12)
+
+### 日志查看器界面升级
+
+v1.2.1 引入了独立的 `errors.log`（WARNING+），但 Web 面板的日志查看页面只硬编码查看 `monitor.log`，缺少文件切换和基本浏览辅助。
+
+v1.2.3 将日志查看器升级为完整的日志浏览界面：
+
+- **文件切换 Tab**：Monitor Log / Errors Log 两个 tab，显示实时文件大小，一键切换 `?file=` 参数
+- **行号**：左侧 48px gutter 显示行号（右对齐，灰色，不可选中），方便定位和引用
+- **日志级别着色**：`[CRITICAL]` / `[ERROR]` 红色，`[WARNING]` 橙色，`[INFO]` 蓝色，`[DEBUG]` 灰色 — 一眼区分严重程度
+- **关键词搜索**：顶部搜索框实时过滤日志行，匹配行数即时显示（如 "23 / 500 lines"）
+- **自动滚动**：独立于暂停的 checkbox，靠近底部时自动追随新日志
+- **保留功能**：3 秒轮询、暂停刷新、清空当前日志（带二次确认）均保留
+
+### 新端点
+
+- **`GET /api/logs/files`**：返回可用日志文件列表及各自大小（`{"files": [{"key": "monitor", "size": ..., "exists": true}, ...]}`），供前端动态渲染文件切换 tab
+
+### 翻译
+
+- 新增 5 个翻译 key：`logs_monitor`、`logs_errors`、`logs_search`、`logs_auto_scroll`
+- 更新 `clear_logs` / `clear_logs_confirm` 语义更明确（含 "当前" 字样）
+
+### 测试
+
+- `test_log_routes.py` 新增 `TestApiLogsFiles` 类（3 个测试）：返回结构正确、匿名 401、guest 403
+
+---
+
 ## v1.2.2 (2026-05-11)
 
 ### 403 / Cloudflare WAF 屏蔽处理

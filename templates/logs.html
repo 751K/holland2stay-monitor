@@ -11,69 +11,323 @@
       <input type="checkbox" id="pause-check" onchange="togglePause()">
       {{ _('pause') }}
     </label>
+    <label style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;">
+      <input type="checkbox" id="autoscroll-check" checked>
+      {{ _('logs_auto_scroll') }}
+    </label>
     <button onclick="clearLogs()" class="btn btn-ghost btn-sm" style="color:var(--danger);">{{ _('clear_logs') }}</button>
   </span>
 </div>
 
+<!-- File tabs -->
+<div class="log-tabs" id="log-tabs">
+  <button class="log-tab active" data-file="monitor">{{ _('logs_monitor') }}</button>
+  <button class="log-tab" data-file="errors">{{ _('logs_errors') }}</button>
+</div>
+
+<!-- Search bar -->
+<div class="log-search-bar">
+  <i class="bi bi-search"></i>
+  <input type="text" id="log-search" placeholder="{{ _('logs_search') }}"
+         oninput="applySearch()" autocomplete="off">
+  <span id="search-count" style="display:none;font-size:11px;color:var(--text2);margin-left:8px;"></span>
+</div>
+
 <div class="card" style="padding:0;overflow:hidden;">
-  <pre id="log-view" style="
+  <div id="log-view" style="
     background:#1e1e1e;color:#0f0;font-family:SF Mono,Menlo,Monaco,monospace;
-    font-size:12px;line-height:1.5;padding:16px;margin:0;overflow:auto;
-    max-height:calc(100vh - 180px);white-space:pre-wrap;word-break:break-all;
-  ">{{ _('loading') }}...</pre>
+    font-size:12px;line-height:1.5;padding:0;margin:0;overflow:auto;
+    max-height:calc(100vh - 260px);counter-reset:line;
+  ">{{ _('loading') }}...</div>
 </div>
 
 <script>
+// ── State ──
+let currentFile = 'monitor';
 let paused = false;
 let timer = null;
 let lastSize = 0;
+let logFiles = [];
 
-function togglePause() {
-  paused = document.getElementById('pause-check').checked;
-  if (!paused) fetchLogs();
+// ── Log level → CSS color ──
+const LEVEL_COLORS = {
+  'CRITICAL': '#ff4444',
+  'ERROR':    '#ff6b6b',
+  'WARNING':  '#f0a040',
+  'INFO':     '#4fc3f7',
+  'DEBUG':    '#888',
+};
+const DEFAULT_COLOR = '#b0b0b0';
+
+function getLevel(line) {
+  const m = line.match(/\[([A-Z]+)\]/);
+  return m ? m[1] : '';
 }
 
+function getLineClass(line) {
+  const level = getLevel(line);
+  return 'level-' + level.toLowerCase();
+}
+
+function getLineColor(line) {
+  const level = getLevel(line);
+  return LEVEL_COLORS[level] || DEFAULT_COLOR;
+}
+
+// ── File tabs ──
+function buildTabs(files) {
+  logFiles = files;
+  const tabs = document.getElementById('log-tabs');
+  tabs.innerHTML = '';
+  files.forEach(f => {
+    const btn = document.createElement('button');
+    btn.className = 'log-tab' + (f.key === currentFile ? ' active' : '');
+    btn.dataset.file = f.key;
+    const label = f.key === 'errors' ? '{{ _("logs_errors") }}' : '{{ _("logs_monitor") }}';
+    const kb = (f.size / 1024).toFixed(1);
+    btn.textContent = label + ' (' + kb + ' KB)';
+    btn.onclick = () => switchFile(f.key);
+    tabs.appendChild(btn);
+  });
+}
+
+function switchFile(key) {
+  currentFile = key;
+  lastSize = 0;
+  document.querySelectorAll('.log-tab').forEach(t => t.classList.toggle('active', t.dataset.file === key));
+  document.getElementById('log-search').value = '';
+  document.getElementById('search-count').style.display = 'none';
+  fetchLogs();
+}
+
+// ── Fetch & render ──
 async function fetchLogs() {
   if (paused) return;
   try {
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
-    const resp = await fetch('/api/logs?lines=300', {
+    const resp = await fetch('/api/logs?file=' + currentFile + '&lines=500', {
       headers: {'X-CSRF-Token': csrf}
     });
     const data = await resp.json();
-    const pre = document.getElementById('log-view');
+
+    // Update file sizes (for tab labels)
+    const kb = (data.size / 1024).toFixed(1);
+    updateTabSize(currentFile, kb);
+
     const info = document.getElementById('log-info');
+    const container = document.getElementById('log-view');
+    const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
 
     if (data.error) {
-      pre.textContent = 'Error: ' + data.error;
+      container.innerHTML = '<span style="color:#ff6b6b">Error: ' + esc(data.error) + '</span>';
       return;
     }
 
-    const text = data.lines.length ? data.lines.join('\n') : '{{ _("no_logs_yet") }}';
-    // Only update if content changed
-    if (pre.textContent !== text) {
-      const wasAtBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 50;
-      pre.textContent = text;
-      if (wasAtBottom) pre.scrollTop = pre.scrollHeight;
+    if (data.note) {
+      container.innerHTML = '<span style="color:#888">' + esc(data.note) + '</span>';
+      info.textContent = '0 lines · 0 KB';
+      return;
     }
 
-    const kb = (data.size / 1024).toFixed(1);
-    info.textContent = data.lines.length + ' lines · ' + kb + ' KB';
+    const lines = data.lines;
+    if (!lines.length) {
+      container.innerHTML = '<span style="color:#888">{{ _("no_logs_yet") }}</span>';
+      info.textContent = '0 lines · 0 KB';
+      return;
+    }
+
+    // Build HTML with line numbers and level coloring
+    const html = lines.map((line, i) => {
+      const color = getLineColor(line);
+      const cls = getLineClass(line);
+      // Global line number = total lines - visible lines + i + 1
+      const num = i + 1;
+      return '<span class="log-line ' + cls + '" data-line="' + num + '">' +
+        '<span class="ln">' + num + '</span>' +
+        '<span class="lt" style="color:' + color + '">' + esc(line) + '</span>' +
+        '</span>';
+    }).join('\n');
+
+    // Only re-render if size changed
+    if (lastSize !== data.size || container.children.length === 0) {
+      container.innerHTML = html;
+    }
+
+    info.textContent = lines.length + ' lines · ' + kb + ' KB';
     lastSize = data.size;
+
+    if (wasAtBottom && document.getElementById('autoscroll-check').checked) {
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Re-apply search filter
+    applySearch();
+
+    // Also refresh file list occasionally (every 10 fetches)
+    if (!fetchLogs._count) fetchLogs._count = 0;
+    fetchLogs._count++;
+    if (fetchLogs._count % 10 === 0) fetchLogFiles();
   } catch(err) {
-    // silently retry
+    // silently retry next poll
   }
 }
+fetchLogs._count = 0;
 
+function updateTabSize(fileKey, kb) {
+  const tabs = document.querySelectorAll('.log-tab');
+  tabs.forEach(t => {
+    if (t.dataset.file === fileKey) {
+      const label = fileKey === 'errors' ? '{{ _("logs_errors") }}' : '{{ _("logs_monitor") }}';
+      t.textContent = label + ' (' + kb + ' KB)';
+    }
+  });
+}
+
+async function fetchLogFiles() {
+  try {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const resp = await fetch('/api/logs/files', {
+      headers: {'X-CSRF-Token': csrf}
+    });
+    const data = await resp.json();
+    if (data.files) buildTabs(data.files);
+  } catch(err) { /* silent */ }
+}
+
+// ── Search filter ──
+function applySearch() {
+  const query = document.getElementById('log-search').value.toLowerCase();
+  const container = document.getElementById('log-view');
+  const lines = container.querySelectorAll('.log-line');
+  const countEl = document.getElementById('search-count');
+  let visible = 0;
+
+  if (!query) {
+    lines.forEach(l => l.style.display = '');
+    countEl.style.display = 'none';
+    return;
+  }
+
+  lines.forEach(l => {
+    const text = l.textContent.toLowerCase();
+    if (text.includes(query)) {
+      l.style.display = '';
+      visible++;
+    } else {
+      l.style.display = 'none';
+    }
+  });
+
+  countEl.style.display = '';
+  countEl.textContent = visible + ' / ' + lines.length + ' lines';
+}
+
+// ── Pause / Resume ──
+function togglePause() {
+  paused = document.getElementById('pause-check').checked;
+  if (!paused) { lastSize = 0; fetchLogs(); }
+}
+
+// ── Clear ──
 async function clearLogs() {
   if(!confirm('{{ _("clear_logs_confirm") }}')) return;
   const csrf = document.querySelector('meta[name="csrf-token"]').content;
-  await fetch('/api/logs/clear', { method:'POST', headers:{'X-CSRF-Token':csrf} });
+  await fetch('/api/logs/clear?file=' + currentFile, {
+    method:'POST', headers:{'X-CSRF-Token':csrf}
+  });
+  lastSize = 0;
+  fetchLogFiles();
   fetchLogs();
 }
 
-// Initial fetch + 3s poll
+// ── Escape HTML ──
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── Init ──
+fetchLogFiles();
 fetchLogs();
 timer = setInterval(fetchLogs, 3000);
 </script>
+
+<style>
+/* ── Log tabs ── */
+.log-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 12px;
+  border-bottom: 2px solid var(--border);
+}
+.log-tab {
+  padding: 8px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+.log-tab:hover { color: var(--text); }
+.log-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ── Search bar ── */
+.log-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.log-search-bar i {
+  color: var(--text2);
+  font-size: 14px;
+}
+.log-search-bar input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+}
+.log-search-bar input::placeholder {
+  color: var(--text3);
+}
+
+/* ── Log lines ── */
+.log-line {
+  display: flex;
+  padding: 0 16px;
+  min-height: 20px;
+}
+.log-line:hover {
+  background: rgba(255,255,255,0.03);
+}
+.log-line .ln {
+  flex: 0 0 48px;
+  text-align: right;
+  padding-right: 16px;
+  color: #555;
+  user-select: none;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.log-line .lt {
+  flex: 1;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+}
+</style>
 {% endblock %}

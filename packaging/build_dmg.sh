@@ -14,16 +14,17 @@ else
     PYTHON="python3"
     PIP="pip3"
 fi
-PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_DIR="$PROJECT_DIR/build"
-DIST_DIR="$PROJECT_DIR/dist"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+BUILD_DIR="$ROOT_DIR/build"
+DIST_DIR="$ROOT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 
 echo "=== Step 1: Install PyInstaller ==="
 $PIP install pyinstaller -q
 
 echo "=== Step 2: Build binary with PyInstaller ==="
-cd "$PROJECT_DIR"
+cd "$SCRIPT_DIR"
 $PYTHON -m PyInstaller --clean --distpath "$DIST_DIR" --workpath "$BUILD_DIR" h2s_monitor.spec
 
 echo "=== Step 3: Create .app bundle ==="
@@ -70,7 +71,7 @@ PLIST
 ICONSET_DIR="$BUILD_DIR/icon.iconset"
 rm -rf "$ICONSET_DIR"
 mkdir -p "$ICONSET_DIR"
-PNG_SRC="$PROJECT_DIR/asset/image.png"
+PNG_SRC="$SCRIPT_DIR/asset/image.png"
 
 if [ -f "$PNG_SRC" ]; then
     echo "Generating icon.icns from asset/image.png..."
@@ -88,7 +89,7 @@ if [ -f "$PNG_SRC" ]; then
     cp "$BUILD_DIR/icon.icns" "$APP_BUNDLE/Contents/Resources/icon.icns"
     echo "Icon generated and added to .app bundle."
 else
-    echo "No asset/image.png found — skipping icon."
+    echo "No packaging/asset/image.png found — skipping icon."
 fi
 
 echo "=== Step 4: Create .dmg ==="
