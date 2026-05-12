@@ -28,6 +28,17 @@ v1.2.3 将日志查看器升级为完整的日志浏览界面：
 
 - `test_log_routes.py` 新增 `TestApiLogsFiles` 类（3 个测试）：返回结构正确、匿名 401、guest 403
 
+### 文件整理
+
+根目录从 35 个文件精简至 22 个，按用途分入子目录：
+
+- **`docs/`**：README.md、README_cn.md、CHANGELOG.md（GitHub 自动识别 `docs/README.md` 作为仓库首页）
+- **`docker/`**：supervisord.conf、entrypoint.sh（仅 Dockerfile 引用的两个辅助文件）
+- **`packaging/`**：h2s_monitor.spec、build_dmg.sh、build.bat、asset/（构建打包相关）
+- **`tools/`**：geocode_all.py、reset_db.py（一次性工具脚本）
+- **修复**：移动后同步更新所有路径引用 — `h2s_monitor.spec` 的 `_base` 指向项目根、build 脚本分离 `SCRIPT_DIR`/`ROOT_DIR`、Dockerfile 两行 COPY 路径、`.github/workflows/build.yml` Windows 拼写纠正（`packing` → `packaging`）、`.gitignore`/`.dockerignore` 去重和对齐
+- **LICENSE** 保留在根目录（GitHub 许可证检测要求）
+
 ---
 
 ## v1.2.2 (2026-05-11)
