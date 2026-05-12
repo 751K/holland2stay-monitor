@@ -22,22 +22,17 @@
 - Dashboard / Listings 显示楼盘名
 - 房源列表新增城市/租客/能耗/装修筛选（城市和租客为多选）
 
-### Bug 修复（3 个）
+### Bug 修复（2 个）
 
-- **预登录 session 过期跳过登录**（P1）：传入过期 prewarmed 时 session 走新建但 login 被跳过，token 未定义导致 NameError
 - **`or 99` 陷阱**：`_energy_rank("A+++")` 返回 0，`0 or 99 == 99` 导致排序错误
 - **非法能耗值触发 500**：`?energy=Z` 使 `_energy_rank` 返回 None，`min_rank <= actual_rank` TypeError
 
-### 安全加固（3 个）
+### 安全加固（1 个）
 
-- **日志脱敏**：email 输出 `tes***@domain.com`，代理 URL 密码段 `***`
-- **地图 API 访客只读**：`GET /api/map` 移除自动 geocode 逻辑（外部请求 + 数据库写入），仅返回已缓存坐标
 - **存储 JSON 解析加固**：`_safe_features()` 统一 try/except，坏数据 WARNING 后返回 `[]`
 
-### 重构（3 个）
+### 重构（1 个）
 
-- **统一代理读取**：`get_proxy_url()`（HTTPS_PROXY > HTTP_PROXY > ALL_PROXY），消除 5 处重复
-- **chart_area/floor 去重**：提取 `_bucketed_number_dist()` 通用方法
 - **前端 multi-select 标签刷新**：提取 `window.refreshMultiSelect()`，copyNotifFilters 不再内联重复逻辑
 
 ### 测试（183 个新测试，14 个模块）
