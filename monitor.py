@@ -55,7 +55,8 @@ from booker import PrewarmedSession, create_prewarmed_session, try_book
 from config import DATA_DIR, ENV_PATH, load_config
 from models import STATUS_AVAILABLE, parse_float
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
-from scraper import BlockedError, RateLimitError, scrape_all
+from config import get_proxy_url
+from scraper import BlockedError, RateLimitError, ScrapeNetworkError, scrape_all
 from update_checker import check_for_updates
 from storage import Storage
 from users import USERS_FILE, UserConfig, load_users, migrate_from_env, save_users
@@ -114,6 +115,11 @@ _ADAPTIVE_INCREASE = 2.0
 # Cloudflare 403 屏蔽冷却时间（秒）。比 429 的 5 min 更长 —— 等待无法自动恢复，
 # 给用户/运维时间换代理或重启进程。
 _BLOCKED_COOLDOWN = 900   # 15 分钟
+
+# 连续网络失败阈值：连续 N 次全部城市第 1 页网络失败时触发冷却，
+# 避免坏代理/断网时监控空转刷屏 error log
+_NETWORK_FAIL_THRESHOLD = 3
+_NETWORK_FAIL_COOLDOWN = 300  # 5 分钟
 
 # 屏蔽通知节流：避免每轮抓取都给用户推一次相同的告警。
 # 状态是模块级，进程重启后清零（重启后第一轮屏蔽会再发通知，符合预期）。
@@ -543,7 +549,7 @@ async def run_once(
         # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。
         # 给 main_loop 一个长 cooldown（15 min），并节流通知避免刷屏。
         await _stash_pending_prewarms()
-        proxy_on = bool(os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY"))
+        proxy_on = bool(get_proxy_url())
         logger.error(
             "🚫 抓取被屏蔽 (HTTP 403) cities=%d users=%d proxy=%s: %s",
             len(city_tasks), len(user_notifiers),
@@ -566,7 +572,7 @@ async def run_once(
         logger.warning(
             "⚠️  抓取被限流 cities=%d users=%d proxy=%s: %s",
             len(city_tasks), len(user_notifiers),
-            "yes" if os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") else "no",
+            "yes" if get_proxy_url() else "no",
             e,
         )
         if not dry_run:
@@ -575,6 +581,18 @@ async def run_once(
                 await notifier.send_error(err_msg)
             if web_notifier:
                 await web_notifier.send_error(err_msg)
+        raise
+    except ScrapeNetworkError as e:
+        # 全部城市第 1 页网络失败 → 不更新 last_scrape_at（非有效抓取），
+        # 上传让 main_loop 做连续失败计数和冷却。不发给用户通知——
+        # 网络抖动通常几轮后自动恢复，连续失败到阈值才告警。
+        await _stash_pending_prewarms()
+        logger.error(
+            "抓取全部网络失败 cities=%s users=%d proxy=%s: %s",
+            [c[0] for c in city_tasks], len(user_notifiers),
+            "yes" if get_proxy_url() else "no",
+            e,
+        )
         raise
     except Exception as e:
         await _stash_pending_prewarms()
@@ -952,6 +970,8 @@ async def main_loop(
         else:
             logger.info("自动预订 [%s]: 已关闭", user.name)
 
+    network_fail_streak = 0  # ScrapeNetworkError 连续计数
+
     while True:
         round_count += 1
         try:
@@ -973,6 +993,11 @@ async def main_loop(
             booking_deadline = time.monotonic() + effective_interval
             await run_once(cfg, storage, user_notifiers, web_notifier=web_notifier,
                            booking_deadline=booking_deadline)
+
+            # 成功：重置网络失败连续计数
+            if network_fail_streak:
+                logger.info("网络恢复，连续失败计数已清零（之前 %d 次）", network_fail_streak)
+                network_fail_streak = 0
 
             # 成功：高峰期将自适应间隔缩短 5%（逐步逼近 min_interval）
             if is_peak:
@@ -1075,6 +1100,23 @@ async def main_loop(
                 cooldown,
             )
             await asyncio.sleep(cooldown)
+        except ScrapeNetworkError as e:
+            network_fail_streak += 1
+            if network_fail_streak >= _NETWORK_FAIL_THRESHOLD:
+                cooldown = _apply_jitter(_NETWORK_FAIL_COOLDOWN, cfg.jitter_ratio)
+                logger.error(
+                    "🌐 连续 %d 次网络失败（阈值 %d），冷却 %d 秒。"
+                    "每轮所有城市第 1 页均无法连接 — 请检查代理/网络。"
+                    "最近错误: %s",
+                    network_fail_streak, _NETWORK_FAIL_THRESHOLD, cooldown, e,
+                )
+                await asyncio.sleep(cooldown)
+            else:
+                logger.warning(
+                    "🌐 网络失败 %d/%d（阈值 %d）: %s",
+                    network_fail_streak, _NETWORK_FAIL_THRESHOLD, _NETWORK_FAIL_THRESHOLD, e,
+                )
+                await asyncio.sleep(10)
         except Exception as e:
             # 任何未预期异常：记录并等待 10 秒后继续，而不是静默退出
             logger.exception("主循环出现异常，10 秒后继续: %s", e)

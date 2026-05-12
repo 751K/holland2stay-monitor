@@ -23,7 +23,7 @@ import pytest
 
 import monitor
 from monitor import _clear_prewarm_cache, run_once
-from scraper import BlockedError, RateLimitError
+from scraper import BlockedError, RateLimitError, ScrapeNetworkError
 from booker import BookingResult
 from notifier import BaseNotifier
 from users import UserConfig
@@ -150,6 +150,53 @@ class TestBlockedErrorPropagation:
         with patch("scraper._scrape_city_pages", side_effect=BlockedError("test")):
             with pytest.raises(BlockedError):
                 scrape_all([("Eindhoven", "29")], ["179"])
+
+
+# ─── ScrapeNetworkError 传播测试 ─────────────────────────────────
+
+
+class TestScrapeNetworkErrorPropagation:
+    """第一页网络失败必须上传，避免被当成 0 条有效抓取。"""
+
+    def test_first_page_network_error_raises_scrape_network_error(self):
+        """第 1 页 timeout/TLS/连接失败不能被 break 吞掉。"""
+        from scraper import _scrape_city_pages
+
+        with patch("scraper._post_gql", side_effect=TimeoutError("timeout")):
+            with pytest.raises(ScrapeNetworkError) as excinfo:
+                _scrape_city_pages(MagicMock(), "Eindhoven", ["29"], ["179"])
+
+        assert "第 1 页网络错误" in str(excinfo.value)
+
+    def test_later_page_network_error_returns_previous_pages(self):
+        """第 2 页之后失败可以返回已抓到的前面分页。"""
+        from scraper import _scrape_city_pages
+
+        first_page = {
+            "data": {
+                "products": {
+                    "items": [],
+                    "page_info": {"current_page": 1, "total_pages": 2},
+                }
+            }
+        }
+        with patch("scraper._post_gql", side_effect=[first_page, TimeoutError("timeout")]):
+            result = _scrape_city_pages(MagicMock(), "Eindhoven", ["29"], ["179"])
+
+        assert result == []
+
+    def test_scrape_all_raises_when_all_cities_fail_on_first_page(self):
+        """所有城市第 1 页都网络失败时，整体抓取必须失败并交给 monitor cooldown。"""
+        from scraper import scrape_all
+
+        with patch(
+            "scraper._scrape_city_pages",
+            side_effect=ScrapeNetworkError("page 1 failed"),
+        ):
+            with pytest.raises(ScrapeNetworkError) as excinfo:
+                scrape_all([("Eindhoven", "29"), ("Amsterdam", "24")], ["179"])
+
+        assert "全部 2 个城市第 1 页网络失败" in str(excinfo.value)
 
 
 # ─── monitor 的 BlockedError 处理 ─────────────────────────────

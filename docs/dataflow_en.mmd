@@ -1,0 +1,48 @@
+flowchart TD
+    A["Start monitor.py"] --> B["Load config .env / users.json"]
+    B --> C["Init Storage / Notifier / WebNotifier"]
+    C --> D["Enter main_loop polling"]
+
+    D --> E["run_once()"]
+    E --> F["Prewarm auto-booking login sessions"]
+    E --> G["scrape_all() — fetch city listings"]
+
+    G --> H{"Scrape result"}
+    H -->|Success| I["storage.diff(fresh)\nDetect new listings / status changes"]
+    H -->|403 BlockedError| J["Notify users\nmain_loop cooldown 15 min"]
+    H -->|429 RateLimitError| K["main_loop cooldown 5 min\nAdaptive interval backoff"]
+    H -->|ScrapeNetworkError| L["Consecutive failure count\nCooldown past threshold"]
+
+    I --> M["Update last_scrape_at / last_scrape_count"]
+    M --> N["Scan auto-booking candidates"]
+    N --> O{"Candidates & notification\nchannels available?"}
+
+    O -->|Yes| P["Submit try_book() immediately\nvia thread pool (concurrent)"]
+    O -->|No| Q["Skip auto-booking"]
+
+    P --> R["booker.py\nLogin / reuse prewarmed session"]
+    R --> S["Fetch SKU / contract_start_date"]
+    S --> T["createEmptyCart"]
+    T --> U["addNewBooking"]
+    U --> V["setPaymentMethodOnCart"]
+    V --> W["placeOrder"]
+    W --> X["idealCheckOut — get payment URL"]
+
+    X --> Y{"Booking result"}
+    Y -->|Success| Z["Send booking success notification\nwith payment URL"]
+    Y -->|Failed| AA["Send failure reason\nMay enter retry queue"]
+
+    M --> AB["Send new listing notifications"]
+    M --> AC["Send status change notifications"]
+    AB --> AD["Record notified status"]
+    AC --> AD
+    Z --> AD
+    AA --> AD
+
+    AD --> AE["Round complete"]
+    Q --> AE
+    J --> AF["Wait for next round"]
+    K --> AF
+    L --> AF
+    AE --> AF
+    AF --> D

@@ -1,5 +1,73 @@
 # Changelog
 
+## v1.2.4 (2026-05-12)
+
+### Bug 修复（3 个）
+
+**预登录 session 过期导致自动预订静默失败**
+`try_book()` 传入过期 prewarmed session 时，session 来源走 else 分支（新建），但登录判断仍用 `if prewarmed is None`（False，因为 prewarmed 非空但已过期），token 未赋值直接进入 `_do_book()` 触发 `NameError`。
+- 引入 `using_prewarmed` 布尔变量，session 来源和登录决策统一使用
+- 过期 prewarmed → `using_prewarmed=False` → 正常创建 session + 调用 `login()` + `own_session=True`
+
+**抓取第 1 页网络失败静默返回 0 条**
+`_scrape_city_pages` 中网络异常走 `except Exception: break`，返回空列表。`scrape_all` 将其当"该城市无房源"处理，monitor 更新 `last_scrape_at` 并继续正常轮询——坏代理/断网时监控空转刷 error log 不知情。
+- 新增 `ScrapeNetworkError` 异常类（区别于 429/403）
+- `_scrape_city_pages`：第 1 页网络失败抛 `ScrapeNetworkError`（后续页仍 break 保留已有数据）
+- `scrape_all`：全部城市均失败才上抛；个别失败记日志继续
+- `run_once`：捕获后不更新 `last_scrape_at`、不发用户通知，直接 re-raise
+- `main_loop`：连续 3 次后触发 5 分钟冷却，成功后自动清零
+
+**`ensure_secret_key()` 首次运行不持久化**
+条件 `if ENV_PATH.exists() or not ENV_PATH.parent.exists()`——当项目目录存在但 `.env` 缺失时（本地首次运行），两个条件都不满足，跳过写入，返回临时 key。重启后所有 session 失效。
+- 去掉了前置条件，无条件尝试 `mkdir -p` + `write_env_key()`
+- 写入失败才降级为进程内临时 key
+- 同时写入 `os.environ` 确保进程内读取一致
+
+### 安全加固（3 个）
+
+**地图 API 自动 geocode 绕过访客只读限制**
+`GET /api/map` 是 `api_login_required`（访客可访问），但在首次查询时自动启动后台 geocode 线程（外部 Photon 请求 + 数据库写入），访客模式只读承诺被破坏。
+- 删除 `api_map()` 中的 auto-geocode 逻辑块
+- 端点改为纯只读：只返回已缓存坐标，`uncached` 计数透出供前端提示
+- admin 手动触发 geocode 仍通过 `POST /api/map/geocode`（`admin_api_required` + CSRF）
+
+**日志脱敏：email 在错误日志中明文**
+`booker.py` 预订失败的 WARNING/ERROR 日志含完整 email（个人身份信息）。
+- 新增 `_mask_email()`，输出 `tes***@domain.com`
+- 两处日志（debug + error 上下文）脱敏
+
+**日志脱敏：代理 URL 含认证凭证**
+`scraper.py` 的 DEBUG 日志完整打印 `http://user:pass@host:port`。
+- 新增 `_mask_proxy_url()`，密码段替换为 `***`
+- 一处 DEBUG 日志脱敏
+
+### 重构
+
+**统一代理读取**
+`os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")` 在 scraper、booker、monitor 中共 5 处重复，且未覆盖 `ALL_PROXY`。Docker 文档建议设置 `ALL_PROXY` 但代码不支持。
+- `config.py` 新增 `get_proxy_url()`，优先级 `HTTPS_PROXY > HTTP_PROXY > ALL_PROXY`
+- 5 处内联读取全部替换；`scraper.py` / `booker.py` 移除闲置 `import os`
+- `docker-compose.yml` 新增代理环境变量注释模板
+
+### 新测试（68 个，3 个模块）
+
+- **`tests/test_scraper_parse.py`**（16 个，3 个类）
+  - `TestToListingNormal`（4）：完整字段、features、lottery、contract_start_date
+  - `TestToListingMissingFields`（6）：price/status/url_key/available_from 缺失降级
+  - `TestToListingEdgeCases`（6）：null 属性、空 selected_options、损坏数据、精度、日期截断
+- **`tests/test_notifier_format.py`**（14 个，4 个类）
+  - `TestFormatNew`、`TestFormatStatusChange`、`TestFormatBookingSuccess`、`TestFormatBookingFailed`
+- **`tests/test_booker_helpers.py`**（22 个，3 个类）
+  - `TestIsBookedByOther`（6）、`TestIsReservedByUser`（8）、`TestToH2sDate`（8）
+
+附带修复：`_to_listing` 的 except 块对非 dict item 调用 `.get()` 的崩溃
+
+### 文档
+
+- 新增 `docs/dataflow_ch.mmd` / `docs/dataflow_en.mmd`：中英文 Mermaid 系统数据流图
+
+---
+
 ## v1.2.3 (2026-05-12)
 
 ### 日志查看器界面升级

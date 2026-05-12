@@ -3,7 +3,7 @@
 
 挂载的 endpoint
 - GET  /map                      → map_view
-- GET  /api/map                  → api_map（自动后台 geocode 未缓存地址）
+- GET  /api/map                  → api_map（纯只读，仅返回已缓存坐标）
 - POST /api/map/geocode          → api_map_geocode（手动启动）
 - GET  /api/map/geocode/status   → api_map_geocode_status
 - GET  /api/neighborhoods        → api_neighborhoods
@@ -71,9 +71,15 @@ def map_view() -> str:
 
 @api_login_required
 def api_map():
-    """返回所有房源坐标。首次查询时自动 geocode 未缓存的地址。"""
+    """
+    返回所有已缓存坐标的房源。
+
+    纯只读——不触发外部 Photon 请求，不写数据库。
+    未缓存地址的房源不包含 lat/lng，前端不渲染标记。
+    需 geocode 时由 admin 通过 POST /api/map/geocode 手动启动。
+    """
     results: list[dict] = []
-    need_geocode: list[dict] = []
+    uncached = 0
     st = storage()
     try:
         listings = st.get_map_listings()
@@ -83,27 +89,11 @@ def api_map():
                 lat, lng = cached
                 results.append({**l, "lat": lat, "lng": lng})
             else:
-                need_geocode.append(l)
+                uncached += 1
     finally:
         st.close()
 
-    # Auto-geocode uncached addresses in background daemon thread,
-    # so the API returns immediately without blocking.
-    # 如果已有 geocode 任务在跑（手动或自动）则跳过，避免并发。
-    if need_geocode:
-        with _geocode_lock:
-            if _geocode_status["running"]:
-                need_geocode = []
-            else:
-                _geocode_status["running"] = True
-                _geocode_status["total"] = len(need_geocode)
-                _geocode_status["done"] = 0
-                _geocode_status["failed"] = 0
-    if need_geocode:
-        addrs = [l["address"] for l in need_geocode]
-        threading.Thread(target=_run_geocode_worker, args=(addrs,), daemon=True).start()
-
-    return jsonify({"listings": results})
+    return jsonify({"listings": results, "uncached": uncached})
 
 
 @admin_api_required

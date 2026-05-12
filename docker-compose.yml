@@ -19,6 +19,12 @@ services:
       - PYTHONUNBUFFERED=1
       # 本地/隔离网络部署时设为 1 可跳过安全预检
       # - H2S_SKIP_PREFLIGHT=1
+      # 代理：将宿主机环境变量传入容器（需同时在 .env 中设置对应的值）。
+      # 优先级：HTTPS_PROXY > HTTP_PROXY > ALL_PROXY。
+      # 例：- HTTPS_PROXY=http://user:pass@proxy:8080
+      # - HTTPS_PROXY=${HTTPS_PROXY}
+      # - HTTP_PROXY=${HTTP_PROXY}
+      # - ALL_PROXY=${ALL_PROXY}
     networks:
       - web
     healthcheck:

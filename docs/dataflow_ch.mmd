@@ -1,0 +1,48 @@
+flowchart TD
+    A["启动 monitor.py"] --> B["读取配置 .env / users.json"]
+    B --> C["创建 Storage / Notifier / WebNotifier"]
+    C --> D["进入 main_loop 轮询"]
+
+    D --> E["run_once()"]
+    E --> F["预热自动预订登录 session"]
+    E --> G["scrape_all() 抓取城市房源"]
+
+    G --> H{"抓取结果"}
+    H -->|成功| I["storage.diff(fresh)\n对比新房源 / 状态变化"]
+    H -->|403 BlockedError| J["通知用户\nmain_loop 冷却 15 分钟"]
+    H -->|429 RateLimitError| K["main_loop 冷却 5 分钟\n自适应拉长间隔"]
+    H -->|ScrapeNetworkError| L["连续失败计数\n超过阈值后 cooldown"]
+
+    I --> M["更新 last_scrape_at / last_scrape_count"]
+    M --> N["扫描自动预订候选"]
+    N --> O{"有候选且通知渠道可用?"}
+
+    O -->|是| P["立即提交 try_book()\n线程池并发执行"]
+    O -->|否| Q["跳过自动预订"]
+
+    P --> R["booker.py\n登录/复用预热 session"]
+    R --> S["获取 SKU / contract_start_date"]
+    S --> T["createEmptyCart"]
+    T --> U["addNewBooking"]
+    U --> V["setPaymentMethodOnCart"]
+    V --> W["placeOrder"]
+    W --> X["idealCheckOut 获取付款链接"]
+
+    X --> Y{"预订结果"}
+    Y -->|成功| Z["发送 Booking 成功通知\n包含付款链接"]
+    Y -->|失败| AA["发送失败原因\n可进入重试队列"]
+
+    M --> AB["发送新房源通知"]
+    M --> AC["发送状态变化通知"]
+    AB --> AD["记录已通知状态"]
+    AC --> AD
+    Z --> AD
+    AA --> AD
+
+    AD --> AE["本轮结束"]
+    Q --> AE
+    J --> AF["等待下一轮"]
+    K --> AF
+    L --> AF
+    AE --> AF
+    AF --> D

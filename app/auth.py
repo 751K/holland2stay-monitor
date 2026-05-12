@@ -149,14 +149,14 @@ def ensure_secret_key() -> str:
     保证重启后 session 不失效。写入失败时（容器只读 .env、磁盘满等）
     回退为本次进程内随机值——会话仍可用，只是重启后失效。
     """
-    key = os.environ.get("FLASK_SECRET", "")
+    key = os.environ.get("FLASK_SECRET", "").strip()
     if key:
         return key
     key = secrets.token_hex(32)
-    if ENV_PATH.exists() or not ENV_PATH.parent.exists():
-        try:
-            ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
-            write_env_key("FLASK_SECRET", key)
-        except Exception:
-            pass
+    try:
+        ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        write_env_key("FLASK_SECRET", key)
+        os.environ["FLASK_SECRET"] = key
+    except Exception:
+        pass
     return key

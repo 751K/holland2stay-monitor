@@ -26,13 +26,12 @@ scraper.py — Holland2Stay 房源抓取
 from __future__ import annotations
 
 import logging
-import os
 import re
 import time
 
 import curl_cffi.requests as req
 
-from config import get_impersonate
+from config import get_impersonate, get_proxy_url
 from models import Listing
 
 logger = logging.getLogger(__name__)
@@ -63,6 +62,22 @@ class BlockedError(Exception):
 
     现象识别：响应体含 `<!DOCTYPE html>` + `no-js ie6 oldie` 等 Cloudflare
     挑战页标志（HTML，不是预期的 JSON）。
+    """
+
+
+class ScrapeNetworkError(Exception):
+    """
+    抓取第一页时遭遇网络错误（连接超时、TLS 中断、DNS 失败等），
+    非 API 层错误——换代理/检查网络即可恢复。
+
+    与 RateLimitError / BlockedError 的区别
+    ---------------------------------------
+    - RateLimitError → API 说"太快"（429），退避后可自动恢复
+    - BlockedError   → API 说"不服务你"（403），等待无法恢复
+    - ScrapeNetworkError → 根本没拿到 API 响应——代理挂了、网络断了、DNS 故障
+
+    由 _scrape_city_pages() 在第一页网络失败时抛出，经 scrape_all() 上传，
+    最终由 monitor.py 的 main_loop 做连续失败计数并在超过阈值后冷却。
     """
 
 
@@ -113,6 +128,12 @@ _HEADERS = {
 }
 
 _MAX_PAGES = 50  # 安全上限：防止 API 返回异常 total_pages 导致无限翻页
+
+
+def _mask_proxy_url(url: str) -> str:
+    """脱敏代理 URL 中的密码（日志安全）。"""
+    import re as _re
+    return _re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", url)
 
 
 def _post_gql(session: req.Session, query: str) -> dict:
@@ -381,9 +402,17 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
         )
     except Exception as e:
         # 含 city 上下文：哪个城市的哪个 url_key 解析失败，便于排查 API schema 变化
+        try:
+            uk = item.get("url_key", "?") if isinstance(item, dict) else "?"
+        except Exception:
+            uk = "?"
+        try:
+            sk = item.get("sku", "?") if isinstance(item, dict) else "?"
+        except Exception:
+            sk = "?"
         logger.warning(
             "[%s] 解析房源失败 url_key=%s sku=%r: %s",
-            city_name, item.get("url_key", "?"), item.get("sku", "?"), e,
+            city_name, uk, sk, e,
             exc_info=True,
         )
         return None
@@ -407,10 +436,18 @@ def _scrape_city_pages(
 
     Returns
     -------
-    该城市所有页面抓到的 Listing 列表。若某页请求失败则停止并返回已有数据。
+    该城市所有页面抓到的 Listing 列表。
+
+    Raises
+    ------
+    ScrapeNetworkError  第 1 页网络错误（连接超时/TLS中断/DNS故障）→ 该城市
+                        完全无法抓取，由上层做连续失败计数和冷却
+    RateLimitError / BlockedError  直接从 _post_gql 上传
 
     注意
     ----
+    第 1 页之外的请求失败（如第 3 页超时）仍返回已有数据，不抛异常——
+    已经拿到前 2 页的结果，部分数据优于零数据。
     GraphQL 错误（errors 字段）视为致命错误，立即停止该城市的抓取。
     单条房源解析失败（_to_listing 返回 None）不影响其他条目。
     """
@@ -434,6 +471,12 @@ def _scrape_city_pages(
                 city_name, current_page, city_ids, availability_ids, e,
                 exc_info=True,
             )
+            # 第 1 页失败 = 该城市完全无法抓取 → 抛异常让上层感知并触发冷却
+            # 后续页失败 → break 返回已有数据（至少拿到了前面几页）
+            if current_page == 1:
+                raise ScrapeNetworkError(
+                    f"[{city_name}] 第 1 页网络错误: {e}"
+                ) from e
             break
 
         if "errors" in data:
@@ -493,7 +536,14 @@ def scrape_all(
 
     Returns
     -------
-    所有城市抓取结果合并后的 Listing 列表。某城市抓取失败不影响其他城市结果。
+    所有城市抓取结果合并后的 Listing 列表。个别城市失败（含 ScrapeNetworkError）
+    不影响其他城市结果；仅全部城市均失败时向上抛出。
+
+    Raises
+    ------
+    ScrapeNetworkError  全部城市第 1 页均网络错误 → 无有效抓取结果
+    RateLimitError      任意城市持续 429 → 直接上传
+    BlockedError        任意城市 403 → 直接上传
 
     副作用
     ------
@@ -507,13 +557,14 @@ def scrape_all(
     if availability_ids is None:
         availability_ids = ["179", "336"]
 
-    # 代理：读取环境变量（HTTPS_PROXY 优先），支持 socks5:// 和 http:// 格式
-    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+    # 代理：统一通过 get_proxy_url() 读取，支持 socks5:// 和 http:// 格式
+    proxy = get_proxy_url()
     proxies = {"https": proxy, "http": proxy} if proxy else {}
     if proxy:
-        logger.debug("使用代理: %s", proxy)
+        logger.debug("使用代理: %s", _mask_proxy_url(proxy))
 
     all_listings: list[Listing] = []
+    network_failures: list[str] = []  # 遭遇 ScrapeNetworkError 的城市
 
     with req.Session(impersonate=get_impersonate(), proxies=proxies) as session:
         for city_name, city_id in city_tasks:
@@ -527,6 +578,14 @@ def scrape_all(
                 all_listings.extend(listings)
             except (RateLimitError, BlockedError):
                 raise   # 429/403 都是 IP/指纹级别的问题，不是单城市失败，直接上传
+            except ScrapeNetworkError as e:
+                network_failures.append(city_name)
+                logger.error(
+                    "[%s] 第 1 页网络失败 city_id=%s avail_ids=%s proxy=%s: %s",
+                    city_name, city_id, availability_ids,
+                    "yes" if proxy else "no", e,
+                    exc_info=True,
+                )
             except Exception as e:
                 logger.error(
                     "[%s] 抓取失败 city_id=%s avail_ids=%s proxy=%s: %s",
@@ -534,5 +593,12 @@ def scrape_all(
                     "yes" if proxy else "no", e,
                     exc_info=True,
                 )
+
+    # 全部城市第 1 页均网络失败 → 不存在有效抓取结果，
+    # 上传让 monitor 做连续失败计数和冷却，避免空数据污染 last_scrape_at
+    if not all_listings and network_failures and len(network_failures) == len(city_tasks):
+        raise ScrapeNetworkError(
+            f"全部 {len(city_tasks)} 个城市第 1 页网络失败: {', '.join(network_failures)}"
+        )
 
     return all_listings

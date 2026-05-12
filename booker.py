@@ -48,7 +48,6 @@ curl_cffi.requests（绕过 Cloudflare），models.Listing
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass
 from datetime import datetime as _dt
@@ -56,7 +55,7 @@ from typing import Literal
 
 import curl_cffi.requests as req
 
-from config import get_impersonate
+from config import get_impersonate, get_proxy_url
 from models import STATUS_AVAILABLE, Listing
 
 logger = logging.getLogger(__name__)
@@ -106,6 +105,15 @@ _PAYMENT_METHOD = "idealcheckout_ideal"
 # Magento token 有效期约 1 小时，设 55 分钟上限保留缓冲，
 # 超时预登录 session 退回正常登录路径避免 auth 错误。
 _TOKEN_MAX_AGE = 3300  # 55 分钟（秒）
+
+
+def _mask_email(email: str) -> str:
+    """脱敏邮箱，仅保留前 3 字符（日志安全）。"""
+    if not email or "@" not in email:
+        return email[:3] + "***" if len(email) > 3 else "***"
+    local, domain = email.split("@", 1)
+    masked = local[:3] + "***" if len(local) > 3 else "***"
+    return f"{masked}@{domain}"
 
 
 # ------------------------------------------------------------------ #
@@ -668,7 +676,7 @@ def create_prewarmed_session(email: str, password: str) -> PrewarmedSession:
     ------
     RuntimeError  登录失败（token 为空）
     """
-    proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+    proxy = get_proxy_url()
     proxies = {"https": proxy, "http": proxy} if proxy else {}
     session = req.Session(impersonate=get_impersonate(), proxies=proxies)
     try:
@@ -757,20 +765,23 @@ def try_book(
         )
 
     # 决定 Session 来源：预登录复用 or 按需创建
+    now = time.monotonic()
+    using_prewarmed = prewarmed is not None and now < prewarmed.token_expiry
     own_session = False
-    if prewarmed is not None and time.monotonic() < prewarmed.token_expiry:
-        session = prewarmed.session
-        token = prewarmed.token
-        logger.debug("复用预登录 session (email=%s)", email)
+
+    if using_prewarmed:
+        session = prewarmed.session      # type: ignore[union-attr]  # guard above
+        token = prewarmed.token          # type: ignore[union-attr]
+        logger.debug("复用预登录 session (email=%s)", _mask_email(email))
     else:
         if prewarmed is not None:
-            age = time.monotonic() - prewarmed.created_at
+            age = now - prewarmed.created_at
             logger.warning(
                 "预登录 session 已过期 (%.0f 秒前创建，上限 %d 秒)，退回正常登录",
                 age, _TOKEN_MAX_AGE,
             )
             prewarmed.session.close()
-        proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or ""
+        proxy = get_proxy_url()
         proxies = {"https": proxy, "http": proxy} if proxy else {}
         session = req.Session(impersonate=get_impersonate(), proxies=proxies)
         own_session = True
@@ -788,7 +799,7 @@ def try_book(
             )
 
         # ---- Step 2: 登录（预登录 session 已跳过） ---- #
-        if prewarmed is None:
+        if not using_prewarmed:
             t2 = time.monotonic()
             token = login(session, email, password)
             t_login = time.monotonic() - t2
@@ -908,7 +919,7 @@ def try_book(
         # 收集尽可能多的上下文：listing 标识 + 账号 + 时间分布 + prewarmed 来源
         ctx = (
             f"listing_id={listing.id} sku={listing.sku or 'N/A'} "
-            f"email={email} dry_run={dry_run} prewarmed={'yes' if prewarmed else 'no'} "
+            f"email={_mask_email(email)} dry_run={dry_run} prewarmed={'yes' if prewarmed else 'no'} "
             f"timings={{sku:{t_sku:.2f}s login:{t_login:.2f}s cancel:{t_cancel:.2f}s total:{total:.2f}s}}"
         )
         # race_lost / reserved_conflict 是预期业务结果，不打 traceback；

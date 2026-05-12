@@ -123,6 +123,21 @@ _POOL_WEIGHTS = [3, 4, 2, 1]  # Chrome 占 70%，Safari 20%，Edge 10%
 _last_impersonate: Optional[str] = None
 
 
+def get_proxy_url() -> str:
+    """
+    统一的代理 URL 读取：HTTPS_PROXY > HTTP_PROXY > ALL_PROXY。
+
+    返回空字符串表示未配置代理。所有需要代理的模块（scraper、booker、
+    monitor）均通过此函数获取，避免各自重复 os.environ.get 链条，
+    消除遗漏 ALL_PROXY 或优先级不一致的问题。
+    """
+    return (
+        os.environ.get("HTTPS_PROXY", "")
+        or os.environ.get("HTTP_PROXY", "")
+        or os.environ.get("ALL_PROXY", "")
+    ).strip()
+
+
 def get_impersonate() -> str:
     """从指纹池中随机选取一个 TLS 指纹（避免连续两次选同一个）。"""
     import random
