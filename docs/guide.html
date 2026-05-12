@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Holland2Stay Monitor — User Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;550;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--text2:#6b7280;--border:#e5e7eb;
+  --accent:#5e6ad2;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;
+  color-scheme:light
+}
+body{font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
+.container{max-width:820px;margin:0 auto;padding:48px 24px 80px}
+h1{font-size:32px;font-weight:700;letter-spacing:-0.5px;margin-bottom:6px}
+h2{font-size:22px;font-weight:600;margin:48px 0 16px;padding-bottom:8px;border-bottom:2px solid var(--border)}
+h3{font-size:17px;font-weight:600;margin:28px 0 10px}
+p{margin:10px 0;color:var(--text2)}
+.subtitle{color:var(--text2);font-size:16px;margin-bottom:32px}
+.card{background:var(--surface);border-radius:12px;padding:24px 28px;margin:16px 0;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.card h3{margin-top:0}
+pre{background:#1e1e2e;color:#cdd6f4;padding:14px 18px;border-radius:8px;font-size:13px;overflow-x:auto;margin:12px 0}
+code{font-family:"SF Mono",Menlo,Monaco,monospace;font-size:13px}
+:not(pre)>code{background:#f0f0f3;padding:2px 6px;border-radius:4px;font-size:12px}
+ul,ol{margin:8px 0;padding-left:22px;color:var(--text2)}
+li{margin:4px 0}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
+.badge-green{background:#d1fae5;color:#065f46}
+.badge-amber{background:#fef3c7;color:#92400e}
+.badge-blue{background:#dbeafe;color:#1e40af}
+.step{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:600;margin-right:8px;flex-shrink:0}
+.tip{background:#eef2ff;border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px}
+.tip strong{color:var(--text)}
+.warn{background:#fefce8;border-left:3px solid var(--warning)}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
+th{font-weight:600;color:var(--text);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+td{color:var(--text2)}
+.nav{position:sticky;top:0;background:var(--bg);padding:12px 0;margin-bottom:24px;border-bottom:1px solid var(--border);z-index:10;display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<nav class="nav">
+  <a href="#start">Quick Start</a>
+  <a href="#panel">Web Panel</a>
+  <a href="#notifications">Notifications</a>
+  <a href="#autobook">Auto-Booking</a>
+  <a href="#filters">Filters</a>
+  <a href="#settings">Settings</a>
+  <a href="#tips">Tips</a>
+</nav>
+
+<h1>🏠 Holland2Stay Monitor — User Guide</h1>
+<p class="subtitle">Monitor new listings on Holland2Stay, get instant notifications, and auto-book before anyone else.</p>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="start">Quick Start</h2>
+
+<div class="card">
+<h3><span class="step">1</span> Docker (recommended for VPS)</h3>
+<pre>cp .env.example .env && mkdir -p data logs logs/caddy
+# Edit Caddyfile → replace your.domain.com with your domain
+# Edit .env → set WEB_PASSWORD
+docker compose up -d</pre>
+<p>Open <code>https://your.domain.com</code>, log in, then click <strong>Start monitor</strong> on the Dashboard.</p>
+</div>
+
+<div class="card">
+<h3><span class="step">2</span> macOS</h3>
+<p>Download the latest <code>.dmg</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a>, drag to Applications, double-click. The browser opens automatically.</p>
+</div>
+
+<div class="card">
+<h3><span class="step">3</span> Windows</h3>
+<p>Download the latest <code>.zip</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a>, extract and run <code>h2s-monitor.exe</code>.</p>
+</div>
+
+<div class="card">
+<h3><span class="step">4</span> Run from source</h3>
+<pre>pip install -r requirements.txt
+cp .env.example .env
+python web.py</pre>
+<p>Open <a href="http://127.0.0.1:8088">http://127.0.0.1:8088</a>.</p>
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="panel">Web Panel Overview</h2>
+
+<p>The web panel is your control center. Everything is accessible from the left sidebar.</p>
+
+<div class="card">
+<h3>📊 Dashboard</h3>
+<p>At-a-glance view: total listings in database, new listings today, status changes today, last scrape time. Shows the newest listings and recent status changes (48h).</p>
+<p>Click <strong>Start monitor</strong> to begin scraping. The dot turns green when the monitor is running.</p>
+</div>
+
+<div class="card">
+<h3>📋 Listings</h3>
+<p>Browse all listings in the database. Filter by <strong>status</strong>, <strong>city</strong> (multi-select), <strong>name</strong>, <strong>max rent</strong>, <strong>min area</strong>, <strong>contract type</strong>, or <strong>tenant requirement</strong> (multi-select). Click any listing name to open its Holland2Stay page.</p>
+</div>
+
+<div class="card">
+<h3>🗺️ Map</h3>
+<p>All listings plotted on an interactive map. Green = available to book, orange = lottery, grey = not available.</p>
+<p>Click <strong>Geocode</strong> (admin only) to resolve addresses to coordinates if some markers are missing.</p>
+</div>
+
+<div class="card">
+<h3>📅 Calendar</h3>
+<p>Month-by-month calendar showing move-in dates. Filter by city. Click a date to see all listings available that day.</p>
+</div>
+
+<div class="card">
+<h3>📈 Statistics</h3>
+<p>Charts for 7/30/90-day ranges:</p>
+<ul>
+  <li><strong>New listings trend</strong> — daily count over time</li>
+  <li><strong>Status change trend</strong> — daily transitions</li>
+  <li><strong>City &amp; status distribution</strong> — doughnut charts</li>
+  <li><strong>Rent distribution</strong> — 9 price buckets</li>
+  <li><strong>Listing drop time</strong> — which hours H2S releases new listings (NL time)</li>
+</ul>
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="notifications">Setting Up Notifications</h2>
+
+<p>Go to <strong>Users</strong> → click a user → <strong>Step 2: Notification Channels</strong>.</p>
+
+<div class="card">
+<h3>Telegram <span class="badge badge-blue">Cross-platform</span></h3>
+<ol>
+  <li>Create a bot with <a href="https://t.me/BotFather">@BotFather</a> and copy the token</li>
+  <li>Send any message to your new bot</li>
+  <li>Visit <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> to get your chat ID</li>
+  <li>Paste the <strong>Bot Token</strong> and <strong>Chat ID</strong> into the user form</li>
+</ol>
+</div>
+
+<div class="card">
+<h3>Email <span class="badge badge-blue">Cross-platform</span></h3>
+<p>Fill in SMTP server details. Common configurations:</p>
+<table>
+  <tr><th>Provider</th><th>SMTP Host</th><th>Port</th><th>Security</th></tr>
+  <tr><td>Gmail</td><td>smtp.gmail.com</td><td>587</td><td>STARTTLS</td></tr>
+  <tr><td>Outlook</td><td>smtp.office365.com</td><td>587</td><td>STARTTLS</td></tr>
+</table>
+<p>Use an <strong>App Password</strong> (not your regular password) if 2FA is enabled.</p>
+</div>
+
+<div class="card">
+<h3>iMessage <span class="badge badge-green">macOS only</span></h3>
+<p>Enter the recipient's phone number (e.g. <code>+31612345678</code>) or Apple ID email. Only works when the monitor runs on macOS with Messages.app signed in.</p>
+</div>
+
+<div class="card">
+<h3>WhatsApp <span class="badge badge-amber">Twilio paid</span></h3>
+<p>Requires a Twilio account. Fill in Account SID, Auth Token, and the <code>whatsapp:+...</code> numbers.</p>
+</div>
+
+<div class="tip">
+<strong>Tip:</strong> Click <strong>Send Test Notification</strong> at the bottom of the user form to verify each channel works before going live.
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="autobook">Auto-Booking</h2>
+
+<p>Go to <strong>Users</strong> → click a user → <strong>Step 4: Auto Booking</strong>.</p>
+
+<div class="card">
+<h3>How it works</h3>
+<p>When a listing becomes <strong>Available to book</strong> and matches your auto-booking filters, the monitor will:</p>
+<ol>
+  <li>Log into your Holland2Stay account</li>
+  <li>Create a fresh shopping cart</li>
+  <li>Add the listing to cart (<code>addNewBooking</code>)</li>
+  <li>Place the order (<code>placeOrder</code>)</li>
+  <li>Generate a direct payment link (<code>idealCheckOut</code>)</li>
+  <li>Send you the payment link immediately</li>
+</ol>
+<p><strong>It does NOT auto-pay.</strong> You receive the payment URL and complete payment manually.</p>
+</div>
+
+<div class="card">
+<h3>Configuration</h3>
+<ul>
+  <li><strong>Enable auto-booking</strong> — toggle on</li>
+  <li><strong>Dry run</strong> — recommended at first: validates login &amp; cart without actually placing orders</li>
+  <li><strong>H2S account email &amp; password</strong> — your Holland2Stay login</li>
+  <li><strong>Payment method</strong> — iDEAL (default), Visa, or Mastercard</li>
+  <li><strong>Auto-booking filters</strong> — optional stricter rules (independent from notification filters)</li>
+</ul>
+<p>Click <strong>Copy from notification filters</strong> to quickly duplicate your notification filter settings.</p>
+</div>
+
+<div class="tip warn">
+<strong>Safety:</strong> Keep <strong>Dry run</strong> on until you've verified that login and SKU resolution work correctly. Turn it off only when you're ready to place real orders.
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="filters">Notification Filters</h2>
+
+<p>Restrict which listings trigger notifications for each user. Go to <strong>Users</strong> → click a user → <strong>Step 3</strong>.</p>
+
+<div class="card">
+<table>
+  <tr><th>Filter</th><th>Example</th><th>How it works</th></tr>
+  <tr><td>Max rent</td><td>€1200</td><td>Only listings ≤ €1200/month</td></tr>
+  <tr><td>Min area</td><td>25 m²</td><td>Only listings ≥ 25 m²</td></tr>
+  <tr><td>Min floor</td><td>1</td><td>Skip ground floor (0)</td></tr>
+  <tr><td>Occupancy</td><td>Single</td><td>Multi-select — any match</td></tr>
+  <tr><td>Type</td><td>Studio, 1</td><td>Multi-select — any match</td></tr>
+  <tr><td>Cities</td><td>Eindhoven, Amsterdam</td><td>Multi-select — any match</td></tr>
+  <tr><td>Neighborhood</td><td>Centrum</td><td>Depends on selected cities</td></tr>
+  <tr><td>Contract</td><td>Indefinite</td><td>Long-term only (skip short-stay)</td></tr>
+  <tr><td>Tenant</td><td>student only</td><td>Multi-select — any match</td></tr>
+  <tr><td>Offer / Promo</td><td>Short-stay</td><td>Multi-select — any match</td></tr>
+</table>
+<p>All filters are <strong>AND</strong> together. Leave a field empty = no restriction.</p>
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="settings">Global Settings</h2>
+
+<p>Go to <strong>Settings</strong> (admin only). These affect the entire monitor process.</p>
+
+<div class="card">
+<table>
+  <tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
+  <tr><td>Check interval</td><td>300s (5 min)</td><td>Normal polling interval outside peak hours</td></tr>
+  <tr><td>Peak max interval</td><td>60s</td><td>Starting interval during peak (08:30–10:00 NL)</td></tr>
+  <tr><td>Peak min interval</td><td>15s</td><td>Floor — adaptive polling never goes below this</td></tr>
+  <tr><td>Peak hours</td><td>08:30–10:00</td><td>When to accelerate (NL time, weekdays only)</td></tr>
+  <tr><td>Jitter ratio</td><td>0.20</td><td>±20% random variation to avoid detection</td></tr>
+  <tr><td>Monitored cities</td><td>—</td><td>Which cities to scrape (multi-select)</td></tr>
+  <tr><td>Log level</td><td>INFO</td><td>DEBUG for troubleshooting</td></tr>
+</table>
+<p>After saving, click <strong>Apply Now</strong> to hot-reload — no restart needed.</p>
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="tips">Tips &amp; Troubleshooting</h2>
+
+<div class="card">
+<h3>Monitor shows "stopped"</h3>
+<p>Click <strong>Start monitor</strong> on the Dashboard. If it doesn't start, check the logs at <strong>Log Viewer</strong> (admin only) or <code>docker compose logs h2s</code>.</p>
+</div>
+
+<div class="card">
+<h3>No listings appearing</h3>
+<ul>
+  <li>Make sure cities are selected in <strong>Settings</strong></li>
+  <li>Check <strong>Log Viewer → Errors Log</strong> for 403 blocks or network errors</li>
+  <li>If using a proxy, verify it's working: <code>docker compose exec h2s python -c "import curl_cffi.requests as req; print(req.get('https://api.ipify.org').text)"</code></li>
+</ul>
+</div>
+
+<div class="card">
+<h3>Notifications not arriving</h3>
+<ul>
+  <li>Check the user is <strong>enabled</strong> and <strong>notifications are on</strong></li>
+  <li>Verify at least one channel is configured with valid credentials</li>
+  <li>Click <strong>Send Test Notification</strong> to debug each channel</li>
+  <li>Check <strong>Log Viewer → Errors Log</strong> for send failures</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>Auto-booking failed</h3>
+<ul>
+  <li>Verify your H2S email/password are correct (try logging in manually)</li>
+  <li>Check if your account already has a pending reservation (log into H2S and cancel it)</li>
+  <li>Enable <strong>Dry run</strong> first to validate the flow without placing real orders</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>403 Blocked (Cloudflare)</h3>
+<p>Holland2Stay's Cloudflare WAF is blocking requests. Solutions:</p>
+<ol>
+  <li>Set up a residential proxy via <code>HTTPS_PROXY</code> in <code>.env</code></li>
+  <li>Restart the monitor to get a new TLS fingerprint</li>
+  <li>Pause monitoring for a few hours to let the block cool off</li>
+</ol>
+</div>
+
+<div class="tip">
+<strong>Pro tip:</strong> The <strong>Log Viewer</strong> (admin → terminal icon in sidebar) lets you switch between Monitor Log (INFO+) and Errors Log (WARNING+) with keyword search, line numbers, and level color highlighting. Use it as your first stop for debugging.
+</div>
+
+</div>
+</body>
+</html>

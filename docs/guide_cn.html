@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Holland2Stay 监控 — 使用指南</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;550;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--text2:#6b7280;--border:#e5e7eb;
+  --accent:#5e6ad2;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;
+  color-scheme:light
+}
+body{font-family:Inter,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
+.container{max-width:820px;margin:0 auto;padding:48px 24px 80px}
+h1{font-size:32px;font-weight:700;letter-spacing:-0.5px;margin-bottom:6px}
+h2{font-size:22px;font-weight:600;margin:48px 0 16px;padding-bottom:8px;border-bottom:2px solid var(--border)}
+h3{font-size:17px;font-weight:600;margin:28px 0 10px}
+p{margin:10px 0;color:var(--text2)}
+.subtitle{color:var(--text2);font-size:16px;margin-bottom:32px}
+.card{background:var(--surface);border-radius:12px;padding:24px 28px;margin:16px 0;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.card h3{margin-top:0}
+pre{background:#1e1e2e;color:#cdd6f4;padding:14px 18px;border-radius:8px;font-size:13px;overflow-x:auto;margin:12px 0}
+code{font-family:"SF Mono",Menlo,Monaco,monospace;font-size:13px}
+:not(pre)>code{background:#f0f0f3;padding:2px 6px;border-radius:4px;font-size:12px}
+ul,ol{margin:8px 0;padding-left:22px;color:var(--text2)}
+li{margin:4px 0}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
+.badge-green{background:#d1fae5;color:#065f46}
+.badge-amber{background:#fef3c7;color:#92400e}
+.badge-blue{background:#dbeafe;color:#1e40af}
+.step{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:600;margin-right:8px;flex-shrink:0}
+.tip{background:#eef2ff;border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px}
+.tip strong{color:var(--text)}
+.warn{background:#fefce8;border-left:3px solid var(--warning)}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
+th{font-weight:600;color:var(--text);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+td{color:var(--text2)}
+.nav{position:sticky;top:0;background:var(--bg);padding:12px 0;margin-bottom:24px;border-bottom:1px solid var(--border);z-index:10;display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
+</style>
+</head>
+<body>
+<div class="container">
+
+<nav class="nav">
+  <a href="#start">快速开始</a>
+  <a href="#panel">Web 面板</a>
+  <a href="#notifications">通知推送</a>
+  <a href="#autobook">自动预订</a>
+  <a href="#filters">过滤条件</a>
+  <a href="#settings">全局设置</a>
+  <a href="#tips">常见问题</a>
+</nav>
+
+<h1>🏠 Holland2Stay 监控 — 使用指南</h1>
+<p class="subtitle">监控 Holland2Stay 新房源，第一时间推送通知，抢在别人之前自动预订。</p>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="start">快速开始</h2>
+
+<div class="card">
+<h3><span class="step">1</span> Docker（推荐，适合 VPS）</h3>
+<pre>cp .env.example .env && mkdir -p data logs logs/caddy
+# 编辑 Caddyfile → 将 your.domain.com 替换为你的域名
+# 编辑 .env → 设置 WEB_PASSWORD
+docker compose up -d</pre>
+<p>打开 <code>https://你的域名</code>，登录后在 Dashboard 点击 <strong>启动监控</strong>。</p>
+</div>
+
+<div class="card">
+<h3><span class="step">2</span> macOS</h3>
+<p>从 <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> 下载最新 <code>.dmg</code>，拖入 Applications，双击启动即可自动打开浏览器。</p>
+</div>
+
+<div class="card">
+<h3><span class="step">3</span> Windows</h3>
+<p>从 <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> 下载最新 <code>.zip</code>，解压后双击 <code>h2s-monitor.exe</code>。</p>
+</div>
+
+<div class="card">
+<h3><span class="step">4</span> 从源码运行</h3>
+<pre>pip install -r requirements.txt
+cp .env.example .env
+python web.py</pre>
+<p>浏览器打开 <a href="http://127.0.0.1:8088">http://127.0.0.1:8088</a>。</p>
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="panel">Web 面板概览</h2>
+
+<p>Web 面板是控制中心，所有功能从左侧边栏进入。</p>
+
+<div class="card">
+<h3>📊 仪表盘</h3>
+<p>一览视图：数据库房源总数、今日新增、今日状态变更、最近抓取时间。展示最新房源列表和近 48 小时状态变更记录。</p>
+<p>点击 <strong>启动监控</strong> 开始抓取。监控运行时侧栏圆点变绿。</p>
+</div>
+
+<div class="card">
+<h3>📋 房源列表</h3>
+<p>浏览数据库中所有房源。按 <strong>状态</strong>、<strong>城市</strong>（多选）、<strong>名称</strong>、<strong>最高租金</strong>、<strong>最小面积</strong>、<strong>合同类型</strong>、<strong>租客要求</strong>（多选）筛选。点击房源名称跳转到 Holland2Stay 详情页。</p>
+</div>
+
+<div class="card">
+<h3>🗺️ 地图</h3>
+<p>所有房源在地图上展示。绿色 = 可直接预订，橙色 = 摇号中，灰色 = 不可预订。</p>
+<p>如果有地址未解析，admin 可点击 <strong>解析地址</strong> 按钮触发地理编码。</p>
+</div>
+
+<div class="card">
+<h3>📅 日历</h3>
+<p>按月历展示入住日期，按城市筛选。点击日期查看当天可入住的房源。</p>
+</div>
+
+<div class="card">
+<h3>📈 统计</h3>
+<p>支持 7/30/90 天范围切换的图表：</p>
+<ul>
+  <li><strong>新增房源趋势</strong> — 每日新增数量</li>
+  <li><strong>状态变更趋势</strong> — 每日状态变化次数</li>
+  <li><strong>城市 &amp; 状态分布</strong> — 环形图</li>
+  <li><strong>租金分布</strong> — 9 个价格区间柱状图</li>
+  <li><strong>房源上线时间分布</strong> — 按小时统计，看出 H2S 哪个时间段集中放房</li>
+</ul>
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="notifications">设置通知推送</h2>
+
+<p>进入 <strong>用户管理</strong> → 点击用户 → <strong>第 2 步：通知渠道</strong>。</p>
+
+<div class="card">
+<h3>Telegram <span class="badge badge-blue">跨平台</span></h3>
+<ol>
+  <li>向 <a href="https://t.me/BotFather">@BotFather</a> 创建 Bot，获取 Token</li>
+  <li>给你的 Bot 发任意一条消息</li>
+  <li>访问 <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> 获取 Chat ID</li>
+  <li>将 <strong>Bot Token</strong> 和 <strong>Chat ID</strong> 填入用户表单</li>
+</ol>
+</div>
+
+<div class="card">
+<h3>Email <span class="badge badge-blue">跨平台</span></h3>
+<p>填写 SMTP 服务器信息。常见配置：</p>
+<table>
+  <tr><th>邮箱</th><th>SMTP 地址</th><th>端口</th><th>安全模式</th></tr>
+  <tr><td>Gmail</td><td>smtp.gmail.com</td><td>587</td><td>STARTTLS</td></tr>
+  <tr><td>Outlook</td><td>smtp.office365.com</td><td>587</td><td>STARTTLS</td></tr>
+  <tr><td>QQ 邮箱</td><td>smtp.qq.com</td><td>587</td><td>STARTTLS</td></tr>
+</table>
+<p>如果开启了二次验证，请使用 <strong>App Password</strong>（应用专用密码）而非登录密码。</p>
+</div>
+
+<div class="card">
+<h3>iMessage <span class="badge badge-green">仅 macOS</span></h3>
+<p>填写收件人手机号（如 <code>+31612345678</code>）或 Apple ID 邮箱。仅当监控程序运行在 macOS 且 Messages.app 已登录时可用。</p>
+</div>
+
+<div class="card">
+<h3>WhatsApp <span class="badge badge-amber">Twilio 付费</span></h3>
+<p>需要 Twilio 账号。填写 Account SID、Auth Token 以及 <code>whatsapp:+...</code> 格式的号码。</p>
+</div>
+
+<div class="tip">
+<strong>提示：</strong>表单底部点击 <strong>发送测试通知</strong>，逐渠道验证配置是否正确。
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="autobook">自动预订</h2>
+
+<p>进入 <strong>用户管理</strong> → 点击用户 → <strong>第 4 步：自动预订</strong>。</p>
+
+<div class="card">
+<h3>工作流程</h3>
+<p>当有房源变为 <strong>可直接预订</strong> 且符合你的自动预订过滤条件时，监控程序会：</p>
+<ol>
+  <li>登录你的 Holland2Stay 账号</li>
+  <li>创建全新购物车</li>
+  <li>将房源加入购物车（<code>addNewBooking</code>）</li>
+  <li>提交订单（<code>placeOrder</code>）</li>
+  <li>生成直链付款链接（<code>idealCheckOut</code>）</li>
+  <li>立即推送付款链接给你</li>
+</ol>
+<p><strong>不会自动付款。</strong>你收到付款链接后手动完成支付。</p>
+</div>
+
+<div class="card">
+<h3>配置项</h3>
+<ul>
+  <li><strong>开启自动预订</strong> — 总开关</li>
+  <li><strong>试运行模式</strong> — 推荐先开启：验证登录和购物车流程，不实际提交订单</li>
+  <li><strong>H2S 账号邮箱 &amp; 密码</strong> — 你的 Holland2Stay 登录凭据</li>
+  <li><strong>支付方式</strong> — iDEAL（默认，推荐）、Visa、Mastercard</li>
+  <li><strong>自动预订专用过滤</strong> — 可选，比通知过滤更严格的条件</li>
+</ul>
+<p>点击 <strong>从通知过滤复制</strong> 可一键同步通知过滤条件。</p>
+</div>
+
+<div class="tip warn">
+<strong>安全提醒：</strong>在确认登录和 SKU 解析正常之前，请保持<strong>试运行模式</strong>开启。确认无误后再关闭以提交真实订单。
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="filters">通知过滤条件</h2>
+
+<p>限制每个用户接收通知的房源范围。进入 <strong>用户管理</strong> → 点击用户 → <strong>第 3 步</strong>。</p>
+
+<div class="card">
+<table>
+  <tr><th>过滤项</th><th>示例</th><th>说明</th></tr>
+  <tr><td>最高月租</td><td>€1200</td><td>只推送 ≤ €1200/月 的房源</td></tr>
+  <tr><td>最小面积</td><td>25 m²</td><td>只推送 ≥ 25 m² 的房源</td></tr>
+  <tr><td>最低楼层</td><td>1</td><td>排除地面层（0）</td></tr>
+  <tr><td>入住类型</td><td>Single</td><td>多选 — 任一匹配</td></tr>
+  <tr><td>户型</td><td>Studio、1</td><td>多选 — 任一匹配</td></tr>
+  <tr><td>城市</td><td>Eindhoven、Amsterdam</td><td>多选 — 任一匹配</td></tr>
+  <tr><td>片区</td><td>Centrum</td><td>依赖所选城市动态加载</td></tr>
+  <tr><td>合同类型</td><td>Indefinite</td><td>只推长租，排除短租</td></tr>
+  <tr><td>租客要求</td><td>student only</td><td>多选 — 任一匹配</td></tr>
+  <tr><td>标签/促销</td><td>Short-stay</td><td>多选 — 任一匹配</td></tr>
+</table>
+<p>所有条件为 <strong>AND</strong> 关系（同时满足）。留空 = 不限制。</p>
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="settings">全局设置</h2>
+
+<p>进入 <strong>设置</strong>（仅 admin）。以下配置影响整个监控进程。</p>
+
+<div class="card">
+<table>
+  <tr><th>设置项</th><th>默认值</th><th>说明</th></tr>
+  <tr><td>常规轮询间隔</td><td>300 秒（5 分钟）</td><td>非高峰期的正常轮询间隔</td></tr>
+  <tr><td>高峰期最大间隔</td><td>60 秒</td><td>高峰期起始间隔（荷兰 08:30–10:00）</td></tr>
+  <tr><td>高峰期最小间隔</td><td>15 秒</td><td>自适应下限，轮询不会低于此值</td></tr>
+  <tr><td>高峰时间段</td><td>08:30–10:00</td><td>荷兰本地时间，仅工作日</td></tr>
+  <tr><td>抖动比例</td><td>0.20</td><td>±20% 随机波动，避免被识别为机器</td></tr>
+  <tr><td>监控城市</td><td>—</td><td>勾选要抓取的城市（多选）</td></tr>
+  <tr><td>日志级别</td><td>INFO</td><td>排查问题时改为 DEBUG</td></tr>
+</table>
+<p>保存后点击 <strong>立即生效</strong> 热重载，无需重启。</p>
+</div>
+
+<!-- ─────────────────────────────────────────────── -->
+<h2 id="tips">常见问题</h2>
+
+<div class="card">
+<h3>监控显示"未启动"</h3>
+<p>在 Dashboard 点击 <strong>启动监控</strong>。如果无法启动，查看 <strong>日志查看器</strong>（admin → 侧栏终端图标）或运行 <code>docker compose logs h2s</code>。</p>
+</div>
+
+<div class="card">
+<h3>抓取不到房源</h3>
+<ul>
+  <li>确认 <strong>设置</strong> 中已勾选目标城市</li>
+  <li>查看 <strong>日志查看器 → 错误日志</strong>，是否有 403 屏蔽或网络错误</li>
+  <li>如果使用代理，验证代理是否生效：<code>docker compose exec h2s python -c "import curl_cffi.requests as req; print(req.get('https://api.ipify.org').text)"</code></li>
+</ul>
+</div>
+
+<div class="card">
+<h3>收不到通知</h3>
+<ul>
+  <li>确认用户已<strong>启用</strong>且<strong>通知开关</strong>已打开</li>
+  <li>确认至少配置了一个有效渠道</li>
+  <li>点击 <strong>发送测试通知</strong> 逐个渠道排查</li>
+  <li>查看 <strong>日志查看器 → 错误日志</strong> 确认发送失败原因</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>自动预订失败</h3>
+<ul>
+  <li>验证 H2S 账号邮箱/密码是否正确（尝试手动登录）</li>
+  <li>检查账号是否已有预留订单（登录 H2S 手动取消）</li>
+  <li>先开启<strong>试运行模式</strong>验证流程，确认无误后再正式启用</li>
+</ul>
+</div>
+
+<div class="card">
+<h3>403 被屏蔽（Cloudflare）</h3>
+<p>Holland2Stay 的 Cloudflare WAF 封了你的请求。解决方法：</p>
+<ol>
+  <li>在 <code>.env</code> 中配置 <code>HTTPS_PROXY</code> 使用住宅代理</li>
+  <li>重启监控获取新的 TLS 指纹</li>
+  <li>暂停监控几小时让屏蔽冷却</li>
+</ol>
+</div>
+
+<div class="tip">
+<strong>小技巧：</strong><strong>日志查看器</strong>（admin → 侧栏终端图标）支持在运行日志和错误日志之间切换，有关键词搜索、行号和级别着色。排查问题时从这里开始最方便。
+</div>
+
+</div>
+</body>
+</html>

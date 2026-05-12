@@ -12,52 +12,28 @@ A personal project that monitors Holland2Stay (https://www.holland2stay.com) for
 
 ## Quick start
 
+The project supports three ways to get started: Docker (recommended for VPS/server deployment), pre-built .dmg/.exe for local use, and running from source.
+Docker images bundle Caddy reverse proxy with automatic Let's Encrypt HTTPS; local runs use Flask's built-in server for personal computers.
+
 **Docker (recommended):**
 ```bash
 cp .env.example .env && mkdir -p data logs logs/caddy
 # Edit Caddyfile: replace "your.domain.com" with your actual domain
-# Edit .env: set WEB_PASSWORD and SESSION_COOKIE_SECURE=true
 docker compose up -d
 # open https://your.domain.com → Dashboard → "Start monitor"
 ```
 
-**macOS .dmg:**
-Download the latest `.dmg` from [Releases](../../releases), mount and drag to Applications. Double-click to start — opens browser automatically. Persistent data is stored in `~/.h2s-monitor/`.
+**macOS:**
+Download the latest `.dmg` from [Releases](../../releases), drag to Applications, and double-click to start. The browser opens automatically. Persistent data is stored in `~/.h2s-monitor/`.
 
 **Windows:**
 Download the latest `.zip` from [Releases](../../releases), extract and double-click `h2s-monitor.exe`. A CMD window opens and the browser launches automatically. Persistent data is stored in `%USERPROFILE%\.h2s-monitor\`.
 
-<details>
-<summary><b>Build from source (macOS / Windows / GitHub Actions)</b></summary>
-
-**Build locally — macOS:**
-```bash
-# Requires: macOS, Python 3.11+
-# Place your app icon at packaging/asset/image.png (1024x1024 PNG)
-bash packaging/build_dmg.sh
-# Output: dist/Holland2Stay Monitor.dmg
-```
-
-**Build locally — Windows:**
-```cmd
-REM Requires: Windows, Python 3.11+, pip
-packaging\build.bat
-REM Output: dist\Holland2Stay Monitor.zip
-```
-
-**Build via GitHub Actions** (no local dev setup, builds both platforms):
-1. Push your code to GitHub
-2. Go to **Actions → Build → Run workflow**
-3. Download artifacts from the completed run (macOS .dmg + Windows .zip)
-4. Or push a `v` tag (e.g. `v1.0.0`) to auto-attach artifacts to a Release
-
-</details>
-
-**Or run locally:**
+**Run from source:**
 ```bash
 pip install -r requirements.txt
 cp .env.example .env
-python web.py  # http://127.0.0.1:8088
+python web.py
 ```
 
 **Run tests:**
