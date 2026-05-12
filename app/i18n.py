@@ -20,14 +20,18 @@ DEFAULT_TYPES     = ["Studio", "1", "2", "3", "Loft (open bedroom area)"]
 DEFAULT_CONTRACT  = ["Indefinite", "6 months max"]
 DEFAULT_TENANT    = ["student only", "student and employed", "employed only"]
 DEFAULT_OFFER     = ["Short-stay", "Parking included"]
+DEFAULT_FINISHING = ["Upholstered", "Shell"]
+DEFAULT_ENERGY    = ["A+++", "A++", "A+", "A", "B", "C", "D"]
 
 # 类别 → 回退默认值
 DEFAULTS: dict[str, list[str]] = {
-    "Occupancy": DEFAULT_OCCUPANCY,
-    "Type":      DEFAULT_TYPES,
-    "Contract":  DEFAULT_CONTRACT,
-    "Offer":     DEFAULT_OFFER,
-    "Tenant":    DEFAULT_TENANT,
+    "Occupancy":  DEFAULT_OCCUPANCY,
+    "Type":       DEFAULT_TYPES,
+    "Contract":   DEFAULT_CONTRACT,
+    "Offer":      DEFAULT_OFFER,
+    "Tenant":     DEFAULT_TENANT,
+    "Finishing":  DEFAULT_FINISHING,
+    "Energy":     DEFAULT_ENERGY,
 }
 
 # 过滤选项显示名称 (zh, en)

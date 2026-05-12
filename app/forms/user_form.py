@@ -25,7 +25,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from config import AutoBookConfig, ListingFilter
+from config import AutoBookConfig, ListingFilter, _ENERGY_LABELS
 from users import UserConfig
 
 if TYPE_CHECKING:
@@ -109,6 +109,16 @@ def build_user_from_form(
         v = form.get(key, "").strip()
         return v if v else old_val
 
+    def _sanitize_energy(key: str) -> str:
+        """校验能耗等级在白名单中，非法值 WARNING 后返回 ''。"""
+        v = form.get(key, "").strip()
+        if not v:
+            return ""
+        if v.upper() in _ENERGY_LABELS:
+            return v
+        logger.warning("表单 [%s] 能耗等级 %r 不在白名单中，已忽略", key, v)
+        return ""
+
     channels_raw = form.get("NOTIFICATION_CHANNELS", "")
     channels = [c.strip().lower() for c in channels_raw.split(",") if c.strip()]
 
@@ -123,6 +133,8 @@ def build_user_from_form(
         allowed_tenant=_lv("ALLOWED_TENANT"),
         allowed_offer=_lv("ALLOWED_OFFER"),
         allowed_cities=_lv("ALLOWED_CITIES"),
+        allowed_finishing=_lv("ALLOWED_FINISHING"),
+        allowed_energy=_sanitize_energy("ALLOWED_ENERGY"),
     )
 
     ex_ab = existing.auto_book if existing else None
@@ -147,6 +159,8 @@ def build_user_from_form(
             allowed_types=_lv("AUTO_BOOK_ALLOWED_TYPES"),
             allowed_neighborhoods=_lv("AUTO_BOOK_ALLOWED_NEIGHBORHOODS"),
             allowed_cities=_lv("AUTO_BOOK_ALLOWED_CITIES"),
+            allowed_finishing=_lv("AUTO_BOOK_ALLOWED_FINISHING"),
+            allowed_energy=_sanitize_energy("AUTO_BOOK_ALLOWED_ENERGY"),
         ),
     )
     return UserConfig(

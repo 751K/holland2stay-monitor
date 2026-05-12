@@ -54,7 +54,7 @@ python -m pytest tests/ -v
 | Multi-city monitoring | ✅ Done | 26 Dutch cities; select cities in the web UI |
 | Multi-channel notifications | ✅ Done | iMessage / Telegram / Email / WhatsApp (Twilio) |
 | Web panel notifications | ✅ Done | Real-time bell + toasts via SSE, works on any platform |
-| Notification filters | ✅ Done | Per-user: rent, area, floor, type, occupancy, city, neighborhood, contract, tenant, promo |
+| Notification filters | ✅ Done | Per-user: rent, area, floor, type, occupancy, city, neighborhood, contract, tenant, promo, finishing, energy |
 | Multi-select filter UI | ✅ Done | Dropdown checkboxes with i18n labels; listing filters for city, tenant, contract |
 | Short-stay detection | ✅ Done | Contract / Tenant / Offer tags extracted from GraphQL; per-user filters |
 | Cross-platform builds | ✅ Done | GitHub Actions builds macOS .dmg + Windows .exe on tag push |
@@ -69,7 +69,7 @@ python -m pytest tests/ -v
 | Multi-user support | ✅ Done | Each user has independent channels / filters / booker settings |
 | VPS / Docker ready | ✅ Done | iMessage gracefully skipped on non-macOS; web panel takes over |
 | Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
-| Visualization | ✅ Done | 30-day trends, city/status/price distribution, 24h listing drop time chart |
+| Visualization | ✅ Done | 10 charts: trends, city/status/price/area/floor/type/energy/tenant/contract distributions, 24h drop time |
 | Move-in calendar | ✅ Done | Calendar view filtered by city |
 | Map view | ✅ Done | Leaflet.js + OpenStreetMap with auto-geocoding |
 | i18n (中/EN) | ✅ Done | One-click language switch, cookie-persisted |
@@ -85,7 +85,7 @@ python -m pytest tests/ -v
 | Code modularization | ✅ Done | web.py split into `app/` with 10 route modules + 8 shared modules; 1,200→154 line bootstrap |
 | Prewarm session cache | ✅ Done | Process-level cache across rounds; token TTL refresh; invalidated on user/config change |
 | Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; log viewer with file tabs, line numbers, level coloring, keyword search, auto-scroll |
-| Pytest test suite | ✅ Done | 11 test modules covering AppleScript escape, auth, crypto, logs, models, prewarm, safety, scraper 403, storage, user form/routes |
+| Pytest test suite | ✅ Done | 25 test modules (486 tests) covering full stack: models, storage, scraper, booker, notifier, auth, CSRF, routes, i18n |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, Storage abstraction enforced |
 
 ---

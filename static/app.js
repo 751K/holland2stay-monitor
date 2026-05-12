@@ -320,5 +320,48 @@ document.addEventListener('DOMContentLoaded', function() {
     document.addEventListener('click', function(e) {
       if (!ms.contains(e.target)) ms.classList.remove('open');
     });
+
+    // 防止滚轮事件穿透到页面
+    dropdown.addEventListener('wheel', function(e) {
+      var atTop = dropdown.scrollTop <= 0;
+      var atBottom = dropdown.scrollTop + dropdown.clientHeight >= dropdown.scrollHeight - 1;
+      if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
+        e.preventDefault();
+      }
+    }, {passive: false});
   });
 });
+
+// ── 公共：手动刷新一个 multi-select 的标签显示 ────────────
+// 供 copyNotifFilters 等外部调用，不依赖 init 闭包中的旧 checkbox 引用
+window.refreshMultiSelect = function(ms) {
+  var cbs = ms.querySelectorAll('input[type="checkbox"]');
+  var trigger = ms.querySelector('.ms-trigger');
+  var textEl  = ms.querySelector('.ms-text');
+  if (!trigger || !textEl) return;
+  trigger.querySelectorAll('.ms-tag').forEach(function(t){ t.remove(); });
+  var sel = [];
+  cbs.forEach(function(cb){
+    if (cb.checked) sel.push({label: cb.parentElement.textContent.trim(), cb: cb});
+  });
+  if (sel.length === 0) {
+    textEl.style.display = '';
+  } else {
+    textEl.style.display = 'none';
+    sel.forEach(function(item){
+      var tag = document.createElement('span');
+      tag.className = 'ms-tag';
+      tag.textContent = item.label;
+      var rm = document.createElement('span');
+      rm.className = 'ms-rm';
+      rm.textContent = '×';
+      rm.onclick = function(e){
+        e.stopPropagation();
+        item.cb.checked = false;
+        window.refreshMultiSelect(ms);
+      };
+      tag.appendChild(rm);
+      trigger.insertBefore(tag, textEl);
+    });
+  }
+};

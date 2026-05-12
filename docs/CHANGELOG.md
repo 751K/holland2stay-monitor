@@ -1,5 +1,67 @@
 # Changelog
 
+## v1.2.6 (2026-05-13)
+
+### 统计页 10 图表 + 筛选增强
+
+**新增 6 个统计图表（4→10）**
+- 户型分布、能耗标签分布（环形图，标准颜色映射）
+- 面积分布（<20 / 20-30 / 30-50 / 50-80 / >80 m²）、楼层分布（Ground / 1-2 / 3-5 / 6+）
+- 租客要求分布（student only / employed only 等）、合同类型分布（Indefinite / 6 months max 等）
+- 租金分布区间细化：€1000 以上拆为 4 档
+
+**能耗等级改为「最低可接受等级」**
+- 从多选白名单改为单选下拉（A+++ → F）
+- 选择 "B" = 匹配 B 及以上的所有等级（A+++/A++/A+/A/B）
+- 严格白名单校验：`_ENERGY_LABELS` 精确匹配，非法值（"banana"/"Z"）→ WARNING + 忽略
+- `_energy_rank()` 从启发式解析改为白名单索引法，消除误匹配
+- 表单 POST 加 `_sanitize_energy()` 防护，防恶意提交非法等级
+
+**用户过滤新增 2 项**
+- 通知过滤 + 自动预订过滤：新增「装修类型」（Upholstered / Shell）和「能耗等级」（最低可接受）
+- Dashboard / Listings 显示楼盘名
+- 房源列表新增城市/租客/能耗/装修筛选（城市和租客为多选）
+
+### Bug 修复（3 个）
+
+- **预登录 session 过期跳过登录**（P1）：传入过期 prewarmed 时 session 走新建但 login 被跳过，token 未定义导致 NameError
+- **`or 99` 陷阱**：`_energy_rank("A+++")` 返回 0，`0 or 99 == 99` 导致排序错误
+- **非法能耗值触发 500**：`?energy=Z` 使 `_energy_rank` 返回 None，`min_rank <= actual_rank` TypeError
+
+### 安全加固（3 个）
+
+- **日志脱敏**：email 输出 `tes***@domain.com`，代理 URL 密码段 `***`
+- **地图 API 访客只读**：`GET /api/map` 移除自动 geocode 逻辑（外部请求 + 数据库写入），仅返回已缓存坐标
+- **存储 JSON 解析加固**：`_safe_features()` 统一 try/except，坏数据 WARNING 后返回 `[]`
+
+### 重构（3 个）
+
+- **统一代理读取**：`get_proxy_url()`（HTTPS_PROXY > HTTP_PROXY > ALL_PROXY），消除 5 处重复
+- **chart_area/floor 去重**：提取 `_bucketed_number_dist()` 通用方法
+- **前端 multi-select 标签刷新**：提取 `window.refreshMultiSelect()`，copyNotifFilters 不再内联重复逻辑
+
+### 测试（183 个新测试，14 个模块）
+
+**从 303 → 486（+60%）**
+
+- `test_energy_filter.py`（42）：`_energy_rank` 白名单、ListingFilter passes/fail-closed、旧 list 兼容、`/listings?energy=` API
+- `test_monitor_cooldown.py`（12）：`_apply_jitter` 边界、`_get_interval` 峰/谷/周末、`_should_notify_block` 节流
+- `test_control_routes.py`（11）：start/stop/reload/shutdown 权限、CSRF、PID None、kill 异常
+- `test_settings_routes.py`（6）：POST 写 .env、CSRF、智能轮询参数
+- `test_notif_routes.py`（17）：分页、limit clamp、mark read、SSE 权限
+- `test_storage_charts.py`（9）：能耗排序、面积/楼层 bucket、坏 JSON 跳过、坐标缓存
+- `test_listings_filter.py`（10）：状态/城市/搜索/feature 查询、坏 JSON
+- `test_users_edge.py`（10）：文件损坏/空/迁移、save/load round-trip
+- `test_notifier_channel.py`（26）：MultiNotifier fanout/retry、email 规范化、WebNotifier
+- `test_booker_flow.py`（9）：非 Available 拒绝、dry_run、过期/有效 prewarmed
+- `test_map_guest.py`（7）：guest GET 不启动 geocode、POST 被拒、CSRF
+- `test_frontend_helpers.py`（9）：`_mask_email`、Jinja2 自动转义、模板语法、AppleScript
+- `test_i18n.py`（6）：翻译 key 完整性、tr fallback、localize_options
+- `test_tools_smoke.py`（4）：tools/launcher import
+- `test_user_form.py`（+5）：`TestEnergySanitization`
+
+---
+
 ## v1.2.5 (2026-05-12)
 
 ### Web 面板增强

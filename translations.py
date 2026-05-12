@@ -105,6 +105,10 @@ TRANSLATIONS = {
     "filter_all_contract":  {"zh": "全部合同",                "en": "All contracts"},
     "filter_tenant":        {"zh": "租客要求",                "en": "Tenant"},
     "filter_all_tenant":    {"zh": "全部租客",                "en": "All tenants"},
+    "filter_energy":        {"zh": "最低能耗",                "en": "Min energy"},
+    "filter_min_energy":    {"zh": "不限",                    "en": "Any"},
+    "filter_finishing":     {"zh": "装修类型",                "en": "Furnishing"},
+    "filter_all_finishing": {"zh": "全部装修",                "en": "All"},
     "filter_search":        {"zh": "搜索",                    "en": "Search"},
     "filter_placeholder":   {"zh": "搜索房源名称…",           "en": "Search name…"},
     "filter_btn":           {"zh": "筛选",                    "en": "Filter"},
@@ -155,6 +159,12 @@ TRANSLATIONS = {
     "stats_status_dist":    {"zh": "状态分布",                "en": "Status distribution"},
     "stats_price_dist":     {"zh": "租金分布",                "en": "Rent distribution"},
     "stats_hourly_dist":    {"zh": "房源上线时间分布（荷兰时间）", "en": "Listing drop time (NL time)"},
+    "stats_tenant_dist":    {"zh": "租客要求分布",              "en": "Tenant requirement distribution"},
+    "stats_contract_dist":  {"zh": "合同类型分布",              "en": "Contract type distribution"},
+    "stats_type_dist":      {"zh": "户型分布",                  "en": "Type distribution"},
+    "stats_energy_dist":    {"zh": "能耗标签分布",              "en": "Energy label distribution"},
+    "stats_area_dist":      {"zh": "面积分布",                  "en": "Area distribution"},
+    "stats_floor_dist":     {"zh": "楼层分布",                  "en": "Floor distribution"},
 
     # ── Settings ─────────────────────────────────────────
     "settings_title":       {"zh": "全局设置",                "en": "Global Settings"},

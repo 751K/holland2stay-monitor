@@ -32,6 +32,13 @@ from app.csrf import csrf_required
 from app.db import storage
 from app.forms.user_form import build_user_from_form
 from app.i18n import DEFAULTS, localize_options
+from config import _ENERGY_LABELS, _energy_rank
+
+
+def _energy_rank_or_99(label: str) -> int:
+    """能耗排序辅助，未知标签排最后。"""
+    r = _energy_rank(label)
+    return r if r is not None else 99
 
 
 def _get_all_filter_options() -> dict[str, list[str]]:
@@ -77,6 +84,10 @@ def user_new() -> Any:
         contract_options=localize_options("Contract", opts["Contract"]),
         tenant_options=localize_options("Tenant", opts["Tenant"]),
         offer_options=opts["Offer"],
+        finishing_options=opts["Finishing"],
+        energy_options=sorted(
+            [x for x in opts["Energy"] if x.upper() in _ENERGY_LABELS] or _ENERGY_LABELS,
+            key=_energy_rank_or_99),
     )
 
 
@@ -109,6 +120,10 @@ def user_edit(user_id: str) -> Any:
         contract_options=localize_options("Contract", opts["Contract"]),
         tenant_options=localize_options("Tenant", opts["Tenant"]),
         offer_options=opts["Offer"],
+        finishing_options=opts["Finishing"],
+        energy_options=sorted(
+            [x for x in opts["Energy"] if x.upper() in _ENERGY_LABELS] or _ENERGY_LABELS,
+            key=_energy_rank_or_99),
     )
 
 

@@ -75,12 +75,51 @@
   </div>
 </div>
 
+<!-- Tenant / Contract / Type / Energy — 4 in a row -->
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:24px;" class="mb-4">
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-person-check mr-1" style="color:var(--accent);"></i>{{ _('stats_tenant_dist') }}</div>
+    <div class="chart-wrap" style="height:200px;"><canvas id="chartTenant"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-file-text mr-1" style="color:var(--accent);"></i>{{ _('stats_contract_dist') }}</div>
+    <div class="chart-wrap" style="height:200px;"><canvas id="chartContract"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-house-door mr-1" style="color:var(--accent);"></i>{{ _('stats_type_dist') }}</div>
+    <div class="chart-wrap" style="height:200px;"><canvas id="chartType"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-lightning-charge mr-1" style="color:var(--warning);"></i>{{ _('stats_energy_dist') }}</div>
+    <div class="chart-wrap" style="height:200px;"><canvas id="chartEnergy"></canvas></div>
+  </div>
+</div>
+
+<!-- Area + Floor distribution -->
+<div class="grid-2 mb-4">
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-arrows-angle-expand mr-1" style="color:var(--success);"></i>{{ _('stats_area_dist') }}</div>
+    <div class="chart-wrap" style="height:220px;"><canvas id="chartArea"></canvas></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-building mr-1" style="color:var(--accent);"></i>{{ _('stats_floor_dist') }}</div>
+    <div class="chart-wrap" style="height:220px;"><canvas id="chartFloor"></canvas></div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
 var LANG = '{{ lang }}';
 var PALETTE = ['#10b981','#5e6ad2','#f59e0b','#ef4444','#8b5cf6','#38bdf8','#34d399','#fbbf24','#f87171','#2dd4bf'];
+
+function colors(n) {
+  // 生成 n 种不重复的颜色（HSL 色相均匀分布，饱和度/亮度固定）
+  var c = [];
+  for(var i=0; i<n; i++) c.push('hsl(' + Math.round(i*360/n) + ', 60%, 55%)');
+  return c;
+}
 
 function statusColor(s) {
   var sl = (s||'').toLowerCase();
@@ -190,11 +229,11 @@ function renderCharts(d) {
 
   var cityLabels = d.city_dist.map(function(r){ return r.city; });
   var cityCounts = d.city_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartCity', cityLabels, cityCounts, PALETTE.slice(0, cityLabels.length));
+  buildDoughnutChart('chartCity', cityLabels, cityCounts, colors(cityLabels.length));
 
   var stLabels = d.status_dist.map(function(r){ return r.status; });
   var stCounts = d.status_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartStatus', stLabels, stCounts, stLabels.map(statusColor));
+  buildDoughnutChart('chartStatus', stLabels, stCounts, colors(stLabels.length));
 
   var prLabels = d.price_dist.map(function(r){ return r.range; });
   var prCounts = d.price_dist.map(function(r){ return r.count; });
@@ -203,6 +242,30 @@ function renderCharts(d) {
   var hrLabels = d.hourly_dist.map(function(r){ return r.hour + ':00'; });
   var hrCounts = d.hourly_dist.map(function(r){ return r.count; });
   buildBarChart('chartHourly', hrLabels, hrCounts, '#8b5cf6');
+
+  var tnLabels = d.tenant_dist.map(function(r){ return r.label; });
+  var tnCounts = d.tenant_dist.map(function(r){ return r.count; });
+  buildDoughnutChart('chartTenant', tnLabels, tnCounts, colors(tnLabels.length));
+
+  var ctLabels = d.contract_dist.map(function(r){ return r.label; });
+  var ctCounts = d.contract_dist.map(function(r){ return r.count; });
+  buildDoughnutChart('chartContract', ctLabels, ctCounts, colors(ctLabels.length));
+
+  var tpLabels = d.type_dist.map(function(r){ return r.label; });
+  var tpCounts = d.type_dist.map(function(r){ return r.count; });
+  buildDoughnutChart('chartType', tpLabels, tpCounts, colors(tpLabels.length));
+
+  var enLabels = d.energy_dist.map(function(r){ return r.label; });
+  var enCounts = d.energy_dist.map(function(r){ return r.count; });
+  buildDoughnutChart('chartEnergy', enLabels, enCounts, enLabels.map(function(l){ var v=(l||'').toUpperCase(); if(v.indexOf('A')===0)return'#10b981'; if(v==='B')return'#5e6ad2'; if(v==='C')return'#f59e0b'; if(v==='D')return'#f97316'; if(v==='E')return'#ef4444'; return'#9ca3af'; }));
+
+  var arLabels = d.area_dist.map(function(r){ return r.label; });
+  var arCounts = d.area_dist.map(function(r){ return r.count; });
+  buildBarChart('chartArea', arLabels, arCounts, '#10b981');
+
+  var flLabels = d.floor_dist.map(function(r){ return r.label; });
+  var flCounts = d.floor_dist.map(function(r){ return r.count; });
+  buildBarChart('chartFloor', flLabels, flCounts, '#5e6ad2');
 }
 
 function loadCharts(days) {
@@ -213,6 +276,15 @@ function loadCharts(days) {
 }
 
 loadCharts(30);
+
+// 窗口缩放时刷新所有图表尺寸（CSS 媒体查询改变网格列数后需要）
+var _resizeTimer;
+window.addEventListener('resize', function() {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(function() {
+    Object.values(charts).forEach(function(c) { c.resize(); });
+  }, 150);
+});
 
 new MutationObserver(function(mutations) {
   for(var i = 0; i < mutations.length; i++) {

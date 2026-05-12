@@ -281,3 +281,39 @@ class TestAutoBookConfig:
         ))
         assert u.listing_filter.max_rent == 1000.0
         assert u.auto_book.listing_filter.max_rent == 800.0
+
+
+class TestEnergySanitization:
+    def test_notif_energy_bogus_value_sanitized(self):
+        u = build_user_from_form(_form(
+            ("name", "x"),
+            ("ALLOWED_ENERGY", "banana"),
+        ))
+        assert u.listing_filter.allowed_energy == ""
+
+    def test_auto_book_energy_bogus_value_sanitized(self):
+        u = build_user_from_form(_form(
+            ("name", "x"),
+            ("AUTO_BOOK_ENABLED", "true"),
+            ("AUTO_BOOK_ALLOWED_ENERGY", "banana"),
+        ))
+        assert u.auto_book.listing_filter.allowed_energy == ""
+
+    def test_notif_energy_valid_value_preserved(self):
+        u = build_user_from_form(_form(
+            ("name", "x"),
+            ("ALLOWED_ENERGY", "A"),
+        ))
+        assert u.listing_filter.allowed_energy == "A"
+
+    def test_auto_book_energy_valid_value_preserved(self):
+        u = build_user_from_form(_form(
+            ("name", "x"),
+            ("AUTO_BOOK_ENABLED", "true"),
+            ("AUTO_BOOK_ALLOWED_ENERGY", "B"),
+        ))
+        assert u.auto_book.listing_filter.allowed_energy == "B"
+
+    def test_notif_energy_empty_allowed(self):
+        u = build_user_from_form(_form(("name", "x")))
+        assert u.listing_filter.allowed_energy == ""

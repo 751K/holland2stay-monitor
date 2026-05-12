@@ -46,6 +46,12 @@ def api_charts():
             "status_dist":   st.chart_status_dist(),
             "price_dist":    st.chart_price_dist(),
             "hourly_dist":   st.chart_hourly_dist(),
+            "tenant_dist":   st.chart_tenant_dist(),
+            "contract_dist": st.chart_contract_dist(),
+            "type_dist":     st.chart_type_dist(),
+            "energy_dist":   st.chart_energy_dist(),
+            "area_dist":     st.chart_area_dist(),
+            "floor_dist":    st.chart_floor_dist(),
         }
     finally:
         st.close()

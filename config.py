@@ -32,6 +32,26 @@ from dotenv import load_dotenv
 
 from models import parse_float, parse_int
 
+
+# 已知能耗等级白名单（大写），按优→差排序
+_ENERGY_LABELS = ["A+++", "A++", "A+", "A", "B", "C", "D", "E", "F"]
+
+
+def _energy_rank(label: str) -> int | None:
+    """
+    能耗等级 → 数值排名（越小越好）。
+    仅接受白名单中的标签（精确匹配，大小写不敏感）；
+    未知标签返回 None。
+    """
+    if not isinstance(label, str):
+        return None
+    upper = label.strip().upper()
+    try:
+        return _ENERGY_LABELS.index(upper)
+    except ValueError:
+        return None
+
+
 if TYPE_CHECKING:
     from models import Listing
 
@@ -282,6 +302,19 @@ class ListingFilter:
     e.g. ["Short-stay"] / ["Parking included"]。
     """
 
+    allowed_finishing: list[str] = field(default_factory=list)
+    """
+    装修类型白名单（子串匹配，大小写不敏感）。非空时只通知匹配的房源。
+    e.g. ["Upholstered"] / ["Shell"]。
+    """
+
+    allowed_energy: str = ""
+    """
+    可接受的最低能耗等级。非空时只通知该等级及以上的房源。
+    e.g. "B" → 匹配 A+++/A++/A+/A/B。
+    等级排序：A+++ > A++ > A+ > A > B > C > D > E > F...
+    """
+
     def is_empty(self) -> bool:
         """所有条件均未设置时返回 True，表示全部放行。"""
         return (
@@ -295,6 +328,10 @@ class ListingFilter:
             and not self.allowed_contract
             and not self.allowed_tenant
             and not self.allowed_offer
+            and not self.allowed_finishing
+            and not (
+                isinstance(self.allowed_energy, str) and self.allowed_energy.strip()
+            )
         )
 
     def passes(self, listing: "Listing") -> bool:
@@ -388,6 +425,26 @@ class ListingFilter:
         if self.allowed_offer:
             offer = fm.get("offer", "")
             if not any(a.lower() in offer.lower() for a in self.allowed_offer):
+                return False
+
+        if self.allowed_finishing:
+            furnishing = fm.get("furnishing", "")
+            if not any(a.lower() in furnishing.lower() for a in self.allowed_finishing):
+                return False
+
+        if isinstance(self.allowed_energy, str) and self.allowed_energy.strip():
+            energy = fm.get("energy_label", "").strip().upper()
+            if not energy:
+                return False  # 房源无能耗标签，设置了最低要求则拒绝
+            min_rank = _energy_rank(self.allowed_energy)
+            if min_rank is None:
+                logger.warning("无效能耗等级配置 %r，过滤条件忽略", self.allowed_energy)
+                return False  # 配置了无效等级（如 "banana"）→ fail-closed
+            actual_rank = _energy_rank(energy)
+            if actual_rank is None:
+                logger.warning("房源 %r 能耗标签不在白名单中: %r", listing.name, energy)
+                return False
+            if actual_rank > min_rank:
                 return False
 
         return True

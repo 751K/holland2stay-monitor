@@ -71,7 +71,7 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
-from models import Listing, parse_features_list, parse_float
+from models import Listing, parse_features_list, parse_float, parse_int
 
 logger = logging.getLogger(__name__)
 
@@ -547,7 +547,10 @@ class Storage:
         ).fetchall()
         results: list[dict] = []
         for r in rows:
-            feats = json.loads(r["features"] or "[]")
+            try:
+                feats = json.loads(r["features"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                feats = []
             feat_map = parse_features_list(feats)
             address = ", ".join(filter(None, [r["name"], r["city"] or ""]))
             results.append({
@@ -883,6 +886,120 @@ class Storage:
             counts[local_hour] = counts.get(local_hour, 0) + 1
 
         return [{"hour": h, "count": counts[h]} for h in range(24)]
+
+    def _count_feature_values(self, category: str) -> list[dict]:
+        """统计指定分类的不重复值分布。"""
+        rows = self._conn.execute(
+            "SELECT features FROM listings WHERE features IS NOT NULL AND features != '[]'"
+        ).fetchall()
+        counts: dict[str, int] = {}
+        prefix = f"{category}: "
+        for (features_json,) in rows:
+            try:
+                feats = json.loads(features_json)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("图表统计: 跳过损坏的 features JSON: %.80s", features_json)
+                continue
+            for f in feats:
+                if f.startswith(prefix):
+                    val = f[len(prefix):].strip()
+                    if val:
+                        counts[val] = counts.get(val, 0) + 1
+                    break  # 每条房源只计一次
+        return [{"label": k, "count": v} for k, v in
+                sorted(counts.items(), key=lambda x: -x[1])]
+
+    def chart_tenant_dist(self) -> list[dict]:
+        """按租客要求统计房源分布。"""
+        return self._count_feature_values("Tenant")
+
+    def chart_contract_dist(self) -> list[dict]:
+        """按合同类型统计房源分布。"""
+        return self._count_feature_values("Contract")
+
+    def chart_type_dist(self) -> list[dict]:
+        """按户型统计房源分布（Studio → Loft → 1 → 2 → 3 → 4+）。"""
+        data = self._count_feature_values("Type")
+        def _rank(label: str) -> tuple:
+            lower = label.lower().strip()
+            if "studio" in lower:
+                return (0, 0)
+            if "loft" in lower:
+                return (0, 1)
+            try:
+                return (1, int(lower))
+            except ValueError:
+                pass
+            return (2, 0)
+        data.sort(key=lambda r: _rank(r["label"]))
+        return data
+
+    def chart_energy_dist(self) -> list[dict]:
+        """按能耗标签统计房源分布（按等级排序，A+++ → D/E/F）。"""
+        data = self._count_feature_values("Energy")
+        # 能耗标签排序：A+++ > A++ > A+ > A > B > C > D > E > F...
+        # 越多的 + 越靠前，同级按字母排，无明确等级的放最后
+        def _rank(label: str) -> tuple:
+            upper = label.upper().strip()
+            if not upper:
+                return (999, 0)
+            pluses = upper.count("+")
+            base = upper.replace("+", "").strip()
+            letter_order = ord(base[0]) if base and base[0].isalpha() else 999
+            return (letter_order, -pluses)  # 字母小的靠前，+ 多的在同字母里靠前
+        data.sort(key=lambda r: _rank(r["label"]))
+        return data
+
+    def _bucketed_number_dist(
+        self, category: str, buckets: dict[str, int], classifier
+    ) -> list[dict]:
+        """
+        从 features JSON 提取数值属性并归入桶。
+
+        classifier(number, buckets) → None：将 number 归入对应桶（直接修改 buckets）。
+        """
+        rows = self._conn.execute(
+            "SELECT features FROM listings WHERE features IS NOT NULL AND features != '[]'"
+        ).fetchall()
+        prefix = f"{category}: "
+        for (features_json,) in rows:
+            try:
+                feats = json.loads(features_json)
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("图表统计: 跳过损坏的 features JSON: %.80s", features_json)
+                continue
+            for f in feats:
+                if f.startswith(prefix):
+                    val = f[len(prefix):].strip()
+                    if val:
+                        classifier(val, buckets)
+                    break  # 每条房源只计一次
+        return [{"label": k, "count": v} for k, v in buckets.items()]
+
+    def chart_area_dist(self) -> list[dict]:
+        """按面积区间统计房源分布。"""
+        buckets = {"<20 m²": 0, "20-30 m²": 0, "30-50 m²": 0, "50-80 m²": 0, ">80 m²": 0}
+        def _classify(val: str, b: dict):
+            area = parse_float(val)
+            if area is None: return
+            if area < 20:   b["<20 m²"] += 1
+            elif area < 30: b["20-30 m²"] += 1
+            elif area < 50: b["30-50 m²"] += 1
+            elif area < 80: b["50-80 m²"] += 1
+            else:           b[">80 m²"] += 1
+        return self._bucketed_number_dist("Area", buckets, _classify)
+
+    def chart_floor_dist(self) -> list[dict]:
+        """按楼层分布统计房源。"""
+        buckets = {"Ground": 0, "1-2": 0, "3-5": 0, "6+": 0}
+        def _classify(val: str, b: dict):
+            floor = parse_int(val)
+            if floor is None: return
+            if floor == 0:    b["Ground"] += 1
+            elif floor <= 2:  b["1-2"] += 1
+            elif floor <= 5:  b["3-5"] += 1
+            else:             b["6+"] += 1
+        return self._bucketed_number_dist("Floor", buckets, _classify)
 
     # ------------------------------------------------------------------ #
     # Web 通知

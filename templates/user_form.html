@@ -229,12 +229,31 @@
             <div class="ms-dropdown">{% set sel_tenant = lf.allowed_tenant if lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_TENANT" value="{{ val }}"{% if val in sel_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
           </div>
         </div>
+      </div>
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
         <div class="form-group">
           <label class="form-label">{{ _('user_form_promo') }}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown">{% set sel_offer = lf.allowed_offer if lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_OFFER" value="{{ o }}"{% if o in sel_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
           </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">{{ _('filter_finishing') }}</label>
+          <div class="multi-select">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown">{% set sel_fin = lf.allowed_finishing if lf else [] %}{% for f in finishing_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_FINISHING" value="{{ f }}"{% if f in sel_fin %} checked{% endif %}> {{ f }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">{{ _('filter_energy') }}</label>
+          {% set cur_en = lf.allowed_energy if lf else '' %}
+          <select name="ALLOWED_ENERGY" class="form-select" style="font-size:14px;">
+            <option value="">{{ _('filter_min_energy') }}</option>
+            {% for e in energy_options %}
+              <option value="{{ e }}" {% if e == cur_en %}selected{% endif %}>{{ e }}</option>
+            {% endfor %}
+          </select>
         </div>
       </div>
     </div>
@@ -319,9 +338,24 @@
         <div class="form-group">
           <label class="form-label">{{ _('user_form_tenant') }}</label>
           <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_tenant = ab_lf.allowed_tenant if ab_lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TENANT" value="{{ val }}"{% if val in ab_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+      </div>
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
         <div class="form-group">
           <label class="form-label">{{ _('user_form_promo') }}</label>
           <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_offer = ab_lf.allowed_offer if ab_lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OFFER" value="{{ o }}"{% if o in ab_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div></div></div>
+        <div class="form-group">
+          <label class="form-label">{{ _('filter_finishing') }}</label>
+          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_fin = ab_lf.allowed_finishing if ab_lf else [] %}{% for f in finishing_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_FINISHING" value="{{ f }}"{% if f in ab_fin %} checked{% endif %}> {{ f }}</label>{% endfor %}</div></div></div>
+        <div class="form-group">
+          <label class="form-label">{{ _('filter_energy') }}</label>
+          {% set ab_en = ab_lf.allowed_energy if ab_lf else '' %}
+          <select name="AUTO_BOOK_ALLOWED_ENERGY" class="form-select" style="font-size:14px;">
+            <option value="">{{ _('filter_min_energy') }}</option>
+            {% for e in energy_options %}
+              <option value="{{ e }}" {% if e == ab_en %}selected{% endif %}>{{ e }}</option>
+            {% endfor %}
+          </select>
+        </div>
       </div>
 
       <div class="alert alert-info mt-4">
@@ -465,15 +499,18 @@ if (window.requestIdleCallback) {
 
 // ── 复制通知过滤条件到自动预订 ────────────────────────────
 function copyNotifFilters() {
-  // 数值字段
+  // 数值字段 + 能耗（单选）
   ['MAX_RENT','MIN_AREA','MIN_FLOOR'].forEach(function(name){
     var src = document.querySelector('input[name="' + name + '"]');
     var dst = document.querySelector('input[name="AUTO_BOOK_' + name + '"]');
     if(src && dst) dst.value = src.value;
   });
+  var srcEn = document.querySelector('select[name="ALLOWED_ENERGY"]');
+  var dstEn = document.querySelector('select[name="AUTO_BOOK_ALLOWED_ENERGY"]');
+  if(srcEn && dstEn) dstEn.value = srcEn.value;
   // 多选字段：静默复制 checked 状态（不触发 change 事件，避免 loadNeighborhoods
   // 用服务器初始值覆盖当前 DOM 中的片区勾选）
-  ['OCCUPANCY','TYPES','CITIES','NEIGHBORHOODS','CONTRACT','TENANT','OFFER'].forEach(function(suffix){
+  ['OCCUPANCY','TYPES','CITIES','NEIGHBORHOODS','CONTRACT','TENANT','OFFER','FINISHING'].forEach(function(suffix){
     var srcCbs = document.querySelectorAll('input[name="ALLOWED_' + suffix + '"]');
     var dstCbs = document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_' + suffix + '"]');
     srcCbs.forEach(function(scb){
@@ -482,35 +519,12 @@ function copyNotifFilters() {
       });
     });
   });
-  // 手动刷新每个自动预订 multi-select 的标签（不依赖 _update 闭包中的旧 checkbox 引用）
+  // 刷新每个自动预订 multi-select 的标签显示
   document.querySelectorAll('.multi-select').forEach(function(ms){
     var cbs = ms.querySelectorAll('input[type="checkbox"]');
     var hasAb = false;
     cbs.forEach(function(cb){ if(cb.name.indexOf('AUTO_BOOK_') === 0) hasAb = true; });
-    if(!hasAb) return;
-    var trigger = ms.querySelector('.ms-trigger');
-    var textEl = ms.querySelector('.ms-text');
-    if(!trigger || !textEl) return;
-    // 清除旧标签
-    trigger.querySelectorAll('.ms-tag').forEach(function(t){ t.remove(); });
-    var sel = [];
-    cbs.forEach(function(cb){ if(cb.checked) sel.push(cb.parentElement.textContent.trim()); });
-    if(sel.length === 0){
-      textEl.style.display = '';
-    } else {
-      textEl.style.display = 'none';
-      sel.forEach(function(label){
-        var tag = document.createElement('span');
-        tag.className = 'ms-tag';
-        tag.textContent = label;
-        var rm = document.createElement('span');
-        rm.className = 'ms-rm';
-        rm.textContent = '×';
-        rm.onclick = function(e){ e.stopPropagation(); tag.remove(); };
-        tag.appendChild(rm);
-        trigger.insertBefore(tag, trigger.lastElementChild);
-      });
-    }
+    if (hasAb) window.refreshMultiSelect(ms);
   });
 }
 </script>

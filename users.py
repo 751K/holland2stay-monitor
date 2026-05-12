@@ -126,6 +126,8 @@ def _lf_from_dict(d: dict) -> ListingFilter:
         allowed_tenant=d.get("allowed_tenant", []),
         allowed_offer=d.get("allowed_offer", []),
         allowed_cities=d.get("allowed_cities", []),
+        allowed_finishing=d.get("allowed_finishing", []),
+        allowed_energy=d.get("allowed_energy", "") if isinstance(d.get("allowed_energy", ""), str) else "",
     )
 
 
