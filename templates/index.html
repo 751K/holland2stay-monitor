@@ -88,7 +88,7 @@
 </div>
 
 <!-- Two column layout -->
-<div class="grid-7-5">
+<div class="grid-7-5" style="grid-template-columns:8fr 4fr;">
 
   <!-- Recent listings -->
   <div class="card">
@@ -98,7 +98,7 @@
     </div>
     <div style="overflow-x:auto;">
       <table class="table-minimal">
-        <thead><tr><th>{{ _('col_listing') }}</th><th>{{ _('col_status') }}</th><th>{{ _('col_rent') }}</th><th>{{ _('col_occupancy') }}</th><th>{{ _('col_found') }}</th></tr></thead>
+        <thead><tr><th>{{ _('col_listing') }}</th><th>{{ _('col_building') }}</th><th>{{ _('col_status') }}</th><th>{{ _('col_rent') }}</th><th>{{ _('col_occupancy') }}</th><th>{{ _('col_found') }}</th></tr></thead>
         <tbody>
         {% for l in recent %}
           {% set fm = l.features | parse_features %}
@@ -107,6 +107,7 @@
               <a href="{{ l.url }}" target="_blank" class="cell-name">{{ l.name }}</a>
               {% if fm.area %}<span class="cell-secondary ml-1">{{ fm.area }}</span>{% endif %}
             </td>
+            <td style="font-weight:550;color:var(--text)">{{ fm.building or '—' }}</td>
             <td>
               {% set sl = l.status | lower %}
               {% if 'book' in sl %}<span class="badge badge-book">{{ l.status }}</span>
@@ -118,7 +119,7 @@
             <td class="cell-secondary">{{ l.first_seen | time_ago }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="5" class="text-center py-4 text-tertiary">{{ _('no_data') }}</td></tr>
+          <tr><td colspan="6" class="text-center py-4 text-tertiary">{{ _('no_data') }}</td></tr>
         {% endfor %}
         </tbody>
       </table>

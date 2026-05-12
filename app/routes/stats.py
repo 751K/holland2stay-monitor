@@ -45,6 +45,7 @@ def api_charts():
             "city_dist":     st.chart_city_dist(),
             "status_dist":   st.chart_status_dist(),
             "price_dist":    st.chart_price_dist(),
+            "hourly_dist":   st.chart_hourly_dist(),
         }
     finally:
         st.close()

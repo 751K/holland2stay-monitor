@@ -127,7 +127,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   margin-left:var(--sidebar-w);
   flex:1;min-width:0;
   padding:36px 40px 60px;
-  max-width:calc(1280px + var(--sidebar-w));
+  /* 默认：移动端无需限制（已在媒体查询中设 max-width:100%） */
 }
 
 /* Mobile nav toggle — keep border for visibility */
@@ -664,4 +664,18 @@ html.theme-transitioning *::after{
   .grid-2,.grid-7-5,.grid-3{grid-template-columns:1fr}
   .user-grid{grid-template-columns:1fr}
   .cal-day{min-height:60px}
+}
+
+/* ── Desktop breakpoints ──────────────────────────────────────────── */
+/* 默认桌面：填满可用宽度，留少量呼吸空间 */
+@media(min-width:769px){
+  .main-content{
+    max-width:calc(100vw - var(--sidebar-w) - 60px);
+  }
+}
+/* 4K+：防止超宽屏内容过于松散 */
+@media(min-width:2560px){
+  .main-content{
+    max-width:calc(2000px + var(--sidebar-w));
+  }
 }

@@ -815,8 +815,6 @@ class Storage:
         """
         按租金区间统计房源数量，供「价格分布」柱状图使用。
 
-        区间划分（固定）：<€600 / €600-700 / €700-800 / €800-900 / €900-1000 / >€1000
-
         Returns
         -------
         list[{"range": str, "count": int}]，按区间顺序排列（非降序）
@@ -830,12 +828,15 @@ class Storage:
         ).fetchall()
 
         buckets: dict[str, int] = {
-            "<€600":      0,
-            "€600-700":   0,
-            "€700-800":   0,
-            "€800-900":   0,
-            "€900-1000":  0,
-            ">€1000":     0,
+            "<€600":       0,
+            "€600-700":    0,
+            "€700-800":    0,
+            "€800-900":    0,
+            "€900-1000":   0,
+            "€1000-1200":  0,
+            "€1200-1400":  0,
+            "€1400-1600":  0,
+            ">€1600":      0,
         }
         for (raw,) in rows:
             price = parse_float(raw)
@@ -851,10 +852,37 @@ class Storage:
                 buckets["€800-900"] += 1
             elif price < 1000:
                 buckets["€900-1000"] += 1
+            elif price < 1200:
+                buckets["€1000-1200"] += 1
+            elif price < 1400:
+                buckets["€1200-1400"] += 1
+            elif price < 1600:
+                buckets["€1400-1600"] += 1
             else:
-                buckets[">€1000"] += 1
+                buckets[">€1600"] += 1
 
         return [{"range": k, "count": v} for k, v in buckets.items()]
+
+    def chart_hourly_dist(self) -> list[dict]:
+        """
+        按小时统计房源上线时间分布（荷兰本地时间 0–23 点）。
+
+        Returns
+        -------
+        list[{"hour": 0-23, "count": int}]，按小时排序
+        """
+        tz = ZoneInfo(self._tz)
+        rows = self._conn.execute(
+            "SELECT first_seen FROM listings WHERE first_seen IS NOT NULL"
+        ).fetchall()
+
+        counts: dict[int, int] = {h: 0 for h in range(24)}
+        for (ts,) in rows:
+            utc_dt = datetime.fromisoformat(ts)
+            local_hour = utc_dt.astimezone(tz).hour
+            counts[local_hour] = counts.get(local_hour, 0) + 1
+
+        return [{"hour": h, "count": counts[h]} for h in range(24)]
 
     # ------------------------------------------------------------------ #
     # Web 通知

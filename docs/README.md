@@ -79,7 +79,7 @@ python -m pytest tests/ -v
 | Multi-channel notifications | ✅ Done | iMessage / Telegram / Email / WhatsApp (Twilio) |
 | Web panel notifications | ✅ Done | Real-time bell + toasts via SSE, works on any platform |
 | Notification filters | ✅ Done | Per-user: rent, area, floor, type, occupancy, city, neighborhood, contract, tenant, promo |
-| Multi-select filter UI | ✅ Done | Dropdown checkboxes with i18n labels; city-dependent neighborhoods |
+| Multi-select filter UI | ✅ Done | Dropdown checkboxes with i18n labels; listing filters for city, tenant, contract |
 | Short-stay detection | ✅ Done | Contract / Tenant / Offer tags extracted from GraphQL; per-user filters |
 | Cross-platform builds | ✅ Done | GitHub Actions builds macOS .dmg + Windows .exe on tag push |
 | Geocoding (Photon) | ✅ Done | Fast map geocoding via Komoot Photon API; manual trigger button |
@@ -93,7 +93,7 @@ python -m pytest tests/ -v
 | Multi-user support | ✅ Done | Each user has independent channels / filters / booker settings |
 | VPS / Docker ready | ✅ Done | iMessage gracefully skipped on non-macOS; web panel takes over |
 | Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
-| Visualization | ✅ Done | 30-day trends, city/status distribution, price histogram |
+| Visualization | ✅ Done | 30-day trends, city/status/price distribution, 24h listing drop time chart |
 | Move-in calendar | ✅ Done | Calendar view filtered by city |
 | Map view | ✅ Done | Leaflet.js + OpenStreetMap with auto-geocoding |
 | i18n (中/EN) | ✅ Done | One-click language switch, cookie-persisted |
@@ -204,7 +204,7 @@ This reduces the delay between detecting availability and reaching the server to
 - **Listings** — filter by status, keyword search, sortable table view
 - **Map** — Leaflet.js interactive map with auto-geocoding (Nominatim → cached coordinates), color-coded markers (green=direct book, orange=lottery, grey=other), popup details, dark/light tile filters
 - **Calendar** — month grid with city filter, click-to-expand date detail panel
-- **Stats** — Chart.js trends (new listings, status changes), doughnut distributions (city, status), price histogram, 7/30/90-day range selector
+- **Stats** — Chart.js trends (new listings, status changes), doughnut distributions (city, status), price histogram (9 buckets up to >€1600), 24h listing drop time chart, 7/30/90-day range selector
 - **Users** — CRUD, enable/disable, per-user notification channels & filters & auto-booking config, one-click per-channel test
 - **Global Settings** — polling intervals, adaptive smart-polling params, monitored cities, save-and-reload workflow
 - **Guest mode** — login page "Guest mode" button lets anyone view the panel read-only without a password; set `WEB_GUEST_MODE=false` to disable; admin routes (Users / Settings / System / Logs) remain fully restricted

@@ -284,7 +284,12 @@
         </div>
       </div>
 
-      <div class="text-xs font-semibold text-secondary mb-2">{{ _('user_form_ab_filter') }}</div>
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-xs font-semibold text-secondary">{{ _('user_form_ab_filter') }}</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="copyNotifFilters()" style="font-size:11px;">
+          <i class="bi bi-copy mr-1"></i>{{ _('user_form_copy_filter') }}
+        </button>
+      </div>
       {% set ab_lf = ab.listing_filter if ab else none %}
       <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
         <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MAX_RENT" value="{{ ab_lf.max_rent | int if ab_lf and ab_lf.max_rent else '' }}"></div>
@@ -456,6 +461,57 @@ if (window.requestIdleCallback) {
   requestIdleCallback(function() { _initNeighborhoods(); });
 } else {
   setTimeout(function() { _initNeighborhoods(); }, 200);
+}
+
+// ── 复制通知过滤条件到自动预订 ────────────────────────────
+function copyNotifFilters() {
+  // 数值字段
+  ['MAX_RENT','MIN_AREA','MIN_FLOOR'].forEach(function(name){
+    var src = document.querySelector('input[name="' + name + '"]');
+    var dst = document.querySelector('input[name="AUTO_BOOK_' + name + '"]');
+    if(src && dst) dst.value = src.value;
+  });
+  // 多选字段：静默复制 checked 状态（不触发 change 事件，避免 loadNeighborhoods
+  // 用服务器初始值覆盖当前 DOM 中的片区勾选）
+  ['OCCUPANCY','TYPES','CITIES','NEIGHBORHOODS','CONTRACT','TENANT','OFFER'].forEach(function(suffix){
+    var srcCbs = document.querySelectorAll('input[name="ALLOWED_' + suffix + '"]');
+    var dstCbs = document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_' + suffix + '"]');
+    srcCbs.forEach(function(scb){
+      dstCbs.forEach(function(dcb){
+        if(dcb.value === scb.value) dcb.checked = scb.checked;
+      });
+    });
+  });
+  // 手动刷新每个自动预订 multi-select 的标签（不依赖 _update 闭包中的旧 checkbox 引用）
+  document.querySelectorAll('.multi-select').forEach(function(ms){
+    var cbs = ms.querySelectorAll('input[type="checkbox"]');
+    var hasAb = false;
+    cbs.forEach(function(cb){ if(cb.name.indexOf('AUTO_BOOK_') === 0) hasAb = true; });
+    if(!hasAb) return;
+    var trigger = ms.querySelector('.ms-trigger');
+    var textEl = ms.querySelector('.ms-text');
+    if(!trigger || !textEl) return;
+    // 清除旧标签
+    trigger.querySelectorAll('.ms-tag').forEach(function(t){ t.remove(); });
+    var sel = [];
+    cbs.forEach(function(cb){ if(cb.checked) sel.push(cb.parentElement.textContent.trim()); });
+    if(sel.length === 0){
+      textEl.style.display = '';
+    } else {
+      textEl.style.display = 'none';
+      sel.forEach(function(label){
+        var tag = document.createElement('span');
+        tag.className = 'ms-tag';
+        tag.textContent = label;
+        var rm = document.createElement('span');
+        rm.className = 'ms-rm';
+        rm.textContent = '×';
+        rm.onclick = function(e){ e.stopPropagation(); tag.remove(); };
+        tag.appendChild(rm);
+        trigger.insertBefore(tag, trigger.lastElementChild);
+      });
+    }
+  });
 }
 </script>
 {% endblock %}

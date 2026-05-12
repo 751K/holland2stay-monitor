@@ -67,6 +67,14 @@
   </div>
 </div>
 
+<!-- Hourly distribution (full width) -->
+<div class="grid-1 mb-4">
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-clock mr-1" style="color:var(--accent);"></i>{{ _('stats_hourly_dist') }}</div>
+    <div class="chart-wrap" style="height:200px;"><canvas id="chartHourly"></canvas></div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -191,6 +199,10 @@ function renderCharts(d) {
   var prLabels = d.price_dist.map(function(r){ return r.range; });
   var prCounts = d.price_dist.map(function(r){ return r.count; });
   buildBarChart('chartPrice', prLabels, prCounts, '#5e6ad2');
+
+  var hrLabels = d.hourly_dist.map(function(r){ return r.hour + ':00'; });
+  var hrCounts = d.hourly_dist.map(function(r){ return r.count; });
+  buildBarChart('chartHourly', hrLabels, hrCounts, '#8b5cf6');
 }
 
 function loadCharts(days) {

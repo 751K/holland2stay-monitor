@@ -23,12 +23,17 @@
       </div>
       <div class="form-group" style="margin-bottom:0;min-width:160px;">
         <label class="form-label">{{ _('filter_city') }}</label>
-        <select name="city" class="form-select" style="font-size:12px;">
-          <option value="">{{ _('filter_all_cities') }}</option>
-          {% for c in cities %}
-            <option value="{{ c }}" {% if c == city_filter %}selected{% endif %}>{{ c }}</option>
-          {% endfor %}
-        </select>
+        <div class="multi-select" style="min-width:140px;">
+          <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
+            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+          </div>
+          <div class="ms-dropdown">
+            {% for c in cities %}
+            <label class="ms-option"><input type="checkbox" name="city" value="{{ c }}" {% if c in city_filters %}checked{% endif %}> {{ c }}</label>
+            {% endfor %}
+          </div>
+        </div>
       </div>
       <div class="form-group" style="margin-bottom:0;min-width:180px;">
         <label class="form-label">{{ _('filter_name') }}</label>
@@ -42,11 +47,34 @@
         <label class="form-label">{{ _('filter_min_area') }}</label>
         <input type="number" name="min_area" class="form-input" placeholder="m²" value="{{ min_area or '' }}" style="font-size:12px;width:80px;">
       </div>
+      <div class="form-group" style="margin-bottom:0;min-width:150px;">
+        <label class="form-label">{{ _('filter_contract') }}</label>
+        <select name="contract" class="form-select" style="font-size:12px;">
+          <option value="">{{ _('filter_all_contract') }}</option>
+          {% for c in contracts %}
+            <option value="{{ c }}" {% if c == contract_filter %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0;min-width:160px;">
+        <label class="form-label">{{ _('filter_tenant') }}</label>
+        <div class="multi-select" style="min-width:140px;">
+          <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
+            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+          </div>
+          <div class="ms-dropdown">
+            {% for t in tenants %}
+            <label class="ms-option"><input type="checkbox" name="tenant" value="{{ t }}" {% if t in tenant_filters %}checked{% endif %}> {{ t }}</label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
       <div style="padding-top:20px;">
         <button type="submit" class="btn btn-primary btn-sm">
           <i class="bi bi-search mr-1"></i>{{ _('filter_btn') }}
         </button>
-        {% if status_filter or search or city_filter or max_rent or min_area %}
+        {% if status_filter or search or city_filters or max_rent or min_area or contract_filter or tenant_filters %}
           <a href="{{ url_for('listings') }}" class="btn btn-ghost btn-sm ml-1">
             <i class="bi bi-x mr-1"></i>{{ _('filter_clear') }}
           </a>
@@ -81,6 +109,7 @@
         <tr>
           <td>
             <a href="{{ l.url }}" target="_blank" class="cell-name">{{ l.name }}</a>
+            {% if fm.building %}<span class="cell-secondary ml-1">· {{ fm.building }}</span>{% endif %}
           </td>
           <td>
             {% if 'book' in sl %}

@@ -16,6 +16,15 @@ from app.db import storage
 from app.process_ctrl import monitor_pid
 
 
+def _feature_contains(row: dict, category: str, value: str) -> bool:
+    """检查房源 features JSON 中指定分类是否包含某值（子串匹配，大小写不敏感）。"""
+    feats = _json.loads(row.get("features", "[]"))
+    for f in feats:
+        if f.startswith(f"{category}: ") and value.lower() in f.lower():
+            return True
+    return False
+
+
 @login_required
 def index() -> str:
     city_filter = request.args.get("city", "")
@@ -51,26 +60,35 @@ def index() -> str:
 def listings() -> str:
     from models import parse_features_list, parse_float
 
-    status_filter = request.args.get("status", "")
-    name_query    = request.args.get("q", "")
-    city_filter   = request.args.get("city", "")
-    max_rent_str  = request.args.get("max_rent", "")
-    min_area_str  = request.args.get("min_area", "")
+    status_filter  = request.args.get("status", "")
+    name_query     = request.args.get("q", "")
+    city_filters   = request.args.getlist("city")  # 多选
+    max_rent_str   = request.args.get("max_rent", "")
+    min_area_str   = request.args.get("min_area", "")
+    contract_filter = request.args.get("contract", "")
+    tenant_filters = request.args.getlist("tenant")  # 多选
     max_rent = parse_float(max_rent_str) if max_rent_str.strip() else None
     min_area = parse_float(min_area_str) if min_area_str.strip() else None
     st = storage()
     try:
+        # 单城市走 SQL 过滤，多城市或不选走 Python 过滤
+        sql_city = city_filters[0] if len(city_filters) == 1 else None
         rows = st.get_all_listings(
             status=status_filter or None,
             search=name_query or None,
-            city=city_filter or None,
+            city=sql_city,
             limit=500,
         )
-        statuses = st.get_distinct_statuses()
-        city_list = st.get_distinct_cities()
+        statuses   = st.get_distinct_statuses()
+        city_list  = st.get_distinct_cities()
+        contracts  = st.get_feature_values("Contract")
+        tenants    = st.get_feature_values("Tenant")
     finally:
         st.close()
-    # Python 端租金/面积过滤（数据量小，无需 SQL 复杂度）
+    # Python 端过滤（数据量小，无需 SQL 复杂度）
+    if len(city_filters) > 1:
+        cf_lower = {c.lower() for c in city_filters}
+        rows = [r for r in rows if (r.get("city") or "").lower() in cf_lower]
     if max_rent is not None:
         rows = [r for r in rows if (pv := parse_float(r.get("price_raw", ""))) is not None and pv <= max_rent]
     if min_area is not None:
@@ -78,11 +96,19 @@ def listings() -> str:
             fm = parse_features_list(_json.loads(r.get("features", "[]")))
             return parse_float(fm.get("area", ""))
         rows = [r for r in rows if (a := _get_area(r)) is not None and a >= min_area]
+    # 合同类型 / 租客要求：子串匹配（与 ListingFilter 一致）
+    if contract_filter:
+        rows = [r for r in rows if _feature_contains(r, "Contract", contract_filter)]
+    if tenant_filters:
+        rows = [r for r in rows if any(_feature_contains(r, "Tenant", t) for t in tenant_filters)]
     return render_template(
         "listings.html",
         listings=rows, statuses=statuses,
-        status_filter=status_filter, search=name_query, city_filter=city_filter,
-        cities=city_list, max_rent=max_rent_str, min_area=min_area_str,
+        status_filter=status_filter, search=name_query, city_filters=city_filters,
+        cities=city_list,
+        max_rent=max_rent_str, min_area=min_area_str,
+        contract_filter=contract_filter, tenant_filters=tenant_filters,
+        contracts=contracts, tenants=tenants,
     )
 
 
