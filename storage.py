@@ -75,6 +75,11 @@ from models import Listing, parse_features_list, parse_float, parse_int
 
 logger = logging.getLogger(__name__)
 
+# 荷兰城市口语别称 → 正式名（提升 Photon 地理编码准确率）
+_CITY_FORMAL: dict[str, str] = {
+    "Den Bosch": "'s-Hertogenbosch",
+}
+
 
 def _now_iso() -> str:
     """返回当前 UTC 时间的 ISO 8601 字符串，用于 first_seen / last_seen / changed_at。"""
@@ -552,7 +557,10 @@ class Storage:
             except (json.JSONDecodeError, TypeError):
                 feats = []
             feat_map = parse_features_list(feats)
-            address = ", ".join(filter(None, [r["name"], r["city"] or ""]))
+            # 补充城市正式名 + 国家后缀，提升 Photon 解析准确率
+            city = r["city"] or ""
+            city_full = _CITY_FORMAL.get(city, city)
+            address = ", ".join(filter(None, [r["name"], city_full, "Netherlands"]))
             results.append({
                 "id": r["id"],
                 "name": r["name"],

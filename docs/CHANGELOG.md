@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.2.7 (2026-05-13)
+
+### 修复
+
+- **Den Bosch 地理编码解析到德国**：Photon 将 "Den Bosch"（口语别称）匹配到德国同名小镇而非荷兰的 's-Hertogenbosch。修复：`get_map_listings` 地址拼接追加 `"Netherlands"` 国家限定；新增 `_CITY_FORMAL` 别称映射 `"Den Bosch" → "'s-Hertogenbosch"`。后续有其他口语别称只需在映射表中加一条。
+
+---
+
 ## v1.2.6 (2026-05-13)
 
 ### 统计页 10 图表 + 筛选增强
