@@ -75,6 +75,16 @@ function getLineColor(line) {
 }
 
 // ── File tabs ──
+const LOG_LABELS = {
+  monitor: '{{ _("logs_monitor") }}',
+  errors:  '{{ _("logs_errors") }}',
+  web:     '{{ _("logs_web") }}',
+};
+
+function logLabel(key) {
+  return LOG_LABELS[key] || key;
+}
+
 function buildTabs(files) {
   logFiles = files;
   const tabs = document.getElementById('log-tabs');
@@ -83,9 +93,8 @@ function buildTabs(files) {
     const btn = document.createElement('button');
     btn.className = 'log-tab' + (f.key === currentFile ? ' active' : '');
     btn.dataset.file = f.key;
-    const label = f.key === 'errors' ? '{{ _("logs_errors") }}' : '{{ _("logs_monitor") }}';
     const kb = (f.size / 1024).toFixed(1);
-    btn.textContent = label + ' (' + kb + ' KB)';
+    btn.textContent = logLabel(f.key) + ' (' + kb + ' KB)';
     btn.onclick = () => switchFile(f.key);
     tabs.appendChild(btn);
   });
@@ -177,8 +186,7 @@ function updateTabSize(fileKey, kb) {
   const tabs = document.querySelectorAll('.log-tab');
   tabs.forEach(t => {
     if (t.dataset.file === fileKey) {
-      const label = fileKey === 'errors' ? '{{ _("logs_errors") }}' : '{{ _("logs_monitor") }}';
-      t.textContent = label + ' (' + kb + ' KB)';
+      t.textContent = logLabel(fileKey) + ' (' + kb + ' KB)';
     }
   });
 }

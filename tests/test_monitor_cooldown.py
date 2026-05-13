@@ -44,6 +44,8 @@ class _FakeCfg:
     peak_interval: int = 60
     peak_start: str = "08:30"
     peak_end: str = "10:00"
+    peak_start_2: str = "13:30"
+    peak_end_2: str = "15:00"
     peak_weekdays_only: bool = True
     min_interval: int = 15
     jitter_ratio: float = 0.20
@@ -69,7 +71,7 @@ class TestGetInterval:
         import datetime as _dt
 
         ams = ZoneInfo("Europe/Amsterdam")
-        fake_now = _dt.datetime(2026, 5, 13, 14, 0, 0, tzinfo=ams)  # afternoon
+        fake_now = _dt.datetime(2026, 5, 13, 11, 0, 0, tzinfo=ams)  # between windows
 
         monkeypatch.setattr(monitor, "datetime", MagicMock(now=lambda tz=None: fake_now))
         interval, is_peak = monitor._get_interval(_FakeCfg())

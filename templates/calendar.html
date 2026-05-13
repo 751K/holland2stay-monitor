@@ -272,10 +272,11 @@ function selectDate(ymd, listings) {
     var row = document.createElement('div');
     row.className = 'listing-row';
 
-    // ── 上行：名称链接 + 状态徽章 ──
+    // ── 上行：名称 + 楼盘（左）+ 状态徽章（右）──
     var topDiv = document.createElement('div');
     topDiv.className = 'flex justify-between items-start gap-2';
 
+    var nameGroup = document.createElement('div');
     var a = document.createElement('a');
     // 只允许 http(s) 协议，防止 javascript: 注入
     a.href = (l.url && /^https?:\/\//i.test(l.url)) ? l.url : '#';
@@ -284,7 +285,16 @@ function selectDate(ymd, listings) {
     a.className = 'font-medium text-sm';
     a.style.color = 'var(--text)';
     a.textContent = l.name;
-    topDiv.appendChild(a);
+    nameGroup.appendChild(a);
+
+    if (l.building) {
+      var bldName = document.createElement('div');
+      bldName.className = 'text-xs';
+      bldName.style.color = 'var(--text2)';
+      bldName.textContent = l.building;
+      nameGroup.appendChild(bldName);
+    }
+    topDiv.appendChild(nameGroup);
 
     var badge = document.createElement('span');
     badge.className = 'badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' text-xs';
@@ -298,9 +308,6 @@ function selectDate(ymd, listings) {
 
     var priceSpan = document.createElement('span');
     priceSpan.className = 'text-xs text-secondary';
-    var priceIcon = document.createElement('i');
-    priceIcon.className = 'bi bi-currency-euro mr-1';
-    priceSpan.appendChild(priceIcon);
     priceSpan.appendChild(document.createTextNode(priceShort(l.price_raw) + T.perMonth));
     bottomDiv.appendChild(priceSpan);
 

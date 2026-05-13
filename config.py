@@ -501,8 +501,10 @@ class Config:
     --------------------------
     peak_interval       : 高峰期轮询间隔初始值（秒），对应 .env PEAK_INTERVAL；
                           也是自适应轮询的起点，被限流后会在此值上翻倍退避
-    peak_start          : 高峰开始时间（荷兰本地时间 HH:MM），对应 .env PEAK_START
-    peak_end            : 高峰结束时间（荷兰本地时间 HH:MM），对应 .env PEAK_END
+    peak_start          : 第一个高峰开始时间（荷兰本地时间 HH:MM），对应 .env PEAK_START
+    peak_end            : 第一个高峰结束时间（荷兰本地时间 HH:MM），对应 .env PEAK_END
+    peak_start_2        : 第二个高峰开始时间（荷兰本地时间 HH:MM），对应 .env PEAK_START_2
+    peak_end_2          : 第二个高峰结束时间（荷兰本地时间 HH:MM），对应 .env PEAK_END_2
     peak_weekdays_only  : True 表示仅工作日启用高峰轮询，对应 .env PEAK_WEEKDAYS_ONLY
     min_interval        : 自适应轮询的下限（秒），对应 .env MIN_INTERVAL；
                           高峰期连续成功时间隔会逐步压低，但不会低于此值；
@@ -512,6 +514,8 @@ class Config:
                           避免多实例在同一时刻集中发起请求
     timezone            : IANA 时区标识符，用于图表日期分组和智能轮询时段判定，
                           对应 .env TIMEZONE；默认 Europe/Amsterdam（荷兰时间 CET/CEST）
+    heartbeat_interval_minutes : 心跳通知间隔（分钟），对应 .env HEARTBEAT_INTERVAL_MINUTES；
+                                 默认 60 分钟；设为 0 禁用心跳
     """
     check_interval: int
     cities: list[CityFilter]
@@ -521,10 +525,13 @@ class Config:
     peak_interval: int = 60
     peak_start: str = "08:30"
     peak_end: str = "10:00"
+    peak_start_2: str = "13:30"
+    peak_end_2: str = "15:00"
     peak_weekdays_only: bool = True
     min_interval: int = 15
     jitter_ratio: float = 0.20
     timezone: str = "Europe/Amsterdam"
+    heartbeat_interval_minutes: int = 60
 
     def scrape_tasks(self) -> tuple[list[tuple[str, str]], list[str]]:
         """
@@ -556,17 +563,20 @@ def load_config() -> Config:
     PEAK_INTERVAL           int，默认 60
     PEAK_START              str HH:MM，默认 "08:30"
     PEAK_END                str HH:MM，默认 "10:00"
+    PEAK_START_2            str HH:MM，默认 "13:30"
+    PEAK_END_2              str HH:MM，默认 "15:00"
     PEAK_WEEKDAYS_ONLY      "true"/"false"，默认 "true"
     MIN_INTERVAL            int ≥ 5，默认 "15"（自适应下限，不低于此值）
     JITTER_RATIO            float 0–0.5，默认 "0.20"
     TIMEZONE                IANA 时区，默认 "Europe/Amsterdam"（荷兰 CET/CEST）
+    HEARTBEAT_INTERVAL_MINUTES int，默认 60；设为 0 禁用心跳
 
     Raises
     ------
     ValueError  若 CITIES 或 AVAILABILITY_FILTERS 中的 ID 不是合法整数
     ValueError  若 TIMEZONE 不是合法的 IANA 时区标识符
     """
-    interval = int(os.environ.get("CHECK_INTERVAL", "300"))
+    interval = int(os.environ.get("CHECK_INTERVAL") or "300")
 
     cities: list[CityFilter] = []
     raw_cities = os.environ.get("CITIES", "Eindhoven,29")
@@ -587,7 +597,7 @@ def load_config() -> Config:
             )
 
     db_path = DB_PATH
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    log_level = (os.environ.get("LOG_LEVEL") or "INFO").upper()
 
     timezone_str = TIMEZONE
     # 启动时校验时区标识符合法性，失败立即报错而非延迟到首次图表查询
@@ -603,11 +613,14 @@ def load_config() -> Config:
         availability_filters=availability_filters,
         db_path=db_path,
         log_level=log_level,
-        peak_interval=int(os.environ.get("PEAK_INTERVAL", "60")),
-        peak_start=os.environ.get("PEAK_START", "08:30"),
-        peak_end=os.environ.get("PEAK_END", "10:00"),
-        peak_weekdays_only=os.environ.get("PEAK_WEEKDAYS_ONLY", "true").lower() != "false",
-        min_interval=max(5, int(os.environ.get("MIN_INTERVAL", "15"))),
-        jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO", "0.20")))),
+        peak_interval=int(os.environ.get("PEAK_INTERVAL") or "60"),
+        peak_start=os.environ.get("PEAK_START") or "08:30",
+        peak_end=os.environ.get("PEAK_END") or "10:00",
+        peak_start_2=os.environ.get("PEAK_START_2") or "13:30",
+        peak_end_2=os.environ.get("PEAK_END_2") or "15:00",
+        peak_weekdays_only=(os.environ.get("PEAK_WEEKDAYS_ONLY") or "true").lower() != "false",
+        min_interval=max(5, int(os.environ.get("MIN_INTERVAL") or "15")),
+        jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO") or "0.20"))),
         timezone=timezone_str,
+        heartbeat_interval_minutes=max(0, int(os.environ.get("HEARTBEAT_INTERVAL_MINUTES") or "60")),
     )

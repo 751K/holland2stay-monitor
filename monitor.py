@@ -16,7 +16,7 @@ monitor.py — 监控主程序
 3. 遍历启用的用户，构建自动预订候选；立即将 try_book() 提交到线程池
 4. 发送新房源/状态变更通知（与步骤 3 中的预订并发进行）
 5. 等待预订完成，推送预订结果通知
-6. 写 meta（last_scrape_at）；每 HEARTBEAT_EVERY 轮发心跳
+6. 写 meta（last_scrape_at）；按时间间隔发心跳
 
 智能轮询
 --------
@@ -104,7 +104,6 @@ def _setup_logging(level: str) -> None:
 
 logger = logging.getLogger("monitor")
 
-HEARTBEAT_EVERY = 12   # 默认 5min * 12 = 1h
 
 # 自适应轮询参数（固定，不需要用户配置）
 # 每轮成功后将当前间隔乘以此系数（5% 缩短），缓慢逼近 min_interval
@@ -229,8 +228,8 @@ def _get_interval(cfg) -> tuple[int, bool]:
     高峰期判断逻辑
     --------------
     1. 若 cfg.peak_weekdays_only=True 且当天是周末 → 非高峰
-    2. 解析 cfg.peak_start / cfg.peak_end（HH:MM 格式）
-    3. 当前分钟数落在 [start, end] 区间内 → 高峰
+    2. 解析两个时间窗 cfg.peak_start / cfg.peak_end 和 peak_start_2 / peak_end_2
+    3. 当前分钟数落在任一时间窗内 → 高峰
 
     Returns
     -------
@@ -241,13 +240,18 @@ def _get_interval(cfg) -> tuple[int, bool]:
     now = datetime.now(_AMS)
     if cfg.peak_weekdays_only and now.weekday() >= 5:
         return cfg.check_interval, False
-    try:
-        sh, sm = map(int, cfg.peak_start.split(":"))
-        eh, em = map(int, cfg.peak_end.split(":"))
-    except ValueError:
-        return cfg.check_interval, False
+
     cur = now.hour * 60 + now.minute
-    if sh * 60 + sm <= cur <= eh * 60 + em:
+
+    def _in_window(start: str, end: str) -> bool:
+        try:
+            sh, sm = map(int, start.split(":"))
+            eh, em = map(int, end.split(":"))
+        except ValueError:
+            return False
+        return sh * 60 + sm <= cur <= eh * 60 + em
+
+    if _in_window(cfg.peak_start, cfg.peak_end) or _in_window(cfg.peak_start_2, cfg.peak_end_2):
         return cfg.peak_interval, True
     return cfg.check_interval, False
 
@@ -905,7 +909,7 @@ async def main_loop(
     --------
     while True:
         1. run_once()           执行一轮抓取+通知
-        2. 每 HEARTBEAT_EVERY 轮发一次心跳
+        2. 按 heartbeat_interval_minutes 间隔发心跳
         3. asyncio.wait_for(_reload_event, timeout=actual_interval)
            - 超时：正常进入下一轮
            - 事件触发（SIGHUP）：热重载 cfg + users，重建 user_notifiers
@@ -920,15 +924,16 @@ async def main_loop(
     _reload_event = asyncio.Event()
 
     round_count = 0
+    last_heartbeat_time = time.monotonic()  # 启动时记为刚发过，避免第一轮立即心跳
 
     # 自适应高峰间隔：从 peak_interval 出发，成功则缩短，限流则翻倍退避。
     # 非高峰时重置，确保下次高峰期从 peak_interval 重新开始探测。
     adaptive_peak: float = float(cfg.peak_interval)
 
     logger.info(
-        "监控启动，常规间隔 %d 秒，高峰期自适应 %d–%d 秒（%s–%s 荷兰时间），城市: %s，用户: %d 个",
+        "监控启动，常规间隔 %d 秒，高峰期自适应 %d–%d 秒（%s–%s / %s–%s 荷兰时间），城市: %s，用户: %d 个",
         cfg.check_interval, cfg.min_interval, cfg.peak_interval,
-        cfg.peak_start, cfg.peak_end,
+        cfg.peak_start, cfg.peak_end, cfg.peak_start_2, cfg.peak_end_2,
         [c.name for c in cfg.cities], len(user_notifiers),
     )
     # 启动时打印每个用户的自动预订状态，并检查通知渠道是否可用
@@ -1009,7 +1014,8 @@ async def main_loop(
                         int(prev), int(adaptive_peak), cfg.min_interval,
                     )
 
-            if round_count % HEARTBEAT_EVERY == 0:
+            heartbeat_interval_sec = cfg.heartbeat_interval_minutes * 60
+            if heartbeat_interval_sec > 0 and time.monotonic() - last_heartbeat_time >= heartbeat_interval_sec:
                 total = storage.count_all()
                 for _, notifier in user_notifiers:
                     await notifier.send_heartbeat(total_in_db=total, round_count=round_count)
@@ -1019,6 +1025,7 @@ async def main_loop(
                 pruned = storage.prune_notifications(keep=500)
                 if pruned:
                     logger.debug("已清理 %d 条旧通知", pruned)
+                last_heartbeat_time = time.monotonic()
 
             actual = _apply_jitter(effective_interval, cfg.jitter_ratio)
             dev_pct = (actual - effective_interval) / effective_interval * 100
@@ -1067,10 +1074,10 @@ async def main_loop(
                     # 热重载后重置自适应间隔（用户可能改了 peak_interval / min_interval）
                     adaptive_peak = float(cfg.peak_interval)
                     logger.info(
-                        "配置已热重载：城市=%s  用户=%d  间隔=%ds  高峰自适应=%d–%ds(%s–%s)",
+                        "配置已热重载：城市=%s  用户=%d  间隔=%ds  高峰自适应=%d–%ds(%s–%s/%s–%s)",
                         [c.name for c in cfg.cities], len(user_notifiers),
                         cfg.check_interval, cfg.min_interval, cfg.peak_interval,
-                        cfg.peak_start, cfg.peak_end,
+                        cfg.peak_start, cfg.peak_end, cfg.peak_start_2, cfg.peak_end_2,
                     )
                 except Exception as e:
                     logger.error(

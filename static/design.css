@@ -296,7 +296,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .toggle input:checked+.toggle-track::after{transform:translateX(16px)}
 
 /* Checkbox */
-.checkbox{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:15px;color:var(--text)}
+.checkbox{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:16px;color:var(--text)}
 .checkbox input{accent-color:var(--accent)}
 
 /* ── Alerts ────────────────────────────────────────────────────── */

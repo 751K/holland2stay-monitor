@@ -63,7 +63,7 @@ python -m pytest tests/ -v
 | Fast-path booking | ✅ Done | Reserved → Available booking submitted before notifications send |
 | Web admin panel | ✅ Done | Dashboard, listings, users, global settings |
 | Hot config reload | ✅ Done | Cross-platform reload, no restart required |
-| Smart polling | ✅ Done | Peak hours auto-accelerate; adaptive interval probes rate limit |
+| Smart polling | ✅ Done | Dual peak windows (AM + PM), auto-accelerate; adaptive interval probes rate limit |
 | Rate limit protection | ✅ Done | 429 exponential backoff + 5-minute cooldown + proxy support |
 | Cloudflare block detection | ✅ Done | 403 WAF detection, throttled alert, 15-min cooldown, actionable recovery steps |
 | Multi-user support | ✅ Done | Each user has independent channels / filters / booker settings |
@@ -78,13 +78,13 @@ python -m pytest tests/ -v
 | Optional auth for web | ✅ Done | Session login enabled when password set; `WEB_GUEST_MODE` controls guest entry |
 | Login rate limiting | ✅ Done | IP-based exponential backoff after 5 failures |
 | HTTPS / Caddy | ✅ Done | Bundled Caddyfile + docker-compose Caddy service; auto Let's Encrypt |
-| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix, DOM XSS prevention |
+| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix, DOM XSS prevention (map geocode errors, settings numeric validation) |
 | Startup preflight | ✅ Done | Blocks container start if `WEB_PASSWORD` unset or Caddyfile domain is still a placeholder |
 | Production WSGI | ✅ Done | Gunicorn (1 worker × 8 threads, timeout=0) replaces Flask dev server in Docker |
 | Dependency pinning | ✅ Done | `requirements.lock` with exact `==` versions; Dockerfile installs from lock file |
 | Code modularization | ✅ Done | web.py split into `app/` with 10 route modules + 8 shared modules; 1,200→154 line bootstrap |
 | Prewarm session cache | ✅ Done | Process-level cache across rounds; token TTL refresh; invalidated on user/config change |
-| Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; log viewer with file tabs, line numbers, level coloring, keyword search, auto-scroll |
+| Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; web.log for Flask app; log viewer with file tabs, line numbers, level coloring, keyword search, auto-scroll |
 | Pytest test suite | ✅ Done | 25 test modules (486 tests) covering full stack: models, storage, scraper, booker, notifier, auth, CSRF, routes, i18n |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, Storage abstraction enforced |
 
@@ -101,7 +101,7 @@ python -m pytest tests/ -v
 
 ### Smart adaptive polling
 
-Normal intervals apply outside peak hours. During the Dutch morning release window (default 08:30–10:00 CET on weekdays), adaptive polling kicks in:
+Normal intervals apply outside peak hours. During the Dutch morning release window (default 08:30–10:00 CET, weekdays) and afternoon window (default 13:30–15:00 CET, weekdays), adaptive polling kicks in:
 
 - Starts each peak session at `PEAK_INTERVAL` (default 60 s)
 - After every successful scrape round, shrinks the interval by 5%, automatically probing how fast the API will tolerate
@@ -109,7 +109,7 @@ Normal intervals apply outside peak hours. During the Dutch morning release wind
 - On a 429 rate-limit response, doubles the current interval and holds a 5-minute cooldown before retrying
 - Resets to `PEAK_INTERVAL` at the end of each peak window, ready to probe again tomorrow
 - Randomised ±`JITTER_RATIO` % jitter on every sleep to avoid mechanical fingerprinting
-- All parameters (PEAK_INTERVAL, MIN_INTERVAL, PEAK_START, PEAK_END, JITTER_RATIO, PEAK_WEEKDAYS_ONLY) configurable in the web UI
+- All parameters (PEAK_INTERVAL, MIN_INTERVAL, PEAK_START, PEAK_END, PEAK_START_2, PEAK_END_2, JITTER_RATIO, PEAK_WEEKDAYS_ONLY) configurable in the web UI
 
 ### Rate limit & block protection
 
@@ -182,7 +182,7 @@ This reduces the delay between detecting availability and reaching the server to
 - **Calendar** — month grid with city filter, click-to-expand date detail panel
 - **Stats** — Chart.js trends (new listings, status changes), doughnut distributions (city, status), price histogram (9 buckets up to >€1600), 24h listing drop time chart, 7/30/90-day range selector
 - **Users** — CRUD, enable/disable, per-user notification channels & filters & auto-booking config, one-click per-channel test
-- **Global Settings** — polling intervals, adaptive smart-polling params, monitored cities, save-and-reload workflow
+- **Global Settings** — polling intervals, adaptive smart-polling params (dual windows), heartbeat interval, monitored cities, save-and-reload workflow
 - **Guest mode** — login page "Guest mode" button lets anyone view the panel read-only without a password; set `WEB_GUEST_MODE=false` to disable; admin routes (Users / Settings / System / Logs) remain fully restricted
 - **i18n** — one-click Chinese / English switch in sidebar, cookie-persisted across sessions
 - **Minimal design** — borderless cards, shadow-based depth, dark/light theme (OS-aware, smooth CSS transition) with Inter typeface
@@ -233,7 +233,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 
 | File | Responsibility |
 |---|---|
-| `monitor.py` | Main scheduler, adaptive smart polling, hot reload, PID management, prewarmed session cache (Phase B cross-round reuse), concurrent booking, dual logging (monitor.log + errors.log) |
+| `monitor.py` | Main scheduler, adaptive smart polling (dual peak windows), hot reload, PID management, prewarmed session cache (Phase B cross-round reuse), concurrent booking, time-based heartbeat, dual logging (monitor.log + errors.log) |
 | `scraper.py` | GraphQL scraping, `curl_cffi`, pagination, multi-city, 429 retry with cumulative wait, proxy support, enhanced error context logging |
 | `storage.py` | SQLite persistence, diff detection, chart aggregation, meta storage, web_notifications table, `get_distinct_cities()` |
 | `models.py` | `Listing` dataclass and formatting helpers |
@@ -241,7 +241,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); enhanced error context (sku/contract_id/start_date); optional `cancel_enabled` auto-cancel, proxy support |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
 | `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
-| `web.py` | Flask app bootstrap: instantiation, security headers, CSRF, Jinja filters, context processors, route registration |
+| `web.py` | Flask app bootstrap: instantiation, security headers, CSRF, Jinja filters, context processors, route registration, web process file logging |
 | `app/auth.py` | Session authentication, role decorators (`login_required`, `admin_required`, `admin_api_required`), guest mode, login rate limiting |
 | `app/csrf.py` | CSRF token generation and validation (Unicode-safe via `.encode("utf-8")`) |
 | `app/db.py` | Database helper: `get_db()` connection factory |
@@ -259,7 +259,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `app/routes/sessions.py` | Login / logout / guest entry |
 | `app/routes/settings.py` | Global settings: view, save, filter options API |
 | `app/routes/stats.py` | Statistics dashboard with Chart.js data API |
-| `app/routes/system.py` | System info, log viewer (file tabs, line numbers, level coloring, keyword search), log clear, health endpoint, log files list API |
+| `app/routes/system.py` | System info, log viewer (file tabs: monitor/errors/web, line numbers, level coloring, keyword search), log clear, health endpoint, log files list API |
 | `app/routes/users.py` | User CRUD, toggle enable/disable, notification test |
 | `translations.py` | 120+ UI translation keys (zh/en), template `_()` helper |
 | `tools/geocode_all.py` | One-shot Nominatim geocoding to pre-warm the coordinate cache |
@@ -429,10 +429,15 @@ TIMEZONE=Europe/Amsterdam  # IANA timezone for chart day boundaries & peak-hour 
 # Adaptive smart polling (peak hours)
 PEAK_INTERVAL=60       # peak starting interval / backoff target (seconds)
 MIN_INTERVAL=15        # adaptive floor — never go below this (seconds)
-PEAK_START=08:30       # peak start, Amsterdam time
-PEAK_END=10:00         # peak end, Amsterdam time
+PEAK_START=08:30       # peak window ① start, Amsterdam time
+PEAK_END=10:00         # peak window ① end, Amsterdam time
+PEAK_START_2=13:30     # peak window ② start, Amsterdam time
+PEAK_END_2=15:00       # peak window ② end, Amsterdam time
 PEAK_WEEKDAYS_ONLY=true
 JITTER_RATIO=0.20      # ±% randomisation applied to every sleep
+
+# Monitoring heartbeat (periodic summary confirming the monitor is alive)
+HEARTBEAT_INTERVAL_MINUTES=60   # minutes between heartbeats; set 0 to disable
 
 # Proxy (optional)
 HTTPS_PROXY=           # e.g. http://user:pass@host:port
@@ -507,13 +512,13 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 ## File structure
 
 ```text
-monitor.py          Main scheduler, adaptive smart polling, hot reload, prewarm cache (Phase B), dual logging
+monitor.py          Main scheduler, adaptive smart polling (dual windows), hot reload, prewarm cache (Phase B), time-based heartbeat, dual logging
 scraper.py          GraphQL scraping, curl_cffi, pagination, 429 retry with cumulative wait, proxy support
 storage.py          SQLite: listings / status_changes / web_notifications / meta / geocode_cache, chart queries, get_distinct_cities()
 models.py           Listing dataclass and formatting helpers
 notifier.py         BaseNotifier, iMessage (AppleScript escape hardened), Telegram, Email, WhatsApp, WebNotifier
 booker.py           Login, createEmptyCart, addNewBooking, placeOrder (store_id=54), idealCheckOut (plateform "h"), proxy support; enhanced error context
-config.py           Global config loading, known cities, ListingFilter, AutoBookConfig
+config.py           Global config loading, known cities, ListingFilter, AutoBookConfig, heartbeat interval
 users.py            UserConfig, users.json management, legacy env migration
 translations.py     UI translations (zh/en) — 120+ keys covering all pages
 tools/

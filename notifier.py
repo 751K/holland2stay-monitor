@@ -92,7 +92,7 @@ class BaseNotifier(ABC):
 
     async def send_heartbeat(self, total_in_db: int, round_count: int) -> bool:
         """
-        发送监控心跳消息，默认每 HEARTBEAT_EVERY 轮发一次。
+        发送监控心跳消息，按配置的时间间隔发送。
 
         Parameters
         ----------

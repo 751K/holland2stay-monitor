@@ -77,6 +77,22 @@
         </div>
       </div>
 
+      <div class="form-row mb-3" style="align-items:center;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">{{ _('settings_peak_start_2') }}</label>
+          <input type="time" class="form-input" name="PEAK_START_2" value="{{ env.get('PEAK_START_2','13:30') }}">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">{{ _('settings_peak_end_2') }}</label>
+          <input type="time" class="form-input" name="PEAK_END_2" value="{{ env.get('PEAK_END_2','15:00') }}">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">{{ _('settings_heartbeat_interval') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_heartbeat_default') }}</span></label>
+          <input type="number" class="form-input" name="HEARTBEAT_INTERVAL_MINUTES" value="{{ env.get('HEARTBEAT_INTERVAL_MINUTES','60') }}" min="0" max="1440">
+          <div class="form-help">{{ _('settings_heartbeat_hint') }}</div>
+        </div>
+      </div>
+
       <div>
         <label class="toggle">
           <input type="checkbox" id="peak_weekdays" {% if env.get('PEAK_WEEKDAYS_ONLY','true') != 'false' %}checked{% endif %}
@@ -85,7 +101,6 @@
           {{ _('settings_weekdays') }}
         </label>
         <input type="hidden" id="peak_weekdays_h" name="PEAK_WEEKDAYS_ONLY" value="{{ env.get('PEAK_WEEKDAYS_ONLY','true') }}">
-        <div class="form-help mt-1"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_weekdays_hint') }}</div>
       </div>
 
     </div>

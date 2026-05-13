@@ -36,6 +36,7 @@ _LOG_PATH = DATA_DIR / "monitor.log"
 _LOG_FILES: dict[str, Path] = {
     "monitor": DATA_DIR / "monitor.log",
     "errors":  DATA_DIR / "errors.log",
+    "web":     DATA_DIR / "web.log",
 }
 
 

@@ -510,13 +510,23 @@ class Storage:
         按 available_from 升序排列，仅包含 available_from 非空的记录
         """
         rows = self._conn.execute(
-            """SELECT id, name, status, price_raw, available_from, url, city
+            """SELECT id, name, status, price_raw, available_from, url, city, features
                FROM listings
                WHERE available_from IS NOT NULL AND available_from != ''
                ORDER BY available_from"""
         ).fetchall()
-        return [
-            {
+        results: list[dict] = []
+        for r in rows:
+            building = ""
+            try:
+                feats = json.loads(r["features"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                feats = []
+            for f in feats:
+                if f.startswith("Building: "):
+                    building = f.split(": ", 1)[1]
+                    break
+            results.append({
                 "id":             r["id"],
                 "name":           r["name"],
                 "status":         r["status"],
@@ -524,9 +534,9 @@ class Storage:
                 "available_from": r["available_from"],
                 "url":            r["url"] or "",
                 "city":           r["city"] or "",
-            }
-            for r in rows
-        ]
+                "building":       building,
+            })
+        return results
 
     # ── Geocode cache ──────────────────────────────────────────────── #
 

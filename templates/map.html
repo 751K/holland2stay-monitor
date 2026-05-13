@@ -28,7 +28,7 @@
 
 {% block content %}
 
-<div class="page-header">
+<div class="page-header" style="position:relative;">
   <h1>{{ _('map_title') }}</h1>
   <div class="flex items-center gap-2">
     <span id="map-count" class="meta"></span>
@@ -39,6 +39,8 @@
     </button>
     {% endif %}
   </div>
+  <div id="geocode-errors" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text2);max-height:140px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);margin-top:6px;"
+       onwheel="var t=this,atTop=t.scrollTop<=0,atBot=t.scrollTop+t.clientHeight>=t.scrollHeight-1;if((atTop&&event.deltaY<0)||(atBot&&event.deltaY>0))event.preventDefault();"></div>
 </div>
 
 <div class="map-legend mb-4">
@@ -253,6 +255,26 @@ loadMapData();
               btn.innerHTML = '<i class="bi bi-arrow-repeat mr-1"></i>' + (zh ? '刷新地图' : 'Refresh map');
               btn.onclick = function(){ loadMapData(); btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode'); btn.onclick = runGeocode; };
               loading.textContent = (zh ? '完成 ' : 'Done ') + s.done + (s.failed > 0 ? (zh ? ' 失败 ' : ' fail ') + s.failed : '');
+              // 显示失败地址
+              var errDiv = document.getElementById('geocode-errors');
+              if (errDiv && s.errors && s.errors.length > 0) {
+                errDiv.innerHTML = '';
+                var title = document.createElement('strong');
+                title.textContent = (zh ? '解析失败详情：' : 'Geocode failures:');
+                errDiv.appendChild(title);
+                errDiv.appendChild(document.createElement('br'));
+                s.errors.forEach(function(e){
+                  var span = document.createElement('span');
+                  span.textContent = e.address + ' — ';
+                  var reason = document.createElement('span');
+                  reason.style.color = 'var(--danger)';
+                  reason.textContent = e.reason;
+                  span.appendChild(reason);
+                  errDiv.appendChild(span);
+                  errDiv.appendChild(document.createElement('br'));
+                });
+                errDiv.style.display = '';
+              }
             }
           });
         }, 800);

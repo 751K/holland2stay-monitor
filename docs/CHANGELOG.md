@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.2.8 (2026-05-13)
+
+### 功能增强
+
+- **心跳改为按时间间隔**：从固定 12 轮发送一次改为按分钟配置（`HEARTBEAT_INTERVAL_MINUTES`，默认 60 min），设为 0 禁用心跳。首轮不再立即发心跳，需等待完整间隔。设置页可在智能轮询区直接修改。
+- **新增下午高峰窗口**：智能轮询从单一窗口（8:30–10:00）扩展为双窗口（早 8:30–10:00 + 下午 13:30–15:00），`PEAK_START_2` / `PEAK_END_2` 可在设置页配置，Web 面板可直接修改。
+- **设置/用户变更写入日志**：全局配置保存和用户创建/更新/删除时，将完整配置快照记录到 `data/web.log`，日志查看器可追溯操作历史。
+- **Web 进程独立日志**：新增 `data/web.log`（Flask 应用日志），与 monitor 的 `monitor.log` 分离；日志查看器新增 Web 日志 Tab（中/英标签），`updateTabSize` 复用 `LOG_LABELS` 映射。
+
+### Bug 修复
+
+- **设置页空值导致启动失败 (P2)**：清空数值设置框（`HEARTBEAT_INTERVAL_MINUTES`、`PEAK_INTERVAL` 等）后保存会写入空字符串，导致 `load_config()` 中 `int("")` / `float("")` 抛错，热重载失败，重启无法启动。修复：数值键空值不覆盖旧值；`config.py` 所有 `int()`/`float()` 改用 `or "default"` 兜底。
+- **设置页非法数字值导致启动失败**：非空非法值（如 `PEAK_INTERVAL=abc`）同样会写入 `.env` 导致 `int("abc")` 抛错。修复：数值键写入前校验 format，非法值跳过并记录日志。
+- **地图 geocode 错误详情 DOM XSS**：`s.errors[].address/reason` 拼入 HTML 后 `innerHTML` 渲染，地址来自外部抓取数据。修复：改用 `createElement` + `textContent`。
+- **geocode 旧错误未清空**：新任务启动和"所有地址已缓存"返回时未重置 `errors=[]`，导致旧失败详情残留显示。修复：两处路径均清空。
+- **WARNING 级别日志未落地**：`web.py` 给 root logger 加了 INFO handler 但未 `setLevel(INFO)`，`logger.info()` 被默认 WARNING 级别过滤。修复：加 `logging.getLogger().setLevel(logging.INFO)`。
+
+### 测试
+
+- 486 测试全部通过。修复 `test_booker_flow.py::test_attrs` 浮点精度 flaky 测试（`pytest.approx`）。
+
+---
+
 ## v1.2.7 (2026-05-13)
 
 ### 修复

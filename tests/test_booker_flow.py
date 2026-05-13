@@ -153,4 +153,4 @@ class TestPrewarmedSession:
                               email="a@b.com")
         assert ps.email == "a@b.com"
         assert ps.token == "tok"
-        assert ps.token_expiry - now == _TOKEN_MAX_AGE
+        assert ps.token_expiry - now == pytest.approx(_TOKEN_MAX_AGE)

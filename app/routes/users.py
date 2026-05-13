@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from flask import (
@@ -34,11 +35,37 @@ from app.forms.user_form import build_user_from_form
 from app.i18n import DEFAULTS, localize_options
 from config import _ENERGY_LABELS, _energy_rank
 
+logger = logging.getLogger(__name__)
+
 
 def _energy_rank_or_99(label: str) -> int:
     """能耗排序辅助，未知标签排最后。"""
     r = _energy_rank(label)
     return r if r is not None else 99
+
+
+def _log_user_change(action: str, user: "UserConfig") -> None:  # noqa: F821
+    """记录用户配置变更到日志。"""
+    channels = [ch for ch in ("imessage", "telegram", "whatsapp", "email") if ch in user.notification_channels]
+    ab = user.auto_book
+    ab_info = ""
+    if ab and ab.enabled:
+        ab_info = f" 自动预订=开启(dry={ab.dry_run} 取消={ab.cancel_enabled} 支付={ab.payment_method})"
+    f = user.listing_filter
+    filters = []
+    if f.max_rent is not None: filters.append(f"租金≤{f.max_rent:.0f}")
+    if f.min_area is not None: filters.append(f"面积≥{f.min_area:.0f}m²")
+    if f.min_floor is not None: filters.append(f"楼层≥{f.min_floor}")
+    if f.allowed_cities: filters.append(f"城市={f.allowed_cities}")
+    if f.allowed_types: filters.append(f"房型={f.allowed_types}")
+    if f.allowed_energy: filters.append(f"能耗≥{f.allowed_energy}")
+    filter_str = " ".join(filters) if filters else "无过滤"
+    logger.info(
+        "用户%s「%s」(id=%s) — 启用=%s 通知=%s 渠道=%s 过滤=[%s]%s",
+        action, user.name, user.id,
+        user.enabled, user.notifications_enabled,
+        channels or "无", filter_str, ab_info,
+    )
 
 
 def _get_all_filter_options() -> dict[str, list[str]]:
@@ -70,6 +97,7 @@ def user_new() -> Any:
         users = load_users()
         users.append(user)
         save_users(users)
+        _log_user_change("创建", user)
         flash(f"✅ 用户「{user.name}」已创建", "success")
         return redirect(url_for("users_list"))
     # GET：空白表单
@@ -105,6 +133,7 @@ def user_edit(user_id: str) -> Any:
         updated = build_user_from_form(request.form, user_id=user_id, existing=user)
         users = [updated if u.id == user_id else u for u in users]
         save_users(users)
+        _log_user_change("更新", updated)
         flash(f"✅ 用户「{updated.name}」已保存", "success")
         return redirect(url_for("user_edit", user_id=user_id))
 
@@ -135,6 +164,7 @@ def user_delete(user_id: str) -> Any:
     name = user.name if user else user_id
     users = [u for u in users if u.id != user_id]
     save_users(users)
+    logger.info("用户「%s」已删除 (id=%s)，剩余 %d 个用户", name, user_id, len(users))
     flash(f"用户「{name}」已删除", "success")
     return redirect(url_for("users_list"))
 

@@ -25,6 +25,8 @@ Docker 容器中由 Gunicorn 启动（supervisord.conf）：
 from __future__ import annotations
 
 import argparse
+import logging
+import logging.handlers
 import os
 import sys
 from pathlib import Path
@@ -34,8 +36,23 @@ from flask import Flask
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from config import ASSETS_DIR  # noqa: E402
+from config import ASSETS_DIR, DATA_DIR  # noqa: E402
 from translations import tr as _tr  # noqa: E402
+
+# 配置 Web 进程日志：独立文件 data/web.log，避免与 monitor 进程写冲突。
+# 注意：此文件记录 Flask 应用自身的日志（请求处理、配置变更等），
+# 与 supervisord 重定向的 Gunicorn stdout（/app/logs/web.log）是不同文件。
+# Web 面板「日志查看」页面读取的是本文件。
+_DATA_DIR = Path(os.environ.get("DATA_DIR", str(DATA_DIR)))
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
+_fh = logging.handlers.RotatingFileHandler(
+    str(_DATA_DIR / "web.log"),
+    maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8",
+)
+_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+_fh.setLevel(logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
+logging.getLogger().addHandler(_fh)
 
 # app/ 子包
 from app import csrf as _csrf                                    # noqa: E402
