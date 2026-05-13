@@ -24,24 +24,27 @@
   </span>
 </div>
 
-<div class="grid-7-5">
+<div class="grid-7-5" id="cal-layout">
 
   <!-- Calendar -->
-  <div>
+  <div id="cal-grid-col">
     <div class="cal-nav">
       <button class="cal-nav-btn" id="btn-prev" title="{{ _('cal_prev_month') }}"><i class="bi bi-chevron-left"></i></button>
       <div class="cal-month-label" id="month-label"></div>
       <button class="cal-nav-btn" id="btn-next" title="{{ _('cal_next_month') }}"><i class="bi bi-chevron-right"></i></button>
+      <div class="cal-view-toggle" id="cal-view-toggle">
+        <button class="cal-view-btn active" data-view="month" title="{{ _('cal_month_view') }}"><i class="bi bi-calendar3"></i></button>
+        <button class="cal-view-btn" data-view="list" title="{{ _('cal_list_view') }}"><i class="bi bi-list-ul"></i></button>
+      </div>
     </div>
 
-    <div class="cal-grid mb-1" id="cal-dow-row">
-    </div>
-
+    <div class="cal-grid mb-1" id="cal-dow-row"></div>
     <div class="cal-grid" id="cal-body"></div>
+    <div class="cal-list" id="cal-list"></div>
   </div>
 
   <!-- Detail panel -->
-  <div>
+  <div id="cal-detail-col">
     <div class="detail-panel">
       <div class="detail-header">
         <span id="detail-title">{{ _('cal_select_date') }}</span>
@@ -87,6 +90,7 @@ var selectedDate = null;
 var selectedCities = new Set();
 var allCities = [];
 var cityColorMap = {};
+var calView = 'month';
 
 function toYMD(d) {
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
@@ -154,7 +158,8 @@ function applyFilter() {
   if(selectedDate && (!byDate[selectedDate] || byDate[selectedDate].length === 0)) {
     selectedDate = null; clearDetail();
   }
-  renderCalendar();
+  if(calView === 'list') renderListView();
+  else renderCalendar();
 }
 
 // Render day-of-week header
@@ -332,6 +337,93 @@ function clearDetail() {
     '<div class="detail-empty"><i class="bi bi-calendar2" style="font-size:28px;opacity:.3;"></i><span>' + T.clickHint + '</span></div>';
 }
 
+// ── List view (mobile) ──
+function renderListView() {
+  var dates = Object.keys(byDate).sort();
+  var container = document.getElementById('cal-list');
+  container.innerHTML = '';
+
+  // Update month label
+  document.getElementById('month-label').textContent =
+    currentYear + (zh ? ' 年 ' : ' ') + MONTHS[currentMonth];
+
+  // Filter to current month
+  var monthPrefix = currentYear + '-' + String(currentMonth + 1).padStart(2, '0');
+  var monthDates = dates.filter(function(d) { return d.indexOf(monthPrefix) === 0; });
+
+  if (!monthDates.length) {
+    container.innerHTML = '<div class="text-center py-4 text-tertiary text-sm">' + (zh ? '本月暂无房源' : 'No listings this month') + '</div>';
+    return;
+  }
+
+  monthDates.forEach(function(ymd) {
+    var parts = ymd.split('-');
+    var d = new Date(+parts[0], +parts[1]-1, +parts[2]);
+    var listings = byDate[ymd];
+
+    var group = document.createElement('div');
+    group.className = 'cal-list-group';
+
+    var dateHdr = document.createElement('div');
+    dateHdr.className = 'cal-list-date';
+    dateHdr.innerHTML = '<span class="cal-list-daynum">' + parts[2] + '</span>' +
+      '<span>' + DOW_FULL[d.getDay()] + '</span>' +
+      '<span class="badge badge-neutral ml-2">' + listings.length + T.units + '</span>';
+    group.appendChild(dateHdr);
+
+    listings.forEach(function(l) {
+      var sc = statusClass(l.status);
+      var cityColor = cityColorMap[l.city] || '#8b949e';
+      var row = document.createElement('a');
+      row.className = 'cal-list-item';
+      row.href = (l.url && /^https?:\/\//i.test(l.url)) ? l.url : '#';
+      row.target = '_blank';
+      row.rel = 'noopener noreferrer';
+
+      var nameDiv = document.createElement('div');
+      nameDiv.className = 'cal-list-name';
+      var badge = document.createElement('span');
+      badge.className = 'badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' ml-1';
+      badge.textContent = sc === 'book' ? T.direct : T.lottery;
+      nameDiv.appendChild(document.createTextNode(l.name));
+      nameDiv.appendChild(badge);
+      row.appendChild(nameDiv);
+
+      if (l.building) {
+        var bld = document.createElement('div');
+        bld.className = 'text-xs text-tertiary';
+        bld.textContent = l.building;
+        row.appendChild(bld);
+      }
+
+      var meta = document.createElement('div');
+      meta.className = 'flex gap-3 mt-1 text-xs text-secondary';
+      meta.innerHTML = '<span>' + priceShort(l.price_raw) + T.perMonth + '</span>' +
+        '<span><i class="bi bi-geo-alt mr-1" style="color:' + cityColor + ';"></i>' + (l.city || '—') + '</span>';
+      row.appendChild(meta);
+
+      group.appendChild(row);
+    });
+
+    container.appendChild(group);
+  });
+}
+
+function showCalView(view) {
+  calView = view;
+  document.querySelectorAll('.cal-view-btn').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.view === view);
+  });
+  document.getElementById('cal-body').style.display = view === 'month' ? '' : 'none';
+  document.getElementById('cal-dow-row').style.display = view === 'month' ? '' : 'none';
+  document.getElementById('cal-list').style.display = view === 'list' ? 'block' : 'none';
+
+  var detailCol = document.getElementById('cal-detail-col');
+  if (detailCol) detailCol.style.display = view === 'list' ? 'none' : '';
+
+  if (view === 'list') renderListView();
+}
+
 // ─── Init ──────────────────────────────────────────────────────────
 fetch('/api/calendar')
   .then(function(r){ return r.json(); })
@@ -363,12 +455,20 @@ fetch('/api/calendar')
 document.getElementById('btn-prev').addEventListener('click', function() {
   if(currentMonth === 0) { currentMonth = 11; currentYear--; }
   else { currentMonth--; }
-  selectedDate = null; renderCalendar(); clearDetail();
+  selectedDate = null;
+  if(calView === 'month') { renderCalendar(); clearDetail(); }
+  else renderListView();
 });
 document.getElementById('btn-next').addEventListener('click', function() {
   if(currentMonth === 11) { currentMonth = 0; currentYear++; }
   else { currentMonth++; }
-  selectedDate = null; renderCalendar(); clearDetail();
+  selectedDate = null;
+  if(calView === 'month') { renderCalendar(); clearDetail(); }
+  else renderListView();
+});
+
+document.querySelectorAll('.cal-view-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() { showCalView(btn.dataset.view); });
 });
 </script>
 {% endblock %}

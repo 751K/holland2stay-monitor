@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}{{ _('dashboard_title') }}{% endblock %}
-{% block head %}<meta http-equiv="refresh" content="60">{% endblock %}
 
 {% block content %}
 
@@ -88,10 +87,10 @@
 </div>
 
 <!-- Two column layout -->
-<div class="grid-7-5" style="grid-template-columns:8fr 4fr;">
+<div class="grid-7-5">
 
   <!-- Recent listings -->
-  <div class="card">
+  <div class="card listing-table-card">
     <div class="card-header">
       <span>{{ _('recent_listings') }}</span>
       <a href="{{ url_for('listings') }}" class="text-sm" style="color:var(--accent);">{{ _('view_all') }} <i class="bi bi-arrow-right ml-1"></i></a>
@@ -124,6 +123,34 @@
         </tbody>
       </table>
     </div>
+  </div>
+
+  <div class="listing-cards">
+    {% for l in recent %}
+    {% set fm = l.features | parse_features %}
+    {% set sl = l.status | lower %}
+    <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer" class="listing-card-item">
+      <div class="lc-top">
+        <div class="lc-name">{{ l.name }}</div>
+        <div class="lc-status">
+          {% if 'book' in sl %}<span class="badge badge-book">{{ l.status }}</span>
+          {% elif 'lottery' in sl %}<span class="badge badge-lottery">{{ l.status }}</span>
+          {% else %}<span class="badge badge-neutral">{{ l.status }}</span>{% endif %}
+        </div>
+      </div>
+      {% if fm.building %}<div class="lc-building">{{ fm.building }}{% if fm.area %} · {{ fm.area }}{% endif %}</div>{% endif %}
+      <div class="lc-details">
+        <span class="lc-rent">{{ l.price_raw | price_short }}</span>
+        {% if fm.occupancy %}<span>{{ fm.occupancy }}</span>{% endif %}
+      </div>
+      <div class="lc-footer">
+        <span>{{ l.available_from or '—' }}</span>
+        <span>{{ l.first_seen | time_ago }}</span>
+      </div>
+    </a>
+    {% else %}
+    <div class="text-center py-4 text-tertiary">{{ _('no_data') }}</div>
+    {% endfor %}
   </div>
 
   <!-- Status changes -->
@@ -203,8 +230,26 @@ async function shutdownAll() {
   try {
     await fetch('/api/shutdown', { method:'POST', headers:{'X-CSRF-Token':csrf} });
   } catch(e) {}
-  // 页面会在 web.py 退出后断开连接
   alert('{{ _("shutdown_done") }}');
 }
+
+// Visibility-aware auto-refresh: reloads every 60s only when tab is visible.
+// Avoids jarring full-page reloads while user is reading on mobile.
+(function(){
+  var RELOAD_SEC = 60;
+  var timer;
+  function schedule() {
+    clearTimeout(timer);
+    timer = setTimeout(function(){
+      if (document.visibilityState === 'visible') window.location.reload();
+      else schedule();
+    }, RELOAD_SEC * 1000);
+  }
+  document.addEventListener('visibilitychange', function(){
+    if (document.visibilityState === 'visible') window.location.reload();
+    else clearTimeout(timer);
+  });
+  schedule();
+})();
 </script>
 {% endblock %}

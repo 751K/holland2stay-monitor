@@ -24,6 +24,11 @@
 .geocode-progress{flex:1;max-width:180px;height:8px;background:var(--border);border-radius:4px;overflow:hidden;min-width:80px}
 .geocode-bar{height:100%;width:40px;background:var(--accent);border-radius:4px;animation:geocode-run 1s linear infinite}
 @keyframes geocode-run{0%{margin-left:-40px}100%{margin-left:100%}}
+.geocode-errors{display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text2);max-height:140px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);margin-top:6px}
+@media(max-width:768px){
+  #map{height:calc(100dvh - 260px);min-height:360px}
+  .geocode-errors{position:relative;top:auto;left:auto;right:auto;margin-top:8px;max-height:120px}
+}
 {% endblock %}
 
 {% block content %}
@@ -39,7 +44,7 @@
     </button>
     {% endif %}
   </div>
-  <div id="geocode-errors" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text2);max-height:140px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);margin-top:6px;"
+  <div id="geocode-errors" class="geocode-errors"
        onwheel="var t=this,atTop=t.scrollTop<=0,atBot=t.scrollTop+t.clientHeight>=t.scrollHeight-1;if((atTop&&event.deltaY<0)||(atBot&&event.deltaY>0))event.preventDefault();"></div>
 </div>
 

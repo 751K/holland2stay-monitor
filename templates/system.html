@@ -45,13 +45,15 @@
   <!-- 配置 -->
   <div class="card">
     <div class="card-header">{{ _('configuration') }}</div>
+    <div style="overflow-x:auto;">
     <table class="table-minimal">
-      <tr><td class="text-tertiary" style="width:140px;">{{ _('cities') }}</td><td>{{ info.cities | join(', ') }}</td></tr>
+      <tr><td class="text-tertiary" style="width:140px;">{{ _('cities') }}</td><td class="cell-break">{{ info.cities | join(', ') }}</td></tr>
       <tr><td class="text-tertiary">{{ _('check_interval') }}</td><td>{{ info.check_interval }}s</td></tr>
       <tr><td class="text-tertiary">{{ _('peak_interval') }}</td><td>{{ info.peak_interval }}s ({{ info.peak_start }}–{{ info.peak_end }})</td></tr>
       <tr><td class="text-tertiary">{{ _('min_interval') }}</td><td>{{ info.min_interval }}s</td></tr>
       <tr><td class="text-tertiary">{{ _('log_level') }}</td><td>{{ info.log_level }}</td></tr>
     </table>
+    </div>
   </div>
 
   <!-- 用户 -->
@@ -69,13 +71,15 @@
   <!-- 环境 -->
   <div class="card">
     <div class="card-header">{{ _('environment') }}</div>
+    <div style="overflow-x:auto;">
     <table class="table-minimal">
       <tr><td class="text-tertiary" style="width:140px;">Python</td><td>{{ info.python.split('\\n')[0] if info.python else '—' }}</td></tr>
       <tr><td class="text-tertiary">{{ _('platform') }}</td><td>{{ info.platform }}</td></tr>
-      <tr><td class="text-tertiary">BASE_DIR</td><td style="font-size:12px;">{{ info.base_dir }}</td></tr>
-      <tr><td class="text-tertiary">DATA_DIR</td><td style="font-size:12px;">{{ info.data_dir }}</td></tr>
+      <tr><td class="text-tertiary">BASE_DIR</td><td class="cell-break text-mono text-sm">{{ info.base_dir }}</td></tr>
+      <tr><td class="text-tertiary">DATA_DIR</td><td class="cell-break text-mono text-sm">{{ info.data_dir }}</td></tr>
       <tr><td class="text-tertiary">Git</td><td>{{ info.git_hash }} ({{ info.git_date }})</td></tr>
     </table>
+    </div>
   </div>
 </div>
 

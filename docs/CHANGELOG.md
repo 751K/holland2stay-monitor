@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.2.10 (2026-05-13)
+
+### 移动端 Web 体验全面升级
+
+对全部 8 个页面进行了移动端适配，覆盖布局、触摸、安全区、iOS Safari 兼容性。
+
+- **房源列表 (P0)**：≤768px 自动切换为卡片视图，每张卡片纵向展示名称、状态、租金、面积、户型、城市、可租日期，替代 10 列横滑表格
+- **Dashboard (P0)**：最近房源表格同步改为卡片视图
+- **全局触摸目标 (P0)**：`@media (pointer: coarse)` 下所有交互元素（侧边栏导航、按钮、表单、多选、toggle）最小高度 ≥44px（WCAG 推荐），`@media (hover: none)` 移除 hover 闪烁
+- **日历 (P1)**：新增月视图/列表视图切换按钮，列表视图按月筛选、按日期分组展示房源；月视图 grid 改用 `minmax(0, 1fr)` 防止窄屏溢出
+- **统计页 (P1)**：4 列图表网格从脆弱的 inline style 选择器改为 `.grid-4` CSS 类，响应式 4→2→1 列
+- **安全区适配 (P2)**：nav-toggle、toast、登录页按钮、通知面板均使用 `env(safe-area-inset-*)` 避开刘海/底部指示条
+- **iOS Safari (P2)**：地图页和日志页 `100vh` → `100dvh`，避免地址栏展开/收起导致高度跳动
+- **Dashboard 刷新 (P2)**：`<meta http-equiv="refresh">` 替换为 Page Visibility API 驱动的 JS 定时刷新，标签页隐藏时暂停
+- **页面标题 (P2)**：移动端 `.page-header` 加 `padding-left:48px`，不再被 hamburger 按钮遮挡
+- **Toast (P2)**：移动端 `max-width:calc(100vw - 32px)`，`min-width:0`，窄屏不再溢出
+- **System 页 (P2)**：配置表和环境表包裹 `overflow-x:auto`，长路径用 `.cell-break` 自动换行
+
+### Bug 修复
+
+- **通知面板 `calc()` 语法错误**：`calc(100vw-32px)` 缺少空格，浏览器视为无效值。修复为 `calc(100vw - 32px)`
+- **CSS 级联 — 房源卡片被隐藏**：`.listing-cards{display:none}` 位于 mobile media query 之后，覆盖了 `display:flex`。移至 media query 之前
+- **地图 geocode 错误面板**：inline `position:absolute` 优先级高于移动端 CSS `position:relative`，错误面板覆盖页面头部。提取为 `.geocode-errors` 类
+- **日历列表视图空白**：JS `style.display = ''` 无法覆盖 CSS `.cal-list{display:none}`，改为 `'block'`
+- **日历列表视图翻月不生效**：`renderListView()` 未按 `currentMonth` 过滤，始终显示全部日期。增加月份过滤
+- **多选筛选器空值显示空白**：JS `update()` 将 `textEl.textContent` 清空为 `''`，覆盖了模板的"不限"/"All"占位文本。改为捕获并恢复初始 placeholder
+- **多选占位文案**：`multi_select_placeholder` 从"点击选择..."改为"不限"/"All"，明确未筛选 = 全部
+
+### 细节
+
+- 日历列表视图支持城市筛选联动，切换筛选后保持当前视图
+- 登录页语言切换按钮从 inline `style="right:62px"` 改为 `.login-lang-btn` 类，统一 safe-area 适配
+- 翻译新增 `cal_month_view` / `cal_list_view` 两个 key
+
+---
+
 ## v1.2.9 (2026-05-13)
 
 ### 移除 v1→v2 迁移逻辑

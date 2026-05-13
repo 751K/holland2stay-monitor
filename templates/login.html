@@ -17,7 +17,7 @@
 <body>
 
 <a href="{{ url_for('set_lang', lang='en' if lang=='zh' else 'zh', next=request.path) }}"
-   class="login-theme-btn" style="right:60px;" title="{{ 'English' if lang=='zh' else '中文' }}">
+   class="login-theme-btn login-lang-btn" title="{{ 'English' if lang=='zh' else '中文' }}">
   <i class="bi bi-translate"></i>
 </a>
 

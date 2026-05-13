@@ -254,6 +254,7 @@ document.addEventListener('DOMContentLoaded', function() {
     var dropdown = ms.querySelector('.ms-dropdown');
     var textEl   = ms.querySelector('.ms-text');
     var checkboxes = ms.querySelectorAll('input[type="checkbox"]');
+    var placeholder = textEl.textContent.trim() || textEl.getAttribute('data-placeholder') || '';
 
     function position() {
       var r = trigger.getBoundingClientRect();
@@ -269,7 +270,7 @@ document.addEventListener('DOMContentLoaded', function() {
       });
       trigger.querySelectorAll('.ms-tag').forEach(function(t) { t.remove(); });
       if (sel.length === 0) {
-        textEl.textContent = '';
+        textEl.textContent = placeholder;
         textEl.style.display = '';
       } else {
         textEl.textContent = '';

@@ -69,6 +69,7 @@ python -m pytest tests/ -v
 | Multi-user support | ✅ Done | Each user has independent channels / filters / booker settings |
 | VPS / Docker ready | ✅ Done | iMessage gracefully skipped on non-macOS; web panel takes over |
 | Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
+| Mobile web optimization | ✅ Done | Adaptive views: card layouts, 44px touch targets, safe-area insets, dvh units, list/calendar toggle, responsive grids |
 | Visualization | ✅ Done | 10 charts: trends, city/status/price/area/floor/type/energy/tenant/contract distributions, 24h drop time |
 | Move-in calendar | ✅ Done | Calendar view filtered by city |
 | Map view | ✅ Done | Leaflet.js + OpenStreetMap with auto-geocoding |
