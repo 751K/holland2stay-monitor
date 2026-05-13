@@ -142,7 +142,7 @@ This reduces the delay between detecting availability and reaching the server to
 - Each user has independent channels, credentials, filters, and auto-book settings
 - One scrape run is shared across all users — adding users does not multiply API traffic
 - User data is stored in `data/users.json` and can be managed entirely from the web UI
-- On first run, legacy notification env vars can be migrated into a default user automatically
+- On first run, open the web panel and click "Add User" to create your first user
 
 ### Notifications
 
@@ -240,7 +240,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `notifier.py` | `BaseNotifier` ABC; iMessage (macOS gate, AppleScript escape hardened), Telegram, Email, WhatsApp, `WebNotifier`, multi-dispatch |
 | `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); enhanced error context (sku/contract_id/start_date); optional `cancel_enabled` auto-cancel, proxy support |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
-| `users.py` | `UserConfig`, `users.json` read/write, legacy env migration |
+| `users.py` | `UserConfig`, `users.json` read/write |
 | `web.py` | Flask app bootstrap: instantiation, security headers, CSRF, Jinja filters, context processors, route registration, web process file logging |
 | `app/auth.py` | Session authentication, role decorators (`login_required`, `admin_required`, `admin_api_required`), guest mode, login rate limiting |
 | `app/csrf.py` | CSRF token generation and validation (Unicode-safe via `.encode("utf-8")`) |
@@ -331,7 +331,7 @@ python monitor.py --once
 
 The web panel dashboard includes **Start / Stop / Shutdown** buttons — no need to SSH in or manage background processes manually.
 
-Tip: On first run, if `data/users.json` does not exist and old `.env` notification env vars are present, the tool auto-migrates them into a default user.
+Tip: On first run, open the web panel and click "Add User" in the Users page to create your first user with notification channels and filters.
 
 ### Run with Docker (VPS / server)
 
@@ -519,7 +519,7 @@ models.py           Listing dataclass and formatting helpers
 notifier.py         BaseNotifier, iMessage (AppleScript escape hardened), Telegram, Email, WhatsApp, WebNotifier
 booker.py           Login, createEmptyCart, addNewBooking, placeOrder (store_id=54), idealCheckOut (plateform "h"), proxy support; enhanced error context
 config.py           Global config loading, known cities, ListingFilter, AutoBookConfig, heartbeat interval
-users.py            UserConfig, users.json management, legacy env migration
+users.py            UserConfig, users.json read/write
 translations.py     UI translations (zh/en) — 120+ keys covering all pages
 tools/
   geocode_all.py      One-shot script: pre-geocode all listing addresses via Nominatim

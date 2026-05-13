@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -163,10 +163,14 @@ def get_impersonate() -> str:
     import random
     global _last_impersonate
     pool = list(_CURL_IMPERSONATE_POOL)
-    # 如果上次选的值在池中且池大小 > 1，排除上次值，避免连续相同
+    weights = list(_POOL_WEIGHTS)
+    # 如果上次选的值在池中且池大小 > 1，排除上次值并同步移除对应权重
     if _last_impersonate is not None and _last_impersonate in pool and len(pool) > 1:
-        pool.remove(_last_impersonate)
-    choice = random.choices(pool, weights=None if _last_impersonate is not None and len(pool) < len(_CURL_IMPERSONATE_POOL) else _POOL_WEIGHTS[:len(pool)], k=1)[0]
+        idx = pool.index(_last_impersonate)
+        pool.pop(idx)
+        if idx < len(weights):
+            weights.pop(idx)
+    choice = random.choices(pool, weights=weights, k=1)[0]
     _last_impersonate = choice
     return choice
 
@@ -317,22 +321,17 @@ class ListingFilter:
 
     def is_empty(self) -> bool:
         """所有条件均未设置时返回 True，表示全部放行。"""
-        return (
-            self.max_rent is None
-            and self.min_area is None
-            and self.min_floor is None
-            and not self.allowed_occupancy
-            and not self.allowed_types
-            and not self.allowed_neighborhoods
-            and not self.allowed_cities
-            and not self.allowed_contract
-            and not self.allowed_tenant
-            and not self.allowed_offer
-            and not self.allowed_finishing
-            and not (
-                isinstance(self.allowed_energy, str) and self.allowed_energy.strip()
-            )
-        )
+        # 通过遍历 dataclass fields 自动判断，新增过滤字段无需手动同步此处
+        for f in fields(self):
+            if f.name == "allowed_energy":
+                if isinstance(self.allowed_energy, str) and self.allowed_energy.strip():
+                    return False
+            elif isinstance(getattr(self, f.name), list):
+                if getattr(self, f.name):
+                    return False
+            elif getattr(self, f.name) is not None:
+                return False
+        return True
 
     def passes(self, listing: "Listing") -> bool:
         """

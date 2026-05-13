@@ -64,3 +64,23 @@ class TestSettingsPost:
         assert "LOG_LEVEL=DEBUG" in env_content
         # CITIES 应为 | 拼接格式
         assert "Eindhoven,29|Amsterdam,24" in env_content
+
+    def test_invalid_numeric_not_written(self, admin_client, isolated_data_dir):
+        """POST 非法数字值（abc）不应写入 .env，保留旧值。"""
+        env_path = isolated_data_dir / ".env"
+        env_path.write_text("PEAK_INTERVAL=45\nCHECK_INTERVAL=300\n", encoding="utf-8")
+        r = admin_client.post("/settings", data={
+            "CHECK_INTERVAL": "300",
+            "PEAK_INTERVAL": "abc",
+            "HEARTBEAT_INTERVAL_MINUTES": "",
+            "LOG_LEVEL": "INFO",
+            "city_selected": "Eindhoven,29",
+        }, headers={"X-CSRF-Token": "test_csrf"})
+        assert r.status_code in (200, 302)
+        env_content = env_path.read_text(encoding="utf-8")
+        # 非法值 abc 不能写入
+        assert "PEAK_INTERVAL=abc" not in env_content
+        # 空值心跳间隔不能写入空字符串
+        assert "HEARTBEAT_INTERVAL_MINUTES=" not in env_content
+        # 旧值 PEAK_INTERVAL=45 应保留
+        assert "PEAK_INTERVAL=45" in env_content

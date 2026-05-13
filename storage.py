@@ -328,10 +328,11 @@ class Storage:
         if not listing_ids:
             return
         with self._conn:
-            for lid in listing_ids:
-                self._conn.execute(
-                    "UPDATE listings SET notified=1 WHERE id=?", (lid,)
-                )
+            placeholders = ",".join("?" for _ in listing_ids)
+            self._conn.execute(
+                f"UPDATE listings SET notified=1 WHERE id IN ({placeholders})",
+                listing_ids,
+            )
 
     def mark_status_change_notified(self, listing_id: str) -> None:
         """

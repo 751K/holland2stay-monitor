@@ -6,7 +6,6 @@ users.py — 多用户配置管理
 - 定义 `UserConfig` dataclass，包含单个用户的全部配置：
   通知渠道凭证、房源过滤条件、自动预订配置
 - 提供 `data/users.json` 的读写接口
-- 首次启动时从旧版 .env 单用户配置迁移（向后兼容）
 
 存储格式
 --------
@@ -191,7 +190,7 @@ def load_users() -> list[UserConfig]:
     Returns
     -------
     list[UserConfig]
-    - 文件不存在 → 返回空列表（首次运行，调用方可执行 .env 迁移）
+    - 文件不存在 → 返回空列表（首次运行，请在 Web 面板添加用户）
     - 文件存在且合法 → 返回解析结果（可能为空列表，表示有意清空）
 
     Raises
@@ -199,7 +198,7 @@ def load_users() -> list[UserConfig]:
     RuntimeError
         文件存在但 JSON 解析失败（损坏/截断/写入中断）时抛出，
         而不是静默返回 []。调用方必须显式处理此异常，
-        禁止在此情况下用迁移逻辑覆盖文件（会导致数据丢失）。
+        禁止在此情况下覆盖文件（会导致数据丢失）。
     """
     if not USERS_FILE.exists():
         return []
@@ -265,100 +264,3 @@ def get_user(users: list[UserConfig], user_id: str) -> Optional[UserConfig]:
     return next((u for u in users if u.id == user_id), None)
 
 
-# ------------------------------------------------------------------ #
-# 迁移：从旧版 .env 单用户配置创建默认用户
-# ------------------------------------------------------------------ #
-
-def migrate_from_env() -> Optional[UserConfig]:
-    """
-    读取旧版 .env 单用户配置，生成一个「默认用户」。
-
-    触发条件
-    --------
-    仅在 `data/users.json` 不存在或为空时由 `monitor.py` 调用一次。
-    若 .env 没有任何通知配置（IMESSAGE_RECIPIENT 和 NOTIFICATION_CHANNELS 均为空），
-    返回 None，提示用户在 Web 面板手动添加。
-
-    读取的 .env 键（完整列表）
-    --------------------------
-    通知：NOTIFICATION_CHANNELS, IMESSAGE_RECIPIENT,
-          TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
-          EMAIL_SMTP_HOST, EMAIL_SMTP_PORT, EMAIL_SMTP_SECURITY,
-          EMAIL_USERNAME, EMAIL_PASSWORD, EMAIL_FROM, EMAIL_TO,
-          TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM, TWILIO_TO,
-          NOTIFICATIONS_ENABLED
-    过滤：MAX_RENT, MIN_AREA, MIN_FLOOR,
-          ALLOWED_OCCUPANCY, ALLOWED_TYPES, ALLOWED_NEIGHBORHOODS
-    预订：AUTO_BOOK_ENABLED, AUTO_BOOK_DRY_RUN, AUTO_BOOK_EMAIL, AUTO_BOOK_PASSWORD,
-          AUTO_BOOK_MAX_RENT, AUTO_BOOK_MIN_AREA, AUTO_BOOK_MIN_FLOOR,
-          AUTO_BOOK_ALLOWED_OCCUPANCY, AUTO_BOOK_ALLOWED_TYPES, AUTO_BOOK_ALLOWED_NEIGHBORHOODS
-
-    Returns
-    -------
-    UserConfig（name="默认用户"）或 None
-    """
-    import os
-
-    channels_raw = os.environ.get("NOTIFICATION_CHANNELS", "")
-    recipient    = os.environ.get("IMESSAGE_RECIPIENT", "")
-    if not channels_raw and not recipient:
-        return None
-
-    channels = [c.strip().lower() for c in channels_raw.split(",") if c.strip()] or ["imessage"]
-
-    def _f(k: str) -> Optional[float]:
-        v = os.environ.get(k, "").strip()
-        return float(v) if v else None
-
-    def _i(k: str) -> Optional[int]:
-        v = os.environ.get(k, "").strip()
-        return int(v) if v else None
-
-    def _l(k: str) -> list[str]:
-        v = os.environ.get(k, "").strip()
-        return [x.strip() for x in v.split(",") if x.strip()] if v else []
-
-    lf = ListingFilter(
-        max_rent=_f("MAX_RENT"),
-        min_area=_f("MIN_AREA"),
-        min_floor=_i("MIN_FLOOR"),
-        allowed_occupancy=_l("ALLOWED_OCCUPANCY"),
-        allowed_types=_l("ALLOWED_TYPES"),
-        allowed_neighborhoods=_l("ALLOWED_NEIGHBORHOODS"),
-    )
-    ab = AutoBookConfig(
-        enabled=os.environ.get("AUTO_BOOK_ENABLED", "false").lower() == "true",
-        dry_run=os.environ.get("AUTO_BOOK_DRY_RUN", "true").lower() != "false",
-        email=os.environ.get("AUTO_BOOK_EMAIL", ""),
-        password=os.environ.get("AUTO_BOOK_PASSWORD", ""),
-        listing_filter=ListingFilter(
-            max_rent=_f("AUTO_BOOK_MAX_RENT"),
-            min_area=_f("AUTO_BOOK_MIN_AREA"),
-            min_floor=_i("AUTO_BOOK_MIN_FLOOR"),
-            allowed_occupancy=_l("AUTO_BOOK_ALLOWED_OCCUPANCY"),
-            allowed_types=_l("AUTO_BOOK_ALLOWED_TYPES"),
-            allowed_neighborhoods=_l("AUTO_BOOK_ALLOWED_NEIGHBORHOODS"),
-        ),
-    )
-
-    return UserConfig(
-        name="默认用户",
-        notifications_enabled=os.environ.get("NOTIFICATIONS_ENABLED", "true").lower() != "false",
-        notification_channels=channels,
-        imessage_recipient=recipient,
-        telegram_token=os.environ.get("TELEGRAM_BOT_TOKEN", ""),
-        telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", ""),
-        email_smtp_host=os.environ.get("EMAIL_SMTP_HOST", ""),
-        email_smtp_port=_i("EMAIL_SMTP_PORT") or 587,
-        email_smtp_security=os.environ.get("EMAIL_SMTP_SECURITY", "starttls"),
-        email_username=os.environ.get("EMAIL_USERNAME", ""),
-        email_password=os.environ.get("EMAIL_PASSWORD", ""),
-        email_from=os.environ.get("EMAIL_FROM", ""),
-        email_to=os.environ.get("EMAIL_TO", ""),
-        twilio_sid=os.environ.get("TWILIO_ACCOUNT_SID", ""),
-        twilio_token=os.environ.get("TWILIO_AUTH_TOKEN", ""),
-        twilio_from=os.environ.get("TWILIO_FROM", ""),
-        twilio_to=os.environ.get("TWILIO_TO", ""),
-        listing_filter=lf,
-        auto_book=ab,
-    )

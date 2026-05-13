@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.2.9 (2026-05-13)
+
+### 移除 v1→v2 迁移逻辑
+
+v1.2.0 起用户配置从 `.env` 迁移至 `data/users.json`，此后的 8 个版本一直携带从 `.env` 自动创建默认用户的迁移代码。该逻辑已无调用场景，本次彻底移除：
+
+- **`users.py`**：删除 `migrate_from_env()` 函数（~95 行）
+- **`monitor.py`**：移除 `migrate_from_env` 导入和调用，更新 `users.json` 不存在/为空时的提示文案
+- **`.env.example`**：删除底部 13 行旧版迁移注释
+- **`docs/README.md` / `docs/README_cn.md`**：移除"自动迁移"描述，改为"在 Web 面板手动添加用户"
+- **`translations.py`**：更新 `users_empty_hint`，移除迁移提示
+- **注释修正**：`monitor.py:1178` 从"避免迁移逻辑覆盖现有数据"改为"避免忽略或覆盖现有数据"
+- **测试**：删除 `TestMigrateFromEnv` 类（2 个测试）
+
+### 功能增强
+
+- **跨平台进程终止**：`_terminate()` 替代裸 `os.kill()`，Windows 通过 `ctypes.windll.kernel32.TerminateProcess` 实现，POSIX 保持 SIGTERM
+- **asyncio 兼容 Gunicorn worker**：`_run_async()` 检测已有 event loop（gevent/asyncio worker），在新线程中跑独立 loop，避免 `asyncio.run()` 抛错
+- **`ListingFilter.is_empty()` 自动化**：用 `dataclasses.fields()` 迭代替代手动枚举所有字段，新增过滤字段无需同步修改此处
+- **`get_impersonate()` 权重修复**：排除上次选择时同步移除对应权重，避免池/权重列表错位
+
+### 性能
+
+- **SQL 批量更新**：`mark_many_notified()` 从逐条 `UPDATE` 改为单条 `WHERE id IN (...)` 批量更新
+
+### 细节
+
+- **Web 日志静化**：屏蔽 Werkzeug HTTP 访问日志（`GET /static/...` 等），仅保留 WARNING+
+- **翻译整理**：`map_geocode_btn` / `map_geocode_hint` / `map_loading` 从 Calendar 区移到 Map 区；删除重复 `settings_heartbeat` key
+- **设置页补充提示**：weekdays-only 复选框下方增加说明文字
+- **测试**：新增 `test_invalid_numeric_not_written`（非法/空值不写入 .env）；conftest 补充 `web.log` fixture
+
+---
+
 ## v1.2.8 (2026-05-13)
 
 ### 功能增强

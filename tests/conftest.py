@@ -122,6 +122,7 @@ def isolated_data_dir(tmp_path, monkeypatch):
         fake_log_files = {
             "monitor": tmp_path / "monitor.log",
             "errors":  tmp_path / "errors.log",
+            "web":     tmp_path / "web.log",
         }
         monkeypatch.setattr(system_route, "_LOG_FILES", fake_log_files)
     except ImportError:

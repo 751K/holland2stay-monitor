@@ -24,6 +24,19 @@ from app.csrf import csrf_required
 from app.process_ctrl import monitor_pid, write_reload_request
 
 
+def _terminate(pid: int) -> None:
+    """跨平台终止进程：POSIX 用 SIGTERM，Windows 用 terminate()。"""
+    if os.name == "nt":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(1, False, pid)  # PROCESS_TERMINATE = 1
+        if handle:
+            kernel32.TerminateProcess(handle, 0)
+            kernel32.CloseHandle(handle)
+    else:
+        os.kill(pid, signal.SIGTERM)
+
+
 @admin_api_required
 @csrf_required
 def api_reload():
@@ -86,7 +99,7 @@ def api_monitor_stop():
     if pid is None:
         return jsonify({"ok": False, "error": "监控未在运行"}), 409
     try:
-        os.kill(pid, signal.SIGTERM)
+        _terminate(pid)
         return jsonify({"ok": True, "message": "已发送停止信号"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -100,7 +113,7 @@ def api_shutdown():
     pid = monitor_pid()
     if pid is not None:
         try:
-            os.kill(pid, signal.SIGTERM)
+            _terminate(pid)
         except Exception:
             pass
 
@@ -108,7 +121,7 @@ def api_shutdown():
     def _delayed():
         import time as _t
         _t.sleep(0.3)
-        os.kill(os.getpid(), signal.SIGTERM)
+        _terminate(os.getpid())
 
     threading.Thread(target=_delayed, daemon=True).start()
     return jsonify({"ok": True, "message": "正在关闭..."})

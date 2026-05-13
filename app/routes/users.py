@@ -38,6 +38,18 @@ from config import _ENERGY_LABELS, _energy_rank
 logger = logging.getLogger(__name__)
 
 
+def _run_async(coro: Any) -> Any:
+    """安全运行 async 协程，兼容已有 event loop（Gunicorn gevent/asyncio worker）。"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # 已有 running loop：在新线程中跑独立的 event loop
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
 def _energy_rank_or_99(label: str) -> int:
     """能耗排序辅助，未知标签排最后。"""
     r = _energy_rank(label)
@@ -247,7 +259,7 @@ def user_test_notify(user_id: str) -> Any:
             continue
 
         try:
-            ok = asyncio.run(_send_and_close(notifier_obj, test_msg))
+            ok = _run_async(_send_and_close(notifier_obj, test_msg))
             results.append({"channel": label, "ok": ok,
                             "error": None if ok else "发送失败，请检查日志"})
         except Exception as e:

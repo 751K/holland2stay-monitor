@@ -53,6 +53,8 @@ _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(mess
 _fh.setLevel(logging.INFO)
 logging.getLogger().setLevel(logging.INFO)
 logging.getLogger().addHandler(_fh)
+# 屏蔽 Werkzeug HTTP 访问日志，只保留 WARNING+（如 5xx 错误）
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # app/ 子包
 from app import csrf as _csrf                                    # noqa: E402

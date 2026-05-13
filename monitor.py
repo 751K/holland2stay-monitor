@@ -59,7 +59,7 @@ from config import get_proxy_url
 from scraper import BlockedError, RateLimitError, ScrapeNetworkError, scrape_all
 from update_checker import check_for_updates
 from storage import Storage
-from users import USERS_FILE, UserConfig, load_users, migrate_from_env, save_users
+from users import USERS_FILE, UserConfig, load_users, save_users
 
 
 def _setup_logging(level: str) -> None:
@@ -206,7 +206,7 @@ def _consume_reload_request_file() -> bool:
 
 def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
     """注册 SIGHUP 处理器：收到信号后唤醒热重载事件。"""
-    def _handler(signum: int, frame) -> None:  # type: ignore[type-arg]
+    def _handler(_signum: int, _frame: object) -> None:
         if _reload_event is not None:
             loop.call_soon_threadsafe(_reload_event.set)
             logger.info("收到 SIGHUP，将在本轮结束后热重载配置")
@@ -1175,30 +1175,22 @@ async def _async_main() -> None:
         total = sum(len(v) for v in _retry_queue.values())
         logger.info("已恢复重试队列: %d 个用户, %d 套候选", len(_retry_queue), total)
 
-    # 加载用户配置；文件损坏时硬停止，避免迁移逻辑覆盖现有数据
+    # 加载用户配置；文件损坏时硬停止，避免忽略或覆盖现有数据
     try:
         users = load_users()
     except RuntimeError as e:
         logger.critical("❌ 无法加载用户配置，进程终止以防数据丢失:\n  %s", e)
         sys.exit(1)
 
-    # 仅在文件完全不存在时（真正的首次运行）才执行 .env 迁移。
-    # users 为空列表但文件已存在，说明是有意清空，不触发迁移。
     if not USERS_FILE.exists():
-        migrated = migrate_from_env()
-        if migrated:
-            save_users([migrated])
-            users = [migrated]
-            logger.info("✅ 已从 .env 迁移旧配置，创建默认用户「%s」", migrated.name)
-        else:
-            logger.warning(
-                "⚠️  users.json 不存在且 .env 无通知配置。"
-                "请在 Web 面板（python web.py）的「用户」页面添加用户。"
-            )
+        logger.warning(
+            "⚠️  users.json 不存在。"
+            "请在 Web 面板（python web.py）点击「新增用户」添加第一个用户。"
+        )
     elif not users:
         logger.warning(
             "⚠️  users.json 为空列表，通知和自动预订不可用。"
-            "请在 Web 面板添加用户。"
+            "请在 Web 面板点击「新增用户」添加用户。"
         )
 
     user_notifiers = _build_user_notifiers(users)

@@ -141,7 +141,7 @@ python -m pytest tests/ -v
 - 每个用户独立拥有：通知渠道 + 凭证、房源过滤条件、自动预订账号
 - 抓取一次共享，通知和预订按各用户条件分发，N 用户 ≠ N 倍 API 请求
 - 用户数据存储于 `data/users.json`，Web 面板增删改、一键启停
-- **零配置升级**：首次启动自动从旧 `.env` 通知配置迁移为默认用户
+- **零配置启动**：打开 Web 面板点击「新增用户」即可创建第一个用户
 
 ### 通知推送
 
@@ -246,7 +246,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `notifier.py` | BaseNotifier ABC，iMessage（macOS 检测 + AppleScript 转义加固），Telegram，Email，WhatsApp，WebNotifier，MultiNotifier |
 | `booker.py` | PrewarmedSession；createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；增强错误上下文（sku/contract_id/start_date）；cancel_enabled 代理支持 |
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
-| `users.py` | UserConfig dataclass，users.json 读写，.env 配置迁移 |
+| `users.py` | UserConfig dataclass，users.json 读写 |
 | `web.py` | Flask app 引导层：实例化、安全头、CSRF、Jinja 过滤器、context processor、路由注册、Web 进程日志 |
 | `app/auth.py` | Session 鉴权、RBAC 装饰器（`login_required`、`admin_required`、`admin_api_required`）、访客模式、登录限流 |
 | `app/csrf.py` | CSRF token 生成与校验（Unicode 安全，`.encode("utf-8")` 防 TypeError）|
@@ -336,7 +336,7 @@ python monitor.py --once
 
 Web 面板 Dashboard 提供 **启动监控 / 停止监控 / 关闭** 三个按钮，无需手动管理进程。
 
-> **提示**：首次启动时，若 `data/users.json` 不存在且 `.env` 中配置了旧版通知变量，会自动迁移为默认用户，无需手动配置。
+> **提示**：首次启动时，打开 Web 面板点击「新增用户」创建第一个用户，配置通知渠道和过滤条件即可。
 
 ### Docker 部署（VPS / 服务器）
 
@@ -519,7 +519,7 @@ models.py           Listing dataclass，price_display，feature_map
 notifier.py         BaseNotifier → iMessage（AppleScript 转义加固）/ Telegram / Email / WhatsApp / WebNotifier
 booker.py           登录 → createEmptyCart → addNewBooking → placeOrder (store_id=54) → idealCheckOut (plateform "h")；增强错误上下文
 config.py           全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig
-users.py            UserConfig，users.json 读写，.env 配置迁移
+users.py            UserConfig，users.json 读写
 translations.py     中/英翻译字典，120+ 键覆盖全部页面
 tools/
   geocode_all.py      一次性脚本：通过 Nominatim 预加载所有房源坐标

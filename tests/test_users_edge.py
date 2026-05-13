@@ -77,25 +77,6 @@ class TestLoadUsers:
         assert "未知字段" in caplog.text or any("unknown" in r.message.lower() for r in caplog.records)
 
 
-class TestMigrateFromEnv:
-    def test_no_env_config_returns_none(self, monkeypatch):
-        monkeypatch.setenv("NOTIFICATION_CHANNELS", "")
-        monkeypatch.setenv("IMESSAGE_RECIPIENT", "")
-        from users import migrate_from_env
-        assert migrate_from_env() is None
-
-    def test_basic_migration_creates_user(self, monkeypatch):
-        monkeypatch.setenv("NOTIFICATION_CHANNELS", "telegram")
-        monkeypatch.setenv("IMESSAGE_RECIPIENT", "")
-        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "tok123")
-        monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat456")
-        from users import migrate_from_env
-        u = migrate_from_env()
-        assert u is not None
-        assert u.name == "默认用户"
-        assert "telegram" in u.notification_channels
-
-
 class TestSaveUsers:
     def test_save_and_reload_round_trip(self, tmp_path, monkeypatch):
         import users
