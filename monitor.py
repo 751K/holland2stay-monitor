@@ -45,15 +45,13 @@ import signal
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from dotenv import load_dotenv
 
-from booker import PrewarmedSession, try_book
-from config import DATA_DIR, ENV_PATH, load_config
+from booker import PrewarmedSession
+from config import DATA_DIR, ENV_PATH, get_proxy_url, load_config
 from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
-from config import get_proxy_url
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
@@ -61,6 +59,7 @@ from scraper import BlockedError, RateLimitError, ScrapeNetworkError, scrape_all
 from update_checker import check_for_updates
 from storage import Storage
 from users import USERS_FILE, UserConfig, load_users, save_users
+from models import Listing
 
 
 def _setup_logging(level: str) -> None:
@@ -105,7 +104,6 @@ def _setup_logging(level: str) -> None:
 
 logger = logging.getLogger("monitor")
 
-
 # 自适应轮询参数（固定，不需要用户配置）
 # 每轮成功后将当前间隔乘以此系数（5% 缩短），缓慢逼近 min_interval
 _ADAPTIVE_DECREASE = 0.95
@@ -114,7 +112,7 @@ _ADAPTIVE_INCREASE = 2.0
 
 # Cloudflare 403 屏蔽冷却时间（秒）。比 429 的 5 min 更长 —— 等待无法自动恢复，
 # 给用户/运维时间换代理或重启进程。
-_BLOCKED_COOLDOWN = 900   # 15 分钟
+_BLOCKED_COOLDOWN = 900  # 15 分钟
 
 # 连续网络失败阈值：连续 N 次全部城市第 1 页网络失败时触发冷却，
 # 避免坏代理/断网时监控空转刷屏 error log
@@ -124,7 +122,7 @@ _NETWORK_FAIL_COOLDOWN = 300  # 5 分钟
 # 屏蔽通知节流：避免每轮抓取都给用户推一次相同的告警。
 # 状态是模块级，进程重启后清零（重启后第一轮屏蔽会再发通知，符合预期）。
 _last_block_notify_at: float = 0.0
-_BLOCK_NOTIFY_INTERVAL = 1800   # 30 分钟
+_BLOCK_NOTIFY_INTERVAL = 1800  # 30 分钟
 
 
 def _should_notify_block() -> bool:
@@ -135,6 +133,7 @@ def _should_notify_block() -> bool:
         _last_block_notify_at = now
         return True
     return False
+
 
 _PID_FILE = DATA_DIR / "monitor.pid"
 _RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
@@ -189,6 +188,7 @@ def _consume_reload_request_file() -> bool:
 
 def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
     """注册 SIGHUP 处理器：收到信号后唤醒热重载事件。"""
+
     def _handler(_signum: int, _frame: object) -> None:
         if _reload_event is not None:
             loop.call_soon_threadsafe(_reload_event.set)
@@ -201,19 +201,18 @@ def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
 
 
 # ------------------------------------------------------------------ #
-# ------------------------------------------------------------------ #
 # 核心逻辑
 # ------------------------------------------------------------------ #
 
 
 async def run_once(
-    cfg,
-    storage: Storage,
-    user_notifiers: UserNotifiers,
-    *,
-    web_notifier: WebNotifier | None = None,
-    dry_run: bool = False,
-    booking_deadline: float = float("inf"),
+        cfg,
+        storage: Storage,
+        user_notifiers: UserNotifiers,
+        *,
+        web_notifier: WebNotifier | None = None,
+        dry_run: bool = False,
+        booking_deadline: float = float("inf"),
 ) -> None:
     """
     执行一次完整的「抓取 → 对比 → 通知 → 自动预订」流程。
@@ -258,8 +257,8 @@ async def run_once(
     loop = asyncio.get_running_loop()
 
     # ── Phase B：缓存查询 → 命中复用 / 未命中刷新（与 scrape 并行）── #
-    prewarm_cached: dict[str, "PrewarmedSession"] = {}   # 命中：同步可用
-    prewarm_futures: dict[str, "asyncio.Future"] = {}    # 未命中：后台刷新
+    prewarm_cached: dict[str, "PrewarmedSession"] = {}  # 命中：同步可用
+    prewarm_futures: dict[str, "asyncio.Future"] = {}  # 未命中：后台刷新
 
     if not dry_run:
         # 1) 失效不再合格的缓存（用户被禁用 / 移除自动预订 / 删除账号）
@@ -271,7 +270,17 @@ async def run_once(
         for stale_uid in set(prewarm_cache.keys()) - active_user_ids:
             prewarm_cache.invalidate(stale_uid)
 
-        # 2) 对合格用户：命中复用，未命中提交刷新
+        # 2) 对合格用户：命中复用，未命中提交刷新。
+        # 给每个 future 加 done_callback：完成后自动写入 prewarm_cache，
+        # 确保慢 future（跨轮完成）的 session 不会泄漏。
+        def _on_prewarm_done(user_id: str, fut) -> None:
+            try:
+                ps = fut.result()
+            except Exception:
+                ps = None
+            if ps:
+                prewarm_cache.set(user_id, ps)
+
         for user, _ in user_notifiers:
             if user.id not in active_user_ids:
                 continue
@@ -281,8 +290,14 @@ async def run_once(
             else:
                 if cached:
                     prewarm_cache.invalidate(user.id)
-                prewarm_futures[user.id] = loop.run_in_executor(
+                fut = loop.run_in_executor(
                     None, prewarm_cache.create, user
+                )
+                prewarm_futures[user.id] = fut
+                fut.add_done_callback(
+                    lambda f, uid=user.id: loop.call_soon_threadsafe(
+                        _on_prewarm_done, uid, f
+                    )
                 )
 
         if prewarm_cached or prewarm_futures:
@@ -292,15 +307,23 @@ async def run_once(
             )
 
     async def _stash_pending_prewarms() -> None:
+        """收集已完成的 prewarm future，供本轮 booking 快速通道使用。
+        未完成的 future 由 done_callback 兜底——完成后自动写入缓存。"""
         for user_id, fut in list(prewarm_futures.items()):
+            if not fut.done():
+                continue
             try:
-                ps = await fut
+                ps = fut.result()
             except Exception:
                 ps = None
             if ps:
                 prewarm_cache.set(user_id, ps)
-        prewarm_futures.clear()
+            del prewarm_futures[user_id]
 
+    # 注意：每个 except 路径显式调用 _stash_pending_prewarms()。
+    # 未用 try/finally 统一收尾——因为成功路径上 stash 要延迟到
+    # booking 快速通道之后（line ~530），提前 stash 会导致 booking
+    # 代码无法从 prewarm_futures 中取出刚完成的 session。
     try:
         fresh = await loop.run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
@@ -372,16 +395,24 @@ async def run_once(
     logger.info("本次抓取共 %d 条房源", len(fresh))
 
     if dry_run:
-        print(f"\n{'='*60}")
-        print(f"[DRY RUN] 抓取结果（共 {len(fresh)} 条）")
+        # flush=True：管道/重定向环境确保即时输出。非 ASCII 字符（房源名含
+        # 荷兰语特殊字母）在某些终端编码下可能抛 UnicodeEncodeError，跳过不崩。
+        def _safe_print(*args, **kw):
+            try:
+                print(*args, **kw)
+            except UnicodeEncodeError:
+                print(*(str(a).encode("ascii", "replace").decode() for a in args), **kw)
+
+        _safe_print(f"\n{'=' * 60}", flush=True)
+        _safe_print(f"[DRY RUN] 抓取结果（共 {len(fresh)} 条）", flush=True)
         for user, _ in user_notifiers:
             if not user.listing_filter.is_empty():
                 matched = [l for l in fresh if user.listing_filter.passes(l)]
-                print(f"  用户 [{user.name}] 过滤后符合：{len(matched)} 条")
-        print('='*60)
+                _safe_print(f"  用户 [{user.name}] 过滤后符合：{len(matched)} 条", flush=True)
+        _safe_print('=' * 60, flush=True)
         for l in fresh:
-            print(f"  [{l.status:22s}] {l.price_display:7s} | {l.available_from or '?':12s} | {l.name}")
-        print('='*60)
+            _safe_print(f"  [{l.status:22s}] {l.price_display:7s} | {l.available_from or '?':12s} | {l.name}", flush=True)
+        _safe_print('=' * 60, flush=True)
         return
 
     new_listings, status_changes = storage.diff(fresh)
@@ -393,7 +424,7 @@ async def run_once(
 
     # ── 快速候选预扫描：立即收集候选，抢在发通知之前提交预订 ──────── #
     # 此处只做过滤判断（纯内存），不发任何通知
-    ab_candidates: dict[str, list] = {u.id: [] for u, _ in user_notifiers}
+    ab_candidates: dict[str, list["Listing"]] = {u.id: [] for u, _ in user_notifiers}
 
     # listing.id → (old_status, new_status)：记录状态变更触发的候选，用于日志区分
     status_transition: dict[str, tuple[str, str]] = {}
@@ -401,12 +432,12 @@ async def run_once(
     for listing in new_listings:
         for user, notifier in user_notifiers:
             if (
-                user.auto_book.enabled
-                and user.notifications_enabled
-                and notifier.has_channels
-                and listing.status.lower() == STATUS_AVAILABLE
-                and (user.auto_book.listing_filter.is_empty()
-                     or user.auto_book.listing_filter.passes(listing))
+                    user.auto_book.enabled
+                    and user.notifications_enabled
+                    and notifier.has_channels
+                    and listing.status.lower() == STATUS_AVAILABLE
+                    and (user.auto_book.listing_filter.is_empty()
+                         or user.auto_book.listing_filter.passes(listing))
             ):
                 ab_candidates[user.id].append(listing)
 
@@ -415,12 +446,12 @@ async def run_once(
             status_transition[listing.id] = (old_status, new_status)
         for user, notifier in user_notifiers:
             if (
-                user.auto_book.enabled
-                and user.notifications_enabled
-                and notifier.has_channels
-                and new_status.lower() == STATUS_AVAILABLE
-                and (user.auto_book.listing_filter.is_empty()
-                     or user.auto_book.listing_filter.passes(listing))
+                    user.auto_book.enabled
+                    and user.notifications_enabled
+                    and notifier.has_channels
+                    and new_status.lower() == STATUS_AVAILABLE
+                    and (user.auto_book.listing_filter.is_empty()
+                         or user.auto_book.listing_filter.passes(listing))
             ):
                 ab_candidates[user.id].append(listing)
 
@@ -467,18 +498,23 @@ async def run_once(
         if not (user.auto_book.enabled and candidates):
             continue
 
-        # 取出该用户的预登录：优先命中缓存（同步），次取后台刷新结果
+        # 取出该用户的预登录：优先命中缓存（同步），其次取已完成的刷新结果。
+        # 未完成的 future 不 await — 让 try_book() 走正常登录 fallback，
+        # 避免预登录网络延迟削弱"快速下单通道"。
         prewarmed: PrewarmedSession | None = prewarm_cached.pop(user.id, None)
         cache_hit = prewarmed is not None
         if prewarmed is None:
             pre_fut = prewarm_futures.pop(user.id, None)
-            if pre_fut is not None:
+            if pre_fut is not None and pre_fut.done():
                 try:
-                    prewarmed = await pre_fut
+                    prewarmed = pre_fut.result()
                 except Exception:
                     prewarmed = None
                 if prewarmed:
                     prewarm_cache.set(user.id, prewarmed)
+            elif pre_fut is not None:
+                # 仍在运行中，放回 futures 让 _stash_pending_prewarms 收尾
+                prewarm_futures[user.id] = pre_fut
 
         if prewarmed:
             age = time.monotonic() - prewarmed.created_at
@@ -516,7 +552,7 @@ async def run_once(
         f = loop.run_in_executor(
             None,
             lambda cs=sorted_cands, u=user, pw=prewarmed:
-                book_with_fallback(cs, u, booking_deadline, prewarmed=pw),
+            book_with_fallback(cs, u, booking_deadline, prewarmed=pw),
         )
         ab_futures.append((user, notifier, sorted_cands, f, prewarmed))
 
@@ -524,6 +560,8 @@ async def run_once(
     await _stash_pending_prewarms()
 
     # ── 新房源通知（预订已在后台线程并行运行）───────────────────── #
+    # 标记策略：任意用户通知成功即标记为"已通知"。若部分用户渠道失败，
+    # 该 listing 不会补发——实际业务中多用户同渠道很少部分失败。
     total_notified = 0
     new_notified_ids: list[str] = []
     for listing in new_listings:
@@ -637,10 +675,10 @@ def _build_user_notifiers(users: list[UserConfig]) -> UserNotifiers:
 
 
 async def main_loop(
-    cfg,
-    storage: Storage,
-    user_notifiers: UserNotifiers,
-    web_notifier: WebNotifier | None = None,
+        cfg,
+        storage: Storage,
+        user_notifiers: UserNotifiers,
+        web_notifier: WebNotifier | None = None,
 ) -> None:
     """
     持续运行的主循环（`python monitor.py` 默认入口）。

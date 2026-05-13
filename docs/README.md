@@ -86,7 +86,7 @@ python -m pytest tests/ -v
 | Code modularization | ✅ Done | web.py split into `app/` (10 route + 8 shared modules); `mcore/` (interval, prewarm, booking); `mstorage/` (6 mixin modules); `monitor.py` 1,235→971, `storage.py` 1,177→17 re-export |
 | Prewarm session cache | ✅ Done | `mcore/prewarm.py` PrewarmCache class; process-level cache with TTL refresh; invalidated on user/config change |
 | Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; web.log for Flask app; log viewer with file tabs, line numbers, level coloring, keyword search, auto-scroll |
-| Pytest test suite | ✅ Done | 30 test modules (561 tests) covering full stack: models, mcore, mstorage, storage, scraper, booker, notifier, auth, CSRF, routes, i18n |
+| Pytest test suite | ✅ Done | 30 test modules (566 tests) covering full stack: models, mcore, mstorage, storage, scraper, booker, notifier, auth, CSRF, routes, i18n |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, mixin composition for Storage |
 
 ---

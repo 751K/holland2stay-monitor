@@ -96,6 +96,20 @@ class TestRetryQueue:
         rq.discard("u1", "L9")  # no error
         assert rq.get("u1") == {"L1"}
 
+    def test_discard_last_removes_key(self):
+        rq = RetryQueue()
+        rq.add("u1", {"L1"})
+        rq.discard("u1", "L1")
+        assert rq.get("u1") == set()
+        assert not bool(rq)  # queue 整体为空
+
+    def test_remove_gone_clears_empty_key(self):
+        rq = RetryQueue()
+        rq.add("u1", {"L1", "L2"})
+        rq.remove_gone("u1", {"L1", "L2"})
+        assert rq.get("u1") == set()
+        assert not bool(rq)
+
     def test_remove_gone(self):
         rq = RetryQueue()
         rq.add("u1", {"L1", "L2", "L3"})

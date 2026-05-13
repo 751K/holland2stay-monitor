@@ -28,10 +28,10 @@ import logging
 import os
 import uuid
 from dataclasses import asdict, dataclass, field, fields as dc_fields
-from pathlib import Path
 
 from config import AutoBookConfig, DATA_DIR, ListingFilter
 from crypto import decrypt, encrypt
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 

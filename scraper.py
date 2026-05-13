@@ -33,6 +33,7 @@ import curl_cffi.requests as req
 
 from config import get_impersonate, get_proxy_url
 from models import Listing
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 

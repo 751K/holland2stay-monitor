@@ -228,8 +228,34 @@ class TestRetryQueuePersistence:
         temp_db.set_meta("retry_queue", "{not valid json")
         result = temp_db.load_retry_queue()
         assert result == {}
-        # 损坏的值应该已经被清掉
         assert temp_db.get_meta("retry_queue", "DEFAULT") in ("", "DEFAULT")
+
+    def test_non_list_value_skipped_with_warning(self, temp_db, caplog):
+        """手动写入字符串/数字作为 user_id 的值 → 跳过并 warning。"""
+        import json, logging
+        temp_db.set_meta("retry_queue", json.dumps({"u1": "not_a_list", "u2": ["L1"]}))
+        with caplog.at_level(logging.WARNING):
+            result = temp_db.load_retry_queue()
+        assert result == {"u2": {"L1"}}  # u1 被跳过
+        assert "u1" in caplog.text
+
+    def test_top_level_array_resets(self, temp_db, caplog):
+        """顶层是 [] → reset + return {}."""
+        import json, logging
+        temp_db.set_meta("retry_queue", json.dumps([1, 2, 3]))
+        with caplog.at_level(logging.WARNING):
+            result = temp_db.load_retry_queue()
+        assert result == {}
+        assert "顶层" in caplog.text
+
+    def test_top_level_string_resets(self, temp_db, caplog):
+        """顶层是 "abc" → reset + return {}."""
+        import logging
+        temp_db.set_meta("retry_queue", '"just a string"')
+        with caplog.at_level(logging.WARNING):
+            result = temp_db.load_retry_queue()
+        assert result == {}
+        assert "顶层" in caplog.text
 
 
 # ─── meta 表基础 ────────────────────────────────────────────────

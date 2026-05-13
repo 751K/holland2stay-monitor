@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Optional
 
 STATUS_AVAILABLE = "available to book"
 STATUS_LOTTERY   = "available in lottery"

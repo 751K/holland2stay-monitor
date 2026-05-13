@@ -84,7 +84,7 @@ python -m pytest tests/ -v
 | 代码模块化 | ✅ 已完成 | web.py 拆分 `app/`（10 路由 + 8 共享）；`mcore/`（interval / prewarm / booking）；`mstorage/`（6 个 mixin 模块）；`monitor.py` 1,235→971，`storage.py` 1,177→17 re-export |
 | Prewarm Session 缓存 | ✅ 已完成 | `mcore/prewarm.py` PrewarmCache 类；进程级缓存跨轮复用；TTL 后台刷新；用户/配置变更时自动失效 |
 | 错误日志（errors.log）| ✅ 已完成 | 独立 WARNING+ 日志，含 `funcName:lineno` 格式；新增 web.log 记录 Flask 应用日志；日志查看器支持文件 Tab 切换、行号、级别着色、关键词搜索、自动滚动 |
-| Pytest 测试套件 | ✅ 已完成 | 30 个测试模块（561 个测试），覆盖全栈：模型、mcore、mstorage、存储、抓取、预订、通知、认证、CSRF、路由、i18n |
+| Pytest 测试套件 | ✅ 已完成 | 30 个测试模块（566 个测试），覆盖全栈：模型、mcore、mstorage、存储、抓取、预订、通知、认证、CSRF、路由、i18n |
 | 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Mixin 组合 Storage、解析逻辑去重 |
 
 ---

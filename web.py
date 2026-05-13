@@ -25,7 +25,6 @@ Docker 容器中由 Gunicorn 启动（supervisord.conf）：
 from __future__ import annotations
 
 import argparse
-import logging
 import logging.handlers
 import os
 import sys

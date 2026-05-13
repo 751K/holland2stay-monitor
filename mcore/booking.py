@@ -157,6 +157,8 @@ class RetryQueue:
     def discard(self, user_id: str, listing_id: str) -> None:
         if user_id in self._queue:
             self._queue[user_id].discard(listing_id)
+            if not self._queue[user_id]:
+                del self._queue[user_id]
             self._dirty = True
 
     def remove_gone(self, user_id: str, gone_ids: set) -> None:
@@ -165,6 +167,8 @@ class RetryQueue:
         if not user_set:
             return
         user_set -= gone_ids
+        if not user_set:
+            del self._queue[user_id]
         self._dirty = True
 
     def __bool__(self) -> bool:

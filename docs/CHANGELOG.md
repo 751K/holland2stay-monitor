@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.3.1 (2026-05-13)
+
+### Bug 修复
+
+- **prewarm future 阻塞下单 (P2)**：`run_once()` 中取 prewarm 时若 future 未完成，不再 `await` 阻塞，改为跳过让 `try_book()` 走正常登录。同时给每个 future 加 `add_done_callback`，完成后自动写入缓存，解决慢 prewarm 的 session 泄漏问题
+- **`_stash_pending_prewarms` 改为非阻塞 (P2)**：从 `await fut` 改为只收 `.done()` 的 future，未完成的跳过不阻塞通知
+- **RetryQueue 空 key 残留 (P2)**：`discard()` / `remove_gone()` 在集合清空后 `del self._queue[user_id]`，避免持久化 `{"user":[]}` 脏数据
+- **`load_retry_queue` 类型校验 (P2)**：顶层 JSON 非 dict 时 warning + 重置；子值只接受 list/set，其他类型跳过
+- **`Optional` 导入缺失 (P2)**：`config.py`、`models.py`、`scraper.py`、`users.py` 补充 `from typing import Optional`
+
+### 代码质量
+
+- **monitor.py**：合并重复的 `from config import`、删除孤儿注释分隔线、`ab_candidates` 类型标注补全
+- **test 模式**：`_safe_print` 包装 `UnicodeEncodeError`，Windows/管道环境不乱码
+- **`mstorage/_base.py`**：`_migrate()` 加注释说明 executescript 隐式提交约束；清理未使用的 import
+- **`web.py`**：移除未使用的 `import logging`
+- **`users.py`**：移除未使用的 `from pathlib import Path`
+
+### 测试
+
+- RetryQueue 空 key 清理 ×2、`load_retry_queue` 顶层类型异常 ×2（`[]` / `"abc"`）
+
+---
+
 ## v1.3.0 (2026-05-13)
 
 ### `monitor.py` 重构 — 提取 `mcore/` 包

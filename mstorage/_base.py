@@ -2,22 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-# 荷兰城市口语别称 → 正式名（提升 Photon 地理编码准确率）
-_CITY_FORMAL: dict[str, str] = {
-    "Den Bosch": "'s-Hertogenbosch",
-}
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class StorageBase:
@@ -34,6 +23,8 @@ class StorageBase:
     # ── Schema ──────────────────────────────────────────────────────
 
     def _migrate(self) -> None:
+        # executescript() 会隐式 COMMIT 任何未决事务——必须在 __init__
+        # 刚创建连接时立即调用，不能在已有未提交事务的连接上执行。
         cur = self._conn.cursor()
         cur.executescript("""
             PRAGMA journal_mode=WAL;

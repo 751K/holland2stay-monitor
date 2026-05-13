@@ -26,7 +26,7 @@ import sys
 
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from dotenv import load_dotenv
 
