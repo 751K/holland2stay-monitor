@@ -20,7 +20,7 @@ monitor.py — 监控主程序
 
 智能轮询
 --------
-_get_interval() 根据荷兰本地时间判断是否处于高峰期（默认 8:30-10:00 工作日）。
+get_interval() 根据荷兰本地时间判断是否处于高峰期（默认 8:30-10:00 工作日）。
 高峰期使用 PEAK_INTERVAL（默认 60s），其余时间使用 CHECK_INTERVAL（默认 300s）。
 实际等待时间在基准值 ±20% 随机抖动，避免多实例同步。
 
@@ -41,21 +41,22 @@ import asyncio
 import json
 import logging
 import os
-import random
 import signal
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from booker import PrewarmedSession, create_prewarmed_session, try_book
+from booker import PrewarmedSession, try_book
 from config import DATA_DIR, ENV_PATH, load_config
-from models import STATUS_AVAILABLE, parse_float
+from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from config import get_proxy_url
+from mcore.booking import RetryQueue, area_key, book_with_fallback
+from mcore.interval import apply_jitter, get_interval
+from mcore.prewarm import PrewarmCache
 from scraper import BlockedError, RateLimitError, ScrapeNetworkError, scrape_all
 from update_checker import check_for_updates
 from storage import Storage
@@ -137,34 +138,16 @@ def _should_notify_block() -> bool:
 
 _PID_FILE = DATA_DIR / "monitor.pid"
 _RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
-_AMS = ZoneInfo("Europe/Amsterdam")
 
 # 热重载事件（SIGHUP → 唤醒 main_loop 中的 sleep，立即重载配置）
 _reload_event: asyncio.Event | None = None
 
-# 竞争失败重试队列：user_id → {listing_id, ...}
-#
-# 背景
-# ----
-# storage.diff() 只产出"新增"和"状态变更"两类事件。如果一套房子在上轮就是
-# "Available to book" 且状态未变（如前一个预订者未付款、房子被重新放出），
-# 它既不进 new_listings 也不进 status_changes，自动预订永远不会重试。
-#
-# 解决方案
-# --------
-# try_book 竞争失败（race_lost）时，将候选 listing_id 加入此队列。
-# 每轮 run_once 开始时，检查队列中的 ID 是否仍在本次抓取的 "Available to book"
-# 列表中，若是则直接加入 ab_candidates，触发新一轮预订尝试。
-#
-# 持久化
-# ------
-# 队列通过 Storage.save_retry_queue() 落盘到 SQLite meta 表，
-# 进程重启后由 _async_main() 恢复，确保不会因重启错过重试窗口。
-_retry_queue: dict[str, set[str]] = {}
-_retry_queue_dirty = False
-
 # 类型别名：每个用户与其对应通知器的配对列表
 UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
+
+# mcore 服务实例（进程生命周期内单例）
+retry_queue = RetryQueue()
+prewarm_cache = PrewarmCache()
 
 
 # ------------------------------------------------------------------ #
@@ -218,226 +201,9 @@ def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
 
 
 # ------------------------------------------------------------------ #
-# 智能轮询
-# ------------------------------------------------------------------ #
-
-def _get_interval(cfg) -> tuple[int, bool]:
-    """
-    根据荷兰本地时间（Europe/Amsterdam）判断当前是否处于高峰期。
-
-    高峰期判断逻辑
-    --------------
-    1. 若 cfg.peak_weekdays_only=True 且当天是周末 → 非高峰
-    2. 解析两个时间窗 cfg.peak_start / cfg.peak_end 和 peak_start_2 / peak_end_2
-    3. 当前分钟数落在任一时间窗内 → 高峰
-
-    Returns
-    -------
-    (interval_seconds, is_peak)
-    interval_seconds : 本轮应等待的基准秒数（抖动前）
-    is_peak          : True 表示当前处于高峰期
-    """
-    now = datetime.now(_AMS)
-    if cfg.peak_weekdays_only and now.weekday() >= 5:
-        return cfg.check_interval, False
-
-    cur = now.hour * 60 + now.minute
-
-    def _in_window(start: str, end: str) -> bool:
-        try:
-            sh, sm = map(int, start.split(":"))
-            eh, em = map(int, end.split(":"))
-        except ValueError:
-            return False
-        return sh * 60 + sm <= cur <= eh * 60 + em
-
-    if _in_window(cfg.peak_start, cfg.peak_end) or _in_window(cfg.peak_start_2, cfg.peak_end_2):
-        return cfg.peak_interval, True
-    return cfg.check_interval, False
-
-
-def _apply_jitter(seconds: int, ratio: float = 0.20) -> int:
-    """
-    在基准等待时间上叠加随机抖动，避免多实例在同一秒发起请求。
-
-    Parameters
-    ----------
-    seconds : 基准等待时间（秒）
-    ratio   : 抖动比例（0–0.5），来自 cfg.jitter_ratio；
-              e.g. 0.20 → 实际时间在 [seconds*0.8, seconds*1.2] 内随机
-
-    Returns
-    -------
-    实际等待时间（秒），最小 5 秒
-    """
-    delta = seconds * ratio
-    return max(5, int(seconds + random.uniform(-delta, delta)))
-
-
-# ------------------------------------------------------------------ #
-# 预登录：模块级缓存 + 跨轮复用（Phase B）
-# ------------------------------------------------------------------ #
-# Phase A 把预登录与 scrape 并行化省下了 ~450ms，但每轮都重新登录，
-# 多轮无候选场景下浪费大量 generateCustomerToken 调用。
-#
-# Phase B 的核心：把 session+token 缓存到进程级 dict，跨轮复用。
-# - 命中：直接同步取用，无网络 IO
-# - TTL 剩余 <_TOKEN_REFRESH_MARGIN 秒：在 executor 中刷新（与 scrape 并行）
-# - email 变更 / 用户被禁用 / 进程退出 / 热重载：失效并关闭旧 session
-# - booking 后保留缓存；仅 unknown_error 失效（疑似 session 损坏）
-#
-# Race 防护：refresh margin 远大于一次 booking 的耗时（10s vs 300s），
-# 保证我们认为"有效"的 session 在 try_book 内部不会触发过期路径
-# （那条路径会 close session，导致下一轮缓存失效）。
-
-# user_id → 已缓存的 PrewarmedSession
-_prewarmed_cache: dict[str, "PrewarmedSession"] = {}
-
-# token 剩余寿命少于这么多秒时，提前刷新（_TOKEN_MAX_AGE=3300s，margin=300s
-# 留出充分时间完成一轮 booking 而不会让 try_book 自行 close 缓存中的 session）
-_TOKEN_REFRESH_MARGIN = 300
-
-
-def _safe_create_prewarmed(user: "UserConfig") -> "PrewarmedSession | None":
-    """
-    在 executor 线程中为单个用户建立预登录 session。失败时记录 WARNING
-    并返回 None，让 try_book() 走正常路径，避免预登录问题阻断下单。
-    """
-    try:
-        return create_prewarmed_session(user.auto_book.email, user.auto_book.password)
-    except Exception as e:
-        logger.warning(
-            "[%s] 预登录失败 (%s)，下单时将回退到正常登录路径",
-            user.name, e,
-        )
-        return None
-
-
-def _close_prewarmed_quietly(ps: "PrewarmedSession | None") -> None:
-    """幂等关闭预登录 session。None 或重复关闭均无副作用。"""
-    if not ps:
-        return
-    try:
-        ps.session.close()
-    except Exception:
-        pass
-
-
-def _is_cached_session_valid(
-    ps: "PrewarmedSession | None", expected_email: str,
-) -> bool:
-    """
-    缓存命中需同时满足：session 存在 / email 一致 / token TTL 余量充足。
-    余量阈值 = _TOKEN_REFRESH_MARGIN，避免 try_book 内部触发过期路径。
-    """
-    if ps is None:
-        return False
-    if ps.email != expected_email:
-        return False
-    return ps.token_expiry - time.monotonic() > _TOKEN_REFRESH_MARGIN
-
-
-def _invalidate_user_prewarm(user_id: str) -> None:
-    """从缓存移除该用户的 session 并关闭。已不在缓存中时为 no-op。"""
-    ps = _prewarmed_cache.pop(user_id, None)
-    _close_prewarmed_quietly(ps)
-
-
-def _clear_prewarm_cache() -> None:
-    """关闭所有缓存的 session。热重载和进程退出时调用。"""
-    if not _prewarmed_cache:
-        return
-    n = len(_prewarmed_cache)
-    for uid in list(_prewarmed_cache.keys()):
-        _invalidate_user_prewarm(uid)
-    logger.info("已清理 %d 个 prewarm 缓存", n)
-
-
 # ------------------------------------------------------------------ #
 # 核心逻辑
 # ------------------------------------------------------------------ #
-
-def _area_key(listing) -> float:
-    """
-    从 Listing.feature_map() 提取面积数值，用于多套候选时按面积降序选最大。
-
-    Returns
-    -------
-    float 面积值（m²）；无法解析时返回 0.0（排在最后）
-    """
-    area_str = listing.feature_map().get("area", "")
-    val = parse_float(area_str)
-    return val if val is not None else 0.0
-
-
-def _book_with_fallback(
-    sorted_candidates: list,
-    user: "UserConfig",
-    deadline: float,
-    prewarmed: "PrewarmedSession | None" = None,
-) -> "BookingResult":
-    """
-    按面积降序依次对 sorted_candidates 中的房源尝试 try_book()。
-
-    重试条件
-    --------
-    仅在 result.phase == "race_lost"（房源已被他人抢先预订）时继续尝试下一套。
-    其余失败类型（reserved_conflict / unknown_error 等）立即返回——这些错误
-    与具体房源无关，换一套也无法解决。
-
-    截止时间
-    --------
-    第一套无条件尝试，确保用户不会因截止超时而错过所有机会。
-    从第二套起，仅在 deadline 之前继续，避免占用下一轮扫描的时间窗口。
-    deadline = float('inf') 表示无限制（--once 模式或单轮模式）。
-
-    Parameters
-    ----------
-    sorted_candidates : 已按面积降序排列的候选房源列表（调用方保证非空）
-    user              : 用户配置（含预订账号、密码、支付方式等）
-    deadline          : time.monotonic() 截止时刻；超过则停止对下一套的尝试
-    prewarmed         : 预认证 Session，传入时跳过 try_book() 中的登录步骤
-
-    Returns
-    -------
-    最后一次 try_book() 的 BookingResult（成功或最终失败）
-    """
-    last_result = None
-    for i, listing in enumerate(sorted_candidates):
-        # 第一套无条件尝试；备选套先检查截止时间
-        if i > 0:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                logger.warning(
-                    "[%s] ⏰ 已到下次扫描截止，停止备选重试"
-                    "（已尝试 %d/%d，剩余 %d 套未试）",
-                    user.name, i, len(sorted_candidates), len(sorted_candidates) - i,
-                )
-                break
-            logger.info(
-                "[%s] 🔄 竞争失败，尝试备选 %d/%d: %s (%.1f m²)"
-                "，距截止还剩 %.0f 秒",
-                user.name, i + 1, len(sorted_candidates),
-                listing.name, _area_key(listing), remaining,
-            )
-
-        result = try_book(
-            listing,
-            user.auto_book.email,
-            user.auto_book.password,
-            dry_run=user.auto_book.dry_run,
-            cancel_enabled=user.auto_book.cancel_enabled,
-            payment_method=user.auto_book.payment_method,
-            prewarmed=prewarmed,
-        )
-        last_result = result
-
-        if result.success or result.dry_run or result.phase != "race_lost":
-            return result
-        # race_lost → 继续下一套
-
-    # 所有候选均已尝试（均 race_lost）或截止时间到
-    return last_result  # type: ignore[return-value]  # sorted_candidates 非空保证非 None
 
 
 async def run_once(
@@ -458,7 +224,7 @@ async def run_once(
     storage          : SQLite 持久化层
     user_notifiers   : [(UserConfig, BaseNotifier), ...]，启用的用户列表
     dry_run          : True 时（--test 模式）只打印结果，不写库不发通知
-    booking_deadline : time.monotonic() 截止时刻，传给 _book_with_fallback()；
+    booking_deadline : time.monotonic() 截止时刻，传给 book_with_fallback()；
                        超过截止时不再尝试备选房源。
                        默认 float("inf") = 无限制（--once / --test 模式）。
 
@@ -482,7 +248,6 @@ async def run_once(
     到步骤 6 await 时，booking 往往已经完成，几乎零额外等待。
     预订请求在发出通知之前就已进入 Holland2Stay 服务器，可节省 1-3 秒。
     """
-    global _retry_queue_dirty
     city_tasks, availability_ids = cfg.scrape_tasks()
     logger.info("开始抓取，城市数: %d，活跃用户数: %d", len(city_tasks), len(user_notifiers))
 
@@ -493,9 +258,6 @@ async def run_once(
     loop = asyncio.get_running_loop()
 
     # ── Phase B：缓存查询 → 命中复用 / 未命中刷新（与 scrape 并行）── #
-    # 优先复用 _prewarmed_cache 中仍然有效的 session；email 变更或
-    # token 余量不足时在 executor 中后台刷新（与抓取重叠）。
-    # 本轮无候选时也保留缓存供下轮复用，避免每轮都登录浪费。
     prewarm_cached: dict[str, "PrewarmedSession"] = {}   # 命中：同步可用
     prewarm_futures: dict[str, "asyncio.Future"] = {}    # 未命中：后台刷新
 
@@ -506,22 +268,21 @@ async def run_once(
             ab = user.auto_book
             if ab.enabled and ab.email and ab.password:
                 active_user_ids.add(user.id)
-        for stale_uid in set(_prewarmed_cache.keys()) - active_user_ids:
-            _invalidate_user_prewarm(stale_uid)
+        for stale_uid in set(prewarm_cache.keys()) - active_user_ids:
+            prewarm_cache.invalidate(stale_uid)
 
         # 2) 对合格用户：命中复用，未命中提交刷新
         for user, _ in user_notifiers:
             if user.id not in active_user_ids:
                 continue
-            cached = _prewarmed_cache.get(user.id)
-            if _is_cached_session_valid(cached, user.auto_book.email):
+            cached = prewarm_cache.get(user.id)
+            if prewarm_cache.is_valid(cached, user.auto_book.email):
                 prewarm_cached[user.id] = cached
             else:
-                # 失效原因：不存在 / email 变更 / TTL 不足。关闭旧的再刷新。
                 if cached:
-                    _invalidate_user_prewarm(user.id)
+                    prewarm_cache.invalidate(user.id)
                 prewarm_futures[user.id] = loop.run_in_executor(
-                    None, _safe_create_prewarmed, user
+                    None, prewarm_cache.create, user
                 )
 
         if prewarm_cached or prewarm_futures:
@@ -531,18 +292,13 @@ async def run_once(
             )
 
     async def _stash_pending_prewarms() -> None:
-        """
-        等待所有 pending 刷新完成，把结果存入缓存供下轮复用。
-        错误路径（scrape 失败 / 无候选）调用：不能关闭 session，
-        否则就退化成 Phase A 的"每轮浪费"问题。
-        """
         for user_id, fut in list(prewarm_futures.items()):
             try:
                 ps = await fut
             except Exception:
                 ps = None
             if ps:
-                _prewarmed_cache[user_id] = ps
+                prewarm_cache.set(user_id, ps)
         prewarm_futures.clear()
 
     try:
@@ -675,19 +431,16 @@ async def run_once(
     for user, notifier in user_notifiers:
         if not user.auto_book.enabled or not user.notifications_enabled or not notifier.has_channels:
             continue
-        user_retry = _retry_queue.get(user.id)
+        user_retry = retry_queue.get(user.id)
         if not user_retry:
             continue
-        # 清理本次抓取中已不再可预订的房源（已被成功预订 / 状态变更为其他）
         gone = user_retry - _fresh_avail.keys()
         if gone:
-            user_retry -= gone          # set 原地修改，直接影响 _retry_queue[user.id]
-            _retry_queue_dirty = True
+            retry_queue.remove_gone(user.id, gone)
             logger.info(
                 "[%s] 🗑️  %d 套 race_lost 房源已不可预订，移出重试队列",
                 user.name, len(gone),
             )
-        # 将仍可预订的重试房源加入候选（避免与 status_changes 路径重复）
         existing_ids = {c.id for c in ab_candidates[user.id]}
         for lid in user_retry & _fresh_avail.keys():
             if lid in existing_ids:
@@ -700,7 +453,7 @@ async def run_once(
                     user.name, listing.name,
                 )
 
-    # ── 立即将 _book_with_fallback() 提交到线程池（快速通道）──────── #
+    # ── 立即将 book_with_fallback() 提交到线程池（快速通道）──────── #
     # 新上线可预订 / 状态变更 → Available to book 均立即提交 run_in_executor，
     # 预订请求在发出通知之前就已进入 Holland2Stay 服务器（节省 1-3 秒）。
     # ab_futures: list of (user, notifier, sorted_candidates, Future, prewarmed)
@@ -725,8 +478,7 @@ async def run_once(
                 except Exception:
                     prewarmed = None
                 if prewarmed:
-                    # 新刷出来的：存入缓存供下轮复用
-                    _prewarmed_cache[user.id] = prewarmed
+                    prewarm_cache.set(user.id, prewarmed)
 
         if prewarmed:
             age = time.monotonic() - prewarmed.created_at
@@ -742,13 +494,13 @@ async def run_once(
                 user.name,
             )
 
-        sorted_cands = sorted(candidates, key=_area_key, reverse=True)
+        sorted_cands = sorted(candidates, key=area_key, reverse=True)
         primary = sorted_cands[0]
         if len(sorted_cands) > 1:
             logger.info(
                 "[%s] 自动预订候选 %d 套（含 %d 套备选），优先面积最大: %s (%.1f m²)",
                 user.name, len(sorted_cands), len(sorted_cands) - 1,
-                primary.name, _area_key(primary),
+                primary.name, area_key(primary),
             )
         if primary.id in status_transition:
             old_s, new_s = status_transition[primary.id]
@@ -764,7 +516,7 @@ async def run_once(
         f = loop.run_in_executor(
             None,
             lambda cs=sorted_cands, u=user, pw=prewarmed:
-                _book_with_fallback(cs, u, booking_deadline, prewarmed=pw),
+                book_with_fallback(cs, u, booking_deadline, prewarmed=pw),
         )
         ab_futures.append((user, notifier, sorted_cands, f, prewarmed))
 
@@ -822,12 +574,8 @@ async def run_once(
     # ── 等待预订结果，发送成功/失败通知 ──────────────────────────── #
     for user, notifier, sorted_cands, future, prewarmed in ab_futures:
         result = await future
-        # Phase B：booking 后保留 prewarm 在缓存中，下轮复用；
-        # 仅 unknown_error 失效（session 可能已损坏，如 auth 错误）。
-        # success / race_lost / reserved_conflict / cancel+retry 均视为
-        # session 健康，留在 _prewarmed_cache 中。
         if prewarmed and result.phase == "unknown_error":
-            _invalidate_user_prewarm(user.id)
+            prewarm_cache.invalidate(user.id)
             logger.info("[%s] 因 unknown_error 失效 prewarm 缓存", user.name)
         # result.listing 是实际被尝试预订的那套房源（fallback 后可能不是 sorted_cands[0]）
         booked_listing = result.listing
@@ -835,20 +583,14 @@ async def run_once(
         # 更新重试队列（dry_run 不改变队列状态，避免污染正式运行时的数据）
         if not result.dry_run:
             if result.phase == "race_lost":
-                # 本轮所有候选均竞争失败（或超时未及尝试）→ 下次扫描如仍可预订则重试
-                _retry_queue.setdefault(user.id, set()).update(c.id for c in sorted_cands)
-                _retry_queue_dirty = True
+                retry_queue.add(user.id, {c.id for c in sorted_cands})
                 logger.info(
                     "[%s] 📝 %d 套候选加入重试队列（下次扫描仍可预订时将重试）",
                     user.name, len(sorted_cands),
                 )
             else:
-                # 成功 / 非竞争性失败（账号冲突、未知错误等）→ 清除这批候选的重试标记
-                # 不再重试：成功无需再试；其他错误换一套房也无法解决根本原因
-                if user.id in _retry_queue:
-                    for c in sorted_cands:
-                        _retry_queue[user.id].discard(c.id)
-                    _retry_queue_dirty = True
+                for c in sorted_cands:
+                    retry_queue.discard(user.id, c.id)
 
         if result.dry_run:
             logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, booked_listing.name)
@@ -875,9 +617,7 @@ async def run_once(
                 await web_notifier.send_booking_failed(booked_listing, result.message)
 
     # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
-    if _retry_queue_dirty:
-        storage.save_retry_queue(_retry_queue)
-        _retry_queue_dirty = False
+    retry_queue.save(storage)
 
     logger.info(
         "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
@@ -980,7 +720,7 @@ async def main_loop(
     while True:
         round_count += 1
         try:
-            base_interval, is_peak = _get_interval(cfg)
+            base_interval, is_peak = get_interval(cfg)
 
             if is_peak:
                 # 高峰期：使用自适应间隔，在 [min_interval, peak_interval] 范围内浮动
@@ -1027,7 +767,7 @@ async def main_loop(
                     logger.debug("已清理 %d 条旧通知", pruned)
                 last_heartbeat_time = time.monotonic()
 
-            actual = _apply_jitter(effective_interval, cfg.jitter_ratio)
+            actual = apply_jitter(effective_interval, cfg.jitter_ratio)
             dev_pct = (actual - effective_interval) / effective_interval * 100
             logger.info(
                 "等待 %d 秒（基准 %d s，%+.0f%%）%s",
@@ -1069,7 +809,7 @@ async def main_loop(
                         await n.close()
                     # 用户可能改了密码/邮箱/账号 → 全量失效 prewarm 缓存。
                     # 下一轮 run_once 会按需重建（命中策略已对齐 active_user_ids）。
-                    _clear_prewarm_cache()
+                    prewarm_cache.clear()
                     user_notifiers = _build_user_notifiers(users)
                     # 热重载后重置自适应间隔（用户可能改了 peak_interval / min_interval）
                     adaptive_peak = float(cfg.peak_interval)
@@ -1091,7 +831,7 @@ async def main_loop(
             # 被限流：自适应间隔翻倍退避，然后冷却 5 分钟
             prev = adaptive_peak
             adaptive_peak = min(float(cfg.check_interval), adaptive_peak * _ADAPTIVE_INCREASE)
-            cooldown = _apply_jitter(300, cfg.jitter_ratio)
+            cooldown = apply_jitter(300, cfg.jitter_ratio)
             logger.warning(
                 "⚠️  触发限流，自适应间隔 %d → %d 秒，冷却 %d 秒后继续",
                 int(prev), int(adaptive_peak), cooldown,
@@ -1100,7 +840,7 @@ async def main_loop(
         except BlockedError:
             # 被 Cloudflare 屏蔽：等待无法恢复，但仍然冷却 15 分钟以减少
             # 错误日志刷屏。真正恢复要靠用户换代理或重启进程。
-            cooldown = _apply_jitter(_BLOCKED_COOLDOWN, cfg.jitter_ratio)
+            cooldown = apply_jitter(_BLOCKED_COOLDOWN, cfg.jitter_ratio)
             logger.error(
                 "🚫 被 Cloudflare 屏蔽，冷却 %d 秒后再试。"
                 "持续屏蔽请考虑：换 HTTPS_PROXY 出口 / 重启 monitor / 暂停几小时。",
@@ -1110,7 +850,7 @@ async def main_loop(
         except ScrapeNetworkError as e:
             network_fail_streak += 1
             if network_fail_streak >= _NETWORK_FAIL_THRESHOLD:
-                cooldown = _apply_jitter(_NETWORK_FAIL_COOLDOWN, cfg.jitter_ratio)
+                cooldown = apply_jitter(_NETWORK_FAIL_COOLDOWN, cfg.jitter_ratio)
                 logger.error(
                     "🌐 连续 %d 次网络失败（阈值 %d），冷却 %d 秒。"
                     "每轮所有城市第 1 页均无法连接 — 请检查代理/网络。"
@@ -1169,11 +909,7 @@ async def _async_main() -> None:
     storage = Storage(cfg.db_path, timezone_str=cfg.timezone)
 
     # 恢复持久化的竞败重试队列（进程重启后不丢失）
-    global _retry_queue
-    _retry_queue = storage.load_retry_queue()
-    if _retry_queue:
-        total = sum(len(v) for v in _retry_queue.values())
-        logger.info("已恢复重试队列: %d 个用户, %d 套候选", len(_retry_queue), total)
+    retry_queue.load(storage)
 
     # 加载用户配置；文件损坏时硬停止，避免忽略或覆盖现有数据
     try:
@@ -1213,7 +949,7 @@ async def _async_main() -> None:
         storage.close()
         for _, n in user_notifiers:
             await n.close()
-        _clear_prewarm_cache()  # 关闭所有缓存的 prewarm session
+        prewarm_cache.clear()
         _remove_pid()
 
 

@@ -1,5 +1,50 @@
 # Changelog
 
+## v1.3.0 (2026-05-13)
+
+### `monitor.py` 重构 — 提取 `mcore/` 包
+
+`monitor.py` 1,235 行承担了间隔计算、预登录缓存、自动预订回退、重试队列等多种职责。
+本次将纯逻辑和小型服务抽到 `mcore/` 包，`monitor.py` 降至 971 行（-21%）。
+
+- **`mcore/interval.py`**（58 行）：`get_interval()` / `apply_jitter()`，智能轮询间隔计算（纯函数，无状态）
+- **`mcore/prewarm.py`**（96 行）：`PrewarmCache` 类，预登录 session 缓存管理（get / set / is_valid / create / invalidate / clear）
+- **`mcore/booking.py`**（171 行）：`book_with_fallback()` + `RetryQueue` 类（load / save / add / discard / remove_gone）
+- **`mcore/__init__.py`**（15 行）：统一 re-export
+
+原有 6 个预登录辅助函数（`_safe_create_prewarmed`、`_close_prewarmed_quietly`、`_is_cached_session_valid` 等）合并为 `PrewarmCache` 类方法；
+`_book_with_fallback` + 全局重试队列字典合并为 `book_with_fallback` 函数 + `RetryQueue` 类。外部行为不变。
+
+### `storage.py` 重构 — 拆分为 `mstorage/` 包
+
+`storage.py` 1,177 行 / 42 个方法全部集中在一个 `Storage` 类中。
+本次按领域拆为 6 个 Mixin，通过多重继承组合，对外接口完全不变（`storage.Storage` 继续可用）。
+
+- **`mstorage/_base.py`**（114 行）：`StorageBase` — 连接 / schema 迁移 / meta 读写 / reset / close
+- **`mstorage/_listings.py`**（258 行）：`ListingOps` — diff / mark_notified×4 / 面板查询×9 / filter helper
+- **`mstorage/_charts.py`**（219 行）：`ChartOps` — 10 个统计图表 + 2 个共享 helper
+- **`mstorage/_notifications.py`**（72 行）：`NotificationOps` — web_notifications CRUD×6
+- **`mstorage/_map_calendar.py`**（96 行）：`MapCalendarOps` — 地图坐标缓存 + 日历查询
+- **`mstorage/_retry.py`**（35 行）：`RetryQueueOps` — 竞败重试队列持久化
+- **`mstorage/__init__.py`**（33 行）：Mixin 组合声明
+- **`storage.py`**：1,177 → 17 行，纯 `from mstorage import Storage` re-export
+
+### 测试补充
+
+- **`test_mcore_interval.py`**（12 tests）：`get_interval` 6 场景 + `apply_jitter` 6 边界
+- **`test_mcore_booking.py`**（21 tests）：`area_key` / `RetryQueue` / `book_with_fallback` 全覆盖
+- **`test_mcore_prewarm.py`**（17 tests）：`PrewarmCache` CRUD / is_valid / invalidate / clear / create
+- **`test_mstorage_notifications.py`**（12 tests）：通知 CRUD / 分页 / 已读 / 清理
+- **`test_mstorage_listings.py`**（16 tests）：面板查询 / filter helper / counts
+- **`test_mstorage_map_calendar.py`**（10 tests）：日历 / 地图 / geocode 缓存 / reset_all
+
+### 测试清理
+
+- 移除 `test_monitor_cooldown.py` 中与 `test_mcore_interval.py` 重复的 `TestApplyJitter`（3）、`TestGetInterval`（3）
+- 移除 `test_prewarm_cache.py` 中与 `test_mcore_prewarm.py` 重复的 `TestIsCachedSessionValid`（5）
+
+---
+
 ## v1.2.10 (2026-05-13)
 
 ### 移动端 Web 体验全面升级

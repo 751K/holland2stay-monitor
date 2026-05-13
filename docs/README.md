@@ -83,11 +83,11 @@ python -m pytest tests/ -v
 | Startup preflight | ✅ Done | Blocks container start if `WEB_PASSWORD` unset or Caddyfile domain is still a placeholder |
 | Production WSGI | ✅ Done | Gunicorn (1 worker × 8 threads, timeout=0) replaces Flask dev server in Docker |
 | Dependency pinning | ✅ Done | `requirements.lock` with exact `==` versions; Dockerfile installs from lock file |
-| Code modularization | ✅ Done | web.py split into `app/` with 10 route modules + 8 shared modules; 1,200→154 line bootstrap |
-| Prewarm session cache | ✅ Done | Process-level cache across rounds; token TTL refresh; invalidated on user/config change |
+| Code modularization | ✅ Done | web.py split into `app/` (10 route + 8 shared modules); `mcore/` (interval, prewarm, booking); `mstorage/` (6 mixin modules); `monitor.py` 1,235→971, `storage.py` 1,177→17 re-export |
+| Prewarm session cache | ✅ Done | `mcore/prewarm.py` PrewarmCache class; process-level cache with TTL refresh; invalidated on user/config change |
 | Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; web.log for Flask app; log viewer with file tabs, line numbers, level coloring, keyword search, auto-scroll |
-| Pytest test suite | ✅ Done | 25 test modules (486 tests) covering full stack: models, storage, scraper, booker, notifier, auth, CSRF, routes, i18n |
-| Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, Storage abstraction enforced |
+| Pytest test suite | ✅ Done | 30 test modules (561 tests) covering full stack: models, mcore, mstorage, storage, scraper, booker, notifier, auth, CSRF, routes, i18n |
+| Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, mixin composition for Storage |
 
 ---
 

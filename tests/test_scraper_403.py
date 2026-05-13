@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import monitor
-from monitor import _clear_prewarm_cache, run_once
+from monitor import run_once
 from scraper import BlockedError, RateLimitError, ScrapeNetworkError
 from booker import BookingResult
 from notifier import BaseNotifier
@@ -208,11 +208,11 @@ class TestMonitorBlockedHandling:
     def setup_method(self):
         # 重置通知节流，每个测试独立
         monitor._last_block_notify_at = 0.0
-        _clear_prewarm_cache()
+        monitor.prewarm_cache.clear()
 
     def teardown_method(self):
         monitor._last_block_notify_at = 0.0
-        _clear_prewarm_cache()
+        monitor.prewarm_cache.clear()
 
     def _run(self, tmp_path, scrape_fn, user, notifications_capture=None):
         cfg = Config(

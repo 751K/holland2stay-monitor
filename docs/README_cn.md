@@ -81,11 +81,11 @@ python -m pytest tests/ -v
 | 启动预检 | ✅ 已完成 | `WEB_PASSWORD` 未设置或 Caddyfile 仍为占位域名时阻止容器启动 |
 | 生产 WSGI | ✅ 已完成 | Docker 中 Gunicorn 替代 Flask 内置服务器（1 worker × 8 线程，timeout=0） |
 | 依赖版本锁定 | ✅ 已完成 | `requirements.lock` 精确版本，Dockerfile 从 lock 文件安装，构建可重复 |
-| 代码模块化 | ✅ 已完成 | web.py 拆分为 `app/` 子包（10 个路由模块 + 8 个共享模块），1,200 行精简至 154 行引导层 |
-| Prewarm Session 缓存 | ✅ 已完成 | 进程级缓存跨轮复用；Token TTL 后台刷新；用户/配置变更时自动失效 |
+| 代码模块化 | ✅ 已完成 | web.py 拆分 `app/`（10 路由 + 8 共享）；`mcore/`（interval / prewarm / booking）；`mstorage/`（6 个 mixin 模块）；`monitor.py` 1,235→971，`storage.py` 1,177→17 re-export |
+| Prewarm Session 缓存 | ✅ 已完成 | `mcore/prewarm.py` PrewarmCache 类；进程级缓存跨轮复用；TTL 后台刷新；用户/配置变更时自动失效 |
 | 错误日志（errors.log）| ✅ 已完成 | 独立 WARNING+ 日志，含 `funcName:lineno` 格式；新增 web.log 记录 Flask 应用日志；日志查看器支持文件 Tab 切换、行号、级别着色、关键词搜索、自动滚动 |
-| Pytest 测试套件 | ✅ 已完成 | 25 个测试模块（486 个测试），覆盖全栈：模型、存储、抓取、预订、通知、认证、CSRF、路由、i18n |
-| 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Storage 抽象统一、解析逻辑去重 |
+| Pytest 测试套件 | ✅ 已完成 | 30 个测试模块（561 个测试），覆盖全栈：模型、mcore、mstorage、存储、抓取、预订、通知、认证、CSRF、路由、i18n |
+| 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Mixin 组合 Storage、解析逻辑去重 |
 
 ---
 
