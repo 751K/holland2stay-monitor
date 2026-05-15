@@ -45,7 +45,8 @@ struct MapView: View {
                     MapScaleView()
                 }
                 .ignoresSafeArea(edges: .bottom)
-                .overlay(alignment: .topTrailing) {
+                // 左上角：避开右上的 MapUserLocationButton/Compass/ScaleView
+                .overlay(alignment: .topLeading) {
                     countBadge
                 }
                 .sheet(item: Binding(
@@ -93,20 +94,27 @@ struct MapView: View {
     private func pinView(for l: MapListing) -> some View {
         let color = pinColor(for: l.status)
         let selected = l.id == store.selectedID
+        let size: CGFloat = selected ? 32 : 24
 
         ZStack {
+            // 主彩色实心圆
             Circle()
-                .fill(color)
-                .frame(width: selected ? 18 : 14,
-                       height: selected ? 18 : 14)
-                .shadow(radius: selected ? 4 : 2)
+                .fill(color.gradient)
+                .frame(width: size, height: size)
+                .shadow(color: .black.opacity(0.25),
+                        radius: selected ? 6 : 3,
+                        x: 0, y: selected ? 3 : 1)
+            // 白色描边
             Circle()
-                .stroke(.white, lineWidth: 2)
-                .frame(width: selected ? 18 : 14,
-                       height: selected ? 18 : 14)
+                .stroke(.white, lineWidth: 2.5)
+                .frame(width: size, height: size)
+            // 中心房屋图标，区分点击对象
+            Image(systemName: "house.fill")
+                .font(.system(size: selected ? 14 : 10, weight: .bold))
+                .foregroundStyle(.white)
         }
-        .scaleEffect(selected ? 1.3 : 1.0)
-        .animation(.spring(duration: 0.2), value: selected)
+        .scaleEffect(selected ? 1.15 : 1.0)
+        .animation(.spring(duration: 0.25), value: selected)
     }
 
     private func pinColor(for status: String) -> Color {
@@ -120,23 +128,26 @@ struct MapView: View {
     // MARK: - Top badge
 
     private var countBadge: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "house.circle.fill")
-                .foregroundStyle(.blue)
-            Text("\(store.listings.count) listings")
-                .font(.subheadline)
-                .fontWeight(.medium)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: "house.circle.fill")
+                    .foregroundStyle(.blue)
+                Text("\(store.listings.count) listings")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+            }
             if store.uncached > 0 {
-                Text("· \(store.uncached) without coords")
-                    .font(.caption)
+                Text("\(store.uncached) without coords")
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.regularMaterial, in: Capsule())
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
         .padding(.top, 8)
-        .padding(.horizontal)
+        .padding(.leading, 12)
     }
 
     // MARK: - Bottom card

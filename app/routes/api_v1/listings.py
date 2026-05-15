@@ -111,12 +111,12 @@ def register(bp: Blueprint) -> None:
     bp.add_url_rule(
         "/listings",
         endpoint="listings_list",
-        view_func=api_auth.bearer_required(("admin", "user"))(_list_listings),
+        view_func=api_auth.bearer_optional(_list_listings),
         methods=["GET"],
     )
     bp.add_url_rule(
         "/listings/<string:listing_id>",
         endpoint="listings_detail",
-        view_func=api_auth.bearer_required(("admin", "user"))(_get_listing),
+        view_func=api_auth.bearer_optional(_get_listing),
         methods=["GET"],
     )

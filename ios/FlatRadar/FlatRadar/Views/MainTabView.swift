@@ -16,19 +16,27 @@ struct MainTabView: View {
                 }
                 .tag(AppTab.dashboard)
 
+            // Listings 和 Map 后端是 bearer_optional：guest 可看（无 filter，全量）
+            ListingsView()
+                .tabItem {
+                    Label("Listings", systemImage: "list.bullet")
+                }
+                .tag(AppTab.listings)
+
+            MapView()
+                .tabItem {
+                    Label("Map", systemImage: "map.fill")
+                }
+                .tag(AppTab.map)
+
+            CalendarView()
+                .tabItem {
+                    Label("Calendar", systemImage: "calendar")
+                }
+                .tag(AppTab.calendar)
+
+            // Notifications 仍是 admin/user 专属（绑 user_id 数据）
             if auth.role == .user || auth.role == .admin {
-                ListingsView()
-                    .tabItem {
-                        Label("Listings", systemImage: "list.bullet")
-                    }
-                    .tag(AppTab.listings)
-
-                MapView()
-                    .tabItem {
-                        Label("Map", systemImage: "map.fill")
-                    }
-                    .tag(AppTab.map)
-
                 NotificationsView()
                     .tabItem {
                         Label("Notifications", systemImage: "bell.fill")

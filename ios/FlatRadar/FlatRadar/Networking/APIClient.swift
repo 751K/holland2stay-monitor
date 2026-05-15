@@ -215,6 +215,14 @@ final class APIClient {
         try await request("GET", "api/v1/map")
     }
 
+    // MARK: - Calendar (Phase 2)
+
+    /// 后端是 bearer_optional：未登录 guest 看全量，登录的 user 走 listing_filter。
+    /// authenticated 用默认 true：有 token 就带上，没 token 也能拿数据。
+    func getCalendar() async throws -> CalendarResponse {
+        try await request("GET", "api/v1/calendar")
+    }
+
     // MARK: - Me (Phase 2)
 
     func getMeSummary() async throws -> MeSummary {

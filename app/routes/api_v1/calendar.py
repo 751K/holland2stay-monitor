@@ -48,6 +48,6 @@ def register(bp: Blueprint) -> None:
     bp.add_url_rule(
         "/calendar",
         endpoint="calendar_list",
-        view_func=api_auth.bearer_required(("admin", "user"))(_calendar),
+        view_func=api_auth.bearer_optional(_calendar),
         methods=["GET"],
     )

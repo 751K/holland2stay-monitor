@@ -6,6 +6,7 @@ enum AppTab: String, Hashable, Sendable {
     case dashboard
     case listings
     case map
+    case calendar
     case notifications
     case settings
 }

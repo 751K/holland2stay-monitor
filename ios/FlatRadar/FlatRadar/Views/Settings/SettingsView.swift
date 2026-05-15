@@ -131,6 +131,17 @@ struct SettingsView: View {
                             Text("Guest")
                                 .foregroundStyle(.secondary)
                         }
+                        // guest 没 token，logout 不调服务端 revoke；只是清本地
+                        // 状态、回到登录页，让用户能登 admin/user。
+                        Button("Sign Out of Guest Mode", role: .destructive) {
+                            showLogoutConfirm = true
+                        }
+                        .confirmationDialog("Sign Out", isPresented: $showLogoutConfirm) {
+                            Button("Sign Out", role: .destructive) {
+                                Task { await auth.logout() }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        }
                     }
                 }
 

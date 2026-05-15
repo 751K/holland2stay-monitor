@@ -59,6 +59,6 @@ def register(bp: Blueprint) -> None:
     bp.add_url_rule(
         "/map",
         endpoint="map_list",
-        view_func=api_auth.bearer_required(("admin", "user"))(_map),
+        view_func=api_auth.bearer_optional(_map),
         methods=["GET"],
     )
