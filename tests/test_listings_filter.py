@@ -22,11 +22,11 @@ def db(temp_db):
         ("id-3", "2BR South", "Not available", "€1200", "2026-08-01", ["Type: 2", "Area: 70.0 m²", "Contract: Indefinite", "Tenant: student and employed"], "Eindhoven"),
     ]
     for i, (lid, name, status, price, avail, features, city) in enumerate(rows):
-        temp_db._conn.execute(
+        temp_db.conn.execute(
             "INSERT OR REPLACE INTO listings (id, name, status, price_raw, available_from, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (lid, name, status, price, avail, json.dumps(features), "https://x.com", city, "2026-05-13T08:00:00", "2026-05-13T08:00:00", status),
         )
-    temp_db._conn.commit()
+    temp_db.conn.commit()
     return temp_db
 
 
@@ -74,10 +74,10 @@ class TestStorageQueries:
 
     def test_bad_features_json_no_crash(self, temp_db):
         """损坏的 JSON 在 get_map_listings 不崩。"""
-        temp_db._conn.execute(
+        temp_db.conn.execute(
             "INSERT INTO listings (id, name, status, price_raw, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?)",
             ("bad-id", "Bad", "Available", "€500", "BROKEN JSON {{{", "https://x.com", "E", "2026-01-01", "2026-01-01", "Available"),
         )
-        temp_db._conn.commit()
+        temp_db.conn.commit()
         rows = temp_db.get_map_listings()
         assert len(rows) >= 1

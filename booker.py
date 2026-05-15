@@ -142,6 +142,63 @@ def _to_h2s_date(iso_date: str) -> str:
 
 
 # ------------------------------------------------------------------ #
+# Cloudflare WAF 屏蔽检测
+# ------------------------------------------------------------------ #
+
+class BookingBlockedError(Exception):
+    """
+    booker 在登录 / 下单流程中遇 H2S API 返回 403 — 通常是 Cloudflare WAF 屏蔽。
+
+    与 scraper.BlockedError 区别
+    --------------------------
+    两者同根（H2S api.holland2stay.com 的同一 Cloudflare 规则），通常会同时
+    出现。分开定义只为模块独立，monitor 把两者都当"403 屏蔽"处理。
+
+    与 unknown_error 区别
+    --------------------
+    旧版把所有 booker 异常都归 unknown_error，导致：
+    1) 日志看不出是 Cloudflare 拦的，user 不知道该换代理
+    2) fallback 候选每个都走一遍 → 浪费时间 + 多发通知
+    3) 失败通知每个用户每个候选发一次 → 刷屏
+
+    现在 phase="blocked"：
+    1) fallback 立即停（403 是 IP/指纹级，换房无意义）
+    2) 每轮聚合一条通知，30 分钟节流（与 scraper 共享 _should_notify_block）
+    3) prewarm 缓存失效（session 被 CF 标记，下轮要换指纹）
+    """
+
+
+def _check_blocked(resp, endpoint_label: str) -> None:
+    """
+    检测 HTTP 403 并抛 BookingBlockedError。在每个 session.post 后调用。
+
+    识别 Cloudflare 挑战页：响应体含 `<!DOCTYPE html>` + `no-js ie6 oldie`
+    等标志（HTML，非预期 JSON）。
+    """
+    if resp.status_code != 403:
+        return
+    body = resp.text[:500]
+    is_cf = (
+        "cloudflare" in body.lower()
+        or "no-js ie6 oldie" in body
+        or "challenge-platform" in body.lower()
+        or "<!DOCTYPE html>" in body[:50]
+    )
+    logger.error(
+        "booker %s HTTP 403 (%s) url=%s body=%r",
+        endpoint_label, "Cloudflare WAF" if is_cf else "其他 403",
+        GQL_URL, body[:200],
+    )
+    reason = "Cloudflare WAF 屏蔽" if is_cf else "API 拒绝服务"
+    raise BookingBlockedError(
+        f"{reason}（{endpoint_label} 返回 HTTP 403）。等待无法恢复。请尝试："
+        f"1) 更换 HTTPS_PROXY 出口 IP；"
+        f"2) 重启 monitor（重建 curl_cffi session + TLS 指纹）；"
+        f"3) 暂停几小时让 Cloudflare 冷却。"
+    )
+
+
+# ------------------------------------------------------------------ #
 # 错误分类（placeOrder 业务错误识别）
 # ------------------------------------------------------------------ #
 
@@ -218,6 +275,9 @@ def _gql(
     if variables:
         payload["variables"] = variables
     resp = session.post(GQL_URL, json=payload, headers=headers, timeout=30)
+    # 403 → Cloudflare 屏蔽，立刻抛 BookingBlockedError；不走 raise_for_status
+    # 的 HTTPError 路径（避免被 try_book 当 unknown_error 处理）。
+    _check_blocked(resp, "GraphQL")
     resp.raise_for_status()
     data = resp.json()
     if "errors" in data:
@@ -473,6 +533,8 @@ def add_to_cart(
         headers={**_BASE_HEADERS, "Authorization": f"Bearer {token}"},
         timeout=30,
     )
+    # 403 → Cloudflare 屏蔽（同 _gql，避免落入下方 unknown_error 通用路径）
+    _check_blocked(resp, "addNewBooking")
     resp.raise_for_status()
     raw = resp.json()
 
@@ -619,6 +681,10 @@ def _ideal_checkout(session: req.Session, token: str, order_number: str) -> str:
 BookingPhase = Literal[
     "", "dry_run", "success", "race_lost",
     "reserved_conflict", "cancel+retry", "unknown_error",
+    # blocked = H2S API 返回 403（Cloudflare WAF 屏蔽）。等待无法恢复，
+    # 与 race_lost / unknown_error 路径独立，让上层（_book_with_fallback /
+    # monitor.run_once）能识别并聚合通知 + 失效 prewarm 缓存。
+    "blocked",
 ]
 
 
@@ -914,6 +980,18 @@ def try_book(
         return BookingResult(listing, True, msg, pay_url=pay_url,
                              contract_start_date=start_date or "", phase="success")
 
+    except BookingBlockedError as block_err:
+        # 403 屏蔽：与 race_lost / unknown_error 完全不同。等待无法恢复，
+        # 不打 traceback，logger.error 给到 errors.log。
+        total = time.monotonic() - t0
+        logger.error(
+            "[%s]%s 🚫 booking 被屏蔽 phase=blocked | listing_id=%s email=%s "
+            "prewarmed=%s timings={total:%.2fs} | %s",
+            listing.name, " [DRY RUN]" if dry_run else "",
+            listing.id, _mask_email(email),
+            "yes" if prewarmed else "no", total, block_err,
+        )
+        return BookingResult(listing, False, str(block_err), phase="blocked")
     except Exception as e:
         total = time.monotonic() - t0
         # 收集尽可能多的上下文：listing 标识 + 账号 + 时间分布 + prewarmed 来源

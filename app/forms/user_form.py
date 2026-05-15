@@ -25,7 +25,7 @@ import logging
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from config import AutoBookConfig, ListingFilter, _ENERGY_LABELS
+from config import AutoBookConfig, ListingFilter, ENERGY_LABELS
 from users import UserConfig
 
 if TYPE_CHECKING:
@@ -114,7 +114,7 @@ def build_user_from_form(
         v = form.get(key, "").strip()
         if not v:
             return ""
-        if v.upper() in _ENERGY_LABELS:
+        if v.upper() in ENERGY_LABELS:
             return v
         logger.warning("表单 [%s] 能耗等级 %r 不在白名单中，已忽略", key, v)
         return ""

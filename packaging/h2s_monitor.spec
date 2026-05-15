@@ -17,6 +17,8 @@ _base = Path(SPECPATH).resolve().parent  # packaging/ → project root
 # 静态分析可能漏掉个别成员；显式 collect_submodules 是零风险的兜底。
 # 未来在 app/ 下新增模块也会被自动包含，不需要手动维护这份清单。
 _app_modules = collect_submodules("app")
+_mcore_modules = collect_submodules("mcore")
+_mstorage_modules = collect_submodules("mstorage")
 
 a = Analysis(
     [str(_base / "launcher.py")],
@@ -39,6 +41,8 @@ a = Analysis(
         "flask",
         "jinja2",
         *_app_modules,
+        *_mcore_modules,
+        *_mstorage_modules,
     ],
     hookspath=[],
     hooksconfig={},

@@ -12,13 +12,34 @@ logger = logging.getLogger(__name__)
 class StorageBase:
     """数据库连接 + schema + meta + 生命周期（其他 mixin 依赖此类提供 self._conn / self._tz）。"""
 
+    # 进程级缓存：已迁移过 schema 的 db_path 集合。
+    # CREATE TABLE IF NOT EXISTS + PRAGMA journal_mode=WAL 都是幂等的，
+    # 但每次实例化（app/db.py 是"每请求一个 Storage"）都跑一次
+    # executescript()，每请求多 ~3ms。同 db_path 在进程内只跑一次即可。
+    _migrated_paths: set[str] = set()
+
     def __init__(self, db_path: Path, timezone_str: str = "UTC") -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._tz = timezone_str
-        self._migrate()
+        path_key = str(db_path.resolve())
+        if path_key not in StorageBase._migrated_paths:
+            self._migrate()
+            StorageBase._migrated_paths.add(path_key)
         logger.debug("Storage 已连接: %s", db_path)
+
+    # ── Public connection accessor ─────────────────────────────────
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """对外暴露底层 sqlite3 连接，供需要原生 SQL 的调用方使用
+        （如 app/routes/system.py 的统计查询、测试 fixture）。
+
+        Mixin 内部仍直接用 self._conn；这里只是稳定的外部 API，
+        将来若把 _conn 改名/换成连接池，外部代码不会断。
+        """
+        return self._conn
 
     # ── Schema ──────────────────────────────────────────────────────
 

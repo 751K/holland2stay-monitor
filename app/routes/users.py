@@ -33,7 +33,7 @@ from app.csrf import csrf_required
 from app.db import storage
 from app.forms.user_form import build_user_from_form
 from app.i18n import DEFAULTS, localize_options
-from config import _ENERGY_LABELS, _energy_rank
+from config import ENERGY_LABELS, energy_rank
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def _run_async(coro: Any) -> Any:
 
 def _energy_rank_or_99(label: str) -> int:
     """能耗排序辅助，未知标签排最后。"""
-    r = _energy_rank(label)
+    r = energy_rank(label)
     return r if r is not None else 99
 
 
@@ -126,7 +126,7 @@ def user_new() -> Any:
         offer_options=opts["Offer"],
         finishing_options=opts["Finishing"],
         energy_options=sorted(
-            [x for x in opts["Energy"] if x.upper() in _ENERGY_LABELS] or _ENERGY_LABELS,
+            [x for x in opts["Energy"] if x.upper() in ENERGY_LABELS] or ENERGY_LABELS,
             key=_energy_rank_or_99),
     )
 
@@ -163,7 +163,7 @@ def user_edit(user_id: str) -> Any:
         offer_options=opts["Offer"],
         finishing_options=opts["Finishing"],
         energy_options=sorted(
-            [x for x in opts["Energy"] if x.upper() in _ENERGY_LABELS] or _ENERGY_LABELS,
+            [x for x in opts["Energy"] if x.upper() in ENERGY_LABELS] or ENERGY_LABELS,
             key=_energy_rank_or_99),
     )
 

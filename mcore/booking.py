@@ -59,8 +59,14 @@ def book_with_fallback(
     重试条件
     --------
     仅在 result.phase == "race_lost"（房源已被他人抢先预订）时继续尝试下一套。
-    其余失败类型（reserved_conflict / unknown_error 等）立即返回——这些错误
-    与具体房源无关，换一套也无法解决。
+    其余失败类型（reserved_conflict / unknown_error / blocked 等）立即返回——
+    这些错误与具体房源无关，换一套也无法解决。
+
+    blocked 特殊说明
+    ----------------
+    phase="blocked" 是 Cloudflare 403 屏蔽，IP/指纹级问题。换房毫无意义，
+    且每次重试都会再触发 403 → 同 IP 风控加重。
+    直接返回让上层（monitor.run_once）聚合通知 + 失效 prewarm 缓存。
 
     截止时间
     --------

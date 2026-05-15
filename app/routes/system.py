@@ -57,8 +57,8 @@ def system_info():
         info["last_scrape"] = st.get_meta("last_scrape_at")
         info["last_count"] = st.get_meta("last_scrape_count")
         info["unread_notifications"] = st.count_unread_notifications()
-        info["total_changes"] = st._conn.execute("SELECT COUNT(*) FROM status_changes").fetchone()[0]
-        info["total_notifications"] = st._conn.execute("SELECT COUNT(*) FROM web_notifications").fetchone()[0]
+        info["total_changes"] = st.conn.execute("SELECT COUNT(*) FROM status_changes").fetchone()[0]
+        info["total_notifications"] = st.conn.execute("SELECT COUNT(*) FROM web_notifications").fetchone()[0]
     finally:
         st.close()
 

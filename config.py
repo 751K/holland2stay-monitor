@@ -34,10 +34,10 @@ from models import parse_float, parse_int
 
 
 # 已知能耗等级白名单（大写），按优→差排序
-_ENERGY_LABELS = ["A+++", "A++", "A+", "A", "B", "C", "D", "E", "F"]
+ENERGY_LABELS = ["A+++", "A++", "A+", "A", "B", "C", "D", "E", "F"]
 
 
-def _energy_rank(label: str) -> int | None:
+def energy_rank(label: str) -> int | None:
     """
     能耗等级 → 数值排名（越小越好）。
     仅接受白名单中的标签（精确匹配，大小写不敏感）；
@@ -47,7 +47,7 @@ def _energy_rank(label: str) -> int | None:
         return None
     upper = label.strip().upper()
     try:
-        return _ENERGY_LABELS.index(upper)
+        return ENERGY_LABELS.index(upper)
     except ValueError:
         return None
 
@@ -435,11 +435,11 @@ class ListingFilter:
             energy = fm.get("energy_label", "").strip().upper()
             if not energy:
                 return False  # 房源无能耗标签，设置了最低要求则拒绝
-            min_rank = _energy_rank(self.allowed_energy)
+            min_rank = energy_rank(self.allowed_energy)
             if min_rank is None:
                 logger.warning("无效能耗等级配置 %r，过滤条件忽略", self.allowed_energy)
                 return False  # 配置了无效等级（如 "banana"）→ fail-closed
-            actual_rank = _energy_rank(energy)
+            actual_rank = energy_rank(energy)
             if actual_rank is None:
                 logger.warning("房源 %r 能耗标签不在白名单中: %r", listing.name, energy)
                 return False

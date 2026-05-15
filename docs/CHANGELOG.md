@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.3.2 (2026-05-15)
+
+### Booker 403 屏蔽精准处理
+
+v1.2.2 为 scraper 引入了 `BlockedError`，但 booker 的 403 一直被 `except Exception` 当作 `unknown_error` 吞噬，导致三个连锁问题：
+1. 日志看不出是 Cloudflare 拦截，用户不知道该换代理
+2. `book_with_fallback` 继续尝试备选房源（每个都 403，浪费时间 + 加重风控）
+3. `run_once` 给每个候选发一条 booking_failed 通知（刷屏）
+
+v1.3.2 将 403 屏蔽提升为 booker 的一等异常，与 scraper 同级处理：
+
+- **`booker.py`**：新增 `BookingBlockedError` 异常类 + `_check_blocked()` 检测函数（与 scraper 共享同一 Cloudflare 特征签名）。`_gql()` 和 `add_to_cart()` 两处 HTTP 调用后立即检测 403 并抛专用异常，不落入 `except Exception` 通用路径。
+- **`try_book()`**：捕获 `BookingBlockedError` → `BookingResult(phase="blocked")`，与 `race_lost` / `unknown_error` 路径独立
+- **`mcore/booking.py`**：`book_with_fallback()` 遇 `phase="blocked"` 立即停止重试（IP/指纹级问题，换房无意义）
+- **`monitor.py`**：`run_once()` 聚合所有 blocked 候选，全轮发一条节流通知（30 min，与 scraper 共享 `_should_notify_block`）；失效 prewarm 缓存；保留 retry_queue 状态（非房源级问题，不丢弃重试队列）
+
+### 代码质量
+
+- **`config.py`**：`_energy_rank()` → `energy_rank()`，`_ENERGY_LABELS` → `ENERGY_LABELS`（公开 API，去掉下划线前缀）。所有调用方（`app/routes/dashboard.py`、`users.py`、`user_form.py`、`tests/`）同步更新。
+- **`mstorage/_base.py`**：新增 `conn` property 替代 `_conn` 直接访问，6 处测试 + `system.py` 统一使用公开访问器；新增 `_migrated_paths` 进程级缓存，同一 db_path 只跑一次 schema migration（原每个请求 ~3ms）
+
+### Bug 修复
+
+- **Dockerfile / PyInstaller 遗漏模块 (v1.3.0 回归)**：v1.3.0 新增 `mcore/` 和 `mstorage/` 两个包，但 `Dockerfile` 缺少对应 `COPY` 指令导致容器内 import 失败；`h2s_monitor.spec` 缺少 `collect_submodules` 导致打包后同样的模块缺失。本次补全两处构建配置。
+
+### 测试
+
+- 新增 `test_booker_blocked.py`：验证 403 → `BookingBlockedError` → `phase="blocked"` 完整链路（`_check_blocked`、`try_book`、`book_with_fallback`、`run_once` 聚合通知 + prewarm 失效）
+---
+
 ## v1.3.1 (2026-05-13)
 
 ### Bug 修复

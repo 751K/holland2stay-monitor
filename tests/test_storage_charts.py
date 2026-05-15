@@ -26,11 +26,11 @@ def db(temp_db):
     ]
     for i, (status, first_seen, features) in enumerate(rows):
         features_json = json.dumps(features)
-        db._conn.execute(
+        db.conn.execute(
             "INSERT OR REPLACE INTO listings (id, name, status, price_raw, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (f"id-{i}", f"Name {i}", status, "€1000", features_json, "https://x.com", "Eindhoven", first_seen, first_seen, status),
         )
-    db._conn.commit()
+    db.conn.commit()
     return db
 
 
@@ -82,11 +82,11 @@ class TestFloorChart:
 class TestBadFeaturesJSON:
     def test_bad_json_skipped_in_charts(self, temp_db):
         """损坏的 JSON 被 _count_feature_values / _bucketed_number_dist 跳过。"""
-        temp_db._conn.execute(
+        temp_db.conn.execute(
             "INSERT INTO listings (id, name, status, price_raw, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?)",
             ("bad-1", "Bad", "Available", "€500", "NOT VALID JSON {{{", "https://x.com", "E", "2026-01-01", "2026-01-01", "Available"),
         )
-        temp_db._conn.commit()
+        temp_db.conn.commit()
 
         # 不应抛异常
         data = temp_db.chart_energy_dist()

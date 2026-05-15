@@ -2,7 +2,7 @@
 Energy / Furnishing 过滤逻辑测试。
 
 覆盖：
-- _energy_rank() 正常/边界/非法输入
+- energy_rank() 正常/边界/非法输入
 - ListingFilter.allowed_energy 过滤语义（最低可接受等级）
 - ListingFilter.allowed_finishing 白名单过滤
 - users._lf_from_dict() 新旧字段 round-trip + 旧 list 兼容
@@ -12,71 +12,71 @@ from __future__ import annotations
 
 import pytest
 
-from config import _energy_rank, ListingFilter
+from config import energy_rank, ListingFilter
 from models import Listing
 
 
-# ── _energy_rank ──────────────────────────────────────────
+# ── energy_rank ──────────────────────────────────────────
 
 class TestEnergyRank:
     def test_a_triple_plus(self):
-        assert _energy_rank("A+++") == 0
+        assert energy_rank("A+++") == 0
 
     def test_a_double_plus(self):
-        assert _energy_rank("A++") == 1
+        assert energy_rank("A++") == 1
 
     def test_a_single_plus(self):
-        assert _energy_rank("A+") == 2
+        assert energy_rank("A+") == 2
 
     def test_a_plain(self):
-        assert _energy_rank("A") == 3
+        assert energy_rank("A") == 3
 
     def test_b(self):
-        assert _energy_rank("B") == 4
+        assert energy_rank("B") == 4
 
     def test_c(self):
-        assert _energy_rank("C") == 5
+        assert energy_rank("C") == 5
 
     def test_d(self):
-        assert _energy_rank("D") == 6
+        assert energy_rank("D") == 6
 
     def test_e(self):
-        assert _energy_rank("E") == 7
+        assert energy_rank("E") == 7
 
     def test_lowercase_normalized(self):
-        assert _energy_rank("a") == 3
-        assert _energy_rank("b") == 4
+        assert energy_rank("a") == 3
+        assert energy_rank("b") == 4
 
     def test_whitespace_stripped(self):
-        assert _energy_rank("  A  ") == 3
+        assert energy_rank("  A  ") == 3
 
     def test_empty_string(self):
-        assert _energy_rank("") is None
+        assert energy_rank("") is None
 
     def test_non_string_input(self):
-        assert _energy_rank(None) is None  # type: ignore[arg-type]
-        assert _energy_rank(123) is None   # type: ignore[arg-type]
+        assert energy_rank(None) is None  # type: ignore[arg-type]
+        assert energy_rank(123) is None   # type: ignore[arg-type]
 
     def test_only_plus_signs(self):
-        assert _energy_rank("+++") is None
+        assert energy_rank("+++") is None
 
     def test_unrecognized_label(self):
-        assert _energy_rank("G") is None
-        assert _energy_rank("XYZ") is None
+        assert energy_rank("G") is None
+        assert energy_rank("XYZ") is None
 
     def test_partial_match_rejected(self):
         """白名单精确匹配，'banana' 不应被当成 B。"""
-        assert _energy_rank("banana") is None
-        assert _energy_rank("AA") is None
-        assert _energy_rank("B++") is None  # 仅 A 有 + 等级
-        assert _energy_rank("Z") is None
+        assert energy_rank("banana") is None
+        assert energy_rank("AA") is None
+        assert energy_rank("B++") is None  # 仅 A 有 + 等级
+        assert energy_rank("Z") is None
 
     def test_ordering_consistency(self):
         """所有已知等级排序应正确：A+++ < A++ < A+ < A < B < C < D"""
         labels = ["B", "A++", "A", "D", "A+++", "C", "A+"]
         sorted_labels = sorted(
             labels,
-            key=lambda x: _energy_rank(x) if _energy_rank(x) is not None else 99,
+            key=lambda x: energy_rank(x) if energy_rank(x) is not None else 99,
         )
         assert sorted_labels == ["A+++", "A++", "A+", "A", "B", "C", "D"]
 

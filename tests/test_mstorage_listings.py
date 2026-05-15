@@ -14,7 +14,7 @@ def store(tmp_path):
 
 def _add(st: Storage, id: str, **kw):
     """快速插入一条房源，绕过 diff。"""
-    st._conn.execute(
+    st.conn.execute(
         """INSERT OR REPLACE INTO listings
            (id, name, status, price_raw, available_from, features, url, city,
             first_seen, last_seen, notified, last_status)
@@ -29,7 +29,7 @@ def _add(st: Storage, id: str, **kw):
             kw.get("notified", 0), kw.get("last_status", kw.get("status", "Available to book")),
         ),
     )
-    st._conn.commit()
+    st.conn.commit()
 
 
 class TestGetAllListings:
@@ -69,11 +69,11 @@ class TestGetAllListings:
 class TestGetRecentChanges:
     def test_returns_changes(self, store):
         _add(store, "L1", name="Test")
-        store._conn.execute(
+        store.conn.execute(
             """INSERT INTO status_changes (listing_id, old_status, new_status, changed_at)
                VALUES ('L1', 'In lottery', 'Available to book', '2026-05-13T10:00:00')"""
         )
-        store._conn.commit()
+        store.conn.commit()
         changes = store.get_recent_changes(hours=24)
         assert len(changes) == 1
         assert changes[0]["name"] == "Test"
@@ -83,21 +83,21 @@ class TestGetRecentChanges:
         _add(store, "L1", city="Amsterdam")
         _add(store, "L2", city="Utrecht")
         for lid in ("L1", "L2"):
-            store._conn.execute(
+            store.conn.execute(
                 """INSERT INTO status_changes (listing_id, old_status, new_status, changed_at)
                    VALUES (?, 'old', 'new', '2026-05-13T10:00:00')""", (lid,)
             )
-        store._conn.commit()
+        store.conn.commit()
         assert len(store.get_recent_changes(hours=24, city="Amsterdam")) == 1
         assert len(store.get_recent_changes(hours=24)) == 2
 
     def test_outside_window_excluded(self, store):
         _add(store, "L1")
-        store._conn.execute(
+        store.conn.execute(
             """INSERT INTO status_changes (listing_id, old_status, new_status, changed_at)
                VALUES ('L1', 'old', 'new', '2020-01-01T00:00:00')"""
         )
-        store._conn.commit()
+        store.conn.commit()
         assert store.get_recent_changes(hours=24) == []
 
 
@@ -109,11 +109,11 @@ class TestCounts:
 
     def test_count_changes_since(self, store):
         _add(store, "L1")
-        store._conn.execute(
+        store.conn.execute(
             """INSERT INTO status_changes (listing_id, old_status, new_status, changed_at)
                VALUES ('L1', 'old', 'new', '2026-05-13T10:00:00')"""
         )
-        store._conn.commit()
+        store.conn.commit()
         assert store.count_changes_since(hours=24) == 1
 
     def test_count_all(self, store):

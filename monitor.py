@@ -610,11 +610,17 @@ async def run_once(
     storage.mark_status_change_notified_batch(sc_notified_ids)
 
     # ── 等待预订结果，发送成功/失败通知 ──────────────────────────── #
+    # 收集本轮被屏蔽的用户（含 notifier），所有候选 await 完后聚合发一条节流通知，
+    # 避免每个用户/每个候选都发一次"预订失败"刷屏。
+    blocked_in_round: list[tuple[UserConfig, BaseNotifier, str]] = []  # (user, notifier, msg)
+
     for user, notifier, sorted_cands, future, prewarmed in ab_futures:
         result = await future
-        if prewarmed and result.phase == "unknown_error":
+        # phase="blocked" 或 unknown_error 都意味着 session 可能已被 H2S 标记，
+        # 失效 prewarm 缓存让下轮换新 session+token+TLS 指纹。
+        if prewarmed and result.phase in ("unknown_error", "blocked"):
             prewarm_cache.invalidate(user.id)
-            logger.info("[%s] 因 unknown_error 失效 prewarm 缓存", user.name)
+            logger.info("[%s] 因 %s 失效 prewarm 缓存", user.name, result.phase)
         # result.listing 是实际被尝试预订的那套房源（fallback 后可能不是 sorted_cands[0]）
         booked_listing = result.listing
 
@@ -626,12 +632,19 @@ async def run_once(
                     "[%s] 📝 %d 套候选加入重试队列（下次扫描仍可预订时将重试）",
                     user.name, len(sorted_cands),
                 )
+            elif result.phase == "blocked":
+                # blocked 是 IP/指纹级，不是房源级问题；保留 retry_queue 状态不动，
+                # 等下轮换指纹后再决定是否重试。
+                pass
             else:
                 for c in sorted_cands:
                     retry_queue.discard(user.id, c.id)
 
         if result.dry_run:
             logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, booked_listing.name)
+        elif result.phase == "blocked":
+            # 不发 per-candidate booking_failed —— 累积到后面聚合一次性发
+            blocked_in_round.append((user, notifier, result.message))
         elif result.success:
             sent = await notifier.send_booking_success(
                 booked_listing, result.message, result.pay_url, result.contract_start_date
@@ -653,6 +666,28 @@ async def run_once(
             await notifier.send_booking_failed(booked_listing, result.message)
             if web_notifier:
                 await web_notifier.send_booking_failed(booked_listing, result.message)
+
+    # ── 聚合屏蔽通知（共享 scrape 的 30 min 节流，避免双重打扰）────── #
+    if blocked_in_round and _should_notify_block():
+        names = sorted({u.name for u, _, _ in blocked_in_round})
+        # 取第一条 msg 作为详情（所有候选的 message 通常相同 —— 都是同一 CF 屏蔽）
+        detail = blocked_in_round[0][2]
+        agg_msg = (
+            f"🚫 自动预订被 403 屏蔽（{len(blocked_in_round)} 套候选 / "
+            f"{len(names)} 个用户）\n\n{detail}\n\n"
+            f"影响用户: {', '.join(names)}\n"
+            f"30 分钟内不会重复通知。"
+        )
+        for u, n, _ in blocked_in_round:
+            await n.send_error(agg_msg)
+        if web_notifier:
+            await web_notifier.send_error(agg_msg)
+    elif blocked_in_round:
+        logger.info(
+            "🚫 %d 套候选 / %d 个用户被屏蔽，30 min 节流期内不发通知",
+            len(blocked_in_round),
+            len({u.id for u, _, _ in blocked_in_round}),
+        )
 
     # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
     retry_queue.save(storage)

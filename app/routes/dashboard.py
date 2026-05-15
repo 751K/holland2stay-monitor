@@ -40,11 +40,11 @@ def _feature_value(row: dict, category: str) -> str | None:
 
 def _feature_rank_ok(row: dict, min_rank: int) -> bool:
     """房源能耗等级 >= min_rank（越小越好）。"""
-    from config import _energy_rank
+    from config import energy_rank
     val = _feature_value(row, "Energy")
     if val is None:
         return False
-    rank = _energy_rank(val)
+    rank = energy_rank(val)
     if rank is None:
         logger.warning("房源 %r 能耗标签不在白名单中: %r", row.get("id"), val)
         return False
@@ -122,7 +122,7 @@ def listings() -> str:
         city_list  = st.get_distinct_cities()
         contracts  = st.get_feature_values("Contract")
         tenants    = st.get_feature_values("Tenant")
-        from config import _ENERGY_LABELS as _EL, _energy_rank as _er
+        from config import ENERGY_LABELS as _EL, energy_rank as _er
         _raw = st.get_feature_values("Energy")
         energies   = sorted([x for x in _raw if x.upper() in _EL] or _EL,
                            key=lambda e: _er(e) if _er(e) is not None else 99)
@@ -146,8 +146,8 @@ def listings() -> str:
     if tenant_filters:
         rows = [r for r in rows if any(_feature_contains(r, "Tenant", t) for t in tenant_filters)]
     if energy_filter:
-        from config import _energy_rank
-        min_rank = _energy_rank(energy_filter)
+        from config import energy_rank
+        min_rank = energy_rank(energy_filter)
         if min_rank is not None:
             rows = [r for r in rows if _feature_rank_ok(r, min_rank)]
         else:

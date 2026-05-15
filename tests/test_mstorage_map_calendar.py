@@ -12,7 +12,7 @@ def store(tmp_path):
 
 
 def _add(st, **kw):
-    st._conn.execute(
+    st.conn.execute(
         """INSERT OR REPLACE INTO listings
            (id, name, status, price_raw, available_from, features, url, city,
             first_seen, last_seen, notified, last_status)
@@ -28,7 +28,7 @@ def _add(st, **kw):
             kw.get("status", "Available to book"),
         ),
     )
-    st._conn.commit()
+    st.conn.commit()
 
 
 class TestCalendar:
