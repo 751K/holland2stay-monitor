@@ -2,11 +2,14 @@ import SwiftUI
 
 struct ListingsView: View {
     @Environment(ListingsStore.self) private var store
+    @Environment(NavigationCoordinator.self) private var coord
     @State private var searchText = ""
     @State private var showFilters = false
 
     var body: some View {
-        NavigationStack {
+        @Bindable var coord = coord
+
+        NavigationStack(path: $coord.listingsPath) {
             Group {
                 if store.isLoading && store.listings.isEmpty {
                     ProgressView().padding(.top, 60)
@@ -46,15 +49,17 @@ struct ListingsView: View {
                     await store.fetch()
                 }
             }
+            // 统一路由：列表点击 + deep link push 都走 ListingRoute → ListingDetailView
+            .navigationDestination(for: ListingRoute.self) { route in
+                ListingDetailView(route: route)
+            }
         }
     }
 
     private var listContent: some View {
         List {
             ForEach(store.listings) { listing in
-                NavigationLink {
-                    ListingDetailView(listing: listing)
-                } label: {
+                NavigationLink(value: ListingRoute.known(listing)) {
                     ListingRow(listing: listing)
                         .onAppear {
                             if listing.id == store.listings.last?.id {

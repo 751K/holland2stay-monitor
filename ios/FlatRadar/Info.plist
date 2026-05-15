@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        本文件只放 Xcode auto-generated Info.plist 无法表达的复杂键。
+        其他键（NSAllowsLocalNetworking、UISupportedInterfaceOrientations 等）
+        继续在 project.pbxproj 的 INFOPLIST_KEY_* build settings 里维护，
+        构建时 Xcode 把两边合并。
+
+        CFBundleURLTypes:
+        注册 ``h2smonitor://`` URL Scheme，使得 ``h2smonitor://listing/<id>``
+        这类链接（邮件 / iMessage / 网页里点）能唤起 FlatRadar，由 SwiftUI
+        ``.onOpenURL`` 接到。
+    -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>com.j.kong.FlatRadar.deepLink</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>h2smonitor</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

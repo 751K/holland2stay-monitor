@@ -33,14 +33,12 @@
 | Notifications 列表 + 翻页 | ✅ | 左滑标记已读 + 全部已读 + 类型图标 |
 | Notifications 未读 badge | ✅ | Tab 角标实时更新 |
 | Map / Calendar | ⬜ v2 | |
-| APNs 设备注册 | ⬜ 待实现 | `POST /api/v1/devices/register` |
-| Deep link | ⬜ 待实现 | `h2smonitor://listing/<id>` |
+| APNs 设备注册 + Send Test Push | ✅ | `POST /api/v1/devices/{register,test}`；Settings tab 一键自测 |
+| Deep link | ✅ | `h2smonitor://listing/<id>` + APNs payload `listing_id`；`NavigationCoordinator` 统一路由 |
 | SSE 实时推送 | ⬜ 待实现 | 当前为轮询 |
 
 ### 待办
 
-- **APNs 设备注册** — `POST /api/v1/devices/register`，App 启动/登录后调用
-- **Deep link** — `h2smonitor://listing/<id>` → ListingDetailView（`getListing(id:)` 已就位）
 - **SSE 实时推送** — `/notifications/stream`，当前通知为手动刷新
 - **Map / Calendar tab** — iOS 端 UI + `/map` `/calendar` 端点（后端已就位）
 - **上架 App Store** — 用途声明、隐私说明、H2S 非官方关系声明

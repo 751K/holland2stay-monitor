@@ -77,6 +77,10 @@ final class PushStore {
                 print("[PushStore] registration error: \(err)")
             }
         }
+        // ⚠️ 时序救援：iOS 可能在 setup() 前就调过 didRegister（cached token
+        // 重放），那时 onDeviceToken 还是 nil 把 token 丢了。这里挂完回调
+        // 立刻让 delegate 把缓存 token 重发一次。
+        PushDelegate.shared.flushPendingToken()
         Task { await refreshPermissionStatus() }
     }
 

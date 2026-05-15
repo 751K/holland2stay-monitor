@@ -25,11 +25,34 @@ import UserNotifications
 @MainActor
 final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 
-    static let shared = PushDelegate()
+    /// **关键**：iOS 通过 ``@UIApplicationDelegateAdaptor(PushDelegate.self)``
+    /// 自己 ``init()`` 一份实例并持有；如果再 ``static let shared = PushDelegate()``
+    /// 会产生 **两个独立实例**——iOS 给它的发 didRegister，PushStore 又配置
+    /// shared，永远收不到 token。
+    ///
+    /// 解决：第一个被构造的实例（iOS 那个）通过 ``init()`` 把 self 写进
+    /// ``shared``。之后 ``PushDelegate.shared`` 拿到的就是 iOS 在用的实例。
+    nonisolated(unsafe) static var shared: PushDelegate!
+
+    override init() {
+        super.init()
+        Self.shared = self
+    }
 
     // Bridge to PushStore; set by FlatRadarApp on launch.
     var onDeviceToken: ((Data) -> Void)?
     var onRegistrationError: ((Error) -> Void)?
+
+    /// iOS 可能在 ``onDeviceToken`` 还未挂上时（App 刚启动、cached token 重放）
+    /// 就调 ``didRegister``。这里保留最新一次的 token，``PushStore.setup()``
+    /// 完成回调挂载后会主动 ``flushPendingToken()`` 把缓存的 token 投递出去。
+    private(set) var latestDeviceToken: Data?
+
+    func flushPendingToken() {
+        guard let data = latestDeviceToken else { return }
+        print("[PushDelegate] flushing pending token (\(data.count) bytes) to handler")
+        onDeviceToken?(data)
+    }
 
     // MARK: - UIApplicationDelegate
 
@@ -45,7 +68,8 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        print("[PushDelegate] didRegister deviceToken (\(deviceToken.count) bytes)")
+        latestDeviceToken = deviceToken
+        print("[PushDelegate] didRegister deviceToken (\(deviceToken.count) bytes), handler=\(onDeviceToken != nil)")
         onDeviceToken?(deviceToken)
     }
 

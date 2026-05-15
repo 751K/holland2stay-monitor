@@ -1,9 +1,59 @@
 import SwiftUI
 
+/// Listing 详情页。
+///
+/// 支持两种打开方式（``ListingRoute``）：
+/// - ``known(Listing)``：从列表行点入，data 已在手，立即渲染
+/// - ``byId(String)``：从推送通知 deep link 进来，只有 id，``.task`` 拉取
+///   ``getListing(id:)`` 再渲染；中间显示 ProgressView
+///
+/// 加载失败（404 / 网络异常）时用 ContentUnavailableView 兜底。
 struct ListingDetailView: View {
-    let listing: Listing
+    let route: ListingRoute
+
+    @State private var listing: Listing?
+    @State private var isLoading = false
+    @State private var errorMessage: String?
 
     var body: some View {
+        Group {
+            if let listing {
+                content(listing)
+            } else if isLoading {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let err = errorMessage {
+                ContentUnavailableView(
+                    "Listing Not Available",
+                    systemImage: "house.slash",
+                    description: Text(err))
+            } else {
+                Color.clear
+            }
+        }
+        .navigationTitle(listing?.name ?? "Loading…")
+        .task { await load() }
+    }
+
+    private func load() async {
+        switch route {
+        case .known(let l):
+            listing = l
+        case .byId(let id):
+            guard listing == nil else { return }   // 二次进入不重复 fetch
+            isLoading = true
+            errorMessage = nil
+            do {
+                listing = try await APIClient.shared.getListing(id: id)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            isLoading = false
+        }
+    }
+
+    @ViewBuilder
+    private func content(_ listing: Listing) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 // Header
@@ -15,7 +65,7 @@ struct ListingDetailView: View {
                         Text(listing.city)
                         Text("·")
                         Text(listing.status)
-                            .foregroundStyle(statusColor)
+                            .foregroundStyle(statusColor(for: listing))
                     }
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -86,10 +136,9 @@ struct ListingDetailView: View {
             }
             .padding()
         }
-        .navigationTitle(listing.name)
     }
 
-    private var statusColor: Color {
+    private func statusColor(for listing: Listing) -> Color {
         let s = listing.status.lowercased()
         if s.contains("available") { return .green }
         if s.contains("lottery") { return .orange }

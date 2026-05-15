@@ -1,6 +1,6 @@
 import Foundation
 
-struct Listing: Decodable, Identifiable, Sendable {
+struct Listing: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let status: String

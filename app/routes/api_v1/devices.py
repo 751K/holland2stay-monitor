@@ -115,22 +115,31 @@ def _delete(device_id: int):
 
 def _test_push():
     """
-    POST /api/v1/devices/test — 给当前会话的所有活跃设备发一条测试推送。
+    POST /api/v1/devices/test — 一键全链路测试。
 
-    用途：iOS 端 Settings 里"Send Test Push"按钮调用，验证 APNs 链路通畅。
+    1. 向 ``web_notifications`` 表插一条 type=new_listing 行
+       → 触发 SSE，iOS 列表顶部即时出现 + tab badge +1
+    2. 给当前会话的所有活跃设备发 APNs 推送
+       → 锁屏 / 横幅 / app 图标红点（如 iOS 允许 badge）
 
     body（全部可选）:
-      title    : "🧪 测试推送"
-      body     : "如果你看到这条..."
+      title           : "🧪 测试推送"
+      body            : "如果你看到这条..."
+      apns_only       : true → 跳过 SSE 写库（只验证 APNs 链路）
+      notification_only: true → 跳过 APNs 发送（只验证 SSE 链路）
 
     返回：
-      {ok: true, data: {sent, total, results: [{device_token_hint, status, reason}]}}
+      {
+        sent: int, total: int,
+        results: [{device_token_hint, status, reason, ok}],
+        notification_id: int | null    # 写库行 id；apns_only=true 时为 null
+      }
 
-    与 mcore.push.dispatch 的区别：
-    - dispatch 走 user_id 维度查设备，admin 没 user_id 用不了
-    - dispatch 有节流去重（同 listing/kind 5min 1 条），测试不应受限
-    - dispatch 失败的 device 会被自动 disable_device；测试不需要这么严
-    这里直接调 ApnsClient.send_many，绕开调度层。
+    与 mcore.push.dispatch 的区别
+    -----------------------------
+    - dispatch 按 user_id 查设备；admin 没 user_id 用不了
+    - dispatch 有节流（同 listing/kind 5min 1 条），测试不该受限
+    这里绕开 dispatch，直接调 ApnsClient.send_many。
     """
     import asyncio
     token_id = api_auth.current_token_id()
@@ -141,53 +150,78 @@ def _test_push():
     title = (body.get("title") or "").strip()[:64] or "🧪 测试推送"
     body_text = (body.get("body") or "").strip()[:180] or \
         "如果你在锁屏看到这条，APNs 链路工作正常 ✓"
+    apns_only = bool(body.get("apns_only"))
+    notification_only = bool(body.get("notification_only"))
 
-    from mcore import push as _push
-    client = _push.get_client()
-    if client is None:
-        return _err.err_validation("APNs 未启用（后端缺少 .p8 或 APNS_* 配置）")
+    # ── 1. 写 web_notifications（触发 SSE） ────────────────────────
+    notification_id: int | None = None
+    if not apns_only:
+        with storage_ctx() as st:
+            notification_id = st.add_web_notification(
+                type="new_listing",
+                title=title,
+                body=body_text,
+                listing_id="",
+            )
+        logger.info("test push 已写 web_notifications id=%d", notification_id)
 
-    with storage_ctx() as st:
-        all_devices = st.list_devices_for_token(token_id)
-    active = [d for d in all_devices if not d.get("disabled_at")]
-    if not active:
-        return _err.err_validation("当前会话没有注册过设备")
+    # ── 2. 发 APNs ───────────────────────────────────────────────
+    sent = 0
+    detail: list[dict] = []
+    if not notification_only:
+        from mcore import push as _push
+        client = _push.get_client()
+        if client is None:
+            return _err.err_validation("APNs 未启用（后端缺少 .p8 或 APNS_* 配置）")
 
-    payload = {
-        "aps": {
-            "alert": {"title": title, "body": body_text},
-            "sound": "default",
-            "thread-id": "test",
-        },
-        "kind": "test",
-    }
-    targets = [
-        {"device_token": d["device_token"], "env": d["env"]}
-        for d in active
-    ]
-    try:
-        # Flask 路由是同步的；asyncio.run 起一次性 event loop 处理 APNs HTTP/2
-        results = asyncio.run(client.send_many(targets, payload=payload))
-    except Exception as e:
-        logger.exception("test push 发送异常")
-        return _err.err_server_error(e, "推送发送失败")
+        with storage_ctx() as st:
+            all_devices = st.list_devices_for_token(token_id)
+        active = [d for d in all_devices if not d.get("disabled_at")]
+        if not active and not apns_only:
+            # SSE 已写但没设备可推 APNs；不算失败
+            logger.info("test push: SSE 已写，但无设备 APNs 不发")
+        elif not active:
+            return _err.err_validation("当前会话没有注册过设备")
+        else:
+            payload = {
+                "aps": {
+                    "alert": {"title": title, "body": body_text},
+                    "sound": "default",
+                    "thread-id": "test",
+                    "badge": 1,
+                },
+                "kind": "test",
+            }
+            targets = [
+                {"device_token": d["device_token"], "env": d["env"]}
+                for d in active
+            ]
+            try:
+                results = asyncio.run(client.send_many(targets, payload=payload))
+            except Exception as e:
+                logger.exception("test push 发送异常")
+                return _err.err_server_error(e, "推送发送失败")
+            sent = sum(1 for r in results if r.ok)
+            for d, r in zip(active, results):
+                tok = d["device_token"]
+                detail.append({
+                    "device_token_hint": f"{tok[:12]}…{tok[-4:]}" if len(tok) > 16 else tok,
+                    "env": d["env"],
+                    "status": r.status,
+                    "reason": r.reason,
+                    "ok": r.ok,
+                })
+            logger.info(
+                "test push 完成 token_id=%d sent=%d/%d notif_id=%s",
+                token_id, sent, len(results), notification_id,
+            )
 
-    sent = sum(1 for r in results if r.ok)
-    detail = []
-    for d, r in zip(active, results):
-        tok = d["device_token"]
-        detail.append({
-            "device_token_hint": f"{tok[:12]}…{tok[-4:]}" if len(tok) > 16 else tok,
-            "env": d["env"],
-            "status": r.status,
-            "reason": r.reason,
-            "ok": r.ok,
-        })
-    logger.info(
-        "test push 完成 token_id=%d sent=%d/%d",
-        token_id, sent, len(results),
-    )
-    return _err.ok({"sent": sent, "total": len(results), "results": detail})
+    return _err.ok({
+        "sent": sent,
+        "total": len(detail),
+        "results": detail,
+        "notification_id": notification_id,
+    })
 
 
 def register(bp: Blueprint) -> None:

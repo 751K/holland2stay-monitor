@@ -27,6 +27,10 @@ struct NotificationsView: View {
             }
             .navigationTitle("Notifications")
             .toolbar {
+                // 左上：实时连接小指示器
+                ToolbarItem(placement: .topBarLeading) {
+                    streamStatusIndicator
+                }
                 if store.unreadCount > 0 {
                     ToolbarItem(placement: .automatic) {
                         Button("Mark All Read") {
@@ -72,5 +76,20 @@ struct NotificationsView: View {
             }
         }
         .refreshable { await store.refresh() }
+    }
+
+    /// 标题栏左侧的实时连接小指示器：
+    /// - 绿点 = SSE 连着，新通知会自动到达
+    /// - 灰点 = 未连（后台 / 登出 / 错误）
+    @ViewBuilder
+    private var streamStatusIndicator: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(store.isStreamConnected ? Color.green : Color.gray)
+                .frame(width: 6, height: 6)
+            Text(store.isStreamConnected ? "Live" : "Idle")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
     }
 }

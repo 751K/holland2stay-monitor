@@ -195,6 +195,26 @@ final class APIClient {
         return try await request("POST", "api/v1/notifications/read", body: MarkReadBody(ids: ids))
     }
 
+    /// SSE 流端点 URL（含 last_id）。token 走 Authorization header（URLSession 支持）。
+    /// 调用方：NotificationsStore.connectStream。
+    func notificationsStreamURL(lastId: Int) -> URL {
+        let comp = URLComponents(
+            url: baseURL.appendingPathComponent("api/v1/notifications/stream"),
+            resolvingAgainstBaseURL: false)
+        var c = comp ?? URLComponents()
+        c.queryItems = [URLQueryItem(name: "last_id", value: String(lastId))]
+        return c.url ?? baseURL
+    }
+
+    /// 当前持有的 Bearer token（SSE Client 需要直接挂 header）。
+    func currentToken() -> String? { token }
+
+    // MARK: - Map (Phase 2)
+
+    func getMap() async throws -> MapResponse {
+        try await request("GET", "api/v1/map")
+    }
+
     // MARK: - Me (Phase 2)
 
     func getMeSummary() async throws -> MeSummary {

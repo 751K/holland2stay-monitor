@@ -91,6 +91,16 @@ struct SettingsView: View {
                                 Text("not registered").foregroundStyle(.secondary)
                             }
                         }
+                        if let err = push.lastError {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label("Registration failed", systemImage: "exclamationmark.triangle")
+                                    .foregroundStyle(.red)
+                                    .font(.subheadline)
+                                Text(err)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                         Button {
                             sendTestPush()
                         } label: {
@@ -102,6 +112,12 @@ struct SettingsView: View {
                             }
                         }
                         .disabled(isSendingTest || push.registeredDeviceId == nil)
+                        Button {
+                            Task { await push.requestPermissionAndRegister() }
+                        } label: {
+                            Text("Re-register Device")
+                        }
+                        .disabled(push.permissionStatus == .denied)
                     } header: {
                         Text("Push Notifications")
                     } footer: {
