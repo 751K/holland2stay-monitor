@@ -4,6 +4,7 @@ struct SettingsView: View {
     @Environment(AuthStore.self) private var auth
     @Environment(PushStore.self) private var push
     @AppStorage("server_url") private var serverURL: String = APIClient.defaultServerHost
+    @AppStorage("color_scheme") private var colorScheme: String = "system"
     @State private var editedURL = ""
     @State private var showLogoutConfirm = false
 
@@ -29,7 +30,7 @@ struct SettingsView: View {
                         Button("Save") {
                             serverURL = editedURL.trimmingCharacters(in: .whitespaces)
                             let url = buildBaseURL(from: serverURL)
-                            Task { await APIClient.shared.configure(baseURL: url) }
+                            APIClient.shared.configure(baseURL: url)
                             endEditing()
                         }
                         .buttonStyle(.bordered)
@@ -145,6 +146,15 @@ struct SettingsView: View {
                     }
                 }
 
+                // Appearance
+                Section("Appearance") {
+                    Picker("Color Scheme", selection: $colorScheme) {
+                        Text("System").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                }
+
                 // About
                 Section("About") {
                     HStack {
@@ -169,11 +179,11 @@ struct SettingsView: View {
 
     private var pushPermissionLabel: String {
         switch push.permissionStatus {
-        case .authorized:    return "Authorized"
-        case .provisional:   return "Provisional"
-        case .ephemeral:     return "Ephemeral"
-        case .denied:        return "Denied"
-        case .notDetermined: return "Not determined"
+        case .authorized:    return String(localized: "Authorized")
+        case .provisional:   return String(localized: "Provisional")
+        case .ephemeral:     return String(localized: "Ephemeral")
+        case .denied:        return String(localized: "Denied")
+        case .notDetermined: return String(localized: "Not determined")
         }
     }
 
@@ -194,16 +204,16 @@ struct SettingsView: View {
             do {
                 let r = try await APIClient.shared.testPush()
                 if r.sent == r.total {
-                    testResultMessage = "✅ Sent to \(r.sent) device\(r.sent == 1 ? "" : "s"). Check your lock screen."
+                    testResultMessage = String(localized: "✅ Sent to \(r.sent) device\(r.sent == 1 ? "" : "s"). Check your lock screen.")
                 } else {
                     let failedReasons = r.results
                         .filter { !$0.ok }
                         .map { "\($0.status) \($0.reason)" }
                         .joined(separator: "; ")
-                    testResultMessage = "⚠️ Sent \(r.sent)/\(r.total). Failures: \(failedReasons)"
+                    testResultMessage = String(localized: "⚠️ Sent \(r.sent)/\(r.total). Failures: \(failedReasons)")
                 }
             } catch {
-                testResultMessage = "❌ \(error.localizedDescription)"
+                testResultMessage = String(localized: "❌ \(error.localizedDescription)")
             }
             showTestResult = true
         }

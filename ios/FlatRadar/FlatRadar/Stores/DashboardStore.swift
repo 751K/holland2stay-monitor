@@ -10,6 +10,7 @@ final class DashboardStore {
     var isLoading = false
     var isLoadingChart = false
     var errorMessage: String?
+    var lastError: APIError?
 
     private let client = APIClient.shared
 
@@ -19,6 +20,7 @@ final class DashboardStore {
         do {
             summary = try await client.getPublicSummary()
         } catch {
+            lastError = error as? APIError
             errorMessage = error.localizedDescription
         }
         isLoading = false

@@ -12,6 +12,7 @@ final class CalendarStore {
     var listingsByDay: [String: [CalendarListing]] = [:]
     var isLoading = false
     var errorMessage: String?
+    var lastError: APIError?
 
     private let client = APIClient.shared
 
@@ -32,6 +33,7 @@ final class CalendarStore {
             listings = resp.listings
             listingsByDay = Dictionary(grouping: listings, by: \.dayKey)
         } catch {
+            lastError = error as? APIError
             errorMessage = error.localizedDescription
             print("[CalendarStore] fetch error: \(error)")
         }

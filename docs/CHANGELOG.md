@@ -1,5 +1,52 @@
 # Changelog
 
+## v1.4.1 (2026-05-15)
+
+### iOS — 错误展示打磨
+
+- **APIError 分类化 UI**：`errorDescription`（短标题）/ `failureReason`（详情）/ `recoverySuggestion`（操作建议）三层结构；每类错误配独立 SF Symbol 图标（401→lock.shield / 403→hand.raised.slash / 网络→wifi.slash 等）
+- **全局 401/403 自动登出**：`APIClient` 检测到 auth 错误时 post `authFailedNotification`，`AuthStore` 监听并自动 `logout()`，任何页面任何请求触发都会清除会话
+- **所有视图 Try Again 按钮**：`ContentUnavailableView` 错误状态加"Try Again"操作按钮，401 显示"请重新登录"、网络错误显示"检查网络"等分类提示
+- **刷新失败弹窗**：数据已有但刷新失败时弹出 alert（title 按错误类型区分），不再静默吞错
+- `LoginView` alert 标题随错误类型变化（网络错误→"Connection Failed"，401→"Session Expired"），不再固定"Login Failed"
+- `DashboardView` 重构为 `summaryContent` / `errorView` / `roleBadge` 三个子组件，避免 type-checker 超时
+
+### iOS — 多语言 en + zh-Hans
+
+- 新建 `Localizable.xcstrings`（154 条），覆盖所有视图、Store、APIError、权限状态、测试推送消息
+- SwiftUI `Text("...")` 自动查询 catalog，`String(localized:)` 用于非 View 代码路径（`APIError`、`LoginMode.label`、`BrowseMode.label`、`MapView.shortStatus`、`SettingsView.pushPermissionLabel`、test push 消息）
+- 跟随系统语言自动切换，无需手动选择
+
+### iOS — 深色模式 + Settings 切换
+
+- Settings 新增 "Appearance" section，Picker 三选一：System / Light / Dark
+- `@AppStorage("color_scheme")` 持久化偏好，`FlatRadarApp` 读取并 `.preferredColorScheme()` 应用到根视图
+- 修复深色下两处对比度：`ChartDetailView` 交替行 `Color.gray.opacity(0.08)` → `Color.primary.opacity(0.04)`；`CalendarView` 非选中日背景 `0.08` → `0.12`
+- App 全程使用 SwiftUI 语义色，无硬编码 hex，无 `preferredColorScheme` 覆盖
+
+### iOS — iPad 适配 + 键盘快捷键
+
+- **响应式 TabView**：iPhone compact 保持 4 tab（Dashboard / Browse / Notifications / Settings）；iPad regular 展开 6 tab（Dashboard / Listings / Map / Calendar / Notifications / Settings），无二级嵌套
+- **液态玻璃底栏**：`.toolbarBackground(.ultraThinMaterial)` 毛玻璃效果
+- **键盘快捷键**：iPad ⌘1-⌘6 切 tab，iPhone ⌘1-⌘4
+- **响应式网格**：Dashboard `gridColumns` compact=2、regular=3
+- `MainTabView` 拆为 `compactTabView` + `wideTabView` 两个子布局，通过 `@Environment(\.horizontalSizeClass)` 自动切换
+- `AppTab` 新增 `.listings` / `.map` / `.calendar` 三个 case（iPad only）
+- `openListing(id:)` deep link 统一使用 `.listings`，iPhone 侧 `onChange` 自动重定向到 `.browse` + `.list` mode
+
+### iOS — APNs 推送优化
+
+- **一次性本地客户端**：`notifier_channels/apns.py` 从复用全局 `httpx.AsyncClient` 改为每次推送创建独立 client 并 `async with` 关闭，避免事件循环竞争导致的连接泄漏和不稳定
+- **Settings 测试推送**：`PushStore` + `SettingsView` 新增 "Send Test Push" 按钮，调用 `POST /api/v1/devices/test`，结果弹窗显示成功/失败设备数及失败原因，验证 APNs 端到端链路
+- **设备管理增强**：Settings 显示当前设备注册 ID、权限状态、Registration failed 错误详情；支持 Re-register Device 手动重注
+
+### iOS — 服务端 / 构建
+
+- 新增 `POST /api/v1/devices/test` 测试推送端点（`app/routes/api_v1/devices.py`），绕过 `push.dispatch` 的 user_id/throttle 限制，直接向当前 session 所有活跃设备推送
+- `FUTURE_PLAN.md` 同步更新：错误展示/多语言/深色模式/iPad 适配/APNs 标记完成
+
+---
+
 ## v1.4.0 (2026-05-15)
 
 ### iOS 后端 — 只读数据端点（Phase 2）

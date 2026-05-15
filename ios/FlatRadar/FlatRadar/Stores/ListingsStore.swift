@@ -8,6 +8,7 @@ final class ListingsStore {
     var isLoading = false
     var isLoadingMore = false
     var errorMessage: String?
+    var lastError: APIError?
     var isFiltered = false
 
     private let client = APIClient.shared
@@ -34,6 +35,7 @@ final class ListingsStore {
             total = resp.total
             isFiltered = resp.filtered ?? false
         } catch {
+            lastError = error as? APIError
             errorMessage = error.localizedDescription
         }
         isLoading = false

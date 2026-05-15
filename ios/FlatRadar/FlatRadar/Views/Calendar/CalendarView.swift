@@ -20,6 +20,7 @@ struct CalendarView: View {
 
     @State private var anchor: Date = Self.startOfMonth(for: Date())
     @State private var selectedDay: Date?
+    @State private var showRefreshError = false
 
     private static let cal: Calendar = {
         var c = Calendar(identifier: .gregorian)
@@ -28,16 +29,24 @@ struct CalendarView: View {
     }()
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
+        // 不再自带 NavigationStack；外层 BrowseView 提供。
+        ScrollView {
                 VStack(spacing: 16) {
                     if store.isLoading && store.listings.isEmpty {
                         ProgressView().padding(.top, 80)
                     } else if let err = store.errorMessage, store.listings.isEmpty {
-                        ContentUnavailableView(
-                            "Unable to Load",
-                            systemImage: "calendar.badge.exclamationmark",
-                            description: Text(err))
+                        let apiErr = store.lastError
+                        ContentUnavailableView {
+                            Label(
+                                apiErr?.errorDescription ?? "Unable to Load",
+                                systemImage: apiErr?.systemImage ?? "calendar.badge.exclamationmark")
+                        } description: {
+                            Text(err)
+                        } actions: {
+                            Button("Try Again") {
+                                Task { await store.refresh() }
+                            }
+                        }
                     } else {
                         monthHeader
                         weekdayHeader
@@ -62,26 +71,35 @@ struct CalendarView: View {
                 }
                 .padding(.vertical)
             }
-            .refreshable { await store.refresh() }
-            .navigationTitle("Calendar")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        anchor = Self.startOfMonth(for: Date())
-                        selectedDay = Date()
-                    } label: {
-                        Text("Today").font(.subheadline.weight(.medium))
-                    }
-                    .disabled(Self.cal.isDate(anchor, equalTo: Self.startOfMonth(for: Date()),
-                                              toGranularity: .month))
+        .refreshable { await store.refresh() }
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    anchor = Self.startOfMonth(for: Date())
+                    selectedDay = Date()
+                } label: {
+                    Text("Today").font(.subheadline.weight(.medium))
                 }
+                .disabled(Self.cal.isDate(anchor, equalTo: Self.startOfMonth(for: Date()),
+                                          toGranularity: .month))
             }
-            .task {
-                if store.listings.isEmpty {
-                    await store.fetch()
-                }
+        }
+        .task {
+            if store.listings.isEmpty {
+                await store.fetch()
             }
+        }
+        .onChange(of: store.errorMessage) { _, new in
+            showRefreshError = new != nil && !store.listings.isEmpty
+        }
+        .alert(
+            store.lastError?.errorDescription ?? "Refresh Failed",
+            isPresented: $showRefreshError
+        ) {
+            Button("OK") {}
+        } message: {
+            Text(store.errorMessage ?? "")
         }
     }
 
@@ -169,7 +187,7 @@ struct CalendarView: View {
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(selected ? Color.blue :
-                              (count > 0 ? Color.blue.opacity(0.08) : Color.clear))
+                              (count > 0 ? Color.blue.opacity(0.12) : Color.clear))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)

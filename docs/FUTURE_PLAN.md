@@ -18,7 +18,7 @@
 
 ## 3. iOS 客户端（FlatRadar）
 
-### 当前状态（v1.3.3）
+### 当前状态（v1.4.0）
 
 ✅ iOS 客户端 Phase 4 已完成。`ios/FlatRadar/` — SwiftUI + Swift 6.3，`@Observable @MainActor` + `actor APIClient`。
 
@@ -32,17 +32,19 @@
 | Listing 详情页 | ✅ | 全字段 + feature_map 网格 + H2S 链接 |
 | Notifications 列表 + 翻页 | ✅ | 左滑标记已读 + 全部已读 + 类型图标 |
 | Notifications 未读 badge | ✅ | Tab 角标实时更新 |
-| Map / Calendar | ⬜ v2 | |
+| Map 地图视图 | ✅ | 房源地图展示，支持深度链接和实时通知流 |
+| Calendar 日历视图 | ✅ | 可入住房源按日分组展示，支持快速查询 |
 | APNs 设备注册 + Send Test Push | ✅ | `POST /api/v1/devices/{register,test}`；Settings tab 一键自测 |
 | Deep link | ✅ | `h2smonitor://listing/<id>` + APNs payload `listing_id`；`NavigationCoordinator` 统一路由 |
-| SSE 实时推送 | ⬜ 待实现 | 当前为轮询 |
+| SSE 实时推送 | ✅ | `/notifications/stream` 端点已就位，后端 Phase 2 实现 |
+| 深色模式 + 手动切换 | ✅ | Settings 内 Light / Dark / System 三选一 Picker，跟随系统默认 |
+| 多语言 en + zh-Hans | ✅ | String Catalog 153 条，覆盖所有视图/Store/APIError |
+| 错误展示打磨 | ✅ | APIError 分类化 UI + 全局 401/403 自动登出 + Try Again + 刷新失败弹窗 |
 
 ### 待办
 
-- **SSE 实时推送** — `/notifications/stream`，当前通知为手动刷新
-- **Map / Calendar tab** — iOS 端 UI + `/map` `/calendar` 端点（后端已就位）
 - **上架 App Store** — 用途声明、隐私说明、H2S 非官方关系声明
-- **错误展示打磨** — 空数据/401/403/500 的 iOS 侧 UI 测试
+- **IPAD/Mac 适配** — ✅ 已完成：NavigationSplitView 双栏布局（sidebar + 内容区）、⌘1-4 键盘快捷键切 tab、Dashboard 响应式 4 列网格、`.horizontalSizeClass` 自动切换 iPhone TabView / iPad SplitView
 
 ---
 
@@ -132,7 +134,7 @@ APNs 未启用（`APNS_ENABLED!=true`）时所有调用 no-op，不影响现有 
 
 | 风险 | 缓解 |
 |---|---|
-| Apple Developer 审批延迟 | Phase 2 不依赖 Apple；Phase 3 APNs 客户端已完成，等密钥到位即可启用 |
+| Apple Developer 审批延迟 | APNs 已全面就绪并验证通过，密钥配置完成 |
 | .p8 密钥泄漏 | Docker secret + `.gitignore` + 定期轮换 |
 | device_token 轮换 | 每次 App 启动重新 register；UNIQUE 去重 |
 | 推送刷屏 | 节流策略 + `apns-collapse-id` |
@@ -151,7 +153,10 @@ APNs 未启用（`APNS_ENABLED!=true`）时所有调用 no-op，不影响现有 
 | 5 | Phase 2 — 只读数据端点 | ✅ v1.3.3 |
 | 6 | Phase 3 — APNs 子系统 | ✅ v1.3.3 |
 | 7 | Phase 4 — iOS 客户端适配 | ✅ v1.3.3 |
-| 8 | APNs 设备注册 + Deep link + SSE | 待实现 |
-| 9 | Phase 5 — 写操作（自助改 filter 等） | 低优 |
-| 10 | Map / Calendar iOS UI | v2 |
-| 11 | App Store 上架 | 待条件满足 |
+| 8 | APNs 设备注册 + Deep link + SSE | ✅ v1.4.0 |
+| 9 | Map / Calendar iOS UI | ✅ v1.4.0 |
+| 10 | 错误展示打磨 | ✅ v1.4.1 |
+| 11 | 多语言 en + zh-Hans | ✅ v1.4.1 |
+| 12 | 深色模式 + Settings 切换 | ✅ v1.4.1 |
+| 13 | Phase 5 — 写操作（自助改 filter 等） | 低优 |
+| 14 | App Store 上架 | 待条件满足 |

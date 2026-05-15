@@ -14,6 +14,7 @@ final class MapStore {
     var uncached: Int = 0
     var isLoading: Bool = false
     var errorMessage: String?
+    var lastError: APIError?
 
     /// 当前选中的房源——MapView 用 `Map(selection:)` 双向绑定，
     /// 选中时弹底部 sheet 卡片。
@@ -36,6 +37,7 @@ final class MapStore {
             listings = resp.listings
             uncached = resp.uncached
         } catch {
+            lastError = error as? APIError
             errorMessage = error.localizedDescription
             print("[MapStore] fetch error: \(error)")
         }

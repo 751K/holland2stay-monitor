@@ -25,10 +25,23 @@ final class AuthStore {
     var userInfo: UserInfo?
     var isLoading = false
     var errorMessage: String?
+    var lastError: APIError?
 
     private let client = APIClient.shared
     private var server: String {
         UserDefaults.standard.string(forKey: "server_url") ?? APIClient.defaultServerHost
+    }
+
+    /// Listen for global auth failures from any API call and auto-logout.
+    func observeAuthFailures() {
+        NotificationCenter.default.addObserver(
+            forName: APIClient.authFailedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isAuthenticated, !self.isGuest else { return }
+            Task { await self.logout() }
+        }
     }
 
     // MARK: - Restore Session
@@ -82,6 +95,7 @@ final class AuthStore {
             applyMe(me)
         } catch {
             print("[AuthStore] login error: \(error)")
+            lastError = error as? APIError
             errorMessage = error.localizedDescription
         }
         isLoading = false

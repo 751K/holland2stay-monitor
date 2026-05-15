@@ -2,13 +2,45 @@ import Foundation
 import SwiftUI
 
 /// Tab 标识——MainTabView 用 ``selection`` 绑定。
+///
+/// iPhone compact: 4 tabs（Dashboard / Browse / Notifications / Settings），
+/// Browse 内用 ``BrowseMode`` segmented picker 切换 List/Map/Calendar。
+///
+/// iPad regular: 6 tabs（Dashboard / Listings / Map / Calendar / Notifications / Settings），
+/// 空间足够，不需要二级 picker。
 enum AppTab: String, Hashable, Sendable {
     case dashboard
-    case listings
-    case map
-    case calendar
+    case browse       // iPhone only
+    case listings     // iPad only
+    case map          // iPad only
+    case calendar     // iPad only
     case notifications
     case settings
+}
+
+/// Browse tab 内的视图模式。
+enum BrowseMode: String, Hashable, Sendable, CaseIterable, Identifiable {
+    case list
+    case map
+    case calendar
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .list:     return String(localized: "List")
+        case .map:      return String(localized: "Map")
+        case .calendar: return String(localized: "Calendar")
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .list:     return "list.bullet"
+        case .map:      return "map.fill"
+        case .calendar: return "calendar"
+        }
+    }
 }
 
 /// 程序内导航协调器。
@@ -33,14 +65,15 @@ enum AppTab: String, Hashable, Sendable {
 @Observable
 final class NavigationCoordinator {
     var selectedTab: AppTab = .dashboard
+    var selectedBrowseMode: BrowseMode = .list
     var listingsPath: [ListingRoute] = []
 
-    /// 由 deep link / 通知点击调用：切到 Listings tab 并 push 详情。
+    /// 由 deep link / 通知点击调用：切到 List 视图并 push 详情。
     /// 多次连点不重复 push 同一条；切换 tab 顺手清空已有 path。
     func openListing(id: String) {
         guard !id.isEmpty else { return }
         selectedTab = .listings
-        // 清空当前栈再 push，避免 "通知 A → 详情 A → 通知 B" 时栈里堆两条
+        selectedBrowseMode = .list
         listingsPath = [.byId(id)]
     }
 }

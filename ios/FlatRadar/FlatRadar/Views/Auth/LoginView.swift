@@ -75,7 +75,7 @@ struct LoginView: View {
             .frame(maxHeight: .infinity, alignment: .top)
             .padding()
             .toolbar(.hidden)
-            .alert("Login Failed", isPresented: $showError) {
+            .alert(auth.lastError?.errorDescription ?? "Login Failed", isPresented: $showError) {
                 Button("OK") {}
             } message: {
                 Text(auth.errorMessage ?? "Unknown error")

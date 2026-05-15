@@ -19,9 +19,13 @@ struct FlatRadarApp: App {
     @State private var pushStore = PushStore()
     @State private var coordinator = NavigationCoordinator()
 
+    /// User-overridden color scheme. "system" = follow OS.
+    @AppStorage("color_scheme") private var colorScheme: String = "system"
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .preferredColorScheme(resolvedColorScheme)
                 .environment(authStore)
                 .environment(dashboardStore)
                 .environment(listingsStore)
@@ -31,11 +35,13 @@ struct FlatRadarApp: App {
                 .environment(pushStore)
                 .environment(coordinator)
                 .task {
-                    // 1. 把 PushStore 与 PushDelegate 桥接好（一次性）
+                    // 1. 全局 401/403 监听 → 自动登出
+                    authStore.observeAuthFailures()
+                    // 2. 把 PushStore 与 PushDelegate 桥接好（一次性）
                     pushStore.setup()
-                    // 2. 恢复 token 会话
+                    // 3. 恢复 token 会话
                     await authStore.restoreSession()
-                    // 3. 若已登录（非 guest），自动尝试注册 APNs
+                    // 4. 若已登录（非 guest），自动尝试注册 APNs
                     if authStore.isAuthenticated, !authStore.isGuest {
                         await pushStore.requestPermissionAndRegister()
                     }
@@ -58,6 +64,16 @@ struct FlatRadarApp: App {
                 .onChange(of: authStore.isAuthenticated) { _, _ in
                     syncStreamState(scenePhase: scenePhase)
                 }
+        }
+    }
+
+    /// 把 UserDefaults 的字符串映射到 SwiftUI ColorScheme?。
+    /// "system" → nil（跟随系统），"light"/"dark" → 对应值。
+    private var resolvedColorScheme: ColorScheme? {
+        switch colorScheme {
+        case "light": return .light
+        case "dark":  return .dark
+        default:      return nil
         }
     }
 

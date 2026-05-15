@@ -38,9 +38,9 @@ enum LoginMode: String, CaseIterable {
 
     var label: String {
         switch self {
-        case .admin: return "Admin"
-        case .user:  return "User"
-        case .guest: return "Guest"
+        case .admin: return String(localized: "Admin")
+        case .user:  return String(localized: "User")
+        case .guest: return String(localized: "Guest")
         }
     }
 }

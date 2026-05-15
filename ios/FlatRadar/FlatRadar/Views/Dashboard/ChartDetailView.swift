@@ -139,7 +139,7 @@ struct ChartDetailView: View {
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 8)
-                .background(idx.isMultiple(of: 2) ? Color.clear : Color.gray.opacity(0.08))
+                .background(idx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.04))
             }
         }
     }

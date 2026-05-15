@@ -13,6 +13,7 @@ final class NotificationsStore {
     var isLoading = false
     var isLoadingMore = false
     var errorMessage: String?
+    var lastError: APIError?
 
     // SSE 实时流状态
     var isStreamConnected = false
@@ -39,6 +40,7 @@ final class NotificationsStore {
             total = resp.total
             unreadCount = resp.unread
         } catch {
+            lastError = error as? APIError
             errorMessage = error.localizedDescription
         }
         isLoading = false

@@ -15,6 +15,9 @@ import Foundation
 /// - ``setToken`` / ``configure`` 等同步方法在主线程上调用，零开销
 @MainActor
 final class APIClient {
+    /// Posted on MainActor when an API call fails with 401/403.
+    /// AuthStore listens and triggers logout.
+    static let authFailedNotification = Notification.Name("APIClient.authFailed")
     static let shared = APIClient()
 
     private var baseURL: URL
@@ -117,7 +120,11 @@ final class APIClient {
         }
 
         if !envelope.ok, let err = envelope.error {
-            throw APIError.fromPayload(code: err.code, message: err.message)
+            let apiErr = APIError.fromPayload(code: err.code, message: err.message)
+            if apiErr.isAuthError {
+                NotificationCenter.default.post(name: Self.authFailedNotification, object: nil)
+            }
+            throw apiErr
         }
 
         guard let payload = envelope.data else {

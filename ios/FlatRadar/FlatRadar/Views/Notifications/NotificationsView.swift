@@ -3,6 +3,7 @@ import SwiftUI
 struct NotificationsView: View {
     @Environment(NotificationsStore.self) private var store
     @Environment(AuthStore.self) private var auth
+    @State private var showRefreshError = false
 
     var body: some View {
         NavigationStack {
@@ -10,11 +11,18 @@ struct NotificationsView: View {
                 if store.isLoading && store.notifications.isEmpty {
                     ProgressView().padding(.top, 60)
                 } else if let err = store.errorMessage, store.notifications.isEmpty {
-                    ContentUnavailableView(
-                        "Unable to Load",
-                        systemImage: "wifi.slash",
-                        description: Text(err))
-                    .refreshable { await store.refresh() }
+                    let apiErr = store.lastError
+                    ContentUnavailableView {
+                        Label(
+                            apiErr?.errorDescription ?? "Unable to Load",
+                            systemImage: apiErr?.systemImage ?? "wifi.slash")
+                    } description: {
+                        Text(err)
+                    } actions: {
+                        Button("Try Again") {
+                            Task { await store.refresh() }
+                        }
+                    }
                 } else if store.notifications.isEmpty {
                     ContentUnavailableView(
                         "No Notifications",
@@ -44,6 +52,17 @@ struct NotificationsView: View {
                 if store.notifications.isEmpty {
                     await store.fetch()
                 }
+            }
+            .onChange(of: store.errorMessage) { _, new in
+                showRefreshError = new != nil && !store.notifications.isEmpty
+            }
+            .alert(
+                store.lastError?.errorDescription ?? "Refresh Failed",
+                isPresented: $showRefreshError
+            ) {
+                Button("OK") {}
+            } message: {
+                Text(store.errorMessage ?? "")
             }
         }
     }

@@ -24,12 +24,13 @@ struct MapView: View {
         MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 51.4416, longitude: 5.4697),
             span: MKCoordinateSpan(latitudeDelta: 0.55, longitudeDelta: 0.55)))
+    @State private var showRefreshError = false
 
     var body: some View {
         @Bindable var store = store
 
-        NavigationStack {
-            ZStack(alignment: .top) {
+        // 不再自带 NavigationStack；外层 BrowseView 提供。
+        ZStack(alignment: .top) {
                 Map(position: $camera, selection: $store.selectedID) {
                     ForEach(store.listings) { l in
                         Annotation(l.name, coordinate: l.coordinate) {
@@ -62,29 +63,46 @@ struct MapView: View {
                     ProgressView("Loading map…")
                         .padding(.top, 80)
                 } else if let err = store.errorMessage, store.listings.isEmpty {
-                    ContentUnavailableView(
-                        "Unable to Load Map",
-                        systemImage: "map.slash",
-                        description: Text(err))
-                }
-            }
-            .navigationTitle("Map")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await store.refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    let apiErr = store.lastError
+                    ContentUnavailableView {
+                        Label(
+                            apiErr?.errorDescription ?? "Unable to Load Map",
+                            systemImage: apiErr?.systemImage ?? "map.slash")
+                    } description: {
+                        Text(err)
+                    } actions: {
+                        Button("Try Again") {
+                            Task { await store.refresh() }
+                        }
                     }
-                    .disabled(store.isLoading)
                 }
             }
-            .task {
-                if store.listings.isEmpty {
-                    await store.fetch()
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    Task { await store.refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
                 }
+                .disabled(store.isLoading)
             }
+        }
+        .task {
+            if store.listings.isEmpty {
+                await store.fetch()
+            }
+        }
+        .onChange(of: store.errorMessage) { _, new in
+            showRefreshError = new != nil && !store.listings.isEmpty
+        }
+        .alert(
+            store.lastError?.errorDescription ?? "Refresh Failed",
+            isPresented: $showRefreshError
+        ) {
+            Button("OK") {}
+        } message: {
+            Text(store.errorMessage ?? "")
         }
     }
 
@@ -227,9 +245,9 @@ struct MapView: View {
 
     private func shortStatus(_ s: String) -> String {
         let lower = s.lowercased()
-        if lower.contains("available to book") { return "Available" }
-        if lower.contains("lottery") { return "Lottery" }
-        if lower.contains("not available") { return "Unavailable" }
+        if lower.contains("available to book") { return String(localized: "Available") }
+        if lower.contains("lottery") { return String(localized: "Lottery") }
+        if lower.contains("not available") { return String(localized: "Unavailable") }
         return s
     }
 }
