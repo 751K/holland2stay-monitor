@@ -229,6 +229,19 @@ final class APIClient {
         try await request("DELETE", "api/v1/devices/\(id)")
     }
 
+    /// 发送测试推送给当前会话所有活跃设备。
+    /// 用于验证 APNs 链路通畅，绕过 push.dispatch 的 user_id/throttle 限制。
+    func testPush(title: String? = nil,
+                  body: String? = nil) async throws -> DeviceTestPushResponse {
+        struct TestPushBody: Encodable {
+            let title: String?
+            let body: String?
+        }
+        return try await request(
+            "POST", "api/v1/devices/test",
+            body: TestPushBody(title: title, body: body))
+    }
+
     // MARK: - Helpers
 
     private func urlEncode(_ s: String) -> String {

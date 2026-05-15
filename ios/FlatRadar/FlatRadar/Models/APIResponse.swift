@@ -128,3 +128,24 @@ struct DeviceInfo: Decodable, Identifiable {
 struct DeviceDeleteResponse: Decodable {
     let deleted: Bool
 }
+
+/// `POST /api/v1/devices/test` 响应。
+struct DeviceTestPushResponse: Decodable {
+    let sent: Int
+    let total: Int
+    let results: [DeviceTestPushResult]
+}
+
+struct DeviceTestPushResult: Decodable, Identifiable {
+    var id: String { deviceTokenHint }
+    let deviceTokenHint: String
+    let env: String
+    let status: Int
+    let reason: String
+    let ok: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case deviceTokenHint = "device_token_hint"
+        case env, status, reason, ok
+    }
+}

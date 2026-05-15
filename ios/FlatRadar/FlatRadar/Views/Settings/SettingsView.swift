@@ -7,6 +7,11 @@ struct SettingsView: View {
     @State private var editedURL = ""
     @State private var showLogoutConfirm = false
 
+    // Test push 状态
+    @State private var isSendingTest = false
+    @State private var testResultMessage: String?
+    @State private var showTestResult = false
+
     var body: some View {
         NavigationStack {
             Form {
@@ -67,6 +72,41 @@ struct SettingsView: View {
                             Button("Cancel", role: .cancel) {}
                         }
                     }
+
+                    // Push notifications
+                    Section {
+                        HStack {
+                            Text("Permission")
+                            Spacer()
+                            Text(pushPermissionLabel)
+                                .foregroundStyle(pushPermissionColor)
+                                .font(.subheadline)
+                        }
+                        HStack {
+                            Text("Device ID")
+                            Spacer()
+                            if let id = push.registeredDeviceId {
+                                Text("\(id)").foregroundStyle(.secondary)
+                            } else {
+                                Text("not registered").foregroundStyle(.secondary)
+                            }
+                        }
+                        Button {
+                            sendTestPush()
+                        } label: {
+                            HStack {
+                                if isSendingTest {
+                                    ProgressView().controlSize(.small)
+                                }
+                                Text(isSendingTest ? "Sending…" : "Send Test Push")
+                            }
+                        }
+                        .disabled(isSendingTest || push.registeredDeviceId == nil)
+                    } header: {
+                        Text("Push Notifications")
+                    } footer: {
+                        Text("Sends a test alert to all devices registered under this session. Verifies APNs end-to-end.")
+                    }
                 } else if auth.isGuest {
                     Section("Account") {
                         HStack {
@@ -90,6 +130,55 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear { editedURL = serverURL }
+            .alert("Test Push", isPresented: $showTestResult, presenting: testResultMessage) { _ in
+                Button("OK", role: .cancel) {}
+            } message: { msg in
+                Text(msg)
+            }
+        }
+    }
+
+    // MARK: - Push permission UI helpers
+
+    private var pushPermissionLabel: String {
+        switch push.permissionStatus {
+        case .authorized:    return "Authorized"
+        case .provisional:   return "Provisional"
+        case .ephemeral:     return "Ephemeral"
+        case .denied:        return "Denied"
+        case .notDetermined: return "Not determined"
+        }
+    }
+
+    private var pushPermissionColor: Color {
+        switch push.permissionStatus {
+        case .authorized, .provisional, .ephemeral: return .green
+        case .denied: return .red
+        case .notDetermined: return .secondary
+        }
+    }
+
+    // MARK: - Test push action
+
+    private func sendTestPush() {
+        isSendingTest = true
+        Task {
+            defer { isSendingTest = false }
+            do {
+                let r = try await APIClient.shared.testPush()
+                if r.sent == r.total {
+                    testResultMessage = "✅ Sent to \(r.sent) device\(r.sent == 1 ? "" : "s"). Check your lock screen."
+                } else {
+                    let failedReasons = r.results
+                        .filter { !$0.ok }
+                        .map { "\($0.status) \($0.reason)" }
+                        .joined(separator: "; ")
+                    testResultMessage = "⚠️ Sent \(r.sent)/\(r.total). Failures: \(failedReasons)"
+                }
+            } catch {
+                testResultMessage = "❌ \(error.localizedDescription)"
+            }
+            showTestResult = true
         }
     }
 
