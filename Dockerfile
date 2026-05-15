@@ -11,7 +11,8 @@ RUN apt-get update \
 # requirements.lock 锁定精确版本，保证构建可重复性
 # requirements.txt 保留 >= 约束，供本地开发 / 版本升级参考
 COPY requirements.txt requirements.lock ./
-RUN pip install --no-cache-dir -r requirements.lock
+RUN pip install --no-cache-dir -r requirements.lock \
+    && pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY *.py ./

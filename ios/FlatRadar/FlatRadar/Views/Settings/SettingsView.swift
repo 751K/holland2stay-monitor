@@ -3,7 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AuthStore.self) private var auth
     @Environment(PushStore.self) private var push
-    @AppStorage("server_url") private var serverURL: String = "127.0.0.1:8088"
+    @AppStorage("server_url") private var serverURL: String = APIClient.defaultServerHost
     @State private var editedURL = ""
     @State private var showLogoutConfirm = false
 

@@ -1,14 +1,47 @@
 import Foundation
 
 /// Central HTTP client for /api/v1/* endpoints.
-/// Actor ensures baseURL and token mutations are data-race safe.
-actor APIClient {
+///
+/// 设计变更（Swift 6 strict concurrency）
+/// --------------------------------------
+/// 原本是 ``actor APIClient``，但项目 ``SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor``
+/// 让所有未标注类型默认 ``@MainActor``，与 ``actor`` 跨 actor 共用 Decodable
+/// conformance 在 Swift 6 严格并发下会报 main actor-isolated 错误。
+///
+/// 改为 ``@MainActor final class``：
+/// - 与所有 Store / View / Model 同处主 actor，conformance 共享无冲突
+/// - 异步 ``request`` 内部的 ``URLSession.shared.data`` 在 background 任务跑，
+///   await 期间主线程不阻塞，与 actor 隔离的性能等价
+/// - ``setToken`` / ``configure`` 等同步方法在主线程上调用，零开销
+@MainActor
+final class APIClient {
     static let shared = APIClient()
 
-    private var baseURL = URL(string: "http://127.0.0.1:8088")!
+    private var baseURL: URL
     private var token: String?
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
+
+    init() {
+        // 启动时立刻读 server_url，避免第一次 restoreSession 用错 URL 撞 connection refused。
+        // Settings 里 Save 后会再次调 configure(baseURL:) 覆盖。
+        self.baseURL = Self.resolveBaseURL()
+        print("[APIClient] init baseURL = \(self.baseURL.absoluteString)")
+        print("[APIClient] UserDefaults[server_url] = \(UserDefaults.standard.string(forKey: "server_url") ?? "<nil>")")
+    }
+
+    /// 把 UserDefaults["server_url"] 解析成完整 URL；未设置时回退到默认生产环境。
+    /// 与 SettingsView.buildBaseURL 保持同步——localhost/127. 走 http，其它一律 https。
+    static let defaultServerHost = "flatradar.app"
+
+    static func resolveBaseURL() -> URL {
+        let raw = UserDefaults.standard.string(forKey: "server_url") ?? defaultServerHost
+        let clean = raw.trimmingCharacters(in: ["/", " "])
+        let scheme = clean.hasPrefix("localhost") || clean.hasPrefix("127.")
+            ? "http" : "https"
+        return URL(string: "\(scheme)://\(clean)")
+            ?? URL(string: "https://\(defaultServerHost)")!
+    }
 
     // MARK: - Configuration
 
@@ -57,10 +90,13 @@ actor APIClient {
             req.httpBody = try encoder.encode(AnyEncodable(body))
         }
 
+        print("[APIClient] \(method) \(url.absoluteString) auth=\(authenticated && token != nil)")
+
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await URLSession.shared.data(for: req)
         } catch {
+            print("[APIClient] network error: \(error)")
             throw APIError.network(error)
         }
 

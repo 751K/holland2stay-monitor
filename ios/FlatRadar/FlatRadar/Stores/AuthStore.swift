@@ -27,7 +27,9 @@ final class AuthStore {
     var errorMessage: String?
 
     private let client = APIClient.shared
-    private var server: String { UserDefaults.standard.string(forKey: "server_url") ?? "127.0.0.1:8088" }
+    private var server: String {
+        UserDefaults.standard.string(forKey: "server_url") ?? APIClient.defaultServerHost
+    }
 
     // MARK: - Restore Session
 
