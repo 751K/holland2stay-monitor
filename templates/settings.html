@@ -11,6 +11,8 @@
 <div class="alert alert-info mb-4">
   <i class="bi bi-people mr-2"></i>
   {{ _('settings_user_hint') }}<a href="{{ url_for('users_list') }}" style="color:var(--accent);font-weight:550;">{{ _('settings_user_link') }}</a>{{ _('settings_user_suffix') }}
+  <span style="margin:0 8px;color:var(--border);">·</span>
+  <a href="{{ url_for('app_accounts') }}" style="color:var(--accent);font-weight:550;"><i class="bi bi-phone mr-1"></i>{{ _('app_accounts_title') }}</a>
 </div>
 
 <form method="post">

@@ -13,10 +13,12 @@
 
 from mstorage._base import StorageBase
 from mstorage._charts import ChartOps
+from mstorage._devices import DeviceOps
 from mstorage._listings import ListingOps
 from mstorage._map_calendar import MapCalendarOps
 from mstorage._notifications import NotificationOps
 from mstorage._retry import RetryQueueOps
+from mstorage._tokens import TokenOps
 
 
 class Storage(
@@ -25,6 +27,8 @@ class Storage(
     ChartOps,
     MapCalendarOps,
     RetryQueueOps,
+    TokenOps,
+    DeviceOps,
     StorageBase,
 ):
     """SQLite 持久化层，通过 mixin 继承组合所有领域方法。

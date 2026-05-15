@@ -1,5 +1,75 @@
 # Changelog
 
+## v1.4.0 (2026-05-15)
+
+### iOS 后端 — 只读数据端点（Phase 2）
+
+新增 9 个 `/api/v1/*` 端点，user 角色按 `listing_filter` 数据隔离，admin 全量：
+
+- `GET /listings` / `GET /listings/<id>` — 分页列表 + 单条详情（`app/routes/api_v1/listings.py`）
+- `GET /notifications` / `POST /notifications/read` / `GET /notifications/stream` — 通知分页 + 标记已读 + SSE 推送（`app/routes/api_v1/notifications.py`）
+- `GET /map` / `GET /calendar` — 地图坐标 + 日历数据（`app/routes/api_v1/map.py` / `calendar.py`）
+- `GET /me/summary` / `GET /me/filter` — 当前用户统计 + 过滤条件（`app/routes/api_v1/me.py`）
+
+共享模块：`_helpers.py`（`row_to_listing` / `apply_user_filter` / `serialize_listing`）；`mstorage/_notifications.py`（`NotificationOps`，支持 `user_id` 过滤）。
+
+SSE 鉴权支持 `?token=` query 参数（兼容浏览器 `EventSource` 不支持自定义 header）。
+
+### iOS 后端 — APNs 子系统（Phase 3）
+
+- **推送调度** `mcore/push.py`：`dispatch` / `dispatch_status_change` / `dispatch_aggregate` / `dispatch_error`，节流去重（同 user+listing+kind 5min / 每分钟 ≤10 条 / ≥3 聚合为 round），`APNS_ENABLED!=true` 时全 no-op
+- **APNs HTTP/2 客户端** `notifier_channels/apns.py`：JWT ES256 `.p8` 签名 + httpx 异步发送，`ApnsConfig.from_env()` 惰性启用，403 `InvalidProviderToken` 自动重签
+- **设备持久化** `mstorage/_devices.py`：`DeviceOps` — `register_device` / `get_active_devices_for_user`（JOIN `app_tokens` 过滤 revoked） / `disable_device`（APNs 410/400 软停） / `delete_device`
+- **设备端点** `app/routes/api_v1/devices.py`：`POST /register` / `GET /` / `DELETE /<id>`，设备隔离按 `app_token_id`
+
+### iOS 客户端 — Phase 2 适配（Phase 4）
+
+14 个文件新增/修改，Listings / Notifications 从 "Coming Soon" 占位切换到真实数据：
+
+**模型层** — `Listing` 新增 `priceValue`/`featureMap`/`firstSeen`/`lastSeen`；新增 `ListingsResponse`/`NotificationsResponse`/`MeSummary`/`Device*` 分页和设备模型；`NotificationItem` 新增 `markedRead()`
+
+**网络层** — `APIClient` 新增 6 个 API 方法（listings/notifications/me/devices）；新增 `buildURL()` 修复 `appendingPathComponent` 把 `?` 编码成 `%3F` 的 bug
+
+**Store 层** — `ListingsStore`（分页/搜索/loadMore/refresh）、`NotificationsStore`（分页/标记已读/全部已读，optimistic update）、`DashboardStore`（`fetchMeSummary`）、`PushStore`（设备注册/解绑）
+
+**View 层**：
+- `ListingsView` — searchable + 无限滚动 + 状态胶囊标签（绿=可订/橙=抽签）+ loading/empty/error
+- `ListingDetailView` — **新建**，全字段 + `feature_map` 网格 + H2S 链接
+- `NotificationsView` — 左滑标记已读 + 全部已读 + 类型图标（SF Symbol + 颜色）+ 无限滚动
+- `NotificationRow` — 新增 type→图标/颜色映射（new_listing=绿 house / status_change=橙 arrow.swap / booking=蓝 cart）
+- `DashboardView` — user 角色显示匹配/可订卡片；退出加确认框并锚定按钮
+- `SettingsView` — 已注册设备列表；退出确认框锚定按钮
+- `MainTabView` — Notifications tab 未读 badge
+
+### 服务端增强
+
+- **H2S 凭据验证**：user 登录优先 `app_password_hash`，未设置或失败时回退到 H2S GraphQL `generateCustomerToken` 验证，用户可直接用 H2S 邮箱+密码登录（`app/routes/api_v1/auth.py`）
+- **bcrypt 容错**：`_dummy_bcrypt_verify` / `_bcrypt_hash` / `verify_app_password` 三处 `import bcrypt` 失败时优雅降级，不再 500（`auth.py` / `users.py`）
+- **Web 表单容错**：`user_form.py` 捕获 bcrypt 未安装异常 → `ValueError`；`users.py` 路由捕获并 flash 提示
+
+### Bug 修复（6 个）
+
+- `URL.appendingPathComponent` 把 `?` 编码成 `%3F` → `buildURL()` 拆分 path + query
+- refresh control 非空闲替换 → `isLoading` 条件加 `&& items.isEmpty`
+- logout API double-wrapping decode → 返回类型改为 `RevokePayload`
+- 不存在的用户名登录 500 → `_dummy_bcrypt_verify` 处理 ImportError
+- Web 界面设置 App 密码崩溃 → `_bcrypt_hash` + 路由层 ValueError 捕获
+- iPad/Mac 退出确认框位置错误 → `confirmationDialog` 锚定按钮
+
+### 构建 / 部署
+
+- **Dockerfile**：新增 `COPY notifier_channels/`（APNs 模块之前漏拷）
+- **`.dockerignore`**：新增 `ios/` / `.claude/` / `tests/` / `*.p8` / `*.p12`
+- **`.gitignore`**：新增 `**/xcuserdata/` / `**/.build/` / `*.p8` / `*.p12` / `DerivedData/`
+- **`requirements.txt`**：已包含 APNs 依赖（`pyjwt[crypto]` / `httpx` / `h2` / `cryptography`）
+
+### 文档
+
+- 新增 `docs/iOS_README.md` — iOS 客户端 & API 后端架构文档（中文）
+- 更新 `docs/FUTURE_PLAN.md` — Phase 2/3/4 标记完成，补全 bug 修复记录和待办清单
+
+---
+
 ## v1.3.2 (2026-05-15)
 
 ### Booker 403 屏蔽精准处理

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+        Apple Push Notification service environment.
+
+        development : Xcode 直连构建（Debug）→ APNs sandbox endpoint
+                      (api.sandbox.push.apple.com)
+        production  : TestFlight / App Store 构建 → APNs production endpoint
+                      (api.push.apple.com)
+
+        模拟器跑 Debug 构建拿到的 device_token 只能走 sandbox。
+        发布时（Archive → TestFlight）Xcode 会自动用 production environment，
+        不需要手工切换这一字段。
+    -->
+    <key>aps-environment</key>
+    <string>development</string>
+</dict>
+</plist>

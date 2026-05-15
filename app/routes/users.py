@@ -105,7 +105,11 @@ def users_list() -> str:
 @csrf_required
 def user_new() -> Any:
     if request.method == "POST":
-        user = build_user_from_form(request.form)
+        try:
+            user = build_user_from_form(request.form)
+        except ValueError as e:
+            flash(str(e), "danger")
+            return redirect(request.url)
         users = load_users()
         users.append(user)
         save_users(users)
@@ -142,10 +146,32 @@ def user_edit(user_id: str) -> Any:
 
     if request.method == "POST":
         # existing=user 确保空密码字段保留旧值，不会意外清除已保存的密码
-        updated = build_user_from_form(request.form, user_id=user_id, existing=user)
+        try:
+            updated = build_user_from_form(request.form, user_id=user_id, existing=user)
+        except ValueError as e:
+            flash(str(e), "danger")
+            return redirect(request.url)
+        # App 密码变化（修改或清除）→ 撤销该用户的所有 Bearer token，
+        # 避免泄漏的旧密码继续生效。app_login_enabled 切到 False 同理。
+        pw_changed = (updated.app_password_hash != user.app_password_hash)
+        login_disabled = (user.app_login_enabled and not updated.app_login_enabled)
         users = [updated if u.id == user_id else u for u in users]
         save_users(users)
         _log_user_change("更新", updated)
+        if pw_changed or login_disabled:
+            from app.api_auth import invalidate_token_cache
+            from app.db import storage
+            st = storage()
+            try:
+                n = st.revoke_user_tokens(user_id)
+            finally:
+                st.close()
+            if n:
+                invalidate_token_cache()
+                logger.info(
+                    "用户「%s」(id=%s) App 凭证变更，已撤销 %d 个会话",
+                    updated.name, user_id, n,
+                )
         flash(f"✅ 用户「{updated.name}」已保存", "success")
         return redirect(url_for("user_edit", user_id=user_id))
 
@@ -176,7 +202,20 @@ def user_delete(user_id: str) -> Any:
     name = user.name if user else user_id
     users = [u for u in users if u.id != user_id]
     save_users(users)
-    logger.info("用户「%s」已删除 (id=%s)，剩余 %d 个用户", name, user_id, len(users))
+    # 连带撤销该用户的所有 App Bearer token
+    from app.api_auth import invalidate_token_cache
+    from app.db import storage
+    st = storage()
+    try:
+        revoked = st.revoke_user_tokens(user_id)
+    finally:
+        st.close()
+    if revoked:
+        invalidate_token_cache()
+    logger.info(
+        "用户「%s」已删除 (id=%s)，剩余 %d 个用户，连带撤销 %d 个 App 会话",
+        name, user_id, len(users), revoked,
+    )
     flash(f"用户「{name}」已删除", "success")
     return redirect(url_for("users_list"))
 

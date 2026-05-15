@@ -107,6 +107,16 @@ class UserConfig:
     listing_filter: ListingFilter = field(default_factory=ListingFilter)
     auto_book: AutoBookConfig = field(default_factory=AutoBookConfig)
 
+    # iOS / 第三方客户端登录凭证 -------------------------------------
+    # 与 notification_channels 完全独立：这里只用于 App 登录鉴权，
+    # 不影响通知/抓取/预订任何现有逻辑。
+    #
+    # app_password_hash : bcrypt(password).decode()；空字符串=未设置
+    # app_login_enabled : False 时即使 hash 存在也拒绝 App 登录
+    #                     默认 False（fail-closed，老用户不会意外打开 App 入口）
+    app_password_hash: str = ""
+    app_login_enabled: bool = False
+
 
 # ------------------------------------------------------------------ #
 # 内部：反序列化辅助
@@ -262,5 +272,78 @@ def get_user(users: list[UserConfig], user_id: str) -> Optional[UserConfig]:
     对应的 UserConfig，不存在时返回 None
     """
     return next((u for u in users if u.id == user_id), None)
+
+
+def get_user_by_name(
+    users: list[UserConfig], name: str
+) -> Optional[UserConfig]:
+    """
+    在用户列表中按 name 查找用户（精确匹配，大小写敏感）。
+
+    App 端登录时用户输入 name + password，这里复用同一查找语义。
+    name 不是唯一约束（UserConfig.id 才是），但 Web 后台编辑表单的
+    保存路径校验过同名冲突，实际不会撞名。
+    """
+    return next((u for u in users if u.name == name), None)
+
+
+# ------------------------------------------------------------------ #
+# App 登录密码 —— bcrypt 包装
+# ------------------------------------------------------------------ #
+# 设计原则
+# - 仅 UserConfig.app_password_hash 字段相关；不影响现有 email_password /
+#   telegram_token 等业务凭证（这些字段是双向加密，要解密后传给第三方
+#   API；密码是单向哈希，永远不需要解密）。
+# - bcrypt 是 lazy import：只有调用 set/verify 的路径才需要装 bcrypt，
+#   监控进程/抓取进程没必要为这层依赖买单（虽然实测开销很小）。
+# - 失败永远 fail-closed：异常视为校验失败，不要泄漏 bcrypt 内部错误细节。
+
+
+def _bcrypt_hash(plaintext: str) -> str:
+    """纯哈希函数：bcrypt(plaintext) → ascii hash。空串返回空串。"""
+    if not plaintext:
+        return ""
+    try:
+        import bcrypt
+    except ImportError:
+        raise RuntimeError("bcrypt 未安装，无法设置 App 密码。请 pip install bcrypt。")
+    return bcrypt.hashpw(
+        plaintext.encode("utf-8"), bcrypt.gensalt()
+    ).decode("ascii")
+
+
+def set_app_password(user: UserConfig, plaintext: str) -> None:
+    """
+    给用户设置 App 登录密码。
+
+    传空串视为"清除密码"（同时 app_login_enabled 不变，但 verify 必失败）。
+    """
+    user.app_password_hash = _bcrypt_hash(plaintext)
+
+
+def verify_app_password(user: UserConfig, plaintext: str) -> bool:
+    """
+    校验 App 登录密码。
+
+    返回 True 仅当：
+    - user.app_login_enabled is True
+    - user.app_password_hash 非空
+    - bcrypt.checkpw 通过
+
+    任何分支异常一律返回 False（fail-closed）。
+    """
+    if not user.app_login_enabled or not user.app_password_hash:
+        return False
+    if not plaintext:
+        return False
+    try:
+        import bcrypt
+        return bcrypt.checkpw(
+            plaintext.encode("utf-8"),
+            user.app_password_hash.encode("ascii"),
+        )
+    except Exception:
+        logger.warning("verify_app_password 异常 (user=%s)", user.name)
+        return False
 
 

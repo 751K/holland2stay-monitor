@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}{{ _('app_accounts_title') }} · Holland2Stay{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1>{{ _('app_accounts_title') }}</h1>
+  <a href="{{ url_for('app_accounts', show_revoked='1' if not show_revoked else '0') }}"
+     class="btn btn-ghost btn-sm">
+    <i class="bi bi-eye{{ '-slash' if show_revoked else '' }} mr-1"></i>
+    {{ _('app_accounts_hide_revoked') if show_revoked else _('app_accounts_show_revoked') }}
+  </a>
+</div>
+
+<div class="alert alert-info mb-4">
+  <i class="bi bi-info-circle mr-2"></i>{{ _('app_accounts_meta') }}
+</div>
+
+{% if not tokens %}
+<div class="alert alert-warning mb-4">
+  <i class="bi bi-info-circle mr-2"></i>{{ _('app_accounts_empty') }}
+</div>
+{% else %}
+
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    <div style="overflow-x:auto;">
+    <table class="data-table" style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:12px 16px;">{{ _('app_accounts_device') }}</th>
+          <th style="text-align:left;padding:12px 16px;">{{ _('app_accounts_role') }}</th>
+          <th style="text-align:left;padding:12px 16px;">{{ _('app_accounts_user') }}</th>
+          <th style="text-align:left;padding:12px 16px;">{{ _('app_accounts_created') }}</th>
+          <th style="text-align:left;padding:12px 16px;">{{ _('app_accounts_last_used') }}</th>
+          <th style="text-align:left;padding:12px 16px;">{{ _('app_accounts_expires') }}</th>
+          <th style="text-align:left;padding:12px 16px;">{{ _('app_accounts_status') }}</th>
+          <th style="text-align:right;padding:12px 16px;">{{ _('app_accounts_actions') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in tokens %}
+        <tr style="border-top:1px solid var(--border);{% if t.revoked %}opacity:0.55;{% endif %}">
+          <td style="padding:12px 16px;font-weight:550;">
+            <i class="bi bi-phone mr-1" style="color:var(--accent);"></i>
+            {{ t.device_name or '—' }}
+          </td>
+          <td style="padding:12px 16px;">
+            {% if t.role == 'admin' %}
+              <span class="badge badge-warning">admin</span>
+            {% else %}
+              <span class="badge badge-neutral">user</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px;">
+            {% if t.user_name %}
+              {{ t.user_name }} <span class="text-xs text-secondary">({{ t.user_id }})</span>
+            {% else %}
+              <span class="text-xs text-secondary">—</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px;" class="text-xs text-secondary">
+            {{ t.created_at | replace('T', ' ') | replace('Z', '') }}
+          </td>
+          <td style="padding:12px 16px;" class="text-xs text-secondary">
+            {% if t.last_used_at %}
+              {{ t.last_used_at | replace('T', ' ') | replace('Z', '') }}
+            {% else %}
+              {{ _('app_accounts_never') }}
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px;" class="text-xs text-secondary">
+            {{ (t.expires_at | replace('T', ' ') | replace('Z', '')) if t.expires_at else _('app_accounts_no_expiry') }}
+          </td>
+          <td style="padding:12px 16px;">
+            {% if t.revoked %}
+              <span class="badge badge-danger">{{ _('app_accounts_revoked') }}</span>
+            {% else %}
+              <span class="badge badge-success">{{ _('app_accounts_active') }}</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px;text-align:right;">
+            {% if not t.revoked %}
+              <form method="post"
+                    action="{{ url_for('app_accounts_revoke', token_id=t.id) }}"
+                    style="display:inline;"
+                    onsubmit="return confirm('{{ _('app_accounts_confirm') }}');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-danger btn-sm">
+                  <i class="bi bi-x-circle mr-1"></i>{{ _('app_accounts_revoke') }}
+                </button>
+              </form>
+            {% else %}
+              <span class="text-xs text-secondary">—</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

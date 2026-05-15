@@ -24,3 +24,10 @@ logs/
 build/
 dist/
 *.icns
+
+# Xcode
+**/xcuserdata/
+**/.build/
+*.p8
+*.p12
+DerivedData/

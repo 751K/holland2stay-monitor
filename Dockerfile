@@ -18,6 +18,7 @@ COPY *.py ./
 COPY app/ app/
 COPY mcore/ mcore/
 COPY mstorage/ mstorage/
+COPY notifier_channels/ notifier_channels/
 COPY .env.example ./
 COPY templates/ templates/
 COPY static/ static/

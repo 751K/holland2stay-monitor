@@ -4,3 +4,8 @@ flask>=3.0.0
 gunicorn>=22.0.0
 tzdata>=2024.1
 cryptography>=42.0.0
+bcrypt>=4.0.0
+# APNs（Phase 3）: ES256 JWT 签名 + HTTP/2 客户端
+pyjwt[crypto]>=2.8.0
+httpx>=0.27.0
+h2>=4.0.0

@@ -562,8 +562,13 @@ async def run_once(
     # ── 新房源通知（预订已在后台线程并行运行）───────────────────── #
     # 标记策略：任意用户通知成功即标记为"已通知"。若部分用户渠道失败，
     # 该 listing 不会补发——实际业务中多用户同渠道很少部分失败。
+    # APNs 推送：与现有 4 渠道并行，fire-and-forget；
+    # 同一用户本轮匹配 ≥ push.aggregate_threshold() 套时改聚合一条。
+    from mcore import push as _push  # 局部 import，避免冷启动加载 httpx
     total_notified = 0
     new_notified_ids: list[str] = []
+    user_round_matches: dict[str, list] = {}  # user_id -> [Listing,...]，用于聚合判定
+    push_tasks: list = []                     # asyncio.Task，run_once 末尾 gather
     for listing in new_listings:
         notified_this = False
         for user, notifier in user_notifiers:
@@ -577,12 +582,36 @@ async def run_once(
                 notified_this = True
                 total_notified += 1
 
+            # APNs 推送钩子：现有渠道发送之后追加，独立 task，与其他渠道互不阻塞。
+            # 是否真正发送由 mcore.push.dispatch 内部判断（APNs 未启用 / 设备列表为空时 no-op）。
+            user_round_matches.setdefault(user.id, []).append(listing)
+
         # Web 面板通知（每条新房源写一次，与用户过滤无关）
         if web_notifier:
             await web_notifier.send_new_listing(listing)
 
         if notified_this:
             new_notified_ids.append(listing.id)
+
+    # APNs 发送：本轮每个用户的匹配若 < 阈值，按条推；否则聚合成一条
+    if _push.get_client() is not None:
+        round_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        user_by_id = {u.id: u for u, _ in user_notifiers}
+        for uid, matched in user_round_matches.items():
+            user_obj = user_by_id.get(uid)
+            if user_obj is None:
+                continue
+            if _push.should_aggregate(len(matched)):
+                push_tasks.append(asyncio.create_task(
+                    _push.dispatch_aggregate(
+                        storage, user_obj, matched, round_id=round_id,
+                    ),
+                ))
+            else:
+                for l in matched:
+                    push_tasks.append(asyncio.create_task(
+                        _push.dispatch(storage, user_obj, l, kind="new"),
+                    ))
 
     storage.mark_notified_batch(new_notified_ids)
 
@@ -599,6 +628,13 @@ async def run_once(
             ok = await notifier.send_status_change(listing, old_status, new_status)
             if ok:
                 notified_this = True
+            # APNs status_change：直接逐条推（变更通常不像新房源那么密集）
+            if _push.get_client() is not None:
+                push_tasks.append(asyncio.create_task(
+                    _push.dispatch_status_change(
+                        storage, user, listing, old_status, new_status,
+                    ),
+                ))
 
         # Web 面板通知（每次状态变更写一次，与用户过滤无关）
         if web_notifier:
@@ -688,6 +724,18 @@ async def run_once(
             len(blocked_in_round),
             len({u.id for u, _, _ in blocked_in_round}),
         )
+
+    # ── 等待本轮所有 APNs 推送完成 ───────────────────────────────── #
+    # asyncio.create_task() 的 fire-and-forget 任务，在 run_once 返回前等齐；
+    # 否则下一轮可能在 APNs 网络 IO 完成前重叠开始。各 task 自身吞异常。
+    if push_tasks:
+        try:
+            results = await asyncio.gather(*push_tasks, return_exceptions=True)
+            sent = sum(r for r in results if isinstance(r, int))
+            errs = sum(1 for r in results if isinstance(r, Exception))
+            logger.info("APNs 本轮推送结果: %d 设备成功 / %d 任务异常", sent, errs)
+        except Exception:
+            logger.exception("等待 push tasks 异常")
 
     # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
     retry_queue.save(storage)

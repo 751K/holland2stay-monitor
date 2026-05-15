@@ -163,9 +163,36 @@ def build_user_from_form(
             allowed_energy=_sanitize_energy("AUTO_BOOK_ALLOWED_ENERGY"),
         ),
     )
-    return UserConfig(
+    # iOS App 登录字段（独立处理，因为是 bcrypt hash 而不是双向加密的凭证）
+    # ----------------------------------------------------------------
+    # 三种用户行为：
+    # 1. 不填 app_password 且不勾 app_password_clear   → 保留旧 hash
+    # 2. 填了新密码                                    → bcrypt 重新哈希
+    # 3. 勾了 "清除密码" checkbox                       → hash="" 强制下次登录失败
+    app_login_enabled = form.get("app_login_enabled") == "true"
+    new_app_pw = form.get("app_password", "")
+    clear_app_pw = form.get("app_password_clear") == "true"
+
+    if clear_app_pw:
+        app_password_hash = ""
+    elif new_app_pw:
+        try:
+            from users import _bcrypt_hash
+            app_password_hash = _bcrypt_hash(new_app_pw)
+        except RuntimeError as e:
+            raise ValueError(str(e)) from e
+    else:
+        app_password_hash = existing.app_password_hash if existing else ""
+
+    # name 规范化：禁止 "__" 前缀，避免与 API v1 的保留 sentinel "__admin__"
+    # 冲突（同名用户会被 sentinel 分支劫持，无法登录 App）。
+    raw_name = form.get("name", "").strip()
+    if raw_name.startswith("__"):
+        logger.warning("用户名 %r 含保留前缀 '__'，已加 'u_' 前缀防冲突", raw_name)
+        raw_name = "u_" + raw_name.lstrip("_")
+    new_user = UserConfig(
         id=user_id or uuid.uuid4().hex[:8],
-        name=form.get("name", "").strip() or "未命名用户",
+        name=raw_name or "未命名用户",
         enabled=form.get("enabled") == "true",
         notifications_enabled=form.get("NOTIFICATIONS_ENABLED", "true") != "false",
         notification_channels=channels,
@@ -185,4 +212,7 @@ def build_user_from_form(
         twilio_to=form.get("TWILIO_TO", ""),
         listing_filter=lf,
         auto_book=ab,
+        app_password_hash=app_password_hash,
+        app_login_enabled=app_login_enabled,
     )
+    return new_user

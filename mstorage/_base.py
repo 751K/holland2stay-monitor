@@ -87,15 +87,90 @@ class StorageBase:
                 body        TEXT NOT NULL DEFAULT '',
                 url         TEXT NOT NULL DEFAULT '',
                 listing_id  TEXT NOT NULL DEFAULT '',
-                read        INTEGER NOT NULL DEFAULT 0
+                read        INTEGER NOT NULL DEFAULT 0,
+                user_id     TEXT NOT NULL DEFAULT ''
             );
+            -- 关于 user_id 列上的索引：不能写在这里，因为对老库
+            -- web_notifications 还没补字段（_add_column_if_missing 在
+            -- executescript 之后跑）。索引创建在 _migrate 末尾完成。
 
             CREATE TABLE IF NOT EXISTS geocode_cache (
                 address TEXT PRIMARY KEY,
                 lat     REAL NOT NULL,
                 lng     REAL NOT NULL
             );
+
+            -- iOS / 第三方客户端的 Bearer 令牌（与 Web cookie session 独立）。
+            -- token 明文只在签发时返回一次，库中只存 sha256(token)。
+            -- role='admin' 时 user_id=NULL；role='user' 时 user_id 指向
+            -- UserConfig.id（8 字符十六进制），便于 token 与用户隔离查询。
+            CREATE TABLE IF NOT EXISTS app_tokens (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_hash   TEXT    UNIQUE NOT NULL,
+                role         TEXT    NOT NULL,
+                user_id      TEXT,
+                device_name  TEXT    NOT NULL DEFAULT '',
+                created_at   TEXT    NOT NULL,
+                last_used_at TEXT,
+                expires_at   TEXT,
+                revoked      INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_app_tokens_user
+                ON app_tokens(user_id, revoked);
+            CREATE INDEX IF NOT EXISTS idx_app_tokens_active
+                ON app_tokens(revoked, expires_at);
+
+            -- iOS / 第三方客户端的 APNs 设备 token。
+            -- 每次 App 启动会重新注册（token 可能轮换）；UNIQUE 约束
+            -- (app_token_id, device_token) 保证同一会话内幂等。
+            -- 关联到 app_tokens：会话撤销时设备自然失效（push.py 查询会 JOIN）。
+            CREATE TABLE IF NOT EXISTS device_tokens (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                app_token_id    INTEGER NOT NULL,
+                device_token    TEXT NOT NULL,
+                env             TEXT NOT NULL DEFAULT 'production',
+                platform        TEXT NOT NULL DEFAULT 'ios',
+                model           TEXT NOT NULL DEFAULT '',
+                bundle_id       TEXT NOT NULL DEFAULT '',
+                created_at      TEXT NOT NULL,
+                last_seen       TEXT NOT NULL,
+                disabled_at     TEXT,
+                disabled_reason TEXT,
+                UNIQUE(app_token_id, device_token)
+            );
+            CREATE INDEX IF NOT EXISTS idx_device_tokens_active
+                ON device_tokens(app_token_id, disabled_at);
         """)
+        # 增量列：CREATE TABLE IF NOT EXISTS 不会给老库补字段；
+        # ALTER TABLE ADD COLUMN 在 SQLite 上幂等需自己捕获 OperationalError。
+        self._add_column_if_missing(
+            "web_notifications", "user_id",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        # 该列存在后再建索引（老库 / 新库都走到这一步时字段已就位）
+        with self._conn:
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_web_notif_user "
+                "ON web_notifications(user_id, id)"
+            )
+
+    def _add_column_if_missing(
+        self, table: str, column: str, decl: str,
+    ) -> None:
+        """幂等 ALTER TABLE ADD COLUMN——已存在时静默跳过。"""
+        # 先查 PRAGMA table_info 避免抛 OperationalError 进日志
+        cols = {
+            r[1] for r in self._conn.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()
+        }
+        if column in cols:
+            return
+        with self._conn:
+            self._conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {decl}"
+            )
+        logger.info("schema 升级: %s.%s 已添加", table, column)
 
     # ── Meta ────────────────────────────────────────────────────────
 
@@ -120,7 +195,9 @@ class StorageBase:
             self._conn.execute("DELETE FROM meta")
             self._conn.execute("DELETE FROM web_notifications")
             self._conn.execute("DELETE FROM geocode_cache")
-        logger.info("数据库已清空（全部 5 张表）")
+            self._conn.execute("DELETE FROM app_tokens")
+            self._conn.execute("DELETE FROM device_tokens")
+        logger.info("数据库已清空（全部 7 张表）")
 
     def close(self) -> None:
         self._conn.close()

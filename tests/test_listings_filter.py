@@ -10,12 +10,18 @@ app/routes/dashboard.py 筛选逻辑 + storage 查询测试。
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 import pytest
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
 
 
 @pytest.fixture
 def db(temp_db):
     """预填充房源数据。"""
+    now = _now_iso()
     rows = [
         ("id-1", "Studio Centrum", "Available to book", "€700", "2026-06-01", ["Type: Studio", "Area: 26.0 m²", "Contract: Indefinite", "Tenant: student only"], "Eindhoven"),
         ("id-2", "1BR West", "Available in lottery", "€950", "2026-07-01", ["Type: 1", "Area: 45.0 m²", "Contract: 6 months max", "Tenant: employed only"], "Amsterdam"),
@@ -24,7 +30,7 @@ def db(temp_db):
     for i, (lid, name, status, price, avail, features, city) in enumerate(rows):
         temp_db.conn.execute(
             "INSERT OR REPLACE INTO listings (id, name, status, price_raw, available_from, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (lid, name, status, price, avail, json.dumps(features), "https://x.com", city, "2026-05-13T08:00:00", "2026-05-13T08:00:00", status),
+            (lid, name, status, price, avail, json.dumps(features), "https://x.com", city, now, now, status),
         )
     temp_db.conn.commit()
     return temp_db
@@ -60,7 +66,7 @@ class TestStorageQueries:
         assert "Not available" in statuses
 
     def test_count_new_since(self, db):
-        cnt = db.count_new_since(hours=48)
+        cnt = db.count_new_since(hours=1)
         assert cnt == 3
 
     def test_chart_daily_new_has_data(self, db):

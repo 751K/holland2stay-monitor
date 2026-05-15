@@ -1,8 +1,17 @@
 """mstorage 房源查询单元测试 — get_all_listings / get_recent_changes / counts / filter helpers。"""
 
 import pytest
+from datetime import datetime, timezone, timedelta
 from models import Listing
 from mstorage import Storage
+
+
+def _now_iso(**delta_kw) -> str:
+    """当前 UTC 时间的 ISO 字符串，可传入 timedelta 参数偏移。"""
+    dt = datetime.now(timezone.utc)
+    if delta_kw:
+        dt = dt + timedelta(**delta_kw)
+    return dt.strftime("%Y-%m-%dT%H:%M:%S")
 
 
 @pytest.fixture
@@ -24,8 +33,8 @@ def _add(st: Storage, id: str, **kw):
             kw.get("price_raw", "€700"), kw.get("available_from", ""),
             kw.get("features", "[]"), kw.get("url", f"https://t/{id}"),
             kw.get("city", kw.get("city", "Eindhoven")),
-            kw.get("first_seen", "2026-05-01T00:00:00"),
-            kw.get("last_seen", "2026-05-13T00:00:00"),
+            kw.get("first_seen", _now_iso(hours=-1)),
+            kw.get("last_seen", _now_iso(minutes=-30)),
             kw.get("notified", 0), kw.get("last_status", kw.get("status", "Available to book")),
         ),
     )
@@ -69,9 +78,11 @@ class TestGetAllListings:
 class TestGetRecentChanges:
     def test_returns_changes(self, store):
         _add(store, "L1", name="Test")
+        now = _now_iso()
         store.conn.execute(
             """INSERT INTO status_changes (listing_id, old_status, new_status, changed_at)
-               VALUES ('L1', 'In lottery', 'Available to book', '2026-05-13T10:00:00')"""
+               VALUES ('L1', 'In lottery', 'Available to book', ?)""",
+            (now,),
         )
         store.conn.commit()
         changes = store.get_recent_changes(hours=24)
@@ -82,10 +93,11 @@ class TestGetRecentChanges:
     def test_filter_by_city(self, store):
         _add(store, "L1", city="Amsterdam")
         _add(store, "L2", city="Utrecht")
+        now = _now_iso()
         for lid in ("L1", "L2"):
             store.conn.execute(
                 """INSERT INTO status_changes (listing_id, old_status, new_status, changed_at)
-                   VALUES (?, 'old', 'new', '2026-05-13T10:00:00')""", (lid,)
+                   VALUES (?, 'old', 'new', ?)""", (lid, now),
             )
         store.conn.commit()
         assert len(store.get_recent_changes(hours=24, city="Amsterdam")) == 1
@@ -103,15 +115,18 @@ class TestGetRecentChanges:
 
 class TestCounts:
     def test_count_new_since(self, store):
-        _add(store, "L1", first_seen="2026-05-13T10:00:00")
+        now = _now_iso()
+        _add(store, "L1", first_seen=now)
         _add(store, "L2", first_seen="2020-01-01T00:00:00")
         assert store.count_new_since(hours=24) == 1
 
     def test_count_changes_since(self, store):
         _add(store, "L1")
+        now = _now_iso()
         store.conn.execute(
             """INSERT INTO status_changes (listing_id, old_status, new_status, changed_at)
-               VALUES ('L1', 'old', 'new', '2026-05-13T10:00:00')"""
+               VALUES ('L1', 'old', 'new', ?)""",
+            (now,),
         )
         store.conn.commit()
         assert store.count_changes_since(hours=24) == 1

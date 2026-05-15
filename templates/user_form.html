@@ -42,6 +42,41 @@
           <input type="hidden" id="enabled_h" name="enabled" value="{{ 'true' if not is_edit or u.enabled else 'false' }}">
         </div>
       </div>
+
+      <!-- iOS App 登录 -->
+      <div class="mt-4" style="padding-top:14px;border-top:1px solid var(--border);">
+        <div class="flex items-center gap-2 mb-2">
+          <i class="bi bi-phone" style="color:var(--accent);"></i>
+          <span class="text-sm font-semibold">{{ _('user_form_app_login') }}</span>
+        </div>
+        <div class="text-xs text-secondary mb-3">{{ _('user_form_app_login_hint') }}</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="toggle">
+              <input type="checkbox" id="app_login_chk"
+                     {% if is_edit and u.app_login_enabled %}checked{% endif %}
+                     onchange="document.getElementById('app_login_h').value=this.checked?'true':'false'">
+              <span class="toggle-track"></span>{{ _('user_form_app_login_enable') }}
+            </label>
+            <input type="hidden" id="app_login_h" name="app_login_enabled"
+                   value="{{ 'true' if is_edit and u.app_login_enabled else 'false' }}">
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ _('user_form_app_password') }}</label>
+            <input type="password" class="form-input" name="app_password"
+                   autocomplete="new-password"
+                   placeholder="{{ _('user_form_pw_keep') if is_edit and u.app_password_hash else _('user_form_app_password_set') }}">
+            <div class="form-help">
+              {% if is_edit and u.app_password_hash %}
+                <span style="color:var(--success);"><i class="bi bi-check-circle mr-1"></i>{{ _('user_form_app_password_set_label') }}</span>
+                · <label style="cursor:pointer;"><input type="checkbox" name="app_password_clear" value="true" style="vertical-align:middle;"> {{ _('user_form_app_password_clear') }}</label>
+              {% else %}
+                <span style="color:var(--text-muted);">{{ _('user_form_app_password_unset_label') }}</span>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

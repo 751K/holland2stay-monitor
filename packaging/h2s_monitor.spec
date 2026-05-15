@@ -40,6 +40,12 @@ a = Analysis(
         "dotenv",
         "flask",
         "jinja2",
+        "bcrypt",
+        "jwt",          # pyjwt
+        "httpx",
+        "h2",           # httpx[http2] 运行时
+        "hpack",
+        "hyperframe",
         *_app_modules,
         *_mcore_modules,
         *_mstorage_modules,

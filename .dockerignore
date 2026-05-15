@@ -9,6 +9,8 @@ dist/
 
 # 密钥（绝对不能打包进镜像）
 .env
+*.p8
+*.p12
 
 # Python 缓存
 __pycache__/
@@ -37,6 +39,15 @@ docs/
 tools/
 packaging/
 launcher.py
+
+# iOS 客户端（不打包进服务端镜像）
+ios/
+
+# Claude 工具链
+.claude/
+
+# 测试
+tests/
 
 # 部署配置（宿主机用，不打包进镜像）
 Caddyfile
