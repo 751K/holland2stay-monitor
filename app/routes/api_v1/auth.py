@@ -375,6 +375,7 @@ def _register() -> Any:
 
     return _err.ok({
         "token": plaintext,
+        "token_id": token_id,
         "role": "user",
         "user": {
             "id": user.id,
