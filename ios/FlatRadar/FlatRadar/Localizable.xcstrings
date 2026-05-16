@@ -5,22 +5,64 @@
 
     },
     "\n\nCurrently has %lld active device session(s)." : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\n\n当前有 %lld 个活跃设备对话。"
+          }
+        }
+      }
     },
     " " : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " "
+          }
+        }
+      }
     },
     " listings" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列表"
+          }
+        }
+      }
     },
     " unread" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未读"
+          }
+        }
+      }
     },
     "—" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "—"
+          }
+        }
+      }
     },
     "·" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "·"
+          }
+        }
+      }
     },
     "(filtered)" : {
       "localizations" : {
@@ -56,7 +98,14 @@
       }
     },
     "%lld" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld"
+          }
+        }
+      }
     },
     "%lld %@ · matches your filter" : {
       "localizations" : {
@@ -64,6 +113,12 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$lld %2$@ · matches your filter"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld %2$@ · 符合你的筛选条件"
           }
         }
       }
@@ -154,7 +209,14 @@
       }
     },
     "%lld selected" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选择%lld "
+          }
+        }
+      }
     },
     "%lld total" : {
       "localizations" : {
@@ -189,13 +251,34 @@
       }
     },
     "•" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "•"
+          }
+        }
+      }
     },
     "+%@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%@"
+          }
+        }
+      }
     },
     "⋯⋯" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⋯⋯"
+          }
+        }
+      }
     },
     "⚠️ Sent %lld/%lld. Failures: %@" : {
       "localizations" : {
@@ -246,7 +329,14 @@
       }
     },
     "€/mo" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "€/月"
+          }
+        }
+      }
     },
     "A one-time tip to support development.\nDoes not unlock any features." : {
       "localizations" : {
@@ -507,7 +597,14 @@
       }
     },
     "Any" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "任意"
+          }
+        }
+      }
     },
     "App" : {
       "localizations" : {
@@ -1295,7 +1392,14 @@
       }
     },
     "Delete %@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除 %@"
+          }
+        }
+      }
     },
     "Delete Account" : {
       "localizations" : {
@@ -1723,7 +1827,14 @@
       }
     },
     "flatradar.app" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "flatradar.app"
+          }
+        }
+      }
     },
     "Good afternoon" : {
       "localizations" : {
@@ -1841,7 +1952,14 @@
       }
     },
     "ID: %@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ID: %@"
+          }
+        }
+      }
     },
     "Idle" : {
       "extractionState" : "stale",
@@ -2266,7 +2384,14 @@
       }
     },
     "m²" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "m²"
+          }
+        }
+      }
     },
     "Manage scrapers, users, push alerts" : {
       "extractionState" : "stale",
@@ -2576,7 +2701,14 @@
       }
     },
     "NEW · %@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "NEW · %@"
+          }
+        }
+      }
     },
     "New · 7d" : {
       "extractionState" : "stale",
@@ -2969,7 +3101,14 @@
       }
     },
     "Notification Filter" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知过滤"
+          }
+        }
+      }
     },
     "Notifications" : {
       "extractionState" : "stale",
@@ -3489,7 +3628,14 @@
       }
     },
     "Reset" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置"
+          }
+        }
+      }
     },
     "Reset All Filters" : {
       "localizations" : {
@@ -4578,7 +4724,14 @@
       }
     },
     "updated %@" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新 %@"
+          }
+        }
+      }
     },
     "User" : {
       "localizations" : {
@@ -4629,7 +4782,14 @@
       }
     },
     "Working…" : {
-
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载中"
+          }
+        }
+      }
     },
     "Yesterday" : {
       "extractionState" : "stale",

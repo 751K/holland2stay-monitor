@@ -42,48 +42,59 @@ logger = logging.getLogger(__name__)
 _client_lock = threading.Lock()
 _client: Optional[ApnsClient] = None
 _client_disabled = False   # from_env 返回 None 或构造失败时为 True
+_client_retry_after = 0.0  # monotonic；避免配置临时缺失后永久 no-op
+_DISABLED_RETRY_SECONDS = 60.0
 
 
 def get_client() -> Optional[ApnsClient]:
     """惰性构造。返回 None = APNs 未启用（调用方应跳过）。"""
-    global _client, _client_disabled
+    global _client, _client_disabled, _client_retry_after
     if _client_disabled:
-        return None
+        if time.monotonic() < _client_retry_after:
+            return None
     if _client is not None:
         return _client
     with _client_lock:
         if _client_disabled:
-            return None
+            if time.monotonic() < _client_retry_after:
+                return None
         if _client is not None:
             return _client
         cfg = ApnsConfig.from_env()
         if cfg is None:
             _client_disabled = True
+            _client_retry_after = time.monotonic() + _DISABLED_RETRY_SECONDS
+            logger.info("APNs 未启用或配置不完整，%ds 后重试", _DISABLED_RETRY_SECONDS)
             return None
         try:
             _client = ApnsClient(cfg)
+            _client_disabled = False
+            _client_retry_after = 0.0
             logger.info("APNs 已启用 (topic=%s, env=%s)", cfg.topic, cfg.env_default)
             return _client
         except Exception:
-            logger.exception("APNs 客户端初始化失败，禁用本进程推送")
+            logger.exception("APNs 客户端初始化失败，%ds 后重试", _DISABLED_RETRY_SECONDS)
             _client_disabled = True
+            _client_retry_after = time.monotonic() + _DISABLED_RETRY_SECONDS
             return None
 
 
 def set_client(client: Optional[ApnsClient]) -> None:
     """供测试注入；生产代码不要调。"""
-    global _client, _client_disabled
+    global _client, _client_disabled, _client_retry_after
     with _client_lock:
         _client = client
         _client_disabled = client is None
+        _client_retry_after = 0.0
 
 
 def reset() -> None:
     """测试用：清空单例 + 节流状态。"""
-    global _client, _client_disabled
+    global _client, _client_disabled, _client_retry_after
     with _client_lock:
         _client = None
         _client_disabled = False
+        _client_retry_after = 0.0
     _dedup.clear()
     for q in _per_user.values():
         q.clear()
@@ -247,6 +258,7 @@ async def _send_to_user(
     """
     client = get_client()
     if client is None:
+        logger.warning("APNs 跳过：client 未启用或初始化失败 user_id=%s（检查 APNS_ENABLED / .p8 / APNS_* 环境变量）", user_id)
         return []
     try:
         devices = storage.get_active_devices_for_user(user_id)
@@ -254,9 +266,32 @@ async def _send_to_user(
         logger.exception("get_active_devices_for_user 失败 user_id=%s", user_id)
         return []
     if not devices:
+        # 诊断：查一下这个 user_id 是不是在 device_tokens/ app_tokens 里完全没关联
+        try:
+            all_devs = storage.conn.execute(
+                "SELECT COUNT(*) FROM device_tokens WHERE disabled_at IS NULL"
+            ).fetchone()
+            user_tokens = storage.conn.execute(
+                "SELECT COUNT(*) FROM app_tokens WHERE user_id = ? AND revoked = 0",
+                (user_id,),
+            ).fetchone()
+            logger.warning(
+                "APNs 跳过：user_id=%s 没有活跃设备 "
+                "（DB 总活跃设备=%d，该 user 活跃 token 数=%d）",
+                user_id,
+                all_devs[0] if all_devs else 0,
+                user_tokens[0] if user_tokens else 0,
+            )
+        except Exception:
+            logger.info("APNs 跳过：user_id=%s 没有活跃设备", user_id)
         return []
 
     targets = [{"device_token": d["device_token"], "env": d["env"]} for d in devices]
+    env_counts = dict(sorted(
+        (env, sum(1 for d in devices if d.get("env") == env))
+        for env in {d.get("env", "") for d in devices}
+    ))
+    logger.info("APNs 准备发送 user_id=%s devices=%d envs=%s", user_id, len(devices), env_counts)
     results: list[ApnsResult] = []
     try:
         results = await client.send_many(
@@ -368,6 +403,61 @@ async def dispatch_error(
         return sum(1 for r in results if r.ok)
     except Exception:
         logger.exception("push.dispatch_error 异常 user=%s", user.id)
+        return 0
+
+
+# ── Admin 推送 ────────────────────────────────────────────────────────
+
+
+async def _send_to_admin(storage, payload: dict, *, collapse_id: str = "") -> list[ApnsResult]:
+    """取出所有 admin 的活跃设备，并发推。admin user_id 为 NULL，不走 user 路径。"""
+    client = get_client()
+    if client is None:
+        logger.warning("APNs admin 跳过：client 未启用")
+        return []
+    try:
+        devices = storage.get_active_devices_for_admin()
+    except Exception:
+        logger.exception("get_active_devices_for_admin 失败")
+        return []
+    if not devices:
+        logger.info("APNs admin 跳过：没有活跃的 admin 设备")
+        return []
+
+    targets = [{"device_token": d["device_token"], "env": d["env"]} for d in devices]
+    logger.info("APNs admin 准备发送 devices=%d", len(devices))
+    results: list[ApnsResult] = []
+    try:
+        results = await client.send_many(targets, payload=payload, collapse_id=collapse_id)
+    except Exception:
+        logger.exception("APNs admin send_many 异常")
+        return []
+
+    token_to_id = {d["device_token"]: d["id"] for d in devices}
+    for r in results:
+        if r.device_dead:
+            did = token_to_id.get(r.device)
+            if did is not None:
+                try:
+                    storage.disable_device(did, reason=r.reason)
+                except Exception:
+                    logger.exception("disable_device 失败 id=%s", did)
+        elif not r.ok:
+            logger.warning("APNs admin 失败 dev=%s status=%d reason=%s",
+                           r.device[:12], r.status, r.reason)
+    return results
+
+
+async def dispatch_admin(storage, message: str, *, kind: str = "blocked") -> int:
+    """admin 设备 APNs 推送入口。dedup 按 (admin, kind) 粒度。"""
+    try:
+        if not _allow_send("__admin__", kind, kind):
+            return 0
+        p = _payload_error(message, kind=kind)
+        results = await _send_to_admin(storage, p)
+        return sum(1 for r in results if r.ok)
+    except Exception:
+        logger.exception("push.dispatch_admin 异常 kind=%s", kind)
         return 0
 
 

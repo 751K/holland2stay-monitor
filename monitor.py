@@ -718,6 +718,10 @@ async def run_once(
             await n.send_error(agg_msg)
         if web_notifier:
             await web_notifier.send_error(agg_msg)
+        # admin 也要收到 403 屏蔽通知
+        push_tasks.append(asyncio.create_task(
+            _push.dispatch_admin(storage, agg_msg, kind="blocked"),
+        ))
     elif blocked_in_round:
         logger.info(
             "🚫 %d 套候选 / %d 个用户被屏蔽，30 min 节流期内不发通知",
@@ -744,6 +748,76 @@ async def run_once(
         "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
         len(new_listings), total_notified, len(status_changes), storage.count_all(),
     )
+
+
+def _apns_startup_diag(st, users: list[UserConfig]) -> None:
+    """启动时诊断 APNs 设备关联，发现配置问题尽早 WARNING。"""
+    from mcore import push as _push
+
+    if _push.get_client() is None:
+        logger.warning("APNs 未启用：启动时无法获取 ApnsClient（检查 APNS_ENABLED / .p8 / APNS_*）")
+        return
+
+    # 统计全局数据
+    try:
+        total_devs = st.conn.execute(
+            "SELECT COUNT(*) FROM device_tokens WHERE disabled_at IS NULL"
+        ).fetchone()
+        total_tokens = st.conn.execute(
+            "SELECT COUNT(*) FROM app_tokens WHERE revoked = 0"
+        ).fetchone()
+        logger.info(
+            "APNs 启动诊断：DB 中 %d 个活跃设备，%d 个活跃 token",
+            total_devs[0] if total_devs else 0,
+            total_tokens[0] if total_tokens else 0,
+        )
+    except Exception:
+        logger.exception("APNs 启动诊断：查询设备/ token 计数失败")
+        return
+
+    # admin 设备诊断
+    try:
+        admin_devs = st.get_active_devices_for_admin()
+        if admin_devs:
+            logger.info("APNs admin: %d 个可推送设备", len(admin_devs))
+        else:
+            admin_tokens = st.conn.execute(
+                "SELECT COUNT(*) FROM app_tokens WHERE role='admin' AND user_id IS NULL AND revoked=0"
+            ).fetchone()
+            logger.warning(
+                "APNs admin: 没有可推送设备！（%s活跃 admin token）",
+                "有" if (admin_tokens and admin_tokens[0] > 0) else "无",
+            )
+    except Exception:
+        logger.exception("APNs 启动诊断：get_active_devices_for_admin 失败")
+
+    # 逐用户查关联
+    for u in users:
+        if not u.enabled:
+            continue
+        try:
+            devs = st.get_active_devices_for_user(u.id)
+        except Exception:
+            logger.exception("APNs 启动诊断：get_active_devices_for_user 失败 user=%s", u.name)
+            continue
+        if devs:
+            logger.info(
+                "APNs 用户 %s (id=%s): %d 个可推送设备",
+                u.name, u.id, len(devs),
+            )
+        else:
+            # 查一下这个 user_id 有没有 token
+            token_count = st.conn.execute(
+                "SELECT COUNT(*) FROM app_tokens WHERE user_id = ? AND revoked = 0",
+                (u.id,),
+            ).fetchone()
+            has_tokens = token_count and token_count[0] > 0
+            logger.warning(
+                "APNs 用户 %s (id=%s): 没有可推送设备！（该 user %s活跃 token）"
+                "—— 请确认 iOS App 已用此账号登录并在 Settings 中注册了设备",
+                u.name, u.id,
+                "有" if has_tokens else "无",
+            )
 
 
 def _build_user_notifiers(users: list[UserConfig]) -> UserNotifiers:
@@ -1052,6 +1126,9 @@ async def _async_main() -> None:
     # Web 面板通知：与平台无关，始终创建
     web_notifier = WebNotifier(storage)
     logger.info("Web 面板通知已启用（所有事件将写入 web_notifications 表）")
+
+    # APNs 诊断：启动时校验每个 user 的设备关联，避免静默丢通知
+    _apns_startup_diag(storage, users)
 
     _write_pid()
     _setup_signals(asyncio.get_running_loop())

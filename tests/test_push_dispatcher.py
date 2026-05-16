@@ -136,6 +136,36 @@ class TestDisabled:
         ))
         assert n == 0
 
+    def test_disabled_client_retries_after_cooldown(self, monkeypatch, store_with_one_device):
+        """APNs 首次配置缺失不能让 monitor 进程永久 no-op。"""
+        fake = FakeApns()
+        calls = 0
+
+        class FakeConfig:
+            topic = "com.example.FlatRadar"
+            env_default = "production"
+
+        def fake_from_env():
+            nonlocal calls
+            calls += 1
+            return None if calls == 1 else FakeConfig()
+
+        monkeypatch.setattr(push.ApnsConfig, "from_env", staticmethod(fake_from_env))
+        monkeypatch.setattr(push, "ApnsClient", lambda _cfg: fake)
+
+        n1 = _run(push.dispatch(
+            store_with_one_device, FakeUser("userA"), FakeListing("l1"),
+        ))
+        assert n1 == 0
+
+        # 模拟 60s 重试窗口已过；下一次真实通知应重新读配置并恢复发送。
+        push._client_retry_after = 0.0  # noqa: SLF001 - intentional white-box test
+        n2 = _run(push.dispatch(
+            store_with_one_device, FakeUser("userA"), FakeListing("l2"),
+        ))
+        assert n2 == 1
+        assert calls == 2
+
 
 # ── 单条 dispatch ──────────────────────────────────────────────────
 

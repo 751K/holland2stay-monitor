@@ -39,8 +39,10 @@ final class AuthStore {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self, self.isAuthenticated, !self.isGuest else { return }
-            Task { await self.logout() }
+            Task { @MainActor in
+                guard let self, self.isAuthenticated, !self.isGuest else { return }
+                await self.logout()
+            }
         }
     }
 
@@ -51,7 +53,7 @@ final class AuthStore {
             ?? UserDefaults.standard.string(forKey: "auth_token")
         guard let token = savedToken else { return }
 
-        await client.setToken(token)
+        client.setToken(token)
 
         // Verify token is still valid
         do {
@@ -61,7 +63,7 @@ final class AuthStore {
             // Token expired or revoked — clear and stay on login screen
             KeychainManager.delete(server: server)
             UserDefaults.standard.removeObject(forKey: "auth_token")
-            await client.setToken(nil)
+            client.setToken(nil)
         }
     }
 
@@ -83,7 +85,7 @@ final class AuthStore {
             let resp = try await client.login(
                 username: username, password: password,
                 deviceName: device, ttlDays: ttlDays)
-            await client.setToken(resp.token)
+            client.setToken(resp.token)
             do {
                 try KeychainManager.save(token: resp.token, server: server)
             } catch {
@@ -115,7 +117,7 @@ final class AuthStore {
             let resp = try await client.register(
                 username: name, password: password,
                 deviceName: device, ttlDays: ttlDays)
-            await client.setToken(resp.token)
+            client.setToken(resp.token)
             do {
                 try KeychainManager.save(token: resp.token, server: server)
             } catch {
@@ -158,7 +160,7 @@ final class AuthStore {
         _ = try? await client.logout()
         KeychainManager.delete(server: server)
         UserDefaults.standard.removeObject(forKey: "auth_token")
-        await client.setToken(nil)
+        client.setToken(nil)
         role = .guest
         isAuthenticated = false
         userInfo = nil
@@ -176,7 +178,7 @@ final class AuthStore {
             // Clear local state and return to login
             KeychainManager.delete(server: server)
             UserDefaults.standard.removeObject(forKey: "auth_token")
-            await client.setToken(nil)
+            client.setToken(nil)
             role = .guest
             isAuthenticated = false
             userInfo = nil

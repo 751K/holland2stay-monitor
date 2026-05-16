@@ -288,7 +288,7 @@ struct DashboardView: View {
     }
 
     private var weekGrowthText: String? {
-        guard let s = store.summary, let daily = chartDailyNew else {
+        guard let daily = chartDailyNew else {
             // Without chart data, fallback to new7d
             if let s = store.summary { return "\(s.new7d)" }
             return nil
@@ -725,9 +725,9 @@ struct DashboardView: View {
             }
             await fetchMiniCharts()
         }
-        // 等结果完成；若父任务被 cancel，这一行的 await 会抛 CancellationError，
-        // 上面的 work 任务仍然继续跑完。spinner 会比真实数据更新略早消失。
-        _ = try? await work.value
+        // 等结果完成；work 不继承父任务 cancellation，因此即使 .refreshable
+        // 被取消，里面的数据请求仍会继续跑完。
+        await work.value
     }
 
     private func fetchMatchedPreviews() async {

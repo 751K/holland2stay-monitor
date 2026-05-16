@@ -124,6 +124,27 @@ class DeviceOps:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_active_devices_for_admin(self) -> list[dict]:
+        """
+        所有 admin 角色当前可推送的设备。
+
+        条件：
+        - app_tokens.role = 'admin' AND user_id IS NULL AND revoked = 0
+        - device_tokens.disabled_at IS NULL
+        """
+        rows = self._conn.execute(
+            """SELECT d.id, d.device_token, d.env, d.platform,
+                      d.model, d.bundle_id, d.app_token_id
+               FROM device_tokens d
+               JOIN app_tokens t ON d.app_token_id = t.id
+               WHERE t.role = 'admin'
+                 AND t.user_id IS NULL
+                 AND t.revoked = 0
+                 AND d.disabled_at IS NULL
+               ORDER BY d.id DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_device(self, device_id: int) -> Optional[dict]:
         row = self._conn.execute(
             "SELECT * FROM device_tokens WHERE id = ?", (device_id,),
