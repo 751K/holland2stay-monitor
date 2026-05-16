@@ -108,6 +108,10 @@ struct SettingsView: View {
                     }
 
                     // Push notifications
+                    //
+                    // user role 只展示状态（Permission + Device ID），不暴露
+                    // "Send Test Push" / "Re-register Device" / 详细错误 ——
+                    // 这些是 admin 调试用的，user 看到容易误操作或泄漏诊断信息。
                     Section {
                         HStack {
                             Text("Permission")
@@ -125,37 +129,43 @@ struct SettingsView: View {
                                 Text("not registered").foregroundStyle(.secondary)
                             }
                         }
-                        if let err = push.lastError {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Label("Registration failed", systemImage: "exclamationmark.triangle")
-                                    .foregroundStyle(.red)
-                                    .font(.subheadline)
-                                Text(err)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Button {
-                            sendTestPush()
-                        } label: {
-                            HStack {
-                                if isSendingTest {
-                                    ProgressView().controlSize(.small)
+                        if auth.isAdmin {
+                            if let err = push.lastError {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Label("Registration failed", systemImage: "exclamationmark.triangle")
+                                        .foregroundStyle(.red)
+                                        .font(.subheadline)
+                                    Text(err)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
-                                Text(isSendingTest ? "Sending…" : "Send Test Push")
                             }
+                            Button {
+                                sendTestPush()
+                            } label: {
+                                HStack {
+                                    if isSendingTest {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    Text(isSendingTest ? "Sending…" : "Send Test Push")
+                                }
+                            }
+                            .disabled(isSendingTest || push.registeredDeviceId == nil)
+                            Button {
+                                Task { await push.requestPermissionAndRegister() }
+                            } label: {
+                                Text("Re-register Device")
+                            }
+                            .disabled(push.permissionStatus == .denied)
                         }
-                        .disabled(isSendingTest || push.registeredDeviceId == nil)
-                        Button {
-                            Task { await push.requestPermissionAndRegister() }
-                        } label: {
-                            Text("Re-register Device")
-                        }
-                        .disabled(push.permissionStatus == .denied)
                     } header: {
                         Text("Push Notifications")
                     } footer: {
-                        Text("Sends a test alert to all devices registered under this session. Verifies APNs end-to-end.")
+                        if auth.isAdmin {
+                            Text("Sends a test alert to all devices registered under this session. Verifies APNs end-to-end.")
+                        } else {
+                            Text("New listings matching your filter will arrive as push notifications.")
+                        }
                     }
                 } else if auth.isGuest {
                     Section("Account") {

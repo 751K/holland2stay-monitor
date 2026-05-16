@@ -124,6 +124,11 @@ enum MapClustering {
                     listings: items))
             }
         }
+        // ⚠️ Swift Dictionary 的迭代顺序**非确定性**——每次 grid.map 输出顺序
+        // 都可能不同。SwiftUI 的 ForEach + Annotation 即便用 id 追踪，数组顺序
+        // 变化也可能误触发 transition 动画 → 拖动时无变化的 pin 闪烁。
+        // 按 id 字典序排序使输出严格稳定。
+        out.sort { $0.id < $1.id }
         return out
     }
 }

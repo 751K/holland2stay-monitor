@@ -74,6 +74,23 @@ class TestStart:
         r = admin_client.post("/api/monitor/start", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 409
 
+    def test_start_uses_supervisor_when_available(self, admin_client, monkeypatch):
+        from app.routes import control as ctrl
+        monkeypatch.setattr(ctrl, "monitor_pid", lambda: None)
+        monkeypatch.setattr(ctrl, "supervisorctl_available", lambda: True)
+        calls = []
+
+        def fake_supervisor(action):
+            calls.append(action)
+            return ctrl.subprocess.CompletedProcess(
+                ["supervisorctl"], 0, stdout="monitor: started", stderr="")
+
+        monkeypatch.setattr(ctrl, "supervisorctl_monitor", fake_supervisor)
+        r = admin_client.post("/api/monitor/start", headers={"X-CSRF-Token": "test_csrf"})
+        assert r.status_code == 200
+        assert r.get_json()["method"] == "supervisor"
+        assert calls == ["start"]
+
 
 # ── stop ─────────────────────────────────────────────────
 
@@ -100,6 +117,24 @@ class TestStop:
         monkeypatch.setattr(ctrl.os, "kill", lambda pid, sig: (_ for _ in ()).throw(OSError("boom")))
         r = admin_client.post("/api/monitor/stop", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 500
+
+    def test_stop_uses_supervisor_when_available(self, admin_client, monkeypatch):
+        from app.routes import control as ctrl
+        monkeypatch.setattr(ctrl, "monitor_pid", lambda: 99999)
+        monkeypatch.setattr(ctrl, "supervisorctl_available", lambda: True)
+        monkeypatch.setattr(ctrl.os, "kill", lambda pid, sig: (_ for _ in ()).throw(AssertionError("should not SIGTERM")))
+        calls = []
+
+        def fake_supervisor(action):
+            calls.append(action)
+            return ctrl.subprocess.CompletedProcess(
+                ["supervisorctl"], 0, stdout="monitor: stopped", stderr="")
+
+        monkeypatch.setattr(ctrl, "supervisorctl_monitor", fake_supervisor)
+        r = admin_client.post("/api/monitor/stop", headers={"X-CSRF-Token": "test_csrf"})
+        assert r.status_code == 200
+        assert r.get_json()["method"] == "supervisor"
+        assert calls == ["stop"]
 
 
 # ── shutdown ─────────────────────────────────────────────

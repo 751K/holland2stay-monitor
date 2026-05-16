@@ -135,9 +135,13 @@ def _bearer(tok):
 
 
 class TestListings:
-    def test_anon_blocked(self, api_client, seeded):
+    def test_anon_sees_public_listings(self, api_client, seeded):
         r = api_client.get("/api/v1/listings")
-        assert r.status_code == 401
+        assert r.status_code == 200
+        d = r.get_json()["data"]
+        ids = {x["id"] for x in d["items"]}
+        assert ids == {"id-1", "id-2", "id-3"}
+        assert d["filtered"] is False
 
     def test_admin_sees_all(self, api_client, seeded, admin_token):
         r = api_client.get("/api/v1/listings", headers=_bearer(admin_token))
@@ -242,8 +246,12 @@ class TestMap:
         ids = {x["id"] for x in d["listings"]}
         assert ids == {"id-1"}
 
-    def test_anon_blocked(self, api_client, seeded):
-        assert api_client.get("/api/v1/map").status_code == 401
+    def test_anon_sees_public_cached_map(self, api_client, seeded):
+        r = api_client.get("/api/v1/map")
+        assert r.status_code == 200
+        d = r.get_json()["data"]
+        ids = {x["id"] for x in d["listings"]}
+        assert ids == {"id-1", "id-2"}
 
 
 # ── /calendar ──────────────────────────────────────────────────────

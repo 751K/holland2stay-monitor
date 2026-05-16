@@ -21,7 +21,12 @@ from config import BASE_DIR
 
 from app.auth import admin_api_required
 from app.csrf import csrf_required
-from app.process_ctrl import monitor_pid, write_reload_request
+from app.process_ctrl import (
+    monitor_pid,
+    supervisorctl_available,
+    supervisorctl_monitor,
+    write_reload_request,
+)
 
 
 def _terminate(pid: int) -> None:
@@ -72,6 +77,11 @@ def api_monitor_start():
     if monitor_pid() is not None:
         return jsonify({"ok": False, "error": "监控已在运行"}), 409
     try:
+        if supervisorctl_available():
+            r = supervisorctl_monitor("start")
+            if r.returncode != 0:
+                return jsonify({"ok": False, "error": (r.stderr or r.stdout or "supervisorctl start failed").strip()}), 500
+            return jsonify({"ok": True, "message": "已启动", "method": "supervisor"})
         if getattr(sys, "frozen", False):
             subprocess.Popen(
                 [sys.executable, "--run-monitor"],
@@ -99,6 +109,11 @@ def api_monitor_stop():
     if pid is None:
         return jsonify({"ok": False, "error": "监控未在运行"}), 409
     try:
+        if supervisorctl_available():
+            r = supervisorctl_monitor("stop")
+            if r.returncode != 0:
+                return jsonify({"ok": False, "error": (r.stderr or r.stdout or "supervisorctl stop failed").strip()}), 500
+            return jsonify({"ok": True, "message": "已停止", "method": "supervisor"})
         _terminate(pid)
         return jsonify({"ok": True, "message": "已发送停止信号"})
     except Exception as e:

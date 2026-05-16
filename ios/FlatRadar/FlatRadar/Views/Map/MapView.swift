@@ -76,18 +76,19 @@ struct MapView: View {
                     }
                 }
                 .onMapCameraChange(frequency: .continuous) { context in
-                    // 用 .continuous 让 cluster 跟手；防闪烁靠 MapClustering 内
-                    // log2 量化 cellSize —— 桶内任意缩放都映射到同一个 grid。
-                    // 跨桶时簇增减用 withAnimation 平滑过渡。
-                    let newRegion = context.region
-                    if Self.bucketsDiffer(currentRegion, newRegion) {
-                        // 跨桶才动画，避免无变化时浪费
+                    // 关键：**只在跨 log2 桶时更新 currentRegion**。
+                    //
+                    // 为什么不更新 same-bucket：
+                    // 1. cluster 计算只依赖 cellSize（同桶内不变）和房源绝对坐标
+                    //    （永远不变）—— 中心点移动不影响 grid 分桶
+                    // 2. 拖动时每帧更新 currentRegion → body 重算 → ForEach
+                    //    迭代触发 SwiftUI 内部 diff，即便 cluster id 没变也可能
+                    //    让 .transition 误触发动画 → 拖动时无关 pin 闪烁
+                    // 3. 同桶时根本不更新就根本不重算，零开销零闪烁
+                    if Self.bucketsDiffer(currentRegion, context.region) {
                         withAnimation(.easeInOut(duration: 0.22)) {
-                            currentRegion = newRegion
+                            currentRegion = context.region
                         }
-                    } else {
-                        // 同桶内仅静默更新 region（实际不会触发 cluster 重算）
-                        currentRegion = newRegion
                     }
                 }
                 .mapStyle(.standard(elevation: .realistic))

@@ -28,7 +28,12 @@ from flask import Blueprint, jsonify, request
 from app import api_auth, api_errors as _err
 from app.api_auth import invalidate_token_cache
 from app.db import storage
-from app.process_ctrl import monitor_pid, write_reload_request
+from app.process_ctrl import (
+    monitor_pid,
+    supervisorctl_available,
+    supervisorctl_monitor,
+    write_reload_request,
+)
 from config import BASE_DIR
 from users import get_user, load_users, save_users
 
@@ -156,6 +161,11 @@ def _monitor_start():
     if monitor_pid() is not None:
         return _err.err_validation("监控已在运行")
     try:
+        if supervisorctl_available():
+            r = supervisorctl_monitor("start")
+            if r.returncode != 0:
+                raise RuntimeError((r.stderr or r.stdout or "supervisorctl start failed").strip())
+            return _err.ok({"started": True, "method": "supervisor"})
         if getattr(sys, "frozen", False):
             subprocess.Popen(
                 [sys.executable, "--run-monitor"],
@@ -181,6 +191,11 @@ def _monitor_stop():
     if pid is None:
         return _err.err_validation("监控未在运行")
     try:
+        if supervisorctl_available():
+            r = supervisorctl_monitor("stop")
+            if r.returncode != 0:
+                raise RuntimeError((r.stderr or r.stdout or "supervisorctl stop failed").strip())
+            return _err.ok({"stopped": True, "pid": pid, "method": "supervisor"})
         _terminate(pid)
     except Exception as e:
         logger.exception("monitor stop 失败")

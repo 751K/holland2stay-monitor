@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from config import DATA_DIR
 
 PID_FILE: Path            = DATA_DIR / "monitor.pid"
 RELOAD_REQUEST_FILE: Path = DATA_DIR / "monitor.reload"
+SUPERVISOR_CONF: Path     = Path(os.environ.get("SUPERVISOR_CONF", "/etc/supervisor/conf.d/app.conf"))
 
 
 def pid_exists(pid: int) -> bool:
@@ -89,3 +92,31 @@ def write_reload_request() -> None:
     """写入文件触发的热重载请求，供 Windows 和信号失败场景使用。"""
     RELOAD_REQUEST_FILE.parent.mkdir(parents=True, exist_ok=True)
     RELOAD_REQUEST_FILE.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
+
+
+def supervisorctl_available() -> bool:
+    """
+    当前进程是否可以通过 supervisord 管理 monitor。
+
+    Docker 镜像内 monitor/web 都由 supervisord 启动。如果 Web 直接 SIGTERM
+    monitor，supervisord 会按 autorestart=true 立即拉起；必须用
+    supervisorctl stop/start 才能改变 program 状态。
+    """
+    return (
+        os.name != "nt"
+        and SUPERVISOR_CONF.exists()
+        and shutil.which("supervisorctl") is not None
+    )
+
+
+def supervisorctl_monitor(action: str) -> subprocess.CompletedProcess[str]:
+    """对 supervisord 里的 monitor program 执行 start/stop/status。"""
+    if action not in {"start", "stop", "status"}:
+        raise ValueError(f"unsupported supervisor action: {action}")
+    return subprocess.run(
+        ["supervisorctl", "-c", str(SUPERVISOR_CONF), action, "monitor"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )

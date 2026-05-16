@@ -129,7 +129,7 @@ def _should_notify_block() -> bool:
     """是否该发屏蔽通知。30 分钟最多一次，避免持续屏蔽时刷屏。"""
     global _last_block_notify_at
     now = time.monotonic()
-    if now - _last_block_notify_at >= _BLOCK_NOTIFY_INTERVAL:
+    if _last_block_notify_at <= 0 or now - _last_block_notify_at >= _BLOCK_NOTIFY_INTERVAL:
         _last_block_notify_at = now
         return True
     return False

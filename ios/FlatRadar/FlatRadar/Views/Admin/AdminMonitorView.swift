@@ -21,9 +21,7 @@ struct AdminMonitorView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await store.fetchMonitorStatus() }
         .refreshable { await store.fetchMonitorStatus() }
-        .confirmationDialog("Stop monitor process?",
-                            isPresented: $showStopConfirm,
-                            titleVisibility: .visible) {
+        .alert("Stop monitor process?", isPresented: $showStopConfirm) {
             Button("Stop", role: .destructive) {
                 Task { await store.stopMonitor() }
             }

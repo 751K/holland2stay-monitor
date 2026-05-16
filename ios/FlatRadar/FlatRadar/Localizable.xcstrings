@@ -4,6 +4,9 @@
     "" : {
 
     },
+    "\n\nCurrently has %lld active device session(s)." : {
+
+    },
     " " : {
 
     },
@@ -249,6 +252,9 @@
           }
         }
       }
+    },
+    "Actions" : {
+
     },
     "Admin" : {
       "localizations" : {
@@ -610,6 +616,9 @@
     "Count" : {
 
     },
+    "Create users via the web admin panel." : {
+
+    },
     "Dark" : {
       "localizations" : {
         "en" : {
@@ -674,6 +683,15 @@
           }
         }
       }
+    },
+    "Delete" : {
+
+    },
+    "Delete %@" : {
+
+    },
+    "Delete user?" : {
+
     },
     "Denied" : {
       "localizations" : {
@@ -946,6 +964,9 @@
         }
       }
     },
+    "ID: %@" : {
+
+    },
     "Idle" : {
       "localizations" : {
         "en" : {
@@ -995,6 +1016,12 @@
       }
     },
     "Label" : {
+
+    },
+    "Last count" : {
+
+    },
+    "Last scrape" : {
 
     },
     "Last scrape: %@" : {
@@ -1243,6 +1270,9 @@
     "m²" : {
 
     },
+    "Manage Users" : {
+
+    },
     "Map" : {
       "localizations" : {
         "en" : {
@@ -1322,6 +1352,9 @@
           }
         }
       }
+    },
+    "Monitor Control" : {
+
     },
     "Name" : {
       "localizations" : {
@@ -1407,6 +1440,9 @@
           }
         }
       }
+    },
+    "New listings matching your filter will arrive as push notifications." : {
+
     },
     "New Listings, Last 7 Days" : {
       "extractionState" : "stale",
@@ -1557,6 +1593,9 @@
     "No options available" : {
 
     },
+    "No Users" : {
+
+    },
     "Not determined" : {
       "localizations" : {
         "en" : {
@@ -1667,6 +1706,9 @@
           }
         }
       }
+    },
+    "PID" : {
+
     },
     "Please sign in again." : {
       "localizations" : {
@@ -1852,6 +1894,12 @@
         }
       }
     },
+    "Reload Config" : {
+
+    },
+    "Reload re-reads users.json and .env without restarting the process. Stop halts scraping; subsequent listings won't trigger push." : {
+
+    },
     "Reset" : {
 
     },
@@ -1894,6 +1942,9 @@
         }
       }
     },
+    "Running" : {
+
+    },
     "Save" : {
       "localizations" : {
         "en" : {
@@ -1911,6 +1962,9 @@
       }
     },
     "Saving…" : {
+
+    },
+    "Scraping and APNs delivery will pause until restarted." : {
 
     },
     "Search by name..." : {
@@ -2092,6 +2146,12 @@
         }
       }
     },
+    "Start Monitor" : {
+
+    },
+    "Status" : {
+
+    },
     "Status Changes, Last 7 Days" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2125,6 +2185,18 @@
           }
         }
       }
+    },
+    "Stop" : {
+
+    },
+    "Stop Monitor" : {
+
+    },
+    "Stop monitor process?" : {
+
+    },
+    "Stopped" : {
+
     },
     "System" : {
       "localizations" : {
@@ -2209,6 +2281,9 @@
         }
       }
     },
+    "This will remove the user, their notification preferences, and revoke all their App sessions. This cannot be undone." : {
+
+    },
     "Today" : {
       "localizations" : {
         "en" : {
@@ -2224,6 +2299,9 @@
           }
         }
       }
+    },
+    "Toggle users on/off, delete accounts, and control the scraping process." : {
+
     },
     "Too Many Requests" : {
       "localizations" : {
@@ -2440,6 +2518,9 @@
           }
         }
       }
+    },
+    "Working…" : {
+
     },
     "You don't have permission to access this." : {
       "localizations" : {
