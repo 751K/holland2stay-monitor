@@ -114,7 +114,7 @@ APNs 未启用（`APNS_ENABLED!=true`）时所有调用 no-op，不影响现有 
 | `users.py` | `_bcrypt_hash` 处理 bcrypt 未安装（抛 RuntimeError 而非崩溃） |
 | `app/forms/user_form.py` | 捕获 bcrypt 未安装异常 → ValueError |
 | `app/routes/users.py` | `user_new`/`user_edit` 捕获 ValueError 并 flash 提示 |
-| `data/users.json` | name → H2S 邮箱，`app_login_enabled: true` |
+| SQLite `user_configs` | name → H2S 邮箱，`app_login_enabled: true` |
 
 **已修复的 bug：**
 - `URL.appendingPathComponent` 把 `?` 编码成 `%3F` → 新增 `buildURL` 拆分 path + query

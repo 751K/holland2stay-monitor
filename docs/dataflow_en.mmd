@@ -1,5 +1,5 @@
 flowchart TD
-    A["Start monitor.py"] --> B["Load config .env / users.json"]
+    A["Start monitor.py"] --> B["Load config .env / SQLite user_configs"]
     B --> C["Init Storage / Notifier / WebNotifier"]
     C --> D["Enter main_loop polling"]
 

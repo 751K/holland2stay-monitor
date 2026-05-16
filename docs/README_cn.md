@@ -101,7 +101,7 @@ python -m pytest tests/ -v
 | iOS 深色模式 | ✅ 已完成 | 全页面自适应（登录 Hero / Dashboard 卡片 / Settings）；overscroll 颜色跟随 |
 | iOS 多语言 | ✅ 已完成 | 174 条本地化字符串（en / zh-Hans）；覆盖所有 UI 文本、错误消息、标签 |
 | iOS 用户注册 | ✅ 已完成 | 用户自助注册，bcrypt 密码哈希；后端限流（每小时每 IP 3 次）+ 冲突检测；注册即登录 |
-| iOS 账号注销 | ✅ 已完成 | DELETE /me 端点；双重确认弹窗；撤销所有 token + 删除 users.json 配置 + 清理 SQLite |
+| iOS 账号注销 | ✅ 已完成 | DELETE /me 端点；双重确认弹窗；撤销所有 token + 删除 SQLite 用户配置 |
 | iOS 法律合规 | ✅ 已完成 | 首次启动 Terms 强制同意弹窗（不可跳过）；Settings 和 Login 内嵌完整使用条款和隐私政策 |
 | iOS StoreKit | ✅ 已完成 | "请我喝杯咖啡" 内购（3 档 consumable：Espresso/Latte/Flat White）；StoreKit 2 交易监听 |
 | iOS 安全 | ✅ 已完成 | ATS HTTPS-only；Keychain token 存储；bcrypt 密码哈希；全部 `print()` 使用 `#if DEBUG` 守卫；TTL 上限 90 天；用户名长度限制 64 字符 |
@@ -241,7 +241,7 @@ FlatRadar/
 
 - 每个用户独立拥有：通知渠道 + 凭证、房源过滤条件、自动预订账号
 - 抓取一次共享，通知和预订按各用户条件分发，N 用户 ≠ N 倍 API 请求
-- 用户数据存储于 `data/users.json`，Web 面板增删改、一键启停
+- 用户数据存储于 SQLite `user_configs`，Web 面板增删改、一键启停
 - **零配置启动**：打开 Web 面板点击「新增用户」即可创建第一个用户
 
 ### 通知推送
@@ -320,7 +320,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
         │        ├── WebNotifier → web_notifications 表
         │        │     └── /api/events SSE → 浏览器铃铛 + Toast
         │        │
-        │        └── 遍历 users.json 中每个启用的用户
+        │        └── 遍历 SQLite user_configs 中每个启用的用户
         │                 │
         │                 ├── ListingFilter.passes() → notifier.py
         │                 │     └── iMessage（macOS）/ Telegram / Email / WhatsApp
@@ -347,7 +347,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | `notifier.py` | BaseNotifier ABC，iMessage（macOS 检测 + AppleScript 转义加固），Telegram，Email，WhatsApp，WebNotifier，MultiNotifier |
 | `booker.py` | PrewarmedSession；createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；增强错误上下文（sku/contract_id/start_date）；cancel_enabled 代理支持 |
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
-| `users.py` | UserConfig dataclass，users.json 读写 |
+| `users.py` | UserConfig dataclass，SQLite `user_configs` 读写，旧 `users.json` 一次性迁移 |
 | `web.py` | Flask app 引导层：实例化、安全头、CSRF、Jinja 过滤器、context processor、路由注册、Web 进程日志 |
 | `app/auth.py` | Session 鉴权、RBAC 装饰器（`login_required`、`admin_required`、`admin_api_required`）、访客模式、登录限流 |
 | `app/csrf.py` | CSRF token 生成与校验（Unicode 安全，`.encode("utf-8")` 防 TypeError）|
@@ -390,7 +390,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | iMessage 非 macOS | `is_macos()` 检测，`create_user_notifier()` 跳过 | 清晰警告，优雅降级，Web 面板接管 |
 | SQLite 并发访问 | WAL journal mode | monitor 写 web_notifications，web.py 独立连接只读，互不阻塞 |
 | 配置热重载 | SIGHUP → asyncio.Event（Unix）/ reload 文件轮询（Windows） | 修改后配置立即生效，监控进程不中断 |
-| 多用户存储 | `data/users.json` | 无额外依赖，结构清晰，Web 面板直接 CRUD |
+| 多用户存储 | SQLite `user_configs` | 单一真实数据源，事务写入，支持并发注册/编辑 |
 | 主题切换无闪烁 | `<head>` 内联脚本 + CSS custom properties | 在 CSS 渲染前同步设置 `data-bs-theme`，避免 FOUC |
 | 面板鉴权 opt-in | `WEB_PASSWORD` 为空则跳过鉴权 | 本地运行无需配置，对外暴露时一行配置即可加锁 |
 | web.py 单体膨胀（1,200+ 行） | 拆分为 `app/routes/`（10 个路由模块）+ `app/`（auth、csrf、db、i18n 等） | 每个模块 15–240 行，职责单一；`web.py` 精简为 154 行引导层；路由用 `add_url_rule` 保留扁平 endpoint 名，模板零改动 |
@@ -491,7 +491,7 @@ python -m tools.doctor --smtp-login
 ```
 
 doctor 会检查 `.env`、data/logs 路径权限、SQLite 完整性和必要表、
-`users.json`、Caddy 占位域名、APNs key/config、SMTP 配置、代理出口 IP、
+SQLite 用户配置、Caddy 占位域名、APNs key/config、SMTP 配置、代理出口 IP、
 Holland2Stay GraphQL 连通性，以及 Docker supervisord 控制能力。发现阻断性
 `FAIL` 时退出码为 `1`，可以安全接入部署脚本。
 
@@ -534,7 +534,8 @@ docker compose up -d --build
 
 ### 配置说明
 
-**用户级别的配置**（通知渠道、过滤条件、自动预订）在 Web 面板 → 用户管理 中设置，存储在 `data/users.json`。
+**用户级别的配置**（通知渠道、过滤条件、自动预订）在 Web 面板 → 用户管理 中设置，存储在 SQLite `user_configs`。
+旧版 `data/users.json` 会按 `users_storage_migrated_v1` meta flag 一次性导入，并永久保留 `.bak` 迁移备份。
 
 **全局配置**可通过 Web 面板 → 全局设置，或直接编辑 `.env`：
 
@@ -640,7 +641,7 @@ models.py           Listing dataclass，price_display，feature_map
 notifier.py         BaseNotifier → iMessage（AppleScript 转义加固）/ Telegram / Email / WhatsApp / WebNotifier
 booker.py           登录 → createEmptyCart → addNewBooking → placeOrder (store_id=54) → idealCheckOut (plateform "h")；增强错误上下文
 config.py           全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig
-users.py            UserConfig，users.json 读写
+users.py            UserConfig，SQLite user_configs 读写 + 旧 users.json 迁移
 translations.py     中/英翻译字典，120+ 键覆盖全部页面
 tools/
   geocode_all.py      一次性脚本：通过 Nominatim 预加载所有房源坐标
@@ -715,7 +716,7 @@ launcher.py         macOS .app 入口（导入 web.app，处理 --run-monitor）
 .github/workflows/  GitHub Actions CI/CD（推送 tag 或手动触发构建 .dmg + .exe）
 data/               运行时自动生成
   listings.db       SQLite 数据库
-  users.json        用户配置（通知渠道 / 过滤 / 预订账号）
+  users.json*.bak   旧 users.json 迁移后的永久备份
   monitor.pid       监控进程 PID，供热重载使用
 logs/               日志文件（supervisord 写入 monitor.log + web.log）
 ```

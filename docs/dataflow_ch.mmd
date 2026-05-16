@@ -1,5 +1,5 @@
 flowchart TD
-    A["启动 monitor.py"] --> B["读取配置 .env / users.json"]
+    A["启动 monitor.py"] --> B["读取配置 .env / SQLite user_configs"]
     B --> C["创建 Storage / Notifier / WebNotifier"]
     C --> D["进入 main_loop 轮询"]
 

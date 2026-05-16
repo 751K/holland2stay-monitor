@@ -103,7 +103,7 @@ python -m pytest tests/ -v
 | iOS Dark Mode | ✅ Done | Adaptive colors throughout (Login hero, Dashboard cards, Settings); overscroll color matching |
 | iOS i18n | ✅ Done | 174 localized strings (en / zh-Hans); all UI text, error messages, labels covered |
 | iOS Registration | ✅ Done | User self-registration with bcrypt password hashing; backend rate-limiting (3 IP/hour) + conflict detection; auto-login on register |
-| iOS Account Deletion | ✅ Done | DELETE /me endpoint; double confirmation dialog; revokes all tokens + removes from users.json + cleans SQLite |
+| iOS Account Deletion | ✅ Done | DELETE /me endpoint; double confirmation dialog; revokes all tokens + removes SQLite user config |
 | iOS Legal | ✅ Done | First-launch Terms agreement (mandatory, non-dismissible); Terms + Privacy sheets in Settings and Login; full legal text in-app |
 | iOS StoreKit | ✅ Done | "Buy me a coffee" IAP (3 consumable tiers: Espresso/Latte/Flat White); StoreKit 2 transaction listener |
 | iOS Security | ✅ Done | ATS HTTPS-only; Keychain token storage; bcrypt password hashing; all `print()` guarded with `#if DEBUG`; TTL capped at 90 days; username length cap 64 chars |
@@ -244,7 +244,7 @@ This reduces the delay between detecting availability and reaching the server to
 
 - Each user has independent channels, credentials, filters, and auto-book settings
 - One scrape run is shared across all users — adding users does not multiply API traffic
-- User data is stored in `data/users.json` and can be managed entirely from the web UI
+- User data is stored in SQLite (`user_configs`) and can be managed entirely from the web UI
 - On first run, open the web panel and click "Add User" to create your first user
 
 ### Notifications
@@ -315,7 +315,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
         |        +-- WebNotifier -> web_notifications table
         |        |     -> /api/events SSE -> browser bell + toast
         |        |
-        |        +-- Loop through enabled users in users.json
+        |        +-- Loop through enabled users in SQLite user_configs
         |                 |
         |                 +-- ListingFilter.passes() -> notifier.py
         |                 |     -> iMessage (macOS only) / Telegram / Email / WhatsApp
@@ -343,7 +343,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | `notifier.py` | `BaseNotifier` ABC; iMessage (macOS gate, AppleScript escape hardened), Telegram, Email, WhatsApp, `WebNotifier`, multi-dispatch |
 | `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); enhanced error context (sku/contract_id/start_date); optional `cancel_enabled` auto-cancel, proxy support |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
-| `users.py` | `UserConfig`, `users.json` read/write |
+| `users.py` | `UserConfig`, SQLite `user_configs` read/write, legacy `users.json` migration |
 | `web.py` | Flask app bootstrap: instantiation, security headers, CSRF, Jinja filters, context processors, route registration, web process file logging |
 | `app/auth.py` | Session authentication, role decorators (`login_required`, `admin_required`, `admin_api_required`), guest mode, login rate limiting |
 | `app/csrf.py` | CSRF token generation and validation (Unicode-safe via `.encode("utf-8")`) |
@@ -386,7 +386,7 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | iMessage on non-macOS | `is_macos()` gate in `create_user_notifier()` | Logs a clear warning, skips gracefully, web notifications take over |
 | Concurrent SQLite access | WAL journal mode | Monitor writes `web_notifications`; web.py reads from a separate connection safely |
 | Hot reload across platforms | Signals on Unix, reload request file fallback on Windows | Settings apply without restarting the process |
-| Multi-user storage | `data/users.json` | No extra dependency, simple structure, easy web-based CRUD |
+| Multi-user storage | SQLite `user_configs` | Single source of truth, transactional writes, safe concurrent registration/editing |
 | Theme switching without flicker | Inline `<head>` script + CSS custom properties | Ensures the correct theme is applied before CSS paint |
 | Optional panel auth | Skip auth when `WEB_PASSWORD` is empty | Keeps local use frictionless while allowing protection when exposed |
 | Monolithic web.py (1,200+ lines) | Split into `app/routes/` (10 route modules) + `app/` (auth, csrf, db, i18n, etc.) | Each module ~15–240 lines with single responsibility; `web.py` is now a 154-line bootstrap; routes use `add_url_rule` to keep flat endpoint names so templates need zero changes |
@@ -489,7 +489,7 @@ python -m tools.doctor --smtp-login
 ```
 
 The doctor checks `.env`, writable data/log paths, SQLite integrity and required
-tables, `users.json`, Caddy placeholder domains, APNs key/config, SMTP settings,
+tables, SQLite user configs, Caddy placeholder domains, APNs key/config, SMTP settings,
 proxy exit IP, Holland2Stay GraphQL reachability, and Docker supervisord control.
 It exits with code `1` if a blocking `FAIL` is found, which makes it safe to add
 to deployment scripts.
@@ -535,7 +535,8 @@ docker compose up -d --build
 
 ## Configuration
 
-User-level settings (notifications, filters, auto-booking) are managed in the web UI and stored in `data/users.json`.
+User-level settings (notifications, filters, auto-booking) are managed in the web UI and stored in SQLite `user_configs`.
+Legacy `data/users.json` is imported once using the `users_storage_migrated_v1` meta flag and kept as a permanent `.bak` migration backup.
 
 Global settings can be changed either in the web UI or by editing `.env` directly.
 
@@ -644,7 +645,7 @@ models.py           Listing dataclass and formatting helpers
 notifier.py         BaseNotifier, iMessage (AppleScript escape hardened), Telegram, Email, WhatsApp, WebNotifier
 booker.py           Login, createEmptyCart, addNewBooking, placeOrder (store_id=54), idealCheckOut (plateform "h"), proxy support; enhanced error context
 config.py           Global config loading, known cities, ListingFilter, AutoBookConfig, heartbeat interval
-users.py            UserConfig, users.json read/write
+users.py            UserConfig, SQLite user_configs read/write + legacy migration
 translations.py     UI translations (zh/en) — 120+ keys covering all pages
 tools/
   geocode_all.py      One-shot script: pre-geocode all listing addresses via Nominatim
@@ -719,7 +720,7 @@ launcher.py         macOS .app entry point (imports web.app, handles --run-monit
 .github/workflows/  GitHub Actions CI/CD (builds .dmg + .exe on tag/manual trigger)
 data/               Runtime data (auto-created)
   listings.db       SQLite database
-  users.json        Per-user config (channels / filters / booking credentials)
+  users.json*.bak   Permanent backup created when legacy users.json is migrated
   monitor.pid       Monitor process PID for hot reload
 logs/               Log files (auto-created; supervisord writes monitor.log + web.log)
 ```

@@ -4,13 +4,14 @@
 
 ### 后端 — 账号注册与存储一致性
 
-- **新增 SQLite `app_users` 账号表**：将 App/Web 登录账号镜像写入 SQLite，`users.json` 继续作为用户配置源，SQLite 负责登录账号唯一性与并发安全。
+- **用户配置完全迁入 SQLite `user_configs`**：`users.json` 不再作为运行时数据源；首次启动按 `users_storage_migrated_v1` meta flag 一次性导入，并永久保留 `.bak` 备份。
+- **移除 SQLite `app_users` 镜像表**：App 登录字段并入 `user_configs`，避免 `users.json`/`app_users` 双源不一致。
 - **`POST /api/v1/auth/register`**：用户自助注册端点，bcrypt 密码哈希，注册即登录自动签发 token；同 IP 每小时限 3 次 + 复用登录爆破防护；并发注册冲突检测，失败自动回滚。
-- **`DELETE /api/v1/me`**：用户注销账号端点，撤销所有 token + 删除 users.json 配置 + 清理 SQLite 镜像。
+- **`DELETE /api/v1/me`**：用户注销账号端点，撤销所有 token + 删除 SQLite 用户配置。
 - **`PUT /api/v1/me/filter`**：user 自助修改过滤条件，白名单校验 + 边界值检查。
 - **`GET /api/v1/filter/options`**：返回所有过滤维度候选值（cities/types/contract/energy...），bearer_optional。
 - **Listings 多维过滤**：`GET /api/v1/listings` 新增 `cities`、`types`、`contract`、`energy` 参数，Python 端过滤。
-- **`update_users()` 加锁**：统一 read-modify-write 入口，持有进程内锁 + 原子替换，避免并发写丢失。
+- **`update_users()` SQLite 事务化**：统一 read-modify-write 入口，使用 `BEGIN IMMEDIATE` 避免并发写丢失。
 - **安全增强**：TTL 上限 365→90 天；用户名长度上限 64 字符；`err_conflict`（409）处理重名；`check_register_rate` 注册专用限流。
 
 ### 后端 — 发布前健康检查
@@ -19,7 +20,7 @@
 
 ### 后端 — 测试
 
-- 并发注册测试、网络失败传播测试、doctor smoke test、`test_app_users_concurrency.py`。
+- 并发注册测试、SQLite 用户迁移测试、网络失败传播测试、doctor smoke test。
 
 ### iOS — 登录页 V5 设计
 
