@@ -102,11 +102,18 @@ def isolated_data_dir(tmp_path, monkeypatch):
     """
     import users, config
     fake_users_file = tmp_path / "users.json"
+    fake_db = tmp_path / "listings.db"
     fake_env = tmp_path / ".env"
     fake_env.write_text("WEB_PASSWORD=dummy\n", encoding="utf-8")  # 保证 ENV_PATH.exists()
 
     monkeypatch.setattr(users, "USERS_FILE", fake_users_file)
     monkeypatch.setattr(config, "ENV_PATH", fake_env)
+    monkeypatch.setattr(config, "DB_PATH", fake_db)
+    try:
+        import app.db as app_db
+        monkeypatch.setattr(app_db, "DB_PATH", fake_db)
+    except ImportError:
+        pass
 
     # settings 路由
     try:

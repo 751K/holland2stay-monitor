@@ -107,10 +107,10 @@ class TestTTLBoundaries:
         assert d["ttl_days"] == 30
 
     def test_max_ttl_clamped(self, api_client, admin_password):
-        """MAX_TTL_DAYS=365 是上限。"""
-        d = self._expires_at(api_client, admin_password, 365)
-        assert d["ttl_days"] == 365
-        d2 = self._expires_at(api_client, admin_password, 366)
+        """MAX_TTL_DAYS=90 是上限。"""
+        d = self._expires_at(api_client, admin_password, 90)
+        assert d["ttl_days"] == 90
+        d2 = self._expires_at(api_client, admin_password, 91)
         assert d2["ttl_days"] == 90  # 越界 → 默认
 
 

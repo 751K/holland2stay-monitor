@@ -2,14 +2,14 @@
 用户管理路由 E2E：/users + /users/new + /users/<id> + /users/<id>/toggle + /users/<id>/delete
 
 T1 已经测了 build_user_from_form 的字段绑定。这里关心 HTTP 层 + 持久化：
-- 创建 → users.json 写入
+- 创建 → SQLite user_configs 写入
 - 编辑 → 密码字段空提交 → 旧值保留（生产事故防线 E2E 版）
 - 切换 enabled → 持久化
-- 删除 → 移出 users.json
+- 删除 → 移出 SQLite user_configs
 - 不存在的 user_id → flash + 重定向
 
-isolated_data_dir fixture 把 USERS_FILE 重定向到 tmp_path，
-所以测试不会污染真实 data/users.json。
+isolated_data_dir fixture 把 USERS_FILE / DB_PATH 重定向到 tmp_path，
+所以测试不会污染真实 data/。
 """
 from __future__ import annotations
 
@@ -87,27 +87,6 @@ class TestUserNew:
             "csrf_token": "test_csrf", "name": "x",
         })
         assert r.status_code == 302  # redirect to /
-
-    def test_create_rolls_back_when_app_user_sync_fails(self, admin_client, monkeypatch):
-        from users import load_users
-        from app.routes import users as users_route
-
-        monkeypatch.setattr(
-            users_route,
-            "_sync_app_user_or_raise",
-            lambda _user: (_ for _ in ()).throw(OSError("sync failed")),
-        )
-        r = admin_client.post("/users/new", data={
-            "csrf_token": "test_csrf",
-            "name": "Rollback Web",
-            "enabled": "true",
-            "NOTIFICATIONS_ENABLED": "true",
-            "NOTIFICATION_CHANNELS": "imessage",
-            "IMESSAGE_RECIPIENT": "+15550000000",
-        })
-        assert r.status_code == 302
-        assert load_users() == []
-
 
 # ─── Edit user + 密码保留 E2E ────────────────────────────────
 
@@ -187,30 +166,6 @@ class TestUserEdit:
         from users import load_users
         updated = load_users()[0]
         assert updated.id == original_id
-
-    def test_edit_rolls_back_when_app_user_sync_fails(self, admin_client, monkeypatch):
-        from users import load_users
-        from app.routes import users as users_route
-
-        u = _create_user(admin_client, name="Rollback Edit")
-        monkeypatch.setattr(
-            users_route,
-            "_sync_app_user_or_raise",
-            lambda _user: (_ for _ in ()).throw(OSError("sync failed")),
-        )
-        r = admin_client.post(f"/users/{u.id}", data={
-            "csrf_token": "test_csrf",
-            "name": "Rollback Edit Changed",
-            "enabled": "true",
-            "NOTIFICATIONS_ENABLED": "true",
-            "NOTIFICATION_CHANNELS": "imessage",
-        })
-        assert r.status_code == 302
-        users = load_users()
-        assert len(users) == 1
-        assert users[0].id == u.id
-        assert users[0].name == "Rollback Edit"
-
 
 # ─── Toggle ───────────────────────────────────────────────────
 

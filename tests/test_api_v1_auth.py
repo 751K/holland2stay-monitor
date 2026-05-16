@@ -33,9 +33,9 @@ from users import UserConfig, save_users, set_app_password
 @pytest.fixture
 def api_app(test_app, tmp_path, monkeypatch):
     """
-    test_app + tmp DB（隔离 token 表 / users.json 写入）。
+    test_app + tmp DB（隔离 token 表 / user_configs 写入）。
 
-    test_app 已经隔离了 users.json / .env / logs；这里再把 DB_PATH 重定向到
+    test_app 已经隔离了 USERS_FILE / DB_PATH / .env / logs；这里再把 DB_PATH 重定向到
     tmp_path 下的 fresh db，避免 token 表污染真实库。
     """
     fake_db = tmp_path / "api_test.db"
@@ -59,7 +59,7 @@ def admin_password(test_credentials):
 
 @pytest.fixture
 def seeded_user(api_app):
-    """在 users.json 写一个开 app_login_enabled 的用户。返回 (UserConfig, plaintext)."""
+    """写一个开 app_login_enabled 的用户。返回 (UserConfig, plaintext)。"""
     plaintext = "user_pass_xyz_456"
     u = UserConfig(
         name="kong",
