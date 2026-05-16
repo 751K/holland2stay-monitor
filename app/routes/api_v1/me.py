@@ -18,9 +18,15 @@ API v1 当前用户专属端点
 
 from __future__ import annotations
 
-from flask import Blueprint
+import logging
+from dataclasses import replace
+from typing import Any
+
+from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
+from config import ENERGY_LABELS, ListingFilter
+from users import load_users, save_users
 
 from ._helpers import (
     apply_user_filter,
@@ -28,6 +34,8 @@ from ._helpers import (
     serialize_filter,
     storage_ctx,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _summary():
@@ -82,6 +90,129 @@ def _filter():
     })
 
 
+# 可改的字段白名单 + 类型校验函数。
+# 不在白名单的字段会被忽略，避免客户端注入未知 attr。
+_LIST_FIELDS = {
+    "allowed_occupancy",
+    "allowed_types",
+    "allowed_neighborhoods",
+    "allowed_cities",
+    "allowed_contract",
+    "allowed_tenant",
+    "allowed_offer",
+    "allowed_finishing",
+}
+_FLOAT_FIELDS = {"max_rent", "min_area"}
+_INT_FIELDS = {"min_floor"}
+
+
+def _coerce_filter_payload(raw: Any) -> dict[str, Any]:
+    """
+    把客户端 JSON payload 收成可丢给 ``ListingFilter(...)`` 的 dict。
+
+    规则：
+    - None / 缺省的字段：跳过（保持 ListingFilter 默认值）
+    - 数值字段：尝试 float/int；负数 / NaN / 非数 → 丢弃
+    - 列表字段：必须是 list[str]；非字符串元素被过滤
+    - allowed_energy：必须在白名单内（大小写不敏感），否则改为 ""
+    - 其它字段：忽略
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("filter 必须是 JSON 对象")
+
+    out: dict[str, Any] = {}
+    for k in _FLOAT_FIELDS:
+        if k in raw and raw[k] is not None:
+            try:
+                v = float(raw[k])
+                if v > 0 and v < 1e9 and v == v:  # v==v filters NaN
+                    out[k] = v
+            except (TypeError, ValueError):
+                pass
+    for k in _INT_FIELDS:
+        if k in raw and raw[k] is not None:
+            try:
+                v = int(raw[k])
+                if 0 <= v <= 200:
+                    out[k] = v
+            except (TypeError, ValueError):
+                pass
+    for k in _LIST_FIELDS:
+        v = raw.get(k)
+        if isinstance(v, list):
+            cleaned = [str(x).strip() for x in v if isinstance(x, str) and x.strip()]
+            out[k] = cleaned[:50]   # 50 上限防滥用
+    if "allowed_energy" in raw:
+        v = raw.get("allowed_energy")
+        if isinstance(v, str):
+            upper = v.strip().upper()
+            out["allowed_energy"] = upper if upper in ENERGY_LABELS else ""
+    return out
+
+
+def _filter_update():
+    """
+    PUT /api/v1/me/filter — user 自助修改自己的过滤条件。
+
+    幂等：完整覆盖式更新（缺省字段保留 ListingFilter 默认值，**不**保留旧值）。
+
+    业务效果：
+    - 立即写回 ``data/users.json``（``save_users`` 原子替换）
+    - 下一轮 ``monitor.run_once`` 检测到文件 mtime 变化会自动 reload 用户配置
+      （现有 _load_users_if_changed 逻辑，不需要这里显式触发）
+    - APNs 设备绑定不动；推送策略下轮即按新 filter 决定
+
+    Body: ListingFilter 的字段子集，例如
+        {"max_rent": 900, "min_area": 25, "allowed_cities": ["Eindhoven"]}
+    """
+    role = api_auth.current_role()
+    if role != "user":
+        return _err.err_forbidden("仅 user 角色可修改自己的过滤条件")
+    user = get_current_user()
+    if user is None:
+        return _err.err_unauthorized("用户已被删除")
+
+    body = request.get_json(silent=True) or {}
+    try:
+        cleaned = _coerce_filter_payload(body)
+    except ValueError as e:
+        return _err.err_validation(str(e))
+
+    new_filter = ListingFilter(**cleaned)
+
+    # users.json 是 source of truth；重新 load 拿最新（防其他端并发修改丢失）
+    try:
+        all_users = load_users()
+    except RuntimeError as e:
+        logger.error("users.json 解析失败: %s", e)
+        return _err.err_server_error(e, "用户配置文件损坏")
+    target_idx = next(
+        (i for i, u in enumerate(all_users) if u.id == user.id), None
+    )
+    if target_idx is None:
+        return _err.err_unauthorized("用户已被删除")
+
+    all_users[target_idx] = replace(all_users[target_idx], listing_filter=new_filter)
+    try:
+        save_users(all_users)
+    except Exception as e:
+        logger.exception("save_users 失败")
+        return _err.err_server_error(e, "保存失败")
+
+    logger.info(
+        "user=%s 自助修改 filter: %s",
+        user.id,
+        {k: v for k, v in cleaned.items() if v not in (None, [], "")},
+    )
+
+    # 重新读 / serialize 后返回，保证客户端与服务端状态一致
+    return _err.ok({
+        "role": role,
+        "filter": serialize_filter(all_users[target_idx]),
+        "is_empty": all_users[target_idx].listing_filter.is_empty(),
+    })
+
+
 def register(bp: Blueprint) -> None:
     bp.add_url_rule(
         "/me/summary",
@@ -94,4 +225,10 @@ def register(bp: Blueprint) -> None:
         endpoint="me_filter",
         view_func=api_auth.bearer_required(("admin", "user"))(_filter),
         methods=["GET"],
+    )
+    bp.add_url_rule(
+        "/me/filter",
+        endpoint="me_filter_update",
+        view_func=api_auth.bearer_required(("user",))(_filter_update),
+        methods=["PUT"],
     )

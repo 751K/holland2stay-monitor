@@ -6,7 +6,7 @@ struct UserInfo: Decodable, Sendable {
     let name: String
     let enabled: Bool
     let notificationsEnabled: Bool
-    let listingFilter: ListingFilter
+    var listingFilter: ListingFilter   // var：filter 修改后本地同步替换
 
     enum CodingKeys: String, CodingKey {
         case id, name, enabled

@@ -109,6 +109,14 @@ final class AuthStore {
         userInfo = nil
     }
 
+    /// 编辑 filter 保存后调用——把 ``userInfo.listingFilter`` 同步成后端
+    /// 规范化过的版本。Dashboard.meSummary 等读 userInfo 的视图会即时刷新。
+    func updateLocalFilter(_ filter: ListingFilter) {
+        guard var info = userInfo else { return }
+        info.listingFilter = filter
+        userInfo = info
+    }
+
     // MARK: - Logout
 
     func logout() async {

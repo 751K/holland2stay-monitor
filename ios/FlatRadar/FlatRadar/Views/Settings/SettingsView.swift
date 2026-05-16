@@ -13,6 +13,9 @@ struct SettingsView: View {
     @State private var testResultMessage: String?
     @State private var showTestResult = false
 
+    // Filter 编辑 sheet
+    @State private var showFilterEdit = false
+
     var body: some View {
         NavigationStack {
             Form {
@@ -71,6 +74,36 @@ struct SettingsView: View {
                                 }
                             }
                             Button("Cancel", role: .cancel) {}
+                        }
+                    }
+
+                    // Notification filter (user role only — admin sees everything)
+                    if auth.isUser, let info = auth.userInfo {
+                        Section {
+                            Button {
+                                showFilterEdit = true
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        Label("Notification Filter",
+                                              systemImage: "line.3.horizontal.decrease.circle.fill")
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    Text(info.listingFilter.summary)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        } header: {
+                            Text("Push Filter")
+                        } footer: {
+                            Text("Only listings matching this filter trigger APNs and notification tab updates.")
                         }
                     }
 
@@ -171,6 +204,9 @@ struct SettingsView: View {
                 Button("OK", role: .cancel) {}
             } message: { msg in
                 Text(msg)
+            }
+            .sheet(isPresented: $showFilterEdit) {
+                FilterEditView()
             }
         }
     }

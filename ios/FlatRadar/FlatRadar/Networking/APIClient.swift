@@ -240,6 +240,12 @@ final class APIClient {
         try await request("GET", "api/v1/me/filter")
     }
 
+    /// PUT 完整 ListingFilter（覆盖式更新）。仅 user 角色可调；admin 调会 403。
+    /// 后端 ``_coerce_filter_payload`` 做白名单过滤 + 边界校验，多/少字段都安全。
+    func updateMeFilter(_ filter: ListingFilter) async throws -> MeFilterResponse {
+        try await request("PUT", "api/v1/me/filter", body: filter)
+    }
+
     // MARK: - Devices / APNs (Phase 3)
 
     /// 注册或刷新一台设备的 APNs token。

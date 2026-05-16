@@ -16,6 +16,7 @@ struct FlatRadarApp: App {
     @State private var notificationsStore = NotificationsStore()
     @State private var mapStore = MapStore()
     @State private var calendarStore = CalendarStore()
+    @State private var meFilterStore = MeFilterStore()
     @State private var pushStore = PushStore()
     @State private var coordinator = NavigationCoordinator()
 
@@ -32,6 +33,7 @@ struct FlatRadarApp: App {
                 .environment(notificationsStore)
                 .environment(mapStore)
                 .environment(calendarStore)
+                .environment(meFilterStore)
                 .environment(pushStore)
                 .environment(coordinator)
                 .task {
