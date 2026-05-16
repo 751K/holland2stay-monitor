@@ -79,11 +79,44 @@ class UserConfigOps:
                 "SELECT id, created_at FROM user_configs"
             ).fetchall()
         }
-        self._conn.execute("DELETE FROM user_configs")
+        incoming_ids = {str(row["id"]) for row in materialized}
+        if incoming_ids:
+            placeholders = ", ".join("?" for _ in incoming_ids)
+            self._conn.execute(
+                f"DELETE FROM user_configs WHERE id NOT IN ({placeholders})",
+                tuple(incoming_ids),
+            )
+        else:
+            self._conn.execute("DELETE FROM user_configs")
         placeholders = ", ".join("?" for _ in USER_CONFIG_COLUMNS)
         sql = (
-            f"INSERT INTO user_configs ({', '.join(USER_CONFIG_COLUMNS)}) "
-            f"VALUES ({placeholders})"
+            f"INSERT INTO user_configs ({', '.join(USER_CONFIG_COLUMNS)}) VALUES ({placeholders}) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "name=excluded.name, "
+            "enabled=excluded.enabled, "
+            "notifications_enabled=excluded.notifications_enabled, "
+            "notification_channels_json=excluded.notification_channels_json, "
+            "imessage_recipient=excluded.imessage_recipient, "
+            "telegram_token=excluded.telegram_token, "
+            "telegram_chat_id=excluded.telegram_chat_id, "
+            "email_smtp_host=excluded.email_smtp_host, "
+            "email_smtp_port=excluded.email_smtp_port, "
+            "email_smtp_security=excluded.email_smtp_security, "
+            "email_username=excluded.email_username, "
+            "email_password=excluded.email_password, "
+            "email_from=excluded.email_from, "
+            "email_to=excluded.email_to, "
+            "twilio_sid=excluded.twilio_sid, "
+            "twilio_token=excluded.twilio_token, "
+            "twilio_from=excluded.twilio_from, "
+            "twilio_to=excluded.twilio_to, "
+            "listing_filter_json=excluded.listing_filter_json, "
+            "auto_book_json=excluded.auto_book_json, "
+            "app_password_hash=excluded.app_password_hash, "
+            "app_login_enabled=excluded.app_login_enabled, "
+            "allow_h2s_login=excluded.allow_h2s_login, "
+            "sort_order=excluded.sort_order, "
+            "updated_at=excluded.updated_at"
         )
         for idx, row in enumerate(materialized):
             item = dict(row)

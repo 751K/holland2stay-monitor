@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 USERS_FILE = DATA_DIR / "users.json"
 USERS_MIGRATION_META_KEY = "users_storage_migrated_v1"
+DEFAULT_EMAIL_SMTP_PORT = 587
 _T = TypeVar("_T")
 
 
@@ -252,6 +253,8 @@ def load_users() -> list[UserConfig]:
 
 def _user_to_row(u: UserConfig) -> dict:
     """UserConfig -> SQLite row dict。敏感字段按原 users.json 规则加密。"""
+    from mstorage._user_configs import UserConfigOps
+
     d = asdict(u)
     for field_name in ("email_password", "telegram_token", "twilio_token"):
         if d.get(field_name):
@@ -265,16 +268,12 @@ def _user_to_row(u: UserConfig) -> dict:
         "name": d["name"],
         "enabled": 1 if d.get("enabled") else 0,
         "notifications_enabled": 1 if d.get("notifications_enabled") else 0,
-        "notification_channels_json": json.dumps(
-            d.get("notification_channels", []),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ),
+        "notification_channels_json": UserConfigOps.dumps_json(d.get("notification_channels", [])),
         "imessage_recipient": d.get("imessage_recipient", ""),
         "telegram_token": d.get("telegram_token", ""),
         "telegram_chat_id": d.get("telegram_chat_id", ""),
         "email_smtp_host": d.get("email_smtp_host", ""),
-        "email_smtp_port": int(d.get("email_smtp_port") or 587),
+        "email_smtp_port": int(d.get("email_smtp_port") or DEFAULT_EMAIL_SMTP_PORT),
         "email_smtp_security": d.get("email_smtp_security", "starttls"),
         "email_username": d.get("email_username", ""),
         "email_password": d.get("email_password", ""),
@@ -284,16 +283,8 @@ def _user_to_row(u: UserConfig) -> dict:
         "twilio_token": d.get("twilio_token", ""),
         "twilio_from": d.get("twilio_from", ""),
         "twilio_to": d.get("twilio_to", ""),
-        "listing_filter_json": json.dumps(
-            d.get("listing_filter", {}),
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ),
-        "auto_book_json": json.dumps(
-            ab,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        ),
+        "listing_filter_json": UserConfigOps.dumps_json(d.get("listing_filter", {})),
+        "auto_book_json": UserConfigOps.dumps_json(ab),
         "app_password_hash": d.get("app_password_hash", ""),
         "app_login_enabled": 1 if d.get("app_login_enabled") else 0,
         "allow_h2s_login": 1 if d.get("allow_h2s_login") else 0,
@@ -301,7 +292,7 @@ def _user_to_row(u: UserConfig) -> dict:
 
 
 def _row_to_user(row: dict) -> UserConfig:
-    """SQLite row dict -> UserConfig。复用 _user_from_dict 的兼容/解密逻辑。"""
+    """SQLite row dict -> UserConfig。SQLite 字段固定，直接构造 dataclass。"""
     try:
         channels = json.loads(row.get("notification_channels_json") or "[]")
     except Exception:
@@ -315,32 +306,45 @@ def _row_to_user(row: dict) -> UserConfig:
     except Exception:
         auto_book = {}
 
-    return _user_from_dict({
-        "id": row.get("id", ""),
-        "name": row.get("name", ""),
-        "enabled": bool(row.get("enabled")),
-        "notifications_enabled": bool(row.get("notifications_enabled")),
-        "notification_channels": channels if isinstance(channels, list) else [],
-        "imessage_recipient": row.get("imessage_recipient", ""),
-        "telegram_token": row.get("telegram_token", ""),
-        "telegram_chat_id": row.get("telegram_chat_id", ""),
-        "email_smtp_host": row.get("email_smtp_host", ""),
-        "email_smtp_port": row.get("email_smtp_port", 587),
-        "email_smtp_security": row.get("email_smtp_security", "starttls"),
-        "email_username": row.get("email_username", ""),
-        "email_password": row.get("email_password", ""),
-        "email_from": row.get("email_from", ""),
-        "email_to": row.get("email_to", ""),
-        "twilio_sid": row.get("twilio_sid", ""),
-        "twilio_token": row.get("twilio_token", ""),
-        "twilio_from": row.get("twilio_from", ""),
-        "twilio_to": row.get("twilio_to", ""),
-        "listing_filter": listing_filter if isinstance(listing_filter, dict) else {},
-        "auto_book": auto_book if isinstance(auto_book, dict) else {},
-        "app_password_hash": row.get("app_password_hash", ""),
-        "app_login_enabled": bool(row.get("app_login_enabled")),
-        "allow_h2s_login": bool(row.get("allow_h2s_login")),
-    })
+    email_password = row.get("email_password", "")
+    telegram_token = row.get("telegram_token", "")
+    twilio_token = row.get("twilio_token", "")
+    auto_book_data = auto_book if isinstance(auto_book, dict) else {}
+
+    if email_password:
+        email_password = decrypt(email_password)
+    if telegram_token:
+        telegram_token = decrypt(telegram_token)
+    if twilio_token:
+        twilio_token = decrypt(twilio_token)
+    ab = _ab_from_dict(auto_book_data)
+
+    return UserConfig(
+        id=row.get("id", ""),
+        name=row.get("name", ""),
+        enabled=bool(row.get("enabled")),
+        notifications_enabled=bool(row.get("notifications_enabled")),
+        notification_channels=channels if isinstance(channels, list) else [],
+        imessage_recipient=row.get("imessage_recipient", ""),
+        telegram_token=telegram_token,
+        telegram_chat_id=row.get("telegram_chat_id", ""),
+        email_smtp_host=row.get("email_smtp_host", ""),
+        email_smtp_port=int(row.get("email_smtp_port") or DEFAULT_EMAIL_SMTP_PORT),
+        email_smtp_security=row.get("email_smtp_security", "starttls"),
+        email_username=row.get("email_username", ""),
+        email_password=email_password,
+        email_from=row.get("email_from", ""),
+        email_to=row.get("email_to", ""),
+        twilio_sid=row.get("twilio_sid", ""),
+        twilio_token=twilio_token,
+        twilio_from=row.get("twilio_from", ""),
+        twilio_to=row.get("twilio_to", ""),
+        listing_filter=_lf_from_dict(listing_filter if isinstance(listing_filter, dict) else {}),
+        auto_book=ab,
+        app_password_hash=row.get("app_password_hash", ""),
+        app_login_enabled=bool(row.get("app_login_enabled")),
+        allow_h2s_login=bool(row.get("allow_h2s_login")),
+    )
 
 
 def _users_to_rows(users: list[UserConfig]) -> list[dict]:
