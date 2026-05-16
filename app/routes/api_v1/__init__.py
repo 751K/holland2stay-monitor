@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from flask import Blueprint, Flask
 
+from . import admin as _admin
 from . import auth as _auth
 from . import calendar as _calendar
 from . import devices as _devices
@@ -43,4 +44,5 @@ def register(app: Flask) -> None:
     _notifications.register(bp)
     _me.register(bp)
     _devices.register(bp)
+    _admin.register(bp)
     app.register_blueprint(bp)

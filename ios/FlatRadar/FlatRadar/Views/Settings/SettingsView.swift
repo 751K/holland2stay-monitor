@@ -180,6 +180,26 @@ struct SettingsView: View {
                 }
 
                 // Appearance
+                // Admin tools — admin role only
+                if auth.isAdmin {
+                    Section {
+                        NavigationLink {
+                            AdminUsersView()
+                        } label: {
+                            Label("Manage Users", systemImage: "person.2.fill")
+                        }
+                        NavigationLink {
+                            AdminMonitorView()
+                        } label: {
+                            Label("Monitor Control", systemImage: "gauge.with.dots.needle.50percent")
+                        }
+                    } header: {
+                        Text("Admin")
+                    } footer: {
+                        Text("Toggle users on/off, delete accounts, and control the scraping process.")
+                    }
+                }
+
                 Section("Appearance") {
                     Picker("Color Scheme", selection: $colorScheme) {
                         Text("System").tag("system")

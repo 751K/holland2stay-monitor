@@ -289,6 +289,36 @@ final class APIClient {
             body: TestPushBody(title: title, body: body))
     }
 
+    // MARK: - Admin (Phase 5 Part 2) — admin role only
+
+    func adminListUsers() async throws -> AdminUsersResponse {
+        try await request("GET", "api/v1/admin/users")
+    }
+
+    func adminToggleUser(id: String) async throws -> AdminUserToggleResponse {
+        try await request("POST", "api/v1/admin/users/\(id)/toggle")
+    }
+
+    func adminDeleteUser(id: String) async throws -> AdminUserDeleteResponse {
+        try await request("DELETE", "api/v1/admin/users/\(id)")
+    }
+
+    func adminMonitorStatus() async throws -> AdminMonitorStatus {
+        try await request("GET", "api/v1/admin/monitor/status")
+    }
+
+    func adminMonitorStart() async throws -> AdminMonitorActionResponse {
+        try await request("POST", "api/v1/admin/monitor/start")
+    }
+
+    func adminMonitorStop() async throws -> AdminMonitorActionResponse {
+        try await request("POST", "api/v1/admin/monitor/stop")
+    }
+
+    func adminMonitorReload() async throws -> AdminMonitorActionResponse {
+        try await request("POST", "api/v1/admin/monitor/reload")
+    }
+
     // MARK: - Helpers
 
     private func urlEncode(_ s: String) -> String {

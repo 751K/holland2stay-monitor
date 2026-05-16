@@ -26,17 +26,68 @@ struct MapView: View {
             span: MKCoordinateSpan(latitudeDelta: 0.55, longitudeDelta: 0.55)))
     @State private var showRefreshError = false
 
+    /// 当前 visible region；onMapCameraChange 实时刷新。clustering 依赖它推 cell 大小。
+    /// 初值与 camera 初值一致（Eindhoven 60km）。
+    @State private var currentRegion = MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 51.4416, longitude: 5.4697),
+        span: MKCoordinateSpan(latitudeDelta: 0.55, longitudeDelta: 0.55))
+
+    /// 当前 cluster 列表（由 listings + currentRegion 决定）。
+    private var clusters: [ListingCluster] {
+        MapClustering.cluster(listings: store.listings, region: currentRegion)
+    }
+
+    /// 判断两个 region 是否跨过 log2 量化桶边界。
+    /// 同桶内 cluster 不会变 → 不需要 withAnimation 包裹 currentRegion 更新，
+    /// 避免每秒 60 次 withAnimation 带来的开销。
+    private static func bucketsDiffer(
+        _ a: MKCoordinateRegion, _ b: MKCoordinateRegion
+    ) -> Bool {
+        let qa = MapClustering.quantizeSpan(a.span.latitudeDelta)
+        let qb = MapClustering.quantizeSpan(b.span.latitudeDelta)
+        return qa != qb
+    }
+
     var body: some View {
         @Bindable var store = store
 
         // 不再自带 NavigationStack；外层 BrowseView 提供。
         ZStack(alignment: .top) {
                 Map(position: $camera, selection: $store.selectedID) {
-                    ForEach(store.listings) { l in
-                        Annotation(l.name, coordinate: l.coordinate) {
-                            pinView(for: l)
+                    ForEach(clusters) { cluster in
+                        if cluster.isSingle, let l = cluster.single {
+                            Annotation(l.name, coordinate: l.coordinate) {
+                                pinView(for: l)
+                                    .transition(.asymmetric(
+                                        insertion: .scale(scale: 0.4).combined(with: .opacity),
+                                        removal: .scale(scale: 0.4).combined(with: .opacity)))
+                            }
+                            .tag(l.id)
+                        } else {
+                            Annotation("\(cluster.count) listings",
+                                       coordinate: cluster.coordinate) {
+                                clusterBubble(for: cluster)
+                                    .transition(.asymmetric(
+                                        insertion: .scale(scale: 0.5).combined(with: .opacity),
+                                        removal: .scale(scale: 0.5).combined(with: .opacity)))
+                            }
+                            .annotationTitles(.hidden)
                         }
-                        .tag(l.id)
+                    }
+                }
+                .onMapCameraChange(frequency: .continuous) { context in
+                    // 用 .continuous 让 cluster 跟手；防闪烁靠 MapClustering 内
+                    // log2 量化 cellSize —— 桶内任意缩放都映射到同一个 grid。
+                    // 跨桶时簇增减用 withAnimation 平滑过渡。
+                    let newRegion = context.region
+                    if Self.bucketsDiffer(currentRegion, newRegion) {
+                        // 跨桶才动画，避免无变化时浪费
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            currentRegion = newRegion
+                        }
+                    } else {
+                        // 同桶内仅静默更新 region（实际不会触发 cluster 重算）
+                        currentRegion = newRegion
                     }
                 }
                 .mapStyle(.standard(elevation: .realistic))
@@ -133,6 +184,70 @@ struct MapView: View {
         }
         .scaleEffect(selected ? 1.15 : 1.0)
         .animation(.spring(duration: 0.25), value: selected)
+    }
+
+    // MARK: - Cluster bubble
+
+    /// 簇气泡：白边大圆 + 数字。颜色按簇内主导状态决定（available > lottery > other）。
+    /// 点击 → ``zoomIn(to:)`` 把镜头缩到该簇 bounding 区域。
+    @ViewBuilder
+    private func clusterBubble(for cluster: ListingCluster) -> some View {
+        let color = clusterColor(for: cluster)
+        // 簇大小按 count log 缓增，避免一簇 50 套时气泡占满屏
+        let size: CGFloat = clusterSize(count: cluster.count)
+        Button {
+            zoomIn(to: cluster)
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(color.opacity(0.25))
+                    .frame(width: size + 12, height: size + 12)
+                Circle()
+                    .fill(color.gradient)
+                    .frame(width: size, height: size)
+                    .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
+                Circle()
+                    .stroke(.white, lineWidth: 2.5)
+                    .frame(width: size, height: size)
+                Text("\(cluster.count)")
+                    .font(.system(size: size * 0.42, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func clusterSize(count: Int) -> CGFloat {
+        // 2-3 套 → 34；4-9 套 → 40；10-24 → 46；25+ → 54
+        switch count {
+        case ..<4:  return 34
+        case 4..<10: return 40
+        case 10..<25: return 46
+        default: return 54
+        }
+    }
+
+    /// 簇颜色取簇内最高优先级状态：Available > Lottery > 其它。
+    private func clusterColor(for cluster: ListingCluster) -> Color {
+        var hasAvailable = false
+        var hasLottery = false
+        for l in cluster.listings {
+            let s = l.status.lowercased()
+            if s.contains("available to book") { hasAvailable = true }
+            else if s.contains("lottery") { hasLottery = true }
+        }
+        if hasAvailable { return .green }
+        if hasLottery { return .orange }
+        return .blue
+    }
+
+    /// 点击簇：相机动画到该簇 bounding 区域，触发自动 zoom-in。
+    /// 下一次 onMapCameraChange 会用新 region 重算 clusters，自动展开成更细的簇 / 单 pin。
+    private func zoomIn(to cluster: ListingCluster) {
+        let region = cluster.boundingRegion()
+        withAnimation(.easeInOut(duration: 0.4)) {
+            camera = .region(region)
+        }
     }
 
     private func pinColor(for status: String) -> Color {

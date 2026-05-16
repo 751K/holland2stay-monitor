@@ -604,6 +604,9 @@
         }
       }
     },
+    "Contract" : {
+
+    },
     "Count" : {
 
     },
@@ -839,6 +842,9 @@
           }
         }
       }
+    },
+    "Finishing" : {
+
     },
     "First seen" : {
       "localizations" : {
@@ -1136,7 +1142,6 @@
       }
     },
     "Loading…" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1290,10 +1295,10 @@
     "Max rent" : {
 
     },
-    "Min A means A is okay but A+/A++/A+++ are also accepted. Anything below the threshold is filtered out." : {
+    "Min area" : {
 
     },
-    "Min area" : {
+    "Min B = A/A+/A++/A+++ also accepted; C and worse filtered out." : {
 
     },
     "Min energy label" : {
@@ -1333,6 +1338,9 @@
           }
         }
       }
+    },
+    "Neighborhoods" : {
+
     },
     "Network error: %@" : {
       "localizations" : {
@@ -1546,6 +1554,9 @@
         }
       }
     },
+    "No options available" : {
+
+    },
     "Not determined" : {
       "localizations" : {
         "en" : {
@@ -1612,6 +1623,12 @@
           }
         }
       }
+    },
+    "Occupancy" : {
+
+    },
+    "Offer" : {
+
     },
     "OK" : {
       "localizations" : {
@@ -1912,7 +1929,7 @@
         }
       }
     },
-    "Select one or more. Empty = match all cities." : {
+    "Select cities first to see neighborhoods" : {
 
     },
     "Send Test Push" : {
@@ -2141,6 +2158,9 @@
         }
       }
     },
+    "Tenant" : {
+
+    },
     "Test Push" : {
       "localizations" : {
         "en" : {
@@ -2287,6 +2307,9 @@
           }
         }
       }
+    },
+    "Types" : {
+
     },
     "Unable to Load" : {
       "localizations" : {
