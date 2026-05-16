@@ -86,6 +86,106 @@ python -m pytest tests/ -v
 | 错误日志（errors.log）| ✅ 已完成 | 独立 WARNING+ 日志，含 `funcName:lineno` 格式；新增 web.log 记录 Flask 应用日志；日志查看器支持文件 Tab 切换、行号、级别着色、关键词搜索、自动滚动 |
 | Pytest 测试套件 | ✅ 已完成 | 30 个测试模块（566 个测试），覆盖全栈：模型、mcore、mstorage、存储、抓取、预订、通知、认证、CSRF、路由、i18n |
 | 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Mixin 组合 Storage、解析逻辑去重 |
+| **iOS App (FlatRadar)** |
+| iOS 认证与 RBAC | ✅ 已完成 | Admin / User / Guest 三档登录；Keychain token 持久化；全局 401/403 自动登出 |
+| iOS Dashboard | ✅ 已完成 | 实时统计卡片 + sparkline 折线图；问候语横幅；2×2 探索网格含内联迷你图表（状态/价格/户型/能源）；匹配房源预览 |
+| iOS 房源列表 | ✅ 已完成 | 分页列表 + 无限滚动 + 搜索；多维筛选（城市/状态/户型/合同/能源）；6 种排序；详情页含关键明细、监控历史、官方核实提醒 |
+| iOS 地图 | ✅ 已完成 | 原生 MapKit + 自定义网格聚类；颜色编码 pin（绿/橙/灰）；集群气泡点击缩放；底部 sheet 卡片 → deep link 跳详情 |
+| iOS 日历 | ✅ 已完成 | 月入住日历含每日可入住数量；月份切换；选中日房源列表 → 详情 |
+| iOS 通知 | ✅ 已完成 | 卡片式 inbox，TODAY/YESTERDAY/EARLIER 三分区；SSE 实时流 + 指数退避重连；滑动已读；未读 badge；APNs 推送（sandbox/production 自动切换） |
+| iOS 设置 | ✅ 已完成 | 通知过滤器编辑器（10 维度多选）；推送权限与设备注册；测试推送（admin）；主题切换（浅色/深色/系统）；账户管理（注销/删除账号）；法律文档（使用条款 + 隐私政策） |
+| iOS 管理面板 | ✅ 已完成 | 用户管理列表（启用/禁用/删除）；监控进程控制（启动/停止/重载 + 状态查看） |
+| iOS 自适应布局 | ✅ 已完成 | iPhone：4 tab + Browse 分段选择器（列表/地图/日历）；iPad：6 tab 直接展开展开；键盘快捷键 ⌘1-6 |
+| iOS Deep Link | ✅ 已完成 | `h2smonitor://listing/<id>` URL Scheme；APNs 通知点击 → 房源详情 |
+| iOS 设计系统 | ✅ 已完成 | 主色 #0A84FF；语义色 #34C759 / #FF9500 / #FF3B30；所有 KPI/价格/时间戳使用 tabular-nums；元数据使用 SF Mono |
+| iOS 深色模式 | ✅ 已完成 | 全页面自适应（登录 Hero / Dashboard 卡片 / Settings）；overscroll 颜色跟随 |
+| iOS 多语言 | ✅ 已完成 | 174 条本地化字符串（en / zh-Hans）；覆盖所有 UI 文本、错误消息、标签 |
+| iOS 用户注册 | ✅ 已完成 | 用户自助注册，bcrypt 密码哈希；后端限流（每小时每 IP 3 次）+ 冲突检测；注册即登录 |
+| iOS 账号注销 | ✅ 已完成 | DELETE /me 端点；双重确认弹窗；撤销所有 token + 删除 users.json 配置 + 清理 SQLite |
+| iOS 法律合规 | ✅ 已完成 | 首次启动 Terms 强制同意弹窗（不可跳过）；Settings 和 Login 内嵌完整使用条款和隐私政策 |
+| iOS StoreKit | ✅ 已完成 | "请我喝杯咖啡" 内购（3 档 consumable：Espresso/Latte/Flat White）；StoreKit 2 交易监听 |
+| iOS 安全 | ✅ 已完成 | ATS HTTPS-only；Keychain token 存储；bcrypt 密码哈希；全部 `print()` 使用 `#if DEBUG` 守卫；TTL 上限 90 天；用户名长度限制 64 字符 |
+| iOS App Store 就绪 | ✅ 已完成 | PrivacyInfo.xcprivacy（UserDefaults CA92.1 + 数据收集声明）；App 图标；Info.plist 配置 |
+
+---
+
+## iOS App (FlatRadar)
+
+原生 iOS 客户端，基于 SwiftUI + StoreKit 2 构建。Xcode 项目位于 `ios/FlatRadar/`。
+
+### 快速启动（iOS）
+
+```bash
+cd ios/FlatRadar
+open FlatRadar.xcodeproj
+# 选择 "FlatRadar" scheme → 模拟器或真机运行
+```
+
+默认连接 `flatradar.app`。本地调试时在 Settings 中修改 Server URL。
+
+### 架构
+
+```
+FlatRadar/
+├── Models/          # 数据模型（Listing, AuthModels, ChartData 等）
+├── Networking/      # APIClient, SSE Client, KeychainManager, APIError
+├── Stores/          # @Observable 状态对象（Auth, Listings, Dashboard 等）
+├── Views/
+│   ├── Auth/        # LoginView, LoginModePicker
+│   ├── Dashboard/   # DashboardView, ChartDetailView
+│   ├── Listings/    # ListingsView, ListingRow, ListingDetailView
+│   ├── Map/         # MapView, MapClustering
+│   ├── Calendar/    # CalendarView
+│   ├── Notifications/ # NotificationsView, NotificationRow
+│   ├── Settings/    # SettingsView, FilterEditView
+│   ├── Admin/       # AdminUsersView, AdminMonitorView
+│   └── Browse/      # BrowseView
+├── Navigation/      # NavigationCoordinator + deep link 路由
+├── Push/            # PushDelegate (APNs 桥接)
+└── FlatRadarApp.swift # @main 入口，环境注入
+```
+
+### 关键功能
+
+- **3 种角色**：Admin（监控控制）、User（过滤 + 推送）、Guest（只读浏览）
+- **Dashboard**：实时统计卡片含 sparkline、2×2 Explore 网格含内联迷你图表、匹配房源预览
+- **房源**：分页浏览、多维筛选、6 种排序、详情页
+- **地图**：原生 MapKit + 自定义聚类、颜色 pin、点击缩放
+- **日历**：月视图入住日历、每日可入住数量
+- **通知**：卡片 inbox + 三区分类、SSE 实时流、APNs 推送
+- **自助服务**：注册、过滤编辑、账号注销
+- **捐赠**："请我喝杯咖啡" StoreKit 2 IAP（3 档，不绑定功能）
+- **法律合规**：首次启动强制 Terms 弹窗、内嵌完整使用条款和隐私政策
+- **多语言**：英文 / 简体中文（174 条本地化字符串）
+- **深色模式**：全页面自适应
+- **设计系统**：主色 #0A84FF、语义色（绿/橙/红）、tabular-nums 数字字体
+
+### API 端点
+
+所有端点使用 `/api/v1/*` + JWT Bearer 鉴权（或 bearer_optional）：
+
+| 端点 | 方法 | 鉴权 | 用途 |
+|---|---|---|---|
+| `/auth/login` | POST | 无 | 登录（admin/user 通过 bcrypt 或 H2S 凭据） |
+| `/auth/register` | POST | 无 | 自助注册（注册即登录） |
+| `/auth/logout` | POST | 需要 | 撤销当前 token |
+| `/auth/me` | GET | 需要 | 当前身份 + 用户信息 |
+| `/stats/public/summary` | GET | 可选 | 实时统计 |
+| `/stats/public/charts/<key>` | GET | 可选 | 图表数据 |
+| `/listings` | GET | 可选 | 分页列表含过滤 |
+| `/map` | GET | 可选 | 全部房源含坐标 |
+| `/calendar` | GET | 可选 | 入住日期房源 |
+| `/notifications` | GET | 需要 | 用户通知列表 |
+| `/notifications/stream` | GET (SSE) | 需要 | 实时通知流 |
+| `/me/summary` | GET | 需要 | 过滤匹配统计 |
+| `/me/filter` | GET/PUT | 需要 | 读取/更新通知过滤 |
+| `/me` | DELETE | 需要（user） | 注销账号 |
+| `/filter/options` | GET | 可选 | 过滤维度候选项 |
+| `/devices/register` | POST | 需要 | 注册 APNs token |
+| `/admin/users` | GET | admin | 用户列表 |
+| `/admin/users/<id>/toggle` | POST | admin | 启用/禁用用户 |
+| `/admin/users/<id>` | DELETE | admin | 删除用户 |
+| `/admin/monitor/*` | GET/POST | admin | 监控进程控制 |
 
 ---
 

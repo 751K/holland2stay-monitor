@@ -1,5 +1,103 @@
 # Changelog
 
+## v1.4.5 (2026-05-16)
+
+### 后端 — 账号注册与存储一致性
+
+- **新增 SQLite `app_users` 账号表**：将 App/Web 登录账号镜像写入 SQLite，`users.json` 继续作为用户配置源，SQLite 负责登录账号唯一性与并发安全。
+- **`POST /api/v1/auth/register`**：用户自助注册端点，bcrypt 密码哈希，注册即登录自动签发 token；同 IP 每小时限 3 次 + 复用登录爆破防护；并发注册冲突检测，失败自动回滚。
+- **`DELETE /api/v1/me`**：用户注销账号端点，撤销所有 token + 删除 users.json 配置 + 清理 SQLite 镜像。
+- **`PUT /api/v1/me/filter`**：user 自助修改过滤条件，白名单校验 + 边界值检查。
+- **`GET /api/v1/filter/options`**：返回所有过滤维度候选值（cities/types/contract/energy...），bearer_optional。
+- **Listings 多维过滤**：`GET /api/v1/listings` 新增 `cities`、`types`、`contract`、`energy` 参数，Python 端过滤。
+- **`update_users()` 加锁**：统一 read-modify-write 入口，持有进程内锁 + 原子替换，避免并发写丢失。
+- **安全增强**：TTL 上限 365→90 天；用户名长度上限 64 字符；`err_conflict`（409）处理重名；`check_register_rate` 注册专用限流。
+
+### 后端 — 发布前健康检查
+
+- **`python -m tools.doctor`**：发布/部署前一键检查，支持 `--no-network` / `--smtp-login`，敏感信息脱敏。
+
+### 后端 — 测试
+
+- 并发注册测试、网络失败传播测试、doctor smoke test、`test_app_users_concurrency.py`。
+
+### iOS — 登录页 V5 设计
+
+- **Hero 山脉动画**：蓝色渐变背景 + 双层山脉剪影（`MountainPath` Shape）+ 呼吸 Logo（scaleEffect 循环动画）。
+- **展开式角色卡片**：Tenant / Guest / Staff 三张卡片，点击展开内联登录表单，.spring 动画 + rotationEffect chevron。
+- **注册流程**：Tenant 卡片底部 "Register" → 注册 sheet → username + password → POST /auth/register → 自动登录。
+- **自适应深色模式**：20+ 颜色属性按 `colorScheme` 切换（hero 深海军蓝 / 浅蓝；卡片/文字/边框全适配）。
+- **实时统计 badge**：从 `/stats/public/summary` 获取 live count / time ago / new today。
+- **法律文档**：首次启动强制 Terms 弹窗（`.interactiveDismissDisabled`）；Settings + Login 内嵌完整使用条款和隐私政策。
+- **版本号动态读取**：`Bundle.main.infoDictionary["CFBundleShortVersionString"]`。
+
+### iOS — Dashboard V1 重设计
+
+- **问候语 + 用户胶囊**：时段感知（Good morning/afternoon/evening）+ 角色自适应（user=蓝色/Menu，admin=红色/Menu，guest=灰色/Menu）。
+- **Live badge**：绿点 + "Live · 199 listings · updated 2m ago" 统合胶囊；网络异常时变橙色 "Offline"。
+- **统合统计卡片**：单张卡片含 TOTAL LISTINGS 大数字 + Sparkline 折线图（`Sparkline` Shape 从 daily_new 数据绘制）+ ↑N this week + 3 个 mini stat（New 24h / New 7d / Changes）。
+- **Your matches**：user 专属区域，从 `/listings` 获取 3 条预览 mini 卡片（价格+城市），点击跳转详情。
+- **Explore 2×2 网格**：By status（分段条绿/橙/灰 + 具体数字）/ By price（9 根柱状图 + 范围标签）/ By type（3 行横向进度条）/ By energy（A-F 竖条从绿到红）。
+- **点击展开 ChartDetailView**：4 个 mini 卡片均可点击打开完整图表详情 sheet。
+
+### iOS — Listings 增强
+
+- **多维筛选 sheet**：城市多选、状态单选、户型多选、合同单选、能源单选（FilterOptions API 动态加载候选项）。
+- **后端多维过滤参数**：`cities`/`types`/`contract`/`energy` 查询参数，Python 端过滤。
+- **NEW 徽章颜色修正**：`Color(red: 52/255, green: 199/255, blue: 89/255)` #34C759 success 绿。
+- **Listing 详情页免责**："Always verify listing details on the official Holland2Stay website before making decisions."
+
+### iOS — 通知 V2 卡片式设计
+
+- **卡片式 inbox**：TODAY / YESTERDAY / EARLIER 三区分组，SF Mono 标题，section header 显示条数。
+- **右上角 "Read all"**：绿色勾药丸按钮（`.buttonBorderShape(.capsule)`）。
+- **灰底白卡**：`.systemGroupedBackground` + `.plain` list row。
+- **行列紧凑型重设计**：内联 `NEW · 38m` 徽章 + monospacedDigit 价格 + ●Book/●Lottery/●Reserved 状态胶囊。
+
+### iOS — 设计系统
+
+- **主色 #0A84FF**（替换原 `#1683FF`）：LoginView brandBlue 统一为 `Color(red: 10/255, green: 132/255, blue: 255/255)`。
+- **语义色**：#34C759 success / #FF9500 warning / #FF3B30 error。
+- **Tabular-nums**：Dashboard KPI 大数字、mini stat、matchedTotal、listing price 全部加 `.monospacedDigit()`。
+- **Energy 条多色方案**：深绿 A+++/A++ → 成功绿 A+ → 浅绿 A → 黄 B → 橙 C → 红 D 及以下。
+- **移除装饰色**：.purple/.pink/.indigo/.teal/.mint 全部替换为主色或语义色。
+
+### iOS — 更多功能
+
+- **Settings 重排**：Push Filter → Appearance → Push Notifications → Account → Admin → Legal → Coffee → About。
+- **Server 入口隐藏** + `buildBaseURL`/`endEditing` 死代码清理。
+- **账户管理**：Log Out + Delete Account（二次确认弹窗，DELETE /me）。
+- **通知过滤器编辑器**：10 维度多选表单，FilterOptions 动态加载候选项。
+- **深色模式优化**：Dashboard 灰底白卡 + Calendar 灰底。
+- **用户胶囊增强**：admin/guest/user 全部显示；guest 加 Menu 可登出。
+- **错误提示升级**：登录失败从统一"Session Expired"改为分类显示（"Login Failed" / "Access Denied" / "Too Many Requests" / "Connection Failed"），alert 消息显示后端实际错误原因。
+- **Live indicator 精简**：删掉绿点圆圈，Live 绿色文字右上角。
+
+### iOS — App Store 准备
+
+- **PrivacyInfo.xcprivacy**：Required Reasons API（UserDefaults CA92.1）+ 数据收集声明（User ID / Email / Device ID / Search Hints / Crash Data / Diagnostic Data）。
+- **App 图标**：新增 AppIcon-Dark.png / AppIcon-Tinted.png / AppIcon.png。
+- **StoreKit 2 捐赠**："Buy me a coffee ☕" IAP，3 档 consumable（Espresso €0.99 / Latte €2.99 / Flat White €5.99），`CoffeeStore` 管理产品加载和购买。
+- **Release 日志安全**：41 处 `print()` 全部包 `#if DEBUG`，Release 不泄漏 token/URL。
+
+### iOS — 代码质量
+
+- **消除死代码**：`hasToken()`、`buildBaseURL(from:)`、`endEditing()`。
+- **消除重复**：`relativeTime` 提取到 `ServerTime.relativeTime(_:)`。
+- **Force unwrap 安全**：`defaultServerHost` 常量下的 URL force unwrap 无风险。
+
+### iOS — 多语言
+
+- **174 条本地化**：en / zh-Hans 全覆盖（登录、Dashboard、Listings、Settings、错误、法律、管理面板）。
+
+### 文档
+
+- **README.md / README_cn.md**：Project Status 表新增 iOS 21 行条目 + 独立 iOS App 章节（架构/功能/端点表）。
+- **iOS_README.md**：完整重写（功能矩阵/文件结构/端点/安全/版本历史 v1.5.0）。
+- **CHANGELOG.md**：v1.4.1–v1.4.5 合并为 v1.5.0，涵盖所有改动。
+
+---
+
 ## v1.4.1 (2026-05-15)
 
 ### iOS — 错误展示打磨

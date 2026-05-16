@@ -88,6 +88,108 @@ python -m pytest tests/ -v
 | Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; web.log for Flask app; log viewer with file tabs, line numbers, level coloring, keyword search, auto-scroll |
 | Pytest test suite | ✅ Done | 30 test modules (566 tests) covering full stack: models, mcore, mstorage, storage, scraper, booker, notifier, auth, CSRF, routes, i18n |
 | Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, mixin composition for Storage |
+| **iOS App (FlatRadar)** |
+| iOS auth & RBAC | ✅ Done | Admin / User / Guest login with Keychain token persistence; global 401/403 auto-logout |
+| iOS Dashboard | ✅ Done | Real-time stats card + sparkline chart; Greeting banner; 2×2 Explore grid with inline mini-charts (status/price/type/energy); Matched listings preview |
+| iOS Listings | ✅ Done | Paginated list with pull-to-refresh + infinite scroll; search; multi-select filter (city, status, type, contract, energy); 6 sort modes; detail view with key details, monitoring history, disclaimer |
+| iOS Map | ✅ Done | Native MapKit with custom grid clustering; color-coded pins (green/orange/gray); cluster-tap zoom-to; bottom sheet card → deep link to detail |
+| iOS Calendar | ✅ Done | Monthly move-in calendar with availability counts per day; month navigation; selected-day listing list → detail |
+| iOS Notifications | ✅ Done | Card-style inbox with TODAY/YESTERDAY/EARLIER sections; SSE real-time stream with exponential backoff reconnect; swipe mark-read; unread badge; APNs push with sandbox/production auto-switch |
+| iOS Settings | ✅ Done | Notification filter editor (10 dimensions, multi-select pickers from FilterOptions API); Push permission & device registration; Test push (admin); Theme switcher; Account management (logout / delete account); Legal (Terms + Privacy sheets) |
+| iOS Admin | ✅ Done | User management list (toggle enable/disable, delete); Monitor control (start/stop/reload with status: PID, last scrape, last count) |
+| iOS Adaptive Layout | ✅ Done | iPhone compact: 4 tabs + Browse segmented picker (List/Map/Calendar); iPad regular: 6 tabs; Keyboard shortcuts ⌘1-6 |
+| iOS Deep Links | ✅ Done | `h2smonitor://listing/<id>` URL scheme; APNs notification tap → listing detail |
+| iOS Design System | ✅ Done | Primary #0A84FF; Success #34C759; Warning #FF9500; Error #FF3B30; Tabular-nums on all KPIs/prices/timestamps; SF Mono for meta data |
+| iOS Dark Mode | ✅ Done | Adaptive colors throughout (Login hero, Dashboard cards, Settings); overscroll color matching |
+| iOS i18n | ✅ Done | 174 localized strings (en / zh-Hans); all UI text, error messages, labels covered |
+| iOS Registration | ✅ Done | User self-registration with bcrypt password hashing; backend rate-limiting (3 IP/hour) + conflict detection; auto-login on register |
+| iOS Account Deletion | ✅ Done | DELETE /me endpoint; double confirmation dialog; revokes all tokens + removes from users.json + cleans SQLite |
+| iOS Legal | ✅ Done | First-launch Terms agreement (mandatory, non-dismissible); Terms + Privacy sheets in Settings and Login; full legal text in-app |
+| iOS StoreKit | ✅ Done | "Buy me a coffee" IAP (3 consumable tiers: Espresso/Latte/Flat White); StoreKit 2 transaction listener |
+| iOS Security | ✅ Done | ATS HTTPS-only; Keychain token storage; bcrypt password hashing; all `print()` guarded with `#if DEBUG`; TTL capped at 90 days; username length cap 64 chars |
+| iOS App Store Readiness | ✅ Done | PrivacyInfo.xcprivacy (UserDefaults CA92.1, data collection declarations); App icon asset; Info.plist configured |
+
+---
+
+## iOS App (FlatRadar)
+
+A native iOS companion app built with SwiftUI + StoreKit 2. Available as an Xcode project under `ios/FlatRadar/`.
+
+### Quick start (iOS)
+
+```bash
+cd ios/FlatRadar
+open FlatRadar.xcodeproj
+# Select "FlatRadar" scheme → Run on simulator or device
+```
+
+The app connects to `flatradar.app` by default. To use a local server, change the URL in Settings (developer builds only).
+
+### Architecture
+
+```
+FlatRadar/
+├── Models/          # Decodable models (Listing, AuthModels, ChartData, etc.)
+├── Networking/      # APIClient, SSE Client, KeychainManager, APIError
+├── Stores/          # @Observable state objects (Auth, Listings, Dashboard, etc.)
+├── Views/
+│   ├── Auth/        # LoginView, LoginModePicker
+│   ├── Dashboard/   # DashboardView, ChartDetailView
+│   ├── Listings/    # ListingsView, ListingRow, ListingDetailView
+│   ├── Map/         # MapView, MapClustering
+│   ├── Calendar/    # CalendarView
+│   ├── Notifications/ # NotificationsView, NotificationRow
+│   ├── Settings/    # SettingsView, FilterEditView
+│   ├── Admin/       # AdminUsersView, AdminMonitorView
+│   └── Browse/      # BrowseView
+├── Navigation/      # NavigationCoordinator + deep link routing
+├── Push/            # PushDelegate (APNs bridge)
+└── FlatRadarApp.swift  # @main entry, environment injection
+```
+
+### Key features
+
+- **3 role modes**: Admin (monitor control), User (saved filters + push), Guest (read-only browsing)
+- **Dashboard**: Live stats card with sparkline, 2×2 Explore grid with inline mini-charts, matched listing previews
+- **Listings**: Paginated browsing, multi-filter (city/status/type/contract/energy), 6 sort modes, detail view
+- **Map**: Native MapKit with custom grid clustering, color-coded pins, tap-to-zoom
+- **Calendar**: Monthly move-in calendar with per-day availability counts
+- **Notifications**: Card inbox with day-grouping, SSE real-time stream, APNs push
+- **Self-service**: Registration, filter editing, account deletion
+- **Donation**: "Buy me a coffee" StoreKit 2 IAP (3 tiers, no feature gating)
+- **Legal**: Mandatory first-launch Terms agreement, in-app Terms & Privacy sheets
+- **i18n**: English / 简体中文 (174 localized strings)
+- **Dark mode**: Adaptive colors throughout
+- **Design system**: Primary #0A84FF, semantic colors (green/orange/red), tabular-nums on all numbers
+
+### API endpoints used
+
+All endpoints under `/api/v1/*` with JWT Bearer auth (or bearer_optional for public stats):
+
+| Endpoint | Method | Auth | Purpose |
+|---|---|---|---|
+| `/auth/login` | POST | None | Login (admin/user via bcrypt or H2S credentials) |
+| `/auth/register` | POST | None | Self-registration with auto-login |
+| `/auth/logout` | POST | Required | Revoke current token |
+| `/auth/me` | GET | Required | Current identity + user info |
+| `/stats/public/summary` | GET | Optional | Live stats (total, new24h, new7d, changes24h) |
+| `/stats/public/charts/<key>` | GET | Optional | Chart data for visualizations |
+| `/listings` | GET | Optional | Paginated listings with filters |
+| `/map` | GET | Optional | All listings with coordinates for map |
+| `/calendar` | GET | Optional | Move-in date listings |
+| `/notifications` | GET | Required | User's notification list |
+| `/notifications/stream` | GET (SSE) | Required | Real-time notification stream |
+| `/notifications/read` | POST | Required | Mark notifications read |
+| `/me/summary` | GET | Required | Filtered match counts |
+| `/me/filter` | GET/PUT | Required | Read/update notification filter |
+| `/me` | DELETE | Required | Delete own account |
+| `/filter/options` | GET | Optional | Available filter choices |
+| `/devices/register` | POST | Required | Register APNs device token |
+| `/admin/users` | GET | Admin | List all users |
+| `/admin/users/<id>/toggle` | POST | Admin | Enable/disable user |
+| `/admin/users/<id>` | DELETE | Admin | Delete user |
+| `/admin/monitor/status` | GET | Admin | Scraper process status |
+| `/admin/monitor/start\|stop\|reload` | POST | Admin | Control scraper |
 
 ---
 
