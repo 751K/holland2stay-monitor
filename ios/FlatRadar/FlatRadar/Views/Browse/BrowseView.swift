@@ -27,12 +27,16 @@ struct BrowseView: View {
         @Bindable var coord = coord
 
         NavigationStack(path: $coord.listingsPath) {
-            Group {
-                switch coord.selectedBrowseMode {
-                case .list:     ListingsView()
-                case .map:      MapView()
-                case .calendar: CalendarView()
-                }
+            ZStack {
+                ListingsView()
+                    .opacity(coord.selectedBrowseMode == .list ? 1 : 0)
+                    .allowsHitTesting(coord.selectedBrowseMode == .list)
+                MapView()
+                    .opacity(coord.selectedBrowseMode == .map ? 1 : 0)
+                    .allowsHitTesting(coord.selectedBrowseMode == .map)
+                CalendarView()
+                    .opacity(coord.selectedBrowseMode == .calendar ? 1 : 0)
+                    .allowsHitTesting(coord.selectedBrowseMode == .calendar)
             }
             .navigationTitle(coord.selectedBrowseMode.label)
             .navigationBarTitleDisplayMode(.inline)

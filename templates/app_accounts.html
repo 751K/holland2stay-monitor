@@ -82,6 +82,15 @@
           <td style="padding:12px 16px;text-align:right;">
             {% if not t.revoked %}
               <form method="post"
+                    action="{{ url_for('app_accounts_test_push', token_id=t.id) }}"
+                    style="display:inline;"
+                    onsubmit="this.querySelector('button').disabled=true;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-ghost btn-sm" title="发送测试 APNs 推送">
+                  <i class="bi bi-bell mr-1"></i>Test Push
+                </button>
+              </form>
+              <form method="post"
                     action="{{ url_for('app_accounts_revoke', token_id=t.id) }}"
                     style="display:inline;"
                     onsubmit="return confirm('{{ _('app_accounts_confirm') }}');">
