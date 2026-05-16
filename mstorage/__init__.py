@@ -12,7 +12,6 @@
 """
 
 from mstorage._base import StorageBase
-from mstorage._app_users import AppUserOps
 from mstorage._charts import ChartOps
 from mstorage._devices import DeviceOps
 from mstorage._listings import ListingOps
@@ -20,6 +19,7 @@ from mstorage._map_calendar import MapCalendarOps
 from mstorage._notifications import NotificationOps
 from mstorage._retry import RetryQueueOps
 from mstorage._tokens import TokenOps
+from mstorage._user_configs import UserConfigOps
 
 
 class Storage(
@@ -29,7 +29,7 @@ class Storage(
     MapCalendarOps,
     RetryQueueOps,
     TokenOps,
-    AppUserOps,
+    UserConfigOps,
     DeviceOps,
     StorageBase,
 ):

@@ -43,23 +43,6 @@ logger = logging.getLogger(__name__)
 # ── Users ──────────────────────────────────────────────────────────
 
 
-def _sync_app_user_or_raise(user) -> None:
-    st = storage()
-    try:
-        existing = st.get_app_user_by_name(user.name)
-        if existing is not None and existing.get("id") != user.id:
-            current_ids = {u.id for u in load_users()}
-            existing_id = existing.get("id") or ""
-            if existing_id in current_ids:
-                raise ValueError(
-                    f"App 登录账号 {user.name!r} 已绑定到另一个用户"
-                )
-            st.delete_app_user(existing_id)
-        st.sync_app_user_from_config(user)
-    finally:
-        st.close()
-
-
 def _summarize_user(u, app_token_count: int) -> dict:
     """脱敏 + 摘要：给 iOS 列表用，省去 Web 表单字段（密码 / SMTP / Twilio 等）。"""
     lf = u.listing_filter
@@ -72,6 +55,7 @@ def _summarize_user(u, app_token_count: int) -> dict:
         "channels": u.notification_channels,
         "app_login_enabled": u.app_login_enabled,
         "has_app_password": bool(u.app_password_hash),
+        "allow_h2s_login": u.allow_h2s_login,
         "active_devices": app_token_count,
         "auto_book_enabled": u.auto_book.enabled,
         "filter_summary": {
@@ -120,15 +104,6 @@ def _user_toggle(user_id: str):
         return _err.err_server_error(e, "用户配置文件损坏")
     except LookupError:
         return _err.err_not_found("用户不存在")
-    try:
-        _sync_app_user_or_raise(user)
-    except Exception as e:
-        logger.exception("同步 app_users 失败，回滚 toggle user=%s", user_id)
-        try:
-            update_users(_toggle)
-        except Exception:
-            logger.exception("回滚 users.json toggle 失败 user=%s", user_id)
-        return _err.err_server_error(e, "用户状态保存失败")
     logger.info("admin toggled user=%s enabled=%s", user.name, user.enabled)
     return _err.ok({"id": user.id, "enabled": user.enabled})
 
@@ -154,7 +129,6 @@ def _user_delete(user_id: str):
     st = storage()
     try:
         revoked = st.revoke_user_tokens(user_id)
-        st.delete_app_user(user_id)
     finally:
         st.close()
     if revoked:
@@ -240,7 +214,7 @@ def _monitor_stop():
 
 
 def _monitor_reload():
-    """触发监控热重载（重读 users.json / .env）。"""
+    """触发监控热重载（重读 SQLite 用户配置 / .env）。"""
     pid = monitor_pid()
     if pid is None:
         return _err.err_validation("监控未在运行")

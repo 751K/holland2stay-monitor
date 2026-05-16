@@ -38,29 +38,6 @@ from config import ENERGY_LABELS, energy_rank
 logger = logging.getLogger(__name__)
 
 
-def _sync_app_user_or_raise(user: "UserConfig") -> None:  # noqa: F821
-    """
-    同步 users.json 配置镜像到 SQLite 账号表；失败交给调用方回滚。
-
-    如果 SQLite 里有同名但不同 id 的账号，而该 id 已不在当前 users.json，
-    视为删除/崩溃/测试隔离留下的 orphan，由路由层带上下文回收。
-    """
-    st = storage()
-    try:
-        existing = st.get_app_user_by_name(user.name)
-        if existing is not None and existing.get("id") != user.id:
-            current_ids = {u.id for u in load_users()}
-            existing_id = existing.get("id") or ""
-            if existing_id in current_ids:
-                raise ValueError(
-                    f"App 登录账号「{user.name}」已绑定到另一个用户"
-                )
-            st.delete_app_user(existing_id)
-        st.sync_app_user_from_config(user)
-    finally:
-        st.close()
-
-
 def _run_async(coro: Any) -> Any:
     """安全运行 async 协程，兼容已有 event loop（Gunicorn gevent/asyncio worker）。"""
     try:
@@ -143,18 +120,6 @@ def user_new() -> Any:
         except ValueError as e:
             flash(str(e), "danger")
             return redirect(request.url)
-        try:
-            _sync_app_user_or_raise(user)
-        except Exception:
-            logger.exception("同步 app_users 失败，回滚新建用户 id=%s", user.id)
-            try:
-                update_users(lambda users: users.__setitem__(
-                    slice(None), [u for u in users if u.id != user.id]
-                ))
-            except Exception:
-                logger.exception("回滚 users.json 新建用户失败 id=%s", user.id)
-            flash("用户创建失败：App 登录账号同步失败，已回滚配置", "danger")
-            return redirect(request.url)
         _log_user_change("创建", user)
         flash(f"✅ 用户「{user.name}」已创建", "success")
         return redirect(url_for("users_list"))
@@ -214,18 +179,6 @@ def user_edit(user_id: str) -> Any:
         # 避免泄漏的旧密码继续生效。app_login_enabled 切到 False 同理。
         pw_changed = (updated.app_password_hash != user.app_password_hash)
         login_disabled = (user.app_login_enabled and not updated.app_login_enabled)
-        try:
-            _sync_app_user_or_raise(updated)
-        except Exception:
-            logger.exception("同步 app_users 失败，回滚编辑用户 id=%s", user_id)
-            try:
-                update_users(lambda users: users.__setitem__(
-                    slice(None), [user if u.id == user_id else u for u in users]
-                ))
-            except Exception:
-                logger.exception("回滚 users.json 编辑用户失败 id=%s", user_id)
-            flash("用户保存失败：App 登录账号同步失败，已回滚配置", "danger")
-            return redirect(request.url)
         _log_user_change("更新", updated)
         if pw_changed or login_disabled:
             from app.api_auth import invalidate_token_cache
@@ -285,7 +238,6 @@ def user_delete(user_id: str) -> Any:
     st = storage()
     try:
         revoked = st.revoke_user_tokens(user_id)
-        st.delete_app_user(user_id)
     finally:
         st.close()
     if revoked:
@@ -401,12 +353,7 @@ def user_toggle(user_id: str) -> Any:
             raise LookupError("missing")
 
         user = update_users(_toggle)
-        try:
-            _sync_app_user_or_raise(user)
-        except Exception:
-            logger.exception("同步 app_users 失败，回滚 toggle 用户 id=%s", user_id)
-            update_users(_toggle)
-            flash("用户状态切换失败：App 登录账号同步失败，已回滚", "danger")
+        logger.info("用户「%s」(id=%s) 已%s", user.name, user.id, "启用" if user.enabled else "停用")
     except LookupError:
         flash("用户不存在", "warning")
     return redirect(url_for("users_list"))

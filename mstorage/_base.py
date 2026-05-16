@@ -120,19 +120,43 @@ class StorageBase:
             CREATE INDEX IF NOT EXISTS idx_app_tokens_active
                 ON app_tokens(revoked, expires_at);
 
-            -- iOS / 第三方客户端的用户账号。业务配置仍在 users.json；
-            -- 此表只承载注册/登录身份字段，用 UNIQUE(name) 抗并发注册。
-            CREATE TABLE IF NOT EXISTS app_users (
-                id                TEXT PRIMARY KEY,
-                name              TEXT UNIQUE NOT NULL,
-                enabled           INTEGER NOT NULL DEFAULT 1,
-                app_login_enabled INTEGER NOT NULL DEFAULT 0,
-                app_password_hash TEXT NOT NULL DEFAULT '',
-                created_at        TEXT NOT NULL,
-                updated_at        TEXT NOT NULL
+            -- 用户完整配置。UserConfig.id 是稳定主键，来自旧 users.json
+            -- 或新注册时的 UserConfig 默认 id，迁移时绝不重新生成。
+            CREATE TABLE IF NOT EXISTS user_configs (
+                id                         TEXT PRIMARY KEY,
+                name                       TEXT UNIQUE NOT NULL,
+                enabled                    INTEGER NOT NULL DEFAULT 1,
+                notifications_enabled      INTEGER NOT NULL DEFAULT 1,
+                notification_channels_json TEXT NOT NULL DEFAULT '[]',
+                imessage_recipient         TEXT NOT NULL DEFAULT '',
+                telegram_token             TEXT NOT NULL DEFAULT '',
+                telegram_chat_id           TEXT NOT NULL DEFAULT '',
+                email_smtp_host            TEXT NOT NULL DEFAULT '',
+                email_smtp_port            INTEGER NOT NULL DEFAULT 587,
+                email_smtp_security        TEXT NOT NULL DEFAULT 'starttls',
+                email_username             TEXT NOT NULL DEFAULT '',
+                email_password             TEXT NOT NULL DEFAULT '',
+                email_from                 TEXT NOT NULL DEFAULT '',
+                email_to                   TEXT NOT NULL DEFAULT '',
+                twilio_sid                 TEXT NOT NULL DEFAULT '',
+                twilio_token               TEXT NOT NULL DEFAULT '',
+                twilio_from                TEXT NOT NULL DEFAULT '',
+                twilio_to                  TEXT NOT NULL DEFAULT '',
+                listing_filter_json        TEXT NOT NULL DEFAULT '{}',
+                auto_book_json             TEXT NOT NULL DEFAULT '{}',
+                app_password_hash          TEXT NOT NULL DEFAULT '',
+                app_login_enabled          INTEGER NOT NULL DEFAULT 0,
+                allow_h2s_login            INTEGER NOT NULL DEFAULT 0,
+                sort_order                 INTEGER NOT NULL DEFAULT 0,
+                created_at                 TEXT NOT NULL,
+                updated_at                 TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_app_users_name
-                ON app_users(name);
+            CREATE INDEX IF NOT EXISTS idx_user_configs_name
+                ON user_configs(name);
+
+            -- app_users 曾经只是 users.json 的账号镜像。UserConfig 完整迁入
+            -- SQLite 后，单独账号表会制造双源状态，按 v1 迁移策略直接移除。
+            DROP TABLE IF EXISTS app_users;
 
             -- iOS / 第三方客户端的 APNs 设备 token。
             -- 每次 App 启动会重新注册（token 可能轮换）；UNIQUE 约束
@@ -210,7 +234,7 @@ class StorageBase:
             self._conn.execute("DELETE FROM web_notifications")
             self._conn.execute("DELETE FROM geocode_cache")
             self._conn.execute("DELETE FROM app_tokens")
-            self._conn.execute("DELETE FROM app_users")
+            self._conn.execute("DELETE FROM user_configs")
             self._conn.execute("DELETE FROM device_tokens")
         logger.info("数据库已清空（全部 8 张表）")
 

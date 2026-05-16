@@ -206,19 +206,35 @@ def check_database(_: DoctorContext) -> list[CheckResult]:
 def check_users(_: DoctorContext) -> list[CheckResult]:
     results: list[CheckResult] = []
     try:
-        from users import USERS_FILE, load_users
+        from app.db import storage
+        from users import USERS_FILE, USERS_MIGRATION_META_KEY, load_users
 
         users = load_users()
     except RuntimeError as exc:
-        return [CheckResult(FAIL, "users.json", "parse failed", str(exc))]
+        return [CheckResult(FAIL, "user_configs", "legacy migration failed", str(exc))]
     except Exception as exc:
-        return [CheckResult(FAIL, "users.json", "cannot load", str(exc))]
+        return [CheckResult(FAIL, "user_configs", "cannot load", str(exc))]
 
-    if not USERS_FILE.exists():
-        results.append(CheckResult(WARN, "users.json", f"missing at {USERS_FILE}; no users configured"))
-    else:
-        enabled = sum(1 for u in users if u.enabled)
-        results.append(CheckResult(OK, "users.json", f"{len(users)} users ({enabled} enabled)"))
+    enabled = sum(1 for u in users if u.enabled)
+    results.append(CheckResult(OK, "user_configs", f"{len(users)} users ({enabled} enabled)"))
+
+    try:
+        st = storage()
+        try:
+            migrated = st.get_meta(USERS_MIGRATION_META_KEY, default="")
+        finally:
+            st.close()
+        if migrated != "1":
+            results.append(CheckResult(WARN, "user migration", "meta flag not set"))
+    except Exception as exc:
+        results.append(CheckResult(WARN, "user migration", "cannot read meta flag", str(exc)))
+
+    if USERS_FILE.exists():
+        backups = sorted(USERS_FILE.parent.glob(f"{USERS_FILE.name}.migrated.*.bak"))
+        msg = "legacy users.json still present"
+        if backups:
+            msg += f"; {len(backups)} migration backup(s) found"
+        results.append(CheckResult(WARN, "legacy users.json", msg, str(USERS_FILE)))
 
     if users and not any(u.enabled for u in users):
         results.append(CheckResult(WARN, "enabled users", "all users are disabled"))

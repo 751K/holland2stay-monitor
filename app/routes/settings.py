@@ -21,7 +21,7 @@ from app.safety import sanitize_dotenv
 
 logger = logging.getLogger(__name__)
 
-# 全局配置可写入的 .env 键（通知/过滤/预订已移至 users.json）
+# 全局配置可写入的 .env 键（通知/过滤/预订已移至 SQLite user_configs）
 SETTINGS_KEYS: list[str] = [
     "CHECK_INTERVAL", "LOG_LEVEL",
     # 智能轮询

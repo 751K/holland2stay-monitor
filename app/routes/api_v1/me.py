@@ -157,7 +157,7 @@ def _filter_update():
     幂等：完整覆盖式更新（缺省字段保留 ListingFilter 默认值，**不**保留旧值）。
 
     业务效果：
-    - 立即写回 ``data/users.json``（``save_users`` 原子替换）
+    - 立即写回 SQLite ``user_configs``（``save_users`` 事务写入）
     - 下一轮 ``monitor.run_once`` 检测到文件 mtime 变化会自动 reload 用户配置
       （现有 _load_users_if_changed 逻辑，不需要这里显式触发）
     - APNs 设备绑定不动；推送策略下轮即按新 filter 决定
@@ -195,7 +195,7 @@ def _filter_update():
 
         updated_user = update_users(_replace_filter)
     except RuntimeError as e:
-        logger.error("users.json 解析失败: %s", e)
+        logger.error("用户配置迁移/加载失败: %s", e)
         return _err.err_server_error(e, "用户配置文件损坏")
     except LookupError:
         return _err.err_unauthorized("用户已被删除")
@@ -259,7 +259,7 @@ def _delete_account() -> Any:
 
     执行：
     1. 撤销该用户所有 App token（立即生效，不需要等过期）
-    2. 从 users.json 中删除该用户
+    2. 从 SQLite user_configs 中删除该用户
     3. 返回 success
 
     admin 不能通过此端点删除（admin 没有 user_id）。
@@ -289,9 +289,6 @@ def _delete_account() -> Any:
     except Exception as e:
         logger.exception("save_users 失败")
         return _err.err_server_error(e, "账号注销失败")
-
-    with storage_ctx() as st:
-        st.delete_app_user(user.id)
 
     logger.info("账号注销完成 user=%s name=%r", user.id, user.name)
     return _err.ok({"deleted": True, "user_id": user.id})

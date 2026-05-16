@@ -26,7 +26,7 @@ get_interval() 根据荷兰本地时间判断是否处于高峰期（默认 8:30
 
 热重载
 ------
-收到 SIGHUP 信号后，在本轮结束时重载 .env + users.json，无需重启进程。
+收到 SIGHUP 信号后，在本轮结束时重载 .env + SQLite 用户配置，无需重启进程。
 Web 面板的「立即应用」按钮通过发送 SIGHUP（`kill -HUP <PID>`）触发。
 
 依赖模块
@@ -58,7 +58,7 @@ from mcore.prewarm import PrewarmCache
 from scraper import BlockedError, RateLimitError, ScrapeNetworkError, scrape_all
 from update_checker import check_for_updates
 from storage import Storage
-from users import USERS_FILE, UserConfig, load_users, save_users
+from users import UserConfig, load_users, save_users
 from models import Listing
 
 
@@ -1032,21 +1032,16 @@ async def _async_main() -> None:
     # 恢复持久化的竞败重试队列（进程重启后不丢失）
     retry_queue.load(storage)
 
-    # 加载用户配置；文件损坏时硬停止，避免忽略或覆盖现有数据
+    # 加载用户配置；旧 users.json 迁移损坏时硬停止，避免忽略或覆盖现有数据
     try:
         users = load_users()
     except RuntimeError as e:
         logger.critical("❌ 无法加载用户配置，进程终止以防数据丢失:\n  %s", e)
         sys.exit(1)
 
-    if not USERS_FILE.exists():
+    if not users:
         logger.warning(
-            "⚠️  users.json 不存在。"
-            "请在 Web 面板（python web.py）点击「新增用户」添加第一个用户。"
-        )
-    elif not users:
-        logger.warning(
-            "⚠️  users.json 为空列表，通知和自动预订不可用。"
+            "⚠️  当前没有用户配置，通知和自动预订不可用。"
             "请在 Web 面板点击「新增用户」添加用户。"
         )
 

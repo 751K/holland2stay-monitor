@@ -5,30 +5,30 @@ users.py — 多用户配置管理
 ----
 - 定义 `UserConfig` dataclass，包含单个用户的全部配置：
   通知渠道凭证、房源过滤条件、自动预订配置
-- 提供 `data/users.json` 的读写接口
+- 提供 `load_users` / `save_users` / `update_users` 兼容接口
 
 存储格式
 --------
-`data/users.json`：JSON 数组，每个元素对应一个 UserConfig 的 asdict() 序列化结果。
-文件不存在时视为无用户（空列表），首次写入时自动创建父目录。
+运行时存储在 SQLite `user_configs` 表。
+旧版 `data/users.json` 只作为一次性迁移输入；迁移状态由 SQLite `meta`
+表中的 `users_storage_migrated_v1` 控制，迁移后会永久保留 `.bak` 备份。
 
 与 config.py 的分工
 --------------------
 - config.py / .env  → 全局参数（轮询间隔、城市、数据库路径）
-- users.py / users.json → 每用户独立配置（通知、过滤、预订）
+- users.py / SQLite user_configs → 每用户独立配置（通知、过滤、预订）
 
 依赖
 ----
-标准库 + config.py（ListingFilter, AutoBookConfig），无其他内部依赖。
+标准库 + config.py（ListingFilter, AutoBookConfig）+ app.db 延迟导入。
 """
 from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
+import shutil
 import uuid
-from contextlib import contextmanager
+from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field, fields as dc_fields
 from typing import Callable, Optional, TypeVar
 
@@ -38,6 +38,7 @@ from crypto import decrypt, encrypt
 logger = logging.getLogger(__name__)
 
 USERS_FILE = DATA_DIR / "users.json"
+USERS_MIGRATION_META_KEY = "users_storage_migrated_v1"
 _T = TypeVar("_T")
 
 
@@ -117,8 +118,14 @@ class UserConfig:
     # app_password_hash : bcrypt(password).decode()；空字符串=未设置
     # app_login_enabled : False 时即使 hash 存在也拒绝 App 登录
     #                     默认 False（fail-closed，老用户不会意外打开 App 入口）
+    # allow_h2s_login   : 是否允许 H2S 站点凭据作为 fallback 登录此本地账号。
+    #                     默认 False（fail-closed）。开关意义：如果用户名恰好
+    #                     等于其 H2S 邮箱、且 H2S 那边密码被泄露/撞库/钓鱼，
+    #                     本字段为 False 时攻击者无法借用 H2S 凭据冒登本地账号。
+    #                     仅当用户显式知情、信任该桥接时再开启。
     app_password_hash: str = ""
     app_login_enabled: bool = False
+    allow_h2s_login: bool = False
 
 
 # ------------------------------------------------------------------ #
@@ -197,40 +204,16 @@ def _user_from_dict(d: dict) -> UserConfig:
 # ------------------------------------------------------------------ #
 
 
-@contextmanager
-def _users_file_lock():
+def _open_storage():
+    """延迟打开 Storage，避免 users.py import 阶段形成循环依赖。"""
+    from app.db import storage
+
+    return storage()
+
+
+def _load_legacy_users_file() -> list[UserConfig]:
     """
-    跨进程独占锁，用于保护 users.json 的 read-modify-write 临界区。
-
-    原子替换只能防止"半截 JSON"，不能防止两个请求同时 load 后互相覆盖。
-    这里使用同目录 lock 文件，兼容 Docker/Linux/macOS/Windows。
-    """
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = USERS_FILE.with_name(USERS_FILE.name + ".lock")
-    with lock_path.open("a+b") as fh:
-        if os.name == "nt":
-            import msvcrt
-
-            fh.seek(0)
-            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                fh.seek(0)
-                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
-
-
-def _load_users_unlocked() -> list[UserConfig]:
-    """
-    从 `data/users.json` 加载用户列表。
+    从旧版 `data/users.json` 加载用户列表，仅供一次性迁移使用。
 
     Returns
     -------
@@ -258,95 +241,213 @@ def _load_users_unlocked() -> list[UserConfig]:
 
 
 def load_users() -> list[UserConfig]:
-    """
-    从 `data/users.json` 加载用户列表。
-
-    普通读不加独占锁：save_users 使用 os.replace 原子替换，读者只会看到旧版或新版。
-    需要"读-改-写"一致性时必须使用 update_users()。
-    """
-    return _load_users_unlocked()
-
-
-def _save_users_unlocked(users: list[UserConfig]) -> None:
-    """
-    将用户列表序列化写入 `data/users.json`（完整覆盖）。
-
-    Parameters
-    ----------
-    users : 要持久化的用户列表，空列表会写入 "[]"
-
-    副作用
-    ------
-    创建父目录（data/）如不存在；以原子方式覆盖已有文件。
-    写入流程：先写 .tmp 临时文件，成功后用 os.replace() 原子替换目标文件。
-    os.replace() 在同一文件系统上是原子操作（POSIX rename 语义），
-    进程在写入中途被 kill 时只会丢失 .tmp，已有 users.json 不受影响。
-    """
-    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    data = []
-    for u in users:
-        d = asdict(u)
-        # 加密敏感字段后再持久化
-        for field in ("email_password", "telegram_token", "twilio_token"):
-            if d.get(field):
-                d[field] = encrypt(d[field])
-        ab = d.get("auto_book", {})
-        if ab.get("password"):
-            ab["password"] = encrypt(ab["password"])
-        d["auto_book"] = ab
-        data.append(d)
-    tmp_fd, tmp_name = tempfile.mkstemp(
-        prefix=f".{USERS_FILE.name}.",
-        suffix=".tmp",
-        dir=str(USERS_FILE.parent),
-        text=True,
-    )
-    tmp_path = USERS_FILE.parent / os.path.basename(tmp_name)
+    """从 SQLite `user_configs` 加载用户列表。"""
+    st = _open_storage()
     try:
-        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(data, indent=2, ensure_ascii=False))
-            fh.write("\n")
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_path, USERS_FILE)
-        if os.name != "nt":
-            dir_fd = os.open(USERS_FILE.parent, os.O_RDONLY)
-            try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
+        _ensure_sqlite_users_migrated(st)
+        return _rows_to_users(st.list_user_config_rows())
+    finally:
+        st.close()
+
+
+def _user_to_row(u: UserConfig) -> dict:
+    """UserConfig -> SQLite row dict。敏感字段按原 users.json 规则加密。"""
+    d = asdict(u)
+    for field_name in ("email_password", "telegram_token", "twilio_token"):
+        if d.get(field_name):
+            d[field_name] = encrypt(d[field_name])
+    ab = d.get("auto_book", {})
+    if ab.get("password"):
+        ab["password"] = encrypt(ab["password"])
+
+    return {
+        "id": d["id"],
+        "name": d["name"],
+        "enabled": 1 if d.get("enabled") else 0,
+        "notifications_enabled": 1 if d.get("notifications_enabled") else 0,
+        "notification_channels_json": json.dumps(
+            d.get("notification_channels", []),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        "imessage_recipient": d.get("imessage_recipient", ""),
+        "telegram_token": d.get("telegram_token", ""),
+        "telegram_chat_id": d.get("telegram_chat_id", ""),
+        "email_smtp_host": d.get("email_smtp_host", ""),
+        "email_smtp_port": int(d.get("email_smtp_port") or 587),
+        "email_smtp_security": d.get("email_smtp_security", "starttls"),
+        "email_username": d.get("email_username", ""),
+        "email_password": d.get("email_password", ""),
+        "email_from": d.get("email_from", ""),
+        "email_to": d.get("email_to", ""),
+        "twilio_sid": d.get("twilio_sid", ""),
+        "twilio_token": d.get("twilio_token", ""),
+        "twilio_from": d.get("twilio_from", ""),
+        "twilio_to": d.get("twilio_to", ""),
+        "listing_filter_json": json.dumps(
+            d.get("listing_filter", {}),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        "auto_book_json": json.dumps(
+            ab,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        "app_password_hash": d.get("app_password_hash", ""),
+        "app_login_enabled": 1 if d.get("app_login_enabled") else 0,
+        "allow_h2s_login": 1 if d.get("allow_h2s_login") else 0,
+    }
+
+
+def _row_to_user(row: dict) -> UserConfig:
+    """SQLite row dict -> UserConfig。复用 _user_from_dict 的兼容/解密逻辑。"""
+    try:
+        channels = json.loads(row.get("notification_channels_json") or "[]")
     except Exception:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        channels = []
+    try:
+        listing_filter = json.loads(row.get("listing_filter_json") or "{}")
+    except Exception:
+        listing_filter = {}
+    try:
+        auto_book = json.loads(row.get("auto_book_json") or "{}")
+    except Exception:
+        auto_book = {}
+
+    return _user_from_dict({
+        "id": row.get("id", ""),
+        "name": row.get("name", ""),
+        "enabled": bool(row.get("enabled")),
+        "notifications_enabled": bool(row.get("notifications_enabled")),
+        "notification_channels": channels if isinstance(channels, list) else [],
+        "imessage_recipient": row.get("imessage_recipient", ""),
+        "telegram_token": row.get("telegram_token", ""),
+        "telegram_chat_id": row.get("telegram_chat_id", ""),
+        "email_smtp_host": row.get("email_smtp_host", ""),
+        "email_smtp_port": row.get("email_smtp_port", 587),
+        "email_smtp_security": row.get("email_smtp_security", "starttls"),
+        "email_username": row.get("email_username", ""),
+        "email_password": row.get("email_password", ""),
+        "email_from": row.get("email_from", ""),
+        "email_to": row.get("email_to", ""),
+        "twilio_sid": row.get("twilio_sid", ""),
+        "twilio_token": row.get("twilio_token", ""),
+        "twilio_from": row.get("twilio_from", ""),
+        "twilio_to": row.get("twilio_to", ""),
+        "listing_filter": listing_filter if isinstance(listing_filter, dict) else {},
+        "auto_book": auto_book if isinstance(auto_book, dict) else {},
+        "app_password_hash": row.get("app_password_hash", ""),
+        "app_login_enabled": bool(row.get("app_login_enabled")),
+        "allow_h2s_login": bool(row.get("allow_h2s_login")),
+    })
+
+
+def _users_to_rows(users: list[UserConfig]) -> list[dict]:
+    return [_user_to_row(u) for u in users]
+
+
+def _rows_to_users(rows: list[dict]) -> list[UserConfig]:
+    return [_row_to_user(r) for r in rows]
+
+
+def _backup_legacy_users_file() -> None:
+    """永久保留 users.json 迁移备份；不覆盖旧备份。"""
+    if not USERS_FILE.exists():
+        return
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    base = USERS_FILE.with_name(f"{USERS_FILE.name}.migrated.{stamp}.bak")
+    target = base
+    i = 1
+    while target.exists():
+        target = USERS_FILE.with_name(
+            f"{USERS_FILE.name}.migrated.{stamp}.{i}.bak"
+        )
+        i += 1
+    shutil.copy2(USERS_FILE, target)
+    logger.info("users.json 已备份到 %s", target)
+
+
+def _ensure_sqlite_users_migrated(st) -> None:
+    """
+    用 meta flag 控制 users.json -> SQLite 迁移。
+
+    只要 meta flag 已设置，运行期永远只读 SQLite，即使 users.json 仍存在。
+    """
+    if st.get_meta(USERS_MIGRATION_META_KEY, default="") == "1":
+        return
+
+    conn = st.conn
+    started = not conn.in_transaction
+    if started:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        # 可能另一个进程刚刚迁移完成，拿到锁后再检查一次。
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = ?",
+            (USERS_MIGRATION_META_KEY,),
+        ).fetchone()
+        if row and row[0] == "1":
+            if started:
+                conn.commit()
+            return
+
+        if USERS_FILE.exists():
+            legacy_users = _load_legacy_users_file()
+            _backup_legacy_users_file()
+            st.replace_user_config_rows_unlocked(_users_to_rows(legacy_users))
+            logger.info("已从 users.json 迁移 %d 个用户到 SQLite", len(legacy_users))
+
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (USERS_MIGRATION_META_KEY, "1"),
+        )
+        if started:
+            conn.commit()
+    except Exception:
+        if started:
+            conn.rollback()
         raise
 
 
 def save_users(users: list[UserConfig]) -> None:
-    """
-    将用户列表序列化写入 `data/users.json`（完整覆盖）。
-
-    单次写入会持有 users.json.lock，避免多个进程同时写同一个临时目标。
-    如果调用方需要基于最新内容修改，请使用 update_users()，不要自行
-    load_users() 后 save_users()。
-    """
-    with _users_file_lock():
-        _save_users_unlocked(users)
+    """将用户列表完整覆盖写入 SQLite `user_configs`。"""
+    st = _open_storage()
+    conn = st.conn
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        _ensure_sqlite_users_migrated(st)
+        st.replace_user_config_rows_unlocked(_users_to_rows(users))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        st.close()
 
 
 def update_users(mutator: Callable[[list[UserConfig]], _T]) -> _T:
     """
-    在 users.json 独占锁内执行 read-modify-write。
+    在 SQLite 事务内执行 read-modify-write。
 
     mutator 会收到最新用户列表，可以原地修改，并返回调用方需要的结果。
-    只有 mutator 成功返回后才写回文件；抛异常时不会覆盖 users.json。
+    只有 mutator 成功返回后才写回；抛异常时事务回滚。
     """
-    with _users_file_lock():
-        users = _load_users_unlocked()
+    st = _open_storage()
+    conn = st.conn
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        _ensure_sqlite_users_migrated(st)
+        users = _rows_to_users(st.list_user_config_rows())
         result = mutator(users)
-        _save_users_unlocked(users)
+        st.replace_user_config_rows_unlocked(_users_to_rows(users))
+        conn.commit()
         return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        st.close()
 
 
 def get_user(users: list[UserConfig], user_id: str) -> Optional[UserConfig]:
@@ -436,4 +537,3 @@ def verify_app_password(user: UserConfig, plaintext: str) -> bool:
     except Exception:
         logger.warning("verify_app_password 异常 (user=%s)", user.name)
         return False
-

@@ -10,7 +10,7 @@ config.py — 全局配置与过滤条件
 分层说明
 --------
 - **全局配置**（Config）：影响整个进程，存于 .env，在 Web 面板「全局设置」页修改
-- **用户级配置**（ListingFilter / AutoBookConfig）：每用户独立，存于 data/users.json，
+- **用户级配置**（ListingFilter / AutoBookConfig）：每用户独立，存于 SQLite user_configs，
   在 Web 面板「用户管理」页修改
 
 依赖关系
@@ -460,7 +460,7 @@ class AutoBookConfig:
     dry_run         : 试运行模式。True 时只做登录/购物车验证，不执行 addNewBooking；
                       默认 True，需显式设为 False 才真正提交预订
     email           : Holland2Stay 账号邮箱
-    password        : Holland2Stay 账号密码（明文存储于 data/users.json）
+    password        : Holland2Stay 账号密码（加密后存储于 SQLite user_configs）
     listing_filter  : 独立于通知过滤的预订条件，可以设置比通知更严格的门槛；
                       is_empty() 为 True 时对所有 Available to book 房源都会触发
     cancel_enabled  : 是否启用自动取消旧订单功能。False 时 placeOrder 返回

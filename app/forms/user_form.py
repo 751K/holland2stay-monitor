@@ -170,6 +170,9 @@ def build_user_from_form(
     # 2. 填了新密码                                    → bcrypt 重新哈希
     # 3. 勾了 "清除密码" checkbox                       → hash="" 强制下次登录失败
     app_login_enabled = form.get("app_login_enabled") == "true"
+    # H2S 凭据 fallback —— 默认关。仅在管理员/用户显式勾选时打开；fail-closed
+    # 防止 H2S 站点密码泄露被借用来登录本地账号（详见 UserConfig 注释）。
+    allow_h2s_login = form.get("allow_h2s_login") == "true"
     new_app_pw = form.get("app_password", "")
     clear_app_pw = form.get("app_password_clear") == "true"
 
@@ -214,5 +217,6 @@ def build_user_from_form(
         auto_book=ab,
         app_password_hash=app_password_hash,
         app_login_enabled=app_login_enabled,
+        allow_h2s_login=allow_h2s_login,
     )
     return new_user

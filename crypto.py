@@ -1,7 +1,7 @@
 """
 crypto.py — 敏感字段加解密
 ==========================
-对 users.json 中的密码、token 类字段做对称加密（Fernet）。
+对 SQLite user_configs / 旧 users.json 中的密码、token 类字段做对称加密（Fernet）。
 密钥存储在 .env 的 DATA_ENCRYPTION_KEY；首次运行时自动生成并写入。
 
 格式：加密值以 "$F$" 开头，后跟 Fernet token（base64）。
