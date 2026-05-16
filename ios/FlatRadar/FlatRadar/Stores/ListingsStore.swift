@@ -10,6 +10,8 @@ final class ListingsStore {
     var errorMessage: String?
     var lastError: APIError?
     var isFiltered = false
+    /// 最近一次成功 fetch 的本地时间戳 — 用于 ListingsView 顶部 "updated 2m ago" 心跳条。
+    var lastUpdated: Date?
 
     private let client = APIClient.shared
     private let pageSize = 50
@@ -46,6 +48,7 @@ final class ListingsStore {
             listings = resp.items
             total = resp.total
             isFiltered = resp.filtered ?? false
+            lastUpdated = Date()
         } catch {
             lastError = error as? APIError
             errorMessage = error.localizedDescription

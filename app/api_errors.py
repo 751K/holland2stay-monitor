@@ -62,6 +62,10 @@ def err_validation(message: str = "参数无效"):
     return err("validation", message, 400)
 
 
+def err_conflict(message: str = "资源已存在"):
+    return err("conflict", message, 409)
+
+
 def err_rate_limited(message: str = "请求过于频繁，请稍后再试"):
     return err("rate_limited", message, 429)
 

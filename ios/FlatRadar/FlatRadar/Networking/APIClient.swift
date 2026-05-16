@@ -83,7 +83,9 @@ final class APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.timeoutInterval = 15
+        // 30s 给后端 cold-start 留余地；之前 15s 在网络抖动 / 冷启动场景下经常
+        // 直接 URLError.timedOut，dashboard 下拉刷新就显示"连接失败"。
+        req.timeoutInterval = 30
 
         if authenticated, let tok = token {
             req.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
@@ -145,6 +147,16 @@ final class APIClient {
         print("[APIClient] login body: username=\(username) device=\(deviceName)")
         let resp: LoginResponse = try await request("POST", "api/v1/auth/login", body: body, authenticated: false)
         print("[APIClient] login ok: role=\(resp.role) token=\(resp.token.prefix(8))...")
+        return resp
+    }
+
+    func register(username: String, password: String,
+                  deviceName: String, ttlDays: Int = 90) async throws -> LoginResponse {
+        let body = LoginRequest(username: username, password: password,
+                                deviceName: deviceName, ttlDays: ttlDays)
+        print("[APIClient] register: username=\(username) device=\(deviceName)")
+        let resp: LoginResponse = try await request("POST", "api/v1/auth/register", body: body, authenticated: false)
+        print("[APIClient] register ok: role=\(resp.role) token=\(resp.token.prefix(8))...")
         return resp
     }
 
@@ -303,6 +315,13 @@ final class APIClient {
         return try await request(
             "POST", "api/v1/devices/test",
             body: TestPushBody(title: title, body: body))
+    }
+
+    // MARK: - Me (account management)
+
+    /// DELETE /me — 注销当前用户账号，删除 users.json 中的数据并撤销所有 token。
+    func deleteAccount() async throws -> AccountDeleteResponse {
+        try await request("DELETE", "api/v1/me")
     }
 
     // MARK: - Admin (Phase 5 Part 2) — admin role only

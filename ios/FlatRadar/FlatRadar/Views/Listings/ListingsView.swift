@@ -114,18 +114,37 @@ struct ListingsView: View {
 
     private var listContent: some View {
         List {
-            if store.isFiltered || activeFilterCount > 0 || sort != .newest {
-                filterSummary
+            // —— Live 心跳条 + 活跃 filter chips（设计稿 ① + ④）
+            //    放在无 header 的小卡片里，跟下面 NEW / EARLIER 视觉对齐
+            Section {
+                heartbeatRow
+                if !activeFilterChips.isEmpty {
+                    filterChipsRow
+                }
+            }
+            .listRowSeparator(.hidden)
+
+            // —— NEW TODAY · N
+            if !newListings.isEmpty {
+                Section {
+                    ForEach(newListings) { listing in
+                        row(for: listing)
+                    }
+                } header: {
+                    sectionHeader(title: "NEW TODAY · \(newListings.count)",
+                                  color: Color(red: 31/255, green: 128/255, blue: 67/255))
+                }
             }
 
-            ForEach(displayedListings) { listing in
-                NavigationLink(value: ListingRoute.known(listing)) {
-                    ListingRow(listing: listing)
-                        .onAppear {
-                            if listing.id == displayedListings.last?.id {
-                                Task { await store.loadMore() }
-                            }
-                        }
+            // —— EARLIER（剩余）
+            if !earlierListings.isEmpty {
+                Section {
+                    ForEach(earlierListings) { listing in
+                        row(for: listing)
+                    }
+                } header: {
+                    sectionHeader(title: newListings.isEmpty ? "ALL LISTINGS" : "EARLIER",
+                                  color: .secondary)
                 }
             }
 
@@ -135,13 +154,185 @@ struct ListingsView: View {
                     ProgressView()
                     Spacer()
                 }
+                .listRowSeparator(.hidden)
             }
         }
+        // .insetGrouped（默认）：灰底 + 白色 inset section 卡片，跟
+        // Settings / Notifications / Dashboard 风格一致。
+        .listStyle(.insetGrouped)
         .refreshable { await store.refresh() }
     }
 
+    @ViewBuilder
+    private func row(for listing: Listing) -> some View {
+        NavigationLink(value: ListingRoute.known(listing)) {
+            ListingRow(listing: listing)
+                .onAppear {
+                    if listing.id == displayedListings.last?.id {
+                        Task { await store.loadMore() }
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func sectionHeader(title: String, color: Color) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .tracking(0.7)
+            .foregroundStyle(color)
+            .textCase(nil)
+            .padding(.top, 4)
+    }
+
+    // MARK: - Heartbeat + chips
+
+    @ViewBuilder
+    private var heartbeatRow: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(Color.green)
+                .frame(width: 6, height: 6)
+            (Text("\(store.total)").font(.system(size: 12, weight: .bold, design: .monospaced))
+                + Text(" listings").font(.system(size: 12)))
+                .foregroundStyle(.primary)
+            Text("·")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Text("updated \(updatedAgoText)")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var filterChipsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(activeFilterChips) { chip in
+                    Button {
+                        chip.remove()
+                    } label: {
+                        HStack(spacing: 5) {
+                            Text(chip.label)
+                                .font(.system(size: 12, weight: .semibold,
+                                              design: chip.mono ? .monospaced : .default))
+                            Image(systemName: "xmark")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .padding(.leading, 11)
+                        .padding(.trailing, 9)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule().fill(chip.active ? Color.accentColor : Color(.secondarySystemBackground))
+                        )
+                        .foregroundStyle(chip.active ? Color.white : Color.primary)
+                        .overlay(
+                            Capsule().stroke(Color.primary.opacity(0.08), lineWidth: chip.active ? 0 : 0.5)
+                        )
+                        .shadow(color: chip.active ? Color.accentColor.opacity(0.25) : .clear,
+                                radius: 4, x: 0, y: 2)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if activeFilterChips.count > 1 {
+                    Button("Clear all", role: .destructive) {
+                        clearAllFilters()
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.leading, 4)
+                }
+            }
+        }
+    }
+
+    // MARK: - Derived data
+
     private var displayedListings: [Listing] {
         store.listings.sorted(using: sort)
+    }
+
+    private var newListings: [Listing] {
+        displayedListings.filter { $0.isNew }
+    }
+
+    private var earlierListings: [Listing] {
+        displayedListings.filter { !$0.isNew }
+    }
+
+    private var updatedAgoText: String {
+        guard let last = store.lastUpdated else { return "just now" }
+        let interval = Date().timeIntervalSince(last)
+        if interval < 5 { return "just now" }
+        if interval < 60 { return "\(Int(interval))s ago" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
+        return "\(Int(interval / 86400))d ago"
+    }
+
+    private struct FilterChipModel: Identifiable {
+        let id = UUID()
+        let label: String
+        let active: Bool
+        let mono: Bool
+        let remove: () -> Void
+    }
+
+    private var activeFilterChips: [FilterChipModel] {
+        var chips: [FilterChipModel] = []
+        if !selectedStatus.isEmpty {
+            chips.append(.init(label: shortStatusLabel(selectedStatus), active: true, mono: false) {
+                selectedStatus = ""
+                Task { await fetchWithCurrentFilters() }
+            })
+        }
+        for city in selectedCities {
+            chips.append(.init(label: city, active: false, mono: false) {
+                selectedCities.removeAll { $0 == city }
+                Task { await fetchWithCurrentFilters() }
+            })
+        }
+        for t in selectedTypes {
+            chips.append(.init(label: t, active: false, mono: false) {
+                selectedTypes.removeAll { $0 == t }
+                Task { await fetchWithCurrentFilters() }
+            })
+        }
+        if !selectedContract.isEmpty {
+            chips.append(.init(label: selectedContract, active: false, mono: false) {
+                selectedContract = ""
+                Task { await fetchWithCurrentFilters() }
+            })
+        }
+        if !selectedEnergy.isEmpty {
+            chips.append(.init(label: "Energy ≥ \(selectedEnergy)", active: false, mono: true) {
+                selectedEnergy = ""
+                Task { await fetchWithCurrentFilters() }
+            })
+        }
+        return chips
+    }
+
+    private func shortStatusLabel(_ raw: String) -> String {
+        let s = raw.lowercased()
+        if s.contains("available to book") { return "Book" }
+        if s.contains("lottery") { return "Lottery" }
+        if s.contains("reserved") { return "Reserved" }
+        if s.contains("rented") { return "Rented" }
+        if s.contains("not available") { return "Unavailable" }
+        return raw
+    }
+
+    private func clearAllFilters() {
+        selectedStatus = ""
+        selectedCities = []
+        selectedTypes = []
+        selectedContract = ""
+        selectedEnergy = ""
+        searchText = ""
+        Task { await fetchWithCurrentFilters() }
     }
 
     private var activeFilterCount: Int {
@@ -154,48 +345,6 @@ struct ListingsView: View {
 
     private var filterButtonTitle: String {
         activeFilterCount > 0 ? "Filters (\(activeFilterCount))" : "Filters"
-    }
-
-    private var filterSummary: some View {
-        Section {
-            HStack(spacing: 8) {
-                Label(summaryText, systemImage: "line.3.horizontal.decrease.circle")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if activeFilterCount > 0 || !searchText.isEmpty {
-                    Button("Clear") {
-                        selectedStatus = ""
-                        selectedCities = []
-                        selectedTypes = []
-                        selectedContract = ""
-                        selectedEnergy = ""
-                        searchText = ""
-                        Task { await fetchWithCurrentFilters() }
-                    }
-                    .font(.caption)
-                }
-            }
-        }
-        .listRowBackground(Color.clear)
-    }
-
-    private var summaryText: String {
-        var parts: [String] = []
-        if !selectedCities.isEmpty {
-            parts.append(selectedCities.prefix(2).joined(separator: ", ")
-                + (selectedCities.count > 2 ? "…" : ""))
-        }
-        if !selectedStatus.isEmpty { parts.append(selectedStatus) }
-        if !selectedTypes.isEmpty {
-            parts.append(selectedTypes.prefix(2).joined(separator: ", ")
-                + (selectedTypes.count > 2 ? "…" : ""))
-        }
-        if !selectedContract.isEmpty { parts.append(selectedContract) }
-        if !selectedEnergy.isEmpty { parts.append("Energy ≥ \(selectedEnergy)") }
-        if sort != .newest { parts.append("Sorted by \(sort.title.lowercased())") }
-        if parts.isEmpty { parts.append("Filtered results") }
-        return parts.joined(separator: " · ")
     }
 
     private func fetchWithCurrentFilters() async {

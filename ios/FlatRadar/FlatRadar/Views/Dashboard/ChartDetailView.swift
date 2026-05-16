@@ -1,16 +1,6 @@
 import Charts
 import SwiftUI
 
-/// 通用图表详情 sheet。
-///
-/// 给定一个 ``chartKey``（与后端 `/api/v1/stats/public/charts/<key>` 对应），
-/// 拉取数据并用 Swift Charts 渲染条形图 + 数值表格。
-///
-/// 自动判定展示方式
-/// ----------------
-/// - 时间序列（``daily_new`` / ``daily_changes`` / ``hourly_dist``）→ Swift Charts
-/// - 分类分布（``city_dist`` / ``status_dist`` / 其它）→ Top N 横向排行条；
-///   移动端分类太多时，横坐标标签会折叠，排行条更稳。
 struct ChartDetailView: View {
     let chartKey: String
     let title: String
@@ -31,7 +21,7 @@ struct ChartDetailView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 20) {
                     if let subtitle {
                         Text(subtitle)
                             .font(.subheadline)
@@ -52,9 +42,23 @@ struct ChartDetailView: View {
                             systemImage: "chart.bar",
                             description: Text("This chart has no entries yet."))
                     } else if let chart {
-                        chartView(chart)
-                        Divider().padding(.horizontal)
-                        breakdownTable(chart)
+                        // 给 type_dist / energy_dist 等做语义合并（"1"/"2"/"3"→Apt,
+                        // A+/A++→A），保证 mini card 和 detail sheet 看到同一套标签。
+                        let displayed = ChartData(
+                            key: chart.key,
+                            days: chart.days,
+                            data: chart.data.bucketed(forKey: chart.key))
+
+                        if isTimeSeries(chart.key) {
+                            // 时序图：折线/柱图 + 下方表格（互补，不冗余）
+                            timeSeriesChart(displayed)
+                            breakdownTable(displayed)
+                        } else {
+                            // 分布图：原本同时画 "Top Categories" 排行 + "Breakdown"
+                            // 表格，两者展示同一份数据。删掉 Top Categories，只留
+                            // 信息更全的 Breakdown（带百分比、总计、完整列表）。
+                            breakdownTable(displayed)
+                        }
                     }
                 }
                 .padding(.vertical)
@@ -66,122 +70,33 @@ struct ChartDetailView: View {
         }
     }
 
-    // MARK: - Chart
+    // MARK: - Time series
 
-    @ViewBuilder
-    private func chartView(_ chart: ChartData) -> some View {
-        let isTime = isTimeSeries(chart.key)
-        if isTime {
-            timeSeriesChart(chart)
-        } else {
-            rankedCategoryChart(chart)
-        }
-    }
-
-    @ViewBuilder
     private func timeSeriesChart(_ chart: ChartData) -> some View {
-        Chart(chart.data) { entry in
-            BarMark(
-                x: .value("Label", entry.label),
-                y: .value("Count", entry.count)
-            )
-            .foregroundStyle(.blue.gradient)
-            .annotation(position: .top, alignment: .center) {
-                if entry.count > 0 {
-                    Text("\(entry.count)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
+        VStack(spacing: 0) {
+            TimeSeriesChartContent(data: chart.data, formatLabel: { prettyLabel($0, isTime: true) })
+                .frame(height: 240)
         }
-        .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 6)) { value in
-                AxisGridLine()
-                AxisTick()
-                AxisValueLabel {
-                    if let s = value.as(String.self) {
-                        Text(prettyLabel(s, isTime: true))
-                            .font(.caption2)
-                    }
-                }
-            }
-        }
-        .frame(height: 260)
-        .padding(.horizontal)
-    }
-
-    @ViewBuilder
-    private func rankedCategoryChart(_ chart: ChartData) -> some View {
-        let sorted = chart.data.sorted { $0.count > $1.count }
-        let visible = Array(sorted.prefix(12))
-        let maxCount = max(visible.map(\.count).max() ?? 1, 1)
-        let hiddenCount = max(sorted.count - visible.count, 0)
-
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Top Categories")
-                    .font(.headline)
-                Spacer()
-                if hiddenCount > 0 {
-                    Text("+\(hiddenCount) more below")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            VStack(spacing: 10) {
-                ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
-                    RankedBarRow(
-                        rank: index + 1,
-                        label: prettyLabel(entry.label, isTime: false),
-                        count: entry.count,
-                        maxCount: maxCount)
-                }
-            }
-        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
         .padding(.horizontal)
     }
 
     // MARK: - Breakdown table
 
-    @ViewBuilder
     private func breakdownTable(_ chart: ChartData) -> some View {
         let isTime = isTimeSeries(chart.key)
         let sorted = isTime ? chart.data.reversed() : Array(chart.data.sorted { $0.count > $1.count })
         let totalAll = chart.data.reduce(0) { $0 + $1.count }
+        let maxCount = sorted.map(\.count).max() ?? 1
 
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Breakdown").font(.headline)
-                Spacer()
-                Text("\(totalAll) total")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
-
-            ForEach(Array(sorted.enumerated()), id: \.offset) { idx, entry in
-                HStack {
-                    Text(prettyLabel(entry.label, isTime: isTime))
-                        .font(.subheadline)
-                    Spacer()
-                    if totalAll > 0 {
-                        Text("\(Int(round(Double(entry.count) / Double(totalAll) * 100)))%")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .padding(.trailing, 8)
-                    }
-                    Text("\(entry.count)")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .frame(minWidth: 32, alignment: .trailing)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-                .background(idx.isMultiple(of: 2) ? Color.clear : Color.primary.opacity(0.04))
-            }
-        }
+        return BreakdownContent(
+            entries: sorted,
+            total: totalAll,
+            maxCount: maxCount,
+            formatLabel: { prettyLabel($0, isTime: isTime) }
+        )
     }
 
     // MARK: - Helpers
@@ -190,7 +105,6 @@ struct ChartDetailView: View {
         key.hasPrefix("daily_") || key == "hourly_dist"
     }
 
-    /// 时间序列把 "2026-05-13" 缩成 "05-13"；其它原样。
     private func prettyLabel(_ s: String, isTime: Bool) -> String {
         if isTime, s.count >= 10, s.contains("-") {
             return String(s.suffix(5))
@@ -210,44 +124,133 @@ struct ChartDetailView: View {
     }
 }
 
-private struct RankedBarRow: View {
-    let rank: Int
+// MARK: - Breakdown row
+
+private struct BreakdownRow: View {
     let label: String
     let count: Int
+    let total: Int
     let maxCount: Int
+    let isEven: Bool
+
+    private var pct: String {
+        guard total > 0 else { return "—" }
+        return "\(Int(round(Double(count) / Double(total) * 100)))%"
+    }
 
     private var ratio: CGFloat {
         guard maxCount > 0 else { return 0 }
-        return max(0.04, CGFloat(count) / CGFloat(maxCount))
+        return max(0.02, CGFloat(count) / CGFloat(maxCount))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 8) {
-                Text("\(rank)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18, alignment: .trailing)
-                Text(label)
-                    .font(.subheadline)
-                    .lineLimit(1)
-                Spacer()
-                Text("\(count)")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .monospacedDigit()
-            }
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.subheadline)
+                .frame(width: 100, alignment: .leading)
+                .lineLimit(1)
 
             GeometryReader { proxy in
                 ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.primary.opacity(0.08))
-                    Capsule()
-                        .fill(Color.blue.gradient)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(.clear)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(.blue.opacity(isEven ? 0.45 : 0.35))
                         .frame(width: proxy.size.width * ratio)
                 }
             }
-            .frame(height: 8)
+            .frame(height: 6)
+
+            Text(pct)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .trailing)
+
+            Text("\(count)")
+                .font(.subheadline.weight(.medium))
+                .monospacedDigit()
+                .frame(width: 40, alignment: .trailing)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(isEven ? Color.clear : Color.primary.opacity(0.03))
+    }
+}
+
+// MARK: - Extracted content structs (help the Swift type-checker)
+
+private struct TimeSeriesChartContent: View {
+    let data: [ChartEntry]
+    let formatLabel: (String) -> String
+
+    var body: some View {
+        Chart(data) { entry in
+            BarMark(
+                x: .value("Label", entry.label),
+                y: .value("Count", entry.count)
+            )
+            .foregroundStyle(.blue.gradient)
+            .cornerRadius(4, style: .continuous)
+            .annotation(position: .top, alignment: .center) {
+                if entry.count > 0 {
+                    Text("\(entry.count)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 6)) { value in
+                AxisGridLine().foregroundStyle(.secondary.opacity(0.3))
+                AxisTick().foregroundStyle(.secondary.opacity(0.4))
+                AxisValueLabel {
+                    if let s = value.as(String.self) {
+                        Text(formatLabel(s))
+                            .font(.caption2)
+                    }
+                }
+            }
+        }
+        .chartYAxis {
+            AxisMarks {
+                AxisGridLine().foregroundStyle(.secondary.opacity(0.3))
+                AxisTick().foregroundStyle(.secondary.opacity(0.4))
+                AxisValueLabel().font(.caption2)
+            }
+        }
+    }
+}
+
+private struct BreakdownContent: View {
+    let entries: [ChartEntry]
+    let total: Int
+    let maxCount: Int
+    let formatLabel: (String) -> String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Label("Breakdown", systemImage: "list.bullet.rectangle")
+                    .font(.headline)
+                Spacer()
+                Text("\(total) total")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 12)
+
+            ForEach(Array(entries.enumerated()), id: \.offset) { idx, entry in
+                BreakdownRow(
+                    label: formatLabel(entry.label),
+                    count: entry.count,
+                    total: total,
+                    maxCount: maxCount,
+                    isEven: idx.isMultiple(of: 2))
+            }
+        }
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal)
     }
 }

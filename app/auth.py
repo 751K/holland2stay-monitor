@@ -68,6 +68,35 @@ def clear_login_failures(ip: str) -> None:
 
 
 # ------------------------------------------------------------------ #
+# 注册滥用防护：同 IP 每小时最多 3 个新账号
+# ------------------------------------------------------------------ #
+_REGISTER_RECORDS: dict[str, list[float]] = {}
+REGISTER_MAX_PER_HOUR = 3
+_REGISTER_WINDOW = 3600  # 1 小时
+
+
+def check_register_rate(ip: str) -> tuple[bool, str]:
+    """
+    返回 (allowed, reason)。
+    同 IP 每小时内最多 REGISTER_MAX_PER_HOUR 个新账号。
+    """
+    now = _time.monotonic()
+    records = [t for t in _REGISTER_RECORDS.get(ip, []) if now - t < _REGISTER_WINDOW]
+    _REGISTER_RECORDS[ip] = records
+    if len(records) >= REGISTER_MAX_PER_HOUR:
+        oldest = min(records)
+        remaining = int(_REGISTER_WINDOW - (now - oldest))
+        minutes = max(1, remaining // 60)
+        return False, f"注册过于频繁，请 {minutes} 分钟后再试"
+    return True, ""
+
+
+def record_registration(ip: str) -> None:
+    """记录一次注册。"""
+    _REGISTER_RECORDS.setdefault(ip, []).append(_time.monotonic())
+
+
+# ------------------------------------------------------------------ #
 # 状态查询
 # ------------------------------------------------------------------ #
 

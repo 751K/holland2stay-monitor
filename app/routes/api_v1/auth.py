@@ -30,13 +30,18 @@ from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
 from app.auth import (
+    check_register_rate,
     clear_login_failures,
     record_login_failure,
+    record_registration,
 )
 from app.db import storage
 from users import (
+    UserConfig,
     get_user_by_name,
     load_users,
+    save_users,
+    set_app_password,
     verify_app_password,
 )
 
@@ -275,6 +280,112 @@ def _me() -> Any:
     return _err.ok(payload)
 
 
+# ── 注册 ─────────────────────────────────────────────────────────────
+
+def _register() -> Any:
+    """
+    POST /auth/register —— JSON body: {username, password, device_name?, ttl_days?}
+
+    创建新用户到 users.json，自动设置 app 登录密码（bcrypt），
+    并同时签发 token 实现"注册即登录"。
+
+    安全边界
+    --------
+    - 用户名不能是 "__admin__"（保留给管理员）
+    - 用户名不能与已有用户重复
+    - 密码最少 4 字符
+    - 复用 login_rate_check 防止批量注册
+    - 新用户 notifications_enabled=False（fail-closed，等用户在 Web 面板
+      配置好通知渠道后再开启）
+    """
+    client_ip = request.remote_addr or "?"
+
+    allowed, wait = api_auth.login_rate_check()
+    if not allowed:
+        _time.sleep(wait)
+
+    # 注册专用限流：同 IP 每小时最多 3 个
+    reg_ok, reg_reason = check_register_rate(client_ip)
+    if not reg_ok:
+        return _err.err_rate_limited(reg_reason)
+
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    device_name = (body.get("device_name") or "").strip()[:64] or "未命名设备"
+
+    ttl_days_raw = body.get("ttl_days", DEFAULT_TTL_DAYS)
+    try:
+        ttl_days = int(ttl_days_raw) if ttl_days_raw is not None else DEFAULT_TTL_DAYS
+    except (TypeError, ValueError):
+        ttl_days = DEFAULT_TTL_DAYS
+    if ttl_days < MIN_TTL_DAYS or ttl_days > MAX_TTL_DAYS:
+        ttl_days = DEFAULT_TTL_DAYS
+
+    # 验证
+    if not username or not password:
+        return _err.err_validation("用户名和密码不能为空")
+    if len(username) < 2:
+        return _err.err_validation("用户名至少需要 2 个字符")
+    if len(password) < 4:
+        return _err.err_validation("密码至少需要 4 个字符")
+    if username.lower() == ADMIN_USERNAME:
+        return _err.err_validation("该用户名不可用")
+
+    try:
+        users = load_users()
+    except RuntimeError as e:
+        logger.error("users.json 解析失败: %s", e)
+        return _err.err_server_error(e, "用户配置文件损坏，请联系管理员")
+
+    if get_user_by_name(users, username) is not None:
+        return _err.err_conflict("该用户名已被注册")
+
+    # 创建用户
+    user = UserConfig(
+        name=username,
+        enabled=True,
+        notifications_enabled=False,
+        app_login_enabled=True,
+    )
+    set_app_password(user, password)
+    users.append(user)
+
+    try:
+        save_users(users)
+    except OSError as e:
+        logger.exception("保存 users.json 失败")
+        return _err.err_server_error(e, "用户创建失败，请稍后再试")
+
+    record_registration(client_ip)
+    logger.info("新用户注册: name=%r id=%s ip=%s", username, user.id, client_ip)
+
+    # 签发 token（注册即登录）
+    clear_login_failures(request.remote_addr or "?")
+    st = storage()
+    try:
+        token_id, plaintext = st.create_app_token(
+            role="user",
+            user_id=user.id,
+            device_name=device_name,
+            ttl_days=ttl_days,
+        )
+    finally:
+        st.close()
+
+    return _err.ok({
+        "token": plaintext,
+        "role": "user",
+        "user": {
+            "id": user.id,
+            "name": user.name,
+            "enabled": user.enabled,
+            "notifications_enabled": user.notifications_enabled,
+            "listing_filter": {},
+        },
+    }, status=201)
+
+
 # ── Blueprint 注册 ───────────────────────────────────────────────────
 
 def register(bp: Blueprint) -> None:
@@ -282,6 +393,12 @@ def register(bp: Blueprint) -> None:
         "/auth/login",
         endpoint="auth_login",
         view_func=_login,
+        methods=["POST"],
+    )
+    bp.add_url_rule(
+        "/auth/register",
+        endpoint="auth_register",
+        view_func=_register,
         methods=["POST"],
     )
     bp.add_url_rule(

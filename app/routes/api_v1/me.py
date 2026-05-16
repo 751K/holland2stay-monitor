@@ -249,6 +249,46 @@ def _filter_options():
     return _err.ok(data)
 
 
+def _delete_account() -> Any:
+    """
+    DELETE /me — 用户注销自己的账号。
+
+    执行：
+    1. 撤销该用户所有 App token（立即生效，不需要等过期）
+    2. 从 users.json 中删除该用户
+    3. 返回 success
+
+    admin 不能通过此端点删除（admin 没有 user_id）。
+    """
+    role = api_auth.current_role()
+    user = get_current_user()
+    if user is None:
+        return _err.err_unauthorized("用户不存在")
+
+    with storage_ctx() as st:
+        revoked = st.revoke_user_tokens(user.id)
+        logger.info("账号注销 user=%s name=%r 撤销了 %d 个 token", user.id, user.name, revoked)
+
+    try:
+        all_users = load_users()
+    except RuntimeError as e:
+        logger.exception("load_users 失败")
+        return _err.err_server_error(e, "用户数据加载失败")
+
+    new_users = [u for u in all_users if u.id != user.id]
+    if len(new_users) == len(all_users):
+        return _err.err_not_found("用户不存在")
+
+    try:
+        save_users(new_users)
+    except Exception as e:
+        logger.exception("save_users 失败")
+        return _err.err_server_error(e, "账号注销失败")
+
+    logger.info("账号注销完成 user=%s name=%r", user.id, user.name)
+    return _err.ok({"deleted": True, "user_id": user.id})
+
+
 def register(bp: Blueprint) -> None:
     bp.add_url_rule(
         "/me/summary",
@@ -273,4 +313,10 @@ def register(bp: Blueprint) -> None:
         endpoint="filter_options",
         view_func=api_auth.bearer_optional(_filter_options),
         methods=["GET"],
+    )
+    bp.add_url_rule(
+        "/me",
+        endpoint="me_delete",
+        view_func=api_auth.bearer_required(("user",))(_delete_account),
+        methods=["DELETE"],
     )

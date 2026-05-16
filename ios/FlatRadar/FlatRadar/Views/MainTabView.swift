@@ -1,8 +1,24 @@
 import SwiftUI
 
+/// 给 NotificationsView 的 tab item 单独挂红点，**故意**抽成 ViewModifier：
+/// 让对 `NotificationsStore.unreadCount` 的观察只发生在这个小 modifier 的 body 里。
+///
+/// 之前 MainTabView 自己 `@Environment(NotificationsStore.self)` + 在 body 里读
+/// `notifStore.unreadCount`，每次 SSE 推一批通知导致 unreadCount 跳，整个 MainTabView.body
+/// 就会重跑——TabView 也跟着重跑——DashboardView 内的 `.refreshable` / `.task` 就被
+/// SwiftUI cancel，正在飞的 URLSession 请求统统抛 `NSURLErrorCancelled (-999)`，UI
+/// 看到的就是"连接失败"。
+///
+/// 抽到这里后，badge 变化只让这个 modifier 的 wrapper view 重跑，MainTabView 不受影响。
+private struct AlertsTabBadge: ViewModifier {
+    @Environment(NotificationsStore.self) private var notifStore
+    func body(content: Content) -> some View {
+        content.badge(notifStore.unreadCount)
+    }
+}
+
 struct MainTabView: View {
     @Environment(AuthStore.self) private var auth
-    @Environment(NotificationsStore.self) private var notifStore
     @Environment(NavigationCoordinator.self) private var coord
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
@@ -43,8 +59,8 @@ struct MainTabView: View {
 
             if auth.role == .user || auth.role == .admin {
                 NotificationsView()
-                    .tabItem { Label("Notifications", systemImage: "bell.fill") }
-                    .badge(notifStore.unreadCount)
+                    .tabItem { Label("Alerts", systemImage: "bell.fill") }
+                    .modifier(AlertsTabBadge())
                     .tag(AppTab.notifications)
             }
 
@@ -76,8 +92,8 @@ struct MainTabView: View {
 
             if auth.role == .user || auth.role == .admin {
                 NotificationsView()
-                    .tabItem { Label("Notifications", systemImage: "bell.fill") }
-                    .badge(notifStore.unreadCount)
+                    .tabItem { Label("Alerts", systemImage: "bell.fill") }
+                    .modifier(AlertsTabBadge())
                     .tag(AppTab.notifications)
             }
 

@@ -101,6 +101,33 @@ final class AuthStore {
         isLoading = false
     }
 
+    // MARK: - Register
+
+    func register(name: String, password: String, ttlDays: Int = 90) async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            let device = DeviceName.current
+            let resp = try await client.register(
+                username: name, password: password,
+                deviceName: device, ttlDays: ttlDays)
+            await client.setToken(resp.token)
+            do {
+                try KeychainManager.save(token: resp.token, server: server)
+            } catch {
+                print("[AuthStore] Keychain save failed, falling back to UserDefaults")
+                UserDefaults.standard.set(resp.token, forKey: "auth_token")
+            }
+            let me = try await client.getMe()
+            applyMe(me)
+        } catch {
+            print("[AuthStore] register error: \(error)")
+            lastError = error as? APIError
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
     // MARK: - Guest
 
     func enterAsGuest() {
@@ -120,7 +147,6 @@ final class AuthStore {
     // MARK: - Logout
 
     func logout() async {
-        // Best-effort server-side revocation
         _ = try? await client.logout()
         KeychainManager.delete(server: server)
         UserDefaults.standard.removeObject(forKey: "auth_token")
@@ -129,6 +155,27 @@ final class AuthStore {
         isAuthenticated = false
         userInfo = nil
         errorMessage = nil
+    }
+
+    // MARK: - Delete Account
+
+    func deleteAccount() async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            _ = try await client.deleteAccount()
+            // Clear local state and return to login
+            KeychainManager.delete(server: server)
+            UserDefaults.standard.removeObject(forKey: "auth_token")
+            await client.setToken(nil)
+            role = .guest
+            isAuthenticated = false
+            userInfo = nil
+        } catch {
+            lastError = error as? APIError
+            errorMessage = error.localizedDescription
+        }
     }
 
     // MARK: - Private

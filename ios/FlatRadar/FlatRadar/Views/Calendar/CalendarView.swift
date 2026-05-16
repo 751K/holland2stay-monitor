@@ -72,6 +72,7 @@ struct CalendarView: View {
                 .padding(.vertical)
             }
         .refreshable { await store.refresh() }
+        .background(Color(.systemGroupedBackground))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

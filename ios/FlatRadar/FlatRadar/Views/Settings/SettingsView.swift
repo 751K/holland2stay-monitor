@@ -7,6 +7,7 @@ struct SettingsView: View {
     @AppStorage("color_scheme") private var colorScheme: String = "system"
     @State private var editedURL = ""
     @State private var showLogoutConfirm = false
+    @State private var showDeleteConfirm = false
 
     // Test push 状态
     @State private var isSendingTest = false
@@ -15,103 +16,53 @@ struct SettingsView: View {
 
     // Filter 编辑 sheet
     @State private var showFilterEdit = false
+    @State private var showLegalTerms = false
+    @State private var showLegalPrivacy = false
 
     var body: some View {
         NavigationStack {
             Form {
-                // Server
-                Section {
-                    HStack {
-                        TextField("host:port", text: $editedURL)
-#if os(iOS)
-                            .keyboardType(.URL)
-#endif
-                            .autocorrectionDisabled()
-#if os(iOS)
-                            .textInputAutocapitalization(.never)
-#endif
-                        Button("Save") {
-                            serverURL = editedURL.trimmingCharacters(in: .whitespaces)
-                            let url = buildBaseURL(from: serverURL)
-                            APIClient.shared.configure(baseURL: url)
-                            endEditing()
+                // 1. Push Filter (user only)
+                if auth.isUser, let info = auth.userInfo {
+                    Section {
+                        Button {
+                            showFilterEdit = true
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Label("Notification Filter",
+                                          systemImage: "line.3.horizontal.decrease.circle.fill")
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Text(info.listingFilter.summary)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(editedURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .buttonStyle(.plain)
+                    } header: {
+                        Text("Push Filter")
+                    } footer: {
+                        Text("Only listings matching this filter trigger APNs and notification tab updates.")
                     }
-                } header: {
-                    Text("Server")
-                } footer: {
-                    Text("Enter the host:port of your FlatRadar server.\nHTTPS is enforced for production.")
                 }
 
-                // Account
+                // 2. Appearance
+                Section("Appearance") {
+                    Picker("Color Scheme", selection: $colorScheme) {
+                        Text("System").tag("system")
+                        Text("Light").tag("light")
+                        Text("Dark").tag("dark")
+                    }
+                }
+
+                // 3. Push Notifications (authenticated, non-guest)
                 if auth.isAuthenticated, auth.role != .guest {
-                    Section("Account") {
-                        HStack {
-                            Text("Role")
-                            Spacer()
-                            Text(auth.role.rawValue.capitalized)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let user = auth.userInfo {
-                            HStack {
-                                Text("Name")
-                                Spacer()
-                                Text(user.name)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        Button("Log Out", role: .destructive) {
-                            showLogoutConfirm = true
-                        }
-                        .confirmationDialog("Log Out", isPresented: $showLogoutConfirm) {
-                            Button("Log Out", role: .destructive) {
-                                Task {
-                                    // 先解绑设备（用旧 token 调）再撤销 token
-                                    await push.logout()
-                                    await auth.logout()
-                                }
-                            }
-                            Button("Cancel", role: .cancel) {}
-                        }
-                    }
-
-                    // Notification filter (user role only — admin sees everything)
-                    if auth.isUser, let info = auth.userInfo {
-                        Section {
-                            Button {
-                                showFilterEdit = true
-                            } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack {
-                                        Label("Notification Filter",
-                                              systemImage: "line.3.horizontal.decrease.circle.fill")
-                                            .foregroundStyle(.primary)
-                                        Spacer()
-                                        Image(systemName: "chevron.right")
-                                            .font(.caption)
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                    Text(info.listingFilter.summary)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(2)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        } header: {
-                            Text("Push Filter")
-                        } footer: {
-                            Text("Only listings matching this filter trigger APNs and notification tab updates.")
-                        }
-                    }
-
-                    // Push notifications
-                    //
-                    // user role 只展示状态（Permission + Device ID），不暴露
-                    // "Send Test Push" / "Re-register Device" / 详细错误 ——
-                    // 这些是 admin 调试用的，user 看到容易误操作或泄漏诊断信息。
                     Section {
                         HStack {
                             Text("Permission")
@@ -167,6 +118,59 @@ struct SettingsView: View {
                             Text("New listings matching your filter will arrive as push notifications.")
                         }
                     }
+                }
+
+                // 4. Account
+                if auth.isAuthenticated, auth.role != .guest {
+                    Section("Account") {
+                        HStack {
+                            Text("Role")
+                            Spacer()
+                            Text(auth.role.rawValue.capitalized)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let user = auth.userInfo {
+                            HStack {
+                                Text("Name")
+                                Spacer()
+                                Text(user.name)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Button("Log Out", role: .destructive) {
+                            showLogoutConfirm = true
+                        }
+                        .confirmationDialog("Log Out", isPresented: $showLogoutConfirm) {
+                            Button("Log Out", role: .destructive) {
+                                Task {
+                                    await push.logout()
+                                    await auth.logout()
+                                }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        }
+
+                        if auth.isUser {
+                            Button("Delete Account", role: .destructive) {
+                                showDeleteConfirm = true
+                            }
+                            .confirmationDialog(
+                                "Permanently delete your account?",
+                                isPresented: $showDeleteConfirm,
+                                titleVisibility: .visible
+                            ) {
+                                Button("Delete Account", role: .destructive) {
+                                    Task {
+                                        await push.logout()
+                                        await auth.deleteAccount()
+                                    }
+                                }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("Your account data, saved filters, alert history, and preferences will be permanently removed. This cannot be undone.")
+                            }
+                        }
+                    }
                 } else if auth.isGuest {
                     Section("Account") {
                         HStack {
@@ -175,8 +179,6 @@ struct SettingsView: View {
                             Text("Guest")
                                 .foregroundStyle(.secondary)
                         }
-                        // guest 没 token，logout 不调服务端 revoke；只是清本地
-                        // 状态、回到登录页，让用户能登 admin/user。
                         Button("Sign Out of Guest Mode", role: .destructive) {
                             showLogoutConfirm = true
                         }
@@ -189,8 +191,7 @@ struct SettingsView: View {
                     }
                 }
 
-                // Appearance
-                // Admin tools — admin role only
+                // Admin tools
                 if auth.isAdmin {
                     Section {
                         NavigationLink {
@@ -210,15 +211,23 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Appearance") {
-                    Picker("Color Scheme", selection: $colorScheme) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
+                // 6. Legal
+                Section("Legal") {
+                    Button {
+                        showLegalTerms = true
+                    } label: {
+                        Label("Terms of Use", systemImage: "doc.text")
+                            .foregroundStyle(.primary)
+                    }
+                    Button {
+                        showLegalPrivacy = true
+                    } label: {
+                        Label("Privacy Policy", systemImage: "hand.raised")
+                            .foregroundStyle(.primary)
                     }
                 }
 
-                // About
+                // 7. About
                 Section("About") {
                     HStack {
                         Text("App")
@@ -237,6 +246,12 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showFilterEdit) {
                 FilterEditView()
+            }
+            .sheet(isPresented: $showLegalTerms) {
+                LegalSheetView(title: "Terms of Use", content: LegalText.terms)
+            }
+            .sheet(isPresented: $showLegalPrivacy) {
+                LegalSheetView(title: "Privacy Policy", content: LegalText.privacy)
             }
         }
     }

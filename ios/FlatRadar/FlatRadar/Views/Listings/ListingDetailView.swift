@@ -69,6 +69,7 @@ struct ListingDetailView: View {
                         Text(listing.status)
                             .font(.caption)
                             .fontWeight(.semibold)
+                            .lineLimit(1)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 4)
                             .background(statusColor(for: listing).opacity(0.16))
@@ -130,6 +131,13 @@ struct ListingDetailView: View {
                 }
 
                 if let url = URL(string: listing.url), !listing.url.isEmpty {
+                    Text("Always verify listing details on the official Holland2Stay website before making decisions.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 8)
+
                     Link(destination: url) {
                         Label("Open on Holland2Stay", systemImage: "safari")
                             .font(.headline)

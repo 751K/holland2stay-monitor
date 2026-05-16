@@ -248,3 +248,14 @@ struct DeviceTestPushResult: Decodable, Identifiable {
         case env, status, reason, ok
     }
 }
+
+/// `DELETE /api/v1/me` 响应
+struct AccountDeleteResponse: Decodable {
+    let deleted: Bool
+    let userId: String
+
+    enum CodingKeys: String, CodingKey {
+        case deleted
+        case userId = "user_id"
+    }
+}

@@ -17,13 +17,27 @@ final class DashboardStore {
     func fetchSummary() async {
         isLoading = true
         errorMessage = nil
-        do {
-            summary = try await client.getPublicSummary()
-        } catch {
-            lastError = error as? APIError
-            errorMessage = error.localizedDescription
+        defer { isLoading = false }
+
+        // 加单次重试 —— 后端冷启动 / 网络抖动单次失败很常见，第二次通常就过。
+        // 失败两次再把错误吐出来。
+        for attempt in 0..<2 {
+            do {
+                summary = try await client.getPublicSummary()
+                lastError = nil
+                errorMessage = nil
+                return
+            } catch {
+                print("[DashboardStore] fetchSummary attempt \(attempt + 1) failed: \(error.localizedDescription)")
+                if attempt == 1 {
+                    lastError = error as? APIError
+                    errorMessage = error.localizedDescription
+                } else {
+                    // 0.6s 退避，给后端 / 网络一个喘息
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                }
+            }
         }
-        isLoading = false
     }
 
     func fetchMeSummary() async {

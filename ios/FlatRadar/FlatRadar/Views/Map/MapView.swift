@@ -353,6 +353,7 @@ struct MapView: View {
         Text(shortStatus(status))
             .font(.caption)
             .fontWeight(.medium)
+            .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(color.opacity(0.18), in: Capsule())

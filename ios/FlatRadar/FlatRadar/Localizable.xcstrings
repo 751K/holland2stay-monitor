@@ -10,6 +10,15 @@
     " " : {
 
     },
+    " listings" : {
+
+    },
+    " unread" : {
+
+    },
+    "—" : {
+
+    },
     "·" : {
 
     },
@@ -48,6 +57,16 @@
     },
     "%lld" : {
 
+    },
+    "%lld %@ · matches your filter" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld %2$@ · matches your filter"
+          }
+        }
+      }
     },
     "%lld added in past 7 days" : {
       "extractionState" : "stale",
@@ -152,10 +171,13 @@
         }
       }
     },
-    "%lld%%" : {
+    "•" : {
 
     },
-    "+%lld more below" : {
+    "+%@" : {
+
+    },
+    "⋯⋯" : {
 
     },
     "⚠️ Sent %lld/%lld. Failures: %@" : {
@@ -207,6 +229,9 @@
       }
     },
     "€/mo" : {
+
+    },
+    "A real-time monitor for Holland2Stay availability." : {
 
     },
     "About" : {
@@ -277,6 +302,7 @@
       }
     },
     "Admin Password" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -291,6 +317,12 @@
           }
         }
       }
+    },
+    "Agree & Continue" : {
+
+    },
+    "Alerts" : {
+
     },
     "All %lld listings, grouped" : {
       "extractionState" : "stale",
@@ -318,6 +350,12 @@
     "All Statuses" : {
 
     },
+    "All Types" : {
+
+    },
+    "Always verify listing details on the official Holland2Stay website before making decisions." : {
+
+    },
     "Any" : {
 
     },
@@ -337,7 +375,11 @@
         }
       }
     },
+    "App password" : {
+
+    },
     "App Password" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -421,6 +463,12 @@
         }
       }
     },
+    "Before You Continue" : {
+
+    },
+    "book" : {
+
+    },
     "Breakdown" : {
       "localizations" : {
         "en" : {
@@ -440,7 +488,11 @@
     "Browse" : {
 
     },
+    "Browse listings\nread-only." : {
+
+    },
     "Browse public statistics without logging in." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -455,6 +507,12 @@
           }
         }
       }
+    },
+    "By continuing, you agree that:" : {
+
+    },
+    "By creating an account, you agree to our" : {
+
     },
     "By Energy" : {
       "extractionState" : "stale",
@@ -592,10 +650,7 @@
     "Cities" : {
 
     },
-    "City" : {
-
-    },
-    "Clear" : {
+    "Clear all" : {
 
     },
     "Color Scheme" : {
@@ -630,10 +685,19 @@
         }
       }
     },
+    "CONTINUE AS" : {
+
+    },
     "Contract" : {
 
     },
     "Count" : {
+
+    },
+    "Create Account" : {
+
+    },
+    "Create Account & Login" : {
 
     },
     "Create users via the web admin panel." : {
@@ -710,6 +774,9 @@
     "Delete %@" : {
 
     },
+    "Delete Account" : {
+
+    },
     "Delete user?" : {
 
     },
@@ -762,6 +829,15 @@
         }
       }
     },
+    "Don't have an account?" : {
+
+    },
+    "Done" : {
+
+    },
+    "Email or username" : {
+
+    },
     "Empty = no limit. Floor 0 = ground floor." : {
 
     },
@@ -803,6 +879,7 @@
       }
     },
     "Enter the host:port of your FlatRadar server.\nHTTPS is enforced for production." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -922,6 +999,9 @@
         }
       }
     },
+    "FlatRadar is an **unofficial** third-party client.\nNot affiliated with, endorsed by, or sponsored by Holland2Stay.\nAll listing data belongs to its respective owners." : {
+
+    },
     "FlatRadar v1.0" : {
       "localizations" : {
         "en" : {
@@ -937,6 +1017,18 @@
           }
         }
       }
+    },
+    "flatradar.app" : {
+
+    },
+    "Good afternoon" : {
+
+    },
+    "Good evening" : {
+
+    },
+    "Good morning" : {
+
     },
     "Guest" : {
       "localizations" : {
@@ -955,6 +1047,7 @@
       }
     },
     "Holland2Stay Monitor" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -969,9 +1062,6 @@
           }
         }
       }
-    },
-    "host:port" : {
-
     },
     "HTTP %lld" : {
       "extractionState" : "stale",
@@ -994,6 +1084,7 @@
 
     },
     "Idle" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1051,6 +1142,7 @@
 
     },
     "Last scrape: %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1081,6 +1173,9 @@
           }
         }
       }
+    },
+    "Legal" : {
+
     },
     "Light" : {
       "localizations" : {
@@ -1163,6 +1258,7 @@
       }
     },
     "Live" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1210,6 +1306,9 @@
         }
       }
     },
+    "Log out" : {
+
+    },
     "Log Out" : {
       "localizations" : {
         "en" : {
@@ -1225,6 +1324,9 @@
           }
         }
       }
+    },
+    "Login" : {
+
     },
     "Login as Admin" : {
       "extractionState" : "stale",
@@ -1277,6 +1379,9 @@
         }
       }
     },
+    "lottery" : {
+
+    },
     "Lottery" : {
       "localizations" : {
         "en" : {
@@ -1315,7 +1420,11 @@
         }
       }
     },
+    "Mark all read" : {
+
+    },
     "Mark All Read" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1347,6 +1456,9 @@
           }
         }
       }
+    },
+    "matched · all available" : {
+
     },
     "Max rent" : {
 
@@ -1380,6 +1492,12 @@
       }
     },
     "Monitor Control" : {
+
+    },
+    "More breakdowns ›" : {
+
+    },
+    "MOST" : {
 
     },
     "Name" : {
@@ -1416,6 +1534,9 @@
           }
         }
       }
+    },
+    "NEW · %@" : {
+
     },
     "New (7d)" : {
       "extractionState" : "stale",
@@ -1504,6 +1625,9 @@
         }
       }
     },
+    "No cities available" : {
+
+    },
     "No Data" : {
       "localizations" : {
         "en" : {
@@ -1568,6 +1692,9 @@
         }
       }
     },
+    "No listings matched your filter in the last 24 hours." : {
+
+    },
     "No Move-In Dates" : {
       "localizations" : {
         "en" : {
@@ -1600,6 +1727,9 @@
         }
       }
     },
+    "No new listings" : {
+
+    },
     "No Notifications" : {
       "localizations" : {
         "en" : {
@@ -1617,6 +1747,9 @@
       }
     },
     "No options available" : {
+
+    },
+    "No types available" : {
 
     },
     "No Users" : {
@@ -1674,6 +1807,7 @@
 
     },
     "Notifications" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1717,6 +1851,15 @@
     "Open on Holland2Stay" : {
 
     },
+    "other" : {
+
+    },
+    "Password (min 4 characters)" : {
+
+    },
+    "Permanently delete your account?" : {
+
+    },
     "Permission" : {
       "localizations" : {
         "en" : {
@@ -1734,6 +1877,9 @@
       }
     },
     "PID" : {
+
+    },
+    "Please read and accept the Terms of Use to use FlatRadar." : {
 
     },
     "Please sign in again." : {
@@ -1804,6 +1950,12 @@
         }
       }
     },
+    "Privacy" : {
+
+    },
+    "Privacy Policy" : {
+
+    },
     "Provisional" : {
       "localizations" : {
         "en" : {
@@ -1821,6 +1973,7 @@
       }
     },
     "Pull to refresh" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1904,6 +2057,9 @@
         }
       }
     },
+    "Register" : {
+
+    },
     "Registration failed" : {
       "localizations" : {
         "en" : {
@@ -1933,9 +2089,6 @@
 
     },
     "Reset filter to none?" : {
-
-    },
-    "Reset Filters" : {
 
     },
     "Response missing data field" : {
@@ -2016,6 +2169,12 @@
         }
       }
     },
+    "Searching for a new\nhome in the Netherlands?" : {
+
+    },
+    "See all %lld" : {
+
+    },
     "Select cities first to see neighborhoods" : {
 
     },
@@ -2068,6 +2227,7 @@
       }
     },
     "Server" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2146,6 +2306,12 @@
           }
         }
       }
+    },
+    "Sign in to your\naccount." : {
+
+    },
+    "Sign out" : {
+
     },
     "Sign Out" : {
       "localizations" : {
@@ -2269,6 +2435,12 @@
     "Tenant" : {
 
     },
+    "Terms" : {
+
+    },
+    "Terms of Use" : {
+
+    },
     "Test Push" : {
       "localizations" : {
         "en" : {
@@ -2317,6 +2489,9 @@
         }
       }
     },
+    "this week" : {
+
+    },
     "This will remove the user, their notification preferences, and revoke all their App sessions. This cannot be undone." : {
 
     },
@@ -2355,9 +2530,6 @@
         }
       }
     },
-    "Top Categories" : {
-
-    },
     "Total by City" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2392,6 +2564,9 @@
         }
       }
     },
+    "TOTAL LISTINGS" : {
+
+    },
     "Try Again" : {
       "localizations" : {
         "en" : {
@@ -2407,6 +2582,9 @@
           }
         }
       }
+    },
+    "Type" : {
+
     },
     "Type Distribution" : {
       "extractionState" : "stale",
@@ -2510,6 +2688,12 @@
         }
       }
     },
+    "UNOFFICIAL · v%@" : {
+
+    },
+    "updated %@" : {
+
+    },
     "User" : {
       "localizations" : {
         "en" : {
@@ -2577,7 +2761,14 @@
         }
       }
     },
+    "Your account data, saved filters, alert history, and preferences will be permanently removed. This cannot be undone." : {
+
+    },
+    "Your matches" : {
+
+    },
     "Your Matches" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
