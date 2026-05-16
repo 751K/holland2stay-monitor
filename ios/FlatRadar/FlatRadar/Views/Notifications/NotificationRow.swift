@@ -134,9 +134,9 @@ private struct CardStyle {
 
         case .test:
             iconName       = "wand.and.stars"
-            accent         = .purple
-            iconBackground = Color.purple.opacity(0.18)
-            cardTint       = Color.purple.opacity(0.12)
+            accent         = .blue
+            iconBackground = Color.blue.opacity(0.18)
+            cardTint       = Color.blue.opacity(0.12)
             eventLabel     = "TEST"
 
         case .system:

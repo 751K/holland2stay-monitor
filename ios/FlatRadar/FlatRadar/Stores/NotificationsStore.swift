@@ -100,7 +100,9 @@ final class NotificationsStore {
     func connectStream() {
         guard streamTask == nil else { return }
         guard client.currentToken() != nil else {
+            #if DEBUG
             print("[SSE] no token, skip connect")
+            #endif
             return
         }
         streamTask = Task { [weak self] in
@@ -132,7 +134,9 @@ final class NotificationsStore {
             } catch {
                 isStreamConnected = false
                 streamError = error.localizedDescription
+                #if DEBUG
                 print("[SSE] stream error: \(error); reconnect in \(backoff / 1_000_000_000)s")
+                #endif
                 try? await Task.sleep(nanoseconds: backoff)
                 backoff = min(backoff * 2, 60_000_000_000)
             }
@@ -145,7 +149,9 @@ final class NotificationsStore {
         let url = client.notificationsStreamURL(lastId: maxId)
         let token = client.currentToken()
         let sse = SSEClient(url: url, bearerToken: token)
+        #if DEBUG
         print("[SSE] connecting \(url.absoluteString)")
+        #endif
         isStreamConnected = true
         streamError = nil
 
@@ -192,9 +198,13 @@ final class NotificationsStore {
             notifications.insert(contentsOf: fresh.reversed(), at: 0)
             total += fresh.count
             unreadCount += fresh.filter { !$0.isRead }.count
+            #if DEBUG
             print("[SSE] +\(fresh.count) new notifications (total=\(total))")
+            #endif
         } catch {
+            #if DEBUG
             print("[SSE] decode error: \(error); raw=\(payload.prefix(200))")
+            #endif
         }
     }
 }

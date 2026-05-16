@@ -132,7 +132,7 @@ struct ListingsView: View {
                     }
                 } header: {
                     sectionHeader(title: "NEW TODAY · \(newListings.count)",
-                                  color: Color(red: 31/255, green: 128/255, blue: 67/255))
+                                  color: Color(red: 52/255, green: 199/255, blue: 89/255))
                 }
             }
 
@@ -583,7 +583,9 @@ private struct ListingFilterSheet: View {
         do {
             options = try await APIClient.shared.getFilterOptions()
         } catch {
+            #if DEBUG
             print("[ListingFilterSheet] loadOptions error: \(error)")
+            #endif
         }
     }
 }

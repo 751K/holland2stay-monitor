@@ -34,7 +34,9 @@ final class MeFilterStore {
             return resp
         } catch {
             errorMessage = error.localizedDescription
+            #if DEBUG
             print("[MeFilterStore] save error: \(error)")
+            #endif
             return nil
         }
     }

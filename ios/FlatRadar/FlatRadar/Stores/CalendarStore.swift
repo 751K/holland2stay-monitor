@@ -35,7 +35,9 @@ final class CalendarStore {
         } catch {
             lastError = error as? APIError
             errorMessage = error.localizedDescription
+            #if DEBUG
             print("[CalendarStore] fetch error: \(error)")
+            #endif
         }
     }
 

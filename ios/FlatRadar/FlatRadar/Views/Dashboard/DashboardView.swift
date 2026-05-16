@@ -209,6 +209,7 @@ struct DashboardView: View {
                         .tracking(1.5)
                     Text("\(s?.total ?? 0)")
                         .font(.system(size: 58, weight: .heavy))
+                        .monospacedDigit()
                         .tracking(-2)
                     if let wg = weekGrowth {
                         HStack(spacing: 4) {
@@ -274,6 +275,7 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("\(num)")
                     .font(.system(size: 26, weight: .heavy))
+                    .monospacedDigit()
                     .foregroundStyle(.primary)
                 Text(desc)
                     .font(.caption)
@@ -325,6 +327,7 @@ struct DashboardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(me.matchedTotal)")
                         .font(.system(size: 38, weight: .heavy))
+                        .monospacedDigit()
                         .tracking(-1)
                     Text("matched · all available")
                         .font(.caption)
@@ -698,11 +701,12 @@ struct DashboardView: View {
         //   A+++=0, A++=1, A+=2, A=3, B=4, C=5, D=6, E=7, F=8
         // 让 A+ 单独绿色，A 用 mint 跟它视觉拉开档次。
         switch energyRank(label) {
-        case 0...2: return .green   // A+ 桶（含 A+++ / A++ 原样混入时也是绿）
-        case 3:     return .mint    // A
-        case 4:     return .yellow  // B
-        case 5:     return .orange  // C
-        default:    return .red     // D 及以下
+        case 0...1: return Color(red: 20/255, green: 140/255, blue: 70/255)   // A+++ / A++
+        case 2:     return Color(red: 52/255, green: 199/255, blue: 89/255)    // A+
+        case 3:     return Color(red: 140/255, green: 200/255, blue: 80/255)   // A
+        case 4:     return .yellow                                              // B
+        case 5:     return .orange                                              // C
+        default:    return .red                                                 // D 及以下
         }
     }
 
@@ -750,17 +754,7 @@ struct DashboardView: View {
     }
 
     private func relativeTime(_ iso: String) -> String {
-        guard !iso.isEmpty, iso != "--" else { return "--" }
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = fmt.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) else { return iso }
-        let secs = max(0, Int(Date().timeIntervalSince(date)))
-        switch secs {
-        case 0..<60: return "\(secs)s ago"
-        case 60..<3600: return "\(secs / 60)m ago"
-        case 3600..<86400: return "\(secs / 3600)h ago"
-        default: return "\(secs / 86400)d ago"
-        }
+        ServerTime.relativeTime(iso)
     }
 }
 

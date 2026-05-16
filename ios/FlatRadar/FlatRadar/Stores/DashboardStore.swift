@@ -28,7 +28,9 @@ final class DashboardStore {
                 errorMessage = nil
                 return
             } catch {
+                #if DEBUG
                 print("[DashboardStore] fetchSummary attempt \(attempt + 1) failed: \(error.localizedDescription)")
+                #endif
                 if attempt == 1 {
                     lastError = error as? APIError
                     errorMessage = error.localizedDescription

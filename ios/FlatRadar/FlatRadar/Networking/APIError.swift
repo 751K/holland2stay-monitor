@@ -46,7 +46,7 @@ enum APIError: Error {
 extension APIError: LocalizedError {
     var errorDescription: String? {
         switch self {
-        case .unauthorized: return String(localized: "Session Expired")
+        case .unauthorized: return String(localized: "Login Failed")
         case .forbidden:    return String(localized: "Access Denied")
         case .notFound:     return String(localized: "Not Found")
         case .validation:   return String(localized: "Invalid Request")

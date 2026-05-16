@@ -88,6 +88,26 @@ class TestUserNew:
         })
         assert r.status_code == 302  # redirect to /
 
+    def test_create_rolls_back_when_app_user_sync_fails(self, admin_client, monkeypatch):
+        from users import load_users
+        from app.routes import users as users_route
+
+        monkeypatch.setattr(
+            users_route,
+            "_sync_app_user_or_raise",
+            lambda _user: (_ for _ in ()).throw(OSError("sync failed")),
+        )
+        r = admin_client.post("/users/new", data={
+            "csrf_token": "test_csrf",
+            "name": "Rollback Web",
+            "enabled": "true",
+            "NOTIFICATIONS_ENABLED": "true",
+            "NOTIFICATION_CHANNELS": "imessage",
+            "IMESSAGE_RECIPIENT": "+15550000000",
+        })
+        assert r.status_code == 302
+        assert load_users() == []
+
 
 # ─── Edit user + 密码保留 E2E ────────────────────────────────
 
@@ -167,6 +187,29 @@ class TestUserEdit:
         from users import load_users
         updated = load_users()[0]
         assert updated.id == original_id
+
+    def test_edit_rolls_back_when_app_user_sync_fails(self, admin_client, monkeypatch):
+        from users import load_users
+        from app.routes import users as users_route
+
+        u = _create_user(admin_client, name="Rollback Edit")
+        monkeypatch.setattr(
+            users_route,
+            "_sync_app_user_or_raise",
+            lambda _user: (_ for _ in ()).throw(OSError("sync failed")),
+        )
+        r = admin_client.post(f"/users/{u.id}", data={
+            "csrf_token": "test_csrf",
+            "name": "Rollback Edit Changed",
+            "enabled": "true",
+            "NOTIFICATIONS_ENABLED": "true",
+            "NOTIFICATION_CHANNELS": "imessage",
+        })
+        assert r.status_code == 302
+        users = load_users()
+        assert len(users) == 1
+        assert users[0].id == u.id
+        assert users[0].name == "Rollback Edit"
 
 
 # ─── Toggle ───────────────────────────────────────────────────

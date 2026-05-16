@@ -35,12 +35,29 @@ from app.process_ctrl import (
     write_reload_request,
 )
 from config import BASE_DIR
-from users import get_user, load_users, save_users
+from users import get_user, load_users, update_users
 
 logger = logging.getLogger(__name__)
 
 
 # ── Users ──────────────────────────────────────────────────────────
+
+
+def _sync_app_user_or_raise(user) -> None:
+    st = storage()
+    try:
+        existing = st.get_app_user_by_name(user.name)
+        if existing is not None and existing.get("id") != user.id:
+            current_ids = {u.id for u in load_users()}
+            existing_id = existing.get("id") or ""
+            if existing_id in current_ids:
+                raise ValueError(
+                    f"App 登录账号 {user.name!r} 已绑定到另一个用户"
+                )
+            st.delete_app_user(existing_id)
+        st.sync_app_user_from_config(user)
+    finally:
+        st.close()
 
 
 def _summarize_user(u, app_token_count: int) -> dict:
@@ -91,14 +108,27 @@ def _users_list():
 def _user_toggle(user_id: str):
     """翻转 enabled —— 立刻生效（下一轮 monitor.run_once 跳过该用户）。"""
     try:
-        users = load_users()
+        def _toggle(users):
+            user = get_user(users, user_id)
+            if user is None:
+                raise LookupError("missing")
+            user.enabled = not user.enabled
+            return user
+
+        user = update_users(_toggle)
     except RuntimeError as e:
         return _err.err_server_error(e, "用户配置文件损坏")
-    user = get_user(users, user_id)
-    if user is None:
+    except LookupError:
         return _err.err_not_found("用户不存在")
-    user.enabled = not user.enabled
-    save_users(users)
+    try:
+        _sync_app_user_or_raise(user)
+    except Exception as e:
+        logger.exception("同步 app_users 失败，回滚 toggle user=%s", user_id)
+        try:
+            update_users(_toggle)
+        except Exception:
+            logger.exception("回滚 users.json toggle 失败 user=%s", user_id)
+        return _err.err_server_error(e, "用户状态保存失败")
     logger.info("admin toggled user=%s enabled=%s", user.name, user.enabled)
     return _err.ok({"id": user.id, "enabled": user.enabled})
 
@@ -106,19 +136,25 @@ def _user_toggle(user_id: str):
 def _user_delete(user_id: str):
     """删除用户 + 连带撤销其 App Bearer token（避免 token 失主）。"""
     try:
-        users = load_users()
+        def _delete(users):
+            user = get_user(users, user_id)
+            name = user.name if user else user_id
+            new_users = [u for u in users if u.id != user_id]
+            if len(new_users) == len(users):
+                raise LookupError("missing")
+            users[:] = new_users
+            return name
+
+        name = update_users(_delete)
     except RuntimeError as e:
         return _err.err_server_error(e, "用户配置文件损坏")
-    user = get_user(users, user_id)
-    name = user.name if user else user_id
-    new_users = [u for u in users if u.id != user_id]
-    if len(new_users) == len(users):
+    except LookupError:
         return _err.err_not_found("用户不存在")
-    save_users(new_users)
 
     st = storage()
     try:
         revoked = st.revoke_user_tokens(user_id)
+        st.delete_app_user(user_id)
     finally:
         st.close()
     if revoked:

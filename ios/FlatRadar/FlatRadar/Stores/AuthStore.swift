@@ -87,14 +87,18 @@ final class AuthStore {
             do {
                 try KeychainManager.save(token: resp.token, server: server)
             } catch {
+                #if DEBUG
                 print("[AuthStore] Keychain save failed, falling back to UserDefaults")
+                #endif
                 UserDefaults.standard.set(resp.token, forKey: "auth_token")
             }
 
             let me = try await client.getMe()
             applyMe(me)
         } catch {
+            #if DEBUG
             print("[AuthStore] login error: \(error)")
+            #endif
             lastError = error as? APIError
             errorMessage = error.localizedDescription
         }
@@ -115,13 +119,17 @@ final class AuthStore {
             do {
                 try KeychainManager.save(token: resp.token, server: server)
             } catch {
+                #if DEBUG
                 print("[AuthStore] Keychain save failed, falling back to UserDefaults")
+                #endif
                 UserDefaults.standard.set(resp.token, forKey: "auth_token")
             }
             let me = try await client.getMe()
             applyMe(me)
         } catch {
+            #if DEBUG
             print("[AuthStore] register error: \(error)")
+            #endif
             lastError = error as? APIError
             errorMessage = error.localizedDescription
         }

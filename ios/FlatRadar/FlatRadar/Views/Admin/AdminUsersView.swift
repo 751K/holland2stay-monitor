@@ -99,7 +99,7 @@ struct AdminUsersView: View {
                 if user.appLoginEnabled {
                     statusChip(
                         label: "App: \(user.activeDevices) device\(user.activeDevices == 1 ? "" : "s")",
-                        color: user.activeDevices > 0 ? .purple : .gray)
+                        color: user.activeDevices > 0 ? .blue : .gray)
                 }
             }
 

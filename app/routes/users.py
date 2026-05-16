@@ -26,7 +26,7 @@ from flask import (
 )
 
 from config import KNOWN_CITIES
-from users import get_user, load_users, save_users
+from users import get_user, load_users, update_users
 
 from app.auth import admin_required
 from app.csrf import csrf_required
@@ -36,6 +36,29 @@ from app.i18n import DEFAULTS, localize_options
 from config import ENERGY_LABELS, energy_rank
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_app_user_or_raise(user: "UserConfig") -> None:  # noqa: F821
+    """
+    同步 users.json 配置镜像到 SQLite 账号表；失败交给调用方回滚。
+
+    如果 SQLite 里有同名但不同 id 的账号，而该 id 已不在当前 users.json，
+    视为删除/崩溃/测试隔离留下的 orphan，由路由层带上下文回收。
+    """
+    st = storage()
+    try:
+        existing = st.get_app_user_by_name(user.name)
+        if existing is not None and existing.get("id") != user.id:
+            current_ids = {u.id for u in load_users()}
+            existing_id = existing.get("id") or ""
+            if existing_id in current_ids:
+                raise ValueError(
+                    f"App 登录账号「{user.name}」已绑定到另一个用户"
+                )
+            st.delete_app_user(existing_id)
+        st.sync_app_user_from_config(user)
+    finally:
+        st.close()
 
 
 def _run_async(coro: Any) -> Any:
@@ -110,9 +133,28 @@ def user_new() -> Any:
         except ValueError as e:
             flash(str(e), "danger")
             return redirect(request.url)
-        users = load_users()
-        users.append(user)
-        save_users(users)
+        try:
+            def _append(users):
+                if any(u.name == user.name for u in users):
+                    raise ValueError(f"用户「{user.name}」已存在")
+                users.append(user)
+
+            update_users(_append)
+        except ValueError as e:
+            flash(str(e), "danger")
+            return redirect(request.url)
+        try:
+            _sync_app_user_or_raise(user)
+        except Exception:
+            logger.exception("同步 app_users 失败，回滚新建用户 id=%s", user.id)
+            try:
+                update_users(lambda users: users.__setitem__(
+                    slice(None), [u for u in users if u.id != user.id]
+                ))
+            except Exception:
+                logger.exception("回滚 users.json 新建用户失败 id=%s", user.id)
+            flash("用户创建失败：App 登录账号同步失败，已回滚配置", "danger")
+            return redirect(request.url)
         _log_user_change("创建", user)
         flash(f"✅ 用户「{user.name}」已创建", "success")
         return redirect(url_for("users_list"))
@@ -151,16 +193,42 @@ def user_edit(user_id: str) -> Any:
         except ValueError as e:
             flash(str(e), "danger")
             return redirect(request.url)
+        try:
+            def _replace(users):
+                current = get_user(users, user_id)
+                if current is None:
+                    raise LookupError("missing")
+                if any(u.id != user_id and u.name == updated.name for u in users):
+                    raise ValueError(f"用户「{updated.name}」已存在")
+                idx = next(i for i, u in enumerate(users) if u.id == user_id)
+                users[idx] = updated
+
+            update_users(_replace)
+        except LookupError:
+            flash("用户不存在", "danger")
+            return redirect(url_for("users_list"))
+        except ValueError as e:
+            flash(str(e), "danger")
+            return redirect(request.url)
         # App 密码变化（修改或清除）→ 撤销该用户的所有 Bearer token，
         # 避免泄漏的旧密码继续生效。app_login_enabled 切到 False 同理。
         pw_changed = (updated.app_password_hash != user.app_password_hash)
         login_disabled = (user.app_login_enabled and not updated.app_login_enabled)
-        users = [updated if u.id == user_id else u for u in users]
-        save_users(users)
+        try:
+            _sync_app_user_or_raise(updated)
+        except Exception:
+            logger.exception("同步 app_users 失败，回滚编辑用户 id=%s", user_id)
+            try:
+                update_users(lambda users: users.__setitem__(
+                    slice(None), [user if u.id == user_id else u for u in users]
+                ))
+            except Exception:
+                logger.exception("回滚 users.json 编辑用户失败 id=%s", user_id)
+            flash("用户保存失败：App 登录账号同步失败，已回滚配置", "danger")
+            return redirect(request.url)
         _log_user_change("更新", updated)
         if pw_changed or login_disabled:
             from app.api_auth import invalidate_token_cache
-            from app.db import storage
             st = storage()
             try:
                 n = st.revoke_user_tokens(user_id)
@@ -197,24 +265,34 @@ def user_edit(user_id: str) -> Any:
 @admin_required
 @csrf_required
 def user_delete(user_id: str) -> Any:
-    users = load_users()
-    user = get_user(users, user_id)
-    name = user.name if user else user_id
-    users = [u for u in users if u.id != user_id]
-    save_users(users)
+    try:
+        def _delete(users):
+            user = get_user(users, user_id)
+            name = user.name if user else user_id
+            new_users = [u for u in users if u.id != user_id]
+            if len(new_users) == len(users):
+                raise LookupError("missing")
+            users[:] = new_users
+            return name, len(users)
+
+        name, remaining_count = update_users(_delete)
+    except LookupError:
+        flash("用户不存在", "warning")
+        return redirect(url_for("users_list"))
     # 连带撤销该用户的所有 App Bearer token
     from app.api_auth import invalidate_token_cache
     from app.db import storage
     st = storage()
     try:
         revoked = st.revoke_user_tokens(user_id)
+        st.delete_app_user(user_id)
     finally:
         st.close()
     if revoked:
         invalidate_token_cache()
     logger.info(
         "用户「%s」已删除 (id=%s)，剩余 %d 个用户，连带撤销 %d 个 App 会话",
-        name, user_id, len(users), revoked,
+        name, user_id, remaining_count, revoked,
     )
     flash(f"用户「{name}」已删除", "success")
     return redirect(url_for("users_list"))
@@ -314,12 +392,23 @@ def user_test_notify(user_id: str) -> Any:
 @csrf_required
 def user_toggle(user_id: str) -> Any:
     """快速开关用户启用状态。"""
-    users = load_users()
-    for u in users:
-        if u.id == user_id:
-            u.enabled = not u.enabled
-            break
-    save_users(users)
+    try:
+        def _toggle(users):
+            for u in users:
+                if u.id == user_id:
+                    u.enabled = not u.enabled
+                    return u
+            raise LookupError("missing")
+
+        user = update_users(_toggle)
+        try:
+            _sync_app_user_or_raise(user)
+        except Exception:
+            logger.exception("同步 app_users 失败，回滚 toggle 用户 id=%s", user_id)
+            update_users(_toggle)
+            flash("用户状态切换失败：App 登录账号同步失败，已回滚", "danger")
+    except LookupError:
+        flash("用户不存在", "warning")
     return redirect(url_for("users_list"))
 
 

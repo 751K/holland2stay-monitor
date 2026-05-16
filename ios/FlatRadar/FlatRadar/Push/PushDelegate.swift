@@ -50,7 +50,9 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
 
     func flushPendingToken() {
         guard let data = latestDeviceToken else { return }
+        #if DEBUG
         print("[PushDelegate] flushing pending token (\(data.count) bytes) to handler")
+        #endif
         onDeviceToken?(data)
     }
 
@@ -69,7 +71,9 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         latestDeviceToken = deviceToken
+        #if DEBUG
         print("[PushDelegate] didRegister deviceToken (\(deviceToken.count) bytes), handler=\(onDeviceToken != nil)")
+        #endif
         onDeviceToken?(deviceToken)
     }
 
@@ -77,7 +81,9 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
     ) {
+        #if DEBUG
         print("[PushDelegate] didFailToRegister: \(error)")
+        #endif
         onRegistrationError?(error)
     }
 

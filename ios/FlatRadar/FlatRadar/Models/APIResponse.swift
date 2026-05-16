@@ -80,6 +80,19 @@ enum ServerTime {
         }
         return nil
     }
+
+    /// "2m ago" / "1h ago" / "3d ago" style relative time from ISO 8601.
+    nonisolated static func relativeTime(_ iso: String) -> String {
+        guard !iso.isEmpty, iso != "--" else { return "--" }
+        guard let date = parse(iso) else { return iso }
+        let secs = max(0, Int(Date().timeIntervalSince(date)))
+        switch secs {
+        case 0..<60: return "\(secs)s ago"
+        case 60..<3600: return "\(secs / 60)m ago"
+        case 3600..<86400: return "\(secs / 3600)h ago"
+        default: return "\(secs / 86400)d ago"
+        }
+    }
 }
 
 /// Generic envelope matching backend {ok, data} / {ok, error} shape.

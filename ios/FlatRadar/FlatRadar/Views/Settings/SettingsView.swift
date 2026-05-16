@@ -1,8 +1,10 @@
+import StoreKit
 import SwiftUI
 
 struct SettingsView: View {
     @Environment(AuthStore.self) private var auth
     @Environment(PushStore.self) private var push
+    @Environment(CoffeeStore.self) private var coffee
     @AppStorage("server_url") private var serverURL: String = APIClient.defaultServerHost
     @AppStorage("color_scheme") private var colorScheme: String = "system"
     @State private var editedURL = ""
@@ -227,7 +229,52 @@ struct SettingsView: View {
                     }
                 }
 
-                // 7. About
+                // 7. Coffee
+                Section {
+                    if coffee.products.isEmpty && !coffee.isLoading {
+                        HStack {
+                            Text("Unable to load products")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Retry") {
+                                Task { await coffee.loadProducts() }
+                            }
+                            .font(.subheadline)
+                        }
+                    } else if coffee.isLoading {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text("Loading…").foregroundStyle(.secondary).padding(.leading, 8)
+                        }
+                    } else {
+                        ForEach(coffee.products, id: \.id) { product in
+                            Button {
+                                Task { await coffee.purchase(product) }
+                            } label: {
+                                HStack {
+                                    Text(product.displayName)
+                                        .foregroundStyle(.primary)
+                                    Spacer()
+                                    Text(product.displayPrice)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.blue)
+                                }
+                            }
+                        }
+                    }
+
+                    if let err = coffee.purchaseError {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                } header: {
+                    Text("Buy me a coffee ☕")
+                } footer: {
+                    Text("A one-time tip to support development.\nDoes not unlock any features.")
+                }
+
+                // 8. About
                 Section("About") {
                     HStack {
                         Text("App")
@@ -243,6 +290,14 @@ struct SettingsView: View {
                 Button("OK", role: .cancel) {}
             } message: { msg in
                 Text(msg)
+            }
+            .alert("Thank you! 🙏", isPresented: Binding(
+                get: { coffee.showThanks },
+                set: { coffee.showThanks = $0 }
+            )) {
+                Button("You're welcome!") {}
+            } message: {
+                Text("Your support means a lot.\nEnjoy your \(coffee.thanksMessage)!")
             }
             .sheet(isPresented: $showFilterEdit) {
                 FilterEditView()
@@ -300,17 +355,4 @@ struct SettingsView: View {
         }
     }
 
-    private func buildBaseURL(from host: String) -> URL {
-        let clean = host.trimmingCharacters(in: ["/", " "])
-        let scheme = clean.hasPrefix("localhost") || clean.hasPrefix("127.")
-            ? "http" : "https"
-        return URL(string: "\(scheme)://\(clean)")!
-    }
-
-    private func endEditing() {
-#if os(iOS)
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-#endif
-    }
 }

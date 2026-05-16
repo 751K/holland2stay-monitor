@@ -19,6 +19,7 @@ struct FlatRadarApp: App {
     @State private var meFilterStore = MeFilterStore()
     @State private var adminStore = AdminStore()
     @State private var pushStore = PushStore()
+    @State private var coffeeStore = CoffeeStore()
     @State private var coordinator = NavigationCoordinator()
 
     /// User-overridden color scheme. "system" = follow OS.
@@ -37,6 +38,7 @@ struct FlatRadarApp: App {
                 .environment(meFilterStore)
                 .environment(adminStore)
                 .environment(pushStore)
+                .environment(coffeeStore)
                 .environment(coordinator)
                 .task {
                     // 1. 全局 401/403 监听 → 自动登出
@@ -49,6 +51,9 @@ struct FlatRadarApp: App {
                     if authStore.isAuthenticated, !authStore.isGuest {
                         await pushStore.requestPermissionAndRegister()
                     }
+                    // 5. StoreKit 2 交易监听 + 加载咖啡产品
+                    coffeeStore.listenForTransactions()
+                    await coffeeStore.loadProducts()
                 }
                 // Deep link 入口 1：用户点击 push 通知 →
                 // PushDelegate 已 post 这个事件
@@ -103,7 +108,9 @@ struct FlatRadarApp: App {
             let id = url.lastPathComponent
             coordinator.openListing(id: id)
         default:
+            #if DEBUG
             print("[FlatRadarApp] unknown deep link host=\(url.host ?? "")")
+            #endif
         }
     }
 }

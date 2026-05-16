@@ -26,7 +26,7 @@ from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
 from config import ENERGY_LABELS, ListingFilter
-from users import load_users, save_users
+from users import update_users
 
 from ._helpers import (
     apply_user_filter,
@@ -180,21 +180,25 @@ def _filter_update():
 
     new_filter = ListingFilter(**cleaned)
 
-    # users.json 是 source of truth；重新 load 拿最新（防其他端并发修改丢失）
     try:
-        all_users = load_users()
+        def _replace_filter(all_users):
+            target_idx = next(
+                (i for i, u in enumerate(all_users) if u.id == user.id), None
+            )
+            if target_idx is None:
+                raise LookupError("missing")
+            all_users[target_idx] = replace(
+                all_users[target_idx],
+                listing_filter=new_filter,
+            )
+            return all_users[target_idx]
+
+        updated_user = update_users(_replace_filter)
     except RuntimeError as e:
         logger.error("users.json 解析失败: %s", e)
         return _err.err_server_error(e, "用户配置文件损坏")
-    target_idx = next(
-        (i for i, u in enumerate(all_users) if u.id == user.id), None
-    )
-    if target_idx is None:
+    except LookupError:
         return _err.err_unauthorized("用户已被删除")
-
-    all_users[target_idx] = replace(all_users[target_idx], listing_filter=new_filter)
-    try:
-        save_users(all_users)
     except Exception as e:
         logger.exception("save_users 失败")
         return _err.err_server_error(e, "保存失败")
@@ -208,8 +212,8 @@ def _filter_update():
     # 重新读 / serialize 后返回，保证客户端与服务端状态一致
     return _err.ok({
         "role": role,
-        "filter": serialize_filter(all_users[target_idx]),
-        "is_empty": all_users[target_idx].listing_filter.is_empty(),
+        "filter": serialize_filter(updated_user),
+        "is_empty": updated_user.listing_filter.is_empty(),
     })
 
 
@@ -270,20 +274,24 @@ def _delete_account() -> Any:
         logger.info("账号注销 user=%s name=%r 撤销了 %d 个 token", user.id, user.name, revoked)
 
     try:
-        all_users = load_users()
+        def _remove_user(all_users):
+            new_users = [u for u in all_users if u.id != user.id]
+            if len(new_users) == len(all_users):
+                raise LookupError("missing")
+            all_users[:] = new_users
+
+        update_users(_remove_user)
+    except LookupError:
+        return _err.err_not_found("用户不存在")
     except RuntimeError as e:
         logger.exception("load_users 失败")
         return _err.err_server_error(e, "用户数据加载失败")
-
-    new_users = [u for u in all_users if u.id != user.id]
-    if len(new_users) == len(all_users):
-        return _err.err_not_found("用户不存在")
-
-    try:
-        save_users(new_users)
     except Exception as e:
         logger.exception("save_users 失败")
         return _err.err_server_error(e, "账号注销失败")
+
+    with storage_ctx() as st:
+        st.delete_app_user(user.id)
 
     logger.info("账号注销完成 user=%s name=%r", user.id, user.name)
     return _err.ok({"deleted": True, "user_id": user.id})

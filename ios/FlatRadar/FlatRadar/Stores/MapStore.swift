@@ -39,7 +39,9 @@ final class MapStore {
         } catch {
             lastError = error as? APIError
             errorMessage = error.localizedDescription
+            #if DEBUG
             print("[MapStore] fetch error: \(error)")
+            #endif
         }
     }
 

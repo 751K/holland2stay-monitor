@@ -29,8 +29,12 @@ final class APIClient {
         // 启动时立刻读 server_url，避免第一次 restoreSession 用错 URL 撞 connection refused。
         // Settings 里 Save 后会再次调 configure(baseURL:) 覆盖。
         self.baseURL = Self.resolveBaseURL()
+        #if DEBUG
         print("[APIClient] init baseURL = \(self.baseURL.absoluteString)")
+        #endif
+        #if DEBUG
         print("[APIClient] UserDefaults[server_url] = \(UserDefaults.standard.string(forKey: "server_url") ?? "<nil>")")
+        #endif
     }
 
     /// 把 UserDefaults["server_url"] 解析成完整 URL；未设置时回退到默认生产环境。
@@ -52,7 +56,6 @@ final class APIClient {
     func setToken(_ t: String?) { token = t }
 
     func currentBaseURL() -> URL { baseURL }
-    func hasToken() -> Bool { token != nil }
 
     // MARK: - Core request helper
 
@@ -95,13 +98,17 @@ final class APIClient {
             req.httpBody = try encoder.encode(AnyEncodable(body))
         }
 
+        #if DEBUG
         print("[APIClient] \(method) \(url.absoluteString) auth=\(authenticated && token != nil)")
+        #endif
 
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await URLSession.shared.data(for: req)
         } catch {
+            #if DEBUG
             print("[APIClient] network error: \(error)")
+            #endif
             throw APIError.network(error)
         }
 
@@ -115,9 +122,15 @@ final class APIClient {
             envelope = try decoder.decode(APIResponse<T>.self, from: data)
         } catch {
             let raw = String(data: data, encoding: .utf8) ?? "<not utf8>"
+            #if DEBUG
             print("[APIClient] decode error for \(method) \(path): \(error)")
+            #endif
+            #if DEBUG
             print("[APIClient] raw: \(raw.prefix(500))")
+            #endif
+            #if DEBUG
             print("[APIClient] HTTP status: \(http.statusCode)")
+            #endif
             throw APIError.decoding(error)
         }
 
@@ -144,9 +157,13 @@ final class APIClient {
                deviceName: String, ttlDays: Int = 90) async throws -> LoginResponse {
         let body = LoginRequest(username: username, password: password,
                                 deviceName: deviceName, ttlDays: ttlDays)
+        #if DEBUG
         print("[APIClient] login body: username=\(username) device=\(deviceName)")
+        #endif
         let resp: LoginResponse = try await request("POST", "api/v1/auth/login", body: body, authenticated: false)
+        #if DEBUG
         print("[APIClient] login ok: role=\(resp.role) token=\(resp.token.prefix(8))...")
+        #endif
         return resp
     }
 
@@ -154,9 +171,13 @@ final class APIClient {
                   deviceName: String, ttlDays: Int = 90) async throws -> LoginResponse {
         let body = LoginRequest(username: username, password: password,
                                 deviceName: deviceName, ttlDays: ttlDays)
+        #if DEBUG
         print("[APIClient] register: username=\(username) device=\(deviceName)")
+        #endif
         let resp: LoginResponse = try await request("POST", "api/v1/auth/register", body: body, authenticated: false)
+        #if DEBUG
         print("[APIClient] register ok: role=\(resp.role) token=\(resp.token.prefix(8))...")
+        #endif
         return resp
     }
 

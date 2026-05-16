@@ -1,5 +1,5 @@
 /* ===================================================================
-   Holland2Stay — Design System (minimal, low-line)
+   FlatRadar — Design System (minimal, low-line)
    =================================================================== */
 
 /* ── CSS Reset ─────────────────────────────────────────────────── */
@@ -88,7 +88,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   font-weight:700;font-size:18px;letter-spacing:-.02em;
   color:var(--text);flex-shrink:0;
 }
-.sidebar-brand .logo{width:24px;height:24px;border-radius:var(--radius-sm);background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.sidebar-brand .brand-mark{width:28px;height:28px;border-radius:7px;box-shadow:0 8px 20px rgba(56,189,248,.18);flex-shrink:0}
 .sidebar-nav{flex:1;padding:4px 8px;display:flex;flex-direction:column;gap:1px}
 .sidebar-nav a{
   display:flex;align-items:center;gap:10px;
@@ -594,6 +594,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   width:52px;height:52px;border-radius:var(--radius-lg);background:var(--accent);color:#fff;
   display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 16px;
 }
+.login-logo{display:block;object-fit:cover;background:transparent;box-shadow:0 10px 28px rgba(56,189,248,.16)}
 .login-field{margin-bottom:16px}
 .login-field label{display:block;font-size:14px;font-weight:550;color:var(--text2);margin-bottom:6px}
 .login-field input{

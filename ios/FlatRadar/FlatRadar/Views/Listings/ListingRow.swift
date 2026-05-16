@@ -25,7 +25,7 @@ struct ListingRow: View {
                         Text("NEW · \(age)")
                             .font(.system(size: 9, weight: .heavy, design: .monospaced))
                             .tracking(0.5)
-                            .foregroundStyle(Color(red: 31/255, green: 128/255, blue: 67/255))
+                            .foregroundStyle(Color(red: 52/255, green: 199/255, blue: 89/255))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
                             .background(Color.green.opacity(0.14),

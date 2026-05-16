@@ -120,6 +120,20 @@ class StorageBase:
             CREATE INDEX IF NOT EXISTS idx_app_tokens_active
                 ON app_tokens(revoked, expires_at);
 
+            -- iOS / 第三方客户端的用户账号。业务配置仍在 users.json；
+            -- 此表只承载注册/登录身份字段，用 UNIQUE(name) 抗并发注册。
+            CREATE TABLE IF NOT EXISTS app_users (
+                id                TEXT PRIMARY KEY,
+                name              TEXT UNIQUE NOT NULL,
+                enabled           INTEGER NOT NULL DEFAULT 1,
+                app_login_enabled INTEGER NOT NULL DEFAULT 0,
+                app_password_hash TEXT NOT NULL DEFAULT '',
+                created_at        TEXT NOT NULL,
+                updated_at        TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_app_users_name
+                ON app_users(name);
+
             -- iOS / 第三方客户端的 APNs 设备 token。
             -- 每次 App 启动会重新注册（token 可能轮换）；UNIQUE 约束
             -- (app_token_id, device_token) 保证同一会话内幂等。
@@ -196,8 +210,9 @@ class StorageBase:
             self._conn.execute("DELETE FROM web_notifications")
             self._conn.execute("DELETE FROM geocode_cache")
             self._conn.execute("DELETE FROM app_tokens")
+            self._conn.execute("DELETE FROM app_users")
             self._conn.execute("DELETE FROM device_tokens")
-        logger.info("数据库已清空（全部 7 张表）")
+        logger.info("数据库已清空（全部 8 张表）")
 
     def close(self) -> None:
         self._conn.close()

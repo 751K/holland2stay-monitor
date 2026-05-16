@@ -38,7 +38,7 @@ struct LoginView: View {
 
     private var isDark: Bool { colorScheme == .dark }
 
-    private var brandBlue: Color { Color(red: 0.09, green: 0.51, blue: 1.0) }
+    private var brandBlue: Color { Color(red: 10/255, green: 132/255, blue: 255/255) }
 
     private var heroGradient: [Color] {
         isDark
@@ -145,7 +145,7 @@ struct LoginView: View {
             .alert(auth.lastError?.errorDescription ?? "Login Failed", isPresented: $showError) {
                 Button("OK") {}
             } message: {
-                Text(auth.errorMessage ?? "Unknown error")
+                Text(auth.lastError?.failureReason ?? auth.errorMessage ?? "Unknown error")
             }
             .onChange(of: auth.errorMessage) { _, new in
                 showError = new != nil

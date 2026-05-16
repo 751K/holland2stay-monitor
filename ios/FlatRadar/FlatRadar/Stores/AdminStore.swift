@@ -34,7 +34,9 @@ final class AdminStore {
             users = resp.items
         } catch {
             errorMessage = error.localizedDescription
+            #if DEBUG
             print("[AdminStore] fetchUsers error: \(error)")
+            #endif
         }
     }
 
@@ -77,7 +79,9 @@ final class AdminStore {
             monitorStatus = try await client.adminMonitorStatus()
         } catch {
             errorMessage = error.localizedDescription
+            #if DEBUG
             print("[AdminStore] fetchMonitorStatus error: \(error)")
+            #endif
         }
     }
 

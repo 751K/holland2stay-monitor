@@ -12,6 +12,7 @@
 """
 
 from mstorage._base import StorageBase
+from mstorage._app_users import AppUserOps
 from mstorage._charts import ChartOps
 from mstorage._devices import DeviceOps
 from mstorage._listings import ListingOps
@@ -28,6 +29,7 @@ class Storage(
     MapCalendarOps,
     RetryQueueOps,
     TokenOps,
+    AppUserOps,
     DeviceOps,
     StorageBase,
 ):

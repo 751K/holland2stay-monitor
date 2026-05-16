@@ -26,16 +26,19 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, fields as dc_fields
+from typing import Callable, Optional, TypeVar
 
 from config import AutoBookConfig, DATA_DIR, ListingFilter
 from crypto import decrypt, encrypt
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 USERS_FILE = DATA_DIR / "users.json"
+_T = TypeVar("_T")
 
 
 # ------------------------------------------------------------------ #
@@ -193,7 +196,39 @@ def _user_from_dict(d: dict) -> UserConfig:
 # 读写接口
 # ------------------------------------------------------------------ #
 
-def load_users() -> list[UserConfig]:
+
+@contextmanager
+def _users_file_lock():
+    """
+    跨进程独占锁，用于保护 users.json 的 read-modify-write 临界区。
+
+    原子替换只能防止"半截 JSON"，不能防止两个请求同时 load 后互相覆盖。
+    这里使用同目录 lock 文件，兼容 Docker/Linux/macOS/Windows。
+    """
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = USERS_FILE.with_name(USERS_FILE.name + ".lock")
+    with lock_path.open("a+b") as fh:
+        if os.name == "nt":
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                fh.seek(0)
+                msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def _load_users_unlocked() -> list[UserConfig]:
     """
     从 `data/users.json` 加载用户列表。
 
@@ -222,7 +257,17 @@ def load_users() -> list[UserConfig]:
         ) from e
 
 
-def save_users(users: list[UserConfig]) -> None:
+def load_users() -> list[UserConfig]:
+    """
+    从 `data/users.json` 加载用户列表。
+
+    普通读不加独占锁：save_users 使用 os.replace 原子替换，读者只会看到旧版或新版。
+    需要"读-改-写"一致性时必须使用 update_users()。
+    """
+    return _load_users_unlocked()
+
+
+def _save_users_unlocked(users: list[UserConfig]) -> None:
     """
     将用户列表序列化写入 `data/users.json`（完整覆盖）。
 
@@ -250,12 +295,58 @@ def save_users(users: list[UserConfig]) -> None:
             ab["password"] = encrypt(ab["password"])
         d["auto_book"] = ab
         data.append(d)
-    tmp = USERS_FILE.with_suffix(".tmp")
-    tmp.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{USERS_FILE.name}.",
+        suffix=".tmp",
+        dir=str(USERS_FILE.parent),
+        text=True,
     )
-    os.replace(tmp, USERS_FILE)
+    tmp_path = USERS_FILE.parent / os.path.basename(tmp_name)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, indent=2, ensure_ascii=False))
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, USERS_FILE)
+        if os.name != "nt":
+            dir_fd = os.open(USERS_FILE.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+
+
+def save_users(users: list[UserConfig]) -> None:
+    """
+    将用户列表序列化写入 `data/users.json`（完整覆盖）。
+
+    单次写入会持有 users.json.lock，避免多个进程同时写同一个临时目标。
+    如果调用方需要基于最新内容修改，请使用 update_users()，不要自行
+    load_users() 后 save_users()。
+    """
+    with _users_file_lock():
+        _save_users_unlocked(users)
+
+
+def update_users(mutator: Callable[[list[UserConfig]], _T]) -> _T:
+    """
+    在 users.json 独占锁内执行 read-modify-write。
+
+    mutator 会收到最新用户列表，可以原地修改，并返回调用方需要的结果。
+    只有 mutator 成功返回后才写回文件；抛异常时不会覆盖 users.json。
+    """
+    with _users_file_lock():
+        users = _load_users_unlocked()
+        result = mutator(users)
+        _save_users_unlocked(users)
+        return result
 
 
 def get_user(users: list[UserConfig], user_id: str) -> Optional[UserConfig]:
@@ -345,5 +436,4 @@ def verify_app_password(user: UserConfig, plaintext: str) -> bool:
     except Exception:
         logger.warning("verify_app_password 异常 (user=%s)", user.name)
         return False
-
 

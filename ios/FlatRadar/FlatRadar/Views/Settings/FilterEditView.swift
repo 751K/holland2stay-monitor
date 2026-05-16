@@ -270,7 +270,9 @@ struct FilterEditView: View {
         do {
             options = try await APIClient.shared.getFilterOptions()
         } catch {
+            #if DEBUG
             print("[FilterEditView] loadOptions error: \(error)")
+            #endif
         }
     }
 

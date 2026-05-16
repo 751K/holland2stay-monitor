@@ -38,11 +38,11 @@ from app.auth import (
 from app.db import storage
 from users import (
     UserConfig,
+    get_user,
     get_user_by_name,
     load_users,
-    save_users,
     set_app_password,
-    verify_app_password,
+    update_users,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ ADMIN_USERNAME = "__admin__"
 
 # 登录端点 TTL 边界：永远不允许客户端拿到非过期 token
 DEFAULT_TTL_DAYS = 90
-MAX_TTL_DAYS = 365
+MAX_TTL_DAYS = 90
 MIN_TTL_DAYS = 1
 
 # 给"用户不存在"路径用的占位 bcrypt 哈希，用来抵消时序差
@@ -79,6 +79,30 @@ def _dummy_bcrypt_verify(password: str) -> None:
         bcrypt.checkpw(password.encode("utf-8"), _DUMMY_BCRYPT_HASH.encode("ascii"))
     except Exception:
         pass  # 任何异常都吞掉，这只是用于时序对齐
+
+
+def _verify_bcrypt_hash(password_hash: str, plaintext: str, *, username: str) -> bool:
+    """校验 SQLite app_users.app_password_hash，失败一律返回 False。"""
+    if not password_hash or not plaintext:
+        return False
+    try:
+        import bcrypt
+
+        return bcrypt.checkpw(
+            plaintext.encode("utf-8"),
+            password_hash.encode("ascii"),
+        )
+    except Exception:
+        logger.warning("verify app user password 异常 (user=%s)", username)
+        return False
+
+
+def _remove_user_config(user_id: str) -> None:
+    """补偿动作：删除刚写入 users.json 的配置镜像。"""
+    def _remove(users: list[UserConfig]) -> None:
+        users[:] = [u for u in users if u.id != user_id]
+
+    update_users(_remove)
 
 
 # ── H2S 凭据验证 ──────────────────────────────────────────────────────
@@ -144,12 +168,14 @@ def _login() -> Any:
         _time.sleep(wait)
 
     body = request.get_json(silent=True) or {}
-    username = (body.get("username") or "").strip()
+    username = (body.get("username") or "").strip()[:64]
     password = body.get("password") or ""
     device_name = (body.get("device_name") or "").strip()[:64] or "未命名设备"
 
+    if len(username) > 64:
+        return _err.err_validation("用户名过长")
+
     # TTL 解析（fail-closed）：客户端永远不能拿到永不过期 token。
-    # 任何 None / 缺失 / 非法值 / 越界 → 退回默认 90 天。
     ttl_days_raw = body.get("ttl_days", DEFAULT_TTL_DAYS)
     try:
         ttl_days = int(ttl_days_raw) if ttl_days_raw is not None else DEFAULT_TTL_DAYS
@@ -192,20 +218,49 @@ def _login() -> Any:
             _dummy_bcrypt_verify(password)
             record_login_failure(client_ip)
             return _err.err_unauthorized("用户名或密码错误")
-        if not user.enabled:
+
+        st = storage()
+        try:
+            account = st.get_app_user_by_name(username)
+            if account is None:
+                # 旧 users.json 自动迁移：第一次登录时把账号镜像写入 SQLite。
+                account = st.sync_app_user_from_config(user)
+            elif account.get("id") != user.id:
+                # SQLite 账号表和 users.json 配置发生同名不同 id。只有当旧 id
+                # 已经不在 users.json 中时，才把它视为 orphan 并回收。
+                stale_id = account.get("id") or ""
+                if stale_id and get_user(users, stale_id) is None:
+                    st.delete_app_user(stale_id)
+                    account = st.sync_app_user_from_config(user)
+                else:
+                    logger.error(
+                        "app_users/users.json 用户映射冲突: name=%r sqlite_id=%s config_id=%s",
+                        username, account.get("id"), user.id,
+                    )
+                    return _err.err_server_error(None, "用户账号状态异常，请联系管理员")
+        finally:
+            st.close()
+
+        if not account.get("enabled"):
             _dummy_bcrypt_verify(password)
             record_login_failure(client_ip)
             return _err.err_forbidden("该用户已停用")
-        authed = verify_app_password(user, password)
+        authed = False
+        if account.get("app_login_enabled"):
+            authed = _verify_bcrypt_hash(
+                account.get("app_password_hash") or "",
+                password,
+                username=username,
+            )
         if not authed:
             # 回退到 H2S 凭据验证（允许用户直接用 H2S 账号密码登录）
-            logger.info("app_password 校验失败或未设置，尝试 H2S 凭据 user=%s", user.name)
+            logger.info("app_password 校验失败或未设置，尝试 H2S 凭据 user=%s", username)
             authed = verify_h2s_credentials(username, password)
         if not authed:
             record_login_failure(client_ip)
             return _err.err_unauthorized("用户名或密码错误")
         role = "user"
-        user_id = user.id
+        user_id = account.get("id") or user.id
 
     # 通过：签发 token
     clear_login_failures(client_ip)
@@ -310,7 +365,7 @@ def _register() -> Any:
         return _err.err_rate_limited(reg_reason)
 
     body = request.get_json(silent=True) or {}
-    username = (body.get("username") or "").strip()
+    username = (body.get("username") or "").strip()[:64]
     password = body.get("password") or ""
     device_name = (body.get("device_name") or "").strip()[:64] or "未命名设备"
 
@@ -333,29 +388,70 @@ def _register() -> Any:
         return _err.err_validation("该用户名不可用")
 
     try:
-        users = load_users()
+        def _append_user(users: list[UserConfig]) -> UserConfig:
+            if get_user_by_name(users, username) is not None:
+                raise ValueError("duplicate")
+            st = storage()
+            try:
+                existing_account = st.get_app_user_by_name(username)
+                if existing_account is not None:
+                    # SQLite 里有账号、users.json 里没有配置，通常是上次写配置
+                    # 失败或删除中断留下的 orphan。配置是业务 source of truth，
+                    # 这里清理 orphan 后允许重新注册同名。
+                    existing_id = existing_account.get("id") or ""
+                    if any(u.id == existing_id for u in users):
+                        raise ValueError("duplicate")
+                    st.delete_app_user(existing_id)
+            finally:
+                st.close()
+
+            user = UserConfig(
+                name=username,
+                enabled=True,
+                notifications_enabled=False,
+                app_login_enabled=True,
+            )
+            set_app_password(user, password)
+            users.append(user)
+            return user
+
+        user = update_users(_append_user)
+    except ValueError as e:
+        if str(e) == "duplicate":
+            return _err.err_conflict("该用户名已被注册")
+        raise
     except RuntimeError as e:
         logger.error("users.json 解析失败: %s", e)
         return _err.err_server_error(e, "用户配置文件损坏，请联系管理员")
-
-    if get_user_by_name(users, username) is not None:
-        return _err.err_conflict("该用户名已被注册")
-
-    # 创建用户
-    user = UserConfig(
-        name=username,
-        enabled=True,
-        notifications_enabled=False,
-        app_login_enabled=True,
-    )
-    set_app_password(user, password)
-    users.append(user)
-
-    try:
-        save_users(users)
     except OSError as e:
         logger.exception("保存 users.json 失败")
         return _err.err_server_error(e, "用户创建失败，请稍后再试")
+
+    st = storage()
+    try:
+        try:
+            st.create_app_user(
+                user_id=user.id,
+                name=user.name,
+                enabled=user.enabled,
+                app_login_enabled=user.app_login_enabled,
+                app_password_hash=user.app_password_hash,
+            )
+        except Exception as e:
+            if st.is_unique_violation(e):
+                # 极端并发/旧脏数据：SQLite 拒绝后清理刚写入的配置镜像。
+                _remove_user_config(user.id)
+                return _err.err_conflict("该用户名已被注册")
+            raise
+    except Exception as e:
+        try:
+            _remove_user_config(user.id)
+        except Exception:
+            logger.exception("回滚 users.json 注册配置失败 user=%s", user.id)
+        logger.exception("保存 app_users 失败")
+        return _err.err_server_error(e, "用户创建失败，请稍后再试")
+    finally:
+        st.close()
 
     record_registration(client_ip)
     logger.info("新用户注册: name=%r id=%s ip=%s", username, user.id, client_ip)

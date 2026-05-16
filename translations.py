@@ -1,5 +1,5 @@
 """
-UI translations for Holland2Stay web panel.
+UI translations for FlatRadar web panel.
 Add new strings as key: {zh, en} pairs. Templates use _(key) to look up.
 """
 import logging
@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 TRANSLATIONS = {
     # ── Layout / Navigation ──────────────────────────────
-    "app_title":            {"zh": "Holland2Stay 监控",       "en": "Holland2Stay Monitor"},
+    "app_title":            {"zh": "FlatRadar",               "en": "FlatRadar"},
     "dashboard":            {"zh": "仪表盘",                  "en": "Dashboard"},
     "listings":             {"zh": "房源列表",                "en": "Listings"},
     "calendar":             {"zh": "日历",                    "en": "Calendar"},
@@ -64,7 +64,7 @@ TRANSLATIONS = {
     "shutdown_done":        {"zh": "已关闭，页面将断开连接。",    "en": "Shutdown complete. Connection will close."},
 
     # ── Dashboard ────────────────────────────────────────
-    "dashboard_title":      {"zh": "仪表盘 · Holland2Stay",   "en": "Dashboard · Holland2Stay"},
+    "dashboard_title":      {"zh": "仪表盘 · FlatRadar",      "en": "Dashboard · FlatRadar"},
     "auto_refresh":         {"zh": "每 60 秒自动刷新",         "en": "Auto-refresh every 60s"},
     "total_listings":       {"zh": "数据库房源",              "en": "DB listings"},
     "new_today":            {"zh": "今日新增",                "en": "New today"},
@@ -126,7 +126,7 @@ TRANSLATIONS = {
     "map_load_error":       {"zh": "地图数据加载失败",        "en": "Map data load failed"},
 
     # ── Calendar ─────────────────────────────────────────
-    "calendar_title":       {"zh": "入住日历 · Holland2Stay",  "en": "Calendar · Holland2Stay"},
+    "calendar_title":       {"zh": "入住日历 · FlatRadar",     "en": "Calendar · FlatRadar"},
     "cal_direct_book":      {"zh": "可直订",                  "en": "Direct book"},
     "cal_lottery":          {"zh": "摇号",                    "en": "Lottery"},
     "cal_select_date":      {"zh": "请选择日期",              "en": "Select a date"},
@@ -343,8 +343,8 @@ TRANSLATIONS = {
     "guest_mode":           {"zh": "访客模式（只读）",            "en": "Guest mode (read-only)"},
 
     # ── Login ────────────────────────────────────────────
-    "login_title":          {"zh": "登录 · Holland2Stay 监控",  "en": "Login · Holland2Stay Monitor"},
-    "login_header":         {"zh": "Holland2Stay 监控",       "en": "Holland2Stay Monitor"},
+    "login_title":          {"zh": "登录 · FlatRadar",        "en": "Login · FlatRadar"},
+    "login_header":         {"zh": "FlatRadar",               "en": "FlatRadar"},
     "login_subtitle":       {"zh": "请登录以继续访问",          "en": "Sign in to continue"},
     "login_username":       {"zh": "用户名",                  "en": "Username"},
     "login_password":       {"zh": "密码",                    "en": "Password"},
