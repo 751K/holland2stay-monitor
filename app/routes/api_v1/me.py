@@ -213,6 +213,42 @@ def _filter_update():
     })
 
 
+def _filter_options():
+    """
+    GET /api/v1/filter/options — 列出 FilterEditView 用到的所有候选值。
+
+    返回：
+        {
+          "cities":        [str, ...],   # 来自 listings.city DISTINCT
+          "occupancy":     [str, ...],   # 来自 features "Occupancy:" 前缀
+          "types":         [str, ...],
+          "neighborhoods": [str, ...],
+          "contract":      [str, ...],
+          "tenant":        [str, ...],
+          "offer":         [str, ...],
+          "finishing":     [str, ...],
+          "energy":        ["A+++", "A++", "A+", "A", "B", "C", "D", "E", "F"]
+        }
+
+    与 ``GET /me/filter`` 配合：客户端拿到 options + 当前 filter，
+    在 FilterEditView 里直接渲染勾选状态。bearer_optional：guest 也可读
+    （没有过滤条件就纯展示用）。
+    """
+    with storage_ctx() as st:
+        data = {
+            "cities":        st.get_distinct_cities(),
+            "occupancy":     st.get_feature_values("Occupancy"),
+            "types":         st.get_feature_values("Type"),
+            "neighborhoods": st.get_feature_values("Neighborhood"),
+            "contract":      st.get_feature_values("Contract"),
+            "tenant":        st.get_feature_values("Tenant"),
+            "offer":         st.get_feature_values("Offer"),
+            "finishing":     st.get_feature_values("Finishing"),
+            "energy":        list(ENERGY_LABELS),
+        }
+    return _err.ok(data)
+
+
 def register(bp: Blueprint) -> None:
     bp.add_url_rule(
         "/me/summary",
@@ -231,4 +267,10 @@ def register(bp: Blueprint) -> None:
         endpoint="me_filter_update",
         view_func=api_auth.bearer_required(("user",))(_filter_update),
         methods=["PUT"],
+    )
+    bp.add_url_rule(
+        "/filter/options",
+        endpoint="filter_options",
+        view_func=api_auth.bearer_optional(_filter_options),
+        methods=["GET"],
     )

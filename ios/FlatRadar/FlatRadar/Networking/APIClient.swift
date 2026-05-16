@@ -246,6 +246,12 @@ final class APIClient {
         try await request("PUT", "api/v1/me/filter", body: filter)
     }
 
+    /// 各筛选维度的候选值（cities/types/contract/tenant/...）。
+    /// FilterEditView 进入时调一次，结果可复用。
+    func getFilterOptions() async throws -> FilterOptions {
+        try await request("GET", "api/v1/filter/options")
+    }
+
     // MARK: - Devices / APNs (Phase 3)
 
     /// 注册或刷新一台设备的 APNs token。

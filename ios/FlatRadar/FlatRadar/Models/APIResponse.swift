@@ -129,6 +129,23 @@ struct DeviceDeleteResponse: Decodable {
     let deleted: Bool
 }
 
+/// `GET /api/v1/filter/options` 响应——FilterEditView 用来渲染所有多选项的候选。
+struct FilterOptions: Decodable, Sendable {
+    let cities: [String]
+    let occupancy: [String]
+    let types: [String]
+    let neighborhoods: [String]
+    let contract: [String]
+    let tenant: [String]
+    let offer: [String]
+    let finishing: [String]
+    let energy: [String]
+
+    static let empty = FilterOptions(
+        cities: [], occupancy: [], types: [], neighborhoods: [],
+        contract: [], tenant: [], offer: [], finishing: [], energy: [])
+}
+
 /// `POST /api/v1/devices/test` 响应。
 struct DeviceTestPushResponse: Decodable {
     let sent: Int
