@@ -377,6 +377,7 @@ def _register() -> Any:
         "token": plaintext,
         "token_id": token_id,
         "role": "user",
+        "device_name": device_name,
         "user": {
             "id": user.id,
             "name": user.name,
