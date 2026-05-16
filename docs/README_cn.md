@@ -376,6 +376,25 @@ docker compose logs -f
 docker compose down
 ```
 
+**发布前健康检查：**
+
+首次部署、修改 `.env` 后、或发布新版本前，建议先运行 doctor：
+
+```bash
+python -m tools.doctor
+
+# 离线 / CI 安全模式：跳过代理、SMTP 和 Holland2Stay 网络探测
+python -m tools.doctor --no-network
+
+# 额外验证 SMTP 用户名/密码登录（不会真正发送邮件）
+python -m tools.doctor --smtp-login
+```
+
+doctor 会检查 `.env`、data/logs 路径权限、SQLite 完整性和必要表、
+`users.json`、Caddy 占位域名、APNs key/config、SMTP 配置、代理出口 IP、
+Holland2Stay GraphQL 连通性，以及 Docker supervisord 控制能力。发现阻断性
+`FAIL` 时退出码为 `1`，可以安全接入部署脚本。
+
 **Docker 环境启用代理：**
 
 如果需要通过代理路由抓取和预订流量（例如用住宅代理规避 Cloudflare 403 封禁），需要在**两个位置**传入代理变量：
@@ -409,6 +428,7 @@ docker compose down
 **更新版本：**
 ```bash
 git pull
+python -m tools.doctor --no-network
 docker compose up -d --build
 ```
 

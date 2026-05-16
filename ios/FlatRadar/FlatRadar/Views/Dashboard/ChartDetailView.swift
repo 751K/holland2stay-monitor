@@ -6,11 +6,11 @@ import SwiftUI
 /// 给定一个 ``chartKey``（与后端 `/api/v1/stats/public/charts/<key>` 对应），
 /// 拉取数据并用 Swift Charts 渲染条形图 + 数值表格。
 ///
-/// 自动判定图表方向
+/// 自动判定展示方式
 /// ----------------
-/// - 时间序列（``daily_new`` / ``daily_changes`` / ``hourly_dist``）→ 横向 BarMark
-/// - 分类（``city_dist`` / ``status_dist`` / 其它）→ 横向 BarMark 同样，但
-///   labels 按 count 降序显示，更直观
+/// - 时间序列（``daily_new`` / ``daily_changes`` / ``hourly_dist``）→ Swift Charts
+/// - 分类分布（``city_dist`` / ``status_dist`` / 其它）→ Top N 横向排行条；
+///   移动端分类太多时，横坐标标签会折叠，排行条更稳。
 struct ChartDetailView: View {
     let chartKey: String
     let title: String
@@ -71,8 +71,16 @@ struct ChartDetailView: View {
     @ViewBuilder
     private func chartView(_ chart: ChartData) -> some View {
         let isTime = isTimeSeries(chart.key)
-        let sorted = isTime ? chart.data : chart.data.sorted { $0.count > $1.count }
-        Chart(sorted) { entry in
+        if isTime {
+            timeSeriesChart(chart)
+        } else {
+            rankedCategoryChart(chart)
+        }
+    }
+
+    @ViewBuilder
+    private func timeSeriesChart(_ chart: ChartData) -> some View {
+        Chart(chart.data) { entry in
             BarMark(
                 x: .value("Label", entry.label),
                 y: .value("Count", entry.count)
@@ -87,18 +95,50 @@ struct ChartDetailView: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .automatic) { value in
+            AxisMarks(values: .automatic(desiredCount: 6)) { value in
                 AxisGridLine()
                 AxisTick()
                 AxisValueLabel {
                     if let s = value.as(String.self) {
-                        Text(prettyLabel(s, isTime: isTime))
+                        Text(prettyLabel(s, isTime: true))
                             .font(.caption2)
                     }
                 }
             }
         }
         .frame(height: 260)
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder
+    private func rankedCategoryChart(_ chart: ChartData) -> some View {
+        let sorted = chart.data.sorted { $0.count > $1.count }
+        let visible = Array(sorted.prefix(12))
+        let maxCount = max(visible.map(\.count).max() ?? 1, 1)
+        let hiddenCount = max(sorted.count - visible.count, 0)
+
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Top Categories")
+                    .font(.headline)
+                Spacer()
+                if hiddenCount > 0 {
+                    Text("+\(hiddenCount) more below")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(spacing: 10) {
+                ForEach(Array(visible.enumerated()), id: \.element.id) { index, entry in
+                    RankedBarRow(
+                        rank: index + 1,
+                        label: prettyLabel(entry.label, isTime: false),
+                        count: entry.count,
+                        maxCount: maxCount)
+                }
+            }
+        }
         .padding(.horizontal)
     }
 
@@ -166,6 +206,48 @@ struct ChartDetailView: View {
             chart = try await APIClient.shared.getPublicChart(key: chartKey, days: days)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct RankedBarRow: View {
+    let rank: Int
+    let label: String
+    let count: Int
+    let maxCount: Int
+
+    private var ratio: CGFloat {
+        guard maxCount > 0 else { return 0 }
+        return max(0.04, CGFloat(count) / CGFloat(maxCount))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 8) {
+                Text("\(rank)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18, alignment: .trailing)
+                Text(label)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(count)")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+            }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.primary.opacity(0.08))
+                    Capsule()
+                        .fill(Color.blue.gradient)
+                        .frame(width: proxy.size.width * ratio)
+                }
+            }
+            .frame(height: 8)
         }
     }
 }

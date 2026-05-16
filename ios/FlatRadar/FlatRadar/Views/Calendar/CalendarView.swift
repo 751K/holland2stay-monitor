@@ -24,7 +24,7 @@ struct CalendarView: View {
 
     private static let cal: Calendar = {
         var c = Calendar(identifier: .gregorian)
-        c.timeZone = TimeZone(identifier: "UTC") ?? .current
+        c.timeZone = ServerTime.timeZone
         return c
     }()
 

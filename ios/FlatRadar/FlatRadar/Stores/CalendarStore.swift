@@ -57,7 +57,7 @@ final class CalendarStore {
     private static let formatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = TimeZone(identifier: "UTC")
+        f.timeZone = ServerTime.timeZone
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
         return f

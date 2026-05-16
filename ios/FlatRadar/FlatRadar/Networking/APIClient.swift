@@ -177,11 +177,27 @@ final class APIClient {
 
     func getListings(city: String? = nil, status: String? = nil,
                      query: String? = nil, limit: Int = 50,
-                     offset: Int = 0) async throws -> ListingsResponse {
+                     offset: Int = 0,
+                     cities: [String]? = nil,
+                     types: [String]? = nil,
+                     contract: String? = nil,
+                     energy: String? = nil) async throws -> ListingsResponse {
         var parts = ["api/v1/listings?limit=\(limit)&offset=\(offset)"]
         if let city { parts.append("city=\(urlEncode(city))") }
         if let status { parts.append("status=\(urlEncode(status))") }
         if let query, !query.isEmpty { parts.append("q=\(urlEncode(query))") }
+        if let cities, !cities.isEmpty {
+            parts.append("cities=\(cities.map(urlEncode).joined(separator: ","))")
+        }
+        if let types, !types.isEmpty {
+            parts.append("types=\(types.map(urlEncode).joined(separator: ","))")
+        }
+        if let contract, !contract.isEmpty {
+            parts.append("contract=\(urlEncode(contract))")
+        }
+        if let energy, !energy.isEmpty {
+            parts.append("energy=\(urlEncode(energy))")
+        }
         return try await request("GET", parts.joined(separator: "&"))
     }
 

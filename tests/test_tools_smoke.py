@@ -18,6 +18,9 @@ class TestToolsImport:
     def test_geocode_all_import(self):
         import tools.geocode_all  # noqa: F401
 
+    def test_doctor_import(self):
+        import tools.doctor  # noqa: F401
+
 
 class TestLauncherImport:
     def test_launcher_imports_web(self):

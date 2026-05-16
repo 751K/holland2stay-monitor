@@ -23,6 +23,10 @@ struct NotificationRow: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+
+                Text(ServerTime.display(notification.createdAt))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 4)

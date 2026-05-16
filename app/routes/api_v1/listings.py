@@ -5,11 +5,15 @@ API v1 房源端点
 - GET /api/v1/listings            房源列表（admin: 全量 / user: 应用 listing_filter）
 - GET /api/v1/listings/<id>       单条详情（user 拿不到 filter 之外的房源 → 404）
 
-查询参数（与 Web 端 /listings 一致的子集）
+查询参数
 --------
 - status        房源状态精确匹配（"Available to book" 等）
-- city          单城市 SQL 过滤
+- city          单城市 SQL 过滤（兼容旧版；优先用 cities）
+- cities        多城市，逗号分隔（如 "Eindhoven,Amsterdam"）
 - q             名称模糊搜索
+- types         房型过滤，逗号分隔（如 "Studio,Apartment"）
+- contract      合同类型过滤（子串匹配，大小写不敏感）
+- energy        最低能耗等级（如 "B" → 匹配 A+++..B）
 - limit         分页 1-500，默认 100
 - offset        偏移 ≥0，默认 0
 
@@ -28,6 +32,8 @@ API v1 房源端点
 
 from __future__ import annotations
 
+import json
+
 from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
@@ -40,11 +46,40 @@ from ._helpers import (
 )
 
 
+# ── helper: feature 子串匹配 ──────────────────────────────────────────
+
+def _safe_features(row: dict) -> list[str]:
+    raw = row.get("features", "[]") or "[]"
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _feature_contains(row: dict, category: str, value: str) -> bool:
+    v2 = value.strip().lower()
+    for f in _safe_features(row):
+        if f.startswith(f"{category}: "):
+            fv = f.split(": ", 1)[1].strip().lower()
+            if v2 in fv:
+                return True
+    return False
+
+
+def _feature_rank_ok(row: dict, min_rank: int) -> bool:
+    from config import energy_rank
+    for f in _safe_features(row):
+        if f.startswith("Energy: "):
+            val = f.split(": ", 1)[1].strip()
+            rank = energy_rank(val)
+            return rank is not None and rank <= min_rank
+    return False
+
+
 def _list_listings():
     role = api_auth.current_role()
     user = get_current_user() if role == "user" else None
     if role == "user" and user is None:
-        # user_id 失效（用户被删了），上层 bearer_required 不会拦到这种
         return _err.err_unauthorized("用户已被删除")
 
     # 参数解析
@@ -57,20 +92,48 @@ def _list_listings():
     except (TypeError, ValueError):
         offset = 0
     status = request.args.get("status") or None
-    city = request.args.get("city") or None
     q = request.args.get("q") or None
 
-    # 读库：取一个相对宽松的上限再走 Python 过滤 + 切片。这样：
-    # 1) total 反映过滤后的真实条数（admin/user 都一致）
-    # 2) user 翻页不会跳条（listing_filter 是 Python 侧的）
-    # 3) 现实数据 < 2000 条，整列拉取也不昂贵
+    # cities: 优先用逗号分隔的多选，回退到单 city
+    cities_raw = request.args.get("cities") or None
+    if cities_raw:
+        cities_list = [c.strip() for c in cities_raw.split(",") if c.strip()]
+    else:
+        single_city = request.args.get("city") or None
+        cities_list = [single_city] if single_city else []
+
+    types_raw = request.args.get("types") or None
+    types_list = [t.strip() for t in types_raw.split(",") if t.strip()] if types_raw else []
+
+    contract = request.args.get("contract") or None
+    energy = request.args.get("energy") or None
+
+    # SQL：单城市走 SQL 过滤（比 Python 过滤快）；多城市或不选走全量
+    sql_city = cities_list[0] if len(cities_list) == 1 else None
     SQL_HARD_CAP = 2000
     with storage_ctx() as st:
         rows = st.get_all_listings(
-            status=status, search=q, city=city, limit=SQL_HARD_CAP,
+            status=status, search=q, city=sql_city, limit=SQL_HARD_CAP,
         )
 
+    # user 视角：先应用 listing_filter
     filtered = apply_user_filter(rows, user) if role == "user" else rows
+
+    # Python 端浏览筛选（与 Web 端 /listings 逻辑一致）
+    if len(cities_list) > 1:
+        cf_lower = {c.lower() for c in cities_list}
+        filtered = [r for r in filtered if (r.get("city") or "").lower() in cf_lower]
+    if types_list:
+        filtered = [r for r in filtered if any(
+            _feature_contains(r, "Type", t) for t in types_list)]
+    if contract:
+        filtered = [r for r in filtered if _feature_contains(r, "Contract", contract)]
+    if energy:
+        from config import energy_rank
+        min_rank = energy_rank(energy)
+        if min_rank is not None:
+            filtered = [r for r in filtered if _feature_rank_ok(r, min_rank)]
+
     total = len(filtered)
     page = filtered[offset : offset + limit]
     return _err.ok({

@@ -30,6 +30,7 @@
       }
     },
     "/mo" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -152,6 +153,9 @@
       }
     },
     "%lld%%" : {
+
+    },
+    "+%lld more below" : {
 
     },
     "⚠️ Sent %lld/%lld. Failures: %@" : {
@@ -305,7 +309,13 @@
         }
       }
     },
+    "All Cities" : {
+
+    },
     "All filters will be cleared. You'll start receiving notifications for every new listing." : {
+
+    },
+    "All Statuses" : {
 
     },
     "Any" : {
@@ -359,6 +369,9 @@
         }
       }
     },
+    "Apply" : {
+
+    },
     "Authorized" : {
       "localizations" : {
         "en" : {
@@ -392,6 +405,7 @@
       }
     },
     "Available from" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -578,6 +592,12 @@
     "Cities" : {
 
     },
+    "City" : {
+
+    },
+    "Clear" : {
+
+    },
     "Color Scheme" : {
       "localizations" : {
         "en" : {
@@ -710,6 +730,7 @@
       }
     },
     "Details" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -830,6 +851,7 @@
       }
     },
     "Features" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -846,6 +868,7 @@
       }
     },
     "Filtered" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -860,6 +883,9 @@
           }
         }
       }
+    },
+    "Filters" : {
+
     },
     "Finishing" : {
 
@@ -1909,6 +1935,9 @@
     "Reset filter to none?" : {
 
     },
+    "Reset Filters" : {
+
+    },
     "Response missing data field" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1967,7 +1996,11 @@
     "Scraping and APNs delivery will pause until restarted." : {
 
     },
+    "Search by name or address..." : {
+
+    },
     "Search by name..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2146,6 +2179,9 @@
         }
       }
     },
+    "Sort" : {
+
+    },
     "Start Monitor" : {
 
     },
@@ -2318,6 +2354,9 @@
           }
         }
       }
+    },
+    "Top Categories" : {
+
     },
     "Total by City" : {
       "extractionState" : "stale",

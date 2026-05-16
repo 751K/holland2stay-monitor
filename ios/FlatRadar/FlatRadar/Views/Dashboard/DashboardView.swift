@@ -111,9 +111,9 @@ struct DashboardView: View {
                 systemImage: "calendar", color: .orange,
                 action: {
                     activeChart = ChartDetail(
-                        title: "New Listings, Last 30 Days",
+                        title: "New Listings, Last 7 Days",
                         subtitle: "\(s.new7d) added in past 7 days",
-                        chartKey: "daily_new", days: 30)
+                        chartKey: "daily_new", days: 7)
                 })
             StatCard(
                 title: "Changes (24h)", value: s.changes24h.formatted(),
@@ -177,7 +177,7 @@ struct DashboardView: View {
         if !s.lastScrape.isEmpty, s.lastScrape != "--" {
             HStack {
                 Image(systemName: "clock").foregroundStyle(.secondary)
-                Text("Last scrape: \(s.lastScrape)")
+                Text("Last scrape: \(ServerTime.display(s.lastScrape))")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .padding(.top, 8)
@@ -201,13 +201,16 @@ struct DashboardView: View {
     @ToolbarContentBuilder
     private var roleBadge: some ToolbarContent {
         ToolbarItem(placement: .automatic) {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(auth.isGuest ? Color.gray : auth.isAdmin ? Color.red : Color.blue)
-                    .frame(width: 8, height: 8)
-                Text(auth.role.rawValue.capitalized)
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            Text(auth.role.rawValue.capitalized)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(roleColor)
         }
+    }
+
+    private var roleColor: Color {
+        if auth.isAdmin { return .red }
+        if auth.isGuest { return .secondary }
+        return .blue
     }
 }

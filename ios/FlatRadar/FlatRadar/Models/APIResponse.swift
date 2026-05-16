@@ -1,5 +1,87 @@
 import Foundation
 
+enum ServerTime {
+    nonisolated static let timeZone = TimeZone(identifier: "Europe/Amsterdam") ?? .current
+
+    nonisolated static func display(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "--", trimmed != "—" else { return raw }
+        if isDateOnly(trimmed) {
+            return displayDate(trimmed)
+        }
+        guard let date = parse(trimmed) else { return raw }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = timeZone
+        formatter.dateFormat = shouldShowTimeZone(for: date)
+            ? "MMM d, HH:mm zzz"
+            : "MMM d, HH:mm"
+        return formatter.string(from: date)
+    }
+
+    nonisolated static func displayDate(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return raw }
+        let source = String(trimmed.prefix(10))
+
+        let parser = DateFormatter()
+        parser.calendar = Calendar(identifier: .gregorian)
+        parser.locale = Locale(identifier: "en_US_POSIX")
+        parser.timeZone = timeZone
+        parser.dateFormat = "yyyy-MM-dd"
+
+        guard let date = parser.date(from: source) else { return raw }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = .autoupdatingCurrent
+        formatter.timeZone = timeZone
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter.string(from: date)
+    }
+
+    nonisolated private static func shouldShowTimeZone(for date: Date) -> Bool {
+        TimeZone.current.secondsFromGMT(for: date) != timeZone.secondsFromGMT(for: date)
+    }
+
+    nonisolated private static func isDateOnly(_ raw: String) -> Bool {
+        raw.count == 10 && raw.dropFirst(4).first == "-" && raw.dropFirst(7).first == "-"
+    }
+
+    nonisolated private static func parse(_ raw: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso.date(from: raw) { return date }
+
+        iso.formatOptions = [.withInternetDateTime]
+        if let date = iso.date(from: raw) { return date }
+
+        let formats = [
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy/MM/dd HH:mm:ss",
+            "yyyy/MM/dd HH:mm"
+        ]
+
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = timeZone
+            formatter.dateFormat = format
+            if let date = formatter.date(from: raw) {
+                return date
+            }
+        }
+        return nil
+    }
+}
+
 /// Generic envelope matching backend {ok, data} / {ok, error} shape.
 /// Every /api/v1/* response decodes through this type.
 struct APIResponse<T: Decodable>: Decodable {

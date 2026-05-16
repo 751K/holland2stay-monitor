@@ -23,7 +23,7 @@ struct CalendarListing: Decodable, Identifiable, Hashable, Sendable {
         case availableFrom = "available_from"
     }
 
-    /// 解析 ``availableFrom`` 为 ``Date``（按 yyyy-MM-dd，UTC）；解析失败返回 nil。
+    /// 解析 ``availableFrom`` 为 ``Date``（按服务器 Amsterdam 日期）；解析失败返回 nil。
     var date: Date? { Self.dateFormatter.date(from: availableFrom) }
 
     /// 用于按"日"分组的 key（YYYY-MM-DD），保证同一天的房源会聚合在一起。
@@ -32,7 +32,7 @@ struct CalendarListing: Decodable, Identifiable, Hashable, Sendable {
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = TimeZone(identifier: "UTC")
+        f.timeZone = ServerTime.timeZone
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
         return f

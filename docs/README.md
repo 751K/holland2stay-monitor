@@ -371,6 +371,27 @@ docker compose logs -f
 docker compose down
 ```
 
+**Pre-release health check:**
+
+Run the doctor before a first deploy, after changing `.env`, or before publishing
+a new build:
+
+```bash
+python -m tools.doctor
+
+# Offline / CI-safe mode: skip proxy, SMTP and Holland2Stay network probes
+python -m tools.doctor --no-network
+
+# Also verify SMTP username/password login (does not send an email)
+python -m tools.doctor --smtp-login
+```
+
+The doctor checks `.env`, writable data/log paths, SQLite integrity and required
+tables, `users.json`, Caddy placeholder domains, APNs key/config, SMTP settings,
+proxy exit IP, Holland2Stay GraphQL reachability, and Docker supervisord control.
+It exits with code `1` if a blocking `FAIL` is found, which makes it safe to add
+to deployment scripts.
+
 **Using a proxy with Docker:**
 
 If you need to route scraping and booking traffic through a proxy (e.g. residential proxy to avoid Cloudflare 403 blocks), you must pass the proxy variables into the container in **two places**:
@@ -404,6 +425,7 @@ The container runs `monitor.py` and `web.py` together under supervisord. Logs go
 **Updating to a new version:**
 ```bash
 git pull
+python -m tools.doctor --no-network
 docker compose up -d --build
 ```
 

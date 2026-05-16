@@ -318,7 +318,7 @@ struct MapView: View {
                     Label(l.area, systemImage: "square.dashed")
                 }
                 if !l.availableFrom.isEmpty {
-                    Label(l.availableFrom, systemImage: "calendar")
+                    Label(ServerTime.displayDate(l.availableFrom), systemImage: "calendar")
                 }
             }
             .font(.footnote)

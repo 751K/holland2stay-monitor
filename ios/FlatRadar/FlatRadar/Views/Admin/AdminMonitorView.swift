@@ -65,7 +65,7 @@ struct AdminMonitorView: View {
                     HStack {
                         Text("Last scrape")
                         Spacer()
-                        Text(s.lastScrape).font(.caption)
+                        Text(ServerTime.display(s.lastScrape)).font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
