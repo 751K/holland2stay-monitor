@@ -67,4 +67,17 @@ final class DashboardStore {
         }
         isLoadingChart = false
     }
+
+    /// 登出时清空——summary 是 public，但 meSummary 是用户私有的，必须清。
+    /// 全部清掉省得分两类。
+    func clear() {
+        summary = nil
+        meSummary = nil
+        chartKeys = []
+        selectedChart = nil
+        isLoading = false
+        isLoadingChart = false
+        errorMessage = nil
+        lastError = nil
+    }
 }

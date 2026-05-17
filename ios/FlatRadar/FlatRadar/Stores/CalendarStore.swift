@@ -45,6 +45,15 @@ final class CalendarStore {
         await fetch()
     }
 
+    /// 登出时清空——下个用户日历应该重新加载。
+    func clear() {
+        listings = []
+        listingsByDay = [:]
+        isLoading = false
+        errorMessage = nil
+        lastError = nil
+    }
+
     /// 某个日期所属当天的可入住房源列表。
     func listings(on date: Date) -> [CalendarListing] {
         let key = Self.dayKey(for: date)

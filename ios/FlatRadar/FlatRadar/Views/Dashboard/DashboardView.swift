@@ -17,6 +17,21 @@ struct DashboardView: View {
     /// "New · 24h" / "New · 7d" / "Changes" 三个 mini stat 点开后的 detail sheet
     @State private var activeRecentMode: RecentActivityMode?
 
+    // MARK: - Derived chart data (cached to avoid re-sorting on every body invalidation)
+    //
+    // Dashboard body 在 store 任何字段变化时都重算（SSE 推通知 → store 间接通知 →
+    // dashboard re-render）。如果让 mini card 在 view body 里调 .sorted() / .bucketed()
+    // ，5 张图每 SSE batch 就重排一遍 → 主线程 10-15ms。
+    //
+    // 这里把"派生数据"提前算好缓存：onChange 监听原始 chartXxx 变化时刷新；
+    // body 直接消费数组，O(1)。
+    @State private var statusBuckets: [ChartEntry] = []   // {available, lottery, other} 计数
+    @State private var statusBucketsTotal: Int = 0
+    @State private var priceSortedAsc: [ChartEntry] = []
+    @State private var typeTopThree: [ChartEntry] = []
+    @State private var energyMerged: [ChartEntry] = []
+    @State private var weekGrowthCached: String? = nil
+
     struct ChartDetail: Identifiable {
         let id = UUID()
         let key: String
@@ -289,16 +304,9 @@ struct DashboardView: View {
         .buttonStyle(.plain)
     }
 
-    private var weekGrowthText: String? {
-        guard let daily = chartDailyNew else {
-            // Without chart data, fallback to new7d
-            if let s = store.summary { return "\(s.new7d)" }
-            return nil
-        }
-        let last7 = daily.data.suffix(7).reduce(0) { $0 + $1.count }
-        guard last7 > 0 else { return nil }
-        return "\(last7)"
-    }
+    /// 直接读 @State 缓存（在 chartDailyNew / summary 变化时 recompute 一次更新）。
+    /// 之前是 computed property，每次 body 重算 .suffix(7).reduce(0)；现在 O(1)。
+    private var weekGrowthText: String? { weekGrowthCached }
 
     // MARK: - Matches section (user only)
 
@@ -449,10 +457,10 @@ struct DashboardView: View {
         }
     }
 
+    /// 直接 forward 到 `Listing.normalizedAreaText`（已在模型层缓存归一逻辑）。
+    /// 之前每张匹配卡每次 render 都 trim + lowercased 一遍。
     private func matchAreaText(_ listing: Listing) -> String? {
-        guard let area = listing.areaText else { return nil }
-        let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.lowercased().contains("m") ? trimmed : "\(trimmed)m²"
+        listing.normalizedAreaText
     }
 
     // MARK: - Explore section
@@ -531,11 +539,12 @@ struct DashboardView: View {
 
     private var statusMiniCard: some View {
         exploreCard(title: "By status", tapKey: "status_dist", tapTitle: "By Status") {
-            if let chart = chartStatus, !chart.data.isEmpty {
-                let total = chart.data.reduce(0) { $0 + $1.count }
-                let available = chart.data.first(where: { $0.label.lowercased().contains("available") })?.count ?? 0
-                let lottery = chart.data.first(where: { $0.label.lowercased().contains("lottery") })?.count ?? 0
-                let unavailable = total - available - lottery
+            if !statusBuckets.isEmpty {
+                // statusBuckets 是 [available, lottery, unavailable] 三元，
+                // 由 recomputeDerivedCharts() 在 chartStatus 变化时算一次。
+                let available   = statusBuckets[0].count
+                let lottery     = statusBuckets[1].count
+                let unavailable = statusBuckets[2].count
                 let sum = max(available + lottery + unavailable, 1)
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -582,8 +591,8 @@ struct DashboardView: View {
 
     private var priceMiniCard: some View {
         exploreCard(title: "By price", tapKey: "price_dist", tapTitle: "By Price") {
-            if let chart = chartPrice, !chart.data.isEmpty {
-                let sorted = chart.data.sorted { priceSortKey($0.label) < priceSortKey($1.label) }
+            if !priceSortedAsc.isEmpty {
+                let sorted = priceSortedAsc   // cached
                 let maxCount = sorted.map(\.count).max() ?? 1
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -607,12 +616,8 @@ struct DashboardView: View {
 
     private var typeMiniCard: some View {
         exploreCard(title: "By type", tapKey: "type_dist", tapTitle: "By Type") {
-            if let chart = chartType, !chart.data.isEmpty {
-                // 后端发 "1"/"2"/"3"/"4" 表示 N-room，bucketed 合并成 "Apt"；
-                // "Studio" / "Loft" 关键字保留。
-                let merged = chart.data.bucketed(forKey: "type_dist")
-                    .sorted { $0.count > $1.count }
-                    .prefix(3)
+            if !typeTopThree.isEmpty {
+                let merged = typeTopThree   // cached top-3 (bucketed + sorted)
                 let maxCount = merged.map(\.count).max() ?? 1
 
                 VStack(spacing: 5) {
@@ -640,9 +645,8 @@ struct DashboardView: View {
 
     private var energyMiniCard: some View {
         exploreCard(title: "By energy", tapKey: "energy_dist", tapTitle: "By Energy") {
-            if let chart = chartEnergy, !chart.data.isEmpty {
-                // A+/A++/A+++ 归为 "A"；bucketed 已按 A→G 顺序输出。
-                let merged = chart.data.bucketed(forKey: "energy_dist")
+            if !energyMerged.isEmpty {
+                let merged = energyMerged   // cached
                 let maxCount = merged.map(\.count).max() ?? 1
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -767,6 +771,65 @@ struct DashboardView: View {
         chartPrice = prR
         chartType = tpR
         chartEnergy = enR
+        // 数据更新后，把派生数据（sorted/bucketed/reduced）算一次缓存起来
+        recomputeDerivedCharts()
+    }
+
+    /// 把 mini chart 用到的派生数据（排序/分桶/求和）一次性算完并缓存到 @State，
+    /// 让 view body 直接 O(1) 读取，避免每次 invalidation 重算。
+    private func recomputeDerivedCharts() {
+        // Status: 拆成 [available, lottery, unavailable] 三元
+        if let chart = chartStatus, !chart.data.isEmpty {
+            let total = chart.data.reduce(0) { $0 + $1.count }
+            let available = chart.data.first(where: { $0.label.lowercased().contains("available") })?.count ?? 0
+            let lottery   = chart.data.first(where: { $0.label.lowercased().contains("lottery") })?.count ?? 0
+            statusBuckets = [
+                ChartEntry(label: "available",   count: available),
+                ChartEntry(label: "lottery",     count: lottery),
+                ChartEntry(label: "unavailable", count: total - available - lottery),
+            ]
+            statusBucketsTotal = total
+        } else {
+            statusBuckets = []
+            statusBucketsTotal = 0
+        }
+
+        // Price: 升序排好
+        if let chart = chartPrice, !chart.data.isEmpty {
+            priceSortedAsc = chart.data.sorted {
+                priceSortKey($0.label) < priceSortKey($1.label)
+            }
+        } else {
+            priceSortedAsc = []
+        }
+
+        // Type: bucketed("Apt"/"Studio"/"Loft") + 取 top 3
+        if let chart = chartType, !chart.data.isEmpty {
+            typeTopThree = Array(
+                chart.data.bucketed(forKey: "type_dist")
+                    .sorted { $0.count > $1.count }
+                    .prefix(3)
+            )
+        } else {
+            typeTopThree = []
+        }
+
+        // Energy: bucketed (A+/A/B/...)
+        if let chart = chartEnergy, !chart.data.isEmpty {
+            energyMerged = chart.data.bucketed(forKey: "energy_dist")
+        } else {
+            energyMerged = []
+        }
+
+        // Week growth: 最近 7 天 daily_new 累加
+        if let daily = chartDailyNew {
+            let last7 = daily.data.suffix(7).reduce(0) { $0 + $1.count }
+            weekGrowthCached = last7 > 0 ? "\(last7)" : nil
+        } else if let s = store.summary {
+            weekGrowthCached = "\(s.new7d)"
+        } else {
+            weekGrowthCached = nil
+        }
     }
 
     private func relativeTime(_ iso: String) -> String {
@@ -805,6 +868,10 @@ struct RecentActivitySheet: View {
     @State private var listings: [Listing] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
+    /// Cached filter+sort 结果——之前 `filtered` 是 computed property，body 里
+    /// 用 4 处（`isEmpty` / ForEach / count × 2），每次扫 100 项算 firstSeenDate
+    /// + 排序。改成 @State 在数据/mode 变更时算一次。
+    @State private var filtered: [Listing] = []
 
     var body: some View {
         NavigationStack {
@@ -848,14 +915,15 @@ struct RecentActivitySheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .task { await fetch() }
             .refreshable { await fetch() }
+            .onChange(of: listings) { _, _ in recomputeFiltered() }
         }
     }
 
     /// 24h 内 first_seen 的房源——后端默认 sort by first_seen desc，所以一页 100
     /// 基本能覆盖任何 24h 增量（即便系统正常一天也就 5-50 条新增）。
-    private var filtered: [Listing] {
+    private func recomputeFiltered() {
         let cutoff = Date().addingTimeInterval(-mode.maxAge)
-        return listings
+        filtered = listings
             .filter { ($0.firstSeenDate ?? .distantPast) >= cutoff }
             .sorted { ($0.firstSeenDate ?? .distantPast) > ($1.firstSeenDate ?? .distantPast) }
     }
@@ -867,7 +935,7 @@ struct RecentActivitySheet: View {
         defer { isLoading = false }
         do {
             let resp = try await APIClient.shared.getListings(limit: 100, offset: 0)
-            listings = resp.items
+            listings = resp.items   // 触发上面的 .onChange → recomputeFiltered
         } catch {
             errorMessage = error.localizedDescription
         }

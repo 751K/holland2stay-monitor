@@ -32,6 +32,10 @@ struct MapListing: Decodable, Identifiable, Hashable, Sendable {
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: lat, longitude: lng)
     }
+
+    /// 已小写的 status 字符串。clusterColor 在 2000 个 pin 上遍历调
+    /// `status.lowercased()` 是热点，提供小写缓存避免每帧 2000 次堆分配。
+    var statusLowered: String { status.lowercased() }
 }
 
 /// `GET /api/v1/map` 响应包络。

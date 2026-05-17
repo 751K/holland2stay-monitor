@@ -17,6 +17,17 @@ struct NotificationsView: View {
     /// 单条左滑标已读不触发（那个动作系统 swipe 自带触觉）。
     @State private var markAllReadTick = 0
 
+    // MARK: - Day-bucketed caches
+    //
+    // 之前 todayItems / yesterdayItems / earlierItems 是 computed properties，
+    // 在 body 里被引用 5+ 次（`.isEmpty` + 取 count + 传给 section），每次都
+    // 全表 filter 一遍。SSE 推一条 → store.notifications 变 → body 重算 → 三次
+    // O(n) filter 重复扫。改成 @State 缓存 + .onChange(of: notifications.count)
+    // 触发重算，body 变成 O(1) 读。
+    @State private var todayItems: [NotificationItem] = []
+    @State private var yesterdayItems: [NotificationItem] = []
+    @State private var earlierItems: [NotificationItem] = []
+
     var body: some View {
         NavigationStack {
             Group {
@@ -54,9 +65,17 @@ struct NotificationsView: View {
                 if store.notifications.isEmpty {
                     await store.fetch()
                 }
+                // 首次出现 / 已有数据时也先分桶一次
+                rebucketDayGroups()
             }
             .onChange(of: store.errorMessage) { _, new in
                 showRefreshError = new != nil && !store.notifications.isEmpty
+            }
+            // SSE 推一条或用户标已读都会改 notifications.count；任何变动都
+            // 用 .id 序列差异判断（map 提 id 是 O(n) 但比 filter 三次便宜）。
+            // 注意：单纯标已读改 read 字段不改 count，无需重分桶（桶按日期分）。
+            .onChange(of: store.notifications.count) { _, _ in
+                rebucketDayGroups()
             }
             .alert(
                 store.lastError?.errorDescription ?? "Refresh Failed",
@@ -194,17 +213,23 @@ struct NotificationsView: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: - Day grouping
+    // MARK: - Day grouping (cached, see @State above)
 
-    private var todayItems: [NotificationItem] {
-        store.notifications.filter { $0.dayBucket == .today }
-    }
-
-    private var yesterdayItems: [NotificationItem] {
-        store.notifications.filter { $0.dayBucket == .yesterday }
-    }
-
-    private var earlierItems: [NotificationItem] {
-        store.notifications.filter { $0.dayBucket == .earlier }
+    /// 单次 O(n) 扫一遍 notifications 分到三个桶，避免连续三次 filter 重扫。
+    /// 由 .onChange / .task 触发。
+    private func rebucketDayGroups() {
+        var today: [NotificationItem] = []
+        var yesterday: [NotificationItem] = []
+        var earlier: [NotificationItem] = []
+        for n in store.notifications {
+            switch n.dayBucket {
+            case .today:     today.append(n)
+            case .yesterday: yesterday.append(n)
+            case .earlier:   earlier.append(n)
+            }
+        }
+        todayItems = today
+        yesterdayItems = yesterday
+        earlierItems = earlier
     }
 }

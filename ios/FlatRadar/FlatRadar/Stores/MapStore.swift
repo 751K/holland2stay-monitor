@@ -48,4 +48,14 @@ final class MapStore {
     func refresh() async {
         await fetch()
     }
+
+    /// 登出时清空——下个用户登入预热的是他自己的 map listings。
+    func clear() {
+        listings = []
+        uncached = 0
+        isLoading = false
+        errorMessage = nil
+        lastError = nil
+        selectedID = nil
+    }
 }

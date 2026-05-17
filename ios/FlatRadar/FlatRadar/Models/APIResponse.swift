@@ -4,20 +4,27 @@ enum ServerTime {
     nonisolated static let timeZone = TimeZone(identifier: "Europe/Amsterdam") ?? .current
 
     // MARK: - Static formatters (DateFormatter creation is expensive)
+    //
+    // Swift 6 strict concurrency 下，static let 默认走 MainActor 隔离，但
+    // display(_:) / parse(_:) 等是 nonisolated，跨不过去 → 编译错。
+    // 加 `nonisolated` 关键字解除隔离；iOS 18 SDK 的 DateFormatter /
+    // ISO8601DateFormatter 已声明为 Sendable，编译器不需要额外 (unsafe) 兜底。
 
-    private nonisolated static let isoFrac: ISO8601DateFormatter = {
+    // ISO8601DateFormatter 当前 SDK 尚未标 Sendable，单 nonisolated 通不过严格
+    // 并发检查；只读使用（仅 .date(from:)）实际线程安全，用 (unsafe) 关掉警告。
+    nonisolated(unsafe) private static let isoFrac: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f
     }()
 
-    private nonisolated static let isoNoFrac: ISO8601DateFormatter = {
+    nonisolated(unsafe) private static let isoNoFrac: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
 
-    private nonisolated static let dateParser: DateFormatter = {
+    nonisolated private static let dateParser: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -26,7 +33,7 @@ enum ServerTime {
         return f
     }()
 
-    private nonisolated static let displayFormatterTZ: DateFormatter = {
+    nonisolated private static let displayFormatterTZ: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = .autoupdatingCurrent
@@ -35,7 +42,7 @@ enum ServerTime {
         return f
     }()
 
-    private nonisolated static let displayFormatterNoTZ: DateFormatter = {
+    nonisolated private static let displayFormatterNoTZ: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = .autoupdatingCurrent
@@ -44,7 +51,7 @@ enum ServerTime {
         return f
     }()
 
-    private nonisolated static let mediumDateFormatter: DateFormatter = {
+    nonisolated private static let mediumDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = .autoupdatingCurrent
@@ -54,7 +61,7 @@ enum ServerTime {
         return f
     }()
 
-    private nonisolated static let fallbackParsers: [DateFormatter] = {
+    nonisolated private static let fallbackParsers: [DateFormatter] = {
         let formats = [
             "yyyy-MM-dd HH:mm:ss",
             "yyyy-MM-dd HH:mm",
@@ -130,15 +137,36 @@ enum ServerTime {
 
 /// Generic envelope matching backend {ok, data} / {ok, error} shape.
 /// Every /api/v1/* response decodes through this type.
-struct APIResponse<T: Decodable>: Decodable {
+nonisolated struct APIResponse<T: Decodable>: Decodable {
     let ok: Bool
     let data: T?
     let error: APIErrorPayload?
+
+    enum CodingKeys: String, CodingKey {
+        case ok, data, error
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        data = try container.decodeIfPresent(T.self, forKey: .data)
+        error = try container.decodeIfPresent(APIErrorPayload.self, forKey: .error)
+    }
 }
 
-struct APIErrorPayload: Decodable {
+nonisolated struct APIErrorPayload: Decodable {
     let code: String
     let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case code, message
+    }
+
+    nonisolated init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        code = try container.decode(String.self, forKey: .code)
+        message = try container.decode(String.self, forKey: .message)
+    }
 }
 
 // MARK: - Paginated responses

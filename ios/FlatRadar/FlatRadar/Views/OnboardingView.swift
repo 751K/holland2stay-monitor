@@ -71,19 +71,22 @@ struct OnboardingView: View {
 
             Spacer(minLength: 0)
 
-            // Bottom button
-            Button(step < pages.count - 1 ? "Next" : "Get Started") {
+            // Bottom button — label 本身撑满蓝色区域，整条都可点击
+            Button {
                 if step < pages.count - 1 {
                     withAnimation(.spring(duration: 0.3)) { step += 1 }
                 } else {
                     finish()
                 }
+            } label: {
+                Text(step < pages.count - 1 ? "Next" : "Get Started")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(.blue, in: RoundedRectangle(cornerRadius: 14))
             }
-            .font(.headline.weight(.semibold))
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
-            .background(.blue, in: RoundedRectangle(cornerRadius: 14))
-            .foregroundStyle(.white)
+            .buttonStyle(.plain)
             .padding(.horizontal, 24)
             .padding(.bottom, 36)
         }

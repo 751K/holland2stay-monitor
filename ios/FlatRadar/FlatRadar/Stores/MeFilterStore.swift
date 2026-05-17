@@ -40,4 +40,11 @@ final class MeFilterStore {
             return nil
         }
     }
+
+    /// 登出时清空——上个用户的 filter response 不应给下个用户看到。
+    func clear() {
+        isSaving = false
+        errorMessage = nil
+        lastResponse = nil
+    }
 }

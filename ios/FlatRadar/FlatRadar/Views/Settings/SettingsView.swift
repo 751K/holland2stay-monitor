@@ -22,6 +22,7 @@ struct SettingsView: View {
     @State private var showLegalTerms = false
     @State private var showLegalPrivacy = false
     @State private var showFeedback = false
+    @State private var showRemoveBiometric = false
     @State private var isExporting = false
     @State private var exportString: String?
     @State private var showShareSheet = false
@@ -141,6 +142,18 @@ struct SettingsView: View {
                                 Text(user.name)
                                     .foregroundStyle(.secondary)
                             }
+                        }
+
+                        if auth.isUser, BiometricAuthService.isAvailable {
+                            let name = BiometricAuthService.biometryName
+                            Toggle("Sign in with \(name)", isOn: Binding(
+                                get: { BiometricAuthService.hasStoredCredentials },
+                                set: { enable in
+                                    if !enable {
+                                        showRemoveBiometric = true
+                                    }
+                                }
+                            ))
                         }
 
                         if auth.isUser {
@@ -325,6 +338,14 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear { editedURL = serverURL }
+            .confirmationDialog("Remove Face ID Sign-In?", isPresented: $showRemoveBiometric, titleVisibility: .visible) {
+                Button("Remove", role: .destructive) {
+                    BiometricAuthService.deleteCredentials()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You can enable it again next time you sign in with your password.")
+            }
             .alert("Test Push", isPresented: $showTestResult, presenting: testResultMessage) { _ in
                 Button("OK", role: .cancel) {}
             } message: { msg in

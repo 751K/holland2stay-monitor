@@ -71,7 +71,15 @@ final class NavigationCoordinator {
     /// 由 deep link / 通知点击调用：切到 List 视图并 push 详情。
     /// 多次连点不重复 push 同一条；切换 tab 顺手清空已有 path。
     func openListing(id: String) {
-        guard !id.isEmpty else { return }
+        // Deep link 来源不可信，必须验输入：
+        // - 非空
+        // - ≤ 128 字符，防止超长 URL 撑爆后端 path
+        // - 只允许字母数字 / `-` / `_` —— Holland2Stay listing id 是这个集合，
+        //   挡掉路径穿越 / 控制字符 / URL 编码注入
+        guard !id.isEmpty, id.count <= 128 else { return }
+        let allowed = id.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+        guard allowed else { return }
+
         selectedTab = .listings
         selectedBrowseMode = .list
         listingsPath = [.byId(id)]

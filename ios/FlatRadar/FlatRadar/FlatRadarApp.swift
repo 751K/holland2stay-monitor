@@ -94,10 +94,20 @@ struct FlatRadarApp: App {
                         }
                     } else {
                         // 登出路径（手动 logout / 401 自动 / 删号都会走这里）：
-                        // 清空导航 coordinator —— 否则下个用户登入时仍停留在
-                        // 上个用户最后看的 tab + listings 详情栈，既诡异又会
-                        // 短暂泄露上一会话的 listing id。
+                        //
+                        // 1. 清空 NavigationCoordinator —— 下个用户登入时不停留
+                        //    在上个用户最后看的 tab + 详情栈。
+                        // 2. 清空所有 @Observable 数据 store —— 否则下个用户登入
+                        //    瞬间会短暂看到上个用户的 listings / notifications /
+                        //    map / dashboard，等下个 fetch 才会覆盖，期间数据是
+                        //    跨账户泄露的。
                         coordinator.reset()
+                        listingsStore.clear()
+                        notificationsStore.clear()
+                        mapStore.clear()
+                        calendarStore.clear()
+                        dashboardStore.clear()
+                        meFilterStore.clear()
                     }
                 }
         }

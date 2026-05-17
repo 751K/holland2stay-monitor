@@ -24,6 +24,7 @@ import UIKit
 ///   器累积合并到本视图的 NavigationStack
 struct BrowseView: View {
     @Environment(NavigationCoordinator.self) private var coord
+    @State private var hasMountedMap = false
 
     var body: some View {
         @Bindable var coord = coord
@@ -60,20 +61,31 @@ struct BrowseView: View {
             .navigationDestination(for: ListingRoute.self) { route in
                 ListingDetailView(route: route)
             }
+            .onAppear {
+                if coord.selectedBrowseMode == .map {
+                    hasMountedMap = true
+                }
+            }
+            .onChange(of: coord.selectedBrowseMode) { _, mode in
+                if mode == .map {
+                    hasMountedMap = true
+                }
+            }
         }
     }
 
     @ViewBuilder
     private var content: some View {
         if usesInlineModePicker {
-            // iPad：MapView 始终留在 ZStack 底层 —— 切到 list/calendar 时只是
-            // opacity=0 隐藏，**不销毁实例**。否则每次切回 map 都重新 init
-            // MapView / 重拉瓦片 / 重建 cluster，肉眼能看到加载闪烁。
+            // iPad：MapView 首次进入 map 后保活。不要在 Browse 第一次打开
+            // list/calendar 时就创建隐藏地图，否则 MapKit 初始化会让首帧卡一下。
             ZStack(alignment: .top) {
-                MapView(overlayTopPadding: 132)
-                    .ignoresSafeArea(edges: .top)
-                    .opacity(coord.selectedBrowseMode == .map ? 1 : 0)
-                    .allowsHitTesting(coord.selectedBrowseMode == .map)
+                if shouldRenderMap {
+                    MapView(overlayTopPadding: 132)
+                        .ignoresSafeArea(edges: .top)
+                        .opacity(coord.selectedBrowseMode == .map ? 1 : 0)
+                        .allowsHitTesting(coord.selectedBrowseMode == .map)
+                }
 
                 if coord.selectedBrowseMode == .map {
                     modePicker(maxWidth: 360)
@@ -91,14 +103,16 @@ struct BrowseView: View {
                 }
             }
         } else {
-            // iPhone：同样的 MapView 保活策略。switch 创建 MapView 那条路径会
-            // 在每次模式切换时 destroy + recreate，闪烁原因。
+            // iPhone：同样是"按需创建，创建后保活"。这样 Listing 首次打开
+            // 不背着一个隐藏 MapKit 实例一起启动，切回 map 又不闪。
             // List / Calendar 视图本身有不透明 systemGroupedBackground，盖住下面
             // 的 map，视觉上感受跟之前一致。
             ZStack {
-                MapView()
-                    .opacity(coord.selectedBrowseMode == .map ? 1 : 0)
-                    .allowsHitTesting(coord.selectedBrowseMode == .map)
+                if shouldRenderMap {
+                    MapView()
+                        .opacity(coord.selectedBrowseMode == .map ? 1 : 0)
+                        .allowsHitTesting(coord.selectedBrowseMode == .map)
+                }
 
                 if coord.selectedBrowseMode != .map {
                     nonMapContent
@@ -107,6 +121,10 @@ struct BrowseView: View {
                 }
             }
         }
+    }
+
+    private var shouldRenderMap: Bool {
+        hasMountedMap || coord.selectedBrowseMode == .map
     }
 
     /// 非 map 模式的内容 —— list 或 calendar。

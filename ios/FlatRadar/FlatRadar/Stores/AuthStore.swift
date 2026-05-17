@@ -27,6 +27,11 @@ final class AuthStore {
     var errorMessage: String?
     var lastError: APIError?
 
+    /// 登录成功后待保存的 Face ID 凭据——由 LoginView 设置，ContentView 弹出 alert。
+    /// LoginView 会在登录成功后立即被 ContentView 替换掉，alert 放 LoginView
+    /// 层级会来不及弹出。提到这里让 ContentView 处理。
+    var pendingBiometricCredential: (username: String, password: String, role: String)?
+
     private let client = APIClient.shared
     private var server: String {
         UserDefaults.standard.string(forKey: "server_url") ?? APIClient.defaultServerHost
@@ -144,6 +149,7 @@ final class AuthStore {
         role = .guest
         isAuthenticated = true
         userInfo = nil
+        pendingBiometricCredential = nil
     }
 
     /// 编辑 filter 保存后调用——把 ``userInfo.listingFilter`` 同步成后端
@@ -158,6 +164,7 @@ final class AuthStore {
 
     func logout() async {
         _ = try? await client.logout()
+        pendingBiometricCredential = nil
         KeychainManager.delete(server: server)
         UserDefaults.standard.removeObject(forKey: "auth_token")
         client.setToken(nil)

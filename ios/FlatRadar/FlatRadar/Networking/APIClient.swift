@@ -11,7 +11,9 @@ import Foundation
 /// 改为 ``@MainActor final class``：
 /// - 与所有 Store / View / Model 同处主 actor，conformance 共享无冲突
 /// - 异步 ``request`` 内部的 ``URLSession.shared.data`` 在 background 任务跑，
-///   await 期间主线程不阻塞，与 actor 隔离的性能等价
+///   await 期间主线程不阻塞
+/// - 响应 JSON decode 也丢到后台队列，避免 /map、/listings 这类大响应在
+///   MainActor 上同步解码造成首屏卡顿
 /// - ``setToken`` / ``configure`` 等同步方法在主线程上调用，零开销
 @MainActor
 final class APIClient {
@@ -22,8 +24,12 @@ final class APIClient {
 
     private var baseURL: URL
     private var token: String?
-    private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
+    private static let decodeQueue = DispatchQueue(
+        label: "app.flatradar.api.decode",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
 
     init() {
         // 启动时立刻读 server_url，避免第一次 restoreSession 用错 URL 撞 connection refused。
@@ -122,10 +128,11 @@ final class APIClient {
             throw APIError.badResponse(0)
         }
 
-        // Decode envelope
+        // Decode envelope off the MainActor. Large list/map responses can be
+        // several thousand models, and JSONDecoder is synchronous.
         let envelope: APIResponse<T>
         do {
-            envelope = try decoder.decode(APIResponse<T>.self, from: data)
+            envelope = try await Self.decodeEnvelope(APIResponse<T>.self, from: data)
         } catch {
             let raw = String(data: data, encoding: .utf8) ?? "<not utf8>"
             #if DEBUG
@@ -155,6 +162,22 @@ final class APIClient {
         }
 
         return payload
+    }
+
+    private static func decodeEnvelope<T: Decodable>(
+        _ type: APIResponse<T>.Type,
+        from data: Data
+    ) async throws -> APIResponse<T> {
+        try await withCheckedThrowingContinuation { continuation in
+            decodeQueue.async {
+                do {
+                    let envelope = try JSONDecoder().decode(type, from: data)
+                    continuation.resume(returning: envelope)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 
     // MARK: - Auth (Phase 1)

@@ -9,7 +9,11 @@ enum BiometricAuthService {
     struct StoredCredential: Codable {
         let username: String
         let password: String
+        let role: String       // "user" | "admin"
     }
+
+    private static let credAccount = "flatradar_biometric"
+    private static let credService = "com.flatradar.biometric"
 
     // MARK: - Availability
 
@@ -29,17 +33,10 @@ enum BiometricAuthService {
         }
     }
 
+    /// 仅 user 凭据才显示 Face ID 按钮。
+    /// 直接读 UserDefaults role 标记——不碰 Keychain（生物保护条目查询可能意外触发面容提示）。
     static var hasStoredCredentials: Bool {
-        let query: [String: Any] = [
-            kSecClass as String:       kSecClassGenericPassword,
-            kSecAttrAccount as String: "flatradar_biometric",
-            kSecAttrService as String: "com.flatradar.biometric",
-            kSecReturnData as String:  true,
-            kSecMatchLimit as String:  kSecMatchLimitOne,
-        ]
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        return status == errSecSuccess
+        UserDefaults.standard.string(forKey: "biometric_role") == "user"
     }
 
     // MARK: - Save / Delete
@@ -56,8 +53,8 @@ enum BiometricAuthService {
         )!
         let query: [String: Any] = [
             kSecClass as String:       kSecClassGenericPassword,
-            kSecAttrAccount as String: "flatradar_biometric",
-            kSecAttrService as String: "com.flatradar.biometric",
+            kSecAttrAccount as String: credAccount,
+            kSecAttrService as String: credService,
             kSecValueData as String:   data,
             kSecAttrAccessControl as String: access,
         ]
@@ -66,15 +63,18 @@ enum BiometricAuthService {
             throw NSError(domain: "BiometricAuth", code: Int(status),
                          userInfo: [NSLocalizedDescriptionKey: "Keychain save failed (OSStatus \(status))"])
         }
+        // 角色标记存 UserDefaults（无生物保护），供 hasStoredCredentials 过滤
+        UserDefaults.standard.set(cred.role, forKey: "biometric_role")
     }
 
     static func deleteCredentials() {
         let query: [String: Any] = [
             kSecClass as String:       kSecClassGenericPassword,
-            kSecAttrAccount as String: "flatradar_biometric",
-            kSecAttrService as String: "com.flatradar.biometric",
+            kSecAttrAccount as String: credAccount,
+            kSecAttrService as String: credService,
         ]
         SecItemDelete(query as CFDictionary)
+        UserDefaults.standard.removeObject(forKey: "biometric_role")
     }
 
     // MARK: - Authenticate + load
@@ -103,8 +103,8 @@ enum BiometricAuthService {
         // 同时解决 kSecUseOperationPrompt 在 iOS 14 已废弃的问题。
         let query: [String: Any] = [
             kSecClass as String:              kSecClassGenericPassword,
-            kSecAttrAccount as String:        "flatradar_biometric",
-            kSecAttrService as String:        "com.flatradar.biometric",
+            kSecAttrAccount as String:        credAccount,
+            kSecAttrService as String:        credService,
             kSecReturnData as String:         true,
             kSecMatchLimit as String:         kSecMatchLimitOne,
             kSecUseAuthenticationContext as String: ctx,

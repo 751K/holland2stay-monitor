@@ -130,9 +130,16 @@ struct ListingsView: View {
     }
 
     private var listContent: some View {
-        let sorted = displayedListings   // 排序一次
-        let new = sorted.filter { $0.isNew }
-        let earlier = sorted.filter { !$0.isNew }
+        // 单次 O(n) 排序 + 分桶：之前是排序 + 两次 filter 扫表（3 × O(n)）。
+        // 现在排序完一次 walk-through 直接分到 new / earlier，省两次 filter。
+        let sorted = displayedListings
+        var new: [Listing] = []
+        var earlier: [Listing] = []
+        new.reserveCapacity(sorted.count)
+        earlier.reserveCapacity(sorted.count)
+        for l in sorted {
+            if l.isNew { new.append(l) } else { earlier.append(l) }
+        }
 
         return List {
             // —— Live 心跳条 + 活跃 filter chips

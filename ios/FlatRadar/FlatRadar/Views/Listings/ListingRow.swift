@@ -179,12 +179,10 @@ struct ListingRow: View {
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 
-    private var normalizedAreaText: String? {
-        guard let area = listing.areaText else { return nil }
-        let trimmed = area.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return nil }
-        return trimmed.lowercased().contains("m") ? trimmed : "\(trimmed)m²"
-    }
+    /// Forward 给 `Listing.normalizedAreaText` —— 之前这个版本是 View-local
+    /// computed property，每行每帧 trim+lowercased 一遍 string；现在缓存到
+    /// 模型上，整张表只算一次。命名保留方便就地引用。
+    private var normalizedAreaText: String? { listing.normalizedAreaText }
 
     private func detailColumn(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {

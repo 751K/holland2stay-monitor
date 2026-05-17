@@ -103,6 +103,16 @@ extension Listing {
         featureValue(matching: ["area", "surface", "living area", "m2", "m²"])
     }
 
+    /// 已规范化的面积串（"65 m²"）：trim + 补 m² 后缀。
+    /// 列表行每滚动一帧都用，缓存在 dataclass-style computed property 上
+    /// 避免在视图层每次 render 重 trim/lowercased。
+    var normalizedAreaText: String? {
+        guard let raw = areaText else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        return trimmed.lowercased().contains("m") ? trimmed : "\(trimmed)m²"
+    }
+
     var floorText: String? {
         featureValue(matching: ["floor", "level"])
     }

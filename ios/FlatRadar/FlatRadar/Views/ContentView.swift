@@ -6,6 +6,7 @@ struct ContentView: View {
     @AppStorage("onboarding_completed") private var onboardingCompleted = false
     @State private var showTerms = false
     @State private var showOnboarding = false
+    @State private var showSaveBiometric = false
 
     var body: some View {
         Group {
@@ -44,6 +45,26 @@ struct ContentView: View {
             if new, termsAccepted, !onboardingCompleted {
                 showOnboarding = true
             }
+            // Face ID 保存提示——LoginView 登录成功后会立即被
+            // MainTabView 替换，alert 不能放 LoginView 层级。
+            // 只有 user 展示 Face ID 保存提示；guest 和 admin 跳过。
+            if new, auth.isUser, auth.pendingBiometricCredential != nil {
+                showSaveBiometric = true
+            }
+        }
+        .alert("Save for \(BiometricAuthService.biometryName)?", isPresented: $showSaveBiometric) {
+            Button("Save") {
+                if let c = auth.pendingBiometricCredential {
+                    try? BiometricAuthService.saveCredentials(
+                        .init(username: c.username, password: c.password, role: c.role))
+                }
+                auth.pendingBiometricCredential = nil
+            }
+            Button("Not Now", role: .cancel) {
+                auth.pendingBiometricCredential = nil
+            }
+        } message: {
+            Text("Next time, sign in instantly with \(BiometricAuthService.biometryName) instead of typing your password.")
         }
     }
 }

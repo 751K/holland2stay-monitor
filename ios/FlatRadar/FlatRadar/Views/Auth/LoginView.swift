@@ -25,8 +25,8 @@ struct LoginView: View {
     @State private var regUsername = ""
     @State private var regPassword = ""
     @State private var isAuthenticatingBiometric = false
-    @State private var showSaveBiometricPrompt = false
-    @State private var pendingSaveCredential: (username: String, password: String)?
+    @State private var contentWidth: CGFloat = 0
+    private var useLargeCards: Bool { contentWidth > 410 }
 
     private static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -147,6 +147,10 @@ struct LoginView: View {
                     contentSection
                     footerSection
                 }
+                .background(GeometryReader { proxy in
+                    Color.clear.onAppear { contentWidth = proxy.size.width }
+                        .onChange(of: proxy.size.width) { _, w in contentWidth = w }
+                })
             }
             .scrollBounceBehavior(.basedOnSize)
             .ignoresSafeArea(edges: .top)
@@ -165,20 +169,6 @@ struct LoginView: View {
             // 或重渲染不会误触发。
             .sensoryFeedback(.success, trigger: auth.isAuthenticated) { old, new in
                 !old && new
-            }
-            .alert("Save for \(BiometricAuthService.biometryName)?", isPresented: $showSaveBiometricPrompt) {
-                Button("Save") {
-                    if let c = pendingSaveCredential {
-                        try? BiometricAuthService.saveCredentials(
-                            .init(username: c.username, password: c.password))
-                    }
-                    pendingSaveCredential = nil
-                }
-                Button("Not Now", role: .cancel) {
-                    pendingSaveCredential = nil
-                }
-            } message: {
-                Text("Next time, sign in instantly with \(BiometricAuthService.biometryName) instead of typing your password.")
             }
             .task { await fetchStats() }
             .sheet(isPresented: $showRegister) {
@@ -305,11 +295,6 @@ struct LoginView: View {
 
     private var contentSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if BiometricAuthService.hasStoredCredentials {
-                biometricButton
-                    .padding(.bottom, 16)
-            }
-
             Text("CONTINUE AS")
                 .font(.system(size: 12, weight: .heavy))
                 .foregroundStyle(sectionLabelColor)
@@ -333,6 +318,11 @@ struct LoginView: View {
                 description: "Manage scrapers, users, push alerts",
                 isExpanded: expandedRole == .admin
             )
+
+            if BiometricAuthService.hasStoredCredentials {
+                biometricButton
+                    .padding(.top, 16)
+            }
         }
         .padding(.horizontal, 18)
     }
@@ -349,64 +339,62 @@ struct LoginView: View {
                 }
                 if mode == .guest { Task { await performLoginAsGuest() } }
             } label: {
-                HStack(spacing: 14) {
+                HStack(spacing: useLargeCards ? 14 : 13) {
                     ZStack {
-                        // 44pt 命中 iOS HIG；这块图标背景虽然不是独立 button
-                        // （外层 HStack 一整块 Button 都可点），但与右上角等其
-                        // 它 icon-square 视觉统一在 44 也更协调。
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(cardIconBg).frame(width: 44, height: 44)
+                        let iconSize: CGFloat = useLargeCards ? 44 : 42
+                        RoundedRectangle(cornerRadius: useLargeCards ? 12 : 11)
+                            .fill(cardIconBg).frame(width: iconSize, height: iconSize)
                         Image(systemName: icon)
-                            .font(.system(size: 20)).foregroundStyle(brandBlue)
+                            .font(.system(size: useLargeCards ? 20 : 19)).foregroundStyle(brandBlue)
                     }
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(title)
-                                .font(.system(size: 18, weight: .heavy))
+                                .font(.system(size: useLargeCards ? 18 : 17, weight: .heavy))
                                 .foregroundStyle(cardTitleColor)
                             if mode == .user {
                                 Text("MOST")
-                                    .font(.system(size: 10, weight: .heavy))
+                                    .font(.system(size: useLargeCards ? 10 : 9, weight: .heavy))
                                     .foregroundStyle(brandBlue).tracking(1)
-                                    .padding(.horizontal, 6).padding(.vertical, 2)
+                                    .padding(.horizontal, useLargeCards ? 6 : 5).padding(.vertical, 1)
                                     .background(cardIconBg)
-                                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    .clipShape(RoundedRectangle(cornerRadius: useLargeCards ? 5 : 4))
                             }
                         }
                         Text(description)
-                            .font(.system(size: 14)).foregroundStyle(cardDescColor)
+                            .font(.system(size: useLargeCards ? 14 : 13)).foregroundStyle(cardDescColor)
                     }
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 22, weight: .light))
+                        .font(.system(size: useLargeCards ? 22 : 20, weight: .light))
                         .foregroundStyle(isExpanded ? brandBlue : chevronMuted)
                         .rotationEffect(isExpanded ? .degrees(90) : .zero)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(16)
+                .padding(useLargeCards ? 16 : 13)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
             if isExpanded, mode != .guest {
-                VStack(spacing: 12) {
+                VStack(spacing: 8) {
                     Divider()
 
                     if mode == .user {
                         HStack(spacing: 0) {
                             Image(systemName: "envelope.fill")
-                                .font(.caption).foregroundStyle(.secondary).frame(width: 28)
+                                .font(.caption).foregroundStyle(.secondary).frame(width: 24)
                             TextField("Email or username", text: $username)
                                 .textContentType(.emailAddress).textFieldStyle(.plain)
                                 .autocorrectionDisabled().textInputAutocapitalization(.never)
                         }
-                        .padding(12)
-                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                        .padding(10)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
                     }
 
                     HStack(spacing: 0) {
                         Image(systemName: "key.fill")
-                            .font(.caption).foregroundStyle(.secondary).frame(width: 28)
+                            .font(.caption).foregroundStyle(.secondary).frame(width: 24)
                         // 眼睛 toggle：根据 showPasswordPlain 在 TextField/SecureField
                         // 之间切换。两个组件共用同一 @State password，无需迁移。
                         if showPasswordPlain {
@@ -422,14 +410,14 @@ struct LoginView: View {
                         } label: {
                             Image(systemName: showPasswordPlain ? "eye.slash.fill" : "eye.fill")
                                 .font(.caption).foregroundStyle(.secondary)
-                                .frame(width: 28, height: 28)
+                                .frame(width: 24, height: 24)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(showPasswordPlain ? "Hide password" : "Show password")
                     }
-                    .padding(12)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+                    .padding(10)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
 
                     // 内联错误提示 —— 替代之前打断式 .alert。仅在该角色卡片
                     // 展开时显示，跟密码输入框紧贴，用户改密码时一眼能看到。
@@ -453,7 +441,7 @@ struct LoginView: View {
                             if auth.isLoading { ProgressView() }
                             Text("Login").fontWeight(.semibold)
                         }
-                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(loginDisabled(for: mode))
@@ -469,10 +457,10 @@ struct LoginView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(brandBlue).underline()
                         }
-                        .padding(.top, 4)
+                        .padding(.top, 2)
                     }
                 }
-                .padding(.horizontal, 16).padding(.bottom, 16)
+                .padding(.horizontal, 12).padding(.bottom, 12)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
@@ -538,21 +526,35 @@ struct LoginView: View {
         return Button {
             Task { await performBiometricLogin() }
         } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Image(systemName: name == "Face ID" ? "faceid" : "touchid")
+                    .font(.system(size: 22))
+                    .foregroundStyle(brandBlue)
+                Text("Sign in with \(name)")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(cardTitleColor)
+                Spacer()
                 if isAuthenticatingBiometric {
                     ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundStyle(chevronMuted)
                 }
-                Image(systemName: BiometricAuthService.biometryName == "Face ID"
-                      ? "faceid" : "touchid")
-                    .font(.system(size: 20))
-                Text("Sign in with \(name)")
-                    .font(.system(size: 16, weight: .semibold))
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16).padding(.vertical, 14)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(.plain)
         .disabled(isAuthenticatingBiometric)
+        .background(cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(cardBorderColor, lineWidth: 1)
+        }
+        .shadow(color: cardShadowColor.opacity(0.03), radius: 4, y: 1)
     }
 
     private func performBiometricLogin() async {
@@ -602,21 +604,29 @@ struct LoginView: View {
     }
 
     private func performLogin(mode: LoginMode) async {
+        // 必须在 login 之前设置 pendingBiometricCredential：
+        // login 内部 isAuthenticated → true 时，ContentView.onChange
+        // 会立即触发；如果 pending 在 login 之后才写，onChange 看到的还是 nil。
+        if mode == .user,
+           BiometricAuthService.isAvailable,
+           !BiometricAuthService.hasStoredCredentials {
+            auth.pendingBiometricCredential = (username, password, "user")
+        }
+
         switch mode {
         case .admin: await auth.loginAsAdmin(password: password)
         case .user:  await auth.loginAsUser(name: username, password: password)
         case .guest: break
         }
-        if auth.isAuthenticated, !auth.isGuest {
-            await push.requestPermissionAndRegister()
 
-            // 第一次手动登录成功后，提示是否保存凭据供 Face ID 使用
-            if BiometricAuthService.isAvailable, !BiometricAuthService.hasStoredCredentials {
-                let user = mode == .admin ? "__admin__" : username
-                let pwd = password
-                pendingSaveCredential = (user, pwd)
-                showSaveBiometricPrompt = true
-            }
+        // 登录失败 → 清理 pending（isAuthenticated 未变，onChange 没触发）
+        if !auth.isAuthenticated {
+            auth.pendingBiometricCredential = nil
+            return
+        }
+
+        if !auth.isGuest {
+            await push.requestPermissionAndRegister()
         }
     }
 
@@ -708,10 +718,20 @@ struct LoginView: View {
 
     private func performRegister() async {
         guard regUsername.count >= 2, regPassword.count >= 4 else { return }
+
+        // 注册前设 pending，同 performLogin——register 内部 login 完成后
+        // isAuthenticated → true，ContentView.onChange 需要此时 pending 已就位。
+        if BiometricAuthService.isAvailable,
+           !BiometricAuthService.hasStoredCredentials {
+            auth.pendingBiometricCredential = (regUsername, regPassword, "user")
+        }
+
         await auth.register(name: regUsername, password: regPassword)
         if auth.isAuthenticated, !auth.isGuest {
             showRegister = false
             await push.requestPermissionAndRegister()
+        } else {
+            auth.pendingBiometricCredential = nil
         }
     }
 }

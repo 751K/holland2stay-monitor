@@ -42,8 +42,15 @@ struct MapView: View {
         span: MKCoordinateSpan(latitudeDelta: 0.55, longitudeDelta: 0.55))
 
     /// 当前 cluster 列表（由 listings + currentRegion 决定）。
-    private var clusters: [ListingCluster] {
-        MapClustering.cluster(listings: store.listings, region: currentRegion)
+    /// **@State 缓存**：之前是 computed property，任何 MapStore 字段变化（包括
+    /// selectedID 切换等无关项）都会触发 body 重算 → 重 cluster 2000 pin。
+    /// 现在只在 `.onChange(of: store.listings.count)` 和跨 bucket 时刷新。
+    @State private var clusters: [ListingCluster] = []
+
+    private func recomputeClusters() {
+        clusters = MapClustering.cluster(
+            listings: store.listings, region: currentRegion
+        )
     }
 
     /// 判断两个 region 是否跨过 log2 量化桶边界。
@@ -98,7 +105,12 @@ struct MapView: View {
                         withAnimation(.easeInOut(duration: 0.22)) {
                             currentRegion = context.region
                         }
+                        recomputeClusters()
                     }
+                }
+                .onAppear { recomputeClusters() }
+                .onChange(of: store.listings.count) { _, _ in
+                    recomputeClusters()
                 }
                 .mapStyle(.standard(elevation: .realistic))
                 .mapControls {
@@ -280,11 +292,12 @@ struct MapView: View {
     }
 
     /// 簇颜色取簇内最高优先级状态：Available > Lottery > 其它。
+    /// 用 `statusLowered` 缓存避免 2000 pin 每帧重复堆分配。
     private func clusterColor(for cluster: ListingCluster) -> Color {
         var hasAvailable = false
         var hasLottery = false
         for l in cluster.listings {
-            let s = l.status.lowercased()
+            let s = l.statusLowered
             if s.contains("available to book") { hasAvailable = true }
             else if s.contains("lottery") { hasLottery = true }
         }

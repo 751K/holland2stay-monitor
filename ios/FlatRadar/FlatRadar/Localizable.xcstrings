@@ -3791,6 +3791,12 @@
         }
       }
     },
+    "Remove" : {
+
+    },
+    "Remove Face ID Sign-In?" : {
+
+    },
     "Reset" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5086,6 +5092,9 @@
           }
         }
       }
+    },
+    "You can enable it again next time you sign in with your password." : {
+
     },
     "You don't have permission to access this." : {
       "localizations" : {

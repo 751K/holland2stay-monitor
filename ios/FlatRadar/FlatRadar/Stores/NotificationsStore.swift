@@ -69,12 +69,19 @@ final class NotificationsStore {
         do {
             _ = try await client.markNotificationsRead(ids: ids)
             let idSet = Set(ids)
-            for i in notifications.indices {
-                if idSet.contains(notifications[i].id) {
-                    notifications[i] = notifications[i].markedRead()
+            // 翻状态时**当场算这次新增了多少 "from unread to read"**，
+            // 直接拿来减 unreadCount。避免之前每次 O(n) 重扫整张列表，也对
+            // SSE 并发更稳：SSE handleSSEData 是用 += 增量更新 unreadCount 的，
+            // 这里用 -= 增量减，跟它对称，不会用 filter().count 覆盖 SSE 期间
+            // 的增量。
+            var transitioned = 0
+            for i in notifications.indices where idSet.contains(notifications[i].id) {
+                if !notifications[i].isRead {
+                    transitioned += 1
                 }
+                notifications[i] = notifications[i].markedRead()
             }
-            unreadCount = notifications.filter { !$0.isRead }.count
+            unreadCount = max(0, unreadCount - transitioned)
         } catch {
             // Non-critical; user can retry
         }
@@ -110,6 +117,20 @@ final class NotificationsStore {
         }
     }
 
+    /// 登出时清空：先断 SSE 再清数据，避免断开期间还有 handleSSEData 写入旧值。
+    /// 注意 unreadCount = 0 会触发 didSet → syncAppBadge → 同步 App 角标到 0。
+    func clear() {
+        disconnectStream()
+        notifications = []
+        total = 0
+        unreadCount = 0
+        isLoading = false
+        isLoadingMore = false
+        errorMessage = nil
+        lastError = nil
+        streamError = nil
+    }
+
     /// 主动停掉 SSE（登出 / 切后台）。
     func disconnectStream() {
         streamTask?.cancel()
@@ -143,10 +164,13 @@ final class NotificationsStore {
         }
     }
 
-    private var maxId: Int { notifications.first?.id ?? 0 }
-
     private func runStreamOnce() async throws {
-        let url = client.notificationsStreamURL(lastId: maxId)
+        // 进函数立刻 snapshot lastId；之前 maxId 是 computed property，
+        // 在 runStreamOnce 内部多处读会随 notifications 变化（handleSSEData
+        // 边塞数据 边可能撞）。snapshot 一次保证本次连接生命周期内 lastId
+        // 始终是建立连接时刻的值。
+        let lastId = notifications.first?.id ?? 0
+        let url = client.notificationsStreamURL(lastId: lastId)
         let token = client.currentToken()
         let sse = SSEClient(url: url, bearerToken: token)
         #if DEBUG
@@ -177,7 +201,10 @@ final class NotificationsStore {
     /// 失败安静吞（权限被撤是常见情况，UI 上 tab badge 仍正常显示）。
     private func syncAppBadge() {
         let n = unreadCount
-        Task {
+        // 显式 @MainActor —— setBadgeCount 是 MainActor-isolated API。
+        // 不写 @MainActor 在 Swift 6 strict concurrency 下报错；
+        // 写了在 Swift 5 模式下也不会有负面影响。
+        Task { @MainActor in
             do {
                 try await UNUserNotificationCenter.current().setBadgeCount(n)
             } catch {
@@ -202,6 +229,9 @@ final class NotificationsStore {
             print("[SSE] +\(fresh.count) new notifications (total=\(total))")
             #endif
         } catch {
+            // Schema 漂移 / 后端发出畸形 JSON → 写到 streamError 让 UI 能展示，
+            // 不再仅 debug print 静默吞。生产 release 模式下也会进 Logger。
+            streamError = "Notification stream parse error"
             #if DEBUG
             print("[SSE] decode error: \(error); raw=\(payload.prefix(200))")
             #endif

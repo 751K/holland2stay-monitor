@@ -134,6 +134,15 @@ final class PushStore {
         print("[PushStore] APNs token hex \(hex.prefix(12))… (\(hex.count) chars)")
         lastToken = hex
 
+        // APNs token 是异步到达的。如果它在 requestPermissionAndRegister 后到
+        // 但用户已经登出（auth token 已清），此时调 /devices/register 会要么
+        // 401 要么把 token 错误地绑到没有 bearer 的请求上。守一道门：没 token
+        // 就先存 `lastToken`、等下次 setup() 再注册（PushDelegate.shared 仍持有）。
+        guard client.currentToken() != nil else {
+            print("[PushStore] no auth token, defer device registration until login")
+            return
+        }
+
         do {
             let resp = try await client.registerDevice(
                 token: hex,
