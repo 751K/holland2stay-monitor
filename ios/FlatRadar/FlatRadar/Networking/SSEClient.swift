@@ -50,33 +50,30 @@ struct SSEClient: Sendable {
 
     /// 拉一个 AsyncThrowingStream；调用方用 ``for try await`` 消费。
     ///
-    /// 注意：返回的 stream 只在当前 Task 内有效；Task 被 cancel 时 stream 自动终止，
-    /// 同时底层 URLSession 也会被 `invalidateAndCancel()`，**强制断 TCP 连接**，
-    /// 不会留下后台 drain。
+    /// 注意：返回的 stream 只在当前 Task 内有效；Task 被 cancel 时 stream 自动
+    /// 终止——Swift Concurrency 会把 cancellation 传给 URLSession.bytes 的内部
+    /// iterator，URLSessionDataTask 被自动 cancel，TCP 连接断开。
+    ///
+    /// 历史上曾尝试用一个 dedicated URLSession + `invalidateAndCancel()` 来更
+    /// "干净" 地断连，但实测会撞 `NSGenericException "Task created in a session
+    /// that has been invalidated"`——onTermination 在 iterator 还有未完成的
+    /// internal continuation 时 invalidate session 会 race。
+    /// 用 URLSession.shared + Task.cancel 足够，已经能正确清理。
     func events() -> AsyncThrowingStream<Event, Error> {
         AsyncThrowingStream { continuation in
-            // 专门给这一条 SSE 用的 session —— 不复用 URLSession.shared 是因为
-            // 后者无法选择性 invalidate 单条连接。这条 session 在 stream 结束/
-            // 取消时 invalidateAndCancel() 强断本连接的 TCP socket，不影响其它
-            // API 请求。
-            let session = URLSession(configuration: .ephemeral)
             let task = Task {
                 do {
-                    try await self.consume(session: session, into: continuation)
+                    try await self.consume(into: continuation)
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
-            continuation.onTermination = { _ in
-                task.cancel()
-                session.invalidateAndCancel()
-            }
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
     private func consume(
-        session: URLSession,
         into continuation: AsyncThrowingStream<Event, Error>.Continuation
     ) async throws {
         var req = URLRequest(url: url)
@@ -90,7 +87,7 @@ struct SSEClient: Sendable {
             req.timeoutInterval = timeout
         }
 
-        let (bytes, response) = try await session.bytes(for: req)
+        let (bytes, response) = try await URLSession.shared.bytes(for: req)
         guard let http = response as? HTTPURLResponse else {
             throw SSEError.badResponse(0)
         }

@@ -70,6 +70,7 @@ from app.routes import (                                          # noqa: E402
     calendar_routes,
     control,
     dashboard,
+    legal,
     map_routes,
     notifications,
     sessions,
@@ -150,6 +151,7 @@ system.register(app)           # /system /logs /api/logs* /api/status /api/platf
 control.register(app)          # /api/reload /api/monitor/{start,stop} /api/shutdown
 notifications.register(app)    # /api/notifications* /api/events
 app_accounts.register(app)     # /settings/app-accounts (admin: Bearer token 管理)
+legal.register(app)            # /privacy /terms （公开页面，无需登录）
 api_v1.register(app)           # /api/v1/auth/* /api/v1/stats/public/* (Bearer token)
 
 

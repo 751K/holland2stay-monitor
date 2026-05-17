@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ page_title }} · FlatRadar</title>
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <meta name="description"
+        content="{{ page_title }} for FlatRadar — unofficial Holland2Stay monitor. Contact: {{ contact_email }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* 跟 legal.html 同一套极简排版；故意不引 design.css 避免依赖 admin 上下文。 */
+    :root {
+      --bg: #f7f7f9;
+      --surface: #ffffff;
+      --text: #0b0b0f;
+      --muted: #6b6b73;
+      --border: rgba(60,60,67,0.16);
+      --accent: #0a84ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --surface: #1c1c1e;
+        --text: #ffffff;
+        --muted: #98989d;
+        --border: rgba(255,255,255,0.14);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                   "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 56px 24px 96px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 18px;
+    }
+    .brand img { width: 28px; height: 28px; }
+    .lang-switch {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 13px;
+    }
+    .lang-switch a {
+      padding: 4px 12px;
+      border-radius: 999px;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .lang-switch a.active {
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin: 0 0 24px;
+    }
+    .contact-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px 24px;
+      margin-bottom: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .contact-card .label {
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .contact-card .email {
+      font-size: 17px;
+      font-weight: 600;
+    }
+    .contact-card a {
+      color: var(--text);
+      text-decoration: none;
+    }
+    .contact-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff !important;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    section.block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 28px;
+      margin-bottom: 16px;
+    }
+    section.block h2 {
+      font-size: 17px;
+      font-weight: 600;
+      margin: 0 0 12px;
+    }
+    section.block .body {
+      white-space: pre-wrap;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.7;
+    }
+    .footer {
+      margin-top: 28px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    .footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <a class="brand" href="/">
+        <img src="/static/logo.png" alt="">
+        FlatRadar
+      </a>
+      <nav class="lang-switch" aria-label="Language">
+        <a href="?lang=en" class="{{ 'active' if lang == 'en' else '' }}">EN</a>
+        <a href="?lang=zh" class="{{ 'active' if lang == 'zh' else '' }}">中文</a>
+      </nav>
+    </div>
+
+    <h1>{{ page_title }}</h1>
+
+    <div class="contact-card">
+      <div>
+        <div class="label">
+          {{ 'Contact' if lang == 'en' else '联系邮箱' }}
+        </div>
+        <div class="email">
+          <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
+        </div>
+      </div>
+      <a class="contact-btn" href="mailto:{{ contact_email }}?subject=FlatRadar%20support">
+        ✉️&nbsp;{{ 'Email us' if lang == 'en' else '联系我们' }}
+      </a>
+    </div>
+
+    {% for title, body in sections %}
+    <section class="block">
+      <h2>{{ title }}</h2>
+      <div class="body">{{ body }}</div>
+    </section>
+    {% endfor %}
+
+    <div class="footer">
+      © FlatRadar ·
+      <a href="/privacy">{{ 'Privacy' if lang == 'en' else '隐私' }}</a> ·
+      <a href="/terms">{{ 'Terms' if lang == 'en' else '条款' }}</a> ·
+      <a href="/support">{{ 'Support' if lang == 'en' else '支持' }}</a>
+    </div>
+  </div>
+</body>
+</html>
