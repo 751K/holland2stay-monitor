@@ -97,6 +97,22 @@
         }
       }
     },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
     "%lld" : {
       "localizations" : {
         "zh-Hans" : {
@@ -246,6 +262,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 套无坐标"
+          }
+        }
+      }
+    },
+    "%lld/2000" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld/2000"
           }
         }
       }
@@ -580,6 +606,16 @@
         }
       }
     },
+    "Allow location access in Settings to center the map on your current position." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“设置”中允许位置访问，以便将地图居中到你当前的位置。"
+          }
+        }
+      }
+    },
     "Always verify listing details on the official Holland2Stay website before making decisions." : {
       "localizations" : {
         "en" : {
@@ -732,6 +768,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可入住日期"
+          }
+        }
+      }
+    },
+    "Back" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返回"
+          }
+        }
+      }
+    },
+    "Bar chart, %lld data points" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "柱状图，%lld 个数据点"
           }
         }
       }
@@ -1428,7 +1484,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "删除用户？"
+            "value" : "确认销毁账号？"
           }
         }
       }
@@ -1478,6 +1534,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "设备 ID"
+          }
+        }
+      }
+    },
+    "Discard changes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消修改"
+          }
+        }
+      }
+    },
+    "Discard filter changes?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "确定取消过滤？"
           }
         }
       }
@@ -1646,6 +1722,16 @@
         }
       }
     },
+    "Error" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败"
+          }
+        }
+      }
+    },
     "Explore" : {
       "localizations" : {
         "en" : {
@@ -1658,6 +1744,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "数据探索"
+          }
+        }
+      }
+    },
+    "Export My Data" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出个人数据"
+          }
+        }
+      }
+    },
+    "Exporting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出中"
           }
         }
       }
@@ -1675,6 +1781,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "特色"
+          }
+        }
+      }
+    },
+    "Feedback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "反馈"
           }
         }
       }
@@ -1776,23 +1892,6 @@
         }
       }
     },
-    "FlatRadar is an unofficial, independent tool. Not affiliated with or endorsed by Holland2Stay." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "FlatRadar is an unofficial, independent tool. Not affiliated with or endorsed by Holland2Stay."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "FlatRadar 是一个独立的非官方工具。与 Holland2Stay 无关联或认可关系。"
-          }
-        }
-      }
-    },
     "FlatRadar is for personal, non-commercial use only." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1811,6 +1910,7 @@
       }
     },
     "FlatRadar v1.0" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1832,6 +1932,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "flatradar.app"
+          }
+        }
+      }
+    },
+    "Get Started" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始"
           }
         }
       }
@@ -1900,6 +2010,16 @@
         }
       }
     },
+    "Hide password" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏密码"
+          }
+        }
+      }
+    },
     "Holland2Stay · today" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1930,23 +2050,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Holland2Stay 房源监控"
-          }
-        }
-      }
-    },
-    "HTTP %lld" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HTTP %lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HTTP %lld"
           }
         }
       }
@@ -2006,6 +2109,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可能已被移除。"
+          }
+        }
+      }
+    },
+    "Keep editing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保持编辑"
           }
         }
       }
@@ -2249,6 +2362,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "加载中…"
+          }
+        }
+      }
+    },
+    "Location Unavailable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置服务不可用"
           }
         }
       }
@@ -2524,6 +2647,16 @@
         }
       }
     },
+    "Message" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信息"
+          }
+        }
+      }
+    },
     "Min area" : {
       "localizations" : {
         "en" : {
@@ -2795,6 +2928,7 @@
       }
     },
     "New listings matching your filter will arrive as push notifications." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2840,6 +2974,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新增房源（最近30天）"
+          }
+        }
+      }
+    },
+    "Next" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一个"
+          }
+        }
+      }
+    },
+    "Next time, sign in instantly with %@ instead of typing your password." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下次登陆使用 %@ 替代密码登陆"
           }
         }
       }
@@ -3080,6 +3234,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未找到"
+          }
+        }
+      }
+    },
+    "Not Now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂时不可用"
           }
         }
       }
@@ -3750,6 +3914,16 @@
         }
       }
     },
+    "Save for %@?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为 %@保存?"
+          }
+        }
+      }
+    },
     "Saved searches, alerts, watching history" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3799,7 +3973,28 @@
         }
       }
     },
+    "Search" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索"
+          }
+        }
+      }
+    },
+    "Search by name or address" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按照名字或地址搜索"
+          }
+        }
+      }
+    },
     "Search by name or address..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3880,6 +4075,16 @@
         }
       }
     },
+    "Send Feedback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送反馈"
+          }
+        }
+      }
+    },
     "Send Test Push" : {
       "localizations" : {
         "en" : {
@@ -3913,6 +4118,7 @@
       }
     },
     "Sends a test alert to all devices registered under this session. Verifies APNs end-to-end." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4010,6 +4216,16 @@
         }
       }
     },
+    "Show password" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示密码"
+          }
+        }
+      }
+    },
     "Sign in to your\naccount." : {
       "localizations" : {
         "en" : {
@@ -4022,6 +4238,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录你的\n账户。"
+          }
+        }
+      }
+    },
+    "Sign in with %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用%@登陆"
           }
         }
       }
@@ -4070,6 +4296,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "退出游客模式"
+          }
+        }
+      }
+    },
+    "Skip" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳过"
           }
         }
       }
@@ -4237,6 +4473,16 @@
         }
       }
     },
+    "Swipe to explore individual bars" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑动探索独立卡片"
+          }
+        }
+      }
+    },
     "System" : {
       "localizations" : {
         "en" : {
@@ -4265,6 +4511,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "点击某天查看可入住房源。"
+          }
+        }
+      }
+    },
+    "Tap to view listing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点击查看列表"
+          }
+        }
+      }
+    },
+    "Tap to zoom in" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点击放大"
           }
         }
       }
@@ -4329,6 +4595,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "测试推送"
+          }
+        }
+      }
+    },
+    "Thank you!" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感谢！"
           }
         }
       }
@@ -4718,7 +4994,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "非官方 · v%@"
+            "value" : "第三方 · v%@"
           }
         }
       }
@@ -4745,6 +5021,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用户"
+          }
+        }
+      }
+    },
+    "User accounts receive push notifications for listings matching their filter. Test push verifies this device session end-to-end." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用户账户会收到与其筛选条件匹配的房源推送通知。测试推送用于端到端验证当前设备会话。"
           }
         }
       }
@@ -4781,46 +5067,22 @@
         }
       }
     },
+    "What's on your mind?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "您的想法是"
+          }
+        }
+      }
+    },
     "Working…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "加载中"
-          }
-        }
-      }
-    },
-    "Yesterday" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Yesterday"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "昨天"
-          }
-        }
-      }
-    },
-    "You are responsible for complying with Holland2Stay's Terms of Service." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "You are responsible for complying with Holland2Stay's Terms of Service."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你需要自行遵守 Holland2Stay 的服务条款。"
           }
         }
       }
@@ -4873,6 +5135,16 @@
         }
       }
     },
+    "Your feedback has been submitted. I read every piece of feedback — it directly shapes what gets built next." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的反馈已提交。我会阅读每一条反馈——它们会直接影响接下来要开发的内容。"
+          }
+        }
+      }
+    },
     "Your matches" : {
       "localizations" : {
         "en" : {
@@ -4889,23 +5161,6 @@
         }
       }
     },
-    "Your Matches" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your Matches"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你的匹配"
-          }
-        }
-      }
-    },
     "Your support means a lot.\nEnjoy your %@!" : {
       "localizations" : {
         "en" : {
@@ -4917,7 +5172,27 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你的支持意义重大。\n享用你的 %@！"
+            "value" : "感谢支持。\n享用你的 %@！"
+          }
+        }
+      }
+    },
+    "使用条款" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用条款"
+          }
+        }
+      }
+    },
+    "隐私政策" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐私政策"
           }
         }
       }

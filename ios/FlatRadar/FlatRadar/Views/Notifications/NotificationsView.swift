@@ -13,6 +13,9 @@ struct NotificationsView: View {
     @Environment(NotificationsStore.self) private var store
     @Environment(AuthStore.self) private var auth
     @State private var showRefreshError = false
+    /// "Mark all read" 触觉反馈 trigger —— 每按一次 +1，驱动 `.sensoryFeedback`。
+    /// 单条左滑标已读不触发（那个动作系统 swipe 自带触觉）。
+    @State private var markAllReadTick = 0
 
     var body: some View {
         NavigationStack {
@@ -63,6 +66,8 @@ struct NotificationsView: View {
             } message: {
                 Text(store.errorMessage ?? "")
             }
+            // 全部标已读触觉确认：批量正向操作用 .success，比 .selection 更明确。
+            .sensoryFeedback(.success, trigger: markAllReadTick)
         }
     }
 
@@ -149,6 +154,7 @@ struct NotificationsView: View {
                     // 用 opacity/hit-testing 保留布局占位，视觉上"渐隐"。
                     let hasUnread = store.unreadCount > 0
                     Button("Mark all read") {
+                        markAllReadTick &+= 1   // 触发 .sensoryFeedback(.success, …)
                         Task { await store.markAllRead() }
                     }
                     .font(.system(size: 12, weight: .semibold))

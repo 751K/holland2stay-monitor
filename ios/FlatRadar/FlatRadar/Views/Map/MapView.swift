@@ -1,3 +1,4 @@
+import CoreLocation
 import MapKit
 import SwiftUI
 
@@ -18,6 +19,13 @@ import SwiftUI
 struct MapView: View {
     @Environment(MapStore.self) private var store
     @Environment(NavigationCoordinator.self) private var coord
+    @State private var locationProvider = UserLocationProvider()
+
+    let overlayTopPadding: CGFloat
+
+    init(overlayTopPadding: CGFloat = 12) {
+        self.overlayTopPadding = overlayTopPadding
+    }
 
     // 初始视野：Eindhoven 中心，约 60km 直径
     @State private var camera = MapCameraPosition.region(
@@ -25,6 +33,7 @@ struct MapView: View {
             center: CLLocationCoordinate2D(latitude: 51.4416, longitude: 5.4697),
             span: MKCoordinateSpan(latitudeDelta: 0.55, longitudeDelta: 0.55)))
     @State private var showRefreshError = false
+    @State private var showLocationError = false
 
     /// 当前 visible region；onMapCameraChange 实时刷新。clustering 依赖它推 cell 大小。
     /// 初值与 camera 初值一致（Eindhoven 60km）。
@@ -93,7 +102,6 @@ struct MapView: View {
                 }
                 .mapStyle(.standard(elevation: .realistic))
                 .mapControls {
-                    MapUserLocationButton()
                     MapCompass()
                     MapScaleView()
                 }
@@ -130,15 +138,20 @@ struct MapView: View {
                 }
             }
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
+        .overlay(alignment: .topTrailing) {
+            VStack(spacing: 10) {
+                mapTopButton(systemName: "location.fill",
+                             label: "Center on my location") {
+                    centerOnUserLocation()
+                }
+                mapTopButton(systemName: "arrow.clockwise",
+                             label: "Refresh listings") {
                     Task { await store.refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
                 }
                 .disabled(store.isLoading)
             }
+            .padding(.trailing, 16)
+            .padding(.top, overlayTopPadding + 54)
         }
         .task {
             if store.listings.isEmpty {
@@ -156,6 +169,30 @@ struct MapView: View {
         } message: {
             Text(store.errorMessage ?? "")
         }
+        .alert("Location Unavailable", isPresented: $showLocationError) {
+            Button("OK") {}
+        } message: {
+            Text("Allow location access in Settings to center the map on your current position.")
+        }
+    }
+
+    private func mapTopButton(
+        systemName: String,
+        label: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 17, weight: .semibold))
+                // 44×44 命中 iOS HIG 最小可点击区域，之前 42×42 差 2pt。
+                .frame(width: 44, height: 44)
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
+        }
+        .buttonStyle(.plain)
+        // VoiceOver: SF symbol 自带 a11y label 但是英文符号名（如 "location fill"），
+        // 这里覆盖成用户可理解的动作描述。
+        .accessibilityLabel(label)
     }
 
     // MARK: - Pin
@@ -185,6 +222,11 @@ struct MapView: View {
         }
         .scaleEffect(selected ? 1.15 : 1.0)
         .animation(.spring(duration: 0.25), value: selected)
+        // VoiceOver: 把 pin 当单个元素朗读"地址 · 状态"，hint 给打开详情。
+        // 不依赖外层 Annotation(title) 的默认行为——显式更稳定。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(l.name), \(l.status)")
+        .accessibilityHint("Tap to view listing")
     }
 
     // MARK: - Cluster bubble
@@ -214,8 +256,17 @@ struct MapView: View {
                     .font(.system(size: size * 0.42, weight: .bold))
                     .foregroundStyle(.white)
             }
+            // 2-3 套小簇视觉直径 34（halo 46）已经够，但显式拍 44×44 命中
+            // 框 + Circle 形状命中，保证 HIG 合规 + 圆形精准点击（不会误触
+            // 矩形角落）。视觉气泡仍按 clusterSize 渲染，不被撑大。
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        // VoiceOver: 簇当单个元素朗读"N 套房源"，hint 提示放大查看。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(cluster.count) listings")
+        .accessibilityHint("Tap to zoom in")
     }
 
     private func clusterSize(count: Int) -> CGFloat {
@@ -251,6 +302,22 @@ struct MapView: View {
         }
     }
 
+    private func centerOnUserLocation() {
+        locationProvider.requestLocation(
+            onUpdate: { coordinate in
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    camera = .region(MKCoordinateRegion(
+                        center: coordinate,
+                        span: MKCoordinateSpan(latitudeDelta: 0.08, longitudeDelta: 0.08)
+                    ))
+                }
+            },
+            onDenied: {
+                showLocationError = true
+            }
+        )
+    }
+
     private func pinColor(for status: String) -> Color {
         let s = status.lowercased()
         if s.contains("available to book") { return .green }
@@ -280,7 +347,7 @@ struct MapView: View {
         .padding(.vertical, 8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-        .padding(.top, 8)
+        .padding(.top, overlayTopPadding + 54)
         .padding(.leading, 12)
     }
 
@@ -329,7 +396,11 @@ struct MapView: View {
                 Button {
                     let id = l.id
                     store.selectedID = nil   // close sheet
-                    coord.openListing(id: id)
+                    if UIDevice.current.userInterfaceIdiom == .pad {
+                        coord.openListing(id: id)
+                    } else {
+                        coord.listingsPath.append(.byId(id))
+                    }
                 } label: {
                     Label("View Details", systemImage: "arrow.right.circle.fill")
                         .frame(maxWidth: .infinity)
@@ -366,5 +437,72 @@ struct MapView: View {
         if lower.contains("lottery") { return String(localized: "Lottery") }
         if lower.contains("not available") { return String(localized: "Unavailable") }
         return s
+    }
+}
+
+private final class UserLocationProvider: NSObject, CLLocationManagerDelegate {
+    private let manager = CLLocationManager()
+    private var pendingUpdate: ((CLLocationCoordinate2D) -> Void)?
+    private var pendingDenied: (() -> Void)?
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+    }
+
+    func requestLocation(
+        onUpdate: @escaping (CLLocationCoordinate2D) -> Void,
+        onDenied: @escaping () -> Void
+    ) {
+        pendingUpdate = onUpdate
+        pendingDenied = onDenied
+
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            finishDenied()
+        @unknown default:
+            finishDenied()
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        switch manager.authorizationStatus {
+        case .authorizedAlways, .authorizedWhenInUse:
+            manager.requestLocation()
+        case .denied, .restricted:
+            finishDenied()
+        case .notDetermined:
+            break
+        @unknown default:
+            finishDenied()
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let coordinate = locations.last?.coordinate else {
+            finishDenied()
+            return
+        }
+        pendingUpdate?(coordinate)
+        clearPending()
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        finishDenied()
+    }
+
+    private func finishDenied() {
+        pendingDenied?()
+        clearPending()
+    }
+
+    private func clearPending() {
+        pendingUpdate = nil
+        pendingDenied = nil
     }
 }

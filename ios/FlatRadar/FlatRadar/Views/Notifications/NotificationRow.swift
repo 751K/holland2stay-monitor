@@ -106,16 +106,16 @@ private struct CardStyle {
         switch kind {
         case .book:
             iconName       = "house.fill"
-            accent         = .green
-            iconBackground = Color.green.opacity(0.18)
-            cardTint       = Color.green.opacity(0.12)
+            accent         = .statusBook
+            iconBackground = Color.statusBook.opacity(0.18)
+            cardTint       = Color.statusBook.opacity(0.12)
             eventLabel     = "NEW · BOOK"
 
         case .lottery:
             iconName       = "ticket.fill"
-            accent         = .orange
-            iconBackground = Color.orange.opacity(0.20)
-            cardTint       = Color.orange.opacity(0.12)
+            accent         = .statusLottery
+            iconBackground = Color.statusLottery.opacity(0.20)
+            cardTint       = Color.statusLottery.opacity(0.12)
             eventLabel     = "NEW · LOTTERY"
 
         case .status:

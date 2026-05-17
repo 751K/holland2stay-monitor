@@ -13,6 +13,10 @@
         这类链接（邮件 / iMessage / 网页里点）能唤起 FlatRadar，由 SwiftUI
         ``.onOpenURL`` 接到。
     -->
+    <key>NSFaceIDUsageDescription</key>
+    <string>Face ID lets you sign in to FlatRadar instantly without typing your password.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>FlatRadar uses your location only to center the map near you.</string>
     <key>CFBundleURLTypes</key>
     <array>
         <dict>

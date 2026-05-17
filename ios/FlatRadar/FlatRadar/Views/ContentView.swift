@@ -3,7 +3,9 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AuthStore.self) private var auth
     @AppStorage("terms_accepted") private var termsAccepted = false
+    @AppStorage("onboarding_completed") private var onboardingCompleted = false
     @State private var showTerms = false
+    @State private var showOnboarding = false
 
     var body: some View {
         Group {
@@ -25,6 +27,23 @@ struct ContentView: View {
                 showTerms = false
             }
             .interactiveDismissDisabled()
+        }
+        .sheet(isPresented: $showOnboarding) {
+            OnboardingView {
+                onboardingCompleted = true
+                showOnboarding = false
+            }
+            .interactiveDismissDisabled()
+        }
+        .onChange(of: termsAccepted) { _, new in
+            if new, auth.isAuthenticated, !onboardingCompleted {
+                showOnboarding = true
+            }
+        }
+        .onChange(of: auth.isAuthenticated) { _, new in
+            if new, termsAccepted, !onboardingCompleted {
+                showOnboarding = true
+            }
         }
     }
 }

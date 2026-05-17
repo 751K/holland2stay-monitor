@@ -21,11 +21,43 @@ struct CalendarView: View {
     @State private var anchor: Date = Self.startOfMonth(for: Date())
     @State private var selectedDay: Date?
     @State private var showRefreshError = false
+    /// 月份切换方向：-1 向前翻 / 1 向后翻 / 0 初始。
+    /// 驱动 daysGrid 的 asymmetric transition 实现空间连续感。
+    @State private var monthShift: Int = 0
 
     private static let cal: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.timeZone = ServerTime.timeZone
         return c
+    }()
+
+    /// VoiceOver 日期朗读格式器——每格一个，DateFormatter 创建昂贵，static 复用。
+    private static let a11yDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .autoupdatingCurrent
+        f.dateStyle = .full
+        f.timeStyle = .none
+        return f
+    }()
+
+    /// 月份标题 "May 2026"
+    private static let monthTitleFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = cal
+        f.timeZone = cal.timeZone
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "MMMM yyyy"
+        return f
+    }()
+
+    /// 完整日期 "Wednesday, May 14, 2026"
+    private static let longDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = cal
+        f.timeZone = cal.timeZone
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateStyle = .full
+        return f
     }()
 
     var body: some View {
@@ -147,11 +179,20 @@ struct CalendarView: View {
     private var daysGrid: some View {
         let days = daysOfMonthWithPadding()
         return LazyVGrid(columns: Self.gridColumns, spacing: 6) {
-            ForEach(days, id: \.self) { item in
+            ForEach(days) { item in
                 cell(for: item)
             }
         }
         .padding(.horizontal)
+        // 月份切换时整格沿水平方向滑动进出：
+        // 向前翻（←）→ grid 从右滑入 / 向左滑出
+        // 向后翻（→）→ grid 从左滑入 / 向右滑出
+        .transition(.asymmetric(
+            insertion: .move(edge: monthShift > 0 ? .trailing : .leading).combined(with: .opacity),
+            removal: .move(edge: monthShift < 0 ? .trailing : .leading).combined(with: .opacity)
+        ))
+        .id(anchor)   // anchor 是 Date，同月份 id 相同不会触发 transition
+                       // 真正触发的是 monthShift 切换 → withAnimation body 重算
     }
 
     @ViewBuilder
@@ -194,9 +235,29 @@ struct CalendarView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(isToday ? Color.blue : .clear, lineWidth: 1.5)
                 )
+                // 选中态平滑过渡：foregroundStyle / background / overlay 的颜色切换
+                // 加上 spring 消除瞬间跳变的生硬感。
+                .animation(.spring(duration: 0.2), value: selected)
             }
             .buttonStyle(.plain)
+            // VoiceOver: 把整个格子当单个元素，朗读"<日期> · N listing(s) available"。
+            // 不然 VO 会分别朗读里面的两个 Text（日期数字 + 计数），缺乏上下文。
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilityDescription(date: date, count: count, isToday: isToday))
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         }
+    }
+
+    /// VoiceOver 朗读串：完整日期 + 房源数 + Today 标识。
+    private func accessibilityDescription(date: Date, count: Int, isToday: Bool) -> String {
+        var parts: [String] = [Self.a11yDateFormatter.string(from: date)]
+        if isToday { parts.append("Today") }
+        switch count {
+        case 0: parts.append("No listings available")
+        case 1: parts.append("1 listing available")
+        default: parts.append("\(count) listings available")
+        }
+        return parts.joined(separator: ", ")
     }
 
     // MARK: - Selected day listings
@@ -220,11 +281,15 @@ struct CalendarView: View {
             } else {
                 ForEach(listings) { l in
                     Button {
-                        coord.openListing(id: l.id)
+                        if UIDevice.current.userInterfaceIdiom == .pad {
+                            coord.openListing(id: l.id)
+                        } else {
+                            coord.listingsPath.append(.byId(l.id))
+                        }
                     } label: {
                         listingRow(l)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(ScaleButtonStyle())
                 }
             }
         }
@@ -278,7 +343,10 @@ struct CalendarView: View {
 
     private func shiftMonth(_ delta: Int) {
         guard let next = Self.cal.date(byAdding: .month, value: delta, to: anchor) else { return }
-        anchor = Self.startOfMonth(for: next)
+        monthShift = delta
+        withAnimation(.easeInOut(duration: 0.28)) {
+            anchor = Self.startOfMonth(for: next)
+        }
         selectedDay = nil
     }
 
@@ -294,21 +362,11 @@ struct CalendarView: View {
     }
 
     private func monthTitle(for date: Date) -> String {
-        let f = DateFormatter()
-        f.calendar = Self.cal
-        f.timeZone = Self.cal.timeZone
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "MMMM yyyy"
-        return f.string(from: date)
+        Self.monthTitleFormatter.string(from: date)
     }
 
     private func longDateLabel(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.calendar = Self.cal
-        f.timeZone = Self.cal.timeZone
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateStyle = .full
-        return f.string(from: date)
+        Self.longDateFormatter.string(from: date)
     }
 
     /// 周一在前 / 周日在前等顺序符号；本地化无关，统一英文短名。
@@ -324,7 +382,13 @@ struct CalendarView: View {
         let monthStart = anchor
         let firstWeekday = Self.cal.component(.weekday, from: monthStart)  // 1=Sun
         let leadingEmpty = (firstWeekday - Self.cal.firstWeekday + 7) % 7
-        var out: [CalendarCell] = Array(repeating: .empty, count: leadingEmpty)
+        var emptyIndex = 0
+        func emptyCell() -> CalendarCell {
+            defer { emptyIndex += 1 }
+            return .empty(emptyIndex)
+        }
+
+        var out: [CalendarCell] = (0..<leadingEmpty).map { _ in emptyCell() }
         for d in range {
             if let date = Self.cal.date(byAdding: .day, value: d - 1, to: monthStart) {
                 out.append(.day(date))
@@ -332,7 +396,7 @@ struct CalendarView: View {
         }
         // 尾部补到 7 的倍数（视觉对齐）
         let pad = (7 - out.count % 7) % 7
-        out.append(contentsOf: Array(repeating: .empty, count: pad))
+        out.append(contentsOf: (0..<pad).map { _ in emptyCell() })
         return out
     }
 
@@ -342,7 +406,16 @@ struct CalendarView: View {
     }
 }
 
-private enum CalendarCell: Hashable {
-    case empty
+private enum CalendarCell: Identifiable, Hashable {
+    case empty(Int)
     case day(Date)
+
+    var id: String {
+        switch self {
+        case .empty(let index):
+            return "empty-\(index)"
+        case .day(let date):
+            return "day-\(Int(date.timeIntervalSince1970))"
+        }
+    }
 }

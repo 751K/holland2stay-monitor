@@ -4,10 +4,16 @@ struct LoginView: View {
     @Environment(AuthStore.self) private var auth
     @Environment(PushStore.self) private var push
     @Environment(\.colorScheme) private var colorScheme
+    /// "减弱动态效果"：用户在 设置 > 辅助功能 > 动态效果 里开启时为 true。
+    /// 受影响的动画（如 hero 图标呼吸）应在此 flag true 时跳过或显著弱化。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expandedRole: LoginMode?
     @State private var username = ""
     @State private var password = ""
-    @State private var showError = false
+    /// 是否显示密码明文（眼睛图标 toggle）。两套表单（登录卡片 / 注册 sheet）
+    /// 各一个，避免互相影响。
+    @State private var showPasswordPlain = false
+    @State private var showRegPasswordPlain = false
     @State private var liveCount = 0
     @State private var new24h = 0
     @State private var changes24h = 0
@@ -18,9 +24,18 @@ struct LoginView: View {
     @State private var showRegister = false
     @State private var regUsername = ""
     @State private var regPassword = ""
+    @State private var isAuthenticatingBiometric = false
+    @State private var showSaveBiometricPrompt = false
+    @State private var pendingSaveCredential: (username: String, password: String)?
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        AppVersion.short
     }
 
     private var timeAgo: String {
@@ -142,13 +157,28 @@ struct LoginView: View {
                     .ignoresSafeArea(edges: .top)
             }
             .toolbar(.hidden)
-            .alert(auth.lastError?.errorDescription ?? "Login Failed", isPresented: $showError) {
-                Button("OK") {}
-            } message: {
-                Text(auth.lastError?.failureReason ?? auth.errorMessage ?? "Unknown error")
+            // 登录错误不再用 .alert 弹窗打断——改为在展开的角色卡片里
+            // 内联红字提示（见 roleCard 的 errorMessage 行）。打断式 alert
+            // 强制用户先点 OK 才能改密码重试，不友好。
+            // 登录成功的触觉确认：isAuthenticated 从 false → true 时触发 .success
+            // 反馈。closure 形式只在真正"登录"那一刻响一次，logout (true→false)
+            // 或重渲染不会误触发。
+            .sensoryFeedback(.success, trigger: auth.isAuthenticated) { old, new in
+                !old && new
             }
-            .onChange(of: auth.errorMessage) { _, new in
-                showError = new != nil
+            .alert("Save for \(BiometricAuthService.biometryName)?", isPresented: $showSaveBiometricPrompt) {
+                Button("Save") {
+                    if let c = pendingSaveCredential {
+                        try? BiometricAuthService.saveCredentials(
+                            .init(username: c.username, password: c.password))
+                    }
+                    pendingSaveCredential = nil
+                }
+                Button("Not Now", role: .cancel) {
+                    pendingSaveCredential = nil
+                }
+            } message: {
+                Text("Next time, sign in instantly with \(BiometricAuthService.biometryName) instead of typing your password.")
             }
             .task { await fetchStats() }
             .sheet(isPresented: $showRegister) {
@@ -167,9 +197,7 @@ struct LoginView: View {
             changes24h = summary.changes24h
             let iso = summary.lastScrape
             if !iso.isEmpty, iso != "--" {
-                let fmt = ISO8601DateFormatter()
-                fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                lastScrapeAt = fmt.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+                lastScrapeAt = Self.isoFormatter.date(from: iso)
             }
         } catch { }
     }
@@ -205,10 +233,13 @@ struct LoginView: View {
                         houseShape
                             .fill(brandBlue)
                             .frame(width: 26, height: 18)
-                            .scaleEffect(breathe ? 1.12 : 0.88)
+                            // 减弱动态效果开启时，呼吸缩放固定在中间值（1.0），
+                            // 不再随时间变化；动画完全跳过。
+                            .scaleEffect(reduceMotion ? 1.0 : (breathe ? 1.12 : 0.88))
                     }
                     .clipShape(Circle())
                     .onAppear {
+                        guard !reduceMotion else { return }
                         withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
                             breathe = true
                         }
@@ -274,6 +305,11 @@ struct LoginView: View {
 
     private var contentSection: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if BiometricAuthService.hasStoredCredentials {
+                biometricButton
+                    .padding(.bottom, 16)
+            }
+
             Text("CONTINUE AS")
                 .font(.system(size: 12, weight: .heavy))
                 .foregroundStyle(sectionLabelColor)
@@ -315,8 +351,11 @@ struct LoginView: View {
             } label: {
                 HStack(spacing: 14) {
                     ZStack {
+                        // 44pt 命中 iOS HIG；这块图标背景虽然不是独立 button
+                        // （外层 HStack 一整块 Button 都可点），但与右上角等其
+                        // 它 icon-square 视觉统一在 44 也更协调。
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(cardIconBg).frame(width: 42, height: 42)
+                            .fill(cardIconBg).frame(width: 44, height: 44)
                         Image(systemName: icon)
                             .font(.system(size: 20)).foregroundStyle(brandBlue)
                     }
@@ -343,10 +382,11 @@ struct LoginView: View {
                         .foregroundStyle(isExpanded ? brandBlue : chevronMuted)
                         .rotationEffect(isExpanded ? .degrees(90) : .zero)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .contentShape(Rectangle())
 
             if isExpanded, mode != .guest {
                 VStack(spacing: 12) {
@@ -367,11 +407,44 @@ struct LoginView: View {
                     HStack(spacing: 0) {
                         Image(systemName: "key.fill")
                             .font(.caption).foregroundStyle(.secondary).frame(width: 28)
-                        SecureField("App password", text: $password)
-                            .textContentType(.password).textFieldStyle(.plain)
+                        // 眼睛 toggle：根据 showPasswordPlain 在 TextField/SecureField
+                        // 之间切换。两个组件共用同一 @State password，无需迁移。
+                        if showPasswordPlain {
+                            TextField("App password", text: $password)
+                                .textContentType(.password).textFieldStyle(.plain)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        } else {
+                            SecureField("App password", text: $password)
+                                .textContentType(.password).textFieldStyle(.plain)
+                        }
+                        Button {
+                            showPasswordPlain.toggle()
+                        } label: {
+                            Image(systemName: showPasswordPlain ? "eye.slash.fill" : "eye.fill")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showPasswordPlain ? "Hide password" : "Show password")
                     }
                     .padding(12)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+
+                    // 内联错误提示 —— 替代之前打断式 .alert。仅在该角色卡片
+                    // 展开时显示，跟密码输入框紧贴，用户改密码时一眼能看到。
+                    if let err = inlineLoginError(for: mode) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .font(.caption)
+                            Text(err)
+                                .font(.caption)
+                                .multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
                     Button {
                         Task { await performLogin(mode: mode) }
@@ -427,11 +500,11 @@ struct LoginView: View {
                 .multilineTextAlignment(.center).lineSpacing(3)
 
             HStack(spacing: 4) {
-                Button("Terms") { showTerms = true }
+                Button(LegalText.isChineseLocale ? "使用条款" : "Terms") { showTerms = true }
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(brandBlue)
                 Text("·").foregroundStyle(.secondary).font(.caption)
-                Button("Privacy") { showPrivacy = true }
+                Button(LegalText.isChineseLocale ? "隐私政策" : "Privacy") { showPrivacy = true }
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(brandBlue)
             }
@@ -442,10 +515,12 @@ struct LoginView: View {
         }
         .padding(.top, 24).padding(.bottom, 36)
         .sheet(isPresented: $showTerms) {
-            legalSheet(title: "Terms of Use", content: termsText)
+            legalSheet(title: LegalText.isChineseLocale ? "使用条款" : "Terms of Use",
+                      content: termsText)
         }
         .sheet(isPresented: $showPrivacy) {
-            legalSheet(title: "Privacy Policy", content: privacyText)
+            legalSheet(title: LegalText.isChineseLocale ? "隐私政策" : "Privacy Policy",
+                       content: privacyText)
         }
     }
 
@@ -453,8 +528,50 @@ struct LoginView: View {
         LegalSheetView(title: title, content: content)
     }
 
-    private var termsText: String { LegalText.terms }
-    private var privacyText: String { LegalText.privacy }
+    private var termsText: String { LegalText.termsLocalized }
+    private var privacyText: String { LegalText.privacyLocalized }
+
+    // MARK: - Biometric
+
+    private var biometricButton: some View {
+        let name = BiometricAuthService.biometryName
+        return Button {
+            Task { await performBiometricLogin() }
+        } label: {
+            HStack(spacing: 10) {
+                if isAuthenticatingBiometric {
+                    ProgressView().controlSize(.small)
+                }
+                Image(systemName: BiometricAuthService.biometryName == "Face ID"
+                      ? "faceid" : "touchid")
+                    .font(.system(size: 20))
+                Text("Sign in with \(name)")
+                    .font(.system(size: 16, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 13)
+        }
+        .buttonStyle(.bordered)
+        .disabled(isAuthenticatingBiometric)
+    }
+
+    private func performBiometricLogin() async {
+        isAuthenticatingBiometric = true
+        defer { isAuthenticatingBiometric = false }
+
+        guard let cred = await BiometricAuthService.authenticateAndLoad(
+            reason: "Unlock FlatRadar to sign in"
+        ) else { return }
+
+        if cred.username == "__admin__" {
+            await auth.loginAsAdmin(password: cred.password)
+        } else {
+            await auth.loginAsUser(name: cred.username, password: cred.password)
+        }
+        if auth.isAuthenticated, !auth.isGuest {
+            await push.requestPermissionAndRegister()
+        }
+    }
 
     // MARK: - Helpers
 
@@ -463,6 +580,16 @@ struct LoginView: View {
             (0, 1.0), (0, 0.55), (0.35, 0.20), (0.55, 0.45),
             (0.80, 0.20), (1.0, 0.55), (1.0, 1.0)
         ])
+    }
+
+    /// 当前应该在哪个角色的卡片里显示内联错误。
+    /// - 只在卡片展开 && 该 mode 不是 guest && AuthStore 有错时显示
+    /// - guest 模式没有密码字段，错误也没什么位置可放（理论上 guest 不会失败）
+    private func inlineLoginError(for mode: LoginMode) -> String? {
+        guard expandedRole == mode, mode != .guest else { return nil }
+        guard let err = auth.lastError?.errorDescription ?? auth.errorMessage,
+              !err.isEmpty else { return nil }
+        return err
     }
 
     private func loginDisabled(for mode: LoginMode) -> Bool {
@@ -480,7 +607,17 @@ struct LoginView: View {
         case .user:  await auth.loginAsUser(name: username, password: password)
         case .guest: break
         }
-        if auth.isAuthenticated, !auth.isGuest { await push.requestPermissionAndRegister() }
+        if auth.isAuthenticated, !auth.isGuest {
+            await push.requestPermissionAndRegister()
+
+            // 第一次手动登录成功后，提示是否保存凭据供 Face ID 使用
+            if BiometricAuthService.isAvailable, !BiometricAuthService.hasStoredCredentials {
+                let user = mode == .admin ? "__admin__" : username
+                let pwd = password
+                pendingSaveCredential = (user, pwd)
+                showSaveBiometricPrompt = true
+            }
+        }
     }
 
     private func performLoginAsGuest() async {
@@ -513,8 +650,24 @@ struct LoginView: View {
                     HStack(spacing: 0) {
                         Image(systemName: "key.fill")
                             .font(.caption).foregroundStyle(.secondary).frame(width: 28)
-                        SecureField("Password (min 4 characters)", text: $regPassword)
-                            .textContentType(.newPassword).textFieldStyle(.plain)
+                        if showRegPasswordPlain {
+                            TextField("Password (min 4 characters)", text: $regPassword)
+                                .textContentType(.newPassword).textFieldStyle(.plain)
+                                .autocorrectionDisabled().textInputAutocapitalization(.never)
+                        } else {
+                            SecureField("Password (min 4 characters)", text: $regPassword)
+                                .textContentType(.newPassword).textFieldStyle(.plain)
+                        }
+                        Button {
+                            showRegPasswordPlain.toggle()
+                        } label: {
+                            Image(systemName: showRegPasswordPlain ? "eye.slash.fill" : "eye.fill")
+                                .font(.caption).foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showRegPasswordPlain ? "Hide password" : "Show password")
                     }
                     .padding(12).background(.quinary, in: RoundedRectangle(cornerRadius: 10))
                 }

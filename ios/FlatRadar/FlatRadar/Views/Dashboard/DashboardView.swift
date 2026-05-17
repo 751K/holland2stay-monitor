@@ -27,40 +27,42 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if store.isLoading && store.summary == nil {
-                        ProgressView().padding(.top, 80).frame(maxWidth: .infinity)
-                    } else if let err = store.errorMessage, store.summary == nil {
-                        errorView(err)
-                    } else {
-                        headerRow
-                        liveBadge
-                        statsCard
-                        if auth.isUser, let me = store.meSummary {
-                            matchesSection(me)
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if store.isLoading && store.summary == nil {
+                            ProgressView().padding(.top, 80).frame(maxWidth: .infinity)
+                        } else if let err = store.errorMessage, store.summary == nil {
+                            errorView(err)
+                        } else {
+                            headerRow
+                            liveBadge
+                            statsCard
+                            if auth.isUser, let me = store.meSummary {
+                                matchesSection(me, availableWidth: proxy.size.width)
+                            }
+                            exploreSection
                         }
-                        exploreSection
                     }
+                    .padding(.bottom, 24)
                 }
-                .padding(.bottom, 24)
-            }
-            .refreshable { await refresh() }
-            .background(Color(.systemGroupedBackground))
-            .navigationBarTitleDisplayMode(.inline)
-            .task { await refresh() }
-            .sheet(item: $activeChart) { detail in
-                ChartDetailView(chartKey: detail.key,
-                                title: detail.title,
-                                subtitle: detail.subtitle,
-                                days: detail.days)
-                    .presentationDetents([.fraction(0.65), .large])
-                    .presentationDragIndicator(.visible)
-            }
-            .sheet(item: $activeRecentMode) { mode in
-                RecentActivitySheet(mode: mode)
-                    .presentationDetents([.fraction(0.75), .large])
-                    .presentationDragIndicator(.visible)
+                .refreshable { await refresh() }
+                .background(Color(.systemGroupedBackground))
+                .navigationBarTitleDisplayMode(.inline)
+                .task { await refresh() }
+                .sheet(item: $activeChart) { detail in
+                    ChartDetailView(chartKey: detail.key,
+                                    title: detail.title,
+                                    subtitle: detail.subtitle,
+                                    days: detail.days)
+                        .presentationDetents([.fraction(0.65), .large])
+                        .presentationDragIndicator(.visible)
+                }
+                .sheet(item: $activeRecentMode) { mode in
+                    RecentActivitySheet(mode: mode)
+                        .presentationDetents([.fraction(0.75), .large])
+                        .presentationDragIndicator(.visible)
+                }
             }
         }
     }
@@ -300,8 +302,10 @@ struct DashboardView: View {
 
     // MARK: - Matches section (user only)
 
-    private func matchesSection(_ me: MeSummary) -> some View {
-        VStack(spacing: 0) {
+    private func matchesSection(_ me: MeSummary, availableWidth: CGFloat) -> some View {
+        let previewCount = matchPreviewCount(for: availableWidth)
+
+        return VStack(spacing: 0) {
             HStack {
                 HStack(spacing: 4) {
                     Text("Your matches")
@@ -336,7 +340,7 @@ struct DashboardView: View {
                 .frame(minWidth: 80)
 
                 if matchedPreviews.isEmpty {
-                    ForEach(0..<3, id: \.self) { _ in
+                    ForEach(0..<previewCount, id: \.self) { _ in
                         VStack(alignment: .leading, spacing: 4) {
                             Text("—").font(.system(size: 13, weight: .bold))
                             ForEach(0..<5, id: \.self) { _ in
@@ -348,7 +352,7 @@ struct DashboardView: View {
                         .background(Color(.systemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
                     }
                 } else {
-                    ForEach(matchedPreviews.prefix(3)) { listing in
+                    ForEach(matchedPreviews.prefix(previewCount)) { listing in
                         Button {
                             coord.openListing(id: listing.id)
                         } label: {
@@ -365,6 +369,12 @@ struct DashboardView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 26)
         }
+    }
+
+    private func matchPreviewCount(for width: CGFloat) -> Int {
+        if width >= 1_180 { return 5 }
+        if width >= 940 { return 4 }
+        return 3
     }
 
     // MARK: - Match preview card
@@ -433,9 +443,9 @@ struct DashboardView: View {
 
     private func matchStatusColor(_ listing: Listing) -> Color {
         switch listing.statusKind {
-        case .book: return .green
-        case .lottery: return .orange
-        case .reserved, .other: return Color(.systemGray)
+        case .book:             return .statusBook
+        case .lottery:          return .statusLottery
+        case .reserved, .other: return .statusReserved
         }
     }
 
@@ -495,24 +505,28 @@ struct DashboardView: View {
         tapTitle: String,
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center) {
-                Text(title)
-                    .font(.system(size: 13, weight: .heavy))
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+        Button {
+            openMiniChart(key: tapKey, title: tapTitle)
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(alignment: .center) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .heavy))
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer(minLength: 10)
+                content()
             }
-            Spacer(minLength: 10)
-            content()
+            .padding(14)
+            .frame(height: 116)
+            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.secondary.opacity(0.1), lineWidth: 1))
+            .contentShape(Rectangle())
         }
-        .padding(14)
-        .frame(height: 116)
-        .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.secondary.opacity(0.1), lineWidth: 1))
-        .contentShape(Rectangle())
-        .onTapGesture { openMiniChart(key: tapKey, title: tapTitle) }
+        .buttonStyle(ScaleButtonStyle())
     }
 
     private var statusMiniCard: some View {
@@ -700,13 +714,15 @@ struct DashboardView: View {
         // 桶后标签是 "A+" / "A" / "B" / "C" / "D" / ... — rank 表里:
         //   A+++=0, A++=1, A+=2, A=3, B=4, C=5, D=6, E=7, F=8
         // 让 A+ 单独绿色，A 用 mint 跟它视觉拉开档次。
+        // 三个绿色等级用 Asset Catalog 语义 token（有亮/暗双值，之前硬编码
+        // RGB 在暗模式下不会自适应）；B/C/D 用 SwiftUI 系统色（已自适应）。
         switch energyRank(label) {
-        case 0...1: return Color(red: 20/255, green: 140/255, blue: 70/255)   // A+++ / A++
-        case 2:     return Color(red: 52/255, green: 199/255, blue: 89/255)    // A+
-        case 3:     return Color(red: 140/255, green: 200/255, blue: 80/255)   // A
-        case 4:     return .yellow                                              // B
-        case 5:     return .orange                                              // C
-        default:    return .red                                                 // D 及以下
+        case 0...1: return .energyTop      // A+++ / A++
+        case 2:     return .energyAPlus    // A+
+        case 3:     return .energyA        // A
+        case 4:     return .yellow         // B
+        case 5:     return .orange         // C
+        default:    return .red            // D 及以下
         }
     }
 
@@ -732,7 +748,7 @@ struct DashboardView: View {
 
     private func fetchMatchedPreviews() async {
         do {
-            let resp = try await APIClient.shared.getListings(limit: 3, offset: 0)
+            let resp = try await APIClient.shared.getListings(limit: 5, offset: 0)
             matchedPreviews = resp.items
         } catch {
             matchedPreviews = []
@@ -855,6 +871,36 @@ struct RecentActivitySheet: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+// MARK: - Press scale modifier
+
+/// 轻量按压反馈：touch down 缩放到 0.97，松手回弹到 1.0。
+/// 用于非 Button 的可点击元素（onTapGesture / contentShape + onTap）。
+/// Button 场景请用 ``ScaleButtonStyle``（通过 configuration.isPressed 驱动，无手势冲突）。
+struct PressScaleModifier: ViewModifier {
+    @State private var pressed = false
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(pressed ? 0.97 : 1.0)
+            .animation(.spring(duration: 0.18), value: pressed)
+            .onLongPressGesture(minimumDuration: 0, maximumDistance: 44,
+                                pressing: { pressing in
+                if pressed != pressing {
+                    pressed = pressing
+                }
+            }, perform: {})
+    }
+}
+
+/// 按钮场景的按压缩放样式：用 configuration.isPressed 驱动，无手势冲突。
+struct ScaleButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.spring(duration: 0.18), value: configuration.isPressed)
     }
 }
 

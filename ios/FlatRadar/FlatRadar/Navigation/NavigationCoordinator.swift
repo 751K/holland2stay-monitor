@@ -76,6 +76,21 @@ final class NavigationCoordinator {
         selectedBrowseMode = .list
         listingsPath = [.byId(id)]
     }
+
+    /// Logout / 401 auto-logout / 删号时清空全部导航状态。
+    ///
+    /// 为什么必须显式调：NavigationCoordinator 是 @Observable 单例，
+    /// 跨 login/logout 一直存活在内存里。如果不重置，下个用户登入时
+    /// 会看到上个用户最后停留的 tab + listings 详情页（残留 listingsPath
+    /// 里的 ListingRoute），既诡异又可能泄露上一会话的房源 id。
+    ///
+    /// 由 ``FlatRadarApp`` 监听 ``AuthStore.isAuthenticated`` 切到 false
+    /// 时统一调用，覆盖手动 logout、401 自动 logout、deleteAccount 三种路径。
+    func reset() {
+        selectedTab = .dashboard
+        selectedBrowseMode = .list
+        listingsPath = []
+    }
 }
 
 /// Listings NavigationStack 的路由对象。

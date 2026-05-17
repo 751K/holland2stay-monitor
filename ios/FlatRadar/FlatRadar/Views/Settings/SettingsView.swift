@@ -1,5 +1,6 @@
 import StoreKit
 import SwiftUI
+import UIKit
 
 struct SettingsView: View {
     @Environment(AuthStore.self) private var auth
@@ -20,6 +21,10 @@ struct SettingsView: View {
     @State private var showFilterEdit = false
     @State private var showLegalTerms = false
     @State private var showLegalPrivacy = false
+    @State private var showFeedback = false
+    @State private var isExporting = false
+    @State private var exportString: String?
+    @State private var showShareSheet = false
 
     var body: some View {
         NavigationStack {
@@ -92,23 +97,27 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        Button {
-                            sendTestPush()
-                        } label: {
-                            HStack {
-                                if isSendingTest {
-                                    ProgressView().controlSize(.small)
+                        if auth.isAdmin {
+                            Button {
+                                sendTestPush()
+                            } label: {
+                                HStack {
+                                    if isSendingTest {
+                                        ProgressView().controlSize(.small)
+                                    }
+                                    Text(isSendingTest ? "Sending…" : "Send Test Push")
                                 }
-                                Text(isSendingTest ? "Sending…" : "Send Test Push")
                             }
+                            .disabled(isSendingTest || push.registeredDeviceId == nil)
                         }
-                        .disabled(isSendingTest || push.registeredDeviceId == nil)
-                        Button {
-                            Task { await push.requestPermissionAndRegister() }
-                        } label: {
-                            Text("Re-register Device")
+                        if auth.isAdmin {
+                            Button {
+                                Task { await push.requestPermissionAndRegister() }
+                            } label: {
+                                Text("Re-register Device")
+                            }
+                            .disabled(push.permissionStatus == .denied)
                         }
-                        .disabled(push.permissionStatus == .denied)
                     } header: {
                         Text("Push Notifications")
                     } footer: {
@@ -133,8 +142,33 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        Button("Log Out", role: .destructive) {
+
+                        if auth.isUser {
+                            Button {
+                                Task { await exportData() }
+                            } label: {
+                                HStack {
+                                    if isExporting {
+                                        ProgressView().controlSize(.small)
+                                        Text("Exporting…").padding(.leading, 8)
+                                    } else {
+                                        Text("Export My Data")
+                                    }
+                                }
+                            }
+                            .disabled(isExporting)
+                            .sheet(isPresented: $showShareSheet, onDismiss: { exportString = nil }) {
+                                if let str = exportString {
+                                    ActivitySheet(activityItems: [str])
+                                }
+                            }
+                        }
+
+                        Button(role: .destructive) {
                             showLogoutConfirm = true
+                        } label: {
+                            Text("Log Out")
+                            .foregroundStyle(.red)
                         }
                         .confirmationDialog("Log Out", isPresented: $showLogoutConfirm) {
                             Button("Log Out", role: .destructive) {
@@ -147,8 +181,11 @@ struct SettingsView: View {
                         }
 
                         if auth.isUser {
-                            Button("Delete Account", role: .destructive) {
+                            Button(role: .destructive) {
                                 showDeleteConfirm = true
+                            } label: {
+                                Text("Delete Account")
+                                .foregroundStyle(.red)
                             }
                             .confirmationDialog(
                                 "Permanently delete your account?",
@@ -175,8 +212,11 @@ struct SettingsView: View {
                             Text("Guest")
                                 .foregroundStyle(.secondary)
                         }
-                        Button("Sign Out of Guest Mode", role: .destructive) {
+                        Button(role: .destructive) {
                             showLogoutConfirm = true
+                        } label: {
+                            Text("Sign Out of Guest Mode")
+                            .foregroundStyle(.red)
                         }
                         .confirmationDialog("Sign Out", isPresented: $showLogoutConfirm) {
                             Button("Sign Out", role: .destructive) {
@@ -212,14 +252,14 @@ struct SettingsView: View {
                     Button {
                         showLegalTerms = true
                     } label: {
-                        Label("Terms of Use", systemImage: "doc.text")
-                            .foregroundStyle(.primary)
+                        Text("Terms of Use")
+                        .foregroundStyle(.primary)
                     }
                     Button {
                         showLegalPrivacy = true
                     } label: {
-                        Label("Privacy Policy", systemImage: "hand.raised")
-                            .foregroundStyle(.primary)
+                        Text("Privacy Policy")
+                        .foregroundStyle(.primary)
                     }
                 }
 
@@ -273,8 +313,13 @@ struct SettingsView: View {
                     HStack {
                         Text("App")
                         Spacer()
-                        Text("FlatRadar v1.0")
+                        Text(AppVersion.displayName)
                             .foregroundStyle(.secondary)
+                    }
+                    Button {
+                        showFeedback = true
+                    } label: {
+                        Text("Send Feedback")
                     }
                 }
             }
@@ -297,10 +342,15 @@ struct SettingsView: View {
                 FilterEditView()
             }
             .sheet(isPresented: $showLegalTerms) {
-                LegalSheetView(title: "Terms of Use", content: LegalText.terms)
+                LegalSheetView(title: LegalText.isChineseLocale ? "使用条款" : "Terms of Use",
+                               content: LegalText.termsLocalized)
             }
             .sheet(isPresented: $showLegalPrivacy) {
-                LegalSheetView(title: "Privacy Policy", content: LegalText.privacy)
+                LegalSheetView(title: LegalText.isChineseLocale ? "隐私政策" : "Privacy Policy",
+                               content: LegalText.privacyLocalized)
+            }
+            .sheet(isPresented: $showFeedback) {
+                FeedbackView()
             }
         }
     }
@@ -349,4 +399,31 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Export
+
+    private func exportData() async {
+        isExporting = true
+        defer { isExporting = false }
+        do {
+            let jsonData = try await APIClient.shared.meExport()
+            exportString = String(data: jsonData, encoding: .utf8)
+            showShareSheet = true
+        } catch {
+            testResultMessage = error.localizedDescription
+            showTestResult = true
+        }
+    }
+
+}
+
+// MARK: - UIActivityViewController wrapper
+
+struct ActivitySheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

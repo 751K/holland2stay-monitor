@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Listing 详情页。
 ///
@@ -32,7 +33,75 @@ struct ListingDetailView: View {
             }
         }
         .navigationTitle(listing?.name ?? "Loading…")
+        .toolbar {
+            // 房源加载好后才显示分享按钮——加载中 / 失败时分享一个空 deep link
+            // 没意义。SwiftUI ShareLink 直接调起系统标准 Share Sheet（AirDrop /
+            // 信息 / 邮件 / 复制 / 拷贝链接 ...），item 用 h2smonitor:// deep link
+            // —— 收件人装了 FlatRadar 点一下就跳到本房源详情；没装的话
+            // message 文本里也带了房源摘要 + Holland2Stay 官网 URL 作为兜底。
+            if let listing {
+                ToolbarItem(placement: .topBarTrailing) {
+                    ShareLink(
+                        item: deepLink(for: listing),
+                        subject: Text(listing.name),
+                        message: Text(shareMessage(for: listing)),
+                        // 自定义 scheme（h2smonitor://...）系统不会自动抓 OpenGraph
+                        // 预览，分享面板默认显示一个灰色占位格子。提供 SharePreview
+                        // 让分享面板顶部正确显示房源名 + App 图标。
+                        preview: SharePreview(
+                            sharePreviewTitle(for: listing),
+                            image: Self.sharePreviewIcon
+                        )
+                    )
+                }
+            }
+        }
         .task { await load() }
+    }
+
+    /// `h2smonitor://listing/<id>` —— 跟 FlatRadarApp.handleURL 解析的 scheme/host 一致。
+    private func deepLink(for listing: Listing) -> URL {
+        URL(string: "h2smonitor://listing/\(listing.id)") ?? URL(string: "h2smonitor://")!
+    }
+
+    /// 分享文本：地址 · 价格 · 城市 + 官网链接。
+    /// 用 \n 分行，让 iMessage / 邮件 / Notes 等通讯类接收方显示更清晰。
+    private func shareMessage(for listing: Listing) -> String {
+        var head: [String] = [listing.name]
+        if let price = listing.priceRaw, !price.isEmpty { head.append(price) }
+        if !listing.city.isEmpty { head.append(listing.city) }
+        var lines = [head.joined(separator: " · ")]
+        if !listing.url.isEmpty { lines.append(listing.url) }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Share Sheet 顶部预览的标题——地址 + 价格（如有），比 deep link 字符串
+    /// 友好得多。
+    private func sharePreviewTitle(for listing: Listing) -> String {
+        if let price = listing.priceRaw, !price.isEmpty {
+            return "\(listing.name) · \(price)"
+        }
+        return listing.name
+    }
+
+    /// Share Sheet 预览图标 —— 优先用 App 自身图标，让收件人/拷贝面板里有品牌
+    /// 识别度；读不到（极少见）退回 SF 房子符号。`static let` 一次加载终生复用。
+    private static let sharePreviewIcon: Image = {
+        if let ui = loadAppIcon() {
+            return Image(uiImage: ui)
+        }
+        return Image(systemName: "house.fill")
+    }()
+
+    /// 从 Info.plist `CFBundleIcons` 取最后一个（最大尺寸）icon 文件名，再用
+    /// `UIImage(named:)` 加载。Apple 没有公开 API 直接获取 AppIcon，只能这样绕。
+    private static func loadAppIcon() -> UIImage? {
+        guard let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],
+              let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+              let files = primary["CFBundleIconFiles"] as? [String],
+              let last = files.last
+        else { return nil }
+        return UIImage(named: last)
     }
 
     private func load() async {

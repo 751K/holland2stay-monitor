@@ -26,6 +26,7 @@ from . import admin as _admin
 from . import auth as _auth
 from . import calendar as _calendar
 from . import devices as _devices
+from . import feedback as _feedback
 from . import listings as _listings
 from . import map as _map
 from . import me as _me
@@ -44,5 +45,6 @@ def register(app: Flask) -> None:
     _notifications.register(bp)
     _me.register(bp)
     _devices.register(bp)
+    _feedback.register(bp)
     _admin.register(bp)
     app.register_blueprint(bp)

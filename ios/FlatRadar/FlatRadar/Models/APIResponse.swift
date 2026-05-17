@@ -3,6 +3,78 @@ import Foundation
 enum ServerTime {
     nonisolated static let timeZone = TimeZone(identifier: "Europe/Amsterdam") ?? .current
 
+    // MARK: - Static formatters (DateFormatter creation is expensive)
+
+    private nonisolated static let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private nonisolated static let isoNoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    private nonisolated static let dateParser: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = timeZone
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private nonisolated static let displayFormatterTZ: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        f.dateFormat = "MMM d, HH:mm zzz"
+        return f
+    }()
+
+    private nonisolated static let displayFormatterNoTZ: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        f.dateFormat = "MMM d, HH:mm"
+        return f
+    }()
+
+    private nonisolated static let mediumDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = .autoupdatingCurrent
+        f.timeZone = timeZone
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    private nonisolated static let fallbackParsers: [DateFormatter] = {
+        let formats = [
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy/MM/dd HH:mm:ss",
+            "yyyy/MM/dd HH:mm",
+        ]
+        return formats.map { fmt in
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .gregorian)
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = timeZone
+            f.dateFormat = fmt
+            return f
+        }
+    }()
+
+    // MARK: - Public API
+
     nonisolated static func display(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != "--", trimmed != "—" else { return raw }
@@ -11,14 +83,8 @@ enum ServerTime {
         }
         guard let date = parse(trimmed) else { return raw }
 
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = .autoupdatingCurrent
-        formatter.timeZone = timeZone
-        formatter.dateFormat = shouldShowTimeZone(for: date)
-            ? "MMM d, HH:mm zzz"
-            : "MMM d, HH:mm"
-        return formatter.string(from: date)
+        let fmt = shouldShowTimeZone(for: date) ? displayFormatterTZ : displayFormatterNoTZ
+        return fmt.string(from: date)
     }
 
     nonisolated static func displayDate(_ raw: String) -> String {
@@ -26,21 +92,8 @@ enum ServerTime {
         guard !trimmed.isEmpty else { return raw }
         let source = String(trimmed.prefix(10))
 
-        let parser = DateFormatter()
-        parser.calendar = Calendar(identifier: .gregorian)
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.timeZone = timeZone
-        parser.dateFormat = "yyyy-MM-dd"
-
-        guard let date = parser.date(from: source) else { return raw }
-
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = .autoupdatingCurrent
-        formatter.timeZone = timeZone
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
+        guard let date = dateParser.date(from: source) else { return raw }
+        return mediumDateFormatter.string(from: date)
     }
 
     nonisolated private static func shouldShowTimeZone(for date: Date) -> Bool {
@@ -52,31 +105,11 @@ enum ServerTime {
     }
 
     nonisolated private static func parse(_ raw: String) -> Date? {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso.date(from: raw) { return date }
+        if let date = isoFrac.date(from: raw) { return date }
+        if let date = isoNoFrac.date(from: raw) { return date }
 
-        iso.formatOptions = [.withInternetDateTime]
-        if let date = iso.date(from: raw) { return date }
-
-        let formats = [
-            "yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-dd HH:mm",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS",
-            "yyyy-MM-dd'T'HH:mm:ss",
-            "yyyy/MM/dd HH:mm:ss",
-            "yyyy/MM/dd HH:mm"
-        ]
-
-        for format in formats {
-            let formatter = DateFormatter()
-            formatter.calendar = Calendar(identifier: .gregorian)
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = timeZone
-            formatter.dateFormat = format
-            if let date = formatter.date(from: raw) {
-                return date
-            }
+        for f in fallbackParsers {
+            if let date = f.date(from: raw) { return date }
         }
         return nil
     }

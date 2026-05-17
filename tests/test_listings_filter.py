@@ -55,6 +55,27 @@ class TestStorageQueries:
         rows = db.get_all_listings(search="Centrum", limit=10)
         assert len(rows) == 1
 
+    def test_get_all_listings_search_matches_building_name(self, db):
+        # 单独插一条带 Building feature 的房源，name 完全无关，
+        # 验证搜索可以命中楼盘名（"加上 building name" 这次新增能力）。
+        now = _now_iso()
+        db.conn.execute(
+            "INSERT INTO listings (id, name, status, price_raw, available_from, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "id-bld", "Some Random Address 99",
+                "Available to book", "€800", "2026-06-01",
+                json.dumps(["Type: Studio", "Building: The Docks", "Area: 30.0 m²"]),
+                "https://x.com", "Eindhoven",
+                now, now, "Available to book",
+            ),
+        )
+        db.conn.commit()
+        # 搜 "Docks" name 里完全没有，必须靠 features 里的 Building 命中
+        rows = db.get_all_listings(search="Docks", limit=10)
+        assert any(r["id"] == "id-bld" for r in rows)
+        # 不该误伤其它房源（它们没有 Building 字段）
+        assert all(r["id"] == "id-bld" for r in rows if "Docks" not in (r.get("name") or ""))
+
     def test_get_distinct_cities(self, db):
         cities = db.get_distinct_cities()
         assert "Amsterdam" in cities

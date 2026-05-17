@@ -51,7 +51,16 @@ struct FlatRadarApp: App {
                     if authStore.isAuthenticated, !authStore.isGuest {
                         await pushStore.requestPermissionAndRegister()
                     }
-                    // 5. StoreKit 2 交易监听 + 加载咖啡产品
+                    // 5. 预热地图 + 列表数据 —— 用户从 App 启动到第一次点 Browse
+                    //    之间的几秒里悄悄把数据拉好。各 view 的 .task 内部检查
+                    //    .isEmpty 决定是否再拉、Store.fetch 自带 isLoading guard，
+                    //    所以不会和真正的 view appear 打架。非结构化 Task 并发跑，
+                    //    不阻塞下面 coffee store 初始化。
+                    if authStore.isAuthenticated, !authStore.isGuest {
+                        Task { await mapStore.fetch() }
+                        Task { await listingsStore.fetch() }
+                    }
+                    // 6. StoreKit 2 交易监听 + 加载咖啡产品
                     coffeeStore.listenForTransactions()
                     await coffeeStore.loadProducts()
                 }
@@ -70,8 +79,26 @@ struct FlatRadarApp: App {
                 .onChange(of: scenePhase) { _, newPhase in
                     syncStreamState(scenePhase: newPhase)
                 }
-                .onChange(of: authStore.isAuthenticated) { _, _ in
+                .onChange(of: authStore.isAuthenticated) { _, newValue in
                     syncStreamState(scenePhase: scenePhase)
+                    if newValue {
+                        // 登入路径：从 guest/未登录切到登录态 → 预热 map + listings，
+                        // 跟 App 首次启动 .task 里的预热同一处理。
+                        if !authStore.isGuest {
+                            if mapStore.listings.isEmpty {
+                                Task { await mapStore.fetch() }
+                            }
+                            if listingsStore.listings.isEmpty {
+                                Task { await listingsStore.fetch() }
+                            }
+                        }
+                    } else {
+                        // 登出路径（手动 logout / 401 自动 / 删号都会走这里）：
+                        // 清空导航 coordinator —— 否则下个用户登入时仍停留在
+                        // 上个用户最后看的 tab + listings 详情栈，既诡异又会
+                        // 短暂泄露上一会话的 listing id。
+                        coordinator.reset()
+                    }
                 }
         }
     }

@@ -106,6 +106,12 @@ final class APIClient {
         do {
             (data, response) = try await URLSession.shared.data(for: req)
         } catch {
+            if let urlError = error as? URLError, urlError.code == .cancelled {
+                #if DEBUG
+                print("[APIClient] cancelled: \(method) \(url.absoluteString)")
+                #endif
+                throw CancellationError()
+            }
             #if DEBUG
             print("[APIClient] network error: \(error)")
             #endif
@@ -343,6 +349,65 @@ final class APIClient {
     /// DELETE /me — 注销当前用户账号，删除 users.json 中的数据并撤销所有 token。
     func deleteAccount() async throws -> AccountDeleteResponse {
         try await request("DELETE", "api/v1/me")
+    }
+
+    // MARK: - Feedback
+
+    struct FeedbackBody: Encodable {
+        let kind: String      // "bug" | "suggestion" | "other"
+        let message: String
+        let user_name: String
+        let app_version: String
+    }
+
+    struct FeedbackResponse: Decodable {
+        let submitted: Bool
+    }
+
+    func submitFeedback(kind: String, message: String,
+                        userName: String = "",
+                        appVersion: String = "") async throws -> FeedbackResponse {
+        try await request("POST", "api/v1/feedback",
+                          body: FeedbackBody(kind: kind, message: message,
+                                            user_name: userName, app_version: appVersion))
+    }
+
+    // MARK: - Me export (GDPR)
+
+    /// GET /me/export — 返回用户的完整个人数据 JSON（GDPR 数据导出）。
+    func meExport() async throws -> Data {
+        let url = buildURL("api/v1/me/export")
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 30
+        if let tok = token {
+            req.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.badResponse(0)
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            if let shell = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let err = shell["error"] as? [String: Any],
+               let code = err["code"] as? String,
+               let message = err["message"] as? String {
+                throw APIError.fromPayload(code: code, message: message)
+            }
+            throw APIError.badResponse(http.statusCode)
+        }
+
+        // 拆 API 壳 {ok, data} → 只保留 data 字段
+        guard let shell = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = shell["ok"] as? Bool, ok,
+              let inner = shell["data"] else {
+            throw APIError.serverError("invalid export response")
+        }
+        return try JSONSerialization.data(withJSONObject: inner,
+                                          options: [.prettyPrinted, .sortedKeys])
     }
 
     // MARK: - Admin (Phase 5 Part 2) — admin role only

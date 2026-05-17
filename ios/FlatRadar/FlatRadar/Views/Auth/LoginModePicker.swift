@@ -18,6 +18,7 @@ struct LoginModePicker: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
+                    .contentShape(Rectangle())
                     .background {
                         if mode == m {
                             RoundedRectangle(cornerRadius: 10)

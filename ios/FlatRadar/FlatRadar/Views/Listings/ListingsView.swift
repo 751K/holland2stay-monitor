@@ -3,12 +3,17 @@ import SwiftUI
 /// Listings 视图 —— BrowseView 内嵌的"列表"模式。
 ///
 /// 不再持有 NavigationStack；外层 BrowseView 提供 NavigationStack(path:) +
-/// navigationDestination，本视图只贡献内容 + `.searchable` + 自己的 toolbar item。
+/// navigationDestination，本视图只贡献内容 + 自己的 toolbar item。
 struct ListingsView: View {
     @Environment(ListingsStore.self) private var store
+    @Environment(NavigationCoordinator.self) private var coord
     @State private var searchText = ""
+    @State private var searchDraft = ""
+    @State private var showSearch = false
     @State private var showFilters = false
     @State private var showRefreshError = false
+    /// Filter Apply 触觉反馈 trigger —— 每按一次 Apply 自增，驱动 `.sensoryFeedback`
+    @State private var filterApplyTick = 0
     @State private var selectedStatus = ""
     @State private var sort = ListingSort.newest
     @State private var selectedCities: [String] = []
@@ -45,12 +50,20 @@ struct ListingsView: View {
                 listContent
             }
         }
-        .searchable(text: $searchText, prompt: "Search by name or address...")
-        .onSubmit(of: .search) {
-            Task { await fetchWithCurrentFilters() }
-        }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    searchDraft = searchText
+                    withAnimation(.spring(duration: 0.28, bounce: 0.12)) {
+                        showSearch.toggle()
+                    }
+                } label: {
+                    Label(searchButtonTitle, systemImage: searchText.isEmpty
+                        ? "magnifyingglass"
+                        : "magnifyingglass.circle.fill")
+                }
+                .tint(searchText.isEmpty ? nil : .blue)
+
                 Menu {
                     Picker("Sort", selection: $sort) {
                         ForEach(ListingSort.allCases) { option in
@@ -81,6 +94,7 @@ struct ListingsView: View {
                 selectedEnergy: $selectedEnergy,
                 activeFilterCount: activeFilterCount,
                 apply: {
+                    filterApplyTick &+= 1   // 触发 .sensoryFeedback(.selection, …)
                     showFilters = false
                     Task { await fetchWithCurrentFilters() }
                 },
@@ -110,40 +124,47 @@ struct ListingsView: View {
         } message: {
             Text(store.errorMessage ?? "")
         }
+        // Filter Apply 轻触反馈 —— 用 .selection 比 .success 更合适：
+        // 应用过滤器是 UI 选择确认动作，不是成功完成型操作。
+        .sensoryFeedback(.selection, trigger: filterApplyTick)
     }
 
     private var listContent: some View {
-        List {
-            // —— Live 心跳条 + 活跃 filter chips（设计稿 ① + ④）
-            //    放在无 header 的小卡片里，跟下面 NEW / EARLIER 视觉对齐
+        let sorted = displayedListings   // 排序一次
+        let new = sorted.filter { $0.isNew }
+        let earlier = sorted.filter { !$0.isNew }
+
+        return List {
+            // —— Live 心跳条 + 活跃 filter chips
             Section {
+                if showSearch { inlineSearchRow }
                 heartbeatRow
-                if !activeFilterChips.isEmpty {
-                    filterChipsRow
-                }
+                if !activeFilterChips.isEmpty { filterChipsRow }
             }
             .listRowSeparator(.hidden)
 
+            let lastID = sorted.last?.id
+
             // —— NEW TODAY · N
-            if !newListings.isEmpty {
+            if !new.isEmpty {
                 Section {
-                    ForEach(newListings) { listing in
-                        row(for: listing)
+                    ForEach(new) { listing in
+                        row(for: listing, lastID: lastID)
                     }
                 } header: {
-                    sectionHeader(title: "NEW TODAY · \(newListings.count)",
+                    sectionHeader(title: "NEW TODAY · \(new.count)",
                                   color: Color(red: 52/255, green: 199/255, blue: 89/255))
                 }
             }
 
-            // —— EARLIER（剩余）
-            if !earlierListings.isEmpty {
+            // —— EARLIER
+            if !earlier.isEmpty {
                 Section {
-                    ForEach(earlierListings) { listing in
-                        row(for: listing)
+                    ForEach(earlier) { listing in
+                        row(for: listing, lastID: lastID)
                     }
                 } header: {
-                    sectionHeader(title: newListings.isEmpty ? "ALL LISTINGS" : "EARLIER",
+                    sectionHeader(title: new.isEmpty ? "ALL LISTINGS" : "EARLIER",
                                   color: .secondary)
                 }
             }
@@ -164,14 +185,23 @@ struct ListingsView: View {
     }
 
     @ViewBuilder
-    private func row(for listing: Listing) -> some View {
-        NavigationLink(value: ListingRoute.known(listing)) {
-            ListingRow(listing: listing)
-                .onAppear {
-                    if listing.id == displayedListings.last?.id {
-                        Task { await store.loadMore() }
-                    }
-                }
+    private func row(for listing: Listing, lastID: String?) -> some View {
+        Button {
+            coord.listingsPath.append(ListingRoute.known(listing))
+        } label: {
+            HStack(spacing: 0) {
+                ListingRow(listing: listing)
+                Spacer(minLength: 10)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .buttonStyle(ScaleButtonStyle())
+        .onAppear {
+            if listing.id == lastID {
+                Task { await store.loadMore() }
+            }
         }
     }
 
@@ -207,6 +237,42 @@ struct ListingsView: View {
         .padding(.vertical, 2)
     }
 
+    private var inlineSearchRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Search by name or address", text: $searchDraft)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+                .onSubmit {
+                    applySearch()
+                }
+            if !searchDraft.isEmpty {
+                Button {
+                    searchDraft = ""
+                    if !searchText.isEmpty {
+                        searchText = ""
+                        Task { await fetchWithCurrentFilters() }
+                    }
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            Button("Search") {
+                applySearch()
+            }
+            .font(.subheadline.weight(.semibold))
+            .disabled(searchDraft.trimmingCharacters(in: .whitespacesAndNewlines) == searchText)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
     @ViewBuilder
     private var filterChipsRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -232,6 +298,10 @@ struct ListingsView: View {
                         .overlay(
                             Capsule().stroke(Color.primary.opacity(0.08), lineWidth: chip.active ? 0 : 0.5)
                         )
+                        // 视觉 chip 高约 22pt（保留紧凑设计），用 minHeight + contentShape
+                        // 把按钮的命中区上下补到 44pt 满足 HIG，不让 chip 视觉变高。
+                        .frame(minHeight: 44)
+                        .contentShape(Capsule())
                         .shadow(color: chip.active ? Color.accentColor.opacity(0.25) : .clear,
                                 radius: 4, x: 0, y: 2)
                     }
@@ -254,14 +324,6 @@ struct ListingsView: View {
         store.listings.sorted(using: sort)
     }
 
-    private var newListings: [Listing] {
-        displayedListings.filter { $0.isNew }
-    }
-
-    private var earlierListings: [Listing] {
-        displayedListings.filter { !$0.isNew }
-    }
-
     private var updatedAgoText: String {
         guard let last = store.lastUpdated else { return "just now" }
         let interval = Date().timeIntervalSince(last)
@@ -282,6 +344,13 @@ struct ListingsView: View {
 
     private var activeFilterChips: [FilterChipModel] {
         var chips: [FilterChipModel] = []
+        if !searchText.isEmpty {
+            chips.append(.init(label: "Search: \(searchText)", active: true, mono: false) {
+                searchText = ""
+                searchDraft = ""
+                Task { await fetchWithCurrentFilters() }
+            })
+        }
         if !selectedStatus.isEmpty {
             chips.append(.init(label: shortStatusLabel(selectedStatus), active: true, mono: false) {
                 selectedStatus = ""
@@ -332,15 +401,28 @@ struct ListingsView: View {
         selectedContract = ""
         selectedEnergy = ""
         searchText = ""
+        searchDraft = ""
+        Task { await fetchWithCurrentFilters() }
+    }
+
+    private func applySearch() {
+        let trimmed = searchDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != searchText else { return }
+        searchText = trimmed
         Task { await fetchWithCurrentFilters() }
     }
 
     private var activeFilterCount: Int {
         ([selectedStatus].filter { !$0.isEmpty }.count
+         + (searchText.isEmpty ? 0 : 1)
          + (selectedCities.isEmpty ? 0 : 1)
          + (selectedTypes.isEmpty ? 0 : 1)
          + (selectedContract.isEmpty ? 0 : 1)
          + (selectedEnergy.isEmpty ? 0 : 1))
+    }
+
+    private var searchButtonTitle: String {
+        searchText.isEmpty ? "Search" : "Search: \(searchText)"
     }
 
     private var filterButtonTitle: String {
@@ -442,6 +524,26 @@ private struct ListingFilterSheet: View {
     @State private var showCities = false
     @State private var showTypes = false
 
+    // ── 未保存变更追踪 ───────────────────────────────────────────────
+    // 打开 sheet 时快照初始值；后续比对得 hasUnsavedChanges；
+    // dirty 时阻止下滑 dismiss，Cancel 弹 confirmation。
+    @State private var initialStatus = ""
+    @State private var initialCities: [String] = []
+    @State private var initialTypes: [String] = []
+    @State private var initialContract = ""
+    @State private var initialEnergy = ""
+    @State private var snapshotTaken = false
+    @State private var showDiscardConfirm = false
+
+    private var hasUnsavedChanges: Bool {
+        guard snapshotTaken else { return false }
+        return selectedStatus != initialStatus
+            || selectedCities != initialCities
+            || selectedTypes != initialTypes
+            || selectedContract != initialContract
+            || selectedEnergy != initialEnergy
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -539,13 +641,48 @@ private struct ListingFilterSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        if hasUnsavedChanges {
+                            showDiscardConfirm = true
+                        } else {
+                            dismiss()
+                        }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Apply", action: apply)
                 }
             }
+            // 脏数据时禁用下滑关闭——防止用户误操作丢掉刚改的筛选条件。
+            // 强制走 Cancel/Apply 按钮路径（Cancel 会再弹 confirmation）。
+            .interactiveDismissDisabled(hasUnsavedChanges)
+            .confirmationDialog(
+                "Discard filter changes?",
+                isPresented: $showDiscardConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Discard changes", role: .destructive) {
+                    // 还原到打开 sheet 那一刻的初始值，避免下次再打开还看到脏数据
+                    selectedStatus = initialStatus
+                    selectedCities = initialCities
+                    selectedTypes = initialTypes
+                    selectedContract = initialContract
+                    selectedEnergy = initialEnergy
+                    dismiss()
+                }
+                Button("Keep editing", role: .cancel) {}
+            }
             .task {
+                // 第一次出现时快照初始 filter 值；后续 sheet 内修改 binding
+                // 不会触发再次快照（snapshotTaken 守卫）。
+                if !snapshotTaken {
+                    initialStatus   = selectedStatus
+                    initialCities   = selectedCities
+                    initialTypes    = selectedTypes
+                    initialContract = selectedContract
+                    initialEnergy   = selectedEnergy
+                    snapshotTaken   = true
+                }
                 await loadOptions()
             }
         }

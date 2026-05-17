@@ -30,6 +30,47 @@ extension Listing {
     /// 解读，避免在做 "now() - first_seen" 计算时因为本地时区抖动出现 25h / -1h。
     fileprivate static let amsterdamTZ: TimeZone = TimeZone(identifier: "Europe/Amsterdam") ?? .current
 
+    private static let dateParser: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = amsterdamTZ
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = .autoupdatingCurrent
+        f.timeZone = amsterdamTZ
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let fallbackParsers: [DateFormatter] = {
+        let formats = [
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS",
+            "yyyy-MM-dd'T'HH:mm:ss",
+        ]
+        return formats.map { fmt in
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .gregorian)
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = amsterdamTZ
+            f.dateFormat = fmt
+            return f
+        }
+    }()
+
     /// Holland2Stay 三态业务语义 — 设计稿用这个区分 ●Book / ●Lottery / ●Reserved。
     enum StatusKind {
         case book      // 先到先得
@@ -98,40 +139,15 @@ extension Listing {
     /// "Jun 22" 形态的短日期，仅当不是占位时返回。
     var availableShortText: String? {
         guard hasRealAvailableDate, let day = availableDayKey else { return nil }
-        let parser = DateFormatter()
-        parser.calendar = Calendar(identifier: .gregorian)
-        parser.locale = Locale(identifier: "en_US_POSIX")
-        parser.timeZone = Listing.amsterdamTZ
-        parser.dateFormat = "yyyy-MM-dd"
-        guard let date = parser.date(from: day) else { return nil }
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = .autoupdatingCurrent
-        f.timeZone = Listing.amsterdamTZ
-        f.dateFormat = "MMM d"
-        return f.string(from: date)
+        guard let date = Self.dateParser.date(from: day) else { return nil }
+        return Self.shortDateFormatter.string(from: date)
     }
 
     /// Parse `first_seen` —— 复用 ServerTime 的多格式兼容。
     var firstSeenDate: Date? {
         guard let firstSeen, !firstSeen.isEmpty else { return nil }
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso.date(from: firstSeen) { return d }
-        iso.formatOptions = [.withInternetDateTime]
-        if let d = iso.date(from: firstSeen) { return d }
-        let formats = [
-            "yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-dd HH:mm",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS",
-            "yyyy-MM-dd'T'HH:mm:ss",
-        ]
-        for fmt in formats {
-            let f = DateFormatter()
-            f.calendar = Calendar(identifier: .gregorian)
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.timeZone = Listing.amsterdamTZ
-            f.dateFormat = fmt
+        if let d = Self.isoFormatter.date(from: firstSeen) { return d }
+        for f in Self.fallbackParsers {
             if let d = f.date(from: firstSeen) { return d }
         }
         return nil

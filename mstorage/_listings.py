@@ -156,8 +156,14 @@ class ListingOps:
             q += " AND status = ?"
             params.append(status)
         if search:
-            q += " AND name LIKE ?"
+            # 同时匹配 `name`（地址）和 `features` 里 "Building: ..." 这一项的楼盘名。
+            # features 是 JSON 数组形如 ["Type: Studio", "Building: The Docks", ...]，
+            # LIKE '%Building: %<search>%' 受限在 building 条目附近，避免误命中
+            # 其它特征里的同名字符串（如 Neighborhood）。SQLite LIKE 对 ASCII
+            # 默认不区分大小写，跟原有 name LIKE 行为一致，无须 COLLATE。
+            q += " AND (name LIKE ? OR features LIKE ?)"
             params.append(f"%{search}%")
+            params.append(f"%Building: %{search}%")
         if city:
             q += " AND city = ?"
             params.append(city)

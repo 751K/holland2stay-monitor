@@ -19,7 +19,8 @@ API v1 当前用户专属端点
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+import time as _time
+from dataclasses import asdict, replace
 from typing import Any
 
 from flask import Blueprint, request
@@ -294,7 +295,79 @@ def _delete_account() -> Any:
     return _err.ok({"deleted": True, "user_id": user.id})
 
 
+def _export():
+    """
+    GET /me/export — GDPR 数据导出。
+
+    返回当前 user 的完整个人数据 JSON，包含：
+    - 账户信息（name, id, role, created_at）
+    - 通知过滤条件
+    - 通知历史（最近 500 条）
+    - 活跃设备/令牌
+    """
+    role = api_auth.current_role()
+    if role != "user":
+        return _err.err_forbidden("仅 user 角色可导出数据")
+    user = get_current_user()
+    if user is None:
+        return _err.err_unauthorized("用户不存在")
+
+    with storage_ctx() as st:
+        # 通知历史（该 user_id）
+        notif_rows = st.conn.execute(
+            "SELECT id, created_at, type, title, body, url, listing_id, read "
+            "FROM web_notifications WHERE user_id = ? "
+            "ORDER BY id DESC LIMIT 500",
+            (user.id,)
+        ).fetchall()
+        notifications = [dict(r) for r in notif_rows]
+
+        # 活跃设备令牌
+        device_rows = st.conn.execute(
+            "SELECT dt.id, dt.device_token, dt.env, dt.platform, dt.model, "
+            "       dt.bundle_id, dt.created_at, dt.last_seen "
+            "FROM device_tokens dt "
+            "JOIN app_tokens at ON dt.app_token_id = at.id "
+            "WHERE at.user_id = ? AND dt.disabled_at IS NULL",
+            (user.id,)
+        ).fetchall()
+        devices = [dict(r) for r in device_rows]
+
+        # 活跃 App 令牌
+        token_rows = st.conn.execute(
+            "SELECT id, device_name, created_at, last_used_at, expires_at "
+            "FROM app_tokens "
+            "WHERE user_id = ? AND revoked = 0",
+            (user.id,)
+        ).fetchall()
+        tokens = [dict(r) for r in token_rows]
+
+    data = {
+        "account": {
+            "id": user.id,
+            "name": user.name,
+            "role": role,
+            "created_at": user.created_at if hasattr(user, "created_at") else "",
+            "enabled": user.enabled,
+            "notifications_enabled": user.notifications_enabled,
+        },
+        "filter": asdict(user.listing_filter),
+        "notification_history": notifications,
+        "notification_count": len(notifications),
+        "active_devices": devices,
+        "active_tokens": tokens,
+        "exported_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+    }
+    return _err.ok(data)
+
+
 def register(bp: Blueprint) -> None:
+    bp.add_url_rule(
+        "/me/export",
+        endpoint="me_export",
+        view_func=api_auth.bearer_required(("user",))(_export),
+        methods=["GET"],
+    )
     bp.add_url_rule(
         "/me/summary",
         endpoint="me_summary",

@@ -20,27 +20,33 @@ private struct AlertsTabBadge: ViewModifier {
 struct MainTabView: View {
     @Environment(AuthStore.self) private var auth
     @Environment(NavigationCoordinator.self) private var coord
-    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     private var tab: Binding<AppTab> {
         Binding(get: { coord.selectedTab }, set: { coord.selectedTab = $0 })
     }
 
     var body: some View {
-        ZStack {
-            if hSizeClass == .regular {
-                wideTabView
-            } else {
-                compactTabView
+        GeometryReader { proxy in
+            let useCompactTabs = shouldUseCompactTabs(width: proxy.size.width)
+
+            ZStack {
+                if useCompactTabs {
+                    compactTabView
+                } else {
+                    wideTabView
+                }
+                keyboardShortcuts(compact: useCompactTabs)
             }
-            keyboardShortcuts
-        }
-        .toolbarBackground(.ultraThinMaterial, for: .tabBar)
-        .toolbarBackground(.visible, for: .tabBar)
-        .onChange(of: coord.selectedTab) { _, new in
-            if hSizeClass == .compact, new == .listings {
-                coord.selectedTab = .browse
-                coord.selectedBrowseMode = .list
+            .toolbarBackground(.ultraThinMaterial, for: .tabBar)
+            .toolbarBackground(.visible, for: .tabBar)
+            .onChange(of: coord.selectedTab) { _, new in
+                normalizeSelection(new, compact: useCompactTabs)
+            }
+            .onChange(of: useCompactTabs) { _, new in
+                normalizeSelection(coord.selectedTab, compact: new)
+            }
+            .onAppear {
+                normalizeSelection(coord.selectedTab, compact: useCompactTabs)
             }
         }
     }
@@ -118,40 +124,89 @@ struct MainTabView: View {
     }
 
     private var mapTab: some View {
-        MapView()
+        NavigationStack {
+            MapView()
+        }
     }
 
     private var calendarTab: some View {
-        CalendarView()
+        NavigationStack {
+            CalendarView()
+        }
     }
 
     // MARK: - Keyboard shortcuts
 
-    private var keyboardShortcuts: some View {
+    private func shouldUseCompactTabs(width: CGFloat) -> Bool {
+        // iPad Stage Manager / Split View can keep a regular size class even
+        // when the window is too narrow for six top tabs. Switch to Browse
+        // once the actual content width gets tight.
+        width < 920
+    }
+
+    private func keyboardShortcuts(compact: Bool) -> some View {
         HStack(spacing: 0) {
-            Button("") { coord.selectedTab = .dashboard }
-                .keyboardShortcut("1", modifiers: .command)
-            if hSizeClass == .regular {
-                Button("") { coord.selectedTab = .listings }
-                    .keyboardShortcut("2", modifiers: .command)
-                Button("") { coord.selectedTab = .map }
-                    .keyboardShortcut("3", modifiers: .command)
-                Button("") { coord.selectedTab = .calendar }
-                    .keyboardShortcut("4", modifiers: .command)
-                Button("") { coord.selectedTab = .notifications }
-                    .keyboardShortcut("5", modifiers: .command)
-                Button("") { coord.selectedTab = .settings }
-                    .keyboardShortcut("6", modifiers: .command)
+            shortcutButton("Switch to Dashboard", key: "1") { coord.selectedTab = .dashboard }
+            if !compact {
+                shortcutButton("Switch to Listings", key: "2") { coord.selectedTab = .listings }
+                shortcutButton("Switch to Map", key: "3") { coord.selectedTab = .map }
+                shortcutButton("Switch to Calendar", key: "4") { coord.selectedTab = .calendar }
+                shortcutButton("Switch to Alerts", key: "5") { coord.selectedTab = .notifications }
+                shortcutButton("Switch to Settings", key: "6") { coord.selectedTab = .settings }
             } else {
-                Button("") { coord.selectedTab = .browse }
-                    .keyboardShortcut("2", modifiers: .command)
-                Button("") { coord.selectedTab = .notifications }
-                    .keyboardShortcut("3", modifiers: .command)
-                Button("") { coord.selectedTab = .settings }
-                    .keyboardShortcut("4", modifiers: .command)
+                shortcutButton("Switch to Browse", key: "2") { coord.selectedTab = .browse }
+                shortcutButton("Switch to Alerts", key: "3") { coord.selectedTab = .notifications }
+                shortcutButton("Switch to Settings", key: "4") { coord.selectedTab = .settings }
             }
         }
         .hidden()
         .frame(width: 0, height: 0)
+        // .hidden() 已经把 HStack 视觉隐藏；同时对 VoiceOver 显式跳过，
+        // 否则 VO 仍能聚焦到这些"空标签按钮"——既然有 accessibilityLabel
+        // 防御性也好，再用 accessibilityHidden 把整组从 a11y 树移除最干净。
+        // 这些 button 只是 keyboardShortcut 接收器，硬件键盘用户走快捷键，
+        // VoiceOver 用户走真实的 tab bar，重复曝光反而干扰。
+        .accessibilityHidden(true)
+    }
+
+    /// 把命令键 shortcut 包成有 accessibilityLabel 的按钮 —— 即便整体走
+    /// accessibilityHidden 屏蔽，单元素仍带 label 是好习惯：
+    /// 一是日后想曝光时只需删 .accessibilityHidden(true)；二是某些辅助工具
+    /// （非 VoiceOver）会扫 label 内容。
+    private func shortcutButton(
+        _ label: String,
+        key: KeyEquivalent,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button("", action: action)
+            .keyboardShortcut(key, modifiers: .command)
+            .accessibilityLabel(label)
+    }
+
+    private func normalizeSelection(_ tab: AppTab, compact: Bool) {
+        if compact {
+            switch tab {
+            case .listings:
+                coord.selectedTab = .browse
+                coord.selectedBrowseMode = .list
+            case .map:
+                coord.selectedTab = .browse
+                coord.selectedBrowseMode = .map
+            case .calendar:
+                coord.selectedTab = .browse
+                coord.selectedBrowseMode = .calendar
+            default:
+                break
+            }
+        } else if tab == .browse {
+            switch coord.selectedBrowseMode {
+            case .list:
+                coord.selectedTab = .listings
+            case .map:
+                coord.selectedTab = .map
+            case .calendar:
+                coord.selectedTab = .calendar
+            }
+        }
     }
 }
