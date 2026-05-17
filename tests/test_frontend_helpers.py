@@ -57,6 +57,27 @@ class TestTemplateAutoEscape:
             source = path.read_text(encoding="utf-8")
             env.parse(source)  # 抛异常 = 语法错误
 
+    def test_users_page_does_not_inline_user_input_in_handlers(self):
+        """用户名等注册用户可控字段不能进入 inline JS handler。"""
+        source = (Path(__file__).parent.parent / "templates" / "users.html").read_text(
+            encoding="utf-8",
+        )
+        assert "onclick=\"sendTestNotify('{{ user.id }}', '{{ user.name }}'" not in source
+        assert "onclick=\"confirmDelete('{{ user.id }}', '{{ user.name }}')" not in source
+        assert "data-user-name=\"{{ user.name }}\"" in source
+
+    def test_notification_result_templates_escape_dynamic_errors(self):
+        """测试通知结果仍用 innerHTML 布局时，动态错误字段必须先 escape。"""
+        source = (Path(__file__).parent.parent / "templates" / "user_form.html").read_text(
+            encoding="utf-8",
+        )
+        assert "+ data.error +" not in source
+        assert "+ r.channel +" not in source
+        assert "+ r.error +" not in source
+        assert "escapeHtml(data.error)" in source
+        assert "escapeHtml(r.channel)" in source
+        assert "escapeHtml(r.error)" in source
+
 
 # ── AppleScript 转义回归 ───────────────────────────────────
 

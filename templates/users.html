@@ -4,10 +4,12 @@
 {% block content %}
 
 <div class="page-header">
-  <h1>{{ _('users_title') }}</h1>
+  <h1>{{ _('my_account') if is_user else _('users_title') }}</h1>
+  {% if is_admin %}
   <a href="{{ url_for('user_new') }}" class="btn btn-primary btn-sm">
     <i class="bi bi-plus-lg mr-1"></i>{{ _('users_new') }}
   </a>
+  {% endif %}
 </div>
 
 {% if not users %}
@@ -100,10 +102,13 @@
     <a href="{{ url_for('user_edit', user_id=user.id) }}" class="btn btn-ghost btn-sm">
       <i class="bi bi-pencil mr-1"></i>{{ _('users_edit') }}
     </a>
-    <button class="btn btn-ghost btn-sm" onclick="sendTestNotify('{{ user.id }}', '{{ user.name }}', this)"
+    <button class="btn btn-ghost btn-sm js-test-notify"
+            data-user-id="{{ user.id }}"
+            data-user-name="{{ user.name }}"
             {% if not user.notification_channels %}disabled{% endif %}>
       <i class="bi bi-send mr-1"></i>{{ _('users_test_notif') }}
     </button>
+    {% if is_admin %}
     <form action="{{ url_for('user_toggle', user_id=user.id) }}" method="post" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-ghost btn-sm">
@@ -111,9 +116,12 @@
         {{ _('users_toggle_off') if user.enabled else _('users_toggle_on') }}
       </button>
     </form>
-    <button class="btn btn-ghost btn-sm danger ml-auto" onclick="confirmDelete('{{ user.id }}', '{{ user.name }}')">
+    <button class="btn btn-ghost btn-sm danger ml-auto js-delete-user"
+            data-user-id="{{ user.id }}"
+            data-user-name="{{ user.name }}">
       <i class="bi bi-trash mr-1"></i>{{ _('users_delete') }}
     </button>
+    {% endif %}
   </div>
 
 </div>
@@ -140,16 +148,32 @@
 <script>
 function confirmDelete(userId, userName) {
   document.getElementById('deleteUserName').textContent = userName;
-  document.getElementById('deleteForm').action = '/users/' + userId + '/delete';
+  document.getElementById('deleteForm').action = '/users/' + encodeURIComponent(userId) + '/delete';
   document.getElementById('deleteModal').classList.remove('hidden');
 }
 
-function sendTestNotify(userId, userName, btn) {
+document.querySelectorAll('.js-delete-user').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    confirmDelete(btn.dataset.userId || '', btn.dataset.userName || '');
+  });
+});
+
+function appendIcon(parent, ok) {
+  var icon = document.createElement('i');
+  icon.className = ok ? 'bi bi-check-circle-fill' : 'bi bi-x-circle-fill';
+  icon.style.color = ok ? 'var(--success)' : 'var(--danger)';
+  parent.appendChild(icon);
+  parent.appendChild(document.createTextNode(' '));
+}
+
+function sendTestNotify(btn) {
+  var userId = btn.dataset.userId || '';
+  var userName = btn.dataset.userName || '';
   var orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>';
 
-  fetch('/users/' + userId + '/test', {
+  fetch('/users/' + encodeURIComponent(userId) + '/test', {
     method: 'POST',
     headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
   })
@@ -159,23 +183,37 @@ function sendTestNotify(userId, userName, btn) {
       if(!wrap) return;
       var div = document.createElement('div');
       div.className = 'toast';
-      var html = '';
       if(data.error && !data.results.length) {
-        html = '<div class="toast-title">' + userName + '：' + data.error + '</div>';
+        var title = document.createElement('div');
+        title.className = 'toast-title';
+        title.textContent = userName + '：' + data.error;
+        div.appendChild(title);
       } else {
         var langMeta = document.querySelector('meta[name="lang"]');
         var zh = langMeta && langMeta.getAttribute('content') === 'zh';
-        html = '<div class="toast-title">' + userName + (zh ? ' 通知测试结果' : ' notification test') + '</div>';
+        var heading = document.createElement('div');
+        heading.className = 'toast-title';
+        heading.textContent = userName + (zh ? ' 通知测试结果' : ' notification test');
+        div.appendChild(heading);
         (data.results||[]).forEach(function(r) {
-          var icon = r.ok ? '<i class="bi bi-check-circle-fill" style="color:var(--success);"></i> ' : '<i class="bi bi-x-circle-fill" style="color:var(--danger);"></i> ';
-          html += '<div class="toast-body">' + icon + r.channel + (r.error ? ' — ' + r.error : '') + '</div>';
+          var body = document.createElement('div');
+          body.className = 'toast-body';
+          appendIcon(body, !!r.ok);
+          body.appendChild(document.createTextNode(String(r.channel || '')));
+          if (r.error) {
+            body.appendChild(document.createTextNode(' — ' + String(r.error)));
+          }
+          div.appendChild(body);
         });
       }
-      div.innerHTML = html;
       wrap.appendChild(div);
       setTimeout(function(){ div.style.opacity='0'; div.style.transition='opacity .3s'; setTimeout(function(){ div.remove(); }, 300); }, 6000);
     })
     .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
 }
+
+document.querySelectorAll('.js-test-notify').forEach(function(btn) {
+  btn.addEventListener('click', function() { sendTestNotify(btn); });
+});
 </script>
 {% endblock %}

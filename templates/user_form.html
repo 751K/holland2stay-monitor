@@ -6,17 +6,25 @@
 {% set u = user %}
 {% set is_edit = u is not none %}
 
+{% if is_admin %}
 <nav class="breadcrumb">
   <a href="{{ url_for('users_list') }}">{{ _('users_title') }}</a>
   <span class="sep">/</span>
   <span>{{ title }}</span>
 </nav>
+{% endif %}
 
 <div class="page-header">
-  <h1>{{ title }}</h1>
+  <h1>{{ _('my_account') if is_user else title }}</h1>
 </div>
 
-<form method="post" action="{{ action }}">
+{% if is_user %}
+<div class="alert alert-info mb-4">
+  <i class="bi bi-info-circle mr-2"></i>{{ _('user_form_self_only_hint') }}
+</div>
+{% endif %}
+
+<form method="post" action="{{ action }}" onsubmit="return confirmSelfDisable();">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   <!-- Step 1: Basic info -->
@@ -29,7 +37,13 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">{{ _('user_form_name') }}</label>
-          <input type="text" class="form-input" name="name" required value="{{ u.name if is_edit else '' }}" placeholder="Alice">
+          {% if is_user %}
+            {# user 自助模式：name 锁死，不允许改 #}
+            <input type="text" class="form-input" value="{{ u.name }}" readonly
+                   style="background:var(--surface2);cursor:not-allowed;color:var(--text2);">
+          {% else %}
+            <input type="text" class="form-input" name="name" required value="{{ u.name if is_edit else '' }}" placeholder="Alice">
+          {% endif %}
         </div>
         <div class="form-group">
           <label class="form-label">{{ _('user_form_status') }}</label>
@@ -43,7 +57,7 @@
         </div>
       </div>
 
-      <!-- iOS App 登录 -->
+      <!-- 登录（iOS App / Web 共用） -->
       <div class="mt-4" style="padding-top:14px;border-top:1px solid var(--border);">
         <div class="flex items-center gap-2 mb-2">
           <i class="bi bi-phone" style="color:var(--accent);"></i>
@@ -52,6 +66,7 @@
         <div class="text-xs text-secondary mb-3">{{ _('user_form_app_login_hint') }}</div>
         <div class="form-row">
           <div class="form-group">
+            {% if is_admin %}
             <label class="toggle">
               <input type="checkbox" id="app_login_chk"
                      {% if is_edit and u.app_login_enabled %}checked{% endif %}
@@ -60,6 +75,19 @@
             </label>
             <input type="hidden" id="app_login_h" name="app_login_enabled"
                    value="{{ 'true' if is_edit and u.app_login_enabled else 'false' }}">
+            {% else %}
+            {# user 自助模式：登录开关只能由 admin 切换，这里只显示状态 #}
+            <label class="form-label">{{ _('user_form_app_login_enable') }}</label>
+            <div style="font-size:14px;color:var(--text2);padding-top:4px;">
+              {% if u.app_login_enabled %}
+                <i class="bi bi-check-circle" style="color:var(--success);"></i>
+                {{ _('users_enabled') }}
+              {% else %}
+                <i class="bi bi-x-circle" style="color:var(--text3);"></i>
+                {{ _('users_disabled') }}
+              {% endif %}
+            </div>
+            {% endif %}
           </div>
           <div class="form-group">
             <label class="form-label">{{ _('user_form_app_password') }}</label>
@@ -151,32 +179,77 @@
             <div class="text-xs text-secondary">SMTP</div>
           </label>
           <div id="sec_email" class="mt-2" style="{% if not is_edit or 'email' not in u.notification_channels %}display:none;{% endif %}">
-            <label class="form-label">{{ _('user_form_smtp_host') }}</label>
-            <input type="text" class="form-input mb-2" name="EMAIL_SMTP_HOST" value="{{ u.email_smtp_host if is_edit else '' }}" placeholder="smtp.gmail.com">
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">{{ _('user_form_port') }}</label>
-                <input type="number" class="form-input" name="EMAIL_SMTP_PORT" value="{{ u.email_smtp_port if is_edit and u.email_smtp_port else 587 }}" placeholder="587">
-              </div>
-              <div class="form-group">
-                <label class="form-label">{{ _('user_form_security') }}</label>
-                {% set email_security = u.email_smtp_security if is_edit and u.email_smtp_security else 'starttls' %}
-                <select class="form-select" name="EMAIL_SMTP_SECURITY">
-                  <option value="starttls" {% if email_security=='starttls' %}selected{% endif %}>STARTTLS</option>
-                  <option value="ssl" {% if email_security=='ssl' %}selected{% endif %}>SSL/TLS</option>
-                  <option value="none" {% if email_security=='none' %}selected{% endif %}>None</option>
-                </select>
-              </div>
+            {% set current_mode = 'shared' if is_user else (u.email_mode if is_edit and u.email_mode else 'shared') %}
+            {% if is_user %}
+              <input type="hidden" name="EMAIL_MODE" value="shared">
+            {% else %}
+            <div class="mb-3" style="display:flex;gap:8px;flex-wrap:wrap;">
+              <label class="channel-card" style="flex:1;min-width:160px;display:block;cursor:pointer;" onclick="setEmailMode('shared')">
+                <div class="flex items-center gap-2">
+                  <input type="radio" name="EMAIL_MODE" value="shared" id="email_mode_shared"
+                         {% if current_mode == 'shared' %}checked{% endif %}>
+                  <span class="font-medium text-sm">{{ _('user_form_email_shared') }}</span>
+                </div>
+                <div class="text-xs text-secondary mt-1">{{ _('user_form_email_shared_hint') }}</div>
+              </label>
+              <label class="channel-card" style="flex:1;min-width:160px;display:block;cursor:pointer;" onclick="setEmailMode('custom')">
+                <div class="flex items-center gap-2">
+                  <input type="radio" name="EMAIL_MODE" value="custom" id="email_mode_custom"
+                         {% if current_mode == 'custom' %}checked{% endif %}>
+                  <span class="font-medium text-sm">{{ _('user_form_email_custom') }}</span>
+                </div>
+                <div class="text-xs text-secondary mt-1">{{ _('user_form_email_custom_hint') }}</div>
+              </label>
             </div>
-            <label class="form-label">{{ _('user_form_smtp_user') }}</label>
-            <input type="text" class="form-input mb-2" name="EMAIL_USERNAME" value="{{ u.email_username if is_edit else '' }}" placeholder="your@email.com">
-            <label class="form-label">{{ _('user_form_smtp_pass') }}</label>
-            <input type="password" class="form-input mb-2" name="EMAIL_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and u.email_password else '' }}" autocomplete="new-password">
-            <label class="form-label">{{ _('user_form_from') }}</label>
-            <input type="email" class="form-input mb-2" name="EMAIL_FROM" value="{{ u.email_from if is_edit else '' }}" placeholder="alerts@example.com">
+            {% endif %}
+
+            <!-- 收件邮箱（两种模式都需要） -->
             <label class="form-label">{{ _('user_form_to') }}</label>
-            <input type="text" class="form-input" name="EMAIL_TO" value="{{ u.email_to if is_edit else '' }}" placeholder="alice@example.com">
-            <div class="form-help">{{ _('user_form_smtp_hint') }}</div>
+            <input type="text" class="form-input" name="EMAIL_TO" id="email_to_input" value="{{ u.email_to if is_edit else '' }}" placeholder="alice@example.com" required>
+            <!-- 验证状态徽章（仅 shared 模式 + 已填邮箱时显示） -->
+            <div id="email_verify_status" class="mb-2" style="margin-top:6px;font-size:12px;{% if not is_edit or current_mode != 'shared' or not u.email_to %}display:none;{% endif %}">
+              {% if is_edit and current_mode == 'shared' and u.email_to %}
+                {% if u.email_verified %}
+                  <span style="color:var(--success);"><i class="bi bi-check-circle-fill mr-1"></i>{{ _('user_form_email_verified') }}</span>
+                {% else %}
+                  <span style="color:var(--warning);"><i class="bi bi-exclamation-triangle-fill mr-1"></i>{{ _('user_form_email_unverified') }}</span>
+                  ·
+                  <a href="#" onclick="resendVerification('{{ u.id }}', this); return false;" style="color:var(--accent);text-decoration:none;">
+                    <i class="bi bi-envelope-arrow-up mr-1"></i>{{ _('user_form_email_resend_verify') }}
+                  </a>
+                {% endif %}
+              {% endif %}
+            </div>
+
+            <!-- SMTP 字段：仅 admin + custom 模式展开 -->
+            {% if is_admin %}
+            <div id="sec_email_custom" style="{% if current_mode != 'custom' %}display:none;{% endif %}">
+              <label class="form-label">{{ _('user_form_smtp_host') }}</label>
+              <input type="text" class="form-input mb-2" name="EMAIL_SMTP_HOST" value="{{ u.email_smtp_host if is_edit else '' }}" placeholder="smtp.gmail.com">
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label">{{ _('user_form_port') }}</label>
+                  <input type="number" class="form-input" name="EMAIL_SMTP_PORT" value="{{ u.email_smtp_port if is_edit and u.email_smtp_port else 587 }}" placeholder="587">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">{{ _('user_form_security') }}</label>
+                  {% set email_security = u.email_smtp_security if is_edit and u.email_smtp_security else 'starttls' %}
+                  <select class="form-select" name="EMAIL_SMTP_SECURITY">
+                    <option value="starttls" {% if email_security=='starttls' %}selected{% endif %}>STARTTLS</option>
+                    <option value="ssl" {% if email_security=='ssl' %}selected{% endif %}>SSL/TLS</option>
+                    <option value="none" {% if email_security=='none' %}selected{% endif %}>None</option>
+                  </select>
+                </div>
+              </div>
+              <label class="form-label">{{ _('user_form_smtp_user') }}</label>
+              <input type="text" class="form-input mb-2" name="EMAIL_USERNAME" value="{{ u.email_username if is_edit else '' }}" placeholder="your@email.com">
+              <label class="form-label">{{ _('user_form_smtp_pass') }}</label>
+              <input type="password" class="form-input mb-2" name="EMAIL_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and u.email_password else '' }}" autocomplete="new-password">
+              <label class="form-label">{{ _('user_form_from') }}</label>
+              <input type="email" class="form-input mb-2" name="EMAIL_FROM" value="{{ u.email_from if is_edit else '' }}" placeholder="alerts@example.com">
+              <div class="form-help">{{ _('user_form_smtp_hint') }}</div>
+            </div>
+            {% endif %}
           </div>
         </div>
 
@@ -294,7 +367,8 @@
     </div>
   </div>
 
-  <!-- Step 4: Auto book -->
+  <!-- Step 4: Auto book — 仅 admin 可见可编辑 -->
+  {% if is_admin %}
   <div class="card mb-4">
     <div class="section-header">
       <span class="step-num">4</span>
@@ -398,12 +472,13 @@
       </div>
     </div>
   </div>
+  {% endif %}{# end is_admin → Step 4 #}
 
   <div class="flex items-center gap-2 flex-wrap">
     <button type="submit" class="btn btn-primary">
       <i class="bi bi-save mr-1"></i>{{ _('user_form_save') if is_edit else _('user_form_create') }}
     </button>
-    <a href="{{ url_for('users_list') }}" class="btn btn-ghost">{{ _('user_form_cancel') }}</a>
+    <a href="{{ url_for('index') if is_user else url_for('users_list') }}" class="btn btn-ghost">{{ _('user_form_cancel') }}</a>
     {% if is_edit %}
     <button type="button" class="btn btn-ghost btn-sm" id="testBtn" onclick="testNotify('{{ u.id }}', this)">
       <i class="bi bi-send mr-1"></i>{{ _('user_form_test') }}
@@ -418,10 +493,86 @@
 
 {% block scripts %}
 <script>
+// 提交前自我禁用确认：user 角色把 enabled 关掉时，弹一次 confirm 兜底。
+// admin 永远直接放行；user 仅在确实把开关切到关闭时才询问。
+window._isSelfUser = {{ 'true' if is_user else 'false' }};
+window._origEnabled = {{ 'true' if (is_edit and u.enabled) else 'false' }};
+function confirmSelfDisable() {
+  if (!window._isSelfUser) return true;
+  var h = document.getElementById('enabled_h');
+  if (!h) return true;
+  var willDisable = (h.value !== 'true');
+  if (window._origEnabled && willDisable) {
+    var msg = (document.documentElement.lang === 'zh')
+      ? '确定要停用自己的账户吗？\n停用后监控/通知会立刻全部停止，仅 admin 能重新启用。'
+      : 'Disable your own account?\nMonitoring and notifications will stop immediately. Only admin can re-enable.';
+    return confirm(msg);
+  }
+  return true;
+}
+
 function updateChannelsInput() {
   var checked = [].map.call(document.querySelectorAll('.channel-chk:checked'), function(el){ return el.dataset.ch; });
   document.getElementById('channels_hidden').value = checked.join(',');
 }
+
+function escapeHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
+    return ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    })[ch];
+  });
+}
+
+function resendVerification(userId, el) {
+  // 重发邮箱验证邮件。复用 test-notify 限流通道。
+  var orig = el.innerHTML;
+  el.innerHTML = '<i class="bi bi-hourglass-split mr-1"></i>发送中...';
+  el.style.pointerEvents = 'none';
+  var csrf = document.querySelector('input[name="csrf_token"]').value;
+  fetch('/users/' + encodeURIComponent(userId) + '/resend-verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'csrf_token=' + encodeURIComponent(csrf),
+  })
+  .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
+  .then(function(arr){
+    var status = arr[0], j = arr[1];
+    if (status === 200 && j.ok) {
+      el.innerHTML = '<i class="bi bi-check-circle mr-1"></i>已发送，请查收邮箱';
+      el.style.color = 'var(--success)';
+    } else {
+      el.innerHTML = '<i class="bi bi-x-circle mr-1"></i>' + escapeHtml(j.error || '发送失败');
+      el.style.color = 'var(--danger)';
+      setTimeout(function(){ el.innerHTML = orig; el.style.color = ''; el.style.pointerEvents=''; }, 4000);
+    }
+  })
+  .catch(function(){
+    el.innerHTML = '<i class="bi bi-x-circle mr-1"></i>网络错误';
+    el.style.color = 'var(--danger)';
+    setTimeout(function(){ el.innerHTML = orig; el.style.color = ''; el.style.pointerEvents=''; }, 4000);
+  });
+}
+
+function setEmailMode(mode) {
+  // 切换 shared / custom：勾上对应 radio，展开/收起 SMTP 字段块。
+  var sharedR = document.getElementById('email_mode_shared');
+  var customR = document.getElementById('email_mode_custom');
+  var smtp = document.getElementById('sec_email_custom');
+  if (!sharedR || !customR || !smtp) return;
+  if (mode === 'custom') {
+    customR.checked = true;
+    smtp.style.display = 'block';
+  } else {
+    sharedR.checked = true;
+    smtp.style.display = 'none';
+  }
+}
+
 function toggleChannel(ch) {
   var chk = document.querySelector('.channel-chk[data-ch="' + ch + '"]');
   var sec = document.getElementById('sec_' + ch);
@@ -446,7 +597,7 @@ function testNotify(userId, btn) {
   var resultDiv = document.getElementById('testResult');
   if(resultDiv) resultDiv.style.display = 'none';
 
-  fetch('/users/' + userId + '/test', {
+  fetch('/users/' + encodeURIComponent(userId) + '/test', {
     method: 'POST',
     headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
   })
@@ -454,12 +605,12 @@ function testNotify(userId, btn) {
     .then(function(data) {
       var rows = '';
       if(data.error && !data.results.length) {
-        rows = '<span style="color:var(--warning);"><i class="bi bi-exclamation-circle mr-1"></i>' + data.error + '</span>';
+        rows = '<span style="color:var(--warning);"><i class="bi bi-exclamation-circle mr-1"></i>' + escapeHtml(data.error) + '</span>';
       } else {
         rows = (data.results||[]).map(function(r) {
           var icon = r.ok ? '<i class="bi bi-check-circle-fill mr-1" style="color:var(--success);"></i>' : '<i class="bi bi-x-circle-fill mr-1" style="color:var(--danger);"></i>';
-          var err = r.error ? ' <span class="text-xs" style="color:var(--danger);">— ' + r.error + '</span>' : '';
-          return '<div class="mb-1">' + icon + '<span class="text-sm">' + r.channel + err + '</span></div>';
+          var err = r.error ? ' <span class="text-xs" style="color:var(--danger);">— ' + escapeHtml(r.error) + '</span>' : '';
+          return '<div class="mb-1">' + icon + '<span class="text-sm">' + escapeHtml(r.channel) + err + '</span></div>';
         }).join('');
       }
       if(resultDiv) {
@@ -470,7 +621,7 @@ function testNotify(userId, btn) {
     })
     .catch(function(e) {
       if(resultDiv) {
-        resultDiv.innerHTML = '<div class="text-xs" style="color:var(--danger);"><i class="bi bi-exclamation-triangle mr-1"></i>' + (zh ? '请求失败：' : 'Request failed: ') + e.message + '</div>';
+        resultDiv.innerHTML = '<div class="text-xs" style="color:var(--danger);"><i class="bi bi-exclamation-triangle mr-1"></i>' + (zh ? '请求失败：' : 'Request failed: ') + escapeHtml(e.message) + '</div>';
         resultDiv.style.display = 'block';
       }
     })

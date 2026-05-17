@@ -60,9 +60,11 @@ from app import csrf as _csrf                                    # noqa: E402
 from app import jinja_filters                                    # noqa: E402
 from app.auth import (                                            # noqa: E402
     auth_enabled,
+    current_user_id,
     ensure_secret_key,
     guest_mode_enabled,
     is_admin,
+    is_user,
 )
 from app.i18n import get_lang                                     # noqa: E402
 from app.routes import (                                          # noqa: E402
@@ -70,6 +72,7 @@ from app.routes import (                                          # noqa: E402
     calendar_routes,
     control,
     dashboard,
+    email_verify as email_verify_routes,
     legal,
     map_routes,
     notifications,
@@ -121,9 +124,11 @@ _csrf.register(app)
 @app.context_processor
 def _inject_auth():
     return {
-        "auth_enabled": auth_enabled(),
-        "is_admin":     is_admin(),
-        "guest_mode":   guest_mode_enabled(),
+        "auth_enabled":    auth_enabled(),
+        "is_admin":        is_admin(),
+        "is_user":         is_user(),
+        "current_user_id": current_user_id(),
+        "guest_mode":      guest_mode_enabled(),
     }
 
 
@@ -143,6 +148,7 @@ def _inject_translations():
 sessions.register(app)         # /login /logout /guest /set-lang
 dashboard.register(app)        # / /listings
 users.register(app)            # /users*
+email_verify_routes.register(app)  # /verify-email/<token> /users/<id>/resend-verify
 settings_routes.register(app)  # /settings
 map_routes.register(app)       # /map /api/map* /api/neighborhoods
 calendar_routes.register(app)  # /calendar /api/calendar

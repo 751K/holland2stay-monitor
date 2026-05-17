@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ class StorageBase:
     # 但每次实例化（app/db.py 是"每请求一个 Storage"）都跑一次
     # executescript()，每请求多 ~3ms。同 db_path 在进程内只跑一次即可。
     _migrated_paths: set[str] = set()
+    _migration_lock = threading.RLock()
 
     def __init__(self, db_path: Path, timezone_str: str = "UTC") -> None:
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -25,8 +27,10 @@ class StorageBase:
         self._tz = timezone_str
         path_key = str(db_path.resolve())
         if path_key not in StorageBase._migrated_paths:
-            self._migrate()
-            StorageBase._migrated_paths.add(path_key)
+            with StorageBase._migration_lock:
+                if path_key not in StorageBase._migrated_paths:
+                    self._migrate()
+                    StorageBase._migrated_paths.add(path_key)
         logger.debug("Storage 已连接: %s", db_path)
 
     # ── Public connection accessor ─────────────────────────────────
@@ -131,6 +135,7 @@ class StorageBase:
                 imessage_recipient         TEXT NOT NULL DEFAULT '',
                 telegram_token             TEXT NOT NULL DEFAULT '',
                 telegram_chat_id           TEXT NOT NULL DEFAULT '',
+                email_mode                 TEXT NOT NULL DEFAULT 'shared',
                 email_smtp_host            TEXT NOT NULL DEFAULT '',
                 email_smtp_port            INTEGER NOT NULL DEFAULT 587,
                 email_smtp_security        TEXT NOT NULL DEFAULT 'starttls',
@@ -178,6 +183,33 @@ class StorageBase:
             );
             CREATE INDEX IF NOT EXISTS idx_device_tokens_active
                 ON device_tokens(app_token_id, disabled_at);
+
+            -- 收件邮箱归属验证（防 shared 模式被当成代发服务滥用）。
+            -- 仅 email_mode='shared' 时强制使用；custom 模式用户自负责。
+            -- 同一邮箱可对应多个 token（用户多次点重发），最新未过期的有效。
+            CREATE TABLE IF NOT EXISTS email_verifications (
+                token       TEXT PRIMARY KEY,
+                user_id     TEXT NOT NULL,
+                email       TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                expires_at  TEXT NOT NULL,
+                verified_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_email_verif_user
+                ON email_verifications(user_id, email);
+
+            -- Resend 每日配额计数。多 Gunicorn worker 共享同一 SQLite，
+            -- 避免内存计数器各 worker 独立导致实际上限 = limit × N。
+            -- scope: 'global' (key='') 或 'user' (key=user_id)
+            -- day  : UTC 日期 YYYY-MM-DD（按 UTC 切换避免本地时区跳变重置）
+            -- 老旧行（>30 天）由 prune_old_email_send_counters 清理。
+            CREATE TABLE IF NOT EXISTS email_send_counters (
+                scope TEXT NOT NULL,
+                key   TEXT NOT NULL,
+                day   TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (scope, key, day)
+            );
         """)
         # 增量列：CREATE TABLE IF NOT EXISTS 不会给老库补字段；
         # ALTER TABLE ADD COLUMN 在 SQLite 上幂等需自己捕获 OperationalError。
@@ -192,10 +224,45 @@ class StorageBase:
                 "ON web_notifications(user_id, id)"
             )
 
+        # email_mode：shared (Resend) / custom (SMTP)；新库默认 shared。
+        # 老库迁移：填过 email_smtp_host 的存量用户视为 custom，避免行为突变。
+        added = self._add_column_if_missing(
+            "user_configs", "email_mode",
+            "TEXT NOT NULL DEFAULT 'shared'",
+        )
+        if added:
+            with self._conn:
+                self._conn.execute(
+                    "UPDATE user_configs SET email_mode='custom' "
+                    "WHERE email_smtp_host <> '' AND email_mode='shared'"
+                )
+
+        # email_verified：shared 模式下 email_to 必须经过 double opt-in。
+        # 老库迁移：已有 email_to 的存量用户视为已验证（admin 信任前提，
+        # 避免升级后存量用户邮件突然全失效）。新增/修改邮箱才触发验证流程。
+        added_ev = self._add_column_if_missing(
+            "user_configs", "email_verified",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        if added_ev:
+            with self._conn:
+                self._conn.execute(
+                    "UPDATE user_configs SET email_verified=1 "
+                    "WHERE email_to <> '' AND email_verified=0"
+                )
+
     def _add_column_if_missing(
         self, table: str, column: str, decl: str,
-    ) -> None:
-        """幂等 ALTER TABLE ADD COLUMN——已存在时静默跳过。"""
+    ) -> bool:
+        """
+        幂等 ALTER TABLE ADD COLUMN——已存在时静默跳过。
+
+        Returns
+        -------
+        True 表示本次调用真的执行了 ADD COLUMN（首次部署 / 升级），
+        False 表示字段早已存在（既有库，无操作）。
+        调用方可据此触发一次性数据迁移（如 backfill 默认值）。
+        """
         # 先查 PRAGMA table_info 避免抛 OperationalError 进日志
         cols = {
             r[1] for r in self._conn.execute(
@@ -203,12 +270,21 @@ class StorageBase:
             ).fetchall()
         }
         if column in cols:
-            return
-        with self._conn:
-            self._conn.execute(
-                f"ALTER TABLE {table} ADD COLUMN {column} {decl}"
-            )
+            return False
+        try:
+            with self._conn:
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {decl}"
+                )
+        except sqlite3.OperationalError as e:
+            # 多线程/多 worker 首次启动时可能在 PRAGMA 与 ALTER 之间被
+            # 另一个连接抢先完成迁移；SQLite 报 duplicate column 时视为
+            # 幂等成功后的 no-op，避免并发注册/写入时偶发 500。
+            if "duplicate column name" in str(e).lower():
+                return False
+            raise
         logger.info("schema 升级: %s.%s 已添加", table, column)
+        return True
 
     # ── Meta ────────────────────────────────────────────────────────
 

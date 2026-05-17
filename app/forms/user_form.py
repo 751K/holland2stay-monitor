@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from typing import TYPE_CHECKING, Optional
 
@@ -40,6 +41,40 @@ VALID_PAYMENT_METHODS: set[str] = {
     "idealcheckout_mastercard",
 }
 DEFAULT_PAYMENT_METHOD = "idealcheckout_ideal"
+_SHARED_EMAIL_TO_RE = re.compile(r"^[^@\s,;]+@[^@\s,;.]+\.[^@\s,;]+$")
+
+
+def _validate_shared_email_to(email: str) -> None:
+    """shared email 使用平台发件域，必须是单个标准邮箱地址。"""
+    if email and not _SHARED_EMAIL_TO_RE.match(email):
+        raise ValueError("收件邮箱格式错误，shared 模式只接受单个标准邮箱地址")
+
+
+# 用户名清洗用的字符黑名单：
+# - C0 控制字符 (U+0000–U+001F) 含 \n \r \t \0：邮件正文段落注入、日志行注入
+# - DEL (U+007F)                                ：同上
+# - U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR：JS / JSON 注入历史风险
+# - U+200B–U+200D / U+FEFF 零宽字符            ：homograph / 钓鱼欺骗
+_NAME_BLACKLIST = frozenset(
+    [chr(c) for c in range(0x00, 0x20)]
+    + ["\x7f", "\u2028", "\u2029", "\u200b", "\u200c", "\u200d", "\ufeff"]
+)
+_NAME_MAX_LEN = 64
+
+
+def _sanitize_display_name(raw: str) -> str:
+    """
+    规范化用户显示名，输入侧防御。
+
+    - 黑名单字符替换为单个空格（不删除：避免肉眼相邻字符意外粘连导致歧义）
+    - 折叠连续空白 → 单空格
+    - 上限 64 字符（按 code point 计，不按 byte），超出截断
+    """
+    cleaned = "".join(" " if c in _NAME_BLACKLIST else c for c in (raw or ""))
+    cleaned = " ".join(cleaned.split())  # 折叠空白 + strip
+    if len(cleaned) > _NAME_MAX_LEN:
+        cleaned = cleaned[:_NAME_MAX_LEN].rstrip()
+    return cleaned
 
 
 def build_user_from_form(
@@ -163,7 +198,7 @@ def build_user_from_form(
             allowed_energy=_sanitize_energy("AUTO_BOOK_ALLOWED_ENERGY"),
         ),
     )
-    # iOS App 登录字段（独立处理，因为是 bcrypt hash 而不是双向加密的凭证）
+    # 登录字段（iOS App + Web 共用，独立处理：bcrypt hash 而非双向加密凭证）
     # ----------------------------------------------------------------
     # 三种用户行为：
     # 1. 不填 app_password 且不勾 app_password_clear   → 保留旧 hash
@@ -187,12 +222,33 @@ def build_user_from_form(
     else:
         app_password_hash = existing.app_password_hash if existing else ""
 
-    # name 规范化：禁止 "__" 前缀，避免与 API v1 的保留 sentinel "__admin__"
-    # 冲突（同名用户会被 sentinel 分支劫持，无法登录 App）。
-    raw_name = form.get("name", "").strip()
+    # name 规范化：
+    # 1. 控制字符 / 换行 → 空格：防止注入到邮件正文构造伪段落（社工攻击面）
+    #    也防 \r\n 注入到日志行造成 log injection
+    # 2. 长度上限 64 字符：避免恶意巨长名字影响 UI / 邮件渲染 / 日志
+    # 3. 禁止 "__" 前缀：与 API v1 的保留 sentinel "__admin__" 冲突，
+    #    同名用户会被 sentinel 分支劫持，无法登录 App
+    raw_name = _sanitize_display_name(form.get("name", ""))
     if raw_name.startswith("__"):
         logger.warning("用户名 %r 含保留前缀 '__'，已加 'u_' 前缀防冲突", raw_name)
         raw_name = "u_" + raw_name.lstrip("_")
+    raw_email_mode = (form.get("EMAIL_MODE", "shared") or "shared").strip().lower()
+    email_mode = raw_email_mode if raw_email_mode in ("shared", "custom") else "shared"
+
+    # email_verified 的继承规则（核心安全逻辑）：
+    # - custom 模式：永远 False（不用此字段，但不污染 shared 状态）
+    # - shared 模式且 email_to 未变：继承 existing.email_verified
+    # - shared 模式且 email_to 变化：强制重置为 False，等待新一轮验证
+    new_email_to = form.get("EMAIL_TO", "").strip()
+    if email_mode == "shared":
+        _validate_shared_email_to(new_email_to)
+    if email_mode != "shared":
+        email_verified = False
+    elif existing and existing.email_to == new_email_to and new_email_to:
+        email_verified = bool(existing.email_verified)
+    else:
+        email_verified = False
+
     new_user = UserConfig(
         id=user_id or uuid.uuid4().hex[:8],
         name=raw_name or "未命名用户",
@@ -202,6 +258,8 @@ def build_user_from_form(
         imessage_recipient=form.get("IMESSAGE_RECIPIENT", ""),
         telegram_token=form.get("TELEGRAM_BOT_TOKEN", ""),
         telegram_chat_id=form.get("TELEGRAM_CHAT_ID", ""),
+        email_mode=email_mode,
+        email_verified=email_verified,
         email_smtp_host=form.get("EMAIL_SMTP_HOST", "").strip(),
         email_smtp_port=_iv("EMAIL_SMTP_PORT", min_val=1, max_val=65535) or 587,
         email_smtp_security=form.get("EMAIL_SMTP_SECURITY", "starttls").strip().lower() or "starttls",
@@ -220,3 +278,150 @@ def build_user_from_form(
         allow_h2s_login=allow_h2s_login,
     )
     return new_user
+
+
+def build_user_from_form_self(
+    form: "ImmutableMultiDict[str, str]",
+    existing: UserConfig,
+) -> UserConfig:
+    """
+    user 角色编辑自己时的安全构造器（白名单字段）。
+
+    与 ``build_user_from_form`` 的区别：仅以下字段允许被表单覆盖：
+    - ``enabled``                       （前端有 confirm 兜底，自禁允许）
+    - ``notifications_enabled`` + ``notification_channels``
+    - 四个渠道的凭证字段（imessage / telegram / email / whatsapp）
+    - ``listing_filter``（通知过滤）
+    - ``app_password``（仅本人可改自己密码；空表单 = 不动）
+
+    **以下字段完全忽略 form 输入，强制沿用 existing**：
+    - ``id`` / ``name``                 — 名称不可改
+    - ``auto_book``                     — 自动预订仅 admin 可设
+    - ``app_login_enabled``             — 客户端登录开关仅 admin 可改（防自锁/自开）
+    - ``allow_h2s_login``               — H2S 凭据 fallback 仅 admin 可设
+
+    即使 user 用 DevTools 在 POST 里塞 ``AUTO_BOOK_*`` / ``name`` / ``app_login_enabled``
+    等字段也会被丢弃。
+
+    Parameters
+    ----------
+    form     : Flask ``request.form``
+    existing : 当前 UserConfig（必填，self 编辑只能更新已有账号）
+    """
+    if existing is None:
+        raise ValueError("self 编辑模式必须传入 existing UserConfig")
+
+    def _fv(key: str, min_val: float = 0.01, max_val: float = 50000) -> Optional[float]:
+        v = form.get(key, "").strip()
+        if not v:
+            return None
+        try:
+            val = float(v)
+        except ValueError:
+            return None
+        return val if min_val <= val <= max_val else None
+
+    def _iv(key: str, min_val: int = 0, max_val: int = 200) -> Optional[int]:
+        v = form.get(key, "").strip()
+        if not v:
+            return None
+        try:
+            val = int(v)
+        except ValueError:
+            return None
+        return val if min_val <= val <= max_val else None
+
+    def _lv(key: str) -> list[str]:
+        vals = form.getlist(key)
+        if vals:
+            return [x.strip() for x in vals if x.strip()]
+        v = form.get(key, "").strip()
+        return [x.strip() for x in v.split(",") if x.strip()] if v else []
+
+    def _secret(key: str, old_val: str) -> str:
+        v = form.get(key, "").strip()
+        return v if v else old_val
+
+    def _sanitize_energy(key: str) -> str:
+        v = form.get(key, "").strip()
+        if not v:
+            return ""
+        return v if v.upper() in ENERGY_LABELS else ""
+
+    channels_raw = form.get("NOTIFICATION_CHANNELS", "")
+    channels = [c.strip().lower() for c in channels_raw.split(",") if c.strip()]
+
+    lf = ListingFilter(
+        max_rent=_fv("MAX_RENT"),
+        min_area=_fv("MIN_AREA"),
+        min_floor=_iv("MIN_FLOOR"),
+        allowed_occupancy=_lv("ALLOWED_OCCUPANCY"),
+        allowed_types=_lv("ALLOWED_TYPES"),
+        allowed_neighborhoods=_lv("ALLOWED_NEIGHBORHOODS"),
+        allowed_contract=_lv("ALLOWED_CONTRACT"),
+        allowed_tenant=_lv("ALLOWED_TENANT"),
+        allowed_offer=_lv("ALLOWED_OFFER"),
+        allowed_cities=_lv("ALLOWED_CITIES"),
+        allowed_finishing=_lv("ALLOWED_FINISHING"),
+        allowed_energy=_sanitize_energy("ALLOWED_ENERGY"),
+    )
+
+    # 密码处理（user 仅可改自己密码，不可改 app_login_enabled）
+    new_app_pw = form.get("app_password", "")
+    clear_app_pw = form.get("app_password_clear") == "true"
+    if clear_app_pw:
+        app_password_hash = ""
+    elif new_app_pw:
+        try:
+            from users import _bcrypt_hash
+            app_password_hash = _bcrypt_hash(new_app_pw)
+        except RuntimeError as e:
+            raise ValueError(str(e)) from e
+    else:
+        app_password_hash = existing.app_password_hash
+
+    # 普通 user 自助设置只能走 shared email。custom SMTP 会让用户控制服务器
+    # 出站连接目标，属于 admin-only 配置。
+    email_mode = "shared"
+
+    # 同 build_user_from_form 的 email_verified 继承规则
+    new_email_to = form.get("EMAIL_TO", "").strip()
+    _validate_shared_email_to(new_email_to)
+    if existing.email_mode == "shared" and existing.email_to == new_email_to and new_email_to:
+        email_verified = bool(existing.email_verified)
+    else:
+        email_verified = False
+
+    return UserConfig(
+        # 不可改字段：强制沿用 existing
+        id=existing.id,
+        name=existing.name,
+        auto_book=existing.auto_book,
+        app_login_enabled=existing.app_login_enabled,
+        allow_h2s_login=existing.allow_h2s_login,
+        # 可改：账户启用（前端 confirm 兜底）
+        enabled=form.get("enabled") == "true",
+        # 可改：通知段
+        notifications_enabled=form.get("NOTIFICATIONS_ENABLED", "true") != "false",
+        notification_channels=channels,
+        imessage_recipient=form.get("IMESSAGE_RECIPIENT", ""),
+        telegram_token=form.get("TELEGRAM_BOT_TOKEN", ""),
+        telegram_chat_id=form.get("TELEGRAM_CHAT_ID", ""),
+        email_mode=email_mode,
+        email_verified=email_verified,
+        email_smtp_host="",
+        email_smtp_port=587,
+        email_smtp_security="starttls",
+        email_username="",
+        email_password="",
+        email_from="",
+        email_to=new_email_to,
+        twilio_sid=form.get("TWILIO_ACCOUNT_SID", ""),
+        twilio_token=_secret("TWILIO_AUTH_TOKEN", existing.twilio_token),
+        twilio_from=form.get("TWILIO_FROM", ""),
+        twilio_to=form.get("TWILIO_TO", ""),
+        # 可改：通知过滤
+        listing_filter=lf,
+        # 可改：仅自己 App 密码
+        app_password_hash=app_password_hash,
+    )

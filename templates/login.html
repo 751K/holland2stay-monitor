@@ -74,7 +74,15 @@
     </div>
     {% endif %}
 
-    <div class="login-footer">{{ _('login_footer') }}</div>
+    <div class="login-footer">
+      <div class="login-links" style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;">
+        <a href="{{ url_for('support_page') }}" style="color:var(--accent);text-decoration:none;">{{ 'Help' if lang == 'en' else '帮助' }}</a>
+        <span style="color:var(--text3);opacity:.5;">·</span>
+        <a href="{{ url_for('privacy_page') }}" style="color:var(--accent);text-decoration:none;">{{ 'Privacy' if lang == 'en' else '隐私' }}</a>
+        <span style="color:var(--text3);opacity:.5;">·</span>
+        <a href="{{ url_for('terms_page') }}" style="color:var(--accent);text-decoration:none;">{{ 'Terms' if lang == 'en' else '条款' }}</a>
+      </div>
+    </div>
   </div>
 </div>
 

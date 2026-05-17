@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		FC1F38632FB72DA000FC7A33 /* FlatRadar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FlatRadar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FCA5BF452FBA1D5F0081A5E4 /* FlatRadar.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FlatRadar.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -32,6 +33,7 @@
 		FC1F385A2FB72DA000FC7A33 = {
 			isa = PBXGroup;
 			children = (
+				FCA5BF452FBA1D5F0081A5E4 /* FlatRadar.storekit */,
 				FC1F38652FB72DA000FC7A33 /* FlatRadar */,
 				FC1F38642FB72DA000FC7A33 /* Products */,
 			);

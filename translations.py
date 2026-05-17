@@ -301,14 +301,23 @@ TRANSLATIONS = {
                              "en": "Safety design: auto-booking only goes as far as 'add to cart'. It will NOT auto-pay. You'll be notified to confirm."},
     "user_form_pw_keep":    {"zh": "已保存，留空保留原密码",    "en": "Saved, leave empty to keep"},
 
-    # ── iOS App 登录 ─────────────────────────────────────
-    "user_form_app_login":               {"zh": "iOS App 登录",              "en": "iOS App Login"},
-    "user_form_app_login_hint":          {"zh": "允许该用户用此名字 + 密码登录手机 App 查看自己的数据和推送。", "en": "Allow this user to log in to the iOS App with this name + a password to view their own data and receive push notifications."},
-    "user_form_app_login_enable":        {"zh": "启用 App 登录",             "en": "Enable App login"},
-    "user_form_app_password":            {"zh": "App 密码",                  "en": "App password"},
+    # ── Email 模式切换（shared / custom） ─────────────────
+    "user_form_email_shared":      {"zh": "使用 FlatRadar 邮件服务",   "en": "Use FlatRadar email service"},
+    "user_form_email_shared_hint": {"zh": "推荐：仅需填收件邮箱，无需配置 SMTP", "en": "Recommended — only fill the recipient address, no SMTP setup"},
+    "user_form_email_custom":      {"zh": "使用自己的 SMTP 服务器",     "en": "Use your own SMTP server"},
+    "user_form_email_custom_hint": {"zh": "高级：自填 SMTP 主机/账号/密码", "en": "Advanced — bring your own SMTP host/account/password"},
+    "user_form_email_verified":      {"zh": "邮箱已验证",                  "en": "Email verified"},
+    "user_form_email_unverified":    {"zh": "邮箱未验证（通知暂不会发出）",  "en": "Email not verified (notifications paused)"},
+    "user_form_email_resend_verify": {"zh": "重发验证邮件",                "en": "Resend verification email"},
+
+    # ── 登录（iOS App / Web 共用） ───────────────────────
+    "user_form_app_login":               {"zh": "登录",                      "en": "Login"},
+    "user_form_app_login_hint":          {"zh": "允许该用户用此名字 + 密码登录手机 App 和网页端，查看自己的数据并接收推送。", "en": "Allow this user to sign in to the iOS App and web with this name + password to view their own data and receive notifications."},
+    "user_form_app_login_enable":        {"zh": "启用登录",                  "en": "Enable login"},
+    "user_form_app_password":            {"zh": "登录密码",                  "en": "Login password"},
     "user_form_app_password_set":        {"zh": "至少 8 个字符",             "en": "At least 8 characters"},
     "user_form_app_password_set_label":  {"zh": "已设置（留空保留）",        "en": "Set (leave empty to keep)"},
-    "user_form_app_password_unset_label":{"zh": "尚未设置 App 密码",         "en": "App password not set"},
+    "user_form_app_password_unset_label":{"zh": "尚未设置登录密码",          "en": "Login password not set"},
     "user_form_app_password_clear":      {"zh": "清除已保存的密码",          "en": "Clear saved password"},
 
     # ── App 账户管理页 ───────────────────────────────────
@@ -352,6 +361,13 @@ TRANSLATIONS = {
     "login_footer":         {"zh": "通过 WEB_USERNAME / WEB_PASSWORD 在 .env 中配置凭据",
                              "en": "Configure credentials via WEB_USERNAME / WEB_PASSWORD in .env"},
     "login_error":          {"zh": "用户名或密码错误",          "en": "Invalid username or password"},
+
+    # ── Multi-role (admin / user / guest) ────────────────
+    "my_account":           {"zh": "我的账号",                 "en": "My Account"},
+    "user_form_self_only_hint": {
+        "zh": "你正在编辑自己的账号。可调整通知渠道与过滤条件；账户名、客户端登录开关及自动预订仅 admin 可修改。",
+        "en": "You are editing your own account. You can adjust notification channels and filters. Account name, client login switch, and auto-booking can only be changed by admin.",
+    },
 
     # ── Badges / Status ──────────────────────────────────
     "badge_book":           {"zh": "直订",                    "en": "Direct"},

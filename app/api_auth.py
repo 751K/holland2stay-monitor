@@ -226,6 +226,29 @@ def _resolve_token(plaintext: str) -> Optional[dict]:
     return row
 
 
+def _user_token_still_allowed(row: dict) -> bool:
+    """
+    role=user 的 Bearer token 每次请求都确认账号仍可登录。
+
+    token 自身有 5 分钟 TTL 缓存；如果 admin 停用用户，不能等缓存自然过期。
+    """
+    if row.get("role") != "user":
+        return True
+    user_id = row.get("user_id")
+    if not user_id:
+        return False
+    try:
+        from users import load_users
+        users = load_users()
+    except Exception:
+        logger.exception("load_users failed while validating bearer user")
+        return False
+    user = next((u for u in users if u.id == user_id), None)
+    if user is None:
+        return False
+    return bool(user.enabled and user.app_login_enabled)
+
+
 # ── 装饰器 ──────────────────────────────────────────────────────────
 
 def bearer_required(allow_roles: tuple[str, ...] = ("admin", "user")) -> Callable:
@@ -253,6 +276,8 @@ def bearer_required(allow_roles: tuple[str, ...] = ("admin", "user")) -> Callabl
             row = _resolve_token(tok)
             if not row:
                 return _err.err_unauthorized("token 无效或已过期")
+            if not _user_token_still_allowed(row):
+                return _err.err_unauthorized("用户已停用或登录已关闭")
             if row["role"] not in allow_roles:
                 return _err.err_forbidden()
             g.api_role = row["role"]
@@ -280,7 +305,7 @@ def bearer_optional(f: Callable) -> Callable:
         tok = _extract_bearer()
         if tok:
             row = _resolve_token(tok)
-            if row:
+            if row and _user_token_still_allowed(row):
                 g.api_role = row["role"]
                 g.api_user_id = row.get("user_id")
                 g.api_token_id = row["id"]

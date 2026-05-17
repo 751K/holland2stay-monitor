@@ -25,6 +25,7 @@ def _form(**fields) -> ImmutableMultiDict:
 
 def _existing_with_password() -> UserConfig:
     u = UserConfig(name="kong", id="kong0001")
+    u.enabled = True
     u.app_login_enabled = True
     set_app_password(u, "old_pw_xyz")
     return u
@@ -32,7 +33,7 @@ def _existing_with_password() -> UserConfig:
 
 class TestAppPasswordSemantics:
     def test_new_user_with_password(self):
-        form = _form(name="kong", app_login_enabled="true", app_password="brand_new_pw")
+        form = _form(name="kong", enabled="true", app_login_enabled="true", app_password="brand_new_pw")
         u = build_user_from_form(form)
         assert u.app_login_enabled is True
         assert u.app_password_hash != ""
@@ -46,14 +47,14 @@ class TestAppPasswordSemantics:
 
     def test_empty_password_keeps_existing(self):
         old = _existing_with_password()
-        form = _form(name="kong", app_login_enabled="true")  # app_password 不传
+        form = _form(name="kong", enabled="true", app_login_enabled="true")  # app_password 不传
         u = build_user_from_form(form, user_id="kong0001", existing=old)
         assert u.app_password_hash == old.app_password_hash
         assert verify_app_password(u, "old_pw_xyz") is True
 
     def test_new_password_overrides_existing(self):
         old = _existing_with_password()
-        form = _form(name="kong", app_login_enabled="true", app_password="new_pw_456")
+        form = _form(name="kong", enabled="true", app_login_enabled="true", app_password="new_pw_456")
         u = build_user_from_form(form, user_id="kong0001", existing=old)
         assert u.app_password_hash != old.app_password_hash
         assert verify_app_password(u, "new_pw_456") is True

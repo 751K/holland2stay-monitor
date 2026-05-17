@@ -23,6 +23,8 @@ USER_CONFIG_COLUMNS = (
     "imessage_recipient",
     "telegram_token",
     "telegram_chat_id",
+    "email_mode",
+    "email_verified",
     "email_smtp_host",
     "email_smtp_port",
     "email_smtp_security",
@@ -99,6 +101,8 @@ class UserConfigOps:
             "imessage_recipient=excluded.imessage_recipient, "
             "telegram_token=excluded.telegram_token, "
             "telegram_chat_id=excluded.telegram_chat_id, "
+            "email_mode=excluded.email_mode, "
+            "email_verified=excluded.email_verified, "
             "email_smtp_host=excluded.email_smtp_host, "
             "email_smtp_port=excluded.email_smtp_port, "
             "email_smtp_security=excluded.email_smtp_security, "

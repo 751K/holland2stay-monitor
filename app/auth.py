@@ -68,6 +68,46 @@ def clear_login_failures(ip: str) -> None:
 
 
 # ------------------------------------------------------------------ #
+# 测试通知限流：防止用户把 /users/<id>/test 当成免费 mail relay 滥用
+# ------------------------------------------------------------------ #
+# 按 user_id 维度记录最近时间戳。两层窗口：
+# - 每分钟 ≤ TEST_NOTIFY_PER_MINUTE 次
+# - 每天   ≤ TEST_NOTIFY_PER_DAY    次（按滚动 24h 窗口，避开本地时区切换坑）
+#
+# admin 不限流（运维测试需求）。
+_TEST_NOTIFY_TIMES: dict[str, list[float]] = {}
+TEST_NOTIFY_PER_MINUTE = 3
+TEST_NOTIFY_PER_DAY    = 20
+_TEST_NOTIFY_MINUTE    = 60
+_TEST_NOTIFY_DAY       = 86400
+
+
+def check_test_notify_rate(user_id: str) -> tuple[bool, str]:
+    """
+    返回 (allowed, reason)。allowed=False 时 reason 是人类可读的拒绝理由。
+    仅做 read-only 检查；命中限制不消耗配额。命中后调用方应直接拒绝；
+    通过则继续调用 ``record_test_notify(user_id)`` 才正式占用一次。
+    """
+    if not user_id:
+        return True, ""
+    now = _time.monotonic()
+    window = [t for t in _TEST_NOTIFY_TIMES.get(user_id, []) if now - t < _TEST_NOTIFY_DAY]
+    _TEST_NOTIFY_TIMES[user_id] = window
+    if len(window) >= TEST_NOTIFY_PER_DAY:
+        return False, f"今日测试次数已达上限（{TEST_NOTIFY_PER_DAY}/天），请明天再试"
+    in_minute = sum(1 for t in window if now - t < _TEST_NOTIFY_MINUTE)
+    if in_minute >= TEST_NOTIFY_PER_MINUTE:
+        return False, f"操作过于频繁，请稍后再试（{TEST_NOTIFY_PER_MINUTE} 次/分钟）"
+    return True, ""
+
+
+def record_test_notify(user_id: str) -> None:
+    if not user_id:
+        return
+    _TEST_NOTIFY_TIMES.setdefault(user_id, []).append(_time.monotonic())
+
+
+# ------------------------------------------------------------------ #
 # 注册滥用防护：同 IP 每小时最多 3 个新账号
 # ------------------------------------------------------------------ #
 _REGISTER_RECORDS: dict[str, list[float]] = {}
@@ -117,6 +157,40 @@ def is_admin() -> bool:
     return session.get("role") == "admin"
 
 
+def is_user() -> bool:
+    """当前 session 是否为普通登录用户（user 角色）。"""
+    if not auth_enabled():
+        return False
+    return session.get("role") == "user"
+
+
+def current_user_id() -> str:
+    """返回 user 角色当前 session 绑定的 UserConfig.id，未登录或 admin/guest 返回空串。"""
+    if not is_user():
+        return ""
+    return session.get("user_id", "") or ""
+
+
+def _session_user_still_allowed() -> bool:
+    """
+    普通 user 的已登录 session 每次请求都重新确认账号仍可用。
+
+    这样 admin 停用用户或关闭登录后，不需要等 cookie/session 过期，
+    旧 Web 会话也会立即失效。admin / guest 不走 UserConfig 校验。
+    """
+    if not auth_enabled() or session.get("role") != "user":
+        return True
+    user_id = session.get("user_id", "") or ""
+    if not user_id:
+        return False
+    try:
+        from users import get_user, load_users
+        user = get_user(load_users(), user_id)
+    except Exception:
+        return False
+    return bool(user and user.enabled and user.app_login_enabled)
+
+
 # ------------------------------------------------------------------ #
 # 装饰器
 # ------------------------------------------------------------------ #
@@ -126,6 +200,9 @@ def login_required(f: Callable) -> Callable:
     @wraps(f)
     def decorated(*args, **kwargs):
         if auth_enabled() and not session.get("authenticated"):
+            return redirect(url_for("login", next=request.path))
+        if auth_enabled() and not _session_user_still_allowed():
+            session.clear()
             return redirect(url_for("login", next=request.path))
         return f(*args, **kwargs)
     return decorated
@@ -137,6 +214,9 @@ def api_login_required(f: Callable) -> Callable:
     def decorated(*args, **kwargs):
         if auth_enabled() and not session.get("authenticated"):
             return jsonify({"error": "unauthorized"}), 401
+        if auth_enabled() and not _session_user_still_allowed():
+            session.clear()
+            return jsonify({"error": "用户已停用或登录已关闭"}), 401
         return f(*args, **kwargs)
     return decorated
 
@@ -164,6 +244,59 @@ def admin_api_required(f: Callable) -> Callable:
             if session.get("role") != "admin":
                 return jsonify({"error": "forbidden"}), 403
         return f(*args, **kwargs)
+    return decorated
+
+
+def self_or_admin_required(f: Callable) -> Callable:
+    """
+    页面装饰器：允许 admin 访问任意 user_id，user 角色仅允许访问自己的 user_id。
+
+    依赖：URL 必须含 ``<user_id>`` 路径参数（即 kwargs 中有 ``user_id``）。
+    guest / 未登录 → 重定向登录页。
+    user 角色访问别人的 ``user_id`` → 重定向首页（不暴露其他用户存在）。
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not auth_enabled():
+            return f(*args, **kwargs)
+        if not session.get("authenticated"):
+            return redirect(url_for("login", next=request.path))
+        role = session.get("role")
+        if role == "admin":
+            return f(*args, **kwargs)
+        if role == "user":
+            if not _session_user_still_allowed():
+                session.clear()
+                return redirect(url_for("login", next=request.path))
+            target = kwargs.get("user_id", "")
+            if target and target == session.get("user_id"):
+                return f(*args, **kwargs)
+            return redirect(url_for("index"))
+        # guest 或未知角色
+        return redirect(url_for("index"))
+    return decorated
+
+
+def self_or_admin_api_required(f: Callable) -> Callable:
+    """``self_or_admin_required`` 的 API 版本：未授权返回 401/403 JSON。"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not auth_enabled():
+            return f(*args, **kwargs)
+        if not session.get("authenticated"):
+            return jsonify({"error": "unauthorized"}), 401
+        role = session.get("role")
+        if role == "admin":
+            return f(*args, **kwargs)
+        if role == "user":
+            if not _session_user_still_allowed():
+                session.clear()
+                return jsonify({"error": "用户已停用或登录已关闭"}), 401
+            target = kwargs.get("user_id", "")
+            if target and target == session.get("user_id"):
+                return f(*args, **kwargs)
+            return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "forbidden"}), 403
     return decorated
 
 

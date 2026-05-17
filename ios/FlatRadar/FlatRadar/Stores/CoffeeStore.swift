@@ -27,6 +27,23 @@ final class CoffeeStore {
         do {
             let fetched = try await Product.products(for: productIDs)
             products = fetched.sorted { $0.price < $1.price }
+            #if DEBUG
+            // 静默丢掉的 SKU 通常是：App Store Connect 不存在 / 状态非
+            // "Ready to Submit" / Product ID 大小写不一致 / Bundle ID 不匹配。
+            let requested = Set(productIDs)
+            let returned = Set(fetched.map(\.id))
+            let missing = requested.subtracting(returned)
+            print("[CoffeeStore] requested: \(requested.sorted())")
+            print("[CoffeeStore] returned:  \(returned.sorted())")
+            if !missing.isEmpty {
+                print("[CoffeeStore] ⚠️ MISSING (silently dropped by StoreKit): \(missing.sorted())")
+                print("[CoffeeStore]    检查 App Store Connect 上这些 IAP 的:")
+                print("[CoffeeStore]    1) Product ID 是否严格匹配（含大小写、点号）")
+                print("[CoffeeStore]    2) Status 是否 'Ready to Submit' 或 'Approved'")
+                print("[CoffeeStore]    3) Bundle ID 是否对得上当前签名")
+                print("[CoffeeStore]    4) 是否新建后 < 15-30min（沙盒同步延迟）")
+            }
+            #endif
         } catch {
             purchaseError = error.localizedDescription
             #if DEBUG

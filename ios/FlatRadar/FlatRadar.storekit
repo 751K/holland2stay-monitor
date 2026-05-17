@@ -1,0 +1,126 @@
+{
+  "identifier" : "FlatRadar",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "ESP_001",
+      "localizations" : [
+        {
+          "description" : "A small tip — espresso shot. Supports development. Does not unlock any features.",
+          "displayName" : "Espresso Tip",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "一杯浓缩的支持。不解锁任何功能。",
+          "displayName" : "浓缩 Espresso",
+          "locale" : "zh_Hans"
+        }
+      ],
+      "productID" : "coffee.espresso",
+      "referenceName" : "Espresso Tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "internalID" : "LAT_001",
+      "localizations" : [
+        {
+          "description" : "A medium tip — latte. Supports development. Does not unlock any features.",
+          "displayName" : "Latte Tip",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "一杯拿铁的支持。不解锁任何功能。",
+          "displayName" : "拿铁 Latte",
+          "locale" : "zh_Hans"
+        }
+      ],
+      "productID" : "coffee.latte",
+      "referenceName" : "Latte Tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "5.99",
+      "familyShareable" : false,
+      "internalID" : "FLW_001",
+      "localizations" : [
+        {
+          "description" : "A larger tip — flat white. Supports development. Does not unlock any features.",
+          "displayName" : "Flat White Tip",
+          "locale" : "en_US"
+        },
+        {
+          "description" : "一杯馥芮白的支持。不解锁任何功能。",
+          "displayName" : "馥芮白 Flat White",
+          "locale" : "zh_Hans"
+        }
+      ],
+      "productID" : "coffee.flatwhite",
+      "referenceName" : "Flat White Tip",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "FlatRadar",
+    "_developerTeamID" : "",
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

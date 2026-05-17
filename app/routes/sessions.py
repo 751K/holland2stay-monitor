@@ -35,6 +35,36 @@ from app.csrf import csrf_required
 from app.safety import safe_next_url
 
 
+def _try_user_login(username: str, password: str):
+    """
+    在 user_configs 表中尝试匹配 (username, password)。
+
+    返回 (UserConfig | None, ok: bool)。
+    - user 不存在 → (None, False)，但仍执行一次 bcrypt 计算抑制时序泄漏
+    - 找到 user 但 app_login_enabled=False → (user, False)
+    - app_login_enabled=True 且 bcrypt 通过 → (user, True)
+    - 任何异常 → (None, False)，fail-closed
+
+    复用 `verify_app_password()` 即可——它已经覆盖 enabled 检查 + 异常吞 + 空串拒。
+    """
+    try:
+        from users import get_user_by_name, load_users, verify_app_password
+        users = load_users()
+        user = get_user_by_name(users, username)
+        if user is None:
+            # 没有该用户：仍消耗一次 bcrypt，避免可探测的时序差
+            try:
+                import bcrypt
+                bcrypt.checkpw(b"x", bcrypt.hashpw(b"x", bcrypt.gensalt()))
+            except Exception:
+                pass
+            return None, False
+        ok = verify_app_password(user, password)
+        return user, ok
+    except Exception:
+        return None, False
+
+
 @csrf_required
 def login() -> Any:
     # 如果鉴权未启用，直接跳首页
@@ -66,8 +96,21 @@ def login() -> Any:
         if user_ok and pass_ok:
             clear_login_failures(client_ip)  # 成功则清除失败记录
             session.permanent = True
+            session.pop("user_id", None)  # 旧 user 残留清掉，admin 不绑 user_id
             session["authenticated"] = True
             session["role"] = "admin"
+            next_url = safe_next_url(request.form.get("next", ""))
+            return redirect(next_url)
+
+        # admin 失败 → 尝试 user 表登录（仅 app_login_enabled 且 bcrypt 通过）
+        # 不论用户是否存在都走 bcrypt 校验路径以减少时序差异（fail-closed）。
+        user_record, user_pass_ok = _try_user_login(username, password)
+        if user_record is not None and user_pass_ok:
+            clear_login_failures(client_ip)
+            session.permanent = True
+            session["authenticated"] = True
+            session["role"] = "user"
+            session["user_id"] = user_record.id
             next_url = safe_next_url(request.form.get("next", ""))
             return redirect(next_url)
 

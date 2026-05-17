@@ -66,6 +66,13 @@ class TestVerifyAppPassword:
         u.app_login_enabled = False
         assert verify_app_password(u, "secret") is False
 
+    def test_user_disabled_fails(self):
+        """账号停用后，即使登录开关和密码都正确也必须拒绝。"""
+        u = _make_user()
+        set_app_password(u, "secret")
+        u.enabled = False
+        assert verify_app_password(u, "secret") is False
+
     def test_no_hash_fails(self):
         u = _make_user()
         # 没设密码

@@ -60,6 +60,19 @@ def is_macos() -> bool:
     return sys.platform == "darwin"
 
 
+def _redact_email(addr: str) -> str:
+    """
+    日志用：a***@example.com。
+    生产日志可能进 SaaS / Sentry，GDPR 视用户邮箱为个人数据。
+    """
+    if not addr or "@" not in addr:
+        return "***"
+    local, _, domain = addr.partition("@")
+    if len(local) <= 1:
+        return f"*@{domain}"
+    return f"{local[0]}***@{domain}"
+
+
 # ------------------------------------------------------------------ #
 # 抽象基类
 # ------------------------------------------------------------------ #
@@ -201,7 +214,11 @@ class MultiNotifier(BaseNotifier):
         return any(r is True for r in results)
 
     async def close(self) -> None:
-        await asyncio.gather(*[n.close() for n in self._notifiers])
+        # 单个 notifier close 抛错不能拖垮其他 close（否则 fd / Session 泄漏）
+        await asyncio.gather(
+            *[n.close() for n in self._notifiers],
+            return_exceptions=True,
+        )
 
 
 # ------------------------------------------------------------------ #
@@ -389,7 +406,7 @@ class EmailNotifier(BaseNotifier):
                         client.starttls()
                         client.ehlo()
                     self._deliver(client, msg, recipients)
-            logger.debug("Email 发送成功 → %s", ", ".join(recipients))
+            logger.debug("Email 发送成功 → %s", ", ".join(_redact_email(r) for r in recipients))
             return True
         except Exception as e:
             logger.error("Email 发送失败: %s", e)
@@ -402,6 +419,241 @@ class EmailNotifier(BaseNotifier):
 
     async def close(self) -> None:
         pass
+
+
+# ------------------------------------------------------------------ #
+# Resend（共享邮件服务）
+# ------------------------------------------------------------------ #
+# Resend (https://resend.com) 是事务邮件 SaaS：
+# - 管理员在 .env 配 RESEND_API_KEY + RESEND_FROM；所有 email_mode='shared'
+#   的用户共用同一发件域名，每个用户只需填 email_to
+# - 自建 SMTP 几乎都因送达率不可用；Resend 免费档 3000/月 + 100/天 足够小规模
+# - 走 HTTPS POST 而不是 SMTP；不需要 25 端口、不需要 SPF/DKIM 自己配
+#
+# 错误处理：4xx/5xx 一律记错误日志返回 False；与 EmailNotifier 行为一致。
+
+class ResendNotifier(BaseNotifier):
+    """
+    通过 Resend HTTP API 发送邮件。
+
+    构造参数
+    --------
+    api_key   : Resend API key（以 ``re_`` 开头）
+    from_addr : 发件人邮箱（必须在 Resend 已验证的域名下）
+    to_addrs  : 收件人邮箱，逗号分隔可多个
+    """
+
+    ENDPOINT = "https://api.resend.com/emails"
+
+    def __init__(
+        self,
+        api_key: str,
+        from_addr: str,
+        to_addrs: str,
+        user_id: str = "",
+    ) -> None:
+        self._api_key = api_key.strip()
+        self._from = from_addr.strip()
+        self._to = to_addrs.strip()
+        # user_id 用于配额计数；空串 = 不归属任何用户（不消耗 per-user quota
+        # 但仍消耗全局 quota，例如验证邮件发送场景）。
+        self._user_id = user_id or ""
+        self._session: req.Session | None = None
+
+    def _ensure_session(self) -> req.Session:
+        if self._session is None:
+            self._session = req.Session(impersonate=get_impersonate())
+        return self._session
+
+    async def _send(self, text: str) -> bool:
+        recipients = _split_email_recipients(self._to)
+        if not self._api_key:
+            logger.error("Resend 发送失败: API key 为空")
+            return False
+        if not self._from:
+            logger.error("Resend 发送失败: 发件人为空")
+            return False
+        if not recipients:
+            logger.error("Resend 发送失败: 收件人为空")
+            return False
+
+        # 配额检查（fail-closed）：触顶不发，写 WARN 日志。
+        ok, reason = check_resend_quota(self._user_id)
+        if not ok:
+            logger.warning(
+                "Resend 配额拒发 user=%s reason=%s",
+                self._user_id or "<anon>", reason,
+            )
+            return False
+
+        subject = _format_email_subject(text)
+        payload = {
+            "from": self._from,
+            "to": recipients,
+            "subject": subject,
+            "text": text,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        def _post() -> bool:
+            try:
+                sess = self._ensure_session()
+                r = sess.post(self.ENDPOINT, json=payload, headers=headers, timeout=15)
+            except Exception as e:
+                logger.error("Resend 网络错误: %s", e)
+                return False
+            if 200 <= r.status_code < 300:
+                logger.debug("Resend 发送成功 → %s", ", ".join(_redact_email(r) for r in recipients))
+                return True
+            # Resend 错误响应：{"name":"validation_error","message":"..."}
+            body_snippet = (r.text or "")[:300]
+            logger.error(
+                "Resend 发送失败 status=%s body=%s", r.status_code, body_snippet,
+            )
+            return False
+
+        try:
+            loop = asyncio.get_running_loop()
+            sent = await loop.run_in_executor(None, _post)
+        except Exception as e:
+            logger.error("Resend 异步发送异常: %s", e)
+            return False
+        if sent:
+            record_resend_send(self._user_id)
+        return sent
+
+    async def close(self) -> None:
+        if self._session is not None:
+            try:
+                self._session.close()
+            except Exception:
+                pass
+            self._session = None
+
+
+# ------------------------------------------------------------------ #
+# 共享邮件配置（admin 在 .env 配置一次，所有 shared 模式用户共用）
+# ------------------------------------------------------------------ #
+
+# ------------------------------------------------------------------ #
+# Resend 每日配额（防 Resend 免费档 100/天被打爆）
+# ------------------------------------------------------------------ #
+# 实现
+# ----
+# - 计数落 SQLite 的 ``email_send_counters`` 表 → 多 Gunicorn worker 共享同一数据
+# - 按"全局每日"+"每用户每日"两层，UTC 日期切窗
+# - 默认值与 Resend 免费档对齐（80/天 + 20/用户/天），admin 用 .env 覆盖
+# - 触顶后 build_user_notifier / test_notify 把 shared email 跳过，
+#   日志里记一行 WARN，方便 admin 监控
+#
+# Race 容忍度
+# ----------
+# check_resend_quota → record_resend_send 是两次 SQL 调用，N 个 worker 并发
+# 会有 race（多扣几条）。在 N≤16 的常见部署，偏差远小于 limit 数量级，可接受。
+# 真要 strict，应该改成单条 UPSERT 同时 check & inc，但 SQLite 没有 RETURNING
+# 配合 ON CONFLICT 的统一写法（3.35+ 部分支持），先维持当前简洁实现。
+import os as _os
+
+RESEND_GLOBAL_DAILY_LIMIT   = int(_os.environ.get("RESEND_GLOBAL_DAILY_LIMIT", "80") or "80")
+RESEND_PER_USER_DAILY_LIMIT = int(_os.environ.get("RESEND_PER_USER_DAILY_LIMIT", "20") or "20")
+
+
+def _today_key() -> str:
+    """UTC 日期字符串，作为切窗 anchor（避开本地时区跳变）。"""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _open_storage_for_quota():
+    """延迟 import 避免循环依赖 / module load 时形成 DB 连接。"""
+    from app.db import storage
+    return storage()
+
+
+def check_resend_quota(user_id: str) -> tuple[bool, str]:
+    """
+    返回 (allowed, reason)。
+    allowed=False 时 reason 是可展示给 admin 的拒绝原因；
+    对 user 角色应在调用层把 reason 替换为通用文案。
+    仅做检查；通过后调用方再调用 ``record_resend_send(user_id)`` 占用 quota。
+
+    DB 不可用（连接失败 / 表缺失）→ fail-open 放行，避免数据库故障时
+    完全发不出邮件。配额本身是 best-effort 限制，不是安全边界。
+    """
+    day = _today_key()
+    try:
+        st = _open_storage_for_quota()
+    except Exception:
+        logger.warning("配额查询: storage 不可用，fail-open 放行")
+        return True, ""
+    try:
+        g, u = st.get_email_send_counts(day, user_id)
+    except Exception:
+        logger.warning("配额查询失败，fail-open 放行")
+        return True, ""
+    finally:
+        try: st.close()
+        except Exception: pass
+
+    if g >= RESEND_GLOBAL_DAILY_LIMIT:
+        return False, f"全局每日额度已用尽 ({g}/{RESEND_GLOBAL_DAILY_LIMIT})"
+    if user_id and u >= RESEND_PER_USER_DAILY_LIMIT:
+        return False, f"该用户今日额度已用尽 ({u}/{RESEND_PER_USER_DAILY_LIMIT})"
+    return True, ""
+
+
+def record_resend_send(user_id: str) -> None:
+    """实际成功提交给 Resend API 后调用，累加计数。DB 写失败不抛错。"""
+    day = _today_key()
+    try:
+        st = _open_storage_for_quota()
+    except Exception:
+        logger.warning("配额记录: storage 不可用，跳过累加")
+        return
+    try:
+        st.record_email_send(day, user_id)
+    except Exception:
+        logger.exception("配额记录失败 user=%s", user_id or "<anon>")
+    finally:
+        try: st.close()
+        except Exception: pass
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s.]+\.[^@\s]+$")
+
+
+def get_shared_email_config() -> tuple[bool, str, str]:
+    """
+    从环境变量读取共享邮件凭据。
+
+    Returns
+    -------
+    (enabled, api_key, from_addr)
+
+    enabled 为 True 当且仅当：SHARED_EMAIL_ENABLED 非 'false' 且 API key + from 均非空
+    且 RESEND_FROM 是合法邮箱格式。任何一项不满足即视为关闭，调用方应回退
+    到 custom SMTP 或跳过该渠道。
+    """
+    enabled = _os.environ.get("SHARED_EMAIL_ENABLED", "true").lower() != "false"
+    api_key = _os.environ.get("RESEND_API_KEY", "").strip()
+    from_addr = _os.environ.get("RESEND_FROM", "").strip()
+    if enabled and from_addr and not _EMAIL_RE.match(from_addr):
+        # 一次性 warn，避免每次发邮件都刷日志：用 module-level set 记录已 warn 过的值
+        if from_addr not in _warned_bad_from:
+            logger.error(
+                "RESEND_FROM 格式非法 (%r)，shared email 已禁用。"
+                "请用 'name@domain.tld' 形式且域名必须在 Resend verified",
+                from_addr,
+            )
+            _warned_bad_from.add(from_addr)
+        enabled = False
+    return (enabled and bool(api_key) and bool(from_addr), api_key, from_addr)
+
+
+_warned_bad_from: set[str] = set()
 
 
 # ------------------------------------------------------------------ #
@@ -613,27 +865,54 @@ def create_user_notifier(user) -> BaseNotifier:
             else:
                 logger.warning("[%s] Telegram 渠道 TOKEN 或 CHAT_ID 为空，跳过", user.name)
         elif ch == "email":
-            has_auth = bool(user.email_username or user.email_password)
-            if (
-                user.email_smtp_host
-                and user.email_to
-                and (user.email_from or user.email_username)
-                and ((not has_auth) or (user.email_username and user.email_password))
-            ):
-                notifiers.append(
-                    EmailNotifier(
-                        user.email_smtp_host,
-                        user.email_smtp_port,
-                        user.email_smtp_security,
-                        user.email_username,
-                        user.email_password,
-                        user.email_from,
-                        user.email_to,
+            mode = (getattr(user, "email_mode", "shared") or "shared").lower()
+            if mode == "shared":
+                # 共享 Resend：用户只填 email_to，凭据在 .env
+                shared_ok, shared_key, shared_from = get_shared_email_config()
+                email_verified = bool(getattr(user, "email_verified", False))
+                if not user.email_to:
+                    logger.warning("[%s] Email(shared) 收件人为空，跳过", user.name)
+                elif not shared_ok:
+                    logger.warning(
+                        "[%s] Email(shared) 后端未配置 (SHARED_EMAIL_ENABLED / "
+                        "RESEND_API_KEY / RESEND_FROM 至少一项缺失)，跳过",
+                        user.name,
                     )
-                )
-                logger.info("[%s] 通知渠道: Email → %s", user.name, user.email_to)
+                elif not email_verified:
+                    # 收件邮箱未通过 double opt-in：拒发，防 shared 模式被滥用为代发服务。
+                    # 用户需到 user_edit 页点"重发验证邮件"并完成验证。
+                    logger.warning(
+                        "[%s] Email(shared) 邮箱未验证，跳过（请到设置页完成邮箱验证）",
+                        user.name,
+                    )
+                else:
+                    notifiers.append(
+                        ResendNotifier(shared_key, shared_from, user.email_to, user_id=user.id)
+                    )
+                    logger.info("[%s] 通知渠道: Email(shared) → %s", user.name, _redact_email(user.email_to))
             else:
-                logger.warning("[%s] Email 渠道 SMTP 参数不完整，跳过", user.name)
+                # 自建 SMTP
+                has_auth = bool(user.email_username or user.email_password)
+                if (
+                    user.email_smtp_host
+                    and user.email_to
+                    and (user.email_from or user.email_username)
+                    and ((not has_auth) or (user.email_username and user.email_password))
+                ):
+                    notifiers.append(
+                        EmailNotifier(
+                            user.email_smtp_host,
+                            user.email_smtp_port,
+                            user.email_smtp_security,
+                            user.email_username,
+                            user.email_password,
+                            user.email_from,
+                            user.email_to,
+                        )
+                    )
+                    logger.info("[%s] 通知渠道: Email(custom) → %s", user.name, _redact_email(user.email_to))
+                else:
+                    logger.warning("[%s] Email(custom) SMTP 参数不完整，跳过", user.name)
         elif ch == "whatsapp":
             if user.twilio_sid and user.twilio_token and user.twilio_from and user.twilio_to:
                 notifiers.append(

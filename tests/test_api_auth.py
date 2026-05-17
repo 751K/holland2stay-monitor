@@ -23,9 +23,11 @@ from app.api_auth import (
     _cache_get,
     _cache_put,
     _resolve_token,
+    _user_token_still_allowed,
     invalidate_token_cache,
 )
 from mstorage._tokens import hash_token
+from users import UserConfig
 
 
 @pytest.fixture
@@ -94,6 +96,40 @@ class TestResolveToken:
             st.close()
         invalidate_token_cache()
         assert _resolve_token(plaintext) is None
+
+
+class TestUserTokenStillAllowed:
+    def test_disabled_user_token_rejected_immediately(self, fresh_state, monkeypatch):
+        from app.db import storage
+
+        user = UserConfig(name="disabled", id="deadbeef", enabled=False, app_login_enabled=True)
+        monkeypatch.setattr("users.load_users", lambda: [user])
+
+        st = storage()
+        try:
+            _, plaintext = st.create_app_token(role="user", user_id=user.id)
+        finally:
+            st.close()
+
+        row = _resolve_token(plaintext)
+        assert row is not None
+        assert _user_token_still_allowed(row) is False
+
+    def test_login_disabled_user_token_rejected_immediately(self, fresh_state, monkeypatch):
+        from app.db import storage
+
+        user = UserConfig(name="no-login", id="cafebabe", enabled=True, app_login_enabled=False)
+        monkeypatch.setattr("users.load_users", lambda: [user])
+
+        st = storage()
+        try:
+            _, plaintext = st.create_app_token(role="user", user_id=user.id)
+        finally:
+            st.close()
+
+        row = _resolve_token(plaintext)
+        assert row is not None
+        assert _user_token_still_allowed(row) is False
 
 
 # ── TTL 缓存 ───────────────────────────────────────────────────────

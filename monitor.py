@@ -960,6 +960,20 @@ async def main_loop(
                 pruned = storage.prune_notifications(keep=500)
                 if pruned:
                     logger.debug("已清理 %d 条旧通知", pruned)
+                # 清理过期验证 token（保留 30 天审计窗口）
+                try:
+                    pruned_tok = storage.prune_expired_verifications()
+                    if pruned_tok:
+                        logger.debug("已清理 %d 条过期验证 token", pruned_tok)
+                except Exception:
+                    logger.exception("prune_expired_verifications 失败（已忽略）")
+                # 清理超期 Resend 配额计数行（保留 30 天）
+                try:
+                    pruned_cnt = storage.prune_old_email_send_counters(keep_days=30)
+                    if pruned_cnt:
+                        logger.debug("已清理 %d 条旧配额计数", pruned_cnt)
+                except Exception:
+                    logger.exception("prune_old_email_send_counters 失败（已忽略）")
                 last_heartbeat_time = time.monotonic()
 
             actual = apply_jitter(effective_interval, cfg.jitter_ratio)

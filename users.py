@@ -97,6 +97,13 @@ class UserConfig:
     imessage_recipient: str = ""
     telegram_token: str = ""
     telegram_chat_id: str = ""
+    # email_mode: "shared" → 走 admin 在 .env 配的 Resend；用户只填 email_to
+    #             "custom" → 走用户自填的 SMTP 字段（兼容旧行为）
+    # 默认 shared，老用户经 SQLite 迁移自动改 custom（见 _base.py）。
+    email_mode: str = "shared"
+    # email_verified: shared 模式专用——email_to 是否通过 double opt-in 验证。
+    # custom 模式忽略此字段（用户自负责）。修改 email_to 会自动重置为 False。
+    email_verified: bool = False
     email_smtp_host: str = ""
     email_smtp_port: int = 587
     email_smtp_security: str = "starttls"
@@ -197,6 +204,10 @@ def _user_from_dict(d: dict) -> UserConfig:
     for field in ("email_password", "telegram_token", "twilio_token"):
         if d.get(field):
             d[field] = decrypt(d[field])
+    # 旧 users.json 没有 email_mode 字段：若用户填过 SMTP host 则视为 custom，
+    # 否则默认 shared。等价于 _row_to_user 中的同款 fallback，保证两路径一致。
+    if not d.get("email_mode"):
+        d["email_mode"] = "custom" if d.get("email_smtp_host") else "shared"
     return UserConfig(**d, listing_filter=lf, auto_book=ab)
 
 
@@ -272,6 +283,8 @@ def _user_to_row(u: UserConfig) -> dict:
         "imessage_recipient": d.get("imessage_recipient", ""),
         "telegram_token": d.get("telegram_token", ""),
         "telegram_chat_id": d.get("telegram_chat_id", ""),
+        "email_mode": (d.get("email_mode") or "shared").lower(),
+        "email_verified": 1 if d.get("email_verified") else 0,
         "email_smtp_host": d.get("email_smtp_host", ""),
         "email_smtp_port": int(d.get("email_smtp_port") or DEFAULT_EMAIL_SMTP_PORT),
         "email_smtp_security": d.get("email_smtp_security", "starttls"),
@@ -328,6 +341,11 @@ def _row_to_user(row: dict) -> UserConfig:
         imessage_recipient=row.get("imessage_recipient", ""),
         telegram_token=telegram_token,
         telegram_chat_id=row.get("telegram_chat_id", ""),
+        email_mode=(
+            (row.get("email_mode") or "").lower()
+            or ("custom" if row.get("email_smtp_host") else "shared")
+        ),
+        email_verified=bool(row.get("email_verified")),
         email_smtp_host=row.get("email_smtp_host", ""),
         email_smtp_port=int(row.get("email_smtp_port") or DEFAULT_EMAIL_SMTP_PORT),
         email_smtp_security=row.get("email_smtp_security", "starttls"),
@@ -522,13 +540,14 @@ def verify_app_password(user: UserConfig, plaintext: str) -> bool:
     校验 App 登录密码。
 
     返回 True 仅当：
+    - user.enabled is True
     - user.app_login_enabled is True
     - user.app_password_hash 非空
     - bcrypt.checkpw 通过
 
     任何分支异常一律返回 False（fail-closed）。
     """
-    if not user.app_login_enabled or not user.app_password_hash:
+    if not user.enabled or not user.app_login_enabled or not user.app_password_hash:
         return False
     if not plaintext:
         return False

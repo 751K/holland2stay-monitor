@@ -14,6 +14,7 @@
 from mstorage._base import StorageBase
 from mstorage._charts import ChartOps
 from mstorage._devices import DeviceOps
+from mstorage._email_verify import EmailVerifyOps
 from mstorage._listings import ListingOps
 from mstorage._map_calendar import MapCalendarOps
 from mstorage._notifications import NotificationOps
@@ -31,6 +32,7 @@ class Storage(
     TokenOps,
     UserConfigOps,
     DeviceOps,
+    EmailVerifyOps,
     StorageBase,
 ):
     """SQLite 持久化层，通过 mixin 继承组合所有领域方法。

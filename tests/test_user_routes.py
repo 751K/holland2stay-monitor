@@ -97,6 +97,23 @@ class TestUserEdit:
         r = admin_client.get(f"/users/{u.id}")
         assert r.status_code == 200
 
+    def test_disabled_user_existing_session_redirected_to_login(self, test_app, isolated_data_dir):
+        """admin 停用用户后，旧 Web session 也不能继续访问自助设置页。"""
+        from users import UserConfig, save_users
+
+        u = UserConfig(name="Disabled", id="deadbeef", enabled=False, app_login_enabled=True)
+        save_users([u])
+        c = test_app.test_client()
+        with c.session_transaction() as sess:
+            sess["authenticated"] = True
+            sess["role"] = "user"
+            sess["user_id"] = u.id
+            sess["csrf_token"] = "test_csrf"
+
+        r = c.get(f"/users/{u.id}")
+        assert r.status_code == 302
+        assert "/login" in r.headers["Location"]
+
     def test_edit_nonexistent_user_redirects(self, admin_client):
         r = admin_client.get("/users/nonexistentid")
         assert r.status_code == 302

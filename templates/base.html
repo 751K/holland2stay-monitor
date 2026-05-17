@@ -58,6 +58,12 @@
       <a href="{{ url_for('users_list') }}" class="{% if request.endpoint in ['users_list','user_new','user_edit'] %}active{% endif %}">
         <i class="bi bi-people"></i> {{ _('users') }}
       </a>
+      {% elif is_user and current_user_id %}
+      <a href="{{ url_for('user_edit', user_id=current_user_id) }}" class="{% if request.endpoint=='user_edit' %}active{% endif %}">
+        <i class="bi bi-person-gear"></i> {{ _('my_account') }}
+      </a>
+      {% endif %}
+      {% if is_admin %}
       <a href="{{ url_for('settings') }}" class="{% if request.endpoint=='settings' %}active{% endif %}">
         <i class="bi bi-gear"></i> {{ _('settings') }}
       </a>

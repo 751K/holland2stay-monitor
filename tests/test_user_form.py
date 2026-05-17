@@ -18,6 +18,7 @@ from werkzeug.datastructures import ImmutableMultiDict
 
 from app.forms.user_form import (
     build_user_from_form,
+    build_user_from_form_self,
     VALID_PAYMENT_METHODS,
     DEFAULT_PAYMENT_METHOD,
 )
@@ -74,6 +75,61 @@ class TestBasicBinding:
         ))
         # 大小写归一 + 空白剥离
         assert u.notification_channels == ["imessage", "telegram", "email"]
+
+
+class TestSharedEmailValidation:
+    def test_shared_email_rejects_multiple_recipients(self):
+        with pytest.raises(ValueError, match="收件邮箱格式错误"):
+            build_user_from_form(_form(
+                ("name", "x"),
+                ("EMAIL_MODE", "shared"),
+                ("EMAIL_TO", "a@example.com,b@example.com"),
+            ))
+
+    def test_shared_email_rejects_malformed_address(self):
+        with pytest.raises(ValueError, match="收件邮箱格式错误"):
+            build_user_from_form(_form(
+                ("name", "x"),
+                ("EMAIL_MODE", "shared"),
+                ("EMAIL_TO", "not-an-email"),
+            ))
+
+    def test_custom_email_keeps_legacy_multiple_recipients(self):
+        u = build_user_from_form(_form(
+            ("name", "x"),
+            ("EMAIL_MODE", "custom"),
+            ("EMAIL_TO", "a@example.com,b@example.com"),
+        ))
+        assert u.email_mode == "custom"
+        assert u.email_to == "a@example.com,b@example.com"
+
+    def test_self_edit_forces_shared_and_drops_custom_smtp(self):
+        existing = UserConfig(
+            name="X",
+            id="aaaaaaaa",
+            enabled=True,
+            app_login_enabled=True,
+            email_mode="custom",
+            email_smtp_host="smtp.old.example",
+            email_username="old-user",
+            email_password="OLD",
+            email_from="old@example.com",
+        )
+        u = build_user_from_form_self(_form(
+            ("enabled", "true"),
+            ("EMAIL_MODE", "custom"),
+            ("EMAIL_TO", "owner@example.com"),
+            ("EMAIL_SMTP_HOST", "127.0.0.1"),
+            ("EMAIL_USERNAME", "attacker"),
+            ("EMAIL_PASSWORD", "SECRET"),
+            ("EMAIL_FROM", "attacker@example.com"),
+        ), existing=existing)
+        assert u.email_mode == "shared"
+        assert u.email_to == "owner@example.com"
+        assert u.email_smtp_host == ""
+        assert u.email_username == ""
+        assert u.email_password == ""
+        assert u.email_from == ""
 
 
 # ─── 数值字段范围校验（fail-closed） ──────────────────────────────
