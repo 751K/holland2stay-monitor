@@ -22,6 +22,10 @@ from notifier import ResendNotifier, get_shared_email_config
 logger = logging.getLogger(__name__)
 
 
+class EmailVerifyConfigError(RuntimeError):
+    """邮箱验证功能缺少必要生产配置，属于可预期配置错误。"""
+
+
 def _build_verify_url(token: str) -> str:
     """
     用 PUBLIC_BASE_URL 生成验证链接。
@@ -32,11 +36,11 @@ def _build_verify_url(token: str) -> str:
     base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
     if not base:
         logger.error("PUBLIC_BASE_URL 未配置，拒绝生成邮箱验证链接")
-        raise RuntimeError("PUBLIC_BASE_URL 未配置")
+        raise EmailVerifyConfigError("PUBLIC_BASE_URL 未配置")
     parsed = urlparse(base)
     if parsed.scheme != "https" or not parsed.netloc:
         logger.error("PUBLIC_BASE_URL 必须是 https 绝对 URL: %r", base)
-        raise RuntimeError("PUBLIC_BASE_URL 配置无效")
+        raise EmailVerifyConfigError("PUBLIC_BASE_URL 配置无效")
     return f"{base}/verify-email/{token}"
 
 
@@ -183,9 +187,9 @@ async def send_verification_email(user_id: str, user_name: str, email: str) -> b
     verify_url = _build_verify_url(token)
     subject, text_body, html_body = _format_verify_email(verify_url, user_name)
 
-    # 验证邮件需要自定义 subject + html 渲染，ResendNotifier._send 不支持，
-    # 直接调底层 HTTP（与 ResendNotifier._post 同形）。配额由该函数自己
-    # 调用 check/record（验证邮件不归属任何 user_id，只占全局额度）。
+    # 验证邮件需要自定义 subject 和确认按钮链接，因此直接调底层 HTTP
+    # （与 ResendNotifier._post 同形）。配额由该函数自己调用 check/record
+    # （验证邮件不归属任何 user_id，只占全局额度）。
     from notifier import check_resend_quota, record_resend_send
     ok_quota, reason = check_resend_quota("")
     if not ok_quota:
@@ -233,9 +237,15 @@ async def send_verification_email(user_id: str, user_name: str, email: str) -> b
 def send_verification_email_sync(user_id: str, user_name: str, email: str) -> bool:
     """同步包装，给 Flask 路由层调用（避免每个路由都管 event loop）。"""
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
+        has_running_loop = False
+    else:
+        has_running_loop = True
+
+    if not has_running_loop:
         return asyncio.run(send_verification_email(user_id, user_name, email))
+
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(

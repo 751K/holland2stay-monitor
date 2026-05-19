@@ -270,7 +270,7 @@ def _user_to_row(u: UserConfig) -> dict:
     for field_name in ("email_password", "telegram_token", "twilio_token"):
         if d.get(field_name):
             d[field_name] = encrypt(d[field_name])
-    ab = d.get("auto_book", {})
+    ab = d.get("auto_book") or {}
     if ab.get("password"):
         ab["password"] = encrypt(ab["password"])
 

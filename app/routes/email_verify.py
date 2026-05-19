@@ -157,7 +157,7 @@ def _redact_email(email: str) -> str:
 @csrf_required
 def resend_verify(user_id: str) -> Any:
     """重新发送验证邮件。复用 send_verification_email_sync。"""
-    from app.email_verify import send_verification_email_sync
+    from app.email_verify import EmailVerifyConfigError, send_verification_email_sync
     from app.auth import check_test_notify_rate, record_test_notify
 
     users = load_users()
@@ -180,6 +180,9 @@ def resend_verify(user_id: str) -> Any:
 
     try:
         sent = send_verification_email_sync(user.id, user.name, user.email_to)
+    except EmailVerifyConfigError as e:
+        logger.error("resend_verify: 邮箱验证未就绪: %s", e)
+        return jsonify({"ok": False, "error": "系统未配置 PUBLIC_BASE_URL，暂时无法发送验证邮件"}), 503
     except Exception:
         logger.exception("resend_verify: 异常")
         return jsonify({"ok": False, "error": "发送失败"}), 500

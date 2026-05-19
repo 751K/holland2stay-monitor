@@ -3,7 +3,7 @@ scraper.py — Holland2Stay 房源抓取
 ====================================
 职责
 ----
-通过直接请求 Holland2Stay GraphQL API 抓取房源列表，返回 `Listing` 对象列表。
+通过直接请求 Holland2Stay GraphQL API 抓取房源列表，并返回每个城市本轮是否完整扫描。
 
 技术要点
 --------
@@ -424,7 +424,7 @@ def _scrape_city_pages(
     city_name: str,
     city_ids: list[str],
     availability_ids: list[str],
-) -> list[Listing]:
+) -> tuple[list[Listing], bool]:
     """
     对单个城市执行分页抓取，直到取完所有页为止。
 
@@ -437,7 +437,12 @@ def _scrape_city_pages(
 
     Returns
     -------
-    该城市所有页面抓到的 Listing 列表。
+    (listings, complete)
+      complete=True 当且仅当：
+        - 从第 1 页到最后一页均 HTTP 成功；
+        - GraphQL 响应没有 errors 字段；
+        - 没有触发 _MAX_PAGES 截断；
+        - 单条解析失败率 <= 5%。
 
     Raises
     ------
@@ -456,6 +461,7 @@ def _scrape_city_pages(
     total_items = 0
     skipped = 0
     current_page = 1
+    complete = False
 
     while True:
         filter_str = _build_filter(city_ids, availability_ids)
@@ -473,7 +479,7 @@ def _scrape_city_pages(
                 exc_info=True,
             )
             # 第 1 页失败 = 该城市完全无法抓取 → 抛异常让上层感知并触发冷却
-            # 后续页失败 → break 返回已有数据（至少拿到了前面几页）
+            # 后续页失败 → 返回已有数据 + complete=False（至少拿到了前面几页）
             if current_page == 1:
                 raise ScrapeNetworkError(
                     f"[{city_name}] 第 1 页网络错误: {e}"
@@ -502,11 +508,24 @@ def _scrape_city_pages(
 
         logger.info("[%s] 第 %d/%d 页，本页 %d 条", city_name, current_page, total_pages, len(items))
 
-        if current_page >= total_pages or current_page >= _MAX_PAGES:
+        if current_page >= total_pages:
+            complete = True
+            break
+        if current_page >= _MAX_PAGES:
+            logger.warning(
+                "[%s] 触发 _MAX_PAGES=%d 截断，实际 total_pages=%s，本轮扫描不完整",
+                city_name, _MAX_PAGES, total_pages,
+            )
             break
         current_page += 1
 
     rate = skipped / total_items if total_items else 0
+    if rate > 0.05:
+        complete = False
+        logger.warning(
+            "[%s] 解析失败率 %.1f%% 超过 5%%，本轮扫描标记为不完整",
+            city_name, rate * 100,
+        )
     if skipped:
         logger.warning(
             "[%s] 共抓取 %d/%d 条房源，%d 条解析失败（%.0f%%）",
@@ -514,13 +533,13 @@ def _scrape_city_pages(
         )
     else:
         logger.info("[%s] 共抓取 %d 条房源", city_name, len(listings))
-    return listings
+    return listings, complete
 
 
 def scrape_all(
     city_tasks: list[tuple[str, str]],
     availability_ids: Optional[list[str]] = None,
-) -> list[Listing]:
+) -> tuple[list[Listing], dict[str, bool]]:
     """
     抓取所有指定城市的房源，返回合并后的列表。
 
@@ -537,8 +556,10 @@ def scrape_all(
 
     Returns
     -------
-    所有城市抓取结果合并后的 Listing 列表。个别城市失败（含 ScrapeNetworkError）
-    不影响其他城市结果；仅全部城市均失败时向上抛出。
+    (all_listings, city_completeness)
+      all_listings: 所有城市抓取结果合并后的 Listing 列表。
+      city_completeness[city_name]: 该城市本轮分页扫描是否完整。
+      个别城市第 1 页网络失败不会出现在 city_completeness 中；仅全部城市均失败时向上抛出。
 
     Raises
     ------
@@ -565,18 +586,20 @@ def scrape_all(
         logger.debug("使用代理: %s", _mask_proxy_url(proxy))
 
     all_listings: list[Listing] = []
+    city_completeness: dict[str, bool] = {}
     network_failures: list[str] = []  # 遭遇 ScrapeNetworkError 的城市
 
     with req.Session(impersonate=get_impersonate(), proxies=proxies) as session:
         for city_name, city_id in city_tasks:
             try:
-                listings = _scrape_city_pages(
+                listings, complete = _scrape_city_pages(
                     session,
                     city_name,
                     city_ids=[str(city_id)],
                     availability_ids=availability_ids,
                 )
                 all_listings.extend(listings)
+                city_completeness[city_name] = complete
             except (RateLimitError, BlockedError):
                 raise   # 429/403 都是 IP/指纹级别的问题，不是单城市失败，直接上传
             except ScrapeNetworkError as e:
@@ -602,4 +625,4 @@ def scrape_all(
             f"全部 {len(city_tasks)} 个城市第 1 页网络失败: {', '.join(network_failures)}"
         )
 
-    return all_listings
+    return all_listings, city_completeness

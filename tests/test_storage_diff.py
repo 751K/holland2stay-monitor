@@ -15,6 +15,8 @@ contract：
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from models import Listing
@@ -34,6 +36,18 @@ def _l(id_, status="Available to book", **overrides):
     )
     base.update(overrides)
     return Listing(**base)
+
+
+def _days_ago_iso(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def _set_last_seen(temp_db, listing_id: str, days_ago: int) -> None:
+    with temp_db.conn:
+        temp_db.conn.execute(
+            "UPDATE listings SET last_seen=? WHERE id=?",
+            (_days_ago_iso(days_ago), listing_id),
+        )
 
 
 # ─── 核心 diff 行为 ─────────────────────────────────────────────────
@@ -135,6 +149,79 @@ class TestDiffMixed:
         # b、c 应该仍在库
         assert temp_db.count_all() == 3
         assert temp_db.get_listing("b") is not None
+
+
+# ─── stale listing 状态收敛 ────────────────────────────────────────
+
+
+class TestMarkStaleListings:
+    def test_marks_old_available_listing_as_inferred_occupied(self, temp_db):
+        temp_db.diff([_l("a", status="Available to book")])
+        _set_last_seen(temp_db, "a", days_ago=8)
+
+        updated = temp_db.mark_stale_listings(days=7)
+
+        row = temp_db.get_listing("a")
+        assert updated == 1
+        assert row["status"] == "Occupied"
+        assert row["last_status"] == "Occupied"
+        assert row["status_is_inferred"] == 1
+        assert temp_db.get_recent_changes(hours=24) == []
+
+    def test_recent_available_listing_is_not_marked(self, temp_db):
+        temp_db.diff([_l("a", status="Available to book")])
+        _set_last_seen(temp_db, "a", days_ago=6)
+
+        updated = temp_db.mark_stale_listings(days=7)
+
+        row = temp_db.get_listing("a")
+        assert updated == 0
+        assert row["status"] == "Available to book"
+        assert row["status_is_inferred"] == 0
+
+    def test_marking_is_idempotent(self, temp_db):
+        temp_db.diff([_l("a", status="Available in lottery")])
+        _set_last_seen(temp_db, "a", days_ago=8)
+
+        assert temp_db.mark_stale_listings(days=7) == 1
+        assert temp_db.mark_stale_listings(days=7) == 0
+
+    def test_city_filter_limits_stale_marking_to_current_monitor_cities(self, temp_db):
+        temp_db.diff([
+            _l("a", status="Available to book", city="Eindhoven"),
+            _l("b", status="Available to book", city="Amsterdam"),
+        ])
+        _set_last_seen(temp_db, "a", days_ago=8)
+        _set_last_seen(temp_db, "b", days_ago=8)
+
+        updated = temp_db.mark_stale_listings(days=7, cities=["Eindhoven"])
+
+        assert updated == 1
+        assert temp_db.get_listing("a")["status"] == "Occupied"
+        assert temp_db.get_listing("b")["status"] == "Available to book"
+
+    def test_empty_city_filter_is_noop(self, temp_db):
+        temp_db.diff([_l("a", status="Available to book", city="Eindhoven")])
+        _set_last_seen(temp_db, "a", days_ago=8)
+
+        updated = temp_db.mark_stale_listings(days=7, cities=[])
+
+        assert updated == 0
+        assert temp_db.get_listing("a")["status"] == "Available to book"
+
+    def test_real_api_return_resets_inferred_flag_and_records_status_change(self, temp_db):
+        temp_db.diff([_l("a", status="Available to book")])
+        _set_last_seen(temp_db, "a", days_ago=8)
+        assert temp_db.mark_stale_listings(days=7) == 1
+
+        new, changes = temp_db.diff([_l("a", status="Available to book")])
+
+        row = temp_db.get_listing("a")
+        assert new == []
+        assert row["status"] == "Available to book"
+        assert row["status_is_inferred"] == 0
+        assert len(changes) == 1
+        assert changes[0][1:] == ("Occupied", "Available to book")
 
 
 # ─── 幂等性 & 原子性 ─────────────────────────────────────────────

@@ -181,9 +181,10 @@ class TestScrapeNetworkErrorPropagation:
             }
         }
         with patch("scraper._post_gql", side_effect=[first_page, TimeoutError("timeout")]):
-            result = _scrape_city_pages(MagicMock(), "Eindhoven", ["29"], ["179"])
+            result, complete = _scrape_city_pages(MagicMock(), "Eindhoven", ["29"], ["179"])
 
         assert result == []
+        assert complete is False
 
     def test_scrape_all_raises_when_all_cities_fail_on_first_page(self):
         """所有城市第 1 页都网络失败时，整体抓取必须失败并交给 monitor cooldown。"""

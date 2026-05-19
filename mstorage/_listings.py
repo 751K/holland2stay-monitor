@@ -58,10 +58,13 @@ class ListingOps:
                     )
                     new_listings.append(listing)
                 else:
+                    # 来自 API 的真实数据：复位 status_is_inferred=0，
+                    # 撤销之前 mark_stale_listings 可能打过的"推测"标记。
                     cur.execute(
                         """UPDATE listings
                            SET name=?, status=?, price_raw=?, available_from=?,
-                               features=?, last_seen=?, last_status=?
+                               features=?, last_seen=?, last_status=?,
+                               status_is_inferred=0
                            WHERE id=?""",
                         (
                             listing.name, listing.status, listing.price_raw,
@@ -117,6 +120,61 @@ class ListingOps:
                        WHERE listing_id=? AND notified=0""",
                     (lid,),
                 )
+
+    # ── 状态收敛：last_seen 老化兜底 ─────────────────────────────────
+    # 当前抓取源只返回 Available to book / lottery 子集；一旦 listing 转入
+    # Reserved/Occupied，API 不再返回，DB 里就会永远停在 "Available" → 鬼影。
+    #
+    # 时间窗兜底：listing 已经 N 天没有刷新 last_seen，几乎可以肯定不再可订，
+    # 直接标为 ``Occupied`` 让 UI/统计自然处理；同时 ``status_is_inferred=1``
+    # 留下"这是推测值"的标记，供 Phase 3 的鬼影回归检测使用。
+    #
+    # 不写 status_changes：推测转换不触发通知/auto_book。Phase 3 引入
+    # synthetic 列后才会写审计行。
+    #
+    # 仅作用于"看起来还可用"的 listing；已经 Occupied / 已 inferred 的不动。
+    _STALE_ELIGIBLE_STATUSES = (
+        "Available to book",
+        "Available in lottery",
+        "Unknown",
+    )
+
+    def mark_stale_listings(self, days: int = 7, cities: Optional[list[str]] = None) -> int:
+        """
+        把 `last_seen` 早于 cutoff 且状态仍是"看起来可用"的 listing
+        标为 ``Occupied`` + ``status_is_inferred=1``。
+
+        Parameters
+        ----------
+        days : 老化阈值；默认 7 天（保守，避免误伤）
+        cities : 限定当前仍在监控的城市；传入空列表时不更新任何 listing
+
+        Returns
+        -------
+        本次实际更新的行数（已 Occupied / inferred=1 的不会被命中，幂等）
+        """
+        city_filter = [c for c in (cities or []) if c]
+        if cities is not None and not city_filter:
+            return 0
+
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(days=days)
+        ).isoformat()
+        placeholders = ",".join("?" * len(self._STALE_ELIGIBLE_STATUSES))
+        sql = (
+            f"UPDATE listings "
+            f"SET status='Occupied', last_status='Occupied', status_is_inferred=1 "
+            f"WHERE last_seen < ? AND status IN ({placeholders}) "
+            f"AND status_is_inferred = 0"
+        )
+        params: list[str] = [cutoff, *self._STALE_ELIGIBLE_STATUSES]
+        if city_filter:
+            city_placeholders = ",".join("?" * len(city_filter))
+            sql += f" AND city IN ({city_placeholders})"
+            params.extend(city_filter)
+        with self._conn:
+            cur = self._conn.execute(sql, params)
+        return cur.rowcount or 0
 
     # ── 基础查询 ────────────────────────────────────────────────────
 

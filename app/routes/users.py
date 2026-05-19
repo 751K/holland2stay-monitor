@@ -241,7 +241,7 @@ def user_edit(user_id: str) -> Any:
                     flash(reason, "warning")
                     return redirect(url_for("user_edit", user_id=user_id))
                 record_test_notify(user_id)
-            from app.email_verify import send_verification_email_sync
+            from app.email_verify import EmailVerifyConfigError, send_verification_email_sync
             try:
                 sent = send_verification_email_sync(
                     updated.id, updated.name, updated.email_to,
@@ -250,6 +250,9 @@ def user_edit(user_id: str) -> Any:
                     flash("📧 验证邮件已发送到新邮箱，请查收并点击链接确认", "success")
                 else:
                     flash("⚠️ 邮箱已保存，但验证邮件未能发出（服务器未配置 Resend 或临时故障），通知暂不会发到此邮箱", "warning")
+            except EmailVerifyConfigError as e:
+                logger.error("邮箱验证未就绪: %s", e)
+                flash("⚠️ 邮箱已保存，但系统未配置 PUBLIC_BASE_URL，暂时无法发送验证邮件", "warning")
             except Exception as e:
                 logger.exception("发送邮箱验证邮件异常: %s", e)
                 flash("⚠️ 邮箱已保存但验证邮件发送失败，请稍后重试", "warning")
@@ -338,7 +341,7 @@ def user_test_notify(user_id: str) -> Any:
         record_test_notify(user_id)
 
     test_msg = (
-        f"🧪 Holland2Stay 监控\n\n"
+        f"🧪 FlatRadar 监控\n\n"
         f"这是一条通知测试消息\n"
         f"发送时间：{_dt.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
         f"通知配置正确 ✅"

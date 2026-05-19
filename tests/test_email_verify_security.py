@@ -8,18 +8,18 @@ from __future__ import annotations
 
 import pytest
 
-from app.email_verify import _build_verify_url
+from app.email_verify import EmailVerifyConfigError, _build_verify_url
 
 
 class TestBuildVerifyUrl:
     def test_missing_public_base_url_fails_closed(self, monkeypatch):
         monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
-        with pytest.raises(RuntimeError, match="PUBLIC_BASE_URL"):
+        with pytest.raises(EmailVerifyConfigError, match="PUBLIC_BASE_URL"):
             _build_verify_url("tok123")
 
     def test_http_public_base_url_rejected(self, monkeypatch):
         monkeypatch.setenv("PUBLIC_BASE_URL", "http://flatradar.app")
-        with pytest.raises(RuntimeError, match="PUBLIC_BASE_URL"):
+        with pytest.raises(EmailVerifyConfigError, match="PUBLIC_BASE_URL"):
             _build_verify_url("tok123")
 
     def test_https_public_base_url_used(self, monkeypatch):

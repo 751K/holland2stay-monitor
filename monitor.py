@@ -11,12 +11,13 @@ monitor.py — 监控主程序
 
 核心流程（每轮）
 ----------------
-1. `scrape_all()`（sync，在 executor 线程中运行）抓取所有城市房源
-2. `storage.diff()` 对比库中快照，产出 new_listings / status_changes
-3. 遍历启用的用户，构建自动预订候选；立即将 try_book() 提交到线程池
-4. 发送新房源/状态变更通知（与步骤 3 中的预订并发进行）
-5. 等待预订完成，推送预订结果通知
-6. 写 meta（last_scrape_at）；按时间间隔发心跳
+1. `scrape_all()`（sync，在 executor 线程中运行）抓取所有城市房源 + 完整扫描信号
+2. 记录完整扫描信号（Phase 2 仅观察，不参与状态收敛）
+3. `storage.diff()` 对比库中快照，产出 new_listings / status_changes
+4. 遍历启用的用户，构建自动预订候选；立即将 try_book() 提交到线程池
+5. 发送新房源/状态变更通知（与步骤 4 中的预订并发进行）
+6. 等待预订完成，推送预订结果通知
+7. 写 meta（last_scrape_at）；按时间间隔发心跳
 
 智能轮询
 --------
@@ -103,6 +104,30 @@ def _setup_logging(level: str) -> None:
 
 
 logger = logging.getLogger("monitor")
+
+
+def _unpack_scrape_result(result):
+    """兼容测试/旧 monkeypatch 返回 list；真实 scraper 返回 (listings, completeness)。"""
+    if (
+        isinstance(result, tuple)
+        and len(result) == 2
+        and isinstance(result[1], dict)
+    ):
+        return result
+    return result, {}
+
+
+def _log_scrape_completeness(completeness: dict[str, bool]) -> None:
+    """Phase 2: 只记录城市完整扫描信号，不参与任何收敛行为。"""
+    if not completeness:
+        return
+    complete_n = sum(1 for ok in completeness.values() if ok)
+    logger.info(
+        "本轮完整扫描: %d/%d 城市 (%s)",
+        complete_n,
+        len(completeness),
+        ", ".join(f"{city}={'✓' if ok else '✗'}" for city, ok in completeness.items()),
+    )
 
 # 自适应轮询参数（固定，不需要用户配置）
 # 每轮成功后将当前间隔乘以此系数（5% 缩短），缓慢逼近 min_interval
@@ -325,9 +350,11 @@ async def run_once(
     # booking 快速通道之后（line ~530），提前 stash 会导致 booking
     # 代码无法从 prewarm_futures 中取出刚完成的 session。
     try:
-        fresh = await loop.run_in_executor(
+        scrape_result = await loop.run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
         )
+        fresh, completeness = _unpack_scrape_result(scrape_result)
+        _log_scrape_completeness(completeness)
     except BlockedError as e:
         # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。
         # 给 main_loop 一个长 cooldown（15 min），并节流通知避免刷屏。
@@ -844,11 +871,12 @@ async def main_loop(
     --------
     while True:
         1. run_once()           执行一轮抓取+通知
-        2. 按 heartbeat_interval_minutes 间隔发心跳
-        3. asyncio.wait_for(_reload_event, timeout=actual_interval)
+        2. 独立执行 stale listing 状态收敛
+        3. 按 heartbeat_interval_minutes 间隔发心跳
+        4. asyncio.wait_for(_reload_event, timeout=actual_interval)
            - 超时：正常进入下一轮
            - 事件触发（SIGHUP）：热重载 cfg + users，重建 user_notifiers
-        4. 未预期异常：记录并 sleep 10s，不退出进程
+        5. 未预期异常：记录并 sleep 10s，不退出进程
 
     热重载
     ------
@@ -860,6 +888,8 @@ async def main_loop(
 
     round_count = 0
     last_heartbeat_time = time.monotonic()  # 启动时记为刚发过，避免第一轮立即心跳
+    last_stale_sweep_time = 0.0  # 启动后第一轮成功抓取即执行一次状态收敛
+    stale_sweep_interval_sec = 24 * 60 * 60
 
     # 自适应高峰间隔：从 peak_interval 出发，成功则缩短，限流则翻倍退避。
     # 非高峰时重置，确保下次高峰期从 peak_interval 重新开始探测。
@@ -948,6 +978,26 @@ async def main_loop(
                         "🔽 自适应间隔: %d → %d 秒（下限 %d 秒）",
                         int(prev), int(adaptive_peak), cfg.min_interval,
                     )
+
+            # 状态收敛兜底：当前监控城市中 >7 天未刷新的"可用"listing 推测为 Occupied。
+            # 与 heartbeat 解耦，避免 heartbeat 关闭或间隔过长时鬼影一直残留。
+            if time.monotonic() - last_stale_sweep_time >= stale_sweep_interval_sec:
+                city_tasks, _ = cfg.scrape_tasks()
+                monitored_cities = sorted({city for city, _city_id in city_tasks if city})
+                try:
+                    if monitored_cities:
+                        stale = storage.mark_stale_listings(days=7, cities=monitored_cities)
+                        if stale:
+                            logger.info(
+                                "已将 %d 条 7 天未见的 listing 推测为 Occupied（城市: %s）",
+                                stale, ", ".join(monitored_cities),
+                            )
+                    else:
+                        logger.debug("跳过 stale listing 状态收敛：未配置监控城市")
+                except Exception:
+                    logger.exception("mark_stale_listings 失败（已忽略）")
+                finally:
+                    last_stale_sweep_time = time.monotonic()
 
             heartbeat_interval_sec = cfg.heartbeat_interval_minutes * 60
             if heartbeat_interval_sec > 0 and time.monotonic() - last_heartbeat_time >= heartbeat_interval_sec:
@@ -1102,9 +1152,11 @@ async def _async_main() -> None:
     if args.test:
         logger.info("TEST 模式：只抓取，不发通知")
         city_tasks, availability_ids = cfg.scrape_tasks()
-        fresh = await asyncio.get_running_loop().run_in_executor(
+        scrape_result = await asyncio.get_running_loop().run_in_executor(
             None, lambda: scrape_all(city_tasks, availability_ids)
         )
+        fresh, completeness = _unpack_scrape_result(scrape_result)
+        _log_scrape_completeness(completeness)
         print(json.dumps([l.to_dict() for l in fresh], ensure_ascii=False, indent=2))
         return
 

@@ -55,18 +55,23 @@ class StorageBase:
             PRAGMA journal_mode=WAL;
 
             CREATE TABLE IF NOT EXISTS listings (
-                id              TEXT PRIMARY KEY,
-                name            TEXT,
-                status          TEXT,
-                price_raw       TEXT,
-                available_from  TEXT,
-                features        TEXT,
-                url             TEXT,
-                city            TEXT,
-                first_seen      TEXT,
-                last_seen       TEXT,
-                notified        INTEGER DEFAULT 0,
-                last_status     TEXT
+                id                TEXT PRIMARY KEY,
+                name              TEXT,
+                status            TEXT,
+                price_raw         TEXT,
+                available_from    TEXT,
+                features          TEXT,
+                url               TEXT,
+                city              TEXT,
+                first_seen        TEXT,
+                last_seen         TEXT,
+                notified          INTEGER DEFAULT 0,
+                last_status       TEXT,
+                -- status_is_inferred=1 表示 status 字段是系统推测的（如
+                -- mark_stale_listings 把 7 天未刷新的 listing 标为 Occupied），
+                -- 不是从 API 真实读到的。下次 API 真的返回该 listing 时，
+                -- diff() 会把 inferred 复位为 0。Phase 3 的"鬼影回归"检测靠它。
+                status_is_inferred INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS status_changes (
@@ -250,6 +255,13 @@ class StorageBase:
                     "UPDATE user_configs SET email_verified=1 "
                     "WHERE email_to <> '' AND email_verified=0"
                 )
+
+        # status_is_inferred：标识 listing.status 是否由系统推测产生。
+        # 老库默认 0（都是 API 真实数据），mark_stale_listings 触发时才置 1。
+        self._add_column_if_missing(
+            "listings", "status_is_inferred",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
 
     def _add_column_if_missing(
         self, table: str, column: str, decl: str,

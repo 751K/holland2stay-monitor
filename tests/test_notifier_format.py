@@ -15,6 +15,8 @@ from notifier import (
     _format_status_change,
     _format_booking_success,
     _format_booking_failed,
+    _format_email_html,
+    _format_email_subject,
 )
 
 
@@ -158,3 +160,16 @@ class TestFormatBookingFailed:
             _listing(), "another unit reserved",
         )
         assert "another unit reserved" in text
+
+
+class TestEmailFormatting:
+    def test_subject_uses_flatradar_brand(self):
+        subject = _format_email_subject("🧪 FlatRadar 监控\nbody")
+        assert subject == "[FlatRadar] FlatRadar 监控"
+        assert "Holland2Stay" not in subject
+
+    def test_html_template_escapes_dynamic_text(self):
+        html = _format_email_html("✅ 新房源上架\n\n<script>alert(1)</script>")
+        assert "FlatRadar" in html
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html

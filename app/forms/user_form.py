@@ -240,7 +240,7 @@ def build_user_from_form(
     # - shared 模式且 email_to 未变：继承 existing.email_verified
     # - shared 模式且 email_to 变化：强制重置为 False，等待新一轮验证
     new_email_to = form.get("EMAIL_TO", "").strip()
-    if email_mode == "shared":
+    if email_mode == "shared" and (not existing or new_email_to != existing.email_to):
         _validate_shared_email_to(new_email_to)
     if email_mode != "shared":
         email_verified = False
@@ -386,7 +386,8 @@ def build_user_from_form_self(
 
     # 同 build_user_from_form 的 email_verified 继承规则
     new_email_to = form.get("EMAIL_TO", "").strip()
-    _validate_shared_email_to(new_email_to)
+    if new_email_to != existing.email_to:
+        _validate_shared_email_to(new_email_to)
     if existing.email_mode == "shared" and existing.email_to == new_email_to and new_email_to:
         email_verified = bool(existing.email_verified)
     else:

@@ -79,17 +79,17 @@ class TestSplitEmailRecipients:
 
 class TestFormatEmailSubject:
     def test_short_first_line(self):
-        assert "Holland2Stay" in _format_email_subject("新房源上架")
+        assert "FlatRadar" in _format_email_subject("新房源上架")
 
     def test_long_first_line_truncated(self):
         long_text = "A" * 200
         result = _format_email_subject(long_text)
-        # "[Holland2Stay] " (16) + truncated(77) + "..." (3) = max 96
-        assert len(result) <= 96
+        # "[FlatRadar] " (12) + truncated(77) + "..." (3) = max 92
+        assert len(result) <= 92
 
     def test_empty_text(self):
         result = _format_email_subject("")
-        assert "Holland2Stay" in result
+        assert "FlatRadar" in result
 
 
 # ── MultiNotifier ─────────────────────────────────────────

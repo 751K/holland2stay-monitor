@@ -38,6 +38,7 @@ import smtplib
 import sys
 from abc import ABC, abstractmethod
 from email.message import EmailMessage
+from html import escape as html_escape
 from typing import TYPE_CHECKING
 
 import curl_cffi.requests as req
@@ -394,6 +395,7 @@ class EmailNotifier(BaseNotifier):
         msg["From"] = from_addr
         msg["To"] = ", ".join(recipients)
         msg.set_content(text)
+        msg.add_alternative(_format_email_html(text), subtype="html")
 
         try:
             if self._security == "ssl":
@@ -492,6 +494,7 @@ class ResendNotifier(BaseNotifier):
             "to": recipients,
             "subject": subject,
             "text": text,
+            "html": _format_email_html(text),
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -993,11 +996,94 @@ def _split_email_recipients(value: str) -> list[str]:
 
 
 def _format_email_subject(text: str) -> str:
-    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "Holland2Stay 通知")
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "FlatRadar 通知")
     first_line = re.sub(r"\s+", " ", first_line)
+    first_line = _strip_leading_symbol(first_line)
     if len(first_line) > 80:
         first_line = first_line[:77].rstrip() + "..."
-    return f"[Holland2Stay] {first_line}"
+    return f"[FlatRadar] {first_line}"
+
+
+def _strip_leading_symbol(value: str) -> str:
+    """邮件标题区域不重复展示 emoji / bullets，保留正文原文。"""
+    return re.sub(r"^[^\w\u4e00-\u9fff]+", "", value or "").strip() or value
+
+
+def _format_email_html(text: str) -> str:
+    """
+    通知邮件 HTML 版本。
+
+    纯文本仍作为 fallback 发送；HTML 只负责品牌化和可读性。所有通知正文先做
+    HTML 转义，再按段落和换行渲染，避免邮件客户端执行用户/房源数据中的 HTML。
+    """
+    raw_lines = text.splitlines()
+    non_empty = [line.strip() for line in raw_lines if line.strip()]
+    title = _strip_leading_symbol(non_empty[0]) if non_empty else "FlatRadar 通知"
+    safe_title = html_escape(title)
+
+    paragraph_blocks: list[str] = []
+    current: list[str] = []
+    for line in raw_lines:
+        if line.strip():
+            current.append(html_escape(line.strip()))
+        elif current:
+            paragraph_blocks.append("<br>".join(current))
+            current = []
+    if current:
+        paragraph_blocks.append("<br>".join(current))
+
+    body_html = "\n".join(
+        f'<p style="margin:0 0 14px;color:#374151;font-size:14px;line-height:1.7;">{block}</p>'
+        for block in paragraph_blocks
+    ) or '<p style="margin:0;color:#374151;font-size:14px;line-height:1.7;">FlatRadar notification</p>'
+
+    safe_text = html_escape(text)
+    return f"""<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{safe_title}</title>
+</head>
+<body style="margin:0;padding:0;background:#f5f7fb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#1f2530;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f5f7fb;padding:32px 16px;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560"
+             style="max-width:560px;width:100%;background:#ffffff;border-radius:18px;
+                    box-shadow:0 8px 32px rgba(20,30,50,.08);overflow:hidden;">
+        <tr>
+          <td style="padding:30px 34px 12px;">
+            <div style="font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#2f8cff;">
+              FlatRadar
+            </div>
+            <h1 style="margin:12px 0 8px;font-size:22px;font-weight:700;line-height:1.3;color:#111827;">
+              {safe_title}
+            </h1>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:12px 34px 18px;">
+            {body_html}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:18px 34px 30px;border-top:1px solid #edf1f7;">
+            <p style="margin:0;color:#8b95a5;font-size:12px;line-height:1.6;">
+              This email was sent by FlatRadar based on your notification settings.
+            </p>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:14px 0 0;color:#aeb7c5;font-size:11px;">
+        © FlatRadar · independent rental listing companion
+      </p>
+      <pre style="display:none;visibility:hidden;opacity:0;height:0;width:0;overflow:hidden;">{safe_text}</pre>
+    </td>
+  </tr>
+</table>
+</body>
+</html>"""
 
 
 # ------------------------------------------------------------------ #
