@@ -179,6 +179,20 @@ class TestMarkStaleListings:
         assert row["status"] == "Available to book"
         assert row["status_is_inferred"] == 0
 
+    def test_lottery_uses_shorter_stale_window(self, temp_db):
+        temp_db.diff([
+            _l("book", status="Available to book"),
+            _l("lottery", status="Available in lottery"),
+        ])
+        _set_last_seen(temp_db, "book", days_ago=3)
+        _set_last_seen(temp_db, "lottery", days_ago=3)
+
+        updated = temp_db.mark_stale_listings(days=7, lottery_days=2)
+
+        assert updated == 1
+        assert temp_db.get_listing("book")["status"] == "Available to book"
+        assert temp_db.get_listing("lottery")["status"] == "Occupied"
+
     def test_marking_is_idempotent(self, temp_db):
         temp_db.diff([_l("a", status="Available in lottery")])
         _set_last_seen(temp_db, "a", days_ago=8)

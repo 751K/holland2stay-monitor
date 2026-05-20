@@ -313,36 +313,3 @@ class TestMonitorBlockedHandling:
         with pytest.raises(BlockedError):
             self._run(tmp_path, scrape, user, notifs_received)
         assert len(notifs_received) == 2, "超过 30 分钟后应该重新通知"
-
-
-# ─── _should_notify_block 单元测试 ────────────────────────────
-
-
-class TestShouldNotifyBlock:
-    def setup_method(self):
-        monitor._last_block_notify_at = 0.0
-
-    def teardown_method(self):
-        monitor._last_block_notify_at = 0.0
-
-    def test_first_call_returns_true(self):
-        from monitor import _should_notify_block
-        assert _should_notify_block() is True
-
-    def test_second_call_within_interval_returns_false(self):
-        from monitor import _should_notify_block
-        assert _should_notify_block() is True
-        assert _should_notify_block() is False
-        assert _should_notify_block() is False  # 持续返回 False
-
-    def test_call_after_interval_returns_true_again(self):
-        from monitor import _should_notify_block, _BLOCK_NOTIFY_INTERVAL
-        _should_notify_block()  # 消耗首次
-        # 把时间戳推回过去（模拟时间流逝）
-        monitor._last_block_notify_at -= (_BLOCK_NOTIFY_INTERVAL + 1)
-        assert _should_notify_block() is True
-
-    def test_interval_is_substantial(self):
-        """节流间隔必须 >= 15 分钟，否则失去节流意义。"""
-        from monitor import _BLOCK_NOTIFY_INTERVAL
-        assert _BLOCK_NOTIFY_INTERVAL >= 900, "节流间隔太短，会刷屏"

@@ -41,16 +41,16 @@ def _summary():
 _PUBLIC_CHARTS = {
     "daily_new":     lambda st, days: st.chart_daily_new(days=days),
     "daily_changes": lambda st, days: st.chart_daily_changes(days=days),
-    "city_dist":     lambda st, _:    st.chart_city_dist(),
-    "status_dist":   lambda st, _:    st.chart_status_dist(),
-    "price_dist":    lambda st, _:    st.chart_price_dist(),
-    "hourly_dist":   lambda st, _:    st.chart_hourly_dist(),
-    "tenant_dist":   lambda st, _:    st.chart_tenant_dist(),
-    "contract_dist": lambda st, _:    st.chart_contract_dist(),
-    "type_dist":     lambda st, _:    st.chart_type_dist(),
-    "energy_dist":   lambda st, _:    st.chart_energy_dist(),
-    "area_dist":     lambda st, _:    st.chart_area_dist(),
-    "floor_dist":    lambda st, _:    st.chart_floor_dist(),
+    "city_dist":     lambda st, days: st.chart_city_dist(days=days),
+    "status_dist":   lambda st, days: st.chart_status_dist(days=days),
+    "price_dist":    lambda st, days: st.chart_price_dist(days=days),
+    "hourly_dist":   lambda st, days: st.chart_hourly_dist(days=days),
+    "tenant_dist":   lambda st, days: st.chart_tenant_dist(days=days),
+    "contract_dist": lambda st, days: st.chart_contract_dist(days=days),
+    "type_dist":     lambda st, days: st.chart_type_dist(days=days),
+    "energy_dist":   lambda st, days: st.chart_energy_dist(days=days),
+    "area_dist":     lambda st, days: st.chart_area_dist(days=days),
+    "floor_dist":    lambda st, days: st.chart_floor_dist(days=days),
 }
 
 

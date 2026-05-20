@@ -15,17 +15,22 @@ from app.db import storage
 
 @login_required
 def stats() -> str:
+    default_days = 30
     st = storage()
     try:
         total       = st.count_all()
         new_24h     = st.count_new_since(hours=24)
-        new_7d      = st.count_new_since(hours=24 * 7)
-        changes_24h = st.count_changes_since(hours=24)
+        new_range   = st.count_new_since(hours=24 * default_days)
+        changes_range = st.count_changes_since(hours=24 * default_days)
     finally:
         st.close()
     return render_template(
         "stats.html",
-        total=total, new_24h=new_24h, new_7d=new_7d, changes_24h=changes_24h,
+        total=total,
+        new_24h=new_24h,
+        new_range=new_range,
+        changes_range=changes_range,
+        default_days=default_days,
     )
 
 
@@ -40,18 +45,25 @@ def api_charts():
     st = storage()
     try:
         data = {
+            "summary": {
+                "days": days,
+                "total": st.count_all(),
+                "new_24h": st.count_new_since(hours=24),
+                "new_range": st.count_new_since(hours=24 * days),
+                "changes_range": st.count_changes_since(hours=24 * days),
+            },
             "daily_new":     st.chart_daily_new(days=days),
             "daily_changes": st.chart_daily_changes(days=days),
-            "city_dist":     st.chart_city_dist(),
-            "status_dist":   st.chart_status_dist(),
-            "price_dist":    st.chart_price_dist(),
-            "hourly_dist":   st.chart_hourly_dist(),
-            "tenant_dist":   st.chart_tenant_dist(),
-            "contract_dist": st.chart_contract_dist(),
-            "type_dist":     st.chart_type_dist(),
-            "energy_dist":   st.chart_energy_dist(),
-            "area_dist":     st.chart_area_dist(),
-            "floor_dist":    st.chart_floor_dist(),
+            "city_dist":     st.chart_city_dist(days=days),
+            "status_dist":   st.chart_status_dist(days=days),
+            "price_dist":    st.chart_price_dist(days=days),
+            "hourly_dist":   st.chart_hourly_dist(days=days),
+            "tenant_dist":   st.chart_tenant_dist(days=days),
+            "contract_dist": st.chart_contract_dist(days=days),
+            "type_dist":     st.chart_type_dist(days=days),
+            "energy_dist":   st.chart_energy_dist(days=days),
+            "area_dist":     st.chart_area_dist(days=days),
+            "floor_dist":    st.chart_floor_dist(days=days),
         }
     finally:
         st.close()

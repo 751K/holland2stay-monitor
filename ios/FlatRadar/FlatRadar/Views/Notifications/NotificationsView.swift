@@ -12,6 +12,7 @@ import SwiftUI
 struct NotificationsView: View {
     @Environment(NotificationsStore.self) private var store
     @Environment(AuthStore.self) private var auth
+    @Environment(NavigationCoordinator.self) private var coord
     @State private var showRefreshError = false
     /// "Mark all read" 触觉反馈 trigger —— 每按一次 +1，驱动 `.sensoryFeedback`。
     /// 单条左滑标已读不触发（那个动作系统 swipe 自带触觉）。
@@ -146,6 +147,13 @@ struct NotificationsView: View {
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    // 整行可点：未读 → 标已读；带 listingID → 跳详情。
+                    // 用 contentShape + onTapGesture 避免给整行套 Button 影响卡片视觉。
+                    // swipeActions 仍保留作 backup 入口（只想标已读不跳转的用户用）。
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        handleTap(notification)
+                    }
                     .swipeActions(edge: .trailing) {
                         if !notification.isRead {
                             Button("Read") {
@@ -188,6 +196,22 @@ struct NotificationsView: View {
             .padding(.top, 8)
             .padding(.horizontal, 4)
         }
+    }
+
+    /// 整行点击：
+    /// 1. 未读 → 立即调 store.markRead 把它标已读（乐观更新，store 内部已经 mutate）
+    /// 2. 有 listingID → 跳到 Listings tab + push 详情页（用 NavigationCoordinator）
+    ///
+    /// 两步独立：alert / system / test 类通知没 listingID 也能正常标已读，
+    /// 不会卡在"不知道往哪跳"。new_listing / status_change 类带 listingID
+    /// 才走二段跳转。
+    private func handleTap(_ notification: NotificationItem) {
+        if !notification.isRead {
+            Task { await store.markRead(ids: [notification.id]) }
+        }
+        let id = notification.listingID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else { return }
+        coord.openListing(id: id)
     }
 
     /// 把 "Mark all read" 链接挂在第一个非空分节的 header 同一行。

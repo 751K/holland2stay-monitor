@@ -5,6 +5,7 @@ enum APIError: Error {
     case forbidden(String)
     case notFound(String)
     case validation(String)
+    case conflict(String)      // 409 — 资源冲突，如注册时用户名已存在
     case rateLimited(String)
     case serverError(String)
     case network(any Error)
@@ -19,6 +20,7 @@ enum APIError: Error {
         case "forbidden":   return .forbidden(message)
         case "not_found":   return .notFound(message)
         case "validation":  return .validation(message)
+        case "conflict":    return .conflict(message)
         case "rate_limited": return .rateLimited(message)
         case "server_error": return .serverError(message)
         default:            return .serverError(message)
@@ -50,6 +52,7 @@ extension APIError: LocalizedError {
         case .forbidden:    return String(localized: "Access Denied")
         case .notFound:     return String(localized: "Not Found")
         case .validation:   return String(localized: "Invalid Request")
+        case .conflict:     return String(localized: "Conflict")
         case .rateLimited:  return String(localized: "Too Many Requests")
         case .serverError:  return String(localized: "Server Error")
         case .network:      return String(localized: "Connection Failed")
@@ -64,6 +67,7 @@ extension APIError: LocalizedError {
         case .forbidden(let msg):    return msg
         case .notFound(let msg):     return msg
         case .validation(let msg):   return msg
+        case .conflict(let msg):     return msg
         case .rateLimited(let msg):  return msg
         case .serverError(let msg):  return msg
         case .network(let err):      return String(localized: "Network error: \(err.localizedDescription)")
@@ -80,6 +84,7 @@ extension APIError: LocalizedError {
         case .serverError:  return String(localized: "Please try again later.")
         case .rateLimited:  return String(localized: "Please wait a moment before retrying.")
         case .notFound:     return String(localized: "It may have been removed.")
+        case .conflict:     return String(localized: "Try a different value.")
         case .validation, .decoding, .badResponse: return nil
         }
     }
@@ -94,6 +99,7 @@ extension APIError: LocalizedError {
         case .rateLimited:  return "clock.badge.exclamationmark"
         case .notFound:     return "questionmark.folder"
         case .validation:   return "exclamationmark.triangle"
+        case .conflict:     return "exclamationmark.bubble"
         case .decoding:     return "doc.badge.gearshape"
         case .badResponse:  return "exclamationmark.arrow.triangle.2.circlepath"
         }

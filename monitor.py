@@ -129,6 +129,30 @@ def _log_scrape_completeness(completeness: dict[str, bool]) -> None:
         ", ".join(f"{city}={'✓' if ok else '✗'}" for city, ok in completeness.items()),
     )
 
+
+def _mark_stale_listings_for_complete_cities(
+        storage: Storage,
+        completeness: dict[str, bool],
+        *,
+        days: int = 7,
+        lottery_days: int = 2,
+) -> int:
+    """Phase 3: 只对本轮完整扫描成功的城市执行 stale listing 收敛。"""
+    complete_cities = sorted(city for city, ok in completeness.items() if ok)
+    if not complete_cities:
+        logger.info("跳过 stale listing 状态收敛：本轮无完整扫描城市")
+        return 0
+
+    logger.info(
+        "执行 stale listing 状态收敛：完整城市 %s",
+        ", ".join(complete_cities),
+    )
+    return storage.mark_stale_listings(
+        days=days,
+        lottery_days=lottery_days,
+        cities=complete_cities,
+    )
+
 # 自适应轮询参数（固定，不需要用户配置）
 # 每轮成功后将当前间隔乘以此系数（5% 缩短），缓慢逼近 min_interval
 _ADAPTIVE_DECREASE = 0.95
@@ -238,7 +262,7 @@ async def run_once(
         web_notifier: WebNotifier | None = None,
         dry_run: bool = False,
         booking_deadline: float = float("inf"),
-) -> None:
+) -> dict[str, bool]:
     """
     执行一次完整的「抓取 → 对比 → 通知 → 自动预订」流程。
 
@@ -255,15 +279,16 @@ async def run_once(
     流程说明
     --------
     1. scrape_all() 在 executor 线程中运行（同步 → 异步桥接）
-    2. storage.diff() 识别 new_listings 和 status_changes
-    3. 快速候选预扫描（纯内存，无网络）：
+    2. 记录城市完整扫描信号，并返回给 main_loop 的 Phase 3 收敛逻辑
+    3. storage.diff() 识别 new_listings 和 status_changes
+    4. 快速候选预扫描（纯内存，无网络）：
        - 同时扫描 new_listings 和 status_changes，收集每个用户的自动预订候选
        - 无论来源（新上线 / 状态变更 → Available to book），立即提交 try_book()
          到线程池（run_in_executor），预订与通知并行执行
-    4. 遍历 new_listings：发送新房源通知（预订已在后台运行）
-    5. 遍历 status_changes：发送状态变更通知（预订已在后台运行）
-    6. await 预订 Future，发送预订成功/失败通知
-    7. 更新 meta（last_scrape_at / last_scrape_count）
+    5. 遍历 new_listings：发送新房源通知（预订已在后台运行）
+    6. 遍历 status_changes：发送状态变更通知（预订已在后台运行）
+    7. await 预订 Future，发送预订成功/失败通知
+    8. 更新 meta（last_scrape_at / last_scrape_count）
 
     并行策略
     --------
@@ -277,7 +302,7 @@ async def run_once(
 
     if not city_tasks:
         logger.warning("未配置任何目标城市（CITIES 为空），本轮不抓取。请检查 .env 中 CITIES 设置。")
-        return
+        return {}
 
     loop = asyncio.get_running_loop()
 
@@ -417,7 +442,7 @@ async def run_once(
                 await notifier.send_error(err_msg)
             if web_notifier:
                 await web_notifier.send_error(err_msg)
-        return
+        return {}
 
     logger.info("本次抓取共 %d 条房源", len(fresh))
 
@@ -440,7 +465,7 @@ async def run_once(
         for l in fresh:
             _safe_print(f"  [{l.status:22s}] {l.price_display:7s} | {l.available_from or '?':12s} | {l.name}", flush=True)
         _safe_print('=' * 60, flush=True)
-        return
+        return completeness
 
     new_listings, status_changes = storage.diff(fresh)
 
@@ -775,6 +800,7 @@ async def run_once(
         "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
         len(new_listings), total_notified, len(status_changes), storage.count_all(),
     )
+    return completeness
 
 
 def _apns_startup_diag(st, users: list[UserConfig]) -> None:
@@ -961,8 +987,13 @@ async def main_loop(
 
             # booking_deadline：在此时刻后不再尝试备选房源，让下一轮扫描优先进行
             booking_deadline = time.monotonic() + effective_interval
-            await run_once(cfg, storage, user_notifiers, web_notifier=web_notifier,
-                           booking_deadline=booking_deadline)
+            city_completeness = await run_once(
+                cfg,
+                storage,
+                user_notifiers,
+                web_notifier=web_notifier,
+                booking_deadline=booking_deadline,
+            )
 
             # 成功：重置网络失败连续计数
             if network_fail_streak:
@@ -979,21 +1010,18 @@ async def main_loop(
                         int(prev), int(adaptive_peak), cfg.min_interval,
                     )
 
-            # 状态收敛兜底：当前监控城市中 >7 天未刷新的"可用"listing 推测为 Occupied。
-            # 与 heartbeat 解耦，避免 heartbeat 关闭或间隔过长时鬼影一直残留。
+            # 状态收敛兜底：仅对本轮完整扫描成功的城市执行。
+            # 整轮连接失败会在 run_once() 抛出并跳过这里；部分城市不完整则不收敛该城市。
             if time.monotonic() - last_stale_sweep_time >= stale_sweep_interval_sec:
-                city_tasks, _ = cfg.scrape_tasks()
-                monitored_cities = sorted({city for city, _city_id in city_tasks if city})
                 try:
-                    if monitored_cities:
-                        stale = storage.mark_stale_listings(days=7, cities=monitored_cities)
-                        if stale:
-                            logger.info(
-                                "已将 %d 条 7 天未见的 listing 推测为 Occupied（城市: %s）",
-                                stale, ", ".join(monitored_cities),
-                            )
-                    else:
-                        logger.debug("跳过 stale listing 状态收敛：未配置监控城市")
+                    stale = _mark_stale_listings_for_complete_cities(
+                        storage,
+                        city_completeness,
+                        days=7,
+                        lottery_days=2,
+                    )
+                    if stale:
+                        logger.info("已将 %d 条未见 listing 推测为 Occupied（book 7 天，lottery 2 天）", stale)
                 except Exception:
                     logger.exception("mark_stale_listings 失败（已忽略）")
                 finally:

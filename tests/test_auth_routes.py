@@ -48,6 +48,11 @@ class TestUnauthenticated:
         r = client.get("/login")
         assert r.status_code == 200
 
+    def test_login_page_links_to_ios_app(self, client):
+        r = client.get("/login")
+        assert r.status_code == 200
+        assert b"https://apps.apple.com/us/app/flarradar/id6769857080" in r.data
+
 
 # ─── CSRF 防护 ──────────────────────────────────────────────────
 
@@ -96,6 +101,20 @@ def _login(client, username, password):
     })
 
 
+def _register_web(client, username, password, next_url="", terms_accepted=True):
+    """完整 Web 注册辅助：GET /login 取 CSRF，再 POST /register。"""
+    client.get("/login")
+    with client.session_transaction() as sess:
+        csrf = sess.get("csrf_token", "")
+    return client.post("/register", data={
+        "register_username": username,
+        "register_password": password,
+        "next": next_url,
+        "terms_accepted": "1" if terms_accepted else "0",
+        "csrf_token": csrf,
+    })
+
+
 class TestLoginSuccess:
     def test_correct_credentials_redirects_to_index(self, client, test_credentials):
         r = _login(client, test_credentials["username"], test_credentials["password"])
@@ -113,6 +132,78 @@ class TestLoginSuccess:
         for url in ["/", "/listings", "/users", "/settings"]:
             r = client.get(url)
             assert r.status_code == 200, f"{url} = {r.status_code}"
+
+
+# ─── Web 注册路径 ───────────────────────────────────────────────
+
+
+class TestWebRegister:
+    def setup_method(self):
+        from app.auth import _REGISTER_RECORDS
+        _REGISTER_RECORDS.clear()
+
+    def teardown_method(self):
+        from app.auth import _REGISTER_RECORDS
+        _REGISTER_RECORDS.clear()
+
+    def test_login_page_has_register_form(self, client):
+        r = client.get("/login")
+        assert r.status_code == 200
+        assert b'action="/register"' in r.data
+        assert b"register_username" in r.data
+        assert b"register_password" in r.data
+        assert b"terms_accepted" in r.data
+        assert b"registerTermsModal" in r.data
+        assert b"/terms" in r.data
+        assert b"/privacy" in r.data
+
+    def test_register_without_csrf_returns_403(self, client):
+        r = client.post("/register", data={
+            "register_username": "alice",
+            "register_password": "secret",
+        })
+        assert r.status_code == 403
+
+    def test_register_without_terms_rejected(self, client, isolated_data_dir):
+        r = _register_web(client, "alice", "secret123", terms_accepted=False)
+        assert r.status_code == 400
+        from users import load_users
+        assert load_users() == []
+
+    def test_register_creates_user_and_logs_in(self, client, isolated_data_dir):
+        r = _register_web(client, "alice", "secret123")
+        assert r.status_code == 302
+        assert r.headers["Location"].endswith("/")
+
+        from users import load_users, verify_app_password
+        users = load_users()
+        assert len(users) == 1
+        user = users[0]
+        assert user.name == "alice"
+        assert user.enabled is True
+        assert user.notifications_enabled is False
+        assert user.app_login_enabled is True
+        assert verify_app_password(user, "secret123") is True
+
+        with client.session_transaction() as sess:
+            assert sess.get("authenticated") is True
+            assert sess.get("role") == "user"
+            assert sess.get("user_id") == user.id
+
+    def test_register_duplicate_name_rejected(self, client, isolated_data_dir):
+        from users import UserConfig, save_users, set_app_password
+        user = UserConfig(name="alice", id="alice001", app_login_enabled=True)
+        set_app_password(user, "oldpass")
+        save_users([user])
+
+        r = _register_web(client, "alice", "secret123")
+        assert r.status_code == 409
+
+    def test_register_short_password_rejected(self, client, isolated_data_dir):
+        r = _register_web(client, "alice", "123")
+        assert r.status_code == 200
+        from users import load_users
+        assert load_users() == []
 
 
 # ─── 登录失败 + brute-force 退避 ───────────────────────────────

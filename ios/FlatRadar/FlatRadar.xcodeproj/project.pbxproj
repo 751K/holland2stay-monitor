@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		FC5588792FBDB6A300855C9D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FC1F385B2FB72DA000FC7A33 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FC1F38622FB72DA000FC7A33;
+			remoteInfo = FlatRadar;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		FC1F38632FB72DA000FC7A33 /* FlatRadar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FlatRadar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FC5588732FBDB6A300855C9D /* FlatRadarUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlatRadarUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FCA5BF452FBA1D5F0081A5E4 /* FlatRadar.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FlatRadar.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -17,10 +28,22 @@
 			path = FlatRadar;
 			sourceTree = "<group>";
 		};
+		FC5588742FBDB6A300855C9D /* FlatRadarUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FlatRadarUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		FC1F38602FB72DA000FC7A33 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FC5588702FBDB6A300855C9D /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -35,6 +58,7 @@
 			children = (
 				FCA5BF452FBA1D5F0081A5E4 /* FlatRadar.storekit */,
 				FC1F38652FB72DA000FC7A33 /* FlatRadar */,
+				FC5588742FBDB6A300855C9D /* FlatRadarUITests */,
 				FC1F38642FB72DA000FC7A33 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -43,6 +67,7 @@
 			isa = PBXGroup;
 			children = (
 				FC1F38632FB72DA000FC7A33 /* FlatRadar.app */,
+				FC5588732FBDB6A300855C9D /* FlatRadarUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -72,6 +97,29 @@
 			productReference = FC1F38632FB72DA000FC7A33 /* FlatRadar.app */;
 			productType = "com.apple.product-type.application";
 		};
+		FC5588722FBDB6A300855C9D /* FlatRadarUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FC55887B2FBDB6A300855C9D /* Build configuration list for PBXNativeTarget "FlatRadarUITests" */;
+			buildPhases = (
+				FC55886F2FBDB6A300855C9D /* Sources */,
+				FC5588702FBDB6A300855C9D /* Frameworks */,
+				FC5588712FBDB6A300855C9D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				FC55887A2FBDB6A300855C9D /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FC5588742FBDB6A300855C9D /* FlatRadarUITests */,
+			);
+			name = FlatRadarUITests;
+			packageProductDependencies = (
+			);
+			productName = FlatRadarUITests;
+			productReference = FC5588732FBDB6A300855C9D /* FlatRadarUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -84,6 +132,10 @@
 				TargetAttributes = {
 					FC1F38622FB72DA000FC7A33 = {
 						CreatedOnToolsVersion = 26.5;
+					};
+					FC5588722FBDB6A300855C9D = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = FC1F38622FB72DA000FC7A33;
 					};
 				};
 			};
@@ -102,12 +154,20 @@
 			projectRoot = "";
 			targets = (
 				FC1F38622FB72DA000FC7A33 /* FlatRadar */,
+				FC5588722FBDB6A300855C9D /* FlatRadarUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		FC1F38612FB72DA000FC7A33 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FC5588712FBDB6A300855C9D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -124,7 +184,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FC55886F2FBDB6A300855C9D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		FC55887A2FBDB6A300855C9D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FC1F38622FB72DA000FC7A33 /* FlatRadar */;
+			targetProxy = FC5588792FBDB6A300855C9D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		FC1F386C2FB72DA300FC7A33 /* Debug */ = {
@@ -253,7 +328,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FlatRadar/FlatRadar.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 151;
+				CURRENT_PROJECT_VERSION = 161;
 				DEVELOPMENT_TEAM = HGXZB3UC25;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -268,7 +343,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5.0;
+				MARKETING_VERSION = 1.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.j.kong.FlatRadar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -288,7 +363,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FlatRadar/FlatRadar.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 151;
+				CURRENT_PROJECT_VERSION = 161;
 				DEVELOPMENT_TEAM = HGXZB3UC25;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -303,7 +378,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.5.0;
+				MARKETING_VERSION = 1.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.j.kong.FlatRadar;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -313,6 +388,48 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		FC55887C2FBDB6A300855C9D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 161;
+				DEVELOPMENT_TEAM = HGXZB3UC25;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.j.kong.FlatRadarUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = FlatRadar;
+			};
+			name = Debug;
+		};
+		FC55887D2FBDB6A300855C9D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 161;
+				DEVELOPMENT_TEAM = HGXZB3UC25;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.j.kong.FlatRadarUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = FlatRadar;
 			};
 			name = Release;
 		};
@@ -333,6 +450,15 @@
 			buildConfigurations = (
 				FC1F386F2FB72DA300FC7A33 /* Debug */,
 				FC1F38702FB72DA300FC7A33 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FC55887B2FBDB6A300855C9D /* Build configuration list for PBXNativeTarget "FlatRadarUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FC55887C2FBDB6A300855C9D /* Debug */,
+				FC55887D2FBDB6A300855C9D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -1,3 +1,5 @@
+"""SQLite user_configs 并发写入和 legacy app_users 清理测试。"""
+
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor

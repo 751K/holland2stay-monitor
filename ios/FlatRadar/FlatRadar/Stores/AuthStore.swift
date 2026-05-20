@@ -54,6 +54,12 @@ final class AuthStore {
     // MARK: - Restore Session
 
     func restoreSession() async {
+        // 截图测试：要求 LoginView 时跳过恢复，否则 keychain 残留的 token
+        // 会让 ContentView 直接展示 Dashboard。生产 build 永远不会进这个分支。
+        if CommandLine.arguments.contains("UI_TEST_SHOW_LOGIN") {
+            return
+        }
+
         let savedToken = KeychainManager.load(server: server)
             ?? UserDefaults.standard.string(forKey: "auth_token")
         guard let token = savedToken else { return }
@@ -106,8 +112,7 @@ final class AuthStore {
             #if DEBUG
             print("[AuthStore] login error: \(error)")
             #endif
-            lastError = error as? APIError
-            errorMessage = error.localizedDescription
+            recordError(error)
         }
         isLoading = false
     }
@@ -137,10 +142,23 @@ final class AuthStore {
             #if DEBUG
             print("[AuthStore] register error: \(error)")
             #endif
-            lastError = error as? APIError
-            errorMessage = error.localizedDescription
+            recordError(error)
         }
         isLoading = false
+    }
+
+    /// 统一错误收纳：errorMessage 优先取后端给的具体原因（failureReason），
+    /// fallback 到 LocalizedError 的标题（errorDescription / localizedDescription）。
+    ///
+    /// 旧实现只取 localizedDescription，导致：
+    /// - 后端返回 409 conflict "该用户名已被注册" → UI 显示 "Server Error"
+    /// - 后端返回 401 "用户名或密码错误" → UI 显示 "Login Failed"
+    ///
+    /// 现在错误条 = 后端给的人话 message，登录/注册失败用户能立即知道为什么。
+    private func recordError(_ error: Error) {
+        let api = error as? APIError
+        lastError = api
+        errorMessage = api?.failureReason ?? error.localizedDescription
     }
 
     // MARK: - Guest
@@ -176,6 +194,40 @@ final class AuthStore {
 
     // MARK: - Delete Account
 
+    // MARK: - Change Password
+
+    /// 修改当前 user 密码。
+    ///
+    /// 成功 → 返回 true，并把 errorMessage 清空；调用方负责 UI dismiss。
+    /// 失败 → 返回 false，errorMessage 含后端 message。
+    ///
+    /// 调用前应先在 UI 层校验：
+    /// - 两次新密码一致
+    /// - 新密码 ≥ 4 字符
+    /// - 新密码 != 当前密码（也可放给后端，会返 validation 错误）
+    ///
+    /// 副作用：后端会撤销该 user 名下"除当前 token 外"的所有 session。
+    /// 当前设备保持登录态。
+    func changePassword(current: String, new: String) async -> Bool {
+        guard role == .user else {
+            errorMessage = String(localized: "Only user accounts can change password here.")
+            return false
+        }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            _ = try await client.changePassword(current: current, new: new)
+            return true
+        } catch {
+            #if DEBUG
+            print("[AuthStore] changePassword error: \(error)")
+            #endif
+            recordError(error)
+            return false
+        }
+    }
+
     func deleteAccount() async {
         isLoading = true
         errorMessage = nil
@@ -190,8 +242,10 @@ final class AuthStore {
             isAuthenticated = false
             userInfo = nil
         } catch {
-            lastError = error as? APIError
-            errorMessage = error.localizedDescription
+            #if DEBUG
+            print("[AuthStore] deleteAccount error: \(error)")
+            #endif
+            recordError(error)
         }
     }
 

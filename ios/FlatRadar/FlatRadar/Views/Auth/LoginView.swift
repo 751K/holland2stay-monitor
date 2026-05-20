@@ -19,6 +19,9 @@ struct LoginView: View {
     @State private var changes24h = 0
     @State private var lastScrapeAt: Date?
     @State private var breathe = false
+    /// "live" 小绿点的心跳脉冲：跟 dashboard 顶部 Live 徽章用同一节奏。
+    /// 独立于上面的 breathe（那个驱动 hero 房子图标的呼吸），互不干扰。
+    @State private var liveDotBreathing = false
     @State private var showTerms = false
     @State private var showPrivacy = false
     @State private var showRegister = false
@@ -260,7 +263,7 @@ struct LoginView: View {
                     .padding(.top, 14)
 
                 HStack(spacing: 10) {
-                    badge(icon: "circle.fill", iconColor: .green, value: "\(liveCount)", label: "live")
+                    badge(icon: "circle.fill", iconColor: .green, value: "\(liveCount)", label: "live", animatesIcon: true)
                     badge(icon: "clock", iconColor: .secondary, value: timeAgo, label: "ago")
                     badge(icon: "bell.fill", iconColor: .secondary, value: "\(new24h)", label: "new today")
                 }
@@ -275,11 +278,54 @@ struct LoginView: View {
         .frame(height: 350)
     }
 
-    private func badge(icon: String, iconColor: Color, value: String, label: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(.system(size: 7))
-                .foregroundStyle(iconColor)
+    private func badge(
+        icon: String,
+        iconColor: Color,
+        value: String,
+        label: String,
+        animatesIcon: Bool = false
+    ) -> some View {
+        // 只有 live 小绿点这种"实时/在线"语义的徽章才传 animatesIcon=true。
+        // reduceMotion 开启时即使要求动画也停下来——遵守 iOS HIG。
+        let shouldAnimate = animatesIcon && !reduceMotion
+        return HStack(spacing: 5) {
+            // animatesIcon=true 时（live 那条）改用裸 Circle，与 Dashboard
+            // liveBadge 的做法保持一致：
+            // - SF Symbol Image("circle.fill") 在 .font(size:7) 下 glyph box
+            //   比可见圆大（含字体上下空白），HStack 居中对齐时圆视觉偏下
+            // - 裸 Circle 是 Shape，无字体度量，frame 就是可见尺寸，对齐准
+            // 其他 badge (clock / bell.fill) 仍保留 Image，因为视觉上对齐没问题
+            if animatesIcon {
+                ZStack {
+                    if shouldAnimate {
+                        Circle()
+                            .fill(iconColor)
+                            .frame(width: 7, height: 7)
+                            .scaleEffect(liveDotBreathing ? 2.4 : 1.0)
+                            .opacity(liveDotBreathing ? 0.0 : 0.45)
+                            .animation(
+                                .easeOut(duration: 1.6)
+                                    .repeatForever(autoreverses: false),
+                                value: liveDotBreathing
+                            )
+                    }
+                    Circle()
+                        .fill(iconColor)
+                        .frame(width: 7, height: 7)
+                        .scaleEffect(shouldAnimate && liveDotBreathing ? 1.12 : 1.0)
+                        .animation(
+                            shouldAnimate
+                                ? .easeInOut(duration: 1.6).repeatForever(autoreverses: true)
+                                : .default,
+                            value: liveDotBreathing
+                        )
+                }
+                .frame(width: 7, height: 7)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 7))
+                    .foregroundStyle(iconColor)
+            }
             Text(value).font(.system(size: 14, weight: .bold))
                 .foregroundStyle(badgeValueColor)
             Text(label).font(.system(size: 14))
@@ -289,6 +335,11 @@ struct LoginView: View {
         .background(badgeBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(isDark ? 0 : 0.06), radius: 4, y: 2)
+        .onAppear {
+            if shouldAnimate {
+                liveDotBreathing = true
+            }
+        }
     }
 
     // MARK: - Content

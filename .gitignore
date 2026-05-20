@@ -30,4 +30,23 @@ dist/
 **/.build/
 *.p8
 *.p12
+*.mobileprovision
+*.cer
+*.certSigningRequest
+*.bak
 DerivedData/
+
+# App Store Connect API（私钥 / config / 草稿）
+# 实际配置应放在 ~/.config/asc/ 外部目录，这里只是防御万一拷贝进仓库
+**/AuthKey_*.p8
+tools/asc/config.json
+tools/asc/*.cache.json
+tools/asc/metadata-drafts/
+
+# Fastlane（如果以后加）
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/screenshots/**/*.jpg
+fastlane/test_output/
+fastlane/AuthKey_*.p8

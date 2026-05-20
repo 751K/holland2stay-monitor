@@ -23,19 +23,19 @@
 <div class="kpi-grid">
   <div class="kpi-card accent-purple">
     <div class="kpi-icon" style="background:linear-gradient(135deg,#bf5af2,#7c3aed);"><i class="bi bi-building-fill"></i></div>
-    <div><div class="kpi-num">{{ total }}</div><div class="kpi-label">{{ _('total_listings') }}</div></div>
+    <div><div id="kpi-total" class="kpi-num">{{ total }}</div><div class="kpi-label">{{ _('total_listings') }}</div></div>
   </div>
   <div class="kpi-card accent-green">
     <div class="kpi-icon" style="background:linear-gradient(135deg,#10b981,#059669);"><i class="bi bi-lightning-charge-fill"></i></div>
-    <div><div class="kpi-num" style="color:var(--success);">{{ new_24h }}</div><div class="kpi-label">{{ _('new_today') }}</div></div>
+    <div><div id="kpi-new-24h" class="kpi-num" style="color:var(--success);">{{ new_24h }}</div><div class="kpi-label">{{ _('new_today') }}</div></div>
   </div>
   <div class="kpi-card accent-blue">
     <div class="kpi-icon" style="background:linear-gradient(135deg,#5e6ad2,#4f5ac2);"><i class="bi bi-graph-up"></i></div>
-    <div><div class="kpi-num" style="color:var(--accent);">{{ new_7d }}</div><div class="kpi-label">{{ _('stats_new_7d') }}</div></div>
+    <div><div id="kpi-new-range" class="kpi-num" style="color:var(--accent);">{{ new_range }}</div><div id="kpi-new-range-label" class="kpi-label"></div></div>
   </div>
   <div class="kpi-card accent-amber">
     <div class="kpi-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);"><i class="bi bi-shuffle"></i></div>
-    <div><div class="kpi-num" style="color:var(--warning);">{{ changes_24h }}</div><div class="kpi-label">{{ _('changes_today') }}</div></div>
+    <div><div id="kpi-changes-range" class="kpi-num" style="color:var(--warning);">{{ changes_range }}</div><div id="kpi-changes-range-label" class="kpi-label"></div></div>
   </div>
 </div>
 
@@ -141,6 +141,26 @@ function themeColors() {
 var charts = {};
 function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
 
+function setText(id, value) {
+  var el = document.getElementById(id);
+  if(el) el.textContent = value == null ? '0' : String(value);
+}
+
+function rangeText(prefixEn, prefixZh, days) {
+  return (LANG === 'zh' ? prefixZh + ' · ' + days + '天' : prefixEn + ' · ' + days + 'd');
+}
+
+function renderSummary(summary) {
+  if(!summary) return;
+  var days = summary.days || Number(document.getElementById('days-select').value || 30);
+  setText('kpi-total', summary.total);
+  setText('kpi-new-24h', summary.new_24h);
+  setText('kpi-new-range', summary.new_range);
+  setText('kpi-changes-range', summary.changes_range);
+  setText('kpi-new-range-label', rangeText('New', '新增', days));
+  setText('kpi-changes-range-label', rangeText('Changes', '变更', days));
+}
+
 function buildLineChart(id, label, data, color) {
   destroyChart(id);
   var c = themeColors();
@@ -223,6 +243,7 @@ var _cachedData = null;
 function renderCharts(d) {
   if(!d) return;
   _cachedData = d;
+  renderSummary(d.summary);
   var zh = LANG === 'zh';
   buildLineChart('chartDailyNew', zh ? '新增房源' : 'New listings', d.daily_new, '#10b981');
   buildLineChart('chartDailyChanges', zh ? '状态变更' : 'Status changes', d.daily_changes, '#f59e0b');
@@ -269,13 +290,20 @@ function renderCharts(d) {
 }
 
 function loadCharts(days) {
-  fetch('/api/charts?days=' + (days || 30))
+  fetch('/api/charts?days=' + encodeURIComponent(days || 30), { cache: 'no-store' })
     .then(function(r){ return r.json(); })
     .then(function(d){ renderCharts(d); })
     .catch(function(err){ console.error('Charts load error:', err); });
 }
 
-loadCharts(30);
+renderSummary({
+  days: {{ default_days }},
+  total: {{ total }},
+  new_24h: {{ new_24h }},
+  new_range: {{ new_range }},
+  changes_range: {{ changes_range }},
+});
+loadCharts({{ default_days }});
 
 // 窗口缩放时刷新所有图表尺寸（CSS 媒体查询改变网格列数后需要）
 var _resizeTimer;

@@ -4,14 +4,13 @@
 覆盖：
 - _mask_email() 脱敏
 - templates 中 XSS 风险点验证（无 innerHTML 拼接用户输入）
-- _escape_applescript_literal 完整覆盖（已有 test_applescript_escape.py，此处回归）
 """
 from __future__ import annotations
 
-import pytest
+import re
+from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from pathlib import Path
 
 
 # ── _mask_email ────────────────────────────────────────────
@@ -78,22 +77,51 @@ class TestTemplateAutoEscape:
         assert "escapeHtml(r.channel)" in source
         assert "escapeHtml(r.error)" in source
 
+    def test_hidden_email_to_is_not_statically_required(self):
+        """Email 通道未启用时隐藏的收件邮箱字段不能阻断表单提交。"""
+        source = (Path(__file__).parent.parent / "templates" / "user_form.html").read_text(
+            encoding="utf-8",
+        )
+        match = re.search(r'<input[^>]+id="email_to_input"[^>]*>', source)
+        assert match is not None
+        assert " required" not in match.group(0)
+        assert "syncEmailRequirement()" in source
 
-# ── AppleScript 转义回归 ───────────────────────────────────
+    def test_telegram_setup_hint_present(self):
+        """Telegram 通知配置应提示用户如何获取 Bot Token 和 Chat ID。"""
+        source = (Path(__file__).parent.parent / "templates" / "user_form.html").read_text(
+            encoding="utf-8",
+        )
+        assert "@BotFather" in source
+        assert "/newbot" in source
+        assert "getUpdates" in source
+        assert "Chat ID" in source
 
-class TestAppleScriptEscapeRegression:
-    def test_backslash_handled_first(self):
-        from notifier import _escape_applescript_literal
-        result = _escape_applescript_literal('\\"')
-        # 反斜杠必须先转义，避免后续双引号转义被反斜杠转义
-        assert result == '\\\\\\"'
+    def test_imessage_macos_only_hint_present(self):
+        """iMessage 通知配置应提示只能在本地 macOS 环境使用。"""
+        source = (Path(__file__).parent.parent / "templates" / "user_form.html").read_text(
+            encoding="utf-8",
+        )
+        assert "本地 macOS" in source
+        assert "Docker" in source
+        assert "servers, Linux, or Docker" in source
 
-    def test_newline_becomes_return(self):
-        from notifier import _escape_applescript_literal
-        result = _escape_applescript_literal("line1\nline2")
-        assert '& return &' in result
-        assert '\n' not in result
+    def test_stats_range_updates_kpi_cards(self):
+        """统计页切换 7/30/90 天时，KPI 卡片也应跟随 API 数据刷新。"""
+        source = (Path(__file__).parent.parent / "templates" / "stats.html").read_text(
+            encoding="utf-8",
+        )
+        assert 'id="kpi-new-range"' in source
+        assert 'id="kpi-changes-range"' in source
+        assert "renderSummary(d.summary)" in source
+        assert "summary.new_range" in source
+        assert "summary.changes_range" in source
+        assert "{ cache: 'no-store' }" in source
 
-    def test_plain_text_unchanged(self):
-        from notifier import _escape_applescript_literal
-        assert _escape_applescript_literal("Hello World") == "Hello World"
+    def test_listings_page_shows_last_seen_for_stale_sweep_debugging(self):
+        """列表页应显示 stale 收敛真正使用的 last_seen，而不只显示 first_seen。"""
+        source = (Path(__file__).parent.parent / "templates" / "listings.html").read_text(
+            encoding="utf-8",
+        )
+        assert "{{ _('col_last_seen') }}" in source
+        assert "l.last_seen | time_ago" in source

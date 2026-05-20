@@ -177,6 +177,22 @@ class TokenOps:
             )
             return cur.rowcount
 
+    def revoke_user_tokens_except(self, user_id: str, except_token_id: int) -> int:
+        """
+        撤销 user 名下除指定 token_id 之外的所有 token。
+
+        典型场景：用户在 App 内改密码——保留当前会话存活，否则用户改完密码
+        会被自己踢下线。`except_token_id` 应该是当前请求所携带的 token id
+        （从 ``g.api_token_id`` 拿）。
+        """
+        with self._conn:
+            cur = self._conn.execute(
+                "UPDATE app_tokens SET revoked = 1 "
+                "WHERE user_id = ? AND id != ? AND revoked = 0",
+                (user_id, except_token_id),
+            )
+            return cur.rowcount
+
     def touch_app_tokens(self, token_ids: list[int]) -> None:
         """
         批量刷新 last_used_at（异步队列调用，每请求不直接走这里）。

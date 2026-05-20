@@ -1,11 +1,11 @@
 """
-users.py 边缘恢复路径测试。
+users.py / SQLite user_configs 边缘恢复路径测试。
 
 覆盖：
-- users.json 不存在 → 返回 []
-- users.json 损坏 → 抛 RuntimeError
-- 空文件 → 返回 []
-- isolate env migration → create default user
+- 无 legacy users.json → 直接从 SQLite user_configs 返回 []
+- legacy users.json 损坏/空文件 → 抛 RuntimeError，避免静默覆盖配置
+- legacy users.json 首次导入 → 写入 SQLite 并保留 migrated backup
+- meta migration flag 已存在 → 不重复导入旧 JSON
 """
 from __future__ import annotations
 

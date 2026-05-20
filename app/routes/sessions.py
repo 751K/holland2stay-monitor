@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 import time as _time
 from typing import Any
@@ -26,13 +27,29 @@ from flask import (
 
 from app.auth import (
     auth_enabled,
+    check_register_rate,
     check_login_rate,
     clear_login_failures,
     guest_mode_enabled,
+    record_registration,
     record_login_failure,
 )
 from app.csrf import csrf_required
 from app.safety import safe_next_url
+
+logger = logging.getLogger(__name__)
+
+
+def _render_login(*, next_value: str = "", status: int = 200):
+    return (
+        render_template(
+            "login.html",
+            next=next_value,
+            auth_enabled=auth_enabled(),
+            guest_mode=guest_mode_enabled(),
+        ),
+        status,
+    )
 
 
 def _try_user_login(username: str, password: str):
@@ -117,12 +134,85 @@ def login() -> Any:
         record_login_failure(client_ip)
         flash("用户名或密码错误", "danger")
 
-    return render_template(
-        "login.html",
-        next=request.args.get("next", ""),
-        auth_enabled=auth_enabled(),
-        guest_mode=guest_mode_enabled(),
-    )
+    return _render_login(next_value=request.args.get("next", ""))
+
+
+@csrf_required
+def register_user() -> Any:
+    """Web 注册：创建普通 user，设置 App/Web 登录密码，并直接登录。"""
+    if not auth_enabled():
+        return redirect(url_for("index"))
+    if session.get("authenticated"):
+        return redirect(url_for("index"))
+
+    next_value = request.form.get("next", "")
+    client_ip = request.remote_addr or "0.0.0.0"
+
+    reg_ok, reg_reason = check_register_rate(client_ip)
+    if not reg_ok:
+        flash(reg_reason, "danger")
+        return _render_login(next_value=next_value, status=429)
+
+    username = request.form.get("register_username", "").strip()[:64]
+    password = request.form.get("register_password", "")
+    terms_accepted = request.form.get("terms_accepted") == "1"
+
+    if not username or not password:
+        flash("用户名和密码不能为空", "danger")
+        return _render_login(next_value=next_value)
+    if not terms_accepted:
+        flash("请先确认使用条款与隐私政策", "danger")
+        return _render_login(next_value=next_value, status=400)
+    if len(username) < 2:
+        flash("用户名至少需要 2 个字符", "danger")
+        return _render_login(next_value=next_value)
+    if len(password) < 4:
+        flash("密码至少需要 4 个字符", "danger")
+        return _render_login(next_value=next_value)
+    if username.lower() == "__admin__" or username.startswith("__"):
+        flash("该用户名不可用", "danger")
+        return _render_login(next_value=next_value)
+
+    try:
+        from users import UserConfig, get_user_by_name, set_app_password, update_users
+
+        def _append_user(users: list[UserConfig]) -> UserConfig:
+            if get_user_by_name(users, username) is not None:
+                raise ValueError("duplicate")
+            user = UserConfig(
+                name=username,
+                enabled=True,
+                notifications_enabled=False,
+                app_login_enabled=True,
+            )
+            set_app_password(user, password)
+            users.append(user)
+            return user
+
+        user = update_users(_append_user)
+    except ValueError as e:
+        if str(e) == "duplicate":
+            flash("该用户名已被注册", "danger")
+            return _render_login(next_value=next_value, status=409)
+        raise
+    except RuntimeError as e:
+        logger.error("用户配置迁移/加载失败: %s", e)
+        flash("用户配置加载失败，请联系管理员", "danger")
+        return _render_login(next_value=next_value, status=500)
+    except OSError:
+        logger.exception("保存用户配置失败")
+        flash("用户创建失败，请稍后再试", "danger")
+        return _render_login(next_value=next_value, status=500)
+
+    record_registration(client_ip)
+    clear_login_failures(client_ip)
+    logger.info("Web 新用户注册: name=%r id=%s ip=%s", username, user.id, client_ip)
+
+    session.permanent = True
+    session["authenticated"] = True
+    session["role"] = "user"
+    session["user_id"] = user.id
+    return redirect(safe_next_url(next_value))
 
 
 def guest_login() -> Any:
@@ -157,6 +247,7 @@ def set_lang() -> Any:
 
 def register(app: Flask) -> None:
     app.add_url_rule("/login",    endpoint="login",       view_func=login,       methods=["GET", "POST"])
+    app.add_url_rule("/register", endpoint="register_user", view_func=register_user, methods=["POST"])
     app.add_url_rule("/logout",   endpoint="logout",      view_func=logout,      methods=["POST"])
     app.add_url_rule("/guest",    endpoint="guest_login", view_func=guest_login, methods=["GET"])
     app.add_url_rule("/set-lang", endpoint="set_lang",    view_func=set_lang,    methods=["GET"])

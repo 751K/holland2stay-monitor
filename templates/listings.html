@@ -118,6 +118,7 @@
           <th>{{ _('col_available') }}</th>
           <th>{{ _('col_city') }}</th>
           <th>{{ _('col_first_seen') }}</th>
+          <th>{{ _('col_last_seen') }}</th>
         </tr>
       </thead>
       <tbody>
@@ -146,9 +147,10 @@
           <td class="cell-secondary">{{ l.available_from or '—' }}</td>
           <td class="cell-secondary">{{ l.city or '—' }}</td>
           <td class="cell-secondary">{{ l.first_seen | time_ago }}</td>
+          <td class="cell-secondary">{{ l.last_seen | time_ago }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="10" class="text-center py-5 text-tertiary">{{ _('filter_no_results') }}</td></tr>
+        <tr><td colspan="11" class="text-center py-5 text-tertiary">{{ _('filter_no_results') }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -183,7 +185,7 @@
       </div>
       <div class="lc-footer">
         <span>{% if l.city %}<i class="bi bi-geo-alt mr-1"></i>{{ l.city }}{% endif %}</span>
-        <span>{{ l.available_from or '—' }}</span>
+        <span>{{ _('col_last_seen') }}: {{ l.last_seen | time_ago }}</span>
       </div>
     </a>
   {% else %}

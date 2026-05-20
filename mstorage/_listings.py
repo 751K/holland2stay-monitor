@@ -129,25 +129,34 @@ class ListingOps:
     # 直接标为 ``Occupied`` 让 UI/统计自然处理；同时 ``status_is_inferred=1``
     # 留下"这是推测值"的标记，供 Phase 3 的鬼影回归检测使用。
     #
+    # Lottery 的生命周期通常更短：从完整扫描结果里消失后，大概率已经被
+    # reserve/occupy，因此使用独立、更短的缺席窗口。
+    #
     # 不写 status_changes：推测转换不触发通知/auto_book。Phase 3 引入
     # synthetic 列后才会写审计行。
     #
     # 仅作用于"看起来还可用"的 listing；已经 Occupied / 已 inferred 的不动。
-    _STALE_ELIGIBLE_STATUSES = (
+    _STALE_GENERAL_STATUSES = (
         "Available to book",
-        "Available in lottery",
         "Unknown",
     )
+    _STALE_LOTTERY_STATUS = "Available in lottery"
 
-    def mark_stale_listings(self, days: int = 7, cities: Optional[list[str]] = None) -> int:
+    def mark_stale_listings(
+        self,
+        days: int = 7,
+        cities: Optional[list[str]] = None,
+        lottery_days: int = 2,
+    ) -> int:
         """
         把 `last_seen` 早于 cutoff 且状态仍是"看起来可用"的 listing
         标为 ``Occupied`` + ``status_is_inferred=1``。
 
         Parameters
         ----------
-        days : 老化阈值；默认 7 天（保守，避免误伤）
+        days : book/unknown 老化阈值；默认 7 天（保守，避免误伤）
         cities : 限定当前仍在监控的城市；传入空列表时不更新任何 listing
+        lottery_days : lottery 老化阈值；默认 2 天
 
         Returns
         -------
@@ -157,17 +166,25 @@ class ListingOps:
         if cities is not None and not city_filter:
             return 0
 
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=days)
-        ).isoformat()
-        placeholders = ",".join("?" * len(self._STALE_ELIGIBLE_STATUSES))
+        now = datetime.now(timezone.utc)
+        cutoff_general = (now - timedelta(days=max(1, int(days)))).isoformat()
+        cutoff_lottery = (now - timedelta(days=max(1, int(lottery_days)))).isoformat()
+        general_placeholders = ",".join("?" * len(self._STALE_GENERAL_STATUSES))
         sql = (
             f"UPDATE listings "
             f"SET status='Occupied', last_status='Occupied', status_is_inferred=1 "
-            f"WHERE last_seen < ? AND status IN ({placeholders}) "
-            f"AND status_is_inferred = 0"
+            f"WHERE status_is_inferred = 0 "
+            f"AND ("
+            f"(last_seen < ? AND status IN ({general_placeholders})) "
+            f"OR (last_seen < ? AND status = ?)"
+            f")"
         )
-        params: list[str] = [cutoff, *self._STALE_ELIGIBLE_STATUSES]
+        params: list[str] = [
+            cutoff_general,
+            *self._STALE_GENERAL_STATUSES,
+            cutoff_lottery,
+            self._STALE_LOTTERY_STATUS,
+        ]
         if city_filter:
             city_placeholders = ",".join("?" * len(city_filter))
             sql += f" AND city IN ({city_placeholders})"

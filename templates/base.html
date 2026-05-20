@@ -67,11 +67,17 @@
       <a href="{{ url_for('settings') }}" class="{% if request.endpoint=='settings' %}active{% endif %}">
         <i class="bi bi-gear"></i> {{ _('settings') }}
       </a>
+      <a href="{{ url_for('app_accounts') }}" class="{% if request.endpoint in ['app_accounts','app_accounts_revoke','app_accounts_test_push'] %}active{% endif %}">
+        <i class="bi bi-phone"></i> {{ _('app_accounts_title') }}
+      </a>
       <a href="{{ url_for('system_info') }}" class="{% if request.endpoint=='system_info' %}active{% endif %}">
         <i class="bi bi-info-circle"></i> {{ _('system_info') }}
       </a>
       <a href="{{ url_for('logs_view') }}" class="{% if request.endpoint=='logs_view' %}active{% endif %}">
         <i class="bi bi-terminal"></i> {{ _('log_viewer') }}
+      </a>
+      <a href="{{ url_for('crashes_view') }}" class="{% if request.endpoint=='crashes_view' %}active{% endif %}">
+        <i class="bi bi-bug"></i> {{ _('crashes_title') }}
       </a>
       {% endif %}
     </nav>
@@ -102,6 +108,25 @@
         <i class="bi bi-translate" style="font-size:15px;width:18px;text-align:center;"></i>
         {{ 'English' if lang=='zh' else '中文' }}
       </a>
+
+      <a href="{{ url_for('privacy_page') }}"
+         target="_blank"
+         rel="noopener noreferrer"
+         style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border-radius:6px;border:none;background:transparent;font-size:15px;color:var(--text2);cursor:pointer;transition:color .12s,background .12s;text-decoration:none;"
+         onmouseover="this.style.color='var(--text)';this.style.background='var(--accent-soft)'"
+         onmouseout="this.style.color='var(--text2)';this.style.background='transparent'">
+        <i class="bi bi-shield-check" style="font-size:15px;width:18px;text-align:center;"></i>
+        {{ 'Privacy Policy' if lang == 'en' else '隐私条款' }}
+      </a>
+      <a href="{{ url_for('terms_page') }}"
+         target="_blank"
+         rel="noopener noreferrer"
+         style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border-radius:6px;border:none;background:transparent;font-size:15px;color:var(--text2);cursor:pointer;transition:color .12s,background .12s;text-decoration:none;"
+         onmouseover="this.style.color='var(--text)';this.style.background='var(--accent-soft)'"
+         onmouseout="this.style.color='var(--text2)';this.style.background='transparent'">
+        <i class="bi bi-file-text" style="font-size:15px;width:18px;text-align:center;"></i>
+        {{ 'Terms of Use' if lang == 'en' else '使用条款' }}
+        </a>
 
       {% if auth_enabled %}
       <form method="POST" action="{{ url_for('logout') }}" style="margin:0;">

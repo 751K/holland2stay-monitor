@@ -15,6 +15,23 @@ logger = logging.getLogger(__name__)
 class ChartOps:
     """依赖 self._conn / self._tz。"""
 
+    def _listing_cutoff(self, days: int | None) -> str | None:
+        """返回按 first_seen 过滤的 UTC cutoff；days=None 表示全量。"""
+        if days is None:
+            return None
+        days = max(1, min(int(days), 365))
+        tz = ZoneInfo(self._tz)
+        now_local = datetime.now(tz)
+        today_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_local = today_local - timedelta(days=days)
+        return (start_local - timedelta(days=1)).isoformat()
+
+    def _listing_where(self, days: int | None) -> tuple[str, tuple]:
+        cutoff = self._listing_cutoff(days)
+        if cutoff is None:
+            return "", ()
+        return " WHERE first_seen >= ?", (cutoff,)
+
     # ── 趋势（折线图）────────────────────────────────────────────────
 
     def chart_daily_new(self, days: int = 30) -> list[dict]:
@@ -65,23 +82,34 @@ class ChartOps:
 
     # ── 分布（饼图/柱状图）───────────────────────────────────────────
 
-    def chart_city_dist(self) -> list[dict]:
+    def chart_city_dist(self, days: int | None = None) -> list[dict]:
+        where, params = self._listing_where(days)
         rows = self._conn.execute(
             """SELECT COALESCE(NULLIF(city,''), '未知') AS city, COUNT(*) AS cnt
-               FROM listings GROUP BY city ORDER BY cnt DESC"""
+               FROM listings{where} GROUP BY city ORDER BY cnt DESC""".format(where=where),
+            params,
         ).fetchall()
         return [{"city": r["city"], "count": r["cnt"]} for r in rows]
 
-    def chart_status_dist(self) -> list[dict]:
+    def chart_status_dist(self, days: int | None = None) -> list[dict]:
+        where, params = self._listing_where(days)
         rows = self._conn.execute(
             """SELECT COALESCE(NULLIF(status,''), '未知') AS status, COUNT(*) AS cnt
-               FROM listings GROUP BY status ORDER BY cnt DESC"""
+               FROM listings{where} GROUP BY status ORDER BY cnt DESC""".format(where=where),
+            params,
         ).fetchall()
         return [{"status": r["status"], "count": r["cnt"]} for r in rows]
 
-    def chart_price_dist(self) -> list[dict]:
+    def chart_price_dist(self, days: int | None = None) -> list[dict]:
+        where = "WHERE price_raw IS NOT NULL AND price_raw != ''"
+        params: tuple = ()
+        cutoff = self._listing_cutoff(days)
+        if cutoff is not None:
+            where += " AND first_seen >= ?"
+            params = (cutoff,)
         rows = self._conn.execute(
-            "SELECT price_raw FROM listings WHERE price_raw IS NOT NULL AND price_raw != ''"
+            f"SELECT price_raw FROM listings {where}",
+            params,
         ).fetchall()
 
         buckets: dict[str, int] = {
@@ -105,10 +133,17 @@ class ChartOps:
 
         return [{"range": k, "count": v} for k, v in buckets.items()]
 
-    def chart_hourly_dist(self) -> list[dict]:
+    def chart_hourly_dist(self, days: int | None = None) -> list[dict]:
         tz = ZoneInfo(self._tz)
+        where = "WHERE first_seen IS NOT NULL"
+        params: tuple = ()
+        cutoff = self._listing_cutoff(days)
+        if cutoff is not None:
+            where += " AND first_seen >= ?"
+            params = (cutoff,)
         rows = self._conn.execute(
-            "SELECT first_seen FROM listings WHERE first_seen IS NOT NULL"
+            f"SELECT first_seen FROM listings {where}",
+            params,
         ).fetchall()
 
         counts: dict[int, int] = {h: 0 for h in range(24)}
@@ -121,9 +156,16 @@ class ChartOps:
 
     # ── 共享 helper ─────────────────────────────────────────────────
 
-    def _count_feature_values(self, category: str) -> list[dict]:
+    def _count_feature_values(self, category: str, days: int | None = None) -> list[dict]:
+        where = "WHERE features IS NOT NULL AND features != '[]'"
+        params: tuple = ()
+        cutoff = self._listing_cutoff(days)
+        if cutoff is not None:
+            where += " AND first_seen >= ?"
+            params = (cutoff,)
         rows = self._conn.execute(
-            "SELECT features FROM listings WHERE features IS NOT NULL AND features != '[]'"
+            f"SELECT features FROM listings {where}",
+            params,
         ).fetchall()
         counts: dict[str, int] = {}
         prefix = f"{category}: "
@@ -143,10 +185,17 @@ class ChartOps:
                 for k, v in sorted(counts.items(), key=lambda x: -x[1])]
 
     def _bucketed_number_dist(
-        self, category: str, buckets: dict[str, int], classifier
+        self, category: str, buckets: dict[str, int], classifier, days: int | None = None
     ) -> list[dict]:
+        where = "WHERE features IS NOT NULL AND features != '[]'"
+        params: tuple = ()
+        cutoff = self._listing_cutoff(days)
+        if cutoff is not None:
+            where += " AND first_seen >= ?"
+            params = (cutoff,)
         rows = self._conn.execute(
-            "SELECT features FROM listings WHERE features IS NOT NULL AND features != '[]'"
+            f"SELECT features FROM listings {where}",
+            params,
         ).fetchall()
         prefix = f"{category}: "
         for (features_json,) in rows:
@@ -165,14 +214,14 @@ class ChartOps:
 
     # ── 具体分布图表 ────────────────────────────────────────────────
 
-    def chart_tenant_dist(self) -> list[dict]:
-        return self._count_feature_values("Tenant")
+    def chart_tenant_dist(self, days: int | None = None) -> list[dict]:
+        return self._count_feature_values("Tenant", days=days)
 
-    def chart_contract_dist(self) -> list[dict]:
-        return self._count_feature_values("Contract")
+    def chart_contract_dist(self, days: int | None = None) -> list[dict]:
+        return self._count_feature_values("Contract", days=days)
 
-    def chart_type_dist(self) -> list[dict]:
-        data = self._count_feature_values("Type")
+    def chart_type_dist(self, days: int | None = None) -> list[dict]:
+        data = self._count_feature_values("Type", days=days)
         def _rank(label: str) -> tuple:
             lower = label.lower().strip()
             if "studio" in lower:  return (0, 0)
@@ -183,8 +232,8 @@ class ChartOps:
         data.sort(key=lambda r: _rank(r["label"]))
         return data
 
-    def chart_energy_dist(self) -> list[dict]:
-        data = self._count_feature_values("Energy")
+    def chart_energy_dist(self, days: int | None = None) -> list[dict]:
+        data = self._count_feature_values("Energy", days=days)
         def _rank(label: str) -> tuple:
             upper = label.upper().strip()
             if not upper: return (999, 0)
@@ -195,7 +244,7 @@ class ChartOps:
         data.sort(key=lambda r: _rank(r["label"]))
         return data
 
-    def chart_area_dist(self) -> list[dict]:
+    def chart_area_dist(self, days: int | None = None) -> list[dict]:
         buckets = {"<20 m²": 0, "20-30 m²": 0, "30-50 m²": 0, "50-80 m²": 0, ">80 m²": 0}
         def _classify(val: str, b: dict):
             area = parse_float(val)
@@ -205,9 +254,9 @@ class ChartOps:
             elif area < 50: b["30-50 m²"] += 1
             elif area < 80: b["50-80 m²"] += 1
             else:           b[">80 m²"] += 1
-        return self._bucketed_number_dist("Area", buckets, _classify)
+        return self._bucketed_number_dist("Area", buckets, _classify, days=days)
 
-    def chart_floor_dist(self) -> list[dict]:
+    def chart_floor_dist(self, days: int | None = None) -> list[dict]:
         buckets = {"Ground": 0, "1-2": 0, "3-5": 0, "6+": 0}
         def _classify(val: str, b: dict):
             floor = parse_int(val)
@@ -216,4 +265,4 @@ class ChartOps:
             elif floor <= 2: b["1-2"] += 1
             elif floor <= 5: b["3-5"] += 1
             else:            b["6+"] += 1
-        return self._bucketed_number_dist("Floor", buckets, _classify)
+        return self._bucketed_number_dist("Floor", buckets, _classify, days=days)

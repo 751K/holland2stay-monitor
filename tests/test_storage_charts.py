@@ -10,6 +10,7 @@ storage.py 图表统计 + 坐标缓存测试。
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -97,6 +98,41 @@ class TestBadFeaturesJSON:
 
         data = temp_db.chart_tenant_dist()
         assert isinstance(data, list)
+
+
+class TestChartDateWindows:
+    def test_distribution_charts_respect_days_window(self, temp_db):
+        now = datetime.now(timezone.utc)
+        recent = (now - timedelta(days=2)).isoformat()
+        old = (now - timedelta(days=45)).isoformat()
+        rows = [
+            ("recent", "Recent", "Available to book", "€950", ["Type: Studio", "Area: 25.0 m²"], "Eindhoven", recent),
+            ("old", "Old", "Reserved", "€1500", ["Type: 2", "Area: 65.0 m²"], "Rotterdam", old),
+        ]
+        for listing_id, name, status, price, features, city, first_seen in rows:
+            temp_db.conn.execute(
+                "INSERT INTO listings (id, name, status, price_raw, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (listing_id, name, status, price, json.dumps(features), "https://x.com", city, first_seen, first_seen, status),
+            )
+        temp_db.conn.commit()
+
+        assert {r["city"]: r["count"] for r in temp_db.chart_city_dist()} == {
+            "Eindhoven": 1,
+            "Rotterdam": 1,
+        }
+        assert {r["city"]: r["count"] for r in temp_db.chart_city_dist(days=7)} == {
+            "Eindhoven": 1,
+        }
+        assert {r["status"]: r["count"] for r in temp_db.chart_status_dist(days=7)} == {
+            "Available to book": 1,
+        }
+        assert {r["label"]: r["count"] for r in temp_db.chart_type_dist(days=7)} == {
+            "Studio": 1,
+        }
+
+        area = {r["label"]: r["count"] for r in temp_db.chart_area_dist(days=7)}
+        assert area["20-30 m²"] == 1
+        assert area["50-80 m²"] == 0
 
 
 class TestGeocodeCache:

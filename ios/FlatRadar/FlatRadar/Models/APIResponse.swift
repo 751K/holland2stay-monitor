@@ -333,3 +333,13 @@ struct AccountDeleteResponse: Decodable {
         case userId = "user_id"
     }
 }
+
+/// `POST /api/v1/auth/password` 响应
+struct ChangePasswordResponse: Decodable {
+    /// 改密码同时被撤销的"其他设备会话"数量；当前 token 不在内
+    let revokedOtherSessions: Int
+
+    enum CodingKeys: String, CodingKey {
+        case revokedOtherSessions = "revoked_other_sessions"
+    }
+}

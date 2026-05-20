@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}{{ _('crashes_title') }}{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1><i class="bi bi-bug mr-2"></i>{{ _('crashes_title') }}</h1>
+  <span class="meta">{{ crashes | length }} {{ _('crashes_total_suffix') }}</span>
+</div>
+
+{% if not crashes %}
+<div class="card">
+  <div class="card-body" style="text-align:center;padding:48px 24px;">
+    <i class="bi bi-emoji-smile" style="font-size:36px;color:var(--success);"></i>
+    <div style="margin-top:12px;font-weight:600;">{{ _('crashes_empty') }}</div>
+    <div class="text-tertiary text-sm mt-1">
+      {{ _('crashes_empty_hint') }}
+      <code style="font-size:11px;">{{ crash_dir }}</code>
+    </div>
+  </div>
+</div>
+{% else %}
+
+<div class="card">
+  <div class="card-header" style="display:flex;align-items:center;gap:8px;">
+    <span>{{ _('crashes_list') }}</span>
+    <span style="flex:1;"></span>
+    <button id="bulk-delete-btn" class="btn btn-ghost btn-sm" disabled
+            onclick="bulkDelete()" style="color:var(--danger);font-size:12px;">
+      <i class="bi bi-trash mr-1"></i><span id="bulk-count">0</span> {{ _('crashes_bulk_delete') }}
+    </button>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="table-minimal" style="width:100%;font-size:13px;">
+      <thead>
+        <tr style="background:var(--surface2);">
+          <th style="width:36px;text-align:center;">
+            <input type="checkbox" id="check-all" onchange="toggleAll(this.checked)">
+          </th>
+          <th>{{ _('crashes_col_time') }}</th>
+          <th>{{ _('crashes_col_kind') }}</th>
+          <th>{{ _('crashes_col_user') }}</th>
+          <th>{{ _('crashes_col_app') }}</th>
+          <th>{{ _('crashes_col_device') }}</th>
+          <th>{{ _('crashes_col_ios') }}</th>
+          <th style="text-align:right;">{{ _('crashes_col_actions') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for c in crashes %}
+        <tr data-crash-id="{{ c.id }}">
+          <td style="text-align:center;">
+            <input type="checkbox" class="crash-check" data-id="{{ c.id }}" onchange="updateBulk()">
+          </td>
+          <td><code style="font-size:11px;">{{ c.received_at or '—' }}</code></td>
+          <td>
+            {% if c.kind == 'crash' %}
+              <span class="badge badge-danger">crash</span>
+            {% elif c.kind == 'hang' %}
+              <span class="badge badge-warning">hang</span>
+            {% elif c.kind == 'cpuexception' %}
+              <span class="badge badge-warning">cpu</span>
+            {% elif c.kind == 'diskwrite' %}
+              <span class="badge badge-warning">disk</span>
+            {% else %}
+              <span class="badge badge-neutral">{{ c.kind }}</span>
+            {% endif %}
+          </td>
+          <td>
+            <span class="text-sm">{{ c.role }}</span>
+            {% if c.user_id %}
+              <span class="text-tertiary text-xs">· {{ c.user_id }}</span>
+            {% endif %}
+          </td>
+          <td><code style="font-size:11px;">{{ c.app_version or '—' }}</code></td>
+          <td>{{ c.device_model or '—' }}</td>
+          <td>{{ c.ios_version or '—' }}</td>
+          <td style="text-align:right;white-space:nowrap;">
+            <button class="btn btn-ghost btn-sm" onclick="viewCrash('{{ c.id }}')">
+              <i class="bi bi-eye"></i>
+            </button>
+            <button class="btn btn-ghost btn-sm" onclick="deleteCrash('{{ c.id }}')" style="color:var(--danger);">
+              <i class="bi bi-trash"></i>
+            </button>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Detail modal -->
+<div class="modal-overlay hidden" id="detailModal">
+  <div class="modal-box" style="max-width:900px;max-height:80vh;display:flex;flex-direction:column;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+      <h3 id="detail-title" style="margin:0;font-size:14px;">{{ _('crashes_detail_title') }}</h3>
+      <span style="flex:1;"></span>
+      <button class="btn btn-ghost btn-sm" onclick="closeDetail()">
+        <i class="bi bi-x-lg"></i>
+      </button>
+    </div>
+    <pre id="detail-body" style="flex:1;overflow:auto;background:var(--surface2);padding:12px;border-radius:8px;font-size:11px;line-height:1.5;font-family:'SF Mono',Menlo,monospace;"></pre>
+  </div>
+</div>
+
+<script>
+  const CSRF = '{{ csrf_token() }}';
+
+  async function viewCrash(id) {
+    const overlay = document.getElementById('detailModal');
+    const body = document.getElementById('detail-body');
+    const title = document.getElementById('detail-title');
+    title.textContent = id;
+    body.textContent = '...';
+    overlay.classList.remove('hidden');
+    try {
+      const r = await fetch('/api/crashes/' + encodeURIComponent(id));
+      const j = await r.json();
+      if (j.ok) {
+        body.textContent = JSON.stringify(j.data, null, 2);
+      } else {
+        body.textContent = 'Error: ' + (j.error || r.status);
+      }
+    } catch (e) {
+      body.textContent = 'Network error: ' + e.message;
+    }
+  }
+
+  function closeDetail() {
+    document.getElementById('detailModal').classList.add('hidden');
+  }
+
+  async function deleteCrash(id) {
+    if (!confirm('{{ _("crashes_confirm_delete") }}')) return;
+    const r = await fetch('/api/crashes/' + encodeURIComponent(id) + '/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+      body: JSON.stringify({ csrf_token: CSRF }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      document.querySelector('tr[data-crash-id="' + id + '"]')?.remove();
+      updateBulk();
+    } else {
+      alert('Delete failed: ' + (j.error || r.status));
+    }
+  }
+
+  function toggleAll(on) {
+    document.querySelectorAll('.crash-check').forEach(cb => cb.checked = on);
+    updateBulk();
+  }
+
+  function updateBulk() {
+    const checked = document.querySelectorAll('.crash-check:checked');
+    const btn = document.getElementById('bulk-delete-btn');
+    document.getElementById('bulk-count').textContent = checked.length;
+    btn.disabled = checked.length === 0;
+  }
+
+  async function bulkDelete() {
+    const ids = Array.from(document.querySelectorAll('.crash-check:checked')).map(cb => cb.dataset.id);
+    if (!ids.length) return;
+    if (!confirm('{{ _("crashes_confirm_bulk_delete") }}'.replace('{n}', ids.length))) return;
+    const r = await fetch('/api/crashes/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+      body: JSON.stringify({ ids: ids, csrf_token: CSRF }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      ids.forEach(id => document.querySelector('tr[data-crash-id="' + id + '"]')?.remove());
+      document.getElementById('check-all').checked = false;
+      updateBulk();
+    } else {
+      alert('Bulk delete failed: ' + (j.error || r.status));
+    }
+  }
+
+  // ESC 关闭 modal
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeDetail();
+  });
+</script>
+
+{% endif %}
+
+{% endblock %}

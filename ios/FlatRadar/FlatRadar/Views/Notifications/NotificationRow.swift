@@ -16,6 +16,10 @@ struct NotificationRow: View {
         let style = CardStyle(kind: notification.kind)
         let isRead = notification.isRead
 
+        // 带 listingID 的行可跳详情；alert/system/test 类没有跳转目标。
+        let isTappable = !notification.listingID.trimmingCharacters(
+            in: .whitespacesAndNewlines).isEmpty
+
         HStack(alignment: .top, spacing: 11) {
             ZStack {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -62,6 +66,16 @@ struct NotificationRow: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+            }
+
+            // 可跳转的行（new_listing / status_change）右侧加 chevron 提示。
+            // alert / system / test 类没 listingID 不画 chevron，避免误导用户
+            // "点了好像没反应"。
+            if isTappable {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 4)
             }
         }
         .padding(14)

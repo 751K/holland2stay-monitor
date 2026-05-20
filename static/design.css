@@ -118,9 +118,9 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   padding:8px 12px;font-size:15px;color:var(--text2);
 }
 .mon-dot{width:6px;height:6px;border-radius:50%;background:var(--text2);flex-shrink:0}
-.mon-badge.running .mon-dot{background:var(--success);animation:breathe 2s ease-in-out infinite}
+.mon-badge.running .mon-dot{background:var(--success);animation:breathe 1.6s ease-in-out infinite}
 .mon-badge.stopped .mon-dot{background:var(--danger)}
-@keyframes breathe{0%,100%{opacity:1}50%{opacity:.25}}
+@keyframes breathe{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(2.2);opacity:.35}}
 
 /* Main content */
 .main-content{

@@ -407,6 +407,90 @@ def _register() -> Any:
     }, status=201)
 
 
+# ── 改密码 ──────────────────────────────────────────────────────────
+
+def _change_password() -> Any:
+    """
+    POST /auth/password —— 当前登录 user 修改自己密码。
+
+    Body: ``{current_password, new_password}``
+
+    安全设计
+    --------
+    - 仅 ``role='user'`` 可用（admin 密码在 .env，不该走 API 修改）
+    - 必须 bearer 已登录；通过 ``g.api_user_id`` 锁定操作对象，
+      不能传 username 参数（防止借自己 token 改别人密码）
+    - bcrypt 校验当前密码——失败计入登录限流，防止用 token 暴力试旧密码
+    - 改完后撤销该 user 名下**除当前 token 外**的所有 session，
+      并 invalidate token cache。当前设备保持登录，其他设备需要重新登录
+    """
+    from flask import g
+
+    user_id = getattr(g, "api_user_id", None)
+    current_token_id = getattr(g, "api_token_id", None)
+    if not user_id or not current_token_id:
+        # 理论上 bearer_required 已经把这俩塞进 g；走到这里说明状态异常
+        return _err.err_unauthorized()
+
+    body = request.get_json(silent=True) or {}
+    current = body.get("current_password") or ""
+    new_pw  = body.get("new_password") or ""
+
+    if not current or not new_pw:
+        return _err.err_validation("current_password 和 new_password 不能为空")
+    if len(new_pw) < 4:
+        return _err.err_validation("新密码至少需要 4 个字符")
+    if len(new_pw) > 256:
+        return _err.err_validation("新密码过长")
+    if current == new_pw:
+        return _err.err_validation("新密码不能与当前密码相同")
+
+    # 登录限流复用：防止用同一 token 反复试错旧密码
+    client_ip = request.remote_addr or "?"
+    allowed, wait = api_auth.login_rate_check()
+    if not allowed:
+        _time.sleep(wait)
+
+    users = load_users()
+    user = next((u for u in users if u.id == user_id), None)
+    if user is None:
+        # token 合法但 user 已被删？fail-closed
+        return _err.err_unauthorized()
+
+    if not verify_app_password(user, current):
+        record_login_failure(client_ip)
+        return _err.err_unauthorized("当前密码错误")
+
+    try:
+        def _update(users: list[UserConfig]) -> None:
+            for u in users:
+                if u.id == user_id:
+                    set_app_password(u, new_pw)
+                    return
+            raise LookupError("missing")
+        update_users(_update)
+    except LookupError:
+        return _err.err_unauthorized()
+    except RuntimeError as e:
+        logger.error("改密码: 用户配置加载失败: %s", e)
+        return _err.err_server_error(e, "服务暂时不可用，请稍后再试")
+
+    # 撤销其他设备 + 让缓存失效（当前 token 保留，用户不会被自己踢下线）
+    st = storage()
+    try:
+        revoked = st.revoke_user_tokens_except(user_id, current_token_id)
+    finally:
+        st.close()
+    if revoked:
+        api_auth.invalidate_token_cache()
+    clear_login_failures(client_ip)
+    logger.info(
+        "user 改密码成功 id=%s ip=%s 撤销其他会话=%d",
+        user_id, client_ip, revoked,
+    )
+    return _err.ok({"revoked_other_sessions": revoked})
+
+
 # ── Blueprint 注册 ───────────────────────────────────────────────────
 
 def register(bp: Blueprint) -> None:
@@ -433,4 +517,10 @@ def register(bp: Blueprint) -> None:
         endpoint="auth_me",
         view_func=api_auth.bearer_required(("admin", "user"))(_me),
         methods=["GET"],
+    )
+    bp.add_url_rule(
+        "/auth/password",
+        endpoint="auth_password",
+        view_func=api_auth.bearer_required(("user",))(_change_password),
+        methods=["POST"],
     )

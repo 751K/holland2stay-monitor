@@ -91,6 +91,13 @@ class TestList:
         # 至少 placeholder 在页面里
         assert b"app-accounts" in r.data or b"App" in r.data
 
+    def test_admin_sidebar_links_to_app_accounts(self, admin):
+        r = admin.get("/settings/app-accounts")
+        assert r.status_code == 200
+        body = r.get_data(as_text=True)
+        assert 'href="/settings/app-accounts"' in body
+        assert "app_accounts_title" not in body
+
     def test_lists_active_tokens(self, admin, issued_tokens):
         r = admin.get("/settings/app-accounts")
         assert r.status_code == 200

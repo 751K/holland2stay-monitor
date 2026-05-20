@@ -1,7 +1,23 @@
 import SwiftUI
+import UIKit
 
 @main
 struct FlatRadarApp: App {
+
+    init() {
+        // 截图自动化模式（UI Test 启动时传 launch arg "UI_TEST_SCREENSHOT_MODE"）：
+        // 跳过条款 sheet / onboarding / biometric / crash prompt，让 App 直接
+        // 进入主 UI；并关掉 UIKit 动画提升截图稳定性。
+        // 不在生产 build 误触：UI_TEST_SCREENSHOT_MODE 永远只由 UI Test 传，
+        // 真实用户启动不会带这个参数。
+        if CommandLine.arguments.contains("UI_TEST_SCREENSHOT_MODE") {
+            let d = UserDefaults.standard
+            d.set(true, forKey: "terms_accepted")
+            d.set(true, forKey: "onboarding_completed")
+            d.set(true, forKey: "crash_prompt_suppressed")
+            UIView.setAnimationsEnabled(false)
+        }
+    }
     // 监听 App 前后台切换；用于 SSE 在后台主动关、回前台重连。
     @Environment(\.scenePhase) private var scenePhase
 
@@ -41,6 +57,11 @@ struct FlatRadarApp: App {
                 .environment(coffeeStore)
                 .environment(coordinator)
                 .task {
+                    // 0. 注册 MetricKit：上一次 launch 间 OS 收集的崩溃/卡顿
+                    //    会在接下来 24h 内通过 didReceive 回调送达。越早注册
+                    //    越不会丢漏。清理 7 天前已被拒绝的旧报告。
+                    CrashDiagnosticsCollector.shared.start()
+                    CrashDiagnosticsCollector.shared.pruneOldDeclined(days: 7)
                     // 1. 全局 401/403 监听 → 自动登出
                     authStore.observeAuthFailures()
                     // 2. 把 PushStore 与 PushDelegate 桥接好（一次性）

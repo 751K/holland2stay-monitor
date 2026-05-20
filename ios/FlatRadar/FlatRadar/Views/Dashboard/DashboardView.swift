@@ -5,6 +5,11 @@ struct DashboardView: View {
     @Environment(AuthStore.self) private var auth
     @Environment(NavigationCoordinator.self) private var coord
     @Environment(\.colorScheme) private var colorScheme
+    /// iOS"减弱动效"开关（设置 → 辅助功能 → 动效 → 减弱动效）。
+    /// 启用时关闭呼吸/脉冲一类的循环动画，避免触发前庭功能敏感的用户。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// 心跳点呼吸动画的相位（true ↔ false 反复切换驱动 .scaleEffect / .opacity）。
+    @State private var liveDotBreathing = false
 
     /// Cached chart data for inline mini visualizations.
     @State private var chartDailyNew: ChartData?
@@ -193,10 +198,41 @@ struct DashboardView: View {
         let dotColor: Color = isStale ? .orange : .green
         let statusText: String = isStale ? "Offline" : "Live"
 
+        // 呼吸动画只在 Live + 未启用减弱动效时跑。
+        // - Offline 时停止：让用户视觉上一眼分辨"动 = 数据新鲜"/"静 = 数据过期"
+        // - reduceMotion=true 时停止：iOS HIG 要求循环动画必须被这个开关
+        //   抑制；前庭功能敏感的用户开了它才能舒服使用 app
+        let animatesLiveDot = !isStale && !reduceMotion
+
         return HStack(spacing: 7) {
-            Circle().fill(dotColor)
-                .frame(width: 10, height: 10)
-                .shadow(color: dotColor.opacity(0.4), radius: 7, x: 0, y: 0)
+            ZStack {
+                // 外层光晕：放大 + 渐隐反复，营造心跳脉冲感
+                if animatesLiveDot {
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 10, height: 10)
+                        .scaleEffect(liveDotBreathing ? 2.4 : 1.0)
+                        .opacity(liveDotBreathing ? 0.0 : 0.45)
+                        .animation(
+                            .easeOut(duration: 1.6)
+                                .repeatForever(autoreverses: false),
+                            value: liveDotBreathing
+                        )
+                }
+                // 内层实心点：固定大小 + 轻微缩放，避免外层光晕让中心点也跟着抖
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 10, height: 10)
+                    .scaleEffect(animatesLiveDot && liveDotBreathing ? 1.12 : 1.0)
+                    .animation(
+                        animatesLiveDot
+                            ? .easeInOut(duration: 1.6).repeatForever(autoreverses: true)
+                            : .default,
+                        value: liveDotBreathing
+                    )
+                    .shadow(color: dotColor.opacity(0.4), radius: 7, x: 0, y: 0)
+            }
+            .frame(width: 10, height: 10)   // 锁定布局尺寸，光晕只在视觉上溢出
             Text(statusText)
                 .fontWeight(isStale ? .semibold : .regular)
                 .foregroundStyle(isStale ? .orange : .primary)
@@ -209,6 +245,24 @@ struct DashboardView: View {
         .overlay(Capsule().strokeBorder(.secondary.opacity(0.15), lineWidth: 1))
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
+        // 一进 onAppear 触发 toggle，由 .animation(.repeatForever) 拉动循环。
+        // 注意：不在 .task 里写——iOS 17 之后 .task 可能比 view 出现晚一帧，
+        // onAppear 时机更稳。
+        .onAppear {
+            if animatesLiveDot {
+                liveDotBreathing = true
+            }
+        }
+        // 离线/在线切换 + reduceMotion 切换时实时停起动画
+        .onChange(of: animatesLiveDot) { _, shouldAnimate in
+            if shouldAnimate {
+                liveDotBreathing = true
+            } else {
+                // 停下时一并复位状态值，否则下次启动是 true→true，
+                // .animation(value:) 不会感知变化，呼吸不起来
+                withAnimation(.default) { liveDotBreathing = false }
+            }
+        }
     }
 
     // MARK: - Stats card

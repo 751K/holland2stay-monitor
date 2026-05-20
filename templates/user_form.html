@@ -143,6 +143,13 @@
           <div id="sec_imessage" class="mt-2" style="{% if not is_edit or 'imessage' not in u.notification_channels %}display:none;{% endif %}">
             <label class="form-label">{{ _('user_form_recipient') }}</label>
             <input type="text" class="form-input" name="IMESSAGE_RECIPIENT" value="{{ u.imessage_recipient if is_edit else '' }}" placeholder="+31612345678">
+            <div class="form-help mt-2" style="line-height:1.6;">
+              {% if lang == 'en' %}
+                iMessage is only available when FlatRadar runs locally on macOS. It does not work on servers, Linux, or Docker deployments.
+              {% else %}
+                iMessage 仅在本地 macOS 部署时可用；服务器、Linux 或 Docker 部署无法使用。
+              {% endif %}
+            </div>
           </div>
         </div>
 
@@ -163,6 +170,13 @@
             <input type="text" class="form-input mb-2" name="TELEGRAM_BOT_TOKEN" value="{{ u.telegram_token if is_edit else '' }}" placeholder="123456:ABC-DEF...">
             <label class="form-label">{{ _('user_form_chat_id') }}</label>
             <input type="text" class="form-input" name="TELEGRAM_CHAT_ID" value="{{ u.telegram_chat_id if is_edit else '' }}" placeholder="123456789">
+            <div class="form-help mt-2" style="line-height:1.6;">
+              {% if lang == 'en' %}
+                Setup: send <code>/newbot</code> to <code>@BotFather</code> and save the Token; send any message to your bot; open <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>; find <code>"chat": {"id": 123456789}</code> and paste that value as Chat ID.
+              {% else %}
+                配置方式：向 <code>@BotFather</code> 发送 <code>/newbot</code>，记下 Token；向你的机器人发任意一条消息；访问 <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>；找到 <code>"chat": {"id": 123456789}</code>，把这个数字填入 Chat ID。
+              {% endif %}
+            </div>
           </div>
         </div>
 
@@ -205,7 +219,7 @@
 
             <!-- 收件邮箱（两种模式都需要） -->
             <label class="form-label">{{ _('user_form_to') }}</label>
-            <input type="text" class="form-input" name="EMAIL_TO" id="email_to_input" value="{{ u.email_to if is_edit else '' }}" placeholder="alice@example.com" required>
+            <input type="text" class="form-input" name="EMAIL_TO" id="email_to_input" value="{{ u.email_to if is_edit else '' }}" placeholder="alice@example.com">
             <!-- 验证状态徽章（仅 shared 模式 + 已填邮箱时显示） -->
             <div id="email_verify_status" class="mb-2" style="margin-top:6px;font-size:12px;{% if not is_edit or current_mode != 'shared' or not u.email_to %}display:none;{% endif %}">
               {% if is_edit and current_mode == 'shared' and u.email_to %}
@@ -573,6 +587,17 @@ function setEmailMode(mode) {
   }
 }
 
+function syncEmailRequirement() {
+  // Email 区域默认可能被隐藏；隐藏 required input 会让浏览器阻止整个表单提交。
+  // 只在用户实际启用 Email 通道时启用浏览器必填校验。
+  var emailTo = document.getElementById('email_to_input');
+  var emailChk = document.querySelector('.channel-chk[data-ch="email"]');
+  if (!emailTo) return;
+  var required = !!(emailChk && emailChk.checked);
+  emailTo.required = required;
+  emailTo.setAttribute('aria-required', required ? 'true' : 'false');
+}
+
 function toggleChannel(ch) {
   var chk = document.querySelector('.channel-chk[data-ch="' + ch + '"]');
   var sec = document.getElementById('sec_' + ch);
@@ -581,12 +606,14 @@ function toggleChannel(ch) {
     sec.style.display = chk.checked ? 'block' : 'none';
     if(card) { if(chk.checked) card.classList.add('selected'); else card.classList.remove('selected'); }
     updateChannelsInput();
+    if (ch === 'email') syncEmailRequirement();
   }, 0);
 }
 document.getElementById('notif_enabled').addEventListener('change', function() {
   document.getElementById('notif_enabled_h').value = this.checked ? 'true' : 'false';
 });
 updateChannelsInput();
+syncEmailRequirement();
 
 function testNotify(userId, btn) {
   var orig = btn.innerHTML;

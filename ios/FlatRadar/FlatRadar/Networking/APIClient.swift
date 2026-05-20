@@ -1,4 +1,5 @@
 import Foundation
+import UIKit  // UIDevice for crash diagnostic upload
 
 /// Central HTTP client for /api/v1/* endpoints.
 ///
@@ -216,6 +217,73 @@ final class APIClient {
 
     func getMe() async throws -> MeResponse {
         try await request("GET", "api/v1/auth/me")
+    }
+
+    /// 上传 MetricKit 收到的诊断 payload 到后端。
+    /// - bearer_optional：guest 也能上传（崩溃可能在登录前发生）
+    /// - kind: "crash" / "hang" / "cpuexception" / "diskwrite"
+    /// - payload 是 MXDiagnosticPayload.jsonRepresentation() 解析出的字典
+    /// - 后端鉴别上传方靠 token + IP，不靠 body 字段，所以 user 不能伪造身份
+    func uploadCrashDiagnostic(
+        kind: String,
+        payload: [String: Any]
+    ) async throws {
+        // 元信息（设备型号 / iOS 版本）走 body 而不是 header —— 便于后端 grep 时
+        // 直接看到，不用解析 User-Agent。
+        let device = UIDevice.current.model
+        let iosVersion = UIDevice.current.systemVersion
+
+        let envelope: [String: Any] = [
+            "kind": kind,
+            "app_version": AppVersion.short,
+            "ios_version": iosVersion,
+            "device_model": device,
+            "payload": payload,
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: envelope) else {
+            throw APIError.serverError("无法序列化诊断包")
+        }
+
+        let url = buildURL("api/v1/diagnostics/crash")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 30
+        if let tok = token {
+            req.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
+        }
+        req.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.badResponse(0)
+        }
+        if (200...299).contains(http.statusCode) {
+            return
+        }
+        // 失败：尝试解析后端错误壳，否则用 status code。data 字段固定 null/Bool，
+        // 用 ``Bool`` 当占位类型即可让 Decodable 通过。
+        if let resp = try? JSONDecoder().decode(APIResponse<Bool>.self, from: data),
+           let err = resp.error {
+            throw APIError.fromPayload(code: err.code, message: err.message)
+        }
+        throw APIError.badResponse(http.statusCode)
+    }
+
+    /// 修改当前登录 user 的密码。
+    /// - 后端校验当前密码，更新 bcrypt hash，撤销其他设备会话（当前 token 保留）
+    /// - 仅 role=user 可用；admin 调会被后端 403
+    func changePassword(current: String, new: String) async throws -> ChangePasswordResponse {
+        struct Body: Encodable {
+            let currentPassword: String
+            let newPassword: String
+            enum CodingKeys: String, CodingKey {
+                case currentPassword = "current_password"
+                case newPassword = "new_password"
+            }
+        }
+        let body = Body(currentPassword: current, newPassword: new)
+        return try await request("POST", "api/v1/auth/password", body: body)
     }
 
     // MARK: - Public Stats (Phase 1, no auth)

@@ -107,6 +107,132 @@ def logs_view():
     return render_template("logs.html")
 
 
+# ── 崩溃报告页 ───────────────────────────────────────────────────────
+#
+# 数据来源：data/crash_reports/*.json （由 /api/v1/diagnostics/crash 落盘）
+# 文件名形如 20260520T0030Z-crash-abc12345.json
+#
+# 安全：admin only；filename 来自目录扫描而不是用户输入，但 view 端点
+# 仍做 basename 白名单防御（拒绝含 / 或 .. 的 id）。
+
+
+_CRASH_DIR = DATA_DIR / "crash_reports"
+
+
+def _read_crash_summaries(limit: int = 200) -> list[dict]:
+    """扫目录返回最近 N 份 crash 报告的元信息（不含 payload，节省内存）。"""
+    import json as _json
+    if not _CRASH_DIR.exists():
+        return []
+    items: list[dict] = []
+    files = sorted(
+        _CRASH_DIR.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )[:limit]
+    for f in files:
+        try:
+            data = _json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        items.append({
+            "id": f.name,
+            "size": f.stat().st_size,
+            "received_at": data.get("received_at", ""),
+            "kind": data.get("kind", "?"),
+            "role": data.get("role", "?"),
+            "user_id": data.get("user_id", ""),
+            "app_version": data.get("app_version", ""),
+            "ios_version": data.get("ios_version", ""),
+            "device_model": data.get("device_model", ""),
+        })
+    return items
+
+
+def _safe_crash_path(crash_id: str) -> Path | None:
+    """白名单校验后返回报告文件路径，非法 id 返 None。"""
+    # 只允许我们自己写出来的命名格式：数字 / 字母 / `-` / `.json`
+    if (
+        not crash_id
+        or "/" in crash_id
+        or "\\" in crash_id
+        or ".." in crash_id
+        or not crash_id.endswith(".json")
+    ):
+        return None
+    path = _CRASH_DIR / crash_id
+    try:
+        # resolve 之后必须仍在 _CRASH_DIR 之下（防止 symlink 逃逸）
+        resolved = path.resolve(strict=False)
+        if not str(resolved).startswith(str(_CRASH_DIR.resolve())):
+            return None
+    except Exception:
+        return None
+    if not path.is_file():
+        return None
+    return path
+
+
+@admin_required
+def crashes_view():
+    """崩溃报告列表页。"""
+    return render_template(
+        "crashes.html",
+        crashes=_read_crash_summaries(),
+        crash_dir=str(_CRASH_DIR),
+    )
+
+
+@admin_api_required
+def api_crash_detail(crash_id: str):
+    """返回单份崩溃报告完整 JSON。"""
+    import json as _json
+    path = _safe_crash_path(crash_id)
+    if path is None:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        data = _json.loads(path.read_text(encoding="utf-8"))
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@admin_api_required
+@csrf_required
+def api_crash_delete(crash_id: str):
+    """物理删除单份崩溃报告。"""
+    path = _safe_crash_path(crash_id)
+    if path is None:
+        return jsonify({"ok": False, "error": "not found"}), 404
+    try:
+        path.unlink()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@admin_api_required
+@csrf_required
+def api_crashes_clear():
+    """批量删除：根据 body.ids 列表删除（前端勾选后调用）。"""
+    body = request.get_json(silent=True) or {}
+    ids = body.get("ids") or []
+    if not isinstance(ids, list):
+        return jsonify({"ok": False, "error": "ids must be list"}), 400
+    deleted = 0
+    for cid in ids:
+        if not isinstance(cid, str):
+            continue
+        path = _safe_crash_path(cid)
+        if path is not None:
+            try:
+                path.unlink()
+                deleted += 1
+            except Exception:
+                pass
+    return jsonify({"ok": True, "deleted": deleted})
+
+
 @admin_api_required
 def api_logs_files():
     """返回可用日志文件列表及各自大小，供前端渲染文件切换 tab。"""
@@ -225,6 +351,7 @@ def health():
 def register(app: Flask) -> None:
     app.add_url_rule("/system",         endpoint="system_info",    view_func=system_info,    methods=["GET"])
     app.add_url_rule("/logs",           endpoint="logs_view",      view_func=logs_view,      methods=["GET"])
+    app.add_url_rule("/crashes",        endpoint="crashes_view",   view_func=crashes_view,   methods=["GET"])
     app.add_url_rule("/api/logs/files", endpoint="api_logs_files", view_func=api_logs_files, methods=["GET"])
     app.add_url_rule("/api/logs",       endpoint="api_logs",       view_func=api_logs,       methods=["GET"])
     app.add_url_rule("/api/logs/clear", endpoint="api_logs_clear", view_func=api_logs_clear, methods=["POST"])
@@ -232,3 +359,6 @@ def register(app: Flask) -> None:
     app.add_url_rule("/api/status",     endpoint="api_status",     view_func=api_status,     methods=["GET"])
     app.add_url_rule("/api/platform",   endpoint="api_platform",   view_func=api_platform,   methods=["GET"])
     app.add_url_rule("/health",         endpoint="health",         view_func=health,         methods=["GET"])
+    app.add_url_rule("/api/crashes/<crash_id>",        endpoint="api_crash_detail",  view_func=api_crash_detail,  methods=["GET"])
+    app.add_url_rule("/api/crashes/<crash_id>/delete", endpoint="api_crash_delete",  view_func=api_crash_delete,  methods=["POST"])
+    app.add_url_rule("/api/crashes/clear",             endpoint="api_crashes_clear", view_func=api_crashes_clear, methods=["POST"])
