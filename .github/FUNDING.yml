@@ -1,0 +1,19 @@
+# GitHub 在仓库顶部 + About 区显示 ❤ Sponsor 按钮。
+# 多个渠道并列时，按钮点开会列出所有选项。
+#
+# 修改后 push 到 GitHub，几分钟内按钮就会出现。
+# 文档: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/displaying-a-sponsor-button-in-your-repository
+
+github: [751K]
+
+# 自托管赞赏页（支付宝 + 微信 + GitHub Sponsors 一站式）。
+# 实现：app/routes/legal.py 的 donate_page() 视图,
+#       模板 templates/donate.html,
+#       QR 图 static/donate-alipay.png / donate-wechat.png
+custom:
+  - "https://flatradar.app/donate"
+
+# 其他渠道（按需启用）：
+# ko_fi: yourname              # https://ko-fi.com/yourname
+# buy_me_a_coffee: yourname    # https://www.buymeacoffee.com/yourname
+# patreon: yourname            # https://www.patreon.com/yourname
