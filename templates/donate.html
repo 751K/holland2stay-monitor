@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ page_title }} · FlatRadar</title>
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <meta name="description"
+        content="{{ page_title }} — 支付宝 / 微信 / GitHub Sponsors 多渠道支持 FlatRadar 开发">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* 跟 support.html / legal.html 同一套极简排版；不依赖 admin design.css */
+    :root {
+      --bg: #f7f7f9;
+      --surface: #ffffff;
+      --text: #0b0b0f;
+      --muted: #6b6b73;
+      --border: rgba(60,60,67,0.16);
+      --accent: #0a84ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --surface: #1c1c1e;
+        --text: #ffffff;
+        --muted: #98989d;
+        --border: rgba(255,255,255,0.14);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                   "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 56px 24px 96px;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 36px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 18px;
+    }
+    .brand img { width: 28px; height: 28px; }
+    .lang-switch {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 13px;
+    }
+    .lang-switch a {
+      padding: 4px 12px;
+      border-radius: 999px;
+      color: var(--muted);
+      text-decoration: none;
+    }
+    .lang-switch a.active {
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+    h1 {
+      font-size: clamp(28px, 4.5vw, 40px);
+      font-weight: 700;
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: 17px;
+      margin: 0 0 36px;
+    }
+    .qr-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 18px;
+      margin: 24px 0 40px;
+    }
+    .qr-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 20px 20px;
+      text-align: center;
+    }
+    .qr-card img {
+      width: 200px;
+      height: 200px;
+      object-fit: contain;
+      border-radius: 8px;
+      background: #fff;     /* QR 永远白底，避免深色模式黑底白码导致扫码识别问题 */
+      padding: 4px;
+    }
+    .qr-placeholder {
+      width: 200px;
+      height: 200px;
+      margin: 0 auto;
+      background: repeating-linear-gradient(45deg,
+        rgba(127,127,127,.08), rgba(127,127,127,.08) 10px,
+        transparent 10px, transparent 20px);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 12px;
+    }
+    .qr-card .label {
+      margin-top: 14px;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    .qr-card .hint {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .external-list {
+      list-style: none;
+      padding: 0;
+      margin: 24px 0 0;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .external-list a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 18px;
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 500;
+      transition: border-color .15s;
+    }
+    .external-list a:hover {
+      border-color: var(--accent);
+    }
+    .external-list .arrow {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .note {
+      margin-top: 48px;
+      padding: 18px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      font-size: 14px;
+      color: var(--muted);
+      line-height: 1.7;
+    }
+    h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 36px 0 4px;
+    }
+    .footer {
+      margin-top: 56px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .footer a { color: var(--muted); text-decoration: none; }
+    .footer a:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <a class="brand" href="/">
+        <img src="/static/logo.png" alt="">
+        <span>FlatRadar</span>
+      </a>
+      <div class="lang-switch">
+        <a href="?lang=zh" class="{{ 'active' if lang == 'zh' else '' }}">中</a>
+        <a href="?lang=en" class="{{ 'active' if lang == 'en' else '' }}">EN</a>
+      </div>
+    </div>
+
+    {% if lang == 'zh' %}
+      <h1>☕ 赞赏开发者</h1>
+      <p class="subtitle">
+        FlatRadar 是个人维护的独立项目。赞赏完全自愿,
+        <strong>不会解锁任何功能</strong>——你和其他人能用到的特性完全一样。
+      </p>
+
+      <h2>国内用户 · 支付宝 / 微信</h2>
+      <div class="qr-grid">
+        <div class="qr-card">
+          {% if alipay_url %}
+            <img src="{{ alipay_url }}" alt="支付宝收款码">
+          {% else %}
+            <div class="qr-placeholder">支付宝收款码<br>（暂未配置）</div>
+          {% endif %}
+          <div class="label">支付宝</div>
+          <div class="hint">扫码即可,任意金额</div>
+        </div>
+        <div class="qr-card">
+          {% if wechat_url %}
+            <img src="{{ wechat_url }}" alt="微信收款码">
+          {% else %}
+            <div class="qr-placeholder">微信收款码<br>（暂未配置）</div>
+          {% endif %}
+          <div class="label">微信</div>
+          <div class="hint">扫码即可,任意金额</div>
+        </div>
+      </div>
+
+      <h2>海外用户</h2>
+      <ul class="external-list">
+        <li>
+          <a href="{{ github_sponsor_url }}" target="_blank" rel="noopener">
+            <span>GitHub Sponsors · 一次性 / 月度订阅</span>
+            <span class="arrow">↗</span>
+          </a>
+        </li>
+      </ul>
+
+      <div class="note">
+        谢谢你愿意支持这个小项目。所有费用会用于:维护服务器 / Apple
+        开发者账号 / 邮件发送配额。如果你只是顺手使用,不赞赏也完全 OK 🙌
+      </div>
+    {% else %}
+      <h1>☕ Support the developer</h1>
+      <p class="subtitle">
+        FlatRadar is built and maintained by one person. Donations are
+        completely voluntary and <strong>do not unlock any features</strong> —
+        everyone gets the same app.
+      </p>
+
+      <h2>International · GitHub Sponsors</h2>
+      <ul class="external-list">
+        <li>
+          <a href="{{ github_sponsor_url }}" target="_blank" rel="noopener">
+            <span>GitHub Sponsors · One-time or monthly</span>
+            <span class="arrow">↗</span>
+          </a>
+        </li>
+      </ul>
+
+      <h2>China · Alipay / WeChat</h2>
+      <div class="qr-grid">
+        <div class="qr-card">
+          {% if alipay_url %}
+            <img src="{{ alipay_url }}" alt="Alipay receive code">
+          {% else %}
+            <div class="qr-placeholder">Alipay QR<br>(not configured)</div>
+          {% endif %}
+          <div class="label">Alipay</div>
+          <div class="hint">Scan with Alipay app · any amount</div>
+        </div>
+        <div class="qr-card">
+          {% if wechat_url %}
+            <img src="{{ wechat_url }}" alt="WeChat Pay receive code">
+          {% else %}
+            <div class="qr-placeholder">WeChat QR<br>(not configured)</div>
+          {% endif %}
+          <div class="label">WeChat Pay</div>
+          <div class="hint">Scan with WeChat · any amount</div>
+        </div>
+      </div>
+
+      <div class="note">
+        Thank you for considering supporting this project. Donations help
+        cover server, Apple Developer account, and email sending costs.
+        If you'd rather just use the app — that's totally fine too 🙌
+      </div>
+    {% endif %}
+
+    <div class="footer">
+      <a href="/">← {{ '返回' if lang == 'zh' else 'Back' }}</a>
+      <span>·</span>
+      <a href="/privacy">{{ '隐私政策' if lang == 'zh' else 'Privacy' }}</a>
+      <span>·</span>
+      <a href="/terms">{{ '使用条款' if lang == 'zh' else 'Terms' }}</a>
+      <span>·</span>
+      <a href="/support">{{ '支持' if lang == 'zh' else 'Support' }}</a>
+    </div>
+
+  </div>
+</body>
+</html>

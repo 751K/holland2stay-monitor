@@ -69,7 +69,41 @@ def support_page():
     )
 
 
+def donate_page():
+    """
+    赞赏 / 打赏页。完全公开，无需登录。
+    GitHub FUNDING.yml 的 custom URL 指向这里；用户点 Sponsor 按钮 → ASC
+    审核员 / 任何用户都可以直接打开。
+
+    QR 图片放 ``static/donate-alipay.{png|jpg|jpeg|webp}``，微信同理。
+    自动按优先级探测；都不存在时模板显示 placeholder（管理员重传后即恢复）。
+    """
+    from pathlib import Path
+    from config import BASE_DIR
+
+    lang = get_lang()
+    is_zh = lang == "zh"
+    static_dir = Path(BASE_DIR) / "static"
+
+    def _find_qr(stem: str) -> str | None:
+        """按 png → jpg → jpeg → webp 顺序探测，返回相对 URL 或 None。"""
+        for ext in ("png", "jpg", "jpeg", "webp"):
+            if (static_dir / f"{stem}.{ext}").exists():
+                return f"/static/{stem}.{ext}"
+        return None
+
+    return render_template(
+        "donate.html",
+        lang=lang,
+        page_title="赞赏开发者" if is_zh else "Support the developer",
+        alipay_url=_find_qr("donate-alipay"),
+        wechat_url=_find_qr("donate-wechat"),
+        github_sponsor_url="https://github.com/sponsors/751K",
+    )
+
+
 def register(app: Flask) -> None:
     app.add_url_rule("/privacy", endpoint="privacy_page", view_func=privacy_page, methods=["GET"])
     app.add_url_rule("/terms",   endpoint="terms_page",   view_func=terms_page,   methods=["GET"])
     app.add_url_rule("/support", endpoint="support_page", view_func=support_page, methods=["GET"])
+    app.add_url_rule("/donate",  endpoint="donate_page",  view_func=donate_page,  methods=["GET"])
