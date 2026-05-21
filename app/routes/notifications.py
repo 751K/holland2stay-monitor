@@ -8,15 +8,16 @@
 """
 from __future__ import annotations
 
-import json
-import threading
-import time as _time
-
 from flask import Flask, Response, jsonify, request, stream_with_context
 
 from app.auth import admin_api_required
 from app.csrf import csrf_required
-from app.db import storage
+from app.services.notification_service import (
+    list_web_notifications,
+    mark_web_notifications_read,
+    sse_headers,
+    stream_notifications,
+)
 
 
 @admin_api_required
@@ -35,14 +36,8 @@ def api_notifications():
     except (TypeError, ValueError):
         limit, offset = 50, 0
 
-    st = storage()
-    try:
-        rows   = st.get_notifications(limit=limit, offset=offset)
-        unread = st.count_unread_notifications()
-    finally:
-        st.close()
-
-    return jsonify({"ok": True, "notifications": rows, "unread": unread})
+    payload = list_web_notifications(limit=limit, offset=offset)
+    return jsonify({"ok": True, **payload})
 
 
 @admin_api_required
@@ -59,11 +54,7 @@ def api_notifications_read():
         except (ValueError, TypeError):
             return jsonify({"ok": False, "error": "ids 元素必须是整数"}), 400
 
-    st = storage()
-    try:
-        st.mark_notifications_read(ids=ids)
-    finally:
-        st.close()
+    mark_web_notifications_read(ids=ids)
 
     return jsonify({"ok": True})
 
@@ -102,55 +93,15 @@ def api_events():
     gevent/eventlet worker 可协作式处理断连，无需以上防护：
         gunicorn -k gevent --worker-connections 1000 web:app
     """
-    _SSE_POLL   = 5    # 轮询间隔（秒）
-    _SSE_MAXAGE = 300  # 单次连接最大生命周期（秒），到期后让浏览器重连
-
     try:
         last_id = int(request.args.get("last_id", 0))
     except (TypeError, ValueError):
         last_id = 0
 
-    stop    = threading.Event()
-    expires = _time.monotonic() + _SSE_MAXAGE
-
-    def _generate():
-        nonlocal last_id
-        # 告知浏览器 2 s 后重连（连接到期或异常关闭时生效）
-        yield "retry: 2000\n\n"
-        st = storage()
-        try:
-            while not stop.is_set() and _time.monotonic() < expires:
-                rows = st.get_notifications_since(last_id)
-
-                if rows:
-                    last_id = rows[-1]["id"]
-                    payload = json.dumps(rows, ensure_ascii=False)
-                    chunk = f"data: {payload}\n\n"
-                else:
-                    chunk = ": keepalive\n\n"
-
-                try:
-                    yield chunk
-                except (GeneratorExit, BrokenPipeError, ConnectionResetError, OSError):
-                    # 写入失败 = 客户端已断连，立即退出，不再轮询
-                    return
-
-                # 可中断 sleep：stop.set() 后立即唤醒，无需等满 _SSE_POLL 秒
-                stop.wait(_SSE_POLL)
-        except GeneratorExit:
-            pass
-        finally:
-            st.close()
-            stop.set()  # 确保所有退出路径都能唤醒任何正在等待的 stop.wait()
-
     return Response(
-        stream_with_context(_generate()),
+        stream_with_context(stream_notifications(last_id=last_id)),
         mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # 禁用 Nginx 缓冲，确保实时推送
-            "Connection": "keep-alive",
-        },
+        headers=sse_headers(),
     )
 
 

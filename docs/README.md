@@ -26,10 +26,10 @@ docker compose up -d
 ```
 
 **macOS:**
-Download the latest `.dmg` from [Releases](../../releases), drag to Applications, and double-click to start. The browser opens automatically. Persistent data is stored in `~/.h2s-monitor/`.
+Download the latest `.dmg` from [Releases](../../releases), drag to Applications, and double-click to start. The browser opens automatically. Persistent data is stored in `~/.flatradar/`.
 
 **Windows:**
-Download the latest `.zip` from [Releases](../../releases), extract and double-click `h2s-monitor.exe`. A CMD window opens and the browser launches automatically. Persistent data is stored in `%USERPROFILE%\.h2s-monitor\`.
+Download the latest `.zip` from [Releases](../../releases), extract and double-click `flatradar.exe`. A CMD window opens and the browser launches automatically. Persistent data is stored in `%USERPROFILE%\.flatradar\`.
 
 **Run from source:**
 ```bash
@@ -169,6 +169,8 @@ FlatRadar/
 - **Design system**: Primary #0A84FF, semantic colors (green/orange/red), tabular-nums on all numbers
 
 ### API endpoints used
+
+Full mobile API contract: [Backend API Reference](API.md). Machine-readable OpenAPI 3.1 contract for iOS/Android clients: [openapi.json](openapi.json).
 
 All endpoints under `/api/v1/*` with JWT Bearer auth (or bearer_optional for public stats):
 
@@ -725,7 +727,7 @@ packaging/
   asset/              App icon source (1024x1024 PNG)
   build_dmg.sh        macOS .dmg build script (PyInstaller + .app bundle + icon)
   build.bat           Windows build script (PyInstaller + ZIP)
-  h2s_monitor.spec    PyInstaller spec file
+  flatradar.spec    PyInstaller spec file
 launcher.py         macOS .app entry point (imports web.app, handles --run-monitor)
 .github/workflows/  GitHub Actions CI/CD (builds .dmg + .exe on tag/manual trigger)
 data/               Runtime data (auto-created)
@@ -739,7 +741,7 @@ logs/               Log files (auto-created; supervisord writes monitor.log + we
 
 ## License
 
-Holland2Stay Monitor is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/).
+FlatRadar is licensed under the [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/).
 
 **Permitted:**
 - Personal use

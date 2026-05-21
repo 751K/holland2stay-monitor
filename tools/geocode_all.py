@@ -17,7 +17,7 @@ def geocode_address(address: str) -> tuple[float, float] | None:
     """Call Photon (Komoot), return (lat, lng) or None."""
     from urllib.request import Request
     url = f"https://photon.komoot.io/api/?q={quote(address)}&limit=1"
-    req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
+    req = Request(url, headers={"User-Agent": "FlatRadar/1.0"})
     try:
         resp = urlopen(req, timeout=8)
         data = json.loads(resp.read().decode())

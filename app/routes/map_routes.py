@@ -22,6 +22,7 @@ from flask import Flask, jsonify, render_template, request
 from app.auth import admin_api_required, api_login_required, login_required
 from app.csrf import csrf_required
 from app.db import storage
+from app.services.listing_service import get_map_payload
 
 # ------------------------------------------------------------------ #
 # 后台地理编码任务的共享状态
@@ -37,7 +38,7 @@ def _geocode_one(addr: str) -> tuple[float, float] | None:
 
     def _query(q: str) -> tuple[float, float] | None:
         url = f"https://photon.komoot.io/api/?q={quote(q)}&limit=1"
-        req = Request(url, headers={"User-Agent": "Holland2StayMonitor/1.0"})
+        req = Request(url, headers={"User-Agent": "FlatRadar/1.0"})
         resp = urlopen(req, timeout=5)
         data = json.loads(resp.read().decode())
         feats = data.get("features", [])
@@ -108,22 +109,7 @@ def api_map():
     未缓存地址的房源不包含 lat/lng，前端不渲染标记。
     需 geocode 时由 admin 通过 POST /api/map/geocode 手动启动。
     """
-    results: list[dict] = []
-    uncached = 0
-    st = storage()
-    try:
-        listings = st.get_map_listings()
-        for l in listings:
-            cached = st.get_cached_coords(l["address"])
-            if cached:
-                lat, lng = cached
-                results.append({**l, "lat": lat, "lng": lng})
-            else:
-                uncached += 1
-    finally:
-        st.close()
-
-    return jsonify({"listings": results, "uncached": uncached})
+    return jsonify(get_map_payload())
 
 
 @admin_api_required

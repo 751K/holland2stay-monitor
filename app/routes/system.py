@@ -28,6 +28,7 @@ from app.auth import admin_api_required, admin_required, api_login_required
 from app.csrf import csrf_required
 from app.db import storage
 from app.process_ctrl import monitor_pid
+from app.services.monitor_service import get_web_status, is_monitor_running
 
 _LOG_PATH = DATA_DIR / "monitor.log"
 
@@ -324,14 +325,7 @@ def api_reset_db():
 
 @api_login_required
 def api_status():
-    pid = monitor_pid()
-    users = load_users()
-    return jsonify({
-        "running": pid is not None,
-        "pid": pid,
-        "users": len(users),
-        "active_users": sum(1 for u in users if u.enabled),
-    })
+    return jsonify(get_web_status())
 
 
 @api_login_required
@@ -344,7 +338,7 @@ def health():
     """无需鉴权：只检查 Web 进程是否存活（能响应 HTTP 即代表存活）。
     monitor 运行状态通过 "monitor" 字段透出，供外部观测，
     但不影响 HTTP 状态码——管理员主动停止监控不应让容器变 unhealthy。"""
-    monitor_ok = monitor_pid() is not None
+    monitor_ok = is_monitor_running()
     return jsonify({"ok": True, "monitor": monitor_ok}), 200
 
 

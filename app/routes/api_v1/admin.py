@@ -18,23 +18,19 @@ iOS App admin role 远程做"应急运维"用的子集：
 from __future__ import annotations
 
 import logging
-import os
-import signal
-import subprocess
-import sys
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint
 
 from app import api_auth, api_errors as _err
 from app.api_auth import invalidate_token_cache
 from app.db import storage
-from app.process_ctrl import (
-    monitor_pid,
-    supervisorctl_available,
-    supervisorctl_monitor,
-    write_reload_request,
+from app.services.monitor_service import (
+    MonitorServiceError,
+    get_monitor_status,
+    reload_monitor,
+    start_monitor,
+    stop_monitor,
 )
-from config import BASE_DIR
 from users import get_user, load_users, update_users
 
 logger = logging.getLogger(__name__)
@@ -139,103 +135,46 @@ def _user_delete(user_id: str):
 
 # ── Monitor process control ────────────────────────────────────────
 
-
-def _terminate(pid: int) -> None:
-    """跨平台终止进程；优先 SIGTERM，Windows 直接 taskkill。"""
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(pid)],
-            check=False, capture_output=True,
-        )
-        return
-    os.kill(pid, signal.SIGTERM)
-
-
 def _monitor_status():
-    pid = monitor_pid()
-    st = storage()
-    try:
-        last_scrape = st.get_meta("last_scrape_at", default="")
-        last_count = st.get_meta("last_scrape_count", default="")
-    finally:
-        st.close()
-    return _err.ok({
-        "running": pid is not None,
-        "pid": pid,
-        "last_scrape": last_scrape,
-        "last_count": last_count,
-    })
+    return _err.ok(get_monitor_status())
 
 
 def _monitor_start():
-    if monitor_pid() is not None:
-        return _err.err_validation("监控已在运行")
     try:
-        if supervisorctl_available():
-            r = supervisorctl_monitor("start")
-            if r.returncode != 0:
-                raise RuntimeError((r.stderr or r.stdout or "supervisorctl start failed").strip())
-            return _err.ok({"started": True, "method": "supervisor"})
-        if getattr(sys, "frozen", False):
-            subprocess.Popen(
-                [sys.executable, "--run-monitor"],
-                cwd=str(BASE_DIR),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        else:
-            subprocess.Popen(
-                [sys.executable, str(BASE_DIR / "monitor.py")],
-                cwd=str(BASE_DIR),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+        return _err.ok(start_monitor())
+    except MonitorServiceError as e:
+        if e.status == 409:
+            return _err.err_validation(str(e))
+        logger.exception("monitor start 失败")
+        return _err.err_server_error(e, "启动失败")
     except Exception as e:
         logger.exception("monitor start 失败")
         return _err.err_server_error(e, "启动失败")
-    return _err.ok({"started": True})
 
 
 def _monitor_stop():
-    pid = monitor_pid()
-    if pid is None:
-        return _err.err_validation("监控未在运行")
     try:
-        if supervisorctl_available():
-            r = supervisorctl_monitor("stop")
-            if r.returncode != 0:
-                raise RuntimeError((r.stderr or r.stdout or "supervisorctl stop failed").strip())
-            return _err.ok({"stopped": True, "pid": pid, "method": "supervisor"})
-        _terminate(pid)
+        return _err.ok(stop_monitor())
+    except MonitorServiceError as e:
+        if e.status == 409:
+            return _err.err_validation(str(e))
+        logger.exception("monitor stop 失败")
+        return _err.err_server_error(e, "停止失败")
     except Exception as e:
         logger.exception("monitor stop 失败")
         return _err.err_server_error(e, "停止失败")
-    return _err.ok({"stopped": True, "pid": pid})
 
 
 def _monitor_reload():
     """触发监控热重载（重读 SQLite 用户配置 / .env）。"""
-    pid = monitor_pid()
-    if pid is None:
-        return _err.err_validation("监控未在运行")
-
-    # Windows 没有可靠 SIGHUP → 走文件触发；POSIX 优先信号，失败再 fallback
-    if os.name == "nt" or not hasattr(signal, "SIGHUP"):
-        try:
-            write_reload_request()
-            return _err.ok({"reload": True, "method": "file"})
-        except Exception as e:
-            return _err.err_server_error(e, "写 reload 请求失败")
-
     try:
-        os.kill(pid, signal.SIGHUP)
-        return _err.ok({"reload": True, "method": "signal"})
-    except Exception:
-        try:
-            write_reload_request()
-            return _err.ok({"reload": True, "method": "file"})
-        except Exception as e:
-            return _err.err_server_error(e, "reload 失败")
+        return _err.ok(reload_monitor())
+    except MonitorServiceError as e:
+        if e.status == 400:
+            return _err.err_validation(str(e))
+        return _err.err_server_error(e, "reload 失败")
+    except Exception as e:
+        return _err.err_server_error(e, "reload 失败")
 
 
 # ── Registration ───────────────────────────────────────────────────

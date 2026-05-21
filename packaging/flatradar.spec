@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for Holland2Stay Monitor macOS .app
+PyInstaller spec for FlatRadar macOS .app
 Build: pyinstaller --clean h2s_monitor.spec
 """
 
@@ -74,7 +74,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="h2s-monitor",
+    name="flatradar",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

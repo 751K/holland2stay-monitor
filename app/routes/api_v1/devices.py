@@ -21,12 +21,15 @@ import logging
 from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
-
-from ._helpers import storage_ctx
+from app.services.device_service import (
+    DeviceValidationError,
+    delete_device_for_token,
+    list_devices_for_token_safe,
+    register_device_for_token,
+    send_test_push,
+)
 
 logger = logging.getLogger(__name__)
-
-_VALID_ENVS = {"production", "sandbox"}
 
 
 def _register():
@@ -37,79 +40,46 @@ def _register():
     model = (body.get("model") or "").strip()[:64]
     bundle_id = (body.get("bundle_id") or "").strip()[:128]
 
-    if not device_token:
-        return _err.err_validation("缺少 device_token")
-    # APNs token 现在通常是 64 字符 hex；接受 32-256 范围以兼容未来变化
-    if not (32 <= len(device_token) <= 256):
-        return _err.err_validation("device_token 长度异常")
-    if env not in _VALID_ENVS:
-        return _err.err_validation(f"env 必须是 {sorted(_VALID_ENVS)} 之一")
-
     token_id = api_auth.current_token_id()
     if token_id is None:
         # bearer_required 已经守门；保险起见再检
         return _err.err_unauthorized()
 
-    with storage_ctx() as st:
-        try:
-            device_id = st.register_device(
-                app_token_id=token_id,
-                device_token=device_token,
-                env=env,
-                platform=platform,
-                model=model,
-                bundle_id=bundle_id,
-            )
-        except ValueError as e:
-            return _err.err_validation(str(e))
+    try:
+        result = register_device_for_token(
+            token_id=token_id,
+            device_token=device_token,
+            env=env,
+            platform=platform,
+            model=model,
+            bundle_id=bundle_id,
+        )
+    except DeviceValidationError as exc:
+        return _err.err_validation(str(exc))
 
     logger.info(
         "device 注册 role=%s user_id=%s token_id=%d device_id=%d env=%s model=%r",
         api_auth.current_role(), api_auth.current_user_id(),
-        token_id, device_id, env, model,
+        token_id, result["device_id"], result["env"], model,
     )
-    return _err.ok({
-        "device_id": device_id,
-        "env": env,
-        "platform": platform,
-    })
+    return _err.ok(result)
 
 
 def _list():
     token_id = api_auth.current_token_id()
     if token_id is None:
         return _err.err_unauthorized()
-    with storage_ctx() as st:
-        rows = st.list_devices_for_token(token_id)
-    # 不要把完整 device_token 回显给客户端（敏感推送目标）；
-    # 只返回前 12 + 末 4 让用户能识别
-    safe: list[dict] = []
-    for r in rows:
-        tok = r["device_token"]
-        safe.append({
-            "id": r["id"],
-            "device_token_hint": f"{tok[:12]}…{tok[-4:]}" if len(tok) > 16 else tok,
-            "env": r["env"],
-            "platform": r["platform"],
-            "model": r.get("model") or "",
-            "created_at": r["created_at"],
-            "last_seen": r["last_seen"],
-            "disabled": bool(r.get("disabled_at")),
-            "disabled_reason": r.get("disabled_reason") or "",
-        })
-    return _err.ok({"items": safe})
+    return _err.ok(list_devices_for_token_safe(token_id=token_id))
 
 
 def _delete(device_id: int):
     token_id = api_auth.current_token_id()
     if token_id is None:
         return _err.err_unauthorized()
-    with storage_ctx() as st:
-        # 通过 token 隔离：找不到 = 不是本会话的设备 → 404（不泄漏存在性）
-        row = st.get_device(device_id)
-        if row is None or row["app_token_id"] != token_id:
-            return _err.err_not_found("设备不存在")
-        deleted = st.delete_device(device_id)
+    # 通过 token 隔离：找不到 = 不是本会话的设备 → 404（不泄漏存在性）
+    deleted = delete_device_for_token(token_id=token_id, device_id=device_id)
+    if deleted is None:
+        return _err.err_not_found("设备不存在")
     return _err.ok({"deleted": bool(deleted)})
 
 
@@ -141,7 +111,6 @@ def _test_push():
     - dispatch 有节流（同 listing/kind 5min 1 条），测试不该受限
     这里绕开 dispatch，直接调 ApnsClient.send_many。
     """
-    import asyncio
     token_id = api_auth.current_token_id()
     if token_id is None:
         return _err.err_unauthorized()
@@ -153,89 +122,19 @@ def _test_push():
     apns_only = bool(body.get("apns_only"))
     notification_only = bool(body.get("notification_only"))
 
-    # ── 1. 写 web_notifications（触发 SSE） ────────────────────────
-    notification_id: int | None = None
-    if not apns_only:
-        with storage_ctx() as st:
-            notification_id = st.add_web_notification(
-                type="new_listing",
-                title=title,
-                body=body_text,
-                listing_id="",
-            )
-        logger.info("test push 已写 web_notifications id=%d", notification_id)
-
-    # ── 2. 发 APNs ───────────────────────────────────────────────
-    sent = 0
-    detail: list[dict] = []
-    if not notification_only:
-        # ⚠️ 不能复用 mcore.push 的单例 ApnsClient：
-        # 单例内的 httpx.AsyncClient 第一次 asyncio.run() 时绑到了那次
-        # event loop，loop 关掉后再次 asyncio.run() 调它就抛 RuntimeError
-        # ("Event loop is closed" / "Task is attached to a different loop")。
-        # monitor.py 没问题因为整个进程跑在同一个 loop。
-        # 这里建一次性 local client，asyncio.run 内部 close 干净。
-        from notifier_channels.apns import ApnsClient, ApnsConfig
-        cfg = ApnsConfig.from_env()
-        if cfg is None:
-            return _err.err_validation("APNs 未启用（后端缺少 .p8 或 APNS_* 配置）")
-
-        with storage_ctx() as st:
-            all_devices = st.list_devices_for_token(token_id)
-        active = [d for d in all_devices if not d.get("disabled_at")]
-        if not active and not apns_only:
-            logger.info("test push: SSE 已写，但无设备 APNs 不发")
-        elif not active:
-            return _err.err_validation("当前会话没有注册过设备")
-        else:
-            payload = {
-                "aps": {
-                    "alert": {"title": title, "body": body_text},
-                    "sound": "default",
-                    "thread-id": "test",
-                    "badge": 1,
-                },
-                "kind": "test",
-            }
-            targets = [
-                {"device_token": d["device_token"], "env": d["env"]}
-                for d in active
-            ]
-
-            async def _run_once() -> list:
-                """Local client 跑完后立即 aclose；避免跨 loop 状态泄漏。"""
-                local = ApnsClient(cfg)
-                try:
-                    return await local.send_many(targets, payload=payload)
-                finally:
-                    await local.close()
-
-            try:
-                results = asyncio.run(_run_once())
-            except Exception as e:
-                logger.exception("test push 发送异常")
-                return _err.err_server_error(e, "推送发送失败")
-            sent = sum(1 for r in results if r.ok)
-            for d, r in zip(active, results):
-                tok = d["device_token"]
-                detail.append({
-                    "device_token_hint": f"{tok[:12]}…{tok[-4:]}" if len(tok) > 16 else tok,
-                    "env": d["env"],
-                    "status": r.status,
-                    "reason": r.reason,
-                    "ok": r.ok,
-                })
-            logger.info(
-                "test push 完成 token_id=%d sent=%d/%d notif_id=%s",
-                token_id, sent, len(results), notification_id,
-            )
-
-    return _err.ok({
-        "sent": sent,
-        "total": len(detail),
-        "results": detail,
-        "notification_id": notification_id,
-    })
+    try:
+        return _err.ok(send_test_push(
+            token_id=token_id,
+            title=title,
+            body=body_text,
+            apns_only=apns_only,
+            notification_only=notification_only,
+        ))
+    except DeviceValidationError as exc:
+        return _err.err_validation(str(exc))
+    except Exception as exc:
+        logger.exception("test push 发送异常")
+        return _err.err_server_error(exc, "推送发送失败")
 
 
 def register(bp: Blueprint) -> None:

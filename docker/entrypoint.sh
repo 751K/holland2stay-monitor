@@ -48,5 +48,5 @@ if [ -z "${H2S_SKIP_PREFLIGHT:-}" ]; then
 
 fi
 
-echo "[entrypoint] Preflight OK. Starting Holland2Stay Monitor..."
+echo "[entrypoint] Preflight OK. Starting FlatRadar..."
 exec "$@"

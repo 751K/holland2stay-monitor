@@ -1,0 +1,1051 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "FlatRadar Backend API",
+    "version": "1.6.0",
+    "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
+  },
+  "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+  "servers": [
+    {
+      "url": "https://flatradar.app/api/v1",
+      "description": "Production"
+    },
+    {
+      "url": "http://127.0.0.1:8088/api/v1",
+      "description": "Local development"
+    }
+  ],
+  "tags": [
+    {"name": "Auth"},
+    {"name": "Stats"},
+    {"name": "Listings"},
+    {"name": "Map"},
+    {"name": "Calendar"},
+    {"name": "Notifications"},
+    {"name": "CurrentUser"},
+    {"name": "Devices"},
+    {"name": "Feedback"},
+    {"name": "Diagnostics"},
+    {"name": "Admin"}
+  ],
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "operationId": "login",
+        "summary": "Sign in and issue a bearer token.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/LoginRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/LoginOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "429": {"$ref": "#/components/responses/RateLimited"}
+        }
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "operationId": "register",
+        "summary": "Self-register a user account and issue a bearer token.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/RegisterRequest"}
+            }
+          }
+        },
+        "responses": {
+          "201": {"$ref": "#/components/responses/RegisterOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "409": {"$ref": "#/components/responses/Conflict"},
+          "429": {"$ref": "#/components/responses/RateLimited"}
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "operationId": "logout",
+        "summary": "Revoke the current bearer token.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/LogoutOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": ["Auth"],
+        "operationId": "getCurrentIdentity",
+        "summary": "Return the current bearer identity.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/AuthMeOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/auth/password": {
+      "post": {
+        "tags": ["Auth"],
+        "operationId": "changePassword",
+        "summary": "Change the current user's app password.",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/ChangePasswordRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/ChangePasswordOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/stats/public/summary": {
+      "get": {
+        "tags": ["Stats"],
+        "operationId": "getPublicStatsSummary",
+        "summary": "Public aggregate statistics. Optional bearer accepted.",
+        "responses": {
+          "200": {"$ref": "#/components/responses/PublicSummaryOk"}
+        }
+      }
+    },
+    "/stats/public/charts": {
+      "get": {
+        "tags": ["Stats"],
+        "operationId": "listPublicCharts",
+        "summary": "List supported public chart keys. Optional bearer accepted.",
+        "responses": {
+          "200": {"$ref": "#/components/responses/ChartsIndexOk"}
+        }
+      }
+    },
+    "/stats/public/charts/{key}": {
+      "get": {
+        "tags": ["Stats"],
+        "operationId": "getPublicChart",
+        "summary": "Return public chart data for a key. Optional bearer accepted.",
+        "parameters": [
+          {"$ref": "#/components/parameters/ChartKeyPath"},
+          {"$ref": "#/components/parameters/DaysQuery"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/ChartOk"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/listings": {
+      "get": {
+        "tags": ["Listings"],
+        "operationId": "listListings",
+        "summary": "List listings. Optional bearer accepted; user tokens apply listing_filter.",
+        "parameters": [
+          {"name": "status", "in": "query", "schema": {"type": "string"}},
+          {"name": "city", "in": "query", "schema": {"type": "string"}, "description": "Legacy single-city filter."},
+          {"name": "cities", "in": "query", "schema": {"type": "string"}, "description": "Comma-separated city list."},
+          {"name": "q", "in": "query", "schema": {"type": "string"}},
+          {"name": "types", "in": "query", "schema": {"type": "string"}, "description": "Comma-separated type list."},
+          {"name": "contract", "in": "query", "schema": {"type": "string"}},
+          {"name": "energy", "in": "query", "schema": {"type": "string"}},
+          {"$ref": "#/components/parameters/LimitQuery"},
+          {"$ref": "#/components/parameters/OffsetQuery"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/ListingsOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/listings/{listing_id}": {
+      "get": {
+        "tags": ["Listings"],
+        "operationId": "getListing",
+        "summary": "Return a listing detail. Optional bearer accepted; filtered-out user listings return 404.",
+        "parameters": [
+          {"$ref": "#/components/parameters/ListingIdPath"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/ListingOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/map": {
+      "get": {
+        "tags": ["Map"],
+        "operationId": "getMapListings",
+        "summary": "Return cached map coordinates. Optional bearer accepted; never triggers geocoding side effects.",
+        "responses": {
+          "200": {"$ref": "#/components/responses/MapOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/calendar": {
+      "get": {
+        "tags": ["Calendar"],
+        "operationId": "getCalendarListings",
+        "summary": "Return listings with available_from for calendar views. Optional bearer accepted.",
+        "responses": {
+          "200": {"$ref": "#/components/responses/CalendarOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/notifications": {
+      "get": {
+        "tags": ["Notifications"],
+        "operationId": "listNotifications",
+        "summary": "List visible notifications.",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/LimitQuery"},
+          {"$ref": "#/components/parameters/OffsetQuery"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/NotificationsOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/notifications/read": {
+      "post": {
+        "tags": ["Notifications"],
+        "operationId": "markNotificationsRead",
+        "summary": "Mark selected or all notifications as read.",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/NotificationsReadRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/NotificationsReadOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/notifications/stream": {
+      "get": {
+        "tags": ["Notifications"],
+        "operationId": "streamNotifications",
+        "summary": "Server-Sent Events notification stream.",
+        "description": "Accepts Authorization: Bearer <token> or ?token=<token> for EventSource clients.",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "token", "in": "query", "schema": {"type": "string"}},
+          {"name": "last_id", "in": "query", "schema": {"type": "integer", "minimum": 0}}
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {"type": "string"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/me/summary": {
+      "get": {
+        "tags": ["CurrentUser"],
+        "operationId": "getMySummary",
+        "summary": "Return user-scoped summary statistics.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/MeSummaryOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/me/filter": {
+      "get": {
+        "tags": ["CurrentUser"],
+        "operationId": "getMyFilter",
+        "summary": "Return current listing filter.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/MeFilterOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      },
+      "put": {
+        "tags": ["CurrentUser"],
+        "operationId": "updateMyFilter",
+        "summary": "Replace current user's listing filter.",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/ListingFilter"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/MeFilterOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/me": {
+      "delete": {
+        "tags": ["CurrentUser"],
+        "operationId": "deleteMe",
+        "summary": "Delete the current user account.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/DeleteMeOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/me/export": {
+      "get": {
+        "tags": ["CurrentUser"],
+        "operationId": "exportMe",
+        "summary": "Export current user's account data.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/ExportMeOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/filter/options": {
+      "get": {
+        "tags": ["CurrentUser"],
+        "operationId": "getFilterOptions",
+        "summary": "Return filter option values. Optional bearer accepted.",
+        "responses": {
+          "200": {"$ref": "#/components/responses/FilterOptionsOk"}
+        }
+      }
+    },
+    "/devices/register": {
+      "post": {
+        "tags": ["Devices"],
+        "operationId": "registerDevice",
+        "summary": "Register or refresh a push device for the current token.",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/DeviceRegisterRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/DeviceRegisterOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/devices": {
+      "get": {
+        "tags": ["Devices"],
+        "operationId": "listDevices",
+        "summary": "List devices attached to the current token/session.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/DevicesOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/devices/{device_id}": {
+      "delete": {
+        "tags": ["Devices"],
+        "operationId": "deleteDevice",
+        "summary": "Delete a device attached to the current token/session.",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/DeviceIdPath"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/DeleteDeviceOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/devices/test": {
+      "post": {
+        "tags": ["Devices"],
+        "operationId": "testPushDevice",
+        "summary": "Send a test notification to the current token/session devices.",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/DeviceTestRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/DeviceTestOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"}
+        }
+      }
+    },
+    "/feedback": {
+      "post": {
+        "tags": ["Feedback"],
+        "operationId": "submitFeedback",
+        "summary": "Submit authenticated user feedback.",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/FeedbackRequest"}
+            }
+          }
+        },
+        "responses": {
+          "200": {"$ref": "#/components/responses/FeedbackOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "429": {"$ref": "#/components/responses/RateLimited"}
+        }
+      }
+    },
+    "/diagnostics/crash": {
+      "post": {
+        "tags": ["Diagnostics"],
+        "operationId": "submitDiagnostic",
+        "summary": "Upload crash, hang, or performance diagnostics. Optional bearer accepted.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/DiagnosticRequest"}
+            }
+          }
+        },
+        "responses": {
+          "202": {"$ref": "#/components/responses/DiagnosticOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "429": {"$ref": "#/components/responses/RateLimited"}
+        }
+      }
+    },
+    "/admin/users": {
+      "get": {
+        "tags": ["Admin"],
+        "operationId": "adminListUsers",
+        "summary": "List user summaries.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/AdminUsersOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/admin/users/{user_id}/toggle": {
+      "post": {
+        "tags": ["Admin"],
+        "operationId": "adminToggleUser",
+        "summary": "Enable or disable a user.",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/UserIdPath"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/AdminToggleUserOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/admin/users/{user_id}": {
+      "delete": {
+        "tags": ["Admin"],
+        "operationId": "adminDeleteUser",
+        "summary": "Delete a user and revoke app tokens.",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"$ref": "#/components/parameters/UserIdPath"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/AdminDeleteUserOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "404": {"$ref": "#/components/responses/NotFound"}
+        }
+      }
+    },
+    "/admin/monitor/status": {
+      "get": {
+        "tags": ["Admin"],
+        "operationId": "adminMonitorStatus",
+        "summary": "Return monitor process status.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/MonitorStatusOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/admin/monitor/start": {
+      "post": {
+        "tags": ["Admin"],
+        "operationId": "adminMonitorStart",
+        "summary": "Start monitor process.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/MonitorStartOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/admin/monitor/stop": {
+      "post": {
+        "tags": ["Admin"],
+        "operationId": "adminMonitorStop",
+        "summary": "Stop monitor process.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/MonitorStopOk"},
+          "400": {"$ref": "#/components/responses/BadRequest"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    },
+    "/admin/monitor/reload": {
+      "post": {
+        "tags": ["Admin"],
+        "operationId": "adminMonitorReload",
+        "summary": "Hot-reload monitor configuration.",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/MonitorReloadOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "parameters": {
+      "ListingIdPath": {"name": "listing_id", "in": "path", "required": true, "schema": {"type": "string"}},
+      "UserIdPath": {"name": "user_id", "in": "path", "required": true, "schema": {"type": "string"}},
+      "DeviceIdPath": {"name": "device_id", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 1}},
+      "ChartKeyPath": {"name": "key", "in": "path", "required": true, "schema": {"$ref": "#/components/schemas/ChartKey"}},
+      "LimitQuery": {"name": "limit", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100}},
+      "OffsetQuery": {"name": "offset", "in": "query", "schema": {"type": "integer", "minimum": 0, "default": 0}},
+      "DaysQuery": {"name": "days", "in": "query", "schema": {"type": "integer", "minimum": 1, "maximum": 365, "default": 30}}
+    },
+    "responses": {
+      "BadRequest": {"description": "Validation error.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "Unauthorized": {"description": "Missing, invalid, expired, or disabled bearer identity.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "Forbidden": {"description": "Authenticated but not allowed.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "NotFound": {"description": "Resource not found or hidden by user filter.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "Conflict": {"description": "Conflict.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "RateLimited": {"description": "Rate limited.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "LoginOk": {"description": "Login success.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/AuthTokenData"}}}]}}}},
+      "RegisterOk": {"description": "Register success.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/RegisterData"}}}]}}}},
+      "LogoutOk": {"description": "Logout success.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["revoked"], "properties": {"revoked": {"type": "boolean"}}}}}]}}}},
+      "AuthMeOk": {"description": "Current identity.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/AuthMeData"}}}]}}}},
+      "ChangePasswordOk": {"description": "Password changed.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["revoked_other_sessions"], "properties": {"revoked_other_sessions": {"type": "integer", "minimum": 0}}}}}]}}}},
+      "PublicSummaryOk": {"description": "Public summary.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/PublicSummary"}}}]}}}},
+      "ChartsIndexOk": {"description": "Chart keys.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["charts"], "properties": {"charts": {"type": "array", "items": {"$ref": "#/components/schemas/ChartKey"}}}}}}]}}}},
+      "ChartOk": {"description": "Chart data.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/ChartResponse"}}}]}}}},
+      "ListingsOk": {"description": "Listing page.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/ListingsPage"}}}]}}}},
+      "ListingOk": {"description": "Listing detail.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/Listing"}}}]}}}},
+      "MapOk": {"description": "Map data.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/MapData"}}}]}}}},
+      "CalendarOk": {"description": "Calendar data.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/CalendarData"}}}]}}}},
+      "NotificationsOk": {"description": "Notification page.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/NotificationsPage"}}}]}}}},
+      "NotificationsReadOk": {"description": "Notifications marked.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["marked"], "properties": {"marked": {"type": "boolean"}}}}}]}}}},
+      "MeSummaryOk": {"description": "Current user summary.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/MeSummary"}}}]}}}},
+      "MeFilterOk": {"description": "Current user filter.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/MeFilter"}}}]}}}},
+      "DeleteMeOk": {"description": "Account deleted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["deleted", "user_id"], "properties": {"deleted": {"type": "boolean"}, "user_id": {"type": "string"}}}}}]}}}},
+      "ExportMeOk": {"description": "Account export.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "additionalProperties": true}}}]}}}},
+      "FilterOptionsOk": {"description": "Filter options.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/FilterOptions"}}}]}}}},
+      "DeviceRegisterOk": {"description": "Device registered.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/DeviceRegisterData"}}}]}}}},
+      "DevicesOk": {"description": "Devices.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/Device"}}}}}}]}}}},
+      "DeleteDeviceOk": {"description": "Device deleted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["deleted"], "properties": {"deleted": {"type": "boolean"}}}}}]}}}},
+      "DeviceTestOk": {"description": "Push test result.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/DeviceTestData"}}}]}}}},
+      "FeedbackOk": {"description": "Feedback accepted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["submitted"], "properties": {"submitted": {"type": "boolean"}}}}}]}}}},
+      "DiagnosticOk": {"description": "Diagnostic accepted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["received", "id"], "properties": {"received": {"type": "boolean"}, "id": {"type": "string"}}}}}]}}}},
+      "AdminUsersOk": {"description": "Admin user list.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["items", "total"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/AdminUser"}}, "total": {"type": "integer", "minimum": 0}}}}}]}}}},
+      "AdminToggleUserOk": {"description": "User toggled.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["id", "enabled"], "properties": {"id": {"type": "string"}, "enabled": {"type": "boolean"}}}}}]}}}},
+      "AdminDeleteUserOk": {"description": "User deleted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["deleted", "name", "revoked_sessions"], "properties": {"deleted": {"type": "boolean"}, "name": {"type": "string"}, "revoked_sessions": {"type": "integer", "minimum": 0}}}}}]}}}},
+      "MonitorStatusOk": {"description": "Monitor status.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/MonitorStatus"}}}]}}}},
+      "MonitorStartOk": {"description": "Monitor started.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["started", "method"], "properties": {"started": {"type": "boolean"}, "method": {"type": "string"}}}}}]}}}},
+      "MonitorStopOk": {"description": "Monitor stopped.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["stopped", "method"], "properties": {"stopped": {"type": "boolean"}, "pid": {"type": ["integer", "null"]}, "method": {"type": "string"}}}}}]}}}},
+      "MonitorReloadOk": {"description": "Monitor reloaded.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["reload", "method"], "properties": {"reload": {"type": "boolean"}, "method": {"type": "string"}}}}}]}}}}
+    },
+    "schemas": {
+      "SuccessEnvelope": {
+        "type": "object",
+        "required": ["ok", "data"],
+        "properties": {
+          "ok": {"type": "boolean", "const": true},
+          "data": {}
+        },
+        "additionalProperties": false
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "required": ["ok", "error"],
+        "properties": {
+          "ok": {"type": "boolean", "const": false},
+          "error": {"$ref": "#/components/schemas/ApiError"}
+        },
+        "additionalProperties": false
+      },
+      "ApiError": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {"$ref": "#/components/schemas/ApiErrorCode"},
+          "message": {"type": "string"}
+        },
+        "additionalProperties": false
+      },
+      "ApiErrorCode": {
+        "type": "string",
+        "enum": ["unauthorized", "forbidden", "not_found", "validation", "conflict", "rate_limited", "server_error"]
+      },
+      "Role": {
+        "type": "string",
+        "enum": ["admin", "user"]
+      },
+      "ChartKey": {
+        "type": "string",
+        "enum": ["area_dist", "city_dist", "contract_dist", "daily_changes", "daily_new", "energy_dist", "floor_dist", "hourly_dist", "price_dist", "status_dist", "tenant_dist", "type_dist"]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": {"type": "string", "minLength": 1, "maxLength": 64},
+          "password": {"type": "string", "minLength": 1},
+          "device_name": {"type": "string", "maxLength": 64},
+          "ttl_days": {"type": "integer", "minimum": 1, "maximum": 90, "default": 90}
+        },
+        "additionalProperties": true
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["username", "password"],
+        "properties": {
+          "username": {"type": "string", "minLength": 2, "maxLength": 64},
+          "password": {"type": "string", "minLength": 4},
+          "device_name": {"type": "string", "maxLength": 64},
+          "ttl_days": {"type": "integer", "minimum": 1, "maximum": 90, "default": 90}
+        },
+        "additionalProperties": true
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": ["current_password", "new_password"],
+        "properties": {
+          "current_password": {"type": "string", "minLength": 1},
+          "new_password": {"type": "string", "minLength": 4}
+        },
+        "additionalProperties": false
+      },
+      "AuthTokenData": {
+        "type": "object",
+        "required": ["token", "token_id", "role", "user_id", "device_name", "ttl_days"],
+        "properties": {
+          "token": {"type": "string"},
+          "token_id": {"type": "integer"},
+          "role": {"$ref": "#/components/schemas/Role"},
+          "user_id": {"type": ["string", "null"]},
+          "device_name": {"type": "string"},
+          "ttl_days": {"type": "integer"}
+        },
+        "additionalProperties": true
+      },
+      "RegisterData": {
+        "allOf": [
+          {"$ref": "#/components/schemas/AuthTokenData"},
+          {
+            "type": "object",
+            "required": ["user"],
+            "properties": {
+              "user": {"$ref": "#/components/schemas/UserSummary"}
+            }
+          }
+        ]
+      },
+      "AuthMeData": {
+        "type": "object",
+        "required": ["role", "user_id", "user"],
+        "properties": {
+          "role": {"$ref": "#/components/schemas/Role"},
+          "user_id": {"type": ["string", "null"]},
+          "user": {"oneOf": [{"$ref": "#/components/schemas/UserSummary"}, {"type": "null"}]}
+        },
+        "additionalProperties": true
+      },
+      "UserSummary": {
+        "type": "object",
+        "required": ["id", "name", "enabled", "notifications_enabled", "listing_filter"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "enabled": {"type": "boolean"},
+          "notifications_enabled": {"type": "boolean"},
+          "listing_filter": {"$ref": "#/components/schemas/ListingFilter"}
+        },
+        "additionalProperties": true
+      },
+      "ListingFilter": {
+        "type": "object",
+        "properties": {
+          "max_rent": {"type": ["number", "null"], "minimum": 0},
+          "min_area": {"type": ["number", "null"], "minimum": 0},
+          "min_floor": {"type": ["integer", "null"], "minimum": 0, "maximum": 200},
+          "allowed_cities": {"type": "array", "items": {"type": "string"}},
+          "allowed_types": {"type": "array", "items": {"type": "string"}},
+          "allowed_neighborhoods": {"type": "array", "items": {"type": "string"}},
+          "allowed_contract": {"type": "array", "items": {"type": "string"}},
+          "allowed_tenant": {"type": "array", "items": {"type": "string"}},
+          "allowed_offer": {"type": "array", "items": {"type": "string"}},
+          "allowed_finishing": {"type": "array", "items": {"type": "string"}},
+          "allowed_occupancy": {"type": "array", "items": {"type": "string"}},
+          "allowed_energy": {"type": ["string", "null"]}
+        },
+        "additionalProperties": true
+      },
+      "PublicSummary": {
+        "type": "object",
+        "required": ["total", "new_24h", "new_7d", "changes_24h", "last_scrape"],
+        "properties": {
+          "total": {"type": "integer", "minimum": 0},
+          "new_24h": {"type": "integer", "minimum": 0},
+          "new_7d": {"type": "integer", "minimum": 0},
+          "changes_24h": {"type": "integer", "minimum": 0},
+          "last_scrape": {"type": ["string", "null"]}
+        },
+        "additionalProperties": true
+      },
+      "ChartResponse": {
+        "type": "object",
+        "required": ["key", "days", "data"],
+        "properties": {
+          "key": {"$ref": "#/components/schemas/ChartKey"},
+          "days": {"type": "integer", "minimum": 1, "maximum": 365},
+          "data": {"type": "array", "items": {"type": "object", "additionalProperties": true}}
+        },
+        "additionalProperties": true
+      },
+      "Listing": {
+        "type": "object",
+        "required": ["id", "name", "status", "city"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "status": {"type": "string"},
+          "price_raw": {"type": "string"},
+          "price_value": {"type": ["number", "null"]},
+          "available_from": {"type": ["string", "null"]},
+          "city": {"type": ["string", "null"]},
+          "url": {"type": ["string", "null"]},
+          "features": {"type": "array", "items": {"type": "string"}},
+          "feature_map": {"type": "object", "additionalProperties": {"type": "string"}},
+          "first_seen": {"type": ["string", "null"]},
+          "last_seen": {"type": ["string", "null"]}
+        },
+        "additionalProperties": true
+      },
+      "ListingsPage": {
+        "type": "object",
+        "required": ["items", "total", "limit", "offset", "filtered"],
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/Listing"}},
+          "total": {"type": "integer", "minimum": 0},
+          "limit": {"type": "integer", "minimum": 1},
+          "offset": {"type": "integer", "minimum": 0},
+          "filtered": {"type": "boolean"}
+        },
+        "additionalProperties": true
+      },
+      "MapListing": {
+        "type": "object",
+        "required": ["id", "name", "status", "lat", "lng"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "status": {"type": "string"},
+          "price_raw": {"type": "string"},
+          "available_from": {"type": ["string", "null"]},
+          "city": {"type": ["string", "null"]},
+          "address": {"type": ["string", "null"]},
+          "lat": {"type": "number"},
+          "lng": {"type": "number"}
+        },
+        "additionalProperties": true
+      },
+      "MapData": {
+        "type": "object",
+        "required": ["listings", "uncached"],
+        "properties": {
+          "listings": {"type": "array", "items": {"$ref": "#/components/schemas/MapListing"}},
+          "uncached": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": true
+      },
+      "CalendarListing": {
+        "type": "object",
+        "required": ["id", "name", "status", "available_from"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "status": {"type": "string"},
+          "price_raw": {"type": "string"},
+          "available_from": {"type": "string"},
+          "url": {"type": ["string", "null"]},
+          "city": {"type": ["string", "null"]},
+          "building": {"type": ["string", "null"]}
+        },
+        "additionalProperties": true
+      },
+      "CalendarData": {
+        "type": "object",
+        "required": ["listings"],
+        "properties": {
+          "listings": {"type": "array", "items": {"$ref": "#/components/schemas/CalendarListing"}}
+        },
+        "additionalProperties": true
+      },
+      "Notification": {
+        "type": "object",
+        "required": ["id", "created_at", "type", "title", "body", "read"],
+        "properties": {
+          "id": {"type": "integer"},
+          "created_at": {"type": "string"},
+          "type": {"type": "string"},
+          "title": {"type": "string"},
+          "body": {"type": "string"},
+          "url": {"type": "string"},
+          "listing_id": {"type": ["string", "null"]},
+          "read": {"type": "integer", "enum": [0, 1]},
+          "user_id": {"type": ["string", "null"]}
+        },
+        "additionalProperties": true
+      },
+      "NotificationsPage": {
+        "type": "object",
+        "required": ["items", "total", "unread", "limit", "offset"],
+        "properties": {
+          "items": {"type": "array", "items": {"$ref": "#/components/schemas/Notification"}},
+          "total": {"type": "integer", "minimum": 0},
+          "unread": {"type": "integer", "minimum": 0},
+          "limit": {"type": "integer", "minimum": 1},
+          "offset": {"type": "integer", "minimum": 0}
+        },
+        "additionalProperties": true
+      },
+      "NotificationsReadRequest": {
+        "type": "object",
+        "properties": {
+          "ids": {"type": "array", "items": {"type": "integer"}}
+        },
+        "additionalProperties": false
+      },
+      "MeSummary": {
+        "type": "object",
+        "required": ["role", "total_in_db", "new_24h_total", "matched_total", "matched_available", "last_scrape", "filter_active"],
+        "properties": {
+          "role": {"$ref": "#/components/schemas/Role"},
+          "total_in_db": {"type": "integer", "minimum": 0},
+          "new_24h_total": {"type": "integer", "minimum": 0},
+          "matched_total": {"type": "integer", "minimum": 0},
+          "matched_available": {"type": "integer", "minimum": 0},
+          "last_scrape": {"type": ["string", "null"]},
+          "filter_active": {"type": "boolean"}
+        },
+        "additionalProperties": true
+      },
+      "MeFilter": {
+        "type": "object",
+        "required": ["role", "filter", "is_empty"],
+        "properties": {
+          "role": {"$ref": "#/components/schemas/Role"},
+          "filter": {"$ref": "#/components/schemas/ListingFilter"},
+          "is_empty": {"type": "boolean"}
+        },
+        "additionalProperties": true
+      },
+      "FilterOptions": {
+        "type": "object",
+        "properties": {
+          "cities": {"type": "array", "items": {"type": "string"}},
+          "occupancy": {"type": "array", "items": {"type": "string"}},
+          "types": {"type": "array", "items": {"type": "string"}},
+          "neighborhoods": {"type": "array", "items": {"type": "string"}},
+          "contract": {"type": "array", "items": {"type": "string"}},
+          "tenant": {"type": "array", "items": {"type": "string"}},
+          "offer": {"type": "array", "items": {"type": "string"}},
+          "finishing": {"type": "array", "items": {"type": "string"}},
+          "energy": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      },
+      "DeviceRegisterRequest": {
+        "type": "object",
+        "required": ["device_token"],
+        "properties": {
+          "device_token": {"type": "string", "minLength": 1},
+          "env": {"type": "string", "enum": ["production", "sandbox"], "default": "production"},
+          "platform": {"type": "string", "enum": ["ios", "android"], "default": "ios"},
+          "model": {"type": "string", "maxLength": 64},
+          "bundle_id": {"type": "string", "maxLength": 128}
+        },
+        "additionalProperties": true
+      },
+      "DeviceRegisterData": {
+        "type": "object",
+        "required": ["device_id", "env", "platform"],
+        "properties": {
+          "device_id": {"type": "integer"},
+          "env": {"type": "string"},
+          "platform": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "Device": {
+        "type": "object",
+        "required": ["id", "device_token_hint", "env", "platform", "disabled"],
+        "properties": {
+          "id": {"type": "integer"},
+          "device_token_hint": {"type": "string"},
+          "env": {"type": "string"},
+          "platform": {"type": "string"},
+          "model": {"type": "string"},
+          "created_at": {"type": ["string", "null"]},
+          "last_seen": {"type": ["string", "null"]},
+          "disabled": {"type": "boolean"},
+          "disabled_reason": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "DeviceTestRequest": {
+        "type": "object",
+        "properties": {
+          "title": {"type": "string", "maxLength": 64},
+          "body": {"type": "string", "maxLength": 180},
+          "apns_only": {"type": "boolean", "default": false},
+          "notification_only": {"type": "boolean", "default": false}
+        },
+        "additionalProperties": true
+      },
+      "DeviceTestData": {
+        "type": "object",
+        "required": ["sent", "total", "results", "notification_id"],
+        "properties": {
+          "sent": {"type": "integer", "minimum": 0},
+          "total": {"type": "integer", "minimum": 0},
+          "results": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+          "notification_id": {"type": ["integer", "null"]}
+        },
+        "additionalProperties": true
+      },
+      "FeedbackRequest": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["bug", "suggestion", "other"], "default": "other"},
+          "message": {"type": "string", "minLength": 5, "maxLength": 2000},
+          "user_name": {"type": "string"},
+          "app_version": {"type": "string"}
+        },
+        "additionalProperties": true
+      },
+      "DiagnosticRequest": {
+        "type": "object",
+        "required": ["kind", "payload"],
+        "properties": {
+          "kind": {"type": "string", "enum": ["crash", "hang", "diskwrite", "cpuexception"]},
+          "app_version": {"type": "string"},
+          "ios_version": {"type": "string"},
+          "os_version": {"type": "string"},
+          "device_model": {"type": "string"},
+          "payload": {"type": "object", "additionalProperties": true}
+        },
+        "additionalProperties": true
+      },
+      "AdminUser": {
+        "type": "object",
+        "required": ["id", "name", "enabled", "notifications_enabled", "channel_count", "channels", "active_devices", "filter_summary"],
+        "properties": {
+          "id": {"type": "string"},
+          "name": {"type": "string"},
+          "enabled": {"type": "boolean"},
+          "notifications_enabled": {"type": "boolean"},
+          "channel_count": {"type": "integer", "minimum": 0},
+          "channels": {"type": "array", "items": {"type": "string"}},
+          "app_login_enabled": {"type": "boolean"},
+          "has_app_password": {"type": "boolean"},
+          "allow_h2s_login": {"type": "boolean"},
+          "active_devices": {"type": "integer", "minimum": 0},
+          "auto_book_enabled": {"type": "boolean"},
+          "filter_summary": {"type": "object", "additionalProperties": true}
+        },
+        "additionalProperties": true
+      },
+      "MonitorStatus": {
+        "type": "object",
+        "required": ["running", "pid"],
+        "properties": {
+          "running": {"type": "boolean"},
+          "pid": {"type": ["integer", "null"]},
+          "last_scrape": {"type": ["string", "null"]},
+          "last_count": {"type": ["string", "integer", "null"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  }
+}

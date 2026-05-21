@@ -23,10 +23,10 @@ docker compose up -d
 ```
 
 **macOS：**
-从 [Releases](../../releases) 下载最新 `.dmg`，拖入 Applications，双击启动即可自动打开浏览器。持久化数据存储在 `~/.h2s-monitor/`。
+从 [Releases](../../releases) 下载最新 `.dmg`，拖入 Applications，双击启动即可自动打开浏览器。持久化数据存储在 `~/.flatradar/`。
 
 **Windows：**
-从 [Releases](../../releases) 下载最新 `.zip`，解压后双击 `h2s-monitor.exe`。CMD 窗口会自动打开浏览器。持久化数据存储在 `%USERPROFILE%\.h2s-monitor\`。
+从 [Releases](../../releases) 下载最新 `.zip`，解压后双击 `flatradar.exe`。CMD 窗口会自动打开浏览器。持久化数据存储在 `%USERPROFILE%\.flatradar\`。
 
 
 **从源代码运行：**
@@ -167,6 +167,8 @@ FlatRadar/
 - **设计系统**：主色 #0A84FF、语义色（绿/橙/红）、tabular-nums 数字字体
 
 ### API 端点
+
+完整移动端 API 契约见：[后端 API 文档](API.md)。iOS/Android 共用的机器可读 OpenAPI 3.1 契约见：[openapi.json](openapi.json)。
 
 所有端点使用 `/api/v1/*` + JWT Bearer 鉴权（或 bearer_optional）：
 
@@ -721,7 +723,7 @@ packaging/
   asset/              应用图标源文件（1024x1024 PNG）
   build_dmg.sh        macOS .dmg 构建脚本（PyInstaller + .app 打包 + 图标生成）
   build.bat           Windows 构建脚本（PyInstaller + ZIP）
-  h2s_monitor.spec    PyInstaller 打包配置
+  flatradar.spec    PyInstaller 打包配置
 launcher.py         macOS .app 入口（导入 web.app，处理 --run-monitor）
 .github/workflows/  GitHub Actions CI/CD（推送 tag 或手动触发构建 .dmg + .exe）
 data/               运行时自动生成
@@ -735,7 +737,7 @@ logs/               日志文件（supervisord 写入 monitor.log + web.log）
 
 ## 许可证
 
-Holland2Stay Monitor 基于 [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) 许可。
+FlatRadar 基于 [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0/) 许可。
 
 **允许：**
 - 个人使用

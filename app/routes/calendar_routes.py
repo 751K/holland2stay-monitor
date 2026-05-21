@@ -12,7 +12,7 @@ from __future__ import annotations
 from flask import Flask, jsonify, render_template
 
 from app.auth import api_login_required, login_required
-from app.db import storage
+from app.services.listing_service import get_calendar_payload
 
 
 @login_required
@@ -23,12 +23,7 @@ def calendar() -> str:
 @api_login_required
 def api_calendar():
     """返回所有有入住日期的房源，供日历前端渲染。"""
-    st = storage()
-    try:
-        listings = st.get_calendar_listings()
-    finally:
-        st.close()
-    return jsonify({"listings": listings})
+    return jsonify(get_calendar_payload())
 
 
 def register(app: Flask) -> None:

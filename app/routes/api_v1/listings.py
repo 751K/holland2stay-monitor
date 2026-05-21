@@ -32,48 +32,16 @@ API v1 房源端点
 
 from __future__ import annotations
 
-import json
-
 from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
-
-from ._helpers import (
-    apply_user_filter,
-    get_current_user,
+from app.services.listing_service import (
+    get_listing_detail,
+    query_listing_rows,
     serialize_listing,
-    storage_ctx,
 )
 
-
-# ── helper: feature 子串匹配 ──────────────────────────────────────────
-
-def _safe_features(row: dict) -> list[str]:
-    raw = row.get("features", "[]") or "[]"
-    try:
-        return json.loads(raw)
-    except (json.JSONDecodeError, TypeError):
-        return []
-
-
-def _feature_contains(row: dict, category: str, value: str) -> bool:
-    v2 = value.strip().lower()
-    for f in _safe_features(row):
-        if f.startswith(f"{category}: "):
-            fv = f.split(": ", 1)[1].strip().lower()
-            if v2 in fv:
-                return True
-    return False
-
-
-def _feature_rank_ok(row: dict, min_rank: int) -> bool:
-    from config import energy_rank
-    for f in _safe_features(row):
-        if f.startswith("Energy: "):
-            val = f.split(": ", 1)[1].strip()
-            rank = energy_rank(val)
-            return rank is not None and rank <= min_rank
-    return False
+from ._helpers import get_current_user
 
 
 def _list_listings():
@@ -108,31 +76,17 @@ def _list_listings():
     contract = request.args.get("contract") or None
     energy = request.args.get("energy") or None
 
-    # SQL：单城市走 SQL 过滤（比 Python 过滤快）；多城市或不选走全量
-    sql_city = cities_list[0] if len(cities_list) == 1 else None
     SQL_HARD_CAP = 2000
-    with storage_ctx() as st:
-        rows = st.get_all_listings(
-            status=status, search=q, city=sql_city, limit=SQL_HARD_CAP,
-        )
-
-    # user 视角：先应用 listing_filter
-    filtered = apply_user_filter(rows, user) if role == "user" else rows
-
-    # Python 端浏览筛选（与 Web 端 /listings 逻辑一致）
-    if len(cities_list) > 1:
-        cf_lower = {c.lower() for c in cities_list}
-        filtered = [r for r in filtered if (r.get("city") or "").lower() in cf_lower]
-    if types_list:
-        filtered = [r for r in filtered if any(
-            _feature_contains(r, "Type", t) for t in types_list)]
-    if contract:
-        filtered = [r for r in filtered if _feature_contains(r, "Contract", contract)]
-    if energy:
-        from config import energy_rank
-        min_rank = energy_rank(energy)
-        if min_rank is not None:
-            filtered = [r for r in filtered if _feature_rank_ok(r, min_rank)]
+    filtered = query_listing_rows(
+        user=user if role == "user" else None,
+        status=status,
+        search=q,
+        cities=cities_list,
+        types=types_list,
+        contract=contract,
+        energy=energy,
+        limit=SQL_HARD_CAP,
+    )
 
     total = len(filtered)
     page = filtered[offset : offset + limit]
@@ -151,23 +105,10 @@ def _get_listing(listing_id: str):
     if role == "user" and user is None:
         return _err.err_unauthorized("用户已被删除")
 
-    with storage_ctx() as st:
-        # listings 表用 id 主键，直接 SQL 单查更省事；现成接口没有，走通用 query
-        row = st.conn.execute(
-            "SELECT * FROM listings WHERE id = ?",
-            (listing_id,),
-        ).fetchone()
-    if not row:
+    row = get_listing_detail(listing_id, user if role == "user" else None)
+    if row is None:
         return _err.err_not_found("房源不存在")
-    r = dict(row)
-
-    # user 视角：filter 不放行的房源对该用户来说"不存在"，避免泄漏
-    # 用户口径之外的房源信息（即便房源本身不算敏感，也保持视图一致性）
-    if role == "user" and user is not None and not user.listing_filter.is_empty():
-        kept = apply_user_filter([r], user)
-        if not kept:
-            return _err.err_not_found("房源不存在")
-    return _err.ok(serialize_listing(r))
+    return _err.ok(serialize_listing(row))
 
 
 def register(bp: Blueprint) -> None:

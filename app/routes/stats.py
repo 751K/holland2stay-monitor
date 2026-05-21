@@ -10,26 +10,24 @@ from __future__ import annotations
 from flask import Flask, jsonify, render_template, request
 
 from app.auth import api_login_required, login_required
-from app.db import storage
+from app.services.stats_service import (
+    DEFAULT_STATS_DAYS,
+    charts_payload,
+    normalize_days,
+    stats_summary,
+)
 
 
 @login_required
 def stats() -> str:
-    default_days = 30
-    st = storage()
-    try:
-        total       = st.count_all()
-        new_24h     = st.count_new_since(hours=24)
-        new_range   = st.count_new_since(hours=24 * default_days)
-        changes_range = st.count_changes_since(hours=24 * default_days)
-    finally:
-        st.close()
+    default_days = DEFAULT_STATS_DAYS
+    summary = stats_summary(days=default_days)
     return render_template(
         "stats.html",
-        total=total,
-        new_24h=new_24h,
-        new_range=new_range,
-        changes_range=changes_range,
+        total=summary["total"],
+        new_24h=summary["new_24h"],
+        new_range=summary["new_range"],
+        changes_range=summary["changes_range"],
         default_days=default_days,
     )
 
@@ -37,37 +35,8 @@ def stats() -> str:
 @api_login_required
 def api_charts():
     """所有图表数据的 JSON API，供前端 Chart.js 调用。"""
-    try:
-        days = int(request.args.get("days", 30))
-    except (TypeError, ValueError):
-        days = 30
-    days = max(1, min(days, 365))  # 限制在 [1, 365]，防止超大查询
-    st = storage()
-    try:
-        data = {
-            "summary": {
-                "days": days,
-                "total": st.count_all(),
-                "new_24h": st.count_new_since(hours=24),
-                "new_range": st.count_new_since(hours=24 * days),
-                "changes_range": st.count_changes_since(hours=24 * days),
-            },
-            "daily_new":     st.chart_daily_new(days=days),
-            "daily_changes": st.chart_daily_changes(days=days),
-            "city_dist":     st.chart_city_dist(days=days),
-            "status_dist":   st.chart_status_dist(days=days),
-            "price_dist":    st.chart_price_dist(days=days),
-            "hourly_dist":   st.chart_hourly_dist(days=days),
-            "tenant_dist":   st.chart_tenant_dist(days=days),
-            "contract_dist": st.chart_contract_dist(days=days),
-            "type_dist":     st.chart_type_dist(days=days),
-            "energy_dist":   st.chart_energy_dist(days=days),
-            "area_dist":     st.chart_area_dist(days=days),
-            "floor_dist":    st.chart_floor_dist(days=days),
-        }
-    finally:
-        st.close()
-    return jsonify(data)
+    days = normalize_days(request.args.get("days", DEFAULT_STATS_DAYS))
+    return jsonify(charts_payload(days=days))
 
 
 def register(app: Flask) -> None:

@@ -17,64 +17,32 @@ from __future__ import annotations
 from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
-from app.db import storage
+from app.services.stats_service import (
+    DEFAULT_STATS_DAYS,
+    chart_data,
+    chart_keys,
+    normalize_days,
+    public_summary_payload,
+)
 
 
 def _summary():
     """GET /stats/public/summary —— 首页几个总览数字。"""
-    st = storage()
-    try:
-        data = {
-            "total": st.count_all(),
-            "new_24h": st.count_new_since(hours=24),
-            "new_7d": st.count_new_since(hours=24 * 7),
-            "changes_24h": st.count_changes_since(hours=24),
-            "last_scrape": st.get_meta("last_scrape_at", default=""),
-        }
-    finally:
-        st.close()
-    return _err.ok(data)
-
-
-# 公开图表白名单——只放纯聚合、不涉及单房源的指标。
-# city_dist / status_dist 等都是 COUNT(*) GROUP BY，没有 listing_id 泄漏。
-_PUBLIC_CHARTS = {
-    "daily_new":     lambda st, days: st.chart_daily_new(days=days),
-    "daily_changes": lambda st, days: st.chart_daily_changes(days=days),
-    "city_dist":     lambda st, days: st.chart_city_dist(days=days),
-    "status_dist":   lambda st, days: st.chart_status_dist(days=days),
-    "price_dist":    lambda st, days: st.chart_price_dist(days=days),
-    "hourly_dist":   lambda st, days: st.chart_hourly_dist(days=days),
-    "tenant_dist":   lambda st, days: st.chart_tenant_dist(days=days),
-    "contract_dist": lambda st, days: st.chart_contract_dist(days=days),
-    "type_dist":     lambda st, days: st.chart_type_dist(days=days),
-    "energy_dist":   lambda st, days: st.chart_energy_dist(days=days),
-    "area_dist":     lambda st, days: st.chart_area_dist(days=days),
-    "floor_dist":    lambda st, days: st.chart_floor_dist(days=days),
-}
+    return _err.ok(public_summary_payload())
 
 
 def _chart(key: str):
     """GET /stats/public/charts/<key>?days=30"""
-    fn = _PUBLIC_CHARTS.get(key)
-    if fn is None:
+    if key not in chart_keys():
         return _err.err_not_found(f"未知图表 {key!r}")
-    try:
-        days = int(request.args.get("days", 30))
-    except (TypeError, ValueError):
-        days = 30
-    days = max(1, min(days, 365))
-    st = storage()
-    try:
-        data = fn(st, days)
-    finally:
-        st.close()
+    days = normalize_days(request.args.get("days", DEFAULT_STATS_DAYS))
+    data = chart_data(key, days=days)
     return _err.ok({"key": key, "days": days, "data": data})
 
 
 def _charts_index():
     """GET /stats/public/charts —— 列出所有可用图表 key。"""
-    return _err.ok({"charts": sorted(_PUBLIC_CHARTS.keys())})
+    return _err.ok({"charts": chart_keys()})
 
 
 def register(bp: Blueprint) -> None:

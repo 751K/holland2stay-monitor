@@ -1,10 +1,10 @@
 #!/bin/bash
-# Build Holland2Stay Monitor .dmg for macOS
+# Build FlatRadar .dmg for macOS
 # Prerequisites: macOS, Python 3.11+
 set -e
 
-APP_NAME="H2S Monitor"
-DMG_NAME="Holland2Stay Monitor"
+APP_NAME="FlatRadar"
+DMG_NAME="FlatRadar"
 
 # Auto-detect Python: use conda env "daily" if available, otherwise plain python
 if conda run -n daily python --version &>/dev/null 2>&1; then
@@ -25,7 +25,7 @@ $PIP install pyinstaller -q
 
 echo "=== Step 2: Build binary with PyInstaller ==="
 cd "$SCRIPT_DIR"
-$PYTHON -m PyInstaller --clean --distpath "$DIST_DIR" --workpath "$BUILD_DIR" h2s_monitor.spec
+$PYTHON -m PyInstaller --clean --distpath "$DIST_DIR" --workpath "$BUILD_DIR" flatradar.spec
 
 echo "=== Step 3: Create .app bundle ==="
 rm -rf "$APP_BUNDLE"
@@ -33,7 +33,7 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 # Move binary into .app
-cp "$DIST_DIR/h2s-monitor" "$APP_BUNDLE/Contents/MacOS/"
+cp "$DIST_DIR/flatradar" "$APP_BUNDLE/Contents/MacOS/"
 
 # Generate Info.plist
 cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
@@ -42,17 +42,17 @@ cat > "$APP_BUNDLE/Contents/Info.plist" << 'PLIST'
 <plist version="1.0">
 <dict>
     <key>CFBundleName</key>
-    <string>H2S Monitor</string>
+    <string>FlatRadar</string>
     <key>CFBundleDisplayName</key>
-    <string>H2S Monitor</string>
+    <string>FlatRadar</string>
     <key>CFBundleIdentifier</key>
-    <string>com.holland2stay.monitor</string>
+    <string>com.flatradar.app</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundleShortVersionString</key>
     <string>1.0</string>
     <key>CFBundleExecutable</key>
-    <string>h2s-monitor</string>
+    <string>flatradar</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSBackgroundOnly</key>

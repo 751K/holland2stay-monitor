@@ -27,56 +27,21 @@ bytes streaming 带 Authorization header，但为了让浏览器/简单客户端
 
 from __future__ import annotations
 
-import json
 import logging
-import threading
-import time as _time
 
 from flask import Blueprint, Response, g, request, stream_with_context
 
 from app import api_auth, api_errors as _err
-
-from ._helpers import (
-    apply_user_filter,
-    get_current_user,
-    storage_ctx,
+from app.services.notification_service import (
+    list_api_notifications,
+    mark_api_notifications_read,
+    sse_headers,
+    stream_notifications,
 )
 
+from ._helpers import get_current_user
+
 logger = logging.getLogger(__name__)
-
-# 用户视角只关心房源相关事件
-_USER_ALLOWED_TYPES = {"new_listing", "status_change", "booking"}
-
-
-def _filter_for_user_view(rows: list[dict], user) -> list[dict]:
-    """
-    通知行的 user 视角过滤：
-    - 仅保留 _USER_ALLOWED_TYPES 内的类型
-    - 对每条带 listing_id 的行反查 Listing，应用本人 listing_filter
-
-    rows 已经由 SQL 层做了 user_id 维度的初筛（user_id = self.id OR '')。
-    """
-    if user is None or user.listing_filter.is_empty():
-        return [r for r in rows if r.get("type") in _USER_ALLOWED_TYPES]
-    typed = [r for r in rows if r.get("type") in _USER_ALLOWED_TYPES]
-    listing_ids = {r["listing_id"] for r in typed if r.get("listing_id")}
-    if not listing_ids:
-        return typed
-    with storage_ctx() as st:
-        placeholders = ",".join("?" * len(listing_ids))
-        raw = st.conn.execute(
-            f"SELECT * FROM listings WHERE id IN ({placeholders})",
-            list(listing_ids),
-        ).fetchall()
-    keep_ids = {r["id"] for r in apply_user_filter(
-        [dict(r) for r in raw], user,
-    )}
-    out: list[dict] = []
-    for r in typed:
-        lid = r.get("listing_id") or ""
-        if not lid or lid in keep_ids:
-            out.append(r)
-    return out
 
 
 # ── 列表 ───────────────────────────────────────────────────────────
@@ -97,32 +62,12 @@ def _list_notifications():
     except (TypeError, ValueError):
         offset = 0
 
-    with storage_ctx() as st:
-        if role == "user":
-            # user_id 维度的 SQL 收窄：拿 user 自己的 + 系统通知
-            # 多取一些（user 视角的二次 Python 过滤可能丢条目）
-            raw = st.get_notifications(
-                limit=limit * 3 + 200,
-                offset=0,
-                user_id=user.id,  # type: ignore[union-attr]
-            )
-        else:
-            raw = st.get_notifications(limit=limit + offset, offset=0)
-        unread = st.count_unread_notifications()
-
-    if role == "user":
-        filtered = _filter_for_user_view(raw, user)
-    else:
-        filtered = raw
-    total = len(filtered)
-    page = filtered[offset : offset + limit]
-    return _err.ok({
-        "items": page,
-        "total": total,
-        "unread": unread,
-        "limit": limit,
-        "offset": offset,
-    })
+    return _err.ok(list_api_notifications(
+        role=role,
+        user=user,
+        limit=limit,
+        offset=offset,
+    ))
 
 
 # ── 标记已读 ────────────────────────────────────────────────────────
@@ -144,38 +89,11 @@ def _mark_read():
         except (ValueError, TypeError):
             return _err.err_validation("ids 元素必须是整数")
 
-    with storage_ctx() as st:
-        if role == "user" and ids is None:
-            # 全部已读 → 只针对自己可见的（user_id=self.id 或 '')
-            # 用 explicit SQL 限定 user_id，避免 user 误点 "全部已读"
-            # 影响别人/admin 的未读计数。
-            with st.conn:
-                st.conn.execute(
-                    "UPDATE web_notifications SET read = 1 "
-                    "WHERE read = 0 AND (user_id = ? OR user_id = '')",
-                    (user.id,),  # type: ignore[union-attr]
-                )
-        elif role == "user" and ids:
-            # 指定 ids：交集自己可见的，防止越权标记别人的
-            placeholders = ",".join("?" * len(ids))
-            with st.conn:
-                st.conn.execute(
-                    f"UPDATE web_notifications SET read = 1 "
-                    f"WHERE id IN ({placeholders}) "
-                    f"AND (user_id = ? OR user_id = '')",
-                    [*ids, user.id],  # type: ignore[union-attr]
-                )
-        else:
-            # admin：保留原全局行为
-            st.mark_notifications_read(ids=ids)
+    mark_api_notifications_read(role=role, user=user, ids=ids)
     return _err.ok({"marked": True})
 
 
 # ── SSE 推送 ────────────────────────────────────────────────────────
-
-
-_SSE_POLL = 5    # 轮询秒数
-_SSE_MAXAGE = 300  # 单连接最大生命
 
 
 def _stream():
@@ -214,49 +132,15 @@ def _stream():
     except (TypeError, ValueError):
         last_id = 0
 
-    stop = threading.Event()
-    expires = _time.monotonic() + _SSE_MAXAGE
-
-    def _generate():
-        nonlocal last_id
-        yield "retry: 2000\n\n"
-        # SSE 在 stream_with_context 内不能引用外层 storage()——会立刻 close。
-        # 独立开一份连接。
-        from app.db import storage as _open_storage
-        st = _open_storage()
-        try:
-            while not stop.is_set() and _time.monotonic() < expires:
-                rows = st.get_notifications_since(
-                    last_id,
-                    user_id=user_id if role == "user" else None,
-                )
-                if role == "user" and rows:
-                    rows = _filter_for_user_view(rows, user)
-                if rows:
-                    last_id = rows[-1]["id"]
-                    payload = json.dumps(rows, ensure_ascii=False)
-                    chunk = f"data: {payload}\n\n"
-                else:
-                    chunk = ": keepalive\n\n"
-                try:
-                    yield chunk
-                except (GeneratorExit, BrokenPipeError, ConnectionResetError, OSError):
-                    return
-                stop.wait(_SSE_POLL)
-        except GeneratorExit:
-            pass
-        finally:
-            st.close()
-            stop.set()
-
     return Response(
-        stream_with_context(_generate()),
+        stream_with_context(stream_notifications(
+            last_id=last_id,
+            role=role,
+            user=user,
+            user_id=user_id,
+        )),
         mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
+        headers=sse_headers(),
     )
 
 

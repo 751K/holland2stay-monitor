@@ -10,114 +10,75 @@
 from __future__ import annotations
 
 import os
-import signal
-import subprocess
-import sys
 import threading
 
 from flask import Flask, jsonify
 
-from config import BASE_DIR
-
 from app.auth import admin_api_required
 from app.csrf import csrf_required
-from app.process_ctrl import (
-    monitor_pid,
-    supervisorctl_available,
-    supervisorctl_monitor,
-    write_reload_request,
+from app.services.monitor_service import (
+    MonitorServiceError,
+    is_monitor_running,
+    reload_monitor,
+    start_monitor,
+    stop_monitor,
+    terminate_process,
 )
 
 
 def _terminate(pid: int) -> None:
-    """跨平台终止进程：POSIX 用 SIGTERM，Windows 用 terminate()。"""
-    if os.name == "nt":
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(1, False, pid)  # PROCESS_TERMINATE = 1
-        if handle:
-            kernel32.TerminateProcess(handle, 0)
-            kernel32.CloseHandle(handle)
-    else:
-        os.kill(pid, signal.SIGTERM)
+    """Backward-compatible alias for shutdown tests and older imports."""
+    terminate_process(pid)
 
 
 @admin_api_required
 @csrf_required
 def api_reload():
-    pid = monitor_pid()
-    if pid is None:
-        return jsonify({"ok": False, "error": "监控程序未运行，请先启动监控"}), 400
-
-    # Windows 没有可靠的 SIGHUP 语义，统一改为写入 reload 请求文件。
-    # 监控进程会在等待间隙轮询该文件并提前热重载。
-    if os.name == "nt" or not hasattr(signal, "SIGHUP"):
-        try:
-            write_reload_request()
-            return jsonify({"ok": True, "message": "已写入重载请求，配置将在 1 秒内检测并生效"})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
-
     try:
-        os.kill(pid, signal.SIGHUP)
-        return jsonify({"ok": True, "message": "重载信号已发送，配置将在本轮抓取结束后生效"})
-    except Exception:
-        # 回退到文件触发机制，避免因信号发送失败导致 Web 面板无法应用配置。
-        try:
-            write_reload_request()
-            return jsonify({"ok": True, "message": "信号发送失败，已回退为文件触发重载"})
-        except Exception as e:
-            return jsonify({"ok": False, "error": str(e)}), 500
+        result = reload_monitor()
+    except MonitorServiceError as e:
+        msg = "监控程序未运行，请先启动监控" if e.status == 400 else str(e)
+        return jsonify({"ok": False, "error": msg}), e.status
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    if result.get("fallback"):
+        message = "信号发送失败，已回退为文件触发重载"
+    elif result.get("method") == "file":
+        message = "已写入重载请求，配置将在 1 秒内检测并生效"
+    else:
+        message = "重载信号已发送，配置将在本轮抓取结束后生效"
+    return jsonify({"ok": True, "message": message})
 
 
 @admin_api_required
 @csrf_required
 def api_monitor_start():
     """启动后台监控进程（monitor.py）。"""
-    if monitor_pid() is not None:
-        return jsonify({"ok": False, "error": "监控已在运行"}), 409
     try:
-        if supervisorctl_available():
-            r = supervisorctl_monitor("start")
-            if r.returncode != 0:
-                return jsonify({"ok": False, "error": (r.stderr or r.stdout or "supervisorctl start failed").strip()}), 500
-            return jsonify({"ok": True, "message": "已启动", "method": "supervisor"})
-        if getattr(sys, "frozen", False):
-            subprocess.Popen(
-                [sys.executable, "--run-monitor"],
-                cwd=str(BASE_DIR),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        else:
-            subprocess.Popen(
-                [sys.executable, str(BASE_DIR / "monitor.py")],
-                cwd=str(BASE_DIR),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        return jsonify({"ok": True, "message": "已启动"})
+        result = start_monitor()
+    except MonitorServiceError as e:
+        return jsonify({"ok": False, "error": str(e)}), e.status
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    payload = {"ok": True, "message": "已启动"}
+    if "method" in result:
+        payload["method"] = result["method"]
+    return jsonify(payload)
 
 
 @admin_api_required
 @csrf_required
 def api_monitor_stop():
     """停止后台监控进程。"""
-    pid = monitor_pid()
-    if pid is None:
-        return jsonify({"ok": False, "error": "监控未在运行"}), 409
     try:
-        if supervisorctl_available():
-            r = supervisorctl_monitor("stop")
-            if r.returncode != 0:
-                return jsonify({"ok": False, "error": (r.stderr or r.stdout or "supervisorctl stop failed").strip()}), 500
-            return jsonify({"ok": True, "message": "已停止", "method": "supervisor"})
-        _terminate(pid)
-        return jsonify({"ok": True, "message": "已发送停止信号"})
+        result = stop_monitor()
+    except MonitorServiceError as e:
+        return jsonify({"ok": False, "error": str(e)}), e.status
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+    if result.get("method") == "supervisor":
+        return jsonify({"ok": True, "message": "已停止", "method": "supervisor"})
+    return jsonify({"ok": True, "message": "已发送停止信号"})
 
 
 @admin_api_required
@@ -125,10 +86,9 @@ def api_monitor_stop():
 def api_shutdown():
     """关闭监控和 Web 面板。"""
     # 先停监控
-    pid = monitor_pid()
-    if pid is not None:
+    if is_monitor_running():
         try:
-            _terminate(pid)
+            stop_monitor()
         except Exception:
             pass
 

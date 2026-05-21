@@ -37,19 +37,18 @@ class TestControlAuth:
 
 class TestReload:
     def test_reload_no_monitor_returns_400(self, admin_client, monkeypatch):
-        from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: None)
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: None)
         r = admin_client.post("/api/reload", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 400
         assert "未运行" in r.get_json()["error"]
 
     def test_reload_file_fallback_on_signal_error(self, admin_client, monkeypatch):
-        import signal
-        from app.routes import control as ctrl
+        from app.services import monitor_service as svc
 
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: 12345)
+        monkeypatch.setattr(svc, "monitor_pid", lambda: 12345)
         # 模拟 os.kill 抛异常 → 回退到文件触发
-        monkeypatch.setattr(ctrl.os, "kill", lambda pid, sig: (_ for _ in ()).throw(OSError("boom")))
+        monkeypatch.setattr(svc.os, "kill", lambda pid, sig: (_ for _ in ()).throw(OSError("boom")))
         r = admin_client.post("/api/reload", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 200
         body = r.get_json()
@@ -61,31 +60,31 @@ class TestReload:
 
 class TestStart:
     def test_start_no_monitor_succeeds(self, admin_client, monkeypatch):
-        from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: None)
-        monkeypatch.setattr(ctrl.subprocess, "Popen", MagicMock())
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: None)
+        monkeypatch.setattr(svc.subprocess, "Popen", MagicMock())
         r = admin_client.post("/api/monitor/start", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 200
         assert r.get_json()["ok"] is True
 
     def test_start_already_running_returns_409(self, admin_client, monkeypatch):
-        from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: 99999)
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: 99999)
         r = admin_client.post("/api/monitor/start", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 409
 
     def test_start_uses_supervisor_when_available(self, admin_client, monkeypatch):
-        from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: None)
-        monkeypatch.setattr(ctrl, "supervisorctl_available", lambda: True)
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: None)
+        monkeypatch.setattr(svc, "supervisorctl_available", lambda: True)
         calls = []
 
         def fake_supervisor(action):
             calls.append(action)
-            return ctrl.subprocess.CompletedProcess(
+            return svc.subprocess.CompletedProcess(
                 ["supervisorctl"], 0, stdout="monitor: started", stderr="")
 
-        monkeypatch.setattr(ctrl, "supervisorctl_monitor", fake_supervisor)
+        monkeypatch.setattr(svc, "supervisorctl_monitor", fake_supervisor)
         r = admin_client.post("/api/monitor/start", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 200
         assert r.get_json()["method"] == "supervisor"
@@ -96,41 +95,41 @@ class TestStart:
 
 class TestStop:
     def test_stop_not_running_returns_409(self, admin_client, monkeypatch):
-        from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: None)
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: None)
         r = admin_client.post("/api/monitor/stop", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 409
 
     def test_stop_running_sends_sigterm(self, admin_client, monkeypatch):
         import signal
-        from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: 99999)
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: 99999)
         kill_calls = []
-        monkeypatch.setattr(ctrl.os, "kill", lambda pid, sig: kill_calls.append((pid, sig)))
+        monkeypatch.setattr(svc.os, "kill", lambda pid, sig: kill_calls.append((pid, sig)))
         r = admin_client.post("/api/monitor/stop", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 200
         assert kill_calls == [(99999, signal.SIGTERM)]
 
     def test_stop_kill_error_returns_500(self, admin_client, monkeypatch):
-        from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: 99999)
-        monkeypatch.setattr(ctrl.os, "kill", lambda pid, sig: (_ for _ in ()).throw(OSError("boom")))
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: 99999)
+        monkeypatch.setattr(svc.os, "kill", lambda pid, sig: (_ for _ in ()).throw(OSError("boom")))
         r = admin_client.post("/api/monitor/stop", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 500
 
     def test_stop_uses_supervisor_when_available(self, admin_client, monkeypatch):
-        from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: 99999)
-        monkeypatch.setattr(ctrl, "supervisorctl_available", lambda: True)
-        monkeypatch.setattr(ctrl.os, "kill", lambda pid, sig: (_ for _ in ()).throw(AssertionError("should not SIGTERM")))
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: 99999)
+        monkeypatch.setattr(svc, "supervisorctl_available", lambda: True)
+        monkeypatch.setattr(svc.os, "kill", lambda pid, sig: (_ for _ in ()).throw(AssertionError("should not SIGTERM")))
         calls = []
 
         def fake_supervisor(action):
             calls.append(action)
-            return ctrl.subprocess.CompletedProcess(
+            return svc.subprocess.CompletedProcess(
                 ["supervisorctl"], 0, stdout="monitor: stopped", stderr="")
 
-        monkeypatch.setattr(ctrl, "supervisorctl_monitor", fake_supervisor)
+        monkeypatch.setattr(svc, "supervisorctl_monitor", fake_supervisor)
         r = admin_client.post("/api/monitor/stop", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 200
         assert r.get_json()["method"] == "supervisor"
@@ -142,7 +141,8 @@ class TestStop:
 class TestShutdown:
     def test_shutdown_always_returns_200(self, admin_client, monkeypatch):
         from app.routes import control as ctrl
-        monkeypatch.setattr(ctrl, "monitor_pid", lambda: None)
+        from app.services import monitor_service as svc
+        monkeypatch.setattr(svc, "monitor_pid", lambda: None)
         with patch.object(ctrl.threading, "Thread", MagicMock()):
             r = admin_client.post("/api/shutdown", headers={"X-CSRF-Token": "test_csrf"})
         assert r.status_code == 200
