@@ -50,6 +50,9 @@ struct AdminMonitorView: View {
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(.secondary)
+                    // icon-only 按钮：补 a11y label，让 VoiceOver / Voice Control
+                    // 都能识别（VC 会拿这个 label 作为语音指令名）
+                    .accessibilityLabel("Refresh monitor status")
                 }
             }
 

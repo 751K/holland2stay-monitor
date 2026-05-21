@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 TRANSLATIONS = {
     # ── Layout / Navigation ──────────────────────────────
     "app_title":            {"zh": "FlatRadar",               "en": "FlatRadar"},
+    "skip_to_content":      {"zh": "跳到主要内容",               "en": "Skip to content"},
+    "nav_section_admin":    {"zh": "管理",                      "en": "Admin"},
     "dashboard":            {"zh": "仪表盘",                  "en": "Dashboard"},
     "listings":             {"zh": "房源列表",                "en": "Listings"},
     "calendar":             {"zh": "日历",                    "en": "Calendar"},

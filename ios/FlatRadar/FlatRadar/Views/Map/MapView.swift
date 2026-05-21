@@ -425,6 +425,8 @@ struct MapView: View {
                         Image(systemName: "safari")
                     }
                     .buttonStyle(.bordered)
+                    // icon-only：默认 VO 朗读"safari"——补 a11y label 说明意图
+                    .accessibilityLabel("Open in browser")
                 }
             }
         }

@@ -242,6 +242,10 @@ struct ListingsView: View {
             Spacer()
         }
         .padding(.vertical, 2)
+        // VoiceOver：默认把绿圈 / 数字 / " listings" / · / "updated 8m" 拆成五个
+        // 元素读出，节奏碎。combine 后变一个元素，自定义 label 自然朗读。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(store.total) listings, updated \(updatedAgoText)")
     }
 
     private var inlineSearchRow: some View {
@@ -267,6 +271,7 @@ struct ListingsView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
             }
             Button("Search") {
                 applySearch()
@@ -294,6 +299,10 @@ struct ListingsView: View {
                                               design: chip.mono ? .monospaced : .default))
                             Image(systemName: "xmark")
                                 .font(.system(size: 8, weight: .bold))
+                                // 装饰性 glyph：跟 chip label 一起被读会变成
+                                // "Eindhoven xmark"——把它从 a11y 树里摘掉，
+                                // 让按钮整体只暴露一个清晰意图。
+                                .accessibilityHidden(true)
                         }
                         .padding(.leading, 11)
                         .padding(.trailing, 9)
@@ -313,6 +322,9 @@ struct ListingsView: View {
                                 radius: 4, x: 0, y: 2)
                     }
                     .buttonStyle(.plain)
+                    // VoiceOver 朗读："Remove filter: Eindhoven, button"；
+                    // Voice Control 也能用"tap Remove filter Eindhoven"。
+                    .accessibilityLabel("Remove filter: \(chip.label)")
                 }
                 if activeFilterChips.count > 1 {
                     Button("Clear all", role: .destructive) {

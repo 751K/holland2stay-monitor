@@ -96,6 +96,16 @@
         }
       }
     },
+    "%@, updated %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, updated %2$@"
+          }
+        }
+      }
+    },
     "%lld" : {
       "localizations" : {
         "zh-Hans" : {
@@ -135,6 +145,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 套房源"
+          }
+        }
+      }
+    },
+    "%lld listings, updated %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld listings, updated %2$@"
           }
         }
       }
@@ -719,7 +739,14 @@
         }
       }
     },
+    "Browse mode" : {
+
+    },
+    "Buy me a coffee" : {
+
+    },
     "Buy me a coffee ☕" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -849,6 +876,9 @@
           }
         }
       }
+    },
+    "Clear search" : {
+
     },
     "Color Scheme" : {
       "localizations" : {
@@ -1180,6 +1210,9 @@
         }
       }
     },
+    "Double tap to open listing details" : {
+
+    },
     "Email or username" : {
       "localizations" : {
         "en" : {
@@ -1211,6 +1244,12 @@
           }
         }
       }
+    },
+    "Enable %@" : {
+
+    },
+    "Enable Notifications" : {
+
     },
     "Energy" : {
       "localizations" : {
@@ -2151,6 +2190,9 @@
         }
       }
     },
+    "Next month" : {
+
+    },
     "Next time, sign in instantly with %@ instead of typing your password." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2437,6 +2479,9 @@
         }
       }
     },
+    "Notifications are disabled in iOS Settings. Enable them in Settings → Notifications → FlatRadar." : {
+
+    },
     "Occupancy" : {
       "localizations" : {
         "en" : {
@@ -2452,6 +2497,9 @@
           }
         }
       }
+    },
+    "Off" : {
+
     },
     "Offer" : {
       "localizations" : {
@@ -2485,6 +2533,9 @@
         }
       }
     },
+    "On" : {
+
+    },
     "Only listings matching this filter trigger APNs and notification tab updates." : {
       "localizations" : {
         "en" : {
@@ -2502,6 +2553,9 @@
       }
     },
     "Only user accounts can change password here." : {
+
+    },
+    "Open in browser" : {
 
     },
     "Open on Holland2Stay" : {
@@ -2686,6 +2740,9 @@
         }
       }
     },
+    "Previous month" : {
+
+    },
     "Price & Space" : {
       "localizations" : {
         "en" : {
@@ -2814,6 +2871,12 @@
         }
       }
     },
+    "Receive push notifications for new listings matching your filter." : {
+
+    },
+    "Refresh monitor status" : {
+
+    },
     "Register" : {
       "localizations" : {
         "en" : {
@@ -2897,6 +2960,9 @@
           }
         }
       }
+    },
+    "Remove filter: %@" : {
+
     },
     "Reset" : {
       "localizations" : {

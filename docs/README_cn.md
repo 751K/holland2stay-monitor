@@ -1,8 +1,10 @@
-# Holland2Stay 房源监控
+# FlatRadar 房源监控
 
-> 自动监控荷兰租房平台 [Holland2Stay](https://www.holland2stay.com)，第一时间向多个用户推送新房源和状态变更，并支持对符合条件的房源自动完成预订流程。
+> FlatRadar 是一个个人 Holland2Stay 房源监控工具。它会跟踪新房源和状态变更，第一时间向多个用户推送通知，并支持对符合条件的房源自动完成预订流程。
 
 > **免责声明：** 本项目仅供个人非商业使用。与 Holland2Stay 无任何关联、背书或合作关系。使用者需自行遵守 Holland2Stay 的服务条款及相关法律法规。作者对任何误用或因此产生的后果不承担任何责任。
+
+**当前版本：** v1.6.0
 
 **在线演示：** [flatradar.app](https://flatradar.app) — 登录页点击「访客模式」即可只读浏览。
 
@@ -48,9 +50,10 @@ python -m pytest tests/ -v
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 数据抓取 | ✅ 已完成 | GraphQL API + curl_cffi 绕过 Cloudflare WAF |
+| 数据抓取 | ✅ 已完成 | GraphQL API + curl_cffi 绕过 Cloudflare WAF；每城市输出完整扫描状态 |
+| Stale 状态收敛 | ✅ 已完成 | 仅对完整扫描城市执行；直订/未知 7 天未见推测 Occupied，lottery 2 天未见推测 Occupied |
 | 多城市监控 | ✅ 已完成 | 26 个荷兰城市，Web 面板复选框选择 |
-| 多通知渠道 | ✅ 已完成 | iMessage / Telegram / Email / WhatsApp，可同时启用 |
+| 多通知渠道 | ✅ 已完成 | iMessage / Telegram HTML / Email HTML / WhatsApp，可同时启用 |
 | Web 面板通知 | ✅ 已完成 | SSE 实时铃铛 + Toast 弹窗，与平台无关 |
 | 通知过滤 | ✅ 已完成 | 租金、面积、楼层、户型、入住类型、城市、片区、合同、租客、促销、装修、能耗 |
 | 多选下拉过滤 | ✅ 已完成 | 下拉多选 + 中英双语标签；房源列表支持城市/租客/合同筛选 |
@@ -68,16 +71,17 @@ python -m pytest tests/ -v
 | VPS / Docker 兼容 | ✅ 已完成 | 非 macOS 自动跳过 iMessage，Web 面板接管通知 |
 | 日夜主题 | ✅ 已完成 | 浅色 / 深色，跟随系统偏好，无刷新闪烁 |
 | 移动端适配 | ✅ 已完成 | 全页面自适应：卡片布局、44px 触摸目标、安全区适配、dvh 单位、日历列表切换、响应式网格 |
-| 数据可视化 | ✅ 已完成 | 10 个图表：趋势、城市/状态/价格/面积/楼层/户型/能耗/租客/合同分布、24h 上线时间 |
+| 数据可视化 | ✅ 已完成 | 10 个图表，7/30/90 天范围会联动 KPI 卡片与分布图 |
 | 入住日历 | ✅ 已完成 | 月视图，按城市筛选 |
 | 地图视图 | ✅ 已完成 | Leaflet.js + OpenStreetMap，自动地理编码，颜色标记 |
 | i18n 中英切换 | ✅ 已完成 | 一键切换语言，cookie 持久化 |
 | 通知测试 | ✅ 已完成 | 一键逐渠道测试，返回成功 / 失败详情 |
 | 访客模式（RBAC）| ✅ 已完成 | 无需密码只读访问；用户/设置/日志等管理功能仅 admin 可见 |
 | 面板鉴权 | ✅ 已完成 | Session 登录，opt-in（设置密码后启用）；`WEB_GUEST_MODE` 控制访客入口 |
+| Web 自助注册 | ✅ 已完成 | 登录页注册入口，注册前确认使用条款与隐私政策；SQLite 用户配置存储 |
 | 登录爆破防护 | ✅ 已完成 | IP 级失败计数 + 指数退避延迟 |
 | HTTPS / Caddy | ✅ 已完成 | 内置 Caddyfile + docker-compose Caddy 服务，自动签发 Let's Encrypt 证书 |
-| 安全加固 | ✅ 已完成 | RBAC 装饰器、通知/SSE/geocode 访客屏蔽、CSRF 防护、DOM XSS 防护（地图 geocode 错误详情、设置数值校验） |
+| 安全加固 | ✅ 已完成 | RBAC 装饰器、通知/SSE/geocode 访客屏蔽、CSRF、DOM XSS 防护、邮箱验证 `PUBLIC_BASE_URL` fail-closed |
 | 启动预检 | ✅ 已完成 | `WEB_PASSWORD` 未设置或 Caddyfile 仍为占位域名时阻止容器启动 |
 | 生产 WSGI | ✅ 已完成 | Docker 中 Gunicorn 替代 Flask 内置服务器（1 worker × 8 线程，timeout=0） |
 | 依赖版本锁定 | ✅ 已完成 | `requirements.lock` 精确版本，Dockerfile 从 lock 文件安装，构建可重复 |
@@ -112,6 +116,8 @@ python -m pytest tests/ -v
 ## iOS App (FlatRadar)
 
 原生 iOS 客户端，基于 SwiftUI + StoreKit 2 构建。Xcode 项目位于 `ios/FlatRadar/`。
+
+[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/us/app/flarradar/id6769857080)
 
 ### 快速启动（iOS）
 
@@ -197,6 +203,8 @@ FlatRadar/
 - 支持 26 个荷兰城市同时监控，城市列表在 Web 面板勾选
 - 检测**新上架房源**与**状态变更**（如 lottery → 可直接预订）
 - 全量房源写入本地 SQLite，历史可查，同一房源不重复通知
+- 每轮抓取会输出每个城市是否完整扫描；不完整城市会记录日志，并跳过 stale 状态收敛
+- 仅当城市完整扫描成功时才会把长期未见房源推测为 `Occupied`：直订/未知房源 7 天，lottery 房源 2 天
 
 ### 智能自适应轮询
 
@@ -252,6 +260,8 @@ FlatRadar/
 - 通知内容：房源名称、状态、租金、面积、楼层、能耗、入住日期、直链
 - 每用户可独立设置过滤条件，只接收符合自己需求的房源
 - 配置页一键发送测试消息，逐渠道返回成功 / 失败原因
+- Telegram 使用 FlatRadar 品牌化 HTML 消息，动态内容会转义，并关闭链接预览
+- 邮箱验证、测试通知、新房源通知统一使用 FlatRadar HTML 邮件模板
 
 **iMessage 平台检测**：iMessage 依赖 macOS 和 Messages.app。在 Linux / Windows / Docker 上，该渠道自动跳过并打印警告；用户配置页面若检测到服务器非 macOS，会显示提示横幅，建议改用其他渠道。
 
@@ -283,7 +293,7 @@ FlatRadar/
 ### Web 管理面板
 
 - **仪表盘**：总房源 / 今日新增 / 今日变更 / 最近抓取时间，加最新房源列表与近 48h 变更记录
-- **房源列表**：全量数据，支持按状态筛选 + 关键词搜索
+- **房源列表**：全量数据，支持按状态筛选、关键词搜索、首次发现与最后出现时间
 - **地图视图**：Leaflet.js 交互地图，Nominatim 自动地理编码 + 坐标缓存，颜色标记（绿=直订/橙=摇号/灰=其他），点击弹窗详情，亮色/暗色底图滤镜
 - **入住日历**：所有有入住日期的房源按月历展示，按城市筛选
 - **统计图表**：Chart.js 折线图 / 环形图 / 柱状图，7/30/90 天可切换；租金分布 9 区间（最高 >€1600）；24h 上线时间分布

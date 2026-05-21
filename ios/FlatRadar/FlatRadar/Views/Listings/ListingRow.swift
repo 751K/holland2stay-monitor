@@ -11,10 +11,23 @@ import SwiftUI
 /// - "1 Jan 2050" 占位日期不显示（`Listing.availableShortText` 已过滤）
 struct ListingRow: View {
     @Environment(\.horizontalSizeClass) private var hSizeClass
+    /// "增加对比度"系统开关。开启时把 10pt mono caps 列标题从 .tertiary 抬到
+    /// .secondary，避免小字号 + .tertiary（~3.3:1）双重低对比。
+    @Environment(\.colorSchemeContrast) private var contrast
 
     let listing: Listing
 
+    /// detailColumn 列标题（10pt mono caps）的层级样式。Increase Contrast 时上抬。
+    private var columnLabelStyle: HierarchicalShapeStyle {
+        contrast == .increased ? .secondary : .tertiary
+    }
+    /// detailColumn 占位值（"—"）的层级样式。
+    private var placeholderStyle: HierarchicalShapeStyle {
+        contrast == .increased ? .secondary : .tertiary
+    }
+
     var body: some View {
+        let inner: AnyView
         if hSizeClass == .regular {
             // iPad（含 portrait/landscape）都是 .regular，但实际可用宽度差很多。
             // ViewThatFits 按最大→最小依次尝试，picks 第一个能装下的：
@@ -22,14 +35,43 @@ struct ListingRow: View {
             //   mediumBody  (~460pt min) → iPad portrait / mini portrait：单列 +
             //                              名字下加一行 type/energy/move-in 细节
             //   compactBody             → 兜底，iPhone / 极窄分屏窗口
-            ViewThatFits(in: .horizontal) {
+            inner = AnyView(ViewThatFits(in: .horizontal) {
                 regularBody
                 mediumBody
                 compactBody
-            }
+            })
         } else {
-            compactBody
+            inner = AnyView(compactBody)
         }
+        // 把整行合并成一个 a11y 元素。默认情况下 VoiceOver 会按 layout 顺序逐个
+        // 朗读 title / NEW 徽章 / 价格 / 状态徽章 / 各 detail column ——节奏碎，
+        // 上下文丢失。用 children: .ignore + 自定义 label 拼成完整一句：
+        //   "Apartment 305, €1,067, Available to Book, Eindhoven, 28 m², from 5 Jan"
+        return inner
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(a11yLabel)
+    }
+
+    /// 拼一句完整的 VoiceOver 读音：name · price · status · location/area/move-in。
+    /// NEW 标识放最前面，让"新房源"的语义先入耳。
+    private var a11yLabel: String {
+        var parts: [String] = []
+        if listing.isNew {
+            if let age = listing.ageText {
+                parts.append("New listing, \(age)")
+            } else {
+                parts.append("New listing")
+            }
+        }
+        parts.append(listing.name)
+        parts.append(priceText)
+        parts.append(statusInfo.label)
+        if !listing.city.isEmpty { parts.append(listing.city) }
+        if let area = normalizedAreaText { parts.append(area) }
+        if let avail = listing.availableShortText {
+            parts.append("from \(avail)")
+        }
+        return parts.joined(separator: ", ")
     }
 
     private var compactBody: some View {
@@ -189,10 +231,10 @@ struct ListingRow: View {
             Text(label.uppercased())
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .tracking(0.5)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(columnLabelStyle)
             Text(value)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(value == "—" ? .tertiary : .secondary)
+                .foregroundStyle(value == "—" ? placeholderStyle : .secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
@@ -226,6 +268,11 @@ struct ListingRow: View {
     @ViewBuilder
     private var statusBadge: some View {
         let info = statusInfo
+        // 默认：饱和状态色文字 + 13% 同色 tint 底——绝大多数 case 满足 AA
+        // （绿/橙在白底上 ~4.5–5.5:1）。但 statusReserved（系统灰）在浅灰
+        // tint 上接近 3:1，且用户开了 Increase Contrast 时整体期望提高。
+        // 解法：开 Increase Contrast 时加 1pt 同色边框 + tint 提到 20%，
+        // 让"形状轮廓"参与传达，不再纯靠颜色差。
         HStack(spacing: 5) {
             Circle()
                 .fill(info.color)
@@ -237,7 +284,12 @@ struct ListingRow: View {
         .padding(.leading, 7)
         .padding(.trailing, 9)
         .padding(.vertical, 3)
-        .background(info.color.opacity(0.13), in: Capsule())
+        .background(info.color.opacity(contrast == .increased ? 0.20 : 0.13), in: Capsule())
+        .overlay {
+            if contrast == .increased {
+                Capsule().stroke(info.color, lineWidth: 1)
+            }
+        }
     }
 
     private var statusInfo: (label: String, color: Color) {

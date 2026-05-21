@@ -1,8 +1,35 @@
 <!doctype html>
-<html lang="{{ lang }}" data-theme="dark">
+<html lang="{{ lang }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script>
+    // 主题决策优先级（高 → 低）：
+    //   1) localStorage 'h2s-theme'        — 用户点过 toggleTheme 的显式选择
+    //   2) 系统时间                          — 19:00–06:59 走 dark
+    //   3) prefers-color-scheme             — 上面都没命中再 fallback 跟 OS
+    // 内联在 <head> 保证渲染前定好 data-theme，避免 light → dark 闪屏。
+    (function(){
+      var stored = localStorage.getItem('h2s-theme');
+      var t;
+      if (stored === 'dark' || stored === 'light') {
+        t = stored;
+      } else {
+        var h = new Date().getHours();
+        // 把"晚上"定义为 19:00 至次日 06:59。改这里的边界可以调整阈值。
+        if (h >= 19 || h < 7) {
+          t = 'dark';
+        } else if (window.matchMedia('(prefers-color-scheme:dark)').matches) {
+          t = 'dark';
+        } else {
+          t = 'light';
+        }
+      }
+      document.documentElement.setAttribute('data-theme', t);
+      document.documentElement.style.visibility = 'visible';
+    })();
+  </script>
+  <style>html{visibility:hidden}</style>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -15,11 +42,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="/static/design.css?v=5">
+  <link rel="stylesheet" href="/static/design.css?v=9">
   <style>{% block extra_style %}{% endblock %}</style>
   {% block head %}{% endblock %}
 </head>
 <body>
+
+<a href="#main-content" class="skip-link">{{ _('skip_to_content') }}</a>
 
 <div class="app-layout">
 
@@ -64,6 +93,7 @@
       </a>
       {% endif %}
       {% if is_admin %}
+      <div class="sidebar-label">{{ _('nav_section_admin') }}</div>
       <a href="{{ url_for('settings') }}" class="{% if request.endpoint=='settings' %}active{% endif %}">
         <i class="bi bi-gear"></i> {{ _('settings') }}
       </a>

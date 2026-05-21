@@ -17,6 +17,8 @@ from notifier import (
     _format_booking_failed,
     _format_email_html,
     _format_email_subject,
+    _format_telegram_html,
+    TelegramNotifier,
 )
 
 
@@ -173,3 +175,53 @@ class TestEmailFormatting:
         assert "FlatRadar" in html
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+class TestTelegramFormatting:
+    def test_telegram_html_is_branded_and_less_demo_like(self):
+        html = _format_telegram_html(_format_new(_listing()))
+
+        assert "<b>FlatRadar</b>" in html
+        assert "<b>新房源上架</b>" in html
+        assert "<b>状态</b>: Available to book" in html
+        assert "✅" not in html
+        assert "🏠" not in html
+        assert '<a href="https://www.holland2stay.com/residences/test-1.html">' in html
+
+    def test_telegram_html_escapes_dynamic_content(self):
+        html = _format_telegram_html(
+            _format_booking_failed(
+                _listing(name="<script>alert(1)</script>"),
+                '<b onclick="x">bad</b>',
+            )
+        )
+
+        assert "<script>alert(1)</script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+        assert '<b onclick="x">bad</b>' not in html
+        assert "&lt;b onclick=&quot;x&quot;&gt;bad&lt;/b&gt;" in html
+
+    def test_telegram_post_uses_html_parse_mode(self):
+        class _Resp:
+            ok = True
+            status_code = 200
+            text = "ok"
+
+        class _Session:
+            payload = None
+
+            def post(self, url, json, timeout):
+                self.payload = json
+                return _Resp()
+
+            def close(self):
+                pass
+
+        notifier = TelegramNotifier("token", "chat")
+        fake = _Session()
+        notifier._session = fake
+
+        assert notifier._post("https://api.telegram.org/bottoken/sendMessage", "✅ 标题\n\n🔗 https://example.com") is True
+        assert fake.payload["parse_mode"] == "HTML"
+        assert fake.payload["disable_web_page_preview"] is True
+        assert "<b>FlatRadar</b>" in fake.payload["text"]

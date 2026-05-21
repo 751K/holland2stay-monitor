@@ -154,16 +154,23 @@ struct BrowseView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: coord.selectedBrowseMode.systemImage)
+                    // 装饰性 icon：mode label 已经在右边了，重复朗读没意义
+                    .accessibilityHidden(true)
                 Text(coord.selectedBrowseMode.label)
                 Image(systemName: "chevron.down")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.secondary)
+                    // chevron 只表示这是 menu，trait 已经传达"pop-up button"
+                    .accessibilityHidden(true)
             }
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.primary)
             .padding(.horizontal, 4)
             .contentShape(Rectangle())
         }
+        // 整个 Menu 朗读："Mode, <current>, pop-up button"
+        .accessibilityLabel("Browse mode")
+        .accessibilityValue(coord.selectedBrowseMode.label)
     }
 
     private func modePicker(maxWidth: CGFloat) -> some View {

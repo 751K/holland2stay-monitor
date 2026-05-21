@@ -1,6 +1,107 @@
 # Changelog
 
-## v1.4.5 (2026-05-16)
+## v1.6.1 (2026-05-21)
+
+### iOS — Settings 重构
+
+- **Settings 按角色精修**：admin 登录后的 Settings 隐藏「Legal」入口（admin 自己维护条款 / 隐私政策，再放一遍是噪音）。
+- **User 推送开关**：user 端 Push Notifications 板块去掉 Permission / Device ID 诊断行，改为一个 `Enable Notifications` 开关；OFF 时删除当前设备后端绑定，ON 时申请权限 + 重新注册。系统 Notification 权限为 `denied` 时开关禁用 + 引导去 iOS Settings。admin 端保留诊断信息和 Test Push / Re-register 按钮。
+- **`PushStore.setEnabled(_:)`**：与 `logout` 区分——只清后端 device 绑定、不清缓存的 APNs token，用户再次开启时可直接复用。
+- **Buy me a coffee 视觉**：section header 用 SF Symbol `cup.and.saucer.fill` 替代 ☕ emoji（HIG 推荐 UI chrome 用 SF Symbol，VoiceOver 朗读语义化"cup and saucer"），文字在前 / 图标在后。
+
+### iOS — Live 心跳点动画与 LoginView 修复
+
+- **LoginView "live" 绿点呼吸动画修复**：原本 ripple 外层圈被 badge `.clipShape(RoundedRectangle(cornerRadius: 12))` 在左上角剪掉一块，动画看起来朝右下"鼓出去"而不是原地呼吸。改用 `.background(_, in: RoundedRectangle(...))`，与 DashboardView.liveBadge 写法对齐——圆角只作用于背景层、content 不参与裁剪。
+- **核心点加柔光晕**：7×7 核心点叠 `.shadow(color: iconColor.opacity(0.4), radius: 5)`，1.0 → 1.12 微缩放在小尺寸下也清晰可感。
+- **reduceMotion 同步停起**：补 `.onChange(of: shouldAnimate)`，会话中途切换"减弱动态效果"时正确停 / 起循环（与 DashboardView 对齐）。
+
+### iOS — Accessibility（覆盖 6 / 9 ASC Nutrition Label 条目）
+
+**VoiceOver + Voice Control**
+- icon-only 按钮全部补 `.accessibilityLabel`：AdminMonitorView 刷新箭头、ListingsView 搜索框 ✕、CalendarView 月份 ◀/▶、MapView Safari 图标、BrowseView mode menu、过滤 chip ✕。
+- 关键自定义视图 `.accessibilityElement(children: .ignore)` + 自定义 label：
+  - DashboardView `liveBadge` → "Live, updated 8 minutes ago"
+  - ListingsView `heartbeatRow` → "127 listings, updated 8m"
+  - `ListingRow` → "New listing, Apartment 305, €1,067, Available to Book, Eindhoven, 28 m², from 5 Jan"
+  - `NotificationRow` → 整卡 event + title + body + 时间合并朗读 + tappable 行加 hint "Double tap to open listing details"
+  - CalendarView 月份标题加 `.isHeader` trait
+- 装饰性 glyph（chip 内 xmark、Menu chevron.down、Menu icon 等）`.accessibilityHidden(true)`。
+- AdminUsersView 用户启用 Toggle 补 `.accessibilityLabel("Enable \(name)")` + `.accessibilityValue("On"/"Off")`，VO 不再读到无名开关。
+
+**Reduced Motion**
+- OnboardingView 接 `@Environment(\.accessibilityReduceMotion)`：Back / Next 按钮 + TabView page 切换的 `.spring` 在开启时降级为瞬时切换。
+- 与 DashboardView / LoginView 现有 reduceMotion 处理形成完整覆盖。
+
+**Sufficient Contrast**
+- LoginView 4 个自定义 RGB 灰阶（`domainColor` / `footerTextColor` / `descriptionColor` / `subtitleColor`）接 `@Environment(\.colorSchemeContrast)`，Increase Contrast 时全部拉到 WCAG AA 4.5:1 以上（`domainColor` 从 1.5:1 提到 ~4.6:1）。
+- NotificationRow 已读卡的 `.tertiary` body / 时间在 Increase Contrast 时上抬到 `.secondary`（避开 ~3.4:1 低对比）。
+- NotificationRow mono caps 事件标签（`statusLottery` 橙色在白底仅 ~3.4:1）在 Increase Contrast 时切到 `.primary`，类别色信号由左侧 icon 方块 + cardTint 承担、不丢语义。
+- ListingRow `detailColumn` 10pt mono caps 列标题在 Increase Contrast 时 `.tertiary` → `.secondary`。
+- ListingRow 状态徽章在 Increase Contrast 时 tint 0.13 → 0.20 + 加 1pt 同色 stroke（同时强化「Differentiate Without Color Alone」——形状轮廓不再纯靠颜色差）。
+
+**Differentiate Without Color Alone**
+- 上述 status badge stroke、NotificationRow icon 块 + 文字标签 + cardTint 三冗余、Calendar 数字计数（不只蓝色）、live dot 配 "Live"/"Offline" 文字——所有色彩信号都有等价的形状 / 文字冗余。
+
+**Dynamic Type 下限保护**
+- NotificationRow mono caps 事件标签 10.5pt → 11pt（达 iOS HIG 正文最小字号），tracking 0.5 → 0.4 保持紧凑视觉密度。
+
+### Publish 建议
+
+- 已可在 ASC Nutrition Label 勾选：**VoiceOver / Voice Control / Reduced Motion / Sufficient Contrast / Differentiate Without Color Alone / Dark Interface**（6 条）。
+- 仍不建议勾选 **Larger Text**（代码内大量 `.font(.system(size: N))` 固定字号未做 Dynamic Type scaling）；**Captions / Audio Descriptions** App 无视频音频内容，自动不适用。
+
+### Web 端 — 侧边栏与主题切换打磨
+
+- **修复 sidebar 顶端紫色横线泄漏**：新增的 `.skip-link`（无障碍"跳到主内容"按钮）原本用 `transform: translateY(-120%)` 隐藏到视口外，但元素实高 ≈ 36px、配上 `top: 8px` 后底边落在 y ≈ 0.8px，导致 accent 色泄漏 1–2px 在 FlatRadar 图标上方显出一条横线。改用 `top: -100px` + `:focus` 时拉回 `top: 8px` + 0.15s `top` 过渡，无障碍跳转功能完整保留。
+- **修复切日夜主题时"横线不跟着动"**：`html.theme-transitioning` 规则原本只覆盖 `background-color` / `color` / `box-shadow`，所有带 border 的横线元素（`<hr>` / table 分割线 / card 外框 / `sidebar-label` 下划线 / `.breadcrumb` 等）切换时颜色瞬间跳变，跟旁边卡面慢慢渐变形成不协调。补 `border-color` / `outline-color` / `fill` / `stroke`（inline SVG 一并覆盖）。
+- **修复 KPI 大数字"晚一点才变色"**：原 `color .25s` 跟 `background-color .35s` 错位 100ms，导致 `.kpi-num` / `.lc-rent` / 表格数字在 250ms 就跑完、背景还在转，中间帧看起来像数字晚到。所有过渡属性统一 `.3s ease`，JS 端 `setTimeout` 400ms 移除 class 仍留 100ms 缓冲。
+- **主题按系统时间自动判断**：未显式 toggle 过的用户首次访问时，根据本地时钟判定 `19:00–06:59` 自动走 dark。优先级 `localStorage` > 系统时间 > `prefers-color-scheme`，已显式 toggle 的用户选择仍然 stick。`base.html` + `login.html` 两个内联 `<head>` 脚本同步更新。
+- **静态资源缓存版本**：`design.css?v=6` → `v=9`，强制浏览器拉新样式。
+
+---
+
+## v1.6.0 (2026-05-20)
+
+### 后端 — 抓取完整性与 stale 状态收敛
+
+- **完整扫描信号**：`scraper.scrape_all()` 现在返回每个城市的完整性状态；monitor 每轮记录 `本轮完整扫描: x/y 城市`，便于区分真实无房源与抓取不完整。
+- **只对完整城市执行 stale 收敛**：7 天未见房源推测为 `Occupied` 的逻辑只在对应城市本轮完整抓取成功后运行，避免代理/网络故障时误判状态。
+- **Lottery 独立 stale 窗口**：`Available in lottery` 使用更短的 2 天未见阈值；`Available to book` / `Unknown` 仍使用 7 天阈值，更贴近 lottery 房源短周期行为。
+- **列表展示 last seen**：Web 房源列表新增 `Last seen`，避免把 `First seen` 误当成 stale 判断依据，排查状态收敛更直接。
+
+### Web — 注册、账号与安全
+
+- **登录页引流与注册入口**：登录页增加 App Store 下载链接，并支持 Web 端账号注册；注册前弹出使用条款与隐私政策确认。
+- **侧边栏法律入口**：登录后的侧边栏底部新增完整「隐私条款」与「使用条款」入口。
+- **Admin 设备管理入口**：admin 侧边栏新增 App 设备管理入口，不再只能从 Settings 深层进入。
+- **邮箱验证加固**：验证链接强制依赖 `PUBLIC_BASE_URL`，缺失时 fail-closed；避免 Host header poisoning 生成攻击者域名链接。
+- **用户邮件配置收紧**：普通 user 仅可使用 shared 邮件模式并修改收件邮箱；custom SMTP 限定 admin 配置，降低 SSRF / 出站滥用风险。
+- **前端 XSS 防护补强**：用户名称、测试通知结果、渠道错误等用户可控内容改为安全渲染，避免 inline handler / `innerHTML` 注入。
+
+### 通知
+
+- **Telegram 品牌化 HTML 消息**：Telegram 发送使用 `parse_mode=HTML`、`disable_web_page_preview=true`，统一 FlatRadar 标题、加粗字段，并转义动态内容。
+- **Email HTML 模板统一**：邮箱验证、测试通知与新房源邮件使用 FlatRadar 品牌模板，不再显示旧 H2S 命名。
+- **配置提示完善**：Web 用户表单补充 Telegram BotFather / `getUpdates` 配置说明；iMessage 标明仅本地 macOS 部署可用。
+
+### 统计与可观测性
+
+- **统计范围联动修复**：Stats 页 7 / 30 / 90 days 切换现在同时影响 KPI 卡片、趋势图和分布图；公开 chart API 也按 `days` 过滤。
+- **更清晰的网络失败链路**：第 1 页网络失败会向上抛出并参与连续失败计数/cooldown，不再伪装成“成功抓取 0 条”。
+
+### iOS / App Store
+
+- **版本更新**：项目版本推进到 `v1.6.0`；iOS App Store build `161`，面向 App Store Connect 完成截图、隐私、年龄分级、加密与内购资料准备。
+- **StoreKit 打赏**：新增 consumable “Buy me a coffee” 内购档位，作为自愿支持入口。
+- **移动端交互打磨**：Browse/List/Map/Calendar 在 iPhone / iPad 横竖屏下继续优化布局、搜索入口、地图按钮位置与深色模式表现。
+
+### 测试
+
+- 补充完整扫描、stale 收敛、lottery stale 窗口、统计范围联动、Telegram HTML 格式、前端安全渲染等回归测试。
+
+---
+
+## v1.5.0 (2026-05-16)
 
 ### 后端 — 账号注册与存储一致性
 

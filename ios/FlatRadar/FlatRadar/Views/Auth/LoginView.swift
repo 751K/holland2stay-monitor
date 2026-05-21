@@ -7,6 +7,11 @@ struct LoginView: View {
     /// "减弱动态效果"：用户在 设置 > 辅助功能 > 动态效果 里开启时为 true。
     /// 受影响的动画（如 hero 图标呼吸）应在此 flag true 时跳过或显著弱化。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// "增加对比度"系统开关。开启时把若干自定义灰阶 token 提到更深 / 更亮，
+    /// 达到 WCAG AA 4.5:1。受影响的全是非语义自定义 RGB 颜色，Apple semantic
+    /// label color（.primary / .secondary / .tertiary）由系统自己调整。
+    @Environment(\.colorSchemeContrast) private var contrast
+    private var highContrast: Bool { contrast == .increased }
     @State private var expandedRole: LoginMode?
     @State private var username = ""
     @State private var password = ""
@@ -79,11 +84,22 @@ struct LoginView: View {
     }
 
     private var descriptionColor: Color {
-        isDark ? Color(red: 0.60, green: 0.64, blue: 0.72) : Color(red: 0.43, green: 0.46, blue: 0.50)
+        // 默认 light vs 白 ≈ 4.9:1（达标），但 12pt 用户字号放大时变体可能跌破。
+        // Increase Contrast 时拉到 ~7:1 给余量。
+        if highContrast {
+            return isDark ? Color(red: 0.85, green: 0.87, blue: 0.92)
+                          : Color(red: 0.20, green: 0.22, blue: 0.26)
+        }
+        return isDark ? Color(red: 0.60, green: 0.64, blue: 0.72) : Color(red: 0.43, green: 0.46, blue: 0.50)
     }
 
     private var subtitleColor: Color {
-        isDark ? Color(red: 0.55, green: 0.58, blue: 0.65) : Color(red: 0.49, green: 0.51, blue: 0.54)
+        // 默认 light vs 白 ≈ 4.3:1（边缘失败，11pt UNOFFICIAL 字号小风险更高）。
+        if highContrast {
+            return isDark ? Color(red: 0.82, green: 0.84, blue: 0.90)
+                          : Color(red: 0.25, green: 0.27, blue: 0.31)
+        }
+        return isDark ? Color(red: 0.55, green: 0.58, blue: 0.65) : Color(red: 0.49, green: 0.51, blue: 0.54)
     }
 
     private var badgeBackground: Color {
@@ -131,11 +147,23 @@ struct LoginView: View {
     }
 
     private var footerTextColor: Color {
-        isDark ? Color(red: 0.50, green: 0.53, blue: 0.60) : Color(red: 0.55, green: 0.56, blue: 0.58)
+        // 默认值在 light mode 下 vs 白底约 3.9:1，刚好低于 WCAG AA 4.5:1。
+        // 开 Increase Contrast 时拉到 ~7.1:1（深灰），暗模式也同步提亮。
+        if highContrast {
+            return isDark ? Color(red: 0.82, green: 0.84, blue: 0.88)
+                          : Color(red: 0.32, green: 0.33, blue: 0.35)
+        }
+        return isDark ? Color(red: 0.50, green: 0.53, blue: 0.60) : Color(red: 0.55, green: 0.56, blue: 0.58)
     }
 
     private var domainColor: Color {
-        isDark ? Color(red: 0.30, green: 0.33, blue: 0.38) : Color(red: 0.76, green: 0.76, blue: 0.78)
+        // 默认值 light mode 下 vs 白底仅 ~1.5:1（远低于 AA），属于"水印感"装饰。
+        // Increase Contrast 时硬拉到 ~4.6:1，保证 12pt mono 也能稳读。
+        if highContrast {
+            return isDark ? Color(red: 0.70, green: 0.72, blue: 0.78)
+                          : Color(red: 0.40, green: 0.40, blue: 0.42)
+        }
+        return isDark ? Color(red: 0.30, green: 0.33, blue: 0.38) : Color(red: 0.76, green: 0.76, blue: 0.78)
     }
 
     private var overscrollColor: Color {
@@ -298,6 +326,7 @@ struct LoginView: View {
             if animatesIcon {
                 ZStack {
                     if shouldAnimate {
+                        // 外层光晕：放大 + 渐隐反复（同 DashboardView.liveBadge）
                         Circle()
                             .fill(iconColor)
                             .frame(width: 7, height: 7)
@@ -309,6 +338,7 @@ struct LoginView: View {
                                 value: liveDotBreathing
                             )
                     }
+                    // 内层实心点：固定 + 轻微缩放（在原地呼吸）
                     Circle()
                         .fill(iconColor)
                         .frame(width: 7, height: 7)
@@ -319,7 +349,11 @@ struct LoginView: View {
                                 : .default,
                             value: liveDotBreathing
                         )
+                        // 跟 DashboardView 一致：给核心点加柔和光晕，让"原地呼吸"
+                        // 在小尺寸下也清晰可感（没有阴影时 7px 的核心点几乎看不出缩放）
+                        .shadow(color: iconColor.opacity(0.4), radius: 5, x: 0, y: 0)
                 }
+                // 锁定布局尺寸，光晕 / ripple 只在视觉上溢出
                 .frame(width: 7, height: 7)
             } else {
                 Image(systemName: icon)
@@ -332,12 +366,24 @@ struct LoginView: View {
                 .foregroundStyle(badgeLabelColor)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
-        .background(badgeBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        // ⚠️ 关键修正：原本用 `.background(...).clipShape(RoundedRectangle(...))`
+        // 会把 ripple 在 badge 圆角处剪掉一块，导致动画看起来不是"原地呼吸"
+        // 而是朝一个方向偏出。DashboardView.liveBadge 用的是 `.background(_, in:)`
+        // —— 圆角只作用于背景，content（含 ripple）不参与裁剪，与 dashboard 保持一致。
+        .background(badgeBackground, in: RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(isDark ? 0 : 0.06), radius: 4, y: 2)
         .onAppear {
             if shouldAnimate {
                 liveDotBreathing = true
+            }
+        }
+        // 与 DashboardView 对齐：reduceMotion 切换时实时停起，否则
+        // 关闭后 liveDotBreathing 仍卡在 true，下次再开就不会触发新的 toggle。
+        .onChange(of: shouldAnimate) { _, willAnimate in
+            if willAnimate {
+                liveDotBreathing = true
+            } else {
+                withAnimation(.default) { liveDotBreathing = false }
             }
         }
     }

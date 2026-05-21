@@ -1,10 +1,12 @@
-# Holland2Stay Listing Monitor
+# FlatRadar
 
 > For the Chinese (简体中文) version, see: [README_cn.md](README_cn.md)
 
-A personal project that monitors Holland2Stay (https://www.holland2stay.com) for new listings and status changes, pushes notifications to multiple users, and can automatically add qualifying listings to the booking cart (stops before payment).
+FlatRadar is a personal Holland2Stay listing monitor. It tracks new listings and status changes, pushes notifications to multiple users, and can automatically add qualifying listings to the booking cart (stops before payment).
 
 > **Disclaimer:** This project is for personal, non-commercial use only. It is not affiliated with, endorsed by, or associated with Holland2Stay. Users are solely responsible for complying with Holland2Stay's Terms of Service and applicable laws. The author assumes no liability for any misuse or consequences arising from the use of this software.
+
+**Current version:** v1.6.0
 
 **Live demo:** [flatradar.app](https://flatradar.app) — click "Guest mode" on the login page for read-only access.
 
@@ -50,9 +52,10 @@ python -m pytest tests/ -v
 
 | Component | Status | Notes |
 |---|---:|---|
-| Data scraping | ✅ Done | Uses GraphQL + curl_cffi to bypass Cloudflare WAF |
+| Data scraping | ✅ Done | Uses GraphQL + curl_cffi to bypass Cloudflare WAF; reports per-city complete-scan status |
+| Stale listing convergence | ✅ Done | Only runs for complete cities; `Available to book` / `Unknown` use 7 days, `Available in lottery` uses 2 days |
 | Multi-city monitoring | ✅ Done | 26 Dutch cities; select cities in the web UI |
-| Multi-channel notifications | ✅ Done | iMessage / Telegram / Email / WhatsApp (Twilio) |
+| Multi-channel notifications | ✅ Done | iMessage / Telegram HTML / Email HTML / WhatsApp (Twilio) |
 | Web panel notifications | ✅ Done | Real-time bell + toasts via SSE, works on any platform |
 | Notification filters | ✅ Done | Per-user: rent, area, floor, type, occupancy, city, neighborhood, contract, tenant, promo, finishing, energy |
 | Multi-select filter UI | ✅ Done | Dropdown checkboxes with i18n labels; listing filters for city, tenant, contract |
@@ -70,16 +73,17 @@ python -m pytest tests/ -v
 | VPS / Docker ready | ✅ Done | iMessage gracefully skipped on non-macOS; web panel takes over |
 | Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
 | Mobile web optimization | ✅ Done | Adaptive views: card layouts, 44px touch targets, safe-area insets, dvh units, list/calendar toggle, responsive grids |
-| Visualization | ✅ Done | 10 charts: trends, city/status/price/area/floor/type/energy/tenant/contract distributions, 24h drop time |
+| Visualization | ✅ Done | 10 charts with 7/30/90-day range-aware KPI cards and distributions |
 | Move-in calendar | ✅ Done | Calendar view filtered by city |
 | Map view | ✅ Done | Leaflet.js + OpenStreetMap with auto-geocoding |
 | i18n (中/EN) | ✅ Done | One-click language switch, cookie-persisted |
 | Notification testing | ✅ Done | Per-channel test with result details |
 | Guest mode (RBAC) | ✅ Done | Password-free read-only access; admin role required for settings/users/logs |
 | Optional auth for web | ✅ Done | Session login enabled when password set; `WEB_GUEST_MODE` controls guest entry |
+| Web self-registration | ✅ Done | Login page registration with Terms/Privacy confirmation; SQLite-backed user config |
 | Login rate limiting | ✅ Done | IP-based exponential backoff after 5 failures |
 | HTTPS / Caddy | ✅ Done | Bundled Caddyfile + docker-compose Caddy service; auto Let's Encrypt |
-| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix, DOM XSS prevention (map geocode errors, settings numeric validation) |
+| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix, DOM XSS prevention, email verification `PUBLIC_BASE_URL` fail-closed |
 | Startup preflight | ✅ Done | Blocks container start if `WEB_PASSWORD` unset or Caddyfile domain is still a placeholder |
 | Production WSGI | ✅ Done | Gunicorn (1 worker × 8 threads, timeout=0) replaces Flask dev server in Docker |
 | Dependency pinning | ✅ Done | `requirements.lock` with exact `==` versions; Dockerfile installs from lock file |
@@ -114,6 +118,8 @@ python -m pytest tests/ -v
 ## iOS App (FlatRadar)
 
 A native iOS companion app built with SwiftUI + StoreKit 2. Available as an Xcode project under `ios/FlatRadar/`.
+
+[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/us/app/flarradar/id6769857080)
 
 ### Quick start (iOS)
 
@@ -201,6 +207,8 @@ All endpoints under `/api/v1/*` with JWT Bearer auth (or bearer_optional for pub
 - Supports multi-city monitoring; cities can be selected in the web UI
 - Detects both new listings and status changes, such as lottery → available to book
 - Stores all listings in local SQLite so history remains queryable and duplicate notifications are avoided
+- Each scrape reports whether every selected city was fully scanned; incomplete cities are logged and excluded from stale-status convergence
+- Stale listings are inferred as `Occupied` only after they disappear from complete scans: 7 days for direct-book/unknown listings and 2 days for lottery listings
 
 ### Smart adaptive polling
 
@@ -255,6 +263,8 @@ This reduces the delay between detecting availability and reaching the server to
 - Notification content includes status, rent, area, floor, energy label, move-in date, and listing link
 - Per-user filters restrict which listings trigger a notification
 - One-click per-channel test with per-result details in the web UI
+- Telegram uses branded HTML messages with escaped dynamic content and disabled link previews
+- Email verification, test notifications, and listing alerts use FlatRadar-branded HTML templates
 
 **iMessage platform check**: iMessage requires macOS and the Messages.app. On Linux/Windows/Docker the channel is automatically skipped with a warning; the user-form page shows an alert if the server is not running macOS.
 
@@ -280,7 +290,7 @@ This reduces the delay between detecting availability and reaching the server to
 ### Web admin panel
 
 - **Dashboard** — totals, today's new listings, recent changes, latest scrape info, auto-refresh
-- **Listings** — filter by status, keyword search, sortable table view
+- **Listings** — filter by status, keyword search, sortable table view with first-seen and last-seen timestamps
 - **Map** — Leaflet.js interactive map with auto-geocoding (Nominatim → cached coordinates), color-coded markers (green=direct book, orange=lottery, grey=other), popup details, dark/light tile filters
 - **Calendar** — month grid with city filter, click-to-expand date detail panel
 - **Stats** — Chart.js trends (new listings, status changes), doughnut distributions (city, status), price histogram (9 buckets up to >€1600), 24h listing drop time chart, 7/30/90-day range selector

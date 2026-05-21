@@ -144,15 +144,21 @@ struct CalendarView: View {
                 Image(systemName: "chevron.left").font(.title3)
             }
             .disabled(!canShiftMonth(-1))
+            // icon-only：补 VoiceOver / Voice Control 用的语义化标签
+            .accessibilityLabel("Previous month")
 
             Text(monthTitle(for: anchor))
                 .font(.title2.weight(.semibold))
                 .frame(maxWidth: .infinity)
+                // 月份标题作为一个完整 a11y 元素朗读，避免 VO 把它和左右按钮
+                // 错位关联
+                .accessibilityAddTraits(.isHeader)
 
             Button { shiftMonth(1) } label: {
                 Image(systemName: "chevron.right").font(.title3)
             }
             .disabled(!canShiftMonth(1))
+            .accessibilityLabel("Next month")
         }
         .padding(.horizontal)
     }

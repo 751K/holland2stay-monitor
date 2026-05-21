@@ -78,6 +78,11 @@ struct AdminUsersView: View {
                 ))
                 .labelsHidden()
                 .disabled(store.actionInFlight)
+                // labelsHidden() 隐藏了 visual label，但 VoiceOver 也读不到——
+                // 单独补一个 a11y label 让屏幕阅读器告诉用户这个开关控制的是谁
+                // 的"启用 / 停用"状态。
+                .accessibilityLabel(Text("Enable \(user.name)"))
+                .accessibilityValue(Text(user.enabled ? "On" : "Off"))
             }
 
             // Status chips

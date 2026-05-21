@@ -9,7 +9,8 @@ notifier.py — 多渠道通知系统
 --------
 - `BaseNotifier`：抽象基类，定义统一的发送接口；子类只需实现 `_send(text)` 和 `close()`
 - `MultiNotifier`：聚合多个渠道，并发发送，任意一个成功即返回 True
-- 消息格式化函数（`_format_*`）与渠道完全解耦，纯文本输出（不用 Markdown）
+- 消息格式化函数（`_format_*`）与渠道默认解耦为纯文本输出；
+  Telegram 在发送前转换为受限 HTML，以获得更正式的展示效果。
 
 调用方式
 --------
@@ -281,7 +282,7 @@ class IMessageNotifier(BaseNotifier):
 
 class TelegramNotifier(BaseNotifier):
     """
-    通过 Telegram Bot API 发送消息。
+    通过 Telegram Bot API 发送消息，使用 Telegram 支持的受限 HTML。
 
     配置步骤
     --------
@@ -319,9 +320,15 @@ class TelegramNotifier(BaseNotifier):
             return False
 
     def _post(self, url: str, text: str) -> bool:
+        html_text = _format_telegram_html(text)
         resp = self._session.post(
             url,
-            json={"chat_id": self._chat_id, "text": text},
+            json={
+                "chat_id": self._chat_id,
+                "text": html_text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            },
             timeout=15,
         )
         if not resp.ok:
@@ -1167,3 +1174,76 @@ def _format_booking_failed(l: Listing, reason: str) -> str:
         f"原因：{reason}",
         f"🔗 请手动预订：{l.url}",
     ])
+
+
+_TELEGRAM_ICON_PREFIX_RE = re.compile(r"^[^\w<@#/\[]+\s*", re.UNICODE)
+
+
+def _strip_telegram_icon(line: str) -> str:
+    """移除纯文本通知里的装饰性 emoji 前缀，保留正式文本。"""
+    return _TELEGRAM_ICON_PREFIX_RE.sub("", line.strip()).strip()
+
+
+def _telegram_link_line(line: str) -> str | None:
+    """把独占 URL 或 '标签：URL' 转成 Telegram HTML 链接。"""
+    clean = _strip_telegram_icon(line)
+    label = "打开链接"
+    url = clean
+    if "：" in clean:
+        maybe_label, maybe_url = clean.split("：", 1)
+        if maybe_url.strip().startswith(("http://", "https://")):
+            label = maybe_label.strip() or label
+            url = maybe_url.strip()
+    if not url.startswith(("http://", "https://")):
+        return None
+    safe_url = html_escape(url, quote=True)
+    safe_label = html_escape(label)
+    return f'<a href="{safe_url}">{safe_label}</a>'
+
+
+def _format_telegram_html(text: str) -> str:
+    """
+    把通用纯文本通知转换成 Telegram 支持的受限 HTML。
+
+    Telegram HTML 不是完整网页 HTML，只支持少量标签。这里所有动态内容都做
+    html_escape，避免房源名、错误原因等用户/外部 API 内容破坏消息结构。
+    """
+    raw_lines = text.splitlines()
+    first_idx = next((i for i, line in enumerate(raw_lines) if line.strip()), None)
+    if first_idx is None:
+        return "<b>FlatRadar</b>"
+
+    title = _strip_telegram_icon(raw_lines[first_idx])
+    lines: list[str] = [
+        "<b>FlatRadar</b>",
+        f"<b>{html_escape(title)}</b>",
+    ]
+
+    for raw in raw_lines[first_idx + 1:]:
+        if not raw.strip():
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+
+        link = _telegram_link_line(raw)
+        if link:
+            lines.append(link)
+            continue
+
+        clean = _strip_telegram_icon(raw)
+        if "：" in clean:
+            label, value = clean.split("：", 1)
+            label = label.strip()
+            value = value.strip()
+            if label and len(label) <= 12:
+                lines.append(f"<b>{html_escape(label)}</b>: {html_escape(value)}")
+                continue
+        lines.append(html_escape(clean))
+
+    # 避免连续空行导致消息显得松散。
+    compact: list[str] = []
+    for line in lines:
+        if line == "" and (not compact or compact[-1] == ""):
+            continue
+        compact.append(line)
+    return "\n".join(compact).strip()

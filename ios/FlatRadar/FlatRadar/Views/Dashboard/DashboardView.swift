@@ -245,6 +245,11 @@ struct DashboardView: View {
         .overlay(Capsule().strokeBorder(.secondary.opacity(0.15), lineWidth: 1))
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
+        // VoiceOver：默认会把绿圈 / Live / · / updated 8m 分四次朗读。combine
+        // 后只剩一个元素，再叠 a11yLabel 拼成 "Live, updated 8 minutes ago"
+        // 这种自然短句（Offline 时变成 "Offline, updated …"）。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(statusText), updated \(relativeTime(s?.lastScrape ?? ""))")
         // 一进 onAppear 触发 toggle，由 .animation(.repeatForever) 拉动循环。
         // 注意：不在 .task 里写——iOS 17 之后 .task 可能比 view 出现晚一帧，
         // onAppear 时机更稳。

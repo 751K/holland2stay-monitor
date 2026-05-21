@@ -74,20 +74,37 @@ struct SettingsView: View {
                 // 3. Push Notifications (authenticated, non-guest)
                 if auth.isAuthenticated, auth.role != .guest {
                     Section {
-                        HStack {
-                            Text("Permission")
-                            Spacer()
-                            Text(pushPermissionLabel)
-                                .foregroundStyle(pushPermissionColor)
-                                .font(.subheadline)
-                        }
-                        HStack {
-                            Text("Device ID")
-                            Spacer()
-                            if let id = push.registeredDeviceId {
-                                Text("\(id)").foregroundStyle(.secondary)
-                            } else {
-                                Text("not registered").foregroundStyle(.secondary)
+                        if auth.isUser {
+                            // User: 一个开关，开启/关闭通知
+                            Toggle("Enable Notifications", isOn: Binding(
+                                get: { push.registeredDeviceId != nil },
+                                set: { enable in
+                                    Task { await push.setEnabled(enable) }
+                                }
+                            ))
+                            .disabled(push.permissionStatus == .denied)
+                            if push.permissionStatus == .denied {
+                                Text("Notifications are disabled in iOS Settings. Enable them in Settings → Notifications → FlatRadar.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            // Admin: 保留 permission / device id 诊断信息
+                            HStack {
+                                Text("Permission")
+                                Spacer()
+                                Text(pushPermissionLabel)
+                                    .foregroundStyle(pushPermissionColor)
+                                    .font(.subheadline)
+                            }
+                            HStack {
+                                Text("Device ID")
+                                Spacer()
+                                if let id = push.registeredDeviceId {
+                                    Text("\(id)").foregroundStyle(.secondary)
+                                } else {
+                                    Text("not registered").foregroundStyle(.secondary)
+                                }
                             }
                         }
                         if let err = push.lastError {
@@ -124,7 +141,11 @@ struct SettingsView: View {
                     } header: {
                         Text("Push Notifications")
                     } footer: {
-                        Text("User accounts receive push notifications for listings matching their filter. Test push verifies this device session end-to-end.")
+                        if auth.isUser {
+                            Text("Receive push notifications for new listings matching your filter.")
+                        } else {
+                            Text("User accounts receive push notifications for listings matching their filter. Test push verifies this device session end-to-end.")
+                        }
                     }
                 }
 
@@ -271,19 +292,22 @@ struct SettingsView: View {
                     }
                 }
 
-                // 6. Legal
-                Section("Legal") {
-                    Button {
-                        showLegalTerms = true
-                    } label: {
-                        Text("Terms of Use")
-                        .foregroundStyle(.primary)
-                    }
-                    Button {
-                        showLegalPrivacy = true
-                    } label: {
-                        Text("Privacy Policy")
-                        .foregroundStyle(.primary)
+                // 6. Legal — admin 是后端运维者，自己维护条款 / 隐私政策文本，
+                // 设置里再放一遍是噪音；只对普通用户 / guest 展示
+                if !auth.isAdmin {
+                    Section("Legal") {
+                        Button {
+                            showLegalTerms = true
+                        } label: {
+                            Text("Terms of Use")
+                            .foregroundStyle(.primary)
+                        }
+                        Button {
+                            showLegalPrivacy = true
+                        } label: {
+                            Text("Privacy Policy")
+                            .foregroundStyle(.primary)
+                        }
                     }
                 }
 
@@ -329,7 +353,15 @@ struct SettingsView: View {
                                 .foregroundStyle(.red)
                         }
                     } header: {
-                        Text("Buy me a coffee ☕")
+                        // 用 SF Symbol 替代 ☕ emoji——iOS HIG 推荐 UI chrome 用
+                        // SF Symbol，跟系统字体度量、字重一致，且 VoiceOver 会朗读
+                        // "cup and saucer"语义而非泛指 emoji。
+                        // Label 默认 icon 在前；这里手动用 HStack 把文字放前面 + 图标放后面，
+                        // 视觉与中文阅读习惯（"赞赏开发者 ☕"）一致。
+                        HStack(spacing: 4) {
+                            Text("Buy me a coffee")
+                            Image(systemName: "cup.and.saucer.fill")
+                        }
                     } footer: {
                         Text("A one-time tip to support development.\nDoes not unlock any features.")
                     }

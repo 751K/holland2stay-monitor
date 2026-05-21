@@ -4,6 +4,8 @@
 
 FlatRadar 是 Holland2Stay 房源监控系统的 iOS 客户端，通过 REST API 连接到自托管 Flask 后端。
 
+[![Download on the App Store](https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg)](https://apps.apple.com/us/app/flarradar/id6769857080)
+
 ```
 ┌─────────────────────┐       Bearer Token        ┌──────────────────────┐
 │   iOS App (SwiftUI)  │ ◄──────────────────────► │  Flask Server (VPS)  │
@@ -356,3 +358,4 @@ docker run -d -p 8088:8088 -v $(pwd)/data:/app/data --env-file .env flatradar
 | v1.4.0 | Map / Calendar / SSE / Deep link / APNs 测试推送 |
 | v1.4.1 | 错误展示打磨 / 多语言 en+zh-Hans / 深色模式 + Settings 切换 / iPad 6 tab 适配 + 键盘快捷键 |
 | v1.5.0 | 登录页 Hero 山脉设计 / 展开式角色卡片 / 用户自助注册 / 账号注销 / Dashboard V1 重设计（问候语 + sparkline + Explore 内联图表 + 匹配预览）/ Listings 多维过滤 / 通知卡片式 inbox / Filter 自助编辑 / Settings 法律文档 / 首次 Terms 弹窗 / Buy me a coffee StoreKit 2 / PrivacyInfo.xcprivacy / 设计系统主色 #0A84FF + tabular-nums / 174 条中英文本地化 / 后端 user_configs 单源存储 + register 限流 + 注册冲突检测 + bcrypt 登录 |
+| v1.6.0 | App Store 发布准备 / Web 注册与法律确认 / FlatRadar 品牌化通知 / Stats 范围联动 / 完整扫描信号 / stale listing 状态收敛（book 7 天、lottery 2 天） |

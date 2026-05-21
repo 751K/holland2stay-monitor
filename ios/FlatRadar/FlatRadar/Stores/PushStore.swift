@@ -169,4 +169,20 @@ final class PushStore {
         lastToken = nil
         lastError = nil
     }
+
+    // MARK: - User-facing toggle
+
+    /// 设置里 "Enable Notifications" 开关用：开 → 申请权限 + 注册；关 → 仅删
+    /// 后端设备绑定。区别于 ``logout``：不清 lastToken / lastError，
+    /// 用户重新打开时可立即用现存 APNs token 再注册。
+    func setEnabled(_ enabled: Bool) async {
+        if enabled {
+            await requestPermissionAndRegister()
+        } else {
+            if let id = registeredDeviceId {
+                _ = try? await client.deleteDevice(id: id)
+            }
+            registeredDeviceId = nil
+        }
+    }
 }

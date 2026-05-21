@@ -48,7 +48,7 @@ a{color:inherit;text-decoration:none}
   --border:#242424;
   --text:#fafafa;
   --text2:#8b8b8b;
-  --text3:#555;
+  --text3:#888;
   --accent:#7c85e8;
   --accent-hover:#8f97f0;
   --accent-soft:rgba(124,133,232,.1);
@@ -65,6 +65,7 @@ body{
   -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
   min-height:100vh;
 }
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
 h1,h2,h3,h4{font-weight:600;letter-spacing:-.02em;line-height:1.2;}
 h1{font-size:26px}
 h2{font-size:20px}
@@ -100,6 +101,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .sidebar-nav a.active{color:var(--text);background:var(--accent-soft);font-weight:550}
 .sidebar-nav a i{font-size:18px;width:22px;text-align:center;flex-shrink:0;opacity:.7}
 .sidebar-nav a.active i{opacity:1;color:var(--accent)}
+.sidebar-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);padding:12px 12px 4px}
 .sidebar-footer{
   padding:10px;display:flex;flex-direction:column;gap:2px;flex-shrink:0;
 }
@@ -178,7 +180,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   width:40px;height:40px;border-radius:var(--radius);flex-shrink:0;
   display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;
 }
-.kpi-num{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1;margin-bottom:4px}
+.kpi-num{font-size:28px;font-weight:700;letter-spacing:-.03em;line-height:1;margin-bottom:4px;font-variant-numeric:tabular-nums}
 .kpi-label{font-size:14px;color:var(--text2);font-weight:450}
 
 /* ── Tables — minimal, single header underline ─────────────────── */
@@ -344,7 +346,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .lc-name{font-weight:600;font-size:16px;color:var(--text);line-height:1.3;flex:1;min-width:0}
 .lc-building{font-size:13px;color:var(--text3);margin-bottom:8px}
 .lc-details{display:flex;flex-wrap:wrap;gap:6px 12px;margin-bottom:8px;font-size:14px;color:var(--text2)}
-.lc-rent{font-weight:600;color:var(--text)}
+.lc-rent{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
 .lc-footer{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text3);padding-top:8px;}
 
 /* ── KPI Grid ──────────────────────────────────────────────────── */
@@ -374,9 +376,9 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 }
 .notif-wrap{position:fixed;z-index:200;pointer-events:none}
 .notif-panel{
-  position:fixed;bottom:80px;left:16px;width:380px;max-width:calc(100vw - 32px);
+  position:fixed;bottom:80px;right:16px;width:380px;max-width:calc(100vw - 32px);
   bottom:calc(80px + env(safe-area-inset-bottom, 0px));
-  left:calc(16px + env(safe-area-inset-left, 0px));
+  right:calc(16px + env(safe-area-inset-right, 0px));
   max-height:420px;
   background:var(--surface);border-radius:var(--radius-xl);
   box-shadow:var(--shadow-lg);pointer-events:all;
@@ -578,6 +580,19 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .breadcrumb a:hover{color:var(--text)}
 .breadcrumb .sep{color:var(--text3)}
 
+/* ── Skip link ───────────────────────────────────────────────── */
+/* 默认完全藏到视口外（top:-100px）。原本用 translateY(-120%) 隐藏，但元素
+   实高 ≈ 36px，-120% = -43.2px，叠加 top:8px 后底边落在 y≈0.8，泄漏 1-2px
+   accent 色到顶端，看起来像 FlatRadar 图标上方一条横线。改用 top 切换更稳。
+   :focus 时拉回 top:8px 暴露按钮——Tab 键到 skip-link 时无障碍跳转仍可用。 */
+.skip-link{
+  position:fixed;top:-100px;left:8px;z-index:9999;
+  padding:8px 16px;border-radius:var(--radius);
+  background:var(--accent);color:#fff;font-weight:600;font-size:14px;
+  transition:top .15s ease;
+}
+.skip-link:focus{top:8px}
+
 /* ── Login ─────────────────────────────────────────────────────── */
 .login-page{
   min-height:100vh;display:flex;align-items:center;justify-content:center;
@@ -631,11 +646,32 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 @keyframes slideUp{from{opacity:0;transform:translateY(12px) scale(.98)}}
 @keyframes scaleIn{from{opacity:0;transform:scale(.96)}}
 
+/* Reduced motion */
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+  html{scroll-behavior:auto}
+}
+
 /* Theme transition */
+/* 切日夜主题时给 400ms 窗口（JS 那边 setTimeout 400ms 移除该 class）期间统一过渡。
+   - 所有属性统一 .3s ease：之前 color .25s / bg .35s 不一致——大数字（KPI / .lc-rent）
+     在 250ms 就跑完，背景还在 350ms 内继续走，中间帧看起来像"数字晚一点"才同步上
+     新底色。统一节奏后所有像素都在同一时间点完成切换。
+   - 覆盖 border-color / outline-color：否则 <hr> / table 分割线 / card 外框 / sidebar-label
+     下划线等"横线"会瞬间跳变。
+   - 覆盖 fill / stroke：inline SVG（chart 轴线、icon）跟随主题。 */
 html.theme-transitioning *,
 html.theme-transitioning *::before,
 html.theme-transitioning *::after{
-  transition:background-color .35s ease,color .25s ease,box-shadow .35s ease!important;
+  transition:
+    background-color .3s ease,
+    color .3s ease,
+    border-color .3s ease,
+    outline-color .3s ease,
+    box-shadow .3s ease,
+    fill .3s ease,
+    stroke .3s ease
+    !important;
 }
 
 /* Content transition */
@@ -719,7 +755,9 @@ html.theme-transitioning *::after{
   .grid-2,.grid-7-5,.grid-3{grid-template-columns:1fr}
   .chart-card .chart-wrap{height:180px!important}
   .user-grid{grid-template-columns:1fr}
-  .cal-day{min-height:72px}
+  .cal-day{min-height:64px;padding:4px 5px}
+  .day-num{font-size:12px}
+  .cal-pill{font-size:10px;padding:1px 4px}
   .listing-table-card{display:none}
   .listing-cards{display:flex;flex-direction:column;gap:10px}
   .toast{min-width:0;max-width:calc(100vw - 32px)}

@@ -6,6 +6,16 @@ struct OnboardingView: View {
     let onComplete: () -> Void
 
     @State private var step = 0
+    /// "减弱动态效果"开关。开启时跳过 TabView .page 滑动 + spring 弹簧，
+    /// 改用瞬时切换。遵守 iOS HIG：前庭功能敏感的用户开了这个 flag 后
+    /// 不应再被快速横向滑动 / 弹簧反馈打扰。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 翻页动画：reduceMotion 时返回 nil（withAnimation 用 .default 等于无动效），
+    /// 否则用与全局一致的 spring 0.3。
+    private var pageAnimation: Animation? {
+        reduceMotion ? nil : .spring(duration: 0.3)
+    }
 
     private let pages: [OnboardingPage] = [
         .init(
@@ -39,7 +49,7 @@ struct OnboardingView: View {
             // Top bar
             HStack {
                 if step > 0 {
-                    Button("Back") { withAnimation(.spring(duration: 0.3)) { step -= 1 } }
+                    Button("Back") { withAnimation(pageAnimation) { step -= 1 } }
                         .font(.subheadline.weight(.medium))
                 } else {
                     Spacer().frame(height: 1)
@@ -67,14 +77,17 @@ struct OnboardingView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
-            .animation(.spring(duration: 0.35), value: step)
+            // reduceMotion 时禁用 step 切换的 spring 动画——TabView 内部的 swipe
+            // gesture 我们无法关，但通过编程切换 step（Back / Next 按钮）此时
+            // 走 nil 动画 = 瞬时切换，遵守 iOS HIG。
+            .animation(reduceMotion ? nil : .spring(duration: 0.35), value: step)
 
             Spacer(minLength: 0)
 
             // Bottom button — label 本身撑满蓝色区域，整条都可点击
             Button {
                 if step < pages.count - 1 {
-                    withAnimation(.spring(duration: 0.3)) { step += 1 }
+                    withAnimation(pageAnimation) { step += 1 }
                 } else {
                     finish()
                 }

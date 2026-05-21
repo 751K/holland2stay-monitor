@@ -11,6 +11,26 @@ import SwiftUI
 /// - 副行：notification.body — 价格 + 入住 / Reserved → Book / 系统消息正文
 struct NotificationRow: View {
     let notification: NotificationItem
+    /// "增加对比度"开关。开启时把已读卡的 .tertiary 文字提到 .secondary，
+    /// 满足 WCAG AA 4.5:1。
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    /// 已读状态下"次要"文字（body / 时间）的样式分层。Increase Contrast
+    /// 开启时整体上抬一档，避免 .tertiary 在 secondarySystemGroupedBackground
+    /// 上仅 ~3.4:1 的低对比。
+    private var readSecondaryStyle: HierarchicalShapeStyle {
+        contrast == .increased ? .secondary : .tertiary
+    }
+
+    /// 事件标签（NEW · BOOK / STATUS CHANGE 等）的前景色。
+    /// - 已读：恒用 .secondary 灰
+    /// - 未读 + Increase Contrast：.primary（避开 orange/red 在白底上低对比）
+    /// - 未读 + 普通对比：style.accent（kind 色，保留色彩识别）
+    private func eventLabelStyle(isRead: Bool, accent: Color) -> AnyShapeStyle {
+        if isRead { return AnyShapeStyle(Color.secondary) }
+        if contrast == .increased { return AnyShapeStyle(Color.primary) }
+        return AnyShapeStyle(accent)
+    }
 
     var body: some View {
         let style = CardStyle(kind: notification.kind)
@@ -35,15 +55,23 @@ struct NotificationRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(style.eventLabel)
-                        .font(.system(size: 10.5, weight: .heavy, design: .monospaced))
-                        .tracking(0.5)
-                        // 已读时 mono caps 标签从 kind 色降到 .secondary（系统灰）
-                        .foregroundStyle(isRead ? Color.secondary : style.accent)
+                        // iOS HIG 最小正文字号 11pt——抬到 11pt 后即使用户开了
+                        // 较大 Dynamic Type，缩放下限也不会进可读阈值以下。
+                        // tracking 微调到 0.4，跟原本 10.5/0.5 的"紧凑 caps"视觉
+                        // 密度保持基本一致。
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                        .tracking(0.4)
+                        // 未读时用 kind 色（绿/橙/蓝/红）传达类别；已读降到 secondary
+                        // 灰。Increase Contrast 开启时：未读改用 .primary——因为
+                        // statusLottery 橙色文字在白色 cardTint 上仅 ~3.4:1，违 AA。
+                        // 类别色信号已经由左侧 32×32 icon 方块 + cardTint 底色携带，
+                        // 文字降级到 .primary 不丢语义、显著提对比。
+                        .foregroundStyle(eventLabelStyle(isRead: isRead, accent: style.accent))
                         .lineLimit(1)
                     Spacer(minLength: 6)
                     Text(notification.ageText)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(isRead ? .tertiary : .secondary)
+                        .foregroundStyle(isRead ? readSecondaryStyle : .secondary)
                         .fixedSize()
                 }
 
@@ -61,7 +89,7 @@ struct NotificationRow: View {
                 if !notification.body.isEmpty {
                     Text(notification.body)
                         .font(.system(size: 12.5))
-                        .foregroundStyle(isRead ? .tertiary : .secondary)
+                        .foregroundStyle(isRead ? readSecondaryStyle : .secondary)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -98,6 +126,27 @@ struct NotificationRow: View {
                 .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
         .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // VoiceOver：把整张卡视为单个元素，朗读 event label + title + body + 时间。
+        // 不 combine 的话 VO 会分别读 "NEW · BOOK" / 8m / title / body 四段，
+        // 用户得多滑几次手势才能读完一条；combine 后一气呵成。
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11yLabel)
+        .accessibilityHint(isTappable
+            ? Text("Double tap to open listing details")
+            : Text(""))
+        .accessibilityAddTraits(isRead ? [] : [.isStaticText])
+    }
+
+    /// 整卡 VoiceOver 朗读：event · title · body · 相对时间。
+    /// 顺序贴合视觉扫读顺序：左上 event → 中间 title → body → 右上时间。
+    private var a11yLabel: Text {
+        let style = CardStyle(kind: notification.kind)
+        var parts: [String] = [style.eventLabel.replacingOccurrences(of: " · ", with: ", ")]
+        if !notification.title.isEmpty { parts.append(notification.title) }
+        if !notification.body.isEmpty { parts.append(notification.body) }
+        parts.append(notification.ageText + " ago")
+        if notification.isRead { parts.append("Read") }
+        return Text(parts.joined(separator: ", "))
     }
 }
 

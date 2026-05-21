@@ -190,7 +190,9 @@ async function toggleMonitor(e) {
   const isRunning = btn.innerText.includes('停止') || btn.innerText.includes('Stop');
 
   const action = isRunning ? 'stop' : 'start';
-  btn.innerText = '...';
+  btn.style.pointerEvents = 'none';
+  btn.style.opacity = '.5';
+  btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:4px;"></span>' + '...';
   try {
     const resp = await fetch('/api/monitor/' + action, {
       method: 'POST',
@@ -199,21 +201,22 @@ async function toggleMonitor(e) {
     const data = await resp.json();
     if (data.ok) {
       if (isRunning) {
-        btn.innerText = '{{ _("start_monitor") }}';
+        btn.innerHTML = '{{ _("start_monitor") }}';
         statusEl.innerText = '{{ _("monitor_stopped") }}';
         card.className = 'kpi-card accent-red';
         card.querySelector('.kpi-icon').style.background = 'linear-gradient(135deg,#ef4444,#dc2626)';
         card.querySelector('.kpi-icon i').className = 'bi bi-stop-circle';
         if (typeof updateMonitorBadge === 'function') updateMonitorBadge();
       } else {
-        btn.innerText = '{{ _("stop_monitor") }}';
+        btn.innerHTML = '{{ _("stop_monitor") }}';
         statusEl.innerText = '{{ _("monitor_running") }}';
         card.className = 'kpi-card accent-green';
         card.querySelector('.kpi-icon').style.background = 'linear-gradient(135deg,#10b981,#059669)';
         card.querySelector('.kpi-icon i').className = 'bi bi-play-circle-fill';
-        // 启动后稍等 PID 文件写入再刷新侧边栏状态
         setTimeout(function(){ if (typeof updateMonitorBadge === 'function') updateMonitorBadge(); }, 800);
       }
+      btn.style.pointerEvents = '';
+      btn.style.opacity = '';
     } else {
       alert(data.error || '操作失败');
       location.reload();
@@ -227,6 +230,8 @@ async function toggleMonitor(e) {
 async function shutdownAll() {
   if(!confirm('{{ _("shutdown_confirm") }}')) return;
   const csrf = document.querySelector('meta[name="csrf-token"]').content;
+  const btn = document.querySelector('.page-header .btn-ghost.btn-sm');
+  if(btn){ btn.style.pointerEvents = 'none'; btn.style.opacity = '.5'; }
   try {
     await fetch('/api/shutdown', { method:'POST', headers:{'X-CSRF-Token':csrf} });
   } catch(e) {}
