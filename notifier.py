@@ -95,15 +95,18 @@ class BaseNotifier(ABC):
     子类若需同步 HTTP，应在 `_send` 内通过 `run_in_executor` 转入线程池。
     """
 
+    def __init__(self, language: str = "en") -> None:
+        self.language = (language or "en").lower()[:8]
+
     async def send_new_listing(self, listing: Listing) -> bool:
         """发送新房源上架通知。"""
-        return await self._send(_format_new(listing))
+        return await self._send(_format_new(listing, lang=self.language))
 
     async def send_status_change(
         self, listing: Listing, old_status: str, new_status: str
     ) -> bool:
         """发送房源状态变更通知（如 lottery → 可直接预订）。"""
-        return await self._send(_format_status_change(listing, old_status, new_status))
+        return await self._send(_format_status_change(listing, old_status, new_status, lang=self.language))
 
     async def send_heartbeat(self, total_in_db: int, round_count: int) -> bool:
         """
@@ -115,15 +118,15 @@ class BaseNotifier(ABC):
         round_count : 自监控启动以来累计的轮询轮数
         """
         msg = (
-            f"💓 监控心跳\n"
-            f"数据库房源总数：{total_in_db}\n"
-            f"本次累计轮询：{round_count} 轮"
+            f"Heartbeat\n"
+            f"Total in DB: {total_in_db}\n"
+            f"Round: {round_count}"
         )
         return await self._send(msg)
 
     async def send_error(self, message: str) -> bool:
         """发送监控异常告警（抓取失败等）。"""
-        return await self._send(f"⚠️ 监控异常\n{message}")
+        return await self._send(f"Monitor Error\n{message}")
 
     async def send_booking_success(
         self,
@@ -132,25 +135,14 @@ class BaseNotifier(ABC):
         pay_url: str = "",
         contract_start_date: str = "",
     ) -> bool:
-        """
-        发送自动预订成功通知。
-
-        Parameters
-        ----------
-        listing               : 已预订的房源
-        detail                : 备用消息文本（pay_url 为空时作为兜底显示）
-        pay_url               : idealCheckOut 返回的直链付款 URL
-        contract_start_date   : try_book() 从 API 获取的实际合同开始日期（"YYYY-MM-DD"）；
-                                优先于 listing.available_from 展示；
-                                为空时回退到 listing.available_from
-        """
-        return await self._send(
-            _format_booking_success(listing, detail, pay_url, contract_start_date)
-        )
+        """发送自动预订成功通知。"""
+        return await self._send(_format_booking_success(
+            listing, detail, pay_url, contract_start_date, lang=self.language,
+        ))
 
     async def send_booking_failed(self, listing: Listing, reason: str) -> bool:
         """发送自动预订失败通知，含失败原因和手动预订链接。"""
-        return await self._send(_format_booking_failed(listing, reason))
+        return await self._send(_format_booking_failed(listing, reason, lang=self.language))
 
     @abstractmethod
     async def _send(self, text: str) -> bool: ...
@@ -752,14 +744,13 @@ class WebNotifier(BaseNotifier):
     # 覆盖高层方法，直接构造结构化通知，不走 _format_*() 纯文本路径
 
     async def send_new_listing(self, listing: Listing) -> bool:
-        status_icon = "🎰" if "lottery" in listing.status.lower() else "✅"
+        source = _source_short(getattr(listing, "source", ""))
+        price = getattr(listing, "price_display", "") or "?"
+        move_in = listing.available_from or "?"
         self._storage.add_web_notification(
             type="new_listing",
-            title=f"{status_icon} 新房源：{listing.name}",
-            body=(
-                f"{listing.status} · {listing.price_display}/月"
-                f" · 入住 {listing.available_from or '待定'}"
-            ),
+            title=f"[{source}] {listing.name}",
+            body=f"{listing.status} · {price}/mo · → {move_in}",
             url=listing.url,
             listing_id=listing.id,
         )
@@ -768,11 +759,12 @@ class WebNotifier(BaseNotifier):
     async def send_status_change(
         self, listing: Listing, old_status: str, new_status: str
     ) -> bool:
-        icon = "🚀" if "book" in new_status.lower() else "🔄"
+        source = _source_short(getattr(listing, "source", ""))
+        price = getattr(listing, "price_display", "") or "?"
         self._storage.add_web_notification(
             type="status_change",
-            title=f"{icon} 状态变更：{listing.name}",
-            body=f"{old_status} → {new_status} · {listing.price_display}/月",
+            title=f"[{source}] {listing.name}",
+            body=f"{old_status} → {new_status} · {price}/mo",
             url=listing.url,
             listing_id=listing.id,
         )
@@ -781,15 +773,15 @@ class WebNotifier(BaseNotifier):
     async def send_heartbeat(self, total_in_db: int, round_count: int) -> bool:
         self._storage.add_web_notification(
             type="heartbeat",
-            title=f"💓 监控心跳 #{round_count}",
-            body=f"数据库房源总数：{total_in_db}",
+            title=f"Heartbeat #{round_count}",
+            body=f"Total in DB: {total_in_db}",
         )
         return True
 
     async def send_error(self, message: str) -> bool:
         self._storage.add_web_notification(
             type="error",
-            title="⚠️ 监控异常",
+            title="Monitor Error",
             body=message,
         )
         return True
@@ -800,30 +792,40 @@ class WebNotifier(BaseNotifier):
         detail: str,
         pay_url: str = "",
         contract_start_date: str = "",
+        user_id: str = "",
     ) -> bool:
-        start = contract_start_date or listing.available_from or "待定"
+        start = contract_start_date or listing.available_from or "?"
+        source = _source_short(getattr(listing, "source", ""))
+        price = getattr(listing, "price_display", "") or "?"
         self._storage.add_web_notification(
             type="booking",
-            title=f"🛒 预订成功：{listing.name}",
-            body=f"入住 {start} · {listing.price_display}/月",
+            title=f"[{source}] Booking: {listing.name}",
+            body=f"→ {start} · {price}/mo",
             url=pay_url or listing.url,
             listing_id=listing.id,
+            user_id=user_id,
         )
         return True
 
-    async def send_booking_failed(self, listing: Listing, reason: str) -> bool:
+    async def send_booking_failed(
+        self,
+        listing: Listing,
+        reason: str,
+        user_id: str = "",
+    ) -> bool:
+        source = _source_short(getattr(listing, "source", ""))
         self._storage.add_web_notification(
             type="booking",
-            title=f"❌ 预订失败：{listing.name}",
+            title=f"[{source}] Booking failed: {listing.name}",
             body=reason,
             url=listing.url,
             listing_id=listing.id,
+            user_id=user_id,
         )
         return True
 
     async def _send(self, text: str) -> bool:
-        # 兜底：直接调用 _send() 时写入通用通知
-        self._storage.add_web_notification(type="error", title="通知", body=text)
+        self._storage.add_web_notification(type="error", title="Notification", body=text)
         return True
 
     async def close(self) -> None:
@@ -934,7 +936,9 @@ def create_user_notifier(user) -> BaseNotifier:
         else:
             logger.warning("[%s] 未知通知渠道: %s", user.name, channel)
 
-    return MultiNotifier(notifiers, enabled=user.notifications_enabled)
+    n = MultiNotifier(notifiers, enabled=user.notifications_enabled)
+    n.language = getattr(user, "language", "en") or "en"
+    return n
 
 
 # ------------------------------------------------------------------ #
@@ -1097,43 +1101,79 @@ def _format_email_html(text: str) -> str:
 # 消息格式化（纯文本，无 Markdown）
 # ------------------------------------------------------------------ #
 
-def _format_new(l: Listing) -> str:
-    """格式化新房源上架通知，含完整特征信息和直链。"""
-    status_icon = "🎰" if "lottery" in l.status.lower() else "✅"
+def _source_short(source: str | None) -> str:
+    value = (source or "holland2stay").strip().lower()
+    return {
+        "holland2stay": "H2S",
+        "ourdomain": "OD",
+    }.get(value, value.upper() or "H2S")
+
+
+# ── 通知标签翻译 ────────────────────────────────────────────────────
+
+_NOTIF_LABELS = {
+    "New Listing":         {"zh": "新房源上架"},
+    "Status Change":       {"zh": "状态变更"},
+    "Booking Successful!": {"zh": "预订成功！"},
+    "Booking Failed":      {"zh": "预订失败"},
+    "Status":              {"zh": "状态"},
+    "Rent":                {"zh": "租金"},
+    "/mo":                 {"zh": "/月"},
+    "Available":           {"zh": "可入住"},
+    "Type":                {"zh": "类型"},
+    "Area":                {"zh": "面积"},
+    "Occupancy":           {"zh": "入住人数"},
+    "Floor":               {"zh": "楼层"},
+    "Energy":              {"zh": "能耗"},
+    "Move-in":             {"zh": "入住"},
+    "Reason":              {"zh": "原因"},
+    "Manual booking":      {"zh": "手动预订"},
+    "Pay now (time-sensitive)": {"zh": "立即付款（有时限）"},
+}
+
+
+def _tl(text: str, lang: str) -> str:
+    if lang == "zh":
+        return _NOTIF_LABELS.get(text, {}).get("zh", text)
+    return text
+
+
+def _format_new(l: Listing, *, lang: str = "en") -> str:
     fm = l.feature_map()
+    source = _source_short(getattr(l, "source", ""))
     lines = [
-        f"{status_icon} 新房源上架",
+        f"[{source}] {_tl('New Listing', lang)}",
         f"",
-        f"🏠 {l.name}",
-        f"📌 状态：{l.status}",
-        f"💰 租金：{l.price_display}/月",
-        f"📅 可入住：{l.available_from or '未知'}",
+        f"{l.name}",
+        f"{_tl('Status', lang)}: {l.status}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}",
+        f"{_tl('Available', lang)}: {l.available_from or '?'}",
         f"",
     ]
     if fm:
         lines += [
-            f"🛏 类型：{fm.get('type', '—')}",
-            f"📐 面积：{fm.get('area', '—')}",
-            f"👤 入住：{fm.get('occupancy', '—')}",
-            f"🏢 楼层：{fm.get('floor', '—')}",
-            f"⚡ 能耗：{fm.get('energy_label', '—')}",
+            f"{_tl('Type', lang)}: {fm.get('type', '—')}",
+            f"{_tl('Area', lang)}: {fm.get('area', '—')}",
+            f"{_tl('Occupancy', lang)}: {fm.get('occupancy', '—')}",
+            f"{_tl('Floor', lang)}: {fm.get('floor', '—')}",
+            f"{_tl('Energy', lang)}: {fm.get('energy_label', '—')}",
             f"",
         ]
-    lines.append(f"🔗 {l.url}")
+    lines.append(f"{l.url}")
     return "\n".join(lines)
 
 
-def _format_status_change(l: Listing, old: str, new: str) -> str:
-    icon = "🚀" if "book" in new.lower() else "🔄"
+def _format_status_change(l: Listing, old: str, new: str, *, lang: str = "en") -> str:
+    source = _source_short(getattr(l, "source", ""))
     return "\n".join([
-        f"{icon} 状态变更",
+        f"[{source}] {_tl('Status Change', lang)}",
         f"",
-        f"🏠 {l.name}",
-        f"📌 {old} → {new}",
-        f"💰 租金：{l.price_display}/月",
-        f"📅 可入住：{l.available_from or '未知'}",
+        f"{l.name}",
+        f"{old} → {new}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}",
+        f"{_tl('Available', lang)}: {l.available_from or '?'}",
         f"",
-        f"🔗 {l.url}",
+        f"{l.url}",
     ])
 
 
@@ -1142,37 +1182,39 @@ def _format_booking_success(
     detail: str,
     pay_url: str = "",
     contract_start_date: str = "",
+    *,
+    lang: str = "en",
 ) -> str:
     # 优先使用 try_book() 预订时 API 返回的实际合同日期，
     # 回退顺序：contract_start_date → listing.available_from → "待定"
     # 不直接使用 l.available_from 作为第一选择：
     # 因为 listing 是监控轮询时的快照，可能与预订时 API 返回的日期存在差异。
-    start = contract_start_date or l.available_from or "待定"
+    start = contract_start_date or l.available_from or "?"
+    source = _source_short(getattr(l, "source", ""))
     lines = [
-        f"🛒 自动预订成功！",
+        f"[{source}] {_tl('Booking Successful!', lang)}",
         f"",
-        f"🏠 {l.name}",
-        f"💰 租金：{l.price_display}/月",
-        f"📅 入住：{start}",
+        f"{l.name}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}",
+        f"{_tl('Move-in', lang)}: {start}",
         f"",
-        f"⚡ 点击链接立即付款（有时限，请尽快）：",
+        f"{_tl('Pay now (time-sensitive)', lang)}:",
         f"",
         pay_url if pay_url else detail,
-        f"",
-        f"⚠️ 链接直达支付页面，无需登录。",
     ]
     return "\n".join(lines)
 
 
-def _format_booking_failed(l: Listing, reason: str) -> str:
+def _format_booking_failed(l: Listing, reason: str, *, lang: str = "en") -> str:
+    source = _source_short(getattr(l, "source", ""))
     return "\n".join([
-        f"❌ 自动预订失败",
+        f"[{source}] {_tl('Booking Failed', lang)}",
         f"",
-        f"🏠 {l.name}",
-        f"💰 租金：{l.price_display}/月",
+        f"{l.name}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}",
         f"",
-        f"原因：{reason}",
-        f"🔗 请手动预订：{l.url}",
+        f"{_tl('Reason', lang)}: {reason}",
+        f"{_tl('Manual booking', lang)}: {l.url}",
     ])
 
 
@@ -1187,7 +1229,7 @@ def _strip_telegram_icon(line: str) -> str:
 def _telegram_link_line(line: str) -> str | None:
     """把独占 URL 或 '标签：URL' 转成 Telegram HTML 链接。"""
     clean = _strip_telegram_icon(line)
-    label = "打开链接"
+    label = "Open link"
     url = clean
     if "：" in clean:
         maybe_label, maybe_url = clean.split("：", 1)

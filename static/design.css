@@ -211,8 +211,17 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .badge-danger{background:var(--danger-soft);color:var(--danger)}
 .badge-info{background:var(--info-soft);color:var(--info)}
 .badge-neutral{background:var(--accent-soft);color:var(--text2)}
+/* status-specific aliases — listings 页面状态列用 */
 .badge-book{background:var(--success-soft);color:var(--success)}
 .badge-lottery{background:var(--warning-soft);color:var(--warning)}
+/* 之前 status_badge() 已经返回 "secondary" / "info" 给 Occupied / Reserved，
+   但 .badge-secondary 一直没定义 → 胶囊有形状无颜色看不见。补两个语义色：
+   - secondary: 中性灰，用于 Occupied / Rented / 终态不可订
+   - reserved:  蓝色，用于 Reserved / In Process 等过渡态 */
+/* secondary: 浅灰底（用 surface-hover，与表格 row hover 同色系，融洽不刺眼）
+   border-color 保持透明，跟 success/warning/info 一致 */
+.badge-secondary{background:var(--surface-hover);color:var(--text2)}
+.badge-reserved{background:var(--info-soft);color:var(--info)}
 
 /* ── Buttons ───────────────────────────────────────────────────── */
 .btn{
@@ -376,9 +385,9 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 }
 .notif-wrap{position:fixed;z-index:200;pointer-events:none}
 .notif-panel{
-  position:fixed;bottom:80px;right:16px;width:380px;max-width:calc(100vw - 32px);
+  position:fixed;bottom:80px;left:236px;width:380px;max-width:calc(100vw - 252px);
   bottom:calc(80px + env(safe-area-inset-bottom, 0px));
-  right:calc(16px + env(safe-area-inset-right, 0px));
+  left:236px;
   max-height:420px;
   background:var(--surface);border-radius:var(--radius-xl);
   box-shadow:var(--shadow-lg);pointer-events:all;

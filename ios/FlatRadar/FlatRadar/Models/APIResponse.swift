@@ -235,11 +235,13 @@ struct DeviceRegisterRequest: Encodable {
     let platform: String  // "ios"
     let model: String
     let bundleId: String
+    let language: String  // "en" | "zh" | ...
 
     enum CodingKeys: String, CodingKey {
         case deviceToken = "device_token"
         case env, platform, model
         case bundleId = "bundle_id"
+        case language
     }
 }
 
@@ -286,8 +288,12 @@ struct DeviceDeleteResponse: Decodable {
 }
 
 /// `GET /api/v1/filter/options` 响应——FilterEditView 用来渲染所有多选项的候选。
+///
+/// **跨版本兼容**：自定义 `init(from:)` 让任一字段缺失都回退 `[]`。
+/// 老 backend 没有 `sources` 字段（P1 多源新加）时 iOS 不会 data error。
 struct FilterOptions: Decodable, Sendable {
     let cities: [String]
+    let sources: [String]
     let occupancy: [String]
     let types: [String]
     let neighborhoods: [String]
@@ -297,8 +303,37 @@ struct FilterOptions: Decodable, Sendable {
     let finishing: [String]
     let energy: [String]
 
+    enum CodingKeys: String, CodingKey {
+        case cities, sources, occupancy, types, neighborhoods
+        case contract, tenant, offer, finishing, energy
+    }
+
+    init(
+        cities: [String], sources: [String], occupancy: [String],
+        types: [String], neighborhoods: [String], contract: [String],
+        tenant: [String], offer: [String], finishing: [String], energy: [String]
+    ) {
+        self.cities = cities; self.sources = sources; self.occupancy = occupancy
+        self.types = types; self.neighborhoods = neighborhoods; self.contract = contract
+        self.tenant = tenant; self.offer = offer; self.finishing = finishing; self.energy = energy
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.cities        = try c.decodeIfPresent([String].self, forKey: .cities)        ?? []
+        self.sources       = try c.decodeIfPresent([String].self, forKey: .sources)       ?? []
+        self.occupancy     = try c.decodeIfPresent([String].self, forKey: .occupancy)     ?? []
+        self.types         = try c.decodeIfPresent([String].self, forKey: .types)         ?? []
+        self.neighborhoods = try c.decodeIfPresent([String].self, forKey: .neighborhoods) ?? []
+        self.contract      = try c.decodeIfPresent([String].self, forKey: .contract)      ?? []
+        self.tenant        = try c.decodeIfPresent([String].self, forKey: .tenant)        ?? []
+        self.offer         = try c.decodeIfPresent([String].self, forKey: .offer)         ?? []
+        self.finishing     = try c.decodeIfPresent([String].self, forKey: .finishing)     ?? []
+        self.energy        = try c.decodeIfPresent([String].self, forKey: .energy)        ?? []
+    }
+
     static let empty = FilterOptions(
-        cities: [], occupancy: [], types: [], neighborhoods: [],
+        cities: [], sources: [], occupancy: [], types: [], neighborhoods: [],
         contract: [], tenant: [], offer: [], finishing: [], energy: [])
 }
 

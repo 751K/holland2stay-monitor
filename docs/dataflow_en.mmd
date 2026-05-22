@@ -1,48 +1,81 @@
 flowchart TD
     A["Start monitor.py"] --> B["Load config .env / SQLite user_configs"]
-    B --> C["Init Storage / Notifier / WebNotifier"]
+    B --> B1["Config.scrape_tasks_v2()\nSOURCES / CITIES / OURDOMAIN_CITIES / XIOR_CITIES"]
+    B1 --> C["Init Storage / Notifier / WebNotifier"]
     C --> D["Enter main_loop polling"]
 
     D --> E["run_once()"]
-    E --> F["Prewarm auto-booking login sessions"]
-    E --> G["scrape_all() — fetch city listings"]
+    E --> F["Prewarm H2S auto-booking login sessions"]
+    E --> G["dispatch_scrape_tasks(tasks)\nRoute ScrapeTask by source"]
 
-    G --> H{"Scrape result"}
-    H -->|Success| I["storage.diff(fresh)\nDetect new listings / status changes"]
-    H -->|403 BlockedError| J["Notify users\nmain_loop cooldown 15 min"]
-    H -->|429 RateLimitError| K["main_loop cooldown 5 min\nAdaptive interval backoff"]
-    H -->|ScrapeNetworkError| L["Consecutive failure count\nCooldown past threshold"]
+    subgraph S["Multi-platform scraping layer scrapers/"]
+        G --> H1["holland2stay:Eindhoven...\nHollandStayScraper -> scraper.scrape_all()"]
+        G --> H2["ourdomain:Diemen / South-East\nOurDomainScraper"]
+        H2 --> H21["RENTCafe floorplans.aspx\nDiscover floorplan ids / names"]
+        H21 --> H22["rcLoadContent.ashx availableunits\nUnit-level listings"]
+        H22 --> H23["Parse Unit / Area / Floor / Date\nListing.name = Diemen #6045\nsource = ourdomain"]
+        H2 --> H24{"403 Cloudflare?"}
+        H24 -->|Yes| H25["Switch TLS fingerprint and rebuild session\nOURDOMAIN_IMPERSONATES / OURDOMAIN_WAF_RETRIES"]
+        H25 --> H21
 
-    I --> M["Update last_scrape_at / last_scrape_count"]
-    M --> N["Scan auto-booking candidates"]
-    N --> O{"Candidates & notification\nchannels available?"}
+        G --> H3["xior:Eindhoven Kronehoefstraat...\nXiorScraper"]
+        H3 --> H31["POST admin-ajax.php\nyardi_room_availability"]
+        H31 --> H32["Parse JSON response\napartmentId / apartmentName / sqm / rent"]
+        H32 --> H33["Unit-level listings\nListing.name = M1.30.53\nsource = xior"]
+        H3 --> H34{"429 rate limit?"}
+        H34 -->|Yes| H35["Backoff retry RATE_LIMIT_BACKOFF\n1.5s pacing between requests"]
+        H35 --> H31
+    end
 
-    O -->|Yes| P["Submit try_book() immediately\nvia thread pool (concurrent)"]
-    O -->|No| Q["Skip auto-booking"]
+    H1 --> I{"Scrape result"}
+    H23 --> I
+    H24 -->|All fingerprints failed| I
+    H33 --> I
+    H34 -->|Retries exhausted| I
 
-    P --> R["booker.py\nLogin / reuse prewarmed session"]
-    R --> S["Fetch SKU / contract_start_date"]
-    S --> T["createEmptyCart"]
-    T --> U["addNewBooking"]
-    U --> V["setPaymentMethodOnCart"]
-    V --> W["placeOrder"]
-    W --> X["idealCheckOut — get payment URL"]
+    I -->|At least one task succeeded| J["Merge listings + completeness\nsource:city keys avoid name collisions"]
+    I -->|All tasks had network failures| K["ScrapeNetworkError\nFailure streak / cooldown"]
+    I -->|All tasks hit 403/429| L["BlockedError / RateLimitError\nmain_loop cooldown"]
+    I -->|One platform failed| M["Record completeness=false\nIsolate failed platform; keep others running"]
 
-    X --> Y{"Booking result"}
-    Y -->|Success| Z["Send booking success notification\nwith payment URL"]
-    Y -->|Failed| AA["Send failure reason\nMay enter retry queue"]
+    M --> J
+    J --> N["storage.diff(fresh)\nsource-aware upsert / status changes"]
+    N --> O["mark_stale_listings()\nConverge stale rows by complete source:city"]
+    O --> P["Update last_scrape_at / last_scrape_count"]
 
-    M --> AB["Send new listing notifications"]
-    M --> AC["Send status change notifications"]
-    AB --> AD["Record notified status"]
-    AC --> AD
-    Z --> AD
-    AA --> AD
+    P --> Q["Send notifications\nWeb / Telegram / Email / APNs"]
+    Q --> Q1["Title/body include platform badge\nH2S / OD / XR"]
+    Q1 --> R["Record notified state"]
 
-    AD --> AE["Round complete"]
-    Q --> AE
-    J --> AF["Wait for next round"]
-    K --> AF
-    L --> AF
-    AE --> AF
-    AF --> D
+    P --> T["Scan auto-booking candidates"]
+    T --> U{"listing.source == holland2stay\nand directly bookable?"}
+    U -->|Yes| V["Submit try_book() immediately\nvia thread pool (concurrent)"]
+    U -->|No| W["Skip auto-booking\nOD / XR are notify-only"]
+
+    V --> X["booker.py\nLogin / reuse prewarmed session"]
+    X --> Y["Fetch SKU / contract_start_date"]
+    Y --> Z["createEmptyCart"]
+    Z --> AA["addNewBooking"]
+    AA --> AB["setPaymentMethodOnCart"]
+    AB --> AC["placeOrder"]
+    AC --> AD["idealCheckOut — get payment URL"]
+
+    AD --> AE{"Booking result"}
+    AE -->|Success| AF["Send booking success notification\nwith payment URL"]
+    AE -->|Failed| AG["Send failure reason\nMay enter retry queue"]
+    AF --> R
+    AG --> R
+
+    R --> AH["Round complete"]
+    W --> AH
+    K --> AI["Wait for next round"]
+    L --> AI
+    AH --> AI
+    AI --> D
+
+    subgraph WEB["Web / API read path"]
+        N --> WEB1["listings table includes source"]
+        WEB1 --> WEB2["dashboard / listings / map / calendar\nshow H2S / OD / XR badges"]
+        WEB1 --> WEB3["/api/v1/listings?source=...\n/filter/options.sources"]
+        WEB1 --> WEB4["stats source_dist platform distribution"]
+    end

@@ -70,7 +70,7 @@ final class NavigationCoordinator {
 
     /// 由 deep link / 通知点击调用：切到 List 视图并 push 详情。
     /// 多次连点不重复 push 同一条；切换 tab 顺手清空已有 path。
-    func openListing(id: String) {
+    func openListing(id: String, titleHint: String? = nil) {
         // Deep link 来源不可信，必须验输入：
         // - 非空
         // - ≤ 128 字符，防止超长 URL 撑爆后端 path
@@ -82,7 +82,7 @@ final class NavigationCoordinator {
 
         selectedTab = .listings
         selectedBrowseMode = .list
-        listingsPath = [.byId(id)]
+        listingsPath = [.byId(id, titleHint: titleHint)]
     }
 
     /// Logout / 401 auto-logout / 删号时清空全部导航状态。
@@ -108,5 +108,5 @@ final class NavigationCoordinator {
 /// - ``byId(String)``：从 deep link 来，只有 id，详情页自己 fetch
 enum ListingRoute: Hashable, Sendable {
     case known(Listing)
-    case byId(String)
+    case byId(String, titleHint: String?)
 }

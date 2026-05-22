@@ -35,6 +35,20 @@
           </div>
         </div>
       </div>
+      <div class="form-group" style="margin-bottom:0;min-width:150px;">
+        <label class="form-label">{{ _('filter_source') }}</label>
+        <div class="multi-select" style="min-width:130px;">
+          <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
+            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+          </div>
+          <div class="ms-dropdown">
+            {% for s in sources %}
+            <label class="ms-option"><input type="checkbox" name="source" value="{{ s }}" {% if s in source_filters %}checked{% endif %}> {{ s | source_label }}</label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
       <div class="form-group" style="margin-bottom:0;min-width:180px;">
         <label class="form-label">{{ _('filter_name') }}</label>
         <input type="text" name="q" class="form-input" placeholder="{{ _('filter_placeholder') }}" value="{{ search }}" style="font-size:12px;">
@@ -55,6 +69,34 @@
             <option value="{{ c }}" {% if c == contract_filter %}selected{% endif %}>{{ c }}</option>
           {% endfor %}
         </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0;min-width:150px;">
+        <label class="form-label">{{ _('filter_type') }}</label>
+        <div class="multi-select" style="min-width:130px;">
+          <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
+            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+          </div>
+          <div class="ms-dropdown">
+            {% for t in types %}
+            <label class="ms-option"><input type="checkbox" name="type" value="{{ t }}" {% if t in type_filters %}checked{% endif %}> {{ t }}</label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0;min-width:170px;">
+        <label class="form-label">{{ _('filter_occupancy') }}</label>
+        <div class="multi-select" style="min-width:150px;">
+          <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
+            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+          </div>
+          <div class="ms-dropdown">
+            {% for o in occupancies %}
+            <label class="ms-option"><input type="checkbox" name="occupancy" value="{{ o }}" {% if o in occupancy_filters %}checked{% endif %}> {{ o }}</label>
+            {% endfor %}
+          </div>
+        </div>
       </div>
       <div class="form-group" style="margin-bottom:0;min-width:160px;">
         <label class="form-label">{{ _('filter_tenant') }}</label>
@@ -92,7 +134,7 @@
         <button type="submit" class="btn btn-primary btn-sm">
           <i class="bi bi-search mr-1"></i>{{ _('filter_btn') }}
         </button>
-        {% if status_filter or search or city_filters or max_rent or min_area or contract_filter or tenant_filters or energy_filter or finishing_filter %}
+        {% if status_filter or search or city_filters or source_filters or type_filters or occupancy_filters or max_rent or min_area or contract_filter or tenant_filters or energy_filter or finishing_filter %}
           <a href="{{ url_for('listings') }}" class="btn btn-ghost btn-sm ml-1">
             <i class="bi bi-x mr-1"></i>{{ _('filter_clear') }}
           </a>
@@ -109,6 +151,7 @@
       <thead>
         <tr>
           <th>{{ _('col_name') }}</th>
+          <th>{{ _('col_source') }}</th>
           <th>{{ _('col_status') }}</th>
           <th>{{ _('col_rent') }}</th>
           <th>{{ _('col_area') }}</th>
@@ -130,6 +173,7 @@
             <a href="{{ l.url }}" target="_blank" class="cell-name">{{ l.name }}</a>
             {% if fm.building %}<span class="cell-secondary ml-1">· {{ fm.building }}</span>{% endif %}
           </td>
+          <td><span class="badge badge-neutral">{{ l.source | source_label }}</span></td>
           <td>
             {% if 'book' in sl %}
               <span class="badge badge-book">{{ l.status }}</span>
@@ -150,7 +194,7 @@
           <td class="cell-secondary">{{ l.last_seen | time_ago }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="11" class="text-center py-5 text-tertiary">{{ _('filter_no_results') }}</td></tr>
+        <tr><td colspan="12" class="text-center py-5 text-tertiary">{{ _('filter_no_results') }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -166,6 +210,7 @@
       <div class="lc-top">
         <div class="lc-name">{{ l.name }}</div>
         <div class="lc-status">
+          <span class="badge badge-neutral">{{ l.source | source_label }}</span>
           {% if 'book' in sl %}
             <span class="badge badge-book">{{ l.status }}</span>
           {% elif 'lottery' in sl %}

@@ -28,6 +28,7 @@ from app.services.monitor_service import (
     MonitorServiceError,
     get_monitor_status,
     reload_monitor,
+    restart_monitor,
     start_monitor,
     stop_monitor,
 )
@@ -177,6 +178,18 @@ def _monitor_reload():
         return _err.err_server_error(e, "reload 失败")
 
 
+def _monitor_restart():
+    """完整重启监控进程（stop + start，重新 import 代码）。改了 Python
+    模块后必须走这个；只改 .env / 用户配置走 reload 即可。"""
+    try:
+        return _err.ok(restart_monitor())
+    except MonitorServiceError as e:
+        return _err.err_server_error(e, str(e))
+    except Exception as e:
+        logger.exception("monitor restart 失败")
+        return _err.err_server_error(e, "重启失败")
+
+
 # ── Registration ───────────────────────────────────────────────────
 
 
@@ -221,5 +234,11 @@ def register(bp: Blueprint) -> None:
         "/admin/monitor/reload",
         endpoint="admin_monitor_reload",
         view_func=api_auth.bearer_required(("admin",))(_monitor_reload),
+        methods=["POST"],
+    )
+    bp.add_url_rule(
+        "/admin/monitor/restart",
+        endpoint="admin_monitor_restart",
+        view_func=api_auth.bearer_required(("admin",))(_monitor_restart),
         methods=["POST"],
     )

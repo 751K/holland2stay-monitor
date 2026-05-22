@@ -182,7 +182,7 @@ class TestBookWithFallback:
         )
 
     def test_success_on_first_candidate(self):
-        with patch("mcore.booking.try_book") as mock_try:
+        with patch("bookers.holland2stay.try_book") as mock_try:
             mock_try.return_value = MagicMock(
                 success=True, dry_run=False, phase="success"
             )
@@ -196,7 +196,7 @@ class TestBookWithFallback:
         race_lost = MagicMock(success=False, dry_run=False, phase="race_lost")
         success = MagicMock(success=True, dry_run=False, phase="success")
 
-        with patch("mcore.booking.try_book", side_effect=[race_lost, success]) as mock_try:
+        with patch("bookers.holland2stay.try_book", side_effect=[race_lost, success]) as mock_try:
             candidates = [self._make_listing(1), self._make_listing(2)]
             result = book_with_fallback(candidates, self._make_user(), float("inf"))
             assert result.success is True
@@ -206,7 +206,7 @@ class TestBookWithFallback:
         """非 race_lost 失败（如 reserved_conflict） → 立即停止，不继续试备选。"""
         failure = MagicMock(success=False, dry_run=False, phase="reserved_conflict")
 
-        with patch("mcore.booking.try_book", return_value=failure) as mock_try:
+        with patch("bookers.holland2stay.try_book", return_value=failure) as mock_try:
             candidates = [self._make_listing(1), self._make_listing(2)]
             result = book_with_fallback(candidates, self._make_user(), float("inf"))
             assert result.success is False
@@ -216,7 +216,7 @@ class TestBookWithFallback:
         """dry_run → 视为成功，不重试。"""
         dr = MagicMock(success=False, dry_run=True, phase="success")
 
-        with patch("mcore.booking.try_book", return_value=dr) as mock_try:
+        with patch("bookers.holland2stay.try_book", return_value=dr) as mock_try:
             candidates = [self._make_listing(1), self._make_listing(2)]
             result = book_with_fallback(candidates, self._make_user(), float("inf"))
             assert result.dry_run is True
@@ -226,7 +226,7 @@ class TestBookWithFallback:
         """截止时间到 → 停止备选，返回最后一个 race_lost 结果。"""
         race_lost = MagicMock(success=False, dry_run=False, phase="race_lost")
 
-        with patch("mcore.booking.try_book", return_value=race_lost) as mock_try:
+        with patch("bookers.holland2stay.try_book", return_value=race_lost) as mock_try:
             candidates = [self._make_listing(1), self._make_listing(2), self._make_listing(3)]
             # 设截止时间为当前，只来得及试第一套
             result = book_with_fallback(candidates, self._make_user(), time.monotonic())

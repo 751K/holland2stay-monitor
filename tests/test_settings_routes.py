@@ -65,6 +65,42 @@ class TestSettingsPost:
         # CITIES 应为 | 拼接格式
         assert "Eindhoven,29|Amsterdam,24" in env_content
 
+    def test_save_sources_h2s_and_ourdomain(self, admin_client, isolated_data_dir):
+        r = admin_client.post("/settings", data={
+            "CHECK_INTERVAL": "300",
+            "LOG_LEVEL": "INFO",
+            "source_selected": ["holland2stay", "ourdomain"],
+            "city_selected": ["Eindhoven,29"],
+            "ourdomain_city_selected": ["Amsterdam Diemen,diemen"],
+        }, headers={"X-CSRF-Token": "test_csrf"})
+        assert r.status_code in (200, 302)
+        env_content = isolated_data_dir.joinpath(".env").read_text(encoding="utf-8")
+        assert "SOURCES=holland2stay,ourdomain" in env_content
+        assert "CITIES=Eindhoven,29" in env_content
+        assert "OURDOMAIN_CITIES=Amsterdam Diemen,diemen" in env_content
+
+    def test_save_sources_ourdomain_only(self, admin_client, isolated_data_dir):
+        r = admin_client.post("/settings", data={
+            "CHECK_INTERVAL": "300",
+            "LOG_LEVEL": "INFO",
+            "source_selected": ["ourdomain"],
+            "city_selected": ["Eindhoven,29"],
+            "ourdomain_city_selected": ["Amsterdam Diemen,diemen"],
+        }, headers={"X-CSRF-Token": "test_csrf"})
+        assert r.status_code in (200, 302)
+        env_content = isolated_data_dir.joinpath(".env").read_text(encoding="utf-8")
+        assert "SOURCES=ourdomain" in env_content
+
+    def test_empty_sources_falls_back_to_h2s(self, admin_client, isolated_data_dir):
+        r = admin_client.post("/settings", data={
+            "CHECK_INTERVAL": "300",
+            "LOG_LEVEL": "INFO",
+            "city_selected": ["Eindhoven,29"],
+        }, headers={"X-CSRF-Token": "test_csrf"})
+        assert r.status_code in (200, 302)
+        env_content = isolated_data_dir.joinpath(".env").read_text(encoding="utf-8")
+        assert "SOURCES=holland2stay" in env_content
+
     def test_invalid_numeric_not_written(self, admin_client, isolated_data_dir):
         """POST 非法数字值（abc）不应写入 .env，保留旧值。"""
         env_path = isolated_data_dir / ".env"

@@ -1,12 +1,24 @@
 # FlatRadar 房源监控
 
-> FlatRadar 是一个个人 Holland2Stay 房源监控工具。它会跟踪新房源和状态变更，第一时间向多个用户推送通知，并支持对符合条件的房源自动完成预订流程。
+> FlatRadar 是一个个人租房监控工具，跨平台跟踪新房源和状态变更，支持多用户推送通知和自动预订。目前已接入 **Holland2Stay**（GraphQL API）、**OurDomain**（RENTCafe HTML）和 **Xior**（WordPress AJAX JSON）。
 
 > **免责声明：** 本项目仅供个人非商业使用。与 Holland2Stay 无任何关联、背书或合作关系。使用者需自行遵守 Holland2Stay 的服务条款及相关法律法规。作者对任何误用或因此产生的后果不承担任何责任。
 
-**当前版本：** v1.6.0
+**当前版本：** v1.7.0
 
-**在线演示：** [flatradar.app](https://flatradar.app) — 登录页点击「访客模式」即可只读浏览。
+**在线演示：** [flatradar.app](https://flatradar.app) — 注册账号或点击「访客模式」即可浏览。  
+**使用指南：** [flatradar.app/guide](https://flatradar.app/guide) — 完整图文教程。
+
+如果这个项目对你有帮助，欢迎 **点个 Star** ⭐ —— 让更多人看到 FlatRadar。
+
+---
+
+## 赞助 / 支持开发者
+
+FlatRadar 是个人独立开发的纯开源项目。服务器、API 代理、推送通知等基础设施均由开发者自费承担。你的赞助直接帮助维持服务器运行和 iOS App 上架。
+
+- **[GitHub Sponsors](https://github.com/sponsors/751K)** — 月捐或一次性赞助
+- **[赞助页面](https://flatradar.app/donate)** — 支付宝 / 微信
 
 ---
 
@@ -44,16 +56,18 @@ python -m pytest tests/ -v
 
 [完整安装指南 →](#本地启动)
 
----
-
 ## 项目状态
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| 数据抓取 | ✅ 已完成 | GraphQL API + curl_cffi 绕过 Cloudflare WAF；每城市输出完整扫描状态 |
-| Stale 状态收敛 | ✅ 已完成 | 仅对完整扫描城市执行；直订/未知 7 天未见推测 Occupied，lottery 2 天未见推测 Occupied |
-| 多城市监控 | ✅ 已完成 | 26 个荷兰城市，Web 面板复选框选择 |
-| 多通知渠道 | ✅ 已完成 | iMessage / Telegram HTML / Email HTML / WhatsApp，可同时启用 |
+| 多源抓取架构 | ✅ 已完成 | AbstractScraper + ScrapeTask dispatch；curl_cffi 指纹池 (Chrome/Safari/Edge) |
+| H2S 数据抓取 | ✅ 已完成 | GraphQL API + curl_cffi Chrome 指纹绕过 Cloudflare WAF |
+| OurDomain 抓取 | ✅ 已完成 | RENTCafe HTML 表格解析；单元级（房间号、面积、楼层、朝向、押金）；2 栋楼（Diemen + South-East） |
+| Xior 抓取 | ✅ 已完成 | WordPress AJAX JSON；单元级（房号、面积、月租、押金、入住日期、预订链接）；荷兰 30 栋楼 |
+| Stale 状态收敛 | ✅ 已完成 | 仅对完整扫描城市执行；直订/未知 7 天，lottery 2 天 |
+| 多城市监控 | ✅ 已完成 | 26 个荷兰城市 (H2S) + Amsterdam (OurDomain) + 15 城市 (Xior) |
+| 多通知渠道 | ✅ 已完成 | iMessage / Telegram HTML / Email HTML / WhatsApp |
+| APNs 双语推送 | ✅ 已完成 | 中英文 `_T` 翻译表；按设备语言分组发送 |
 | Web 面板通知 | ✅ 已完成 | SSE 实时铃铛 + Toast 弹窗，与平台无关 |
 | 通知过滤 | ✅ 已完成 | 租金、面积、楼层、户型、入住类型、城市、片区、合同、租客、促销、装修、能耗 |
 | 多选下拉过滤 | ✅ 已完成 | 下拉多选 + 中英双语标签；房源列表支持城市/租客/合同筛选 |
@@ -88,7 +102,7 @@ python -m pytest tests/ -v
 | 代码模块化 | ✅ 已完成 | web.py 拆分 `app/`（10 路由 + 8 共享）；`mcore/`（interval / prewarm / booking）；`mstorage/`（6 个 mixin 模块）；`monitor.py` 1,235→971，`storage.py` 1,177→17 re-export |
 | Prewarm Session 缓存 | ✅ 已完成 | `mcore/prewarm.py` PrewarmCache 类；进程级缓存跨轮复用；TTL 后台刷新；用户/配置变更时自动失效 |
 | 错误日志（errors.log）| ✅ 已完成 | 独立 WARNING+ 日志，含 `funcName:lineno` 格式；新增 web.log 记录 Flask 应用日志；日志查看器支持文件 Tab 切换、行号、级别着色、关键词搜索、自动滚动 |
-| Pytest 测试套件 | ✅ 已完成 | 30 个测试模块（566 个测试），覆盖全栈：模型、mcore、mstorage、存储、抓取、预订、通知、认证、CSRF、路由、i18n |
+| Pytest 测试套件 | ✅ 已完成 | 62 个测试模块（950 个测试），覆盖全栈：模型、mcore、mstorage、抓取（H2S/OD/XR）、预订、推送、通知、认证、CSRF、路由、i18n |
 | 代码质量 | ✅ 已完成 | Literal 类型、共享常量、Mixin 组合 Storage、解析逻辑去重 |
 | **iOS App (FlatRadar)** |
 | iOS 认证与 RBAC | ✅ 已完成 | Admin / User / Guest 三档登录；Keychain token 持久化；全局 401/403 自动登出 |
@@ -199,106 +213,59 @@ FlatRadar/
 
 ## 核心功能
 
-### 数据抓取
+### 多平台抓取
 
-- 每隔 N 秒（默认 5 分钟）轮询 Holland2Stay GraphQL API
-- 支持 26 个荷兰城市同时监控，城市列表在 Web 面板勾选
-- 检测**新上架房源**与**状态变更**（如 lottery → 可直接预订）
-- 全量房源写入本地 SQLite，历史可查，同一房源不重复通知
-- 每轮抓取会输出每个城市是否完整扫描；不完整城市会记录日志，并跳过 stale 状态收敛
-- 仅当城市完整扫描成功时才会把长期未见房源推测为 `Occupied`：直订/未知房源 7 天，lottery 房源 2 天
+FlatRadar 通过统一的 `AbstractScraper` 接口监控三个房源平台：
+
+| 平台 | 数据源 | 方式 | 粒度 |
+|---|---|---|---|
+| **Holland2Stay** | GraphQL API | `curl_cffi` Chrome 指纹 | 单元级（具体房号） |
+| **OurDomain** | RENTCafe HTML | `curl_cffi` Safari 指纹 | 单元级（#6045, 面积, 楼层, 朝向） |
+| **Xior** | WordPress AJAX JSON | `curl_cffi` + 1.5s 间隔 | 单元级（M1.30.53, 面积, 租金, 押金） |
+
+- 每个平台实现 `AbstractScraper.scrape(task)` → 产出带 `source` 标签的 `Listing`
+- `dispatch_scrape_tasks()` 按 source 路由，隔离单平台故障，合并结果
+- 所有 scraper 共享 `RATE_LIMIT_BACKOFF`、`is_cloudflare_body` 和 429 重试逻辑
 
 ### 智能自适应轮询
 
-非高峰期使用常规间隔。荷兰工作日两个高峰时段（默认早 8:30–10:00，下午 13:30–15:00）启用自适应轮询：
-
-- 每次高峰期从 `PEAK_INTERVAL`（默认 60 s）出发
-- 每轮抓取成功后将间隔乘以 0.95（缩短 5%），自动逼近速率上限
-- 最低不低于 `MIN_INTERVAL`（默认 15 s，可配置）
-- 遭遇 429 限流时：间隔立即翻倍，并强制冷却 5 分钟后再恢复
-- 高峰期结束后重置为 `PEAK_INTERVAL`，下次高峰期重新探测
-- 每次等待都叠加 ±`JITTER_RATIO`% 随机抖动，破坏机械规律性
-- 所有参数（PEAK_INTERVAL、MIN_INTERVAL、PEAK_START、PEAK_END、PEAK_START_2、PEAK_END_2、JITTER_RATIO、PEAK_WEEKDAYS_ONLY）均可在 Web 面板配置
+- 双高峰窗口（默认早 8:30–10:00 和下午 13:30–15:00，仅工作日）
+- 自适应间隔：成功 ×0.95（逐步逼近上限），限流 ×2.0（退避），下限 15s
+- 随机 ±`JITTER_RATIO` 抖动防机械指纹
+- 所有参数 Web 面板可配
 
 ### 限流与屏蔽防护
 
-**429（限流）— 临时，可自动恢复：**
-
-1. **scraper 层**：收到 429 后等 30 s 重试，再等 60 s 重试，仍失败则抛出 `RateLimitError`
-2. **monitor 层**：捕获 `RateLimitError`，通知所有用户，强制冷却 5 分钟后继续
-3. **自适应层**：自动将高峰间隔翻倍退避，从根源减少触发 429 的频率
-
-**403（Cloudflare WAF 屏蔽）— 持续，需人工介入：**
-
-- **scraper 层**：检测 Cloudflare 挑战页（HTML 特征如 `no-js ie6 oldie`），立即抛出 `BlockedError`，不重试（与 429 不同）
-- **monitor 层**：捕获 `BlockedError`，通知用户（节流至 30 分钟 1 次），冷却 15 分钟
-- **可操作建议**：错误消息含三条恢复路径 — 换代理 IP / 重启 monitor 重建 TLS 指纹 / 暂停几小时冷却
-
-**代理支持**：在 `.env` 中设置 `HTTPS_PROXY` / `HTTP_PROXY`，抓取和预订流量均通过代理路由；支持热重载，无需重启即可生效。
-
-### 快速预订通道
-
-无论是**新上线**的 Available to book 房源，还是**状态切换**到 Available to book 的房源，抢占窗口往往只有几秒钟。监控程序的处理逻辑：
-
-1. 对 diff 结果做纯内存预扫描（无网络请求）
-2. **立即**将 `try_book()` 提交到线程池（**所有**自动预订候选均走快速通道），早于任何通知发送
-3. 预订 HTTP 请求与通知发送**并发执行**
-4. 通知发完后再 await 预订结果——此时预订往往已经完成
-
-与原来"先发完通知再预订"的顺序执行相比，这套方案将预订请求到达服务器的延迟从 2–5 秒缩短到约 0–1 秒。
-
-### 多用户支持
-
-- 每个用户独立拥有：通知渠道 + 凭证、房源过滤条件、自动预订账号
-- 抓取一次共享，通知和预订按各用户条件分发，N 用户 ≠ N 倍 API 请求
-- 用户数据存储于 SQLite `user_configs`，Web 面板增删改、一键启停
-- **零配置启动**：打开 Web 面板点击「新增用户」即可创建第一个用户
+- **429**：退避重试 30s/60s → `RateLimitError` → 5 分钟冷却
+- **403 Cloudflare WAF**：立即 `BlockedError`（不重试）→ 节流告警（1/30min）→ 15 分钟冷却 + 恢复建议
+- **代理**：`.env` 设 `HTTPS_PROXY` / `HTTP_PROXY`，热重载生效
 
 ### 通知推送
 
-**用户独立的推送渠道**（iMessage、Telegram、Email、WhatsApp）：
+- **渠道**：iMessage、Telegram、Email、WhatsApp —— 每用户独立，多渠道并行
+- **iOS 推送**：APNs 双语支持（中英 `_T` 翻译表，按设备语言分组发送）
+- **Web 面板**：SSE 实时铃铛 + Toast，全平台可用
+- **过滤**：每用户 10 维度（租金、面积、楼层、户型、入住类型、城市、平台、合同、能耗等）
 
-- 每用户可独立选择一个或多个渠道同时启用
-- 通知内容：房源名称、状态、租金、面积、楼层、能耗、入住日期、直链
-- 每用户可独立设置过滤条件，只接收符合自己需求的房源
-- 配置页一键发送测试消息，逐渠道返回成功 / 失败原因
-- Telegram 使用 FlatRadar 品牌化 HTML 消息，动态内容会转义，并关闭链接预览
-- 邮箱验证、测试通知、新房源通知统一使用 FlatRadar HTML 邮件模板
+### 自动预订（仅 Holland2Stay）
 
-**iMessage 平台检测**：iMessage 依赖 macOS 和 Messages.app。在 Linux / Windows / Docker 上，该渠道自动跳过并打印警告；用户配置页面若检测到服务器非 macOS，会显示提示横幅，建议改用其他渠道。
-
-**Web 面板通知（与平台无关）**：
-
-- 每个事件（新房源、状态变更、预订结果、错误、心跳）都会写入 `web_notifications` SQLite 表
-- 导航栏铃铛图标显示未读数角标，点击展开最近通知下拉面板
-- 新事件自动弹出滑入式 Toast 通知
-- 基于 Server-Sent Events（SSE）实时推送，断连后浏览器自动重连
-- 在所有平台（VPS、Docker、本地 Mac/Linux/Windows）均可使用，无额外依赖
-
-### 自动预订
-
-- 检测到符合条件的 "Available to book" 房源时，自动完成完整预订流程：
-  1. 登录账号
-  2. `createEmptyCart` 创建全新购物车
-  3. `addNewBooking` 将房源加入购物车并创建预订
-  4. `placeOrder` 下单（含 `store_id=54`，与官方前端一致）
-  5. `idealCheckOut` 生成直链付款 URL（含 `plateform="h"`）
-  6. 推送通知，含直链，用户点击即进入付款页，**无需登录**
-- 流程通过浏览器 DevTools 抓包验证，与 H2S 官方前端预订流程一致
-- 若 `placeOrder` 返回 "another unit reserved" 且用户开启了 `cancel_enabled`，通过 `cancelOrder` mutation 自动取消旧订单后重试整个流程
-- `cancel_enabled` 默认关闭：H2S 平台默认未启用 `cancelOrder`，开启前需确认平台支持
-- 多套候选时按面积从大到小选择
-- 每用户可设置独立的预订过滤条件（可比通知条件更严格）
-- 支持 Dry Run 模式，走完登录/购物车验证但不实际提交
-- 预订与通知并发执行（见「快速预订通道」）
+- 全 GraphQL 流程：登录 → `createEmptyCart` → `addNewBooking` → `placeOrder` → 付款直链
+- **快速通道**：预订在通知发送**之前**提交到线程池——早到服务器 1–2 秒
+- **Prewarm 缓存**：登录 session 跨轮复用，配置变更自动失效
+- Dry Run 验证模式；竞败重试队列
 
 ### Web 管理面板
 
-- **仪表盘**：总房源 / 今日新增 / 今日变更 / 最近抓取时间，加最新房源列表与近 48h 变更记录
-- **房源列表**：全量数据，支持按状态筛选、关键词搜索、首次发现与最后出现时间
-- **地图视图**：Leaflet.js 交互地图，Nominatim 自动地理编码 + 坐标缓存，颜色标记（绿=直订/橙=摇号/灰=其他），点击弹窗详情，亮色/暗色底图滤镜
-- **入住日历**：所有有入住日期的房源按月历展示，按城市筛选
-- **统计图表**：Chart.js 折线图 / 环形图 / 柱状图，7/30/90 天可切换；租金分布 9 区间（最高 >€1600）；24h 上线时间分布
+- **仪表盘**：KPI 卡片、筛选芯片、房源表格、48h 状态变更时间线
+- **房源列表**：多维度筛选（状态/城市/平台/户型/租金/能耗），可排序
+- **地图**：Leaflet.js + OpenStreetMap，颜色标记，自动地理编码
+- **日历**：月入住视图，按城市筛选
+- **统计**：10 个 Chart.js 图表，7/30/90 天范围切换
+- **用户**：CRUD、启停、逐用户渠道/过滤/预订配置
+- **设置**：全局轮询、自适应参数、平台城市勾选、保存即生效
+- **i18n**：一键中英切换，cookie 持久化
+- **RBAC**：Admin / User / Guest 三级；自助注册 + 条款确认
+- **主题**：浅色/深色，跟随系统，无闪烁
 - **用户管理**：多用户 CRUD，每用户独立配置通知 / 过滤 / 预订，一键启停，一键发送测试通知
 - **全局设置**：轮询间隔、自适应轮询参数（双窗口）、心跳间隔、监控城市，可视化配置无需手动编辑 `.env`
 - **立即生效**：保存后点击按钮热重载配置，监控进程不中断
@@ -313,50 +280,102 @@ FlatRadar/
 
 ### 数据流
 
-```
-Holland2Stay 网站（Next.js + Magento）
-        │
-        │  页面数据由 Apollo Client 发起 GraphQL 请求
-        ▼
-api.holland2stay.com/graphql/   ← Magento GraphQL 后端
-        │
-        │  curl_cffi impersonate="chrome110"  绕过 Cloudflare WAF
-        ▼
-   scraper.py  ──→  models.py（Listing dataclass）
-        │
-        ▼
-   storage.py（SQLite diff：比对新旧快照）
-        │
-        ├── 新房源 / 状态变更
-        │        │
-        │        ├── WebNotifier → web_notifications 表
-        │        │     └── /api/events SSE → 浏览器铃铛 + Toast
-        │        │
-        │        └── 遍历 SQLite user_configs 中每个启用的用户
-        │                 │
-        │                 ├── ListingFilter.passes() → notifier.py
-        │                 │     └── iMessage（macOS）/ Telegram / Email / WhatsApp
-        │                 │
-        │                 └── AutoBookConfig.passes() → booker.py  [并发执行]
-        │                       └── 预登录 session（与通知并行完成）
-        │                              → createEmptyCart → addNewBooking
-        │                              → placeOrder (store_id=54) → idealCheckOut → 付款直链
-        │
-        └── Web 面板只读查询 → web.py（Flask + Bootstrap 5）
-                 ├── /api/charts
-                 ├── /api/events  （SSE 流）
-                 └── /api/notifications
+```mermaid
+flowchart TD
+    A["启动 monitor.py"] --> B["读取配置 .env / SQLite user_configs"]
+    B --> B1["Config.scrape_tasks_v2()\nSOURCES / CITIES / OURDOMAIN_CITIES / XIOR_CITIES"]
+    B1 --> C["创建 Storage / Notifier / WebNotifier"]
+    C --> D["进入 main_loop 轮询"]
+
+    D --> E["run_once()"]
+    E --> F["预热 H2S 自动预订登录 session"]
+    E --> G["dispatch_scrape_tasks(tasks)\n按 source 路由 ScrapeTask"]
+
+    subgraph S["多平台抓取层 scrapers/"]
+        G --> H1["holland2stay:Eindhoven...\nHollandStayScraper"]
+        G --> H2["ourdomain:Diemen / South-East\nOurDomainScraper"]
+        H2 --> H21["RENTCafe floorplans.aspx\n发现 floorplan ids"]
+        H21 --> H22["rcLoadContent.ashx availableunits\n单元级房源"]
+        H22 --> H23["解析 Unit / Area / Floor / Date\nsource = ourdomain"]
+        H2 --> H24{"403 Cloudflare?"}
+        H24 -->|是| H25["切换 TLS 指纹\nOURDOMAIN_IMPERSONATES"]
+        H25 --> H21
+
+        G --> H3["xior:Eindhoven Kronehoefstraat...\nXiorScraper"]
+        H3 --> H31["POST admin-ajax.php\nyardi_room_availability"]
+        H31 --> H32["解析 JSON 响应\napartmentId / sqm / rent"]
+        H32 --> H33["单元级房源\nsource = xior"]
+        H3 --> H34{"429 限流?"}
+        H34 -->|是| H35["退避重试 RATE_LIMIT_BACKOFF\n请求间 1.5s 间隔"]
+        H35 --> H31
+    end
+
+    H1 --> I{"抓取结果"}
+    H23 --> I
+    H24 -->|全部指纹失败| I
+    H33 --> I
+    H34 -->|重试耗尽| I
+
+    I -->|至少一个任务成功| J["合并 listings + completeness\nsource:city key 防同名覆盖"]
+    I -->|全部任务网络失败| K["ScrapeNetworkError\n连续失败计数 / cooldown"]
+    I -->|全部任务 403/429| L["BlockedError / RateLimitError\nmain_loop 冷却"]
+    I -->|单平台失败| M["记录 completeness=false\n隔离失败平台"]
+
+    M --> J
+    J --> N["storage.diff(fresh)\nsource-aware upsert / 状态变化"]
+    N --> O["mark_stale_listings()\n按 source:city 完整扫描结果收敛"]
+    O --> P["更新 last_scrape_at / last_scrape_count"]
+
+    P --> Q["发送通知\nWeb / Telegram / Email / APNs"]
+    Q --> Q1["标题/正文带平台 badge\nH2S / OD / XR"]
+    Q1 --> R["记录已通知状态"]
+
+    P --> T["扫描自动预订候选"]
+    T --> U{"listing.source == holland2stay\n且可直接预订?"}
+    U -->|是| V["立即提交 try_book()\n线程池并发执行"]
+    U -->|否| W["跳过自动预订\nOD / XR 仅通知不预订"]
+
+    V --> X["booker.py\n登录/复用预热 session"]
+    X --> Y["createEmptyCart → addNewBooking\n→ placeOrder → idealCheckOut"]
+    Y --> AE{"预订结果"}
+    AE -->|成功| AF["发送 Booking 成功通知\n包含付款链接"]
+    AE -->|失败| AG["发送失败原因\n可进入重试队列"]
+    AF --> R
+    AG --> R
+
+    R --> AH["本轮结束"]
+    W --> AH
+    K --> AI["等待下一轮"]
+    L --> AI
+    AH --> AI
+    AI --> D
+
+    subgraph WEB["网页 / API 读取路径"]
+        N --> WEB1["listings 表含 source 字段"]
+        WEB1 --> WEB2["dashboard / listings / map / calendar\n显示 H2S / OD / XR badge"]
+        WEB1 --> WEB3["/api/v1/listings?source=...\nfilter/options.sources"]
+        WEB1 --> WEB4["stats source_dist 平台分布"]
+    end
 ```
 
 ### 模块职责
 
 | 文件 | 职责 |
 |------|------|
-| `monitor.py` | 主调度循环，自适应智能轮询（双高峰窗口），热重载，prewarm 缓存（Phase B 跨轮复用），并发预订，按时心跳，双日志（monitor.log + errors.log） |
-| `scraper.py` | GraphQL 抓取，curl_cffi，自动翻页，多城市，429 退避含累计等待，代理支持，增强错误上下文日志 |
-| `storage.py` | SQLite 持久化，diff 检测，chart 聚合，meta 键值，web_notifications 表，`get_distinct_cities()` |
-| `models.py` | Listing dataclass，price_display，feature_map |
-| `notifier.py` | BaseNotifier ABC，iMessage（macOS 检测 + AppleScript 转义加固），Telegram，Email，WhatsApp，WebNotifier，MultiNotifier |
+| `monitor.py` | 主调度循环，自适应智能轮询（双高峰窗口），热重载，prewarm 缓存，并发预订，多源 dispatch |
+| `scrapers/__init__.py` | `SCRAPER_REGISTRY`，`dispatch_scrape_tasks()` — 按 source 路由 ScrapeTask，合并结果，隔离故障 |
+| `scrapers/base.py` | `AbstractScraper` ABC，`ScrapeTask`/`ScrapeResult` 数据类，共享异常 |
+| `scrapers/holland2stay.py` | `HollandStayScraper`：GraphQL API，curl_cffi Chrome 指纹，翻页，429 退避，代理 |
+| `scrapers/ourdomain.py` | `OurDomainScraper`：RENTCafe 两阶段抓取（floorplans→availableunits），单元去重，楼层/日期解析，Safari 指纹 |
+| `scraper.py` | 向后兼容 re-export + 旧 `scrape_all()` |
+| `storage.py` | SQLite 持久化 re-export（`mstorage/`） |
+| `mstorage/_listings.py` | diff 检测，房源查询，状态计数，stale 收敛 |
+| `models.py` | `Listing` dataclass（含 `source` 多源字段），price_display，feature_map |
+| `notifier.py` | BaseNotifier ABC，iMessage/Telegram/Email/WhatsApp/WebNotifier，MultiNotifier |
+| `mcore/push.py` | APNs 推送：按设备语言分组，`_T` 中英翻译表，频率/去重节流 |
+| `mcore/booking.py` | 预订编排：`book_with_fallback()`，`RetryQueue`，`area_key` |
+| `mcore/interval.py` | 自适应轮询间隔 + 抖动 |
+| `mcore/prewarm.py` | `PrewarmCache`：进程级 session 缓存，TTL 刷新 |
 | `booker.py` | PrewarmedSession；createEmptyCart → addNewBooking → placeOrder (store_id) → idealCheckOut (plateform "h")；增强错误上下文（sku/contract_id/start_date）；cancel_enabled 代理支持 |
 | `config.py` | 全局配置加载，KNOWN_CITIES（26 城市），ListingFilter，AutoBookConfig |
 | `users.py` | UserConfig dataclass，SQLite `user_configs` 读写，旧 `users.json` 一次性迁移 |
@@ -389,17 +408,21 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 
 | 问题 | 方案 | 原因 |
 |------|------|------|
-| Cloudflare 403 | `curl_cffi` + `impersonate="chrome110"` | TLS 层模拟 Chrome 指纹，无需启动浏览器 |
-| 页面无房源数据 | 直接请求 GraphQL API | Next.js + Apollo CSR，HTML 中无房源 DOM |
-| 预订竞争条件 | 通知前先提交 `try_book()` 到线程池 | 预订与通知并发执行，早到服务器 2–4 秒 |
-| 重复登录开销 | `PrewarmedSession`：每轮只登录一次，多套候选复用 | 预登录与通知并发进行；每次预订节省约 0.7 秒（建连 + 登录往返） |
-| API 限流 | 429 退避重试（30s / 60s）+ 5 分钟冷却 + 自适应降速 | 三层防御：scraper 重试、monitor 冷却、自适应间隔守住安全阈值 |
-| Cloudflare 403 WAF 屏蔽 | 立即抛 `BlockedError`（不重试）+ Cloudflare 挑战页识别 + 15 分钟冷却 + 节流告警（最多 1 次/30 分钟） | 403 是持续性封禁，等待无效；错误消息含可操作的恢复步骤 |
-| 高峰期频率探测 | 自适应间隔：×0.95 成功，×2.0 限流，下限 MIN_INTERVAL | 自动发现最大安全频率，无需手动调参 |
-| 异步通知 + 同步抓取 | `run_in_executor` 桥接 | scraper 用 sync curl_cffi，notifier 用 async subprocess |
-| 多渠道通知 | `BaseNotifier` ABC + `MultiNotifier` 聚合 | 统一格式化逻辑，子类只实现 `_send()` |
-| 与平台无关的通知 | `WebNotifier` 写 SQLite，SSE 推送浏览器 | 在 VPS / Docker 上无需任何 OS 依赖 |
-| iMessage 非 macOS | `is_macos()` 检测，`create_user_notifier()` 跳过 | 清晰警告，优雅降级，Web 面板接管 |
+| 多平台数据源 | `AbstractScraper` + `ScrapeTask`/`ScrapeResult` 协议 | 每个平台实现 `scrape(task) → ScrapeResult`；`dispatch_scrape_tasks()` 按 source 路由，隔离故障，合并结果 |
+| H2S Cloudflare 403 | `curl_cffi` + `impersonate="chrome*"` | TLS 层模拟 Chrome 指纹，无需浏览器 |
+| OurDomain RENTCafe CF | `curl_cffi` + `impersonate="safari17_0"` | Safari 指纹可过 RENTCafe 的 POST 请求；Chrome 被拦 |
+| RENTCafe reCAPTCHA | 第三方解决服务（capsolver/2captcha） | HTTP API 返回 v3 token，1–15s，无需 Playwright |
+| H2S 页面无房源数据 | 直接请求 GraphQL API | Next.js + Apollo CSR，HTML 中无房源 DOM |
+| OurDomain 无 API | 解析 HTML 表格 + `data-selenium-id` 锚点 | RENTCafe 是 ASP.NET 服务端渲染；Yardi 留有测试锚点 |
+| 单元去重 (OurDomain) | `_merge_unit()` 按 `unit_id` 跨 FP 去重 | 同一物理单元可签约多种合同类型 |
+| 预订竞争条件 | 通知前先提交 `try_book()` 到线程池 | 预订与通知并发执行 |
+| 重复登录开销 | `PrewarmedSession` 缓存 + TTL 刷新 | 进程级缓存，跨轮复用，与抓取并行 |
+| API 限流 | 429 退避 + 5 分钟冷却 + 自适应降速 | 三层防御 |
+| Cloudflare 403 WAF | 立即抛 `BlockedError` + 节流告警 + 15 分钟冷却 | 403 持续性封禁，等待无效 |
+| iOS 双语推送 | `_T` 翻译表 + `_send_to_user` 按语言分组 | 每语言组独立 payload；`_t(text, lang)` 查表 |
+| 异步通知 + 同步抓取 | `run_in_executor` 桥接 | scraper sync，notifier async |
+| 多渠道通知 | `BaseNotifier` ABC + `MultiNotifier` | 统一格式化，子类实现 `_send()` |
+| iMessage 非 macOS | `is_macos()` 检测 + 跳过 | 清晰警告，优雅降级 |
 | SQLite 并发访问 | WAL journal mode | monitor 写 web_notifications，web.py 独立连接只读，互不阻塞 |
 | 配置热重载 | SIGHUP → asyncio.Event（Unix）/ reload 文件轮询（Windows） | 修改后配置立即生效，监控进程不中断 |
 | 多用户存储 | SQLite `user_configs` | 单一真实数据源，事务写入，支持并发注册/编辑 |
@@ -410,7 +433,7 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | INFO 噪音淹没告警 | 独立 `errors.log`（WARNING+），含 `funcName:lineno` 格式，backupCount=5 | `monitor.log` 保留 INFO+ 运维视图；`errors.log` 归档稀疏但可操作的异常，精确定位源 |
 | 无自动化测试 | 10 个 pytest 模块，共享 fixture（`temp_db`、`client`、`admin_client` 等） | 纯函数测试覆盖 models/crypto/safety/storage；HTTP 集成测试覆盖 auth/user/log 路由；零外部网络依赖 |
 
-### GraphQL API 参数
+### H2S GraphQL API
 
 | 参数 | 值 |
 |------|-----|
@@ -419,6 +442,18 @@ api.holland2stay.com/graphql/   ← Magento GraphQL 后端
 | 可直接预订 | `available_to_book: { in: ["179"] }` |
 | 摇号中 | `available_to_book: { in: ["336"] }` |
 | 自定义属性 | `custom_attributesV2` → `price`（总租金含服务费）/ `living_area` / `floor` / `available_startdate` 等 |
+
+### OurDomain / RENTCafe 数据
+
+| 参数 | 值 |
+|------|-----|
+| 基础 URL | `https://thisisourdomain.securerc.co.uk/onlineleasing/` |
+| 阶段 1 | `floorplans.aspx` → 提取 `subPointerId`（户型 ID） |
+| 阶段 2 | `rcLoadContent.ashx?contentclass=availableunits&floorPlans={id}&MoveInDate={date}` → 单元行 |
+| 单元字段 | `data-selenium-id="Apt{N}"`（房间号）、`SqFt`（面积 m²）、`Rent`（月租 €）、`Deposit`（押金）、`Amenity`（楼层/朝向）、`AvailDate`（可租状态） |
+| 状态映射 | `<span class="text-success">Available</span>` → 可预订 / `<span class="text-warning">Wait List` → 可抽签 |
+| 去重 | `_merge_unit()` 按数字 `unit_id` 去重——同一房间可签不同合同类型 |
+| 自动预订 | ASP.NET 多步表单 POST → `rcformsave.ashx`；受 reCAPTCHA v3+v2 保护（详见 [OURDOMAIN.md](OURDOMAIN.md) §10） |
 
 ---
 

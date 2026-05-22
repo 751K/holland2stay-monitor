@@ -235,7 +235,7 @@ class TestMonitorBlockedHandling:
         storage = Storage(tmp_path / "test.db", timezone_str="UTC")
 
         async def go():
-            with patch("monitor.scrape_all", side_effect=scrape_fn):
+            with patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn):
                 await run_once(cfg, storage, notifs, dry_run=False)
 
         try:

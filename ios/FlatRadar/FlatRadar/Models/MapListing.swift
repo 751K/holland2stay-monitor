@@ -12,6 +12,7 @@ struct MapListing: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let status: String
+    let source: String?
     let priceRaw: String
     let availableFrom: String
     let url: String
@@ -24,7 +25,7 @@ struct MapListing: Decodable, Identifiable, Hashable, Sendable {
     let lng: Double
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, url, city, neighborhood, building, area, address, lat, lng
+        case id, name, status, source, url, city, neighborhood, building, area, address, lat, lng
         case priceRaw = "price_raw"
         case availableFrom = "available_from"
     }
@@ -36,6 +37,22 @@ struct MapListing: Decodable, Identifiable, Hashable, Sendable {
     /// 已小写的 status 字符串。clusterColor 在 2000 个 pin 上遍历调
     /// `status.lowercased()` 是热点，提供小写缓存避免每帧 2000 次堆分配。
     var statusLowered: String { status.lowercased() }
+
+    var sourceShortText: String {
+        switch (source ?? "holland2stay").lowercased() {
+        case "holland2stay": return "H2S"
+        case "ourdomain": return "OD"
+        default: return (source ?? "H2S").uppercased()
+        }
+    }
+
+    var sourceDisplayText: String {
+        switch (source ?? "holland2stay").lowercased() {
+        case "holland2stay": return "Holland2Stay"
+        case "ourdomain": return "OurDomain"
+        default: return sourceShortText
+        }
+    }
 }
 
 /// `GET /api/v1/map` 响应包络。

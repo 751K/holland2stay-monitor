@@ -372,9 +372,12 @@ struct MapView: View {
             // Title row
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(l.name)
-                        .font(.headline)
-                        .lineLimit(2)
+                    HStack(spacing: 6) {
+                        Text(l.name)
+                            .font(.headline)
+                            .lineLimit(2)
+                        sourceBadge(l.sourceShortText, source: l.source)
+                    }
                     HStack(spacing: 6) {
                         Text(l.city)
                         if !l.neighborhood.isEmpty {
@@ -408,11 +411,12 @@ struct MapView: View {
             HStack(spacing: 8) {
                 Button {
                     let id = l.id
+                    let title = l.name
                     store.selectedID = nil   // close sheet
                     if UIDevice.current.userInterfaceIdiom == .pad {
-                        coord.openListing(id: id)
+                        coord.openListing(id: id, titleHint: title)
                     } else {
-                        coord.listingsPath.append(.byId(id))
+                        coord.listingsPath.append(.byId(id, titleHint: title))
                     }
                 } label: {
                     Label("View Details", systemImage: "arrow.right.circle.fill")
@@ -452,6 +456,23 @@ struct MapView: View {
         if lower.contains("lottery") { return String(localized: "Lottery") }
         if lower.contains("not available") { return String(localized: "Unavailable") }
         return s
+    }
+
+    private func sourceBadge(_ label: String, source: String?) -> some View {
+        Text(label)
+            .font(.system(size: 10, weight: .heavy, design: .monospaced))
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(sourceColor(source).opacity(0.14), in: Capsule())
+            .foregroundStyle(sourceColor(source))
+    }
+
+    private func sourceColor(_ source: String?) -> Color {
+        switch (source ?? "holland2stay").lowercased() {
+        case "ourdomain": return .purple
+        case "xior": return .teal
+        default: return .blue
+        }
     }
 }
 

@@ -39,6 +39,7 @@ def register_device_for_token(
     platform: str = "ios",
     model: str = "",
     bundle_id: str = "",
+    language: str = "en",
 ) -> dict:
     """Validate and register/refresh a device for one app auth token."""
     device_token = (device_token or "").strip()
@@ -46,6 +47,7 @@ def register_device_for_token(
     platform = (platform or "ios").strip().lower()
     model = (model or "").strip()[:64]
     bundle_id = (bundle_id or "").strip()[:128]
+    language = (language or "en").strip().lower()[:8]
 
     if not device_token:
         raise DeviceValidationError("缺少 device_token")
@@ -63,6 +65,7 @@ def register_device_for_token(
                 platform=platform,
                 model=model,
                 bundle_id=bundle_id,
+                language=language,
             )
         except ValueError as exc:
             raise DeviceValidationError(str(exc)) from exc

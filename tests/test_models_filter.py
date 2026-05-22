@@ -50,6 +50,12 @@ class TestParseFloat:
         # "1,200.50" → 1200.50
         assert parse_float("€1,200.50") == 1200.5
 
+    def test_with_euro_dot_thousands_separator(self):
+        assert parse_float("€ 1.587") == 1587.0
+
+    def test_with_euro_decimal_comma(self):
+        assert parse_float("€ 1.587,50") == 1587.5
+
     def test_empty_returns_none(self):
         assert parse_float("") is None
 
@@ -224,6 +230,12 @@ class TestListingFilterWhitelist:
         assert f.passes(l) is True
         l2 = _make_listing(city="Amsterdam")
         assert f.passes(l2) is False
+
+    def test_allowed_sources_exact_match(self):
+        """平台是精确匹配，支持用户只订阅 OD 或 H2S。"""
+        f = ListingFilter(allowed_sources=["ourdomain"])
+        assert f.passes(_make_listing(source="ourdomain")) is True
+        assert f.passes(_make_listing(source="holland2stay")) is False
 
     def test_empty_whitelist_passes_all(self):
         """白名单是空列表 = 不生效（全部放行）。"""

@@ -15,10 +15,11 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from booker import try_book
+from bookers import BookingRequest, dispatch_book, supports_booking
 from models import parse_float
 
 if TYPE_CHECKING:
+    from booker import PrewarmedSession
     from users import UserConfig
 
 logger = logging.getLogger("monitor")
@@ -51,16 +52,29 @@ def book_with_fallback(
     sorted_candidates: list,
     user: "UserConfig",
     deadline: float,
-    prewarmed=None,
+    prewarmed: "PrewarmedSession | None" = None,
 ):
     """
-    按面积降序依次对 sorted_candidates 中的房源尝试 try_book()。
+    按面积降序依次对 sorted_candidates 中的房源尝试自动下单。
+
+    候选过滤
+    --------
+    P1 多源后：``sorted_candidates`` 可能包含 OurDomain 等**不支持自动下单**
+    的 source。这些 listing 不参与本函数——通过 ``bookers.supports_booking()``
+    在入口处过滤掉。被过滤的候选会得到一个 INFO 日志，不发任何通知（用户
+    已经从 new-listing 推送的 deep link 自行处理）。
+
+    路由
+    ----
+    每个候选通过 ``bookers.dispatch_book(BookingRequest)`` 按 ``listing.source``
+    路由到对应 Booker。当前注册：
+        holland2stay → HollandStayBooker（封装 booker.try_book）
 
     重试条件
     --------
     仅在 result.phase == "race_lost"（房源已被他人抢先预订）时继续尝试下一套。
-    其余失败类型（reserved_conflict / unknown_error / blocked 等）立即返回——
-    这些错误与具体房源无关，换一套也无法解决。
+    其余失败类型（reserved_conflict / unknown_error / blocked / unsupported 等）
+    立即返回——这些错误与具体房源无关，换一套也无法解决。
 
     blocked 特殊说明
     ----------------
@@ -74,31 +88,44 @@ def book_with_fallback(
     从第二套起，仅在 deadline 之前继续，避免占用下一轮扫描的时间窗口。
     deadline = float('inf') 表示无限制（--once / --test 模式）。
     """
+    bookable = [l for l in sorted_candidates if supports_booking(getattr(l, "source", "holland2stay"))]
+    skipped = len(sorted_candidates) - len(bookable)
+    if skipped:
+        sources_skipped = sorted({
+            getattr(l, "source", "?") for l in sorted_candidates
+            if not supports_booking(getattr(l, "source", "holland2stay"))
+        })
+        logger.info(
+            "[%s] 跳过 %d 个不支持自动下单的候选 (source=%s)——用户应从通知 deep link 手动申请",
+            user.name, skipped, ",".join(sources_skipped),
+        )
+    if not bookable:
+        return None
+
     last_result = None
-    for i, listing in enumerate(sorted_candidates):
+    for i, listing in enumerate(bookable):
         if i > 0:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 logger.warning(
                     "[%s] ⏰ 已到下次扫描截止，停止备选重试（已尝试 %d/%d，剩余 %d 套未试）",
-                    user.name, i, len(sorted_candidates),
-                    len(sorted_candidates) - i,
+                    user.name, i, len(bookable),
+                    len(bookable) - i,
                 )
                 break
             logger.info(
                 "[%s] 🔄 竞争失败，尝试备选 %d/%d: %s (%.1f m²)，距截止还剩 %.0f 秒",
-                user.name, i + 1, len(sorted_candidates),
+                user.name, i + 1, len(bookable),
                 listing.name, area_key(listing), remaining,
             )
 
-        result = try_book(
-            listing,
-            user.auto_book.email,
-            user.auto_book.password,
-            dry_run=user.auto_book.dry_run,
-            cancel_enabled=user.auto_book.cancel_enabled,
-            payment_method=user.auto_book.payment_method,
-            prewarmed=prewarmed,
+        result = dispatch_book(
+            BookingRequest(
+                listing=listing,
+                user=user,
+                dry_run=user.auto_book.dry_run,
+                prewarmed=prewarmed,
+            )
         )
         last_result = result
 

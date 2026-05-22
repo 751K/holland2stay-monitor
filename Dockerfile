@@ -17,9 +17,11 @@ RUN pip install --no-cache-dir -r requirements.lock \
 # 复制应用代码
 COPY *.py ./
 COPY app/ app/
+COPY bookers/ bookers/
 COPY mcore/ mcore/
 COPY mstorage/ mstorage/
 COPY notifier_channels/ notifier_channels/
+COPY scrapers/ scrapers/
 COPY .env.example ./
 COPY templates/ templates/
 COPY static/ static/

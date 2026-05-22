@@ -2,10 +2,11 @@
 路由：监控进程控制 + 配置热重载 + 整体关闭
 
 挂载的 endpoint
-- POST /api/reload         → api_reload
-- POST /api/monitor/start  → api_monitor_start
-- POST /api/monitor/stop   → api_monitor_stop
-- POST /api/shutdown       → api_shutdown
+- POST /api/reload          → api_reload          热重载（SIGHUP）只更新 .env / SQLite 配置
+- POST /api/monitor/start   → api_monitor_start
+- POST /api/monitor/stop    → api_monitor_stop
+- POST /api/monitor/restart → api_monitor_restart 完整进程重启（stop + start，会重新 import 代码）
+- POST /api/shutdown        → api_shutdown
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from app.services.monitor_service import (
     MonitorServiceError,
     is_monitor_running,
     reload_monitor,
+    restart_monitor,
     start_monitor,
     stop_monitor,
     terminate_process,
@@ -83,6 +85,21 @@ def api_monitor_stop():
 
 @admin_api_required
 @csrf_required
+def api_monitor_restart():
+    """完整重启监控进程（stop + start）——会重新 import 所有 Python 模块，
+    供改了代码后用。与 ``/api/reload`` 不同：reload 只刷新 .env/SQLite 配置。"""
+    try:
+        result = restart_monitor()
+    except MonitorServiceError as e:
+        return jsonify({"ok": False, "error": str(e)}), e.status
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    msg = "进程已重启（旧进程已退出，新进程已启动）" if result.get("was_running") else "进程已启动"
+    return jsonify({"ok": True, "message": msg, **{k: v for k, v in result.items() if k != "restarted"}})
+
+
+@admin_api_required
+@csrf_required
 def api_shutdown():
     """关闭监控和 Web 面板。"""
     # 先停监控
@@ -103,7 +120,8 @@ def api_shutdown():
 
 
 def register(app: Flask) -> None:
-    app.add_url_rule("/api/reload",        endpoint="api_reload",        view_func=api_reload,        methods=["POST"])
-    app.add_url_rule("/api/monitor/start", endpoint="api_monitor_start", view_func=api_monitor_start, methods=["POST"])
-    app.add_url_rule("/api/monitor/stop",  endpoint="api_monitor_stop",  view_func=api_monitor_stop,  methods=["POST"])
-    app.add_url_rule("/api/shutdown",      endpoint="api_shutdown",      view_func=api_shutdown,      methods=["POST"])
+    app.add_url_rule("/api/reload",          endpoint="api_reload",          view_func=api_reload,          methods=["POST"])
+    app.add_url_rule("/api/monitor/start",   endpoint="api_monitor_start",   view_func=api_monitor_start,   methods=["POST"])
+    app.add_url_rule("/api/monitor/stop",    endpoint="api_monitor_stop",    view_func=api_monitor_stop,    methods=["POST"])
+    app.add_url_rule("/api/monitor/restart", endpoint="api_monitor_restart", view_func=api_monitor_restart, methods=["POST"])
+    app.add_url_rule("/api/shutdown",        endpoint="api_shutdown",        view_func=api_shutdown,        methods=["POST"])

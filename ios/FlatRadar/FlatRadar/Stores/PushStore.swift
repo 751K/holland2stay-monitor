@@ -60,6 +60,16 @@ final class PushStore {
         Bundle.main.bundleIdentifier ?? ""
     }
 
+    /// 设备当前语言，取 primary language code（"en" / "zh" / ...）。
+    /// 上报给后端的 ``/api/v1/devices/register``，用于 APNs 双语推送。
+    static var currentLanguage: String {
+        if #available(iOS 16, *) {
+            return Locale.current.language.languageCode?.identifier ?? "en"
+        } else {
+            return Locale.current.languageCode ?? "en"
+        }
+    }
+
     // MARK: - Setup
 
     /// App 启动时调一次：挂回调，让 PushDelegate 把 token 转给我们。
@@ -148,7 +158,8 @@ final class PushStore {
                 token: hex,
                 env: Self.currentEnv,
                 model: Self.currentModel,
-                bundleId: Self.currentBundleId)
+                bundleId: Self.currentBundleId,
+                language: Self.currentLanguage)
             registeredDeviceId = resp.deviceId
             lastError = nil
             print("[PushStore] backend registered device_id=\(resp.deviceId) env=\(resp.env)")

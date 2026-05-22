@@ -4,6 +4,7 @@ struct Listing: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let status: String
+    let source: String?
     let priceRaw: String?
     let priceValue: Double?
     let availableFrom: String?
@@ -15,7 +16,7 @@ struct Listing: Decodable, Identifiable, Hashable, Sendable {
     let lastSeen: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, features, url, city
+        case id, name, status, source, features, url, city
         case priceRaw = "price_raw"
         case priceValue = "price_value"
         case availableFrom = "available_from"
@@ -177,6 +178,50 @@ extension Listing {
         if interval < 3600 { return "\(Int(interval / 60))m" }
         if interval < 86400 { return "\(Int(interval / 3600))h" }
         return "\(Int(interval / 86400))d"
+    }
+
+    var normalizedSourceKey: String? {
+        let raw = (source ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if raw.contains("holland2stay") || raw == "h2s" { return "holland2stay" }
+        if raw.contains("ourdomain") || raw == "od" { return "ourdomain" }
+        if raw.contains("xior") || raw == "xr" { return "xior" }
+
+        let host = URL(string: url)?.host(percentEncoded: false)?.lowercased() ?? url.lowercased()
+        if host.contains("holland2stay") { return "holland2stay" }
+        if host.contains("ourdomain") || host.contains("securerc.co.uk") { return "ourdomain" }
+        if host.contains("xior") { return "xior" }
+
+        return raw.isEmpty ? nil : raw
+    }
+
+    var sourceShortText: String {
+        switch normalizedSourceKey {
+        case "holland2stay": return "H2S"
+        case "ourdomain":    return "OD"
+        case "xior":         return "XR"
+        case .some(let source): return source.uppercased()
+        case .none: return "PLT"
+        }
+    }
+
+    var sourceDisplayText: String {
+        switch normalizedSourceKey {
+        case "holland2stay": return "Holland2Stay"
+        case "ourdomain":    return "OurDomain"
+        case "xior":         return "Xior"
+        case .some(let source): return sourceShortText(for: source)
+        case .none: return "Platform"
+        }
+    }
+
+    private func sourceShortText(for source: String) -> String {
+        source
+            .split { $0 == "_" || $0 == "-" || $0 == " " }
+            .map { word in
+                let lower = word.lowercased()
+                return lower.prefix(1).uppercased() + lower.dropFirst()
+            }
+            .joined(separator: " ")
     }
 
     func featureValue(matching aliases: [String]) -> String? {

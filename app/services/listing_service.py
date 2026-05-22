@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from contextlib import contextmanager
 from dataclasses import asdict
 from typing import Any, Iterable, Optional
@@ -62,6 +63,62 @@ def feature_contains(row: dict, category: str, value: str) -> bool:
     return False
 
 
+def normalize_listing_row(row: dict) -> dict:
+    """Return a display-normalized copy of one listing row."""
+    out = dict(row)
+    source = (out.get("source") or "holland2stay").lower()
+    if source == "ourdomain":
+        out["name"] = _ourdomain_display_name(out)
+    elif source == "xior":
+        out["name"] = _xior_display_name(out)
+    return out
+
+
+def normalize_listing_rows(rows: Iterable[dict]) -> list[dict]:
+    """Normalize rows for Web/API display without mutating storage results."""
+    return [normalize_listing_row(r) for r in rows]
+
+
+def _ourdomain_display_name(row: dict) -> str:
+    unit = feature_value(row, "Unit") or _extract_ourdomain_unit(row.get("name", ""))
+    if not unit:
+        return str(row.get("name") or "")
+    building = feature_value(row, "Building") or row.get("city") or "Diemen"
+    building = _short_ourdomain_building(str(building))
+    unit = unit.strip()
+    if not unit.startswith("#"):
+        unit = f"#{unit}"
+    return f"{building} {unit}".strip()
+
+
+def _extract_ourdomain_unit(name: str) -> str:
+    m = re.search(r"#?\b(\d{3,})\b", name or "")
+    return f"#{m.group(1)}" if m else ""
+
+
+def _short_ourdomain_building(building: str) -> str:
+    value = building.strip()
+    lower = value.lower()
+    if lower == "amsterdam diemen" or lower.endswith(" diemen"):
+        return "Diemen"
+    return value or "Diemen"
+
+
+def _xior_display_name(row: dict) -> str:
+    """Xior listing display: 'Maastricht Annadal M1.30.53' → 'M1.30.53'"""
+    unit = feature_value(row, "Unit") or ""
+    building = feature_value(row, "Building") or ""
+    if unit:
+        return unit
+    # fallback: extract from raw name
+    name = row.get("name", "")
+    if " " in name:
+        parts = name.split(" ", 2)
+        if len(parts) >= 3:
+            return parts[-1]
+    return name
+
+
 def feature_rank_ok(row: dict, min_rank: int) -> bool:
     """Return whether the listing energy rank is at least as good as min_rank."""
     from config import energy_rank
@@ -78,6 +135,7 @@ def feature_rank_ok(row: dict, min_rank: int) -> bool:
 
 def row_to_listing(row: dict) -> Listing:
     """Convert a SQLite listing row dict into models.Listing for filters."""
+    row = normalize_listing_row(row)
     return Listing(
         id=row.get("id", "") or "",
         name=row.get("name", "") or "",
@@ -87,6 +145,7 @@ def row_to_listing(row: dict) -> Listing:
         features=safe_features(row),
         url=row.get("url", "") or "",
         city=row.get("city", "") or "",
+        source=row.get("source") or "holland2stay",
     )
 
 
@@ -122,6 +181,7 @@ def serialize_listing(row: dict) -> dict:
     """Stable API v1 listing JSON shape."""
     from models import parse_features_list, parse_float
 
+    row = normalize_listing_row(row)
     feats = safe_features(row)
     feature_map = parse_features_list(feats)
     return {
@@ -132,6 +192,7 @@ def serialize_listing(row: dict) -> dict:
         "price_value": parse_float(row.get("price_raw", "")),
         "available_from": row.get("available_from") or "",
         "city": row.get("city") or "",
+        "source": row.get("source") or "holland2stay",
         "url": row.get("url") or "",
         "features": feats,
         "feature_map": feature_map,
@@ -153,12 +214,14 @@ def query_listing_rows(
     status: str | None = None,
     search: str | None = None,
     cities: list[str] | None = None,
+    sources: list[str] | None = None,
     types: list[str] | None = None,
     contract: str | None = None,
     energy: str | None = None,
     max_rent: float | None = None,
     min_area: float | None = None,
     tenants: list[str] | None = None,
+    occupancies: list[str] | None = None,
     finishing: str | None = None,
     limit: int = 2000,
 ) -> list[dict]:
@@ -172,15 +235,19 @@ def query_listing_rows(
     from models import parse_features_list, parse_float
 
     cities = cities or []
+    sources = sources or []
     types = types or []
     tenants = tenants or []
+    occupancies = occupancies or []
     sql_city = cities[0] if len(cities) == 1 else None
+    sql_source = sources[0] if len(sources) == 1 else None
 
     with storage_ctx() as st:
         rows = st.get_all_listings(
             status=status,
             search=search,
             city=sql_city,
+            source=sql_source,
             limit=limit,
         )
 
@@ -189,6 +256,9 @@ def query_listing_rows(
     if len(cities) > 1:
         city_set = {c.lower() for c in cities}
         rows = [r for r in rows if (r.get("city") or "").lower() in city_set]
+    if len(sources) > 1:
+        source_set = {s.lower() for s in sources}
+        rows = [r for r in rows if (r.get("source") or "holland2stay").lower() in source_set]
     if max_rent is not None:
         rows = [
             r for r in rows
@@ -213,6 +283,13 @@ def query_listing_rows(
             r for r in rows
             if any(feature_contains(r, "Tenant", tenant) for tenant in tenants)
         ]
+    if occupancies:
+        # Occupancy feature 值形如 "Single" / "Two (only couples)" / "Three" 等。
+        # 多选语义：OR，命中任意一个值即通过。
+        rows = [
+            r for r in rows
+            if any(feature_contains(r, "Occupancy", occ) for occ in occupancies)
+        ]
     if energy:
         min_rank = energy_rank(energy)
         if min_rank is not None:
@@ -222,7 +299,7 @@ def query_listing_rows(
     if finishing:
         rows = [r for r in rows if feature_contains(r, "Finishing", finishing)]
 
-    return rows
+    return normalize_listing_rows(rows)
 
 
 def get_listing_detail(listing_id: str, user: UserConfig | None = None) -> dict | None:
@@ -238,7 +315,7 @@ def get_listing_detail(listing_id: str, user: UserConfig | None = None) -> dict 
     if user is not None and not user.listing_filter.is_empty():
         if not apply_user_filter([result], user):
             return None
-    return result
+    return normalize_listing_row(result)
 
 
 def get_filter_options() -> dict[str, Any]:
@@ -246,6 +323,12 @@ def get_filter_options() -> dict[str, Any]:
     with storage_ctx() as st:
         statuses = st.get_distinct_statuses()
         cities = st.get_distinct_cities()
+        sources = st.get_distinct_sources()
+        # 新增维度：Type（房型）+ Occupancy（允许入住人数）。
+        # 都是从 listings.features 里 distinct 提取的——values 取决于已抓取的源
+        # （H2S Studio / 1 / Loft；OurDomain Studio / 1-Bedroom Apartment / 1-Bedroom Loft）。
+        types = st.get_feature_values("Type")
+        occupancies = st.get_feature_values("Occupancy")
         contracts = st.get_feature_values("Contract")
         tenants = st.get_feature_values("Tenant")
         from config import ENERGY_LABELS, energy_rank
@@ -259,6 +342,9 @@ def get_filter_options() -> dict[str, Any]:
     return {
         "statuses": statuses,
         "cities": cities,
+        "sources": sources,
+        "types": types,
+        "occupancies": occupancies,
         "contracts": contracts,
         "tenants": tenants,
         "energies": energies,
@@ -307,4 +393,3 @@ def get_calendar_payload(user: UserConfig | None = None) -> dict[str, Any]:
     with storage_ctx() as st:
         listings = _filter_prebuilt_rows_by_user(st, st.get_calendar_listings(), user)
     return {"listings": listings}
-

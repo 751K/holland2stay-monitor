@@ -15,8 +15,8 @@ def _add(st, **kw):
     st.conn.execute(
         """INSERT OR REPLACE INTO listings
            (id, name, status, price_raw, available_from, features, url, city,
-            first_seen, last_seen, notified, last_status)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            first_seen, last_seen, notified, last_status, source)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             kw.get("id", "x"), kw.get("name", "x"),
             kw.get("status", "Available to book"),
@@ -26,6 +26,7 @@ def _add(st, **kw):
             kw.get("city", "Eindhoven"),
             "2026-05-01T00:00:00", "2026-05-13T00:00:00", 0,
             kw.get("status", "Available to book"),
+            kw.get("source", "holland2stay"),
         ),
     )
     st.conn.commit()
@@ -49,9 +50,11 @@ class TestCalendar:
 
     def test_extracts_building_from_features(self, store):
         _add(store, id="L1", available_from="2026-06-01",
-             features='["Building: De Flat", "Area: 30 m²"]')
+             features='["Building: De Flat", "Area: 30 m²"]',
+             source="ourdomain")
         items = store.get_calendar_listings()
         assert items[0]["building"] == "De Flat"
+        assert items[0]["source"] == "ourdomain"
 
     def test_empty_db(self, store):
         assert store.get_calendar_listings() == []
@@ -59,10 +62,11 @@ class TestCalendar:
 
 class TestMap:
     def test_get_map_listings(self, store):
-        _add(store, id="L1", name="Studio 1", city="Amsterdam")
+        _add(store, id="L1", name="Studio 1", city="Amsterdam", source="ourdomain")
         _add(store, id="L2", name="Studio 2", city="Utrecht")
         items = store.get_map_listings()
         assert len(items) == 2
+        assert any(i["id"] == "L1" and i["source"] == "ourdomain" for i in items)
 
     def test_address_includes_country(self, store):
         _add(store, id="L1", name="De Studio", city="Eindhoven")

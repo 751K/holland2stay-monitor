@@ -1,5 +1,98 @@
 # Changelog
 
+## v1.7.0 (2026-05-22)
+
+### 后端 — 多源抓取架构（P0→P1）
+
+- **`scrapers/` 包**：新增 `AbstractScraper` ABC + `ScrapeTask`/`ScrapeResult` 协议。每个第三方平台实现 `scrape(task) → ScrapeResult`，`dispatch_scrape_tasks()` 按 `source` 路由、隔离故障、合并产出。
+- **`scrapers/base.py`**：共享异常 `RateLimitError`/`BlockedError`/`ScrapeNetworkError` 从 `scraper.py` 迁入，所有 scraper 统一异常协议。
+- **`scrapers/holland2stay.py`**：`HollandStayScraper` 封装现有 GraphQL 抓取逻辑，行为零变更。
+- **`monitor.py` 全量切换到 `dispatch_scrape_tasks()`**：旧 `scraper.scrape_all()` 路径已移除。多源抓取结果合并后统一走 diff → notify → book 管线。
+- **`Listing.source` 字段**：标识房源平台来源（`"holland2stay"` / `"ourdomain"`），UI/通知模板可据此显示 source badge。
+
+### 后端 — OurDomain / RENTCafe 集成
+
+- **`scrapers/ourdomain.py`**：`OurDomainScraper` — RENTCafe 两阶段抓取（`floorplans.aspx` → `availableunits`），单元级数据提取（房间号 #6045、面积单值 m²、月租单值 €、押金、楼层、朝向），`unit_id` 跨 FP 去重，`parse_ourdomain_floor()` 楼层解析（Ground → 0）。
+- **HTTP 策略**：`curl_cffi` + `safari17_0` impersonation 通过 RENTCafe Cloudflare（Chrome 指纹在此路径被拦，Safari 可过 GET + POST）。
+- **自动预订侦察**：RENTCafe 多步 ASP.NET 表单 POST → `rcformsave.ashx`；受 reCAPTCHA v3+v2 保护。第三方解决服务（capsolver/2captcha）可行但未实现——后续步骤待手动侦察。详见 [OURDOMAIN.md](OURDOMAIN.md) §10。
+- **`OurDomainScraper` 已注册到 `SCRAPER_REGISTRY`**，`scrape_tasks_v2()` 展开 `OURDOMAIN_CITIES`。
+- **Diemen & South-East 共用一个 RENTCafe property (184283)**，8 个物理单元，每个单元可签多种合同类型。
+
+### 后端 — 预订管线重构
+
+- **`mcore/booking.py`**：`book_with_fallback()` 抽取到独立模块，按面积降序尝试备选房源；`RetryQueue` 持久化竞败候选，跨轮重试。
+- **`mcore/interval.py`**：自适应间隔 + 抖动逻辑独立模块。
+- **`mcore/prewarm.py`**：`PrewarmCache` 进程级 session 缓存，TTL 刷新。
+- **`mcore/push.py`**：APNs 推送调度独立模块，含去重节流。
+
+### iOS — APNs 双语推送
+
+- **`_T` 中英翻译表**：9 条通知模板（新房源标题/正文、状态变更、预订成功、聚合轮次、异常告警），`_t(text, lang)` 查表。
+- **按设备语言分组发送**：`_send_to_user()` 取设备 `language` 字段，分组后每语言组构建独立 payload；同一用户中英设备各收各的语言。
+- **推送去 emoji**：标题/正文移除所有 emoji，仅保留 `[H2S]`/`[OD]` source tag 前缀。
+
+### iOS — 设备语言上报
+
+- **`PushStore.currentLanguage`**：读取 `Locale.current.language.languageCode`，iOS 16+ 兼容。
+- **`DeviceRegisterRequest.language`**：`POST /api/v1/devices/register` 新增 `language` 字段。
+- **`device_tokens.language`**：DB 新增列（默认 `'en'`），幂等 migration 兼容老库。
+
+### DB 迁移
+
+- **`device_tokens.language`**：`TEXT NOT NULL DEFAULT 'en'`，幂等 `_add_column_if_missing`。
+- **`user_configs.language`**：`TEXT NOT NULL DEFAULT 'en'`，幂等 `_add_column_if_missing`。用户推送语言偏好。
+- **`mstorage/_listings.py`**：新增 `count_by_status()` 方法，仪表盘用。
+
+### 通知多语言
+
+- **`UserConfig.language`**：新增字段（`"en"` / `"zh"`），控制 iMessage/Telegram/Email/WhatsApp 推送语言。
+- **`notifier.py`**：`_NOTIF_LABELS` 18 条中英翻译表 + `_tl(text, lang)`。`BaseNotifier.__init__` 接收 `language`，`_format_*` 所有标签走 `_tl()` 动态切换。
+- **通知文案去中文硬编码**：`WebNotifier` 和所有 `_format_*` 中的硬编码中文（`/月`、`入住`、`新房源上架` 等）改为英文 + `_tl()`，全渠道统一。
+- **APNs 推送**：此前已独立支持双语（按设备语言），不受此变更影响。
+
+### 后端 — Xior 集成
+
+- **`scrapers/xior.py`**：`XiorScraper` — WordPress AJAX JSON 抓取（`admin-ajax.php?action=yardi_room_availability`），单元级数据（房号 M1.30.53、精确面积 m²、月租 €、押金、入住日期、直达预订链接），`apartmentId` 去重。429 退避重用 `RATE_LIMIT_BACKOFF`。
+- **建筑字典**：荷兰 30 栋楼（15 城市），含 `property_page_id`、`semester_id`、`room_type_ids`，自动发现 + 手动维护。
+- **`discover_buildings()`**：城市页 → 建筑页 → 提取 Yardi modal 元数据，可一键刷新全量楼数据。
+- **HTTP 策略**：`curl_cffi` + 1.5s 间隔防 CF 限流。Turnstile 不验证服务端（空 token 返回完整数据）。
+- **Config**：`KNOWN_XIOR_CITIES`（30 栋），`XiorCityFilter`，`scrape_tasks_v2()` 集成，`.env` 默认 Eindhoven 两栋楼。
+
+### iOS — Alerts 界面重设计
+
+- **`NotificationsView` V3**：与 Dashboard / Browse 视觉语言对齐——`insetGrouped` 白色大圆角容器 + hairline 分割，不再逐行独立卡片。顶部双药丸 toolbar（type filter + Mark all read）。Live pill 绿点 + halo 呼吸动画。删除 emoji 和 32×32 icon tile → 8pt 小色点。
+
+### Bug 修复
+
+- **`stop_monitor()` 残留 PID 文件**：`terminate_process()` 杀进程后未清理 `monitor.pid`，导致 `monitor_pid()` 返回僵尸 PID→仪表盘误显示"监控运行中"。修复：`stop_monitor()` 增加 `PID_FILE.unlink(missing_ok=True)`。
+- **仪表盘 toggleMonitor 状态竞争**：`visibilitychange` 事件在切回标签页时强制 `location.reload()`，与 `toggleMonitor` 成功的本地 DOM 更新竞争——本地刚改为"已停止"，切页回来 reload 又把后端状态（进程尚未完全退出）覆盖回"运行中"。修复：`toggleMonitor` 成功分支改为 `location.reload()`，去掉脆弱的 16 行手动 DOM 操作。
+- **`scrapers/holland2stay.py` 缺汇总日志**：日志只显示内部 `scraper: [Eindhoven] 共抓取 12 条`，缺少 `scrapers.holland2stay:` 前缀的 source 级汇总，与 OurDomain/Xior 日志格式不一致。修复：`HollandStayScraper.scrape()` 返回前加 `logger.info("[%s] Holland2Stay 共抓取 %d 条房源", ...)`。
+- **`scraper.py` / `ourdomain.py` 重复常量**：`_RATE_LIMIT_BACKOFF` 和 `_is_cloudflare_body` 在两处重定义。修复：移至 `scrapers/base.py` 并导入复用。
+
+### Web — Xior 适配
+
+- **`app/jinja_filters.py`**：`source_label` / `source_short` 加 Xior（`"Xior"` / `"XR"`）。
+- **`templates/settings.html`**：平台勾选加 `XR · Xior`，新增 Xior 楼盘复选框（30 栋）。
+- **`app/routes/settings.py`**：读写 `XIOR_CITIES` env，`allowed_sources` 加 `"xior"`。
+- **`app/services/listing_service.py`**：`_xior_display_name()` 处理 Xior 房源名显示。
+- **`translations.py`**：`settings_xior_cities`、`settings_xior_hint` 中英标签。
+
+### 文档
+
+- **`docs/XIOR.md`**：完整设计文档（10 节）— 平台概况、技术验证、数据快照、三阶段抓取流程、Listing 映射、平台对比、实现设计、通知模板、风险、工程量。
+- **`docs/OURDOMAIN.md`**：完整设计文档（11 节）— 含自动预订可行性分析（§10）和 reCAPTCHA 绕过方案。
+- **`docs/SCRAPING_RECON.md`**：Xior 加入速览矩阵（第 1 位）；§5 Xior 独立侦察报告；原有 §4 OurDomain 更新；§7 推荐路径重排（Xior 排第一）。
+- **`docs/README.md` / `docs/README_cn.md`**：项目描述 H2S 单平台 → 多平台（H2S + OurDomain + Xior）；数据流图、模块职责表、技术决策表全面更新。
+- **`docs/CHANGELOG.md`**：v1.7.0 条目。
+
+### 测试
+
+- **`tests/test_ourdomain_scraper.py`**：27 个测试（FP ID、单元解析、楼层映射、occupancy 推断、抓取流程、403 异常、TLS 指纹重试）。
+- **`tests/test_push_dispatcher.py`**：推送测试适配新 `payload_fn` 接口，17/17 通过。
+- **`tests/test_scraper_dispatch.py`**：多源 dispatch 部分成功/全量失败场景，2/2 通过。
+
+---
+
 ## v1.6.1 (2026-05-21)
 
 ### iOS — Settings 重构

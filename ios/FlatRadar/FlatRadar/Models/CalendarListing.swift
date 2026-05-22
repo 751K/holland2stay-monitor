@@ -11,6 +11,7 @@ struct CalendarListing: Decodable, Identifiable, Hashable, Sendable {
     let id: String
     let name: String
     let status: String
+    let source: String?
     let priceRaw: String
     let availableFrom: String   // ISO yyyy-MM-dd
     let url: String
@@ -18,7 +19,7 @@ struct CalendarListing: Decodable, Identifiable, Hashable, Sendable {
     let building: String
 
     enum CodingKeys: String, CodingKey {
-        case id, name, status, url, city, building
+        case id, name, status, source, url, city, building
         case priceRaw = "price_raw"
         case availableFrom = "available_from"
     }
@@ -28,6 +29,22 @@ struct CalendarListing: Decodable, Identifiable, Hashable, Sendable {
 
     /// 用于按"日"分组的 key（YYYY-MM-DD），保证同一天的房源会聚合在一起。
     var dayKey: String { String(availableFrom.prefix(10)) }
+
+    var sourceShortText: String {
+        switch (source ?? "holland2stay").lowercased() {
+        case "holland2stay": return "H2S"
+        case "ourdomain": return "OD"
+        default: return (source ?? "H2S").uppercased()
+        }
+    }
+
+    var sourceDisplayText: String {
+        switch (source ?? "holland2stay").lowercased() {
+        case "holland2stay": return "Holland2Stay"
+        case "ourdomain": return "OurDomain"
+        default: return sourceShortText
+        }
+    }
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()

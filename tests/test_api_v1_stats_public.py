@@ -52,8 +52,9 @@ class TestGuestChartsIndex:
         keys = r.get_json()["data"]["charts"]
         assert "daily_new" in keys
         assert "status_dist" in keys
-        # 12 张图都暴露
-        assert len(keys) >= 10
+        assert "source_dist" in keys
+        # 多平台后包含平台分布图
+        assert len(keys) >= 13
 
 
 class TestGuestChart:

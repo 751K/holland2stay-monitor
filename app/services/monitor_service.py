@@ -19,6 +19,7 @@ from typing import Any
 
 from app.db import storage
 from app.process_ctrl import (
+    PID_FILE,
     monitor_pid,
     supervisorctl_available,
     supervisorctl_monitor,
@@ -127,6 +128,7 @@ def stop_monitor() -> dict[str, Any]:
         return {"stopped": True, "pid": pid, "method": "supervisor"}
 
     terminate_process(pid)
+    PID_FILE.unlink(missing_ok=True)
     return {"stopped": True, "pid": pid}
 
 
@@ -146,4 +148,51 @@ def reload_monitor() -> dict[str, Any]:
     except Exception:
         write_reload_request()
         return {"reload": True, "method": "file", "fallback": True}
+
+
+def restart_monitor() -> dict[str, Any]:
+    """Full process restart: stop + wait + start.
+
+    Reload（SIGHUP）只重读 .env / SQLite 配置，不重新 import Python 模块。
+    改了 scraper / notifier / 业务逻辑代码时需要走 restart，让新进程从头加载。
+
+    流程
+    ----
+    1. stop_monitor()  →  发 SIGTERM 让旧进程优雅退出（supervisor 接管时走 supervisorctl stop）
+    2. 等 PID 文件消失（最多 5s）—— 老进程清掉 PID 文件后再启动，避免 monitor_pid() 误判为已运行
+    3. start_monitor() →  起新进程
+
+    supervisor 环境下两步都走 supervisorctl，autorestart 配置仍生效。
+    """
+    import time
+
+    was_running = monitor_pid() is not None
+    if was_running:
+        # 让 stop_monitor 决定路径（直接 SIGTERM / supervisorctl stop）
+        try:
+            stop_monitor()
+        except MonitorServiceError as e:
+            # 已经停了 = 没问题，继续 start；其他错误上抛
+            if e.status != 409:
+                raise
+
+        # 等老进程退出（PID 文件被 monitor.py finally 块清掉）。
+        # 最多等 5s——supervisorctl stop 可能阻塞直到子进程死，
+        # 但直接 SIGTERM 是异步的，poll PID 才知道真死。
+        for _ in range(50):
+            if monitor_pid() is None:
+                break
+            time.sleep(0.1)
+        else:
+            raise MonitorServiceError(
+                "旧进程未在 5 秒内退出，可能正在收尾长操作；请稍后再试或先 Stop 再 Start",
+                status=500,
+            )
+
+    result = start_monitor()
+    return {
+        "restarted": True,
+        "was_running": was_running,
+        **{k: v for k, v in result.items() if k != "started"},
+    }
 

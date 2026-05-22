@@ -7,7 +7,13 @@ from models import Listing
 from monitor import _mark_stale_listings_for_complete_cities
 
 
-def _listing(listing_id: str, *, city: str, status: str = "Available to book") -> Listing:
+def _listing(
+    listing_id: str,
+    *,
+    city: str,
+    status: str = "Available to book",
+    source: str = "holland2stay",
+) -> Listing:
     return Listing(
         id=listing_id,
         name=f"Listing {listing_id}",
@@ -17,6 +23,7 @@ def _listing(listing_id: str, *, city: str, status: str = "Available to book") -
         features=[],
         url=f"https://example.test/{listing_id}",
         city=city,
+        source=source,
     )
 
 
@@ -88,3 +95,21 @@ class TestMonitorStaleSweep:
         assert updated == 1
         assert temp_db.get_listing("book")["status"] == "Available to book"
         assert temp_db.get_listing("lottery")["status"] == "Occupied"
+
+    def test_source_prefixed_completeness_limits_stale_to_source_city(self, temp_db):
+        temp_db.diff([
+            _listing("h2s", city="Amsterdam Diemen", source="holland2stay"),
+            _listing("od", city="Amsterdam Diemen", source="ourdomain"),
+        ])
+        _set_last_seen(temp_db, "h2s", 8)
+        _set_last_seen(temp_db, "od", 8)
+
+        updated = _mark_stale_listings_for_complete_cities(
+            temp_db,
+            {"ourdomain:Amsterdam Diemen": True},
+            days=7,
+        )
+
+        assert updated == 1
+        assert temp_db.get_listing("h2s")["status"] == "Available to book"
+        assert temp_db.get_listing("od")["status"] == "Occupied"

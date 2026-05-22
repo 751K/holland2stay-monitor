@@ -173,7 +173,7 @@ class TestBookWithFallbackBlocked:
             call_count[0] += 1
             return BookingResult(listing, False, "CF blocked", phase="blocked")
 
-        with patch("mcore.booking.try_book", side_effect=fake_try):
+        with patch("bookers.holland2stay.try_book", side_effect=fake_try):
             result = book_with_fallback(listings, user, deadline=float("inf"))
 
         # 只调用第一次 try_book，不应该 fallback 到 listing 2/3
@@ -195,7 +195,7 @@ class TestBookWithFallbackBlocked:
                 return BookingResult(listing, False, "raced", phase="race_lost")
             return BookingResult(listing, True, "ok", pay_url="x", phase="success")
 
-        with patch("mcore.booking.try_book", side_effect=fake_try):
+        with patch("bookers.holland2stay.try_book", side_effect=fake_try):
             result = book_with_fallback(listings, user, deadline=float("inf"))
 
         assert call_count[0] == 3
@@ -265,8 +265,8 @@ class TestMonitorRunOnceBlockedAggregation:
     def _run(self, cfg, storage, notifs, scrape_fn, try_book_fn):
         async def go():
             # prewarm 跳过：mcore.prewarm.create_prewarmed_session 返回 None
-            with patch("monitor.scrape_all", side_effect=scrape_fn), \
-                 patch("mcore.booking.try_book", side_effect=try_book_fn), \
+            with patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn), \
+                 patch("bookers.holland2stay.try_book", side_effect=try_book_fn), \
                  patch("mcore.prewarm.create_prewarmed_session",
                        side_effect=lambda e, p: None):
                 await run_once(cfg, storage, notifs, dry_run=False)

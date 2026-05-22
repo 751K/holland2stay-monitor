@@ -179,7 +179,7 @@ class TestDispatch:
         call = with_apns.calls[0]
         assert call["payload"]["kind"] == "new"
         assert call["payload"]["listing_id"] == "l1"
-        assert call["payload"]["aps"]["alert"]["title"].startswith("🏠")
+        assert call["payload"]["aps"]["alert"]["title"].startswith("[H2S]")
 
     def test_booked(self, with_apns, store_with_one_device):
         n = _run(push.dispatch(
@@ -330,3 +330,106 @@ class TestExceptionsSwallowed:
         n = _run(push.dispatch(store_with_one_device, FakeUser("userA"),
                                FakeListing("l1")))
         assert n == 0
+
+
+# ── Bilingual translation (_t / _T) ──────────────────────────────────
+
+
+class TestTranslation:
+    def test_t_en_returns_original(self):
+        from mcore.push import _t
+        assert _t("[{source}] {city} new listing", "en") == "[{source}] {city} new listing"
+
+    def test_t_zh_returns_translated(self):
+        from mcore.push import _t
+        assert "新房源" in _t("[{source}] {city} new listing", "zh")
+
+    def test_t_unknown_lang_falls_back_to_en(self):
+        from mcore.push import _t
+        assert _t("[{source}] {city} new listing", "fr") == "[{source}] {city} new listing"
+
+    def test_t_unknown_key_returns_as_is(self):
+        from mcore.push import _t
+        assert _t("not in the translation map", "zh") == "not in the translation map"
+
+    def test_payload_new_listing_zh_uses_chinese(self):
+        from mcore.push import _payload_new_listing
+        p = _payload_new_listing(FakeListing("l1"), lang="zh")
+        assert "新房源" in p["aps"]["alert"]["title"]
+
+    def test_payload_new_listing_en_uses_english(self):
+        from mcore.push import _payload_new_listing
+        p = _payload_new_listing(FakeListing("l1"), lang="en")
+        assert "new listing" in p["aps"]["alert"]["title"]
+
+    def test_payload_booked_zh(self):
+        from mcore.push import _payload_booked
+        p = _payload_booked(FakeListing("l1"), lang="zh")
+        assert "预订成功" in p["aps"]["alert"]["title"]
+
+    def test_payload_error_zh(self):
+        from mcore.push import _payload_error
+        p = _payload_error("something broke", lang="zh")
+        assert "监控异常" in p["aps"]["alert"]["title"]
+
+
+# ── Language-grouped payload construction ────────────────────────────
+
+
+class TestLanguageGrouping:
+
+    def test_payload_builder_invoked_per_language(self):
+        """payload_fn is called with 'en' and 'zh' for mixed-language devices."""
+        from mcore import push
+
+        langs_seen = []
+
+        def _track(lang):
+            langs_seen.append(lang)
+            return {"aps": {"alert": {"title": "", "body": ""}}, "kind": "test"}
+
+        # Direct test of the grouping logic without full dispatch chain
+        class FakeStorage:
+            def get_active_devices_for_user(self, uid):
+                return [
+                    {"id": 1, "device_token": "a" * 32, "env": "production", "language": "en"},
+                    {"id": 2, "device_token": "b" * 32, "env": "production", "language": "zh"},
+                    {"id": 3, "device_token": "c" * 32, "env": "production", "language": "en"},
+                ]
+            conn = None  # not used by _send_to_user when devices exist
+
+        class FakeApns:
+            async def send_many(self, targets, payload, collapse_id=""):
+                return [type("R", (), {"ok": True, "device_dead": False, "device": t["device_token"], "reason": "", "status": 200}) for t in targets]
+
+        push.set_client(FakeApns())
+        results = _run(push._send_to_user(FakeStorage(), "uid", _track))
+        assert len(results) == 3
+        assert set(langs_seen) == {"en", "zh"}
+
+    def test_single_lang_one_call(self):
+        """All devices same language → payload_fn called once."""
+        from mcore import push
+
+        langs_seen = []
+
+        def _track(lang):
+            langs_seen.append(lang)
+            return {"aps": {"alert": {"title": "", "body": ""}}, "kind": "test"}
+
+        class FakeStorage:
+            def get_active_devices_for_user(self, uid):
+                return [
+                    {"id": 1, "device_token": "a" * 32, "env": "production", "language": "en"},
+                    {"id": 2, "device_token": "b" * 32, "env": "production", "language": "en"},
+                ]
+            conn = None
+
+        class FakeApns:
+            async def send_many(self, targets, payload, collapse_id=""):
+                return [type("R", (), {"ok": True, "device_dead": False, "device": t["device_token"], "reason": "", "status": 200}) for t in targets]
+
+        push.set_client(FakeApns())
+        results = _run(push._send_to_user(FakeStorage(), "uid", _track))
+        assert len(results) == 2
+        assert langs_seen == ["en"]

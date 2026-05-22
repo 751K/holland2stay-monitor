@@ -21,8 +21,7 @@ struct ListingDetailView: View {
             if let listing {
                 content(listing)
             } else if isLoading {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                loadingContent
             } else if let err = errorMessage {
                 ContentUnavailableView(
                     "Listing Not Available",
@@ -32,13 +31,14 @@ struct ListingDetailView: View {
                 Color.clear
             }
         }
-        .navigationTitle(listing?.name ?? "Loading…")
+        .navigationTitle(navigationTitle)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             // 房源加载好后才显示分享按钮——加载中 / 失败时分享一个空 deep link
             // 没意义。SwiftUI ShareLink 直接调起系统标准 Share Sheet（AirDrop /
             // 信息 / 邮件 / 复制 / 拷贝链接 ...），item 用 h2smonitor:// deep link
             // —— 收件人装了 FlatRadar 点一下就跳到本房源详情；没装的话
-            // message 文本里也带了房源摘要 + Holland2Stay 官网 URL 作为兜底。
+            // message 文本里也带了房源摘要 + 官方平台 URL 作为兜底。
             if let listing {
                 ToolbarItem(placement: .topBarTrailing) {
                     ShareLink(
@@ -59,6 +59,29 @@ struct ListingDetailView: View {
         .task { await load() }
     }
 
+    private var titleHint: String? {
+        switch route {
+        case .known(let l):
+            return l.name
+        case .byId(_, let hint):
+            let clean = (hint ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return clean.isEmpty ? nil : clean
+        }
+    }
+
+    private var navigationTitle: String {
+        listing?.name ?? titleHint ?? "Listing"
+    }
+
+    private var loadingContent: some View {
+        VStack {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     /// `h2smonitor://listing/<id>` —— 跟 FlatRadarApp.handleURL 解析的 scheme/host 一致。
     private func deepLink(for listing: Listing) -> URL {
         URL(string: "h2smonitor://listing/\(listing.id)") ?? URL(string: "h2smonitor://")!
@@ -67,7 +90,7 @@ struct ListingDetailView: View {
     /// 分享文本：地址 · 价格 · 城市 + 官网链接。
     /// 用 \n 分行，让 iMessage / 邮件 / Notes 等通讯类接收方显示更清晰。
     private func shareMessage(for listing: Listing) -> String {
-        var head: [String] = [listing.name]
+        var head: [String] = [listing.sourceShortText, listing.name]
         if let price = listing.priceRaw, !price.isEmpty { head.append(price) }
         if !listing.city.isEmpty { head.append(listing.city) }
         var lines = [head.joined(separator: " · ")]
@@ -107,17 +130,37 @@ struct ListingDetailView: View {
     private func load() async {
         switch route {
         case .known(let l):
-            listing = l
-        case .byId(let id):
-            guard listing == nil else { return }   // 二次进入不重复 fetch
-            isLoading = true
-            errorMessage = nil
-            do {
-                listing = try await APIClient.shared.getListing(id: id)
-            } catch {
-                errorMessage = error.localizedDescription
+            withoutImplicitAnimation {
+                listing = l
+                isLoading = false
+                errorMessage = nil
             }
-            isLoading = false
+        case .byId(let id, _):
+            guard listing == nil else { return }   // 二次进入不重复 fetch
+            withoutImplicitAnimation {
+                isLoading = true
+                errorMessage = nil
+            }
+            do {
+                let fetched = try await APIClient.shared.getListing(id: id)
+                withoutImplicitAnimation {
+                    listing = fetched
+                    isLoading = false
+                }
+            } catch {
+                withoutImplicitAnimation {
+                    errorMessage = error.localizedDescription
+                    isLoading = false
+                }
+            }
+        }
+    }
+
+    private func withoutImplicitAnimation(_ updates: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            updates()
         }
     }
 
@@ -129,8 +172,12 @@ struct ListingDetailView: View {
                     Text(listing.name)
                         .font(.title2)
                         .fontWeight(.bold)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 8) {
+                        sourceBadge(listing.sourceShortText, source: listing.normalizedSourceKey)
+
                         Label(listing.city, systemImage: "mappin.and.ellipse")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
@@ -200,7 +247,7 @@ struct ListingDetailView: View {
                 }
 
                 if let url = URL(string: listing.url), !listing.url.isEmpty {
-                    Text("Always verify listing details on the official Holland2Stay website before making decisions.")
+                    Text("Always verify listing details on the official platform website before making decisions.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -208,7 +255,7 @@ struct ListingDetailView: View {
                         .padding(.top, 8)
 
                     Link(destination: url) {
-                        Label("Open on Holland2Stay", systemImage: "safari")
+                        Label("Open on \(listing.sourceDisplayText)", systemImage: "safari")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                     }
@@ -223,6 +270,7 @@ struct ListingDetailView: View {
     private func primaryDetails(for listing: Listing) -> [DetailItem] {
         let items: [(title: String, value: String?)] = [
             ("Type", listing.typeText),
+            ("Platform", listing.sourceDisplayText),
             ("Contract", listing.contractText),
             ("Energy", listing.energyText),
             ("Available from", listing.availableFrom.map(ServerTime.displayDate))
@@ -266,6 +314,24 @@ struct ListingDetailView: View {
         if s.contains("lottery") { return .orange }
         if s.contains("reserved") || s.contains("rented") { return .red }
         return .secondary
+    }
+
+    private func sourceBadge(_ label: String, source: String?) -> some View {
+        Text(label)
+            .font(.system(size: 11, weight: .heavy, design: .monospaced))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(sourceColor(source).opacity(0.14), in: Capsule())
+            .foregroundStyle(sourceColor(source))
+            .accessibilityLabel("Platform \(label)")
+    }
+
+    private func sourceColor(_ source: String?) -> Color {
+        switch (source ?? "holland2stay").lowercased() {
+        case "ourdomain": return .purple
+        case "xior": return .teal
+        default: return .blue
+        }
     }
 }
 

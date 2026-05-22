@@ -16,7 +16,11 @@ logger = logging.getLogger(__name__)
 from app.auth import login_required
 from app.db import storage
 from app.process_ctrl import monitor_pid
-from app.services.listing_service import get_filter_options, query_listing_rows
+from app.services.listing_service import (
+    get_filter_options,
+    normalize_listing_rows,
+    query_listing_rows,
+)
 
 
 @login_required
@@ -28,14 +32,17 @@ def index() -> str:
         # 推 SQL 端做去重，且没有 LIMIT 截断导致老城市丢失的正确性 bug。
         all_cities = st.get_distinct_cities()
         last_scrape = st.get_meta("last_scrape_at")
+        status_counts = st.count_by_status(city=city_filter or None)
         stats = {
             "total":       st.count_all(city=city_filter or None),
             "new_24h":     st.count_new_since(hours=24, city=city_filter or None),
             "changes_24h": st.count_changes_since(hours=24, city=city_filter or None),
             "last_scrape": last_scrape,
             "last_count":  st.get_meta("last_scrape_count"),
+            "book_count":  status_counts.get("available to book", 0),
+            "lottery_count": status_counts.get("available in lottery", 0),
         }
-        recent  = st.get_all_listings(city=city_filter or None, limit=15)
+        recent  = normalize_listing_rows(st.get_all_listings(city=city_filter or None, limit=15))
         changes = st.get_recent_changes(hours=48, city=city_filter or None)
     finally:
         st.close()
@@ -57,6 +64,9 @@ def listings() -> str:
     status_filter  = request.args.get("status", "")
     name_query     = request.args.get("q", "")
     city_filters   = request.args.getlist("city")  # 多选
+    source_filters = request.args.getlist("source")  # 多选
+    type_filters   = request.args.getlist("type")  # 多选：房型（Studio / 1-Bedroom / Loft）
+    occupancy_filters = request.args.getlist("occupancy")  # 多选：允许入住人数
     max_rent_str   = request.args.get("max_rent", "")
     min_area_str   = request.args.get("min_area", "")
     contract_filter = request.args.get("contract", "")
@@ -69,10 +79,13 @@ def listings() -> str:
         status=status_filter or None,
         search=name_query or None,
         cities=city_filters,
+        sources=source_filters,
+        types=type_filters,
         max_rent=max_rent,
         min_area=min_area,
         contract=contract_filter or None,
         tenants=tenant_filters,
+        occupancies=occupancy_filters,
         energy=energy_filter or None,
         finishing=finishing_filter or None,
         limit=500,
@@ -82,7 +95,13 @@ def listings() -> str:
         "listings.html",
         listings=rows, statuses=options["statuses"],
         status_filter=status_filter, search=name_query, city_filters=city_filters,
+        source_filters=source_filters,
+        type_filters=type_filters,
+        occupancy_filters=occupancy_filters,
         cities=options["cities"],
+        sources=options["sources"],
+        types=options["types"],
+        occupancies=options["occupancies"],
         max_rent=max_rent_str, min_area=min_area_str,
         contract_filter=contract_filter, tenant_filters=tenant_filters,
         energy_filter=energy_filter, finishing_filter=finishing_filter,

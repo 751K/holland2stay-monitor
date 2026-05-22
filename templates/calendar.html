@@ -102,6 +102,14 @@ function priceShort(raw) {
   return m ? m[0] : raw;
 }
 
+function sourceLabel(source) {
+  var s = (source || 'holland2stay').toLowerCase();
+  if (s === 'ourdomain') return 'OurDomain';
+  if (s === 'holland2stay') return 'Holland2Stay';
+  if (s === 'xior') return 'Xior';
+  return source || 'Holland2Stay';
+}
+
 function statusClass(s) {
   var sl = (s||'').toLowerCase();
   if(sl.indexOf('book') !== -1) return 'book';
@@ -304,7 +312,11 @@ function selectDate(ymd, listings) {
     var badge = document.createElement('span');
     badge.className = 'badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' text-xs';
     badge.textContent = sc === 'book' ? T.direct : T.lottery;
+    var sourceBadge = document.createElement('span');
+    sourceBadge.className = 'badge badge-neutral text-xs';
+    sourceBadge.textContent = sourceLabel(l.source);
     topDiv.appendChild(badge);
+    topDiv.appendChild(sourceBadge);
     row.appendChild(topDiv);
 
     // ── 下行：价格 + 城市 ──
@@ -385,7 +397,11 @@ function renderListView() {
       var badge = document.createElement('span');
       badge.className = 'badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' ml-1';
       badge.textContent = sc === 'book' ? T.direct : T.lottery;
+      var sourceBadge = document.createElement('span');
+      sourceBadge.className = 'badge badge-neutral ml-1';
+      sourceBadge.textContent = sourceLabel(l.source);
       nameDiv.appendChild(document.createTextNode(l.name));
+      nameDiv.appendChild(sourceBadge);
       nameDiv.appendChild(badge);
       row.appendChild(nameDiv);
 

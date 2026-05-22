@@ -160,6 +160,8 @@
         "summary": "List listings. Optional bearer accepted; user tokens apply listing_filter.",
         "parameters": [
           {"name": "status", "in": "query", "schema": {"type": "string"}},
+          {"name": "source", "in": "query", "schema": {"type": "string"}, "description": "Legacy single-source filter."},
+          {"name": "sources", "in": "query", "schema": {"type": "string"}, "description": "Comma-separated source list, for example holland2stay,ourdomain."},
           {"name": "city", "in": "query", "schema": {"type": "string"}, "description": "Legacy single-city filter."},
           {"name": "cities", "in": "query", "schema": {"type": "string"}, "description": "Comma-separated city list."},
           {"name": "q", "in": "query", "schema": {"type": "string"}},
@@ -660,7 +662,7 @@
       },
       "ChartKey": {
         "type": "string",
-        "enum": ["area_dist", "city_dist", "contract_dist", "daily_changes", "daily_new", "energy_dist", "floor_dist", "hourly_dist", "price_dist", "status_dist", "tenant_dist", "type_dist"]
+        "enum": ["area_dist", "city_dist", "contract_dist", "daily_changes", "daily_new", "energy_dist", "floor_dist", "hourly_dist", "price_dist", "source_dist", "status_dist", "tenant_dist", "type_dist"]
       },
       "LoginRequest": {
         "type": "object",
@@ -747,6 +749,7 @@
           "min_area": {"type": ["number", "null"], "minimum": 0},
           "min_floor": {"type": ["integer", "null"], "minimum": 0, "maximum": 200},
           "allowed_cities": {"type": "array", "items": {"type": "string"}},
+          "allowed_sources": {"type": "array", "items": {"type": "string"}},
           "allowed_types": {"type": "array", "items": {"type": "string"}},
           "allowed_neighborhoods": {"type": "array", "items": {"type": "string"}},
           "allowed_contract": {"type": "array", "items": {"type": "string"}},
@@ -787,6 +790,7 @@
           "id": {"type": "string"},
           "name": {"type": "string"},
           "status": {"type": "string"},
+          "source": {"type": "string", "default": "holland2stay"},
           "price_raw": {"type": "string"},
           "price_value": {"type": ["number", "null"]},
           "available_from": {"type": ["string", "null"]},
@@ -818,6 +822,7 @@
           "id": {"type": "string"},
           "name": {"type": "string"},
           "status": {"type": "string"},
+          "source": {"type": "string", "default": "holland2stay"},
           "price_raw": {"type": "string"},
           "available_from": {"type": ["string", "null"]},
           "city": {"type": ["string", "null"]},
@@ -843,6 +848,7 @@
           "id": {"type": "string"},
           "name": {"type": "string"},
           "status": {"type": "string"},
+          "source": {"type": "string", "default": "holland2stay"},
           "price_raw": {"type": "string"},
           "available_from": {"type": "string"},
           "url": {"type": ["string", "null"]},
@@ -922,6 +928,7 @@
         "type": "object",
         "properties": {
           "cities": {"type": "array", "items": {"type": "string"}},
+          "sources": {"type": "array", "items": {"type": "string"}},
           "occupancy": {"type": "array", "items": {"type": "string"}},
           "types": {"type": "array", "items": {"type": "string"}},
           "neighborhoods": {"type": "array", "items": {"type": "string"}},

@@ -33,6 +33,7 @@ LISTING_KEY_MAP: dict[str, str] = {
     "Offer":        "offer",        # 短租标签，e.g. "Short-stay"
     "Contract":     "contract",     # 合同类型，e.g. "Indefinite" / "6 months max"
     "Tenant":       "tenant",       # 租客要求，e.g. "student only" / "employed only"
+    "Address":      "address",      # 街道地址，供 geocode pipeline 用，e.g. "Wenckebachweg 51, 1096 AN Amsterdam"
 }
 
 
@@ -43,15 +44,33 @@ LISTING_KEY_MAP: dict[str, str] = {
 
 def parse_float(text: Optional[str]) -> Optional[float]:
     """
-    从含单位的字符串中提取浮点数，容忍千分位逗号。
+    从含单位的字符串中提取浮点数，容忍英文/欧式千分位。
 
     e.g. "€707" → 707.0, "1,200.50" → 1200.5, "26.0 m²" → 26.0,
-         "" → None, None → None
+         "€ 1.587" → 1587.0, "" → None, None → None
     """
     if not text:
         return None
-    m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
-    return float(m.group()) if m else None
+    m = re.search(r"\d[\d,\.]*", text)
+    if not m:
+        return None
+
+    token = m.group()
+    if "," in token and "." in token:
+        # Last separator is the decimal mark; the other separator is thousands.
+        if token.rfind(".") > token.rfind(","):
+            token = token.replace(",", "")
+        else:
+            token = token.replace(".", "").replace(",", ".")
+    elif "," in token:
+        if re.fullmatch(r"\d{1,3}(?:,\d{3})+", token):
+            token = token.replace(",", "")
+        else:
+            token = token.replace(",", ".")
+    elif "." in token and re.fullmatch(r"\d{1,3}(?:\.\d{3})+", token):
+        token = token.replace(".", "")
+
+    return float(token)
 
 
 def parse_int(text: Optional[str]) -> Optional[int]:
@@ -101,6 +120,13 @@ class Listing:
     contract_start_date  预订用的合同开始日期（来自 next_contract_startdate 属性）；
                     与 available_from 不同：available_from 用于展示/日历，
                     contract_start_date 用于预订 API 调用；可能为 None
+    source          房源所在的第三方平台标识，与 ``scrapers.SCRAPER_REGISTRY`` 的
+                    key 一致。P0 阶段默认 ``"holland2stay"``，单源行为不变；
+                    P1 起新平台（OurDomain / DUWO 等）会用 ``"ourdomain"`` / ``"duwo"``。
+                    UI / 通知模板可据此显示 source badge 区分平台来源。
+                    **id 字段在 P0 仍是 H2S 的 url_key 原样**，未做前缀化；
+                    跨平台 id 唯一性的迁移留到 P1 接 OurDomain 时一起做，
+                    避免提前重写 status_changes / web_notifications / iOS deep link。
     """
 
     id: str
@@ -114,6 +140,7 @@ class Listing:
     sku: str = ""
     contract_id: Optional[int] = None
     contract_start_date: Optional[str] = None
+    source: str = "holland2stay"
 
     # feature_map() 解析结果缓存，排除在 __repr__ / __eq__ / __init__ 之外
     _feature_map_cache: Optional[dict[str, str]] = field(
@@ -212,4 +239,5 @@ class Listing:
             "sku": self.sku,
             "contract_id": self.contract_id,
             "contract_start_date": self.contract_start_date,
+            "source": self.source,
         }

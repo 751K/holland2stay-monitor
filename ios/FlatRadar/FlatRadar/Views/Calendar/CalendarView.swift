@@ -288,9 +288,9 @@ struct CalendarView: View {
                 ForEach(listings) { l in
                     Button {
                         if UIDevice.current.userInterfaceIdiom == .pad {
-                            coord.openListing(id: l.id)
+                            coord.openListing(id: l.id, titleHint: l.name)
                         } else {
-                            coord.listingsPath.append(.byId(l.id))
+                            coord.listingsPath.append(.byId(l.id, titleHint: l.name))
                         }
                     } label: {
                         listingRow(l)
@@ -305,9 +305,12 @@ struct CalendarView: View {
     private func listingRow(_ l: CalendarListing) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(l.name)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(l.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(2)
+                    sourceBadge(l.sourceShortText, source: l.source)
+                }
                 HStack(spacing: 6) {
                     Text(l.city)
                     if !l.building.isEmpty {
@@ -343,6 +346,23 @@ struct CalendarView: View {
         if s.contains("lottery") { return .orange }
         if s.contains("not available") { return .gray }
         return .secondary
+    }
+
+    private func sourceBadge(_ label: String, source: String?) -> some View {
+        Text(label)
+            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(sourceColor(source).opacity(0.14), in: Capsule())
+            .foregroundStyle(sourceColor(source))
+    }
+
+    private func sourceColor(_ source: String?) -> Color {
+        switch (source ?? "holland2stay").lowercased() {
+        case "ourdomain": return .purple
+        case "xior": return .teal
+        default: return .blue
+        }
     }
 
     // MARK: - Helpers

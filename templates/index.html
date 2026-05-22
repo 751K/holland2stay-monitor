@@ -200,23 +200,7 @@ async function toggleMonitor(e) {
     });
     const data = await resp.json();
     if (data.ok) {
-      if (isRunning) {
-        btn.innerHTML = '{{ _("start_monitor") }}';
-        statusEl.innerText = '{{ _("monitor_stopped") }}';
-        card.className = 'kpi-card accent-red';
-        card.querySelector('.kpi-icon').style.background = 'linear-gradient(135deg,#ef4444,#dc2626)';
-        card.querySelector('.kpi-icon i').className = 'bi bi-stop-circle';
-        if (typeof updateMonitorBadge === 'function') updateMonitorBadge();
-      } else {
-        btn.innerHTML = '{{ _("stop_monitor") }}';
-        statusEl.innerText = '{{ _("monitor_running") }}';
-        card.className = 'kpi-card accent-green';
-        card.querySelector('.kpi-icon').style.background = 'linear-gradient(135deg,#10b981,#059669)';
-        card.querySelector('.kpi-icon i').className = 'bi bi-play-circle-fill';
-        setTimeout(function(){ if (typeof updateMonitorBadge === 'function') updateMonitorBadge(); }, 800);
-      }
-      btn.style.pointerEvents = '';
-      btn.style.opacity = '';
+      location.reload();
     } else {
       alert(data.error || '操作失败');
       location.reload();

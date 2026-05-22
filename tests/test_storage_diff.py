@@ -214,6 +214,23 @@ class TestMarkStaleListings:
         assert temp_db.get_listing("a")["status"] == "Occupied"
         assert temp_db.get_listing("b")["status"] == "Available to book"
 
+    def test_source_city_filter_limits_stale_marking_to_source(self, temp_db):
+        temp_db.diff([
+            _l("h2s", status="Available to book", city="Amsterdam Diemen"),
+            _l("od", status="Available to book", city="Amsterdam Diemen", source="ourdomain"),
+        ])
+        _set_last_seen(temp_db, "h2s", days_ago=8)
+        _set_last_seen(temp_db, "od", days_ago=8)
+
+        updated = temp_db.mark_stale_listings(
+            days=7,
+            source_city_pairs=[("ourdomain", "Amsterdam Diemen")],
+        )
+
+        assert updated == 1
+        assert temp_db.get_listing("h2s")["status"] == "Available to book"
+        assert temp_db.get_listing("od")["status"] == "Occupied"
+
     def test_empty_city_filter_is_noop(self, temp_db):
         temp_db.diff([_l("a", status="Available to book", city="Eindhoven")])
         _set_last_seen(temp_db, "a", days_ago=8)
@@ -236,6 +253,53 @@ class TestMarkStaleListings:
         assert row["status_is_inferred"] == 0
         assert len(changes) == 1
         assert changes[0][1:] == ("Occupied", "Available to book")
+
+
+# ─── booking hold 本地状态保持 ─────────────────────────────────────
+
+
+class TestBookingHoldStatus:
+    def test_booking_success_marks_listing_reserved(self, temp_db):
+        temp_db.diff([_l("a", status="Available to book")])
+
+        assert temp_db.mark_listing_reserved_after_booking("a") is True
+
+        row = temp_db.get_listing("a")
+        assert row["status"] == "Reserved"
+        assert row["last_status"] == "Reserved"
+        assert row["status_is_inferred"] == 1
+        assert row["status_hold_until"]
+
+    def test_booking_hold_suppresses_immediate_available_overwrite(self, temp_db):
+        temp_db.diff([_l("a", status="Available to book")])
+        temp_db.mark_listing_reserved_after_booking("a")
+
+        new, changes = temp_db.diff([_l("a", status="Available to book")])
+
+        assert new == []
+        assert changes == []
+        row = temp_db.get_listing("a")
+        assert row["status"] == "Reserved"
+        assert row["status_is_inferred"] == 1
+
+    def test_expired_booking_hold_allows_available_status(self, temp_db):
+        temp_db.diff([_l("a", status="Available to book")])
+        temp_db.mark_listing_reserved_after_booking("a")
+        with temp_db.conn:
+            temp_db.conn.execute(
+                "UPDATE listings SET status_hold_until=? WHERE id=?",
+                (_days_ago_iso(1), "a"),
+            )
+
+        new, changes = temp_db.diff([_l("a", status="Available to book")])
+
+        assert new == []
+        assert len(changes) == 1
+        assert changes[0][1:] == ("Reserved", "Available to book")
+        row = temp_db.get_listing("a")
+        assert row["status"] == "Available to book"
+        assert row["status_is_inferred"] == 0
+        assert row["status_hold_until"] == ""
 
 
 # ─── 幂等性 & 原子性 ─────────────────────────────────────────────

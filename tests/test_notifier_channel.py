@@ -196,3 +196,19 @@ class TestWebNotifier:
         st.add_web_notification.assert_called_once()
         call_kw = st.add_web_notification.call_args[1]
         assert call_kw["type"] == "heartbeat"
+
+    def test_send_booking_success_writes_user_id(self):
+        st = MagicMock()
+        wn = WebNotifier(st)
+        import asyncio
+        from models import Listing
+        l = Listing(
+            id="t1", name="Test", status="Available to book",
+            price_raw="€950", available_from="2026-06-15", features=[],
+            url="https://x.com", city="E", sku="SKU1",
+            contract_id=1, contract_start_date=None,
+        )
+        asyncio.run(wn.send_booking_success(l, "ok", user_id="u1"))
+        call_kw = st.add_web_notification.call_args[1]
+        assert call_kw["type"] == "booking"
+        assert call_kw["user_id"] == "u1"

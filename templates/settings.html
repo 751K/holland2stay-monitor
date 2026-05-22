@@ -109,10 +109,34 @@
     </div>
   </div>
 
-  <!-- Section 2: Cities -->
+  <!-- Section 2: Sources -->
   <div class="card mb-4">
     <div class="section-header">
-      <i class="bi bi-geo-alt mr-2" style="color:var(--success);"></i>{{ _('settings_cities') }}
+      <i class="bi bi-broadcast-pin mr-2" style="color:var(--accent);"></i>{{ _('settings_sources') }}
+    </div>
+    <div class="card-body">
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+        <label class="checkbox" style="white-space:nowrap;">
+          <input type="checkbox" name="source_selected" value="holland2stay" {% if 'holland2stay' in selected_sources %}checked{% endif %}>
+          H2S · Holland2Stay
+        </label>
+        <label class="checkbox" style="white-space:nowrap;">
+          <input type="checkbox" name="source_selected" value="ourdomain" {% if 'ourdomain' in selected_sources %}checked{% endif %}>
+          OD · OurDomain
+        </label>
+        <label class="checkbox" style="white-space:nowrap;">
+          <input type="checkbox" name="source_selected" value="xior" {% if 'xior' in selected_sources %}checked{% endif %}>
+          XR · Xior
+        </label>
+      </div>
+      <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_sources_hint') }}</div>
+    </div>
+  </div>
+
+  <!-- Section 3: Cities -->
+  <div class="card mb-4">
+    <div class="section-header">
+      <i class="bi bi-geo-alt mr-2" style="color:var(--success);"></i>{{ _('settings_h2s_cities') }}
       <button type="button" class="btn btn-ghost btn-sm" onclick="var cbs=this.parentElement.nextElementSibling.querySelectorAll('input[type=checkbox]');var all=Array.from(cbs).every(c=>c.checked);cbs.forEach(c=>c.checked=!all);this.textContent=all?'{{ _('select_all') }}':'{{ _('deselect_all') }}'" style="margin-left:auto;">{{ _('select_all') }}</button>
     </div>
     <div class="card-body">
@@ -128,12 +152,66 @@
     </div>
   </div>
 
+  <!-- Section 4: OurDomain buildings -->
+  <div class="card mb-4">
+    <div class="section-header">
+      <i class="bi bi-building mr-2" style="color:var(--warning);"></i>{{ _('settings_ourdomain_cities') }}
+    </div>
+    <div class="card-body">
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+        {% for city in known_ourdomain_cities %}
+        <label class="checkbox" style="white-space:nowrap;">
+          <input type="checkbox" name="ourdomain_city_selected" value="{{ city.name }},{{ city.key }}" {% if city.key in selected_ourdomain_keys %}checked{% endif %}>
+          {{ city.name }}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_ourdomain_hint') }}</div>
+    </div>
+  </div>
+
+  <!-- Section 5: Xior buildings -->
+  <div class="card mb-4">
+    <div class="section-header">
+      <i class="bi bi-building mr-2" style="color:var(--accent);"></i>{{ _('settings_xior_cities') }}
+      <button type="button" class="btn btn-ghost btn-sm" onclick="var cbs=this.parentElement.parentElement.querySelectorAll('.xior-bldg input[type=checkbox]');var all=Array.from(cbs).every(c=>c.checked);cbs.forEach(c=>c.checked=!all);this.textContent=all?'{{ _('select_all') }}':'{{ _('deselect_all') }}'" style="margin-left:auto;">{{ _('select_all') }}</button>
+    </div>
+    <div class="card-body">
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+        {% for city, buildings in xior_by_city | dictsort %}
+        <div style="background:var(--bg);border-radius:10px;padding:10px 12px;">
+          <label class="checkbox" style="font-weight:600;margin-bottom:6px;display:block;"
+                 onclick="var cbs=this.parentElement.querySelectorAll('.xior-bldg input');cbs.forEach(c=>c.checked=this.querySelector('input').checked)">
+            <input type="checkbox" class="xior-city" onchange="this.parentElement.click()"
+                   {% if xior_city_all_checked.get(city) %}checked{% endif %}>
+            {{ city }}
+          </label>
+          <div style="display:flex;flex-wrap:wrap;gap:2px 14px;padding-left:16px;">
+            {% for b in buildings %}
+            <label class="checkbox xior-bldg" style="white-space:nowrap;font-size:12.5px;font-weight:400;">
+              <input type="checkbox" name="xior_city_selected" value="{{ city }} {{ b.bldg }},{{ b.key }}" {% if b.key in selected_xior_keys %}checked{% endif %}>
+              {{ b.bldg }}
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_xior_hint') }}</div>
+    </div>
+  </div>
+
   <div class="flex items-center gap-2 flex-wrap">
     <button type="submit" class="btn btn-primary">
       <i class="bi bi-save mr-1"></i>{{ _('settings_save') }}
     </button>
-    <button type="button" id="btn-reload" class="btn btn-ghost" onclick="reloadMonitor(this)">
+    <button type="button" id="btn-reload" class="btn btn-ghost" onclick="reloadMonitor(this)"
+            title="{{ _('settings_apply_hint') }}">
       <i class="bi bi-arrow-clockwise mr-1"></i>{{ _('settings_apply') }}
+    </button>
+    <button type="button" id="btn-restart" class="btn btn-ghost" onclick="restartMonitor(this)"
+            title="{{ _('settings_restart_hint') }}">
+      <i class="bi bi-arrow-repeat mr-1"></i>{{ _('settings_restart') }}
     </button>
     <a href="{{ url_for('index') }}" class="btn btn-ghost">{{ _('settings_cancel') }}</a>
   </div>
@@ -207,6 +285,26 @@ function reloadMonitor(btn) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner mr-1"></span>' + sending;
   fetch('/api/reload', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
+  })
+    .then(function(r){ return r.json(); })
+    .then(function(d) { showResultToast(d.ok, d.ok ? d.message : (d.error || (lang === 'zh' ? '未知错误' : 'Unknown error'))); })
+    .catch(function() { showResultToast(false, lang === 'zh' ? '请求失败' : 'Request failed'); })
+    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
+}
+
+function restartMonitor(btn) {
+  var lang = document.querySelector('meta[name="lang"]').getAttribute('content');
+  var confirmMsg = lang === 'zh'
+    ? '确定要重启监控进程吗？\n\n这会中断本轮抓取并 stop + start 进程；只在改了代码后需要。'
+    : 'Restart the monitor process?\n\nThis interrupts the current scrape and does a full stop + start; only needed after code changes.';
+  if (!confirm(confirmMsg)) return;
+  var restarting = lang === 'zh' ? '重启中...' : 'Restarting...';
+  var orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner mr-1"></span>' + restarting;
+  fetch('/api/monitor/restart', {
     method: 'POST',
     headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
   })

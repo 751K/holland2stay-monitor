@@ -40,51 +40,17 @@ logger = logging.getLogger(__name__)
 GQL_URL = "https://api.holland2stay.com/graphql/"
 
 
-class RateLimitError(Exception):
-    """
-    Holland2Stay API 持续返回 429 Too Many Requests，所有重试均已耗尽。
+# P0 重构：异常类挪到 scrapers/base.py，便于多 scraper 复用 + 让
+# isinstance(e, scraper.RateLimitError) 和 isinstance(e, scrapers.base.RateLimitError)
+# 指向同一个类对象。本文件保留 re-export，老调用方（monitor.py / tests）import 路径不变。
+from scrapers.base import (  # noqa: F401  (re-export for backwards compat)
+    RATE_LIMIT_BACKOFF,
+    BlockedError,
+    RateLimitError,
+    ScrapeNetworkError,
+    is_cloudflare_body,
+)
 
-    由 _post_gql() 抛出，经 _scrape_city_pages() / scrape_all() 上传，
-    最终由 monitor.py 的 main_loop 捕获并触发冷却期。
-    """
-
-
-class BlockedError(Exception):
-    """
-    Holland2Stay API 返回 403 — 通常是 Cloudflare WAF 屏蔽。
-
-    与 429 的区别
-    -------------
-    429 = "请求太快，等等就好"，退避后通常自动恢复。
-    403 = "我们不想服务你"，等待不会自动恢复，需要：
-      - 更换 HTTPS_PROXY 出口 IP（住宅代理换池）
-      - 重启 monitor（重建 curl_cffi session + 新 TLS 指纹）
-      - 临时关闭 monitor 让 Cloudflare 冷却该 IP/指纹组合
-
-    现象识别：响应体含 `<!DOCTYPE html>` + `no-js ie6 oldie` 等 Cloudflare
-    挑战页标志（HTML，不是预期的 JSON）。
-    """
-
-
-class ScrapeNetworkError(Exception):
-    """
-    抓取第一页时遭遇网络错误（连接超时、TLS 中断、DNS 失败等），
-    非 API 层错误——换代理/检查网络即可恢复。
-
-    与 RateLimitError / BlockedError 的区别
-    ---------------------------------------
-    - RateLimitError → API 说"太快"（429），退避后可自动恢复
-    - BlockedError   → API 说"不服务你"（403），等待无法恢复
-    - ScrapeNetworkError → 根本没拿到 API 响应——代理挂了、网络断了、DNS 故障
-
-    由 _scrape_city_pages() 在第一页网络失败时抛出，经 scrape_all() 上传，
-    最终由 monitor.py 的 main_loop 做连续失败计数并在超过阈值后冷却。
-    """
-
-
-# 429 退避策略：依次等待这些秒数后重试。
-# 两次重试 = 最多额外等待 90 秒后才放弃并抛出 RateLimitError。
-_RATE_LIMIT_BACKOFF: tuple[int, ...] = (30, 60)
 
 # GraphQL 查询模板。
 # %s → city/availability filter 字符串（由 _build_filter 生成）
@@ -143,7 +109,7 @@ def _post_gql(session: req.Session, query: str) -> dict:
 
     重试策略
     --------
-    依次等待 _RATE_LIMIT_BACKOFF 中各值后重试，全部耗尽仍 429 则抛 RateLimitError。
+    依次等待 RATE_LIMIT_BACKOFF 中各值后重试，全部耗尽仍 429 则抛 RateLimitError。
     sleep 在 executor 线程中执行，不阻塞 asyncio 事件循环。
 
     Returns
@@ -158,12 +124,12 @@ def _post_gql(session: req.Session, query: str) -> dict:
     Exception       网络超时、JSON 解析失败等
     """
     total_wait = 0
-    for attempt, wait in enumerate([0] + list(_RATE_LIMIT_BACKOFF)):
+    for attempt, wait in enumerate([0] + list(RATE_LIMIT_BACKOFF)):
         if wait:
             total_wait += wait
             logger.warning(
                 "429 Too Many Requests，第 %d/%d 次退避，等待 %d 秒（累计 %ds）",
-                attempt, len(_RATE_LIMIT_BACKOFF), wait, total_wait,
+                attempt, len(RATE_LIMIT_BACKOFF), wait, total_wait,
             )
             time.sleep(wait)
         try:
@@ -180,12 +146,7 @@ def _post_gql(session: req.Session, query: str) -> dict:
         # 与 429（重试可能恢复）不同，403 需要换代理/重启来切 IP 或指纹。
         if resp.status_code == 403:
             body = resp.text[:500]
-            is_cf = (
-                "cloudflare" in body.lower()
-                or "no-js ie6 oldie" in body
-                or "challenge-platform" in body.lower()
-                or "<!DOCTYPE html>" in body[:50]
-            )
+            is_cf = is_cloudflare_body(body[:500])
             logger.error(
                 "GraphQL POST HTTP 403 (%s) url=%s body=%r",
                 "Cloudflare WAF" if is_cf else "其他 403", GQL_URL, body[:200],
@@ -209,7 +170,7 @@ def _post_gql(session: req.Session, query: str) -> dict:
         return resp.json()
 
     raise RateLimitError(
-        f"API 持续返回 429（已退避重试 {len(_RATE_LIMIT_BACKOFF)} 次，"
+        f"API 持续返回 429（已退避重试 {len(RATE_LIMIT_BACKOFF)} 次，"
         f"累计等待 {total_wait}s）。"
         "请降低轮询频率（CHECK_INTERVAL / PEAK_INTERVAL）或配置 HTTPS_PROXY。"
     )

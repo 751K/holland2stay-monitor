@@ -121,8 +121,8 @@ class TestPrewarmCacheLifecycle:
 
         async def go():
             with patch("mcore.prewarm.create_prewarmed_session", side_effect=fake_prewarm), \
-                 patch("mcore.booking.try_book", side_effect=try_book_fn), \
-                 patch("monitor.scrape_all", side_effect=scrape_fn):
+                 patch("bookers.holland2stay.try_book", side_effect=try_book_fn), \
+                 patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn):
                 await run_once(cfg, storage, notifs, dry_run=False)
 
         asyncio.run(go())
@@ -293,9 +293,9 @@ class TestPhaseBLongRunEconomy:
 
             async def go():
                 with patch("mcore.prewarm.create_prewarmed_session", side_effect=fake_prewarm), \
-                     patch("mcore.booking.try_book", side_effect=lambda l, *a, **k:
+                     patch("bookers.holland2stay.try_book", side_effect=lambda l, *a, **k:
                            BookingResult(l, True, "ok", pay_url="x", phase="success")), \
-                     patch("monitor.scrape_all", side_effect=scrape_fn):
+                     patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn):
                     await run_once(cfg, fake_storage, notifs, dry_run=False)
             asyncio.run(go())
 
@@ -308,4 +308,20 @@ class TestPhaseBLongRunEconomy:
             f"实际 {len(prewarm_log)} 次。Phase A 会是 51 次"
         )
 
+    def test_ourdomain_listing_does_not_trigger_h2s_booking(
+        self, clean_cache, fake_storage, cfg, user_ab
+    ):
+        listing = _make_listing(1)
+        listing.id = "od_307195"
+        listing.source = "ourdomain"
+        listing.sku = ""
+        notifs = [(user_ab, _FakeNotifier())]
 
+        async def go():
+            with patch("monitor.dispatch_scrape_tasks", return_value=([listing], {"ourdomain:Amsterdam Diemen": True})), \
+                 patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
+                 patch("bookers.holland2stay.try_book") as try_book:
+                await run_once(cfg, fake_storage, notifs, dry_run=False)
+                try_book.assert_not_called()
+
+        asyncio.run(go())

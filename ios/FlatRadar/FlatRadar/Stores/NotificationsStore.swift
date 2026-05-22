@@ -14,6 +14,7 @@ final class NotificationsStore {
     var isLoadingMore = false
     var errorMessage: String?
     var lastError: APIError?
+    var revision: UInt64 = 0
 
     // SSE 实时流状态
     var isStreamConnected = false
@@ -31,6 +32,10 @@ final class NotificationsStore {
 
     var hasMore: Bool { notifications.count < total }
 
+    private var loadedUnreadCount: Int {
+        notifications.reduce(0) { $0 + ($1.isRead ? 0 : 1) }
+    }
+
     func fetch() async {
         isLoading = true
         errorMessage = nil
@@ -39,6 +44,8 @@ final class NotificationsStore {
             notifications = resp.items
             total = resp.total
             unreadCount = resp.unread
+            revision &+= 1
+            await loadMoreUntilUnreadIsVisible()
         } catch {
             lastError = error as? APIError
             errorMessage = error.localizedDescription
@@ -54,10 +61,27 @@ final class NotificationsStore {
                 limit: pageSize, offset: notifications.count)
             notifications.append(contentsOf: resp.items)
             total = resp.total
+            revision &+= 1
         } catch {
             // Silently fail; pull-to-refresh recovers
         }
         isLoadingMore = false
+    }
+
+    private func loadMoreUntilUnreadIsVisible() async {
+        while unreadCount > loadedUnreadCount, notifications.count < total {
+            do {
+                let resp = try await client.getNotifications(
+                    limit: pageSize,
+                    offset: notifications.count)
+                if resp.items.isEmpty { break }
+                notifications.append(contentsOf: resp.items)
+                total = resp.total
+                revision &+= 1
+            } catch {
+                break
+            }
+        }
     }
 
     func refresh() async {
@@ -82,6 +106,7 @@ final class NotificationsStore {
                 notifications[i] = notifications[i].markedRead()
             }
             unreadCount = max(0, unreadCount - transitioned)
+            if transitioned > 0 { revision &+= 1 }
         } catch {
             // Non-critical; user can retry
         }
@@ -95,6 +120,7 @@ final class NotificationsStore {
                 notifications[i] = notifications[i].markedRead()
             }
             unreadCount = 0
+            revision &+= 1
         } catch {
             // Non-critical
         }
@@ -129,6 +155,7 @@ final class NotificationsStore {
         errorMessage = nil
         lastError = nil
         streamError = nil
+        revision &+= 1
     }
 
     /// 主动停掉 SSE（登出 / 切后台）。
@@ -225,6 +252,7 @@ final class NotificationsStore {
             notifications.insert(contentsOf: fresh.reversed(), at: 0)
             total += fresh.count
             unreadCount += fresh.filter { !$0.isRead }.count
+            revision &+= 1
             #if DEBUG
             print("[SSE] +\(fresh.count) new notifications (total=\(total))")
             #endif

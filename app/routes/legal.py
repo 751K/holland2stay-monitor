@@ -95,11 +95,20 @@ def donate_page():
     return render_template(
         "donate.html",
         lang=lang,
-        page_title="赞赏开发者" if is_zh else "Support the developer",
+        page_title="赞助开发者" if is_zh else "Support the developer",
         alipay_url=_find_qr("donate-alipay"),
         wechat_url=_find_qr("donate-wechat"),
         github_sponsor_url="https://github.com/sponsors/751K",
     )
+
+
+def guide_page():
+    """用户指南——公开，无需登录。"""
+    from flask import send_from_directory
+    from config import BASE_DIR
+    lang = get_lang()
+    filename = "guide_cn.html" if lang == "zh" else "guide.html"
+    return send_from_directory(str(BASE_DIR / "docs"), filename)
 
 
 def register(app: Flask) -> None:
@@ -107,3 +116,4 @@ def register(app: Flask) -> None:
     app.add_url_rule("/terms",   endpoint="terms_page",   view_func=terms_page,   methods=["GET"])
     app.add_url_rule("/support", endpoint="support_page", view_func=support_page, methods=["GET"])
     app.add_url_rule("/donate",  endpoint="donate_page",  view_func=donate_page,  methods=["GET"])
+    app.add_url_rule("/guide",   endpoint="guide_page",   view_func=guide_page,   methods=["GET"])

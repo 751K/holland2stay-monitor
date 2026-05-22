@@ -51,22 +51,22 @@ def seeded(api_app):
     st = storage()
     try:
         rows = [
-            # id, name, status, price_raw, avail, features, city
+            # id, name, status, price_raw, avail, features, city, source
             ("id-1", "Studio Centrum", "Available to book", "€700", "2026-06-01",
-             ["Type: Studio", "Area: 26.0 m²"], "Eindhoven"),
+             ["Type: Studio", "Area: 26.0 m²"], "Eindhoven", "holland2stay"),
             ("id-2", "1BR West", "Available in lottery", "€950", "2026-07-01",
-             ["Type: 1", "Area: 45.0 m²"], "Amsterdam"),
+             ["Type: 1", "Area: 45.0 m²"], "Amsterdam", "ourdomain"),
             ("id-3", "2BR South", "Not available", "€1200", "2026-08-01",
-             ["Type: 2", "Area: 70.0 m²"], "Eindhoven"),
+             ["Type: 2", "Area: 70.0 m²"], "Eindhoven", "holland2stay"),
         ]
-        for lid, name, status, price, avail, feats, city in rows:
+        for lid, name, status, price, avail, feats, city, source in rows:
             st.conn.execute(
                 "INSERT INTO listings (id,name,status,price_raw,available_from,"
-                "features,url,city,first_seen,last_seen,last_status) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "features,url,city,first_seen,last_seen,last_status,source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (lid, name, status, price, avail, json.dumps(feats),
                  f"https://h.com/{lid}", city,
-                 "2026-05-13T08:00:00", "2026-05-13T08:00:00", status),
+                 "2026-05-13T08:00:00", "2026-05-13T08:00:00", status, source),
             )
         # 地图坐标缓存：给 id-1 / id-2 加坐标（id-3 没地址匹配，故意不缓存）
         from mstorage._map_calendar import _CITY_FORMAL
@@ -180,6 +180,11 @@ class TestListings:
                            headers=_bearer(admin_token))
         assert {x["id"] for x in r.get_json()["data"]["items"]} == {"id-2"}
 
+    def test_source_filter(self, api_client, seeded, admin_token):
+        r = api_client.get("/api/v1/listings?source=ourdomain",
+                           headers=_bearer(admin_token))
+        assert {x["id"] for x in r.get_json()["data"]["items"]} == {"id-2"}
+
     def test_search(self, api_client, seeded, admin_token):
         r = api_client.get("/api/v1/listings?q=Centrum",
                            headers=_bearer(admin_token))
@@ -200,10 +205,11 @@ class TestListings:
         item = r.get_json()["data"]["items"][0]
         # 关键 iOS 端字段都在
         for k in ("id", "name", "status", "price_raw", "price_value",
-                  "available_from", "city", "url", "features",
+                  "available_from", "city", "source", "url", "features",
                   "feature_map", "first_seen", "last_seen"):
             assert k in item
         assert item["price_value"] == 700.0
+        assert item["source"] == "holland2stay"
 
 
 class TestListingDetail:
@@ -300,6 +306,38 @@ class TestNotificationsList:
         listing_ids = {n["listing_id"] for n in d["items"]}
         assert listing_ids == {"id-1"}
 
+    def test_user_sees_only_own_booking_notifications(
+        self, api_app, api_client, seeded, user_token
+    ):
+        """booking 结果必须按 user_id 隔离，不能把 A 的成功/失败显示给 B。"""
+        from app.db import storage
+
+        user, _ = seeded
+        st = storage()
+        try:
+            st.add_web_notification(
+                type="booking", title="own booking", listing_id="id-1",
+                user_id=user.id,
+            )
+            st.add_web_notification(
+                type="booking", title="other booking", listing_id="id-1",
+                user_id="other-user",
+            )
+            st.add_web_notification(
+                type="booking", title="legacy global booking", listing_id="id-1",
+            )
+        finally:
+            st.close()
+
+        r = api_client.get("/api/v1/notifications",
+                           headers=_bearer(user_token))
+        d = r.get_json()["data"]
+        titles = {n["title"] for n in d["items"]}
+        assert "own booking" in titles
+        assert "other booking" not in titles
+        assert "legacy global booking" not in titles
+        assert d["unread"] == sum(1 for n in d["items"] if not n["read"])
+
     def test_pagination(self, api_client, seeded, admin_token):
         r = api_client.get("/api/v1/notifications?limit=1",
                            headers=_bearer(admin_token))
@@ -378,6 +416,12 @@ class TestMe:
         d = r.get_json()["data"]
         assert d["role"] == "admin"
         assert d["is_empty"] is True
+
+    def test_filter_options_include_sources(self, api_client, seeded):
+        r = api_client.get("/api/v1/filter/options")
+        assert r.status_code == 200
+        sources = set(r.get_json()["data"]["sources"])
+        assert {"holland2stay", "ourdomain"} <= sources
 
 
 # ── SSE 鉴权 ───────────────────────────────────────────────────────

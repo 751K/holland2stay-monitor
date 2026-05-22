@@ -26,8 +26,8 @@ def _add(st: Storage, id: str, **kw):
     st.conn.execute(
         """INSERT OR REPLACE INTO listings
            (id, name, status, price_raw, available_from, features, url, city,
-            first_seen, last_seen, notified, last_status)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            first_seen, last_seen, notified, last_status, source)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             id, kw.get("name", id), kw.get("status", "Available to book"),
             kw.get("price_raw", "€700"), kw.get("available_from", ""),
@@ -36,6 +36,7 @@ def _add(st: Storage, id: str, **kw):
             kw.get("first_seen", _now_iso(hours=-1)),
             kw.get("last_seen", _now_iso(minutes=-30)),
             kw.get("notified", 0), kw.get("last_status", kw.get("status", "Available to book")),
+            kw.get("source", "holland2stay"),
         ),
     )
     st.conn.commit()
@@ -60,6 +61,17 @@ class TestGetAllListings:
         _add(store, "L2", city="Utrecht")
         items = store.get_all_listings(city="Amsterdam")
         assert len(items) == 1
+
+    def test_filter_by_source(self, store):
+        _add(store, "L1", source="holland2stay")
+        _add(store, "L2", source="ourdomain")
+        items = store.get_all_listings(source="ourdomain")
+        assert [i["id"] for i in items] == ["L2"]
+
+    def test_get_distinct_sources(self, store):
+        _add(store, "L1", source="holland2stay")
+        _add(store, "L2", source="ourdomain")
+        assert store.get_distinct_sources() == ["holland2stay", "ourdomain"]
 
     def test_search_by_name(self, store):
         _add(store, "L1", name="Sunny Studio")
@@ -173,3 +185,24 @@ class TestFilterHelpers:
 
     def test_get_listing_missing(self, store):
         assert store.get_listing("nonexistent") is None
+
+
+class TestCountByStatus:
+    def test_returns_counts_empty_db(self, store):
+        result = store.count_by_status()
+        assert isinstance(result, dict)
+        assert len(result) == 0
+
+    def test_returns_counts_with_listings(self, store):
+        _add(store, "l1", status="Available to book", city="Eindhoven")
+        _add(store, "l2", status="Occupied", city="Eindhoven")
+        result = store.count_by_status()
+        assert result.get("available to book") == 1
+        assert result.get("occupied") == 1
+
+    def test_counts_filtered_by_city(self, store):
+        _add(store, "l3", status="Available to book", city="Amsterdam")
+        _add(store, "l4", status="Available to book", city="Eindhoven")
+        result = store.count_by_status(city="Amsterdam")
+        assert result.get("available to book") == 1
+        assert len(result) == 1  # only Amsterdam listings

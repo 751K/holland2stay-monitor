@@ -16,6 +16,7 @@ struct ListingsView: View {
     @State private var filterApplyTick = 0
     @State private var selectedStatus = ""
     @State private var sort = ListingSort.newest
+    @State private var selectedSources: [String] = []
     @State private var selectedCities: [String] = []
     @State private var selectedTypes: [String] = []
     @State private var selectedContract = ""
@@ -88,6 +89,7 @@ struct ListingsView: View {
         .sheet(isPresented: $showFilters) {
             ListingFilterSheet(
                 selectedStatus: $selectedStatus,
+                selectedSources: $selectedSources,
                 selectedCities: $selectedCities,
                 selectedTypes: $selectedTypes,
                 selectedContract: $selectedContract,
@@ -100,6 +102,7 @@ struct ListingsView: View {
                 },
                 reset: {
                     selectedStatus = ""
+                    selectedSources = []
                     selectedCities = []
                     selectedTypes = []
                     selectedContract = ""
@@ -382,6 +385,12 @@ struct ListingsView: View {
                 Task { await fetchWithCurrentFilters() }
             })
         }
+        for source in selectedSources {
+            chips.append(.init(label: sourceShortLabel(source), active: false, mono: true) {
+                selectedSources.removeAll { $0 == source }
+                Task { await fetchWithCurrentFilters() }
+            })
+        }
         for t in selectedTypes {
             chips.append(.init(label: t, active: false, mono: false) {
                 selectedTypes.removeAll { $0 == t }
@@ -415,6 +424,7 @@ struct ListingsView: View {
 
     private func clearAllFilters() {
         selectedStatus = ""
+        selectedSources = []
         selectedCities = []
         selectedTypes = []
         selectedContract = ""
@@ -434,6 +444,7 @@ struct ListingsView: View {
     private var activeFilterCount: Int {
         ([selectedStatus].filter { !$0.isEmpty }.count
          + (searchText.isEmpty ? 0 : 1)
+         + (selectedSources.isEmpty ? 0 : 1)
          + (selectedCities.isEmpty ? 0 : 1)
          + (selectedTypes.isEmpty ? 0 : 1)
          + (selectedContract.isEmpty ? 0 : 1)
@@ -450,15 +461,26 @@ struct ListingsView: View {
 
     private func fetchWithCurrentFilters() async {
         // Backend treats single-city cities= as SQL level; multi-city as Python filter
+        let sourcesParam = selectedSources.isEmpty ? nil : selectedSources
         let citiesParam = selectedCities.isEmpty ? nil : selectedCities
         await store.fetch(
             city: (selectedCities.count == 1 ? selectedCities[0] : nil),
             status: selectedStatus.nilIfEmpty,
             query: searchText.nilIfEmpty,
+            sources: sourcesParam,
             cities: citiesParam,
             types: selectedTypes.isEmpty ? nil : selectedTypes,
             contract: selectedContract.nilIfEmpty,
             energy: selectedEnergy.nilIfEmpty)
+    }
+
+    private func sourceShortLabel(_ source: String) -> String {
+        switch source.lowercased() {
+        case "holland2stay": return "H2S"
+        case "ourdomain": return "OD"
+        case "xior": return "XR"
+        default: return source.uppercased()
+        }
     }
 }
 
@@ -526,6 +548,7 @@ private extension String {
 
 private struct ListingFilterSheet: View {
     @Binding var selectedStatus: String
+    @Binding var selectedSources: [String]
     @Binding var selectedCities: [String]
     @Binding var selectedTypes: [String]
     @Binding var selectedContract: String
@@ -541,12 +564,14 @@ private struct ListingFilterSheet: View {
 
     /// Expandable sections
     @State private var showCities = false
+    @State private var showSources = false
     @State private var showTypes = false
 
     // ── 未保存变更追踪 ───────────────────────────────────────────────
     // 打开 sheet 时快照初始值；后续比对得 hasUnsavedChanges；
     // dirty 时阻止下滑 dismiss，Cancel 弹 confirmation。
     @State private var initialStatus = ""
+    @State private var initialSources: [String] = []
     @State private var initialCities: [String] = []
     @State private var initialTypes: [String] = []
     @State private var initialContract = ""
@@ -557,6 +582,7 @@ private struct ListingFilterSheet: View {
     private var hasUnsavedChanges: Bool {
         guard snapshotTaken else { return false }
         return selectedStatus != initialStatus
+            || selectedSources != initialSources
             || selectedCities != initialCities
             || selectedTypes != initialTypes
             || selectedContract != initialContract
@@ -566,6 +592,24 @@ private struct ListingFilterSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    if isLoadingOptions && options.sources.isEmpty {
+                        ProgressView()
+                    } else if options.sources.isEmpty {
+                        Text("No platforms available").font(.subheadline).foregroundStyle(.secondary)
+                    } else if options.sources.count > 6 {
+                        DisclosureGroup(isExpanded: $showSources) {
+                            sourceRows(choices: options.sources, selection: $selectedSources)
+                        } label: {
+                            Text(selectedSources.isEmpty ? "All Platforms" : "\(selectedSources.count) selected")
+                        }
+                    } else {
+                        sourceRows(choices: options.sources, selection: $selectedSources)
+                    }
+                } header: {
+                    Label("Platforms", systemImage: "rectangle.3.group.fill")
+                }
+
                 // Cities: multi-select
                 Section {
                     if isLoadingOptions && options.cities.isEmpty {
@@ -683,6 +727,7 @@ private struct ListingFilterSheet: View {
                 Button("Discard changes", role: .destructive) {
                     // 还原到打开 sheet 那一刻的初始值，避免下次再打开还看到脏数据
                     selectedStatus = initialStatus
+                    selectedSources = initialSources
                     selectedCities = initialCities
                     selectedTypes = initialTypes
                     selectedContract = initialContract
@@ -696,6 +741,7 @@ private struct ListingFilterSheet: View {
                 // 不会触发再次快照（snapshotTaken 守卫）。
                 if !snapshotTaken {
                     initialStatus   = selectedStatus
+                    initialSources  = selectedSources
                     initialCities   = selectedCities
                     initialTypes    = selectedTypes
                     initialContract = selectedContract
@@ -730,6 +776,51 @@ private struct ListingFilterSheet: View {
             )) {
                 Text(c)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func sourceRows(choices: [String], selection: Binding<[String]>) -> some View {
+        ForEach(choices, id: \.self) { source in
+            Toggle(isOn: Binding(
+                get: { selection.wrappedValue.contains(source) },
+                set: { add in
+                    if add {
+                        if !selection.wrappedValue.contains(source) {
+                            selection.wrappedValue.append(source)
+                        }
+                    } else {
+                        selection.wrappedValue.removeAll { $0 == source }
+                    }
+                }
+            )) {
+                HStack {
+                    Text(sourceShortLabel(source))
+                        .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                    Text(sourceDisplayName(source))
+                }
+            }
+        }
+    }
+
+    private func sourceShortLabel(_ source: String) -> String {
+        switch source.lowercased() {
+        case "holland2stay": return "H2S"
+        case "ourdomain": return "OD"
+        case "xior": return "XR"
+        default: return source.uppercased()
+        }
+    }
+
+    private func sourceDisplayName(_ source: String) -> String {
+        switch source.lowercased() {
+        case "holland2stay": return "Holland2Stay"
+        case "ourdomain": return "OurDomain"
+        case "xior": return "Xior"
+        default: return source
         }
     }
 

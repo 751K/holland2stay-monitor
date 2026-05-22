@@ -52,7 +52,11 @@
 </div>
 
 <!-- Distribution charts -->
-<div class="grid-3 mb-4">
+<div class="grid-4 mb-4">
+  <div class="chart-card">
+    <div class="chart-title"><i class="bi bi-diagram-3 mr-1" style="color:var(--accent);"></i>{{ _('stats_source_dist') }}</div>
+    <div class="chart-wrap" style="height:220px;"><canvas id="chartSource"></canvas></div>
+  </div>
   <div class="chart-card">
     <div class="chart-title"><i class="bi bi-geo-alt mr-1" style="color:var(--accent);"></i>{{ _('stats_city_dist') }}</div>
     <div class="chart-wrap" style="height:220px;"><canvas id="chartCity"></canvas></div>
@@ -126,6 +130,14 @@ function statusColor(s) {
   if(sl.indexOf('book') !== -1) return '#10b981';
   if(sl.indexOf('lottery') !== -1) return '#f59e0b';
   return 'rgba(128,128,128,.6)';
+}
+
+function sourceLabel(s) {
+  var v = (s || 'holland2stay').toLowerCase();
+  if(v === 'holland2stay') return 'H2S';
+  if(v === 'ourdomain') return 'OD';
+  if(v === 'xior') return 'XR';
+  return (s || 'H2S').toUpperCase();
 }
 
 function themeColors() {
@@ -247,6 +259,11 @@ function renderCharts(d) {
   var zh = LANG === 'zh';
   buildLineChart('chartDailyNew', zh ? '新增房源' : 'New listings', d.daily_new, '#10b981');
   buildLineChart('chartDailyChanges', zh ? '状态变更' : 'Status changes', d.daily_changes, '#f59e0b');
+
+  var sourceDist = d.source_dist || [];
+  var srcLabels = sourceDist.map(function(r){ return sourceLabel(r.source); });
+  var srcCounts = sourceDist.map(function(r){ return r.count; });
+  buildDoughnutChart('chartSource', srcLabels, srcCounts, ['#10b981', '#5e6ad2', '#f59e0b', '#ef4444']);
 
   var cityLabels = d.city_dist.map(function(r){ return r.city; });
   var cityCounts = d.city_dist.map(function(r){ return r.count; });

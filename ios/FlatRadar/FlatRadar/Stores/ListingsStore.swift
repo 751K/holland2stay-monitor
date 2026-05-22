@@ -20,6 +20,7 @@ final class ListingsStore {
     private var currentCity: String?
     private var currentStatus: String?
     private var currentQuery: String?
+    private var currentSources: [String] = []
     private var currentCities: [String] = []
     private var currentTypes: [String] = []
     private var currentContract: String?
@@ -32,11 +33,12 @@ final class ListingsStore {
     var hasMore: Bool { listings.count < total }
 
     func fetch(city: String? = nil, status: String? = nil, query: String? = nil,
-               cities: [String]? = nil, types: [String]? = nil,
+               sources: [String]? = nil, cities: [String]? = nil, types: [String]? = nil,
                contract: String? = nil, energy: String? = nil) async {
         currentCity = city
         currentStatus = status
         currentQuery = query
+        currentSources = sources ?? []
         currentCities = cities ?? []
         currentTypes = types ?? []
         currentContract = contract
@@ -49,7 +51,7 @@ final class ListingsStore {
             let resp = try await client.getListings(
                 city: city, status: status, query: query,
                 limit: pageSize, offset: 0,
-                cities: cities, types: types,
+                sources: sources, cities: cities, types: types,
                 contract: contract, energy: energy)
             // 期间又被 fetch 一次 → 当前响应已过期，整体丢弃，不写 state。
             guard myGen == fetchGeneration else { return }
@@ -73,6 +75,7 @@ final class ListingsStore {
             let resp = try await client.getListings(
                 city: currentCity, status: currentStatus, query: currentQuery,
                 limit: pageSize, offset: listings.count,
+                sources: currentSources.isEmpty ? nil : currentSources,
                 cities: currentCities.isEmpty ? nil : currentCities,
                 types: currentTypes.isEmpty ? nil : currentTypes,
                 contract: currentContract, energy: currentEnergy)
@@ -88,6 +91,7 @@ final class ListingsStore {
 
     func refresh() async {
         await fetch(city: currentCity, status: currentStatus, query: currentQuery,
+                    sources: currentSources.isEmpty ? nil : currentSources,
                     cities: currentCities.isEmpty ? nil : currentCities,
                     types: currentTypes.isEmpty ? nil : currentTypes,
                     contract: currentContract, energy: currentEnergy)
@@ -106,6 +110,7 @@ final class ListingsStore {
         currentCity = nil
         currentStatus = nil
         currentQuery = nil
+        currentSources = []
         currentCities = []
         currentTypes = []
         currentContract = nil

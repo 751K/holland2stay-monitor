@@ -685,6 +685,11 @@ BookingPhase = Literal[
     # 与 race_lost / unknown_error 路径独立，让上层（_book_with_fallback /
     # monitor.run_once）能识别并聚合通知 + 失效 prewarm 缓存。
     "blocked",
+    # unsupported = 该 listing 所属 source 没有注册 Booker（如 OurDomain
+    # 当前没有 auto-book 实现）。由 bookers.dispatch_book() 返回，
+    # 调用方应当跳过该候选 + 不发"预订失败"通知（用户已经从 new-listing
+    # 通知 deep link 手动申请）。
+    "unsupported",
 ]
 
 

@@ -27,10 +27,19 @@ def filter_for_user_view(rows: list[dict], user: Any) -> list[dict]:
     This second pass removes system-only event types and applies the user's
     listing_filter to rows that reference a listing.
     """
-    if user is None or user.listing_filter.is_empty():
-        return [r for r in rows if r.get("type") in USER_ALLOWED_TYPES]
+    def _visible_type(row: dict) -> bool:
+        if row.get("type") not in USER_ALLOWED_TYPES:
+            return False
+        # Booking 结果是用户私有事件。旧版本曾写成 user_id='' 的全局通知；
+        # 用户视角必须隐藏这些旧行，避免 A 的成功/失败出现在 B 的 Alerts。
+        if row.get("type") == "booking" and row.get("user_id") != getattr(user, "id", ""):
+            return False
+        return True
 
-    typed = [r for r in rows if r.get("type") in USER_ALLOWED_TYPES]
+    typed = [r for r in rows if _visible_type(r)]
+    if user is None or user.listing_filter.is_empty():
+        return typed
+
     listing_ids = {r["listing_id"] for r in typed if r.get("listing_id")}
     if not listing_ids:
         return typed
@@ -71,6 +80,8 @@ def list_api_notifications(
         unread = st.count_unread_notifications()
 
     filtered = filter_for_user_view(raw, user) if role == "user" else raw
+    if role == "user":
+        unread = sum(1 for row in filtered if not int(row.get("read") or 0))
     total = len(filtered)
     page = filtered[offset : offset + limit]
     return {

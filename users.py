@@ -93,6 +93,7 @@ class UserConfig:
     enabled: bool = True
 
     notifications_enabled: bool = True
+    language: str = "en"          # 推送语言：en / zh
     notification_channels: list[str] = field(default_factory=list)
     imessage_recipient: str = ""
     telegram_token: str = ""
@@ -153,6 +154,7 @@ def _lf_from_dict(d: dict) -> ListingFilter:
         allowed_tenant=d.get("allowed_tenant", []),
         allowed_offer=d.get("allowed_offer", []),
         allowed_cities=d.get("allowed_cities", []),
+        allowed_sources=d.get("allowed_sources", []),
         allowed_finishing=d.get("allowed_finishing", []),
         allowed_energy=d.get("allowed_energy", "") if isinstance(d.get("allowed_energy", ""), str) else "",
     )
@@ -301,6 +303,7 @@ def _user_to_row(u: UserConfig) -> dict:
         "app_password_hash": d.get("app_password_hash", ""),
         "app_login_enabled": 1 if d.get("app_login_enabled") else 0,
         "allow_h2s_login": 1 if d.get("allow_h2s_login") else 0,
+        "language": (d.get("language") or "en").lower()[:8],
     }
 
 
@@ -362,6 +365,7 @@ def _row_to_user(row: dict) -> UserConfig:
         app_password_hash=row.get("app_password_hash", ""),
         app_login_enabled=bool(row.get("app_login_enabled")),
         allow_h2s_login=bool(row.get("allow_h2s_login")),
+        language=(row.get("language") or "en").lower()[:8],
     )
 
 

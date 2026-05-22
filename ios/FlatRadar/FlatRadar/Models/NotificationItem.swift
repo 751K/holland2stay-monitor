@@ -23,6 +23,22 @@ struct NotificationItem: Decodable, Identifiable, Sendable {
                          title: title, body: body, url: url,
                          listingID: listingID, read: 1)
     }
+
+    var listingTitleHint: String {
+        let separators = ["：", ":"]
+        var value = title
+        for sep in separators {
+            if let range = value.range(of: sep) {
+                value = String(value[range.upperBound...])
+                break
+            }
+        }
+        value = value.replacingOccurrences(
+            of: #"^\s*(?:[^\p{L}\p{N}\[]+\s*)?(?:\[[^\]]+\]\s*)?"#,
+            with: "",
+            options: .regularExpression)
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 extension NotificationItem {

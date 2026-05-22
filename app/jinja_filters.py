@@ -65,13 +65,41 @@ def parse_features(features_json: str) -> dict[str, str]:
 
 
 def status_badge(status: str) -> str:
-    """房源状态字符串 → Bootstrap badge 颜色类名。"""
+    """房源状态字符串 → badge 颜色类名（CSS 里有对应的 .badge-{name} 定义）。
+
+    - book        → 绿（success）        Available to book
+    - lottery     → 橙（warning）        Available in lottery
+    - reserved    → 蓝（info）           Reserved / In Process（过渡态）
+    - secondary   → 灰（neutral）        Occupied / Rented / Not available（终态）
+    """
     s = status.lower()
     if "book" in s:
         return "success"
     if "lottery" in s:
         return "warning"
+    if "reserved" in s or "in process" in s or "pending" in s:
+        return "reserved"
     return "secondary"
+
+
+def source_label(source: str) -> str:
+    """Source id → user-facing platform label."""
+    mapping = {
+        "holland2stay": "Holland2Stay",
+        "ourdomain": "OurDomain",
+        "xior": "Xior",
+    }
+    return mapping.get((source or "").lower(), source or "Holland2Stay")
+
+
+def source_short(source: str) -> str:
+    """Source id → compact platform label for dense tables."""
+    mapping = {
+        "holland2stay": "H2S",
+        "ourdomain": "OD",
+        "xior": "XR",
+    }
+    return mapping.get((source or "").lower(), source_label(source))
 
 
 def register(app: "Flask") -> None:
@@ -79,4 +107,6 @@ def register(app: "Flask") -> None:
     app.add_template_filter(time_ago,       "time_ago")
     app.add_template_filter(price_short,    "price_short")
     app.add_template_filter(parse_features, "parse_features")
+    app.add_template_filter(source_label,    "source_label")
+    app.add_template_filter(source_short,    "source_short")
     app.add_template_global(status_badge,   "status_badge")

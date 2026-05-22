@@ -9,8 +9,8 @@ API v1 通知端点
 user 视角的过滤
 ---------------
 1. ``user_id`` 列过滤：仅返回 ``user_id = <self.id>`` 或 ``user_id = ''``
-   （系统通知，所有人可见）的行。当前 Phase 2 写入路径还未 populate
-   user_id，所以效果等同 "返回全部"；Phase 3 APNs 接入后会真正分流。
+   （系统通知，所有人可见）的行。自动预订结果会写入具体 ``user_id``，
+   避免 A 的成功/失败结果出现在 B 的 App Alerts。
 2. ``listing_filter`` 二次过滤：对带 ``listing_id`` 的行，
    从 listings 表反查该房源，应用本人的 listing_filter，不通过则丢弃。
    减少用户在 App 通知中心看到不相关房源的噪音。

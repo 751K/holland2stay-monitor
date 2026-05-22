@@ -2,13 +2,25 @@
 
 > For the Chinese (简体中文) version, see: [README_cn.md](README_cn.md)
 
-FlatRadar is a personal Holland2Stay listing monitor. It tracks new listings and status changes, pushes notifications to multiple users, and can automatically add qualifying listings to the booking cart (stops before payment).
+FlatRadar is a personal rental listing monitor. It tracks new listings and status changes across multiple platforms, pushes notifications to multiple users, and can automatically add qualifying listings to the booking cart (stops before payment). Currently supports **Holland2Stay** (GraphQL API), **OurDomain** (RENTCafe HTML), and **Xior** (WordPress AJAX JSON).
 
 > **Disclaimer:** This project is for personal, non-commercial use only. It is not affiliated with, endorsed by, or associated with Holland2Stay. Users are solely responsible for complying with Holland2Stay's Terms of Service and applicable laws. The author assumes no liability for any misuse or consequences arising from the use of this software.
 
-**Current version:** v1.6.0
+**Current version:** v1.7.0
 
-**Live demo:** [flatradar.app](https://flatradar.app) — click "Guest mode" on the login page for read-only access.
+**Live demo:** [flatradar.app](https://flatradar.app) — register an account or click "Guest mode" for read-only access.  
+**User guide:** [flatradar.app/guide](https://flatradar.app/guide) — full walkthrough with screenshots.
+
+If you find this project useful, please consider **starring the repo** ⭐ — it helps others discover FlatRadar.
+
+---
+
+## Sponsor / Support
+
+FlatRadar is a solo-driven open source project. Server costs, API proxies, and push notification infrastructure are paid out of pocket. Every sponsorship directly keeps the server running and the iOS app on the App Store.
+
+- **[GitHub Sponsors](https://github.com/sponsors/751K)** — monthly or one-time
+- **[Buy Me a Coffee](https://flatradar.app/donate)** — Alipay / WeChat QR
 
 ---
 
@@ -45,73 +57,6 @@ python -m pytest tests/ -v
 ```
 
 [Full installation guide →](#run-locally)
-
----
-
-## Project status
-
-| Component | Status | Notes |
-|---|---:|---|
-| Data scraping | ✅ Done | Uses GraphQL + curl_cffi to bypass Cloudflare WAF; reports per-city complete-scan status |
-| Stale listing convergence | ✅ Done | Only runs for complete cities; `Available to book` / `Unknown` use 7 days, `Available in lottery` uses 2 days |
-| Multi-city monitoring | ✅ Done | 26 Dutch cities; select cities in the web UI |
-| Multi-channel notifications | ✅ Done | iMessage / Telegram HTML / Email HTML / WhatsApp (Twilio) |
-| Web panel notifications | ✅ Done | Real-time bell + toasts via SSE, works on any platform |
-| Notification filters | ✅ Done | Per-user: rent, area, floor, type, occupancy, city, neighborhood, contract, tenant, promo, finishing, energy |
-| Multi-select filter UI | ✅ Done | Dropdown checkboxes with i18n labels; listing filters for city, tenant, contract |
-| Short-stay detection | ✅ Done | Contract / Tenant / Offer tags extracted from GraphQL; per-user filters |
-| Cross-platform builds | ✅ Done | GitHub Actions builds macOS .dmg + Windows .exe on tag push |
-| Geocoding (Photon) | ✅ Done | Fast map geocoding via Komoot Photon API; manual trigger button |
-| Auto-booking | ✅ Done | Full flow: add to cart → place order → direct payment URL |
-| Fast-path booking | ✅ Done | Reserved → Available booking submitted before notifications send |
-| Web admin panel | ✅ Done | Dashboard, listings, users, global settings |
-| Hot config reload | ✅ Done | Cross-platform reload, no restart required |
-| Smart polling | ✅ Done | Dual peak windows (AM + PM), auto-accelerate; adaptive interval probes rate limit |
-| Rate limit protection | ✅ Done | 429 exponential backoff + 5-minute cooldown + proxy support |
-| Cloudflare block detection | ✅ Done | 403 WAF detection, throttled alert, 15-min cooldown, actionable recovery steps |
-| Multi-user support | ✅ Done | Each user has independent channels / filters / booker settings |
-| VPS / Docker ready | ✅ Done | iMessage gracefully skipped on non-macOS; web panel takes over |
-| Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
-| Mobile web optimization | ✅ Done | Adaptive views: card layouts, 44px touch targets, safe-area insets, dvh units, list/calendar toggle, responsive grids |
-| Visualization | ✅ Done | 10 charts with 7/30/90-day range-aware KPI cards and distributions |
-| Move-in calendar | ✅ Done | Calendar view filtered by city |
-| Map view | ✅ Done | Leaflet.js + OpenStreetMap with auto-geocoding |
-| i18n (中/EN) | ✅ Done | One-click language switch, cookie-persisted |
-| Notification testing | ✅ Done | Per-channel test with result details |
-| Guest mode (RBAC) | ✅ Done | Password-free read-only access; admin role required for settings/users/logs |
-| Optional auth for web | ✅ Done | Session login enabled when password set; `WEB_GUEST_MODE` controls guest entry |
-| Web self-registration | ✅ Done | Login page registration with Terms/Privacy confirmation; SQLite-backed user config |
-| Login rate limiting | ✅ Done | IP-based exponential backoff after 5 failures |
-| HTTPS / Caddy | ✅ Done | Bundled Caddyfile + docker-compose Caddy service; auto Let's Encrypt |
-| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix, DOM XSS prevention, email verification `PUBLIC_BASE_URL` fail-closed |
-| Startup preflight | ✅ Done | Blocks container start if `WEB_PASSWORD` unset or Caddyfile domain is still a placeholder |
-| Production WSGI | ✅ Done | Gunicorn (1 worker × 8 threads, timeout=0) replaces Flask dev server in Docker |
-| Dependency pinning | ✅ Done | `requirements.lock` with exact `==` versions; Dockerfile installs from lock file |
-| Code modularization | ✅ Done | web.py split into `app/` (10 route + 8 shared modules); `mcore/` (interval, prewarm, booking); `mstorage/` (6 mixin modules); `monitor.py` 1,235→971, `storage.py` 1,177→17 re-export |
-| Prewarm session cache | ✅ Done | `mcore/prewarm.py` PrewarmCache class; process-level cache with TTL refresh; invalidated on user/config change |
-| Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; web.log for Flask app; log viewer with file tabs, line numbers, level coloring, keyword search, auto-scroll |
-| Pytest test suite | ✅ Done | 30 test modules (566 tests) covering full stack: models, mcore, mstorage, storage, scraper, booker, notifier, auth, CSRF, routes, i18n |
-| Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, mixin composition for Storage |
-| **iOS App (FlatRadar)** |
-| iOS auth & RBAC | ✅ Done | Admin / User / Guest login with Keychain token persistence; global 401/403 auto-logout |
-| iOS Dashboard | ✅ Done | Real-time stats card + sparkline chart; Greeting banner; 2×2 Explore grid with inline mini-charts (status/price/type/energy); Matched listings preview |
-| iOS Listings | ✅ Done | Paginated list with pull-to-refresh + infinite scroll; search; multi-select filter (city, status, type, contract, energy); 6 sort modes; detail view with key details, monitoring history, disclaimer |
-| iOS Map | ✅ Done | Native MapKit with custom grid clustering; color-coded pins (green/orange/gray); cluster-tap zoom-to; bottom sheet card → deep link to detail |
-| iOS Calendar | ✅ Done | Monthly move-in calendar with availability counts per day; month navigation; selected-day listing list → detail |
-| iOS Notifications | ✅ Done | Card-style inbox with TODAY/YESTERDAY/EARLIER sections; SSE real-time stream with exponential backoff reconnect; swipe mark-read; unread badge; APNs push with sandbox/production auto-switch |
-| iOS Settings | ✅ Done | Notification filter editor (10 dimensions, multi-select pickers from FilterOptions API); Push permission & device registration; Test push (admin); Theme switcher; Account management (logout / delete account); Legal (Terms + Privacy sheets) |
-| iOS Admin | ✅ Done | User management list (toggle enable/disable, delete); Monitor control (start/stop/reload with status: PID, last scrape, last count) |
-| iOS Adaptive Layout | ✅ Done | iPhone compact: 4 tabs + Browse segmented picker (List/Map/Calendar); iPad regular: 6 tabs; Keyboard shortcuts ⌘1-6 |
-| iOS Deep Links | ✅ Done | `h2smonitor://listing/<id>` URL scheme; APNs notification tap → listing detail |
-| iOS Design System | ✅ Done | Primary #0A84FF; Success #34C759; Warning #FF9500; Error #FF3B30; Tabular-nums on all KPIs/prices/timestamps; SF Mono for meta data |
-| iOS Dark Mode | ✅ Done | Adaptive colors throughout (Login hero, Dashboard cards, Settings); overscroll color matching |
-| iOS i18n | ✅ Done | 174 localized strings (en / zh-Hans); all UI text, error messages, labels covered |
-| iOS Registration | ✅ Done | User self-registration with bcrypt password hashing; backend rate-limiting (3 IP/hour) + conflict detection; auto-login on register |
-| iOS Account Deletion | ✅ Done | DELETE /me endpoint; double confirmation dialog; revokes all tokens + removes SQLite user config |
-| iOS Legal | ✅ Done | First-launch Terms agreement (mandatory, non-dismissible); Terms + Privacy sheets in Settings and Login; full legal text in-app |
-| iOS StoreKit | ✅ Done | "Buy me a coffee" IAP (3 consumable tiers: Espresso/Latte/Flat White); StoreKit 2 transaction listener |
-| iOS Security | ✅ Done | ATS HTTPS-only; Keychain token storage; bcrypt password hashing; all `print()` guarded with `#if DEBUG`; TTL capped at 90 days; username length cap 64 chars |
-| iOS App Store Readiness | ✅ Done | PrivacyInfo.xcprivacy (UserDefaults CA92.1, data collection declarations); App icon asset; Info.plist configured |
 
 ---
 
@@ -203,104 +148,130 @@ All endpoints under `/api/v1/*` with JWT Bearer auth (or bearer_optional for pub
 
 ## Core features
 
-### Data scraping
+### Multi-platform scraping
 
-- Polls the Holland2Stay GraphQL API every N seconds (default: 5 minutes)
-- Supports multi-city monitoring; cities can be selected in the web UI
-- Detects both new listings and status changes, such as lottery → available to book
-- Stores all listings in local SQLite so history remains queryable and duplicate notifications are avoided
-- Each scrape reports whether every selected city was fully scanned; incomplete cities are logged and excluded from stale-status convergence
-- Stale listings are inferred as `Occupied` only after they disappear from complete scans: 7 days for direct-book/unknown listings and 2 days for lottery listings
+FlatRadar monitors three housing platforms through a unified `AbstractScraper` interface:
+
+| Platform | Source | Method | Granularity |
+|---|---|---|---|
+| **Holland2Stay** | GraphQL API | `curl_cffi` Chrome impersonation | Unit-level (specific apartment #) |
+| **OurDomain** | RENTCafe HTML | `curl_cffi` Safari impersonation | Unit-level (#6045, sqm, floor, view) |
+| **Xior** | WordPress AJAX JSON | `curl_cffi` with 1.5s pacing | Unit-level (M1.30.53, sqm, rent, deposit) |
+
+- Each platform implements `AbstractScraper.scrape(task)` → produces `Listing` objects with `source` tags
+- `dispatch_scrape_tasks()` routes by source, isolates per-platform failures, merges results
+- All scrapers share `RATE_LIMIT_BACKOFF`, `is_cloudflare_body`, and 429 retry logic from `scrapers/base.py`
 
 ### Smart adaptive polling
 
-Normal intervals apply outside peak hours. During the Dutch morning release window (default 08:30–10:00 CET, weekdays) and afternoon window (default 13:30–15:00 CET, weekdays), adaptive polling kicks in:
-
-- Starts each peak session at `PEAK_INTERVAL` (default 60 s)
-- After every successful scrape round, shrinks the interval by 5%, automatically probing how fast the API will tolerate
-- Floors at `MIN_INTERVAL` (default 15 s, configurable) — never pushes below this
-- On a 429 rate-limit response, doubles the current interval and holds a 5-minute cooldown before retrying
-- Resets to `PEAK_INTERVAL` at the end of each peak window, ready to probe again tomorrow
-- Randomised ±`JITTER_RATIO` % jitter on every sleep to avoid mechanical fingerprinting
-- All parameters (PEAK_INTERVAL, MIN_INTERVAL, PEAK_START, PEAK_END, PEAK_START_2, PEAK_END_2, JITTER_RATIO, PEAK_WEEKDAYS_ONLY) configurable in the web UI
+- Dual peak windows (default 08:30–10:00 and 13:30–15:00 CET, weekdays only)
+- Adaptive interval: ×0.95 on success (probing downward), ×2.0 on 429 (backing off), floor at `MIN_INTERVAL` (15s)
+- Random ±`JITTER_RATIO` jitter prevents mechanical fingerprinting
+- All parameters configurable from the web UI
 
 ### Rate limit & block protection
 
-**429 (rate limit)** — temporary, auto-recovers:
-
-- `scraper.py` retries a 429 response twice (waits 30 s then 60 s) before giving up
-- On persistent rate-limiting, `monitor.py` raises a `RateLimitError`, notifies all users, and sleeps 5 minutes before resuming
-
-**403 (Cloudflare WAF block)** — permanent until you act:
-
-- `scraper.py` detects Cloudflare challenge pages (HTML signatures like `no-js ie6 oldie`) and immediately raises `BlockedError` — no retry, unlike 429
-- `monitor.py` catches `BlockedError`, notifies users (throttled to 1 alert per 30 min), and sleeps 15 minutes
-- Error message includes actionable recovery steps: switch proxy IP, restart monitor (new TLS fingerprint), or pause for a few hours
-
-**Proxy support:** set `HTTPS_PROXY` or `HTTP_PROXY` in `.env` to route all scraping and booking traffic through a proxy; picked up at runtime so a hot reload applies the change without restart
-
-### Fast-path booking
-
-For any qualifying "Available to book" listing — whether it just appeared for the first time or transitioned from another status — the window to claim it is measured in seconds. The monitor:
-
-1. Pre-scans the diff result in memory (no network calls)
-2. Immediately submits `try_book()` to a thread pool for **all** auto-book candidates, before any notification is sent
-3. Runs the booking HTTP flow concurrently while notification sends are in flight
-4. Awaits the booking result after notifications finish — in most cases the booking is already done
-
-This reduces the delay between detecting availability and reaching the server to approximately 0–1 second instead of the former 2–5 second notification-first approach.
-
-### Multi-user support
-
-- Each user has independent channels, credentials, filters, and auto-book settings
-- One scrape run is shared across all users — adding users does not multiply API traffic
-- User data is stored in SQLite (`user_configs`) and can be managed entirely from the web UI
-- On first run, open the web panel and click "Add User" to create your first user
+- **429**: Retry twice (30s / 60s) → `RateLimitError` → 5-minute cooldown
+- **403 Cloudflare WAF**: Immediate `BlockedError` (no retry) → throttled alert (1/30 min) → 15-minute cooldown + recovery steps
+- **Proxy**: `HTTPS_PROXY` / `HTTP_PROXY` in `.env`, hot-reloadable
 
 ### Notifications
 
-**Per-user push channels** (iMessage, Telegram, Email, WhatsApp):
+- **Channels**: iMessage, Telegram, Email, WhatsApp — per-user, multi-channel
+- **iOS push**: APNs with bilingual support (en/zh `_T` translation map, per-device language grouping)
+- **Web panel**: SSE real-time bell + toast, works on any platform
+- **Filters**: 10 dimensions per user (rent, area, floor, type, occupancy, city, source, contract, energy, etc.)
 
-- Each user can enable one or more channels simultaneously
-- Notification content includes status, rent, area, floor, energy label, move-in date, and listing link
-- Per-user filters restrict which listings trigger a notification
-- One-click per-channel test with per-result details in the web UI
-- Telegram uses branded HTML messages with escaped dynamic content and disabled link previews
-- Email verification, test notifications, and listing alerts use FlatRadar-branded HTML templates
+### Auto-booking (Holland2Stay only)
 
-**iMessage platform check**: iMessage requires macOS and the Messages.app. On Linux/Windows/Docker the channel is automatically skipped with a warning; the user-form page shows an alert if the server is not running macOS.
-
-**Web panel notifications (platform-independent)**:
-
-- Every event (new listing, status change, booking result, error, heartbeat) is also written to a `web_notifications` SQLite table
-- The navbar bell icon shows an unread badge; clicking opens a dropdown of recent notifications
-- Slide-in toast popups appear automatically for real-time events
-- Powered by Server-Sent Events (SSE) at `GET /api/events` — the browser reconnects automatically on disconnect
-- Works on all platforms including VPS and Docker, with no extra dependencies
-
-### Auto-booking
-
-- When a qualifying "Available to book" listing appears, the monitor can complete the booking workflow automatically
-- Flow: login → `createEmptyCart` → `addNewBooking` → `placeOrder` (with `store_id=54`) → `idealCheckOut` (with `plateform="h"`)
-- Matches the official H2S frontend booking flow verified via browser DevTools
-- If `placeOrder` returns "another unit reserved" and `cancel_enabled` is on, auto-cancels the old order via `cancelOrder` mutation and retries the entire flow
-- If `cancel_enabled` is off (default), the "another unit reserved" error is forwarded directly to the user — no cancel attempt is made (H2S disables `cancelOrder` by default)
-- Sends a direct payment URL so payment can be completed without logging in again
-- Supports stricter booking filters than notification filters, plus a dry-run mode for validation
-- Booking runs concurrently with notifications (see Fast-path booking above)
+- Full GraphQL flow: login → `createEmptyCart` → `addNewBooking` → `placeOrder` → payment URL
+- **Fast-path**: booking submitted to thread pool *before* notifications send — reaches server 1–2s earlier
+- **Prewarm cache**: cross-round session reuse; invalidated on config change
+- Dry-run mode for validation; retry queue for race-lost candidates
 
 ### Web admin panel
 
-- **Dashboard** — totals, today's new listings, recent changes, latest scrape info, auto-refresh
-- **Listings** — filter by status, keyword search, sortable table view with first-seen and last-seen timestamps
-- **Map** — Leaflet.js interactive map with auto-geocoding (Nominatim → cached coordinates), color-coded markers (green=direct book, orange=lottery, grey=other), popup details, dark/light tile filters
-- **Calendar** — month grid with city filter, click-to-expand date detail panel
-- **Stats** — Chart.js trends (new listings, status changes), doughnut distributions (city, status), price histogram (9 buckets up to >€1600), 24h listing drop time chart, 7/30/90-day range selector
-- **Users** — CRUD, enable/disable, per-user notification channels & filters & auto-booking config, one-click per-channel test
-- **Global Settings** — polling intervals, adaptive smart-polling params (dual windows), heartbeat interval, monitored cities, save-and-reload workflow
-- **Guest mode** — login page "Guest mode" button lets anyone view the panel read-only without a password; set `WEB_GUEST_MODE=false` to disable; admin routes (Users / Settings / System / Logs) remain fully restricted
-- **i18n** — one-click Chinese / English switch in sidebar, cookie-persisted across sessions
-- **Minimal design** — borderless cards, shadow-based depth, dark/light theme (OS-aware, smooth CSS transition) with Inter typeface
+- **Dashboard**: KPI cards, filter chips, listings table, 48h status-change timeline
+- **Listings**: multi-filter (status / city / source / type / rent / energy), sortable table
+- **Map**: Leaflet.js + OpenStreetMap, color-coded markers, auto-geocoding
+- **Calendar**: monthly move-in view with city filter
+- **Stats**: 10 Chart.js visualizations with 7/30/90-day range selector
+- **Users**: CRUD, enable/disable, per-user channels / filters / auto-book config
+- **Settings**: global polling, adaptive params, platform cities, save-and-reload
+- **i18n**: one-click Chinese / English switch, cookie-persisted
+- **RBAC**: Admin / User / Guest roles; self-registration with Terms/Privacy confirmation
+- **Theme**: light/dark, OS-aware, no flicker
+
+---
+
+## Project status
+
+| Component | Status | Notes |
+|---|---:|---|
+| Multi-source scraper | ✅ Done | AbstractScraper + ScrapeTask dispatch; CURl_cffi + impersonation pool (Chrome/Safari/Edge) |
+| H2S data scraping | ✅ Done | GraphQL API + `curl_cffi` bypasses Cloudflare WAF; per-city complete-scan status |
+| OurDomain scraping | ✅ Done | RENTCafe HTML table parsing; unit-level (apartment #, sqft, floor, view, deposit); 2 buildings (Diemen + South-East) |
+| Xior scraping | ✅ Done | WordPress AJAX JSON; unit-level (room #, sqm, rent, deposit, move-in date, booking URL); NL 30 buildings |
+| Stale listing convergence | ✅ Done | Only runs for complete cities; `Available to book` / `Unknown` use 7 days, `Available in lottery` uses 2 days |
+| Multi-city monitoring | ✅ Done | 26 Dutch cities (H2S) + Amsterdam (OurDomain) + 15 cities (Xior); selectable in web UI |
+| Multi-channel notifications | ✅ Done | iMessage / Telegram HTML / Email HTML / WhatsApp (Twilio) |
+| APNs bilingual push | ✅ Done | iOS push with `_T` translation map; per-device language group dispatch (en/zh) |
+| Web panel notifications | ✅ Done | Real-time bell + toasts via SSE, works on any platform |
+| Notification filters | ✅ Done | Per-user: rent, area, floor, type, occupancy, city, neighborhood, contract, tenant, promo, finishing, energy |
+| Multi-select filter UI | ✅ Done | Dropdown checkboxes with i18n labels; listing filters for city, tenant, contract |
+| Short-stay detection | ✅ Done | Contract / Tenant / Offer tags extracted from GraphQL; per-user filters |
+| Cross-platform builds | ✅ Done | GitHub Actions builds macOS .dmg + Windows .exe on tag push |
+| Geocoding (Photon) | ✅ Done | Fast map geocoding via Komoot Photon API; manual trigger button |
+| Auto-booking | ✅ Done | Full flow: add to cart → place order → direct payment URL |
+| Fast-path booking | ✅ Done | Reserved → Available booking submitted before notifications send |
+| Web admin panel | ✅ Done | Dashboard, listings, users, global settings |
+| Hot config reload | ✅ Done | Cross-platform reload, no restart required |
+| Smart polling | ✅ Done | Dual peak windows (AM + PM), auto-accelerate; adaptive interval probes rate limit |
+| Rate limit protection | ✅ Done | 429 exponential backoff + 5-minute cooldown + proxy support |
+| Cloudflare block detection | ✅ Done | 403 WAF detection, throttled alert, 15-min cooldown, actionable recovery steps |
+| Multi-user support | ✅ Done | Each user has independent channels / filters / booker settings |
+| VPS / Docker ready | ✅ Done | iMessage gracefully skipped on non-macOS; web panel takes over |
+| Day/night theme | ✅ Done | Light/dark, follows OS preference without flicker |
+| Mobile web optimization | ✅ Done | Adaptive views: card layouts, 44px touch targets, safe-area insets, dvh units, list/calendar toggle, responsive grids |
+| Visualization | ✅ Done | 10 charts with 7/30/90-day range-aware KPI cards and distributions |
+| Move-in calendar | ✅ Done | Calendar view filtered by city |
+| Map view | ✅ Done | Leaflet.js + OpenStreetMap with auto-geocoding |
+| i18n (中/EN) | ✅ Done | One-click language switch, cookie-persisted |
+| Notification testing | ✅ Done | Per-channel test with result details |
+| Guest mode (RBAC) | ✅ Done | Password-free read-only access; admin role required for settings/users/logs |
+| Optional auth for web | ✅ Done | Session login enabled when password set; `WEB_GUEST_MODE` controls guest entry |
+| Web self-registration | ✅ Done | Login page registration with Terms/Privacy confirmation; SQLite-backed user config |
+| Login rate limiting | ✅ Done | IP-based exponential backoff after 5 failures |
+| HTTPS / Caddy | ✅ Done | Bundled Caddyfile + docker-compose Caddy service; auto Let's Encrypt |
+| Security hardening | ✅ Done | RBAC decorators, notifications/SSE/geocode blocked for guests, CSRF, open-redirect fix, DOM XSS prevention, email verification `PUBLIC_BASE_URL` fail-closed |
+| Startup preflight | ✅ Done | Blocks container start if `WEB_PASSWORD` unset or Caddyfile domain is still a placeholder |
+| Production WSGI | ✅ Done | Gunicorn (1 worker × 8 threads, timeout=0) replaces Flask dev server in Docker |
+| Dependency pinning | ✅ Done | `requirements.lock` with exact `==` versions; Dockerfile installs from lock file |
+| Code modularization | ✅ Done | web.py split into `app/` (10 route + 8 shared modules); `mcore/` (interval, prewarm, booking); `mstorage/` (6 mixin modules); `monitor.py` 1,235→971, `storage.py` 1,177→17 re-export |
+| Prewarm session cache | ✅ Done | `mcore/prewarm.py` PrewarmCache class; process-level cache with TTL refresh; invalidated on user/config change |
+| Error log (errors.log) | ✅ Done | Separate WARNING+ log with `funcName:lineno` format; web.log for Flask app; log viewer with file tabs, line numbers, level coloring, keyword search, auto-scroll |
+| Pytest test suite | ✅ Done | 62 test modules (950 tests) covering full stack: models, mcore, mstorage, scraper (H2S/OD/XR), booker, notifier, auth, CSRF, routes, push, i18n |
+| Code quality | ✅ Done | Literal types, shared constants, dedup parse logic, mixin composition for Storage |
+| **iOS App (FlatRadar)** |
+| iOS auth & RBAC | ✅ Done | Admin / User / Guest login with Keychain token persistence; global 401/403 auto-logout |
+| iOS Dashboard | ✅ Done | Real-time stats card + sparkline chart; Greeting banner; 2×2 Explore grid with inline mini-charts (status/price/type/energy); Matched listings preview |
+| iOS Listings | ✅ Done | Paginated list with pull-to-refresh + infinite scroll; search; multi-select filter (city, status, type, contract, energy); 6 sort modes; detail view with key details, monitoring history, disclaimer |
+| iOS Map | ✅ Done | Native MapKit with custom grid clustering; color-coded pins (green/orange/gray); cluster-tap zoom-to; bottom sheet card → deep link to detail |
+| iOS Calendar | ✅ Done | Monthly move-in calendar with availability counts per day; month navigation; selected-day listing list → detail |
+| iOS Notifications | ✅ Done | Card-style inbox with TODAY/YESTERDAY/EARLIER sections; SSE real-time stream with exponential backoff reconnect; swipe mark-read; unread badge; APNs push with sandbox/production auto-switch |
+| iOS Settings | ✅ Done | Notification filter editor (10 dimensions, multi-select pickers from FilterOptions API); Push permission & device registration; Test push (admin); Theme switcher; Account management (logout / delete account); Legal (Terms + Privacy sheets) |
+| iOS Admin | ✅ Done | User management list (toggle enable/disable, delete); Monitor control (start/stop/reload with status: PID, last scrape, last count) |
+| iOS Adaptive Layout | ✅ Done | iPhone compact: 4 tabs + Browse segmented picker (List/Map/Calendar); iPad regular: 6 tabs; Keyboard shortcuts ⌘1-6 |
+| iOS Deep Links | ✅ Done | `h2smonitor://listing/<id>` URL scheme; APNs notification tap → listing detail |
+| iOS Design System | ✅ Done | Primary #0A84FF; Success #34C759; Warning #FF9500; Error #FF3B30; Tabular-nums on all KPIs/prices/timestamps; SF Mono for meta data |
+| iOS Dark Mode | ✅ Done | Adaptive colors throughout (Login hero, Dashboard cards, Settings); overscroll color matching |
+| iOS i18n | ✅ Done | 174 localized strings (en / zh-Hans); all UI text, error messages, labels covered |
+| iOS Registration | ✅ Done | User self-registration with bcrypt password hashing; backend rate-limiting (3 IP/hour) + conflict detection; auto-login on register |
+| iOS Account Deletion | ✅ Done | DELETE /me endpoint; double confirmation dialog; revokes all tokens + removes SQLite user config |
+| iOS Legal | ✅ Done | First-launch Terms agreement (mandatory, non-dismissible); Terms + Privacy sheets in Settings and Login; full legal text in-app |
+| iOS StoreKit | ✅ Done | "Buy me a coffee" IAP (3 consumable tiers: Espresso/Latte/Flat White); StoreKit 2 transaction listener |
+| iOS Security | ✅ Done | ATS HTTPS-only; Keychain token storage; bcrypt password hashing; all `print()` guarded with `#if DEBUG`; TTL capped at 90 days; username length cap 64 chars |
+| iOS App Store Readiness | ✅ Done | PrivacyInfo.xcprivacy (UserDefaults CA92.1, data collection declarations); App icon asset; Info.plist configured |
 
 ---
 
@@ -308,52 +279,104 @@ This reduces the delay between detecting availability and reaching the server to
 
 ### Data flow
 
-```text
-Holland2Stay website (Next.js + Magento)
-        |
-        |  Page data is loaded through Apollo GraphQL requests
-        v
-api.holland2stay.com/graphql/   <- Magento GraphQL backend
-        |
-        |  curl_cffi impersonate="chrome110" bypasses Cloudflare WAF
-        v
-   scraper.py  ->  models.py (Listing dataclass)
-        |
-        v
-   storage.py (SQLite diff: compare old vs new snapshots)
-        |
-        +-- New listing / status change
-        |        |
-        |        +-- WebNotifier -> web_notifications table
-        |        |     -> /api/events SSE -> browser bell + toast
-        |        |
-        |        +-- Loop through enabled users in SQLite user_configs
-        |                 |
-        |                 +-- ListingFilter.passes() -> notifier.py
-        |                 |     -> iMessage (macOS only) / Telegram / Email / WhatsApp
-        |                 |
-        |                 +-- AutoBookConfig.passes() -> booker.py  [concurrent]
-        |                       -> prewarmed session (login done in parallel with notifs)
-        |                          → createEmptyCart → addNewBooking
-        |                          → placeOrder (store_id=54) → idealCheckOut → payment URL
-        |
-        +-- Read-only web queries -> web.py (Flask + custom design system)
-                 -> /api/charts
-                 -> /api/map    (auto-geocoding)
-                 -> /api/events  (SSE stream)
-                 -> /api/notifications
+```mermaid
+flowchart TD
+    A["Start monitor.py"] --> B["Load config .env / SQLite user_configs"]
+    B --> B1["Config.scrape_tasks_v2()\nSOURCES / CITIES / OURDOMAIN_CITIES / XIOR_CITIES"]
+    B1 --> C["Init Storage / Notifier / WebNotifier"]
+    C --> D["Enter main_loop polling"]
+
+    D --> E["run_once()"]
+    E --> F["Prewarm H2S auto-booking login sessions"]
+    E --> G["dispatch_scrape_tasks(tasks)\nRoute ScrapeTask by source"]
+
+    subgraph S["Multi-platform scraping layer scrapers/"]
+        G --> H1["holland2stay:Eindhoven...\nHollandStayScraper"]
+        G --> H2["ourdomain:Diemen / South-East\nOurDomainScraper"]
+        H2 --> H21["RENTCafe floorplans.aspx\nDiscover floorplan ids"]
+        H21 --> H22["rcLoadContent.ashx availableunits\nUnit-level listings"]
+        H22 --> H23["Parse Unit / Area / Floor / Date\nsource = ourdomain"]
+        H2 --> H24{"403 Cloudflare?"}
+        H24 -->|Yes| H25["Switch TLS fingerprint\nOURDOMAIN_IMPERSONATES"]
+        H25 --> H21
+
+        G --> H3["xior:Eindhoven Kronehoefstraat...\nXiorScraper"]
+        H3 --> H31["POST admin-ajax.php\nyardi_room_availability"]
+        H31 --> H32["Parse JSON response\napartmentId / sqm / rent"]
+        H32 --> H33["Unit-level listings\nsource = xior"]
+        H3 --> H34{"429 rate limit?"}
+        H34 -->|Yes| H35["Backoff retry RATE_LIMIT_BACKOFF\n1.5s pacing between requests"]
+        H35 --> H31
+    end
+
+    H1 --> I{"Scrape result"}
+    H23 --> I
+    H24 -->|All fingerprints failed| I
+    H33 --> I
+    H34 -->|Retries exhausted| I
+
+    I -->|At least one task succeeded| J["Merge listings + completeness\nsource:city keys avoid name collisions"]
+    I -->|All tasks had network failures| K["ScrapeNetworkError\nFailure streak / cooldown"]
+    I -->|All tasks hit 403/429| L["BlockedError / RateLimitError\nmain_loop cooldown"]
+    I -->|One platform failed| M["Record completeness=false\nIsolate failed platform"]
+
+    M --> J
+    J --> N["storage.diff(fresh)\nsource-aware upsert / status changes"]
+    N --> O["mark_stale_listings()\nConverge stale rows by source:city"]
+    O --> P["Update last_scrape_at / last_scrape_count"]
+
+    P --> Q["Send notifications\nWeb / Telegram / Email / APNs"]
+    Q --> Q1["Title/body include platform badge\nH2S / OD / XR"]
+    Q1 --> R["Record notified state"]
+
+    P --> T["Scan auto-booking candidates"]
+    T --> U{"listing.source == holland2stay\nand directly bookable?"}
+    U -->|Yes| V["Submit try_book() immediately\nvia thread pool (concurrent)"]
+    U -->|No| W["Skip auto-booking\nOD / XR are notify-only"]
+
+    V --> X["booker.py\nLogin / reuse prewarmed session"]
+    X --> Y["createEmptyCart → addNewBooking\n→ placeOrder → idealCheckOut"]
+    Y --> AE{"Booking result"}
+    AE -->|Success| AF["Send booking success notification\nwith payment URL"]
+    AE -->|Failed| AG["Send failure reason\nMay enter retry queue"]
+    AF --> R
+    AG --> R
+
+    R --> AH["Round complete"]
+    W --> AH
+    K --> AI["Wait for next round"]
+    L --> AI
+    AH --> AI
+    AI --> D
+
+    subgraph WEB["Web / API read path"]
+        N --> WEB1["listings table includes source"]
+        WEB1 --> WEB2["dashboard / listings / map / calendar\nshow H2S / OD / XR badges"]
+        WEB1 --> WEB3["/api/v1/listings?source=...\nfilter/options.sources"]
+        WEB1 --> WEB4["stats source_dist platform distribution"]
+    end
 ```
 
 ### Module responsibilities
 
 | File | Responsibility |
 |---|---|
-| `monitor.py` | Main scheduler, adaptive smart polling (dual peak windows), hot reload, PID management, prewarmed session cache (Phase B cross-round reuse), concurrent booking, time-based heartbeat, dual logging (monitor.log + errors.log) |
-| `scraper.py` | GraphQL scraping, `curl_cffi`, pagination, multi-city, 429 retry with cumulative wait, proxy support, enhanced error context logging |
-| `storage.py` | SQLite persistence, diff detection, chart aggregation, meta storage, web_notifications table, `get_distinct_cities()` |
-| `models.py` | `Listing` dataclass and formatting helpers |
-| `notifier.py` | `BaseNotifier` ABC; iMessage (macOS gate, AppleScript escape hardened), Telegram, Email, WhatsApp, `WebNotifier`, multi-dispatch |
-| `booker.py` | `PrewarmedSession`, `createEmptyCart`, `addNewBooking`, `placeOrder` (store_id), `idealCheckOut` (plateform "h"); enhanced error context (sku/contract_id/start_date); optional `cancel_enabled` auto-cancel, proxy support |
+| `monitor.py` | Main scheduler, adaptive smart polling, hot reload, PID management, prewarmed session cache, concurrent booking, multi-source dispatch via `dispatch_scrape_tasks()` |
+| `scrapers/__init__.py` | `SCRAPER_REGISTRY`, `dispatch_scrape_tasks()` — routes `ScrapeTask` to `AbstractScraper` by source, merges results, isolates per-source failures |
+| `scrapers/base.py` | `AbstractScraper` ABC, `ScrapeTask`/`ScrapeResult` dataclasses, shared exceptions (`RateLimitError`/`BlockedError`/`ScrapeNetworkError`) |
+| `scrapers/holland2stay.py` | `HollandStayScraper`: GraphQL API, `curl_cffi` Chrome impersonation, pagination, 429 retry, proxy support |
+| `scrapers/ourdomain.py` | `OurDomainScraper`: RENTCafe two-stage scraping (floorplans→availableunits), unit dedup, floor/date parsing, Safari impersonation |
+| `scraper.py` | Backward-compatible re-exports from `scrapers/` + legacy `scrape_all()` |
+| `storage.py` | SQLite persistence re-export from `mstorage/` |
+| `mstorage/_base.py` | SQLite schema, connection management, idempotent migrations |
+| `mstorage/_listings.py` | Diff detection, listing queries, status counts, stale convergence |
+| `models.py` | `Listing` dataclass (with `source` field for multi-platform) and formatting helpers |
+| `notifier.py` | `BaseNotifier` ABC; iMessage, Telegram, Email, WhatsApp, `WebNotifier`, multi-dispatch |
+| `booker.py` | H2S auto-booking: `PrewarmedSession`, GraphQL cart/order mutations, payment URL |
+| `mcore/booking.py` | Booking orchestration: `book_with_fallback()`, `RetryQueue`, `area_key` |
+| `mcore/push.py` | APNs dispatch: per-device language grouping, `_T` bilingual translation map, rate/dedup throttle |
+| `mcore/interval.py` | Adaptive polling interval + jitter |
+| `mcore/prewarm.py` | `PrewarmCache`: process-level session cache with TTL refresh |
 | `config.py` | Global config loading, known cities, `ListingFilter`, `AutoBookConfig` |
 | `users.py` | `UserConfig`, SQLite `user_configs` read/write, legacy `users.json` migration |
 | `web.py` | Flask app bootstrap: instantiation, security headers, CSRF, Jinja filters, context processors, route registration, web process file logging |
@@ -385,28 +408,31 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 
 | Problem | Solution | Why |
 |---|---|---|
-| Cloudflare 403 | `curl_cffi` + `impersonate="chrome110"` | Emulates a Chrome TLS fingerprint without launching a browser |
-| No useful listing HTML | Call the GraphQL API directly | Holland2Stay uses Next.js + Apollo client-side data loading |
+| Multi-platform data sources | `AbstractScraper` + `ScrapeTask`/`ScrapeResult` protocol | Each platform implements `scrape(task) → ScrapeResult`; `dispatch_scrape_tasks()` routes by source, isolates failures, merges results |
+| H2S Cloudflare 403 | `curl_cffi` + `impersonate="chrome*"` | Emulates Chrome TLS fingerprint; no browser needed |
+| OurDomain RENTCafe CF | `curl_cffi` + `impersonate="safari17_0"` | Safari fingerprint passes CF on RENTCafe form POSTs; Chrome blocked |
+| RENTCafe reCAPTCHA | reCAPTCHA solving services (capsolver/2captcha) | HTTP API returns valid v3 token in 1–15s; no Playwright required |
+| H2S: no useful listing HTML | Call the GraphQL API directly | H2S uses Next.js + Apollo client-side data loading |
+| OurDomain: no API | Parse HTML tables with `data-selenium-id` anchors | RENTCafe is ASP.NET server-rendered; Yardi leaves test anchors |
+| Unit dedup (OurDomain) | `_merge_unit()` by `unit_id` across floor plans | Same physical unit appears under multiple contract types |
 | Sync scraping + async notifications | `run_in_executor` bridge | Keeps `curl_cffi` scraping simple while async notifiers still work |
-| Booking race condition | Submit `try_book()` to thread pool before notifications send | Booking and notification network calls run concurrently; booking reaches the server ~2–4 s sooner |
-| Repeated login overhead | `PrewarmedSession`: log in once per round, reuse for all candidates | Prewarm runs in parallel with notifications; each booking saves ~0.7 s (session creation + login round-trip) |
-| API rate limits | 429 backoff (30 s / 60 s retry) + 5-min cooldown + adaptive decrease | Three-layer defence: scraper retries, monitor cools down, adaptive polling stays below the threshold |
-| Cloudflare 403 WAF block | Immediate `BlockedError` raise (no retry) + Cloudflare challenge detection + 15-min cooldown + throttled alert (max 1/30 min) | 403 is permanent — waiting won't help; actionable recovery steps included in error + notification |
-| Peak-hour probing | Adaptive interval: ×0.95 on success, ×2.0 on 429, floor at MIN_INTERVAL | Automatically discovers the maximum safe frequency without manual tuning |
-| Multi-channel notifications | `BaseNotifier` + `MultiNotifier` | Shared formatting logic, per-channel send implementations |
-| Platform-independent notifications | `WebNotifier` writes to SQLite; SSE pushes to browser | Works on VPS/Docker without any OS dependency |
-| iMessage on non-macOS | `is_macos()` gate in `create_user_notifier()` | Logs a clear warning, skips gracefully, web notifications take over |
-| Concurrent SQLite access | WAL journal mode | Monitor writes `web_notifications`; web.py reads from a separate connection safely |
-| Hot reload across platforms | Signals on Unix, reload request file fallback on Windows | Settings apply without restarting the process |
-| Multi-user storage | SQLite `user_configs` | Single source of truth, transactional writes, safe concurrent registration/editing |
-| Theme switching without flicker | Inline `<head>` script + CSS custom properties | Ensures the correct theme is applied before CSS paint |
-| Optional panel auth | Skip auth when `WEB_PASSWORD` is empty | Keeps local use frictionless while allowing protection when exposed |
-| Monolithic web.py (1,200+ lines) | Split into `app/routes/` (10 route modules) + `app/` (auth, csrf, db, i18n, etc.) | Each module ~15–240 lines with single responsibility; `web.py` is now a 154-line bootstrap; routes use `add_url_rule` to keep flat endpoint names so templates need zero changes |
-| Prewarm session per-round waste | Process-level cache with TTL-aware refresh; cross-round reuse | Hit: zero network IO; TTL < 300 s: background refresh parallel to scrape; only invalidated on email change / unknown_error |
-| INFO noise drowning warnings | Separate `errors.log` (WARNING+) with `funcName:lineno` formatter, backupCount=5 | `monitor.log` stays INFO+ for operational view; `errors.log` captures sparse but actionable anomalies with precise source location |
-| No automated tests | 10 pytest modules with shared fixtures (`temp_db`, `client`, `admin_client`, etc.) | Pure-function tests for models/crypto/safety/storage; HTTP integration tests for auth/user/log routes; zero external network dependency |
+| Booking race condition | Submit `try_book()` to thread pool before notifications send | Booking and notification network calls run concurrently |
+| Repeated login overhead | `PrewarmedSession` cache with TTL refresh | Process-level cache; cross-round reuse; parallel to scrape |
+| API rate limits | 429 backoff (30s/60s retry) + 5-min cooldown + adaptive decrease | Three-layer defence; adaptive polling stays below threshold |
+| Cloudflare 403 WAF block | Immediate `BlockedError` raise (no retry) + throttled alert (1/30 min) + 15-min cooldown | 403 is permanent — waiting won't help |
+| Peak-hour probing | Adaptive interval: ×0.95 on success, ×2.0 on 429, floor at `MIN_INTERVAL` | Discovers max safe frequency without manual tuning |
+| iOS bilingual push | `_T` translation map + per-device language grouping in `_send_to_user` | One payload per language group; `_t(text, lang)` lookup |
+| Multi-channel notifications | `BaseNotifier` + `MultiNotifier` | Shared formatting, per-channel send implementations |
+| Platform-independent notifications | `WebNotifier` writes to SQLite; SSE pushes to browser | Works on VPS/Docker without OS dependency |
+| iMessage on non-macOS | `is_macos()` gate in `create_user_notifier()` | Clear warning, skips gracefully |
+| Concurrent SQLite access | WAL journal mode | Monitor writes; web.py reads from separate connection |
+| Hot reload across platforms | Signals on Unix, reload request file fallback on Windows | Settings apply without restart |
+| Theme switching without flicker | Inline `<head>` script + CSS custom properties | Theme applied before CSS paint |
+| Optional panel auth | Skip auth when `WEB_PASSWORD` is empty | Local use frictionless; protection when exposed |
+| Modularisation | `scrapers/` + `mcore/` + `mstorage/` + `app/routes/` | Each module single responsibility; `web.py` is an 154-line bootstrap |
+| INFO noise | Separate `errors.log` (WARNING+) with `funcName:lineno` | `monitor.log` stays INFO+; `errors.log` captures sparse anomalies |
 
-### GraphQL API parameters
+### H2S GraphQL API
 
 | Parameter | Value |
 |---|---|
@@ -415,6 +441,18 @@ api.holland2stay.com/graphql/   <- Magento GraphQL backend
 | Available to book | `available_to_book: { in: ["179"] }` |
 | Available in lottery | `available_to_book: { in: ["336"] }` |
 | Custom fields | `custom_attributesV2` → `price` (total rent incl. service costs), `living_area`, `floor`, `available_startdate`, and more |
+
+### OurDomain / RENTCafe data
+
+| Parameter | Value |
+|---|---|
+| Base URL | `https://thisisourdomain.securerc.co.uk/onlineleasing/` |
+| Stage 1 | `floorplans.aspx` → extract `subPointerId` (floor plan IDs) |
+| Stage 2 | `rcLoadContent.ashx?contentclass=availableunits&floorPlans={id}&MoveInDate={date}` → unit rows |
+| Unit fields | `data-selenium-id="Apt{N}"` (apartment #), `SqFt` (m²), `Rent` (€), `Deposit`, `Amenity` (floor/view), `AvailDate` (availability) |
+| Status | `<span class="text-success">Available</span>` / `<span class="text-warning">Wait List</span>` → mapped to "Available to book" / "Available in lottery" |
+| Dedup | `_merge_unit()` by numeric `unit_id` — same physical unit appears under multiple floor plan types |
+| Booking | ASP.NET multi-step form POST → `rcformsave.ashx`; reCAPTCHA v3+v2 protected (see [OURDOMAIN.md](OURDOMAIN.md) §10) |
 
 ---
 
@@ -645,7 +683,6 @@ https://account.holland2stay.com/idealcheckout/setup.php?order_id=...
 ```
 
 ---
-
 
 ## File structure
 

@@ -24,6 +24,9 @@
         }
       }
     },
+    " · updated %@" : {
+
+    },
     " listings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -34,7 +37,11 @@
         }
       }
     },
+    " today" : {
+
+    },
     " unread" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -64,6 +71,12 @@
         }
       }
     },
+    "·  %@" : {
+
+    },
+    "· %lld new" : {
+
+    },
     "(filtered)" : {
       "localizations" : {
         "en" : {
@@ -92,6 +105,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@, %2$@"
+          }
+        }
+      }
+    },
+    "%@, %lld items" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@, %2$lld items"
           }
         }
       }
@@ -132,6 +155,16 @@
         }
       }
     },
+    "%lld alerts today, updated %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld alerts today, updated %2$@"
+          }
+        }
+      }
+    },
     "%lld listings" : {
       "comment" : "Duplicate key — this one for calendar day",
       "localizations" : {
@@ -168,6 +201,9 @@
           }
         }
       }
+    },
+    "%lld status changes" : {
+
     },
     "%lld total" : {
       "localizations" : {
@@ -443,6 +479,9 @@
         }
       }
     },
+    "All alerts read" : {
+
+    },
     "All Cities" : {
       "localizations" : {
         "en" : {
@@ -475,6 +514,9 @@
         }
       }
     },
+    "All Platforms" : {
+
+    },
     "All Statuses" : {
       "localizations" : {
         "en" : {
@@ -490,6 +532,9 @@
           }
         }
       }
+    },
+    "All types" : {
+
     },
     "All Types" : {
       "localizations" : {
@@ -518,6 +563,7 @@
       }
     },
     "Always verify listing details on the official Holland2Stay website before making decisions." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -532,6 +578,9 @@
           }
         }
       }
+    },
+    "Always verify listing details on the official platform website before making decisions." : {
+
     },
     "Any" : {
       "localizations" : {
@@ -1339,6 +1388,12 @@
         }
       }
     },
+    "Filter alerts by type" : {
+
+    },
+    "Filter type" : {
+
+    },
     "Filters" : {
       "localizations" : {
         "en" : {
@@ -1908,6 +1963,9 @@
         }
       }
     },
+    "Mark all alerts as read" : {
+
+    },
     "Mark all read" : {
       "localizations" : {
         "en" : {
@@ -1923,6 +1981,9 @@
           }
         }
       }
+    },
+    "Mark as read" : {
+
     },
     "matched · all available" : {
       "localizations" : {
@@ -2152,6 +2213,12 @@
         }
       }
     },
+    "New · Book" : {
+
+    },
+    "New · Lottery" : {
+
+    },
     "New listings and status changes will appear here." : {
       "localizations" : {
         "en" : {
@@ -2202,6 +2269,9 @@
           }
         }
       }
+    },
+    "No changes" : {
+
     },
     "No cities available" : {
       "localizations" : {
@@ -2378,6 +2448,12 @@
           }
         }
       }
+    },
+    "No platforms available" : {
+
+    },
+    "No status changes in the last 24 hours." : {
+
     },
     "No types available" : {
       "localizations" : {
@@ -2558,7 +2634,11 @@
     "Open in browser" : {
 
     },
+    "Open on %@" : {
+
+    },
     "Open on Holland2Stay" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2675,6 +2755,12 @@
           }
         }
       }
+    },
+    "Platform %@" : {
+
+    },
+    "Platforms" : {
+
     },
     "Please read and accept the Terms of Use to use FlatRadar." : {
       "localizations" : {
@@ -2856,6 +2942,7 @@
       }
     },
     "Read" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3421,6 +3508,9 @@
         }
       }
     },
+    "Status change" : {
+
+    },
     "Stop" : {
       "localizations" : {
         "en" : {
@@ -3668,6 +3758,9 @@
           }
         }
       }
+    },
+    "This only controls which platforms can trigger your notifications." : {
+
     },
     "this week" : {
       "localizations" : {

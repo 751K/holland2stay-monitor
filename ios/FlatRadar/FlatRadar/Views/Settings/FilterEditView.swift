@@ -39,6 +39,7 @@ struct FilterEditView: View {
             Form {
                 priceSection
                 energySection
+                sourceSection
                 multiSelect("Types", icon: "house.lodge",
                             choices: options.types,
                             selection: $draft.allowedTypes)
@@ -157,6 +158,62 @@ struct FilterEditView: View {
             Label("Energy", systemImage: "bolt.fill")
         } footer: {
             Text("Min B = A/A+/A++/A+++ also accepted; C and worse filtered out.")
+        }
+    }
+
+    private var sourceSection: some View {
+        Section {
+            if loadingOptions && options.sources.isEmpty {
+                ProgressView().padding(.vertical, 4)
+            } else if options.sources.isEmpty {
+                Text("No platforms available").font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                ForEach(options.sources, id: \.self) { source in
+                    Toggle(isOn: Binding(
+                        get: { draft.allowedSources.contains(source) },
+                        set: { add in
+                            if add {
+                                if !draft.allowedSources.contains(source) {
+                                    draft.allowedSources.append(source)
+                                }
+                            } else {
+                                draft.allowedSources.removeAll { $0 == source }
+                            }
+                        }
+                    )) {
+                        HStack {
+                            Text(sourceShortLabel(source))
+                                .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Color.secondary.opacity(0.12), in: Capsule())
+                            Text(sourceDisplayName(source))
+                        }
+                    }
+                }
+            }
+        } header: {
+            Label("Platforms", systemImage: "rectangle.3.group.fill")
+        } footer: {
+            Text("This only controls which platforms can trigger your notifications.")
+        }
+    }
+
+    private func sourceShortLabel(_ source: String) -> String {
+        switch source.lowercased() {
+        case "holland2stay": return "H2S"
+        case "ourdomain": return "OD"
+        case "xior": return "XR"
+        default: return source.uppercased()
+        }
+    }
+
+    private func sourceDisplayName(_ source: String) -> String {
+        switch source.lowercased() {
+        case "holland2stay": return "Holland2Stay"
+        case "ourdomain": return "OurDomain"
+        case "xior": return "Xior"
+        default: return source
         }
     }
 

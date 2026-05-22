@@ -13,10 +13,12 @@ struct DashboardView: View {
 
     /// Cached chart data for inline mini visualizations.
     @State private var chartDailyNew: ChartData?
+    @State private var chartSource: ChartData?
     @State private var chartStatus: ChartData?
     @State private var chartPrice: ChartData?
     @State private var chartType: ChartData?
     @State private var chartEnergy: ChartData?
+    @State private var chartTenant: ChartData?
     @State private var matchedPreviews: [Listing] = []
     @State private var activeChart: ChartDetail?
     /// "New · 24h" / "New · 7d" / "Changes" 三个 mini stat 点开后的 detail sheet
@@ -32,9 +34,11 @@ struct DashboardView: View {
     // body 直接消费数组，O(1)。
     @State private var statusBuckets: [ChartEntry] = []   // {available, lottery, other} 计数
     @State private var statusBucketsTotal: Int = 0
+    @State private var sourceBuckets: [ChartEntry] = []
     @State private var priceSortedAsc: [ChartEntry] = []
     @State private var typeTopThree: [ChartEntry] = []
     @State private var energyMerged: [ChartEntry] = []
+    @State private var tenantTopThree: [ChartEntry] = []
     @State private var weekGrowthCached: String? = nil
 
     struct ChartDetail: Identifiable {
@@ -329,10 +333,7 @@ struct DashboardView: View {
                 Rectangle().fill(.secondary.opacity(0.2)).frame(width: 2, height: 36)
                     .padding(.horizontal, 14)
                 miniStat(num: s?.changes24h ?? 0, desc: "Changes") {
-                    openMiniChart(key: "daily_changes",
-                                  title: "Status changes",
-                                  subtitle: "Last 7 days",
-                                  days: 7)
+                    activeRecentMode = .changesPast24h
                 }
             }
             .padding(.vertical, 14)
@@ -536,10 +537,12 @@ struct DashboardView: View {
             .padding(.bottom, 12)
 
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                sourceMiniCard
                 statusMiniCard
                 priceMiniCard
                 typeMiniCard
                 energyMiniCard
+                tenantMiniCard
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 18)
@@ -557,7 +560,7 @@ struct DashboardView: View {
 
     // MARK: - Mini cards
     //
-    // 共用骨架（exploreCard）保证 4 张卡：
+    // 共用骨架（exploreCard）保证所有 Explore 卡：
     //   - 标题永远在最上 14pt padding 处对齐，chevron 用小一号 11pt semibold
     //     替代之前 18pt light，少抢戏；
     //   - header 和 content 之间 Spacer(minLength:) 强行拉开，所有 chart 视觉
@@ -648,6 +651,42 @@ struct DashboardView: View {
         }
     }
 
+    private var sourceMiniCard: some View {
+        exploreCard(title: "By platform", tapKey: "source_dist", tapTitle: "By Platform") {
+            if !sourceBuckets.isEmpty {
+                let total = max(sourceBuckets.reduce(0) { $0 + $1.count }, 1)
+                VStack(alignment: .leading, spacing: 8) {
+                    GeometryReader { proxy in
+                        let w = proxy.size.width
+                        HStack(spacing: 0) {
+                            ForEach(sourceBuckets) { entry in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(sourceColor(entry.label))
+                                    .frame(width: max(4, w * CGFloat(entry.count) / CGFloat(total)))
+                            }
+                        }
+                    }
+                    .frame(height: 6)
+                    .clipShape(Capsule())
+
+                    HStack {
+                        ForEach(sourceBuckets.prefix(3)) { entry in
+                            VStack(spacing: 2) {
+                                Text("\(entry.count)")
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(sourceColor(entry.label))
+                                Text(entry.label)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var priceMiniCard: some View {
         exploreCard(title: "By price", tapKey: "price_dist", tapTitle: "By Price") {
             if !priceSortedAsc.isEmpty {
@@ -730,6 +769,34 @@ struct DashboardView: View {
         }
     }
 
+    private var tenantMiniCard: some View {
+        exploreCard(title: "By tenant", tapKey: "tenant_dist", tapTitle: "By Tenant") {
+            if !tenantTopThree.isEmpty {
+                let maxCount = tenantTopThree.map(\.count).max() ?? 1
+
+                VStack(spacing: 5) {
+                    ForEach(tenantTopThree) { entry in
+                        HStack(spacing: 6) {
+                            Text(tenantMiniLabel(entry.label))
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                                .frame(width: 54, alignment: .leading)
+                            GeometryReader { proxy in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(.blue.opacity(0.62))
+                                    .frame(width: proxy.size.width * ratio(entry.count, maxCount))
+                            }
+                            .frame(height: 5)
+                            Text("\(entry.count)")
+                                .font(.system(size: 11, weight: .bold))
+                                .frame(width: 24, alignment: .trailing)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
 
     // MARK: - Error
 
@@ -789,6 +856,26 @@ struct DashboardView: View {
         }
     }
 
+    private func sourceColor(_ label: String) -> Color {
+        switch label.lowercased() {
+        case "od", "ourdomain": return .purple
+        default: return .blue
+        }
+    }
+
+    private func tenantMiniLabel(_ label: String) -> String {
+        let lower = label.lowercased()
+        if lower.contains("student") { return "Student" }
+        if lower.contains("working") || lower.contains("employed") { return "Working" }
+        if lower.contains("young") { return "Young" }
+        if lower.contains("any") || lower.contains("all") { return "Any" }
+        return label
+            .components(separatedBy: CharacterSet(charactersIn: "(_-"))
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .capitalized ?? label
+    }
+
     private func refresh() async {
         // 防御：SwiftUI 的 .refreshable / .task 在 @Observable 状态变化时可能把
         // 当前任务 cancel 掉（之前的 bug：SSE 推一批通知时整个 dashboard 的 refresh
@@ -819,17 +906,21 @@ struct DashboardView: View {
     }
 
     private func fetchMiniCharts() async {
-        async let dn = try? APIClient.shared.getPublicChart(key: "daily_new", days: 30)
+        async let dn = try? APIClient.shared.getPublicChart(key: "daily_new", days: 7)
+        async let so = try? APIClient.shared.getPublicChart(key: "source_dist", days: 30)
         async let st = try? APIClient.shared.getPublicChart(key: "status_dist", days: 30)
         async let pr = try? APIClient.shared.getPublicChart(key: "price_dist", days: 30)
         async let tp = try? APIClient.shared.getPublicChart(key: "type_dist", days: 30)
         async let en = try? APIClient.shared.getPublicChart(key: "energy_dist", days: 30)
-        let (dnR, stR, prR, tpR, enR) = await (dn, st, pr, tp, en)
+        async let tn = try? APIClient.shared.getPublicChart(key: "tenant_dist", days: 30)
+        let (dnR, soR, stR, prR, tpR, enR, tnR) = await (dn, so, st, pr, tp, en, tn)
         chartDailyNew = dnR
+        chartSource = soR
         chartStatus = stR
         chartPrice = prR
         chartType = tpR
         chartEnergy = enR
+        chartTenant = tnR
         // 数据更新后，把派生数据（sorted/bucketed/reduced）算一次缓存起来
         recomputeDerivedCharts()
     }
@@ -837,6 +928,13 @@ struct DashboardView: View {
     /// 把 mini chart 用到的派生数据（排序/分桶/求和）一次性算完并缓存到 @State，
     /// 让 view body 直接 O(1) 读取，避免每次 invalidation 重算。
     private func recomputeDerivedCharts() {
+        // Status: 拆成 [available, lottery, unavailable] 三元
+        if let chart = chartSource, !chart.data.isEmpty {
+            sourceBuckets = chart.data.bucketed(forKey: "source_dist")
+        } else {
+            sourceBuckets = []
+        }
+
         // Status: 拆成 [available, lottery, unavailable] 三元
         if let chart = chartStatus, !chart.data.isEmpty {
             let total = chart.data.reduce(0) { $0 + $1.count }
@@ -880,6 +978,13 @@ struct DashboardView: View {
             energyMerged = []
         }
 
+        // Tenant requirements: top 3 by count
+        if let chart = chartTenant, !chart.data.isEmpty {
+            tenantTopThree = Array(chart.data.sorted { $0.count > $1.count }.prefix(3))
+        } else {
+            tenantTopThree = []
+        }
+
         // Week growth: 最近 7 天 daily_new 累加
         if let daily = chartDailyNew {
             let last7 = daily.data.suffix(7).reduce(0) { $0 + $1.count }
@@ -901,17 +1006,20 @@ struct DashboardView: View {
 /// 暂时只剩 "新房 24h" 一种 sheet ——7d 和 Changes 改成走 ChartDetailView 趋势图。
 enum RecentActivityMode: String, Identifiable {
     case newPast24h
+    case changesPast24h
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .newPast24h: return "New · last 24h"
+        case .newPast24h:      return "New · last 24h"
+        case .changesPast24h:  return "Changes · last 24h"
         }
     }
 
     var maxAge: TimeInterval {
         switch self {
-        case .newPast24h: return 24 * 3600
+        case .newPast24h:      return 24 * 3600
+        case .changesPast24h:  return 24 * 3600
         }
     }
 }
@@ -925,22 +1033,48 @@ struct RecentActivitySheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var listings: [Listing] = []
+    @State private var changes: [NotificationItem] = []
     @State private var isLoading = false
     @State private var errorMessage: String?
-    /// Cached filter+sort 结果——之前 `filtered` 是 computed property，body 里
-    /// 用 4 处（`isEmpty` / ForEach / count × 2），每次扫 100 项算 firstSeenDate
-    /// + 排序。改成 @State 在数据/mode 变更时算一次。
     @State private var filtered: [Listing] = []
 
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading && listings.isEmpty {
+                if isLoading && listings.isEmpty && changes.isEmpty {
                     ProgressView().padding(.top, 60).frame(maxWidth: .infinity)
-                } else if let err = errorMessage, listings.isEmpty {
+                } else if let err = errorMessage, listings.isEmpty && changes.isEmpty {
                     ContentUnavailableView("Unable to Load",
                                            systemImage: "wifi.slash",
                                            description: Text(err))
+                } else if mode == .changesPast24h {
+                    if changes.isEmpty {
+                        ContentUnavailableView("No changes", systemImage: "arrow.left.arrow.right",
+                            description: Text("No status changes in the last 24 hours."))
+                    } else {
+                        List {
+                            Section {
+                                ForEach(changes) { n in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(n.listingTitleHint)
+                                            .font(.system(size: 14, weight: .medium))
+                                        Text(n.body)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(2)
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                            } header: {
+                                Text("\(changes.count) status changes")
+                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                    .tracking(0.7)
+                                    .foregroundStyle(.secondary)
+                                    .textCase(nil)
+                            }
+                        }
+                        .listStyle(.insetGrouped)
+                    }
                 } else if filtered.isEmpty {
                     ContentUnavailableView(
                         "No new listings",
@@ -951,9 +1085,8 @@ struct RecentActivitySheet: View {
                         Section {
                             ForEach(filtered) { listing in
                                 Button {
-                                    let lid = listing.id
                                     dismiss()
-                                    coord.openListing(id: lid)
+                                    coord.openListing(id: listing.id)
                                 } label: {
                                     ListingRow(listing: listing)
                                 }
@@ -978,8 +1111,6 @@ struct RecentActivitySheet: View {
         }
     }
 
-    /// 24h 内 first_seen 的房源——后端默认 sort by first_seen desc，所以一页 100
-    /// 基本能覆盖任何 24h 增量（即便系统正常一天也就 5-50 条新增）。
     private func recomputeFiltered() {
         let cutoff = Date().addingTimeInterval(-mode.maxAge)
         filtered = listings
@@ -993,8 +1124,16 @@ struct RecentActivitySheet: View {
         errorMessage = nil
         defer { isLoading = false }
         do {
-            let resp = try await APIClient.shared.getListings(limit: 100, offset: 0)
-            listings = resp.items   // 触发上面的 .onChange → recomputeFiltered
+            if mode == .changesPast24h {
+                let resp = try await APIClient.shared.getNotifications(limit: 100, offset: 0)
+                let cutoff = Date().addingTimeInterval(-mode.maxAge)
+                changes = resp.items.filter { n in
+                    n.kind == .status && (n.createdDate ?? .distantPast) >= cutoff
+                }
+            } else {
+                let resp = try await APIClient.shared.getListings(limit: 100, offset: 0)
+                listings = resp.items
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

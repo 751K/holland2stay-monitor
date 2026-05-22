@@ -49,6 +49,7 @@ class DeviceOps:
         platform: str = "ios",
         model: str = "",
         bundle_id: str = "",
+        language: str = "en",
     ) -> int:
         """
         注册或刷新一台设备的 APNs token。
@@ -76,19 +77,20 @@ class DeviceOps:
                 self._conn.execute(
                     """UPDATE device_tokens SET
                           env = ?, platform = ?, model = ?, bundle_id = ?,
+                          language = ?,
                           last_seen = ?,
                           disabled_at = NULL, disabled_reason = NULL
                        WHERE id = ?""",
-                    (env, platform, model, bundle_id, now, row["id"]),
+                    (env, platform, model, bundle_id, language, now, row["id"]),
                 )
                 return int(row["id"])
             cur = self._conn.execute(
                 """INSERT INTO device_tokens
                        (app_token_id, device_token, env, platform,
-                        model, bundle_id, created_at, last_seen)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        model, bundle_id, language, created_at, last_seen)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (app_token_id, device_token, env, platform,
-                 model, bundle_id, now, now),
+                 model, bundle_id, language, now, now),
             )
             return int(cur.lastrowid)  # type: ignore[arg-type]
 
@@ -113,7 +115,7 @@ class DeviceOps:
         """
         rows = self._conn.execute(
             """SELECT d.id, d.device_token, d.env, d.platform,
-                      d.model, d.bundle_id, d.app_token_id
+                      d.model, d.bundle_id, d.app_token_id, d.language
                FROM device_tokens d
                JOIN app_tokens t ON d.app_token_id = t.id
                WHERE t.user_id = ?
@@ -134,7 +136,7 @@ class DeviceOps:
         """
         rows = self._conn.execute(
             """SELECT d.id, d.device_token, d.env, d.platform,
-                      d.model, d.bundle_id, d.app_token_id
+                      d.model, d.bundle_id, d.app_token_id, d.language
                FROM device_tokens d
                JOIN app_tokens t ON d.app_token_id = t.id
                WHERE t.role = 'admin'

@@ -39,6 +39,7 @@ def _register():
     platform = (body.get("platform") or "ios").strip().lower()
     model = (body.get("model") or "").strip()[:64]
     bundle_id = (body.get("bundle_id") or "").strip()[:128]
+    language = (body.get("language") or "en").strip().lower()[:8]
 
     token_id = api_auth.current_token_id()
     if token_id is None:
@@ -53,6 +54,7 @@ def _register():
             platform=platform,
             model=model,
             bundle_id=bundle_id,
+            language=language,
         )
     except DeviceValidationError as exc:
         return _err.err_validation(str(exc))

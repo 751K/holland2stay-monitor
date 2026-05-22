@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 
 from dataclasses import dataclass, field, fields
@@ -206,6 +207,11 @@ KNOWN_CITIES: list[dict] = [
     {"name": "Zoetermeer",              "id": "6088"},
 ]
 
+KNOWN_OURDOMAIN_CITIES: list[dict] = [
+    {"name": "Amsterdam Diemen",    "key": "diemen"},
+    {"name": "Amsterdam South-East","key": "south-east"},
+]
+
 
 @dataclass
 class CityFilter:
@@ -226,6 +232,54 @@ class AvailabilityFilter:
     """
     label: str  # 可读标签，e.g. "Available to book"
     id: int     # GraphQL filter 数值 ID，e.g. 179
+
+
+@dataclass
+class OurDomainCityFilter:
+    """OurDomain / RENTCafe building filter 的单个条目。"""
+    name: str
+    key: str
+
+
+KNOWN_XIOR_CITIES: list[dict] = [
+    {"city": "Aachen Vaals",   "bldg": "Katzensprung",          "key": "p0196061"},
+    {"city": "Amsterdam",      "bldg": "Karspeldreef",          "key": "p0196062"},
+    {"city": "Amsterdam",      "bldg": "Naritaweg",             "key": "p0196102"},
+    {"city": "Breda",          "bldg": "Kraanstraat",           "key": "p0196099"},
+    {"city": "Breda",          "bldg": "Rat Verleghstraat",     "key": "p0196103"},
+    {"city": "Breda",          "bldg": "Tramsingel 21",         "key": "p0196106"},
+    {"city": "Breda",          "bldg": "Tramsingel 27",         "key": "p0196107"},
+    {"city": "Delft",          "bldg": "Antonia Veerstraat",    "key": "p0196059"},
+    {"city": "Delft",          "bldg": "Barbarasteeg",          "key": "p0196060"},
+    {"city": "Delft",          "bldg": "Phoenixstraat",         "key": "p0196499"},
+    {"city": "Eindhoven",      "bldg": "Kronehoefstraat",       "key": "p0196467"},
+    {"city": "Eindhoven",      "bldg": "Zernikestraat",         "key": "p0195855"},
+    {"city": "Groningen",      "bldg": "Eendrachtskade",        "key": "p0196098"},
+    {"city": "Groningen",      "bldg": "Oosterhamrikkade",      "key": "p0196468"},
+    {"city": "Groningen",      "bldg": "Zernike Tower",         "key": "p0195447"},
+    {"city": "Leeuwarden",     "bldg": "Ritsumastraat",         "key": "p0196104"},
+    {"city": "Leeuwarden",     "bldg": "Tesselschadestraat",    "key": "p0196105"},
+    {"city": "Leiden",         "bldg": "Verbeekstraat",         "key": "p0196501"},
+    {"city": "Maastricht",     "bldg": "Annadal",               "key": "p0196111"},
+    {"city": "Maastricht",     "bldg": "Bonnefanten",           "key": "p0195680"},
+    {"city": "Maastricht",     "bldg": "Vijverdalseweg",        "key": "p0196471"},
+    {"city": "Rotterdam",      "bldg": "Burgemeester Oudlaan",  "key": "p0196502"},
+    {"city": "The Hague",      "bldg": "Eisenhowerlaan",         "key": "p0196500"},
+    {"city": "The Hague",      "bldg": "Lutherse Burgwal",       "key": "p0196100"},
+    {"city": "Utrecht",        "bldg": "Rotsoord",              "key": "p0195853"},
+    {"city": "Utrecht",        "bldg": "Willem Dreeslaan",      "key": "p0196503"},
+    {"city": "Venlo",          "bldg": "Peperstraat",           "key": "p0196469"},
+    {"city": "Venlo",          "bldg": "Spoorstraat",           "key": "p0196470"},
+    {"city": "Wageningen",     "bldg": "Costerweg",             "key": "p0196465"},
+    {"city": "Wageningen",     "bldg": "Duivendaal",            "key": "p0196466"},
+]
+
+
+@dataclass
+class XiorCityFilter:
+    """Xior / RENTCafe building filter 的单个条目。"""
+    name: str
+    key: str
 
 
 @dataclass
@@ -286,6 +340,12 @@ class ListingFilter:
     """
     城市白名单（精确匹配城市名，大小写不敏感）。非空时只通知指定城市的房源。
     e.g. ["Eindhoven", "Amsterdam"]
+    """
+
+    allowed_sources: list[str] = field(default_factory=list)
+    """
+    平台白名单（精确匹配 Listing.source，大小写不敏感）。非空时只通知指定平台。
+    e.g. ["holland2stay", "ourdomain"]
     """
 
     allowed_contract: list[str] = field(default_factory=list)
@@ -411,6 +471,11 @@ class ListingFilter:
             if not any(a.lower() == city.lower() for a in self.allowed_cities):
                 return False
 
+        if self.allowed_sources:
+            source = listing.source or "holland2stay"
+            if not any(a.lower() == source.lower() for a in self.allowed_sources):
+                return False
+
         if self.allowed_contract:
             contract = fm.get("contract", "")
             if not any(a.lower() in contract.lower() for a in self.allowed_contract):
@@ -531,6 +596,9 @@ class Config:
     jitter_ratio: float = 0.20
     timezone: str = "Europe/Amsterdam"
     heartbeat_interval_minutes: int = 60
+    sources: list[str] = field(default_factory=lambda: ["holland2stay"])
+    ourdomain_cities: list[OurDomainCityFilter] = field(default_factory=list)
+    xior_cities: list[XiorCityFilter] = field(default_factory=list)
 
     def scrape_tasks(self) -> tuple[list[tuple[str, str]], list[str]]:
         """
@@ -542,10 +610,97 @@ class Config:
                            e.g. [("Eindhoven", "29"), ("Amsterdam", "24")]
         availability_ids : [id_str, ...]
                            e.g. ["179", "336"]
+
+        历史接口；与 P0 多源重构并存。新代码用 ``scrape_tasks_v2()``。
         """
         city_tasks = [(c.name, str(c.id)) for c in self.cities]
         availability_ids = [str(af.id) for af in self.availability_filters]
         return city_tasks, availability_ids
+
+    def scrape_tasks_v2(self) -> list["ScrapeTask"]:  # type: ignore[name-defined]
+        """
+        P0 新接口：展开为 source-aware 的 ``ScrapeTask`` 列表。
+
+        按 ``SOURCES`` env 变量 + 各 source 自己的 ``{NAME}_CITIES`` 配置
+        展开成多 source 的混合列表。
+
+        每个 H2S task 把 ``availability_ids`` 塞进 ``extra``，让
+        ``HollandStayScraper.scrape()`` 能拿到 H2S 专有的可用性过滤参数；
+        其他 source 不需要这个字段就忽略。
+
+        Returns
+        -------
+        list[ScrapeTask]
+        """
+        # 延迟 import 避免 config 加载链路提前触发 scrapers 包初始化
+        from scrapers.base import ScrapeTask  # noqa: WPS433
+
+        tasks: list[ScrapeTask] = []
+        availability_ids = [str(af.id) for af in self.availability_filters]
+
+        if "holland2stay" in self.sources:
+            tasks.extend(
+                ScrapeTask(
+                    source="holland2stay",
+                    city_key=str(c.id),
+                    city_display=c.name,
+                    extra={"availability_ids": list(availability_ids)},
+                )
+                for c in self.cities
+            )
+
+        if "ourdomain" in self.sources:
+            tasks.extend(
+                ScrapeTask(
+                    source="ourdomain",
+                    city_key=c.key,
+                    city_display=c.name,
+                )
+                for c in self.ourdomain_cities
+            )
+
+        if "xior" in self.sources:
+            tasks.extend(
+                ScrapeTask(
+                    source="xior",
+                    city_key=c.key,
+                    city_display=c.name,
+                )
+                for c in self.xior_cities
+            )
+
+        return tasks
+
+
+def _parse_sources(raw: str) -> list[str]:
+    values = [
+        p.strip().lower()
+        for p in re.split(r"[,|]", raw or "")
+        if p.strip()
+    ]
+    return list(dict.fromkeys(values)) or ["holland2stay"]
+
+
+def _parse_name_key_list(raw: str, cls: type):
+    """Parse ``name,key|name,key`` into a list of *cls* instances."""
+    items = []
+    for entry in (raw or "").split("|"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        parts = entry.rsplit(",", 1)
+        if len(parts) == 2:
+            items.append(cls(name=parts[0].strip(), key=parts[1].strip()))
+    return items
+
+
+def _parse_ourdomain_cities(raw: str) -> list[OurDomainCityFilter]:
+    return _parse_name_key_list(raw, OurDomainCityFilter)
+
+
+def _parse_xior_cities(raw: str) -> list[XiorCityFilter]:
+    return _parse_name_key_list(raw, XiorCityFilter)
+    return cities
 
 
 def load_config() -> Config:
@@ -555,7 +710,9 @@ def load_config() -> Config:
     读取的 .env 键
     --------------
     CHECK_INTERVAL          int，默认 300
+    SOURCES                 逗号或 | 分隔，默认 "holland2stay"
     CITIES                  格式 "城市名,ID|城市名,ID"，默认 "Eindhoven,29"
+    OURDOMAIN_CITIES        格式 "显示名,key|显示名,key"，启用 ourdomain 时默认 Amsterdam Diemen
     AVAILABILITY_FILTERS    格式 "标签,ID|标签,ID"，默认包含 179 和 336
     DB_PATH                 str，默认 "data/listings.db"
     LOG_LEVEL               str，默认 "INFO"
@@ -576,6 +733,7 @@ def load_config() -> Config:
     ValueError  若 TIMEZONE 不是合法的 IANA 时区标识符
     """
     interval = int(os.environ.get("CHECK_INTERVAL") or "300")
+    sources = _parse_sources(os.environ.get("SOURCES", "holland2stay"))
 
     cities: list[CityFilter] = []
     raw_cities = os.environ.get("CITIES", "Eindhoven,29")
@@ -594,6 +752,23 @@ def load_config() -> Config:
             availability_filters.append(
                 AvailabilityFilter(label=parts[0].strip(), id=int(parts[1].strip()))
             )
+
+    ourdomain_cities: list[OurDomainCityFilter] = []
+    if "ourdomain" in sources:
+        raw_od_cities = os.environ.get("OURDOMAIN_CITIES", "Amsterdam Diemen,diemen")
+        ourdomain_cities = _parse_ourdomain_cities(raw_od_cities)
+
+    xior_cities: list[XiorCityFilter] = []
+    if "xior" in sources:
+        raw_xior_cities = os.environ.get("XIOR_CITIES", "")
+        if not raw_xior_cities:
+            # 未显式配置时使用荷兰核心 4 栋楼
+            xior_cities = [
+                XiorCityFilter(name=c["name"], key=c["key"])
+                for c in KNOWN_XIOR_CITIES
+            ]
+        else:
+            xior_cities = _parse_xior_cities(raw_xior_cities)
 
     db_path = DB_PATH
     log_level = (os.environ.get("LOG_LEVEL") or "INFO").upper()
@@ -622,4 +797,7 @@ def load_config() -> Config:
         jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO") or "0.20"))),
         timezone=timezone_str,
         heartbeat_interval_minutes=max(0, int(os.environ.get("HEARTBEAT_INTERVAL_MINUTES") or "60")),
+        sources=sources,
+        ourdomain_cities=ourdomain_cities,
+        xior_cities=xior_cities,
     )

@@ -308,6 +308,7 @@ final class APIClient {
     func getListings(city: String? = nil, status: String? = nil,
                      query: String? = nil, limit: Int = 50,
                      offset: Int = 0,
+                     sources: [String]? = nil,
                      cities: [String]? = nil,
                      types: [String]? = nil,
                      contract: String? = nil,
@@ -316,6 +317,9 @@ final class APIClient {
         if let city { parts.append("city=\(urlEncode(city))") }
         if let status { parts.append("status=\(urlEncode(status))") }
         if let query, !query.isEmpty { parts.append("q=\(urlEncode(query))") }
+        if let sources, !sources.isEmpty {
+            parts.append("sources=\(sources.map(urlEncode).joined(separator: ","))")
+        }
         if let cities, !cities.isEmpty {
             parts.append("cities=\(cities.map(urlEncode).joined(separator: ","))")
         }
@@ -407,10 +411,12 @@ final class APIClient {
     ///   - model: 显示用，例如 "iPhone15,2"
     ///   - bundleId: 防 Bundle ID 配错；上报实际运行的 bundle id
     func registerDevice(token: String, env: String,
-                        model: String, bundleId: String) async throws -> DeviceRegisterResponse {
+                        model: String, bundleId: String,
+                        language: String) async throws -> DeviceRegisterResponse {
         let body = DeviceRegisterRequest(
             deviceToken: token, env: env,
-            platform: "ios", model: model, bundleId: bundleId)
+            platform: "ios", model: model, bundleId: bundleId,
+            language: language)
         return try await request("POST", "api/v1/devices/register", body: body)
     }
 

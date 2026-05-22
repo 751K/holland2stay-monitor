@@ -109,6 +109,20 @@ struct ChartDetailView: View {
         if isTime, s.count >= 10, s.contains("-") {
             return String(s.suffix(5))
         }
+        // 状态标签太长 → 缩到核心词
+        let lower = s.lowercased()
+        if lower.contains("available to book") || lower == "book" { return "Book" }
+        if lower.contains("available in lottery") || lower == "lottery" { return "Lottery" }
+        if lower.contains("occupied") || lower.contains("not available") { return "Occupied" }
+        if lower.contains("reserved") { return "Reserved" }
+        // tenant 标签也缩
+        if lower.contains("student") && lower.contains("employ") { return "S/E" }
+        if lower.contains("student") && lower.contains("work") { return "S/W" }
+        if lower.contains("student") { return "Student" }
+        if lower.contains("employ") { return "Employed" }
+        if lower.contains("couple") { return "Couple" }
+        if lower.contains("family") { return "Family" }
+        if lower == "custom" { return "Custom" }
         return s
     }
 

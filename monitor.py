@@ -11,7 +11,7 @@ monitor.py — 监控主程序
 
 核心流程（每轮）
 ----------------
-1. `scrape_all()`（sync，在 executor 线程中运行）抓取所有城市房源 + 完整扫描信号
+1. `dispatch_scrape_tasks()`（sync，在 executor 线程中运行）抓取所有 source 房源 + 完整扫描信号
 2. 记录完整扫描信号（Phase 2 仅观察，不参与状态收敛）
 3. `storage.diff()` 对比库中快照，产出 new_listings / status_changes
 4. 遍历启用的用户，构建自动预订候选；立即将 try_book() 提交到线程池
@@ -56,7 +56,7 @@ from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
-from scraper import BlockedError, RateLimitError, ScrapeNetworkError, scrape_all
+from scrapers import BlockedError, RateLimitError, ScrapeNetworkError, dispatch_scrape_tasks
 from update_checker import check_for_updates
 from storage import Storage
 from users import UserConfig, load_users, save_users
@@ -138,20 +138,92 @@ def _mark_stale_listings_for_complete_cities(
         lottery_days: int = 2,
 ) -> int:
     """Phase 3: 只对本轮完整扫描成功的城市执行 stale listing 收敛。"""
-    complete_cities = sorted(city for city, ok in completeness.items() if ok)
-    if not complete_cities:
+    complete_cities: list[str] = []
+    complete_source_cities: list[tuple[str, str]] = []
+    for key, ok in completeness.items():
+        if not ok:
+            continue
+        if ":" in key:
+            source, city = key.split(":", 1)
+            complete_source_cities.append((source, city))
+        else:
+            complete_cities.append(key)
+
+    if not complete_cities and not complete_source_cities:
         logger.info("跳过 stale listing 状态收敛：本轮无完整扫描城市")
         return 0
 
+    labels = sorted(complete_cities + [f"{s}:{c}" for s, c in complete_source_cities])
     logger.info(
         "执行 stale listing 状态收敛：完整城市 %s",
-        ", ".join(complete_cities),
+        ", ".join(labels),
     )
     return storage.mark_stale_listings(
         days=days,
         lottery_days=lottery_days,
-        cities=complete_cities,
+        cities=complete_cities if complete_cities else None,
+        source_city_pairs=complete_source_cities if complete_source_cities else None,
     )
+
+
+def _task_labels(tasks) -> list[str]:
+    return [f"{t.source}:{t.city_display}" for t in tasks]
+
+
+def _listing_booking_key(listing: Listing) -> tuple[str, str]:
+    """自动预订去重键：同 source + id 的房源每轮只允许一个用户尝试。"""
+    source = (getattr(listing, "source", "") or "holland2stay").strip().lower()
+    return source, str(listing.id)
+
+
+def _assign_auto_book_candidates(
+    raw_candidates: dict[str, list[Listing]],
+    user_notifiers: UserNotifiers,
+) -> dict[str, list[Listing]]:
+    """
+    把自动预订候选从“每用户匹配”收敛成“每房源唯一归属”。
+
+    多用户模式下，同一套房源可能同时满足多个用户的自动预订条件。直接让所有
+    用户并发预订同一套房源会制造无意义的竞态，也更容易触发平台风控。这里在
+    提交 executor 前做一次进程内分配：同一 listing 每轮只交给一个用户；多套
+    listing 同时出现时按当前已分配数量做简单均衡，平局按用户配置顺序决定。
+    """
+    assigned: dict[str, list[Listing]] = {u.id: [] for u, _ in user_notifiers}
+    user_order = {u.id: idx for idx, (u, _) in enumerate(user_notifiers)}
+    user_names = {u.id: u.name for u, _ in user_notifiers}
+    assigned_count = {u.id: 0 for u, _ in user_notifiers}
+
+    by_listing: dict[tuple[str, str], tuple[Listing, list[str]]] = {}
+    for user, _ in user_notifiers:
+        seen_for_user: set[tuple[str, str]] = set()
+        for listing in raw_candidates.get(user.id, []):
+            key = _listing_booking_key(listing)
+            if key in seen_for_user:
+                continue
+            seen_for_user.add(key)
+            if key not in by_listing:
+                by_listing[key] = (listing, [])
+            by_listing[key][1].append(user.id)
+
+    for listing, user_ids in by_listing.values():
+        eligible = [uid for uid in user_ids if uid in assigned]
+        if not eligible:
+            continue
+        chosen = min(eligible, key=lambda uid: (assigned_count[uid], user_order[uid]))
+        assigned[chosen].append(listing)
+        assigned_count[chosen] += 1
+
+        if len(eligible) > 1:
+            skipped = [user_names[uid] for uid in eligible if uid != chosen]
+            logger.info(
+                "[%s] 自动预订候选去重: %s 同时匹配 %d 个用户，已分配给当前用户，跳过: %s",
+                user_names[chosen],
+                listing.name,
+                len(eligible),
+                ", ".join(skipped),
+            )
+
+    return assigned
 
 # 自适应轮询参数（固定，不需要用户配置）
 # 每轮成功后将当前间隔乘以此系数（5% 缩短），缓慢逼近 min_interval
@@ -278,7 +350,7 @@ async def run_once(
 
     流程说明
     --------
-    1. scrape_all() 在 executor 线程中运行（同步 → 异步桥接）
+    1. dispatch_scrape_tasks() 在 executor 线程中运行（同步 → 异步桥接）
     2. 记录城市完整扫描信号，并返回给 main_loop 的 Phase 3 收敛逻辑
     3. storage.diff() 识别 new_listings 和 status_changes
     4. 快速候选预扫描（纯内存，无网络）：
@@ -297,11 +369,11 @@ async def run_once(
     到步骤 6 await 时，booking 往往已经完成，几乎零额外等待。
     预订请求在发出通知之前就已进入 Holland2Stay 服务器，可节省 1-3 秒。
     """
-    city_tasks, availability_ids = cfg.scrape_tasks()
-    logger.info("开始抓取，城市数: %d，活跃用户数: %d", len(city_tasks), len(user_notifiers))
+    scrape_tasks = cfg.scrape_tasks_v2()
+    logger.info("开始抓取，任务数: %d，活跃用户数: %d", len(scrape_tasks), len(user_notifiers))
 
-    if not city_tasks:
-        logger.warning("未配置任何目标城市（CITIES 为空），本轮不抓取。请检查 .env 中 CITIES 设置。")
+    if not scrape_tasks:
+        logger.warning("未配置任何抓取任务，本轮不抓取。请检查 .env 中 SOURCES / CITIES / OURDOMAIN_CITIES 设置。")
         return {}
 
     loop = asyncio.get_running_loop()
@@ -376,7 +448,7 @@ async def run_once(
     # 代码无法从 prewarm_futures 中取出刚完成的 session。
     try:
         scrape_result = await loop.run_in_executor(
-            None, lambda: scrape_all(city_tasks, availability_ids)
+            None, lambda: dispatch_scrape_tasks(scrape_tasks)
         )
         fresh, completeness = _unpack_scrape_result(scrape_result)
         _log_scrape_completeness(completeness)
@@ -387,7 +459,7 @@ async def run_once(
         proxy_on = bool(get_proxy_url())
         logger.error(
             "🚫 抓取被屏蔽 (HTTP 403) cities=%d users=%d proxy=%s: %s",
-            len(city_tasks), len(user_notifiers),
+            len(scrape_tasks), len(user_notifiers),
             "yes" if proxy_on else "no", e,
         )
         if not dry_run and _should_notify_block():
@@ -406,7 +478,7 @@ async def run_once(
         await _stash_pending_prewarms()
         logger.warning(
             "⚠️  抓取被限流 cities=%d users=%d proxy=%s: %s",
-            len(city_tasks), len(user_notifiers),
+            len(scrape_tasks), len(user_notifiers),
             "yes" if get_proxy_url() else "no",
             e,
         )
@@ -424,7 +496,7 @@ async def run_once(
         await _stash_pending_prewarms()
         logger.error(
             "抓取全部网络失败 cities=%s users=%d proxy=%s: %s",
-            [c[0] for c in city_tasks], len(user_notifiers),
+            _task_labels(scrape_tasks), len(user_notifiers),
             "yes" if get_proxy_url() else "no",
             e,
         )
@@ -433,7 +505,7 @@ async def run_once(
         await _stash_pending_prewarms()
         logger.error(
             "抓取全部失败 cities=%s users=%d: %s",
-            [c[0] for c in city_tasks], len(user_notifiers), e,
+            _task_labels(scrape_tasks), len(user_notifiers), e,
             exc_info=True,
         )
         if not dry_run:
@@ -487,6 +559,7 @@ async def run_once(
                     user.auto_book.enabled
                     and user.notifications_enabled
                     and notifier.has_channels
+                    and listing.source == "holland2stay"
                     and listing.status.lower() == STATUS_AVAILABLE
                     and (user.auto_book.listing_filter.is_empty()
                          or user.auto_book.listing_filter.passes(listing))
@@ -501,6 +574,7 @@ async def run_once(
                     user.auto_book.enabled
                     and user.notifications_enabled
                     and notifier.has_channels
+                    and listing.source == "holland2stay"
                     and new_status.lower() == STATUS_AVAILABLE
                     and (user.auto_book.listing_filter.is_empty()
                          or user.auto_book.listing_filter.passes(listing))
@@ -510,7 +584,11 @@ async def run_once(
     # ── 重试队列检查：上次 race_lost 的候选，若仍 Available to book 则补入候选 ── #
     # 这处理了"前一个预订者未付款、房子被重新放出"但状态未变的场景：
     # storage.diff() 对此类房源不产出任何事件，必须从重试队列中手动补入。
-    _fresh_avail = {l.id: l for l in fresh if l.status.lower() == STATUS_AVAILABLE}
+    _fresh_avail = {
+        l.id: l
+        for l in fresh
+        if l.source == "holland2stay" and l.status.lower() == STATUS_AVAILABLE
+    }
     for user, notifier in user_notifiers:
         if not user.auto_book.enabled or not user.notifications_enabled or not notifier.has_channels:
             continue
@@ -535,6 +613,8 @@ async def run_once(
                     "[%s] 🔁 重试 race_lost 房源（仍可预订）: %s",
                     user.name, listing.name,
                 )
+
+    ab_candidates = _assign_auto_book_candidates(ab_candidates, user_notifiers)
 
     # ── 立即将 book_with_fallback() 提交到线程池（快速通道）──────── #
     # 新上线可预订 / 状态变更 → Available to book 均立即提交 run_in_executor，
@@ -734,12 +814,21 @@ async def run_once(
             # 不发 per-candidate booking_failed —— 累积到后面聚合一次性发
             blocked_in_round.append((user, notifier, result.message))
         elif result.success:
+            if storage.mark_listing_reserved_after_booking(booked_listing.id):
+                logger.info(
+                    "[%s] 已将房源本地状态标记为 Reserved（booking hold）: %s",
+                    user.name, booked_listing.name,
+                )
             sent = await notifier.send_booking_success(
                 booked_listing, result.message, result.pay_url, result.contract_start_date
             )
             if web_notifier:
                 await web_notifier.send_booking_success(
-                    booked_listing, result.message, result.pay_url, result.contract_start_date
+                    booked_listing,
+                    result.message,
+                    result.pay_url,
+                    result.contract_start_date,
+                    user_id=user.id,
                 )
             if not sent:
                 # 通知发送失败（渠道关闭/配置错误/网络问题），付款链接必须保留在日志中
@@ -753,7 +842,11 @@ async def run_once(
         else:
             await notifier.send_booking_failed(booked_listing, result.message)
             if web_notifier:
-                await web_notifier.send_booking_failed(booked_listing, result.message)
+                await web_notifier.send_booking_failed(
+                    booked_listing,
+                    result.message,
+                    user_id=user.id,
+                )
 
     # ── 聚合屏蔽通知（共享 scrape 的 30 min 节流，避免双重打扰）────── #
     if blocked_in_round and _should_notify_block():
@@ -1179,9 +1272,9 @@ async def _async_main() -> None:
 
     if args.test:
         logger.info("TEST 模式：只抓取，不发通知")
-        city_tasks, availability_ids = cfg.scrape_tasks()
+        scrape_tasks = cfg.scrape_tasks_v2()
         scrape_result = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: scrape_all(city_tasks, availability_ids)
+            None, lambda: dispatch_scrape_tasks(scrape_tasks)
         )
         fresh, completeness = _unpack_scrape_result(scrape_result)
         _log_scrape_completeness(completeness)

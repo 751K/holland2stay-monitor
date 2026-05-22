@@ -6,7 +6,7 @@ Last updated: May 17, 2026
 
 These Terms of Use govern your access to and use of FlatRadar.
 
-FlatRadar is an independent, unofficial monitoring tool for Holland2Stay listings. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by Holland2Stay.
+FlatRadar is an independent, unofficial monitoring tool for rental housing listings across multiple platforms, including Holland2Stay, OurDomain, and Xior. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.
 
 By creating an account, accessing, or using FlatRadar, you agree to these Terms.
 
@@ -22,7 +22,7 @@ FlatRadar does not guarantee that any listing will remain available, that listin
 
 FlatRadar is provided for personal, non-commercial use only.
 
-You may not use FlatRadar for resale, commercial monitoring, mass scraping, unauthorized data extraction, or any activity that abuses, overloads, interferes with, or attempts to bypass the services of Holland2Stay or any third party.
+You may not use FlatRadar for resale, commercial monitoring, mass scraping, unauthorized data extraction, or any activity that abuses, overloads, interferes with, or attempts to bypass the services of any housing platform or third party.
 
 3. User Account
 
@@ -36,13 +36,13 @@ You are responsible for keeping your login credentials secure and for all activi
 
 We may suspend or terminate your FlatRadar account if we reasonably believe that you have violated these Terms, misused the app, interfered with the service, or created legal, security, or operational risk.
 
-4. Holland2Stay and Third-Party Terms
+4. Housing Platforms and Third-Party Terms
 
-You are solely responsible for complying with Holland2Stay's Terms of Service and all applicable laws, rules, and regulations.
+You are solely responsible for complying with the Terms of Service of each housing platform you interact with (including Holland2Stay, OurDomain, Xior, and others) and all applicable laws, rules, and regulations.
 
-FlatRadar does not grant you any right to access, use, copy, scrape, bypass, or interfere with Holland2Stay's systems in a way that is not permitted by Holland2Stay.
+FlatRadar does not grant you any right to access, use, copy, scrape, bypass, or interfere with any housing platform's systems in a way that is not permitted by that platform.
 
-If Holland2Stay changes, restricts, blocks, or disables access to its services, FlatRadar may stop working partially or completely.
+If a housing platform changes, restricts, blocks, or disables access to its services, FlatRadar may stop working partially or completely for that platform.
 
 5. Listing Data
 
@@ -52,7 +52,7 @@ Listing information may be delayed, incomplete, inaccurate, duplicated, outdated
 
 All listing data, names, trademarks, service marks, logos, and related content belong to their respective owners.
 
-FlatRadar is not responsible for listing availability, price changes, booking results, eligibility requirements, lottery outcomes, account restrictions, or any decision made by Holland2Stay or any housing provider.
+FlatRadar is not responsible for listing availability, price changes, booking results, eligibility requirements, lottery outcomes, account restrictions, or any decision made by any housing platform or provider.
 
 6. Alerts and Push Notifications
 
@@ -80,7 +80,7 @@ Where possible, credentials are stored locally on your device using secure stora
 
 You are responsible for ensuring that your use of any third-party account through FlatRadar complies with the applicable third-party terms.
 
-FlatRadar is not responsible for account restrictions, login issues, access limitations, or actions taken by Holland2Stay or any third party.
+FlatRadar is not responsible for account restrictions, login issues, access limitations, or actions taken by any housing platform or third party.
 
 9. Acceptable Use
 
@@ -91,7 +91,7 @@ You agree not to:
 - Use FlatRadar to overload, attack, disrupt, or interfere with any server, network, API, website, or service.
 - Use automated scripts, bots, or external tools to abuse FlatRadar.
 - Attempt to gain unauthorized access to FlatRadar, its servers, other users' accounts, or third-party systems.
-- Misrepresent FlatRadar as an official Holland2Stay product or service.
+- Misrepresent FlatRadar as an official product of any housing platform or service.
 
 10. Availability of the Service
 
@@ -116,7 +116,7 @@ This includes, but is not limited to:
 - Missed housing opportunities.
 - Failed or delayed notifications.
 - Incorrect, incomplete, or outdated listing data.
-- Account restrictions or access issues with Holland2Stay or other third-party services.
+- Account restrictions or access issues with housing platforms or other third-party services.
 - Service interruptions.
 - Loss of data.
 - Unauthorized access caused by your failure to secure your account or device.
@@ -156,7 +156,7 @@ Last updated: May 17, 2026
 
 This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
 
-FlatRadar is an independent, unofficial monitoring tool for Holland2Stay listings. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by Holland2Stay.
+FlatRadar is an independent, unofficial monitoring tool for rental housing listings across multiple platforms, including Holland2Stay, OurDomain, and Xior. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.
 
 By using FlatRadar, you acknowledge that you have read and understood this Privacy Policy.
 
@@ -246,13 +246,13 @@ FlatRadar uses Cloudflare for DNS, traffic routing, security, performance, and r
 
 FlatRadar uses Apple Push Notification service to deliver listing alerts. We store your APNs device token and associate it with your account. You can disable push notifications at any time in iOS Settings.
 
-9. Holland2Stay and Listing Data
+9. Housing Platforms and Listing Data
 
-FlatRadar may fetch listing information from publicly accessible Holland2Stay services, APIs, or technical interfaces. Holland2Stay is independent from FlatRadar. FlatRadar does not control Holland2Stay's data, systems, terms, or privacy practices.
+FlatRadar may fetch listing information from publicly accessible services, APIs, or technical interfaces of housing platforms including Holland2Stay, OurDomain, and Xior. These platforms are independent from FlatRadar. FlatRadar does not control their data, systems, terms, or privacy practices.
 
 10. Third-Party Services
 
-FlatRadar may interact with: Holland2Stay (listing data), Apple Push Notification service (notifications), Cloudflare (DNS and security), hosting and backend providers, and email or support providers.
+FlatRadar may interact with: housing platforms (listing data), Apple Push Notification service (notifications), Cloudflare (DNS and security), hosting and backend providers, and email or support providers.
 
 11. Data Sharing
 
@@ -298,7 +298,7 @@ k1012922528@gmail.com
 
 本使用条款约束您对 FlatRadar 的访问和使用。
 
-FlatRadar 是一款独立的、非官方的 Holland2Stay 房源监控工具。FlatRadar 与 Holland2Stay 不存在关联、认可、赞助、维护或运营关系。
+FlatRadar 是一款独立的、非官方的租房监控工具，跨平台跟踪 Holland2Stay、OurDomain、Xior 等多个平台的房源。FlatRadar 与其监控的任何房源平台均不存在关联、认可、赞助、维护或运营关系。
 
 创建账户、访问或使用 FlatRadar，即表示您同意本条款。
 
@@ -314,7 +314,7 @@ FlatRadar 不保证任何房源将始终可用、房源信息准确无误，或�
 
 FlatRadar 仅供个人、非商业用途使用。
 
-您不得将 FlatRadar 用于转售、商业监控、大规模抓取、未经授权的数据提取，或任何滥用、过载、干扰或试图绕过 Holland2Stay 或任何第三方服务的活动。
+您不得将 FlatRadar 用于转售、商业监控、大规模抓取、未经授权的数据提取，或任何滥用、过载、干扰或试图绕过任何房源平台或第三方服务的活动。
 
 3. 用户账户
 
@@ -328,13 +328,13 @@ FlatRadar 账户密码采用服务器端安全措施进行保护。密码不以�
 
 如果我们合理认为您违反了本条款、滥用应用程序、干扰服务，或造成了法律、安全或运营风险，我们可能会暂停或终止您的 FlatRadar 账户。
 
-4. Holland2Stay 及第三方条款
+4. 房源平台及第三方条款
 
-您有责任自行遵守 Holland2Stay 的服务条款及所有适用的法律法规。
+您有责任自行遵守您所交互的每个房源平台（包括 Holland2Stay、OurDomain、Xior 等）的服务条款及所有适用的法律法规。
 
-FlatRadar 不授予您任何以 Holland2Stay 不允许的方式访问、使用、复制、抓取、绕过或干扰 Holland2Stay 系统的权利。
+FlatRadar 不授予您任何以相关平台不允许的方式访问、使用、复制、抓取、绕过或干扰其系统的权利。
 
-如果 Holland2Stay 更改、限制、封锁或禁用对其服务的访问，FlatRadar 可能会部分或完全停止运行。
+如果某房源平台更改、限制、封锁或禁用对其服务的访问，FlatRadar 可能针对该平台部分或完全停止运行。
 
 5. 房源数据
 
@@ -448,7 +448,7 @@ k1012922528@gmail.com
 
 本隐私政策说明 FlatRadar 如何收集、使用、存储和保护您的数据。
 
-FlatRadar 是一款独立的、非官方的 Holland2Stay 房源监控工具。FlatRadar 与 Holland2Stay 不存在关联、认可、赞助、维护或运营关系。
+FlatRadar 是一款独立的、非官方的租房监控工具，跨平台跟踪 Holland2Stay、OurDomain、Xior 等多个平台的房源。FlatRadar 与其监控的任何房源平台均不存在关联、认可、赞助、维护或运营关系。
 
 使用 FlatRadar，即表示您确认已阅读并理解本隐私政策。
 

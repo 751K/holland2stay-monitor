@@ -98,6 +98,7 @@ _LIST_FIELDS = {
     "allowed_types",
     "allowed_neighborhoods",
     "allowed_cities",
+    "allowed_sources",
     "allowed_contract",
     "allowed_tenant",
     "allowed_offer",
@@ -225,6 +226,7 @@ def _filter_options():
     返回：
         {
           "cities":        [str, ...],   # 来自 listings.city DISTINCT
+          "sources":       [str, ...],   # 来自 listings.source DISTINCT
           "occupancy":     [str, ...],   # 来自 features "Occupancy:" 前缀
           "types":         [str, ...],
           "neighborhoods": [str, ...],
@@ -242,6 +244,7 @@ def _filter_options():
     with storage_ctx() as st:
         data = {
             "cities":        st.get_distinct_cities(),
+            "sources":       st.get_distinct_sources(),
             "occupancy":     st.get_feature_values("Occupancy"),
             "types":         st.get_feature_values("Type"),
             "neighborhoods": st.get_feature_values("Neighborhood"),

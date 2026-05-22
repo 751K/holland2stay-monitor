@@ -63,6 +63,7 @@ struct ListingRow: View {
                 parts.append("New listing")
             }
         }
+        parts.append(listing.sourceShortText)
         parts.append(listing.name)
         parts.append(priceText)
         parts.append(statusInfo.label)
@@ -185,6 +186,16 @@ struct ListingRow: View {
                 .font(.system(size: 15.5, weight: .semibold))
                 .lineLimit(1)
                 .truncationMode(.tail)
+
+            Text(listing.sourceShortText)
+                .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                .tracking(0.5)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(Color.secondary.opacity(0.12),
+                            in: RoundedRectangle(cornerRadius: 4))
+                .fixedSize()
 
             if listing.isNew, let age = listing.ageText {
                 Text("NEW · \(age)")

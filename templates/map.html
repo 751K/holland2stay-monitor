@@ -115,6 +115,14 @@ function priceShort(raw) {
   return m ? m[0] : raw;
 }
 
+function sourceLabel(source) {
+  var s = (source || 'holland2stay').toLowerCase();
+  if (s === 'ourdomain') return 'OurDomain';
+  if (s === 'holland2stay') return 'Holland2Stay';
+  if (s === 'xior') return 'Xior';
+  return source || 'Holland2Stay';
+}
+
 function getMarkerColor(sc) {
   if(sc === 'book') return '#10b981';
   if(sc === 'lottery') return '#f59e0b';
@@ -153,6 +161,7 @@ function loadMapData() {
       var badgeText = sc === 'book' ? (zh ? '直订' : 'Direct')
         : sc === 'lottery' ? (zh ? '摇号' : 'Lottery')
         : l.status;
+      var platformText = sourceLabel(l.source);
 
       // 使用 DOM 构造 popup，避免 innerHTML 字符串拼接带来的 XSS 风险
       var popupEl = document.createElement('div');
@@ -187,6 +196,12 @@ function loadMapData() {
       citySpan.textContent = l.city || '';
       popupEl.appendChild(citySpan);
       popupEl.appendChild(document.createElement('br'));
+
+      var sourceSpan = document.createElement('span');
+      sourceSpan.style.cssText = 'display:inline-block;margin-top:4px;margin-right:6px;padding:2px 8px;' +
+        'border-radius:100px;font-size:11px;background:var(--surface2);color:var(--text2);';
+      sourceSpan.textContent = platformText;
+      popupEl.appendChild(sourceSpan);
 
       var badgeSpan = document.createElement('span');
       badgeSpan.style.cssText = 'display:inline-block;margin-top:4px;padding:2px 8px;' +

@@ -10,8 +10,11 @@ API v1 房源端点
 - status        房源状态精确匹配（"Available to book" 等）
 - city          单城市 SQL 过滤（兼容旧版；优先用 cities）
 - cities        多城市，逗号分隔（如 "Eindhoven,Amsterdam"）
+- source        单平台 SQL 过滤（如 "holland2stay" / "ourdomain"）
+- sources       多平台，逗号分隔
 - q             名称模糊搜索
 - types         房型过滤，逗号分隔（如 "Studio,Apartment"）
+- occupancies   入住人数过滤，逗号分隔（如 "Single,Two"）
 - contract      合同类型过滤（子串匹配，大小写不敏感）
 - energy        最低能耗等级（如 "B" → 匹配 A+++..B）
 - limit         分页 1-500，默认 100
@@ -72,6 +75,17 @@ def _list_listings():
 
     types_raw = request.args.get("types") or None
     types_list = [t.strip() for t in types_raw.split(",") if t.strip()] if types_raw else []
+    occupancies_raw = request.args.get("occupancies") or None
+    occupancies_list = (
+        [o.strip() for o in occupancies_raw.split(",") if o.strip()]
+        if occupancies_raw else []
+    )
+    sources_raw = request.args.get("sources") or None
+    if sources_raw:
+        sources_list = [s.strip() for s in sources_raw.split(",") if s.strip()]
+    else:
+        single_source = request.args.get("source") or None
+        sources_list = [single_source] if single_source else []
 
     contract = request.args.get("contract") or None
     energy = request.args.get("energy") or None
@@ -82,7 +96,9 @@ def _list_listings():
         status=status,
         search=q,
         cities=cities_list,
+        sources=sources_list,
         types=types_list,
+        occupancies=occupancies_list,
         contract=contract,
         energy=energy,
         limit=SQL_HARD_CAP,

@@ -106,13 +106,13 @@ class TestChartDateWindows:
         recent = (now - timedelta(days=2)).isoformat()
         old = (now - timedelta(days=45)).isoformat()
         rows = [
-            ("recent", "Recent", "Available to book", "€950", ["Type: Studio", "Area: 25.0 m²"], "Eindhoven", recent),
-            ("old", "Old", "Reserved", "€1500", ["Type: 2", "Area: 65.0 m²"], "Rotterdam", old),
+            ("recent", "Recent", "Available to book", "€950", ["Type: Studio", "Area: 25.0 m²"], "Eindhoven", "ourdomain", recent),
+            ("old", "Old", "Reserved", "€1500", ["Type: 2", "Area: 65.0 m²"], "Rotterdam", "holland2stay", old),
         ]
-        for listing_id, name, status, price, features, city, first_seen in rows:
+        for listing_id, name, status, price, features, city, source, first_seen in rows:
             temp_db.conn.execute(
-                "INSERT INTO listings (id, name, status, price_raw, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (listing_id, name, status, price, json.dumps(features), "https://x.com", city, first_seen, first_seen, status),
+                "INSERT INTO listings (id, name, status, price_raw, features, url, city, source, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (listing_id, name, status, price, json.dumps(features), "https://x.com", city, source, first_seen, first_seen, status),
             )
         temp_db.conn.commit()
 
@@ -125,6 +125,9 @@ class TestChartDateWindows:
         }
         assert {r["status"]: r["count"] for r in temp_db.chart_status_dist(days=7)} == {
             "Available to book": 1,
+        }
+        assert {r["source"]: r["count"] for r in temp_db.chart_source_dist(days=7)} == {
+            "ourdomain": 1,
         }
         assert {r["label"]: r["count"] for r in temp_db.chart_type_dist(days=7)} == {
             "Studio": 1,

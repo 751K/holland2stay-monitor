@@ -13,6 +13,7 @@ struct ChartData: Decodable, Sendable {
 /// 一条图表数据。后端不同图表 key 字段名各异：
 ///   daily_new / daily_changes → ``date``
 ///   city_dist                 → ``city``
+///   source_dist               → ``source``
 ///   status_dist               → ``status``
 ///   price_dist / area_dist /
 ///   floor_dist                → ``range``
@@ -71,6 +72,15 @@ extension Array where Element == ChartEntry {
     ///                 B/C/D/E/F/G 原样。
     func bucketed(forKey key: String) -> [ChartEntry] {
         switch key {
+        case "source_dist":
+            let merged = mergedByBucket { Self.sourceBucketLabel($0) }
+            let rank = ["H2S": 0, "OD": 1, "XR": 2]
+            return merged.sorted { lhs, rhs in
+                let lr = rank[lhs.label] ?? 99
+                let rr = rank[rhs.label] ?? 99
+                if lr != rr { return lr < rr }
+                return lhs.label < rhs.label
+            }
         case "type_dist":
             return mergedByBucket { Self.typeBucketLabel($0) }
         case "energy_dist":
@@ -132,6 +142,15 @@ extension Array where Element == ChartEntry {
         // 兜底：剥括号取主标签
         return trimmed.components(separatedBy: "(").first?
             .trimmingCharacters(in: .whitespaces) ?? trimmed
+    }
+
+    static func sourceBucketLabel(_ label: String) -> String {
+        switch label.lowercased() {
+        case "holland2stay": return "H2S"
+        case "ourdomain": return "OD"
+        case "xior": return "XR"
+        default: return label.uppercased()
+        }
     }
 
     static func energyBucketLabel(_ label: String) -> String {

@@ -55,33 +55,32 @@ def _listing(**overrides):
 class TestFormatNew:
     def test_direct_book_listing(self):
         text = _format_new(_listing())
-        assert "✅ 新房源上架" in text
+        assert "[H2S] New Listing" in text
         assert "Teststraat 1-A, Eindhoven" in text
-        assert "Available to book" in text
+        assert "Status: Available to book" in text
         assert "€950" in text
         assert "2026-06-15" in text
-        assert "Studio" in text
-        assert "30.0 m²" in text
-        assert "Single" in text
-        assert "Floor: 2" not in text  # floor is in features, not separate line
+        assert "Type: Studio" in text
+        assert "Area: 30.0 m²" in text
+        assert "Occupancy: Single" in text
         assert "https://www.holland2stay.com/residences/test-1.html" in text
-
-    def test_lottery_listing_has_slot_icon(self):
-        text = _format_new(_listing(status="Available in lottery"))
-        assert "🎰 新房源上架" in text
 
     def test_missing_available_from(self):
         text = _format_new(_listing(available_from=None))
-        assert "未知" in text
+        assert "Available: ?" in text
 
     def test_empty_features(self):
         text = _format_new(_listing(features=[]))
-        assert "类型" not in text  # no type line when features empty
-        assert "面积" not in text
+        assert "Type:" not in text
+        assert "Area:" not in text
 
     def test_contains_price_per_month(self):
         text = _format_new(_listing())
-        assert "/月" in text
+        assert "/mo" in text
+
+    def test_ourdomain_listing_uses_short_platform_badge(self):
+        text = _format_new(_listing(source="ourdomain"))
+        assert "[OD] New Listing" in text
 
 
 # ── _format_status_change ─────────────────────────────────
@@ -91,7 +90,7 @@ class TestFormatStatusChange:
         text = _format_status_change(
             _listing(), "Available in lottery", "Available to book"
         )
-        assert "🚀 状态变更" in text
+        assert "[H2S] Status Change" in text
         assert "Available in lottery → Available to book" in text
 
     def test_book_to_not_available(self):
@@ -99,7 +98,7 @@ class TestFormatStatusChange:
             _listing(status="Not available"),
             "Available to book", "Not available",
         )
-        assert "🔄 状态变更" in text
+        assert "[H2S] Status Change" in text
         assert "Available to book → Not available" in text
 
     def test_contains_listing_url(self):
@@ -117,10 +116,8 @@ class TestFormatBookingSuccess:
             _listing(), "detail fallback",
             pay_url="https://account.holland2stay.com/idealcheckout/setup.php?order_id=123",
         )
-        assert "🛒 自动预订成功！" in text
+        assert "[H2S] Booking Successful!" in text
         assert "idealcheckout" in text
-        assert "链接直达支付页面" in text
-        assert "无需登录" in text
 
     def test_no_pay_url_falls_back_to_detail(self):
         text = _format_booking_success(
@@ -152,9 +149,9 @@ class TestFormatBookingFailed:
         text = _format_booking_failed(
             _listing(), "already booked by someone else",
         )
-        assert "❌ 自动预订失败" in text
+        assert "[H2S] Booking Failed" in text
         assert "already booked by someone else" in text
-        assert "请手动预订" in text
+        assert "Manual booking:" in text
         assert "https://www.holland2stay.com/residences/test-1.html" in text
 
     def test_with_reserved_conflict(self):
@@ -166,12 +163,12 @@ class TestFormatBookingFailed:
 
 class TestEmailFormatting:
     def test_subject_uses_flatradar_brand(self):
-        subject = _format_email_subject("🧪 FlatRadar 监控\nbody")
-        assert subject == "[FlatRadar] FlatRadar 监控"
+        subject = _format_email_subject("FlatRadar Monitor\nbody")
+        assert subject == "[FlatRadar] FlatRadar Monitor"
         assert "Holland2Stay" not in subject
 
     def test_html_template_escapes_dynamic_text(self):
-        html = _format_email_html("✅ 新房源上架\n\n<script>alert(1)</script>")
+        html = _format_email_html("[H2S] New Listing\n\n<script>alert(1)</script>")
         assert "FlatRadar" in html
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
@@ -182,10 +179,9 @@ class TestTelegramFormatting:
         html = _format_telegram_html(_format_new(_listing()))
 
         assert "<b>FlatRadar</b>" in html
-        assert "<b>新房源上架</b>" in html
-        assert "<b>状态</b>: Available to book" in html
+        assert "<b>[H2S] New Listing</b>" in html
+        assert "Status: Available to book" in html
         assert "✅" not in html
-        assert "🏠" not in html
         assert '<a href="https://www.holland2stay.com/residences/test-1.html">' in html
 
     def test_telegram_html_escapes_dynamic_content(self):

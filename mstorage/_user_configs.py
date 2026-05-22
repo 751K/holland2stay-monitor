@@ -42,6 +42,7 @@ USER_CONFIG_COLUMNS = (
     "app_login_enabled",
     "allow_h2s_login",
     "sort_order",
+    "language",
     "created_at",
     "updated_at",
 )

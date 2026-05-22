@@ -158,6 +158,7 @@ class StorageBase:
                 app_login_enabled          INTEGER NOT NULL DEFAULT 0,
                 allow_h2s_login            INTEGER NOT NULL DEFAULT 0,
                 sort_order                 INTEGER NOT NULL DEFAULT 0,
+                language                   TEXT NOT NULL DEFAULT 'en',
                 created_at                 TEXT NOT NULL,
                 updated_at                 TEXT NOT NULL
             );
@@ -184,6 +185,7 @@ class StorageBase:
                 last_seen       TEXT NOT NULL,
                 disabled_at     TEXT,
                 disabled_reason TEXT,
+                language        TEXT NOT NULL DEFAULT 'en',
                 UNIQUE(app_token_id, device_token)
             );
             CREATE INDEX IF NOT EXISTS idx_device_tokens_active
@@ -256,11 +258,48 @@ class StorageBase:
                     "WHERE email_to <> '' AND email_verified=0"
                 )
 
+        # language：用户推送语言偏好（en / zh），默认英文。
+        self._add_column_if_missing(
+            "user_configs", "language",
+            "TEXT NOT NULL DEFAULT 'en'",
+        )
+
         # status_is_inferred：标识 listing.status 是否由系统推测产生。
         # 老库默认 0（都是 API 真实数据），mark_stale_listings 触发时才置 1。
         self._add_column_if_missing(
             "listings", "status_is_inferred",
             "INTEGER NOT NULL DEFAULT 0",
+        )
+        # 自动预订成功后的本地状态保持窗口。hold 期内如果 scraper 仍返回
+        # Available to book，不立即覆盖本地 Reserved，避免下一轮重复预订。
+        self._add_column_if_missing(
+            "listings", "status_hold_until",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+
+        # P0 多源重构：listings.source 标识房源来自哪个第三方平台。
+        # 老库默认 'holland2stay'（迁移时全量房源都属于 H2S，符合实际）；
+        # 新写入由 ListingOps.diff() 从 Listing.source 字段读取。
+        # 索引：跨 source 时按 source / (source, city) 过滤的查询会很多。
+        self._add_column_if_missing(
+            "listings", "source",
+            "TEXT NOT NULL DEFAULT 'holland2stay'",
+        )
+        with self._conn:
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_listings_source "
+                "ON listings(source)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_listings_source_city "
+                "ON listings(source, city)"
+            )
+
+        # device_tokens.language：APNs 推送语言（'en' | 'zh'）。
+        # 客户端注册设备时上报；老设备默认 'en'。
+        self._add_column_if_missing(
+            "device_tokens", "language",
+            "TEXT NOT NULL DEFAULT 'en'",
         )
 
     def _add_column_if_missing(
