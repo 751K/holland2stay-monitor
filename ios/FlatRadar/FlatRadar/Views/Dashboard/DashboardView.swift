@@ -1146,7 +1146,7 @@ struct RecentActivitySheet: View {
                 let resp = try await APIClient.shared.getNotifications(limit: 100, offset: 0)
                 let cutoff = Date().addingTimeInterval(-mode.maxAge)
                 changes = resp.items.filter { n in
-                    n.kind == .status && (n.createdDate ?? .distantPast) >= cutoff
+                    n.type == "status_change" && (n.createdDate ?? .distantPast) >= cutoff
                 }
             } else {
                 let resp = try await APIClient.shared.getListings(limit: 100, offset: 0)
