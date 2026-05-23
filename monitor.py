@@ -56,7 +56,13 @@ from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
-from scrapers import BlockedError, RateLimitError, ScrapeNetworkError, dispatch_scrape_tasks
+from scrapers import (
+    BlockedError,
+    RateLimitError,
+    ScrapeNetworkError,
+    UpstreamMaintenanceError,
+    dispatch_scrape_tasks,
+)
 from update_checker import check_for_updates
 from storage import Storage
 from users import UserConfig, load_users, save_users
@@ -235,6 +241,11 @@ _ADAPTIVE_INCREASE = 2.0
 # 给用户/运维时间换代理或重启进程。
 _BLOCKED_COOLDOWN = 900  # 15 分钟
 
+# 平台维护冷却时间（秒）。H2S 公告通常 1–2 小时窗口，15 分钟一次再探即可：
+# 探到还在维护 → 继续冷却；探到恢复 → 当轮成功，正常回到 check_interval。
+# 不发用户告警，不计入 network_fail_streak，安静等。
+_MAINTENANCE_COOLDOWN = 900  # 15 分钟
+
 # 连续网络失败阈值：连续 N 次全部城市第 1 页网络失败时触发冷却，
 # 避免坏代理/断网时监控空转刷屏 error log
 _NETWORK_FAIL_THRESHOLD = 3
@@ -245,6 +256,12 @@ _NETWORK_FAIL_COOLDOWN = 300  # 5 分钟
 _last_block_notify_at: float = 0.0
 _BLOCK_NOTIFY_INTERVAL = 1800  # 30 分钟
 
+# 维护通知节流：admin 已经在 dashboard banner 上看到维护态了，再叠加 web 通知
+# 主要是让 admin 在收 push（如果接了）/ 刷通知面板时也能看到一条记录。
+# 间隔比屏蔽长一截——维护态用户什么都做不了，没必要 30 min 一刷。
+_last_maintenance_notify_at: float = 0.0
+_MAINTENANCE_NOTIFY_INTERVAL = 3600  # 1 小时
+
 
 def _should_notify_block() -> bool:
     """是否该发屏蔽通知。30 分钟最多一次，避免持续屏蔽时刷屏。"""
@@ -252,6 +269,19 @@ def _should_notify_block() -> bool:
     now = time.monotonic()
     if _last_block_notify_at <= 0 or now - _last_block_notify_at >= _BLOCK_NOTIFY_INTERVAL:
         _last_block_notify_at = now
+        return True
+    return False
+
+
+def _should_notify_maintenance() -> bool:
+    """是否该给 admin 发维护通知。1 小时最多一次。"""
+    global _last_maintenance_notify_at
+    now = time.monotonic()
+    if (
+        _last_maintenance_notify_at <= 0
+        or now - _last_maintenance_notify_at >= _MAINTENANCE_NOTIFY_INTERVAL
+    ):
+        _last_maintenance_notify_at = now
         return True
     return False
 
@@ -489,6 +519,38 @@ async def run_once(
             if web_notifier:
                 await web_notifier.send_error(err_msg)
         raise
+    except UpstreamMaintenanceError as e:
+        # 平台维护：自己会恢复，**不给普通用户**发告警（用户什么也做不了），
+        # 但是给 **admin 的 web 通知面板** 发一条（节流 1 小时一次）——admin
+        # 能从中看到维护开始时间，方便日后排查"那段时间为什么没数据"。
+        #
+        # 持久化状态用两个 meta key 驱动 dashboard banner：
+        #   - upstream_maintenance_seen_at：首次探测到维护的时间（持续期间不刷新）
+        #   - upstream_maintenance_last_at：最近一次仍在维护的时间（每次都刷新）
+        # 等再次抓取成功时清空（在成功路径里做）。
+        await _stash_pending_prewarms()
+        logger.info(
+            "🔧 H2S 平台维护中，本轮跳过 cities=%d users=%d: %s",
+            len(scrape_tasks), len(user_notifiers), e,
+        )
+        if not dry_run:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            first_detect = not storage.get_meta("upstream_maintenance_seen_at", default="")
+            if first_detect:
+                storage.set_meta("upstream_maintenance_seen_at", now_iso)
+            storage.set_meta("upstream_maintenance_last_at", now_iso)
+
+            # admin web 通知：首次探测 + 1h 节流后再次复查命中时才发，避免每轮刷屏。
+            # 不走 user_notifiers——他们的 push / iMessage 不该在凌晨被维护吵醒。
+            if web_notifier and _should_notify_maintenance():
+                hint = (
+                    "🔧 H2S 平台计划维护中\n\n"
+                    f"{e}\n\n"
+                    "监控已暂停轮询，平台恢复后会自动继续。"
+                    "无需操作；状态会在 dashboard 顶部 banner 显示。"
+                )
+                await web_notifier.send_error(hint)
+        raise
     except ScrapeNetworkError as e:
         # 全部城市第 1 页网络失败 → 不更新 last_scrape_at（非有效抓取），
         # 上传让 main_loop 做连续失败计数和冷却。不发给用户通知——
@@ -545,6 +607,17 @@ async def run_once(
     # "抓取 + 入库" 操作；若 diff() 抛异常，时间戳不会被更新。
     storage.set_meta("last_scrape_at", datetime.now(timezone.utc).isoformat())
     storage.set_meta("last_scrape_count", str(len(fresh)))
+
+    # 维护态恢复：本轮成功就清掉 maintenance meta，让 dashboard banner 消失。
+    # 写完 ended_at 留个最近一次恢复时间戳便于排查；seen_at 清空即"不在维护中"。
+    if storage.get_meta("upstream_maintenance_seen_at", default=""):
+        storage.set_meta(
+            "upstream_maintenance_ended_at",
+            datetime.now(timezone.utc).isoformat(),
+        )
+        storage.set_meta("upstream_maintenance_seen_at", "")
+        storage.set_meta("upstream_maintenance_last_at", "")
+        logger.info("🔧→✅ H2S 平台维护已结束，抓取恢复正常")
 
     # ── 快速候选预扫描：立即收集候选，抢在发通知之前提交预订 ──────── #
     # 此处只做过滤判断（纯内存），不发任何通知
@@ -1224,6 +1297,18 @@ async def main_loop(
             logger.error(
                 "🚫 被 Cloudflare 屏蔽，冷却 %d 秒后再试。"
                 "持续屏蔽请考虑：换 HTTPS_PROXY 出口 / 重启 monitor / 暂停几小时。",
+                cooldown,
+            )
+            await asyncio.sleep(cooldown)
+        except UpstreamMaintenanceError:
+            # 平台维护：和 BlockedError 用相同冷却长度，但语义完全不同：
+            #   - 不打 ERROR 日志（INFO 已在 run_once 里打过）
+            #   - 不重置 adaptive_peak（恢复后立刻按正常节奏跑）
+            #   - 不计入 network_fail_streak（不是网络问题）
+            # 冷却结束后下一轮 run_once 会再次尝试，若仍维护则继续走本分支。
+            cooldown = apply_jitter(_MAINTENANCE_COOLDOWN, cfg.jitter_ratio)
+            logger.info(
+                "🔧 H2S 平台维护中，冷却 %d 秒后再探。无需人工操作。",
                 cooldown,
             )
             await asyncio.sleep(cooldown)

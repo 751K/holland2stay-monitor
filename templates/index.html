@@ -101,6 +101,7 @@
         <tbody>
         {% for l in recent %}
           {% set fm = l.features | parse_features %}
+          {% set cap = l.status | status_capsule %}
           <tr>
             <td>
               <a href="{{ l.url }}" target="_blank" class="cell-name">{{ l.name }}</a>
@@ -108,10 +109,7 @@
             </td>
             <td style="font-weight:550;color:var(--text)">{{ fm.building or '—' }}</td>
             <td>
-              {% set sl = l.status | lower %}
-              {% if 'book' in sl %}<span class="badge badge-book">{{ l.status }}</span>
-              {% elif 'lottery' in sl %}<span class="badge badge-lottery">{{ l.status }}</span>
-              {% else %}<span class="badge badge-neutral">{{ l.status }}</span>{% endif %}
+              <span class="badge badge-status badge-{{ cap.css }}">{{ cap.label }}</span>
             </td>
             <td class="font-medium">{{ l.price_raw | price_short }}</td>
             <td class="cell-secondary">{{ l.available_from or '—' }}</td>
@@ -128,14 +126,12 @@
   <div class="listing-cards">
     {% for l in recent %}
     {% set fm = l.features | parse_features %}
-    {% set sl = l.status | lower %}
+    {% set cap = l.status | status_capsule %}
     <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer" class="listing-card-item">
       <div class="lc-top">
         <div class="lc-name">{{ l.name }}</div>
         <div class="lc-status">
-          {% if 'book' in sl %}<span class="badge badge-book">{{ l.status }}</span>
-          {% elif 'lottery' in sl %}<span class="badge badge-lottery">{{ l.status }}</span>
-          {% else %}<span class="badge badge-neutral">{{ l.status }}</span>{% endif %}
+          <span class="badge badge-status badge-{{ cap.css }}">{{ cap.label }}</span>
         </div>
       </div>
       {% if fm.building %}<div class="lc-building">{{ fm.building }}{% if fm.area %} · {{ fm.area }}{% endif %}</div>{% endif %}
@@ -164,9 +160,9 @@
           <tr>
             <td><a href="{{ c.url }}" target="_blank" class="cell-name" style="font-size:12px;">{{ c.name }}</a></td>
             <td>
-              <span class="badge badge-{{ status_badge(c.old_status) }} mr-1">{{ c.old_status }}</span>
+              <span class="badge badge-status badge-{{ status_badge(c.old_status) }} mr-1">{{ c.old_status | status_short }}</span>
               <i class="bi bi-arrow-right text-tertiary text-xs mr-1"></i>
-              <span class="badge badge-{{ status_badge(c.new_status) }}">{{ c.new_status }}</span>
+              <span class="badge badge-status badge-{{ status_badge(c.new_status) }}">{{ c.new_status | status_short }}</span>
             </td>
             <td class="cell-secondary">{{ c.changed_at | time_ago }}</td>
           </tr>

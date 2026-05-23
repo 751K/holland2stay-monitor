@@ -294,6 +294,33 @@ class StorageBase:
                 "CREATE INDEX IF NOT EXISTS idx_listings_source_city "
                 "ON listings(source, city)"
             )
+            # 高频查询列索引：city（首页城市筛选）、first_seen（ORDER BY + 排序）、
+            # status（状态筛选）、last_seen（老化检测 + 排序）。
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_listings_city "
+                "ON listings(city)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_listings_first_seen "
+                "ON listings(first_seen)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_listings_status "
+                "ON listings(status)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_listings_last_seen "
+                "ON listings(last_seen)"
+            )
+            # status_changes 高频查询列索引
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_status_changes_changed_at "
+                "ON status_changes(changed_at)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_status_changes_listing_id "
+                "ON status_changes(listing_id)"
+            )
 
         # device_tokens.language：APNs 推送语言（'en' | 'zh'）。
         # 客户端注册设备时上报；老设备默认 'en'。

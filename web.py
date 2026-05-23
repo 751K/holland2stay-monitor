@@ -28,9 +28,10 @@ import argparse
 import logging.handlers
 import os
 import sys
+import time
 from pathlib import Path
 
-from flask import Flask
+from flask import Flask, request
 
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -111,6 +112,24 @@ def _add_security_headers(resp):
     resp.headers.setdefault("X-Frame-Options",        "DENY")
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy",        "strict-origin-when-cross-origin")
+
+    # ── 静态资源缓存 ──────────────────────────────────────────────
+    # /static/ 下的文件都通过 `?v=NN` 查询字符串做 cache bust（design.css?v=15、
+    # app.js?v=5 等）。URL 不变就能命中缓存。
+    #
+    # 缓存周期 30 天：在"重复访问命中率高"和"忘记 bump v=N 时痛苦时长"
+    # 之间折中——理论可以拉到 1 年（immutable 标准做法），但如果某次部署
+    # 改了 design.css 忘记 bump，用户/Cloudflare 边缘缓存会卡 1 年；30
+    # 天意味着最差 30 天内就会自动 revalidate。
+    #
+    # 不带版本号的 favicon / logo 给更保守的 1 天，因为它们没 cache-bust 机制。
+    if resp.status_code == 200 and request.path.startswith("/static/"):
+        if request.query_string:
+            # cache-busted URL → 30 天
+            resp.headers["Cache-Control"] = "public, max-age=2592000"
+        else:
+            resp.headers["Cache-Control"] = "public, max-age=86400"
+
     return resp
 
 
@@ -140,6 +159,29 @@ def _inject_translations():
         return _tr(key, lang)
 
     return {"_": _, "lang": lang}
+
+
+@app.context_processor
+def _inject_upstream_maintenance():
+    """
+    向所有模板注入 H2S 平台维护态。
+
+    base.html 用 `upstream_maintenance.active` 决定是否渲染顶部 banner。
+    异常时静默——dashboard 永远不应该因为状态查询失败而崩。
+
+    5s TTL 缓存：避免每次页面渲染都读 SQLite meta 表。
+    """
+    now = time.monotonic()
+    cache = getattr(_inject_upstream_maintenance, "_cache", None)
+    if cache is not None and (now - cache[0]) < 5:
+        return {"upstream_maintenance": cache[1]}
+    try:
+        from app.services.monitor_service import get_upstream_maintenance
+        info = get_upstream_maintenance()
+    except Exception:
+        info = {"active": "", "since": "", "last_seen": ""}
+    _inject_upstream_maintenance._cache = (now, info)
+    return {"upstream_maintenance": info}
 
 
 # ------------------------------------------------------------------ #

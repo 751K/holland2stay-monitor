@@ -62,6 +62,7 @@ def get_monitor_status() -> dict[str, Any]:
     try:
         last_scrape = st.get_meta("last_scrape_at", default="")
         last_count = st.get_meta("last_scrape_count", default="")
+        maintenance_seen = st.get_meta("upstream_maintenance_seen_at", default="")
     finally:
         st.close()
     return {
@@ -69,6 +70,29 @@ def get_monitor_status() -> dict[str, Any]:
         "pid": pid,
         "last_scrape": last_scrape,
         "last_count": last_count,
+        # 非空 = H2S 正在维护；前端显示一个温和 banner
+        "upstream_maintenance_since": maintenance_seen,
+    }
+
+
+def get_upstream_maintenance() -> dict[str, str]:
+    """
+    Banner-friendly snapshot of upstream maintenance state.
+
+    Returns
+    -------
+    {"active": "1"/"", "since": "<ISO>", "last_seen": "<ISO>"}
+    """
+    st = storage()
+    try:
+        since = st.get_meta("upstream_maintenance_seen_at", default="")
+        last = st.get_meta("upstream_maintenance_last_at", default="")
+    finally:
+        st.close()
+    return {
+        "active": "1" if since else "",
+        "since": since,
+        "last_seen": last,
     }
 
 

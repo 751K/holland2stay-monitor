@@ -131,15 +131,28 @@ BASE_URL = "https://www.holland2stay.com/residences"
 
 # curl_cffi TLS 指纹模拟池，绕过 Cloudflare WAF。
 # 配合代理使用时每个 IP 随机选取不同指纹，模拟真实多用户浏览器分布。
-# 池中指纹均来自 curl_cffi 支持的现代浏览器版本，
+# 池中指纹均来自 curl_cffi 支持的现代浏览器版本。
+#
+# 多元化思路
+# ----------
+# 旧池只有 Chrome × 2 + Safari + Edge，TLS 栈集中在 BoringSSL 系。新池
+# 加入 Firefox（NSS 栈）和移动端（iOS Safari / Android Chrome），让
+# Cloudflare 看到的"浏览器分布"更接近真实流量直方图。
+#
 # 出现连续 Connection closed abruptly 时可更新或扩充列表。
 _CURL_IMPERSONATE_POOL = [
-    "chrome124",     # Chrome 124 (2024 Q2)
-    "chrome131",     # Chrome 131 (2024 Q4, 最新)
-    "safari17_0",    # Safari 17 (macOS/iOS)
-    "edge101",       # Edge 101 (Windows 默认浏览器)
+    "chrome136",          # Chrome 136 (2025 Q2, 最新)
+    "chrome131",          # Chrome 131 (2024 Q4)
+    "chrome124",          # Chrome 124 (2024 Q2, fallback)
+    "safari18_0",         # Safari 18 (macOS, 2024 秋)
+    "safari17_2_ios",     # iOS Safari 17.2（移动端，TLS 与 macOS 不同）
+    "firefox135",         # Firefox 135（NSS 栈，与 Chromium 系完全不同）
+    "chrome131_android",  # Android Chrome 131（移动端 Chromium）
+    "edge101",            # Edge 101 (Windows 默认浏览器)
 ]
-_POOL_WEIGHTS = [3, 4, 2, 1]  # Chrome 占 70%，Safari 20%，Edge 10%
+# Chrome 桌面 40% / Safari 25% / Firefox 15% / 移动 15% / Edge 5%
+# 接近 NL 桌面浏览器市场实际分布（StatCounter 2025 数据）。
+_POOL_WEIGHTS = [4, 4, 2, 3, 2, 3, 1, 1]
 
 _last_impersonate: Optional[str] = None
 

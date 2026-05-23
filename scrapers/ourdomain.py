@@ -41,12 +41,81 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
+# 默认 TLS 指纹池：多浏览器家族 × 多平台，最大化 TLS handshake 差异。
+#
+# 设计思路
+# --------
+# Cloudflare 做 fingerprint 跟踪时同家族同平台的差异很小（同样的 JA3/JA4
+# hash + 极相似的 h2 settings）。混进 Safari / Firefox / 移动端能显著扩大
+# "可用指纹空间"——某家族被烧时还有 3-4 个完全不同的回路可走。
+#
+# 排除条件
+# --------
+# - 老版本（chrome99, chrome100, chrome104, chrome110 等）已经被 CF 标
+#   "可疑 / 过时浏览器"，不放进默认池
+# - tor145 触发 CF 高强度挑战，不当首选
+# - safari_beta / chrome_beta 等带 "beta" 后缀的不稳定，不进默认池
+#
+# 共 8 个，覆盖 4 个家族 (Chrome / Safari / Firefox / Edge) × 桌面/移动
+# 不同平台。默认 OURDOMAIN_WAF_RETRIES=4 只取前 4 个；想用全量设为 8。
 _DEFAULT_IMPERSONATES: tuple[str, ...] = (
-    "chrome131",
-    "chrome124",
-    "safari17_0",
+    # ── Chrome 桌面：主力 ──
+    "chrome136",          # 最新稳定版（2025 Q2），CF 通常优先放行
+    "chrome131",          # 上一稳定版，作为可信备份
+    # ── Safari：完全不同的 TLS 栈，Cloudflare 待遇也不同 ──
+    "safari18_0",         # macOS Safari 18（2024 秋）
+    "safari17_2_ios",     # iOS Safari（移动版 fingerprint 差异巨大）
+    # ── Firefox：又一家族，NSS 栈，h2 settings 完全不同 ──
+    "firefox135",         # 现代稳定版
+    # ── Chrome Android：扩 Chrome 家族但是移动平台 ──
+    "chrome131_android",
+    # ── 旧但仍现代的 Chrome：fallback ──
+    "chrome124",          # 2024 Q2，依然广泛存在
+    # ── Edge：Windows 默认浏览器分布的代表 ──
     "edge101",
 )
+
+
+# ────────────────────────────────────────────────────────────────────
+# TLS 指纹状态（进程级，跨 scrape() 调用持久化）
+# ────────────────────────────────────────────────────────────────────
+#
+# 痛点
+# ----
+# SecureRC（OurDomain 用的 RentCafe + Cloudflare）做 per-fingerprint 跟踪：
+# 同一指纹短时间内重复打它，会进入"挑战中"状态返 403。原实现每次
+# scrape() 都从 chrome131 重新试，等于把"被烧"的指纹反复用——chrome131
+# / chrome124 看起来"特别容易 block"其实就是因为它们总是被最先试。
+#
+# 改进
+# ----
+# - 成功通过的指纹记录 last_good_at，下次 scrape() 从它开始
+# - 403 失败的指纹标记 cooldown_until = now + 30 min，期内不再优先用
+# - 排序：[上次 last_good] → [未冷却的] → [冷却中的兜底]
+# - 全员冷却时仍可用——冷却中的会被放到队尾，至少给条出路
+#
+# 这是进程内存，monitor 重启清空（重启后等于"忘掉之前的烧"，从配置
+# 顺序重新探）。够用——TLS 指纹热度本身就是分钟级现象。
+_FINGERPRINT_COOLDOWN_SEC = 1800  # 30 分钟
+_FINGERPRINT_STATE: dict[str, dict[str, float]] = {}
+# 例：{"chrome131": {"last_good_at": 1234.5, "cooldown_until": 0.0}}
+
+
+def _mark_fingerprint_good(impersonate: str) -> None:
+    state = _FINGERPRINT_STATE.setdefault(impersonate, {})
+    state["last_good_at"] = time.monotonic()
+    state["cooldown_until"] = 0.0  # 成功 = 解除冷却
+
+
+def _mark_fingerprint_blocked(impersonate: str) -> None:
+    state = _FINGERPRINT_STATE.setdefault(impersonate, {})
+    state["cooldown_until"] = time.monotonic() + _FINGERPRINT_COOLDOWN_SEC
+
+
+def _is_in_cooldown(impersonate: str) -> bool:
+    state = _FINGERPRINT_STATE.get(impersonate, {})
+    until = state.get("cooldown_until", 0.0)
+    return until > time.monotonic()
 
 
 class OurDomainScraper(AbstractScraper):
@@ -110,13 +179,17 @@ class OurDomainScraper(AbstractScraper):
                     proxies=proxies,
                     impersonate=impersonate,
                 )
+                # 成功通过 → 标记这个指纹"好"，下次 scrape() 会优先用它
+                _mark_fingerprint_good(impersonate)
                 break
             except BlockedError as e:
                 last_blocked = e
+                # 标记冷却：30 min 内不再优先选这个指纹（除非全员冷却才兜底）
+                _mark_fingerprint_blocked(impersonate)
                 if idx < len(attempts):
                     logger.warning(
-                        "[%s] OurDomain 403，切换 TLS 指纹重试 %d/%d: %s",
-                        display, idx + 1, len(attempts), attempts[idx],
+                        "[%s] OurDomain 403，切换 TLS 指纹重试 %d/%d: %s → %s",
+                        display, idx + 1, len(attempts), impersonate, attempts[idx],
                     )
                     continue
                 raise BlockedError(
@@ -232,8 +305,26 @@ class OurDomainScraper(AbstractScraper):
 
 
 def _get_text(session: req.Session, url: str, *, headers: Optional[dict[str, str]] = None) -> str:
-    """GET text with 429 retry and 403 Cloudflare classification."""
+    """
+    GET text with 429 retry, 403 Cloudflare classification, **+ same-session 403 retry**.
+
+    Same-session 403 retry
+    ----------------------
+    SecureRC 的 "Just a moment..." 是 Cloudflare JS challenge：第一次访问
+    返 403 + 一段 challenge HTML，但**同时也会下发 cf_clearance cookie**。
+    curl_cffi 没跑 JS 算不出最终 challenge token，但 cookie 已经攒到
+    session 上了——很多时候第二次 GET 同 URL 就直接过了（CF 见到部分
+    cookie 会放宽到 light challenge）。
+
+    所以：拿到 403 后**先在同 session 内短退避重试一次**，仍然 403 再
+    抛 BlockedError 让上层切指纹。这一步省下大量"换指纹"开销——稳态下
+    一个指纹就能稳定服务。
+
+    重试只做 1 次，避免维护期之类的情况下白白多打几次。
+    """
     total_wait = 0
+    in_session_403_retried = False  # 同 session 内 403 只重试一次
+
     for attempt, wait in enumerate([0] + list(RATE_LIMIT_BACKOFF)):
         if wait:
             total_wait += wait
@@ -248,16 +339,39 @@ def _get_text(session: req.Session, url: str, *, headers: Optional[dict[str, str
             body = resp.text[:500]
             is_cf = is_cloudflare_body(body)
             reason = "Cloudflare WAF 屏蔽" if is_cf else "服务拒绝"
-            logger.warning(
-                "OurDomain GET HTTP 403 (%s) url=%s body=%r",
-                reason, url, body[:200],
-            )
-            raise BlockedError(
-                f"OurDomain {reason}（HTTP 403）。等待无法恢复。请尝试："
-                f"1) 更换 HTTPS_PROXY 出口 IP；"
-                f"2) 重启 monitor（重建 curl_cffi session + TLS 指纹）；"
-                f"3) 暂停几小时让 Cloudflare 冷却。"
-            )
+
+            # 同 session 内重试 1 次：CF 可能已经下发了 cf_clearance / 校验 cookie，
+            # 第二次 GET 同 URL 就能软通过。只对 Cloudflare 类 403 做（非 CF 的硬
+            # 403 重试没意义）。
+            if is_cf and not in_session_403_retried:
+                in_session_403_retried = True
+                logger.info(
+                    "OurDomain 首次 403 (Cloudflare)，同 session 内短退避重试一次 url=%s",
+                    url,
+                )
+                time.sleep(2)  # 短等待让 CF cookie 生效
+                resp = session.get(url, headers=headers or {}, timeout=30)
+                if resp.ok:
+                    return resp.text
+                # 仍 403 / 其他错 → 落到下方常规处理
+                if resp.status_code == 403:
+                    body = resp.text[:500]
+                    is_cf = is_cloudflare_body(body)
+                    reason = "Cloudflare WAF 屏蔽" if is_cf else "服务拒绝"
+
+            if resp.status_code == 403:
+                logger.warning(
+                    "OurDomain GET HTTP 403 (%s) url=%s body=%r",
+                    reason, url, body[:200],
+                )
+                raise BlockedError(
+                    f"OurDomain {reason}（HTTP 403）。等待无法恢复。请尝试："
+                    f"1) 更换 HTTPS_PROXY 出口 IP；"
+                    f"2) 重启 monitor（重建 curl_cffi session + TLS 指纹）；"
+                    f"3) 暂停几小时让 Cloudflare 冷却。"
+                )
+            # 重试拿到 200 已经 return；走到这里说明拿到了非 403 的其它状态码，
+            # 落到下方常规分支处理
         if resp.status_code == 429:
             continue
         if not resp.ok:
@@ -272,12 +386,37 @@ def _get_text(session: req.Session, url: str, *, headers: Optional[dict[str, str
 
 
 def _impersonate_attempts() -> list[str]:
+    """
+    生成本轮要尝试的 TLS 指纹列表，**按状态智能排序**。
+
+    顺序逻辑
+    --------
+    1. 上次成功用过的指纹（last_good_at 最新）排首位——稳态下基本只用 1 个
+    2. 未在 cooldown 期的、按配置原顺序
+    3. cooldown 中的兜底（万一其它全失败，至少能挣扎一下）
+
+    Returns
+    -------
+    list[str]，长度受 OURDOMAIN_WAF_RETRIES 限制。
+    """
     raw = os.environ.get("OURDOMAIN_IMPERSONATES", "")
     configured = [p.strip() for p in re.split(r"[,|]", raw) if p.strip()]
     candidates = configured or [get_impersonate(), *_DEFAULT_IMPERSONATES]
     unique = list(dict.fromkeys(candidates))
     retries = _env_int("OURDOMAIN_WAF_RETRIES", min(4, len(unique)), min_value=1, max_value=8)
-    return unique[:retries]
+
+    # ── 按状态分桶 ─────────────────────────────────────────────
+    last_good = sorted(
+        (imp for imp in unique if _FINGERPRINT_STATE.get(imp, {}).get("last_good_at", 0)),
+        key=lambda imp: _FINGERPRINT_STATE[imp].get("last_good_at", 0),
+        reverse=True,  # 最近成功的排最前
+    )
+    cool = [imp for imp in unique if _is_in_cooldown(imp)]
+    fresh = [imp for imp in unique if imp not in last_good and imp not in cool]
+
+    # 合并：last_good → fresh → cooldown（去重保序）
+    ordered = list(dict.fromkeys([*last_good, *fresh, *cool]))
+    return ordered[:retries]
 
 
 def _env_int(name: str, default: int, *, min_value: int, max_value: int) -> int:
@@ -452,6 +591,13 @@ def _extract_units(html: str) -> list[dict]:
 
 
 def _extract_unit(row_html: str, unit_id: str) -> Optional[dict]:
+    """
+    从单条 unitrow 提取 unit 数据。selenium-id 用 Diemen 主题命名，
+    data-label 作为兜底（South-East 等其它 RentCafe 主题）。
+
+    每个字段都传一组 label fallback——data-label 是表格的"用户可见列标题"，
+    跨主题稳定（Sq.M. / Apartment / Rent / Deposit / Amenities / Availability）。
+    """
     idx_match = re.search(
         r"data-selenium-id=[\"']urow(\d+)[\"']",
         row_html,
@@ -459,25 +605,45 @@ def _extract_unit(row_html: str, unit_id: str) -> Optional[dict]:
     )
     idx = idx_match.group(1) if idx_match else "1"
 
-    apt = _cell_text(row_html, f"Apt{idx}")
+    apt = _cell_text(row_html, f"Apt{idx}", labels=("Apartment", "Apt", "Unit"))
     if not apt:
         logger.warning("OurDomain 单元缺少 Apt%s: unit_id=%s", idx, unit_id)
         return None
 
-    detail_labels = _label_texts(_cell_html(row_html, f"Amenity{idx}"))
+    # Amenity / Floor info：selenium-id Amenity{idx}，fallback 用 data-label
+    # "Amenities" / "Floor"（不同主题可能命名其一）
+    amenity_html = _cell_html(
+        row_html, f"Amenity{idx}", labels=("Amenities", "Floor", "Details"),
+    )
+    detail_labels = _label_texts(amenity_html)
     detail = ", ".join(detail_labels)
     floor = parse_ourdomain_floor(detail)
     avail_date = _extract_apply_date(row_html)
 
+    sqft = _cell_text(row_html, f"SqFt{idx}", labels=("Sq.M.", "Sq.Ft.", "Size", "Area"))
+    rent = _cell_text(row_html, f"Rent{idx}", labels=("Rent",))
+    deposit = _cell_text(row_html, f"Deposit{idx}", labels=("Deposit",))
+    avail_html = _cell_html(
+        row_html, f"AvailDate{idx}", labels=("Availability", "Available", "Apply"),
+    )
+
+    # 关键字段全空时打一条 WARNING，方便日后回看哪些主题需要再加 label fallback
+    if not sqft and not detail and not rent:
+        logger.warning(
+            "OurDomain 单元 %s 解析后核心字段全空——可能是新主题 / 新字段名，"
+            "row_html 前 300: %s",
+            unit_id, row_html[:300],
+        )
+
     return {
         "unit_id": unit_id,
         "apt": apt,
-        "sqft": _cell_text(row_html, f"SqFt{idx}"),
-        "rent": _cell_text(row_html, f"Rent{idx}"),
-        "deposit": _cell_text(row_html, f"Deposit{idx}"),
+        "sqft": sqft,
+        "rent": rent,
+        "deposit": deposit,
         "detail": detail,
         "floor": floor,
-        "status": _extract_status(_cell_html(row_html, f"AvailDate{idx}")),
+        "status": _extract_status(avail_html),
         "avail_date": avail_date,
         "fp_ids": [],
     }
@@ -578,18 +744,50 @@ def _short_building_label(city_display: str) -> str:
     return value
 
 
-def _cell_html(row_html: str, selenium_id: str) -> str:
+def _cell_html(row_html: str, selenium_id: str, *, labels: tuple[str, ...] = ()) -> str:
+    """
+    抓单元 cell 的 HTML，**多策略容错**：
+
+    1. `data-selenium-id="<selenium_id>"` 精确匹配（Diemen 用这套）
+    2. `data-label="<label>"` 任一匹配（South-East 等其它 RentCafe 主题
+       可能用 data-label 而 selenium-id 不同；data-label 是用户可见标签，
+       跨主题更稳定）
+
+    任一策略命中即返回；都没命中返回空串。
+
+    为什么需要兜底
+    --------------
+    OurDomain 的两个楼盘用了不同的 RentCafe 主题。Diemen 的 row 是
+    `<td data-selenium-id="SqFt1" data-label="Sq.M.">27</td>`，South-East
+    实测 SqFt cell 的 selenium-id 跟 Diemen 不同。data-label 在两套主题
+    里都稳定存在，作为兜底胜率更高。
+    """
+    # 策略 1：selenium-id 精确匹配
     pattern = (
         r"<(?P<tag>th|td)\b"
         rf"(?=[^>]*data-selenium-id=[\"']{re.escape(selenium_id)}[\"'])"
         r"[^>]*>(?P<body>.*?)</(?P=tag)>"
     )
     m = re.search(pattern, row_html, re.IGNORECASE | re.DOTALL)
-    return m.group("body") if m else ""
+    if m:
+        return m.group("body")
+
+    # 策略 2：data-label 兜底（允许任一 label 命中）
+    for label in labels:
+        pattern2 = (
+            r"<(?P<tag>th|td)\b"
+            rf"(?=[^>]*data-label=[\"']?{re.escape(label)}[\"']?)"
+            r"[^>]*>(?P<body>.*?)</(?P=tag)>"
+        )
+        m = re.search(pattern2, row_html, re.IGNORECASE | re.DOTALL)
+        if m:
+            return m.group("body")
+
+    return ""
 
 
-def _cell_text(row_html: str, selenium_id: str) -> str:
-    return _strip_html(_cell_html(row_html, selenium_id))
+def _cell_text(row_html: str, selenium_id: str, *, labels: tuple[str, ...] = ()) -> str:
+    return _strip_html(_cell_html(row_html, selenium_id, labels=labels))
 
 
 def _strip_html(value: str) -> str:

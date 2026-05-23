@@ -1,5 +1,52 @@
 # Changelog
 
+## v1.7.1 (2026-05-23)
+
+### 平台维护态检测与安静降级
+
+Holland2Stay 计划维护期间整站（含 GraphQL API）返回 403，旧路径将所有 403 一律当作 Cloudflare WAF 屏蔽处理——发用户告警、走 15 min 冷却、打 ERROR 日志。维护态下用户什么都做不了，凌晨告警是噪音。
+
+v1.7.1 引入 **UpstreamMaintenanceError**，在 403 连续出现时主动探测主站，命中维护页则走"安静等待"路径：
+
+- **`scrapers/base.py` — 维护检测基础设施**：新增 `UpstreamMaintenanceError` 异常类（与 `BlockedError` 语义区分——前者自己会恢复、后者需人工介入）；`is_maintenance_body()` 通过 5 组英文短语识别维护占位页；`probe_h2s_maintenance()` GET 主站探测，异常安全（网络错误吞掉返回 False）。
+- **`scraper.py` — 连续 403 触发探测**：进程级 `_consecutive_403_count` 跨轮累计，达阈值 3 时 GET 主站；命中维护页 → 抛 `UpstreamMaintenanceError` 并清零 streak；未命中 → 维持原 `BlockedError` 路径。成功响应自动清零 streak。
+- **`scrapers/__init__.py` — dispatcher 维护优先**：所有任务失败时 `UpstreamMaintenanceError` 优先于 `BlockedError` 上抛，确保 monitor 选择正确冷却策略。
+- **`monitor.py` — 维护态两段处理**：
+  - `run_once`：捕获后写 `upstream_maintenance_seen_at` / `upstream_maintenance_last_at` meta 键驱动 dashboard banner；**不给普通用户发告警**（避免凌晨维护吵醒人）；给 admin web 通知面板发一条（1 小时节流）。抓取成功时自动清空维护态 meta。
+  - `main_loop`：15 min 冷却（与 BlockedError 同长度但语义不同——INFO 日志、不重置 adaptive_peak、不计入 network_fail_streak）。
+- **Web dashboard 维护 banner**：新增 `.maintenance-banner` CSS（温和警告色，区别于 error alert）；`base.html` 顶部渲染维护标题 + "Since X time ago"；`_inject_upstream_maintenance` context processor 注入状态；`monitor_service.py` 新增 `get_upstream_maintenance()`。
+- **翻译**：3 个新 key（`upstream_maintenance_title` / `_hint` / `_since`），中英双语。
+
+### OurDomain TLS 指纹智能轮换
+
+SecureRC（OurDomain 用的 RentCafe + Cloudflare）对 TLS 指纹做 per-fingerprint 跟踪——同一指纹短时间内重复使用会被标记进入"挑战中"状态返 403。旧实现每次 `scrape()` 固定从 chrome131 开始依次重试，等于反复把"被烧"的指纹往枪口上送，chrome131 / chrome124 看起来"特别容易被封"只是因为它俩总是排最前面。
+
+v1.7.1 引入进程级指纹状态记忆 + 同 session 内 403 软重试：
+
+- **指纹状态追踪**（`_FINGERPRINT_STATE`）：成功通过的指纹记录 `last_good_at`，下次 `scrape()` 优先用它；403 失败的标记 30 min cooldown，期内排到队尾。排序逻辑：上次成功 → 未冷却 → 冷却中兜底。进程重启清空（等于"忘掉旧烧"从配置顺序重探），指纹热度本身就是分钟级现象，无需持久化。
+- **同 session 内 403 软重试**（`_get_text`）：Cloudflare JS challenge 返回 403 的同时也会下发 `cf_clearance` cookie，`curl_cffi` 不跑 JS 算不出 challenge token，但 cookie 已攒到 session 上——第二次 GET 同 URL 往往直接通过。拿到 Cloudflare 403 后先等 2s 再同 session 重试 1 次，仍失败才抛 `BlockedError` 让上层切指纹。大幅减少"换指纹"开销，稳态下一个指纹即可稳定服务。
+- **`_impersonate_attempts()` 智能排序**：从固定顺序改为按状态分桶 → 合并（last_good → fresh → cooldown），受 `OURDOMAIN_WAF_RETRIES` 限制长度。
+
+### 测试
+
+- **`tests/test_scraper_maintenance.py`**（6 个类，17 个测试）：`is_maintenance_body` 单元测试、`probe_h2s_maintenance` 单元测试、`_post_gql` 403 streak → 维护探测全链路、dispatcher 维护优先上抛、monitor 维护态 admin 通知 + 节流 + meta 写入。
+
+### iOS App — 性能优化
+
+- **Dashboard chart 请求分批**：`fetchMiniCharts()` 从 7 并发改为 3 批串行（3→2→2），峰值并发从 7 降到 3，首页 sparkline + source/status mini card 最先返回。避免慢网络下 TCP 队头阻塞同时打到后端。
+- **`Listing.isNew` / `ageText` 减少 `Date()` syscall**：新增 `isNew(asOf:)` / `ageText(asOf:)` 重载，调用方可外部快照 `now` 复用。`ListingsView` 分桶循环从每条 `Date()` 改为循环前快照一次（100 条 = 100→1 次 syscall）；`ListingRow.titleLine` 中 `isNew` 和 `ageText` 共用同一个 `now`（每行 2→1 次 syscall）。
+
+### Web 前端 — 性能优化
+
+- **SSE bfcache 支持**：admin 页面在 `pagehide` 时关闭 SSE EventSource 连接，`pageshow` 时若从 bfcache 恢复则重连。配合 `Cache-Control: no-cache`（而非 `no-store`），浏览器可将当前页放入 back-forward cache，返回键瞬间复原不再空白卡死。
+- **状态胶囊 filter 归并**：新增 `status_capsule` filter，一次 `.lower()` 同时返回 label + CSS 类名。模板每行从 `status_short` + `status_badge` 两次 filter 调用（各做一次 `.lower()`）改为单次调用。`listings.html` / `index.html` 的表格和移动卡片均已简化。
+- **LCP 优化**：`design.css` preload 加 `fetchpriority="high"`；sidebar logo preload；CSS 版本号升至 v16。
+- **SQLite 索引补全**：新增 `listings(city)`、`listings(first_seen)`、`listings(status)`、`listings(last_seen)`、`status_changes(changed_at)`、`status_changes(listing_id)` 6 个索引。dashboard 首页城市筛选 / 状态计数 / 排序、status_changes JOIN 查询不再走全表扫描。
+- **维护态查询缓存**：`_inject_upstream_maintenance` context processor 加 5s TTL 缓存。之前每个页面渲染都读 SQLite meta 表，现在最多每 5 秒读一次。
+- **Dashboard 60s 自动刷新**（已知问题，待修）：当前用 `window.location.reload()` 整页硬刷新，浪费带宽和服务器资源。建议改为 AJAX 局部刷新。
+
+---
+
 ## v1.7.0 (2026-05-22)
 
 ### 后端 — 多源抓取架构（P0→P1）

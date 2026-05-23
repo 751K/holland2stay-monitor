@@ -135,13 +135,15 @@ struct ListingsView: View {
     private var listContent: some View {
         // 单次 O(n) 排序 + 分桶：之前是排序 + 两次 filter 扫表（3 × O(n)）。
         // 现在排序完一次 walk-through 直接分到 new / earlier，省两次 filter。
+        // 外部快照 now，避免循环内每条 l.isNew 都调 Date() 做 syscall。
+        let now = Date()
         let sorted = displayedListings
         var new: [Listing] = []
         var earlier: [Listing] = []
         new.reserveCapacity(sorted.count)
         earlier.reserveCapacity(sorted.count)
         for l in sorted {
-            if l.isNew { new.append(l) } else { earlier.append(l) }
+            if l.isNew(asOf: now) { new.append(l) } else { earlier.append(l) }
         }
 
         return List {

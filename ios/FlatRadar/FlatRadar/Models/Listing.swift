@@ -165,15 +165,21 @@ extension Listing {
     }
 
     /// 24h 内首次出现的房源 — 用于 "NEW TODAY" 分组和 NEW 徽章。
-    var isNew: Bool {
-        guard let d = firstSeenDate else { return false }
-        return Date().timeIntervalSince(d) < 24 * 3600
-    }
+    var isNew: Bool { isNew(asOf: Date()) }
 
     /// 相对年龄串："now" / "38m" / "5h" / "2d"。
-    var ageText: String? {
+    var ageText: String? { ageText(asOf: Date()) }
+
+    /// 同 ``isNew`` 但使用外部快照的 `now`（避免循环中每条都调 `Date()` 做 syscall）。
+    func isNew(asOf now: Date) -> Bool {
+        guard let d = firstSeenDate else { return false }
+        return now.timeIntervalSince(d) < 24 * 3600
+    }
+
+    /// 同 ``ageText`` 但使用外部快照的 `now`。
+    func ageText(asOf now: Date) -> String? {
         guard let d = firstSeenDate else { return nil }
-        let interval = Date().timeIntervalSince(d)
+        let interval = now.timeIntervalSince(d)
         if interval < 60 { return "now" }
         if interval < 3600 { return "\(Int(interval / 60))m" }
         if interval < 86400 { return "\(Int(interval / 3600))h" }

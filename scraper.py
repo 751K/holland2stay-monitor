@@ -48,7 +48,9 @@ from scrapers.base import (  # noqa: F401  (re-export for backwards compat)
     BlockedError,
     RateLimitError,
     ScrapeNetworkError,
+    UpstreamMaintenanceError,
     is_cloudflare_body,
+    probe_h2s_maintenance,
 )
 
 
@@ -96,6 +98,23 @@ _HEADERS = {
 
 _MAX_PAGES = 50  # 安全上限：防止 API 返回异常 total_pages 导致无限翻页
 
+# ── 连续 403 → 主站维护探测 ─────────────────────────────────────────
+# 进程级计数：跨 round / 跨 city 累加。每次 403 +1，成功响应清零。
+# 阈值 = 2 次连续 403 时（≈ 已经被拒了一整轮的所有城市页），主动 GET 主站，
+# 命中维护页则抛 UpstreamMaintenanceError 给 monitor 走"长冷却 + 不发告警"。
+# 计数本身只在 _post_gql 内读写，不需要锁——抓取层是串行（一个 source 内
+# 多 city 顺序跑），dispatch_scrape_tasks 之外没有并发。
+_consecutive_403_count: int = 0
+_MAINTENANCE_PROBE_THRESHOLD: int = 3
+
+
+def _reset_403_streak() -> None:
+    """成功响应后清零 403 streak。供 _post_gql 内部调用。"""
+    global _consecutive_403_count
+    if _consecutive_403_count:
+        logger.info("403 streak 重置（之前 %d 次）", _consecutive_403_count)
+        _consecutive_403_count = 0
+
 
 def _mask_proxy_url(url: str) -> str:
     """脱敏代理 URL 中的密码（日志安全）。"""
@@ -142,15 +161,41 @@ def _post_gql(session: req.Session, query: str) -> dict:
                 exc_info=True,
             )
             raise
-        # 403 → Cloudflare WAF 屏蔽，等待无法恢复，立刻抛 BlockedError。
-        # 与 429（重试可能恢复）不同，403 需要换代理/重启来切 IP 或指纹。
+        # 403 → Cloudflare WAF 屏蔽 *或者* 平台维护。两者都返回 403，但语义不同：
+        #   - Cloudflare 屏蔽 → 需要换代理/重启，发用户告警
+        #   - 平台维护       → 自己会恢复，安静等待即可
+        # 用进程级 _consecutive_403_count 跟踪连续 403 次数；攒到阈值就 GET
+        # 主站看是不是维护页（响应里有 "We'll be back soon"）。
         if resp.status_code == 403:
+            global _consecutive_403_count
+            _consecutive_403_count += 1
             body = resp.text[:500]
             is_cf = is_cloudflare_body(body[:500])
             logger.error(
-                "GraphQL POST HTTP 403 (%s) url=%s body=%r",
-                "Cloudflare WAF" if is_cf else "其他 403", GQL_URL, body[:200],
+                "GraphQL POST HTTP 403 (%s) streak=%d url=%s body=%r",
+                "Cloudflare WAF" if is_cf else "其他 403",
+                _consecutive_403_count, GQL_URL, body[:200],
             )
+
+            # 连续 N 次 403 时探测一次主站。注意只在"刚跨过阈值"那次探，
+            # 避免维护期间每次 _post_gql 都打一次主站（5–10 min 一次抓取
+            # 已经够了；H2S 反爬不会因为偶尔一次探测加重）。
+            if _consecutive_403_count >= _MAINTENANCE_PROBE_THRESHOLD:
+                logger.info(
+                    "连续 %d 次 403，探测主站是否在维护中...",
+                    _consecutive_403_count,
+                )
+                if probe_h2s_maintenance(session):
+                    # 探到维护页 → 清零（避免恢复时还卡着旧 streak），
+                    # 抛 UpstreamMaintenanceError 让 monitor 走长冷却+不通知。
+                    _consecutive_403_count = 0
+                    raise UpstreamMaintenanceError(
+                        "Holland2Stay 主站显示计划维护中（"
+                        "We'll be back soon / scheduled maintenance）。"
+                        "等待平台自行恢复，无需操作。"
+                    )
+                logger.info("主站未显示维护页，按 Cloudflare 屏蔽继续处理")
+
             reason = "Cloudflare WAF 屏蔽" if is_cf else "API 拒绝服务"
             raise BlockedError(
                 f"{reason}（HTTP 403）。等待无法恢复。请尝试："
@@ -167,6 +212,8 @@ def _post_gql(session: req.Session, query: str) -> dict:
                 resp.status_code, attempt, GQL_URL, resp.text[:300],
             )
         resp.raise_for_status()
+        # 成功响应：清掉 403 streak。维护或屏蔽期间临时恢复后能立刻接得上。
+        _reset_403_streak()
         return resp.json()
 
     raise RateLimitError(
@@ -431,8 +478,8 @@ def _scrape_city_pages(
         logger.info("[%s] 抓取第 %d 页", city_name, current_page)
         try:
             data = _post_gql(session, query)
-        except (RateLimitError, BlockedError):
-            raise   # 直接上传：429 等待可恢复 / 403 需人工介入，monitor 各自处理
+        except (RateLimitError, BlockedError, UpstreamMaintenanceError):
+            raise   # 直接上传：429/403/维护都不是单页失败，monitor 各自处理
         except Exception as e:
             logger.error(
                 "[%s] 请求失败 page=%d city_ids=%s avail_ids=%s: %s",
@@ -561,8 +608,8 @@ def scrape_all(
                 )
                 all_listings.extend(listings)
                 city_completeness[city_name] = complete
-            except (RateLimitError, BlockedError):
-                raise   # 429/403 都是 IP/指纹级别的问题，不是单城市失败，直接上传
+            except (RateLimitError, BlockedError, UpstreamMaintenanceError):
+                raise   # 429/403/维护 都是 IP/指纹/平台级别的问题，不是单城市失败，直接上传
             except ScrapeNetworkError as e:
                 network_failures.append(city_name)
                 logger.error(

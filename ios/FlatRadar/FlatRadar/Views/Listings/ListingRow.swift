@@ -197,7 +197,8 @@ struct ListingRow: View {
                             in: RoundedRectangle(cornerRadius: 4))
                 .fixedSize()
 
-            if listing.isNew, let age = listing.ageText {
+            let now = Date()
+            if listing.isNew(asOf: now), let age = listing.ageText(asOf: now) {
                 Text("NEW · \(age)")
                     .font(.system(size: 9, weight: .heavy, design: .monospaced))
                     .tracking(0.5)

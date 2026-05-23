@@ -3,12 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  {#
+    主题决策（同步内联，运行 <1ms）：
+      1) localStorage 'h2s-theme' — 用户显式选择
+      2) 19:00–06:59 走 dark
+      3) prefers-color-scheme fallback
+
+    取消了原来的 `html{visibility:hidden}` 阻塞——这个 trick 把整页渲染
+    押在 script 执行后，会拖慢 LCP（即便 script 只跑 1ms，浏览器也无法
+    在它之前 paint）。现代浏览器同步 inline script 一定在 body parse 前
+    执行完，data-theme 必然就位，不会闪。
+  #}
   <script>
-    // 主题决策优先级（高 → 低）：
-    //   1) localStorage 'h2s-theme'        — 用户点过 toggleTheme 的显式选择
-    //   2) 系统时间                          — 19:00–06:59 走 dark
-    //   3) prefers-color-scheme             — 上面都没命中再 fallback 跟 OS
-    // 内联在 <head> 保证渲染前定好 data-theme，避免 light → dark 闪屏。
     (function(){
       var stored = localStorage.getItem('h2s-theme');
       var t;
@@ -16,33 +22,51 @@
         t = stored;
       } else {
         var h = new Date().getHours();
-        // 把"晚上"定义为 19:00 至次日 06:59。改这里的边界可以调整阈值。
         if (h >= 19 || h < 7) {
           t = 'dark';
-        } else if (window.matchMedia('(prefers-color-scheme:dark)').matches) {
+        } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme:dark)').matches) {
           t = 'dark';
         } else {
           t = 'light';
         }
       }
       document.documentElement.setAttribute('data-theme', t);
-      document.documentElement.style.visibility = 'visible';
     })();
   </script>
-  <style>html{visibility:hidden}</style>
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <meta http-equiv="Pragma" content="no-cache">
-  <meta http-equiv="Expires" content="0">
+  {#
+    no-store 会禁用浏览器 bfcache，导致"返回"必须重拉页面（参考之前
+    user_edit 卡顿的 fix）。改用 no-cache + must-revalidate：仍然保证每次
+    都拿新内容，但允许 bfcache 复活。
+  #}
+  <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <meta name="lang" content="{{ lang }}">
   <title>{% block title %}{{ _('app_title') }}{% endblock %}</title>
   <link rel="icon" href="/static/favicon.png" type="image/png">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+
+  {#
+    资源加载策略：
+    - design.css：render-blocking + preload + fetchpriority=high，浏览器优先下载
+    - preconnect 提前 DNS+TLS 握手，省 150–300ms 跨海连接耗时
+    - Inter / Bootstrap Icons：保持 render-blocking——字体异步加载会有
+      FOUT（系统字体先 paint 后切到 Inter，字距/字重轻微跳变），用户
+      明确不接受。代价是 LCP 等字体到位，preconnect 已经能省点。
+    - logo-small.png：preload —— sidebar 品牌 logo 在首屏视口内，是 LCP 候选。
+  #}
+  <link rel="preload" href="/static/design.css?v=16" as="style" fetchpriority="high">
+  <link rel="stylesheet" href="/static/design.css?v=16">
+  <link rel="preload" href="/static/logo-small.png" as="image" type="image/png">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <link rel="stylesheet" href="/static/design.css?v=9">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;700&display=swap">
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
   <style>{% block extra_style %}{% endblock %}</style>
   {% block head %}{% endblock %}
 </head>
@@ -63,7 +87,7 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-brand">
-      <img class="brand-mark" src="/static/logo.png" alt="" width="28" height="28">
+      <img class="brand-mark" src="/static/logo-small.png" alt="" width="28" height="28">
       <span>FlatRadar</span>
     </div>
 
@@ -172,6 +196,20 @@
 
   <!-- Main content -->
   <main class="main-content content-enter" id="main-content">
+    {% if upstream_maintenance and upstream_maintenance.active %}
+    <div class="maintenance-banner" role="status" aria-live="polite">
+      <i class="bi bi-tools" aria-hidden="true"></i>
+      <div class="maintenance-banner-body">
+        <div class="maintenance-banner-title">{{ _('upstream_maintenance_title') }}</div>
+        <div class="maintenance-banner-hint">
+          {{ _('upstream_maintenance_hint') }}
+          {% if upstream_maintenance.since %}
+          <span class="maintenance-banner-since">· {{ _('upstream_maintenance_since') }} {{ upstream_maintenance.since | time_ago }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
       <div class="alert alert-{{ 'success' if cat=='success' else ('warning' if cat=='warning' else 'danger') }}">
@@ -204,7 +242,7 @@
 <div class="toast-container" id="toast-container"></div>
 
 <script>window._isAdmin = {{ 'true' if is_admin else 'false' }};</script>
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v=5"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

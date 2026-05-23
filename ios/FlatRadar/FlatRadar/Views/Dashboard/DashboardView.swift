@@ -906,14 +906,26 @@ struct DashboardView: View {
     }
 
     private func fetchMiniCharts() async {
+        // 分 3 批发出，每批 2-3 个请求，避免 7 并发同时打到后端造成 TCP 队头阻塞。
+        // 第一批是最重要的 3 张（首页 sparkline + source/status mini card），
+        // 第二批和第三批是详情页才展开的分布图，优先级靠后。
+
+        // Batch 1: daily_new + source_dist + status_dist
         async let dn = try? APIClient.shared.getPublicChart(key: "daily_new", days: 7)
         async let so = try? APIClient.shared.getPublicChart(key: "source_dist", days: 30)
         async let st = try? APIClient.shared.getPublicChart(key: "status_dist", days: 30)
+        let (dnR, soR, stR) = await (dn, so, st)
+
+        // Batch 2: price_dist + type_dist
         async let pr = try? APIClient.shared.getPublicChart(key: "price_dist", days: 30)
         async let tp = try? APIClient.shared.getPublicChart(key: "type_dist", days: 30)
+        let (prR, tpR) = await (pr, tp)
+
+        // Batch 3: energy_dist + tenant_dist
         async let en = try? APIClient.shared.getPublicChart(key: "energy_dist", days: 30)
         async let tn = try? APIClient.shared.getPublicChart(key: "tenant_dist", days: 30)
-        let (dnR, soR, stR, prR, tpR, enR, tnR) = await (dn, so, st, pr, tp, en, tn)
+        let (enR, tnR) = await (en, tn)
+
         chartDailyNew = dnR
         chartSource = soR
         chartStatus = stR
@@ -921,7 +933,6 @@ struct DashboardView: View {
         chartType = tpR
         chartEnergy = enR
         chartTenant = tnR
-        // 数据更新后，把派生数据（sorted/bucketed/reduced）算一次缓存起来
         recomputeDerivedCharts()
     }
 

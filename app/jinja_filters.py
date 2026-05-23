@@ -64,6 +64,64 @@ def parse_features(features_json: str) -> dict[str, str]:
     return parse_features_list(items)
 
 
+def status_short(status: str) -> str:
+    """
+    长状态字符串 → 短标签，给胶囊显示用。
+
+    Holland2Stay 原始状态名很啰嗦（"Available to book" / "Available in lottery"），
+    胶囊宽度差异巨大。本过滤器把它们截短到 1 个词，配合 .badge-status 等宽 CSS
+    让 4 种状态胶囊视觉上长度一致：
+
+    - Available to book      → "Book"
+    - Available in lottery   → "Lottery"
+    - Reserved / In process  → "Reserved"
+    - Occupied / Rented / …  → "Occupied"
+
+    未知状态保持原样（用作 fallback，避免静默丢失信息）。
+    """
+    s = (status or "").strip().lower()
+    if "book" in s:
+        return "Book"
+    if "lottery" in s:
+        return "Lottery"
+    if "reserved" in s or "in process" in s or "pending" in s:
+        return "Reserved"
+    if "occupied" in s or "rented" in s or "not available" in s:
+        return "Occupied"
+    return status or ""
+
+
+class StatusCapsule:
+    """一次 .lower() 同时产出标签文案 + CSS 类名，避免模板里调两次 filter。
+
+    用法：模板里 ``{% set cap = l.status | status_capsule %}``，
+    然后 ``{{ cap.label }}`` + ``badge-{{ cap.css }}``。
+    """
+    __slots__ = ("label", "css")
+
+    def __init__(self, label: str, css: str) -> None:
+        self.label = label
+        self.css = css
+
+
+def status_capsule(status: str) -> StatusCapsule:
+    """status → (short_label, css_class)，一次 .lower() 完成。
+
+    原来模板里每行至少调 status_short + status_badge 两个 filter，每个 filter
+    都各自 .lower() 一次。N 行列表 = 2N 次 .lower()。这里归并成单次调用。
+    """
+    s = (status or "").strip().lower()
+    if "book" in s:
+        return StatusCapsule("Book", "book")
+    if "lottery" in s:
+        return StatusCapsule("Lottery", "lottery")
+    if "reserved" in s or "in process" in s or "pending" in s:
+        return StatusCapsule("Reserved", "reserved")
+    if "occupied" in s or "rented" in s or "not available" in s:
+        return StatusCapsule("Occupied", "secondary")
+    return StatusCapsule(status or "", "secondary")
+
+
 def status_badge(status: str) -> str:
     """房源状态字符串 → badge 颜色类名（CSS 里有对应的 .badge-{name} 定义）。
 
@@ -109,4 +167,6 @@ def register(app: "Flask") -> None:
     app.add_template_filter(parse_features, "parse_features")
     app.add_template_filter(source_label,    "source_label")
     app.add_template_filter(source_short,    "source_short")
+    app.add_template_filter(status_short,    "status_short")
+    app.add_template_filter(status_capsule,  "status_capsule")
     app.add_template_global(status_badge,   "status_badge")

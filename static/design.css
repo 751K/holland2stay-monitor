@@ -223,6 +223,39 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .badge-secondary{background:var(--surface-hover);color:var(--text2)}
 .badge-reserved{background:var(--info-soft);color:var(--info)}
 
+/* ── Status badge：四态严格等宽 ─────────────────────────────────
+   listings / 首页用 .badge-status 把 4 种状态胶囊（Book / Lottery /
+   Reserved / Occupied）固定到同一宽度。
+
+   关键点
+   ------
+   - 用 `width` 而非 `min-width`：letter-spacing 会撑大 inline-flex 容器，
+     min-width 守不住边界
+   - `box-sizing: border-box` + 在本类里重申 padding：让 84px 是含 padding
+     的"总外宽"，不会因为字间距把宽度拱出去
+   - `overflow: hidden`：双重保险，万一字间距 + 渲染差异让某字符溢出，
+     也不影响盒子尺寸
+   - letter-spacing 只控制视觉拉伸；text-indent 抵消末字符后的幽灵空白
+
+   只命中带 .badge-status 修饰的状态胶囊；其它地方的 .badge-secondary
+   等仍按 inline-flex 自然宽度走（监控停止徽标等）。 */
+.badge-status{
+  width:72px;
+  padding:3px 6px;
+  box-sizing:border-box;
+  justify-content:center;
+  text-align:center;
+  overflow:hidden;
+  font-variant-numeric:tabular-nums;
+}
+/* 字间距经过实测（12px Inter / weight 550 / 72px 总宽 / 6px 两侧 padding =
+   60px 文字区）。短文案拉间距填满文字区；长的（Reserved / Occupied）
+   不动。 */
+.badge-status.badge-book{letter-spacing:.5em;text-indent:.5em}
+.badge-status.badge-lottery{letter-spacing:.08em;text-indent:.08em}
+.badge-status.badge-reserved,
+.badge-status.badge-secondary{letter-spacing:.01em;text-indent:.01em}
+
 /* ── Buttons ───────────────────────────────────────────────────── */
 .btn{
   display:inline-flex;align-items:center;justify-content:center;gap:6px;
@@ -322,6 +355,23 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .alert-warning{background:var(--warning-soft);color:var(--warning)}
 .alert-info{background:var(--info-soft);color:var(--info)}
 .alert-dismiss{background:none;border:none;color:inherit;opacity:.6;cursor:pointer;margin-left:auto;font-size:18px;padding:0 4px}
+
+/* ── Upstream maintenance banner ───────────────────────────────────
+   平台维护态——比 .alert 更温和，专门用于"对方运维窗口、我们什么都不用做"
+   的状态。颜色用 warning 软底，但措辞要明显是 informational 不是 error。 */
+.maintenance-banner{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:14px 16px;margin-bottom:20px;
+  background:var(--warning-soft);color:var(--warning);
+  border:1px solid color-mix(in srgb, var(--warning) 25%, transparent);
+  border-radius:var(--radius-lg);
+  font-size:14px;line-height:1.45;
+}
+.maintenance-banner i{font-size:20px;line-height:1;flex-shrink:0;margin-top:1px}
+.maintenance-banner-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.maintenance-banner-title{font-weight:600;font-size:15px}
+.maintenance-banner-hint{color:var(--text2);font-size:13px}
+.maintenance-banner-since{color:var(--text3);font-variant-numeric:tabular-nums}
 
 /* ── Page Header ───────────────────────────────────────────────── */
 .page-header{

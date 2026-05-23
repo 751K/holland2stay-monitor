@@ -70,6 +70,24 @@ class ScrapeNetworkError(Exception):
     """
 
 
+class UpstreamMaintenanceError(Exception):
+    """
+    抓取目标平台正在做计划内维护（主站显示"We'll be back soon" /
+    "scheduled maintenance"），整个站 + API 都暂时不可用。
+
+    与 BlockedError 的区别
+    ---------------------
+    - BlockedError → Cloudflare WAF 主动拒绝服务，**永远不会**自己恢复，
+      必须换代理 / 重启 / 等几小时；要给用户发告警让其介入。
+    - UpstreamMaintenanceError → 对方运维窗口，**自己**会恢复（公告通常
+      1–2 小时窗口），不需要用户做任何事，只需要 monitor 安静等待。
+
+    monitor 那边对维护态的处理：长冷却（15 min）、INFO 而非 ERROR 日志、
+    不发用户告警（避免凌晨维护把人吵醒），状态上抛 web dashboard
+    显示一个温和的 banner。
+    """
+
+
 # ────────────────────────────────────────────────────────────────────
 # 共享常量与工具
 # ────────────────────────────────────────────────────────────────────
@@ -88,6 +106,62 @@ def is_cloudflare_body(body: str) -> bool:
         or "challenge-platform" in lower
         or "<!doctype html>" in lower[:80]
     )
+
+
+# 维护页关键词（大小写不敏感匹配）。
+# Holland2Stay 在计划维护期间会把整站换成一个简单 HTML，含以下短语之一。
+# 抽成常量便于复用 + 测试时 monkeypatch 注入"假维护页"。
+_MAINTENANCE_MARKERS: tuple[str, ...] = (
+    "we'll be back soon",
+    "we will be back soon",
+    "scheduled maintenance",
+    "performing scheduled maintenance",
+    "currently performing scheduled",
+)
+
+
+def is_maintenance_body(body: str) -> bool:
+    """
+    判断响应体（HTML 字符串）是否为"平台维护中"占位页。
+
+    判定基于多个英文短语任一命中——H2S 维护页是固定模板，命中率高。
+    对短 body / JSON 不会误伤（这些字符串不会出现在正常 GraphQL 响应里）。
+    """
+    if not body:
+        return False
+    lower = body.lower()
+    return any(marker in lower for marker in _MAINTENANCE_MARKERS)
+
+
+# 主站探测 URL：维护时这个 URL 直接返回维护 HTML（200 或 503 都可能），
+# 不走 Cloudflare WAF，所以即便 GraphQL 端点被 403，主站也能看到真正状态。
+H2S_MAIN_SITE_URL = "https://www.holland2stay.com/"
+
+
+def probe_h2s_maintenance(session, *, timeout: float = 10.0) -> bool:
+    """
+    用现有 curl_cffi Session GET 主站，看是否命中维护页。
+
+    用法
+    ----
+    连续 N 次 403 时（每次 403 = 一轮抓取被拒），调一次本函数。
+    True  → 抛 UpstreamMaintenanceError，让 monitor 走长冷却 + 安静等。
+    False → 维持原来的 BlockedError 路径，按 Cloudflare 屏蔽处理。
+
+    异常安全
+    --------
+    探测本身的网络异常一律吞掉，返回 False——探测失败不应该升级成更严重
+    的错误，让上层继续按 Block 路径走即可。
+    """
+    try:
+        resp = session.get(H2S_MAIN_SITE_URL, timeout=timeout)
+    except Exception:
+        return False
+    body = getattr(resp, "text", "") or ""
+    # 即便 status_code 是 503，body 里照样含 "We'll be back soon" — 不限制 status。
+    return is_maintenance_body(body[:4000])
+
+
 # ────────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)

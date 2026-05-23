@@ -5,8 +5,10 @@ import pytest
 from scrapers.base import BlockedError, ScrapeTask
 from scrapers.ourdomain import (
     OurDomainScraper,
+    _cell_text,
     _extract_floorplan_ids,
     _extract_floorplan_names,
+    _extract_unit,
     _extract_units,
     _infer_occupancy,
     parse_ourdomain_floor,
@@ -285,3 +287,51 @@ def test_scrape_retries_cloudflare_with_next_tls_fingerprint(monkeypatch):
         "chrome131",
         "safari17_0",
     ]
+
+
+# ─── data-label fallback（应对 South-East 等替代主题）────────────────
+
+
+class TestCellExtractionFallback:
+    """selenium-id 不匹配时，应该用 data-label 兜底。"""
+
+    def test_selenium_id_wins_when_present(self):
+        row = '<td data-selenium-id="SqFt1" data-label="Sq.M.">27</td>'
+        assert _cell_text(row, "SqFt1", labels=("Sq.M.",)) == "27"
+
+    def test_falls_back_to_data_label_when_selenium_id_missing(self):
+        """South-East 主题：selenium-id 不同，但 data-label 仍是 Sq.M.。"""
+        row = '<td data-selenium-id="SomeOtherId" data-label="Sq.M.">31</td>'
+        assert _cell_text(row, "SqFt1", labels=("Sq.M.",)) == "31"
+
+    def test_falls_back_through_multiple_labels(self):
+        """允许多个 label fallback——主题可能用 Sq.Ft. 或 Size。"""
+        row = '<td data-selenium-id="X" data-label="Size">25</td>'
+        assert _cell_text(row, "SqFt1", labels=("Sq.M.", "Sq.Ft.", "Size")) == "25"
+
+    def test_no_label_no_selenium_id_returns_empty(self):
+        row = '<td data-selenium-id="X" data-label="Other">99</td>'
+        assert _cell_text(row, "SqFt1", labels=("Sq.M.",)) == ""
+
+    def test_southeast_style_row_extracts_all_fields(self):
+        """模拟 South-East 风格：selenium-id 不同但 data-label 标准。"""
+        row = (
+            "<tr data-selenium-id='urow1' id='unitrow_551'>"
+            "<th data-selenium-id='Unit_1' data-label='Apartment'>#551</th>"
+            "<td data-selenium-id='Sq_1' data-label='Sq.M.'>33</td>"
+            "<td data-selenium-id='RentVal_1' data-label='Rent'>€ 1.890</td>"
+            "<td data-selenium-id='Dep_1' data-label='Deposit'>€ 3.000</td>"
+            "<td data-selenium-id='Am_1' data-label='Amenities'>"
+            "<label>High Floor</label></td>"
+            "<td data-selenium-id='Av_1' data-label='Availability'>"
+            "<span class='success'>Available</span></td>"
+            "</tr>"
+        )
+        unit = _extract_unit(row, "551")
+        assert unit is not None
+        assert unit["apt"] == "#551"
+        assert unit["sqft"] == "33", f"sqft 应该从 data-label='Sq.M.' 兜底，实际 {unit['sqft']!r}"
+        assert unit["rent"] == "€ 1.890"
+        assert unit["deposit"] == "€ 3.000"
+        assert "High Floor" in unit["detail"]
+        assert unit["status"] == "Available to book"

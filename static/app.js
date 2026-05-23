@@ -208,9 +208,18 @@ document.addEventListener('click', function(e) {
 });
 
 // ── SSE ───────────────────────────────────────────────────────────
+//
+// 把当前 EventSource 引用挂在模块作用域，让 pagehide 能 close 它——
+// 不 close 的话浏览器 bfcache 拒绝缓存当前页（活跃连接是 bfcache 杀手），
+// 用户点"返回"就得整页重拉，单线程 dev server 还被 SSE 占着 worker，
+// 偶尔出现空白卡死。
+var _sseConn = null;
+
 function connectSSE() {
   if(!window.EventSource) return;
+  if(_sseConn) { try { _sseConn.close(); } catch(_){} }
   var src = new EventSource('/api/events?last_id=' + _notifLastId);
+  _sseConn = src;
   src.onmessage = function(e) {
     var items;
     try { items = JSON.parse(e.data); } catch(_) { return; }
@@ -225,9 +234,17 @@ function connectSSE() {
     if(_notifPanelOpen) loadNotifications();
   };
   src.onerror = function() {
-    src.close();
+    try { src.close(); } catch(_){}
+    if(_sseConn === src) _sseConn = null;
     setTimeout(connectSSE, 10000);
   };
+}
+
+function closeSSE() {
+  if(_sseConn) {
+    try { _sseConn.close(); } catch(_){}
+    _sseConn = null;
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────
@@ -238,6 +255,21 @@ document.addEventListener('DOMContentLoaded', function() {
     // uses _notifLastId=0 before loadNotifications updates it)
     loadNotifications().then(function(){ connectSSE(); });
   }
+
+  // bfcache 友好：导航离开页面前关掉 SSE，浏览器才会把当前页放进
+  // back-forward cache，下次"返回"瞬间复原，不会触发完整重新加载。
+  //
+  // - pagehide:  导航离开（含点返回、点链接、关 tab）
+  // - pageshow:  导航回到（含从 bfcache 复原）。event.persisted=true 表示
+  //              是从 bfcache 复活的——这种情况页面 JS 状态还在，但 SSE
+  //              已经被我们 close 了，需要重连。
+  window.addEventListener('pagehide', closeSSE);
+  window.addEventListener('pageshow', function(e) {
+    if(e.persisted && window._isAdmin === true && !_sseConn) {
+      // 从 bfcache 复原 + 是 admin + 当前没 SSE 连接 → 重连
+      connectSSE();
+    }
+  });
 
   // Close sidebar when clicking overlay
   var overlay = document.querySelector('.sidebar-overlay');

@@ -33,7 +33,10 @@ from .base import (
     ScrapeNetworkError,
     ScrapeResult,
     ScrapeTask,
+    UpstreamMaintenanceError,
     is_cloudflare_body,
+    is_maintenance_body,
+    probe_h2s_maintenance,
 )
 from .holland2stay import HollandStayScraper
 from .ourdomain import OurDomainScraper
@@ -112,6 +115,13 @@ def dispatch_scrape_tasks(
                 success_count += 1
                 all_listings.extend(result.listings)
                 completeness[ckey] = result.complete
+            except UpstreamMaintenanceError as e:
+                # 平台维护是站点级状态——不和其它 source 隔离尝试也无意义，
+                # 但仍然走 hard_failures 计数：让"全部任务都失败"判定成立时
+                # 直接上抛维护异常，monitor 据此走长冷却 + 安静等。
+                hard_failures.append((ckey, e))
+                completeness[ckey] = False
+                logger.info("%s 平台维护中，已隔离该任务: %s", ckey, e)
             except (RateLimitError, BlockedError) as e:
                 hard_failures.append((ckey, e))
                 completeness[ckey] = False
@@ -121,10 +131,16 @@ def dispatch_scrape_tasks(
                 logger.error("%s 抓取网络失败，已隔离该任务: %s", ckey, e)
                 # 单 city 网络失败不进 completeness（与现有 scrape_all 行为一致）
 
-    # 429 / 403：若没有任何任务成功，维持旧行为让 monitor 进入冷却；若已有
-    # 其它平台成功，则返回部分结果，避免 OurDomain 被挡时拖垮 H2S。
+    # 429 / 403 / 维护：若没有任何任务成功，维持旧行为让 monitor 进入冷却；
+    # 若已有其它平台成功，则返回部分结果，避免 OurDomain 被挡时拖垮 H2S。
+    # 全失败时优先上抛 UpstreamMaintenanceError——它是最有用的信号，monitor
+    # 据此能选择"长冷却 + 不通知"而非"长冷却 + 通知"。
     if success_count == 0 and hard_failures:
-        raise hard_failures[0][1]
+        maint = next(
+            (e for _, e in hard_failures if isinstance(e, UpstreamMaintenanceError)),
+            None,
+        )
+        raise maint if maint is not None else hard_failures[0][1]
 
     # 全部任务都网络失败 → 上抛，让 monitor 做连续失败计数
     if success_count == 0 and network_failures and len(network_failures) == len(tasks):
@@ -161,7 +177,10 @@ __all__ = [
     "ScrapeNetworkError",
     "ScrapeResult",
     "ScrapeTask",
+    "UpstreamMaintenanceError",
     "dispatch_scrape_tasks",
     "get_scraper",
     "is_cloudflare_body",
+    "is_maintenance_body",
+    "probe_h2s_maintenance",
 ]
