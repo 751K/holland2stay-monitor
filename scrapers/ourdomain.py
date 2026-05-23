@@ -143,8 +143,8 @@ class OurDomainScraper(AbstractScraper):
         "south-east": {
             "base": "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing",
             "slug": "ourdomain-amsterdam-south-east",
-            "display": "Amsterdam South-East",
-            "short_display": "South-East",
+            "display": "Amsterdam South East",
+            "short_display": "South East",
             "property_id": "182801",
             "type": "Studio",
             "street_address": "Dalsteindreef 20-40, 1112 XC Diemen",

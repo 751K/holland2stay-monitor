@@ -230,24 +230,37 @@ function renderCalendar() {
     cell.appendChild(numEl);
 
     var MAX_PILLS = 3;
-    listings.slice(0, MAX_PILLS).forEach(function(l) {
+    // 直定优先，同状态按名称排，保证每天胶囊排列整齐
+    var sorted = listings.slice().sort(function(a, b) {
+      var sa = statusClass(a.status), sb = statusClass(b.status);
+      if (sa === 'book' && sb !== 'book') return -1;
+      if (sa !== 'book' && sb === 'book') return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    sorted.slice(0, MAX_PILLS).forEach(function(l) {
       var pill = document.createElement('span');
-      if(selectedCities.size !== 1 && allCities.length > 1) {
+      var sc = statusClass(l.status);
+      pill.className = 'cal-pill ' + sc;
+      pill.style.display = 'flex';
+      pill.style.width = '100%';
+      pill.style.boxSizing = 'border-box';
+      if (selectedCities.size !== 1 && allCities.length > 1) {
         var c = cityColorMap[l.city] || '#8b949e';
-        pill.className = 'cal-pill';
-        pill.style.borderLeft = '2px solid ' + c;
-        pill.style.background = c + '22';
-        pill.style.color = c;
-      } else {
-        pill.className = 'cal-pill ' + statusClass(l.status);
+        var dot = document.createElement('span');
+        dot.className = 'cal-pill-dot';
+        dot.style.background = c;
+        pill.appendChild(dot);
       }
-      pill.textContent = l.name;
+      var text = document.createElement('span');
+      text.className = 'cal-pill-text';
+      text.textContent = (l.name || '').trim();
+      pill.appendChild(text);
       cell.appendChild(pill);
     });
-    if(listings.length > MAX_PILLS) {
+    if(sorted.length > MAX_PILLS) {
       var more = document.createElement('span');
       more.className = 'cal-pill more';
-      more.textContent = '+' + (listings.length - MAX_PILLS) + T.units;
+      more.textContent = '+' + (sorted.length - MAX_PILLS) + T.units;
       cell.appendChild(more);
     }
 
@@ -279,13 +292,19 @@ function selectDate(ymd, listings) {
   var body = document.getElementById('detail-body');
   body.innerHTML = '';
 
-  listings.forEach(function(l) {
+  var sorted = listings.slice().sort(function(a, b) {
+    var sa = statusClass(a.status), sb = statusClass(b.status);
+    if (sa === 'book' && sb !== 'book') return -1;
+    if (sa !== 'book' && sb === 'book') return 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  sorted.forEach(function(l) {
     var sc = statusClass(l.status);
     var cityColor = cityColorMap[l.city] || '#8b949e';
     var row = document.createElement('div');
     row.className = 'listing-row';
 
-    // ── 上行：名称 + 楼盘（左）+ 状态徽章（右）──
+    // ── 上行：名称 + 楼盘（左）+ 状态徽章组（右）──
     var topDiv = document.createElement('div');
     topDiv.className = 'flex justify-between items-start gap-2';
 
@@ -309,14 +328,19 @@ function selectDate(ymd, listings) {
     }
     topDiv.appendChild(nameGroup);
 
+    // 两个 badge 包在一起，避免 justify-between 把三个子元素分散到左中右
+    var badgeGroup = document.createElement('div');
+    badgeGroup.className = 'flex items-center gap-1 flex-shrink-0';
+
     var badge = document.createElement('span');
     badge.className = 'badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' text-xs';
     badge.textContent = sc === 'book' ? T.direct : T.lottery;
     var sourceBadge = document.createElement('span');
     sourceBadge.className = 'badge badge-neutral text-xs';
     sourceBadge.textContent = sourceLabel(l.source);
-    topDiv.appendChild(badge);
-    topDiv.appendChild(sourceBadge);
+    badgeGroup.appendChild(badge);
+    badgeGroup.appendChild(sourceBadge);
+    topDiv.appendChild(badgeGroup);
     row.appendChild(topDiv);
 
     // ── 下行：价格 + 城市 ──
@@ -383,7 +407,13 @@ function renderListView() {
       '<span class="badge badge-neutral ml-2">' + listings.length + T.units + '</span>';
     group.appendChild(dateHdr);
 
-    listings.forEach(function(l) {
+    var sorted = listings.slice().sort(function(a, b) {
+      var sa = statusClass(a.status), sb = statusClass(b.status);
+      if (sa === 'book' && sb !== 'book') return -1;
+      if (sa !== 'book' && sb === 'book') return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+    sorted.forEach(function(l) {
       var sc = statusClass(l.status);
       var cityColor = cityColorMap[l.city] || '#8b949e';
       var row = document.createElement('a');

@@ -101,6 +101,8 @@ def _short_ourdomain_building(building: str) -> str:
     lower = value.lower()
     if lower == "amsterdam diemen" or lower.endswith(" diemen"):
         return "Diemen"
+    if "south-east" in lower or "south east" in lower:
+        return "South East"
     return value or "Diemen"
 
 
