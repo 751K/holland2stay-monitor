@@ -60,6 +60,9 @@ def filter_for_user_view(rows: list[dict], user: Any) -> list[dict]:
     return out
 
 
+GUEST_ALLOWED_TYPES = {"status_change", "new_listing"}
+
+
 def list_api_notifications(
     *,
     role: str,
@@ -79,9 +82,14 @@ def list_api_notifications(
             raw = st.get_notifications(limit=limit + offset, offset=0)
         unread = st.count_unread_notifications()
 
-    filtered = filter_for_user_view(raw, user) if role == "user" else raw
     if role == "user":
+        filtered = filter_for_user_view(raw, user)
         unread = sum(1 for row in filtered if not int(row.get("read") or 0))
+    elif role == "guest":
+        filtered = [r for r in raw if r.get("type") in GUEST_ALLOWED_TYPES]
+        unread = 0
+    else:
+        filtered = raw
     total = len(filtered)
     page = filtered[offset : offset + limit]
     return {

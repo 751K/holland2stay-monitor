@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 def _list_notifications():
-    role = api_auth.current_role()
+    role = api_auth.current_role() or "guest"
     user = get_current_user() if role == "user" else None
     if role == "user" and user is None:
         return _err.err_unauthorized("用户已被删除")
@@ -148,7 +148,7 @@ def register(bp: Blueprint) -> None:
     bp.add_url_rule(
         "/notifications",
         endpoint="notifications_list",
-        view_func=api_auth.bearer_required(("admin", "user"))(_list_notifications),
+        view_func=api_auth.bearer_optional(_list_notifications),
         methods=["GET"],
     )
     bp.add_url_rule(

@@ -1066,15 +1066,22 @@ struct RecentActivitySheet: View {
                         List {
                             Section {
                                 ForEach(changes) { n in
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(n.listingTitleHint)
-                                            .font(.system(size: 14, weight: .medium))
-                                        Text(n.body)
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(.secondary)
-                                            .lineLimit(2)
+                                    Button {
+                                        guard !n.listingID.isEmpty else { return }
+                                        dismiss()
+                                        coord.openListing(id: n.listingID)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(n.listingTitleHint)
+                                                .font(.system(size: 14, weight: .medium))
+                                            Text(n.body)
+                                                .font(.system(size: 12))
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                        .padding(.vertical, 4)
                                     }
-                                    .padding(.vertical, 4)
+                                    .buttonStyle(.plain)
                                 }
                             } header: {
                                 Text("\(changes.count) status changes")
