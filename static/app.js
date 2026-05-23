@@ -91,6 +91,10 @@ document.addEventListener('click', function(e) {
 });
 
 // ── Monitor Status ────────────────────────────────────────────────
+// 把定时器引用挂模块作用域，pagehide 时能 clearInterval ——和 SSE 同样的
+// 道理：活跃定时器在某些浏览器（Safari 尤甚）会阻止 bfcache。
+var _monitorTimer = null;
+
 function updateMonitorBadge() {
   var badge = document.getElementById('mon-badge');
   if(!badge) return;
@@ -104,8 +108,21 @@ function updateMonitorBadge() {
     }
   }).catch(function(){});
 }
-updateMonitorBadge();
-setInterval(updateMonitorBadge, 15000);
+
+function startMonitorPoll() {
+  if(_monitorTimer) return;
+  updateMonitorBadge();
+  _monitorTimer = setInterval(updateMonitorBadge, 15000);
+}
+
+function stopMonitorPoll() {
+  if(_monitorTimer) {
+    clearInterval(_monitorTimer);
+    _monitorTimer = null;
+  }
+}
+
+startMonitorPoll();
 
 // ── Notification System ───────────────────────────────────────────
 var _notifLastId = 0;
@@ -209,15 +226,22 @@ document.addEventListener('click', function(e) {
 
 // ── SSE ───────────────────────────────────────────────────────────
 //
-// 把当前 EventSource 引用挂在模块作用域，让 pagehide 能 close 它——
-// 不 close 的话浏览器 bfcache 拒绝缓存当前页（活跃连接是 bfcache 杀手），
-// 用户点"返回"就得整页重拉，单线程 dev server 还被 SSE 占着 worker，
-// 偶尔出现空白卡死。
+// bfcache 友好的 SSE 生命周期管理：
+// - _sseConn       当前 EventSource 引用，方便 pagehide 时 close
+// - _sseRetryTimer 失败重连的 setTimeout 引用，必须能取消——否则
+//                  pagehide 后这个 timer 在隐藏页面上 fire，又新开一条
+//                  EventSource，bfcache 还是被破坏。
+//
+// 不 close + cancel timer 的话浏览器 bfcache 拒绝缓存当前页（活跃连接 /
+// pending timer 都是 bfcache 杀手），用户点"返回"就得整页重拉，单线程
+// dev server 还被 SSE 占着 worker，偶尔出现空白卡死。
 var _sseConn = null;
+var _sseRetryTimer = null;
 
 function connectSSE() {
   if(!window.EventSource) return;
   if(_sseConn) { try { _sseConn.close(); } catch(_){} }
+  if(_sseRetryTimer) { clearTimeout(_sseRetryTimer); _sseRetryTimer = null; }
   var src = new EventSource('/api/events?last_id=' + _notifLastId);
   _sseConn = src;
   src.onmessage = function(e) {
@@ -236,7 +260,12 @@ function connectSSE() {
   src.onerror = function() {
     try { src.close(); } catch(_){}
     if(_sseConn === src) _sseConn = null;
-    setTimeout(connectSSE, 10000);
+    // 关键：retry timer 必须可取消。closeSSE() 会清掉它，所以 pagehide
+    // 后 10s 内即使本来要重连，也不会真的 fire。
+    _sseRetryTimer = setTimeout(function(){
+      _sseRetryTimer = null;
+      connectSSE();
+    }, 10000);
   };
 }
 
@@ -244,6 +273,10 @@ function closeSSE() {
   if(_sseConn) {
     try { _sseConn.close(); } catch(_){}
     _sseConn = null;
+  }
+  if(_sseRetryTimer) {
+    clearTimeout(_sseRetryTimer);
+    _sseRetryTimer = null;
   }
 }
 
@@ -256,20 +289,25 @@ document.addEventListener('DOMContentLoaded', function() {
     loadNotifications().then(function(){ connectSSE(); });
   }
 
-  // bfcache 友好：导航离开页面前关掉 SSE，浏览器才会把当前页放进
-  // back-forward cache，下次"返回"瞬间复原，不会触发完整重新加载。
+  // bfcache 友好：导航离开页面前**关掉所有活跃连接和定时器**，浏览器才
+  // 会把当前页放进 back-forward cache。Safari 对这块尤其严格——任何一
+  // 个活跃 EventSource / setInterval 都让它拒绝 bfcache。
   //
   // - pagehide:  导航离开（含点返回、点链接、关 tab）
-  // - pageshow:  导航回到（含从 bfcache 复原）。event.persisted=true 表示
-  //              是从 bfcache 复活的——这种情况页面 JS 状态还在，但 SSE
-  //              已经被我们 close 了，需要重连。
-  window.addEventListener('pagehide', closeSSE);
-  window.addEventListener('pageshow', function(e) {
-    if(e.persisted && window._isAdmin === true && !_sseConn) {
-      // 从 bfcache 复原 + 是 admin + 当前没 SSE 连接 → 重连
-      connectSSE();
+  // - pageshow:  导航回到（含从 bfcache 复原）。event.persisted=true 表
+  //              示是从 bfcache 复活的，把连接和定时器恢复回来。
+  function _onPageHide() {
+    closeSSE();
+    stopMonitorPoll();
+  }
+  function _onPageShow(e) {
+    if(e.persisted) {
+      if(window._isAdmin === true && !_sseConn) connectSSE();
+      startMonitorPoll();
     }
-  });
+  }
+  window.addEventListener('pagehide', _onPageHide);
+  window.addEventListener('pageshow', _onPageShow);
 
   // Close sidebar when clicking overlay
   var overlay = document.querySelector('.sidebar-overlay');

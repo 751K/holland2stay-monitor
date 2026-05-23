@@ -97,7 +97,7 @@
     </div>
     <div style="overflow-x:auto;">
       <table class="table-minimal">
-        <thead><tr><th>{{ _('col_listing') }}</th><th>{{ _('col_building') }}</th><th>{{ _('col_status') }}</th><th>{{ _('col_rent') }}</th><th>{{ _('col_occupancy') }}</th><th>{{ _('col_found') }}</th></tr></thead>
+        <thead><tr><th>{{ _('col_listing') }}</th><th>{{ _('col_building') }}</th><th>{{ _('col_source') }}</th><th>{{ _('col_status') }}</th><th>{{ _('col_rent') }}</th><th>{{ _('col_occupancy') }}</th><th>{{ _('col_found') }}</th></tr></thead>
         <tbody>
         {% for l in recent %}
           {% set fm = l.features | parse_features %}
@@ -108,6 +108,7 @@
               {% if fm.area %}<span class="cell-secondary ml-1">{{ fm.area }}</span>{% endif %}
             </td>
             <td style="font-weight:550;color:var(--text)">{{ fm.building or '—' }}</td>
+            <td><span class="badge badge-neutral">{{ l.source | source_short }}</span></td>
             <td>
               <span class="badge badge-status badge-{{ cap.css }}">{{ cap.label }}</span>
             </td>
@@ -116,7 +117,7 @@
             <td class="cell-secondary">{{ l.first_seen | time_ago }}</td>
           </tr>
         {% else %}
-          <tr><td colspan="6" class="text-center py-4 text-tertiary">{{ _('no_data') }}</td></tr>
+          <tr><td colspan="7" class="text-center py-4 text-tertiary">{{ _('no_data') }}</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -131,6 +132,7 @@
       <div class="lc-top">
         <div class="lc-name">{{ l.name }}</div>
         <div class="lc-status">
+          <span class="badge badge-neutral">{{ l.source | source_short }}</span>
           <span class="badge badge-status badge-{{ cap.css }}">{{ cap.label }}</span>
         </div>
       </div>

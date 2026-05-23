@@ -577,7 +577,20 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .cal-list-item{display:block;padding:10px 12px;border-radius:var(--radius);transition:background .1s;color:inherit}
 .cal-list-item:hover{background:var(--accent-soft)}
 .cal-list-item:active{background:var(--accent-soft)}
-.cal-list-name{font-size:14px;font-weight:550}
+.cal-list-name{
+  display:flex;align-items:center;gap:8px;
+  font-size:14px;font-weight:550;
+}
+/* name 文字撑左半行，过长会省略号截断（避免把 badges 挤出可视区） */
+.cal-list-name-text{
+  min-width:0;flex:1 1 auto;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+/* badges 永远右对齐成一组；flex-shrink:0 防止它们被名字挤变形 */
+.cal-list-name-meta{
+  margin-left:auto;display:inline-flex;align-items:center;gap:6px;
+  flex-shrink:0;
+}
 
 .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
 #cal-grid-col{min-width:0}

@@ -392,17 +392,27 @@ function renderListView() {
       row.target = '_blank';
       row.rel = 'noopener noreferrer';
 
+      // 结构：[name span] [spacer] [badges group]
+      // name span 占主轴起点，badges group 用 margin-left:auto 锚到右边。
+      // 这样不管 name 多长，badges 都对齐在每行的同一 X 位置——之前 badges
+      // 直接跟在 name 文本后面，每行长度不同就会左右飘。
       var nameDiv = document.createElement('div');
       nameDiv.className = 'cal-list-name';
+      var nameSpan = document.createElement('span');
+      nameSpan.className = 'cal-list-name-text';
+      nameSpan.textContent = l.name;
+      var meta = document.createElement('span');
+      meta.className = 'cal-list-name-meta';
       var badge = document.createElement('span');
-      badge.className = 'badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery') + ' ml-1';
+      badge.className = 'badge ' + (sc === 'book' ? 'badge-book' : 'badge-lottery');
       badge.textContent = sc === 'book' ? T.direct : T.lottery;
       var sourceBadge = document.createElement('span');
-      sourceBadge.className = 'badge badge-neutral ml-1';
+      sourceBadge.className = 'badge badge-neutral';
       sourceBadge.textContent = sourceLabel(l.source);
-      nameDiv.appendChild(document.createTextNode(l.name));
-      nameDiv.appendChild(sourceBadge);
-      nameDiv.appendChild(badge);
+      meta.appendChild(badge);
+      meta.appendChild(sourceBadge);
+      nameDiv.appendChild(nameSpan);
+      nameDiv.appendChild(meta);
       row.appendChild(nameDiv);
 
       if (l.building) {
