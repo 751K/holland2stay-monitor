@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FlatRadar</string>
+
+    <!-- Tabs -->
+    <string name="tab_dashboard">仪表盘</string>
+    <string name="tab_browse">浏览</string>
+    <string name="tab_listings">房源</string>
+    <string name="tab_map">地图</string>
+    <string name="tab_calendar">日历</string>
+    <string name="tab_notifications">通知</string>
+    <string name="tab_settings">设置</string>
+
+    <!-- Browse modes -->
+    <string name="browse_list">列表</string>
+    <string name="browse_map">地图</string>
+    <string name="browse_calendar">日历</string>
+    <string name="calendar_select_prompt">选择一天以查看房源。</string>
+    <string name="calendar_select_date">选择日期</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">仪表盘</string>
+    <string name="total_listings">总房源</string>
+    <string name="new_24h">新增 · 24h</string>
+    <string name="new_7d">新增 · 7d</string>
+    <string name="changes">变化</string>
+    <string name="live">在线</string>
+    <string name="offline">离线</string>
+
+    <!-- Auth -->
+    <string name="login">登录</string>
+    <string name="logout">登出</string>
+    <string name="register">注册</string>
+    <string name="username">用户名</string>
+    <string name="password">密码</string>
+    <string name="sign_in">登录</string>
+    <string name="guest">游客</string>
+    <string name="enter_as_guest">游客进入</string>
+
+    <!-- Generic -->
+    <string name="try_again">重试</string>
+    <string name="unable_to_load">无法加载</string>
+    <string name="loading">加载中…</string>
+    <string name="error_network">网络错误，请检查连接。</string>
+    <string name="error_unauthorized">登录失败，请重新登录。</string>
+</resources>

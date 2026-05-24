@@ -17,7 +17,7 @@ TERMS_EN / TERMS_ZH / PRIVACY_EN / PRIVACY_ZH —— 4 个常量字符串。
 from __future__ import annotations
 
 
-TERMS_EN = """Last updated: May 17, 2026
+TERMS_EN = """Last updated: May 22, 2026
 
 These Terms of Use govern your access to and use of FlatRadar.
 
@@ -167,7 +167,7 @@ k1012922528@gmail.com
 """
 
 
-PRIVACY_EN = """Last updated: May 17, 2026
+PRIVACY_EN = """Last updated: May 22, 2026
 
 This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
 
@@ -309,7 +309,7 @@ k1012922528@gmail.com
 """
 
 
-TERMS_ZH = """最后更新日期：2026年5月17日
+TERMS_ZH = """最后更新日期：2026年5月22日
 
 本使用条款约束您对 FlatRadar 的访问和使用。
 
@@ -459,7 +459,7 @@ k1012922528@gmail.com
 """
 
 
-PRIVACY_ZH = """最后更新日期：2026年5月17日
+PRIVACY_ZH = """最后更新日期：2026年5月22日
 
 本隐私政策说明 FlatRadar 如何收集、使用、存储和保护您的数据。
 

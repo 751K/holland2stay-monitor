@@ -50,3 +50,56 @@ fastlane/screenshots/**/*.png
 fastlane/screenshots/**/*.jpg
 fastlane/test_output/
 fastlane/AuthKey_*.p8
+
+# ──────────────────────────────────────────────────────────────
+# Android
+# ──────────────────────────────────────────────────────────────
+# local.properties 含 sdk.dir + 任何 ${MY_KEY}=xxx 配置（比如 Google
+# Maps API Key）。**绝对禁止上传**——本仓库当前的 android/local.properties
+# 就含一个生效的 MAPS_API_KEY。每个开发者本地各自维护。
+**/local.properties
+
+# Gradle 缓存与构建中间产物（动辄几百 MB，每次构建重生成）
+.gradle/
+**/.gradle/
+.kotlin/
+**/.kotlin/
+captures/
+.cxx/
+.externalNativeBuild/
+
+# IntelliJ / Android Studio 模块文件（每个开发者本地各异）
+*.iml
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/usage.statistics.xml
+.idea/shelf/
+.idea/dictionaries/
+.idea/libraries/
+.idea/caches/
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.idea/deploymentTargetDropDown.xml
+.idea/deploymentTargetSelector.xml
+
+# 构建输出（多平台 .apk / .aab / 映射文件）
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Keystore / 签名材料（**绝对**不上传，丢了等于 app 失控）
+*.jks
+*.keystore
+keystore.properties
+release.properties
+signing.properties
+*.p8
+google-services.json    # Firebase 配置，含 project_number / api_key
+google-services.json.enc  # 加密版另当别论
+
+# Android Profiler 输出
+*.hprof
+*.trace

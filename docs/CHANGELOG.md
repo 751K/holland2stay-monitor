@@ -1,5 +1,40 @@
 # Changelog
 
+## Unreleased
+
+### Android App — Map and Settings parity
+
+- **Google Maps Compose 接入**：Android Map 页从城市分组列表升级为 GoogleMap marker 视图；接入 `maps-compose-utils` 官方 clustering，marker 按状态着色，初始 camera 根据房源 bounds 适配，点击 marker/cluster 显示底部房源卡片并可进入详情。
+- **Android Map/Calendar 状态打磨**：Map 底部选中卡片补齐状态、价格、面积、入住日期和来源信息；Map/Calendar 错误态和空态增加 retry。
+- **Android Map/Calendar DTO 对齐**：修复 `/map` 与 `/calendar` 返回 `data.listings`、`lat/lng`、`building` 轻量字段时的解析路径，移除开发期误加的 `items` fallback，避免进入 Map/Calendar 后出现 `Required value 'items' missing at $.data`。
+- **Maps key 本地配置**：Gradle 从 `android/local.properties` 读取 `MAPS_API_KEY`，注入 Manifest 和 `BuildConfig`；未配置时 Map 页保留列表 fallback，避免开发/CI 白屏。
+- **Settings 运行时配置**：新增 DataStore `PreferencesManager`，持久化 `server_url` 和 `color_scheme`；App 启动后自动应用 server URL，主题支持 System / Light / Dark。
+- **Android Biometric sign-in**：user 登录/注册可选择保存本机生物识别登录；登录页通过系统 BiometricPrompt 解锁后复用正常登录 API，Settings 可移除本机保存凭据。
+- **Android A1 错误展示**：新增 root `AppErrorBus` + snackbar，登录、注册、Dashboard、Listings、Listing Detail 的后端/网络错误统一进入全局提示。
+- **Android 登录兼容存量账号**：Sign in 前端校验改为只要求密码非空，兼容后端已有 3 字符密码用户；注册和改密码仍保留新密码至少 4 字符。
+- **Android 顶层导航修复**：从 Listing Detail 等二级页面点击 Dashboard/Browse/Alerts/Settings tab 时禁用详情栈 restore，避免 tab 看似无效、只能 Back 返回。
+- **Android Browse 子模式入口**：phone 端 Browse tab 增加 List / Map / Calendar 二级 tabs，让 Map 和 Calendar 在 4-tab 布局下可见；tablet 端继续保留独立 Map/Calendar rail 项。
+- **Android 品牌资源接入**：复用 `static/logo.png` 生成 Android launcher icon，并在登录页展示 FlatRadar logo，替换开发期默认图标体验。
+- **Android Material 3 设计系统接入**：按 `FlatRadar Android M3.html` 设计规范落地第一批原生 Compose 改造，更新 M3 seed 色 `#0057CC`、light/dark color roles、Typography、Shape、状态色 token、80dp bottom navigation、Login、Dashboard hero 和 Alerts 列表/功能胶囊样式。
+- **Android Dashboard Explore 统计修复**：`ChartEntry` 改为兼容后端 `source/status/range/hour/city/label/date` 动态字段，恢复 Explore 下平台、状态、价格、类型、能源、租客统计卡片展示，并按 iOS 逻辑合并 source/type/energy bucket。
+- **Android Dashboard 统计交互修复**：Explore 统计卡片恢复点击展开能力，通过底部弹层展示完整分布明细和条形占比；Dashboard 根内容增加 status bar inset，避免标题与手机状态栏重合。
+- **Android Browse 状态栏适配**：Browse 页 List / Map / Calendar 顶部切换栏增加 status bar inset，避免 edge-to-edge 模式下与系统状态栏重合。
+- **Android Calendar 日期分组修复**：Calendar 不再复用会过滤 `2049/2050` 占位日期的通用 `ServerTime.dayKey()`，改为按 iOS Calendar 专用逻辑读取 `available_from` 前 10 位并校验日期，避免后端已有房源但选中日期列表为空。
+- **Android M3 页面收口**：Listings 改为 M3 surface card 列表与 pill 搜索/筛选；Listing Detail 增加 M3 hero、tonal CTA 和 grouped detail sections；Settings 改为 profile card、tonal save button、40dp leading icon containers；Map/Calendar 统一 surfaceContainer、shape 和 FlatRadar 语义状态色。
+- **Android Listing Detail 字段对齐**：详情页字段改为和 iOS 一样从后端 `feature_map` / `features` 派生 Type、Area、Building、Floor、Rooms、Energy、Finishing、Occupancy、Contract、Tenant，修复后端已有数据但 Android 显示 `—` 的问题。
+- **Android Listing Detail parity**：详情页补齐 source/status/city 头部、价格/入住日期/面积/建筑 metric cards、Key Details、All Details、Monitoring 和官方平台链接；当前 API/model 无 listing 图片 URL，图片展示继续等待数据源。
+- **Android 账号合规**：user Settings 增加 Change Password，调用 `/auth/password` 更新 app password，并显示其他 session 撤销结果。
+- **Android 数据导出**：user Settings 增加 Export My Data，调用 `/me/export` 拆出 `data` JSON 后通过系统分享面板交付，不写入本地文件。
+- **Android 法律入口**：Settings 增加 Terms of Use / Privacy Policy 页面，普通用户和 guest 可离线打开；admin 继续隐藏法律入口。
+- **Android Calendar 月格**：Calendar 页从月份列表升级为月历网格，每日显示可入住房源数量，选中日期后展示当天房源并可进入详情，空态/错误态可重试。
+- **Android Alerts inbox**：通知页按 TODAY / YESTERDAY / EARLIER 分组，增加类型色点、相对时间、Live 状态、单条 mark read、滑动已读、单条更多菜单和导航 unread 角标。
+- **Android 计划文档复盘**：`docs/ANDROID_PLAN.md` 增加当前实现进度、A2/A5 状态和 FCM 阻塞说明。
+- **Android Alerts 界面重设计**：重新设计 Alerts 界面，使用更具现代感的多色小药丸（如 New 绿点、Status 橘点）、未读角标叠层显示、横向过滤 Chip 及更现代扁平化分割线布局，提升列表的可读性与美观度。
+- **Android Settings 界面优化**：去除了 `server_url` 服务器配置选项，防止普通用户误修改；并在“Push Notification Filter”设置栏下方动态显示当前应用中的活跃过滤条件摘要，点击可直接跳转到过滤配置页。
+- **Android 登录界面打字性能优化**：将原本在重组时动态创建的 `BackMountainPoints` 与 `FrontMountainPoints` 坐标对列表抽离为顶层静态常量；重构 `MountainPath` 绘制函数，使用 `Modifier.drawWithCache` 将 `Path` 初始化移动到缓存区，避免打字重组触发 draw 帧时重新分配 Path 对象，实现零对象绘制和流畅打字；并使用 `remember(isDark)` 缓存顶部背景渐变。
+- **Android 登出二级防误触**：在 Settings 界面点击 Log Out 时，加入 `showLogoutDialog` 状态并拉起二级确认弹窗（AlertDialog），防止用户误点导致会话非预期终止。
+
+
 ## v1.7.1 (2026-05-23)
 
 ### 平台维护态检测与安静降级

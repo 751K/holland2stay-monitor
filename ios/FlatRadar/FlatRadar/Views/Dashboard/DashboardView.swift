@@ -614,15 +614,15 @@ struct DashboardView: View {
                         let w = proxy.size.width
                         HStack(spacing: 0) {
                             if available > 0 {
-                                RoundedRectangle(cornerRadius: 2).fill(.green)
+                                RoundedRectangle(cornerRadius: 2).fill(Color.statusBook)
                                     .frame(width: max(4, w * CGFloat(available) / CGFloat(sum)))
                             }
                             if lottery > 0 {
-                                RoundedRectangle(cornerRadius: 2).fill(.orange)
+                                RoundedRectangle(cornerRadius: 2).fill(Color.statusLottery)
                                     .frame(width: max(4, w * CGFloat(lottery) / CGFloat(sum)))
                             }
                             if unavailable > 0 {
-                                RoundedRectangle(cornerRadius: 2).fill(.gray.opacity(0.4))
+                                RoundedRectangle(cornerRadius: 2).fill(Color.statusReserved.opacity(0.4))
                                     .frame(width: max(4, w * CGFloat(unavailable) / CGFloat(sum)))
                             }
                         }
@@ -631,17 +631,17 @@ struct DashboardView: View {
 
                     HStack(alignment: .firstTextBaseline) {
                         VStack(spacing: 2) {
-                            Text("\(available)").fontWeight(.bold).foregroundStyle(.green)
+                            Text("\(available)").fontWeight(.bold).foregroundStyle(Color.statusBook)
                             Text("book").foregroundStyle(.secondary)
                         }
                         Spacer()
                         VStack(spacing: 2) {
-                            Text("\(lottery)").fontWeight(.bold).foregroundStyle(.orange)
+                            Text("\(lottery)").fontWeight(.bold).foregroundStyle(Color.statusLottery)
                             Text("lottery").foregroundStyle(.secondary)
                         }
                         Spacer()
                         VStack(spacing: 2) {
-                            Text("\(unavailable)").fontWeight(.bold)
+                            Text("\(unavailable)").fontWeight(.bold).foregroundStyle(Color.statusReserved)
                             Text("other").foregroundStyle(.secondary)
                         }
                     }
@@ -655,13 +655,14 @@ struct DashboardView: View {
         exploreCard(title: "By platform", tapKey: "source_dist", tapTitle: "By Platform") {
             if !sourceBuckets.isEmpty {
                 let total = max(sourceBuckets.reduce(0) { $0 + $1.count }, 1)
+                let palette: [Color] = [.statusBook, .statusLottery, .statusReserved]
                 VStack(alignment: .leading, spacing: 8) {
                     GeometryReader { proxy in
                         let w = proxy.size.width
                         HStack(spacing: 0) {
-                            ForEach(sourceBuckets) { entry in
+                            ForEach(Array(sourceBuckets.enumerated()), id: \.element.id) { idx, entry in
                                 RoundedRectangle(cornerRadius: 2)
-                                    .fill(sourceColor(entry.label))
+                                    .fill(palette[idx % palette.count])
                                     .frame(width: max(4, w * CGFloat(entry.count) / CGFloat(total)))
                             }
                         }
@@ -670,11 +671,11 @@ struct DashboardView: View {
                     .clipShape(Capsule())
 
                     HStack {
-                        ForEach(sourceBuckets.prefix(3)) { entry in
+                        ForEach(Array(sourceBuckets.prefix(3).enumerated()), id: \.element.id) { idx, entry in
                             VStack(spacing: 2) {
                                 Text("\(entry.count)")
                                     .fontWeight(.bold)
-                                    .foregroundStyle(sourceColor(entry.label))
+                                    .foregroundStyle(palette[idx % palette.count])
                                 Text(entry.label)
                                     .foregroundStyle(.secondary)
                             }
@@ -783,7 +784,7 @@ struct DashboardView: View {
                                 .frame(width: 54, alignment: .leading)
                             GeometryReader { proxy in
                                 RoundedRectangle(cornerRadius: 2)
-                                    .fill(.blue.opacity(0.62))
+                                    .fill(.blue.opacity(0.6))
                                     .frame(width: proxy.size.width * ratio(entry.count, maxCount))
                             }
                             .frame(height: 5)
@@ -853,13 +854,6 @@ struct DashboardView: View {
         case 4:     return .yellow         // B
         case 5:     return .orange         // C
         default:    return .red            // D 及以下
-        }
-    }
-
-    private func sourceColor(_ label: String) -> Color {
-        switch label.lowercased() {
-        case "od", "ourdomain": return .purple
-        default: return .blue
         }
     }
 

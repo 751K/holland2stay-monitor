@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- House icon for FlatRadar -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,30L32,48v30h14V64h16v14h14V48L54,30zM54,38l12,10v22h-6V56H48v14h-6V48L54,38z"/>
+</vector>
