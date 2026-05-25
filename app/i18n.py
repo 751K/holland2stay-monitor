@@ -63,9 +63,12 @@ LABELS: dict[str, dict[str, tuple[str, str]]] = {
 
 
 def get_lang() -> str:
-    """从 cookie 或 query 参数读取语言；默认 zh。"""
-    lang = request.args.get("lang", "") or request.cookies.get("h2s-lang", "zh")
-    return lang if lang in ("zh", "en") else "zh"
+    """从 cookie 或 query 参数读取语言；如果未设置，尝试从 Accept-Language 获取，默认 zh。"""
+    lang = request.args.get("lang", "") or request.cookies.get("h2s-lang", "")
+    if lang not in ("zh", "en"):
+        best = request.accept_languages.best_match(["zh", "en"])
+        lang = best if best else "zh"
+    return lang
 
 
 def localize_options(category: str, options: list[str]) -> list[tuple[str, str]]:

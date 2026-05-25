@@ -122,17 +122,66 @@ def login() -> Any:
         # admin 失败 → 尝试 user 表登录（仅 app_login_enabled 且 bcrypt 通过）
         # 不论用户是否存在都走 bcrypt 校验路径以减少时序差异（fail-closed）。
         user_record, user_pass_ok = _try_user_login(username, password)
-        if user_record is not None and user_pass_ok:
-            clear_login_failures(client_ip)
-            session.permanent = True
-            session["authenticated"] = True
-            session["role"] = "user"
-            session["user_id"] = user_record.id
-            next_url = safe_next_url(request.form.get("next", ""))
-            return redirect(next_url)
+        if user_record is not None:
+            if user_pass_ok:
+                clear_login_failures(client_ip)
+                session.permanent = True
+                session["authenticated"] = True
+                session["role"] = "user"
+                session["user_id"] = user_record.id
+                next_url = safe_next_url(request.form.get("next", ""))
+                return redirect(next_url)
+            else:
+                record_login_failure(client_ip)
+                flash("用户名或密码错误", "danger")
+        else:
+            # 用户不存在 -> 自动注册
+            reg_ok, reg_reason = check_register_rate(client_ip)
+            if not reg_ok:
+                flash(reg_reason, "danger")
+            elif len(username) < 2:
+                flash("用户名至少需要 2 个字符", "danger")
+            elif len(password) < 4:
+                flash("密码至少需要 4 个字符", "danger")
+            elif username.lower() == "__admin__" or username.startswith("__"):
+                flash("该用户名不可用", "danger")
+            else:
+                try:
+                    from users import UserConfig, set_app_password, update_users
 
-        record_login_failure(client_ip)
-        flash("用户名或密码错误", "danger")
+                    def _append_user(users: list[UserConfig]) -> UserConfig:
+                        from users import get_user_by_name
+                        if get_user_by_name(users, username) is not None:
+                            raise ValueError("duplicate")
+                        user = UserConfig(
+                            name=username,
+                            enabled=True,
+                            notifications_enabled=False,
+                            app_login_enabled=True,
+                        )
+                        set_app_password(user, password)
+                        users.append(user)
+                        return user
+
+                    user_record = update_users(_append_user)
+                    record_registration(client_ip)
+                    clear_login_failures(client_ip)
+                    logger.info("Web 自动注册并登录: name=%r id=%s ip=%s", username, user_record.id, client_ip)
+
+                    session.permanent = True
+                    session["authenticated"] = True
+                    session["role"] = "user"
+                    session["user_id"] = user_record.id
+                    next_url = safe_next_url(request.form.get("next", ""))
+                    return redirect(next_url)
+                except ValueError as e:
+                    if str(e) == "duplicate":
+                        flash("并发注册冲突，请重试", "danger")
+                    else:
+                        raise
+                except Exception as e:
+                    logger.exception("自动注册失败: %s", e)
+                    flash("自动注册失败，请稍后再试", "danger")
 
     return _render_login(next_value=request.args.get("next", ""))
 

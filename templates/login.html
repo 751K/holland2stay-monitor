@@ -306,25 +306,6 @@
       box-shadow: 0 12px 24px color-mix(in srgb, var(--text) 15%, transparent) !important;
       transform: translateY(-2px);
     }
-    .register-content {
-      display: grid;
-      grid-template-rows: 0fr;
-      transition: grid-template-rows 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .register-inner {
-      overflow: hidden;
-      opacity: 0;
-      transform: translateY(-10px);
-      transition: opacity 0.3s ease, transform 0.3s ease;
-    }
-    #register_toggle:checked ~ .register-content {
-      grid-template-rows: 1fr;
-    }
-    #register_toggle:checked ~ .register-content .register-inner {
-      opacity: 1;
-      transform: translateY(0);
-      transition: opacity 0.4s ease 0.1s, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.05s;
-    }
     .btn-download {
       display: inline-flex;
       align-items: center;
@@ -468,7 +449,7 @@
   <div class="login-card">
     <img class="login-icon login-logo" src="/static/logo-md.png" alt="" width="64" height="64">
     <h1>{{ 'Welcome to FlatRadar' if lang == 'en' else '欢迎来到 FlatRadar' }}</h1>
-    <div class="sub">{{ 'Find your dream house faster and smarter.' if lang == 'en' else '更快、更智能地发现心仪好房' }}</div>
+    <div class="sub">{{ 'Find your dream house in the Netherlands, faster and smarter.' if lang == 'en' else '更快、更智能地发现荷兰心仪好房' }}</div>
     
     <div style="display:flex;gap:12px;margin:16px 0 28px;">
       <a href="https://apps.apple.com/us/app/flarradar/id6769857080" target="_blank" rel="noopener noreferrer" class="btn-download btn-dl-ios">
@@ -509,53 +490,16 @@
       </div>
 
       <button type="submit" class="login-btn" id="login-btn">{{ _('login_btn') }}</button>
-    </form>
-
-    <div style="margin-top:16px;padding-top:14px;">
-      <input type="checkbox" id="register_toggle" style="display:none;">
-      <label for="register_toggle" class="login-btn btn-secondary" style="cursor:pointer; width:100%;">
-        {{ 'Create a user account' if lang == 'en' else '注册账户' }}
-      </label>
-      <div class="register-content">
-        <div class="register-inner">
-          <form method="POST" action="{{ url_for('register_user') }}" autocomplete="on" style="padding-top:14px;">
-            <input type="hidden" name="next" value="{{ next }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <input type="hidden" name="terms_accepted" id="terms_accepted" value="0">
-
-            <div class="login-field">
-              <label for="register_username">{{ 'Username' if lang == 'en' else '用户名' }}</label>
-              <input id="register_username"
-                     type="text"
-                     name="register_username"
-                     placeholder="{{ 'Choose a username' if lang == 'en' else '设置用户名' }}"
-                     autocomplete="username"
-                     minlength="2"
-                     maxlength="64"
-                     required>
-            </div>
-
-            <div class="login-field">
-              <label for="register_password">{{ 'Password' if lang == 'en' else '密码' }}</label>
-              <input id="register_password"
-                     type="password"
-                     name="register_password"
-                     placeholder="{{ 'At least 4 characters' if lang == 'en' else '至少 4 个字符' }}"
-                     autocomplete="new-password"
-                     minlength="4"
-                     required>
-            </div>
-
-            <button type="submit" class="login-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);">
-              {{ 'Register and Sign In' if lang == 'en' else '注册并登录' }}
-            </button>
-            <div class="sub" style="font-size:12px;margin-top:8px;">
-              {{ 'New accounts start with notifications off. Configure alerts after signing in.' if lang == 'en' else '新账号默认关闭通知，登录后可配置提醒。' }}
-            </div>
-          </form>
-        </div>
+      <div class="sub" style="font-size:13px;margin-top:16px;text-align:center;line-height:1.6;color:var(--text2);text-wrap:balance;">
+        <strong style="color:var(--text);font-weight:600;">
+          {{ 'Sign in to receive push notifications.' if lang == 'en' else '登录以获取房源推送功能' }}<br>
+          {{ 'Unregistered accounts are created automatically.' if lang == 'en' else '未注册的账户将自动完成注册' }}
+        </strong><br>
+        <span style="display:inline-block;margin-top:4px;">
+          {{ 'By continuing, you agree to our ' if lang == 'en' else '继续即代表同意我们的 ' }}<a href="{{ url_for('terms_page') }}" style="color:var(--accent);text-decoration:none;font-weight:600;">{{ 'Terms' if lang == 'en' else '使用条款' }}</a>{{ ' and ' if lang == 'en' else ' 和 ' }}<a href="{{ url_for('privacy_page') }}" style="color:var(--accent);text-decoration:none;font-weight:600;">{{ 'Privacy Policy' if lang == 'en' else '隐私政策' }}</a>{{ '.' if lang == 'en' else '。' }}
+        </span>
       </div>
-    </div>
+    </form>
 
     {% if guest_mode %}
     <div style="margin-top:16px;">
@@ -582,45 +526,7 @@
   </div>
 </div>
 
-<div id="registerTermsModal"
-     class="hidden"
-     role="dialog"
-     aria-modal="true"
-     aria-labelledby="registerTermsTitle"
-     style="position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(2,6,23,.62);backdrop-filter:blur(10px);">
-  <div style="width:min(440px,100%);border:1px solid var(--border);border-radius:24px;background:var(--surface);box-shadow:var(--shadow-lg);padding:22px;">
-    <h2 id="registerTermsTitle" style="margin:0 0 8px;font-size:20px;">
-      {{ 'Before You Register' if lang == 'en' else '注册前确认' }}
-    </h2>
-    <p class="sub" style="text-align:left;margin:0 0 16px;line-height:1.55;">
-      {{ 'Please review and accept the Terms of Use and Privacy Policy before creating your FlatRadar account.' if lang == 'en' else '创建 FlatRadar 账号前，请先阅读并同意使用条款与隐私政策。' }}
-    </p>
 
-    <div style="display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--border);border-radius:14px;background:var(--surface2);">
-      <input id="register_terms_checkbox" type="checkbox" style="margin-top:3px;accent-color:var(--accent);">
-      <label for="register_terms_checkbox" style="font-size:13px;line-height:1.5;color:var(--text2);">
-        {{ 'I have read and agree to the ' if lang == 'en' else '我已阅读并同意 ' }}
-        <a href="{{ url_for('terms_page') }}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:650;text-decoration:none;">
-          {{ 'Terms of Use' if lang == 'en' else '使用条款' }}
-        </a>
-        {{ ' and ' if lang == 'en' else ' 和 ' }}
-        <a href="{{ url_for('privacy_page') }}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:650;text-decoration:none;">
-          {{ 'Privacy Policy' if lang == 'en' else '隐私政策' }}
-        </a>
-        {{ '.' if lang == 'en' else '。' }}
-      </label>
-    </div>
-
-    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px;">
-      <button type="button" class="btn btn-ghost btn-sm" onclick="hideRegisterTermsModal()">
-        {{ 'Cancel' if lang == 'en' else '取消' }}
-      </button>
-      <button type="button" id="registerTermsConfirm" class="btn btn-primary btn-sm" disabled onclick="confirmRegisterTerms()">
-        {{ 'Agree & Register' if lang == 'en' else '同意并注册' }}
-      </button>
-    </div>
-  </div>
-</div>
 
 <script>
 function handleLoginSubmit(form) {
@@ -661,56 +567,7 @@ function togglePw() {
   else { inp.type = 'password'; eye.className = 'bi bi-eye'; }
 }
 
-var pendingRegisterForm = null;
-var registerModal = document.getElementById('registerTermsModal');
-var registerTermsCheckbox = document.getElementById('register_terms_checkbox');
-var registerTermsConfirm = document.getElementById('registerTermsConfirm');
-var registerTermsHidden = document.getElementById('terms_accepted');
-var registerForm = document.querySelector('form[action="{{ url_for("register_user") }}"]');
 
-if(registerForm) {
-  registerForm.addEventListener('submit', function(e) {
-    if(registerTermsHidden && registerTermsHidden.value === '1') return;
-    if(!registerForm.reportValidity()) return;
-    e.preventDefault();
-    pendingRegisterForm = registerForm;
-    showRegisterTermsModal();
-  });
-}
-
-if(registerTermsCheckbox && registerTermsConfirm) {
-  registerTermsCheckbox.addEventListener('change', function() {
-    registerTermsConfirm.disabled = !registerTermsCheckbox.checked;
-  });
-}
-
-function showRegisterTermsModal() {
-  if(!registerModal) return;
-  registerModal.style.display = 'flex';
-  registerModal.classList.remove('hidden');
-  if(registerTermsCheckbox) registerTermsCheckbox.checked = false;
-  if(registerTermsConfirm) registerTermsConfirm.disabled = true;
-  setTimeout(function(){ if(registerTermsCheckbox) registerTermsCheckbox.focus(); }, 0);
-}
-
-function hideRegisterTermsModal() {
-  if(!registerModal) return;
-  registerModal.style.display = 'none';
-  registerModal.classList.add('hidden');
-  pendingRegisterForm = null;
-}
-
-function confirmRegisterTerms() {
-  if(!registerTermsCheckbox || !registerTermsCheckbox.checked || !pendingRegisterForm) return;
-  if(registerTermsHidden) registerTermsHidden.value = '1';
-  pendingRegisterForm.submit();
-}
-
-document.addEventListener('keydown', function(e) {
-  if(e.key === 'Escape' && registerModal && !registerModal.classList.contains('hidden')) {
-    hideRegisterTermsModal();
-  }
-});
 </script>
 </body>
 </html>
