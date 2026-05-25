@@ -114,14 +114,14 @@ def _add_security_headers(resp):
     resp.headers.setdefault("Referrer-Policy",        "strict-origin-when-cross-origin")
     resp.headers.setdefault("Strict-Transport-Security",
                             "max-age=63072000; includeSubDomains; preload")
-    # CSP: allow self, inline styles (design.css vars), Google Fonts, maps.
+    # CSP: allow self, inline styles (design.css vars), Google Fonts, CDN (icons + charts), maps.
     resp.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://unpkg.com; "
+        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: https://*.tile.openstreetmap.org; "
-        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
         "connect-src 'self'; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
