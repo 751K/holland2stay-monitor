@@ -6,15 +6,17 @@
 
 ## 1. Android 客户端
 
+> 状态更新（2026-05-25）：iOS 客户端已完成当前产品范围内的大功能开发，进入维护阶段。Android 客户端已经启动并持续推进，本章节保留为 Android parity 和上架收口的方向说明。
+
 ### 目标
 
-把 iOS FlatRadar 的功能复刻到 Android，覆盖另一半潜在用户群。国际学生 / 流动 young professional 群体里 Android 占比 ~40-50%，目前只有 iOS 客户端等于把这部分用户挡在门外。
+把 FlatRadar 的核心租客体验稳定带到 Android，覆盖另一半潜在用户群。国际学生 / 流动 young professional 群体里 Android 占比 ~40-50%，Android parity 和 Play Store 上架是当前客户端侧主要推进方向。
 
 ### 技术栈
 
 **Kotlin + Jetpack Compose 原生开发**，不引入 KMP / 跨平台框架。理由：
 
-- iOS 端 SwiftUI 代码已稳定，没必要为了共享 60% 逻辑回去重构
+- iOS 端 SwiftUI 代码已稳定并进入维护阶段，没必要为了共享 60% 逻辑回去重构
 - Compose 与 SwiftUI 声明式范式接近，视图层迁移心智成本低
 - Material 3 组件体系成熟，设计系统可对等映射
 - 原生推送（FCM）、地图（Google Maps / OSM）、图表库支持最完整
@@ -61,9 +63,11 @@
 
 ## 2. 更多租房平台支持
 
+> 状态更新（2026-05-25）：本章节是早期多平台规划记录。当前主线已经完成多源抓取架构，并接入 Holland2Stay、OurDomain 和 Xior；后续平台扩展仍可参考下方调研和架构原则。
+
 ### 目标
 
-目前 FlatRadar 仅抓取 Holland2Stay 一家。荷兰国际学生 / young professional 群体租房的主要平台还有十几家，多平台聚合后能成为**一站式房源雷达**，对用户价值提升一个数量级。
+FlatRadar 已从 Holland2Stay 单源演进为多平台监控。荷兰国际学生 / young professional 群体租房的主要平台仍有十几家，继续扩展更多平台后能进一步接近**一站式房源雷达**，对用户价值继续提升。
 
 ### 平台调研（按优先级）
 

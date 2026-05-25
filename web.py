@@ -122,7 +122,8 @@ def _add_security_headers(resp):
         "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
         "img-src 'self' data: https://*.tile.openstreetmap.org https://maps.googleapis.com https://maps.gstatic.com; "
         "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://maps.googleapis.com; "
-        "connect-src 'self' https://maps.googleapis.com; "
+        "connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com; "
+        "worker-src 'self' blob:; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'",

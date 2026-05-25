@@ -25,6 +25,7 @@ COPY scrapers/ scrapers/
 COPY .env.example ./
 COPY templates/ templates/
 COPY static/ static/
+COPY docs/guide.html docs/guide_cn.html docs/
 
 # 复制 entrypoint 并加执行权限
 COPY docker/entrypoint.sh /entrypoint.sh

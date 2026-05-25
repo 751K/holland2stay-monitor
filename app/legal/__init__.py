@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from support_text import CONTACT_EMAIL
+
 _dir = Path(__file__).parent
 
 _terms_en = (_dir / "terms.txt").read_text()
@@ -12,16 +14,20 @@ _privacy_zh = (_dir / "privacyzh.txt").read_text()
 UPDATED_AT = "2026-05-25"
 
 
+def _with_contact_email(text: str) -> str:
+    return text.replace("{{CONTACT_EMAIL}}", CONTACT_EMAIL)
+
+
 def get_legal(lang: str = "en") -> dict:
     """Return {"terms": ..., "privacy": ..., "updated_at": ...} for the given language."""
     if lang.startswith("zh"):
         return {
-            "terms": _terms_zh,
-            "privacy": _privacy_zh,
+            "terms": _with_contact_email(_terms_zh),
+            "privacy": _with_contact_email(_privacy_zh),
             "updated_at": UPDATED_AT,
         }
     return {
-        "terms": _terms_en,
-        "privacy": _privacy_en,
+        "terms": _with_contact_email(_terms_en),
+        "privacy": _with_contact_email(_privacy_en),
         "updated_at": UPDATED_AT,
     }

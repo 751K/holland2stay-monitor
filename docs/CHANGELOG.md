@@ -27,6 +27,7 @@
 - **测试推送无日志**：加 `logger.info(...)` 操作审计
 - **stale docstring**：`legal_text.py` → `app.legal/`
 - **Web 地图加载修复**：CSP 增加 Google Maps 所需的 `maps.googleapis.com` / `maps.gstatic.com` 许可，避免动态加载 Google Maps JS 被浏览器拦截后页面一直停在“加载中”；地图脚本增加 `onerror` 和初始化超时提示。
+- **Web Google Map 性能优化**：保留 Google Maps 的同时接入 marker clustering；marker 改为 `requestAnimationFrame` 分批创建，InfoWindow 内容改为点击时懒创建，clusterer CDN 超时后自动降级为普通分批 marker，避免几百个点同步渲染卡住主线程。
 
 **iOS（5 修复 + 31 单元测试）**
 - **Biometric crash**：`SecAccessControlCreateWithFlags(...)!` → `guard let`

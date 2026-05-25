@@ -113,6 +113,9 @@ var markers = [];
 var bounds;
 var infoWindow;
 var mapsLoaded = false;
+var markerCluster = null;
+var clustererPromise = null;
+var renderRun = 0;
 
 function isDark() {
   return document.documentElement.getAttribute('data-theme') === 'dark';
@@ -154,6 +157,28 @@ function createMarkerIcon(color) {
     strokeWeight: 3,
     scale: 10,
   };
+}
+
+function loadMarkerClusterer() {
+  if (window.markerClusterer && window.markerClusterer.MarkerClusterer) {
+    return Promise.resolve(window.markerClusterer);
+  }
+  if (clustererPromise) return clustererPromise;
+  clustererPromise = new Promise(function(resolve) {
+    var script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@googlemaps/markerclusterer/dist/index.min.js';
+    script.onload = function() { resolve(window.markerClusterer || null); };
+    script.onerror = function() { resolve(null); };
+    document.head.appendChild(script);
+  });
+  return clustererPromise;
+}
+
+function loadMarkerClustererWithTimeout() {
+  return Promise.race([
+    loadMarkerClusterer(),
+    new Promise(function(resolve) { setTimeout(function() { resolve(null); }, 1200); })
+  ]);
 }
 
 function buildPopupContent(l) {
@@ -213,11 +238,17 @@ function buildPopupContent(l) {
 
 function loadMapData() {
   // Clear old markers
+  renderRun += 1;
+  if (markerCluster) {
+    markerCluster.clearMarkers();
+    markerCluster = null;
+  }
   markers.forEach(function(m){ m.setMap(null); });
   markers = [];
   bounds = new google.maps.LatLngBounds();
   if (infoWindow) infoWindow.close();
   document.getElementById('map-loading').style.display = '';
+  document.getElementById('map-loading').textContent = zh ? '加载中…' : 'Loading…';
 
   fetch('/api/map')
   .then(function(r){ return r.json(); })
@@ -225,47 +256,81 @@ function loadMapData() {
     var listings = d.listings || [];
     document.getElementById('map-count').textContent =
       (zh ? '共 ' : '') + listings.length + (zh ? ' 套可展示房源' : ' listings shown');
-    document.getElementById('map-loading').style.display = 'none';
-
-    listings.forEach(function(l) {
-      var sc = statusClass(l.status);
-      var color = getMarkerColor(sc);
-      var marker = new google.maps.Marker({
-        position: {lat: l.lat, lng: l.lng},
-        map: map,
-        icon: createMarkerIcon(color),
-        title: l.name,
-      });
-
-      var popupEl = buildPopupContent(l);
-
-      marker.addListener('click', function() {
-        if (infoWindow) infoWindow.close();
-        infoWindow = new google.maps.InfoWindow({content: popupEl});
-        infoWindow.open(map, marker);
-      });
-
-      // Hover → status bar
-      marker.addListener('mouseover', function() {
-        document.getElementById('map-status').textContent = l.name;
-      });
-      marker.addListener('mouseout', function() {
-        document.getElementById('map-status').textContent = '';
-      });
-
-      bounds.extend(marker.getPosition());
-      markers.push(marker);
+    return loadMarkerClustererWithTimeout().then(function(clustererLib) {
+      renderMarkers(listings, clustererLib);
     });
-
-    if (markers.length > 0) {
-      map.fitBounds(bounds, 60); // 60px padding
-    }
-
-    document.getElementById('map-status').textContent = '';
   })
   .catch(function() {
     document.getElementById('map-loading').textContent = zh ? '地图数据加载失败' : 'Map data load failed';
   });
+}
+
+function renderMarkers(listings, clustererLib) {
+  var run = ++renderRun;
+  var i = 0;
+  var batchSize = 60;
+  var clusterMarkers = [];
+  var useClusterer = !!(clustererLib && clustererLib.MarkerClusterer);
+  bounds = new google.maps.LatLngBounds();
+
+  function createOne(l) {
+    var lat = Number(l.lat);
+    var lng = Number(l.lng);
+    if (!isFinite(lat) || !isFinite(lng)) return;
+
+    var sc = statusClass(l.status);
+    var color = getMarkerColor(sc);
+    var marker = new google.maps.Marker({
+      position: {lat: lat, lng: lng},
+      map: useClusterer ? null : map,
+      icon: createMarkerIcon(color),
+      title: l.name,
+      optimized: true,
+    });
+
+    marker.addListener('click', function() {
+      if (infoWindow) infoWindow.close();
+      infoWindow = new google.maps.InfoWindow({content: buildPopupContent(l)});
+      infoWindow.open(map, marker);
+    });
+    marker.addListener('mouseover', function() {
+      document.getElementById('map-status').textContent = l.name;
+    });
+    marker.addListener('mouseout', function() {
+      document.getElementById('map-status').textContent = '';
+    });
+
+    bounds.extend(marker.getPosition());
+    markers.push(marker);
+    clusterMarkers.push(marker);
+  }
+
+  function step() {
+    if (run !== renderRun) return;
+    var end = Math.min(i + batchSize, listings.length);
+    for (; i < end; i += 1) createOne(listings[i]);
+
+    if (i < listings.length) {
+      document.getElementById('map-loading').textContent =
+        (zh ? '渲染中 ' : 'Rendering ') + i + '/' + listings.length;
+      requestAnimationFrame(step);
+      return;
+    }
+
+    if (useClusterer && clusterMarkers.length > 0) {
+      markerCluster = new clustererLib.MarkerClusterer({
+        map: map,
+        markers: clusterMarkers,
+      });
+    }
+    if (markers.length > 0) {
+      map.fitBounds(bounds, 60);
+    }
+    document.getElementById('map-status').textContent = '';
+    document.getElementById('map-loading').style.display = 'none';
+  }
+
+  requestAnimationFrame(step);
 }
 
 // ── Map init (called by Google Maps callback) ──

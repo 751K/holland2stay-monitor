@@ -10,7 +10,7 @@ By using FlatRadar, you acknowledge that you have read and understood this Priva
 
 For privacy-related questions, account deletion requests, or data requests, contact:
 
-k1012922528@gmail.com
+{{CONTACT_EMAIL}}
 
 For the purposes of applicable data protection laws, the operator of FlatRadar is responsible for the personal data processed by FlatRadar.
 
@@ -110,11 +110,11 @@ We keep your data only as long as necessary. Account data is retained while your
 
 13. Account Deletion
 
-You can request deletion of your account and associated data by contacting k1012922528@gmail.com. After deletion, you may lose access to saved filters, notification settings, alert history, and other account-based features.
+You can request deletion of your account and associated data by contacting {{CONTACT_EMAIL}}. After deletion, you may lose access to saved filters, notification settings, alert history, and other account-based features.
 
 14. Your Rights
 
-Depending on your location, you may have the right to access, correct, delete, restrict processing of, or port your data, object to processing, withdraw consent, or lodge a complaint with a data protection authority. Contact k1012922528@gmail.com to exercise these rights.
+Depending on your location, you may have the right to access, correct, delete, restrict processing of, or port your data, object to processing, withdraw consent, or lodge a complaint with a data protection authority. Contact {{CONTACT_EMAIL}} to exercise these rights.
 
 15. Security
 
@@ -136,4 +136,4 @@ We may update this Privacy Policy from time to time. If changes are material, we
 
 For privacy-related questions, account deletion requests, or data requests, contact:
 
-k1012922528@gmail.com
+{{CONTACT_EMAIL}}

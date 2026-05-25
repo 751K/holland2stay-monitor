@@ -26,6 +26,8 @@ __pycache__/
 
 # 文档
 docs/
+!docs/guide.html
+!docs/guide_cn.html
 
 # macOS 垃圾文件
 .DS_Store

@@ -128,7 +128,7 @@ Please read the Privacy Policy carefully to understand how we collect, use, stor
 
 You may request deletion of your FlatRadar account and associated data through the app where available, or by contacting us at:
 
-k1012922528@gmail.com
+{{CONTACT_EMAIL}}
 
 Some limited data may be retained if required for legal, security, fraud-prevention, or legitimate operational reasons.
 
@@ -144,4 +144,4 @@ Continued use of FlatRadar after the updated Terms become effective means that y
 
 For questions about these Terms, contact:
 
-k1012922528@gmail.com
+{{CONTACT_EMAIL}}
