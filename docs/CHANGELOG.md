@@ -1,6 +1,39 @@
 # Changelog
 
-## Unreleased
+## v1.7.5 (2026-05-25)
+
+### 全量代码审查与安全加固
+
+5 路并行扫描，26 个发现，修复 22 个：
+
+**Android（6 修复）**
+- **SSE 阻塞 Main 线程**：`SseClient.connect()` 内 `call.execute()` 包 `withContext(Dispatchers.IO)`
+- **深链接断开**：`AppNavigation` 观察 `NavigationCoordinator.pendingListingId` → `navController.navigate("listing/$id")`
+- **弱网误删 token**：`restoreSession()` 改为只对 `ApiException.isAuthError` 清 token，网络异常不清
+- **Settings 状态擦除**：`saveServerUrl/saveColorScheme` 改用 `.copy(message=)` 而非新建 `SettingsUiState()`
+- **LocationListener 泄漏**：`MapScreen` "My Location" 加 15s timeout，超时自动 `removeUpdates`
+- **filter 不生效**：`PUT /api/v1/me/filter` 成功后加 `write_reload_request()`，让 monitor 热重载
+
+**Python 后端（11 修复）**
+- **SSE 绕过禁用用户**：加 `_user_token_still_allowed()` 检查
+- **CSP 缺位**：`web.py` 加 `Content-Security-Policy` header
+- **HSTS 缺失**：加 `Strict-Transport-Security: max-age=63072000`
+- **booker None 崩溃**：`book_with_fallback` 返回 None 时 `continue`
+- **Guest 无 CSRF**：`/guest` GET→POST + `@csrf_required`
+- **房源 API 无限流**：guest 访问 100 req/min IP 限流，超限返 429
+- **status change FCM gate 遗漏**：加 `get_fcm_client() is not None` 条件
+- **测试推送 flash 条件错误**：`any("/" in m)` 替代复杂条件
+- **CSS 无效值**：`active` → `var(--accent)`
+- **测试推送无日志**：加 `logger.info(...)` 操作审计
+- **stale docstring**：`legal_text.py` → `app.legal/`
+
+**iOS（5 修复 + 31 单元测试）**
+- **Biometric crash**：`SecAccessControlCreateWithFlags(...)!` → `guard let`
+- **Dashboard 并发 mutation**：`fetchSummary()` 加 `guard !isLoading`
+- **PushDelegate IUO**：`shared: PushDelegate!` → `PushDelegate?`
+- **AdminStore 死代码**：清理未使用的 `original` 变量
+- **LegalSheetView API fetch**：`.task {}` 拉取法律文本 + 本地 fallback
+- **iOS 单元测试补齐**：新建 `FlatRadarTests` target（31 tests），覆盖 Listing/APIResponse/AuthModels/NotificationItem 模型编解码与状态逻辑。此前 13K 行代码零单元测试，现核心模型层已覆盖
 
 ### Android App — Map and Settings parity
 
@@ -33,6 +66,14 @@
 - **Android Settings 界面优化**：去除了 `server_url` 服务器配置选项，防止普通用户误修改；并在“Push Notification Filter”设置栏下方动态显示当前应用中的活跃过滤条件摘要，点击可直接跳转到过滤配置页。
 - **Android 登录界面打字性能优化**：将原本在重组时动态创建的 `BackMountainPoints` 与 `FrontMountainPoints` 坐标对列表抽离为顶层静态常量；重构 `MountainPath` 绘制函数，使用 `Modifier.drawWithCache` 将 `Path` 初始化移动到缓存区，避免打字重组触发 draw 帧时重新分配 Path 对象，实现零对象绘制和流畅打字；并使用 `remember(isDark)` 缓存顶部背景渐变。
 - **Android 登出二级防误触**：在 Settings 界面点击 Log Out 时，加入 `showLogoutDialog` 状态并拉起二级确认弹窗（AlertDialog），防止用户误点导致会话非预期终止。
+- **法律文本三端统一**：新增 `app/legal/*.txt` 作为 canonical source of truth（terms_en/zh + privacy_en/zh），`GET /api/v1/legal` 公开 API 端点（无需登录）。三端改为 API 优先 + 本地缓存 fallback：Android `LegalScreen` → `LegalViewModel` fetch，iOS `LegalSheetView` → `.task` async fetch，web `app/routes/legal.py` → `app.legal.get_legal()`。删除旧的 `legal_text.py`（web）、`LegalText.kt` 降级为 Android 离线 fallback、`LegalText.swift` 降级为 iOS 离线 fallback。免责条款同步更新为多平台中立声明（"not affiliated with any of the housing platforms it monitors"），去掉原先仅提 Holland2Stay 的单一措辞。
+- **Android 中文字符翻译完整覆盖**：`values/strings.xml` + `values-zh/strings.xml` 各 ~170 条目完全对称，覆盖 Tab、仪表盘、登录注册、房源列表/详情/筛选、地图、日历、通知、设置、管理面板、使用条款和通用文案。
+- **Android FCM 推送完整闭环**：
+  - 客户端：`FcmService`（onNewToken + onMessageReceived）、`FcmTokenManager`（设备注册/注销 + 异常日志）、通知渠道（listings/general）、Android 13+ 运行时权限、通知点击 deep link 全部接入。
+  - 后端：`notifier_channels/fcm.py`（OAuth2 服务账号认证 + FCM HTTP v1 API，send_one/send_many），`mcore/push.py` 按 `device_tokens.platform` 字段分流 iOS（APNs）/ Android（FCM）双发，所有 dispatch 函数双端覆盖。
+  - 测试：Python FCM 35 tests（client 18 + dispatcher 17），Android 47 ViewModel tests。
+- **Android Listing 模型对齐 iOS**：删除 `Listing` 中 9 个与 `featureMap` 重复的硬编码字段（areaText/energyLabel/buildingText/finishing/floor/rooms/occupancy/contractType/tenantRequirement），`display*` 计算属性统一从 `featureMap` 派生。`MapCalendarListingDto.toListing()` 将 DTO flat 字段 `putIfAbsent` 合并进 `featureMap`，后端改 key 名时两端同步自适应。
+- **架构审查（5 Critical + 10 Warning）**：确认 SQLite WAL 模式多进程安全、users.json 仅作一次性迁移输入运行期只读 SQLite；修复 FCM 私钥日志泄漏风险（不再 dump traceback）；`FcmTokenManager` 不再静默吞异常；`push.py` 移除 `storage.conn` 直接访问、补齐 FCM 路径日志。
 
 
 ## v1.7.1 (2026-05-23)

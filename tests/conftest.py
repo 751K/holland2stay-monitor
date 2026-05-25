@@ -173,7 +173,10 @@ def test_app(monkeypatch, isolated_data_dir):
 @pytest.fixture
 def client(test_app):
     """匿名 client（未登录）。"""
-    return test_app.test_client()
+    c = test_app.test_client()
+    with c.session_transaction() as sess:
+        sess["csrf_token"] = "test_csrf"
+    return c
 
 
 @pytest.fixture

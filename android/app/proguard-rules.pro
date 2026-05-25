@@ -16,3 +16,8 @@
 
 # Hilt
 -keep class dagger.hilt.** { *; }
+
+# Firebase Messaging
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
+-keep class com.flatradar.app.push.FcmService { *; }

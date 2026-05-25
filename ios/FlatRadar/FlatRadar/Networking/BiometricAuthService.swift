@@ -45,12 +45,15 @@ enum BiometricAuthService {
         deleteCredentials()
 
         let data = try JSONEncoder().encode(cred)
-        let access = SecAccessControlCreateWithFlags(
+        guard let access = SecAccessControlCreateWithFlags(
             kCFAllocatorDefault,
             kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
             .biometryCurrentSet,
             nil
-        )!
+        ) else {
+            throw NSError(domain: "BiometricAuth", code: -1,
+                         userInfo: [NSLocalizedDescriptionKey: "Failed to create access control"])
+        }
         let query: [String: Any] = [
             kSecClass as String:       kSecClassGenericPassword,
             kSecAttrAccount as String: credAccount,

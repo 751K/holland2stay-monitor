@@ -76,12 +76,12 @@ final class PushStore {
     func setup() {
         guard !hasInstalledDelegate else { return }
         hasInstalledDelegate = true
-        PushDelegate.shared.onDeviceToken = { [weak self] data in
+        PushDelegate.shared?.onDeviceToken = { [weak self] data in
             Task { @MainActor in
                 await self?.handleDeviceToken(data)
             }
         }
-        PushDelegate.shared.onRegistrationError = { [weak self] err in
+        PushDelegate.shared?.onRegistrationError = { [weak self] err in
             Task { @MainActor in
                 self?.lastError = err.localizedDescription
                 print("[PushStore] registration error: \(err)")
@@ -90,7 +90,7 @@ final class PushStore {
         // ⚠️ 时序救援：iOS 可能在 setup() 前就调过 didRegister（cached token
         // 重放），那时 onDeviceToken 还是 nil 把 token 丢了。这里挂完回调
         // 立刻让 delegate 把缓存 token 重发一次。
-        PushDelegate.shared.flushPendingToken()
+        PushDelegate.shared?.flushPendingToken()
         Task { await refreshPermissionStatus() }
     }
 

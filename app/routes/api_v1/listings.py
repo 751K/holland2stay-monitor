@@ -38,6 +38,27 @@ from __future__ import annotations
 from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
+
+# Simple in-memory IP rate limiter for public endpoints (100 req/min per IP)
+import time as _time
+_guest_rate_map: dict[str, list[float]] = {}
+_GUEST_RATE_LIMIT = 100
+_GUEST_RATE_WINDOW = 60.0
+
+
+def _check_guest_rate(ip: str) -> bool:
+    """Return True if the IP is within the rate limit. Clean up stale entries inline."""
+    now = _time.monotonic()
+    timestamps = _guest_rate_map.get(ip, [])
+    timestamps = [t for t in timestamps if now - t < _GUEST_RATE_WINDOW]
+    if len(timestamps) >= _GUEST_RATE_LIMIT:
+        _guest_rate_map[ip] = timestamps  # store cleaned list
+        return False
+    timestamps.append(now)
+    _guest_rate_map[ip] = timestamps
+    return True
+
+
 from app.services.listing_service import (
     get_listing_detail,
     query_listing_rows,
@@ -49,6 +70,9 @@ from ._helpers import get_current_user
 
 def _list_listings():
     role = api_auth.current_role()
+    # Rate limit unauthenticated access (guest scraping prevention)
+    if role == "guest" and not _check_guest_rate(request.remote_addr or "127.0.0.1"):
+        return _err.err_rate_limited("请求过于频繁，请稍后再试")
     user = get_current_user() if role == "user" else None
     if role == "user" and user is None:
         return _err.err_unauthorized("用户已被删除")

@@ -13,6 +13,7 @@ import com.flatradar.app.data.remote.AuthInterceptor
 import com.flatradar.app.domain.model.LoginRequest
 import com.flatradar.app.domain.model.UserInfo
 import com.flatradar.app.navigation.NavigationCoordinator
+import com.flatradar.app.push.FcmTokenManager
 import com.flatradar.app.ui.components.AppErrorBus
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,7 @@ class AuthViewModel @Inject constructor(
     private val biometricAuth: BiometricAuth,
     private val authInterceptor: AuthInterceptor,
     private val navigationCoordinator: NavigationCoordinator,
+    private val fcmTokenManager: FcmTokenManager,
     private val errorBus: AppErrorBus,
     application: Application
 ) : AndroidViewModel(application) {
@@ -68,8 +70,12 @@ class AuthViewModel @Inject constructor(
                 if (resp.ok && resp.data != null) {
                     applyMe(resp.data.role, resp.data.user)
                 }
-            } catch (e: Exception) {
-                tokenManager.clearToken()
+            } catch (e: ApiException) {
+                if (e.isAuthError) {
+                    tokenManager.clearToken()
+                }
+                _uiState.value = _uiState.value.copy(isLoading = false)
+            } catch (_: Exception) {
                 _uiState.value = _uiState.value.copy(isLoading = false)
             }
         }
@@ -229,6 +235,7 @@ class AuthViewModel @Inject constructor(
     }
 
     private fun clearAuth(deleteBiometric: Boolean = false) {
+        fcmTokenManager.unregisterCurrentDevice()
         tokenManager.clearToken()
         if (deleteBiometric) {
             biometricAuth.deleteCredentials()
@@ -242,6 +249,7 @@ class AuthViewModel @Inject constructor(
     }
 
     private fun applyMe(role: String, user: UserInfo?) {
+        fcmTokenManager.registerCurrentDevice()
         _uiState.value = AuthUiState(
             isAuthenticated = true,
             isLoading = false,

@@ -62,6 +62,7 @@ datastore = { group = "androidx.datastore", name = "datastore-preferences", vers
 security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "security-crypto" }
 
 # Firebase
+firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebase-bom" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging" }
 
 # Maps

@@ -402,6 +402,14 @@ final class APIClient {
         try await request("GET", "api/v1/filter/options")
     }
 
+    // MARK: - Legal
+
+    func getLegal(lang: String? = nil) async throws -> LegalResponse {
+        var path = "api/v1/legal"
+        if let lang { path += "?lang=\(lang)" }
+        return try await request("GET", path, authenticated: false)
+    }
+
     // MARK: - Devices / APNs (Phase 3)
 
     /// 注册或刷新一台设备的 APNs token。

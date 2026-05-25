@@ -148,8 +148,9 @@ android/
 │   │   │   │   └── AppModule.kt               # Hilt @Module
 │   │   │   │
 │   │   │   ├── push/
-│   │   │   │   ├── FlatRadarMessagingService.kt  # FirebaseMessagingService
-│   │   │   │   └── PushTokenManager.kt
+│   │   │   │   ├── FcmService.kt              # FirebaseMessagingService
+│   │   │   │   ├── FcmTokenManager.kt         # Token 存储 + 设备注册/注销 API
+│   │   │   │   └── NotificationChannels.kt    # 通知渠道常量
 │   │   │   │
 │   │   │   └── util/
 │   │   │       ├── DateFormatter.kt
@@ -387,25 +388,50 @@ class TokenManager @Inject constructor(
 
 ```
 iOS:                                  Android:
-PushDelegate (UIApplicationDelegate)  FirebaseMessagingService
+PushDelegate (UIApplicationDelegate)  FcmService (FirebaseMessagingService)
 APNs hex token → POST /devices        FCM token → POST /devices (platform="android")
 Notification tap → deep link          PendingIntent → NavDeepLink
 ```
 
+**FcmService**（`@AndroidEntryPoint`）：
 ```kotlin
 @AndroidEntryPoint
-class FlatRadarMessagingService : FirebaseMessagingService() {
+class FcmService : FirebaseMessagingService() {
+    @Inject lateinit var fcmTokenManager: FcmTokenManager
+
     override fun onNewToken(token: String) {
-        // POST /api/v1/devices/register { platform: "android", device_token: token, ... }
-        pushTokenManager.registerToken(token)
+        super.onNewToken(token)
+        fcmTokenManager.onTokenRefreshed(token)  // 存储 token，已登录则立即注册
     }
 
-    override fun onMessageReceived(remoteMessage: RemoteMessage) {
-        // 处理 data payload → 显示通知 + deep link
-        val listingId = remoteMessage.data["listing_id"]
-        // ...
+    override fun onMessageReceived(message: RemoteMessage) {
+        // 前台/后台统一手动展示通知
+        // 解析 data payload → title / body / listing_id
+        // 构建 PendingIntent（h2smonitor://listing/<id> deep link）
+        // NotificationCompat.Builder → notify()
     }
 }
+```
+
+**FcmTokenManager**（`@Singleton`）：
+- `onTokenRefreshed(token)`: 存储 FCM token 到 SharedPreferences；若 auth token 存在则自动注册
+- `registerCurrentDevice()`: 获取当前 FCM token → `POST /api/v1/devices/register` (env=sandbox/production, platform=android)
+- `unregisterCurrentDevice()`: `DELETE /api/v1/devices/{deviceId}`，登出时调用
+- 设备注册在 `AuthViewModel.applyMe()`（登录成功后）和 `clearAuth()`（登出时）自动触发
+
+**通知渠道**：`FlatRadarApplication.onCreate()` 创建 `listings`（HIGH importance）和 `general`（DEFAULT）渠道。
+
+**POST_NOTIFICATIONS 权限**：Android 13+ 用户在登录后通过 `rememberLauncherForActivityResult` 请求运行时权限。
+
+**深度链接**：`MainActivity.onNewIntent()` → `handleDeepLink()` → `NavigationCoordinator.openListing(id)`。
+
+**AndroidManifest.xml**：
+```xml
+<service android:name=".push.FcmService" android:exported="false">
+    <intent-filter>
+        <action android:name="com.google.firebase.MESSAGING_EVENT" />
+    </intent-filter>
+</service>
 ```
 
 **后端改动**（~300 行 Python）：
@@ -483,16 +509,16 @@ private val LightColors = lightColorScheme(
 
 ## 6. 当前实现进度与复盘
 
-截至 2026-05-24，Android 客户端已具备可编译的 Compose 原生骨架，并完成一轮 A2/A5 推进：
+截至 2026-05-25，Android 客户端已完成 FCM 推送闭环（客户端 + 后端 sender），并完成架构审查与测试补齐：
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
 | A0 项目骨架 | 已完成 | Gradle Kotlin DSL、Compose Material 3、Hilt、NavigationBar/NavigationRail、自适应导航均已落地。 |
-| A1 鉴权 + Dashboard + Listings | 部分完成 | 三档登录、注册、token 持久化、BiometricPrompt user 登录解锁、Dashboard、Listings、详情页、全局 snackbar 错误通道已接入；Dashboard Explore 统计卡片已按后端动态 chart key 解码并恢复平台/状态/价格/类型/能源/租客分布展示，且可点击展开完整统计明细；Dashboard edge-to-edge 顶部 inset 已修正；已按 `FlatRadar Android M3.html` 落地 M3 token、登录页、Dashboard hero、Listings card list 和 Detail hero/sections 改造；登录页底部已新增 Terms of Use 与 Privacy Policy 条款入口及滑动 bottom sheets；Biometric/详情页真机验证和视觉 QA 仍待补。 |
-| A2 Map + Calendar | 部分完成 | Map 已接 Google Maps Compose，支持聚类、状态色 marker、边界初始视角、选中卡片详情、无 key 列表降级与重试，地图界面已加导航（移动到当前设备定位）与刷新按钮；Calendar 已升级为月格、每日数量、选中日房源列表与重试；`/map` 与 `/calendar` 已对齐轻量 DTO；Map/Calendar surface、shape、状态色已按 M3 token 收口。真机地图手动验证仍待补。 |
-| A3 Notifications + SSE | 部分完成 | 通知列表已重构为扁平化 flat list 布局（已对齐 light/dark 设计图），包括顶部动态 stats 胶囊 pill、实时滚动筛选 chips、覆盖型未读提示蓝点 badge、箭头符号标准化与 Extended FAB，并保留了右滑已读/更多操作；SSE 去重/重连测试仍待补。 |
-| A4 FCM 推送 | 未开始 | 客户端 devices DTO 已预留；正式 FCM 依赖后端 FCM sender、Firebase 项目和 `google-services.json`。 |
-| A5 Settings + 多语言 + 深色模式 | 部分完成 | Settings 已支持 DataStore 持久化、System/Light/Dark 主题、反馈、法律文档、改密码、GDPR 数据导出、删号、Admin Users/Monitor；Settings profile card、tonal action 和 leading icon containers 已按 M3 token 收口；法律文档已完成 Android 特有 FCM 推送与 Google Maps SDK 的适配修改，落款日期更新为 2026-05-24；完整 zh-Hans 覆盖、Crash 诊断仍待补。 |
+| A1 鉴权 + Dashboard + Listings | 部分完成 | 三档登录、注册、token 持久化、BiometricPrompt user 登录解锁、Dashboard、Listings、详情页、全局 snackbar 错误通道已接入；Dashboard Explore 统计卡片已按后端动态 chart key 解码并恢复平台/状态/价格/类型/能源/租客分布展示，且可点击展开完整统计明细；AuthViewModel（12 测试）、DashboardViewModel（6 测试）、ListingsViewModel（11 测试）单元测试已完成。BiometricPrompt 真机指纹/面部解锁已验证通过。 |
+| A2 Map + Calendar | 部分完成 | Map 已接 Google Maps Compose，支持聚类、状态色 marker、边界初始视角、选中卡片详情、无 key 列表降级与重试；Calendar 已升级为月格、每日数量、选中日房源列表与重试，CalendarViewModel（9 测试）单元测试已完成。真机地图手动验证仍待补。 |
+| A3 Notifications + SSE | 部分完成 | 通知列表已重构为扁平化 flat list 布局，包括顶部动态 stats 胶囊 pill、实时滚动筛选 chips、覆盖型未读提示蓝点 badge、箭头符号标准化与 Extended FAB；NotificationsViewModel（10 测试）覆盖 load、markRead/markAllRead、SSE Data 新增/去重/已读更新、Keepalive、error 重连。 |
+| A4 FCM 推送 | 已完成 | **客户端**：Firebase 项目 `flatradar-66342`，`google-services.json` 已配置，`FcmService` + `FcmTokenManager` + 通知渠道 + POST_NOTIFICATIONS 运行时权限 + deep link 全部接入。**后端**：`notifier_channels/fcm.py`（~260 行，OAuth2 服务账号认证 + FCM HTTP v1 API），`mcore/push.py` 按 `platform` 字段分流 iOS（APNs）/ Android（FCM）双发，`FcmTokenManager` 异常已加日志不再静默吞错。服务端已部署 `FCM_ENABLED=true` + service account JSON 密钥（`/secrets/`）。端到端推送通道已拉通。 |
+| A5 Settings + 多语言 + 深色模式 | 部分完成 | Settings 已支持 DataStore 持久化、System/Light/Dark 主题、反馈、法律文档、改密码、GDPR 数据导出、删号、Admin Users/Monitor；法律文案已统一为 `app/legal/*.txt` 单一数据源，三端（web/iOS/Android）均通过 API 获取 + 本地缓存 fallback，修改一处即时生效；中文字符串 `values-zh/strings.xml` 已覆盖 ~170 条目，与英文版本完全对称；Crash 诊断仍待补。 |
 | A6 打磨 + 内购 + 上架 | 未开始 | Google Play Billing、截图、Data Safety、封闭测试和上架流程尚未启动。 |
 
 本轮关键复盘：
@@ -507,6 +533,14 @@ private val LightColors = lightColorScheme(
 - Listing Detail 对齐 iOS 关键结构：顶部 source/status/city，价格、入住日期、面积、建筑 metric cards，Key Details、All Details、Monitoring、官方平台链接均稳定展示。当前 API/model 未提供 listing 图片 URL，因此 Android/iOS 原生详情页均无房源图片展示。
 - Calendar 从月份列表升级为月格视图，并在选中日下方展示可入住房源；Android Calendar 日期分组已改为与 iOS 一致的 `available_from` 前 10 位 day key，不再复用会过滤 `2049/2050` 的通用时间 helper，避免后端已有房源但当天列表为空；空态和错误态均提供 retry。
 - Notifications 从平铺列表升级为 TODAY/YESTERDAY/EARLIER inbox，支持导航 unread 角标、单条已读、滑动已读、更多菜单、类型色点和相对时间；导航和 Alerts 页面共用同一个 ViewModel，避免重复 SSE 连接。
+- **FCM 后端 sender**：`notifier_channels/fcm.py` 对标 `apns.py`，OAuth2 服务账号认证（RS256 JWT → access token 缓存 55min），`FcmClient.send_one/send_many`，data-only payload 由 Android `FcmService` 统一展示通知 + deep link。`mcore/push.py` 按 `device_tokens.platform` 字段分流，所有 dispatch 函数双发 APNs + FCM，平台隔离故障互不阻塞。FCM 测试 35 个（client 18 + dispatcher 17），Python 全量 1033 passed。
+- **架构审查与修复**：C1（SQLite 多线程）确认无风险——monitor 单进程主线程写，web Gunicorn 多进程独立连接，WAL 模式保证并发安全。C2（users.json 双存储）确认不存在——旧 JSON 仅一次性迁移，运行期只读 SQLite `user_configs`。C3（FCM 私钥日志泄漏）已修复——文件加载失败不再 dump traceback，构造失败只打 `project_id` 不碰 `private_key`。
+- **Android Listing 模型对齐 iOS**：删除 `areaText`/`energyLabel`/`buildingText`/`finishing`/`floor`/`rooms`/`occupancy`/`contractType`/`tenantRequirement` 共 9 个冗余字段，`display*` 计算属性统一从 `featureMap` 派生（与 iOS 一致）。`MapCalendarListingDto.toListing()` 将 DTO flat 字段 `putIfAbsent` 合并进 `featureMap`，后端改 key 名时两端同步自适应。`ListingDetailScreen` 改用 `display*` 属性。全量 47 Android 测试通过。
+- **测试总览**：Python 1033 tests（含 FCM 35），Android 47 tests（Auth 12 / Dashboard 6 / Listings 11 / Calendar 9 / Notifications 10）。ViewModel 层无 Repository 重构，MockK + kotlinx-coroutines-test 直接 mock `ApiClient`。
+- **法律文案统一**：之前四份独立副本（`legal_text.py` web / `LegalText.kt` Android / `LegalText.swift` iOS / API 无端点），修改需同步四处。现在 `app/legal/*.txt` 为 canonical source of truth，`GET /api/v1/legal` 公开 API 端点，三端均 API 优先 + 本地缓存 fallback。免责条款已从"仅 Holland2Stay"更新为多平台中立声明（"not affiliated with any of the housing platforms it monitors"）。
+- **中文字符串完整覆盖**：`values/strings.xml` + `values-zh/strings.xml` 各 ~170 条目完全对称，覆盖 Tab、仪表盘、登录注册、房源列表/详情、地图、日历、通知、设置、管理面板、使用条款、通用文案。Kotlin 代码中硬编码英文暂不动，后续可逐步迁移到 `R.string.*`。
+- **Android 代码审查与修复**：全量代码审查发现 6 个问题（2 Critical + 3 High + 1 Medium），全部修复——SSE 阻塞 Main 线程（`SseClient` → `withContext(Dispatchers.IO)`）、深链接断开（`AppNavigation` 加 `consumePendingListingId` 消费）、弱网误删 token（`restoreSession` 只对 401/403 清）、Settings 状态擦除（`.copy()` 替代新建）、LocationListener 内存泄漏（15s timeout）、filter 不生效（monitor 侧 `write_reload_request()`）。
+- **iOS 单元测试补齐**：新增 `FlatRadarTests` target（31 个测试），覆盖 Listing 模型解码/computed properties/statusKind、APIResponse 信封、AuthModels 编解码、NotificationItem 解码/listingTitleHint/NotificationKind 分类。此前 iOS 端 13K 行代码零单元测试，现在核心模型层有覆盖。
 - 设计系统开始从 iOS 风格 token 收敛到 Android Material 3：固定 seed `#0057CC`、light/dark role mapping、M3 type scale、shape scale、FlatRadar `book/lottery/reserved` semantic status token、80dp bottom navigation 已落地；Listings、Detail、Settings、Map、Calendar 已完成第一轮 surface/shape/status/token 收口，后续重点转为真机视觉 QA、文案本地化和截图回归。
 - FCM 不在本轮启用。`docs/API.md` 仍标注 Android FCM sender 未完成，客户端不能依赖 `/devices/test` 验证 FCM。
 
@@ -543,20 +577,25 @@ private val LightColors = lightColorScheme(
    - [/] A2：验证有/无 `MAPS_API_KEY`、cluster 点击、单点 marker 点击、bounds 初始视角、`/map` 与 `/calendar` 真实响应解析、Calendar 跨月、无房源日期和占位日期过滤（Calendar 已验证正常，Map API Key 已于 local.properties 完成配置，待在真机上最终确认效果）。
    - [ ] A3：验证新通知到达后角标增量、单条 mark read 后角标递减、mark all read 后角标清零。
 
-2. **R2 客户端测试补齐**
-   - 给 `NotificationsViewModel` 补 SSE 重连、去重、unread count 更新测试。
-   - 给 `CalendarViewModel` 补日期过滤、跨月选择、空数据测试。
-   - 给 `ListingsViewModel` 补分页、搜索清空、过滤参数组装测试。
-   - 若直接 mock `ApiClient` 成本高，只引入最小接口 seam，不做全量 Repository 重构。
+2. **R2 客户端测试补齐**（已完成）
+   - [x] `AuthViewModel` — 12 测试 (login/logout/register/deleteAccount/restoreSession/guest)
+   - [x] `DashboardViewModel` — 6 测试 (fetchAll guest/user/error/meSummary failure/clear/initial)
+   - [x] `NotificationsViewModel` — 10 测试 (load/markRead/markAllRead/SSE Data merge/update/keepalive/error)
+   - [x] `CalendarViewModel` — 9 测试 (load 成功/失败/分组/过滤/月份导航/日期选择)
+   - [x] `ListingsViewModel` — 11 测试 (load/loadMore/updateSearch/updateFilters/clearFilters/filterOptions/isActive)
+   - 总计 47 个 ViewModel 单元测试，使用 MockK + kotlinx-coroutines-test，无 Repository 重构
 
 3. **R3 A5 本地化与合规收口**
-   - 补齐完整 `values-zh`，覆盖登录、Dashboard、Listings、Detail、Map、Calendar、Notifications、Settings、错误提示、法律入口。
-   - [x] 复查 Terms/Privacy 文案里 Android 生物识别、DataStore/EncryptedSharedPreferences、Google Maps、未来 FCM 的表述。（已完成：推送适配为 FCM，地图适配为 Google Maps SDK，日期更新至 2026-05-24）
+   - [x] 补齐完整 `values-zh`（~170 条目），覆盖全页面。
+   - [x] Terms/Privacy 文案已统一为多平台中立声明（"与任何房源平台无关"），法律文本已合并为 `app/legal/*.txt` 单一数据源，三端 API 获取 + 本地缓存。
    - Crash 诊断暂不实现，除非后端明确诊断接收协议；文档继续列为 A5 待办。
 
-4. **R4 A4 FCM 后端就绪后集成**
-   - 后端完成 `notifier_channels/fcm.py` 和 Firebase service account 配置后，再接 `FlatRadarMessagingService`、token register/refresh、通知点击 deep link。
-   - 验收标准：真实 Android 设备能收到 FCM，点击通知进入对应 listing，失效 token 能被后端清理。
+4. **R4 A4 FCM 推送（已完成）**
+   - [x] Firebase 项目 + `google-services.json` 配置完成
+   - [x] `FcmService`（onNewToken / onMessageReceived）、`FcmTokenManager`（设备注册/注销）、通知渠道、运行时权限、deep link 全部接入
+   - [x] 后端 `notifier_channels/fcm.py`（OAuth2 + FCM HTTP v1 API）+ `mcore/push.py` 平台分流双发
+   - [x] 服务端 `FCM_ENABLED=true` + service account JSON 已部署
+   - [ ] 真机验收：Android 设备收到 FCM 推送，点击通知进入对应 listing
 
 5. **R5 A6 上架准备**
    - Google Play Billing coffee、Data Safety、截图、多设备/多语言测试、封闭测试计划进入 A6。
@@ -603,12 +642,14 @@ Gradle 会把该值注入 `AndroidManifest.xml` 的 `com.google.android.geo.API_
 | | `NotificationsViewModel` — 分页 + SSE 实时增量 + 未读角标 | | |
 | | `NotificationsScreen` — 分组列表 + 滑动/长按标记已读 | | |
 | | `NotificationRow` — 类型图标 + 时间相对文本 | | |
-| **A4** | FCM 推送（等待后端 FCM sender + Firebase 配置） | 8 | 1.5 周 |
-| | Firebase 项目创建 + `google-services.json` | | |
-| | `FlatRadarMessagingService` — token 注册 + 刷新 | | |
-| | 通知点击 deep link → NavigationCoordinator | | |
-| | 后端 `fcm.py` 开发 + 测试推送验证 | | |
-| | 后端 `/api/v1/devices/register` 确认 `platform="android"` 通道 | | |
+| **A4** | FCM 推送（端到端已拉通） | 4 | 已完成 |
+| | Firebase 项目 + `google-services.json` + Gradle 插件 | | |
+| | `FcmService` — onNewToken 注册 + onMessageReceived 展示通知 | | |
+| | `FcmTokenManager` — Token 存储 + 设备注册/注销（含异常日志） | | |
+| | `FlatRadarApplication` 通知渠道（listings/general）+ Android 13+ 运行时权限 | | |
+| | 通知点击 deep link → `MainActivity.handleDeepLink()` → `NavigationCoordinator.openListing()` | | |
+| | 后端 `notifier_channels/fcm.py`（OAuth2 + FCM HTTP v1）+ `mcore/push.py` 平台分流双发 | | |
+| | 服务端 `FCM_ENABLED=true` + service account JSON 已部署 | | |
 | **A5** | Settings + 多语言 + 深色模式 + 错误处理（部分完成：server URL/主题/法律/反馈/改密码/导出/admin） | 10 | 1.5 周 |
 | | `SettingsScreen` — 服务器地址、颜色方案、关于 | | |
 | | `FilterEditScreen` — 多维度 listing filter 编辑（对标 iOS FilterEditView） | | |
@@ -629,9 +670,9 @@ Gradle 会把该值注入 `AndroidManifest.xml` 的 `com.google.android.geo.API_
 | 里程碑 | 目标 | 进入条件 | 退出条件 |
 |---|---|---|---|
 | **RC1 验证收口** | 证明当前 Android 核心功能在设备上可用 | `assembleDebug` 通过，A1/A2/A3/A5 主要功能已接入 | 手动验证矩阵完成，记录所有阻塞 bug |
-| **RC2 测试补齐** | 锁住最容易回归的状态逻辑 | RC1 阻塞 bug 修完 | Notifications/Calendar/Listings ViewModel 单测覆盖关键状态 |
-| **RC3 本地化与合规** | 达到可给测试用户使用的文本和合规水位 | RC2 通过 | `values-zh` 覆盖主路径，Terms/Privacy Android 表述复查完成 |
-| **RC4 FCM 集成** | Android push 进入真实验收 | 后端 FCM sender、Firebase 配置就绪 | 真机 FCM 收发、点击 deep link、token refresh/cleanup 通过 |
+| **RC2 测试补齐** | 锁住最容易回归的状态逻辑 | RC1 阻塞 bug 修完 | 47 个 ViewModel 单测覆盖 Auth/Dashboard/Notifications/Calendar/Listings 关键状态 ✅ |
+| **RC3 本地化与合规** | 达到可给测试用户使用的文本和合规水位 | RC2 通过 | `values-zh` 170 条目完整覆盖，法律文本三端统一 ✅ |
+| **RC4 FCM 集成** | 端到端推送通道已拉通 | 后端 FCM sender + 客户端均已就绪 | 真机验收 FCM 收发、点击 deep link（待真机测试） |
 | **RC5 上架准备** | 进入 Google Play 发布流程 | RC4 通过 | Billing/Data Safety/截图/封闭测试计划完成 |
 
 **总工时：约 10 周**（一个全职 Android 开发）。

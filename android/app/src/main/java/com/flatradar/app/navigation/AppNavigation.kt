@@ -10,6 +10,7 @@ import androidx.compose.material3.*
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -32,7 +33,6 @@ import com.flatradar.app.ui.notifications.NotificationsViewModel
 import com.flatradar.app.ui.settings.FilterEditScreen
 import com.flatradar.app.ui.settings.FeedbackScreen
 import com.flatradar.app.ui.settings.LegalScreen
-import com.flatradar.app.ui.settings.LegalText
 import com.flatradar.app.ui.settings.SettingsScreen
 import com.flatradar.app.ui.admin.AdminMonitorScreen
 import com.flatradar.app.ui.admin.AdminUsersScreen
@@ -49,6 +49,7 @@ fun AppNavigation(
     isUser: Boolean = false,
     userName: String? = null,
     preferences: AppPreferences = AppPreferences(),
+    navigationCoordinator: NavigationCoordinator? = null,
     onLoginSuccess: () -> Unit = {},
     onLogout: () -> Unit = {},
     onDeleteAccount: () -> Unit = {}
@@ -56,6 +57,16 @@ fun AppNavigation(
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
+
+    // Consume deep link pending listing ID from push notifications / URL scheme
+    val pendingId by (navigationCoordinator?.pendingListingId ?: MutableStateFlow(null))
+        .collectAsState()
+    LaunchedEffect(pendingId) {
+        val id = navigationCoordinator?.consumePendingListingId()
+        if (id != null) {
+            navController.navigate("listing/$id")
+        }
+    }
 
     // Show login if not authenticated
     if (!isAuthenticated) {
@@ -244,14 +255,14 @@ private fun androidx.navigation.NavGraphBuilder.flatRadarNavGraph(
     composable("legal_terms") {
         LegalScreen(
             title = "Terms of Use",
-            content = LegalText.TERMS,
+            kind = "terms",
             onBack = { navController.popBackStack() }
         )
     }
     composable("legal_privacy") {
         LegalScreen(
             title = "Privacy Policy",
-            content = LegalText.PRIVACY,
+            kind = "privacy",
             onBack = { navController.popBackStack() }
         )
     }

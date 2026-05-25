@@ -1,0 +1,139 @@
+Last updated: May 25, 2026
+
+This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
+
+FlatRadar is an independent, unofficial monitoring tool for rental housing listings across multiple platforms, including Holland2Stay, OurDomain, and Xior. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.
+
+By using FlatRadar, you acknowledge that you have read and understood this Privacy Policy.
+
+1. Contact and Data Controller
+
+For privacy-related questions, account deletion requests, or data requests, contact:
+
+k1012922528@gmail.com
+
+For the purposes of applicable data protection laws, the operator of FlatRadar is responsible for the personal data processed by FlatRadar.
+
+2. Data We Collect
+
+Depending on how you use FlatRadar, we may collect and process the following categories of data:
+
+Account Data
+- Email address or username used to create your FlatRadar account.
+- Password authentication data for your FlatRadar account.
+- Account creation date, login status, account settings, and account deletion status.
+- User role or account type, where applicable.
+
+Password Storage
+FlatRadar account passwords are not stored in plain text.
+Passwords are protected using bcrypt, a one-way password hashing mechanism. This means that FlatRadar stores password verification data, not your original plain-text password.
+
+Authentication and Session Data
+- Session tokens, refresh tokens, or similar login tokens used to keep you signed in.
+- Device-specific authentication state.
+- Login timestamps and security-related authentication records.
+- Failed login attempts or other security events, where necessary to protect the service.
+
+Device and Notification Data
+- Apple Push Notification service device token.
+- Device type, app version, operating system version, and notification settings where necessary for app functionality.
+- Basic device or app diagnostic information used to maintain and debug the service.
+
+Biometric Authentication Data
+- FlatRadar supports Face ID and Touch ID for sign-in convenience.
+- Your biometric data (face scan, fingerprint) is processed entirely on your device by Apple's LocalAuthentication framework. FlatRadar never receives, stores, or has access to your biometric data.
+- When you choose to save your login for Face ID or Touch ID, your account credentials (username and password) are stored locally in your device Keychain, protected by your biometric authentication. FlatRadar does not upload these locally stored credentials.
+
+Location Data
+- If you use the map location button, your device may provide your current location to the app so the map can center near you.
+- FlatRadar uses this location only on your device for the map feature.
+- FlatRadar does not upload, store, retain, or associate your precise device location with your account.
+
+Saved Preferences and Alert Data
+- Saved filters, city, price range, availability, listing type, listing status, and other search preferences.
+- Notification preferences.
+- Alert history, including matched listings, alert timestamps, and delivery status where needed to operate notifications.
+
+Usage, Network, and Technical Data
+- Basic app usage events, server logs, request timestamps, error logs, IP address, device information, app version, and diagnostic information.
+- Security-related logs used to prevent abuse, spam, unauthorized access, scraping abuse, or service disruption.
+
+Feedback Data
+- When you submit feedback or report a bug through the app, we collect your feedback type (bug report / suggestion / other), your message content, your account identifier, your username, your app version, and your device platform.
+- Feedback data is used to understand, investigate, and improve FlatRadar.
+
+3. Data We Do Not Intentionally Collect
+
+FlatRadar does not intentionally collect sensitive personal data such as race, religion, political opinions, health information, biometric data, or precise real-time location. Device location used by the map feature is processed locally on your device and is not stored by FlatRadar.
+
+FlatRadar does not sell your personal data.
+
+FlatRadar does not use your personal data for third-party advertising or cross-app tracking.
+
+4. How We Use Your Data
+
+We use your data for: creating and managing your account, authenticating you, saving your filters and preferences, sending push notifications for matching listings, recording alert history, displaying listing information, synchronizing data, operating and securing the service, debugging and maintaining the service, preventing abuse, and complying with legal obligations.
+
+5. Legal Basis for Processing
+
+Where applicable under GDPR or similar data protection laws, we process your data on the legal bases of performance of a contract, consent (for optional features like push notifications), legitimate interests (security, maintenance, abuse prevention), and legal obligation where required.
+
+6. Data Storage
+
+FlatRadar stores data on your device (app preferences, local cache, authentication state, Keychain credentials) and on FlatRadar servers (account data, bcrypt-hashed passwords, session tokens, saved filters, push tokens, alert history, server logs, and security logs). FlatRadar may use third-party infrastructure providers to operate the service.
+
+Passwords are not stored in plain text on FlatRadar servers.
+
+7. Cloudflare
+
+FlatRadar uses Cloudflare for DNS, traffic routing, security, performance, and related infrastructure services. Cloudflare may process technical data such as IP address, request headers, and security events according to its own privacy policy.
+
+8. Push Notifications
+
+FlatRadar uses Apple Push Notification service to deliver listing alerts. We store your APNs device token and associate it with your account. You can disable push notifications at any time in iOS Settings.
+
+9. Housing Platforms and Listing Data
+
+FlatRadar may fetch listing information from publicly accessible services, APIs, or technical interfaces of housing platforms including Holland2Stay, OurDomain, and Xior. These platforms are independent from FlatRadar. FlatRadar does not control their data, systems, terms, or privacy practices.
+
+10. Third-Party Services
+
+FlatRadar may interact with: housing platforms (listing data), Apple Push Notification service (notifications), Cloudflare (DNS and security), hosting and backend providers, and email or support providers.
+
+11. Data Sharing
+
+We do not sell your personal data. We do not use your personal data for third-party advertising or cross-app tracking. We may share limited data with service providers only where necessary to operate FlatRadar. We may disclose information if required by law or to protect rights and safety.
+
+12. Data Retention
+
+We keep your data only as long as necessary. Account data is retained while your account remains active. Server logs and diagnostic data are retained for a limited period. When you delete your account, we will delete or anonymize associated personal data unless retention is required for legal, security, or legitimate operational reasons.
+
+13. Account Deletion
+
+You can request deletion of your account and associated data by contacting k1012922528@gmail.com. After deletion, you may lose access to saved filters, notification settings, alert history, and other account-based features.
+
+14. Your Rights
+
+Depending on your location, you may have the right to access, correct, delete, restrict processing of, or port your data, object to processing, withdraw consent, or lodge a complaint with a data protection authority. Contact k1012922528@gmail.com to exercise these rights.
+
+15. Security
+
+We use reasonable technical and organizational measures to protect your data, including HTTPS, server-side access controls, bcrypt password hashing, secure session handling, Cloudflare security protections, Apple Keychain where applicable, and monitoring to detect abuse. FlatRadar account passwords are not stored in plain text.
+
+16. International Data Transfers
+
+FlatRadar servers are located in Germany (European Union). Your personal data is stored and processed within the EU, subject to EU data protection laws including the GDPR.
+
+17. Children
+
+FlatRadar is not intended for children under 13. We do not knowingly collect personal data from children.
+
+18. Changes to This Privacy Policy
+
+We may update this Privacy Policy from time to time. If changes are material, we may notify you through the app. Continued use of FlatRadar after the updated Privacy Policy becomes effective means that you acknowledge the updated Privacy Policy.
+
+19. Contact
+
+For privacy-related questions, account deletion requests, or data requests, contact:
+
+k1012922528@gmail.com

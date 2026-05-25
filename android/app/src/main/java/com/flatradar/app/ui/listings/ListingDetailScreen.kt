@@ -119,15 +119,15 @@ fun ListingDetailScreen(
                     DetailRow("Status", listing.status)
                     DetailRow("City", listing.displayCity)
                     DetailRow("Source", listing.source)
-                    listing.buildingText?.let { DetailRow("Building", it) }
-                    listing.areaText?.let { DetailRow("Area", it) }
-                    listing.rooms?.let { DetailRow("Rooms", it) }
-                    listing.floor?.let { DetailRow("Floor", it) }
-                    listing.energyLabel?.let { DetailRow("Energy", it) }
-                    listing.finishing?.let { DetailRow("Finishing", it) }
-                    listing.occupancy?.let { DetailRow("Occupancy", it) }
-                    listing.contractType?.let { DetailRow("Contract", it) }
-                    listing.tenantRequirement?.let { DetailRow("Tenant", it) }
+                    DetailRow("Building", listing.displayBuilding)
+                    DetailRow("Area", listing.displayArea)
+                    DetailRow("Rooms", listing.displayRooms)
+                    DetailRow("Floor", listing.displayFloor)
+                    DetailRow("Energy", listing.displayEnergy)
+                    DetailRow("Finishing", listing.displayFinishing)
+                    DetailRow("Occupancy", listing.displayOccupancy)
+                    DetailRow("Contract", listing.displayContract)
+                    DetailRow("Tenant", listing.displayTenant)
                     listing.availableFrom?.let { DetailRow("Available", it) }
 
                     // Feature map

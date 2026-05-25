@@ -369,6 +369,18 @@ struct AccountDeleteResponse: Decodable {
     }
 }
 
+/// `GET /api/v1/legal` 响应
+struct LegalResponse: Decodable {
+    let terms: String
+    let privacy: String
+    let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case terms, privacy
+        case updatedAt = "updated_at"
+    }
+}
+
 /// `POST /api/v1/auth/password` 响应
 struct ChangePasswordResponse: Decodable {
     /// 改密码同时被撤销的"其他设备会话"数量；当前 token 不在内

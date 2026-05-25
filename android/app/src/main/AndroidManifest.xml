@@ -38,6 +38,14 @@
                 <data android:scheme="h2smonitor" android:host="listing" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".push.FcmService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

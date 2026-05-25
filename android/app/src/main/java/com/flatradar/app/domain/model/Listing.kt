@@ -16,16 +16,6 @@ data class Listing(
     val url: String = "",
     @Json(name = "price_raw") val priceRaw: String? = null,
     @Json(name = "price_value") val priceValue: Float? = null,
-    @Json(name = "area_text") val areaText: String? = null,
-    @Json(name = "area_value") val areaValue: Int? = null,
-    @Json(name = "energy_label") val energyLabel: String? = null,
-    @Json(name = "building_text") val buildingText: String? = null,
-    val finishing: String? = null,
-    val floor: String? = null,
-    val rooms: String? = null,
-    val occupancy: String? = null,
-    @Json(name = "contract_type") val contractType: String? = null,
-    @Json(name = "tenant_requirement") val tenantRequirement: String? = null,
     @Json(name = "available_from") val availableFrom: String? = null,
     @Json(name = "available_from_raw") val availableFromRaw: String? = null,
     @Json(name = "first_seen") val firstSeen: String? = null,
@@ -49,9 +39,7 @@ data class Listing(
         get() = priceRaw ?: "—"
 
     val displayArea: String
-        get() = areaText.cleanValue()
-            ?: featureValue("area", "surface", "living area", "m2", "m²")
-            ?: "—"
+        get() = featureValue("area", "surface", "living area", "m2", "m²") ?: "—"
 
     val displayCity: String
         get() = city.ifEmpty { "—" }
@@ -66,34 +54,28 @@ data class Listing(
         get() = featureValue("type", "property type", "apartment type") ?: "—"
 
     val displayBuilding: String
-        get() = buildingText.cleanValue()
-            ?: featureValue("building", "building name", "building_name", "complex")
-            ?: "—"
+        get() = featureValue("building", "building name", "building_name", "complex") ?: "—"
 
     val displayFloor: String
-        get() = floor.cleanValue() ?: featureValue("floor", "level") ?: "—"
+        get() = featureValue("floor", "level") ?: "—"
 
     val displayRooms: String
-        get() = rooms.cleanValue() ?: featureValue("rooms", "bedrooms", "bedroom") ?: "—"
+        get() = featureValue("rooms", "bedrooms", "bedroom") ?: "—"
 
     val displayEnergy: String
-        get() = energyLabel.cleanValue() ?: featureValue("energy", "energy label") ?: "—"
+        get() = featureValue("energy", "energy label") ?: "—"
 
     val displayFinishing: String
-        get() = finishing.cleanValue() ?: featureValue("finishing", "furnished", "furniture") ?: "—"
+        get() = featureValue("finishing", "furnished", "furniture") ?: "—"
 
     val displayOccupancy: String
-        get() = occupancy.cleanValue() ?: featureValue("occupancy", "suitable for", "persons", "person") ?: "—"
+        get() = featureValue("occupancy", "suitable for", "persons", "person") ?: "—"
 
     val displayContract: String
-        get() = contractType.cleanValue()
-            ?: featureValue("contract", "rental agreement", "agreement")
-            ?: "—"
+        get() = featureValue("contract", "rental agreement", "agreement") ?: "—"
 
     val displayTenant: String
-        get() = tenantRequirement.cleanValue()
-            ?: featureValue("tenant", "tenant requirement", "requirements", "target group")
-            ?: "—"
+        get() = featureValue("tenant", "tenant requirement", "requirements", "target group") ?: "—"
 
     fun hasFeatureKeyMatching(vararg keys: String): Boolean =
         featureMap.orEmpty().keys.any { key ->

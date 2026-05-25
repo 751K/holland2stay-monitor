@@ -96,6 +96,19 @@ class DeviceOps:
 
     # ── 查询 ────────────────────────────────────────────────────────
 
+    def list_all_devices(self) -> list[dict]:
+        """列出所有推送设备（含 disabled），JOIN app_tokens 拿到 user/role。"""
+        rows = self._conn.execute(
+            """SELECT d.id, d.device_token, d.platform, d.env, d.model,
+                      d.bundle_id, d.language, d.created_at, d.last_seen,
+                      d.disabled_at, d.disabled_reason,
+                      t.user_id, t.role, t.device_name
+               FROM device_tokens d
+               JOIN app_tokens t ON d.app_token_id = t.id
+               ORDER BY d.id DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def list_devices_for_token(self, app_token_id: int) -> list[dict]:
         """列出某会话名下的所有设备（含 disabled）。"""
         rows = self._conn.execute(

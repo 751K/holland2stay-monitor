@@ -32,7 +32,7 @@ final class PushDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCen
     ///
     /// 解决：第一个被构造的实例（iOS 那个）通过 ``init()`` 把 self 写进
     /// ``shared``。之后 ``PushDelegate.shared`` 拿到的就是 iOS 在用的实例。
-    nonisolated(unsafe) static var shared: PushDelegate!
+    nonisolated(unsafe) static var shared: PushDelegate?
 
     override init() {
         super.init()

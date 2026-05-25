@@ -140,12 +140,15 @@
 
     {% if guest_mode %}
     <div style="text-align:center;margin-top:16px;">
-      <a href="{{ url_for('guest_login') }}"
-         style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text3);text-decoration:none;padding:8px 16px;border-radius:8px;border:1px solid var(--border);transition:color .15s,background .15s;"
-         onmouseover="this.style.color='var(--text)';this.style.background='var(--surface2)'"
-         onmouseout="this.style.color='var(--text3)';this.style.background='transparent'">
-        <i class="bi bi-eye"></i> {{ _('guest_mode') }}
-      </a>
+      <form method="post" action="{{ url_for('guest_login') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit"
+                style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text3);text-decoration:none;padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:transparent;cursor:pointer;transition:color .15s,background .15s;"
+                onmouseover="this.style.color='var(--text)';this.style.background='var(--surface2)'"
+                onmouseout="this.style.color='var(--text3)';this.style.background='transparent'">
+          <i class="bi bi-eye"></i> {{ _('guest_mode') }}
+        </button>
+      </form>
     </div>
     {% endif %}
 

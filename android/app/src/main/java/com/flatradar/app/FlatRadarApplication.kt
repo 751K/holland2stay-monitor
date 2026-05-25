@@ -1,7 +1,37 @@
 package com.flatradar.app
 
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import com.flatradar.app.push.NotificationChannels
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
-class FlatRadarApplication : Application()
+class FlatRadarApplication : Application() {
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannels()
+    }
+
+    private fun createNotificationChannels() {
+        val listingsChannel = NotificationChannel(
+            NotificationChannels.LISTINGS,
+            "New Listings",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Alerts for new and changed listings"
+        }
+
+        val generalChannel = NotificationChannel(
+            NotificationChannels.GENERAL,
+            "General",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "General notifications"
+        }
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannels(listOf(listingsChannel, generalChannel))
+    }
+}

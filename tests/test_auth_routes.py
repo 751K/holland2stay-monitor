@@ -281,7 +281,7 @@ class TestLoginFailureAndBackoff:
 
 class TestGuestMode:
     def test_guest_route_creates_guest_session(self, client):
-        r = client.get("/guest")
+        r = client.post("/guest", data={"csrf_token": "test_csrf"})
         assert r.status_code == 302
         with client.session_transaction() as sess:
             assert sess.get("authenticated") is True
@@ -289,7 +289,7 @@ class TestGuestMode:
 
     def test_admin_cannot_be_demoted_via_guest_route(self, admin_client):
         """已登录的 admin 调 /guest 不应该被降级到 guest（CSRF 降级攻击防护）。"""
-        r = admin_client.get("/guest")
+        r = admin_client.post("/guest", data={"csrf_token": "test_csrf"})
         assert r.status_code == 302
         with admin_client.session_transaction() as sess:
             assert sess.get("role") == "admin", "admin 被错误降级"

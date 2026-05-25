@@ -121,7 +121,7 @@
       <a href="{{ url_for('settings') }}" class="{% if request.endpoint=='settings' %}active{% endif %}">
         <i class="bi bi-gear"></i> {{ _('settings') }}
       </a>
-      <a href="{{ url_for('app_accounts') }}" class="{% if request.endpoint in ['app_accounts','app_accounts_revoke','app_accounts_test_push'] %}active{% endif %}">
+      <a href="{{ url_for('app_accounts') }}" class="{% if request.endpoint in ['app_accounts','app_accounts_revoke','app_accounts_test_push','app_accounts_disable_device'] %}active{% endif %}">
         <i class="bi bi-phone"></i> {{ _('app_accounts_title') }}
       </a>
       <a href="{{ url_for('system_info') }}" class="{% if request.endpoint=='system_info' %}active{% endif %}">

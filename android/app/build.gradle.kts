@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services)
 }
 
 import java.util.Properties
@@ -107,12 +108,16 @@ dependencies {
     implementation(libs.maps.compose.utils)
     implementation(libs.play.services.maps)
 
+    // Firebase
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+
     // Core
     implementation(libs.core.ktx)
 
-    // Test (disabled — uncomment when adding test suites)
-    // testImplementation(libs.junit)
-    // testImplementation(libs.mockk)
-    // testImplementation(libs.coroutines.test)
+    // Test
+    testImplementation(libs.junit)
+    testImplementation(libs.mockk)
+    testImplementation(libs.coroutines.test)
     // androidTestImplementation(libs.compose.ui.test)
 }

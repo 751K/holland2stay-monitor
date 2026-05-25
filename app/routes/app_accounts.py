@@ -1,17 +1,16 @@
 """
-路由：App 会话（Bearer Token）管理
-====================================
+路由：App 会话 + 推送设备管理
+===============================
 
 挂载的 endpoint
-- GET  /settings/app-accounts                → app_accounts（页面，admin）
-- POST /settings/app-accounts/<int:token_id>/revoke → app_accounts_revoke（撤销）
+- GET  /settings/app-accounts              → app_accounts（admin，双 tab）
+- POST /settings/app-accounts/<token_id>/revoke → app_accounts_revoke
+- POST /settings/app-accounts/<token_id>/test-push → app_accounts_test_push
+- POST /settings/app-accounts/devices/<device_id>/disable → app_accounts_disable_device
 
-设计要点
---------
-- 仅 admin 可见/可改：guest 与 user 在 Web 端不需要管理 Bearer Token
-  （他们各自的会话信息也可以放进 /api/v1/me/sessions，留给 Phase 后期）。
-- 撤销后立即调 invalidate_token_cache —— 不然 5 分钟内 token 仍可用。
-- 包含已撤销的列在默认视图中隐藏，可通过 ?show_revoked=1 切换。
+Tab:
+- ?tab=sessions  → app_tokens 登录会话（默认）
+- ?tab=devices   → device_tokens 推送设备
 """
 
 from __future__ import annotations
@@ -29,31 +28,58 @@ from users import load_users
 
 logger = logging.getLogger(__name__)
 
+TAB_SESSIONS = "sessions"
+TAB_DEVICES = "devices"
+
 
 def _name_for_user_id(user_id: str, users) -> str:
-    """把 user_id 翻译成显示名；找不到时显示 id 本身。"""
     if not user_id:
         return ""
     u = next((x for x in users if x.id == user_id), None)
     return u.name if u else user_id
 
 
+def _user_id_to_name(users) -> dict[str, str]:
+    """预构建 user_id → name 映射。"""
+    return {u.id: u.name for u in users}
+
+
 @admin_required
 def app_accounts() -> str:
-    show_revoked = request.args.get("show_revoked", "").lower() in ("1", "true", "yes")
+    tab = request.args.get("tab", TAB_SESSIONS)
+    if tab not in (TAB_SESSIONS, TAB_DEVICES):
+        tab = TAB_SESSIONS
+
     st = storage()
+    users = load_users()
+    user_names = _user_id_to_name(users)
+
+    sessions = []
+    show_revoked = False
+    devices = []
+
     try:
-        rows = st.list_app_tokens(include_revoked=show_revoked)
+        if tab == TAB_SESSIONS:
+            show_revoked = request.args.get("show_revoked", "").lower() in ("1", "true", "yes")
+            sessions = st.list_app_tokens(include_revoked=show_revoked)
+            for r in sessions:
+                r["user_name"] = user_names.get(r.get("user_id", ""), r.get("user_id", ""))
+        else:
+            devices = st.list_all_devices()
+            for d in devices:
+                d["user_name"] = user_names.get(d.get("user_id", ""), d.get("user_id", ""))
+                # mask token for display
+                tok = d.get("device_token") or ""
+                d["token_hint"] = (tok[:8] + "…" + tok[-4:]) if len(tok) > 16 else tok
     finally:
         st.close()
-    users = load_users()
-    # 为模板预先把 user_id → name 解析好，避免 Jinja 里循环查找
-    for r in rows:
-        r["user_name"] = _name_for_user_id(r.get("user_id", ""), users)
+
     return render_template(
         "app_accounts.html",
-        tokens=rows,
+        tab=tab,
+        tokens=sessions,
         show_revoked=show_revoked,
+        devices=devices,
     )
 
 
@@ -71,7 +97,6 @@ def app_accounts_revoke(token_id: int) -> Any:
         flash("会话已撤销", "success")
     else:
         flash("撤销失败（可能已撤销）", "warning")
-    # 保持当前过滤态（show_revoked）回到列表
     nxt = request.args.get("next") or request.referrer or url_for("app_accounts")
     return redirect(nxt)
 
@@ -79,7 +104,7 @@ def app_accounts_revoke(token_id: int) -> Any:
 @admin_required
 @csrf_required
 def app_accounts_test_push(token_id: int) -> Any:
-    """向指定 token 的所有活跃设备发送一条测试 APNs 推送。"""
+    """向指定 token 的所有活跃设备发送测试推送（APNs + FCM）。"""
     st = storage()
     try:
         token_row = st.conn.execute(
@@ -99,53 +124,106 @@ def app_accounts_test_push(token_id: int) -> Any:
         flash(f"该会话没有活跃设备（共 {len(devices)} 台，{len(active)} 台活跃）", "warning")
         return redirect(url_for("app_accounts"))
 
-    # 构造测试 payload
-    from notifier_channels.apns import ApnsClient, ApnsConfig
-    cfg = ApnsConfig.from_env()
-    if cfg is None:
-        flash("APNs 未启用（后端缺少 APNS_ENABLED / .p8 / APNS_* 配置）", "danger")
-        return redirect(url_for("app_accounts"))
+    # 按平台分流
+    ios_devs = [d for d in active if d.get("platform", "ios") != "android"]
+    android_devs = [d for d in active if d.get("platform", "ios") == "android"]
 
-    payload = {
-        "aps": {
-            "alert": {
-                "title": "🧪 Web 面板测试推送",
-                "body": f"管理员从 Web 面板发送的测试推送（{token_row['device_name'] or '未知设备'}）",
-            },
-            "sound": "default",
-            "thread-id": "test",
-            "badge": 1,
-        },
-        "kind": "test",
-    }
-    targets = [{"device_token": d["device_token"], "env": d["env"]} for d in active]
+    msgs: list[str] = []
 
-    import asyncio
+    # APNs
+    if ios_devs:
+        from notifier_channels.apns import ApnsClient, ApnsConfig
+        cfg = ApnsConfig.from_env()
+        if cfg is None:
+            msgs.append("APNs 未启用")
+        else:
+            payload = {
+                "aps": {
+                    "alert": {
+                        "title": "🧪 Test Push",
+                        "body": f"Admin test push（{token_row['device_name'] or 'unknown'}）",
+                    },
+                    "sound": "default",
+                    "thread-id": "test",
+                    "badge": 1,
+                },
+                "kind": "test",
+            }
+            targets = [{"device_token": d["device_token"], "env": d["env"]} for d in ios_devs]
+            import asyncio
 
-    async def _send():
-        local = ApnsClient(cfg)
-        try:
-            return await local.send_many(targets, payload=payload)
-        finally:
-            await local.close()
+            async def _send_apns():
+                local = ApnsClient(cfg)
+                try:
+                    return await local.send_many(targets, payload=payload)
+                finally:
+                    await local.close()
+            try:
+                results = asyncio.run(_send_apns())
+                sent = sum(1 for r in results if r.ok)
+                msgs.append(f"APNs: {sent}/{len(ios_devs)}")
+            except Exception as e:
+                logger.exception("APNs test push 失败")
+                msgs.append(f"APNs: 失败 ({e})")
 
-    try:
-        results = asyncio.run(_send())
-    except Exception as e:
-        logger.exception("Web test push 发送异常 token_id=%d", token_id)
-        flash(f"推送发送失败：{e}", "danger")
-        return redirect(url_for("app_accounts"))
+    # FCM
+    if android_devs:
+        from notifier_channels.fcm import FcmClient, FcmConfig
+        cfg = FcmConfig.from_env()
+        if cfg is None:
+            msgs.append("FCM 未启用")
+        else:
+            payload = {
+                "message": {
+                    "data": {
+                        "title": "🧪 Test Push",
+                        "body": f"Admin test push（{token_row['device_name'] or 'unknown'}）",
+                        "kind": "test",
+                        "deep_link": "",
+                    },
+                    "android": {"priority": "high"},
+                },
+            }
+            targets = [{"device_token": d["device_token"]} for d in android_devs]
+            import asyncio
 
-    sent = sum(1 for r in results if r.ok)
-    failed = len(results) - sent
-    if sent:
-        flash(f"测试推送已发送：{sent}/{len(results)} 台设备成功" + (f"，{failed} 台失败" if failed else ""), "success")
+            async def _send_fcm():
+                local = FcmClient(cfg)
+                try:
+                    return await local.send_many(targets, payload=payload)
+                finally:
+                    await local.close()
+            try:
+                results = asyncio.run(_send_fcm())
+                sent = sum(1 for r in results if r.ok)
+                msgs.append(f"FCM: {sent}/{len(android_devs)}")
+            except Exception as e:
+                logger.exception("FCM test push 失败")
+                msgs.append(f"FCM: 失败 ({e})")
+
+    if msgs:
+        logger.info("Web test push token_id=%d: %s", token_id, " | ".join(msgs))
+        flash("测试推送: " + " | ".join(msgs), "success" if any("/" in m for m in msgs) else "warning")
     else:
-        flash(f"测试推送失败：{len(results)} 台设备均未成功", "danger")
+        flash("没有可用的推送渠道", "warning")
 
-    device_name = token_row["device_name"] or f"token#{token_id}"
-    logger.info("Web test push: admin 向 %s 发送，%d/%d 成功", device_name, sent, len(results))
     return redirect(url_for("app_accounts"))
+
+
+@admin_required
+@csrf_required
+def app_accounts_disable_device(device_id: int) -> Any:
+    """禁用一台推送设备。"""
+    st = storage()
+    try:
+        ok = st.disable_device(device_id, reason="admin_manual")
+    finally:
+        st.close()
+    if ok:
+        flash(f"设备 #{device_id} 已禁用", "success")
+    else:
+        flash(f"设备 #{device_id} 禁用失败（可能已禁用）", "warning")
+    return redirect(url_for("app_accounts", tab=TAB_DEVICES))
 
 
 def register(app: Flask) -> None:
@@ -165,5 +243,11 @@ def register(app: Flask) -> None:
         "/settings/app-accounts/<int:token_id>/test-push",
         endpoint="app_accounts_test_push",
         view_func=app_accounts_test_push,
+        methods=["POST"],
+    )
+    app.add_url_rule(
+        "/settings/app-accounts/devices/<int:device_id>/disable",
+        endpoint="app_accounts_disable_device",
+        view_func=app_accounts_disable_device,
         methods=["POST"],
     )

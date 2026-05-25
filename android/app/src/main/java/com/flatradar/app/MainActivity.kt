@@ -28,6 +28,9 @@ import com.flatradar.app.ui.auth.AuthViewModel
 import com.flatradar.app.ui.components.AppErrorBus
 import com.flatradar.app.ui.theme.FlatRadarTheme
 import android.content.Context
+import android.content.Intent
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -65,6 +68,21 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var preferencesManager: PreferencesManager
     @Inject lateinit var apiClient: ApiClient
     @Inject lateinit var errorBus: AppErrorBus
+    @Inject lateinit var navigationCoordinator: com.flatradar.app.navigation.NavigationCoordinator
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleDeepLink(intent)
+    }
+
+    private fun handleDeepLink(intent: Intent) {
+        val uri = intent.data ?: return
+        if (uri.scheme != "h2smonitor") return
+        val id = uri.lastPathSegment ?: return
+        if (id.isNotBlank()) {
+            navigationCoordinator.openListing(id)
+        }
+    }
 
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,6 +90,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         authViewModel.restoreSession()
+        handleDeepLink(intent)
 
         setContent {
             val defaultPreferences = remember { AppPreferences() }
@@ -93,6 +112,17 @@ class MainActivity : ComponentActivity() {
                     errorBus.messages.collect { snackbarHostState.showSnackbar(it) }
                 }
 
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    val permLauncher = rememberLauncherForActivityResult(
+                        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                    ) { /* proceed regardless */ }
+                    LaunchedEffect(authState.isAuthenticated) {
+                        if (authState.isAuthenticated) {
+                            permLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                }
+
                 Scaffold(
                     snackbarHost = { SnackbarHost(snackbarHostState) },
                     contentWindowInsets = WindowInsets(0.dp)
@@ -105,6 +135,7 @@ class MainActivity : ComponentActivity() {
                             isUser = authState.role == "user",
                             userName = authState.userInfo?.name,
                             preferences = preferences,
+                            navigationCoordinator = navigationCoordinator,
                             onLoginSuccess = {},
                             onLogout = { authViewModel.logout() },
                             onDeleteAccount = { authViewModel.deleteAccount() }
@@ -177,7 +208,7 @@ private fun TermsAgreementSheet(
                             .verticalScroll(rememberScrollState())
                     ) {
                         Text(
-                            text = "FlatRadar is an independent, unofficial monitoring tool for Holland2Stay listings. It is not affiliated with, endorsed by, sponsored by, maintained by, or operated by Holland2Stay.\n\n" +
+                            text = "FlatRadar is an independent, unofficial monitoring tool for rental housing listings across multiple platforms. It is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.\n\n" +
                                    "By using FlatRadar, you acknowledge that you have read and agree to the Terms of Use and Privacy Policy.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -196,8 +227,8 @@ private fun TermsAgreementSheet(
 
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        BulletPoint("FlatRadar is an unofficial, independent tool. Not affiliated with or endorsed by Holland2Stay.")
-                        BulletPoint("You are responsible for complying with Holland2Stay's Terms of Service.")
+                        BulletPoint("FlatRadar is an unofficial, independent tool. Not affiliated with or endorsed by any housing platform.")
+                        BulletPoint("You are responsible for complying with each housing platform's Terms of Service.")
                         BulletPoint("Listing data may be delayed, incomplete, inaccurate, or change without notice.")
                         BulletPoint("Push notifications are best-effort. Always verify listings on the official website.")
                         BulletPoint("FlatRadar is for personal, non-commercial use only.")

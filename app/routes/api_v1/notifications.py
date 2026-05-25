@@ -114,6 +114,8 @@ def _stream():
     row = api_auth._resolve_token(tok)
     if not row:
         return _err.err_unauthorized("token 无效或已过期")
+    if not api_auth._user_token_still_allowed(row):
+        return _err.err_unauthorized("账户已禁用")
     g.api_role = row["role"]
     g.api_user_id = row.get("user_id")
     g.api_token_id = row["id"]

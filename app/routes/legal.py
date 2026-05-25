@@ -6,7 +6,7 @@
 - **不需要登录**：放在 admin 鉴权之外，App Store 审核员 / 任何用户直接能访问
 - **不继承 base.html**：base.html 带侧边栏 / CSRF 上下文，对公开页过度
 - **中英双语**：`?lang=en|zh` 切换，默认跟随 `app.i18n.get_lang()`（cookie/默认中文）
-- **内容来源单一**：`legal_text.py` / `support_text.py` 与 iOS 对应文件保持平行
+- **内容来源单一**：`app/legal/*.txt` 为 canonical source of truth，三端通过 API 获取
 
 挂载的 endpoint
 - GET /privacy → privacy_page（公开）
@@ -18,7 +18,7 @@ from __future__ import annotations
 from flask import Flask, render_template
 
 from app.i18n import get_lang
-from legal_text import PRIVACY_EN, PRIVACY_ZH, TERMS_EN, TERMS_ZH
+from app.legal import get_legal
 from support_text import CONTACT_EMAIL, SECTIONS_EN, SECTIONS_ZH
 
 
@@ -26,14 +26,15 @@ def _render_legal(*, kind: str):
     """渲染法务页。`kind` ∈ {'privacy', 'terms'}。"""
     lang = get_lang()
     is_zh = lang == "zh"
+    legal = get_legal(lang)
 
     if kind == "privacy":
-        content = PRIVACY_ZH if is_zh else PRIVACY_EN
+        content = legal["privacy"]
         page_title = "隐私政策" if is_zh else "Privacy Policy"
         other_title = "使用条款" if is_zh else "Terms of Use"
         other_url = "/terms"
     else:  # terms
-        content = TERMS_ZH if is_zh else TERMS_EN
+        content = legal["terms"]
         page_title = "使用条款" if is_zh else "Terms of Use"
         other_title = "隐私政策" if is_zh else "Privacy Policy"
         other_url = "/privacy"

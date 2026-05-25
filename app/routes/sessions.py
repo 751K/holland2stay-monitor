@@ -4,7 +4,7 @@
 挂载的 endpoint（保留扁平名，模板/前端零改动）
 - GET/POST /login   → login
 - POST    /logout   → logout
-- GET     /guest    → guest_login
+- POST    /guest    → guest_login
 - GET     /set-lang → set_lang
 """
 from __future__ import annotations
@@ -215,8 +215,11 @@ def register_user() -> Any:
     return redirect(safe_next_url(next_value))
 
 
+@csrf_required
 def guest_login() -> Any:
-    """访客模式：无需密码，直接以只读身份进入面板。"""
+    """访客模式：无需密码，直接以只读身份进入面板。需 POST + CSRF 防跨站攻击。"""
+    if request.method != "POST":
+        return redirect(url_for("login"))
     if not auth_enabled():
         return redirect(url_for("index"))
     if not guest_mode_enabled():
@@ -249,5 +252,5 @@ def register(app: Flask) -> None:
     app.add_url_rule("/login",    endpoint="login",       view_func=login,       methods=["GET", "POST"])
     app.add_url_rule("/register", endpoint="register_user", view_func=register_user, methods=["POST"])
     app.add_url_rule("/logout",   endpoint="logout",      view_func=logout,      methods=["POST"])
-    app.add_url_rule("/guest",    endpoint="guest_login", view_func=guest_login, methods=["GET"])
+    app.add_url_rule("/guest",    endpoint="guest_login", view_func=guest_login, methods=["POST"])
     app.add_url_rule("/set-lang", endpoint="set_lang",    view_func=set_lang,    methods=["GET"])

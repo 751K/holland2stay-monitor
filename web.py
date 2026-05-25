@@ -112,6 +112,21 @@ def _add_security_headers(resp):
     resp.headers.setdefault("X-Frame-Options",        "DENY")
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy",        "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Strict-Transport-Security",
+                            "max-age=63072000; includeSubDomains; preload")
+    # CSP: allow self, inline styles (design.css vars), Google Fonts, maps.
+    resp.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https://*.tile.openstreetmap.org; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'",
+    )
 
     # ── 静态资源缓存 ──────────────────────────────────────────────
     # /static/ 下的文件都通过 `?v=NN` 查询字符串做 cache bust（design.css?v=15、

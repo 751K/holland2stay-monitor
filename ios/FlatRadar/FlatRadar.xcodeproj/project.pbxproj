@@ -18,8 +18,13 @@
 
 /* Begin PBXFileReference section */
 		FC1F38632FB72DA000FC7A33 /* FlatRadar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FlatRadar.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B11F0A8D2EDB5687B5AABF27 /* FlatRadarTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlatRadarTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FC5588732FBDB6A300855C9D /* FlatRadarUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = FlatRadarUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FCA5BF452FBA1D5F0081A5E4 /* FlatRadar.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; path = FlatRadar.storekit; sourceTree = "<group>"; };
+		D87B0C434C905632AB2E44EA /* ListingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListingTests.swift; sourceTree = "<group>"; };
+		C3134DB90B6750B0A2F7943E /* APIResponseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIResponseTests.swift; sourceTree = "<group>"; };
+		4BC7F1E478E755AAAB011286 /* AuthModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModelsTests.swift; sourceTree = "<group>"; };
+		57F977BFD1905594B33D10E1 /* NotificationItemTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationItemTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -50,6 +55,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A2B9951937DF517DADC66032 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -70,6 +82,17 @@
 				FC5588732FBDB6A300855C9D /* FlatRadarUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		E872FAEE73CB5A918C03BFA9 /* FlatRadarTests */ = {
+			isa = PBXGroup;
+			children = (
+				D87B0C434C905632AB2E44EA /* ListingTests.swift */,
+				C3134DB90B6750B0A2F7943E /* APIResponseTests.swift */,
+				4BC7F1E478E755AAAB011286 /* AuthModelsTests.swift */,
+				57F977BFD1905594B33D10E1 /* NotificationItemTests.swift */,
+			);
+			path = FlatRadarTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -120,6 +143,26 @@
 			productReference = FC5588732FBDB6A300855C9D /* FlatRadarUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		071AE7CD17E459F6973B8ABD /* FlatRadarTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2A463794E0F05143908262DD /* Build configuration list for PBXNativeTarget "FlatRadarTests" */;
+			buildPhases = (
+				EA645AD1879E5C68B2EE6B94 /* Sources */,
+				A2B9951937DF517DADC66032 /* Frameworks */,
+				9A83CB38A6DC5219BCF14087 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CCB5ABCC2B325B8F89AE238A /* PBXTargetDependency */,
+			);
+			name = FlatRadarTests;
+			packageProductDependencies = (
+			);
+			productName = FlatRadarTests;
+			productReference = B11F0A8D2EDB5687B5AABF27 /* FlatRadarTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -155,6 +198,7 @@
 			targets = (
 				FC1F38622FB72DA000FC7A33 /* FlatRadar */,
 				FC5588722FBDB6A300855C9D /* FlatRadarUITests */,
+				071AE7CD17E459F6973B8ABD /* FlatRadarTests */,
 			);
 		};
 /* End PBXProject section */
@@ -168,6 +212,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		FC5588712FBDB6A300855C9D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9A83CB38A6DC5219BCF14087 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -191,6 +242,17 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		EA645AD1879E5C68B2EE6B94 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2086E0C1B5145965A18BF439 /* ListingTests.swift in Sources */,
+				0508B153E6B45885B7042D6E /* APIResponseTests.swift in Sources */,
+				5E0E9A78D9ED5FE9AFA486AF /* AuthModelsTests.swift in Sources */,
+				48911BC1975C51F484614C1E /* NotificationItemTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -198,6 +260,11 @@
 			isa = PBXTargetDependency;
 			target = FC1F38622FB72DA000FC7A33 /* FlatRadar */;
 			targetProxy = FC5588792FBDB6A300855C9D /* PBXContainerItemProxy */;
+		};
+		CCB5ABCC2B325B8F89AE238A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FC1F38622FB72DA000FC7A33 /* FlatRadar */;
+			targetProxy = FC5588812FBDB6A300855C9D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -433,6 +500,42 @@
 			};
 			name = Release;
 		};
+		F454D78F1B8354DFAC7C94D4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.j.kong.FlatRadarTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlatRadar.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/FlatRadar";
+			};
+			name = Debug;
+		};
+		0259A4CD8E215710BE5325D5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.j.kong.FlatRadarTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/FlatRadar.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/FlatRadar";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -459,6 +562,15 @@
 			buildConfigurations = (
 				FC55887C2FBDB6A300855C9D /* Debug */,
 				FC55887D2FBDB6A300855C9D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		2A463794E0F05143908262DD /* Build configuration list for PBXNativeTarget "FlatRadarTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F454D78F1B8354DFAC7C94D4 /* Debug */,
+				0259A4CD8E215710BE5325D5 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

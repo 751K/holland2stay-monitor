@@ -5,15 +5,34 @@
 
 <div class="page-header">
   <h1>{{ _('app_accounts_title') }}</h1>
-  <a href="{{ url_for('app_accounts', show_revoked='1' if not show_revoked else '0') }}"
+</div>
+
+{# ── Tab switcher ──────────────────────────────────────────────── #}
+<div class="tab-bar" style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid var(--border);">
+  <a href="?tab=sessions"
+     class="tab-item {% if tab == 'sessions' %}active{% endif %}"
+     style="padding:10px 20px;text-decoration:none;font-weight:500;border-bottom:2px solid {% if tab == 'sessions' %}var(--accent){% else %}transparent{% endif %};margin-bottom:-2px;">
+    <i class="bi bi-phone mr-1"></i> App 会话
+  </a>
+  <a href="?tab=devices"
+     class="tab-item {% if tab == 'devices' %}active{% endif %}"
+     style="padding:10px 20px;text-decoration:none;font-weight:500;border-bottom:2px solid {% if tab == 'devices' %}var(--accent){% else %}transparent{% endif %};margin-bottom:-2px;">
+    <i class="bi bi-bell mr-1"></i> 推送设备
+  </a>
+</div>
+
+{# ── Tab: App Sessions ─────────────────────────────────────────── #}
+{% if tab == 'sessions' %}
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+  <div class="text-xs text-secondary">
+    <i class="bi bi-info-circle mr-1"></i>{{ _('app_accounts_meta') }}
+  </div>
+  <a href="{{ url_for('app_accounts', tab='sessions', show_revoked='1' if not show_revoked else '0') }}"
      class="btn btn-ghost btn-sm">
     <i class="bi bi-eye{{ '-slash' if show_revoked else '' }} mr-1"></i>
     {{ _('app_accounts_hide_revoked') if show_revoked else _('app_accounts_show_revoked') }}
   </a>
-</div>
-
-<div class="alert alert-info mb-4">
-  <i class="bi bi-info-circle mr-2"></i>{{ _('app_accounts_meta') }}
 </div>
 
 {% if not tokens %}
@@ -86,7 +105,7 @@
                     style="display:inline;"
                     onsubmit="this.querySelector('button').disabled=true;">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="btn btn-ghost btn-sm" title="发送测试 APNs 推送">
+                <button type="submit" class="btn btn-ghost btn-sm" title="发送测试推送（APNs + FCM）">
                   <i class="bi bi-bell mr-1"></i>Test Push
                 </button>
               </form>
@@ -110,6 +129,110 @@
     </div>
   </div>
 </div>
+{% endif %}
+
+{# ── Tab: Push Devices ─────────────────────────────────────────── #}
+{% elif tab == 'devices' %}
+
+{% if not devices %}
+<div class="alert alert-warning mb-4">
+  <i class="bi bi-info-circle mr-2"></i>暂无推送设备注册。
+</div>
+{% else %}
+
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    <div style="overflow-x:auto;">
+    <table class="data-table" style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:12px 16px;">设备</th>
+          <th style="text-align:left;padding:12px 16px;">平台</th>
+          <th style="text-align:left;padding:12px 16px;">用户</th>
+          <th style="text-align:left;padding:12px 16px;">型号</th>
+          <th style="text-align:left;padding:12px 16px;">环境</th>
+          <th style="text-align:left;padding:12px 16px;">注册时间</th>
+          <th style="text-align:left;padding:12px 16px;">最后活跃</th>
+          <th style="text-align:left;padding:12px 16px;">状态</th>
+          <th style="text-align:right;padding:12px 16px;">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for d in devices %}
+        {% set is_disabled = d.disabled_at is not none %}
+        <tr style="border-top:1px solid var(--border);{% if is_disabled %}opacity:0.5;{% endif %}">
+          <td style="padding:12px 16px;font-weight:550;" title="{{ d.device_token }}">
+            <i class="bi bi-{{ 'apple' if d.platform == 'ios' else 'android' if d.platform == 'android' else 'phone' }} mr-1" style="color:var(--accent);"></i>
+            <code style="font-size:0.8rem;">{{ d.token_hint }}</code>
+          </td>
+          <td style="padding:12px 16px;">
+            {% if d.platform == 'ios' %}
+              <span class="badge" style="background:var(--accent);color:#fff;">iOS</span>
+            {% elif d.platform == 'android' %}
+              <span class="badge" style="background:#34C759;color:#fff;">Android</span>
+            {% else %}
+              <span class="badge badge-neutral">{{ d.platform or '—' }}</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px;">
+            {% if d.user_name %}
+              <span style="font-size:0.85rem;">{{ d.user_name }}</span>
+            {% elif d.role == 'admin' %}
+              <span class="badge badge-warning">admin</span>
+            {% else %}
+              <span class="text-xs text-secondary">—</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px;" class="text-xs text-secondary">
+            {{ d.model or '—' }}
+          </td>
+          <td style="padding:12px 16px;">
+            {% if d.env == 'sandbox' %}
+              <span class="badge" style="background:#FF9500;color:#fff;">sandbox</span>
+            {% elif d.env == 'production' %}
+              <span class="badge" style="background:#34C759;color:#fff;">production</span>
+            {% else %}
+              <span class="badge badge-neutral">{{ d.env or '—' }}</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px;" class="text-xs text-secondary">
+            {{ (d.created_at or '') | replace('T', ' ') | replace('Z', '') }}
+          </td>
+          <td style="padding:12px 16px;" class="text-xs text-secondary">
+            {{ (d.last_seen or '') | replace('T', ' ') | replace('Z', '') }}
+          </td>
+          <td style="padding:12px 16px;">
+            {% if is_disabled %}
+              <span class="badge badge-danger">已禁用</span>
+              <div class="text-xs text-secondary mt-1">{{ d.disabled_reason or '' }}</div>
+            {% else %}
+              <span class="badge badge-success">活跃</span>
+            {% endif %}
+          </td>
+          <td style="padding:12px 16px;text-align:right;">
+            {% if not is_disabled %}
+              <form method="post"
+                    action="{{ url_for('app_accounts_disable_device', device_id=d.id) }}"
+                    style="display:inline;"
+                    onsubmit="return confirm('禁用此设备？不再接收推送。');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-ghost btn-sm" title="禁用设备">
+                  <i class="bi bi-slash-circle mr-1"></i>禁用
+                </button>
+              </form>
+            {% else %}
+              <span class="text-xs text-secondary">—</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% endif %}
 
 {% endblock %}

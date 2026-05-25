@@ -211,31 +211,35 @@ private fun GoogleListingsMap(
                 }
             }
 
-            // Request a single high-accuracy location update
+            // Request a single high-accuracy location update with 15s timeout
             val providersForUpdates = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+            val handler = android.os.Handler(context.mainLooper)
             for (provider in providersForUpdates) {
                 if (locationManager.isProviderEnabled(provider)) {
                     try {
-                        locationManager.requestLocationUpdates(
-                            provider,
-                            0L,
-                            0f,
-                            object : LocationListener {
-                                override fun onLocationChanged(location: Location) {
-                                    coroutineScope.launch {
-                                        cameraPositionState.animate(
-                                            CameraUpdateFactory.newLatLngZoom(
-                                                LatLng(location.latitude, location.longitude),
-                                                14f
-                                            )
+                        var timeoutRunnable: Runnable? = null
+                        val listener = object : LocationListener {
+                            override fun onLocationChanged(location: Location) {
+                                timeoutRunnable?.let { handler.removeCallbacks(it) }
+                                coroutineScope.launch {
+                                    cameraPositionState.animate(
+                                        CameraUpdateFactory.newLatLngZoom(
+                                            LatLng(location.latitude, location.longitude),
+                                            14f
                                         )
-                                    }
-                                    locationManager.removeUpdates(this)
+                                    )
                                 }
-                                override fun onProviderEnabled(provider: String) {}
-                                override fun onProviderDisabled(provider: String) {}
-                            },
-                            context.mainLooper
+                                locationManager.removeUpdates(this)
+                            }
+                            override fun onProviderEnabled(provider: String) {}
+                            override fun onProviderDisabled(provider: String) {}
+                        }
+                        timeoutRunnable = Runnable {
+                            locationManager.removeUpdates(listener)
+                        }
+                        timeoutRunnable?.let { handler.postDelayed(it, 15_000L) }
+                        locationManager.requestLocationUpdates(
+                            provider, 0L, 0f, listener, context.mainLooper,
                         )
                     } catch (e: SecurityException) {
                         // Ignore

@@ -798,8 +798,8 @@ async def run_once(
         if notified_this:
             new_notified_ids.append(listing.id)
 
-    # APNs 发送：本轮每个用户的匹配若 < 阈值，按条推；否则聚合成一条
-    if _push.get_client() is not None:
+    # APNs + FCM 发送：本轮每个用户的匹配若 < 阈值，按条推；否则聚合成一条
+    if _push.get_client() is not None or _push.get_fcm_client() is not None:
         round_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         user_by_id = {u.id: u for u, _ in user_notifiers}
         for uid, matched in user_round_matches.items():
@@ -833,8 +833,8 @@ async def run_once(
             ok = await notifier.send_status_change(listing, old_status, new_status)
             if ok:
                 notified_this = True
-            # APNs status_change：直接逐条推（变更通常不像新房源那么密集）
-            if _push.get_client() is not None:
+            # APNs + FCM status_change：直接逐条推（变更通常不像新房源那么密集）
+            if _push.get_client() is not None or _push.get_fcm_client() is not None:
                 push_tasks.append(asyncio.create_task(
                     _push.dispatch_status_change(
                         storage, user, listing, old_status, new_status,
@@ -857,6 +857,8 @@ async def run_once(
 
     for user, notifier, sorted_cands, future, prewarmed in ab_futures:
         result = await future
+        if result is None:
+            continue
         # phase="blocked" 或 unknown_error 都意味着 session 可能已被 H2S 标记，
         # 失效 prewarm 缓存让下轮换新 session+token+TLS 指纹。
         if prewarmed and result.phase in ("unknown_error", "blocked"):

@@ -71,4 +71,146 @@
     <string name="loading">Loading…</string>
     <string name="error_network">Network error. Check your connection.</string>
     <string name="error_unauthorized">Login failed. Please sign in again.</string>
+
+    <!-- Dashboard extras -->
+    <string name="active_listings">Active Listings</string>
+    <string name="matched">Matched</string>
+    <string name="alerts_today">Alerts Today</string>
+    <string name="by_platform">By platform</string>
+    <string name="by_status">By status</string>
+    <string name="by_price">By price</string>
+    <string name="by_type">By type</string>
+    <string name="by_energy">By energy</string>
+    <string name="by_tenant">By tenant</string>
+    <string name="updated">updated</string>
+    <string name="updated_just_now">updated just now</string>
+    <string name="no_data">No data</string>
+
+    <!-- Auth extras -->
+    <string name="login_username_hint">Username</string>
+    <string name="login_password_hint">Password</string>
+    <string name="register_username_hint">Choose a username</string>
+    <string name="register_password_hint">Choose a password</string>
+    <string name="change_password">Change Password</string>
+    <string name="current_password">Current password</string>
+    <string name="new_password">New password</string>
+    <string name="confirm_new_password">Confirm new password</string>
+    <string name="delete_account_confirm">Are you sure you want to delete %s? This cannot be undone.</string>
+    <string name="delete_account_success">Account deleted</string>
+    <string name="session_expired">Session expired. Please sign in again.</string>
+    <string name="confirm_logout">Are you sure you want to log out?</string>
+
+    <!-- Listings -->
+    <string name="filter">Filter</string>
+    <string name="filters">Filters</string>
+    <string name="clear_filters">Clear filters</string>
+    <string name="edit_filters">Edit Filters</string>
+    <string name="apply">Apply</string>
+    <string name="any">Any</string>
+    <string name="sort">Sort</string>
+    <string name="newest">Newest</string>
+    <string name="price_low_high">Price low→high</string>
+    <string name="price_high_low">Price high→low</string>
+    <string name="status">Status</string>
+    <string name="city">City</string>
+    <string name="source">Source</string>
+    <string name="type">Type</string>
+    <string name="contract">Contract</string>
+    <string name="energy">Energy</string>
+    <string name="area">Area</string>
+    <string name="rooms">Rooms</string>
+    <string name="floor_detail">Floor</string>
+    <string name="building">Building</string>
+    <string name="finishing">Finishing</string>
+    <string name="occupancy">Occupancy</string>
+    <string name="tenant">Tenant</string>
+    <string name="available">Available</string>
+    <string name="available_to_book">Available to book</string>
+    <string name="available_in_lottery">Available in lottery</string>
+    <string name="reserved">Reserved</string>
+    <string name="features">Features</string>
+    <string name="key_details">Key Details</string>
+    <string name="all_details">All Details</string>
+    <string name="monitoring">Monitoring</string>
+    <string name="open_on_official">Open on official site</string>
+    <string name="monitor_history">Status change history</string>
+
+    <!-- Map -->
+    <string name="listings_on_map">%d listings on map</string>
+    <string name="listings_with_coordinates">%d listings with coordinates</string>
+    <string name="more_nearby">+ %d more nearby</string>
+    <string name="more_cities">+ %d more</string>
+    <string name="my_location">My location</string>
+    <string name="refresh">Refresh</string>
+
+    <!-- Calendar -->
+    <string name="prev_month">Previous month</string>
+    <string name="next_month">Next month</string>
+    <string name="no_listings_on_date">No available listings on this date</string>
+
+    <!-- Notifications -->
+    <string name="mark_all_read">Mark all read</string>
+    <string name="alerts">Alerts</string>
+    <string name="new_listing">New listing</string>
+    <string name="status_change">Status change</string>
+    <string name="booking_alert">Booking alert</string>
+
+    <!-- Settings -->
+    <string name="settings">Settings</string>
+    <string name="light_mode">Light Mode</string>
+    <string name="system_default">System default</string>
+    <string name="message">Message</string>
+    <string name="delete_account_warning">This action cannot be undone. All your data will be permanently deleted.</string>
+    <string name="push_notification_filter">Push Notification Filter</string>
+    <string name="active_filter_summary">Active filter: %s</string>
+    <string name="no_active_filter">No active filter</string>
+    <string name="test_push">Test Push</string>
+    <string name="export_data">Export Data</string>
+    <string name="share">Share</string>
+    <string name="done">Done</string>
+    <string name="cancel">Cancel</string>
+    <string name="back">Back</string>
+
+    <!-- Admin -->
+    <string name="admin_users">Admin Users</string>
+    <string name="admin_monitor">Admin Monitor</string>
+    <string name="no_users">No users</string>
+    <string name="toggle_user">Toggle user</string>
+    <string name="delete_user">Delete user</string>
+    <string name="monitor_control">Monitor Control</string>
+    <string name="start_monitor">Start monitor</string>
+    <string name="stop_monitor">Stop monitor</string>
+    <string name="reload_monitor">Reload monitor</string>
+    <string name="monitor_status">Monitor Status</string>
+    <string name="last_scrape">Last scrape</string>
+    <string name="last_count">Last count</string>
+    <string name="pid">Process ID</string>
+    <string name="running">Running</string>
+    <string name="stopped">Stopped</string>
+
+    <!-- Terms -->
+    <string name="before_you_continue">Before You Continue</string>
+    <string name="terms_prompt">Please read and accept the Terms of Use to use FlatRadar.</string>
+    <string name="terms_disclaimer">FlatRadar is an independent, unofficial monitoring tool for rental housing listings across multiple platforms. It is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.\n\nBy using FlatRadar, you acknowledge that you have read and agree to the Terms of Use and Privacy Policy.</string>
+    <string name="terms_agree_label">By continuing, you agree that:</string>
+    <string name="terms_bullet_1">FlatRadar is an unofficial, independent tool. Not affiliated with or endorsed by any housing platform.</string>
+    <string name="terms_bullet_2">You are responsible for complying with each housing platform\'s Terms of Service.</string>
+    <string name="terms_bullet_3">Listing data may be delayed, incomplete, inaccurate, or change without notice.</string>
+    <string name="terms_bullet_4">Push notifications are best-effort. Always verify listings on the official website.</string>
+    <string name="terms_bullet_5">FlatRadar is for personal, non-commercial use only.</string>
+    <string name="agree_and_continue">Agree &amp; Continue</string>
+
+    <!-- Generic -->
+    <string name="submit">Submit</string>
+    <string name="search">Search</string>
+    <string name="clear">Clear</string>
+    <string name="close">Close</string>
+    <string name="max_price">Max price</string>
+    <string name="min_price">Min price</string>
+    <string name="retry">Retry</string>
+    <string name="no_options">No options available</string>
+    <string name="enabled">Enabled</string>
+    <string name="disabled">Disabled</string>
+    <string name="devices">Devices</string>
+    <string name="delete">Delete</string>
 </resources>

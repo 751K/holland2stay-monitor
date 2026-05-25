@@ -600,21 +600,14 @@ struct LoginView: View {
         }
         .padding(.top, 24).padding(.bottom, 36)
         .sheet(isPresented: $showTerms) {
-            legalSheet(title: LegalText.isChineseLocale ? "使用条款" : "Terms of Use",
-                      content: termsText)
+            LegalSheetView(title: LegalText.isChineseLocale ? "使用条款" : "Terms of Use",
+                          kind: "terms")
         }
         .sheet(isPresented: $showPrivacy) {
-            legalSheet(title: LegalText.isChineseLocale ? "隐私政策" : "Privacy Policy",
-                       content: privacyText)
+            LegalSheetView(title: LegalText.isChineseLocale ? "隐私政策" : "Privacy Policy",
+                          kind: "privacy")
         }
     }
-
-    private func legalSheet(title: String, content: String) -> some View {
-        LegalSheetView(title: title, content: content)
-    }
-
-    private var termsText: String { LegalText.termsLocalized }
-    private var privacyText: String { LegalText.privacyLocalized }
 
     // MARK: - Biometric
 
@@ -854,13 +847,24 @@ private struct MountainPath: Shape {
 
 struct LegalSheetView: View {
     let title: String
-    let content: String
+    let kind: String  // "terms" or "privacy"
+    @State private var loaded: String?
+    @State private var isLoading = true
     @Environment(\.dismiss) private var dismiss
+
+    /// Local fallback when API is unreachable
+    private var fallback: String {
+        if kind == "privacy" { return LegalText.privacyLocalized }
+        return LegalText.termsLocalized
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(content)
+                if isLoading {
+                    ProgressView().padding(.top, 80)
+                }
+                Text(loaded ?? fallback)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding()
@@ -871,6 +875,15 @@ struct LegalSheetView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .task {
+                do {
+                    let resp = try await APIClient.shared.getLegal()
+                    loaded = kind == "privacy" ? resp.privacy : resp.terms
+                } catch {
+                    // Use local fallback (already default)
+                }
+                isLoading = false
             }
         }
     }

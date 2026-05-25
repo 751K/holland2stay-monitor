@@ -42,19 +42,19 @@ class SettingsViewModel @Inject constructor(
 
     fun saveServerUrl(rawUrl: String) {
         if (!PreferencesManager.isValidServerUrl(rawUrl)) {
-            _uiState.value = SettingsUiState("Enter a valid http or https URL.")
+            _uiState.value = _uiState.value.copy(message = "Enter a valid http or https URL.")
             return
         }
         viewModelScope.launch {
             preferencesManager.setServerUrl(rawUrl)
-            _uiState.value = SettingsUiState("Server URL saved")
+            _uiState.value = _uiState.value.copy(message = "Server URL saved")
         }
     }
 
     fun saveColorScheme(scheme: AppColorScheme) {
         viewModelScope.launch {
             preferencesManager.setColorScheme(scheme)
-            _uiState.value = SettingsUiState("Appearance updated")
+            _uiState.value = _uiState.value.copy(message = "Appearance updated")
         }
     }
 

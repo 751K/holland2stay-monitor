@@ -412,11 +412,11 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showLegalTerms) {
                 LegalSheetView(title: LegalText.isChineseLocale ? "使用条款" : "Terms of Use",
-                               content: LegalText.termsLocalized)
+                               kind: "terms")
             }
             .sheet(isPresented: $showLegalPrivacy) {
                 LegalSheetView(title: LegalText.isChineseLocale ? "隐私政策" : "Privacy Policy",
-                               content: LegalText.privacyLocalized)
+                               kind: "privacy")
             }
             .sheet(isPresented: $showFeedback) {
                 FeedbackView()

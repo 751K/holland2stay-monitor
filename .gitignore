@@ -36,14 +36,13 @@ dist/
 *.bak
 DerivedData/
 
-# App Store Connect API（私钥 / config / 草稿）
-# 实际配置应放在 ~/.config/asc/ 外部目录，这里只是防御万一拷贝进仓库
+# App Store Connect API
 **/AuthKey_*.p8
 tools/asc/config.json
 tools/asc/*.cache.json
 tools/asc/metadata-drafts/
 
-# Fastlane（如果以后加）
+# Fastlane
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
@@ -59,7 +58,6 @@ fastlane/AuthKey_*.p8
 # 就含一个生效的 MAPS_API_KEY。每个开发者本地各自维护。
 **/local.properties
 
-# Gradle 缓存与构建中间产物（动辄几百 MB，每次构建重生成）
 .gradle/
 **/.gradle/
 .kotlin/
@@ -68,7 +66,6 @@ captures/
 .cxx/
 .externalNativeBuild/
 
-# IntelliJ / Android Studio 模块文件（每个开发者本地各异）
 *.iml
 .idea/workspace.xml
 .idea/tasks.xml
@@ -84,7 +81,6 @@ captures/
 .idea/deploymentTargetDropDown.xml
 .idea/deploymentTargetSelector.xml
 
-# 构建输出（多平台 .apk / .aab / 映射文件）
 *.apk
 *.aab
 *.ap_
@@ -97,8 +93,13 @@ keystore.properties
 release.properties
 signing.properties
 *.p8
-google-services.json    # Firebase 配置，含 project_number / api_key
-google-services.json.enc  # 加密版另当别论
+# Firebase 配置，含 project_number / api_key——绝对禁止提交原始文件
+google-services.json
+# Firebase / GCP service account 私钥
+*-service-account*.json
+service-account*.json
+# 加密版另当别论
+google-services.json.enc
 
 # Android Profiler 输出
 *.hprof

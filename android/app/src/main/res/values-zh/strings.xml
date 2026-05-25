@@ -36,6 +36,155 @@
     <string name="sign_in">登录</string>
     <string name="guest">游客</string>
     <string name="enter_as_guest">游客进入</string>
+    <string name="admin">管理员</string>
+    <string name="login_username_hint">用户名</string>
+    <string name="login_password_hint">密码</string>
+    <string name="register_username_hint">设置用户名</string>
+    <string name="register_password_hint">设置密码</string>
+    <string name="change_password">修改密码</string>
+    <string name="current_password">当前密码</string>
+    <string name="new_password">新密码</string>
+    <string name="confirm_new_password">确认新密码</string>
+    <string name="delete_account">删除账户</string>
+    <string name="delete_account_confirm">确定要删除 %s 的账户吗？此操作不可撤销。</string>
+    <string name="delete_account_success">账户已删除</string>
+
+    <!-- Dashboard -->
+    <string name="explore">探索</string>
+    <string name="this_week">本周</string>
+    <string name="your_matches">你的匹配</string>
+    <string name="see_all">查看全部 %d</string>
+    <string name="active_listings">活跃房源</string>
+    <string name="matched">匹配</string>
+    <string name="alerts_today">今日提醒</string>
+    <string name="by_platform">按平台</string>
+    <string name="by_status">按状态</string>
+    <string name="by_price">按价格</string>
+    <string name="by_type">按类型</string>
+    <string name="by_energy">按能效</string>
+    <string name="by_tenant">按租客</string>
+    <string name="updated">已更新</string>
+    <string name="updated_just_now">刚刚更新</string>
+    <string name="no_data">暂无数据</string>
+
+    <!-- Listings -->
+    <string name="search_listings">搜索房源…</string>
+    <string name="no_listings">暂无房源</string>
+    <string name="listing_detail">房源详情</string>
+    <string name="listing_details">房源详情</string>
+    <string name="filter">筛选</string>
+    <string name="filters">筛选条件</string>
+    <string name="clear_filters">清除筛选</string>
+    <string name="edit_filters">编辑筛选</string>
+    <string name="apply">应用</string>
+    <string name="any">不限</string>
+    <string name="sort">排序</string>
+    <string name="newest">最新</string>
+    <string name="price_low_high">价格低→高</string>
+    <string name="price_high_low">价格高→低</string>
+    <string name="status">状态</string>
+    <string name="city">城市</string>
+    <string name="source">来源</string>
+    <string name="type">类型</string>
+    <string name="contract">合同</string>
+    <string name="energy">能效</string>
+    <string name="area">面积</string>
+    <string name="rooms">房间</string>
+    <string name="floor_detail">楼层</string>
+    <string name="building">建筑</string>
+    <string name="finishing">装修</string>
+    <string name="occupancy">入住人数</string>
+    <string name="tenant">租客要求</string>
+    <string name="available">入住日期</string>
+    <string name="available_to_book">可预订</string>
+    <string name="available_in_lottery">抽签中</string>
+    <string name="reserved">已预订</string>
+    <string name="features">设施</string>
+    <string name="key_details">关键信息</string>
+    <string name="all_details">全部信息</string>
+    <string name="monitoring">监控记录</string>
+    <string name="open_on_official">在官网打开</string>
+    <string name="monitor_history">状态变化记录</string>
+
+    <!-- Map -->
+    <string name="map">地图</string>
+    <string name="list">列表</string>
+    <string name="listings_on_map">地图上 %d 套房源</string>
+    <string name="listings_with_coordinates">%d 套有坐标的房源</string>
+    <string name="more_nearby">+ %d 套附近房源</string>
+    <string name="more_cities">+ %d 更多</string>
+    <string name="my_location">我的位置</string>
+    <string name="refresh">刷新</string>
+
+    <!-- Calendar -->
+    <string name="prev_month">上个月</string>
+    <string name="next_month">下个月</string>
+    <string name="no_listings_on_date">当天无可入住房源</string>
+
+    <!-- Notifications -->
+    <string name="no_notifications">暂无通知</string>
+    <string name="mark_read">标记已读</string>
+    <string name="mark_all_read">全部标为已读</string>
+    <string name="today">今天</string>
+    <string name="yesterday">昨天</string>
+    <string name="earlier">更早</string>
+    <string name="alerts">通知</string>
+    <string name="new_listing">新房源</string>
+    <string name="status_change">状态变动</string>
+    <string name="booking_alert">预订提醒</string>
+
+    <!-- Settings -->
+    <string name="settings">设置</string>
+    <string name="server_url">服务器地址</string>
+    <string name="appearance">外观</string>
+    <string name="dark_mode">深色模式</string>
+    <string name="light_mode">浅色模式</string>
+    <string name="system_default">跟随系统</string>
+    <string name="language">语言</string>
+    <string name="about">关于</string>
+    <string name="feedback">反馈</string>
+    <string name="message">内容</string>
+    <string name="privacy_policy">隐私政策</string>
+    <string name="terms_of_use">使用条款</string>
+    <string name="delete_account_warning">此操作不可恢复。所有数据将被永久删除。</string>
+    <string name="push_notification_filter">推送通知筛选</string>
+    <string name="active_filter_summary">活跃筛选: %s</string>
+    <string name="no_active_filter">无活跃筛选</string>
+    <string name="test_push">测试推送</string>
+    <string name="export_data">导出数据</string>
+    <string name="share">分享</string>
+    <string name="done">完成</string>
+    <string name="cancel">取消</string>
+    <string name="back">返回</string>
+
+    <!-- Admin -->
+    <string name="admin_users">用户管理</string>
+    <string name="admin_monitor">监控管理</string>
+    <string name="no_users">暂无用户</string>
+    <string name="toggle_user">切换状态</string>
+    <string name="delete_user">删除用户</string>
+    <string name="monitor_control">监控控制</string>
+    <string name="start_monitor">启动监控</string>
+    <string name="stop_monitor">停止监控</string>
+    <string name="reload_monitor">重载监控</string>
+    <string name="monitor_status">监控状态</string>
+    <string name="last_scrape">上次抓取</string>
+    <string name="last_count">上次数量</string>
+    <string name="pid">进程 ID</string>
+    <string name="running">运行中</string>
+    <string name="stopped">已停止</string>
+
+    <!-- Terms -->
+    <string name="before_you_continue">使用前须知</string>
+    <string name="terms_prompt">请阅读并接受使用条款以使用 FlatRadar。</string>
+    <string name="terms_disclaimer">FlatRadar 是一个独立的、非官方的多平台房源监控工具。它不与所监控的任何房源平台（包括 Holland2Stay、OurDomain、Xior 等）有关联、认可、赞助、维护或运营。\n\n使用 FlatRadar 即表示您确认已阅读并同意使用条款和隐私政策。</string>
+    <string name="terms_agree_label">继续即表示您同意：</string>
+    <string name="terms_bullet_1">FlatRadar 是一个独立的非官方工具，与任何房源平台无关。</string>
+    <string name="terms_bullet_2">您应自行遵守各房源平台的服务条款。</string>
+    <string name="terms_bullet_3">房源数据可能存在延迟、不完整或不准确。</string>
+    <string name="terms_bullet_4">推送通知为尽力而为服务，请以官网信息为准。</string>
+    <string name="terms_bullet_5">FlatRadar 仅供个人非商业用途使用。</string>
+    <string name="agree_and_continue">同意并继续</string>
 
     <!-- Generic -->
     <string name="try_again">重试</string>
@@ -43,4 +192,18 @@
     <string name="loading">加载中…</string>
     <string name="error_network">网络错误，请检查连接。</string>
     <string name="error_unauthorized">登录失败，请重新登录。</string>
+    <string name="session_expired">会话已过期，请重新登录。</string>
+    <string name="confirm_logout">确定要登出吗？</string>
+    <string name="submit">提交</string>
+    <string name="search">搜索</string>
+    <string name="clear">清除</string>
+    <string name="close">关闭</string>
+    <string name="max_price">最高价</string>
+    <string name="min_price">最低价</string>
+    <string name="retry">重试</string>
+    <string name="no_options">暂无选项</string>
+    <string name="enabled">已启用</string>
+    <string name="disabled">已禁用</string>
+    <string name="devices">设备</string>
+    <string name="delete">删除</string>
 </resources>

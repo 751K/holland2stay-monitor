@@ -15,6 +15,7 @@ final class DashboardStore {
     private let client = APIClient.shared
 
     func fetchSummary() async {
+        guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }

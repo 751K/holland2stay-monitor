@@ -42,18 +42,14 @@ final class AdminStore {
 
     /// 翻转用户 enabled；本地立刻 optimistic 更新，失败回滚 + 显示错误。
     func toggleUser(id: String) async {
-        guard let idx = users.firstIndex(where: { $0.id == id }) else { return }
-        let original = users[idx]
-        // 用 Decoder 的方式重建 summary 不便；这里手动构造 summary 的 var 副本
-        // 通过 fetch 来同步（toggle 后 resp 只回 id+enabled，不够构造完整 summary）
+        guard users.contains(where: { $0.id == id }) else { return }
         actionInFlight = true
         defer { actionInFlight = false }
         do {
             _ = try await client.adminToggleUser(id: id)
-            await fetchUsers()   // 重新拉一次保持完整字段一致
+            await fetchUsers()
         } catch {
             errorMessage = error.localizedDescription
-            _ = original  // suppressed warning
         }
     }
 
