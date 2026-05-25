@@ -370,7 +370,7 @@ TRANSLATIONS = {
     "user_form_app_password_clear":      {"zh": "清除已保存的密码",          "en": "Clear saved password"},
 
     # ── App 账户管理页 ───────────────────────────────────
-    "app_accounts_title":     {"zh": "App 会话管理",                "en": "App Session Management"},
+    "app_accounts_title":     {"zh": "客户端管理",                "en": "Client Management"},
     "app_accounts_meta":      {"zh": "查看和撤销 iOS App / 第三方客户端签发的 Bearer Token。", "en": "View and revoke Bearer Tokens issued to iOS App / third-party clients."},
     "app_accounts_empty":     {"zh": "暂无活跃会话",                "en": "No active sessions"},
     "app_accounts_show_revoked":{"zh": "显示已撤销",                "en": "Show revoked"},
@@ -398,7 +398,7 @@ TRANSLATIONS = {
     "user_form_reload_hint":{"zh": "保存后点击「立即生效」按钮通知 monitor.py 热重载。", "en": "After saving, click 'Apply Now' to hot-reload monitor.py."},
 
     # ── Guest mode ───────────────────────────────────────
-    "guest_mode":           {"zh": "访客模式（只读）",            "en": "Guest mode (read-only)"},
+    "guest_mode":           {"zh": "访客模式",            "en": "Guest mode"},
 
     # ── Login ────────────────────────────────────────────
     "login_title":          {"zh": "登录 · FlatRadar",        "en": "Login · FlatRadar"},

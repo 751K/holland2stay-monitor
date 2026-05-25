@@ -9,10 +9,32 @@
 </div>
 
 <!-- Filter bar -->
+<style>
+  .listing-filters-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+  @media (min-width: 1200px) {
+    .listing-filters-grid {
+      grid-template-columns: repeat(7, 1fr);
+    }
+  }
+  .listing-filters-grid .form-group {
+    margin-bottom: 0 !important;
+  }
+  .listing-filters-grid .multi-select {
+    min-width: 0 !important;
+  }
+  .listing-filters-grid input[type="number"] {
+    width: 100% !important;
+  }
+</style>
 <div class="card mb-4">
   <div class="card-body">
-    <form method="get" class="form-inline">
-      <div class="form-group" style="margin-bottom:0;min-width:160px;">
+    <form method="get" class="listing-filters-grid">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_status') }}</label>
         <select name="status" class="form-select" style="font-size:12px;">
           <option value="">{{ _('filter_all_status') }}</option>
@@ -21,9 +43,9 @@
           {% endfor %}
         </select>
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:160px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_city') }}</label>
-        <div class="multi-select" style="min-width:140px;">
+        <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
             <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
@@ -35,9 +57,9 @@
           </div>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:150px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_source') }}</label>
-        <div class="multi-select" style="min-width:130px;">
+        <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
             <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
@@ -49,19 +71,19 @@
           </div>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:180px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_name') }}</label>
         <input type="text" name="q" class="form-input" placeholder="{{ _('filter_placeholder') }}" value="{{ search }}" style="font-size:12px;">
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:100px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_max_rent') }}</label>
-        <input type="number" name="max_rent" class="form-input" placeholder="€" value="{{ max_rent or '' }}" style="font-size:12px;width:90px;">
+        <input type="number" name="max_rent" class="form-input" placeholder="€" value="{{ max_rent or '' }}" style="font-size:12px;">
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:100px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_min_area') }}</label>
-        <input type="number" name="min_area" class="form-input" placeholder="m²" value="{{ min_area or '' }}" style="font-size:12px;width:80px;">
+        <input type="number" name="min_area" class="form-input" placeholder="m²" value="{{ min_area or '' }}" style="font-size:12px;">
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:150px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_contract') }}</label>
         <select name="contract" class="form-select" style="font-size:12px;">
           <option value="">{{ _('filter_all_contract') }}</option>
@@ -70,9 +92,9 @@
           {% endfor %}
         </select>
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:150px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_type') }}</label>
-        <div class="multi-select" style="min-width:130px;">
+        <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
             <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
@@ -84,9 +106,9 @@
           </div>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:170px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_occupancy') }}</label>
-        <div class="multi-select" style="min-width:150px;">
+        <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
             <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
@@ -98,9 +120,9 @@
           </div>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:160px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_tenant') }}</label>
-        <div class="multi-select" style="min-width:140px;">
+        <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
             <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
@@ -112,7 +134,7 @@
           </div>
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:130px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_energy') }}</label>
         <select name="energy" class="form-select" style="font-size:12px;">
           <option value="">{{ _('filter_min_energy') }}</option>
@@ -121,7 +143,7 @@
           {% endfor %}
         </select>
       </div>
-      <div class="form-group" style="margin-bottom:0;min-width:130px;">
+      <div class="form-group">
         <label class="form-label">{{ _('filter_finishing') }}</label>
         <select name="finishing" class="form-select" style="font-size:12px;">
           <option value="">{{ _('filter_all_finishing') }}</option>
@@ -130,12 +152,12 @@
           {% endfor %}
         </select>
       </div>
-      <div style="padding-top:20px;">
+      <div class="form-group filter-actions" style="display:flex; gap:8px;">
         <button type="submit" class="btn btn-primary btn-sm">
           <i class="bi bi-search mr-1"></i>{{ _('filter_btn') }}
         </button>
         {% if status_filter or search or city_filters or source_filters or type_filters or occupancy_filters or max_rent or min_area or contract_filter or tenant_filters or energy_filter or finishing_filter %}
-          <a href="{{ url_for('listings') }}" class="btn btn-ghost btn-sm ml-1">
+          <a href="{{ url_for('listings') }}" class="btn btn-ghost btn-sm">
             <i class="bi bi-x mr-1"></i>{{ _('filter_clear') }}
           </a>
         {% endif %}

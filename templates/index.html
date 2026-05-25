@@ -162,9 +162,11 @@
           <tr>
             <td><a href="{{ c.url }}" target="_blank" class="cell-name" style="font-size:12px;">{{ c.name }}</a></td>
             <td>
-              <span class="badge badge-status badge-{{ status_badge(c.old_status) }} mr-1">{{ c.old_status | status_short }}</span>
+              {% set old_cap = c.old_status | status_capsule %}
+              {% set new_cap = c.new_status | status_capsule %}
+              <span class="badge badge-status badge-{{ old_cap.css }} mr-1">{{ old_cap.label }}</span>
               <i class="bi bi-arrow-right text-tertiary text-xs mr-1"></i>
-              <span class="badge badge-status badge-{{ status_badge(c.new_status) }}">{{ c.new_status | status_short }}</span>
+              <span class="badge badge-status badge-{{ new_cap.css }}">{{ new_cap.label }}</span>
             </td>
             <td class="cell-secondary">{{ c.changed_at | time_ago }}</td>
           </tr>

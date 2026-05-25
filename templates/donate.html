@@ -108,12 +108,15 @@
       text-align: center;
     }
     .qr-card img {
-      width: 200px;
-      height: 200px;
+      width: 100%;
+      max-width: 220px;
+      height: auto;
       object-fit: contain;
       border-radius: 8px;
       background: #fff;     /* QR 永远白底，避免深色模式黑底白码导致扫码识别问题 */
-      padding: 4px;
+      padding: 6px;
+      margin: 0 auto;
+      display: block;
     }
     .qr-placeholder {
       width: 200px;

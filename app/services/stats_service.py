@@ -12,7 +12,7 @@ from typing import Any
 
 from app.services.listing_service import storage_ctx
 
-DEFAULT_STATS_DAYS = 30
+DEFAULT_STATS_DAYS = 7
 MIN_STATS_DAYS = 1
 MAX_STATS_DAYS = 365
 

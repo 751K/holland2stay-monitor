@@ -40,30 +40,444 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;550;600;700&display=swap">
   <link rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <style>
+    /* B2C Modern Aesthetic Overrides */
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: transparent !important;
+    }
+    .sky-light, .sky-dark {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 0;
+      transition: opacity 1.5s ease-in-out !important;
+    }
+    html.theme-transitioning .sky-light,
+    html.theme-transitioning .sky-dark {
+      transition: opacity 1.5s ease-in-out !important;
+    }
+
+    .sky-light {
+      background: radial-gradient(circle at 20% 20%, #fde68a 0%, #ffedd5 40%, #ffffff 100%);
+      opacity: 1;
+    }
+    .sky-dark {
+      background: radial-gradient(circle at 80% 20%, #1e293b 0%, #0f172a 60%, #020617 100%);
+      opacity: 0;
+    }
+    [data-theme="dark"] .sky-light { opacity: 0; }
+    [data-theme="dark"] .sky-dark { opacity: 1; }
+
+    .celestial-container {
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      overflow: hidden;
+      z-index: 1;
+      pointer-events: none;
+    }
+    .sun {
+      position: absolute;
+      top: 10%;
+      left: 10%;
+      width: 140px;
+      height: 140px;
+      background: radial-gradient(circle, #fde047 0%, #fbbf24 60%, #f59e0b 100%);
+      border-radius: 50%;
+      box-shadow: 0 0 100px 40px rgba(251, 191, 36, 0.4), 0 0 160px 80px rgba(245, 158, 11, 0.2);
+      transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 1.5s ease !important;
+      transform: translateY(0);
+    }
+    html.theme-transitioning .sun {
+      transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 1.5s ease !important;
+    }
+    [data-theme="dark"] .sun {
+      transform: translateY(100vh) translateX(30vw);
+      opacity: 0;
+    }
+    .sun-rays {
+      position: absolute;
+      top: -50%; left: -50%; width: 200%; height: 200%;
+      background: conic-gradient(from 0deg, transparent 0deg, rgba(253, 186, 116, 0.3) 15deg, transparent 30deg, rgba(253, 186, 116, 0.3) 45deg, transparent 60deg, rgba(253, 186, 116, 0.3) 75deg, transparent 90deg, rgba(253, 186, 116, 0.3) 105deg, transparent 120deg, rgba(253, 186, 116, 0.3) 135deg, transparent 150deg, rgba(253, 186, 116, 0.3) 165deg, transparent 180deg, rgba(253, 186, 116, 0.3) 195deg, transparent 210deg, rgba(253, 186, 116, 0.3) 225deg, transparent 240deg, rgba(253, 186, 116, 0.3) 255deg, transparent 270deg, rgba(253, 186, 116, 0.3) 285deg, transparent 300deg, rgba(253, 186, 116, 0.3) 315deg, transparent 330deg, rgba(253, 186, 116, 0.3) 345deg, transparent 360deg);
+      animation: rotate-rays 30s linear infinite;
+      border-radius: 50%;
+      -webkit-mask-image: radial-gradient(circle, #000 30%, transparent 70%);
+      mask-image: radial-gradient(circle, #000 30%, transparent 70%);
+    }
+    @keyframes rotate-rays {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .moon {
+      position: absolute;
+      top: 15%;
+      right: 15%;
+      width: 100px;
+      height: 100px;
+      background: radial-gradient(circle at 30% 30%, #f8fafc 0%, #cbd5e1 50%, #94a3b8 100%);
+      border-radius: 50%;
+      box-shadow: 0 0 60px 20px rgba(148, 163, 184, 0.3), inset -8px -8px 16px rgba(0,0,0,0.15);
+      transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 1.5s ease !important;
+      transform: translateY(100vh) translateX(-30vw);
+      opacity: 0;
+      z-index: 2;
+    }
+    html.theme-transitioning .moon {
+      transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 1.5s ease !important;
+    }
+    [data-theme="dark"] .moon {
+      transform: translateY(0) translateX(0);
+      opacity: 1;
+    }
+    .crater {
+      position: absolute;
+      background: rgba(0,0,0,0.1);
+      border-radius: 50%;
+      box-shadow: inset 2px 2px 4px rgba(0,0,0,0.1);
+    }
+    .ground-light, .ground-dark {
+      position: absolute;
+      bottom: 0;
+      left: -10vw;
+      width: 120vw;
+      height: 28vh;
+      border-radius: 50% 50% 0 0 / 80px 80px 0 0;
+      z-index: 5;
+      transition: opacity 1.5s ease-in-out !important;
+    }
+    html.theme-transitioning .ground-light,
+    html.theme-transitioning .ground-dark {
+      transition: opacity 1.5s ease-in-out !important;
+    }
+    .ground-light {
+      background: linear-gradient(to bottom, #dcb68a 0%, #ad7c4c 100%);
+      box-shadow: inset 0 20px 40px rgba(255,255,255,0.3);
+      opacity: 1;
+    }
+    .ground-dark {
+      background: linear-gradient(to bottom, #0f172a 0%, #000000 100%);
+      box-shadow: inset 0 10px 30px rgba(255,255,255,0.05);
+      opacity: 0;
+    }
+    [data-theme="dark"] .ground-light { opacity: 0; }
+    [data-theme="dark"] .ground-dark { opacity: 1; }
+
+    /* Windmills */
+    .windmill {
+      position: absolute;
+      bottom: 24vh;
+      left: 12vw;
+      width: 100px;
+      height: 120px;
+      z-index: 6; /* In front of the ground */
+      color: #b45309;
+      transition: color 1.5s ease-in-out !important;
+    }
+    .windmill-2 {
+      left: auto;
+      right: 18vw;
+      bottom: 20vh;
+      transform: scale(0.45);
+    }
+    [data-theme="dark"] .windmill { color: #020617; }
+    html.theme-transitioning .windmill { transition: color 1.5s ease-in-out !important; }
+
+    .windmill-svg {
+      width: 100%; height: 100%;
+      display: block;
+    }
+
+    .wm-sails {
+      position: absolute;
+      top: 20px; left: 50%;
+      margin-left: -70px; margin-top: -70px;
+      width: 140px; height: 140px;
+      animation: rotate-rays 22s linear infinite;
+    }
+    .windmill-2 .wm-sails { animation-duration: 28s; }
+    
+    .wm-sails::before {
+      content: ''; position: absolute; top: 69px; left: 0; width: 140px; height: 2px; background-color: currentColor;
+    }
+    .wm-sails::after {
+      content: ''; position: absolute; left: 69px; top: 0; width: 2px; height: 140px; background-color: currentColor;
+    }
+    
+    .wm-blade { 
+      position: absolute; 
+      border: 1.5px solid currentColor; 
+      background: repeating-linear-gradient(to bottom, transparent, transparent 6px, currentColor 6px, currentColor 7px),
+                  repeating-linear-gradient(to right, transparent, transparent 6px, currentColor 6px, currentColor 7px);
+    }
+    .wm-blade-top { top: 5px; left: 45px; width: 24px; height: 60px; border-right: none; }
+    .wm-blade-right { top: 45px; left: 71px; width: 60px; height: 24px; border-bottom: none; }
+    .wm-blade-bottom { top: 71px; left: 71px; width: 24px; height: 60px; border-left: none; }
+    .wm-blade-left { top: 71px; left: 5px; width: 60px; height: 24px; border-top: none; }
+
+    .login-page {
+      background: transparent !important;
+      position: relative;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      min-height: 100vh;
+      padding: 40px 20px;
+    }
+    .login-card {
+      background: rgba(255, 255, 255, 0.55) !important;
+      backdrop-filter: blur(40px) saturate(2);
+      border: 1px solid rgba(255, 255, 255, 0.9) !important;
+      box-shadow: 0 32px 64px rgba(0,0,0,0.08), 0 8px 16px rgba(0,0,0,0.04) !important;
+      border-radius: 28px !important;
+      padding: 48px 40px !important;
+      width: 100% !important;
+      max-width: 440px !important;
+      margin: auto;
+    }
+    [data-theme="dark"] .login-card {
+      background: rgba(30, 30, 30, 0.6) !important;
+      border: 1px solid rgba(255, 255, 255, 0.08) !important;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.4) !important;
+    }
+    .login-logo {
+      width: 64px !important;
+      height: 64px !important;
+      border-radius: 18px;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.1);
+      margin-bottom: 24px !important;
+    }
+    .login-card h1 {
+      font-size: 28px !important;
+      font-weight: 700 !important;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px !important;
+      background: linear-gradient(135deg, var(--text) 0%, color-mix(in srgb, var(--text) 60%, transparent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .login-card .sub {
+      font-size: 15px !important;
+      color: var(--text2) !important;
+      margin-bottom: 28px !important;
+    }
+    .login-field input {
+      background: rgba(255, 255, 255, 0.7) !important;
+      border: 1px solid rgba(0, 0, 0, 0.08) !important;
+      border-radius: 14px !important;
+      padding: 14px 16px !important;
+      font-size: 15px !important;
+      transition: all 0.2s;
+    }
+    [data-theme="dark"] .login-field input {
+      background: rgba(0, 0, 0, 0.2) !important;
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
+    .login-field input:focus {
+      background: var(--surface) !important;
+      border: 1px solid var(--accent) !important;
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent) !important;
+    }
+    .login-btn {
+      border-radius: 14px !important;
+      padding: 14px !important;
+      font-size: 16px !important;
+      font-weight: 600 !important;
+      letter-spacing: 0.3px;
+      margin-top: 12px;
+      box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 30%, transparent);
+      transition: all 0.2s;
+    }
+    .login-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 24px color-mix(in srgb, var(--accent) 40%, transparent);
+    }
+    .btn-secondary {
+      background: var(--surface) !important;
+      color: var(--text) !important;
+      border: 1px solid var(--border) !important;
+      box-shadow: 0 8px 20px color-mix(in srgb, var(--text) 8%, transparent) !important;
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 0 !important;
+    }
+    .btn-secondary:hover {
+      background: var(--surface-hover) !important;
+      box-shadow: 0 12px 24px color-mix(in srgb, var(--text) 15%, transparent) !important;
+      transform: translateY(-2px);
+    }
+    .register-content {
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .register-inner {
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(-10px);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+    }
+    #register_toggle:checked ~ .register-content {
+      grid-template-rows: 1fr;
+    }
+    #register_toggle:checked ~ .register-content .register-inner {
+      opacity: 1;
+      transform: translateY(0);
+      transition: opacity 0.4s ease 0.1s, transform 0.4s cubic-bezier(0.16, 1, 0.3, 1) 0.05s;
+    }
+    .btn-download {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 18px;
+      border-radius: 999px;
+      font-size: 14px;
+      font-weight: 650;
+      text-decoration: none;
+      transition: all 0.2s;
+      cursor: pointer;
+      flex: 1;
+    }
+    .btn-dl-ios {
+      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+      color: var(--accent);
+    }
+    .btn-dl-ios:hover {
+      background: color-mix(in srgb, var(--accent) 18%, transparent);
+      transform: scale(1.03);
+    }
+    .btn-dl-android {
+      border: 1px solid color-mix(in srgb, #10b981 28%, var(--border));
+      background: color-mix(in srgb, #10b981 10%, transparent);
+      color: #10b981;
+    }
+    .btn-dl-android:hover {
+      background: color-mix(in srgb, #10b981 18%, transparent);
+      transform: scale(1.03);
+    }
+    .floating-tools {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      display: flex;
+      gap: 12px;
+      z-index: 20;
+    }
+    .login-theme-btn {
+      position: static !important;
+      background: rgba(255, 255, 255, 0.5) !important;
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.3) !important;
+      color: var(--text2) !important;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+    .login-theme-btn:hover {
+      color: var(--text) !important;
+      transform: scale(1.05);
+      background: rgba(255, 255, 255, 0.8) !important;
+    }
+    [data-theme="dark"] .login-theme-btn {
+      background: rgba(30, 30, 30, 0.5) !important;
+      border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
+    [data-theme="dark"] .login-theme-btn:hover {
+      background: rgba(50, 50, 50, 0.8) !important;
+    }
+  </style>
 </head>
 <body>
 
-<a href="{{ url_for('set_lang', lang='en' if lang=='zh' else 'zh', next=request.path) }}"
-   class="login-theme-btn login-lang-btn" title="{{ 'English' if lang=='zh' else '中文' }}">
-  <i class="bi bi-translate"></i>
-</a>
+<div class="sky-light"></div>
+<div class="sky-dark"></div>
+<div class="celestial-container">
+  <div class="sun" style="z-index: 2;">
+    <div class="sun-rays"></div>
+  </div>
+  <div class="moon">
+    <div class="crater" style="top:25%; left:25%; width:16px; height:16px;"></div>
+    <div class="crater" style="top:55%; left:65%; width:24px; height:24px;"></div>
+    <div class="crater" style="top:75%; left:35%; width:12px; height:12px;"></div>
+  </div>
+  <div class="ground-light"></div>
+  <div class="ground-dark"></div>
 
-<button class="login-theme-btn" onclick="toggleTheme()" title="{{ _('toggle_theme') }}">
-  <i id="theme-icon" class="bi bi-sun"></i>
-</button>
+  <!-- Dutch Windmills -->
+  <div class="windmill">
+    <svg class="windmill-svg" viewBox="0 0 100 120">
+      <path d="M 20,120 L 80,120 L 65,50 L 35,50 Z" fill="currentColor"/>
+      <path d="M 35,50 L 65,50 L 58,25 L 42,25 Z" fill="currentColor"/>
+      <rect x="38" y="23" width="24" height="3" fill="currentColor"/>
+      <path d="M 40,23 C 40,5 60,5 60,23 Z" fill="currentColor"/>
+      <rect x="10" y="50" width="80" height="2" fill="currentColor"/>
+      <rect x="15" y="55" width="70" height="2" fill="currentColor"/>
+      <line x1="42" y1="35" x2="15" y2="50" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="58" y1="35" x2="85" y2="50" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="38" y1="40" x2="25" y2="50" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="62" y1="40" x2="75" y2="50" stroke="currentColor" stroke-width="1.5"/>
+    </svg>
+    <div class="wm-sails">
+      <div class="wm-blade wm-blade-top"></div>
+      <div class="wm-blade wm-blade-right"></div>
+      <div class="wm-blade wm-blade-bottom"></div>
+      <div class="wm-blade wm-blade-left"></div>
+    </div>
+  </div>
+  <div class="windmill windmill-2">
+    <svg class="windmill-svg" viewBox="0 0 100 120">
+      <path d="M 20,120 L 80,120 L 65,50 L 35,50 Z" fill="currentColor"/>
+      <path d="M 35,50 L 65,50 L 58,25 L 42,25 Z" fill="currentColor"/>
+      <rect x="38" y="23" width="24" height="3" fill="currentColor"/>
+      <path d="M 40,23 C 40,5 60,5 60,23 Z" fill="currentColor"/>
+      <rect x="10" y="50" width="80" height="2" fill="currentColor"/>
+      <rect x="15" y="55" width="70" height="2" fill="currentColor"/>
+      <line x1="42" y1="35" x2="15" y2="50" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="58" y1="35" x2="85" y2="50" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="38" y1="40" x2="25" y2="50" stroke="currentColor" stroke-width="1.5"/>
+      <line x1="62" y1="40" x2="75" y2="50" stroke="currentColor" stroke-width="1.5"/>
+    </svg>
+    <div class="wm-sails">
+      <div class="wm-blade wm-blade-top"></div>
+      <div class="wm-blade wm-blade-right"></div>
+      <div class="wm-blade wm-blade-bottom"></div>
+      <div class="wm-blade wm-blade-left"></div>
+    </div>
+  </div>
+</div>
+
+<div class="floating-tools">
+  <a href="{{ url_for('set_lang', lang='en' if lang=='zh' else 'zh', next=request.path) }}"
+     class="login-theme-btn login-lang-btn" title="{{ 'English' if lang=='zh' else '中文' }}" style="text-decoration:none;">
+    <i class="bi bi-translate"></i>
+  </a>
+  <button class="login-theme-btn" onclick="toggleTheme()" title="{{ _('toggle_theme') }}">
+    <i id="theme-icon" class="bi bi-sun"></i>
+  </button>
+</div>
 
 <div class="login-page">
   <div class="login-card">
-    <img class="login-icon login-logo" src="/static/logo-md.png" alt="" width="52" height="52">
-    <h1>{{ _('login_header') }}</h1>
-    <div class="sub">{{ _('login_subtitle') }}</div>
-    <div style="display:flex;justify-content:center;margin:14px 0 4px;">
-      <a href="https://apps.apple.com/us/app/flarradar/id6769857080"
-         target="_blank"
-         rel="noopener noreferrer"
-         style="display:inline-flex;align-items:center;gap:8px;padding:9px 14px;border-radius:999px;border:1px solid color-mix(in srgb,var(--accent) 28%,var(--border));background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);font-size:13px;font-weight:650;text-decoration:none;">
+    <img class="login-icon login-logo" src="/static/logo-md.png" alt="" width="64" height="64">
+    <h1>{{ 'Welcome to FlatRadar' if lang == 'en' else '欢迎来到 FlatRadar' }}</h1>
+    <div class="sub">{{ 'Find your dream house faster and smarter.' if lang == 'en' else '更快、更智能地发现心仪好房' }}</div>
+    
+    <div style="display:flex;gap:12px;margin:16px 0 28px;">
+      <a href="https://apps.apple.com/us/app/flarradar/id6769857080" target="_blank" rel="noopener noreferrer" class="btn-download btn-dl-ios">
         <i class="bi bi-apple"></i>
-        {{ 'Download iOS App' if lang == 'en' else '下载 iOS App' }}
+        iOS App
+      </a>
+      <a href="#" onclick="alert('{{ 'Actively preparing for release! Coming soon.' if lang == 'en' else '安卓版本积极上架中，敬请期待！' }}'); return false;" class="btn-download btn-dl-android">
+        <i class="bi bi-android2"></i>
+        Android App
       </a>
     </div>
 
@@ -97,70 +511,72 @@
       <button type="submit" class="login-btn" id="login-btn">{{ _('login_btn') }}</button>
     </form>
 
-    <details style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
-      <summary style="cursor:pointer;text-align:center;color:var(--accent);font-size:13px;font-weight:650;list-style:none;">
-        {{ 'Create a user account' if lang == 'en' else '注册用户账号' }}
-      </summary>
-      <form method="POST" action="{{ url_for('register_user') }}" autocomplete="on" style="margin-top:14px;">
-        <input type="hidden" name="next" value="{{ next }}">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="terms_accepted" id="terms_accepted" value="0">
+    <div style="margin-top:16px;padding-top:14px;">
+      <input type="checkbox" id="register_toggle" style="display:none;">
+      <label for="register_toggle" class="login-btn btn-secondary" style="cursor:pointer; width:100%;">
+        {{ 'Create a user account' if lang == 'en' else '注册账户' }}
+      </label>
+      <div class="register-content">
+        <div class="register-inner">
+          <form method="POST" action="{{ url_for('register_user') }}" autocomplete="on" style="padding-top:14px;">
+            <input type="hidden" name="next" value="{{ next }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="terms_accepted" id="terms_accepted" value="0">
 
-        <div class="login-field">
-          <label for="register_username">{{ 'Username' if lang == 'en' else '用户名' }}</label>
-          <input id="register_username"
-                 type="text"
-                 name="register_username"
-                 placeholder="{{ 'Choose a username' if lang == 'en' else '设置用户名' }}"
-                 autocomplete="username"
-                 minlength="2"
-                 maxlength="64"
-                 required>
-        </div>
+            <div class="login-field">
+              <label for="register_username">{{ 'Username' if lang == 'en' else '用户名' }}</label>
+              <input id="register_username"
+                     type="text"
+                     name="register_username"
+                     placeholder="{{ 'Choose a username' if lang == 'en' else '设置用户名' }}"
+                     autocomplete="username"
+                     minlength="2"
+                     maxlength="64"
+                     required>
+            </div>
 
-        <div class="login-field">
-          <label for="register_password">{{ 'Password' if lang == 'en' else '密码' }}</label>
-          <input id="register_password"
-                 type="password"
-                 name="register_password"
-                 placeholder="{{ 'At least 4 characters' if lang == 'en' else '至少 4 个字符' }}"
-                 autocomplete="new-password"
-                 minlength="4"
-                 required>
-        </div>
+            <div class="login-field">
+              <label for="register_password">{{ 'Password' if lang == 'en' else '密码' }}</label>
+              <input id="register_password"
+                     type="password"
+                     name="register_password"
+                     placeholder="{{ 'At least 4 characters' if lang == 'en' else '至少 4 个字符' }}"
+                     autocomplete="new-password"
+                     minlength="4"
+                     required>
+            </div>
 
-        <button type="submit" class="login-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);">
-          {{ 'Register and Sign In' if lang == 'en' else '注册并登录' }}
-        </button>
-        <div class="sub" style="font-size:12px;margin-top:8px;">
-          {{ 'New accounts start with notifications off. Configure alerts after signing in.' if lang == 'en' else '新账号默认关闭通知，登录后可配置提醒。' }}
+            <button type="submit" class="login-btn" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);">
+              {{ 'Register and Sign In' if lang == 'en' else '注册并登录' }}
+            </button>
+            <div class="sub" style="font-size:12px;margin-top:8px;">
+              {{ 'New accounts start with notifications off. Configure alerts after signing in.' if lang == 'en' else '新账号默认关闭通知，登录后可配置提醒。' }}
+            </div>
+          </form>
         </div>
-      </form>
-    </details>
+      </div>
+    </div>
 
     {% if guest_mode %}
-    <div style="text-align:center;margin-top:16px;">
+    <div style="margin-top:16px;">
       <form method="post" action="{{ url_for('guest_login') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit"
-                style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text3);text-decoration:none;padding:8px 16px;border-radius:8px;border:1px solid var(--border);background:transparent;cursor:pointer;transition:color .15s,background .15s;"
-                onmouseover="this.style.color='var(--text)';this.style.background='var(--surface2)'"
-                onmouseout="this.style.color='var(--text3)';this.style.background='transparent'">
+        <button type="submit" class="login-btn btn-secondary">
           <i class="bi bi-eye"></i> {{ _('guest_mode') }}
         </button>
       </form>
     </div>
     {% endif %}
 
-    <div class="login-footer">
-      <div class="login-links" style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;">
+    <div class="login-footer" style="margin-top:24px;">
+      <div class="login-links" style="display:flex;justify-content:center;gap:14px;flex-wrap:wrap;font-size:14px;font-weight:500;">
         <a href="{{ url_for('support_page') }}" style="color:var(--accent);text-decoration:none;">{{ 'Help' if lang == 'en' else '帮助' }}</a>
         <span style="color:var(--text3);opacity:.5;">·</span>
         <a href="{{ url_for('privacy_page') }}" style="color:var(--accent);text-decoration:none;">{{ 'Privacy' if lang == 'en' else '隐私' }}</a>
         <span style="color:var(--text3);opacity:.5;">·</span>
         <a href="{{ url_for('terms_page') }}" style="color:var(--accent);text-decoration:none;">{{ 'Terms' if lang == 'en' else '条款' }}</a>
         <span style="color:var(--text3);opacity:.5;">·</span>
-        <a href="{{ url_for('donate_page') }}" style="color:var(--accent);text-decoration:none;">{{ 'Donate' if lang == 'en' else '赞赏' }}</a>
+        <a href="{{ url_for('donate_page') }}" style="color:var(--accent);text-decoration:none;">{{ 'Donate' if lang == 'en' else '赞助' }}</a>
       </div>
     </div>
   </div>

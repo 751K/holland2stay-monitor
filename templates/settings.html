@@ -177,16 +177,23 @@
       <button type="button" class="btn btn-ghost btn-sm" onclick="var cbs=this.parentElement.parentElement.querySelectorAll('.xior-bldg input[type=checkbox]');var all=Array.from(cbs).every(c=>c.checked);cbs.forEach(c=>c.checked=!all);this.textContent=all?'{{ _('select_all') }}':'{{ _('deselect_all') }}'" style="margin-left:auto;">{{ _('select_all') }}</button>
     </div>
     <div class="card-body">
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+      <style>
+        .xior-details summary { list-style: none; user-select: none; }
+        .xior-details summary::-webkit-details-marker { display: none; }
+        .xior-details[open] summary .bi-chevron-down { transform: rotate(180deg); }
+      </style>
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;">
         {% for city, buildings in xior_by_city | dictsort %}
-        <div style="background:var(--bg);border-radius:10px;padding:10px 12px;">
-          <label class="checkbox" style="font-weight:600;margin-bottom:6px;display:block;"
-                 onclick="var cbs=this.parentElement.querySelectorAll('.xior-bldg input');cbs.forEach(c=>c.checked=this.querySelector('input').checked)">
-            <input type="checkbox" class="xior-city" onchange="this.parentElement.click()"
-                   {% if xior_city_all_checked.get(city) %}checked{% endif %}>
-            {{ city }}
-          </label>
-          <div style="display:flex;flex-wrap:wrap;gap:2px 14px;padding-left:16px;">
+        <details class="xior-details" style="background:transparent;">
+          <summary style="padding:8px 0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+            <label class="checkbox" style="margin:0;" onclick="event.stopPropagation();var cbs=this.closest('details').querySelectorAll('.xior-bldg input');var ch=this.querySelector('input').checked;cbs.forEach(c=>c.checked=ch);">
+              <input type="checkbox" class="xior-city" onchange="this.parentElement.click()"
+                     {% if xior_city_all_checked.get(city) %}checked{% endif %}>
+              {{ city }}
+            </label>
+            <i class="bi bi-chevron-down text-tertiary" style="transition:transform 0.2s;"></i>
+          </summary>
+          <div style="padding:4px 0 12px 28px;display:flex;flex-wrap:wrap;gap:8px 16px;">
             {% for b in buildings %}
             <label class="checkbox xior-bldg" style="white-space:nowrap;font-size:12.5px;font-weight:400;">
               <input type="checkbox" name="xior_city_selected" value="{{ city }} {{ b.bldg }},{{ b.key }}" {% if b.key in selected_xior_keys %}checked{% endif %}>
@@ -194,7 +201,7 @@
             </label>
             {% endfor %}
           </div>
-        </div>
+        </details>
         {% endfor %}
       </div>
       <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_xior_hint') }}</div>
