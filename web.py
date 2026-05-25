@@ -120,9 +120,9 @@ def _add_security_headers(resp):
         "default-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://unpkg.com; "
         "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-        "img-src 'self' data: https://*.tile.openstreetmap.org; "
-        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net; "
-        "connect-src 'self'; "
+        "img-src 'self' data: https://*.tile.openstreetmap.org https://maps.googleapis.com https://maps.gstatic.com; "
+        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://maps.googleapis.com; "
+        "connect-src 'self' https://maps.googleapis.com; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'",

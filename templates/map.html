@@ -112,6 +112,7 @@ var map;
 var markers = [];
 var bounds;
 var infoWindow;
+var mapsLoaded = false;
 
 function isDark() {
   return document.documentElement.getAttribute('data-theme') === 'dark';
@@ -269,6 +270,7 @@ function loadMapData() {
 
 // ── Map init (called by Google Maps callback) ──
 window.initMap = function() {
+  mapsLoaded = true;
   map = new google.maps.Map(document.getElementById('map'), {
     center: {lat: 51.8, lng: 5.0},
     zoom: 8,
@@ -354,7 +356,23 @@ function getCsrf() {
 // Load Google Maps API — dynamic injection guarantees initMap is defined first
 var gmapsScript = document.createElement('script');
 gmapsScript.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(GMAPS_KEY) + '&loading=async&callback=initMap';
+gmapsScript.onerror = function() {
+  document.getElementById('map-loading').textContent = zh ? '地图脚本加载失败' : 'Map script failed to load';
+  document.getElementById('map').innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:14px;text-align:center;padding:40px">' +
+    (zh ? 'Google Maps 加载失败，请检查网络、API key 或浏览器控制台。' : 'Google Maps failed to load. Check network, API key, or browser console.') +
+    '</div>';
+};
 document.head.appendChild(gmapsScript);
+setTimeout(function() {
+  if (!mapsLoaded) {
+    document.getElementById('map-loading').textContent = zh ? '地图脚本未响应' : 'Map script did not respond';
+    document.getElementById('map').innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:14px;text-align:center;padding:40px">' +
+      (zh ? 'Google Maps 没有完成初始化，请检查 API key、CSP 或网络连接。' : 'Google Maps did not finish initializing. Check API key, CSP, or network connection.') +
+      '</div>';
+  }
+}, 10000);
 })();
 </script>
 {% else %}
