@@ -1,25 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ _('map_title') }} · FlatRadar{% endblock %}
 
-{% block head %}
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-{% endblock %}
-
 {% block extra_style %}
 #map-container{position:relative;border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm)}
-#map{height:calc(100vh - 160px);min-height:500px;background:#f0f0f0;z-index:0}
-/* Light mode: slight desaturation so markers stand out */
-#map .leaflet-tile{filter:saturate(60%) brightness(1.05)}
-/* Dark mode: invert light tiles to create readable dark map */
-[data-theme="dark"] #map .leaflet-tile{filter:invert(1) hue-rotate(180deg) brightness(.85) saturate(80%)}
-[data-theme="dark"] #map{background:#1a1a1a}
+#map{height:calc(100vh - 160px);min-height:500px;background:#f0f0f0}
 .map-legend{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
 .legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 3px rgba(0,0,0,.08)}
-.leaflet-popup-content-wrapper{background:var(--surface)!important;color:var(--text)!important;border-radius:var(--radius-lg)!important;box-shadow:var(--shadow-lg)!important;font-family:var(--font)!important}
-.leaflet-popup-tip{background:var(--surface)!important}
-.leaflet-popup-content{font-size:14px!important;margin:12px 16px!important;line-height:1.5!important}
-.leaflet-popup-content a{color:var(--accent)!important;font-weight:500}
-.leaflet-control-zoom a{background:var(--surface)!important;color:var(--text)!important;border:none!important;border-radius:var(--radius-sm)!important}
+/* Google Maps InfoWindow overrides */
+.gm-style .gm-style-iw-c{border-radius:12px!important;padding:0!important}
+.gm-style .gm-style-iw-d{overflow:hidden!important;padding:12px 16px!important;font-size:14px!important;line-height:1.5!important}
+.gm-style .gm-style-iw-d a{color:var(--accent)!important;font-weight:500}
 .map-status{position:absolute;top:12px;right:12px;z-index:1000;background:var(--surface);padding:6px 12px;border-radius:100px;font-size:12px;color:var(--text2);box-shadow:var(--shadow-sm);pointer-events:none}
 .geocode-progress{flex:1;max-width:180px;height:8px;background:var(--border);border-radius:4px;overflow:hidden;min-width:80px}
 .geocode-bar{height:100%;width:40px;background:var(--accent);border-radius:4px;animation:geocode-run 1s linear infinite}
@@ -68,49 +58,74 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+{% if google_maps_key %}
 <script>
+(function() {
+var GMAPS_KEY = '{{ google_maps_key }}';
 var LANG = '{{ lang }}';
 var zh = LANG === 'zh';
 
 // City center coords for initial view
 var CITY_CENTERS = {
-  'Eindhoven': [51.4416, 5.4697],
-  'Amsterdam': [52.3676, 4.9041],
-  'Rotterdam': [51.9225, 4.4792],
-  'Den Haag': [52.0705, 4.3007],
-  'Utrecht': [52.0907, 5.1214],
-  'Maastricht': [50.8514, 5.6910],
-  'Groningen': [53.2194, 6.5665],
-  'Delft': [52.0116, 4.3571],
-  'Leiden': [52.1601, 4.4970],
-  'Tilburg': [51.5555, 5.0913],
-  'Breda': [51.5719, 4.7683],
-  'Nijmegen': [51.8126, 5.8372],
-  'Den Bosch': [51.6978, 5.3037],
-  'Dordrecht': [51.8133, 4.6901],
-  'Haarlem': [52.3874, 4.6462],
+  'Eindhoven': {lat: 51.4416, lng: 5.4697},
+  'Amsterdam': {lat: 52.3676, lng: 4.9041},
+  'Rotterdam': {lat: 51.9225, lng: 4.4792},
+  'Den Haag': {lat: 52.0705, lng: 4.3007},
+  'Utrecht': {lat: 52.0907, lng: 5.1214},
+  'Maastricht': {lat: 50.8514, lng: 5.6910},
+  'Groningen': {lat: 53.2194, lng: 6.5665},
+  'Delft': {lat: 52.0116, lng: 4.3571},
+  'Leiden': {lat: 52.1601, lng: 4.4970},
+  'Tilburg': {lat: 51.5555, lng: 5.0913},
+  'Breda': {lat: 51.5719, lng: 4.7683},
+  'Nijmegen': {lat: 51.8126, lng: 5.8372},
+  'Den Bosch': {lat: 51.6978, lng: 5.3037},
+  'Dordrecht': {lat: 51.8133, lng: 4.6901},
+  'Haarlem': {lat: 52.3874, lng: 4.6462},
 };
 
-var map = L.map('map').setView([51.8, 5.0], 8);
+// Google Maps dark style
+var DARK_STYLE = [
+  {elementType:'geometry',stylers:[{color:'#212121'}]},
+  {elementType:'labels.icon',stylers:[{visibility:'off'}]},
+  {elementType:'labels.text.fill',stylers:[{color:'#757575'}]},
+  {elementType:'labels.text.stroke',stylers:[{color:'#212121'}]},
+  {featureType:'administrative',elementType:'geometry',stylers:[{color:'#757575'}]},
+  {featureType:'administrative.country',elementType:'labels.text.fill',stylers:[{color:'#9e9e9e'}]},
+  {featureType:'administrative.locality',elementType:'labels.text.fill',stylers:[{color:'#bdbdbd'}]},
+  {featureType:'poi',elementType:'labels.text.fill',stylers:[{color:'#757575'}]},
+  {featureType:'poi.park',elementType:'geometry',stylers:[{color:'#181818'}]},
+  {featureType:'poi.park',elementType:'labels.text.fill',stylers:[{color:'#616161'}]},
+  {featureType:'poi.business',stylers:[{visibility:'off'}]},
+  {featureType:'road',elementType:'geometry.fill',stylers:[{color:'#2c2c2c'}]},
+  {featureType:'road',elementType:'labels.text.fill',stylers:[{color:'#8a8a8a'}]},
+  {featureType:'road.arterial',elementType:'geometry',stylers:[{color:'#373737'}]},
+  {featureType:'road.highway',elementType:'geometry',stylers:[{color:'#3c3c3c'}]},
+  {featureType:'road.highway.controlled_access',elementType:'geometry',stylers:[{color:'#4e4e4e'}]},
+  {featureType:'road.local',elementType:'labels.text.fill',stylers:[{color:'#616161'}]},
+  {featureType:'transit',elementType:'labels.text.fill',stylers:[{color:'#757575'}]},
+  {featureType:'water',elementType:'geometry',stylers:[{color:'#000000'}]},
+  {featureType:'water',elementType:'labels.text.fill',stylers:[{color:'#3d3d3d'}]},
+];
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap',
-  maxZoom: 19,
-}).addTo(map);
-
+var map;
 var markers = [];
-var bounds = L.latLngBounds();
+var bounds;
+var infoWindow;
+
+function isDark() {
+  return document.documentElement.getAttribute('data-theme') === 'dark';
+}
 
 function statusClass(s) {
   var sl = (s||'').toLowerCase();
-  if(sl.indexOf('book') !== -1) return 'book';
-  if(sl.indexOf('lottery') !== -1) return 'lottery';
+  if (sl.indexOf('book') !== -1) return 'book';
+  if (sl.indexOf('lottery') !== -1) return 'lottery';
   return 'other';
 }
 
 function priceShort(raw) {
-  if(!raw) return '—';
+  if (!raw) return '—';
   var m = raw.match(/€[\d,\.]+/);
   return m ? m[0] : raw;
 }
@@ -124,28 +139,86 @@ function sourceLabel(source) {
 }
 
 function getMarkerColor(sc) {
-  if(sc === 'book') return '#10b981';
-  if(sc === 'lottery') return '#f59e0b';
+  if (sc === 'book') return '#10b981';
+  if (sc === 'lottery') return '#f59e0b';
   return '#9b9b9b';
 }
 
 function createMarkerIcon(color) {
-  return L.divIcon({
-    className: '',
-    html: '<div style="width:22px;height:22px;border-radius:50%;background:' + color + ';border:3px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);"></div>',
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-    popupAnchor: [0, -13],
-  });
+  return {
+    path: google.maps.SymbolPath.CIRCLE,
+    fillColor: color,
+    fillOpacity: 1,
+    strokeColor: '#ffffff',
+    strokeWeight: 3,
+    scale: 10,
+  };
+}
+
+function buildPopupContent(l) {
+  var sc = statusClass(l.status);
+  var color = getMarkerColor(sc);
+  var badgeText = sc === 'book' ? (zh ? '直订' : 'Direct')
+    : sc === 'lottery' ? (zh ? '摇号' : 'Lottery')
+    : l.status;
+  var platformText = sourceLabel(l.source);
+
+  var div = document.createElement('div');
+
+  var strong = document.createElement('strong');
+  var a = document.createElement('a');
+  a.href = (l.url && /^https?:\/\//i.test(l.url)) ? l.url : '#';
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = l.name;
+  strong.appendChild(a);
+  div.appendChild(strong);
+  div.appendChild(document.createElement('br'));
+
+  var priceSpan = document.createElement('span');
+  priceSpan.style.color = 'var(--text2)';
+  priceSpan.textContent = priceShort(l.price_raw || '') + (zh ? '/月' : '/mo');
+  div.appendChild(priceSpan);
+  div.appendChild(document.createElement('br'));
+
+  if (l.neighborhood) {
+    var neighborSpan = document.createElement('span');
+    neighborSpan.style.color = 'var(--text3)';
+    neighborSpan.style.fontSize = '12px';
+    neighborSpan.textContent = l.neighborhood + ' · ';
+    div.appendChild(neighborSpan);
+  }
+  var citySpan = document.createElement('span');
+  citySpan.style.color = 'var(--text3)';
+  citySpan.style.fontSize = '12px';
+  citySpan.textContent = l.city || '';
+  div.appendChild(citySpan);
+  div.appendChild(document.createElement('br'));
+
+  var sourceSpan = document.createElement('span');
+  sourceSpan.style.cssText = 'display:inline-block;margin-top:4px;margin-right:6px;padding:2px 8px;' +
+    'border-radius:100px;font-size:11px;background:var(--surface2);color:var(--text2);';
+  sourceSpan.textContent = platformText;
+  div.appendChild(sourceSpan);
+
+  var badgeSpan = document.createElement('span');
+  badgeSpan.style.cssText = 'display:inline-block;margin-top:4px;padding:2px 8px;' +
+    'border-radius:100px;font-size:11px;background:' + color + '18;color:' + color + ';';
+  badgeSpan.textContent = badgeText;
+  div.appendChild(badgeSpan);
+
+  return div;
 }
 
 function loadMapData() {
-  // 清除旧标记
-  markers.forEach(function(m){ map.removeLayer(m); });
+  // Clear old markers
+  markers.forEach(function(m){ m.setMap(null); });
   markers = [];
-  bounds = L.latLngBounds();
+  bounds = new google.maps.LatLngBounds();
+  if (infoWindow) infoWindow.close();
   document.getElementById('map-loading').style.display = '';
-  return fetch('/api/map')
+
+  fetch('/api/map')
   .then(function(r){ return r.json(); })
   .then(function(d) {
     var listings = d.listings || [];
@@ -156,89 +229,36 @@ function loadMapData() {
     listings.forEach(function(l) {
       var sc = statusClass(l.status);
       var color = getMarkerColor(sc);
-      var marker = L.marker([l.lat, l.lng], { icon: createMarkerIcon(color) }).addTo(map);
+      var marker = new google.maps.Marker({
+        position: {lat: l.lat, lng: l.lng},
+        map: map,
+        icon: createMarkerIcon(color),
+        title: l.name,
+      });
 
-      var badgeText = sc === 'book' ? (zh ? '直订' : 'Direct')
-        : sc === 'lottery' ? (zh ? '摇号' : 'Lottery')
-        : l.status;
-      var platformText = sourceLabel(l.source);
+      var popupEl = buildPopupContent(l);
 
-      // 使用 DOM 构造 popup，避免 innerHTML 字符串拼接带来的 XSS 风险
-      var popupEl = document.createElement('div');
+      marker.addListener('click', function() {
+        if (infoWindow) infoWindow.close();
+        infoWindow = new google.maps.InfoWindow({content: popupEl});
+        infoWindow.open(map, marker);
+      });
 
-      var strong = document.createElement('strong');
-      var a = document.createElement('a');
-      // 只允许 http(s) 协议，防止 javascript: 注入
-      a.href = (l.url && /^https?:\/\//i.test(l.url)) ? l.url : '#';
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.textContent = l.name;
-      strong.appendChild(a);
-      popupEl.appendChild(strong);
-      popupEl.appendChild(document.createElement('br'));
+      // Hover → status bar
+      marker.addListener('mouseover', function() {
+        document.getElementById('map-status').textContent = l.name;
+      });
+      marker.addListener('mouseout', function() {
+        document.getElementById('map-status').textContent = '';
+      });
 
-      var priceSpan = document.createElement('span');
-      priceSpan.style.color = 'var(--text2)';
-      priceSpan.textContent = priceShort(l.price_raw || '') + (zh ? '/月' : '/mo');
-      popupEl.appendChild(priceSpan);
-      popupEl.appendChild(document.createElement('br'));
-
-      if (l.neighborhood) {
-        var neighborSpan = document.createElement('span');
-        neighborSpan.style.color = 'var(--text3)';
-        neighborSpan.style.fontSize = '12px';
-        neighborSpan.textContent = l.neighborhood + ' · ';
-        popupEl.appendChild(neighborSpan);
-      }
-      var citySpan = document.createElement('span');
-      citySpan.style.color = 'var(--text3)';
-      citySpan.style.fontSize = '12px';
-      citySpan.textContent = l.city || '';
-      popupEl.appendChild(citySpan);
-      popupEl.appendChild(document.createElement('br'));
-
-      var sourceSpan = document.createElement('span');
-      sourceSpan.style.cssText = 'display:inline-block;margin-top:4px;margin-right:6px;padding:2px 8px;' +
-        'border-radius:100px;font-size:11px;background:var(--surface2);color:var(--text2);';
-      sourceSpan.textContent = platformText;
-      popupEl.appendChild(sourceSpan);
-
-      var badgeSpan = document.createElement('span');
-      badgeSpan.style.cssText = 'display:inline-block;margin-top:4px;padding:2px 8px;' +
-        'border-radius:100px;font-size:11px;background:' + color + '18;color:' + color + ';';
-      badgeSpan.textContent = badgeText;
-      popupEl.appendChild(badgeSpan);
-
-      // 将房源名称存到 marker 上，供 mousemove 状态栏直接读取
-      marker._listingName = l.name;
-      marker.bindPopup(popupEl);
-      bounds.extend([l.lat, l.lng]);
+      bounds.extend(marker.getPosition());
       markers.push(marker);
     });
 
-    if(markers.length > 0) {
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+    if (markers.length > 0) {
+      map.fitBounds(bounds, 60); // 60px padding
     }
-
-    // Hover on marker: show status bar
-    map.on('mousemove', function(e) {
-      var closest = null;
-      var minDist = 30;
-      map.eachLayer(function(layer) {
-        if(layer.getLatLng && (!closest || map.distance(layer.getLatLng(), e.latlng) < minDist)) {
-          if(layer.getLatLng) {
-            var d = map.distance(layer.getLatLng(), e.latlng);
-            if(d < minDist) { minDist = d; closest = layer; }
-          }
-        }
-      });
-      var statusEl = document.getElementById('map-status');
-      if(closest && closest._listingName) {
-        statusEl.textContent = closest._listingName;
-      } else {
-        statusEl.textContent = '';
-      }
-    });
 
     document.getElementById('map-status').textContent = '';
   })
@@ -247,68 +267,105 @@ function loadMapData() {
   });
 }
 
-// 初始加载
-loadMapData();
+// ── Map init (called by Google Maps callback) ──
+window.initMap = function() {
+  map = new google.maps.Map(document.getElementById('map'), {
+    center: {lat: 51.8, lng: 5.0},
+    zoom: 8,
+    mapTypeControl: true,
+    fullscreenControl: false,
+    streetViewControl: false,
+    styles: isDark() ? DARK_STYLE : [],
+  });
 
-  // ── Manual geocode ──
-  function runGeocode() {
-    var btn = document.getElementById('btn-geocode');
-    var loading = document.getElementById('map-loading');
-    var csrf = getCsrf();
-    if (!btn || !csrf) return;
-    btn.disabled = true;
-    loading.textContent = (zh ? '启动中…' : 'Starting…');
+  loadMapData();
 
-    fetch('/api/map/geocode', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': csrf } })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (!data.ok) { loading.textContent = (zh ? '启动失败' : 'Start failed'); btn.disabled = false; return; }
-        if (data.total === 0) { loading.textContent = (zh ? '所有地址已缓存' : 'All addresses cached'); btn.disabled = false; btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode'); return; }
-        // 轮询进度（每 800ms），按钮上显示进度
-        var timer = setInterval(function() {
-          fetch('/api/map/geocode/status').then(function(r){ return r.json(); }).then(function(s) {
-            btn.innerHTML = '<i class="bi bi-arrow-clockwise mr-1"></i>' + (zh ? '解析中 ' : 'Geocoding ') + s.done + '/' + s.total;
-            loading.textContent = s.failed > 0 ? (zh ? '失败 ' : 'Failed ') + s.failed : '';
-            if (s.finished) {
-              clearInterval(timer);
-              btn.disabled = false;
-              btn.innerHTML = '<i class="bi bi-arrow-repeat mr-1"></i>' + (zh ? '刷新地图' : 'Refresh map');
-              btn.onclick = function(){ loadMapData(); btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode'); btn.onclick = runGeocode; };
-              loading.textContent = (zh ? '完成 ' : 'Done ') + s.done + (s.failed > 0 ? (zh ? ' 失败 ' : ' fail ') + s.failed : '');
-              // 显示失败地址
-              var errDiv = document.getElementById('geocode-errors');
-              if (errDiv && s.errors && s.errors.length > 0) {
-                errDiv.innerHTML = '';
-                var title = document.createElement('strong');
-                title.textContent = (zh ? '解析失败详情：' : 'Geocode failures:');
-                errDiv.appendChild(title);
+  // Watch theme changes to toggle dark map style
+  var observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+      if (m.attributeName === 'data-theme') {
+        map.setOptions({styles: isDark() ? DARK_STYLE : []});
+      }
+    });
+  });
+  observer.observe(document.documentElement, {attributes: true});
+};
+
+// ── Manual geocode ──
+function runGeocode() {
+  var btn = document.getElementById('btn-geocode');
+  var loading = document.getElementById('map-loading');
+  var csrf = getCsrf();
+  if (!btn || !csrf) return;
+  btn.disabled = true;
+  loading.textContent = (zh ? '启动中…' : 'Starting…');
+
+  fetch('/api/map/geocode', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': csrf } })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) { loading.textContent = (zh ? '启动失败' : 'Start failed'); btn.disabled = false; return; }
+      if (data.total === 0) { loading.textContent = (zh ? '所有地址已缓存' : 'All addresses cached'); btn.disabled = false; btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode'); return; }
+      var timer = setInterval(function() {
+        fetch('/api/map/geocode/status').then(function(r){ return r.json(); }).then(function(s) {
+          btn.innerHTML = '<i class="bi bi-arrow-clockwise mr-1"></i>' + (zh ? '解析中 ' : 'Geocoding ') + s.done + '/' + s.total;
+          loading.textContent = s.failed > 0 ? (zh ? '失败 ' : 'Failed ') + s.failed : '';
+          if (s.finished) {
+            clearInterval(timer);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-repeat mr-1"></i>' + (zh ? '刷新地图' : 'Refresh map');
+            var origClick = btn.onclick;
+            btn.onclick = function(){ loadMapData(); btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode'); btn.onclick = origClick; };
+            loading.textContent = (zh ? '完成 ' : 'Done ') + s.done + (s.failed > 0 ? (zh ? ' 失败 ' : ' fail ') + s.failed : '');
+            var errDiv = document.getElementById('geocode-errors');
+            if (errDiv && s.errors && s.errors.length > 0) {
+              errDiv.innerHTML = '';
+              var title = document.createElement('strong');
+              title.textContent = (zh ? '解析失败详情：' : 'Geocode failures:');
+              errDiv.appendChild(title);
+              errDiv.appendChild(document.createElement('br'));
+              s.errors.forEach(function(e){
+                var span = document.createElement('span');
+                span.textContent = e.address + ' — ';
+                var reason = document.createElement('span');
+                reason.style.color = 'var(--danger)';
+                reason.textContent = e.reason;
+                span.appendChild(reason);
+                errDiv.appendChild(span);
                 errDiv.appendChild(document.createElement('br'));
-                s.errors.forEach(function(e){
-                  var span = document.createElement('span');
-                  span.textContent = e.address + ' — ';
-                  var reason = document.createElement('span');
-                  reason.style.color = 'var(--danger)';
-                  reason.textContent = e.reason;
-                  span.appendChild(reason);
-                  errDiv.appendChild(span);
-                  errDiv.appendChild(document.createElement('br'));
-                });
-                errDiv.style.display = '';
-              }
+              });
+              errDiv.style.display = '';
             }
-          });
-        }, 800);
-      })
-      .catch(function() {
-        loading.textContent = zh ? '请求失败' : 'Request failed';
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode');
-      });
-  }
+          }
+        });
+      }, 800);
+    })
+    .catch(function() {
+      loading.textContent = zh ? '请求失败' : 'Request failed';
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode');
+    });
+}
 
-  function getCsrf() {
-    var meta = document.querySelector('meta[name="csrf-token"]');
-    return meta ? meta.getAttribute('content') : '';
-  }
+function getCsrf() {
+  var meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? meta.getAttribute('content') : '';
+}
+
+// Load Google Maps API — dynamic injection guarantees initMap is defined first
+var gmapsScript = document.createElement('script');
+gmapsScript.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(GMAPS_KEY) + '&loading=async&callback=initMap';
+document.head.appendChild(gmapsScript);
+})();
 </script>
+{% else %}
+<script>
+// Google Maps API key not configured — show inline message
+document.getElementById('map').innerHTML =
+  '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:14px;text-align:center;padding:40px">' +
+  (document.documentElement.lang === 'zh'
+    ? '未配置 GOOGLE_MAPS_API_KEY<br>请在 .env 中添加 GOOGLE_MAPS_API_KEY=你的密钥'
+    : 'GOOGLE_MAPS_API_KEY not set<br>Add GOOGLE_MAPS_API_KEY=your_key to .env') +
+  '</div>';
+</script>
+{% endif %}
 {% endblock %}

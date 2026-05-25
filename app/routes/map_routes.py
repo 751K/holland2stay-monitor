@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time as _time
 
@@ -97,7 +98,10 @@ def _run_geocode_worker(addresses: list[str]) -> None:
 
 @login_required
 def map_view() -> str:
-    return render_template("map.html")
+    return render_template(
+        "map.html",
+        google_maps_key=os.environ.get("GOOGLE_MAPS_API_KEY", ""),
+    )
 
 
 @api_login_required
