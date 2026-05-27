@@ -2,7 +2,7 @@ import Foundation
 
 enum LegalText {
     static let terms: String = """
-Last updated: May 17, 2026
+Last updated: May 26, 2026
 
 These Terms of Use govern your access to and use of FlatRadar.
 
@@ -132,7 +132,7 @@ Please read the Privacy Policy carefully to understand how we collect, use, stor
 
 You may request deletion of your FlatRadar account and associated data through the app where available, or by contacting us at:
 
-k1012922528@gmail.com
+support@flatradar.app
 
 Some limited data may be retained if required for legal, security, fraud-prevention, or legitimate operational reasons.
 
@@ -148,11 +148,11 @@ Continued use of FlatRadar after the updated Terms become effective means that y
 
 For questions about these Terms, contact:
 
-k1012922528@gmail.com
+support@flatradar.app
 """
 
     static let privacy: String = """
-Last updated: May 17, 2026
+Last updated: May 26, 2026
 
 This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
 
@@ -164,7 +164,7 @@ By using FlatRadar, you acknowledge that you have read and understood this Priva
 
 For privacy-related questions, account deletion requests, or data requests, contact:
 
-k1012922528@gmail.com
+support@flatradar.app
 
 For the purposes of applicable data protection laws, the operator of FlatRadar is responsible for the personal data processed by FlatRadar.
 
@@ -264,11 +264,11 @@ We keep your data only as long as necessary. Account data is retained while your
 
 13. Account Deletion
 
-You can request deletion of your account and associated data by contacting k1012922528@gmail.com. After deletion, you may lose access to saved filters, notification settings, alert history, and other account-based features.
+You can request deletion of your account and associated data by contacting support@flatradar.app. After deletion, you may lose access to saved filters, notification settings, alert history, and other account-based features.
 
 14. Your Rights
 
-Depending on your location, you may have the right to access, correct, delete, restrict processing of, or port your data, object to processing, withdraw consent, or lodge a complaint with a data protection authority. Contact k1012922528@gmail.com to exercise these rights.
+Depending on your location, you may have the right to access, correct, delete, restrict processing of, or port your data, object to processing, withdraw consent, or lodge a complaint with a data protection authority. Contact support@flatradar.app to exercise these rights.
 
 15. Security
 
@@ -290,11 +290,11 @@ We may update this Privacy Policy from time to time. If changes are material, we
 
 For privacy-related questions, account deletion requests, or data requests, contact:
 
-k1012922528@gmail.com
+support@flatradar.app
 """
 
     static let termsZH: String = """
-最后更新日期：2026年5月17日
+最后更新日期：2026年5月26日
 
 本使用条款约束您对 FlatRadar 的访问和使用。
 
@@ -424,7 +424,7 @@ FlatRadar 按"现状"和"现有可用"状态提供。
 
 您可以通过应用程序中提供的功能（如适用）或通过以下方式联系我们，请求删除您的 FlatRadar 账户及相关数据：
 
-k1012922528@gmail.com
+support@flatradar.app
 
 如果法律、安全、防欺诈或合法运营需要，我们可能会保留部分有限数据。
 
@@ -440,11 +440,11 @@ k1012922528@gmail.com
 
 如对本条款有任何疑问，请联系：
 
-k1012922528@gmail.com
+support@flatradar.app
 """
 
     static let privacyZH: String = """
-最后更新日期：2026年5月17日
+最后更新日期：2026年5月26日
 
 本隐私政策说明 FlatRadar 如何收集、使用、存储和保护您的数据。
 
@@ -456,7 +456,7 @@ FlatRadar 是一款独立的、非官方的租房监控工具，跨平台跟踪 
 
 如涉及隐私相关问题、账户删除请求或数据请求，请联系：
 
-k1012922528@gmail.com
+support@flatradar.app
 
 就适用的数据保护法律而言，FlatRadar 的运营方对 FlatRadar 处理的个人数据负责。
 
@@ -556,11 +556,11 @@ FlatRadar 可能会与以下服务交互：Holland2Stay（房源数据）、Appl
 
 13. 账户删除
 
-您可以通过联系 k1012922528@gmail.com 请求删除您的账户及相关数据。删除后，您可能会失去对已保存的筛选条件、通知设置、提醒历史和其他基于账户的功能的访问权限。
+您可以通过联系 support@flatradar.app 请求删除您的账户及相关数据。删除后，您可能会失去对已保存的筛选条件、通知设置、提醒历史和其他基于账户的功能的访问权限。
 
 14. 您的权利
 
-根据您所在的地区，您可能有权访问、更正、删除、限制处理或迁移您的数据，反对处理，撤回同意，或向数据保护机构提出投诉。联系 k1012922528@gmail.com 以行使这些权利。
+根据您所在的地区，您可能有权访问、更正、删除、限制处理或迁移您的数据，反对处理，撤回同意，或向数据保护机构提出投诉。联系 support@flatradar.app 以行使这些权利。
 
 15. 安全
 
@@ -582,7 +582,7 @@ FlatRadar 不面向 13 岁以下儿童。我们不会故意收集儿童的个人
 
 如涉及隐私相关问题、账户删除请求或数据请求，请联系：
 
-k1012922528@gmail.com
+support@flatradar.app
 """
 
     /// 根据系统语言偏好选择中文或英文法律文本。

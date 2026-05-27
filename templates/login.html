@@ -684,16 +684,26 @@ var _loginBtnText = '{{ 'Sign in / Register' if lang == 'en' else '登录 / 注�
 function handleLoginSubmit(form) {
   var btn = document.getElementById('login-btn');
   if (!btn || btn.disabled) return false;
-  document.getElementById('register-modal-card').classList.remove('hidden');
+  var username = document.getElementById('username').value.trim();
+  if (!username) return false;
+  // 查一下用户名是否已存在，已注册用户直接登录，不弹条款弹窗
+  fetch('/check-user?username=' + encodeURIComponent(username))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.exists) {
+        submitLoginForm();
+      } else {
+        document.getElementById('register-modal-card').classList.remove('hidden');
+      }
+    })
+    .catch(function() {
+      // 网络异常也弹窗（保守策略）
+      document.getElementById('register-modal-card').classList.remove('hidden');
+    });
   return false;
 }
 
-function cancelLogin() {
-  document.getElementById('register-modal-card').classList.add('hidden');
-}
-
-function confirmLogin() {
-  document.getElementById('register-modal-card').classList.add('hidden');
+function submitLoginForm() {
   var btn = document.getElementById('login-btn');
   var form = document.getElementById('login-form');
   if (!btn || !form) return;
@@ -702,6 +712,15 @@ function confirmLogin() {
   btn.style.pointerEvents = 'none';
   btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;margin-right:6px;vertical-align:middle;"></span>' + _loginBtnText;
   form.submit();
+}
+
+function cancelLogin() {
+  document.getElementById('register-modal-card').classList.add('hidden');
+}
+
+function confirmLogin() {
+  document.getElementById('register-modal-card').classList.add('hidden');
+  submitLoginForm();
 }
 
 (function(){

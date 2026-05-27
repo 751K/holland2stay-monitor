@@ -1,7 +1,7 @@
 package com.flatradar.app.ui.settings
 
 object LegalText {
-    const val TERMS = """Last updated: May 24, 2026
+    const val TERMS = """Last updated: May 26, 2026
 
 These Terms of Use govern your access to and use of FlatRadar.
 
@@ -47,14 +47,14 @@ To the fullest extent permitted by law, the developers and operators of FlatRada
 
 10. Account Deletion
 
-You may request deletion of your FlatRadar account and associated data through the app where available, or by contacting k1012922528@gmail.com. Some limited data may be retained if required for legal, security, fraud-prevention, or legitimate operational reasons.
+You may request deletion of your FlatRadar account and associated data through the app where available, or by contacting support@flatradar.app. Some limited data may be retained if required for legal, security, fraud-prevention, or legitimate operational reasons.
 
 11. Changes and Contact
 
-We may update these Terms from time to time. Continued use of FlatRadar after updated Terms become effective means you accept the updated Terms. For questions, contact k1012922528@gmail.com.
+We may update these Terms from time to time. Continued use of FlatRadar after updated Terms become effective means you accept the updated Terms. For questions, contact support@flatradar.app.
 """
 
-    const val PRIVACY = """Last updated: May 24, 2026
+    const val PRIVACY = """Last updated: May 26, 2026
 
 This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
 
@@ -62,7 +62,7 @@ FlatRadar is an independent, unofficial monitoring tool for rental housing listi
 
 1. Contact and Data Controller
 
-For privacy-related questions, account deletion requests, or data requests, contact k1012922528@gmail.com.
+For privacy-related questions, account deletion requests, or data requests, contact support@flatradar.app.
 
 2. Data We Collect
 
@@ -98,6 +98,6 @@ We use reasonable technical and organizational safeguards, including secure toke
 
 10. Contact
 
-For privacy questions or requests, contact k1012922528@gmail.com.
+For privacy questions or requests, contact support@flatradar.app.
 """
 }

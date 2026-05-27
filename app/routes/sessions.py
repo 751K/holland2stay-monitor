@@ -297,8 +297,24 @@ def set_lang() -> Any:
     return resp
 
 
+def check_user() -> Any:
+    """返回用户名是否已注册（供前端判断是否弹出条款弹窗）。"""
+    from flask import jsonify
+    from users import get_user_by_name, load_users
+    username = request.args.get("username", "").strip()
+    if not username:
+        return jsonify(exists=False)
+    try:
+        users = load_users()
+        user = get_user_by_name(users, username)
+        return jsonify(exists=user is not None)
+    except Exception:
+        return jsonify(exists=False)
+
+
 def register(app: Flask) -> None:
     app.add_url_rule("/login",    endpoint="login",       view_func=login,       methods=["GET", "POST"])
+    app.add_url_rule("/check-user", endpoint="check_user", view_func=check_user, methods=["GET"])
     app.add_url_rule("/register", endpoint="register_user", view_func=register_user, methods=["POST"])
     app.add_url_rule("/logout",   endpoint="logout",      view_func=logout,      methods=["POST"])
     app.add_url_rule("/guest",    endpoint="guest_login", view_func=guest_login, methods=["POST"])

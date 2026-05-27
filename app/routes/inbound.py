@@ -164,6 +164,94 @@ def _is_dmarc_report(sender: str, subject: str) -> bool:
     )
 
 
+def _forward_inbound(
+    email_id: str,
+    sender: str,
+    subject: str,
+    text_body: str,
+    html_body: str,
+    is_dmarc: bool,
+) -> None:
+    """
+    把入站邮件转发到管理员个人邮箱（INBOUND_FORWARD_TO）。
+
+    仅转发非 DMARC 的真实邮件；转发失败只记日志不阻塞 webhook 200。
+    """
+    forward_to = os.environ.get("INBOUND_FORWARD_TO", "").strip()
+    if not forward_to:
+        return
+    if is_dmarc:
+        return  # DMARC 报告不需要转发
+
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+    from_addr = os.environ.get("RESEND_FROM", "").strip()
+    if not api_key or not from_addr:
+        logger.warning("转发入站邮件跳过: Resend 未配置")
+        return
+
+    fwd_subject = f"Fwd: {subject}" if not subject.startswith("Fwd:") else subject
+
+    # 构建转发正文
+    fwd_text = (
+        f"---------- 转发的邮件 ----------\n"
+        f"发件人: {sender}\n"
+        f"收件人: notify@flatradar.app\n"
+        f"主题: {subject}\n\n"
+        f"{text_body or '(无文字内容)'}"
+    )
+
+    # 原始 HTML 包裹转发头
+    if html_body:
+        fwd_html = (
+            f'<div style="color:#6b7280;font-size:13px;margin-bottom:12px;'
+            f'padding-bottom:12px;border-bottom:1px solid #e5e7eb;">'
+            f'<strong>转发的邮件</strong><br>'
+            f'发件人: {html_body_escape(sender)}<br>'
+            f'收件人: notify@flatradar.app<br>'
+            f'主题: {html_body_escape(subject)}'
+            f'</div>'
+            f'{html_body}'
+        )
+    else:
+        fwd_html = ""
+
+    payload = {
+        "from": from_addr,
+        "to": [forward_to],
+        "subject": fwd_subject,
+        "text": fwd_text,
+        **(dict(html=fwd_html) if fwd_html else {}),
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        with req.Session(impersonate=get_impersonate()) as session:
+            r = session.post(
+                "https://api.resend.com/emails",
+                json=payload,
+                headers=headers,
+                timeout=15,
+            )
+    except Exception as e:
+        logger.error("转发入站邮件网络错误 email_id=%s: %s", email_id, e)
+        return
+
+    if 200 <= r.status_code < 300:
+        logger.info("📤 入站邮件已转发 email_id=%s → %s", email_id, forward_to)
+    else:
+        logger.error(
+            "转发入站邮件失败 email_id=%s status=%s body=%s",
+            email_id, r.status_code, (r.text or "")[:200],
+        )
+
+
+def html_body_escape(s: str) -> str:
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def resend_inbound() -> Any:
     """
     POST /api/inbound/email
@@ -230,8 +318,10 @@ def resend_inbound() -> Any:
     api_key = os.environ.get("RESEND_API_KEY", "").strip()
     full = _fetch_full_email(email_id, api_key)
     text_body = ""
+    html_body = ""
     if full:
-        text_body = (full.get("text") or "")[:1500]
+        text_body = (full.get("text") or "")[:5000]
+        html_body = (full.get("html") or "")[:10000]
 
     is_dmarc = _is_dmarc_report(sender, subject)
 
@@ -251,7 +341,7 @@ def resend_inbound() -> Any:
         notif_body_parts.append(f"Attachments: {', '.join(names)}")
     if text_body and not is_dmarc:
         notif_body_parts.append("")
-        notif_body_parts.append(text_body)
+        notif_body_parts.append(text_body[:1500])
 
     st = storage()
     try:
@@ -266,12 +356,8 @@ def resend_inbound() -> Any:
     finally:
         st.close()
 
-    # 业务分发：按 recipient local-part 路由
-    for to_addr in recipients:
-        local = to_addr.split("@", 1)[0].lower()
-        # support@ → 之后可触发 admin push；notify@ → DMARC 之类静默归档
-        # 当前阶段只走通用 web_notifications，留这块给后续 hook
-        _ = local
+    # 转发到管理员个人邮箱
+    _forward_inbound(email_id, sender, subject, text_body, html_body, is_dmarc)
 
     return jsonify(ok=True, email_id=email_id)
 
