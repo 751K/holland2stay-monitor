@@ -171,6 +171,7 @@ class MultiNotifier(BaseNotifier):
     """
 
     def __init__(self, notifiers: list[BaseNotifier], enabled: bool = True) -> None:
+        super().__init__()
         self._notifiers = notifiers
         self._enabled = enabled
 

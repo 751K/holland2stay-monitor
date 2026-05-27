@@ -17,7 +17,9 @@ from config import ENV_PATH, KNOWN_CITIES, KNOWN_OURDOMAIN_CITIES, KNOWN_XIOR_CI
 from app.auth import admin_required
 from app.csrf import csrf_required
 from app.env_writer import write_env_key
+from app.i18n import get_lang
 from app.safety import sanitize_dotenv
+from translations import tr
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,7 @@ _FLOAT_KEYS = frozenset({"JITTER_RATIO"})
 @admin_required
 @csrf_required
 def settings() -> Any:
+    lang = get_lang()
     if request.method == "POST":
         if not ENV_PATH.exists():
             ENV_PATH.touch()
@@ -50,7 +53,7 @@ def settings() -> Any:
         sources = [s for s in selected_sources if s in allowed_sources]
         if not sources:
             sources = ["holland2stay"]
-            flash("⚠️ 至少需要启用一个平台，已保留 Holland2Stay。", "warning")
+            flash(tr("settings_no_source", lang), "warning")
         sources_val = ",".join(sources)
         write_env_key("SOURCES", sanitize_dotenv(sources_val))
 
@@ -99,7 +102,7 @@ def settings() -> Any:
             od_cities_val,
         )
 
-        flash("✅ 全局配置已保存", "success")
+        flash(tr("settings_config_saved", lang), "success")
         return redirect(url_for("settings"))
 
     env = dict(dotenv_values(str(ENV_PATH)))

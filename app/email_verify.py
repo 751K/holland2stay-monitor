@@ -111,7 +111,7 @@ def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str
                     box-shadow:0 1px 3px rgba(20,30,50,.06);overflow:hidden;">
         <tr>
           <td style="padding:32px 36px 12px;">
-            <div style="font-size:13px;font-weight:600;letter-spacing:.5px;color:#5e6ad2;">
+            <div style="font-size:13px;font-weight:600;letter-spacing:.5px;color:#0f6b7a;">
               FLATRADAR
             </div>
             <h1 style="margin:14px 0 8px;font-size:22px;font-weight:600;line-height:1.3;color:#1f2530;">
@@ -126,9 +126,9 @@ def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str
         <tr>
           <td align="center" style="padding:24px 36px 8px;">
             <a href="{safe_url}"
-               style="display:inline-block;padding:12px 28px;background:#5e6ad2;color:#ffffff;
+               style="display:inline-block;padding:12px 28px;background:#0f6b7a;color:#ffffff;
                       text-decoration:none;border-radius:8px;font-size:15px;font-weight:500;
-                      box-shadow:0 1px 2px rgba(94,106,210,.3);">
+                      box-shadow:0 1px 2px rgba(15,107,122,.3);">
               确认邮箱
             </a>
           </td>
@@ -139,7 +139,7 @@ def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str
               如按钮无法点击，复制以下链接到浏览器打开：
             </p>
             <p style="margin:8px 0 0;word-break:break-all;text-align:center;">
-              <a href="{safe_url}" style="color:#5e6ad2;font-size:12px;text-decoration:none;">{safe_url}</a>
+              <a href="{safe_url}" style="color:#0f6b7a;font-size:12px;text-decoration:none;">{safe_url}</a>
             </p>
           </td>
         </tr>

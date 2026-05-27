@@ -54,8 +54,8 @@
       明确不接受。代价是 LCP 等字体到位，preconnect 已经能省点。
     - logo-small.png：preload —— sidebar 品牌 logo 在首屏视口内，是 LCP 候选。
   #}
-  <link rel="preload" href="/static/design.css?v=18" as="style" fetchpriority="high">
-  <link rel="stylesheet" href="/static/design.css?v=18">
+  <link rel="preload" href="/static/design.css?v=29" as="style" fetchpriority="high">
+  <link rel="stylesheet" href="/static/design.css?v=29">
   <link rel="preload" href="/static/logo-small.png" as="image" type="image/png">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -242,7 +242,7 @@
 <div class="toast-container" id="toast-container"></div>
 
 <script>window._isAdmin = {{ 'true' if is_admin else 'false' }};</script>
-<script src="/static/app.js?v=6"></script>
+<script src="/static/app.js?v=8"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

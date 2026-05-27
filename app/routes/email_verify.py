@@ -35,7 +35,7 @@ _VERIFY_RESULT_HTML = """<!doctype html>
   .icon { font-size: 48px; margin-bottom:12px; }
   h1 { font-size:20px; margin: 0 0 8px; }
   p  { color:#9aa3ad; line-height:1.6; margin: 6px 0; }
-  a  { color:#7c85e8; text-decoration:none; }
+  a  { color:#38bdf8; text-decoration:none; }
   .ok { color:#3eb877; }
   .err { color:#e26a6a; }
 </style>

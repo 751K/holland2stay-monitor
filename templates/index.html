@@ -1,89 +1,109 @@
 {% extends "base.html" %}
 {% block title %}{{ _('dashboard_title') }}{% endblock %}
 
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+{% endblock %}
+
 {% block content %}
 
-<div class="page-header">
-  <h1>{{ _('dashboard') }}</h1>
-  <span class="meta" style="display:flex;align-items:center;gap:12px;">
+<div class="page-header" style="margin-bottom: 24px;">
+  <div style="display: flex; align-items: center; gap: 16px;">
+    <h1 style="margin: 0; font-size: 24px;">{{ _('dashboard') }}</h1>
+    
+    <!-- Flat Status Pill -->
+    <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; background: {% if monitor_running %}var(--success-soft){% else %}var(--danger-soft){% endif %}; font-size: 12px; font-weight: 600; color: {% if monitor_running %}var(--success){% else %}var(--danger){% endif %};">
+      <span style="width: 6px; height: 6px; border-radius: 50%; background: currentColor;"></span>
+      {% if monitor_running %}{{ _('monitor_live') }}{% else %}{{ _('monitor_stopped_short') }}{% endif %}
+    </div>
+    
+    <span style="font-size: 13px; color: var(--text3); font-weight: 500;">
+      {{ _('dash_updated') }} {{ stats.last_scrape | time_ago }}
+    </span>
+  </div>
+  
+  <div class="meta dashboard-actions">
     <form method="get" action="{{ url_for('index') }}" style="display:inline;">
-      <select name="city" class="form-select" style="font-size:12px;width:auto;padding:4px 28px 4px 10px;" onchange="this.form.submit()">
+      <select name="city" class="form-select dashboard-control dashboard-select" onchange="this.form.submit()">
         <option value="">{{ _('filter_all_cities') }}</option>
         {% for c in all_cities %}
           <option value="{{ c }}" {% if c == city_filter %}selected{% endif %}>{{ c }}</option>
         {% endfor %}
       </select>
     </form>
-    <span><i class="bi bi-arrow-clockwise mr-1"></i>{{ _('auto_refresh') }}</span>
-    {% if is_admin %}
-    <button onclick="shutdownAll()" class="btn btn-ghost btn-sm" style="color:var(--danger);" title="{{ _('shutdown_hint') }}">
-      <i class="bi bi-power mr-1"></i>{{ _('shutdown') }}
-    </button>
-    {% endif %}
-  </span>
+    
+    <a href="javascript:location.reload()" class="btn btn-ghost dashboard-control dashboard-refresh">
+      <i class="bi bi-arrow-clockwise"></i>
+      {{ _('dash_refresh') }}
+    </a>
+  </div>
 </div>
 
-<!-- KPI -->
-<div class="kpi-grid">
-  <div class="kpi-card accent-purple">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,#bf5af2,#7c3aed);">
-      <i class="bi bi-building-fill"></i>
-    </div>
-    <div>
-      <div class="kpi-num">{{ stats.total }}</div>
-      <div class="kpi-label">{{ _('total_listings') }}</div>
-    </div>
-  </div>
-
-  <div class="kpi-card accent-green">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,#10b981,#059669);">
-      <i class="bi bi-lightning-charge-fill"></i>
-    </div>
-    <div>
-      <div class="kpi-num" style="color:var(--success);">{{ stats.new_24h }}</div>
-      <div class="kpi-label">{{ _('new_today') }}</div>
-    </div>
-  </div>
-
-  <div class="kpi-card accent-amber">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);">
-      <i class="bi bi-shuffle"></i>
-    </div>
-    <div>
-      <div class="kpi-num" style="color:var(--warning);">{{ stats.changes_24h }}</div>
-      <div class="kpi-label">{{ _('changes_today') }}</div>
-    </div>
-  </div>
-
-  <div class="kpi-card accent-blue">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,#5e6ad2,#4f5ac2);">
-      <i class="bi bi-cloud-download-fill"></i>
-    </div>
-    <div>
-      <div class="kpi-num" style="font-size:16px;padding-top:4px;">{{ stats.last_scrape | time_ago }}</div>
-      <div class="kpi-label">{{ _('last_scrape') }} · {{ stats.last_count }} {{ _('items_unit') }}</div>
-    </div>
-  </div>
-
-  <div class="kpi-card {% if monitor_running %}accent-green{% else %}accent-red{% endif %}" id="monitor-card">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,{% if monitor_running %}#10b981,#059669{% else %}#ef4444,#dc2626{% endif %});">
-      <i class="bi {% if monitor_running %}bi-play-circle-fill{% else %}bi-stop-circle{% endif %}"></i>
-    </div>
-    <div>
-      <div class="kpi-num" style="font-size:14px;padding-top:4px;" id="monitor-status">
-        {% if monitor_running %}{{ _('monitor_running') }}{% else %}{{ _('monitor_stopped') }}{% endif %}
+<!-- Modular Dashboard Grid -->
+<div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 32px;">
+  
+  <!-- Card 1: Hero Metric & Chart (Flex 3) -->
+  <div class="dashboard-hero-card">
+    <div class="dashboard-hero-copy">
+      <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text3); margin-bottom: 12px;">
+        {{ _('dash_total_listings') }}
       </div>
-      <div class="kpi-label">
-        {% if is_admin %}
-        <a href="#" onclick="toggleMonitor(event)" class="text-sm" style="color:var(--accent);" id="monitor-btn">
-          {% if monitor_running %}{{ _('stop_monitor') }}{% else %}{{ _('start_monitor') }}{% endif %}
-        </a>
-        {% else %}
-        <span class="text-sm" style="color:var(--text3);">{{ _('monitor_running') if monitor_running else _('monitor_stopped') }}</span>
-        {% endif %}
+      <div class="text-gradient-blue" style="font-size: 64px; font-weight: 800; line-height: 1; letter-spacing: -0.04em; margin-bottom: 12px;">
+        {{ stats.total }}
+      </div>
+      <div style="font-size: 13px; font-weight: 600; color: var(--success); display: flex; align-items: center; gap: 4px;">
+        <i class="bi bi-arrow-up-short"></i> {{ stats.new_24h }} {{ _('dash_new_today_suffix') }}
       </div>
     </div>
+    <div class="dashboard-hero-chart">
+      <canvas id="heroChart"></canvas>
+    </div>
   </div>
+
+  <!-- Card 2: New 24h (Flex 1) -->
+  <div style="flex: 1; min-width: 140px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 20px; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden;">
+    <div style="font-size: 13px; font-weight: 500; color: var(--text2);">{{ _('dash_new_24h') }}</div>
+    <div style="font-size: 40px; font-weight: 700; color: var(--success); line-height: 1; margin: 12px 0;">{{ stats.new_24h }}</div>
+    <div style="font-size: 12px; color: var(--text3); font-weight: 500;">{{ stats.new_24h_delta_label }}</div>
+  </div>
+
+  <!-- Card 3: Changes 24h (Flex 1) -->
+  <div style="flex: 1; min-width: 140px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 20px; display: flex; flex-direction: column; justify-content: space-between; position: relative; overflow: hidden;">
+    <div style="font-size: 13px; font-weight: 500; color: var(--text2);">{{ _('dash_changes_24h') }}</div>
+    <div style="font-size: 40px; font-weight: 700; color: var(--warning); line-height: 1; margin: 12px 0;">{{ stats.changes_24h }}</div>
+    <div style="font-size: 12px; color: var(--text3); font-weight: 500;">{{ stats.changes_24h_delta_label }}</div>
+  </div>
+
+  <!-- Card 4: Performance (Flex 2) -->
+  <div style="flex: 2; min-width: 260px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); display: flex; position: relative; overflow: hidden;">
+    <div style="flex: 1; padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+      <div style="font-size: 13px; font-weight: 500; color: var(--text2);">{{ _('dash_items_per_run') }}</div>
+      <div class="text-gradient-blue" style="font-size: 40px; font-weight: 700; line-height: 1; margin: 12px 0;">{{ stats.items_per_run }}</div>
+      <div style="font-size: 12px; color: var(--text3); font-weight: 500;">{{ stats.items_per_run_label }}</div>
+    </div>
+    <div style="width: 1px; background: var(--glass-border); margin: 20px 0;"></div>
+    <div style="flex: 1; padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+      <div style="font-size: 13px; font-weight: 500; color: var(--text2);">{{ _('dash_uptime') }}</div>
+      <div class="text-gradient-blue" style="font-size: 40px; font-weight: 700; line-height: 1; margin: 12px 0;">{{ stats.uptime_pct_7d }}%</div>
+      <div style="font-size: 12px; color: var(--text3); font-weight: 500;">{{ stats.uptime_label }}</div>
+    </div>
+  </div>
+
+  <!-- Card 5: Scope (Flex 2) -->
+  <div style="flex: 2; min-width: 260px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); display: flex; position: relative; overflow: hidden;">
+    <div style="flex: 1; padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+      <div style="font-size: 13px; font-weight: 500; color: var(--text2);">{{ _('dash_active_cities') }}</div>
+      <div style="font-size: 40px; font-weight: 700; color: var(--text); line-height: 1; margin: 12px 0;">{{ all_cities|length }}</div>
+      <div style="font-size: 12px; color: var(--text3); font-weight: 500;">{{ _('dash_of_targets') }} {{ stats.configured_targets }}</div>
+    </div>
+    <div style="width: 1px; background: var(--glass-border); margin: 20px 0;"></div>
+    <div style="flex: 1; padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
+      <div style="font-size: 13px; font-weight: 500; color: var(--text2);">{{ _('dash_platforms') }}</div>
+      <div style="font-size: 40px; font-weight: 700; color: var(--text); line-height: 1; margin: 12px 0;">{{ stats.enabled_platforms }}</div>
+      <div style="font-size: 12px; color: var(--text3); font-weight: 500;">{{ _('dash_of_total') }} {{ stats.supported_platforms }}</div>
+    </div>
+  </div>
+
 </div>
 
 <!-- Two column layout -->
@@ -181,47 +201,6 @@
 </div>
 
 <script>
-async function toggleMonitor(e) {
-  e.preventDefault();
-  const btn = document.getElementById('monitor-btn');
-  const statusEl = document.getElementById('monitor-status');
-  const card = document.getElementById('monitor-card');
-  const csrf = document.querySelector('meta[name="csrf-token"]').content;
-  const isRunning = btn.innerText.includes('停止') || btn.innerText.includes('Stop');
-
-  const action = isRunning ? 'stop' : 'start';
-  btn.style.pointerEvents = 'none';
-  btn.style.opacity = '.5';
-  btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin-right:4px;"></span>' + '...';
-  try {
-    const resp = await fetch('/api/monitor/' + action, {
-      method: 'POST',
-      headers: {'X-CSRF-Token': csrf}
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      location.reload();
-    } else {
-      alert(data.error || '操作失败');
-      location.reload();
-    }
-  } catch(err) {
-    alert('请求失败: ' + err.message);
-    location.reload();
-  }
-}
-
-async function shutdownAll() {
-  if(!confirm('{{ _("shutdown_confirm") }}')) return;
-  const csrf = document.querySelector('meta[name="csrf-token"]').content;
-  const btn = document.querySelector('.page-header .btn-ghost.btn-sm');
-  if(btn){ btn.style.pointerEvents = 'none'; btn.style.opacity = '.5'; }
-  try {
-    await fetch('/api/shutdown', { method:'POST', headers:{'X-CSRF-Token':csrf} });
-  } catch(e) {}
-  alert('{{ _("shutdown_done") }}');
-}
-
 // Visibility-aware auto-refresh: reloads every 60s only when tab is visible.
 // Avoids jarring full-page reloads while user is reading on mobile.
 (function(){
@@ -240,5 +219,58 @@ async function shutdownAll() {
   });
   schedule();
 })();
+
+async function loadHeroChart() {
+  try {
+    const res = await fetch('/api/charts?days=7');
+    const data = await res.json();
+    const ctx = document.getElementById('heroChart');
+    if (!ctx) return;
+    
+    // Fallback data if API returns empty
+    const chartData = (data.daily_new && data.daily_new.length > 0) 
+      ? data.daily_new.map(d => d.count)
+      : [0, 5, 2, 8, 3, 10, 6];
+    
+    const labels = (data.daily_new && data.daily_new.length > 0)
+      ? data.daily_new.map(d => d.date)
+      : ['1','2','3','4','5','6','7'];
+
+    // Create gradient fill
+    const gradient = ctx.getContext('2d').createLinearGradient(0, 0, 0, 80);
+    gradient.addColorStop(0, 'rgba(2,132,199,0.24)');
+    gradient.addColorStop(1, 'rgba(15,118,110,0)');
+
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: chartData,
+          borderColor: '#0284c7',
+          borderWidth: 2,
+          tension: 0.4,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          fill: true,
+          backgroundColor: gradient
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { enabled: false } },
+        scales: { 
+          x: { display: false }, 
+          y: { display: false, min: 0 } 
+        },
+        layout: { padding: 0 }
+      }
+    });
+  } catch(e) {
+    console.error('Failed to load hero chart', e);
+  }
+}
+document.addEventListener('DOMContentLoaded', loadHeroChart);
 </script>
 {% endblock %}

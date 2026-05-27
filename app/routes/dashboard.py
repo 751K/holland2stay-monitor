@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import logging
 
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request
 
 logger = logging.getLogger(__name__)
 
-from app.auth import login_required
+from app.auth import api_login_required, login_required
 from app.db import storage
 from app.process_ctrl import monitor_pid
+from app.services.dashboard_service import dashboard_metrics
+from app.i18n import get_lang
 from app.services.listing_service import (
     get_filter_options,
     normalize_listing_rows,
@@ -31,30 +33,36 @@ def index() -> str:
         # get_distinct_cities() 走 SELECT DISTINCT city，比拉 2000 行再 set
         # 推 SQL 端做去重，且没有 LIMIT 截断导致老城市丢失的正确性 bug。
         all_cities = st.get_distinct_cities()
-        last_scrape = st.get_meta("last_scrape_at")
         status_counts = st.count_by_status(city=city_filter or None)
-        stats = {
-            "total":       st.count_all(city=city_filter or None),
-            "new_24h":     st.count_new_since(hours=24, city=city_filter or None),
-            "changes_24h": st.count_changes_since(hours=24, city=city_filter or None),
-            "last_scrape": last_scrape,
-            "last_count":  st.get_meta("last_scrape_count"),
-            "book_count":  status_counts.get("available to book", 0),
-            "lottery_count": status_counts.get("available in lottery", 0),
-        }
+        stats = dashboard_metrics(st, city=city_filter or None, lang=get_lang())
+        stats["book_count"] = status_counts.get("available to book", 0)
+        stats["lottery_count"] = status_counts.get("available in lottery", 0)
         recent  = normalize_listing_rows(st.get_all_listings(city=city_filter or None, limit=15))
         changes = st.get_recent_changes(hours=48, city=city_filter or None)
     finally:
         st.close()
+    pid = monitor_pid()
+
     return render_template(
         "index.html",
         stats=stats,
         recent=recent,
         changes=changes,
-        monitor_running=monitor_pid() is not None,
+        monitor_running=pid is not None,
         city_filter=city_filter,
         all_cities=all_cities,
     )
+
+
+@api_login_required
+def api_dashboard_summary():
+    city_filter = request.args.get("city", "")
+    st = storage()
+    try:
+        stats = dashboard_metrics(st, city=city_filter or None, lang=get_lang())
+        return jsonify({"ok": True, "city": city_filter, "summary": stats})
+    finally:
+        st.close()
 
 
 @login_required
@@ -112,4 +120,5 @@ def listings() -> str:
 
 def register(app: Flask) -> None:
     app.add_url_rule("/",         endpoint="index",    view_func=index,    methods=["GET"])
+    app.add_url_rule("/api/dashboard/summary", endpoint="api_dashboard_summary", view_func=api_dashboard_summary, methods=["GET"])
     app.add_url_rule("/listings", endpoint="listings", view_func=listings, methods=["GET"])

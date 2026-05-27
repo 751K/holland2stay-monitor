@@ -92,13 +92,13 @@ FlatRadar 使用 Cloudflare 提供 DNS、流量路由、安全、性能及相关
 
 FlatRadar 使用 Apple 推送通知服务发送房源提醒。我们存储您的 APNs 设备令牌并将其与您的账户关联。您可以随时在 iOS 设置中禁用推送通知。
 
-9. Holland2Stay 与房源数据
+9. 房源平台与数据
 
-FlatRadar 可能会从公开可访问的 Holland2Stay 服务、API 或技术接口获取房源信息。Holland2Stay 独立于 FlatRadar。FlatRadar 不控制 Holland2Stay 的数据、系统、条款或隐私实践。
+FlatRadar 可能会从公开可访问的各房源平台（包括但不限于 Holland2Stay、OurDomain、Xior 等）的服务、API 或技术接口获取房源信息。这些平台独立于 FlatRadar。FlatRadar 不控制这些平台的数据、系统、条款或隐私实践。
 
 10. 第三方服务
 
-FlatRadar 可能会与以下服务交互：Holland2Stay（房源数据）、Apple 推送通知服务（通知）、Cloudflare（DNS 和安全）、托管和后端提供商以及电子邮件或支持服务提供商。
+FlatRadar 可能会与以下服务交互：各房源平台（房源数据）、Apple 推送通知服务（通知）、Cloudflare（DNS 和安全）、托管和后端提供商以及电子邮件或支持服务提供商。
 
 11. 数据共享
 

@@ -231,11 +231,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Holland2Stay Web 面板")
     parser.add_argument("--port", type=int, default=8088)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--debug", action="store_true", default=os.environ.get("FLASK_DEBUG", "").lower() in {"1", "true", "yes"})
     args = parser.parse_args()
     check_for_updates()
-    print(f"Web 面板运行中 → http://{args.host}:{args.port}")
+    print(f"Web 面板运行中 → http://{args.host}:{args.port}" + (" (debug)" if args.debug else ""))
     # threaded=True：允许多个 SSE 连接并发（每个连接占用一个线程）
-    app.run(host=args.host, port=args.port, debug=False, threaded=True)
+    app.run(host=args.host, port=args.port, debug=args.debug, threaded=True)
 
 
 if __name__ == "__main__":

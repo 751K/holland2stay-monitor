@@ -10,17 +10,17 @@
 
 <!-- Filter bar -->
 <style>
-  .listing-filters-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-    gap: 12px;
-    align-items: end;
-  }
-  @media (min-width: 1200px) {
-    .listing-filters-grid {
-      grid-template-columns: repeat(7, 1fr);
-    }
-  }
+	  .listing-filters-grid {
+	    display: grid;
+	    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	    gap: 12px;
+	    align-items: end;
+	  }
+	  @media (min-width: 1200px) {
+	    .listing-filters-grid {
+	      grid-template-columns: repeat(7, minmax(0, 1fr));
+	    }
+	  }
   .listing-filters-grid .form-group {
     margin-bottom: 0 !important;
   }
@@ -31,7 +31,7 @@
     width: 100% !important;
   }
 </style>
-<div class="card mb-4">
+<div class="card mb-4 listing-filter-card">
   <div class="card-body">
     <form method="get" class="listing-filters-grid">
       <div class="form-group">

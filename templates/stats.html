@@ -19,26 +19,6 @@
   </div>
 </div>
 
-<!-- KPI -->
-<div class="kpi-grid">
-  <div class="kpi-card accent-purple">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,#bf5af2,#7c3aed);"><i class="bi bi-building-fill"></i></div>
-    <div><div id="kpi-total" class="kpi-num">{{ total }}</div><div class="kpi-label">{{ _('total_listings') }}</div></div>
-  </div>
-  <div class="kpi-card accent-green">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,#10b981,#059669);"><i class="bi bi-lightning-charge-fill"></i></div>
-    <div><div id="kpi-new-24h" class="kpi-num" style="color:var(--success);">{{ new_24h }}</div><div class="kpi-label">{{ _('new_today') }}</div></div>
-  </div>
-  <div class="kpi-card accent-blue">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,#5e6ad2,#4f5ac2);"><i class="bi bi-graph-up"></i></div>
-    <div><div id="kpi-new-range" class="kpi-num" style="color:var(--accent);">{{ new_range }}</div><div id="kpi-new-range-label" class="kpi-label"></div></div>
-  </div>
-  <div class="kpi-card accent-amber">
-    <div class="kpi-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706);"><i class="bi bi-shuffle"></i></div>
-    <div><div id="kpi-changes-range" class="kpi-num" style="color:var(--warning);">{{ changes_range }}</div><div id="kpi-changes-range-label" class="kpi-label"></div></div>
-  </div>
-</div>
-
 <!-- Trend charts -->
 <div class="grid-7-5 mb-4">
   <div class="chart-card">
@@ -116,7 +96,7 @@
 {% block scripts %}
 <script>
 var LANG = '{{ lang }}';
-var PALETTE = ['#10b981','#5e6ad2','#f59e0b','#ef4444','#8b5cf6','#38bdf8','#34d399','#fbbf24','#f87171','#2dd4bf'];
+var PALETTE = ['#10b981','#0284c7','#f59e0b','#ef4444','#0f766e','#38bdf8','#34d399','#fbbf24','#f87171','#2dd4bf'];
 
 function colors(n) {
   // 生成 n 种不重复的颜色（HSL 色相均匀分布，饱和度/亮度固定）
@@ -263,7 +243,7 @@ function renderCharts(d) {
   var sourceDist = d.source_dist || [];
   var srcLabels = sourceDist.map(function(r){ return sourceLabel(r.source); });
   var srcCounts = sourceDist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartSource', srcLabels, srcCounts, ['#10b981', '#5e6ad2', '#f59e0b', '#ef4444']);
+  buildDoughnutChart('chartSource', srcLabels, srcCounts, ['#10b981', '#0284c7', '#f59e0b', '#ef4444']);
 
   var cityLabels = d.city_dist.map(function(r){ return r.city; });
   var cityCounts = d.city_dist.map(function(r){ return r.count; });
@@ -275,11 +255,11 @@ function renderCharts(d) {
 
   var prLabels = d.price_dist.map(function(r){ return r.range; });
   var prCounts = d.price_dist.map(function(r){ return r.count; });
-  buildBarChart('chartPrice', prLabels, prCounts, '#5e6ad2');
+  buildBarChart('chartPrice', prLabels, prCounts, '#0284c7');
 
   var hrLabels = d.hourly_dist.map(function(r){ return r.hour + ':00'; });
   var hrCounts = d.hourly_dist.map(function(r){ return r.count; });
-  buildBarChart('chartHourly', hrLabels, hrCounts, '#8b5cf6');
+  buildBarChart('chartHourly', hrLabels, hrCounts, '#0f766e');
 
   var tnLabels = d.tenant_dist.map(function(r){ return r.label; });
   var tnCounts = d.tenant_dist.map(function(r){ return r.count; });
@@ -295,7 +275,7 @@ function renderCharts(d) {
 
   var enLabels = d.energy_dist.map(function(r){ return r.label; });
   var enCounts = d.energy_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartEnergy', enLabels, enCounts, enLabels.map(function(l){ var v=(l||'').toUpperCase(); if(v.indexOf('A')===0)return'#10b981'; if(v==='B')return'#5e6ad2'; if(v==='C')return'#f59e0b'; if(v==='D')return'#f97316'; if(v==='E')return'#ef4444'; return'#9ca3af'; }));
+  buildDoughnutChart('chartEnergy', enLabels, enCounts, enLabels.map(function(l){ var v=(l||'').toUpperCase(); if(v.indexOf('A')===0)return'#10b981'; if(v==='B')return'#0284c7'; if(v==='C')return'#f59e0b'; if(v==='D')return'#f97316'; if(v==='E')return'#ef4444'; return'#9ca3af'; }));
 
   var arLabels = d.area_dist.map(function(r){ return r.label; });
   var arCounts = d.area_dist.map(function(r){ return r.count; });
@@ -303,7 +283,7 @@ function renderCharts(d) {
 
   var flLabels = d.floor_dist.map(function(r){ return r.label; });
   var flCounts = d.floor_dist.map(function(r){ return r.count; });
-  buildBarChart('chartFloor', flLabels, flCounts, '#5e6ad2');
+  buildBarChart('chartFloor', flLabels, flCounts, '#0284c7');
 }
 
 function loadCharts(days) {

@@ -713,7 +713,6 @@ def _parse_ourdomain_cities(raw: str) -> list[OurDomainCityFilter]:
 
 def _parse_xior_cities(raw: str) -> list[XiorCityFilter]:
     return _parse_name_key_list(raw, XiorCityFilter)
-    return cities
 
 
 def load_config() -> Config:
@@ -775,18 +774,21 @@ def load_config() -> Config:
     if "xior" in sources:
         raw_xior_cities = os.environ.get("XIOR_CITIES", "")
         if not raw_xior_cities:
-            # 未显式配置时使用荷兰核心 4 栋楼
+            # 未显式配置时使用荷兰核心楼栋。
             xior_cities = [
-                XiorCityFilter(name=c["name"], key=c["key"])
+                XiorCityFilter(
+                    name=c.get("name") or f"{c.get('city', '').strip()} {c.get('bldg', '').strip()}".strip(),
+                    key=c["key"],
+                )
                 for c in KNOWN_XIOR_CITIES
             ]
         else:
             xior_cities = _parse_xior_cities(raw_xior_cities)
 
-    db_path = DB_PATH
+    db_path = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
     log_level = (os.environ.get("LOG_LEVEL") or "INFO").upper()
 
-    timezone_str = TIMEZONE
+    timezone_str = os.environ.get("TIMEZONE", "Europe/Amsterdam")
     # 启动时校验时区标识符合法性，失败立即报错而非延迟到首次图表查询
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     try:

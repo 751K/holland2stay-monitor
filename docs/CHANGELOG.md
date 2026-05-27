@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.7.7 (2026-05-27)
+
+### 代码维护 (Maintenance)
+- 修复 `config.py` `_parse_xior_cities()` 死代码（残留 return 语句）
+- 修复 `load_config()` 中 DB_PATH/TIMEZONE 热重载时不从 os.environ 重新读取的问题
+- 修复 `MultiNotifier` 未调用 `super().__init__()` 导致 language 属性未初始化
+- 修正 `scraper.py` 403 维护探测阈值注释与代码不一致
+- Settings 页面 flash 消息硬编码中文改为走翻译系统
+- 移除 Settings 页面冗余的 User Management / Client Management 提示条
+- CSS 暗色模式颜色切换统一走变量：新增 `--grad-green/amber/red`、`--pill-telegram/email` 变量
+- 暗色模式下文字渐变色提亮一档；Telegram/Email 渠道标签自动适配主题
+- 修复暗色模式下表单输入框、filter 卡片边框的硬编码白色内阴影
+
+### 界面优化 (UI)
+- Web 端全面换用毛玻璃（Glassmorphism）设计风格
+- 仪表盘、日历、统计、地图等核心页面统一玻璃质感
+
 ## v1.7.6 (2026-05-26)
 
 ### 新特性与界面重构 (Features & UI Revamp)

@@ -27,8 +27,6 @@ TRANSLATIONS = {
     # ── Monitor badge ────────────────────────────────────
     "monitor_running":      {"zh": "监控运行中",              "en": "Monitor running"},
     "monitor_stopped":      {"zh": "监控未启动",              "en": "Monitor stopped"},
-    "start_monitor":        {"zh": "启动监控",                "en": "Start monitor"},
-    "stop_monitor":         {"zh": "停止监控",                "en": "Stop monitor"},
     "monitor_checking":     {"zh": "检测中",                  "en": "Checking"},
     "upstream_maintenance_title":   {"zh": "Holland2Stay 平台维护中",
                                      "en": "Holland2Stay under maintenance"},
@@ -83,17 +81,10 @@ TRANSLATIONS = {
     "no_logs_yet":          {"zh": "暂无日志",                "en": "No logs yet"},
     "clear_logs":           {"zh": "清空当前日志",            "en": "Clear current log"},
     "clear_logs_confirm":   {"zh": "确定要清空当前日志文件吗？", "en": "Delete all entries in this log file?"},
-    "shutdown":             {"zh": "关闭",                    "en": "Shutdown"},
-    "shutdown_hint":        {"zh": "停止监控和 Web 面板",      "en": "Stop monitor and web panel"},
-    "shutdown_confirm":     {"zh": "确定要停止监控和 Web 面板吗？", "en": "Stop the monitor and web panel?"},
-    "shutdown_done":        {"zh": "已关闭，页面将断开连接。",    "en": "Shutdown complete. Connection will close."},
-
     # ── Dashboard ────────────────────────────────────────
     "dashboard_title":      {"zh": "仪表盘 · FlatRadar",      "en": "Dashboard · FlatRadar"},
     "auto_refresh":         {"zh": "每 60 秒自动刷新",         "en": "Auto-refresh every 60s"},
     "total_listings":       {"zh": "数据库房源",              "en": "DB listings"},
-    "new_today":            {"zh": "今日新增",                "en": "New today"},
-    "changes_today":        {"zh": "今日状态变更",            "en": "Status changes today"},
     "last_scrape":          {"zh": "最近抓取",                "en": "Last scrape"},
     "items_unit":           {"zh": "条",                     "en": ""},
     "recent_listings":      {"zh": "最新房源",                "en": "Recent listings"},
@@ -101,6 +92,20 @@ TRANSLATIONS = {
     "changes_48h":          {"zh": "近 48h 状态变更",         "en": "Status changes (48h)"},
     "no_data":              {"zh": "暂无数据",                "en": "No data"},
     "no_changes":           {"zh": "暂无变更",                "en": "No changes"},
+    "dash_total_listings":  {"zh": "活跃房源总数",            "en": "Total Listings"},
+    "dash_new_today_suffix":{"zh": "今日新增",                "en": "new today"},
+    "dash_new_24h":         {"zh": "今日新增",                "en": "New (24h)"},
+    "dash_changes_24h":     {"zh": "状态变更",                "en": "Changes (24h)"},
+    "dash_items_per_run":   {"zh": "单次抓取量",              "en": "Items / run"},
+    "dash_uptime":          {"zh": "持续运行时间",            "en": "System Uptime"},
+    "dash_active_cities":   {"zh": "活跃城市",                "en": "Active Cities"},
+    "dash_of_targets":      {"zh": "配置目标",                "en": "of"},
+    "dash_platforms":       {"zh": "支持平台",                "en": "Platforms"},
+    "dash_of_total":        {"zh": "共",                     "en": "of"},
+    "monitor_live":         {"zh": "运行中",                  "en": "Live"},
+    "monitor_stopped_short":{"zh": "已停止",                  "en": "Stopped"},
+    "dash_updated":         {"zh": "更新于",                  "en": "Updated"},
+    "dash_refresh":         {"zh": "刷新",                    "en": "Refresh"},
 
     # ── Table columns ────────────────────────────────────
     "col_listing":          {"zh": "房源",                    "en": "Listing"},
@@ -265,6 +270,7 @@ TRANSLATIONS = {
     "settings_sending":     {"zh": "发送中...",               "en": "Sending..."},
     "settings_config_saved":{"zh": "全局配置已保存",           "en": "Global config saved"},
     "settings_request_fail":{"zh": "请求失败",                "en": "Request failed"},
+    "settings_no_source":   {"zh": "至少需要启用一个平台，已保留 Holland2Stay。", "en": "At least one platform required. Holland2Stay kept."},
 
     # ── Users ────────────────────────────────────────────
     "users_title":          {"zh": "用户管理",                "en": "User Management"},

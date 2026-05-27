@@ -326,12 +326,9 @@ document.addEventListener('DOMContentLoaded', function() {
     var checkboxes = ms.querySelectorAll('input[type="checkbox"]');
     var placeholder = textEl.textContent.trim() || textEl.getAttribute('data-placeholder') || '';
 
-    function position() {
-      var r = trigger.getBoundingClientRect();
-      dropdown.style.top  = (r.bottom + 4) + 'px';
-      dropdown.style.left = r.left + 'px';
-      dropdown.style.minWidth = r.width + 'px';
-    }
+	    function position() {
+	      dropdown.style.minWidth = Math.max(trigger.offsetWidth, 180) + 'px';
+	    }
 
     function update() {
       var sel = [];

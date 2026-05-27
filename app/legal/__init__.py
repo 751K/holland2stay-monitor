@@ -11,7 +11,7 @@ _privacy_en = (_dir / "privacy.txt").read_text()
 _terms_zh = (_dir / "termszh.txt").read_text()
 _privacy_zh = (_dir / "privacyzh.txt").read_text()
 
-UPDATED_AT = "2026-05-25"
+UPDATED_AT = "2026-05-26"
 
 
 def _with_contact_email(text: str) -> str:
