@@ -304,6 +304,10 @@ def check_user() -> Any:
     username = request.args.get("username", "").strip()
     if not username:
         return jsonify(exists=False)
+    # admin 账号不在 user 表里，直接返回已存在，跳过注册确认弹窗
+    expected_user = os.environ.get("WEB_USERNAME", "").strip() or "admin"
+    if hmac.compare_digest(username.encode("utf-8"), expected_user.encode("utf-8")):
+        return jsonify(exists=True)
     try:
         users = load_users()
         user = get_user_by_name(users, username)
