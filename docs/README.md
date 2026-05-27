@@ -14,6 +14,10 @@ FlatRadar is an independent, unofficial tool. It is not affiliated with, endorse
 **User guide:** [flatradar.app/guide](https://flatradar.app/guide)  
 **Support:** [flatradar.app/support](https://flatradar.app/support)
 
+**Contact**: [surrport@flatradar.app](mailto:surrport@flatradar.app)
+
+> The demo environment has auto-booking disabled for user accounts. To enable it, please contact us via email or [deploy locally](#quick-start).
+
 ## What It Does
 
 - Monitors listings across Holland2Stay, OurDomain, and Xior.
@@ -45,10 +49,6 @@ Platform coverage changes over time as third-party websites change. Always verif
 | Desktop packages | Available | macOS `.dmg` and Windows `.zip` from GitHub Releases |
 
 [Download on the App Store](https://apps.apple.com/us/app/flarradar/id6769857080)
-
-Contact: [surrport@flatradar.app](mailto:surrport@flatradar.app)
-
-> The demo environment has auto-booking disabled for user accounts. To enable it, please contact us via email or [deploy locally](#quick-start).
 
 ## Quick Start
 
