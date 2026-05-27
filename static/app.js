@@ -371,14 +371,29 @@ document.addEventListener('DOMContentLoaded', function() {
 
     update();
 
+    function flipDropdown() {
+      var rect = trigger.getBoundingClientRect();
+      var spaceBelow = window.innerHeight - rect.bottom;
+      var spaceAbove = rect.top;
+      // Reset to CSS defaults
+      dropdown.style.top = '';
+      dropdown.style.bottom = '';
+      // Flip upward if insufficient space below and more room above
+      if (spaceBelow < 240 && spaceAbove > spaceBelow) {
+        dropdown.style.top = 'auto';
+        dropdown.style.bottom = 'calc(100% + 4px)';
+      }
+    }
+
     trigger.addEventListener('click', function(e) {
       e.stopPropagation();
       position();
       ms.classList.toggle('open');
+      if (ms.classList.contains('open')) flipDropdown();
     });
 
     window.addEventListener('resize', function() {
-      if (ms.classList.contains('open')) position();
+      if (ms.classList.contains('open')) { position(); flipDropdown(); }
     });
 
     checkboxes.forEach(function(cb) {

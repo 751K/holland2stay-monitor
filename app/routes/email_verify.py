@@ -166,6 +166,26 @@ def resend_verify(user_id: str) -> Any:
         return jsonify({"ok": False, "error": "用户不存在"}), 404
     if user.email_mode != "shared":
         return jsonify({"ok": False, "error": "仅共享模式需要验证"}), 400
+
+    # 支持前端即时验证：传入 email 参数时先更新邮箱再发送
+    email = (request.form.get("email") or "").strip()
+    if email and email != user.email_to:
+        if "@" not in email or "." not in email.split("@")[-1]:
+            return jsonify({"ok": False, "error": "邮箱格式不正确"}), 400
+        def _update_email(users):
+            for u in users:
+                if u.id == user_id:
+                    u.email_to = email
+                    u.email_verified = False
+                    return True
+            return False
+        if not update_users(_update_email):
+            return jsonify({"ok": False, "error": "更新邮箱失败"}), 500
+        users = load_users()
+        user = get_user(users, user_id)
+        if user is None:
+            return jsonify({"ok": False, "error": "用户不存在"}), 404
+
     if not user.email_to:
         return jsonify({"ok": False, "error": "请先填写收件邮箱"}), 400
     if user.email_verified:

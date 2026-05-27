@@ -349,6 +349,10 @@ class EmailNotifier(BaseNotifier):
     - `none`     ：不加密，仅适合可信内网或本地中继
     """
 
+    async def send_heartbeat(self, total_in_db: int, round_count: int) -> bool:
+        """心跳不通过邮件发送（避免打扰用户）。"""
+        return True
+
     def __init__(
         self,
         smtp_host: str,
@@ -444,6 +448,10 @@ class ResendNotifier(BaseNotifier):
     from_addr : 发件人邮箱（必须在 Resend 已验证的域名下）
     to_addrs  : 收件人邮箱，逗号分隔可多个
     """
+
+    async def send_heartbeat(self, total_in_db: int, round_count: int) -> bool:
+        """心跳不通过邮件发送（避免打扰用户）。"""
+        return True
 
     ENDPOINT = "https://api.resend.com/emails"
 

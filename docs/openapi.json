@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FlatRadar Backend API",
-    "version": "1.6.0",
+    "version": "1.7.7",
     "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
@@ -566,6 +566,20 @@
           "403": {"$ref": "#/components/responses/Forbidden"}
         }
       }
+    },
+    "/admin/monitor/restart": {
+      "post": {
+        "tags": ["Admin"],
+        "operationId": "adminMonitorRestart",
+        "summary": "Full restart monitor process (stop + start, re-import Python modules).",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"$ref": "#/components/responses/MonitorRestartOk"},
+          "401": {"$ref": "#/components/responses/Unauthorized"},
+          "403": {"$ref": "#/components/responses/Forbidden"},
+          "500": {"$ref": "#/components/responses/ServerError"}
+        }
+      }
     }
   },
   "components": {
@@ -622,7 +636,9 @@
       "MonitorStatusOk": {"description": "Monitor status.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/MonitorStatus"}}}]}}}},
       "MonitorStartOk": {"description": "Monitor started.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["started", "method"], "properties": {"started": {"type": "boolean"}, "method": {"type": "string"}}}}}]}}}},
       "MonitorStopOk": {"description": "Monitor stopped.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["stopped", "method"], "properties": {"stopped": {"type": "boolean"}, "pid": {"type": ["integer", "null"]}, "method": {"type": "string"}}}}}]}}}},
-      "MonitorReloadOk": {"description": "Monitor reloaded.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["reload", "method"], "properties": {"reload": {"type": "boolean"}, "method": {"type": "string"}}}}}]}}}}
+      "MonitorReloadOk": {"description": "Monitor reloaded.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["reload", "method"], "properties": {"reload": {"type": "boolean"}, "method": {"type": "string"}}}}}]}}}},
+      "MonitorRestartOk": {"description": "Monitor restarted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["restarted", "was_running"], "properties": {"restarted": {"type": "boolean"}, "was_running": {"type": "boolean"}, "method": {"type": "string"}}}}}]}}}},
+      "ServerError": {"description": "Server error.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}}
     },
     "schemas": {
       "SuccessEnvelope": {

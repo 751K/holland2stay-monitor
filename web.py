@@ -74,6 +74,7 @@ from app.routes import (                                          # noqa: E402
     control,
     dashboard,
     email_verify as email_verify_routes,
+    inbound,
     legal,
     map_routes,
     notifications,
@@ -214,6 +215,7 @@ stats.register(app)            # /stats /api/charts
 system.register(app)           # /system /logs /api/logs* /api/status /api/platform /health /api/reset-db
 control.register(app)          # /api/reload /api/monitor/{start,stop} /api/shutdown
 notifications.register(app)    # /api/notifications* /api/events
+inbound.register(app)          # /api/inbound/email （Resend webhook，Svix 签名校验，无需登录）
 app_accounts.register(app)     # /settings/app-accounts (admin: Bearer token 管理)
 legal.register(app)            # /privacy /terms （公开页面，无需登录）
 api_v1.register(app)           # /api/v1/auth/* /api/v1/stats/public/* (Bearer token)

@@ -219,9 +219,11 @@
 
             <!-- 收件邮箱（两种模式都需要） -->
             <label class="form-label">{{ _('user_form_to') }}</label>
-            <input type="text" class="form-input" name="EMAIL_TO" id="email_to_input" value="{{ u.email_to if is_edit else '' }}" placeholder="alice@example.com">
-            <!-- 验证状态徽章（仅 shared 模式 + 已填邮箱时显示） -->
-            <div id="email_verify_status" class="mb-2" style="margin-top:6px;font-size:12px;{% if not is_edit or current_mode != 'shared' or not u.email_to %}display:none;{% endif %}">
+            <input type="text" class="form-input" name="EMAIL_TO" id="email_to_input"
+                   value="{{ u.email_to if is_edit else '' }}" placeholder="alice@example.com"
+                   oninput="onEmailInput()">
+            <!-- 验证状态 / 即时验证按钮 -->
+            <div id="email_verify_area" class="mb-2" style="margin-top:6px;font-size:12px;{% if not is_edit or current_mode != 'shared' or not u.email_to %}display:none;{% endif %}">
               {% if is_edit and current_mode == 'shared' and u.email_to %}
                 {% if u.email_verified %}
                   <span style="color:var(--success);"><i class="bi bi-check-circle-fill mr-1"></i>{{ _('user_form_email_verified') }}</span>
@@ -548,10 +550,15 @@ function resendVerification(userId, el) {
   el.innerHTML = '<i class="bi bi-hourglass-split mr-1"></i>发送中...';
   el.style.pointerEvents = 'none';
   var csrf = document.querySelector('input[name="csrf_token"]').value;
+  var emailInput = document.getElementById('email_to_input');
+  var body = 'csrf_token=' + encodeURIComponent(csrf);
+  if (emailInput && emailInput.value.trim()) {
+    body += '&email=' + encodeURIComponent(emailInput.value.trim());
+  }
   fetch('/users/' + encodeURIComponent(userId) + '/resend-verify', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'csrf_token=' + encodeURIComponent(csrf),
+    body: body,
   })
   .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
   .then(function(arr){
@@ -569,6 +576,74 @@ function resendVerification(userId, el) {
     el.innerHTML = '<i class="bi bi-x-circle mr-1"></i>网络错误';
     el.style.color = 'var(--danger)';
     setTimeout(function(){ el.innerHTML = orig; el.style.color = ''; el.style.pointerEvents=''; }, 4000);
+  });
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function onEmailInput() {
+  var input = document.getElementById('email_to_input');
+  var area = document.getElementById('email_verify_area');
+  if (!input || !area) return;
+  var email = input.value.trim();
+
+  if (!email) {
+    area.style.display = 'none';
+    return;
+  }
+
+  area.style.display = 'block';
+
+  if (!isValidEmail(email)) {
+    var zh = document.documentElement.lang === 'zh';
+    area.innerHTML = '<span style="color:var(--danger);"><i class="bi bi-exclamation-circle mr-1"></i>' +
+      (zh ? '邮箱格式不正确' : 'Invalid email format') + '</span>';
+    return;
+  }
+
+  // 合法邮箱：显示验证按钮
+  var zh = document.documentElement.lang === 'zh';
+  area.innerHTML = '<button type="button" class="btn btn-sm" style="background:var(--accent);color:#fff;font-size:12px;" onclick="verifyEmail()">' +
+    '<i class="bi bi-envelope-arrow-up mr-1"></i>' +
+    (zh ? '发送验证邮件' : 'Send verification') + '</button>';
+}
+
+function verifyEmail() {
+  var input = document.getElementById('email_to_input');
+  var area = document.getElementById('email_verify_area');
+  var email = input.value.trim();
+  var userId = '{{ u.id if is_edit else '' }}';
+  if (!userId || !email) return;
+  var csrf = document.querySelector('input[name="csrf_token"]').value;
+  var zh = document.documentElement.lang === 'zh';
+
+  area.innerHTML = '<span style="color:var(--text2);"><span class="spinner mr-1"></span>' +
+    (zh ? '发送中…' : 'Sending…') + '</span>';
+
+  fetch('/users/' + encodeURIComponent(userId) + '/resend-verify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'csrf_token=' + encodeURIComponent(csrf) + '&email=' + encodeURIComponent(email),
+  })
+  .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
+  .then(function(arr){
+    var status = arr[0], j = arr[1];
+    if (status === 200 && j.ok) {
+      area.innerHTML = '<span style="color:var(--success);"><i class="bi bi-check-circle mr-1"></i>' +
+        escapeHtml(j.msg || (zh ? '验证邮件已发送，请查收邮箱' : 'Verification email sent, check inbox')) +
+        '</span>';
+    } else {
+      area.innerHTML = '<span style="color:var(--danger);"><i class="bi bi-x-circle mr-1"></i>' +
+        escapeHtml(j.error || (zh ? '发送失败' : 'Send failed')) + '</span>';
+      setTimeout(function(){ onEmailInput(); }, 3000);
+    }
+  })
+  .catch(function(){
+    area.innerHTML = '<span style="color:var(--danger);"><i class="bi bi-x-circle mr-1"></i>' +
+      (zh ? '网络错误' : 'Network error') + '</span>';
+    setTimeout(function(){ onEmailInput(); }, 3000);
   });
 }
 
