@@ -46,6 +46,10 @@ Platform coverage changes over time as third-party websites change. Always verif
 
 [Download on the App Store](https://apps.apple.com/us/app/flarradar/id6769857080)
 
+Contact: [surrport@flatradar.app](mailto:surrport@flatradar.app)
+
+> The demo environment has auto-booking disabled for user accounts. To enable it, please contact us via email or [deploy locally](#quick-start).
+
 ## Quick Start
 
 ### Docker
