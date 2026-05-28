@@ -301,8 +301,8 @@ struct MapView: View {
             if s.contains("available to book") { hasAvailable = true }
             else if s.contains("lottery") { hasLottery = true }
         }
-        if hasAvailable { return .green }
-        if hasLottery { return .orange }
+        if hasAvailable { return .statusBook }
+        if hasLottery { return .statusLottery }
         return .blue
     }
 
@@ -333,9 +333,9 @@ struct MapView: View {
 
     private func pinColor(for status: String) -> Color {
         let s = status.lowercased()
-        if s.contains("available to book") { return .green }
-        if s.contains("lottery") { return .orange }
-        if s.contains("not available") { return .gray }
+        if s.contains("available to book") { return .statusBook }
+        if s.contains("lottery") { return .statusLottery }
+        if s.contains("not available") { return .statusReserved }
         return .blue
     }
 

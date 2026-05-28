@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -86,12 +87,36 @@ def _avg_run_count(*, days: int = 7, fallback: int = 0) -> tuple[int, int]:
     return round(sum(counts) / len(counts)), len(counts)
 
 
+def _system_uptime_seconds() -> float | None:
+    """读取系统启动以来的秒数（Linux /proc/uptime）。"""
+    try:
+        return float(Path("/proc/uptime").read_text().split()[0])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 def _uptime_percent_7d(pid: int | None) -> int:
     if pid is None:
         return 0
     try:
+        # 优先从 /proc/<pid>/stat 读取进程真实启动时间（Linux/Docker 兼容）。
+        # PID_FILE.st_mtime 在 Docker 持久卷上可能是旧时间戳。
+        stat_path = Path(f"/proc/{pid}/stat")
+        if stat_path.exists():
+            raw = stat_path.read_text()
+            # /proc/pid/stat 第 22 个字段是 starttime（clock ticks since boot）
+            fields = raw[raw.rfind(")") + 2:].split()
+            if len(fields) >= 20:
+                clk_tck = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
+                uptime_sec = _system_uptime_seconds()
+                if uptime_sec is not None:
+                    start_ticks = int(fields[19])  # 0-indexed: field 21
+                    started_at = time.time() - (uptime_sec - start_ticks / clk_tck)
+                    elapsed = max(0.0, time.time() - started_at)
+                    return min(100, round(elapsed * 100 / (7 * 24 * 3600)))
+        # fallback: PID 文件 mtime（macOS 或 /proc 不可用时）
         started_at = PID_FILE.stat().st_mtime
-    except OSError:
+    except (OSError, ValueError, IndexError):
         return 0
     elapsed = max(0.0, time.time() - started_at)
     return min(100, round(elapsed * 100 / (7 * 24 * 3600)))

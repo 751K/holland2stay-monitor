@@ -26,6 +26,7 @@ import com.flatradar.app.data.remote.ApiClient
 import com.flatradar.app.navigation.AppNavigation
 import com.flatradar.app.ui.auth.AuthViewModel
 import com.flatradar.app.ui.components.AppErrorBus
+import com.flatradar.app.util.CrashReporter
 import com.flatradar.app.ui.theme.FlatRadarTheme
 import android.content.Context
 import android.content.Intent
@@ -98,6 +99,7 @@ class MainActivity : ComponentActivity() {
 
             LaunchedEffect(preferences.serverUrl) {
                 apiClient.configureBaseUrl(preferences.serverUrl)
+                CrashReporter.updateBaseUrl(preferences.serverUrl)
             }
 
             FlatRadarTheme(colorSchemePreference = preferences.colorScheme) {

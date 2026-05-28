@@ -50,6 +50,22 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _safe_int(val: str, default: int) -> int:
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        logger.warning("FCM 配置值 %r 不是合法整数，回退到 %d", val, default)
+        return default
+
+
+def _safe_float(val: str, default: float) -> float:
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        logger.warning("FCM 配置值 %r 不是合法浮点数，回退到 %.1f", val, default)
+        return default
+
+
 # ── 配置 ────────────────────────────────────────────────────────────
 
 
@@ -96,9 +112,9 @@ class FcmConfig:
                 client_email=sa["client_email"],
                 private_key=sa["private_key"],
                 token_uri=sa.get("token_uri", "https://oauth2.googleapis.com/token"),
-                concurrency=int(os.environ.get("FCM_CONCURRENCY", "16") or 16),
-                request_timeout=float(
-                    os.environ.get("FCM_REQUEST_TIMEOUT", "10") or 10,
+                concurrency=_safe_int(os.environ.get("FCM_CONCURRENCY", "16") or "16", 16),
+                request_timeout=_safe_float(
+                    os.environ.get("FCM_REQUEST_TIMEOUT", "10") or "10", 10.0,
                 ),
             )
         except Exception:

@@ -25,8 +25,8 @@ android {
         applicationId = "com.flatradar.app"
         minSdk = 31
         targetSdk = 35
-        versionCode = 172
-        versionName = "1.7.1"
+        versionCode = 178
+        versionName = "1.7.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["mapsApiKey"] = mapsApiKey

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from dataclasses import dataclass
 
 from app.services.listing_service import storage_ctx
@@ -29,6 +30,36 @@ class DeviceValidationError(Exception):
 
 def _token_hint(token: str) -> str:
     return f"{token[:12]}…{token[-4:]}" if len(token) > 16 else token
+
+
+def _run_async(coro):
+    """
+    安全执行 async 协程，兼容 sync/async 两种 worker。
+
+    - 当前线程无 running loop 时直接用 ``asyncio.run()``
+    - 已有 running loop（Gunicorn + uvicorn / gevent）时在新线程中跑，
+      避免 ``RuntimeError: asyncio.run() cannot be called from a running event loop``
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # running loop 已存在 → 另起线程
+    result_container = []
+    error_container = []
+
+    def _target():
+        try:
+            result_container.append(asyncio.run(coro))
+        except Exception as exc:
+            error_container.append(exc)
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join()
+    if error_container:
+        raise error_container[0]
+    return result_container[0]
 
 
 def register_device_for_token(
@@ -162,7 +193,8 @@ def send_test_push(
             raise DeviceValidationError("当前会话没有注册过设备")
 
         # 按 platform 分流：iOS → APNs，Android → FCM
-        ios_devices = [d for d in active if d.get("platform", "ios") != "android"]
+        # 使用显式允许列表，避免未知/空 platform 被静默当 iOS 处理
+        ios_devices = [d for d in active if d.get("platform", "ios") in ("ios",)]
         android_devices = [d for d in active if d.get("platform", "ios") == "android"]
 
         # ── iOS / APNs ────────────────────────────────────────────
@@ -192,7 +224,7 @@ def send_test_push(
                     finally:
                         await local.close()
 
-                results = asyncio.run(_run_apns())
+                results = _run_async(_run_apns())
                 sent += sum(1 for r in results if r.ok)
                 for device, result in zip(ios_devices, results):
                     token = device["device_token"]
@@ -236,7 +268,7 @@ def send_test_push(
                     finally:
                         await local.close()
 
-                results = asyncio.run(_run_fcm())
+                results = _run_async(_run_fcm())
                 sent += sum(1 for r in results if r.ok)
                 for device, result in zip(android_devices, results):
                     token = device["device_token"]

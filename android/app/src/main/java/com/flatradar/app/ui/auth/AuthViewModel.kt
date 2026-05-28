@@ -16,6 +16,7 @@ import com.flatradar.app.navigation.NavigationCoordinator
 import com.flatradar.app.push.FcmTokenManager
 import com.flatradar.app.ui.components.AppErrorBus
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -118,6 +119,8 @@ class AuthViewModel @Inject constructor(
                     isLoading = false,
                     errorMessage = e.message
                 )
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 val message = e.localizedMessage ?: "Network error"
                 errorBus.show(message)

@@ -65,7 +65,7 @@ function getLang() {
 }
 
 function escapeHtml(s) {
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 function timeAgo(iso) {
@@ -106,7 +106,7 @@ function updateMonitorBadge() {
       var zh = getLang() === 'zh';
       txt.textContent = d.running ? (zh ? '监控运行中' : 'Monitor running') : (zh ? '监控未启动' : 'Monitor stopped');
     }
-  }).catch(function(){});
+  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
 }
 
 function startMonitorPoll() {
@@ -190,7 +190,7 @@ function loadNotifications() {
       updateNotifBadge(d.unread);
       if(d.notifications.length)
         _notifLastId = Math.max.apply(null, d.notifications.map(function(n){ return n.id; }));
-    }).catch(function(){});
+    }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
 }
 
 function toggleNotifications() {
@@ -210,7 +210,7 @@ function markAllRead(e) {
     body: JSON.stringify({}),
   }).then(function(r){ return r.json(); })
     .then(function(){ updateNotifBadge(0); loadNotifications(); })
-    .catch(function(){});
+    .catch(function(e){ console.error('FlatRadar fetch error:', e); });
 }
 
 // Close panel when clicking outside
@@ -254,7 +254,7 @@ function connectSSE() {
     // 从服务端同步真实未读数，避免本地计数不准
     fetch('/api/notifications?limit=1').then(function(r){ return r.json(); }).then(function(d){
       if(d.ok && typeof d.unread === 'number') updateNotifBadge(d.unread);
-    }).catch(function(){});
+    }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
     if(_notifPanelOpen) loadNotifications();
   };
   src.onerror = function() {
@@ -325,6 +325,12 @@ document.addEventListener('DOMContentLoaded', function() {
     var textEl   = ms.querySelector('.ms-text');
     var checkboxes = ms.querySelectorAll('input[type="checkbox"]');
     var placeholder = textEl.textContent.trim() || textEl.getAttribute('data-placeholder') || '';
+
+    // a11y: aria attributes for screen readers
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('role', 'combobox');
+    dropdown.setAttribute('role', 'listbox');
+    checkboxes.forEach(function(cb) { cb.closest('label')?.setAttribute('role', 'option'); });
 
 	    function position() {
 	      dropdown.style.minWidth = Math.max(trigger.offsetWidth, 180) + 'px';

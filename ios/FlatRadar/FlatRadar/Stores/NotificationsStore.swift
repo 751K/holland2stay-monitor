@@ -63,7 +63,9 @@ final class NotificationsStore {
             total = resp.total
             revision &+= 1
         } catch {
-            // Silently fail; pull-to-refresh recovers
+            #if DEBUG
+            print("[NotificationsStore] loadMore failed: \(error)")
+            #endif
         }
         isLoadingMore = false
     }

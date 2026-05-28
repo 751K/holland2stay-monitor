@@ -174,8 +174,8 @@ struct NotificationRow: View {
         let s = raw.lowercased()
         if s.contains("book")     { return .statusBook }
         if s.contains("lottery")  { return .statusLottery }
-        if s.contains("reserved") { return Color(.secondaryLabel) }
-        if s.contains("occupied") { return Color(.secondaryLabel) }
+        if s.contains("reserved") { return .statusReserved }
+        if s.contains("occupied") { return .statusReserved }
         return .primary
     }
 

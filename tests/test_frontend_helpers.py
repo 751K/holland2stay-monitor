@@ -107,12 +107,11 @@ class TestTemplateAutoEscape:
         assert "servers, Linux, or Docker" in source
 
     def test_stats_range_updates_kpi_cards(self):
-        """统计页切换 7/30/90 天时，KPI 卡片也应跟随 API 数据刷新。"""
+        """统计页切换天数时 KPI 卡片通过 JS setText 动态更新。"""
         source = (Path(__file__).parent.parent / "templates" / "stats.html").read_text(
             encoding="utf-8",
         )
-        assert 'id="kpi-new-range"' in source
-        assert 'id="kpi-changes-range"' in source
+        # v1.7.x KPI 元素由 JS renderSummary() 动态注入，不写静态 HTML id
         assert "renderSummary(d.summary)" in source
         assert "summary.new_range" in source
         assert "summary.changes_range" in source

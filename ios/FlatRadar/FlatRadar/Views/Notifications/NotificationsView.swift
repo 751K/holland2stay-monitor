@@ -29,10 +29,11 @@ struct NotificationsView: View {
     /// Live pill 绿点呼吸动画相位
     @State private var liveDotBreathing = false
 
-    // 分桶缓存——避免 body 重渲染时连续 3 次 O(n) filter
+    // 分桶 + 分类计数缓存——一次 O(n) 扫描产出所有 UI 需要的数据
     @State private var todayItems: [NotificationItem] = []
     @State private var yesterdayItems: [NotificationItem] = []
     @State private var earlierItems: [NotificationItem] = []
+    @State private var kindCounts: [NotificationItem.Kind: Int] = [:]
 
     var body: some View {
         NavigationStack(path: $notificationsPath) {
@@ -478,10 +479,7 @@ struct NotificationsView: View {
                 count: store.notifications.count
             )
         }
-        let count = store.notifications.filter { $0.kind == kind }.count
-        // 标签**故意短**：类别色已经由左侧色点传达，标签只要单词 + count
-        // 就足够；保留 "New · Lottery" 这种长字串会让胶囊撑出 Mark all read
-        // 之外（特别是 iPhone Pro 标准宽度下）。
+        let count = kindCounts[kind] ?? 0
         switch kind {
         case .book:    return FilterScope(label: "Book",    dot: .statusBook,    count: count)
         case .lottery: return FilterScope(label: "Lottery", dot: .statusLottery, count: count)
@@ -506,14 +504,17 @@ struct NotificationsView: View {
 
     // MARK: - Day grouping (cached)
 
-    /// 单次 O(n) 扫 notifications 分到三个桶。
-    /// 同时应用 typeFilter——nil = 全部，其他 = 该 kind。
+    /// 单次 O(n) 扫 notifications，同时产出：
+    /// - 三个时间桶（today / yesterday / earlier）
+    /// - 每种 kind 的总数（``kindCounts``，供 filter pill 用，避免二次扫描）
     private func rebucketDayGroups() {
         var today: [NotificationItem] = []
         var yesterday: [NotificationItem] = []
         var earlier: [NotificationItem] = []
+        var counts: [NotificationItem.Kind: Int] = [:]
         let filter = typeFilter
         for n in store.notifications {
+            counts[n.kind, default: 0] += 1
             if let f = filter, n.kind != f { continue }
             switch n.dayBucket {
             case .today:     today.append(n)
@@ -524,6 +525,7 @@ struct NotificationsView: View {
         todayItems = today
         yesterdayItems = yesterday
         earlierItems = earlier
+        kindCounts = counts
     }
 }
 

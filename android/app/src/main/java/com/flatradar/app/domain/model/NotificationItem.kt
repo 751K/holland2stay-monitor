@@ -42,7 +42,11 @@ enum class NotificationKind {
             val t = item.type.lowercase().replace("_", " ")
             val blob = "${item.title} ${item.body}".lowercase()
 
-            if (t.contains("test") || blob.contains("sse test") || blob.contains("test push")) return TEST
+            // 测试推送：title/body 含 🧪 或 "测试推送" / "test push" / "测试" / "sse test"
+            if (t.contains("test") || blob.contains("sse test")
+                || blob.contains("test push") || blob.contains("🧪")  // 🧪
+                || blob.contains("测试推送") || blob.contains("推送链路")
+            ) return TEST
             if (t.contains("error") || t.contains("block") || t.contains("alert")
                 || t.contains("403") || t.contains("fail")) return ALERT
             if (t.contains("status") || t.contains("change") || blob.contains("→")) return STATUS

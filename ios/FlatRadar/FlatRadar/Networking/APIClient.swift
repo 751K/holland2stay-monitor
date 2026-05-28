@@ -54,7 +54,8 @@ final class APIClient {
         let scheme = clean.hasPrefix("localhost") || clean.hasPrefix("127.")
             ? "http" : "https"
         return URL(string: "\(scheme)://\(clean)")
-            ?? URL(string: "https://\(defaultServerHost)")!
+            ?? URL(string: "https://\(defaultServerHost)")
+            ?? URL(string: "https://flatradar.app")!  // 最终兜底，字面量不可能为 nil
     }
 
     // MARK: - Configuration

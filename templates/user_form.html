@@ -747,7 +747,7 @@ function loadNeighborhoods() {
   if(cities.length > 0) url += '?cities=' + encodeURIComponent(cities.join(','));
   fetch(url).then(function(r){ return r.json(); }).then(function(d){
     renderHoods('neighborhood-dropdown', 'ALLOWED_NEIGHBORHOODS', d.neighborhoods, curSel.length ? curSel : selNbh);
-  }).catch(function(){});
+  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
   // Auto-book
   var abCities = [];
   document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_CITIES"]:checked').forEach(function(cb){ abCities.push(cb.value); });
@@ -755,7 +755,7 @@ function loadNeighborhoods() {
   if(abCities.length > 0) abUrl += '?cities=' + encodeURIComponent(abCities.join(','));
   fetch(abUrl).then(function(r){ return r.json(); }).then(function(d){
     renderHoods('ab-neighborhood-dropdown', 'AUTO_BOOK_ALLOWED_NEIGHBORHOODS', d.neighborhoods, curAbSel.length ? curAbSel : selAbNbh);
-  }).catch(function(){});
+  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
 }
 
 function renderHoods(dropId, inputName, hoods, selected) {

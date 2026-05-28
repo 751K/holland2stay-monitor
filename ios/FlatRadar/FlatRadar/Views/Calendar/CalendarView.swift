@@ -342,9 +342,9 @@ struct CalendarView: View {
 
     private func statusColor(for status: String) -> Color {
         let s = status.lowercased()
-        if s.contains("available to book") { return .green }
-        if s.contains("lottery") { return .orange }
-        if s.contains("not available") { return .gray }
+        if s.contains("available to book") { return .statusBook }
+        if s.contains("lottery") { return .statusLottery }
+        if s.contains("not available") { return .statusReserved }
         return .secondary
     }
 

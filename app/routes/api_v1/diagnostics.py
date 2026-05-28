@@ -85,18 +85,20 @@ def _submit() -> Any:
     role = api_auth.current_role() or "anonymous"
     user_id = getattr(g, "api_user_id", None) or ""
     app_version = str(body.get("app_version", ""))[:32]
-    ios_version = str(body.get("ios_version", ""))[:32]
+    platform = str(body.get("platform", "ios")).strip().lower()[:8]  # "ios" | "android"
+    os_version = str(body.get("os_version", body.get("ios_version", "")))[:32]  # 兼容旧字段
     device_model = str(body.get("device_model", ""))[:64]
 
     received_at = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     record = {
         "received_at": received_at,
         "kind": kind,
+        "platform": platform,
         "role": role,
         "user_id": user_id,
         "client_ip": client_ip,
         "app_version": app_version,
-        "ios_version": ios_version,
+        "os_version": os_version,
         "device_model": device_model,
         "user_agent": request.headers.get("User-Agent", "")[:200],
         "payload": payload,
@@ -118,8 +120,8 @@ def _submit() -> Any:
         return _err.err_server_error(e, "诊断上传失败，请稍后重试")
 
     logger.warning(
-        "📋 收到崩溃诊断 kind=%s role=%s user=%s app=%s ios=%s device=%s size=%d → %s",
-        kind, role, user_id or "-", app_version, ios_version,
+        "📋 收到崩溃诊断 kind=%s platform=%s role=%s user=%s app=%s os=%s device=%s size=%d → %s",
+        kind, platform, role, user_id or "-", app_version, os_version,
         device_model, len(raw), fname,
     )
     return _err.ok({"received": True, "id": fname}, status=202)

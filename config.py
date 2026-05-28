@@ -90,7 +90,8 @@ def write_env_key(key: str, value: str) -> None:
     found = False
     new_lines: list[str] = []
     for line in lines:
-        if _re.match(rf"^\s*{_re.escape(key)}\s*=", line):
+        # 加 \b 确保 PPORT 不会误匹配 SPORT 之类的前缀碰撞
+        if _re.match(rf"^\s*{_re.escape(key)}\b\s*=", line):
             new_lines.append(f"{key}={value}\n")
             found = True
         else:

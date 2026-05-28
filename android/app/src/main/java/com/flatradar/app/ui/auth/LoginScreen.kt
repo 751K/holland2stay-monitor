@@ -21,7 +21,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -131,14 +130,6 @@ fun LoginScreen(
                     icon = Icons.Filled.Visibility,
                     selected = selectedRole == "guest",
                     onClick = { selectedRole = "guest" },
-                    modifier = Modifier.weight(1f).fillMaxHeight()
-                )
-                RoleCard(
-                    title = "Staff",
-                    subtitle = "Admin",
-                    icon = Icons.Filled.Shield,
-                    selected = selectedRole == "admin",
-                    onClick = { selectedRole = "admin" },
                     modifier = Modifier.weight(1f).fillMaxHeight()
                 )
             }
@@ -637,7 +628,7 @@ private fun HeroHeaderSection(selectedRole: String) {
                         color = brandBlue
                     )
                     Text(
-                        text = "UNOFFICIAL · v1.7.1",
+                        text = "UNOFFICIAL · v1.7.8",
                         style = MaterialTheme.typography.labelSmall,
                         color = descriptionColor,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace

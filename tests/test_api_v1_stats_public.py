@@ -63,12 +63,12 @@ class TestGuestChart:
         assert r.status_code == 200
         d = r.get_json()["data"]
         assert d["key"] == "daily_new"
-        assert d["days"] == 30
+        assert d["days"] == 7   # DEFAULT_STATS_DAYS
         assert isinstance(d["data"], list)
 
     def test_custom_days(self, api_client):
-        r = api_client.get("/api/v1/stats/public/charts/daily_new?days=7")
-        assert r.get_json()["data"]["days"] == 7
+        r = api_client.get("/api/v1/stats/public/charts/daily_new?days=14")
+        assert r.get_json()["data"]["days"] == 14
 
     def test_days_clamped_high(self, api_client):
         r = api_client.get("/api/v1/stats/public/charts/daily_new?days=9999")
@@ -80,7 +80,7 @@ class TestGuestChart:
 
     def test_days_non_int(self, api_client):
         r = api_client.get("/api/v1/stats/public/charts/daily_new?days=foo")
-        assert r.get_json()["data"]["days"] == 30  # 退回默认
+        assert r.get_json()["data"]["days"] == 7  # 退回默认
 
     def test_unknown_key_404(self, api_client):
         r = api_client.get("/api/v1/stats/public/charts/nonexistent")

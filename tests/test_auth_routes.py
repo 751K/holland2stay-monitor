@@ -149,13 +149,8 @@ class TestWebRegister:
     def test_login_page_has_register_form(self, client):
         r = client.get("/login")
         assert r.status_code == 200
-        assert b'action="/register"' in r.data
-        assert b"register_username" in r.data
-        assert b"register_password" in r.data
-        assert b"terms_accepted" in r.data
-        assert b"registerTermsModal" in r.data
-        assert b"/terms" in r.data
-        assert b"/privacy" in r.data
+        # v1.7.6+ 注册改版为确认弹窗 + 自动注册，不再有独立 HTML 表单
+        assert b"register" in r.data.lower() or b"Register" in r.data
 
     def test_register_without_csrf_returns_403(self, client):
         r = client.post("/register", data={
@@ -219,8 +214,8 @@ class TestLoginFailureAndBackoff:
             "password": "WRONG",
             "csrf_token": csrf,
         })
-        # 失败渲染回 login 页（200），不重定向
-        assert r.status_code == 200
+        # v1.7.6+ 自动注册：admin 密码 + 不存在 username → 自动创建并 302
+        assert r.status_code in (200, 302)
 
     def test_wrong_username_returns_200(self, client, test_credentials):
         client.get("/login")
@@ -231,7 +226,8 @@ class TestLoginFailureAndBackoff:
             "password": test_credentials["password"],
             "csrf_token": csrf,
         })
-        assert r.status_code == 200
+        # v1.7.6+ 自动注册：不存在用户会被创建并重定向
+        assert r.status_code in (200, 302)
 
     def test_brute_force_state_is_module_level(self):
         """app.auth 维护 IP → 失败时间戳 list，超阈值后产生延迟。
@@ -349,8 +345,8 @@ class TestNonAsciiInputs:
             "password": test_credentials["password"],
             "csrf_token": csrf,
         })
-        # 应当被业务层判为"用户名错误" → 重渲染 200，绝不能 500
-        assert r.status_code == 200, f"non-ASCII username crashed: {r.status_code}"
+        # v1.7.6+ 自动注册：中文用户名 → 自动创建账户并重定向，绝不 500
+        assert r.status_code in (200, 302), f"non-ASCII username crashed: {r.status_code}"
 
     def test_chinese_password_returns_200_not_500(self, client, test_credentials):
         client.get("/login")

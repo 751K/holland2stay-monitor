@@ -68,12 +68,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.flatradar.app.domain.model.NotificationItem
 import com.flatradar.app.domain.model.NotificationKind
-import com.flatradar.app.ui.theme.StatusBook
-import com.flatradar.app.ui.theme.StatusBookContainer
-import com.flatradar.app.ui.theme.StatusLottery
-import com.flatradar.app.ui.theme.StatusLotteryContainer
-import com.flatradar.app.ui.theme.StatusReserved
-import com.flatradar.app.ui.theme.StatusReservedContainer
+import com.flatradar.app.ui.theme.*
 import com.flatradar.app.util.ServerTime
 import java.time.LocalDate
 
@@ -86,6 +81,9 @@ fun NotificationsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val isDark = isSystemInDarkTheme()
+
+    // 每次进入通知页自动刷新列表
+    LaunchedEffect(Unit) { viewModel.load() }
 
     Scaffold(
         topBar = {
@@ -192,7 +190,7 @@ fun NotificationsScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "${todayCount} today · updated 5s ago",
+                                text = "${todayCount} today · live",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = if (isDark) Color(0xFF4EE2D0) else Color(0xFF006057),
                                 fontWeight = FontWeight.SemiBold
@@ -556,30 +554,18 @@ private fun NotificationRow(
 
 private fun getKindColors(kind: NotificationKind, isDark: Boolean): Pair<Color, Color> {
     return when (kind) {
-        NotificationKind.BOOK -> {
-            if (isDark) Color(0xFF1B5E20) to Color(0xFF81C784)
-            else Color(0xFFE8F5E9) to Color(0xFF2E7D32)
-        }
-        NotificationKind.LOTTERY -> {
-            if (isDark) Color(0xFF5D4037) to Color(0xFFD7CCC8)
-            else Color(0xFFFFF3E0) to Color(0xFFE65100)
-        }
-        NotificationKind.STATUS -> {
-            if (isDark) Color(0xFF0D47A1) to Color(0xFF90CAF9)
-            else Color(0xFFE3F2FD) to Color(0xFF1565C0)
-        }
-        NotificationKind.ALERT -> {
-            if (isDark) Color(0xFFB71C1C) to Color(0xFFFF8A80)
-            else Color(0xFFFFEBEE) to Color(0xFFC62828)
-        }
-        NotificationKind.TEST -> {
-            if (isDark) Color(0xFF4A148C) to Color(0xFFE1BEE7)
-            else Color(0xFFF3E5F5) to Color(0xFF6A1B9A)
-        }
-        NotificationKind.SYSTEM -> {
-            if (isDark) Color(0xFF212121) to Color(0xFFBDBDBD)
-            else Color(0xFFF5F5F5) to Color(0xFF616161)
-        }
+        NotificationKind.BOOK -> if (isDark) NotifBookBgDark to NotifBookFgDark
+            else NotifBookBgLight to NotifBookFgLight
+        NotificationKind.LOTTERY -> if (isDark) NotifLotteryBgDark to NotifLotteryFgDark
+            else NotifLotteryBgLight to NotifLotteryFgLight
+        NotificationKind.STATUS -> if (isDark) NotifStatusBgDark to NotifStatusFgDark
+            else NotifStatusBgLight to NotifStatusFgLight
+        NotificationKind.ALERT -> if (isDark) NotifAlertBgDark to NotifAlertFgDark
+            else NotifAlertBgLight to NotifAlertFgLight
+        NotificationKind.TEST -> if (isDark) NotifTestBgDark to NotifTestFgDark
+            else NotifTestBgLight to NotifTestFgLight
+        NotificationKind.SYSTEM -> if (isDark) NotifSystemBgDark to NotifSystemFgDark
+            else NotifSystemBgLight to NotifSystemFgLight
     }
 }
 

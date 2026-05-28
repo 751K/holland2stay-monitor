@@ -3,7 +3,9 @@ package com.flatradar.app
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import com.flatradar.app.data.remote.ApiClient
 import com.flatradar.app.push.NotificationChannels
+import com.flatradar.app.util.CrashReporter
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
@@ -12,6 +14,7 @@ class FlatRadarApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannels()
+        CrashReporter.init(ApiClient.DEFAULT_BASE_URL, filesDir)
     }
 
     private fun createNotificationChannels() {

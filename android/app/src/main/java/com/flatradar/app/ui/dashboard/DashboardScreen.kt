@@ -832,11 +832,13 @@ private fun statusBuckets(entries: List<ChartEntry>): List<ChartEntry> {
     ).filter { it.count > 0 }
 }
 
+private val DIGIT_REGEX = Regex("\\d+")
+
 private fun priceSortKey(label: String): Int {
     return when {
         label.startsWith("<") -> 0
         label.startsWith(">") -> Int.MAX_VALUE
-        else -> Regex("\\d+").find(label)?.value?.toIntOrNull() ?: Int.MAX_VALUE - 1
+        else -> DIGIT_REGEX.find(label)?.value?.toIntOrNull() ?: Int.MAX_VALUE - 1
     }
 }
 

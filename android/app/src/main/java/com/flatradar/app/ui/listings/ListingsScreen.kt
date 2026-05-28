@@ -98,10 +98,11 @@ fun ListingsScreen(
             )
 
             // 3. Pull-to-refresh + Content
+            val pullRefreshState = rememberPullToRefreshState()
             PullToRefreshBox(
                 isRefreshing = state.isLoading && state.items.isNotEmpty(),
                 onRefresh = { viewModel.load() },
-                state = rememberPullToRefreshState()
+                state = pullRefreshState
             ) {
                 val listState = rememberLazyListState()
 

@@ -22,6 +22,12 @@ struct ListingsView: View {
     @State private var selectedContract = ""
     @State private var selectedEnergy = ""
 
+    // 缓存排序 + 分桶结果，避免每次 body 重算 O(n log n) + O(n) date parse
+    @State private var cachedSorted: [Listing] = []
+    @State private var cachedNew: [Listing] = []
+    @State private var cachedEarlier: [Listing] = []
+    @State private var sortVersion = 0
+
     var body: some View {
         Group {
             if store.isLoading && store.listings.isEmpty {
@@ -115,10 +121,13 @@ struct ListingsView: View {
             if store.listings.isEmpty {
                 await store.fetch()
             }
+            recomputeCachedListings()
         }
         .onChange(of: store.errorMessage) { _, new in
             showRefreshError = new != nil && !store.listings.isEmpty
         }
+        .onChange(of: store.listings) { _, _ in recomputeCachedListings() }
+        .onChange(of: sort) { _, _ in recomputeCachedListings() }
         .alert(
             store.lastError?.errorDescription ?? "Refresh Failed",
             isPresented: $showRefreshError
@@ -133,18 +142,9 @@ struct ListingsView: View {
     }
 
     private var listContent: some View {
-        // 单次 O(n) 排序 + 分桶：之前是排序 + 两次 filter 扫表（3 × O(n)）。
-        // 现在排序完一次 walk-through 直接分到 new / earlier，省两次 filter。
-        // 外部快照 now，避免循环内每条 l.isNew 都调 Date() 做 syscall。
-        let now = Date()
-        let sorted = displayedListings
-        var new: [Listing] = []
-        var earlier: [Listing] = []
-        new.reserveCapacity(sorted.count)
-        earlier.reserveCapacity(sorted.count)
-        for l in sorted {
-            if l.isNew(asOf: now) { new.append(l) } else { earlier.append(l) }
-        }
+        let sorted = cachedSorted
+        let new = cachedNew
+        let earlier = cachedEarlier
 
         return List {
             // —— Live 心跳条 + 活跃 filter chips
@@ -344,8 +344,18 @@ struct ListingsView: View {
 
     // MARK: - Derived data
 
-    private var displayedListings: [Listing] {
-        store.listings.sorted(using: sort)
+    /// 当 listings 或排序变化时重新计算缓存，避免 body 重渲染时反复 O(n log n)。
+    private func recomputeCachedListings() {
+        let sorted = store.listings.sorted(using: sort)
+        let now = Date()
+        var new: [Listing] = []; new.reserveCapacity(sorted.count)
+        var earlier: [Listing] = []; earlier.reserveCapacity(sorted.count)
+        for l in sorted {
+            if l.isNew(asOf: now) { new.append(l) } else { earlier.append(l) }
+        }
+        cachedSorted = sorted
+        cachedNew = new
+        cachedEarlier = earlier
     }
 
     private var updatedAgoText: String {

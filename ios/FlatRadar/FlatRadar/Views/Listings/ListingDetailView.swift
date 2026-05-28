@@ -310,9 +310,9 @@ struct ListingDetailView: View {
 
     private func statusColor(for listing: Listing) -> Color {
         let s = listing.status.lowercased()
-        if s.contains("available to book") { return .green }
-        if s.contains("lottery") { return .orange }
-        if s.contains("reserved") || s.contains("rented") { return .red }
+        if s.contains("available to book") { return .statusBook }
+        if s.contains("lottery") { return .statusLottery }
+        if s.contains("reserved") || s.contains("rented") { return .statusReserved }
         return .secondary
     }
 

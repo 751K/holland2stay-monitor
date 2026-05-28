@@ -514,11 +514,11 @@ private val LightColors = lightColorScheme(
 | 模块 | 状态 | 说明 |
 |---|---|---|
 | A0 项目骨架 | 已完成 | Gradle Kotlin DSL、Compose Material 3、Hilt、NavigationBar/NavigationRail、自适应导航均已落地。 |
-| A1 鉴权 + Dashboard + Listings | 部分完成 | 三档登录、注册、token 持久化、BiometricPrompt user 登录解锁、Dashboard、Listings、详情页、全局 snackbar 错误通道已接入；Dashboard Explore 统计卡片已按后端动态 chart key 解码并恢复平台/状态/价格/类型/能源/租客分布展示，且可点击展开完整统计明细；AuthViewModel（12 测试）、DashboardViewModel（6 测试）、ListingsViewModel（11 测试）单元测试已完成。BiometricPrompt 真机指纹/面部解锁已验证通过。 |
+| A1 鉴权 + Dashboard + Listings | 部分完成 | 登录页已简化为 Tenant / Guest 双入口（移除 Staff）；注册、token 持久化、BiometricPrompt user 登录解锁、Dashboard、Listings、详情页、全局 snackbar 错误通道已接入；详情页改为 13 项 DetailRow + displayType（Room → Type），移除收藏按钮和重复 featureMap；AuthViewModel（12 测试）、DashboardViewModel（6 测试）、ListingsViewModel（11 测试）单元测试已完成。BiometricPrompt 真机指纹/面部解锁已验证通过。 |
 | A2 Map + Calendar | 部分完成 | Map 已接 Google Maps Compose，支持聚类、状态色 marker、边界初始视角、选中卡片详情、暗色模式（`mapStyleOptions` JSON 样式）；定位按钮改用 `FusedLocationProviderClient.getLastLocation()`（Play Services 聚合缓存），禁用了 Google Maps 原生定位按钮；Calendar 已升级为月格、每日数量、选中日房源列表与重试，CalendarViewModel（9 测试）单元测试已完成。真机地图手动验证仍待补。 |
-| A3 Notifications + SSE | 部分完成 | 通知列表已重构为扁平化 flat list 布局，包括顶部动态 stats 胶囊 pill、实时滚动筛选 chips、覆盖型未读提示蓝点 badge、箭头符号标准化与 Extended FAB；NotificationsViewModel（10 测试）覆盖 load、markRead/markAllRead、SSE Data 新增/去重/已读更新、Keepalive、error 重连。 |
+| A3 Notifications + SSE | 部分完成 | 通知列表已重构为扁平化 flat list 布局，包括顶部动态 stats 胶囊 pill、实时滚动筛选 chips、覆盖型未读提示蓝点 badge、Extended FAB；新增进入页面自动刷新（`LaunchedEffect`）；测试推送分类修复（中文/emoji 匹配 TEST 类型）；NotificationsViewModel（10 测试）覆盖 load、markRead/markAllRead、SSE Data 新增/去重/已读更新、Keepalive、error 重连。 |
 | A4 FCM 推送 | 已完成 | **客户端**：Firebase 项目 `flatradar-66342`，`google-services.json` 已配置，`FcmService` + `FcmTokenManager` + 通知渠道 + POST_NOTIFICATIONS 运行时权限 + deep link 全部接入。**后端**：`notifier_channels/fcm.py`（~260 行，OAuth2 服务账号认证 + FCM HTTP v1 API），`mcore/push.py` 按 `platform` 字段分流 iOS（APNs）/ Android（FCM）双发，`FcmTokenManager` 异常已加日志不再静默吞错。服务端已部署 `FCM_ENABLED=true` + service account JSON 密钥（`/secrets/`）。端到端推送通道已拉通。 |
-| A5 Settings + 多语言 + 深色模式 | 部分完成 | Settings 已支持 DataStore 持久化、System/Light/Dark 主题、反馈、法律文档、改密码、GDPR 数据导出、删号、Admin Users/Monitor；法律文案已统一为 `app/legal/*.txt` 单一数据源，三端（web/iOS/Android）均通过 API 获取 + 本地缓存 fallback，修改一处即时生效；中文字符串 `values-zh/strings.xml` 已覆盖 ~170 条目，与英文版本完全对称；Crash 诊断仍待补。 |
+| A5 Settings + 多语言 + 深色模式 | 已完成 | Settings 已支持 DataStore 持久化、System/Light/Dark 主题、反馈、法律文档、改密码、GDPR 数据导出、删号、Admin Users/Monitor；法律文案已统一为 `app/legal/*.txt` 单一数据源，三端均通过 API 获取 + 本地缓存 fallback；中文字符串 `values-zh/strings.xml` 已覆盖 ~170 条目；Crash 诊断已实现（`CrashReporter` 全局异常捕获 + 后端 `platform`/`os_version` 字段支持）。 |
 | A6 打磨 + 内购 + 上架 | 未开始 | Google Play Billing、截图、Data Safety、封闭测试和上架流程尚未启动。 |
 
 本轮关键复盘：
@@ -547,7 +547,7 @@ private val LightColors = lightColorScheme(
   - **启动 ANR 修复**：`SseClient.connect()` 的 `callbackFlow` 继承 `viewModelScope.launch` 的 Main dispatcher，导致 `readUtf8Line()` 在主线程阻塞 5s+。将整个 SSE 读取循环包入 `withContext(Dispatchers.IO)`（之前仅 `call.execute()` 在 IO）。
   - **后端设备测试推送**：`POST /api/v1/devices/test` 新增按 `platform` 分流——iOS → APNs，Android → FCM data-only payload。之前所有设备统一走 APNs。
   - **地图定位重做**：删除自定义定位逻辑（LocationManager/LocationListener ~110 行），改用 `FusedLocationProviderClient.getLastLocation()` + `Tasks.await()`；添加 `play-services-location` 依赖；添加暗色模式（`mapStyleOptions`）；移除 Google Maps 原生定位按钮。
-  - **UI 打磨**：ListingRow 删除收藏爱心按钮；ListingDetailScreen 删除顶部爱心中 + 底部重复 featureMap dump；"Rooms" → "Type"（显示 Studio/Loft/Apartment 等房型）。
+  - **UI 打磨**：ListingRow 删除收藏爱心按钮；ListingDetailScreen 删除顶部爱心中 + 底部重复 featureMap dump，"Rooms" → "Type"（显示 Studio/Loft/Apartment 等房型）；登录页移除 Staff 入口，仅保留 Tenant + Guest；通知页新增进页自动刷新；通知分类 TEST 支持中文/emoji 关键词。
 
 ### 架构师视角：下一阶段策略
 
@@ -580,7 +580,7 @@ private val LightColors = lightColorScheme(
    - [x] A1：验证 Biometric 保存、登出后解锁、Settings 移除、无生物识别设备 fallback（已通过模拟器验证正常）。
    - [x] A1：验证 401、登录失败、Dashboard 网络失败、Listings/Detail 后端错误都进入全局 snackbar，且页面状态不丢（已验证正常）。
    - [/] A2：验证有/无 `MAPS_API_KEY`、cluster 点击、单点 marker 点击、bounds 初始视角、`/map` 与 `/calendar` 真实响应解析、Calendar 跨月、无房源日期和占位日期过滤（Calendar 已验证正常，Map 聚类/暗色模式/定位按钮/选中卡片已基本验证通过，定位超时需依赖 Play Services 缓存）。
-   - [ ] A3：验证新通知到达后角标增量、单条 mark read 后角标递减、mark all read 后角标清零。
+   - [x] A3：验证新通知到达后角标增量、单条 mark read 后角标递减、mark all read 后角标清零。 ✅
 
 2. **R2 客户端测试补齐**（已完成）
    - [x] `AuthViewModel` — 12 测试 (login/logout/register/deleteAccount/restoreSession/guest)
@@ -593,14 +593,14 @@ private val LightColors = lightColorScheme(
 3. **R3 A5 本地化与合规收口**
    - [x] 补齐完整 `values-zh`（~170 条目），覆盖全页面。
    - [x] Terms/Privacy 文案已统一为多平台中立声明（"与任何房源平台无关"），法律文本已合并为 `app/legal/*.txt` 单一数据源，三端 API 获取 + 本地缓存。
-   - Crash 诊断暂不实现，除非后端明确诊断接收协议；文档继续列为 A5 待办。
+   - [x] Crash 诊断已实现（`CrashReporter` — 全局异常捕获 → HTTP POST + 本地文件兜底，后端 `platform`/`os_version` 支持 Android）。
 
 4. **R4 A4 FCM 推送（已完成）**
    - [x] Firebase 项目 + `google-services.json` 配置完成
    - [x] `FcmService`（onNewToken / onMessageReceived）、`FcmTokenManager`（设备注册/注销）、通知渠道、运行时权限、deep link 全部接入
    - [x] 后端 `notifier_channels/fcm.py`（OAuth2 + FCM HTTP v1 API）+ `mcore/push.py` 平台分流双发
    - [x] 服务端 `FCM_ENABLED=true` + service account JSON 已部署
-   - [ ] 真机验收：Android 设备收到 FCM 推送，点击通知进入对应 listing
+   - [x] 真机验收：Android 设备收到 FCM 推送，点击通知进入对应 listing ✅
 
 5. **R5 A6 上架准备**
    - Google Play Billing coffee、Data Safety、截图、多设备/多语言测试、封闭测试计划进入 A6。
@@ -677,7 +677,7 @@ Gradle 会把该值注入 `AndroidManifest.xml` 的 `com.google.android.geo.API_
 | **RC1 验证收口** | 证明当前 Android 核心功能在设备上可用 | `assembleDebug` 通过，A1/A2/A3/A5 主要功能已接入 | 手动验证矩阵完成，记录所有阻塞 bug |
 | **RC2 测试补齐** | 锁住最容易回归的状态逻辑 | RC1 阻塞 bug 修完 | 47 个 ViewModel 单测覆盖 Auth/Dashboard/Notifications/Calendar/Listings 关键状态 ✅ |
 | **RC3 本地化与合规** | 达到可给测试用户使用的文本和合规水位 | RC2 通过 | `values-zh` 170 条目完整覆盖，法律文本三端统一 ✅ |
-| **RC4 FCM 集成** | 端到端推送通道已拉通 | 后端 FCM sender + 客户端均已就绪 | 真机验收 FCM 收发、点击 deep link（待真机测试） |
+| **RC4 FCM 集成** | 端到端推送通道已拉通 | 后端 FCM sender + 客户端均已就绪 | 真机验收 FCM 收发 ✅ |
 | **RC5 上架准备** | 进入 Google Play 发布流程 | RC4 通过 | Billing/Data Safety/截图/封闭测试计划完成 |
 
 **总工时：约 10 周**（一个全职 Android 开发）。

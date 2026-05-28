@@ -1,11 +1,25 @@
 # Changelog
 
-## Unreleased
+## v1.7.8 (2026-05-28)
+
+### 代码质量 (Code Quality)
+- **后端**：device_service 平台路由改为显式 allowlist；`asyncio.run()` → `_run_async()` 兼容 async worker；FCM env var 加 `_safe_int/_safe_float` 防配置错误崩溃；config.py env key 正则加 `\b` 防前缀碰撞；Dashboard uptime 改用 `/proc/<pid>/stat` 计算进程真实启动时间（修复 Docker 重启后 uptime 不变的问题）。
+- **Web 前端**：`escapeHtml` 补全单双引号转义；所有 fetch 静默 catch 加 `console.error`；multi-select 加 `aria-haspopup`/`role`/`aria-expanded` 无障碍属性。
+- **iOS**：`resolveBaseURL()` 移除 force-unwrap 启动崩溃风险；NotificationsStore 静默 catch 加 DEBUG 日志。
+- **Android**：`rememberPullToRefreshState()` 从 recompose 重建改为外部 `remember`；AuthViewModel 全局 catch 前置 `CancellationException` 重新抛出。
 
 ### Bug 修复 (Bug fixes)
-- **Android 设备测试推送**：`POST /api/v1/devices/test` 现在按 `platform` 字段分流——iOS 走 APNs，Android 走 FCM（data-only payload）。之前只发了 APNs，Android 设备注册后无法测试推送链路。
+- **Android FCM 推送端到端**：客户端 FCM 通道已拉通并真机验收通过。后端 `POST /api/v1/devices/test` 按 `platform` 分流——iOS 走 APNs，Android 走 FCM（data-only payload）。
 - **Android 启动 ANR**：修复 App 冷启动时主线程阻塞导致 ANR 的问题。根因是 `SseClient.connect()` 的 `callbackFlow` 继承了 `viewModelScope.launch` 的 Main dispatcher，`readUtf8Line()` 在主线程上阻塞等待 SSE 数据；修复方案是将整个 SSE 读取循环包在 `withContext(Dispatchers.IO)` 中。
-- **Android 地图定位**：修复 MapScreen 定位功能不可用的问题。移除自定义定位按钮（与 Google Maps 原生按钮重复），添加 `play-services-location` 依赖，改用 `FusedLocationProviderClient.getLastLocation()` 获取缓存位置；暗色模式下地图自动切换暗色样式。
+- **Android 地图定位**：修复 MapScreen 定位功能不可用的问题。移除自定义定位按钮，添加 `play-services-location` 依赖，改用 `FusedLocationProviderClient.getLastLocation()` 获取缓存位置；暗色模式下地图自动切换暗色样式。
+- **Android 通知分类**：修复测试推送在通知列表中被归类为 BOOK 的问题，新增中文/emoji 关键词（🧪、测试推送、推送链路）匹配为 TEST 类型。
+- **Android 崩溃诊断**：新增 `CrashReporter` 全局异常捕获，自动收集堆栈 + 设备信息，POST 到 `/api/v1/diagnostics/crash`（bearer_optional），同时写入本地文件兜底。后端诊断端点新增 `platform` / `os_version` 字段兼容 Android。
+- **Android 登录页**：移除 Staff 管理员登录入口，保留 Tenant / Guest 两种模式。
+- **Android 通知页**：新增进入页面时自动刷新列表，避免首次加载后 SSE 未连接时数据陈旧。
+- **Android 日历性能**：修复 `CalendarScreen` 月历网格每次 recompose 重建 42 个 `LocalDate` 对象的问题，加 `remember(month)` 缓存；`DashboardScreen` 价格排序 `Regex` 从每次调用重建改为顶层单例。
+- **iOS 通知筛选性能**：修复通知列表切换 type filter 时卡顿问题。`NotificationItem.kind` 从计算属性改为 decode 时预计算的存储属性（O(n) 字符串匹配 → O(1)），`currentFilterScope()` 改用 `rebucketDayGroups()` 中缓存的 kindCounts（消除额外 O(n) 扫描）。500 条通知下 filter 切换从 ~500ms 降至 ~20ms。
+- **iOS 列表页性能**：修复 ListingsView 每次 body 重渲染都做 O(n log n) 排序 + O(n) `isNew()` 扫描（含每条 date 解析）的性能问题。改为 `@State` 缓存排序和 new/earlier 分桶结果，仅在 `store.listings` 或排序条件变化时重算。
+- **iOS 状态色统一**：修复 Reserved 胶囊在不同页面显示颜色不一致的问题（详情页红色、通知页系统灰、列表页灰蓝）。统一所有页面 Book/Lottery/Reserved 状态色为 asset catalog 语义 token（`.statusBook`/`.statusLottery`/`.statusReserved`），涵盖 ListingDetailView、CalendarView、MapView、NotificationRow。
 - **街区筛选保存失效**：修复用户编辑页面中，选择街区后点击保存实际未保存的问题。原因是街区下拉框动态加载时，`loadNeighborhoods()` 重新渲染 DOM 时使用了页面初始快照值 `selNbh`，覆盖了用户当前的勾选状态。
 
 ## v1.7.8 (2026-05-27)
