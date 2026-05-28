@@ -8,7 +8,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,11 +46,7 @@ fun ListingDetailScreen(
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                     }
                 },
-                actions = {
-                    IconButton(onClick = { /* Save logic */ }) {
-                        Icon(Icons.Filled.FavoriteBorder, "Save")
-                    }
-                }
+                actions = {}
             )
         },
         bottomBar = {
@@ -121,7 +116,7 @@ fun ListingDetailScreen(
                     DetailRow("Source", listing.source)
                     DetailRow("Building", listing.displayBuilding)
                     DetailRow("Area", listing.displayArea)
-                    DetailRow("Rooms", listing.displayRooms)
+                    DetailRow("Type", listing.displayType)
                     DetailRow("Floor", listing.displayFloor)
                     DetailRow("Energy", listing.displayEnergy)
                     DetailRow("Finishing", listing.displayFinishing)
@@ -129,21 +124,6 @@ fun ListingDetailScreen(
                     DetailRow("Contract", listing.displayContract)
                     DetailRow("Tenant", listing.displayTenant)
                     listing.availableFrom?.let { DetailRow("Available", it) }
-
-                    // Feature map
-                    listing.featureMap?.let { features ->
-                        if (features.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(24.dp))
-                            Text("Features", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(12.dp))
-                            features.forEach { (key, value) ->
-                                Row(modifier = Modifier.padding(vertical = 3.dp)) {
-                                    Text("${key.displayKey()}: ", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, modifier = Modifier.width(110.dp))
-                                    Text(value, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
 
                     Spacer(modifier = Modifier.height(100.dp))
                 }
@@ -159,12 +139,3 @@ private fun DetailRow(label: String, value: String) {
         Text(value, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
     }
 }
-
-private fun String.displayKey(): String =
-    replace("_", " ")
-        .replace("-", " ")
-        .split(" ")
-        .filter { it.isNotBlank() }
-        .joinToString(" ") { word ->
-            word.lowercase().replaceFirstChar { it.uppercase() }
-        }

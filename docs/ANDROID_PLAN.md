@@ -509,13 +509,13 @@ private val LightColors = lightColorScheme(
 
 ## 6. 当前实现进度与复盘
 
-截至 2026-05-25，Android 客户端已完成 FCM 推送闭环（客户端 + 后端 sender），并完成架构审查与测试补齐：
+截至 2026-05-28，Android 客户端已完成 FCM 推送闭环（客户端 + 后端 sender），并完成架构审查与测试补齐。本轮重点为真机调试发现的 ANR/崩溃修复及 UI 打磨：
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
 | A0 项目骨架 | 已完成 | Gradle Kotlin DSL、Compose Material 3、Hilt、NavigationBar/NavigationRail、自适应导航均已落地。 |
 | A1 鉴权 + Dashboard + Listings | 部分完成 | 三档登录、注册、token 持久化、BiometricPrompt user 登录解锁、Dashboard、Listings、详情页、全局 snackbar 错误通道已接入；Dashboard Explore 统计卡片已按后端动态 chart key 解码并恢复平台/状态/价格/类型/能源/租客分布展示，且可点击展开完整统计明细；AuthViewModel（12 测试）、DashboardViewModel（6 测试）、ListingsViewModel（11 测试）单元测试已完成。BiometricPrompt 真机指纹/面部解锁已验证通过。 |
-| A2 Map + Calendar | 部分完成 | Map 已接 Google Maps Compose，支持聚类、状态色 marker、边界初始视角、选中卡片详情、无 key 列表降级与重试；Calendar 已升级为月格、每日数量、选中日房源列表与重试，CalendarViewModel（9 测试）单元测试已完成。真机地图手动验证仍待补。 |
+| A2 Map + Calendar | 部分完成 | Map 已接 Google Maps Compose，支持聚类、状态色 marker、边界初始视角、选中卡片详情、暗色模式（`mapStyleOptions` JSON 样式）；定位按钮改用 `FusedLocationProviderClient.getLastLocation()`（Play Services 聚合缓存），禁用了 Google Maps 原生定位按钮；Calendar 已升级为月格、每日数量、选中日房源列表与重试，CalendarViewModel（9 测试）单元测试已完成。真机地图手动验证仍待补。 |
 | A3 Notifications + SSE | 部分完成 | 通知列表已重构为扁平化 flat list 布局，包括顶部动态 stats 胶囊 pill、实时滚动筛选 chips、覆盖型未读提示蓝点 badge、箭头符号标准化与 Extended FAB；NotificationsViewModel（10 测试）覆盖 load、markRead/markAllRead、SSE Data 新增/去重/已读更新、Keepalive、error 重连。 |
 | A4 FCM 推送 | 已完成 | **客户端**：Firebase 项目 `flatradar-66342`，`google-services.json` 已配置，`FcmService` + `FcmTokenManager` + 通知渠道 + POST_NOTIFICATIONS 运行时权限 + deep link 全部接入。**后端**：`notifier_channels/fcm.py`（~260 行，OAuth2 服务账号认证 + FCM HTTP v1 API），`mcore/push.py` 按 `platform` 字段分流 iOS（APNs）/ Android（FCM）双发，`FcmTokenManager` 异常已加日志不再静默吞错。服务端已部署 `FCM_ENABLED=true` + service account JSON 密钥（`/secrets/`）。端到端推送通道已拉通。 |
 | A5 Settings + 多语言 + 深色模式 | 部分完成 | Settings 已支持 DataStore 持久化、System/Light/Dark 主题、反馈、法律文档、改密码、GDPR 数据导出、删号、Admin Users/Monitor；法律文案已统一为 `app/legal/*.txt` 单一数据源，三端（web/iOS/Android）均通过 API 获取 + 本地缓存 fallback，修改一处即时生效；中文字符串 `values-zh/strings.xml` 已覆盖 ~170 条目，与英文版本完全对称；Crash 诊断仍待补。 |
@@ -543,6 +543,11 @@ private val LightColors = lightColorScheme(
 - **iOS 单元测试补齐**：新增 `FlatRadarTests` target（31 个测试），覆盖 Listing 模型解码/computed properties/statusKind、APIResponse 信封、AuthModels 编解码、NotificationItem 解码/listingTitleHint/NotificationKind 分类。此前 iOS 端 13K 行代码零单元测试，现在核心模型层有覆盖。
 - 设计系统开始从 iOS 风格 token 收敛到 Android Material 3：固定 seed `#0057CC`、light/dark role mapping、M3 type scale、shape scale、FlatRadar `book/lottery/reserved` semantic status token、80dp bottom navigation 已落地；Listings、Detail、Settings、Map、Calendar 已完成第一轮 surface/shape/status/token 收口，后续重点转为真机视觉 QA、文案本地化和截图回归。
 - FCM 不在本轮启用。`docs/API.md` 仍标注 Android FCM sender 未完成，客户端不能依赖 `/devices/test` 验证 FCM。
+- **真机调试修复（2026-05-28）**：
+  - **启动 ANR 修复**：`SseClient.connect()` 的 `callbackFlow` 继承 `viewModelScope.launch` 的 Main dispatcher，导致 `readUtf8Line()` 在主线程阻塞 5s+。将整个 SSE 读取循环包入 `withContext(Dispatchers.IO)`（之前仅 `call.execute()` 在 IO）。
+  - **后端设备测试推送**：`POST /api/v1/devices/test` 新增按 `platform` 分流——iOS → APNs，Android → FCM data-only payload。之前所有设备统一走 APNs。
+  - **地图定位重做**：删除自定义定位逻辑（LocationManager/LocationListener ~110 行），改用 `FusedLocationProviderClient.getLastLocation()` + `Tasks.await()`；添加 `play-services-location` 依赖；添加暗色模式（`mapStyleOptions`）；移除 Google Maps 原生定位按钮。
+  - **UI 打磨**：ListingRow 删除收藏爱心按钮；ListingDetailScreen 删除顶部爱心中 + 底部重复 featureMap dump；"Rooms" → "Type"（显示 Studio/Loft/Apartment 等房型）。
 
 ### 架构师视角：下一阶段策略
 
@@ -574,7 +579,7 @@ private val LightColors = lightColorScheme(
 1. **R1 手动验证矩阵收口（最高优先级）**
    - [x] A1：验证 Biometric 保存、登出后解锁、Settings 移除、无生物识别设备 fallback（已通过模拟器验证正常）。
    - [x] A1：验证 401、登录失败、Dashboard 网络失败、Listings/Detail 后端错误都进入全局 snackbar，且页面状态不丢（已验证正常）。
-   - [/] A2：验证有/无 `MAPS_API_KEY`、cluster 点击、单点 marker 点击、bounds 初始视角、`/map` 与 `/calendar` 真实响应解析、Calendar 跨月、无房源日期和占位日期过滤（Calendar 已验证正常，Map API Key 已于 local.properties 完成配置，待在真机上最终确认效果）。
+   - [/] A2：验证有/无 `MAPS_API_KEY`、cluster 点击、单点 marker 点击、bounds 初始视角、`/map` 与 `/calendar` 真实响应解析、Calendar 跨月、无房源日期和占位日期过滤（Calendar 已验证正常，Map 聚类/暗色模式/定位按钮/选中卡片已基本验证通过，定位超时需依赖 Play Services 缓存）。
    - [ ] A3：验证新通知到达后角标增量、单条 mark read 后角标递减、mark all read 后角标清零。
 
 2. **R2 客户端测试补齐**（已完成）

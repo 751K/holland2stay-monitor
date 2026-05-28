@@ -18,11 +18,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Map
-import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -60,6 +61,7 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.LatLngBounds
+import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.maps.android.clustering.ClusterItem
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapsComposeExperimentalApi
@@ -70,15 +72,39 @@ import com.google.maps.android.compose.clustering.Clustering
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.widget.Toast
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val NetherlandsCenter = LatLng(52.1326, 5.2913)
+
+// Google Maps 暗色模式样式。减弱道路/建筑/水域亮度，适配深色主题。
+private const val DARK_MAP_STYLE_JSON = """
+[
+  {"elementType":"geometry","stylers":[{"color":"#242f3e"}]},
+  {"elementType":"labels.text.fill","stylers":[{"color":"#746855"}]},
+  {"elementType":"labels.text.stroke","stylers":[{"color":"#242f3e"}]},
+  {"featureType":"administrative.locality","elementType":"labels.text.fill","stylers":[{"color":"#d59563"}]},
+  {"featureType":"poi","elementType":"labels.text.fill","stylers":[{"color":"#d59563"}]},
+  {"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#263c3f"}]},
+  {"featureType":"poi.park","elementType":"labels.text.fill","stylers":[{"color":"#6b9a76"}]},
+  {"featureType":"road","elementType":"geometry","stylers":[{"color":"#38414e"}]},
+  {"featureType":"road","elementType":"geometry.stroke","stylers":[{"color":"#212a37"}]},
+  {"featureType":"road","elementType":"labels.text.fill","stylers":[{"color":"#9ca5b3"}]},
+  {"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#746855"}]},
+  {"featureType":"road.highway","elementType":"geometry.stroke","stylers":[{"color":"#1f2835"}]},
+  {"featureType":"road.highway","elementType":"labels.text.fill","stylers":[{"color":"#f3d19c"}]},
+  {"featureType":"transit","elementType":"geometry","stylers":[{"color":"#2f3948"}]},
+  {"featureType":"transit.station","elementType":"labels.text.fill","stylers":[{"color":"#d59563"}]},
+  {"featureType":"water","elementType":"geometry","stylers":[{"color":"#17263c"}]},
+  {"featureType":"water","elementType":"labels.text.fill","stylers":[{"color":"#515c6d"}]},
+  {"featureType":"water","elementType":"labels.text.stroke","stylers":[{"color":"#17263c"}]}
+]
+"""
 
 @Composable
 fun MapScreen(
@@ -136,125 +162,58 @@ private fun GoogleListingsMap(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    // Location Permission Launcher
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
-        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        if (fineGranted || coarseGranted) {
-            // Permission granted, trigger map location centering
-            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val providers = locationManager.getProviders(true)
-            var bestLocation: Location? = null
-            for (provider in providers) {
-                try {
-                    val l = locationManager.getLastKnownLocation(provider)
-                    if (l != null) {
-                        if (bestLocation == null || l.accuracy < bestLocation.accuracy) {
-                            bestLocation = l
-                        }
-                    }
-                } catch (e: SecurityException) {
-                    // Ignore
-                }
-            }
-            if (bestLocation != null) {
-                coroutineScope.launch {
-                    cameraPositionState.animate(
-                        CameraUpdateFactory.newLatLngZoom(
-                            LatLng(bestLocation.latitude, bestLocation.longitude),
-                            14f
-                        )
-                    )
-                }
-            }
-        }
-    }
+    ) { /* granted → 下次点击定位按钮即可获取位置 */ }
 
-    // Function to fetch device location and center map
     fun moveToCurrentLocation() {
-        val fineGranted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
+        val fineOk = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_FINE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
-        val coarseGranted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_COARSE_LOCATION
+        val coarseOk = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.ACCESS_COARSE_LOCATION
         ) == PackageManager.PERMISSION_GRANTED
 
-        if (fineGranted || coarseGranted) {
-            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val providers = locationManager.getProviders(true)
-            var bestLocation: Location? = null
-            for (provider in providers) {
-                try {
-                    val l = locationManager.getLastKnownLocation(provider)
-                    if (l != null) {
-                        if (bestLocation == null || l.accuracy < bestLocation.accuracy) {
-                            bestLocation = l
-                        }
-                    }
-                } catch (e: SecurityException) {
-                    // Ignore
-                }
-            }
-
-            if (bestLocation != null) {
-                coroutineScope.launch {
-                    cameraPositionState.animate(
-                        CameraUpdateFactory.newLatLngZoom(
-                            LatLng(bestLocation.latitude, bestLocation.longitude),
-                            14f
-                        )
-                    )
-                }
-            }
-
-            // Request a single high-accuracy location update with 15s timeout
-            val providersForUpdates = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
-            val handler = android.os.Handler(context.mainLooper)
-            for (provider in providersForUpdates) {
-                if (locationManager.isProviderEnabled(provider)) {
-                    try {
-                        var timeoutRunnable: Runnable? = null
-                        val listener = object : LocationListener {
-                            override fun onLocationChanged(location: Location) {
-                                timeoutRunnable?.let { handler.removeCallbacks(it) }
-                                coroutineScope.launch {
-                                    cameraPositionState.animate(
-                                        CameraUpdateFactory.newLatLngZoom(
-                                            LatLng(location.latitude, location.longitude),
-                                            14f
-                                        )
-                                    )
-                                }
-                                locationManager.removeUpdates(this)
-                            }
-                            override fun onProviderEnabled(provider: String) {}
-                            override fun onProviderDisabled(provider: String) {}
-                        }
-                        timeoutRunnable = Runnable {
-                            locationManager.removeUpdates(listener)
-                        }
-                        timeoutRunnable?.let { handler.postDelayed(it, 15_000L) }
-                        locationManager.requestLocationUpdates(
-                            provider, 0L, 0f, listener, context.mainLooper,
-                        )
-                    } catch (e: SecurityException) {
-                        // Ignore
-                    } catch (e: IllegalArgumentException) {
-                        // Ignore
-                    }
-                }
-            }
-        } else {
+        if (!fineOk && !coarseOk) {
             locationPermissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
                 )
             )
+            return
+        }
+
+        val lm = context.getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+        if (!lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) &&
+            !lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) {
+            Toast.makeText(context, "请先打开手机的定位服务", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        coroutineScope.launch {
+            try {
+                val loc: android.location.Location? = withContext(Dispatchers.IO) {
+                    com.google.android.gms.tasks.Tasks.await(
+                        com.google.android.gms.location.LocationServices
+                            .getFusedLocationProviderClient(context)
+                            .lastLocation
+                    )
+                }
+                if (loc != null) {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(
+                            LatLng(loc.latitude, loc.longitude), 14f
+                        )
+                    )
+                } else {
+                    Toast.makeText(context, "暂无缓存位置，请点击地图上的定位按钮", Toast.LENGTH_SHORT).show()
+                }
+            } catch (_: SecurityException) {
+                Toast.makeText(context, "定位失败", Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {
+                Toast.makeText(context, "定位超时", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -273,18 +232,18 @@ private fun GoogleListingsMap(
     }
 
     Box(Modifier.fillMaxSize()) {
-        val hasLocationPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        val isDark = isSystemInDarkTheme()
+        val mapStyleOptions = remember(isDark) {
+            if (isDark) MapStyleOptions(DARK_MAP_STYLE_JSON) else null
+        }
 
         GoogleMap(
             modifier = Modifier.fillMaxSize(),
             cameraPositionState = cameraPositionState,
-            properties = MapProperties(isMyLocationEnabled = hasLocationPermission),
+            properties = MapProperties(
+                isMyLocationEnabled = false,
+                mapStyleOptions = mapStyleOptions,
+            ),
             uiSettings = MapUiSettings(zoomControlsEnabled = false, mapToolbarEnabled = false),
             onMapClick = { selectedCluster = null },
             onMapLoaded = { mapLoaded = true }
@@ -353,28 +312,21 @@ private fun GoogleListingsMap(
             }
         }
 
-        // Floating action buttons on the right side
+        // 右上角按钮组：定位 + 刷新（Google Maps 原生定位按钮需要权限，点击这里触发权限请求）
         Column(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .padding(end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .align(Alignment.TopEnd)
+                .padding(top = 52.dp, end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // My Location navigation button
             SmallFloatingActionButton(
                 onClick = { moveToCurrentLocation() },
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 shape = CircleShape
             ) {
-                Icon(
-                    imageVector = Icons.Filled.MyLocation,
-                    contentDescription = "My Location"
-                )
+                Icon(Icons.Filled.MyLocation, contentDescription = "My Location")
             }
-
-            // Refresh button
             SmallFloatingActionButton(
                 onClick = { if (!isLoading) onRefresh() },
                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -388,10 +340,7 @@ private fun GoogleListingsMap(
                         color = MaterialTheme.colorScheme.primary
                     )
                 } else {
-                    Icon(
-                        imageVector = Icons.Filled.Refresh,
-                        contentDescription = "Refresh"
-                    )
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
         }

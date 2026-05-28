@@ -68,6 +68,7 @@ firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging
 # Maps
 maps-compose = { group = "com.google.maps.android", name = "maps-compose", version.ref = "maps-compose" }
 maps-compose-utils = { group = "com.google.maps.android", name = "maps-compose-utils", version.ref = "maps-compose" }
+play-services-location = { group = "com.google.android.gms", name = "play-services-location", version = "21.3.0" }
 play-services-maps = { group = "com.google.android.gms", name = "play-services-maps", version = "19.0.0" }
 
 # Image

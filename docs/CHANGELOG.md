@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Bug 修复 (Bug fixes)
+- **Android 设备测试推送**：`POST /api/v1/devices/test` 现在按 `platform` 字段分流——iOS 走 APNs，Android 走 FCM（data-only payload）。之前只发了 APNs，Android 设备注册后无法测试推送链路。
+- **Android 启动 ANR**：修复 App 冷启动时主线程阻塞导致 ANR 的问题。根因是 `SseClient.connect()` 的 `callbackFlow` 继承了 `viewModelScope.launch` 的 Main dispatcher，`readUtf8Line()` 在主线程上阻塞等待 SSE 数据；修复方案是将整个 SSE 读取循环包在 `withContext(Dispatchers.IO)` 中。
+- **Android 地图定位**：修复 MapScreen 定位功能不可用的问题。移除自定义定位按钮（与 Google Maps 原生按钮重复），添加 `play-services-location` 依赖，改用 `FusedLocationProviderClient.getLastLocation()` 获取缓存位置；暗色模式下地图自动切换暗色样式。
+- **街区筛选保存失效**：修复用户编辑页面中，选择街区后点击保存实际未保存的问题。原因是街区下拉框动态加载时，`loadNeighborhoods()` 重新渲染 DOM 时使用了页面初始快照值 `selNbh`，覆盖了用户当前的勾选状态。
+
 ## v1.7.8 (2026-05-27)
 
 ### 体验优化 (UX)

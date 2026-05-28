@@ -2,8 +2,6 @@ package com.flatradar.app.ui.listings
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -21,8 +19,7 @@ import com.flatradar.app.ui.dashboard.StatusBadge
 fun ListingRow(
     listing: Listing,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    onSaveClick: () -> Unit = {}
+    modifier: Modifier = Modifier
 ) {
     ElevatedCard(
         modifier = modifier
@@ -74,14 +71,6 @@ fun ListingRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-            }
-            
-            IconButton(onClick = onSaveClick) {
-                Icon(
-                    Icons.Filled.FavoriteBorder,
-                    contentDescription = "Save",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
         }
     }

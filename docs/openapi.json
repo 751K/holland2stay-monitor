@@ -27,8 +27,41 @@
     {"name": "Devices"},
     {"name": "Feedback"},
     {"name": "Diagnostics"},
-    {"name": "Admin"}
+    {"name": "Admin"},
+    {"name": "Webhooks"}
   ],
+  "webhooks": {
+    "/api/inbound/email": {
+      "post": {
+        "tags": ["Webhooks"],
+        "operationId": "resendInboundEmail",
+        "summary": "Receive inbound email from Resend webhook (email.received event).",
+        "description": "Resend pushes email.received metadata to this endpoint when notify@flatradar.app receives mail. Authenticated via Svix HMAC-SHA256 signature — not Bearer token. FlatRadar then fetches the full email body from the Resend API and stores it in the admin notification panel. DMARC reports are auto-classified as inbound_dmarc; non-DMARC emails are forwarded to the configured admin inbox.",
+        "servers": [
+          {"url": "https://flatradar.app", "description": "Production (root, not /api/v1)"}
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {"$ref": "#/components/schemas/ResendEmailReceivedPayload"}
+            }
+          }
+        },
+        "parameters": [
+          {"$ref": "#/components/parameters/SvixIdHeader"},
+          {"$ref": "#/components/parameters/SvixTimestampHeader"},
+          {"$ref": "#/components/parameters/SvixSignatureHeader"}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/InboundOk"},
+          "401": {"$ref": "#/components/responses/InboundUnauthorized"},
+          "503": {"$ref": "#/components/responses/InboundNotConfigured"}
+        }
+      }
+    }
+  },
   "paths": {
     "/auth/login": {
       "post": {
@@ -590,6 +623,9 @@
       }
     },
     "parameters": {
+      "SvixIdHeader": {"name": "svix-id", "in": "header", "required": true, "schema": {"type": "string"}, "description": "Unique event identifier from Svix/Resend."},
+      "SvixTimestampHeader": {"name": "svix-timestamp", "in": "header", "required": true, "schema": {"type": "string"}, "description": "Unix timestamp in seconds (verified within ±5 min tolerance)."},
+      "SvixSignatureHeader": {"name": "svix-signature", "in": "header", "required": true, "schema": {"type": "string"}, "description": "HMAC-SHA256 signature, format v1,<base64> (space-delimited for key rotation)."},
       "ListingIdPath": {"name": "listing_id", "in": "path", "required": true, "schema": {"type": "string"}},
       "UserIdPath": {"name": "user_id", "in": "path", "required": true, "schema": {"type": "string"}},
       "DeviceIdPath": {"name": "device_id", "in": "path", "required": true, "schema": {"type": "integer", "minimum": 1}},
@@ -638,7 +674,10 @@
       "MonitorStopOk": {"description": "Monitor stopped.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["stopped", "method"], "properties": {"stopped": {"type": "boolean"}, "pid": {"type": ["integer", "null"]}, "method": {"type": "string"}}}}}]}}}},
       "MonitorReloadOk": {"description": "Monitor reloaded.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["reload", "method"], "properties": {"reload": {"type": "boolean"}, "method": {"type": "string"}}}}}]}}}},
       "MonitorRestartOk": {"description": "Monitor restarted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["restarted", "was_running"], "properties": {"restarted": {"type": "boolean"}, "was_running": {"type": "boolean"}, "method": {"type": "string"}}}}}]}}}},
-      "ServerError": {"description": "Server error.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}}
+      "ServerError": {"description": "Server error.", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorEnvelope"}}}},
+      "InboundOk": {"description": "Email received and stored.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["email_id"], "properties": {"email_id": {"type": "string"}}}}}]}}}},
+      "InboundUnauthorized": {"description": "Invalid or missing Svix signature.", "content": {"text/plain": {"schema": {"type": "string", "example": "invalid signature"}}}},
+      "InboundNotConfigured": {"description": "RESEND_WEBHOOK_SECRET not configured on server.", "content": {"text/plain": {"schema": {"type": "string", "example": "server not configured"}}}}
     },
     "schemas": {
       "SuccessEnvelope": {
@@ -1066,6 +1105,40 @@
           "pid": {"type": ["integer", "null"]},
           "last_scrape": {"type": ["string", "null"]},
           "last_count": {"type": ["string", "integer", "null"]}
+        },
+        "additionalProperties": true
+      },
+      "ResendEmailReceivedPayload": {
+        "type": "object",
+        "required": ["type", "created_at", "data"],
+        "properties": {
+          "type": {"type": "string", "const": "email.received"},
+          "created_at": {"type": "string", "format": "date-time"},
+          "data": {"$ref": "#/components/schemas/ResendEmailReceivedData"}
+        },
+        "additionalProperties": false
+      },
+      "ResendEmailReceivedData": {
+        "type": "object",
+        "required": ["email_id", "from", "to"],
+        "properties": {
+          "email_id": {"type": "string", "description": "Resend email identifier. Use this to fetch the full body via the Resend API."},
+          "from": {"type": "string", "format": "email"},
+          "to": {"type": "array", "items": {"type": "string", "format": "email"}},
+          "subject": {"type": "string"},
+          "attachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "filename"],
+              "properties": {
+                "id": {"type": "string"},
+                "filename": {"type": "string"},
+                "content_type": {"type": "string"}
+              },
+              "additionalProperties": true
+            }
+          }
         },
         "additionalProperties": true
       }

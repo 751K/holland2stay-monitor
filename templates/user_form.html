@@ -735,12 +735,18 @@ var selNbh = {{ (lf.allowed_neighborhoods if lf else []) | tojson }};
 var selAbNbh = {{ (ab_lf.allowed_neighborhoods if ab_lf else []) | tojson }};
 
 function loadNeighborhoods() {
+  // 先读取当前 DOM 中的勾选状态，避免重新渲染时丢失用户刚刚的选择
+  var curSel = [];
+  document.querySelectorAll('input[name="ALLOWED_NEIGHBORHOODS"]:checked').forEach(function(cb){ curSel.push(cb.value); });
+  var curAbSel = [];
+  document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS"]:checked').forEach(function(cb){ curAbSel.push(cb.value); });
+
   var cities = [];
   document.querySelectorAll('input[name="ALLOWED_CITIES"]:checked').forEach(function(cb){ cities.push(cb.value); });
   var url = '/api/neighborhoods';
   if(cities.length > 0) url += '?cities=' + encodeURIComponent(cities.join(','));
   fetch(url).then(function(r){ return r.json(); }).then(function(d){
-    renderHoods('neighborhood-dropdown', 'ALLOWED_NEIGHBORHOODS', d.neighborhoods, selNbh);
+    renderHoods('neighborhood-dropdown', 'ALLOWED_NEIGHBORHOODS', d.neighborhoods, curSel.length ? curSel : selNbh);
   }).catch(function(){});
   // Auto-book
   var abCities = [];
@@ -748,7 +754,7 @@ function loadNeighborhoods() {
   var abUrl = '/api/neighborhoods';
   if(abCities.length > 0) abUrl += '?cities=' + encodeURIComponent(abCities.join(','));
   fetch(abUrl).then(function(r){ return r.json(); }).then(function(d){
-    renderHoods('ab-neighborhood-dropdown', 'AUTO_BOOK_ALLOWED_NEIGHBORHOODS', d.neighborhoods, selAbNbh);
+    renderHoods('ab-neighborhood-dropdown', 'AUTO_BOOK_ALLOWED_NEIGHBORHOODS', d.neighborhoods, curAbSel.length ? curAbSel : selAbNbh);
   }).catch(function(){});
 }
 

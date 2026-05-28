@@ -132,10 +132,11 @@ def send_test_push(
     Run the app's end-to-end notification test for the current auth token.
 
     The Web notification branch exercises SSE / notification list behavior; the
-    APNs branch sends directly to devices registered under this app token.
+    APNs / FCM branch sends directly to devices registered under this app token,
+    routing by platform (iOS → APNs, Android → FCM).
     """
     title = (title or "").strip()[:64] or "🧪 测试推送"
-    body = (body or "").strip()[:180] or "如果你在锁屏看到这条，APNs 链路工作正常 ✓"
+    body = (body or "").strip()[:180] or "如果你在锁屏看到这条，推送链路工作正常 ✓"
 
     notification_id: int | None = None
     if not apns_only:
@@ -145,57 +146,116 @@ def send_test_push(
     sent = 0
     detail: list[dict] = []
     if not notification_only:
-        from notifier_channels.apns import ApnsClient, ApnsConfig
-
-        cfg = ApnsConfig.from_env()
-        if cfg is None:
-            raise DeviceValidationError("APNs 未启用（后端缺少 .p8 或 APNS_* 配置）")
-
         with storage_ctx() as st:
             all_devices = st.list_devices_for_token(token_id)
 
         active = [d for d in all_devices if not d.get("disabled_at")]
         if not active and not apns_only:
-            logger.info("test push: SSE 已写，但无设备 APNs 不发")
-        elif not active:
-            raise DeviceValidationError("当前会话没有注册过设备")
-        else:
-            payload = {
-                "aps": {
-                    "alert": {"title": title, "body": body},
-                    "sound": "default",
-                    "thread-id": "test",
-                    "badge": 1,
-                },
-                "kind": "test",
+            logger.info("test push: SSE 已写，但无设备 不发")
+            return {
+                "sent": 0,
+                "total": 0,
+                "results": [],
+                "notification_id": notification_id,
             }
-            targets = [
-                {"device_token": d["device_token"], "env": d["env"]}
-                for d in active
-            ]
+        if not active:
+            raise DeviceValidationError("当前会话没有注册过设备")
 
-            async def _run_once() -> list:
-                local = ApnsClient(cfg)
-                try:
-                    return await local.send_many(targets, payload=payload)
-                finally:
-                    await local.close()
+        # 按 platform 分流：iOS → APNs，Android → FCM
+        ios_devices = [d for d in active if d.get("platform", "ios") != "android"]
+        android_devices = [d for d in active if d.get("platform", "ios") == "android"]
 
-            results = asyncio.run(_run_once())
-            sent = sum(1 for r in results if r.ok)
-            for device, result in zip(active, results):
-                token = device["device_token"]
-                detail.append({
-                    "device_token_hint": _token_hint(token),
-                    "env": device["env"],
-                    "status": result.status,
-                    "reason": result.reason,
-                    "ok": result.ok,
-                })
-            logger.info(
-                "test push 完成 token_id=%d sent=%d/%d notif_id=%s",
-                token_id, sent, len(results), notification_id,
-            )
+        # ── iOS / APNs ────────────────────────────────────────────
+        if ios_devices:
+            from notifier_channels.apns import ApnsClient, ApnsConfig
+
+            apns_cfg = ApnsConfig.from_env()
+            if apns_cfg is not None:
+                apns_payload = {
+                    "aps": {
+                        "alert": {"title": title, "body": body},
+                        "sound": "default",
+                        "thread-id": "test",
+                        "badge": 1,
+                    },
+                    "kind": "test",
+                }
+                apns_targets = [
+                    {"device_token": d["device_token"], "env": d["env"]}
+                    for d in ios_devices
+                ]
+
+                async def _run_apns() -> list:
+                    local = ApnsClient(apns_cfg)
+                    try:
+                        return await local.send_many(apns_targets, payload=apns_payload)
+                    finally:
+                        await local.close()
+
+                results = asyncio.run(_run_apns())
+                sent += sum(1 for r in results if r.ok)
+                for device, result in zip(ios_devices, results):
+                    token = device["device_token"]
+                    detail.append({
+                        "device_token_hint": _token_hint(token),
+                        "platform": device.get("platform", "ios"),
+                        "env": device["env"],
+                        "status": result.status,
+                        "reason": result.reason,
+                        "ok": result.ok,
+                    })
+            else:
+                logger.warning("test push: APNs 未启用，跳过 %d 台 iOS 设备", len(ios_devices))
+
+        # ── Android / FCM ─────────────────────────────────────────
+        if android_devices:
+            from notifier_channels.fcm import FcmClient, FcmConfig
+
+            fcm_cfg = FcmConfig.from_env()
+            if fcm_cfg is not None:
+                fcm_payload = {
+                    "message": {
+                        "data": {
+                            "title": title,
+                            "body": body,
+                            "kind": "test",
+                        },
+                    },
+                }
+                fcm_targets = [
+                    {"device_token": d["device_token"]}
+                    for d in android_devices
+                ]
+
+                async def _run_fcm() -> list:
+                    local = FcmClient(fcm_cfg)
+                    try:
+                        return await local.send_many(
+                            fcm_targets, payload=fcm_payload,
+                        )
+                    finally:
+                        await local.close()
+
+                results = asyncio.run(_run_fcm())
+                sent += sum(1 for r in results if r.ok)
+                for device, result in zip(android_devices, results):
+                    token = device["device_token"]
+                    detail.append({
+                        "device_token_hint": _token_hint(token),
+                        "platform": device.get("platform", "android"),
+                        "env": device.get("env", ""),
+                        "status": result.status,
+                        "reason": result.reason,
+                        "ok": result.ok,
+                    })
+            else:
+                logger.warning("test push: FCM 未启用，跳过 %d 台 Android 设备", len(android_devices))
+
+        logger.info(
+            "test push 完成 token_id=%d sent=%d/%d (ios=%d android=%d) notif_id=%s",
+            token_id, sent, len(active), len(ios_devices), len(android_devices),
+            notification_id,
+        )
 
     return {
         "sent": sent,

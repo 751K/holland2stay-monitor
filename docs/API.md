@@ -1149,6 +1149,91 @@ Android 客户端可复用此端点，但建议字段改为：
 }
 ```
 
+## Webhooks
+
+FlatRadar 通过 webhook 接收外部服务回调。Webhook 端点不走 Bearer token 鉴权，而是通过 Svix HMAC-SHA256 签名验证请求来源。
+
+### POST `/api/inbound/email`
+
+接收 Resend `email.received` webhook 回调。当 `notify@flatradar.app` 收到入站邮件时，Resend 向该端点推送事件元数据。
+
+鉴权：Svix HMAC-SHA256 签名（无 session）
+
+**请求头：**
+
+| 头 | 说明 |
+|---|---|
+| `svix-id` | 事件唯一 ID |
+| `svix-timestamp` | Unix 秒时间戳 |
+| `svix-signature` | `v1,<base64>` 形式，可空格分隔多个轮换签名 |
+
+**签名验证：**
+
+1. 用 `RESEND_WEBHOOK_SECRET`（`whsec_` 前缀的 base64 串）解码 HMAC 密钥。
+2. 验证时间戳在 ±5 分钟容忍窗口内（防重放攻击）。
+3. 计算 `HMAC-SHA256(secret, "svix-id.svix-timestamp.raw_body")`，与 `svix-signature` 中的任一 `v1,xxx` 比对。
+4. 所有比较使用 `hmac.compare_digest` 防时序攻击。
+
+**Body：**
+
+```json
+{
+  "type": "email.received",
+  "created_at": "2026-02-22T23:41:12.126Z",
+  "data": {
+    "email_id": "56761188-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "from": "user@example.com",
+    "to": ["notify@flatradar.app"],
+    "subject": "关于某房源的咨询",
+    "attachments": [
+      {
+        "id": "att_xxx",
+        "filename": "photo.png",
+        "content_type": "image/png"
+      }
+    ]
+  }
+}
+```
+
+**处理流程：**
+
+1. 验证 Svix 签名，失败返回 `401`。
+2. 忽略非 `email.received` 事件类型。
+3. 用 `email_id` 反查 Resend API 拉取完整邮件正文（text/html）。
+4. DMARC 报告自动识别为 `inbound_dmarc` 类型，其余为 `inbound_email`。
+5. 写入 admin 通知面板（`web_notifications` 表）。
+6. 非 DMARC 邮件转发到 `INBOUND_FORWARD_TO` 配置的管理员邮箱。
+
+**成功响应：**
+
+```json
+{
+  "ok": true,
+  "email_id": "56761188-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+}
+```
+
+**错误响应：**
+
+| HTTP | 说明 |
+|---:|---|
+| 401 | 签名验证失败（secret 未配置 / 时间戳过期 / HMAC 不匹配） |
+| 503 | 服务端未配置 `RESEND_WEBHOOK_SECRET` |
+
+**环境变量：**
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `RESEND_WEBHOOK_SECRET` | 是 | Svix webhook 签名密钥，形如 `whsec_<base64>` |
+| `RESEND_API_KEY` | 是 | 反查完整邮件和转发邮件使用 |
+| `RESEND_FROM` | 否 | 转发邮件时的发件地址 |
+| `INBOUND_FORWARD_TO` | 否 | 管理员个人邮箱，用于转发入站邮件 |
+
+**Resend 配置建议：**
+
+在 Resend Dashboard → Webhooks 中添加 endpoint `https://<domain>/api/inbound/email`，订阅 `email.received` 事件。Resend 会自动重试失败的投递。
+
 ## 移动端实现建议
 
 ### Token 存储
