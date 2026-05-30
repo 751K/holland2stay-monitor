@@ -87,7 +87,7 @@ jobs:
         env:
           GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
         run: |
-          # 经 env 传入避免 inline ${{ }} 多行替换被 shell 拆行；
+          # 经 env 传入避免 GitHub Actions 表达式多行替换被 shell 拆行；
           # tr -d 去掉 base64 的换行/回车（wrap 或 CRLF 会让 base64 -d 报 invalid input）
           printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '\r\n' | base64 -d > android/app/google-services.json
           test -s android/app/google-services.json \
