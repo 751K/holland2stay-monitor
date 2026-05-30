@@ -95,24 +95,30 @@ jobs:
           python3 -c "import json,sys; json.load(open('android/app/google-services.json'))" \
             || { echo "::error::解码出的不是合法 JSON——secret 内容可能不是 base64 或被截断"; exit 1; }
 
-      - name: Decode keystore
+      - name: Decode Android signing key
         if: startsWith(github.ref, 'refs/tags/')
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "ANDROID_SIGNING_READY=false" >> "$GITHUB_ENV"
+            echo "::notice::ANDROID_KEYSTORE_BASE64 is not configured; skipping signed Android AAB."
+            exit 0
+          fi
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '\r\n' | base64 -d > android/sign.p12
           test -s android/sign.p12 \
             || { echo "::error::keystore 解码后为空——检查 ANDROID_KEYSTORE_BASE64 secret"; exit 1; }
+          echo "ANDROID_SIGNING_READY=true" >> "$GITHUB_ENV"
 
       - name: Extract version from tag
         if: startsWith(github.ref, 'refs/tags/')
         run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
 
       - name: Build release AAB
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && env.ANDROID_SIGNING_READY == 'true'
         working-directory: android
         env:
-          RELEASE_STORE_FILE: sign.p12
+          RELEASE_STORE_FILE: ../sign.p12
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -120,7 +126,7 @@ jobs:
         run: ./gradlew :app:bundleRelease
 
       - name: Upload AAB to Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && env.ANDROID_SIGNING_READY == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: android/app/build/outputs/bundle/release/app-release.aab
