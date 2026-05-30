@@ -25,8 +25,8 @@ android {
         applicationId = "com.flatradar.app"
         minSdk = 31
         targetSdk = 35
-        versionCode = 178
-        versionName = "1.7.8"
+        versionCode = 179
+        versionName = "1.7.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["mapsApiKey"] = mapsApiKey
@@ -37,9 +37,29 @@ android {
         buildConfig = true
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(
+                localProperties.getProperty("RELEASE_STORE_FILE")
+                    ?: System.getenv("RELEASE_STORE_FILE")
+                    ?: "sign.p12"
+            )
+            storePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
+                ?: System.getenv("RELEASE_STORE_PASSWORD")
+                ?: ""
+            keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")
+                ?: System.getenv("RELEASE_KEY_ALIAS")
+                ?: "flatradar"
+            keyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+                ?: System.getenv("RELEASE_KEY_PASSWORD")
+                ?: ""
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = true
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

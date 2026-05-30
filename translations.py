@@ -295,6 +295,9 @@ TRANSLATIONS = {
     "users_delete_confirm": {"zh": "确认删除",                "en": "Confirm delete"},
     "users_delete_msg":     {"zh": "确定要删除用户",           "en": "Delete user "},
     "users_delete_warn":    {"zh": "此操作无法撤销。",          "en": "This cannot be undone."},
+    "users_rank_hint":      {"zh": "自动预订优先级（越小越优先）", "en": "Auto-book priority (lower = higher priority)"},
+    "users_rank_up":        {"zh": "上移（提高优先级）",          "en": "Move up (higher priority)"},
+    "users_rank_down":      {"zh": "下移（降低优先级）",          "en": "Move down (lower priority)"},
     "users_user_deleted":   {"zh": "已删除",                  "en": "deleted"},
 
     # ── User Form ────────────────────────────────────────

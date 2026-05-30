@@ -1,5 +1,5 @@
 """
-路由：用户管理（列表 / 新增 / 编辑 / 删除 / 测试通知 / 启用切换）
+路由：用户管理（列表 / 新增 / 编辑 / 删除 / 测试通知 / 启用切换 / 优先级调整）
 
 挂载的 endpoint
 - GET      /users                  → users_list
@@ -8,6 +8,7 @@
 - POST     /users/<user_id>/delete → user_delete
 - POST     /users/<user_id>/test   → user_test_notify
 - POST     /users/<user_id>/toggle → user_toggle
+- POST     /users/<user_id>/move   → user_move
 """
 from __future__ import annotations
 
@@ -444,6 +445,30 @@ def user_test_notify(user_id: str) -> Any:
 
 @admin_required
 @csrf_required
+def user_move(user_id: str) -> Any:
+    """调整用户在自动预订中的优先级（上移/下移）。"""
+    direction = (request.form.get("direction") or "").strip().lower()
+    if direction not in ("up", "down"):
+        flash("无效的移动方向", "warning")
+        return redirect(url_for("users_list"))
+
+    from app.db import storage
+    st = storage()
+    try:
+        ok = st.reorder_user(user_id, direction)
+    finally:
+        st.close()
+
+    if ok:
+        direction_label = "上移" if direction == "up" else "下移"
+        flash(f"用户优先级已{direction_label}", "success")
+    else:
+        flash("已在边界，无法移动", "info")
+    return redirect(url_for("users_list"))
+
+
+@admin_required
+@csrf_required
 def user_toggle(user_id: str) -> Any:
     """快速开关用户启用状态。"""
     try:
@@ -468,3 +493,4 @@ def register(app: Flask) -> None:
     app.add_url_rule("/users/<user_id>/delete",      endpoint="user_delete",      view_func=user_delete,      methods=["POST"])
     app.add_url_rule("/users/<user_id>/test",        endpoint="user_test_notify", view_func=user_test_notify, methods=["POST"])
     app.add_url_rule("/users/<user_id>/toggle",      endpoint="user_toggle",      view_func=user_toggle,      methods=["POST"])
+    app.add_url_rule("/users/<user_id>/move",       endpoint="user_move",        view_func=user_move,       methods=["POST"])

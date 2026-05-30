@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.7.9 (2026-05-30)
+
+### 新特性 (Features)
+- **用户优先级排序**：Admin 用户管理页新增 rank 排序功能。每个用户卡片显示 `#1` `#2` `#3` 优先级徽标 + ▲/▼ 按钮，点击即可调整顺序。rank 越小自动预订优先级越高——当多个用户同时匹配同一房源时，rank 小的优先拿到（`sort_order` 字段此前已建但无可操作入口）。
+
+### Bug 修复 (Bug fixes)
+- **Dashboard 运行时间**：修复 Docker 容器重启后 7 天运行时间从 1% 重新计数的 bug。根因是 `/proc/uptime` 和 `/proc/<pid>/stat` 的 `starttime` 都相对于容器启动时间，重启后两者同时归零导致 `started_at ≈ now`。修复方案是将 monitor 启动时间持久化到 SQLite `meta` 表（`monitor_started_at`），Dashboard 优先读取 DB 值计算运行时间，跨容器重启保持不变；`/proc` 计算保留为回退路径（macOS 开发环境）。
+- **抓取 GraphQL data=null 崩溃**：修复 H2S API 返回 `{"data": null}`（GraphQL 字段级 non-null 错误传播至根）时 `.get("products")` 抛 `AttributeError` 导致整轮抓取中断的 bug。改用 `(data.get("data") or {}).get(...)` 安全链式访问，同时第 1 页遇 null 时显式抛出可感知错误。
+
+### 安全加固 (Security)
+- **存储型 XSS**：修复 `user_form.html` 中 `renderHoods()` 动态渲染街区名时未转义 HTML 的问题，改用 `escapeHtml(h)`。
+- **用户名枚举**：`/check-user` 端点加 IP 限速（30 次/分钟），防批量枚举已注册用户名。
+- **Xior 未知状态 fail-open**：`_STATUS_MAP` 未知状态默认值从 `"Available to book"` 改为 `"Occupied"`（fail-closed），避免新状态被误判为可预订。
+- **Android 签名密钥**：移除 `build.gradle.kts` 中硬编码的签名密码，改为从 `local.properties` / 环境变量读取。
+
 ## v1.7.8 (2026-05-28)
 
 ### 代码质量 (Code Quality)

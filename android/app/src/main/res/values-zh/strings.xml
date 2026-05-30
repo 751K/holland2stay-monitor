@@ -71,7 +71,6 @@
     <string name="search_listings">搜索房源…</string>
     <string name="no_listings">暂无房源</string>
     <string name="listing_detail">房源详情</string>
-    <string name="listing_details">房源详情</string>
     <string name="filter">筛选</string>
     <string name="filters">筛选条件</string>
     <string name="clear_filters">清除筛选</string>
@@ -107,8 +106,6 @@
     <string name="monitor_history">状态变化记录</string>
 
     <!-- Map -->
-    <string name="map">地图</string>
-    <string name="list">列表</string>
     <string name="listings_on_map">地图上 %d 套房源</string>
     <string name="listings_with_coordinates">%d 套有坐标的房源</string>
     <string name="more_nearby">+ %d 套附近房源</string>

@@ -221,7 +221,7 @@ def _post_ajax(
             return None
 
         if not envelope.get("success"):
-            msg = envelope.get("data", {}).get("message", "unknown error")
+            msg = (envelope.get("data") or {}).get("message", "unknown error")
             logger.warning("Xior AJAX 业务失败 attempt=%d: %s", attempt, msg)
             return None
 
@@ -257,7 +257,7 @@ def _to_listing(
     avail_date = _normalise_date(unit.get("availableDate", ""))
     raw_status = (unit.get("unitStatus") or "").strip().lower()
 
-    status = _STATUS_MAP.get(raw_status, "Available to book")
+    status = _STATUS_MAP.get(raw_status, "Occupied")
 
     price_raw = f"€{min_rent}"
     if max_rent and max_rent != min_rent:

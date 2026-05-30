@@ -1377,6 +1377,21 @@ async def _async_main() -> None:
 
     storage = Storage(cfg.db_path, timezone_str=cfg.timezone)
 
+    # 持久化 monitor 启动时间，用于 dashboard 7 天运行时间计算。
+    # Docker 重启后 /proc/uptime 和 /proc/<pid>/stat 都会重置，
+    # 基于 /proc 的计算会错误地显示 0-1%，因此存在 DB meta 中。
+    existing_started = storage.get_meta("monitor_started_at", default="")
+    if existing_started:
+        try:
+            started_dt = datetime.fromisoformat(existing_started)
+            # 如果旧时间戳距今超过 7 天，视为全新启动，覆盖为当前时间
+            if (datetime.now(timezone.utc) - started_dt).total_seconds() > 7 * 24 * 3600:
+                existing_started = ""
+        except ValueError:
+            existing_started = ""
+    if not existing_started:
+        storage.set_meta("monitor_started_at", datetime.now(timezone.utc).isoformat())
+
     # 恢复持久化的竞败重试队列（进程重启后不丢失）
     retry_queue.load(storage)
 

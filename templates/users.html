@@ -29,6 +29,9 @@
   <!-- Header -->
   <div class="user-card-header">
     <div class="flex items-center gap-2">
+      {% if is_admin %}
+      <span class="rank-badge" title="{{ _('users_rank_hint') }}">#{{ loop.index }}</span>
+      {% endif %}
       <div class="user-avatar" style="background:linear-gradient(135deg,hsl({{ (loop.index0 * 67) % 360 }},70%,45%),hsl({{ (loop.index0 * 67 + 40) % 360 }},70%,35%));">
         {{ user.name[0].upper() }}
       </div>
@@ -37,7 +40,19 @@
         <div class="user-id">ID: {{ user.id }}</div>
       </div>
     </div>
-    <div>
+    <div class="flex items-center gap-1">
+      {% if is_admin %}
+      <form action="{{ url_for('user_move', user_id=user.id) }}" method="post" class="rank-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="direction" value="up">
+        <button type="submit" class="rank-btn" {% if loop.first %}disabled{% endif %} title="{{ _('users_rank_up') }}">▲</button>
+      </form>
+      <form action="{{ url_for('user_move', user_id=user.id) }}" method="post" class="rank-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="direction" value="down">
+        <button type="submit" class="rank-btn" {% if loop.last %}disabled{% endif %} title="{{ _('users_rank_down') }}">▼</button>
+      </form>
+      {% endif %}
       {% if user.enabled %}
         <span class="badge badge-success">{{ _('users_enabled') }}</span>
       {% else %}

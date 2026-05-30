@@ -502,7 +502,22 @@ def _scrape_city_pages(
             )
             break
 
-        products = data.get("data", {}).get("products", {})
+        gql_data = data.get("data")
+        if gql_data is None:
+            # GraphQL 规范允许 data=null（non-null 字段错误传播至根）。
+            # 此时 products 不可用，按页处理：第 1 页抛异常让上层感知，
+            # 后续页 break 保留前面已抓到的数据。
+            logger.error(
+                "[%s] GraphQL 返回 data=null page=%d，本轮数据不完整",
+                city_name, current_page,
+            )
+            if current_page == 1:
+                raise ScrapeNetworkError(
+                    f"[{city_name}] GraphQL 返回 data=null，无法获取房源"
+                )
+            break
+
+        products = gql_data.get("products", {})
         items = products.get("items") or []
         page_info = products.get("page_info", {})
         total_pages = page_info.get("total_pages", 1)

@@ -764,7 +764,7 @@ function renderHoods(dropId, inputName, hoods, selected) {
   var html = '';
   hoods.forEach(function(h){
     var checked = selected.indexOf(h) >= 0 ? ' checked' : '';
-    html += '<label class="ms-option"><input type="checkbox" name="' + inputName + '" value="' + h.replace(/"/g, '&quot;') + '"' + checked + '> ' + h + '</label>';
+    html += '<label class="ms-option"><input type="checkbox" name="' + inputName + '" value="' + h.replace(/"/g, '&quot;') + '"' + checked + '> ' + escapeHtml(h) + '</label>';
   });
   drop.innerHTML = html || '<div class="ms-option" style="color:var(--text3);cursor:default">' + (document.documentElement.lang === 'zh' ? '请先选择城市' : 'Select a city first') + '</div>';
   // Re-init multi-select — retry once if not yet initialised

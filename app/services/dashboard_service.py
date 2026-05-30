@@ -95,12 +95,29 @@ def _system_uptime_seconds() -> float | None:
         return None
 
 
-def _uptime_percent_7d(pid: int | None) -> int:
+def _uptime_percent_7d(pid: int | None, st: Any = None) -> int:
+    """返回监控进程在过去 7 天内的运行时间百分比。
+
+    优先从 DB meta 读取持久化的 ``monitor_started_at``（Docker 重启
+    后 /proc 时间基准会重置，DB 持久化值不受影响）。
+    如果 DB 不可用或没有该值，回退到 /proc 计算。
+    """
     if pid is None:
         return 0
     try:
-        # 优先从 /proc/<pid>/stat 读取进程真实启动时间（Linux/Docker 兼容）。
-        # PID_FILE.st_mtime 在 Docker 持久卷上可能是旧时间戳。
+        # ── 主路径：DB 持久化的启动时间（跨 Docker 重启保持） ──
+        if st is not None:
+            started_str = st.get_meta("monitor_started_at", default="")
+            if started_str:
+                try:
+                    started_dt = datetime.fromisoformat(started_str)
+                    started_at = started_dt.timestamp()
+                    elapsed = max(0.0, time.time() - started_at)
+                    return min(100, round(elapsed * 100 / (7 * 24 * 3600)))
+                except (ValueError, OSError):
+                    pass  # 解析失败，回退到 /proc 路径
+
+        # ── 回退路径：/proc/<pid>/stat（原生 Linux / macOS 开发环境） ──
         stat_path = Path(f"/proc/{pid}/stat")
         if stat_path.exists():
             raw = stat_path.read_text()
@@ -168,7 +185,7 @@ def dashboard_metrics(st: Any, *, city: str | None = None, lang: str = "en") -> 
             if run_count
             else ("最近一轮" if zh else "last run")
         ),
-        "uptime_pct_7d": _uptime_percent_7d(pid),
+        "uptime_pct_7d": _uptime_percent_7d(pid, st=st),
         "uptime_label": "最近 7 天" if zh else "last 7 days",
         "configured_targets": scope["configured_targets"],
         "enabled_platforms": scope["enabled_platforms"],

@@ -297,10 +297,25 @@ def set_lang() -> Any:
     return resp
 
 
+# /check-user 限速：防止批量枚举用户名（按 IP，每分钟最多 30 次）
+_CHECK_USER_RATE: dict[str, list[float]] = {}
+_CHECK_USER_MAX_PER_MIN = 30
+_CHECK_USER_WINDOW = 60
+
+
 def check_user() -> Any:
     """返回用户名是否已注册（供前端判断是否弹出条款弹窗）。"""
     from flask import jsonify
     from users import get_user_by_name, load_users
+
+    # 限速检查
+    ip = request.remote_addr or "0.0.0.0"
+    now = _time.monotonic()
+    window = [t for t in _CHECK_USER_RATE.get(ip, []) if now - t < _CHECK_USER_WINDOW]
+    _CHECK_USER_RATE[ip] = window
+    if len(window) >= _CHECK_USER_MAX_PER_MIN:
+        return jsonify(exists=False, throttled=True)
+
     username = request.args.get("username", "").strip()
     if not username:
         return jsonify(exists=False)
@@ -311,9 +326,13 @@ def check_user() -> Any:
     try:
         users = load_users()
         user = get_user_by_name(users, username)
-        return jsonify(exists=user is not None)
+        exists = user is not None
     except Exception:
-        return jsonify(exists=False)
+        exists = False
+
+    # 仅记录有实际查询的请求（排除空用户名和 admin 匹配）
+    _CHECK_USER_RATE.setdefault(ip, []).append(now)
+    return jsonify(exists=exists)
 
 
 def register(app: Flask) -> None:

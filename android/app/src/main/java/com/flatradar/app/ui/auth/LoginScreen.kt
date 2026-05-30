@@ -628,7 +628,7 @@ private fun HeroHeaderSection(selectedRole: String) {
                         color = brandBlue
                     )
                     Text(
-                        text = "UNOFFICIAL · v1.7.8",
+                        text = "UNOFFICIAL · v1.7.9",
                         style = MaterialTheme.typography.labelSmall,
                         color = descriptionColor,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace

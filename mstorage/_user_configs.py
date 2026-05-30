@@ -144,6 +144,44 @@ class UserConfigOps:
         ).fetchone()
         return dict(row) if row else None
 
+    def reorder_user(self, user_id: str, direction: str) -> bool:
+        """将 user_id 向上（direction='up'）或向下（direction='down'）移动一位。
+
+        通过交换相邻用户的 sort_order 实现。所有用户按
+        ``sort_order ASC, created_at ASC, id ASC`` 排序后重新编号，
+        保证 sort_order 始终是连续的 0, 1, 2, ...。
+
+        Returns
+        -------
+        bool  True 表示移动成功，False 表示已在边界无法移动。
+        """
+        rows = self.list_user_config_rows()
+        if len(rows) < 2:
+            return False
+
+        idx = next((i for i, r in enumerate(rows) if str(r["id"]) == user_id), None)
+        if idx is None:
+            return False
+
+        if direction == "up":
+            if idx == 0:
+                return False
+            rows[idx], rows[idx - 1] = rows[idx - 1], rows[idx]
+        elif direction == "down":
+            if idx >= len(rows) - 1:
+                return False
+            rows[idx], rows[idx + 1] = rows[idx + 1], rows[idx]
+        else:
+            return False
+
+        with self._conn:
+            for new_idx, row in enumerate(rows):
+                self._conn.execute(
+                    "UPDATE user_configs SET sort_order = ? WHERE id = ?",
+                    (new_idx, str(row["id"])),
+                )
+        return True
+
     @staticmethod
     def dumps_json(value) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
