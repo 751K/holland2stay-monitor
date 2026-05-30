@@ -194,12 +194,12 @@ class ListingOps:
         if not listing_ids:
             return
         with self._conn:
-            for lid in listing_ids:
-                self._conn.execute(
-                    """UPDATE status_changes SET notified=1
-                       WHERE listing_id=? AND notified=0""",
-                    (lid,),
-                )
+            placeholders = ",".join("?" for _ in listing_ids)
+            self._conn.execute(
+                f"""UPDATE status_changes SET notified=1
+                   WHERE listing_id IN ({placeholders}) AND notified=0""",
+                listing_ids,
+            )
 
     # ── 状态收敛：last_seen 老化兜底 ─────────────────────────────────
     # 当前抓取源只返回 Available to book / lottery 子集；一旦 listing 转入

@@ -43,12 +43,13 @@ def test_to_listing_maps_status_vacant_unrented():
     assert listing.status == "Available in lottery"
 
 
-def test_to_listing_unknown_status_falls_back_to_available():
+def test_to_listing_unknown_status_falls_back_to_occupied():
+    """v1.7.9 安全加固：未知状态 fail-closed → Occupied（防误判为可预订）。"""
     from scrapers.xior import _to_listing
 
     unit = dict(SAMPLE_UNIT, unitStatus="Some New Status")
     listing = _to_listing(unit, display="Maastricht Annadal", building_url="https://example.com")
-    assert listing.status == "Available to book"
+    assert listing.status == "Occupied"
 
 
 def test_to_listing_single_rent_when_min_equals_max():

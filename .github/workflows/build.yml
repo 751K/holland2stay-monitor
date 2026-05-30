@@ -32,13 +32,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macOS-dmg
-          path: dist/Holland2Stay Monitor.dmg
+          path: dist/FlatRadar.dmg
 
       - name: Upload to Release (tag only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Holland2Stay Monitor.dmg
+          files: dist/FlatRadar.dmg
 
   windows:
     runs-on: windows-latest
@@ -60,10 +60,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe
-          path: dist/Holland2Stay Monitor.zip
+          path: dist/FlatRadar.zip
 
       - name: Upload to Release (tag only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Holland2Stay Monitor.zip
+          files: dist/FlatRadar.zip

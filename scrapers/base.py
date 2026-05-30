@@ -10,7 +10,8 @@ P0 引入：把抓取从 H2S 单源耦合中解放出来，每个第三方租房
 - **同步 API**：保留现有 sync 范式，monitor 那边继续用 ``run_in_executor``
   把抓取放进线程池。改 async 是另一坨工作量，不在 P0 范围内。
 - **零回归承诺**：仅 Holland2Stay 一家时行为完全不变——`HollandStayScraper`
-  内部直接调原 `scraper.py:scrape_all`，I/O 形状一致。
+  内部直接调 `scraper.py:_scrape_city_pages`，多城市编排归 dispatcher，
+  I/O 形状一致。
 - **异常分类**：``RateLimitError`` / ``BlockedError`` / ``ScrapeNetworkError``
   都来自这里。P0 之前它们住在 `scraper.py`；现在挪到中性位置，旧
   `scraper.py` 仅做 re-export 保持 import 路径兼容。
@@ -22,6 +23,7 @@ P0 引入：把抓取从 H2S 单源耦合中解放出来，每个第三方租房
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -244,6 +246,30 @@ class AbstractScraper(ABC):
         """
 
     # ── 可选钩子（多数平台不实现，留空 no-op 默认即可）───────────────
+
+    @contextmanager
+    def batch_session(self):
+        """
+        批量抓取作用域：dispatcher 在调用本 source 的一组 ``scrape()`` 之前
+        进入此上下文，结束后退出。子类可在此创建一个**跨该 source 所有 task
+        复用的会话**（一次 TLS 握手 + 一个固定指纹），避免每个城市单独建连。
+
+        为什么需要
+        ----------
+        P0 把"遍历城市"的循环从 ``scrape()`` 内部提到了 dispatcher，但 Session
+        生命周期没跟着提——若 ``scrape()`` 每次自建 Session，N 个城市 = N 次
+        TLS 握手 + N 个不同 TLS 指纹（同 IP 快速换指纹对 Cloudflare 是 bot
+        信号）。子类重写本方法把 Session 提升到批次级，恢复 P0 之前的行为。
+
+        默认 no-op：子类（如 OurDomain，它本就要 per-task 轮换指纹）不重写
+        时，``scrape()`` 各自管自己的会话，行为不变。
+
+        线程模型
+        --------
+        dispatcher 在单个 executor 线程里顺序处理一个 source 的所有 task，
+        所以批次作用域内的共享 Session 无并发风险。
+        """
+        yield
 
     def prewarm_session(self) -> None:
         """登录 / 预热会话。仅 H2S 等支持 auto-book 的平台需要。"""

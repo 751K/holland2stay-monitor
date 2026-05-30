@@ -57,6 +57,7 @@ import curl_cffi.requests as req
 
 from config import get_impersonate, get_proxy_url
 from models import STATUS_AVAILABLE, Listing
+from scrapers.base import is_cloudflare_body
 
 logger = logging.getLogger(__name__)
 
@@ -178,12 +179,7 @@ def _check_blocked(resp, endpoint_label: str) -> None:
     if resp.status_code != 403:
         return
     body = resp.text[:500]
-    is_cf = (
-        "cloudflare" in body.lower()
-        or "no-js ie6 oldie" in body
-        or "challenge-platform" in body.lower()
-        or "<!DOCTYPE html>" in body[:50]
-    )
+    is_cf = is_cloudflare_body(body)
     logger.error(
         "booker %s HTTP 403 (%s) url=%s body=%r",
         endpoint_label, "Cloudflare WAF" if is_cf else "其他 403",

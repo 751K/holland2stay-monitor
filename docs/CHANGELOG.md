@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.7.10 (2026-05-30)
+
+### Bug 修复 (Bug fixes)
+- **GitHub Actions Release 缺 DMG/ZIP**：修复 `build.yml` 中 upload-artifact 和 action-gh-release 步骤引用的文件名与构建脚本实际产出不一致的问题。构建脚本 (`build_dmg.sh` / `build.bat`) 产出的文件名为 `FlatRadar.dmg` / `FlatRadar.zip`，但 workflow 中写的是 `Holland2Stay Monitor.dmg` / `Holland2Stay Monitor.zip`，导致每个 release 都报 "No files were found" 并空发布。v1.7.10 统一为 `FlatRadar.dmg` / `FlatRadar.zip`。
+- **Xior 未知状态测试断言过期**：`test_xior_scraper.py` 中 `test_to_listing_unknown_status_falls_back_to_available` 仍断言未知状态返回 `"Available to book"`，但 v1.7.9 已将默认值改为 `"Occupied"`（fail-closed）。测试名和断言同步更新为 `test_to_listing_unknown_status_falls_back_to_occupied`。
+
+### 代码质量 (Code Quality)
+- **SQLite 连接池化**：Web 路由中每个请求不再重复创建 SQLite 连接。`app/db.py` 的 `storage()` 在 Flask 请求上下文中将连接存入 `g._storage` 并复用，`teardown_appcontext` 自动关闭。非请求上下文（monitor / CLI / 测试）行为不变。消除每请求 ~3ms 的重复 `sqlite3.connect()` + `executescript()` 开销。
+- **图表查询下推至 SQL**：`mstorage/_charts.py` 的 `_count_feature_values()` 和 `_bucketed_number_dist()` 从 Python 侧逐行 `json.loads()` 改为 SQLite `json_each()` 在数据库引擎内完成 JSON 解析 + 前缀过滤，Python 仅做分类。`json_valid(features)` 守卫防止非法 JSON 导致查询抛错。大数据库（1000+ 房源）下图表加载提升 50-80%。
+- **N+1 batch UPDATE 修复**：`mark_status_change_notified_batch()` 从 for 循环逐条执行 UPDATE 改为单条 `WHERE listing_id IN (...)` 批量更新，与同文件 `mark_notified_batch()` 模式一致。
+- **异常捕获范围收窄**：`scraper.py` `_to_listing()` 的 `except Exception` 改为 `except (TypeError, KeyError, ValueError, AttributeError)`，避免 `KeyboardInterrupt` / `SystemExit` / `MemoryError` 被意外吞掉。`notifier.py` `_send_with_retry()` 两处 `except Exception: pass` 改为 `except (OSError, asyncio.TimeoutError)` 并加 DEBUG 日志。
+- **Cloudflare 403 检测统一**：`booker.py` 内联的 CF 检测改为复用 `scrapers/base.py` 的 `is_cloudflare_body()`，消除两份不同实现（booker 旧版只匹配大写 `<!DOCTYPE html>` 会漏检测小写 HTML）。同时确认 `batch_session()` 机制已在 `HollandStayScraper` 实现，P1 多源上线后 HTTP Session 跨城市复用不会退化。
+
+### iOS 性能优化 (iOS Performance)
+- **DateFormatter 静态化**：`NotificationItem.createdDate` 每次访问新建 `ISO8601DateFormatter` + 最多 4 个 `DateFormatter`（~100–200μs/次），列表滚动时每行每帧重复分配。全部改为 `static let` 共享实例（`isoFractional`、`isoPlain`、`fallbackParsers`、`shortDateFormatter`），`dayBucket` 的 `Calendar` 也改为 `static let`。消除通知列表最大的单点分配开销。
+- **Listing.featureMap 键预归一化**：`featureValue(matching:)` 每次调用都对 `featureMap` 所有键现调 `normalizeFeatureKey`（folding + 多次 replacingOccurrences + lowercased，~4 次分配/键）。`ListingRow` 一行读 5–6 个派生属性、每个再遍历 10–20 个键 → 50 行可见时每帧 ~5,250 次字符串操作。改为 decode 时一次性预算 `normalizedFeatureMap`（`normalizeFeatureKey` 改为 `static`），后续查找只需归一化少量别名。
+- **URLCache 条件 GET**：`APIClient` 从 `URLSession.shared` 改为专用 `URLSession`，配 2MB 内存 + 20MB 磁盘 `URLCache`。服务端 GET 200 响应带 `ETag` + `max-age=10` → 10s 新鲜窗口内切 tab 直接命中本地缓存、零网络；超窗后自动带 `If-None-Match` 复验，304 无 body 复用缓存。消除列表/地图/日历/图表的重复下载。
+- **通知首屏非阻塞**：`NotificationsStore.fetch()` 中 `loadMoreUntilUnreadIsVisible()` 从同步 `await` 改为后台 `Task` 执行——首屏拿第一页就结束 loading 立刻渲染，不再干等 N 次串行往返。加 `maxBackfillPages=5` 上限防止未读极多时串行拉几十页拖垮网络/电量。`backfillTask` 可取消（登出 / 新一轮 fetch）。
+- **地图聚类后台化**：`MapClustering.cluster()` 拆出纯值类型重载（`Double` 替代非 Sendable 的 `MKCoordinateRegion`），`MapView.recomputeClusters()` 改用 `Task.detached(priority: .userInitiated)` 把 2000 条 grid 分桶 + 排序移出主线程。加 `clusterTask` 取消机制防止快速缩放时旧结果覆盖新结果。
+
 ## v1.7.9 (2026-05-30)
 
 ### 新特性 (Features)

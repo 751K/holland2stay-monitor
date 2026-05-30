@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import json
-import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from models import parse_float, parse_int
-
-logger = logging.getLogger(__name__)
 
 
 class ChartOps:
@@ -166,59 +162,70 @@ class ChartOps:
     # ── 共享 helper ─────────────────────────────────────────────────
 
     def _count_feature_values(self, category: str, days: int | None = None) -> list[dict]:
-        where = "WHERE features IS NOT NULL AND features != '[]'"
-        params: tuple = ()
+        """统计某个 feature category 的取值分布。
+
+        使用 SQLite json_each() 将 JSON 解析 + 前缀匹配下推到数据库引擎，
+        消除 Python 侧逐行 json.loads() 的开销。
+        """
+        conditions = ["features IS NOT NULL", "features != '[]'",
+                       "json_valid(features)"]  # 跳过损坏的 JSON（json_each 遇非法 JSON 会抛错）
+        params: list = []
         cutoff = self._listing_cutoff(days)
         if cutoff is not None:
-            where += " AND first_seen >= ?"
-            params = (cutoff,)
-        rows = self._conn.execute(
-            f"SELECT features FROM listings {where}",
-            params,
-        ).fetchall()
-        counts: dict[str, int] = {}
+            conditions.append("first_seen >= ?")
+            params.append(cutoff)
+
         prefix = f"{category}: "
-        for (features_json,) in rows:
-            try:
-                feats = json.loads(features_json)
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("图表统计: 跳过损坏的 features JSON: %.80s", features_json)
-                continue
-            for f in feats:
-                if f.startswith(prefix):
-                    val = f[len(prefix):].strip()
-                    if val:
-                        counts[val] = counts.get(val, 0) + 1
-                    break
-        return [{"label": k, "count": v}
-                for k, v in sorted(counts.items(), key=lambda x: -x[1])]
+        conditions.append("TRIM(value, '\"') LIKE ?")
+        params.append(f"{prefix}%")
+
+        where = "WHERE " + " AND ".join(conditions)
+        # json_each 将每个 listings.features JSON 数组展开为多行；
+        # TRIM(value, '"') 去掉 JSON 字符串的引号，INSTR+SUBSTR 提取冒号后的值。
+        # 每个 listing 每条 category 最多一个匹配项，COUNT(*) 语义正确。
+        label_start = len(prefix) + 1
+        sql = f"""
+            SELECT TRIM(SUBSTR(TRIM(value, '"'), {label_start})) AS label,
+                   COUNT(*) AS cnt
+            FROM listings, json_each(features)
+            {where}
+            GROUP BY label
+            HAVING label != ''
+            ORDER BY cnt DESC
+        """
+        rows = self._conn.execute(sql, params).fetchall()
+        return [{"label": r["label"], "count": r["cnt"]} for r in rows]
 
     def _bucketed_number_dist(
         self, category: str, buckets: dict[str, int], classifier, days: int | None = None
     ) -> list[dict]:
-        where = "WHERE features IS NOT NULL AND features != '[]'"
-        params: tuple = ()
+        """从 features JSON 中提取数值型 category 并分桶统计。
+
+        使用 SQLite json_each() 过滤 + 提取，Python 仅负责分类（保留了原
+        classifier 回调的灵活性，同时避免了全量 json.loads()）。
+        """
+        conditions = ["features IS NOT NULL", "features != '[]'",
+                       "json_valid(features)"]
+        params: list = []
         cutoff = self._listing_cutoff(days)
         if cutoff is not None:
-            where += " AND first_seen >= ?"
-            params = (cutoff,)
-        rows = self._conn.execute(
-            f"SELECT features FROM listings {where}",
-            params,
-        ).fetchall()
+            conditions.append("first_seen >= ?")
+            params.append(cutoff)
+
         prefix = f"{category}: "
-        for (features_json,) in rows:
-            try:
-                feats = json.loads(features_json)
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("图表统计: 跳过损坏的 features JSON: %.80s", features_json)
-                continue
-            for f in feats:
-                if f.startswith(prefix):
-                    val = f[len(prefix):].strip()
-                    if val:
-                        classifier(val, buckets)
-                    break
+        conditions.append("TRIM(value, '\"') LIKE ?")
+        params.append(f"{prefix}%")
+
+        where = "WHERE " + " AND ".join(conditions)
+        label_start = len(prefix) + 1
+        sql = f"""
+            SELECT TRIM(SUBSTR(TRIM(value, '"'), {label_start})) AS val
+            FROM listings, json_each(features)
+            {where}
+        """
+        rows = self._conn.execute(sql, params).fetchall()
+        for r in rows:
+            classifier(r["val"], buckets)
         return [{"label": k, "count": v} for k, v in buckets.items()]
 
     # ── 具体分布图表 ────────────────────────────────────────────────

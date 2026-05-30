@@ -15,6 +15,16 @@ struct Listing: Decodable, Identifiable, Hashable, Sendable {
     let firstSeen: String?
     let lastSeen: String?
 
+    /// `featureMap` 的**键预归一化**版本（normalizedKey → value），decode 时
+    /// 算一次。`featureValue(matching:)` 之前每次访问都对 featureMap 每个键现
+    /// 调一次 `normalizeFeatureKey`（folding + 多次 replacingOccurrences +
+    /// lowercased，~4 次分配/键）。ListingRow 一行读 5–6 个派生属性、每个再遍历
+    /// 10–20 个键 → 快速滚动时分配量巨大。预归一化后查找只需归一化少量别名。
+    ///
+    /// 它是 featureMap 的纯函数，参与 Hashable/Equatable 合成不改变语义
+    /// （featureMap 相等 ⇒ 本字段相等）。
+    let normalizedFeatureMap: [String: String]
+
     enum CodingKeys: String, CodingKey {
         case id, name, status, source, features, url, city
         case priceRaw = "price_raw"
@@ -23,6 +33,33 @@ struct Listing: Decodable, Identifiable, Hashable, Sendable {
         case featureMap = "feature_map"
         case firstSeen = "first_seen"
         case lastSeen = "last_seen"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        status = try c.decode(String.self, forKey: .status)
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        priceRaw = try c.decodeIfPresent(String.self, forKey: .priceRaw)
+        priceValue = try c.decodeIfPresent(Double.self, forKey: .priceValue)
+        availableFrom = try c.decodeIfPresent(String.self, forKey: .availableFrom)
+        features = try c.decodeIfPresent([String].self, forKey: .features) ?? []
+        let rawFeatureMap = try c.decodeIfPresent([String: String].self, forKey: .featureMap) ?? [:]
+        featureMap = rawFeatureMap
+        url = try c.decode(String.self, forKey: .url)
+        city = try c.decode(String.self, forKey: .city)
+        firstSeen = try c.decodeIfPresent(String.self, forKey: .firstSeen)
+        lastSeen = try c.decodeIfPresent(String.self, forKey: .lastSeen)
+
+        // 键预归一化（一次性）。collision 时后者覆盖——归一化后撞键极少见，
+        // 且原实现也是"取 featureMap 迭代里第一个匹配"，无确定性承诺。
+        var norm: [String: String] = [:]
+        norm.reserveCapacity(rawFeatureMap.count)
+        for (k, v) in rawFeatureMap {
+            norm[Self.normalizeFeatureKey(k)] = v
+        }
+        normalizedFeatureMap = norm
     }
 }
 
@@ -231,9 +268,10 @@ extension Listing {
     }
 
     func featureValue(matching aliases: [String]) -> String? {
-        let normalizedAliases = aliases.map(normalizeFeatureKey)
-        for (key, value) in featureMap {
-            let normalizedKey = normalizeFeatureKey(key)
+        // 只归一化少量别名（每属性 1–5 个字面量）；featureMap 的键已在
+        // decode 时预归一化进 normalizedFeatureMap，这里不再逐键现算。
+        let normalizedAliases = aliases.map(Self.normalizeFeatureKey)
+        for (normalizedKey, value) in normalizedFeatureMap {
             if normalizedAliases.contains(where: { normalizedKey.contains($0) || $0.contains(normalizedKey) }) {
                 let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 return trimmed.isEmpty ? nil : trimmed
@@ -242,7 +280,8 @@ extension Listing {
         return nil
     }
 
-    private func normalizeFeatureKey(_ key: String) -> String {
+    /// static：与实例无关的纯函数，供 init 预归一化键 + featureValue 归一化别名共用。
+    static func normalizeFeatureKey(_ key: String) -> String {
         key
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .replacingOccurrences(of: "_", with: " ")

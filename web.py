@@ -31,7 +31,7 @@ import sys
 import time
 from pathlib import Path
 
-from flask import Flask, request
+from flask import Flask, g, request
 
 if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -106,6 +106,20 @@ app.config["PERMANENT_SESSION_LIFETIME"] = int(os.environ.get("SESSION_LIFETIME_
 
 # 稳定的 secret key：优先读 .env，不存在则自动生成并写入
 app.secret_key = ensure_secret_key()
+
+
+@app.teardown_appcontext
+def _close_request_storage(exc=None):
+    """关闭请求作用域的 SQLite 连接（若存在）。
+
+    仅关闭由 app.db.storage() 标记为 _teardown_managed=True 的实例；
+    路由内部自行创建的 Storage（如 SSE 生成器内的）不受影响。
+    """
+    st = g.pop('_storage', None)
+    if st is not None:
+        # 绕过 _teardown_managed 检查，强制关闭
+        st._teardown_managed = False
+        st.close()
 
 
 @app.after_request

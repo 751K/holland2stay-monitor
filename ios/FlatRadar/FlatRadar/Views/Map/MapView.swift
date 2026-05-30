@@ -47,10 +47,31 @@ struct MapView: View {
     /// 现在只在 `.onChange(of: store.listings.count)` 和跨 bucket 时刷新。
     @State private var clusters: [ListingCluster] = []
 
+    /// 聚类后台任务句柄；新一轮 recompute 前取消上一轮，避免快速跨桶时
+    /// 叠加多个 detached 任务、用旧 region 的结果覆盖新结果。
+    @State private var clusterTask: Task<Void, Never>?
+
     private func recomputeClusters() {
-        clusters = MapClustering.cluster(
-            listings: store.listings, region: currentRegion
-        )
+        // 在主线程取值类型快照（store.listings 是 [MapListing] Sendable，
+        // region 只取两个 Double delta），聚类计算丢到后台 detached 跑——
+        // 2000 条的 grid 分桶 + 排序不再阻塞首屏/拖动那一帧。算完回主线程
+        // 赋值 @State 触发渲染。
+        let snapshot = store.listings
+        let latDelta = currentRegion.span.latitudeDelta
+        let lngDelta = currentRegion.span.longitudeDelta
+
+        clusterTask?.cancel()
+        // @MainActor in：计算在 detached 后台跑，但任务体本身锚在主 actor，
+        // 末尾 `clusters = result` 是主线程上的 @State 写入，并发安全。
+        clusterTask = Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) {
+                MapClustering.cluster(
+                    listings: snapshot, latDelta: latDelta, lngDelta: lngDelta
+                )
+            }.value
+            if Task.isCancelled { return }
+            clusters = result
+        }
     }
 
     /// 判断两个 region 是否跨过 log2 量化桶边界。

@@ -79,11 +79,10 @@ def dispatch_scrape_tasks(
       （例如 H2S 的 Amsterdam + OurDomain 的 Amsterdam）会前缀化 source
       避免覆盖：``"holland2stay:Amsterdam"`` / ``"ourdomain:Amsterdam"``
 
-    P0 现状
-    -------
-    monitor.run_once 当前仍走 ``scraper.scrape_all(city_tasks, availability_ids)``
-    旧路径——零回归。本函数留作 P1 接 OurDomain 时把 monitor 切过来用。
-    单源情况下两个路径行为完全一致。
+    调用方
+    ------
+    ``monitor.run_once`` 走本函数（``scrape_tasks_v2()`` → 本 dispatcher），
+    是当前唯一的生产抓取路径。旧的 ``scraper.scrape_all`` 已删除。
     """
     from collections import defaultdict
 
@@ -108,28 +107,32 @@ def dispatch_scrape_tasks(
                 completeness[_completeness_key(source, t.city_display, by_source)] = False
             continue
 
-        for t in source_tasks:
-            ckey = _completeness_key(source, t.city_display, by_source)
-            try:
-                result = scraper.scrape(t)
-                success_count += 1
-                all_listings.extend(result.listings)
-                completeness[ckey] = result.complete
-            except UpstreamMaintenanceError as e:
-                # 平台维护是站点级状态——不和其它 source 隔离尝试也无意义，
-                # 但仍然走 hard_failures 计数：让"全部任务都失败"判定成立时
-                # 直接上抛维护异常，monitor 据此走长冷却 + 安静等。
-                hard_failures.append((ckey, e))
-                completeness[ckey] = False
-                logger.info("%s 平台维护中，已隔离该任务: %s", ckey, e)
-            except (RateLimitError, BlockedError) as e:
-                hard_failures.append((ckey, e))
-                completeness[ckey] = False
-                logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
-            except ScrapeNetworkError as e:
-                network_failures.append(ckey)
-                logger.error("%s 抓取网络失败，已隔离该任务: %s", ckey, e)
-                # 单 city 网络失败不进 completeness（与现有 scrape_all 行为一致）
+        # batch_session() 让 scraper 把 Session/TLS 指纹提升到批次级——H2S
+        # 这样一批城市只握手一次、用同一个指纹（恢复 P0 之前 scrape_all 的
+        # 行为）。默认 no-op，OurDomain 等仍各 task 自管会话。
+        with scraper.batch_session():
+            for t in source_tasks:
+                ckey = _completeness_key(source, t.city_display, by_source)
+                try:
+                    result = scraper.scrape(t)
+                    success_count += 1
+                    all_listings.extend(result.listings)
+                    completeness[ckey] = result.complete
+                except UpstreamMaintenanceError as e:
+                    # 平台维护是站点级状态——不和其它 source 隔离尝试也无意义，
+                    # 但仍然走 hard_failures 计数：让"全部任务都失败"判定成立时
+                    # 直接上抛维护异常，monitor 据此走长冷却 + 安静等。
+                    hard_failures.append((ckey, e))
+                    completeness[ckey] = False
+                    logger.info("%s 平台维护中，已隔离该任务: %s", ckey, e)
+                except (RateLimitError, BlockedError) as e:
+                    hard_failures.append((ckey, e))
+                    completeness[ckey] = False
+                    logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
+                except ScrapeNetworkError as e:
+                    network_failures.append(ckey)
+                    logger.error("%s 抓取网络失败，已隔离该任务: %s", ckey, e)
+                    # 单 city 网络失败不进 completeness（与现有 scrape_all 行为一致）
 
     # 429 / 403 / 维护：若没有任何任务成功，维持旧行为让 monitor 进入冷却；
     # 若已有其它平台成功，则返回部分结果，避免 OurDomain 被挡时拖垮 H2S。

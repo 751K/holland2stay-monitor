@@ -30,6 +30,13 @@ final class NotificationsStore {
     // SSE 后台任务句柄；登出 / 切后台时取消
     private var streamTask: Task<Void, Never>?
 
+    // "补齐未读页"的后台任务句柄；每次 fetch 重启，避免并发叠加。
+    private var backfillTask: Task<Void, Never>?
+
+    // 后台补未读页的安全上限——未读极多时（比如几百条历史未读）不该串行
+    // 拉几十页拖垮网络/电量。封顶后用户照常下拉/滚动 loadMore() 继续。
+    private let maxBackfillPages = 5
+
     var hasMore: Bool { notifications.count < total }
 
     private var loadedUnreadCount: Int {
@@ -45,12 +52,22 @@ final class NotificationsStore {
             total = resp.total
             unreadCount = resp.unread
             revision &+= 1
-            await loadMoreUntilUnreadIsVisible()
         } catch {
             lastError = error as? APIError
             errorMessage = error.localizedDescription
         }
+        // 关键：首屏一拿到第 1 页就结束 loading，立刻渲染。
+        // "把所有未读页都补齐"放到后台非阻塞执行——之前 await 在这里，
+        // 未读跨 N 页时首屏要干等 N 次串行往返才显示，体感卡顿。
         isLoading = false
+
+        // 后台补齐未读页（不阻塞 UI；带上限防失控）。仅在第 1 页拉成功后启动。
+        if errorMessage == nil {
+            backfillTask?.cancel()
+            backfillTask = Task { [weak self] in
+                await self?.loadMoreUntilUnreadIsVisible()
+            }
+        }
     }
 
     func loadMore() async {
@@ -71,7 +88,10 @@ final class NotificationsStore {
     }
 
     private func loadMoreUntilUnreadIsVisible() async {
+        var pagesLoaded = 0
         while unreadCount > loadedUnreadCount, notifications.count < total {
+            // 取消（登出 / 新一轮 fetch / 视图消失）或触顶 → 立即停。
+            if Task.isCancelled || pagesLoaded >= maxBackfillPages { break }
             do {
                 let resp = try await client.getNotifications(
                     limit: pageSize,
@@ -80,6 +100,7 @@ final class NotificationsStore {
                 notifications.append(contentsOf: resp.items)
                 total = resp.total
                 revision &+= 1
+                pagesLoaded += 1
             } catch {
                 break
             }
@@ -160,10 +181,13 @@ final class NotificationsStore {
         revision &+= 1
     }
 
-    /// 主动停掉 SSE（登出 / 切后台）。
+    /// 主动停掉 SSE（登出 / 切后台）。同时取消后台补页任务，避免登出后
+    /// 仍在偷偷拉分页。
     func disconnectStream() {
         streamTask?.cancel()
         streamTask = nil
+        backfillTask?.cancel()
+        backfillTask = nil
         isStreamConnected = false
     }
 

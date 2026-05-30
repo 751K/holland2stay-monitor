@@ -8,7 +8,7 @@ import MapKit
 /// pin 会糊成一团。这里在 Swift 侧用最简单的 **grid bucket** 算法做手动聚合：
 /// 把当前可见区域按 lat/lng 等距切成网格，落在同一格的房源归并成一个簇，
 /// 视图渲染时单条画 pin、多条画带数字的气泡。
-struct ListingCluster: Identifiable, Hashable {
+struct ListingCluster: Identifiable, Hashable, Sendable {
     /// 形如 ``"single:<listingId>"`` 或 ``"cluster:<lat>,<lng>"``，
     /// `Map(selection:)` 用同一个 string 选中（单 pin 才有效）。
     let id: String
@@ -79,17 +79,35 @@ enum MapClustering {
         return pow(2.0, snapped)
     }
 
+    /// 便捷重载：从 region 取 span 两个 delta 后转调主实现。
     static func cluster(
         listings: [MapListing],
         region: MKCoordinateRegion,
+        targetCells: Double = 12
+    ) -> [ListingCluster] {
+        cluster(
+            listings: listings,
+            latDelta: region.span.latitudeDelta,
+            lngDelta: region.span.longitudeDelta,
+            targetCells: targetCells
+        )
+    }
+
+    /// 主实现：入参全是值类型（`[MapListing]` Sendable + `Double`），可安全
+    /// 在 `Task.detached` 里跨 actor 边界调用——把 2000 条聚类移出主线程。
+    /// 不收 `MKCoordinateRegion`（非 Sendable），避免并发告警。
+    static func cluster(
+        listings: [MapListing],
+        latDelta: Double,
+        lngDelta: Double,
         targetCells: Double = 12
     ) -> [ListingCluster] {
         guard !listings.isEmpty else { return [] }
 
         // 各自量化 lat/lng span → 缩放过程中 grid 大部分时间不变（除了
         // 跨桶边界那一刻）。这是消除闪烁的关键。
-        let qLat = Self.quantizeSpan(region.span.latitudeDelta)
-        let qLng = Self.quantizeSpan(region.span.longitudeDelta)
+        let qLat = Self.quantizeSpan(latDelta)
+        let qLng = Self.quantizeSpan(lngDelta)
         let cellLat = max(qLat / targetCells, 1e-6)
         let cellLng = max(qLng / targetCells, 1e-6)
 

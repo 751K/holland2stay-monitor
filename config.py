@@ -614,23 +614,6 @@ class Config:
     ourdomain_cities: list[OurDomainCityFilter] = field(default_factory=list)
     xior_cities: list[XiorCityFilter] = field(default_factory=list)
 
-    def scrape_tasks(self) -> tuple[list[tuple[str, str]], list[str]]:
-        """
-        将配置展开为 scraper.scrape_all() 所需的参数格式。
-
-        Returns
-        -------
-        city_tasks       : [(city_name, city_id_str), ...]
-                           e.g. [("Eindhoven", "29"), ("Amsterdam", "24")]
-        availability_ids : [id_str, ...]
-                           e.g. ["179", "336"]
-
-        历史接口；与 P0 多源重构并存。新代码用 ``scrape_tasks_v2()``。
-        """
-        city_tasks = [(c.name, str(c.id)) for c in self.cities]
-        availability_ids = [str(af.id) for af in self.availability_filters]
-        return city_tasks, availability_ids
-
     def scrape_tasks_v2(self) -> list["ScrapeTask"]:  # type: ignore[name-defined]
         """
         P0 新接口：展开为 source-aware 的 ``ScrapeTask`` 列表。

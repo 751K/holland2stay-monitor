@@ -23,12 +23,19 @@ logger = logging.getLogger(__name__)
 
 @contextmanager
 def storage_ctx():
-    """Yield a storage instance and always close it."""
+    """Yield a storage instance.
+
+    Flask request context → g._storage (auto-closed by teardown_appcontext).
+    Outside request context → new instance (caller must close via context manager).
+    """
+    from flask import has_request_context
+
     st = storage()
     try:
         yield st
     finally:
-        st.close()
+        if not has_request_context():
+            st.close()
 
 
 def safe_features(row: dict) -> list[str]:

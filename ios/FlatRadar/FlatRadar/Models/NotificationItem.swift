@@ -117,31 +117,66 @@ extension NotificationItem {
         return .system
     }
 
+    // MARK: - 共享日期格式化器（static，避免每次访问重新分配）
+    //
+    // DateFormatter / ISO8601DateFormatter 的创建是已知最贵的 Foundation
+    // 操作之一（~100–200μs）。createdDate 是计算属性，ageText / dayBucket
+    // 都会调它——之前每次访问都现 new 1 个 ISO + 最多 4 个 DateFormatter。
+    // 列表滚动时每行每帧重复分配，开销显著。
+    //
+    // 改成 static let 一次性建好复用。DateFormatter / ISO8601DateFormatter
+    // 自 iOS 7 起对并发"解析/格式化"是线程安全的（只读不改 options），所以
+    // 全局共享安全。注意：ISO 拆成两个（含/不含小数秒），避免运行时改
+    // formatOptions（那会破坏共享）。
+
+    fileprivate static let amsterdamTZ: TimeZone =
+        TimeZone(identifier: "Europe/Amsterdam") ?? .current
+
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoPlain: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// 多格式兜底解析器（Europe/Amsterdam，en_US_POSIX 固定 locale）。
+    private static let fallbackParsers: [DateFormatter] = {
+        ["yyyy-MM-dd HH:mm:ss",
+         "yyyy-MM-dd HH:mm",
+         "yyyy-MM-dd'T'HH:mm:ss.SSS",
+         "yyyy-MM-dd'T'HH:mm:ss"].map { fmt in
+            let f = DateFormatter()
+            f.calendar = Calendar(identifier: .gregorian)
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.timeZone = amsterdamTZ
+            f.dateFormat = fmt
+            return f
+        }
+    }()
+
+    /// "超过一周"时显示的具体日期（"MMM d"，跟随系统 locale）。
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = .autoupdatingCurrent
+        f.timeZone = amsterdamTZ
+        f.dateFormat = "MMM d"
+        return f
+    }()
+
     /// 把 `createdAt` 解成 Date —— 复用 listing 那套多格式解析。
     /// 用 Europe/Amsterdam 算相对年龄，避免本地时区漂移。
     var createdDate: Date? {
         let raw = createdAt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }
-
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let d = iso.date(from: raw) { return d }
-        iso.formatOptions = [.withInternetDateTime]
-        if let d = iso.date(from: raw) { return d }
-
-        let tz = TimeZone(identifier: "Europe/Amsterdam") ?? .current
-        let formats = [
-            "yyyy-MM-dd HH:mm:ss",
-            "yyyy-MM-dd HH:mm",
-            "yyyy-MM-dd'T'HH:mm:ss.SSS",
-            "yyyy-MM-dd'T'HH:mm:ss",
-        ]
-        for fmt in formats {
-            let f = DateFormatter()
-            f.calendar = Calendar(identifier: .gregorian)
-            f.locale = Locale(identifier: "en_US_POSIX")
-            f.timeZone = tz
-            f.dateFormat = fmt
+        if let d = Self.isoFractional.date(from: raw) { return d }
+        if let d = Self.isoPlain.date(from: raw) { return d }
+        for f in Self.fallbackParsers {
             if let d = f.date(from: raw) { return d }
         }
         return nil
@@ -155,13 +190,8 @@ extension NotificationItem {
         if interval < 3600 { return "\(Int(interval / 60))m" }
         if interval < 86400 { return "\(Int(interval / 3600))h" }
         if interval < 86400 * 7 { return "\(Int(interval / 86400))d" }
-        // 超过一周回退到具体日期
-        let f = DateFormatter()
-        f.calendar = Calendar(identifier: .gregorian)
-        f.locale = .autoupdatingCurrent
-        f.timeZone = TimeZone(identifier: "Europe/Amsterdam") ?? .current
-        f.dateFormat = "MMM d"
-        return f.string(from: d)
+        // 超过一周回退到具体日期（共享 formatter）
+        return Self.shortDateFormatter.string(from: d)
     }
 
     /// "Today" / "Yesterday" / "Earlier" 三段——给 NotificationsView 做 Section 分组。
@@ -169,10 +199,15 @@ extension NotificationItem {
         case today, yesterday, earlier
     }
 
+    private static let amsterdamCalendar: Calendar = {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = amsterdamTZ
+        return cal
+    }()
+
     var dayBucket: DayBucket {
         guard let d = createdDate else { return .earlier }
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone(identifier: "Europe/Amsterdam") ?? .current
+        let cal = Self.amsterdamCalendar
         if cal.isDateInToday(d) { return .today }
         if cal.isDateInYesterday(d) { return .yesterday }
         return .earlier

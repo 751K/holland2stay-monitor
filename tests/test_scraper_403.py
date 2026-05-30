@@ -132,8 +132,22 @@ class TestPostGqlBlockedError:
 # ─── BlockedError 传播测试 ──────────────────────────────────────
 
 
+def _h2s_tasks(*pairs):
+    """构造 H2S ScrapeTask 列表（city_display, city_key）。"""
+    from scrapers.base import ScrapeTask
+    return [
+        ScrapeTask(
+            source="holland2stay",
+            city_key=city_id,
+            city_display=city_name,
+            extra={"availability_ids": ["179"]},
+        )
+        for city_name, city_id in pairs
+    ]
+
+
 class TestBlockedErrorPropagation:
-    """403 必须从 _post_gql 一路传到 scrape_all，不被中间层吞。"""
+    """403 必须从 _post_gql 一路传到 dispatcher，不被中间层吞。"""
 
     def test_blocked_error_propagates_through_scrape_city_pages(self):
         """_scrape_city_pages 不能 except Exception 把 BlockedError 吃掉。"""
@@ -143,13 +157,17 @@ class TestBlockedErrorPropagation:
             with pytest.raises(BlockedError):
                 _scrape_city_pages(MagicMock(), "Eindhoven", ["29"], ["179"])
 
-    def test_blocked_error_propagates_through_scrape_all(self):
-        """scrape_all 也必须透传，不能降级为单城市失败。"""
-        from scraper import scrape_all
+    def test_blocked_error_propagates_through_dispatch(self):
+        """dispatcher 也必须透传 BlockedError，不降级为单城市失败。
 
-        with patch("scraper._scrape_city_pages", side_effect=BlockedError("test")):
+        路径：dispatch → HollandStayScraper.scrape() → _scrape_city_pages。
+        单 H2S 任务被 block + 无其它成功 → dispatch 上抛 BlockedError。"""
+        from scrapers import dispatch_scrape_tasks
+
+        with patch("scraper._scrape_city_pages", side_effect=BlockedError("test")), \
+             patch("scrapers.holland2stay._make_session", return_value=MagicMock()):
             with pytest.raises(BlockedError):
-                scrape_all([("Eindhoven", "29")], ["179"])
+                dispatch_scrape_tasks(_h2s_tasks(("Eindhoven", "29")))
 
 
 # ─── ScrapeNetworkError 传播测试 ─────────────────────────────────
@@ -186,18 +204,18 @@ class TestScrapeNetworkErrorPropagation:
         assert result == []
         assert complete is False
 
-    def test_scrape_all_raises_when_all_cities_fail_on_first_page(self):
+    def test_dispatch_raises_when_all_cities_fail_on_first_page(self):
         """所有城市第 1 页都网络失败时，整体抓取必须失败并交给 monitor cooldown。"""
-        from scraper import scrape_all
+        from scrapers import dispatch_scrape_tasks
 
         with patch(
             "scraper._scrape_city_pages",
             side_effect=ScrapeNetworkError("page 1 failed"),
-        ):
+        ), patch("scrapers.holland2stay._make_session", return_value=MagicMock()):
             with pytest.raises(ScrapeNetworkError) as excinfo:
-                scrape_all([("Eindhoven", "29"), ("Amsterdam", "24")], ["179"])
+                dispatch_scrape_tasks(_h2s_tasks(("Eindhoven", "29"), ("Amsterdam", "24")))
 
-        assert "全部 2 个城市第 1 页网络失败" in str(excinfo.value)
+        assert "全部 2 个任务网络失败" in str(excinfo.value)
 
 
 # ─── monitor 的 BlockedError 处理 ─────────────────────────────

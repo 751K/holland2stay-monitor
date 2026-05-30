@@ -25,6 +25,10 @@ class StorageBase:
         self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._tz = timezone_str
+        # _teardown_managed 为 True 时，close() 是空操作——连接的真正关闭由
+        # Flask teardown_appcontext 负责（参见 app/db.py）。非请求上下文（monitor /
+        # CLI / 测试）创建的实例此标志为 False，.close() 照常关闭连接。
+        self._teardown_managed: bool = False
         path_key = str(db_path.resolve())
         if path_key not in StorageBase._migrated_paths:
             with StorageBase._migration_lock:
@@ -393,4 +397,5 @@ class StorageBase:
         logger.info("数据库已清空（全部 8 张表）")
 
     def close(self) -> None:
-        self._conn.close()
+        if not self._teardown_managed:
+            self._conn.close()

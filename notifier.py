@@ -193,13 +193,14 @@ class MultiNotifier(BaseNotifier):
                 ok = await n._send(text)
                 if ok:
                     return True
-            except Exception:
-                pass
+            except (OSError, asyncio.TimeoutError) as e:
+                logger.debug("通知渠道首次发送失败 %s: %s", type(n).__name__, e)
             # 失败后等待 3 秒重试一次
             await asyncio.sleep(3)
             try:
                 return await n._send(text)
-            except Exception:
+            except (OSError, asyncio.TimeoutError) as e:
+                logger.debug("通知渠道重试仍失败 %s: %s", type(n).__name__, e)
                 return False
 
         results = await asyncio.gather(

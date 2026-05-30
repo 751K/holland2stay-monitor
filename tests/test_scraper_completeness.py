@@ -7,7 +7,22 @@ import pytest
 
 import scraper
 from models import Listing
-from scraper import ScrapeNetworkError, _scrape_city_pages, scrape_all
+from scraper import ScrapeNetworkError, _scrape_city_pages
+from scrapers import dispatch_scrape_tasks
+from scrapers.base import ScrapeTask
+
+
+def _h2s_tasks(*pairs: tuple[str, str], availability_ids=("179",)) -> list[ScrapeTask]:
+    """构造 H2S ScrapeTask 列表（city_display, city_key）。"""
+    return [
+        ScrapeTask(
+            source="holland2stay",
+            city_key=city_id,
+            city_display=city_name,
+            extra={"availability_ids": list(availability_ids)},
+        )
+        for city_name, city_id in pairs
+    ]
 
 
 def _page(page: int, total_pages: int, items: list[dict] | None = None) -> dict:
@@ -115,14 +130,22 @@ class TestScrapeCityCompleteness:
         assert complete is True
 
 
-class TestScrapeAllCompleteness:
+class TestDispatchCompleteness:
+    """多城市编排 + completeness 聚合 —— 现由 dispatch_scrape_tasks 负责
+    （旧 scraper.scrape_all 已删除）。路径：
+    dispatch → HollandStayScraper.scrape() → scraper._scrape_city_pages。
+
+    patch _scrape_city_pages 注入各城市结果；patch _make_session 避免真建
+    curl_cffi 会话（保持测试 hermetic + 快）。
+    """
+
     def test_returns_city_completeness_map(self):
         with patch("scraper._scrape_city_pages", side_effect=[
             ([_listing({"id": "a"}, "Eindhoven")], True),
             ([], False),
-        ]):
-            listings, completeness = scrape_all(
-                [("Eindhoven", "29"), ("Amsterdam", "24")], ["179"]
+        ]), patch("scrapers.holland2stay._make_session", return_value=MagicMock()):
+            listings, completeness = dispatch_scrape_tasks(
+                _h2s_tasks(("Eindhoven", "29"), ("Amsterdam", "24"))
             )
 
         assert [l.id for l in listings] == ["a"]
@@ -132,9 +155,9 @@ class TestScrapeAllCompleteness:
         with patch("scraper._scrape_city_pages", side_effect=[
             ([], True),
             ScrapeNetworkError("page 1 failed"),
-        ]):
-            listings, completeness = scrape_all(
-                [("Eindhoven", "29"), ("Amsterdam", "24")], ["179"]
+        ]), patch("scrapers.holland2stay._make_session", return_value=MagicMock()):
+            listings, completeness = dispatch_scrape_tasks(
+                _h2s_tasks(("Eindhoven", "29"), ("Amsterdam", "24"))
             )
 
         assert listings == []
@@ -144,6 +167,8 @@ class TestScrapeAllCompleteness:
         with patch(
             "scraper._scrape_city_pages",
             side_effect=ScrapeNetworkError("page 1 failed"),
-        ):
+        ), patch("scrapers.holland2stay._make_session", return_value=MagicMock()):
             with pytest.raises(ScrapeNetworkError):
-                scrape_all([("Eindhoven", "29"), ("Amsterdam", "24")], ["179"])
+                dispatch_scrape_tasks(
+                    _h2s_tasks(("Eindhoven", "29"), ("Amsterdam", "24"))
+                )

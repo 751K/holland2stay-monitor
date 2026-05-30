@@ -12,11 +12,14 @@ scraper.py — Holland2Stay 房源抓取
 - **GraphQL 端点**：`https://api.holland2stay.com/graphql/`（Magento 后端）
   Holland2Stay 前端为 Next.js + Apollo Client CSR，页面 HTML 中无房源数据。
 - **自动翻页**：每页最多 100 条，`page_info.total_pages` 控制循环。
-- **多城市**：调用方传入 `city_tasks` 列表，本模块对每个城市串行请求。
+- **单城市抓取**：``_scrape_city_pages(session, city, ...)`` 是对外主入口。
 
 对外接口
 --------
-只有一个公开函数 `scrape_all()`，其余均为模块私有。
+``_scrape_city_pages()`` 由 ``scrapers/holland2stay.py`` 的适配层调用——
+多城市编排（遍历 + Session 复用 + 错误隔离）现归 ``scrapers.dispatch_scrape_tasks``。
+旧的多城市公开函数 ``scrape_all()`` 已删除（生产无调用方）。
+本模块其余符号均为私有实现细节。
 
 依赖
 ----
@@ -31,7 +34,6 @@ import time
 
 import curl_cffi.requests as req
 
-from config import get_impersonate, get_proxy_url
 from models import Listing
 from typing import Optional
 
@@ -115,12 +117,6 @@ def _reset_403_streak() -> None:
     if _consecutive_403_count:
         logger.info("403 streak 重置（之前 %d 次）", _consecutive_403_count)
         _consecutive_403_count = 0
-
-
-def _mask_proxy_url(url: str) -> str:
-    """脱敏代理 URL 中的密码（日志安全）。"""
-    import re as _re
-    return _re.sub(r"(://[^:]+:)[^@]+(@)", r"\1***\2", url)
 
 
 def _post_gql(session: req.Session, query: str) -> dict:
@@ -410,8 +406,10 @@ def _to_listing(item: dict, city_name: str) -> Optional[Listing]:
             contract_id=contract_id,
             contract_start_date=contract_start_date,
         )
-    except Exception as e:
-        # 含 city 上下文：哪个城市的哪个 url_key 解析失败，便于排查 API schema 变化
+    except (TypeError, KeyError, ValueError, AttributeError) as e:
+        # 含 city 上下文：哪个城市的哪个 url_key 解析失败，便于排查 API schema 变化。
+        # 只捕获解析阶段预期的异常类型——KeyboardInterrupt / SystemExit / MemoryError
+        # 等 BaseException 子类应直接向上传播，不能被吞掉。
         try:
             uk = item.get("url_key", "?") if isinstance(item, dict) else "?"
         except Exception:
@@ -439,7 +437,8 @@ def _scrape_city_pages(
 
     Parameters
     ----------
-    session          : 已初始化的 curl_cffi Session（由 scrape_all 创建并复用）
+    session          : 已初始化的 curl_cffi Session（由 scrapers/holland2stay.py
+                       的 batch_session 创建，批次内多城市复用）
     city_name        : 城市显示名，用于日志和 Listing.city 字段
     city_ids         : 该城市的 GraphQL filter ID 列表（通常只有一个）
     availability_ids : 可用性 filter ID 列表
@@ -558,95 +557,3 @@ def _scrape_city_pages(
     else:
         logger.info("[%s] 共抓取 %d 条房源", city_name, len(listings))
     return listings, complete
-
-
-def scrape_all(
-    city_tasks: list[tuple[str, str]],
-    availability_ids: Optional[list[str]] = None,
-) -> tuple[list[Listing], dict[str, bool]]:
-    """
-    抓取所有指定城市的房源，返回合并后的列表。
-
-    这是本模块唯一的公开接口。在 monitor.py 中通过
-    `run_in_executor` 在线程池里调用（scraper 是同步代码）。
-
-    Parameters
-    ----------
-    city_tasks       : [(city_name, city_id_str), ...]
-                       由 `Config.scrape_tasks()` 生成
-                       e.g. [("Eindhoven", "29"), ("Amsterdam", "24")]
-    availability_ids : 可用性 filter ID 列表，默认 ["179", "336"]
-                       （179=Available to book，336=Available in lottery）
-
-    Returns
-    -------
-    (all_listings, city_completeness)
-      all_listings: 所有城市抓取结果合并后的 Listing 列表。
-      city_completeness[city_name]: 该城市本轮分页扫描是否完整。
-      个别城市第 1 页网络失败不会出现在 city_completeness 中；仅全部城市均失败时向上抛出。
-
-    Raises
-    ------
-    ScrapeNetworkError  全部城市第 1 页均网络错误 → 无有效抓取结果
-    RateLimitError      任意城市持续 429 → 直接上传
-    BlockedError        任意城市 403 → 直接上传
-
-    副作用
-    ------
-    每次调用都创建一个新的 curl_cffi Session（TCP 连接不跨调用复用）。
-    代理通过 HTTPS_PROXY / HTTP_PROXY 环境变量控制，热重载时自动生效。
-
-    Raises
-    ------
-    RateLimitError  任意城市遭遇持续 429（已退避重试仍失败），直接上传给 monitor
-    """
-    if availability_ids is None:
-        availability_ids = ["179", "336"]
-
-    # 代理：统一通过 get_proxy_url() 读取，支持 socks5:// 和 http:// 格式
-    proxy = get_proxy_url()
-    proxies = {"https": proxy, "http": proxy} if proxy else {}
-    if proxy:
-        logger.debug("使用代理: %s", _mask_proxy_url(proxy))
-
-    all_listings: list[Listing] = []
-    city_completeness: dict[str, bool] = {}
-    network_failures: list[str] = []  # 遭遇 ScrapeNetworkError 的城市
-
-    with req.Session(impersonate=get_impersonate(), proxies=proxies) as session:
-        for city_name, city_id in city_tasks:
-            try:
-                listings, complete = _scrape_city_pages(
-                    session,
-                    city_name,
-                    city_ids=[str(city_id)],
-                    availability_ids=availability_ids,
-                )
-                all_listings.extend(listings)
-                city_completeness[city_name] = complete
-            except (RateLimitError, BlockedError, UpstreamMaintenanceError):
-                raise   # 429/403/维护 都是 IP/指纹/平台级别的问题，不是单城市失败，直接上传
-            except ScrapeNetworkError as e:
-                network_failures.append(city_name)
-                logger.error(
-                    "[%s] 第 1 页网络失败 city_id=%s avail_ids=%s proxy=%s: %s",
-                    city_name, city_id, availability_ids,
-                    "yes" if proxy else "no", e,
-                    exc_info=True,
-                )
-            except Exception as e:
-                logger.error(
-                    "[%s] 抓取失败 city_id=%s avail_ids=%s proxy=%s: %s",
-                    city_name, city_id, availability_ids,
-                    "yes" if proxy else "no", e,
-                    exc_info=True,
-                )
-
-    # 全部城市第 1 页均网络失败 → 不存在有效抓取结果，
-    # 上传让 monitor 做连续失败计数和冷却，避免空数据污染 last_scrape_at
-    if not all_listings and network_failures and len(network_failures) == len(city_tasks):
-        raise ScrapeNetworkError(
-            f"全部 {len(city_tasks)} 个城市第 1 页网络失败: {', '.join(network_failures)}"
-        )
-
-    return all_listings, city_completeness
