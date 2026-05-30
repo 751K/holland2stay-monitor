@@ -45,10 +45,10 @@ Platform coverage changes over time as third-party websites change. Always verif
 |---|---|---|
 | Web dashboard | Stable | Primary admin and self-hosted interface |
 | iOS app | Maintenance | Available on the App Store; feature-complete for current scope |
-| Android app | Active development | Kotlin + Compose client, moving toward parity and Play Store readiness |
+| Android app | Beta | Kotlin + Compose client, feature-complete (57 files, ~9.5k lines), FCM push verified, Play Store prep in progress |
 | Desktop packages | Available | macOS `.dmg` and Windows `.zip` from GitHub Releases |
 
-[Download on the App Store](https://apps.apple.com/us/app/flarradar/id6769857080)
+[Download on the App Store](https://apps.apple.com/us/app/flarradar/id6769857080) · [Download Android App](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.aab)
 
 ## Quick Start
 

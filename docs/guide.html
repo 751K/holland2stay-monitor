@@ -75,16 +75,22 @@ docker compose up -d</pre>
 
 <div class="card">
 <h3><span class="step">2</span> macOS</h3>
-<p>Download the latest <code>.dmg</code> from <a href="https://github.com/751K/flatradar/releases">Releases</a>, drag to Applications, double-click. The browser opens automatically.</p>
+<p>Download the latest <code>.dmg</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a>, drag to Applications, double-click. The browser opens automatically.</p>
 </div>
 
 <div class="card">
 <h3><span class="step">3</span> Windows</h3>
-<p>Download the latest <code>.zip</code> from <a href="https://github.com/751K/flatradar/releases">Releases</a>, extract and run <code>flatradar.exe</code>.</p>
+<p>Download the latest <code>.zip</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a>, extract and run <code>flatradar.exe</code>.</p>
 </div>
 
 <div class="card">
-<h3><span class="step">4</span> Run from source</h3>
+<h3><span class="step">4</span> iOS / Android Apps</h3>
+<p><strong>iOS:</strong> <a href="https://apps.apple.com/us/app/flarradar/id6769857080">Download on the App Store</a> — native SwiftUI client.</p>
+<p><strong>Android:</strong> <a href="https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.aab">Download Android App</a> (.aab) — Kotlin + Compose client with FCM push.</p>
+</div>
+
+<div class="card">
+<h3><span class="step">5</span> Run from source</h3>
 <pre>pip install -r requirements.txt
 cp .env.example .env
 python web.py</pre>
@@ -176,12 +182,12 @@ python web.py</pre>
 
 <div class="card">
 <h3>iOS Push Notifications</h3>
-<p>If you use the FlatRadar iOS app, APNs push notifications are sent automatically. Notifications are bilingual — Chinese or English depending on your device language.</p>
+<p>If you use the <a href="https://apps.apple.com/us/app/flarradar/id6769857080">FlatRadar iOS app</a>, APNs push notifications are sent automatically. Notifications are bilingual — Chinese or English depending on your device language.</p>
 </div>
 
 <div class="card">
 <h3>Android Push Notifications</h3>
-<p>If you use the FlatRadar Android app, FCM push notifications are sent automatically. Same bilingual support as iOS.</p>
+<p>If you use the <a href="https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.aab">FlatRadar Android app</a>, FCM push notifications are sent automatically. Same bilingual support as iOS.</p>
 </div>
 
 <div class="tip">

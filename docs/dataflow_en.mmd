@@ -43,9 +43,10 @@ flowchart TD
     N --> O["mark_stale_listings()\nConverge stale rows by complete source:city"]
     O --> P["Update last_scrape_at / last_scrape_count"]
 
-    P --> Q["Send notifications\nWeb / Telegram / Email / APNs"]
+    P --> Q["Send notifications\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
     Q --> Q1["Title/body include platform badge\nH2S / OD / XR"]
-    Q1 --> R["Record notified state"]
+    Q1 --> Q2["Push: mcore/push.py platform dispatch\niOS→APNs  Android→FCM data-only"]
+    Q2 --> R["Record notified state"]
 
     P --> T["Scan auto-booking candidates"]
     T --> U{"listing.source == holland2stay\nand directly bookable?"}
@@ -70,7 +71,8 @@ flowchart TD
     W --> AH
     K --> AI["Wait for next round"]
     L --> AI
-    AH --> AI
+    AH --> AH1["record_uptime_sample()\nPersist alive hour to SQLite meta\n→ dashboard 7d uptime%"]
+    AH1 --> AI
     AI --> D
 
     subgraph WEB["Web / API read path"]
@@ -78,4 +80,11 @@ flowchart TD
         WEB1 --> WEB2["dashboard / listings / map / calendar\nshow H2S / OD / XR badges"]
         WEB1 --> WEB3["/api/v1/listings?source=...\n/filter/options.sources"]
         WEB1 --> WEB4["stats source_dist platform distribution"]
+        WEB2 --> WEB5["Conditional cache middleware\nETag + Cache-Control: max-age=10\nIf-None-Match → 304 Not Modified"]
+        WEB3 --> WEB5
+        WEB4 --> WEB5
+    end
+
+    subgraph INBOUND["Inbound webhooks"]
+        IW1["POST /api/inbound/email\nResend email.received webhook\nSvix HMAC-SHA256 signature"] --> IW2["Parse inbound mail\n→ auto-reply / ticket routing"]
     end

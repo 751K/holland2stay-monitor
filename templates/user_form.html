@@ -130,15 +130,25 @@
       <div class="form-row">
         <!-- iMessage -->
         <div class="form-group">
-          <label class="channel-card {% if is_edit and 'imessage' in u.notification_channels %}selected{% endif %}" style="display:block;" onclick="toggleChannel('imessage')">
+          <label class="channel-card {% if is_edit and 'imessage' in u.notification_channels %}selected{% endif %}"
+                 style="display:block;{% if not is_macos %}opacity:0.45;pointer-events:none;cursor:not-allowed;{% endif %}"
+                 {% if is_macos %}onclick="toggleChannel('imessage')"{% endif %}>
             <div class="flex items-center justify-between mb-1">
               <div class="flex items-center gap-2">
-                <input type="checkbox" class="channel-chk" data-ch="imessage" {% if is_edit and 'imessage' in u.notification_channels %}checked{% endif %}>
+                <input type="checkbox" class="channel-chk" data-ch="imessage"
+                       {% if is_edit and 'imessage' in u.notification_channels %}checked{% endif %}
+                       {% if not is_macos %}disabled{% endif %}>
                 <span class="font-medium text-sm">iMessage</span>
               </div>
               <span class="badge badge-neutral text-xs">{{ _('badge_macos') }}</span>
             </div>
-            <div class="text-xs text-secondary">{{ _('user_form_notif_on') }}</div>
+            <div class="text-xs text-secondary">
+              {% if not is_macos %}
+                {{ 'Unavailable — iMessage requires macOS' if lang == 'en' else '不可用 — iMessage 需要 macOS 环境' }}
+              {% else %}
+                {{ _('user_form_notif_on') }}
+              {% endif %}
+            </div>
           </label>
           <div id="sec_imessage" class="mt-2" style="{% if not is_edit or 'imessage' not in u.notification_channels %}display:none;{% endif %}">
             <label class="form-label">{{ _('user_form_recipient') }}</label>

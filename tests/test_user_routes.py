@@ -88,6 +88,37 @@ class TestUserNew:
         })
         assert r.status_code == 302  # redirect to /
 
+    def test_imessage_disabled_on_non_macos(self, admin_client, monkeypatch):
+        """CI / Linux 服务器上 iMessage 应灰掉且不可勾选。"""
+        monkeypatch.setattr("sys.platform", "linux")
+        r = admin_client.get("/users/new")
+        assert r.status_code == 200
+        html = r.data.decode()
+        # 卡片灰掉 + 不可点击
+        assert "opacity:0.45" in html
+        assert "pointer-events:none" in html
+        # checkbox disabled
+        assert 'data-ch="imessage"' in html
+        assert "disabled" in html
+        # 提示文案
+        assert "Unavailable" in html or "不可用" in html
+        # 没有 onclick（不会展开输入框）
+        assert 'onclick="toggleChannel(\'imessage\')"' not in html
+
+    def test_imessage_enabled_on_macos(self, admin_client, monkeypatch):
+        """macOS 服务器上 iMessage 应正常可用。"""
+        monkeypatch.setattr("sys.platform", "darwin")
+        # 需要重载模块让 is_macos 重新计算——
+        # 但 render_template 是每次请求计算的，所以直接请求即可
+        r = admin_client.get("/users/new")
+        assert r.status_code == 200
+        html = r.data.decode()
+        assert "opacity:0.45" not in html
+        assert "pointer-events:none" not in html
+        assert 'onclick="toggleChannel(\'imessage\')"' in html
+        assert "Unavailable" not in html
+        assert "不可用" not in html
+
 # ─── Edit user + 密码保留 E2E ────────────────────────────────
 
 
@@ -96,6 +127,30 @@ class TestUserEdit:
         u = _create_user(admin_client, name="Bob")
         r = admin_client.get(f"/users/{u.id}")
         assert r.status_code == 200
+
+    def test_imessage_selected_but_grayed_on_non_macos(self, admin_client, monkeypatch):
+        """已有 iMessage 渠道的用户在 Linux 服务器上编辑时，
+        卡片保持选中态但灰掉不可操作。"""
+        monkeypatch.setattr("sys.platform", "linux")
+        u = _create_user(admin_client, name="Carol",
+                         NOTIFICATION_CHANNELS="imessage",
+                         IMESSAGE_RECIPIENT="+15551111111")
+        r = admin_client.get(f"/users/{u.id}")
+        assert r.status_code == 200
+        html = r.data.decode()
+        # 卡片灰掉
+        assert "opacity:0.45" in html
+        assert "pointer-events:none" in html
+        # checkbox 保持 checked + disabled
+        assert 'data-ch="imessage"' in html
+        assert "checked" in html
+        assert "disabled" in html
+        # 文案提示不可用
+        assert "Unavailable" in html or "不可用" in html
+        # 没有 onclick
+        assert 'onclick="toggleChannel(\'imessage\')"' not in html
+        # 但输入框区域显示已有收件人
+        assert "+15551111111" in html
 
     def test_disabled_user_existing_session_redirected_to_login(self, test_app, isolated_data_dir):
         """admin 停用用户后，旧 Web session 也不能继续访问自助设置页。"""

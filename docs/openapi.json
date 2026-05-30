@@ -499,6 +499,20 @@
         }
       }
     },
+    "/legal": {
+      "get": {
+        "tags": ["Legal"],
+        "operationId": "getLegal",
+        "summary": "Return canonical Terms of Use and Privacy Policy text (public, unauthenticated).",
+        "parameters": [
+          {"name": "lang", "in": "query", "required": false, "schema": {"type": "string"}, "description": "Language preference (en / zh). Falls back to Accept-Language header."}
+        ],
+        "responses": {
+          "200": {"$ref": "#/components/responses/LegalOk"},
+          "429": {"$ref": "#/components/responses/RateLimited"}
+        }
+      }
+    },
     "/admin/users": {
       "get": {
         "tags": ["Admin"],
@@ -664,6 +678,7 @@
       "DevicesOk": {"description": "Devices.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/Device"}}}}}}]}}}},
       "DeleteDeviceOk": {"description": "Device deleted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["deleted"], "properties": {"deleted": {"type": "boolean"}}}}}]}}}},
       "DeviceTestOk": {"description": "Push test result.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"$ref": "#/components/schemas/DeviceTestData"}}}]}}}},
+      "LegalOk": {"description": "Legal text returned.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["terms", "privacy", "updated_at"], "properties": {"terms": {"type": "string"}, "privacy": {"type": "string"}, "updated_at": {"type": "string"}}}}}]}}}},
       "FeedbackOk": {"description": "Feedback accepted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["submitted"], "properties": {"submitted": {"type": "boolean"}}}}}]}}}},
       "DiagnosticOk": {"description": "Diagnostic accepted.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["received", "id"], "properties": {"received": {"type": "boolean"}, "id": {"type": "string"}}}}}]}}}},
       "AdminUsersOk": {"description": "Admin user list.", "content": {"application/json": {"schema": {"allOf": [{"$ref": "#/components/schemas/SuccessEnvelope"}, {"type": "object", "properties": {"data": {"type": "object", "required": ["items", "total"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/AdminUser"}}, "total": {"type": "integer", "minimum": 0}}}}}]}}}},

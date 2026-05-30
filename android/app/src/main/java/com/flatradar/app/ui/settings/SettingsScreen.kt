@@ -66,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.font.FontWeight
+import com.flatradar.app.BuildConfig
 import com.flatradar.app.domain.model.ListingFilter
 import com.flatradar.app.data.local.AppColorScheme
 import com.flatradar.app.data.local.AppPreferences
@@ -230,7 +231,7 @@ fun SettingsScreen(
             }
 
             HorizontalDivider()
-            SettingsItem(Icons.Filled.Info, "About FlatRadar 1.7.1", onClick = {})
+            SettingsItem(Icons.Filled.Info, "About FlatRadar v${BuildConfig.VERSION_NAME}", onClick = {})
             SettingsItem(Icons.AutoMirrored.Filled.Logout, "Log Out", onClick = { showLogoutDialog = true })
             if (isUser) {
                 SettingsItem(

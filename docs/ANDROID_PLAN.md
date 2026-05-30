@@ -509,14 +509,41 @@ private val LightColors = lightColorScheme(
 
 ## 6. 当前实现进度与复盘
 
+### 当前快照（2026-05-30）
+
+| 维度 | 数值 |
+|---|---|
+| Kotlin 源文件 | 57 个（~9,500 行） |
+| 测试文件 | 5 个（47 个 ViewModel 单测，~1,200 行） |
+| 版本 | 动态（`APP_VERSION` 环境变量注入，fallback 1.7.10），versionCode 自动派生 |
+| minSdk / targetSdk / compileSdk | 31 / 35 / 35 |
+| 已实现屏幕 | Login, Dashboard, Listings, ListingDetail, Map, Calendar, Notifications, Settings, FilterEdit, Feedback, Legal, AdminUsers, AdminMonitor |
+| 推送 | FCM 端到端拉通，真机验收通过 |
+| 生物识别 | BiometricPrompt 登录解锁 + 设置中管理 |
+| 本地化 | 英文 + 中文 strings.xml（各 ~170 条目） |
+| 主题 | Material 3，System / Light / Dark 三档 |
+| 自适应 | NavigationBar（手机 4-tab）+ NavigationRail（平板 6-tab） |
+| 测试 | MockK + kotlinx-coroutines-test，覆盖 Auth / Dashboard / Listings / Calendar / Notifications |
+| Play Store | 尚未上架（A6 待启动）；CI 自动构建 AAB 已配置（`build.yml` android job） |
+
+### 架构实际落地情况
+
+与原始计划的差异（均为合理简化）：
+
+- **无 Repository 层**：ViewModel 直接依赖 `ApiClient`，避免过度工程化。测试通过 MockK 直接 mock `ApiClient`。
+- **无 UseCase 层**：业务逻辑量不足以支撑独立 UseCase 层，ViewModel 内聚度已足够。
+- **组件未拆分独立文件**：`StatusBadge`、`FilterChips` 等作为 Composable 函数内联在对应 Screen 文件中，减少碎片化。
+- **工具类精简**：`ServerTime.kt`（时间格式化 + 相对时间）+ `CrashReporter.kt`（全局异常上报），替代原计划的 DateFormatter / CurrencyFormatter / NetworkMonitor / Constants 四个文件。
+- **新增 `LegalText.kt`**：法律文案已统一为 `app/legal/*.txt` 单一数据源，三端通过 API 获取。
+
 截至 2026-05-28，Android 客户端已完成 FCM 推送闭环（客户端 + 后端 sender），并完成架构审查与测试补齐。本轮重点为真机调试发现的 ANR/崩溃修复及 UI 打磨：
 
 | 模块 | 状态 | 说明 |
 |---|---|---|
 | A0 项目骨架 | 已完成 | Gradle Kotlin DSL、Compose Material 3、Hilt、NavigationBar/NavigationRail、自适应导航均已落地。 |
-| A1 鉴权 + Dashboard + Listings | 部分完成 | 登录页已简化为 Tenant / Guest 双入口（移除 Staff）；注册、token 持久化、BiometricPrompt user 登录解锁、Dashboard、Listings、详情页、全局 snackbar 错误通道已接入；详情页改为 13 项 DetailRow + displayType（Room → Type），移除收藏按钮和重复 featureMap；AuthViewModel（12 测试）、DashboardViewModel（6 测试）、ListingsViewModel（11 测试）单元测试已完成。BiometricPrompt 真机指纹/面部解锁已验证通过。 |
-| A2 Map + Calendar | 部分完成 | Map 已接 Google Maps Compose，支持聚类、状态色 marker、边界初始视角、选中卡片详情、暗色模式（`mapStyleOptions` JSON 样式）；定位按钮改用 `FusedLocationProviderClient.getLastLocation()`（Play Services 聚合缓存），禁用了 Google Maps 原生定位按钮；Calendar 已升级为月格、每日数量、选中日房源列表与重试，CalendarViewModel（9 测试）单元测试已完成。真机地图手动验证仍待补。 |
-| A3 Notifications + SSE | 部分完成 | 通知列表已重构为扁平化 flat list 布局，包括顶部动态 stats 胶囊 pill、实时滚动筛选 chips、覆盖型未读提示蓝点 badge、Extended FAB；新增进入页面自动刷新（`LaunchedEffect`）；测试推送分类修复（中文/emoji 匹配 TEST 类型）；NotificationsViewModel（10 测试）覆盖 load、markRead/markAllRead、SSE Data 新增/去重/已读更新、Keepalive、error 重连。 |
+| A1 鉴权 + Dashboard + Listings | 已完成 | 登录页 Tenant / Guest 双入口；注册、token 持久化、BiometricPrompt 登录解锁；Dashboard 含 quick stats carousel + matches section + 6 类 explore charts（平台/状态/价格/户型/能源/租客）；Listings 含搜索、多条件筛选 bottom sheet、pull-to-refresh、无限滚动；详情页 13 项 DetailRow + displayType + metric cards；全局 snackbar 错误通道。AuthViewModel（12 测试）、DashboardViewModel（6 测试）、ListingsViewModel（11 测试）。BiometricPrompt 真机指纹/面部解锁已验证。 |
+| A2 Map + Calendar | 已完成 | Map：Google Maps Compose，clustering、状态色 marker、bounds 初始视角、选中卡片详情、暗色模式（`mapStyleOptions` JSON）、定位按钮（`FusedLocationProviderClient`）、无 API key 时 fallback 列表。Calendar：月格视图、每日房源数量、选中日列表、跨月导航。CalendarViewModel（9 测试）。 |
+| A3 Notifications + SSE | 已完成 | 通知列表：TODAY/YESTERDAY/EARLIER 分组、筛选 chips（All/Book/Lottery/Status/System）、swipe-to-read、mark all read FAB、顶部 stats pill、unread badge。SSE：OkHttp streaming + `withContext(Dispatchers.IO)`、`SseEvent.Data/Retry/Keepalive`。NotificationsViewModel（10 测试）。 |
 | A4 FCM 推送 | 已完成 | **客户端**：Firebase 项目 `flatradar-66342`，`google-services.json` 已配置，`FcmService` + `FcmTokenManager` + 通知渠道 + POST_NOTIFICATIONS 运行时权限 + deep link 全部接入。**后端**：`notifier_channels/fcm.py`（~260 行，OAuth2 服务账号认证 + FCM HTTP v1 API），`mcore/push.py` 按 `platform` 字段分流 iOS（APNs）/ Android（FCM）双发，`FcmTokenManager` 异常已加日志不再静默吞错。服务端已部署 `FCM_ENABLED=true` + service account JSON 密钥（`/secrets/`）。端到端推送通道已拉通。 |
 | A5 Settings + 多语言 + 深色模式 | 已完成 | Settings 已支持 DataStore 持久化、System/Light/Dark 主题、反馈、法律文档、改密码、GDPR 数据导出、删号、Admin Users/Monitor；法律文案已统一为 `app/legal/*.txt` 单一数据源，三端均通过 API 获取 + 本地缓存 fallback；中文字符串 `values-zh/strings.xml` 已覆盖 ~170 条目；Crash 诊断已实现（`CrashReporter` 全局异常捕获 + 后端 `platform`/`os_version` 字段支持）。 |
 | A6 打磨 + 内购 + 上架 | 未开始 | Google Play Billing、截图、Data Safety、封闭测试和上架流程尚未启动。 |
@@ -542,7 +569,7 @@ private val LightColors = lightColorScheme(
 - **Android 代码审查与修复**：全量代码审查发现 6 个问题（2 Critical + 3 High + 1 Medium），全部修复——SSE 阻塞 Main 线程（`SseClient` → `withContext(Dispatchers.IO)`）、深链接断开（`AppNavigation` 加 `consumePendingListingId` 消费）、弱网误删 token（`restoreSession` 只对 401/403 清）、Settings 状态擦除（`.copy()` 替代新建）、LocationListener 内存泄漏（15s timeout）、filter 不生效（monitor 侧 `write_reload_request()`）。
 - **iOS 单元测试补齐**：新增 `FlatRadarTests` target（31 个测试），覆盖 Listing 模型解码/computed properties/statusKind、APIResponse 信封、AuthModels 编解码、NotificationItem 解码/listingTitleHint/NotificationKind 分类。此前 iOS 端 13K 行代码零单元测试，现在核心模型层有覆盖。
 - 设计系统开始从 iOS 风格 token 收敛到 Android Material 3：固定 seed `#0057CC`、light/dark role mapping、M3 type scale、shape scale、FlatRadar `book/lottery/reserved` semantic status token、80dp bottom navigation 已落地；Listings、Detail、Settings、Map、Calendar 已完成第一轮 surface/shape/status/token 收口，后续重点转为真机视觉 QA、文案本地化和截图回归。
-- FCM 不在本轮启用。`docs/API.md` 仍标注 Android FCM sender 未完成，客户端不能依赖 `/devices/test` 验证 FCM。
+- FCM 已在 v1.7.8 端到端拉通并真机验收通过。`docs/API.md` 已更新 Android FCM sender 状态。
 - **真机调试修复（2026-05-28）**：
   - **启动 ANR 修复**：`SseClient.connect()` 的 `callbackFlow` 继承 `viewModelScope.launch` 的 Main dispatcher，导致 `readUtf8Line()` 在主线程阻塞 5s+。将整个 SSE 读取循环包入 `withContext(Dispatchers.IO)`（之前仅 `call.execute()` 在 IO）。
   - **后端设备测试推送**：`POST /api/v1/devices/test` 新增按 `platform` 分流——iOS → APNs，Android → FCM data-only payload。之前所有设备统一走 APNs。
@@ -551,26 +578,25 @@ private val LightColors = lightColorScheme(
 
 ### 架构师视角：下一阶段策略
 
-当前 Android 端已经从“功能空壳”进入“可编译、可体验、主要路径已接通”的阶段。下一阶段不应继续横向堆功能，而应进入 **Release Candidate 收敛模式**：冻结 A1/A2/A3/A5 的核心交互面，补验证、测试、配置边界和上架前风险项。只有验证闭环稳定后，再切到 A4 FCM 和 A6 Play Store。
+当前 Android 端已从”功能空壳”进入”核心功能完成、A0-A5 全部闭环”的阶段。RC1-RC4 均已通过，下一阶段应聚焦 **RC5 上架准备**：Google Play Billing、Data Safety、截图、封闭测试和正式提交审核。
 
-架构原则：
+架构原则（上架准备阶段）：
 
-1. **先稳定核心路径，再扩功能**
-   - 核心路径定义为：登录/guest → Dashboard → Listings → Detail → Map/Calendar → Notifications → Settings。
-   - 除 FCM、Billing、Crash 诊断外，不再新增大功能；只做错误处理、状态一致性、测试和真机验证。
+1. **冻结核心功能，聚焦上架合规**
+   - 核心路径（登录 → Dashboard → Listings → Detail → Map/Calendar → Notifications → Settings）已稳定，不再新增功能。
+   - 当前唯一待办为 A6：Google Play Billing、”Buy me a coffee” 内购、Data Safety、截图、封闭测试、提交审核。
 
-2. **不做大重构，只补必要接缝**
-   - 现阶段 ViewModel 直接依赖 `ApiClient` 可以接受；为测试而新增小型 fake/service seam 可以做，但暂不引入完整 Repository 层重构。
-   - 避免为了“架构纯度”拆散已经可工作的 Compose + Hilt + Retrofit 结构。
+2. **不做大重构**
+   - ViewModel 直接依赖 `ApiClient` 的结构已通过 47 个单测验证，保持不变。
+   - 不引入 Repository/UseCase 层重构。
 
-3. **所有剩余开发都必须带验收口径**
-   - 每个任务完成后至少跑 `./gradlew :app:assembleDebug`。
-   - 对 Map、Biometric、通知角标、Settings server URL 这类依赖系统能力的功能，必须补真机/模拟器手动验证记录。
-   - A3 SSE、Listings 分页、Calendar 日期过滤这种纯客户端逻辑应补 ViewModel 单元测试。
+3. **真机验证与截图**
+   - Play Store 截图需覆盖手机 + 平板（7 寸和 10 寸），中英文双语言。
+   - 封闭测试需 12+ 人连续 14 天——提前从现有 iOS 用户群招募。
 
-4. **后端阻塞项和客户端项分离**
-   - A4 FCM 在后端 sender、Firebase 项目、`google-services.json` 未齐前不进入主线。
-   - 客户端继续保留 devices DTO/接口，但不把 `/devices/test` 当作 Android FCM 验收。
+4. **后端无阻塞项**
+   - FCM 推送通道已部署并验收通过。
+   - Devices 端点已支持 `platform=android` 全流程。
 
 ### 下一步待完成
 
@@ -674,11 +700,11 @@ Gradle 会把该值注入 `AndroidManifest.xml` 的 `com.google.android.geo.API_
 
 | 里程碑 | 目标 | 进入条件 | 退出条件 |
 |---|---|---|---|
-| **RC1 验证收口** | 证明当前 Android 核心功能在设备上可用 | `assembleDebug` 通过，A1/A2/A3/A5 主要功能已接入 | 手动验证矩阵完成，记录所有阻塞 bug |
+| **RC1 验证收口** | 证明当前 Android 核心功能在设备上可用 | `assembleDebug` 通过，A1/A2/A3/A5 主要功能已接入 | 手动验证矩阵完成 ✅ |
 | **RC2 测试补齐** | 锁住最容易回归的状态逻辑 | RC1 阻塞 bug 修完 | 47 个 ViewModel 单测覆盖 Auth/Dashboard/Notifications/Calendar/Listings 关键状态 ✅ |
 | **RC3 本地化与合规** | 达到可给测试用户使用的文本和合规水位 | RC2 通过 | `values-zh` 170 条目完整覆盖，法律文本三端统一 ✅ |
 | **RC4 FCM 集成** | 端到端推送通道已拉通 | 后端 FCM sender + 客户端均已就绪 | 真机验收 FCM 收发 ✅ |
-| **RC5 上架准备** | 进入 Google Play 发布流程 | RC4 通过 | Billing/Data Safety/截图/封闭测试计划完成 |
+| **RC5 上架准备** | 进入 Google Play 发布流程 | RC4 通过 | Billing/Data Safety/截图/封闭测试计划完成（**当前阶段**） |
 
 **总工时：约 10 周**（一个全职 Android 开发）。
 
@@ -724,14 +750,15 @@ A0 (骨架)
 
 ## 10. 后端待办
 
-Android 客户端开发依赖以下后端改动（~300 行 Python）：
+以下后端改动已完成并部署：
 
-1. **`notifier_channels/fcm.py`** — FCM HTTP v1 API 推送通道（对标 `apns.py`）
-2. **`mstorage/_devices.py`** — 确认 `platform` 字段支持 `"android"`
-3. **Devices 端点** — 注册/注销/列表/测试推送均已在 `platform` body 字段支持 android
-4. **SSE 流** — 无需改动，Android 端用 OkHttp 连接与 iOS `SSEClient` 协议一致
+1. **`notifier_channels/fcm.py`** ✅ — FCM HTTP v1 API 推送通道（OAuth2 服务账号认证 + RS256 JWT，~260 行），对标 `apns.py`。已部署 `FCM_ENABLED=true`。
+2. **`mstorage/_devices.py`** ✅ — `platform` 字段支持 `"android"`。
+3. **Devices 端点** ✅ — 注册/注销/列表/测试推送均已支持 `platform=android`。`POST /api/v1/devices/test` 按 platform 分流（iOS → APNs，Android → FCM data-only payload）。
+4. **`mcore/push.py`** ✅ — 按 `device_tokens.platform` 分流，所有 dispatch 函数双发 APNs + FCM，平台隔离故障互不阻塞。
+5. **SSE 流** — 无需改动，Android 端用 OkHttp 连接与 iOS `SSEClient` 协议一致。
 
-这些后端改动不受 iOS 上架节奏影响，但 Android 正式启用 FCM 前必须完成。当前客户端只保留 devices API 模型和服务接口，不展示 FCM test push 作为验收依据。
+无剩余后端阻塞项。
 
 ---
 

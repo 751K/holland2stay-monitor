@@ -26,6 +26,8 @@ from flask import (
     url_for,
 )
 
+import sys
+
 from config import KNOWN_CITIES
 from users import get_user, load_users, update_users
 
@@ -158,6 +160,7 @@ def user_new() -> Any:
     return render_template(
         "user_form.html", user=None,
         action=url_for("user_new"), title="新增用户",
+        is_macos=(sys.platform == "darwin"),
         occupancy_options=localize_options("Occupancy", opts["Occupancy"]),
         type_options=localize_options("Type", opts["Type"]),
         city_options=city_names,
@@ -267,6 +270,7 @@ def user_edit(user_id: str) -> Any:
         "user_form.html", user=user,
         action=url_for("user_edit", user_id=user_id),
         title=f"编辑用户 · {user.name}",
+        is_macos=(sys.platform == "darwin"),
         occupancy_options=localize_options("Occupancy", opts["Occupancy"]),
         type_options=localize_options("Type", opts["Type"]),
         city_options=city_names,

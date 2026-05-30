@@ -28,8 +28,6 @@ dist/
 # Xcode
 **/xcuserdata/
 **/.build/
-*.p8
-*.p12
 *.mobileprovision
 *.cer
 *.certSigningRequest
@@ -66,33 +64,22 @@ captures/
 .cxx/
 .externalNativeBuild/
 
+# Android 通用忽略（.idea/ 已在全局忽略，无需重复）
 *.iml
-.idea/workspace.xml
-.idea/tasks.xml
-.idea/usage.statistics.xml
-.idea/shelf/
-.idea/dictionaries/
-.idea/libraries/
-.idea/caches/
-.idea/modules.xml
-.idea/jarRepositories.xml
-.idea/navEditor.xml
-.idea/assetWizardSettings.xml
-.idea/deploymentTargetDropDown.xml
-.idea/deploymentTargetSelector.xml
 
 *.apk
 *.aab
 *.ap_
 *.dex
 
-# Keystore / 签名材料（**绝对**不上传，丢了等于 app 失控）
+# 密钥 / 证书（**绝对**不上传）
+*.p12
+# Keystore / 签名材料
 *.jks
 *.keystore
 keystore.properties
 release.properties
 signing.properties
-*.p8
 # Firebase 配置，含 project_number / api_key——绝对禁止提交原始文件
 google-services.json
 # Firebase / GCP service account 私钥

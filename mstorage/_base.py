@@ -382,6 +382,67 @@ class StorageBase:
                 "INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value)
             )
 
+    # ── 7 天运行时间（uptime）采样 ──────────────────────────────────
+    #
+    # 设计：monitor 每轮成功后记一个"当前所在 UTC 小时"的样本到持久化的
+    # meta（与 listings 同一个 DB → 同一个 Docker volume，跟着一起持久）。
+    # uptime% = 最近 7 天(168h)里有样本的小时数 / 168。
+    #
+    # 为什么不用 monitor_started_at：
+    #   旧方案存"启动时间"，算 (now - start)/7d。它 (a) 超 7 天后下次重启会
+    #   被覆盖回 now → 掉到 1%；(b) 根本不是 uptime——它不感知中途宕机。
+    #   累积小时采样天然抗重启（持久 + 累加）且真实反映宕机（宕的小时没样本）。
+
+    _UPTIME_META_KEY = "uptime_alive_hours"
+    _UPTIME_WINDOW_HOURS = 7 * 24  # 168
+
+    def record_uptime_sample(self, *, now: float | None = None) -> None:
+        """记录"当前小时存活"。幂等：同一小时多次调用只留一条。
+
+        顺带把窗口外（>7 天前）的旧样本剪掉，控制 meta 体积（≤168 个 int）。
+        """
+        import json
+        import time as _time
+
+        now_ts = now if now is not None else _time.time()
+        cur_hour = int(now_ts // 3600)
+        cutoff = cur_hour - self._UPTIME_WINDOW_HOURS + 1
+
+        raw = self.get_meta(self._UPTIME_META_KEY, default="")
+        try:
+            hours = set(json.loads(raw)) if raw else set()
+        except (ValueError, TypeError):
+            hours = set()
+
+        # 已有当前小时且无需剪枝 → 跳过写入，省一次 DB 操作
+        if cur_hour in hours and all(h >= cutoff for h in hours):
+            return
+
+        hours.add(cur_hour)
+        hours = {h for h in hours if h >= cutoff}
+        self.set_meta(self._UPTIME_META_KEY, json.dumps(sorted(hours)))
+
+    def uptime_percent_7d(self, *, now: float | None = None) -> int:
+        """最近 7 天有存活样本的小时数 / 168，向下取整成百分比（0–100）。
+
+        无样本（全新库 / 刚上线）返回 0；满 168h 连续运行返回 100。
+        """
+        import json
+        import time as _time
+
+        raw = self.get_meta(self._UPTIME_META_KEY, default="")
+        if not raw:
+            return 0
+        try:
+            hours = json.loads(raw)
+        except (ValueError, TypeError):
+            return 0
+        now_ts = now if now is not None else _time.time()
+        cur_hour = int(now_ts // 3600)
+        cutoff = cur_hour - self._UPTIME_WINDOW_HOURS + 1
+        alive = sum(1 for h in hours if h >= cutoff)
+        return min(100, round(alive * 100 / self._UPTIME_WINDOW_HOURS))
+
     # ── 生命周期 ────────────────────────────────────────────────────
 
     def reset_all(self) -> None:

@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.flatradar.app.BuildConfig
 import com.flatradar.app.R
 import com.flatradar.app.ui.settings.LegalText
 
@@ -628,7 +629,7 @@ private fun HeroHeaderSection(selectedRole: String) {
                         color = brandBlue
                     )
                     Text(
-                        text = "UNOFFICIAL · v1.7.9",
+                        text = "UNOFFICIAL · v${BuildConfig.VERSION_NAME}",
                         style = MaterialTheme.typography.labelSmall,
                         color = descriptionColor,
                         fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace

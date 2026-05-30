@@ -1290,6 +1290,13 @@ async def main_loop(
                 booking_deadline=booking_deadline,
             )
 
+            # 记录本小时存活样本（用于 dashboard 7 天 uptime%）。幂等、持久，
+            # 跟 listings 同库 → 同 Docker volume，重启/重建不丢，真实反映宕机。
+            try:
+                storage.record_uptime_sample()
+            except Exception:
+                logger.debug("record_uptime_sample 失败（已忽略）", exc_info=True)
+
             # 成功：重置网络失败连续计数
             if network_fail_streak:
                 logger.info("网络恢复，连续失败计数已清零（之前 %d 次）", network_fail_streak)
@@ -1504,20 +1511,15 @@ async def _async_main() -> None:
 
     storage = Storage(cfg.db_path, timezone_str=cfg.timezone)
 
-    # 持久化 monitor 启动时间，用于 dashboard 7 天运行时间计算。
-    # Docker 重启后 /proc/uptime 和 /proc/<pid>/stat 都会重置，
-    # 基于 /proc 的计算会错误地显示 0-1%，因此存在 DB meta 中。
-    existing_started = storage.get_meta("monitor_started_at", default="")
-    if existing_started:
-        try:
-            started_dt = datetime.fromisoformat(existing_started)
-            # 如果旧时间戳距今超过 7 天，视为全新启动，覆盖为当前时间
-            if (datetime.now(timezone.utc) - started_dt).total_seconds() > 7 * 24 * 3600:
-                existing_started = ""
-        except ValueError:
-            existing_started = ""
-    if not existing_started:
-        storage.set_meta("monitor_started_at", datetime.now(timezone.utc).isoformat())
+    # dashboard 7 天 uptime% 改用"每小时存活采样"（见 Storage.record_uptime_sample），
+    # 抗重启、真实反映宕机。旧的 monitor_started_at 单时间戳方案已弃用——它超 7 天
+    # 后下次重启会被覆盖回 now → 掉到 1%，且不感知中途宕机。
+
+    # 启动即记一个存活样本，避免刚拉起时 dashboard 短暂显示 0%
+    try:
+        storage.record_uptime_sample()
+    except Exception:
+        logger.debug("启动 record_uptime_sample 失败（已忽略）", exc_info=True)
 
     # 恢复持久化的竞败重试队列（进程重启后不丢失）
     retry_queue.load(storage)

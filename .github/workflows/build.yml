@@ -67,3 +67,60 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/FlatRadar.zip
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+
+      - name: Decode google-services.json
+        run: echo "${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}" | base64 -d > android/app/google-services.json
+
+      - name: Decode keystore
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/sign.p12
+
+      - name: Extract version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Build release AAB
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: android
+        env:
+          RELEASE_STORE_FILE: sign.p12
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          MAPS_API_KEY: ${{ secrets.MAPS_API_KEY || '' }}
+        run: ./gradlew :app:bundleRelease
+
+      - name: Upload AAB to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: Build debug APK (manual trigger)
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: android
+        env:
+          MAPS_API_KEY: ''
+        run: ./gradlew :app:assembleDebug
+
+      - name: Upload debug APK artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

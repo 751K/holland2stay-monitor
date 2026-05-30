@@ -42,8 +42,12 @@ tools/
 packaging/
 launcher.py
 
-# iOS 客户端（不打包进服务端镜像）
+# iOS / Android 客户端（不打包进服务端镜像）
 ios/
+android/
+
+# CI / GitHub
+.github/
 
 # Claude 工具链
 .claude/

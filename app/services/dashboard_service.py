@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import os
 import re
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from config import DATA_DIR, load_config
-from app.process_ctrl import PID_FILE, monitor_pid
+from app.process_ctrl import monitor_pid
 
 
 SUPPORTED_SOURCES = ("holland2stay", "ourdomain", "xior")
@@ -87,56 +85,19 @@ def _avg_run_count(*, days: int = 7, fallback: int = 0) -> tuple[int, int]:
     return round(sum(counts) / len(counts)), len(counts)
 
 
-def _system_uptime_seconds() -> float | None:
-    """读取系统启动以来的秒数（Linux /proc/uptime）。"""
-    try:
-        return float(Path("/proc/uptime").read_text().split()[0])
-    except (OSError, ValueError, IndexError):
-        return None
-
-
 def _uptime_percent_7d(pid: int | None, st: Any = None) -> int:
-    """返回监控进程在过去 7 天内的运行时间百分比。
+    """监控进程在过去 7 天(168h)内的运行时间百分比。
 
-    优先从 DB meta 读取持久化的 ``monitor_started_at``（Docker 重启
-    后 /proc 时间基准会重置，DB 持久化值不受影响）。
-    如果 DB 不可用或没有该值，回退到 /proc 计算。
+    数据来自 ``Storage.record_uptime_sample()`` 每轮记的"每小时存活样本"
+    （持久化在与 listings 同一个 DB → 同一个 Docker volume，重启/重建不丢，
+    且真实反映中途宕机）。无 DB / 无样本时返回 0。
     """
-    if pid is None:
+    if st is None:
         return 0
     try:
-        # ── 主路径：DB 持久化的启动时间（跨 Docker 重启保持） ──
-        if st is not None:
-            started_str = st.get_meta("monitor_started_at", default="")
-            if started_str:
-                try:
-                    started_dt = datetime.fromisoformat(started_str)
-                    started_at = started_dt.timestamp()
-                    elapsed = max(0.0, time.time() - started_at)
-                    return min(100, round(elapsed * 100 / (7 * 24 * 3600)))
-                except (ValueError, OSError):
-                    pass  # 解析失败，回退到 /proc 路径
-
-        # ── 回退路径：/proc/<pid>/stat（原生 Linux / macOS 开发环境） ──
-        stat_path = Path(f"/proc/{pid}/stat")
-        if stat_path.exists():
-            raw = stat_path.read_text()
-            # /proc/pid/stat 第 22 个字段是 starttime（clock ticks since boot）
-            fields = raw[raw.rfind(")") + 2:].split()
-            if len(fields) >= 20:
-                clk_tck = os.sysconf(os.sysconf_names["SC_CLK_TCK"])
-                uptime_sec = _system_uptime_seconds()
-                if uptime_sec is not None:
-                    start_ticks = int(fields[19])  # 0-indexed: field 21
-                    started_at = time.time() - (uptime_sec - start_ticks / clk_tck)
-                    elapsed = max(0.0, time.time() - started_at)
-                    return min(100, round(elapsed * 100 / (7 * 24 * 3600)))
-        # fallback: PID 文件 mtime（macOS 或 /proc 不可用时）
-        started_at = PID_FILE.stat().st_mtime
-    except (OSError, ValueError, IndexError):
+        return st.uptime_percent_7d()
+    except Exception:
         return 0
-    elapsed = max(0.0, time.time() - started_at)
-    return min(100, round(elapsed * 100 / (7 * 24 * 3600)))
 
 
 def _configured_scope() -> dict[str, int]:

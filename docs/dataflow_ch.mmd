@@ -43,9 +43,10 @@ flowchart TD
     N --> O["mark_stale_listings()\n按 source:city 完整扫描结果收敛"]
     O --> P["更新 last_scrape_at / last_scrape_count"]
 
-    P --> Q["发送通知\nWeb / Telegram / Email / APNs"]
+    P --> Q["发送通知\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
     Q --> Q1["标题/正文带平台 badge\nH2S / OD / XR"]
-    Q1 --> R["记录已通知状态"]
+    Q1 --> Q2["Push: mcore/push.py 平台分流\niOS→APNs  Android→FCM data-only"]
+    Q2 --> R["记录已通知状态"]
 
     P --> T["扫描自动预订候选"]
     T --> U{"listing.source == holland2stay\n且可直接预订?"}
@@ -70,7 +71,8 @@ flowchart TD
     W --> AH
     K --> AI["等待下一轮"]
     L --> AI
-    AH --> AI
+    AH --> AH1["record_uptime_sample()\n存活小时持久化到 SQLite meta\n→ dashboard 7 天 uptime%"]
+    AH1 --> AI
     AI --> D
 
     subgraph WEB["网页 / API 读取路径"]
@@ -78,4 +80,11 @@ flowchart TD
         WEB1 --> WEB2["dashboard / listings / map / calendar\n显示 H2S / OD / XR badge"]
         WEB1 --> WEB3["/api/v1/listings?source=...\n/filter/options.sources"]
         WEB1 --> WEB4["stats source_dist 平台分布"]
+        WEB2 --> WEB5["条件缓存中间件\nETag + Cache-Control: max-age=10\nIf-None-Match → 304 Not Modified"]
+        WEB3 --> WEB5
+        WEB4 --> WEB5
+    end
+
+    subgraph INBOUND["入站 Webhook"]
+        IW1["POST /api/inbound/email\nResend email.received webhook\nSvix HMAC-SHA256 签名"] --> IW2["解析入站邮件\n→ 自动回复 / 工单路由"]
     end

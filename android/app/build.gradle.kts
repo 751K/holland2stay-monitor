@@ -15,7 +15,44 @@ val localProperties = Properties().apply {
     }
 }
 
-val mapsApiKey = localProperties.getProperty("MAPS_API_KEY").orEmpty()
+// Maps API key: local.properties > env > empty (app degrades gracefully)
+val mapsApiKey = localProperties.getProperty("MAPS_API_KEY")
+    ?: System.getenv("MAPS_API_KEY")
+    ?: ""
+
+// Version: env APP_VERSION (CI injects git tag like "1.7.10") > local.properties > hardcoded fallback
+val appVersionName = System.getenv("APP_VERSION")
+    ?: localProperties.getProperty("APP_VERSION")
+    ?: "1.7.10"
+
+// versionCode: env VERSION_CODE > derive from versionName (e.g. 1.7.10 → 1710) > hardcoded fallback
+val appVersionCode = System.getenv("VERSION_CODE")?.toIntOrNull()
+    ?: localProperties.getProperty("VERSION_CODE")?.toIntOrNull()
+    ?: run {
+        // Parse major.minor.patch → major*1000 + minor*100 + patch (clamped to 2 digits each)
+        val parts = appVersionName.split(".").map { it.toIntOrNull() ?: 0 }
+        val major = parts.getOrElse(0) { 1 }.coerceIn(0, 99)
+        val minor = parts.getOrElse(1) { 0 }.coerceIn(0, 99)
+        val patch = parts.getOrElse(2) { 0 }.coerceIn(0, 9)  // single digit to stay < 2100000000
+        major * 1000 + minor * 100 + patch
+    }
+
+// Signing: env vars (CI) > local.properties (dev) > empty fallback (debug-only)
+val releaseStoreFile = localProperties.getProperty("RELEASE_STORE_FILE")
+    ?: System.getenv("RELEASE_STORE_FILE")
+    ?: "sign.p12"
+val releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
+    ?: System.getenv("RELEASE_STORE_PASSWORD")
+    ?: System.getenv("ANDROID_STORE_PASSWORD")
+    ?: ""
+val releaseKeyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")
+    ?: System.getenv("RELEASE_KEY_ALIAS")
+    ?: System.getenv("ANDROID_KEY_ALIAS")
+    ?: "flatradar"
+val releaseKeyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+    ?: System.getenv("RELEASE_KEY_PASSWORD")
+    ?: System.getenv("ANDROID_KEY_PASSWORD")
+    ?: ""
 
 android {
     namespace = "com.flatradar.app"
@@ -25,8 +62,8 @@ android {
         applicationId = "com.flatradar.app"
         minSdk = 31
         targetSdk = 35
-        versionCode = 179
-        versionName = "1.7.9"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["mapsApiKey"] = mapsApiKey
@@ -39,20 +76,10 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(
-                localProperties.getProperty("RELEASE_STORE_FILE")
-                    ?: System.getenv("RELEASE_STORE_FILE")
-                    ?: "sign.p12"
-            )
-            storePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
-                ?: System.getenv("RELEASE_STORE_PASSWORD")
-                ?: ""
-            keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")
-                ?: System.getenv("RELEASE_KEY_ALIAS")
-                ?: "flatradar"
-            keyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
-                ?: System.getenv("RELEASE_KEY_PASSWORD")
-                ?: ""
+            storeFile = file(releaseStoreFile)
+            storePassword = releaseStorePassword
+            keyAlias = releaseKeyAlias
+            keyPassword = releaseKeyPassword
         }
     }
 

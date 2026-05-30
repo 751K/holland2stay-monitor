@@ -1,6 +1,6 @@
 # FlatRadar iOS Maintenance Notes
 
-The iOS app is feature-complete for the current FlatRadar product scope and is now in maintenance mode. Large feature development has moved to Android parity, backend reliability, and multi-platform data quality.
+The iOS app is feature-complete for the current FlatRadar product scope and is now in maintenance mode. Large feature development has moved to Android Play Store launch (A6), backend reliability, and multi-platform data quality. Android parity (A0–A5) is complete.
 
 [Download on the App Store](https://apps.apple.com/us/app/flarradar/id6769857080)
 
@@ -11,6 +11,8 @@ The iOS app is feature-complete for the current FlatRadar product scope and is n
 - Supports admin, user, and guest roles.
 - Covers Dashboard, Listings, Listing Detail, Map, Calendar, Notifications, Settings, Admin tools, legal pages, and StoreKit coffee donations.
 - Uses APNs for iOS push notifications and SSE for live in-app updates.
+- Conditional GET caching (URLCache 2MB memory + 20MB disk) with backend ETag/304 support (v1.7.10).
+- Performance optimizations: DateFormatter static instances, featureMap key pre-normalization, non-blocking notification first screen, background map clustering (v1.7.10).
 - Supports English and Simplified Chinese.
 
 ## Maintenance Policy

@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.7.11 (2026-05-30)
+
+### Bug 修复 (Bug fixes)
+- **Dashboard 启动时间修复**：监控进程重启后 7 天运行时间百分比从 ~1% 重新攀升的 bug 已修复。旧方案存单个 `monitor_started_at` 时间戳，超过 7 天后下次重启会被覆盖为当前时间 → 掉到 1%，且不感知中途宕机。新方案改为**每小时存活采样**（`record_uptime_sample()`）：每个 UTC 小时记一条幂等样本到 SQLite meta 表，uptime% = 168h 里有样本的小时数 / 168。持久化跟 listings 同库、同 Docker volume，重启/重建不丢，宕机的小时自然没样本 → 真实反映可用率。
+- **Android 下载链接 404**：修复登录页 Android App 下载链接在新版本发布后 404 的问题。根因是 GitHub Actions CI workflow（`build.yml`）没有 Android 构建 job，每次发新版 `.aab` 资产缺失。同时修复了 `versionCode`/`versionName` 硬编码和 `LoginScreen`/`SettingsScreen` 中版本字符串硬编码的问题。
+- **非 macOS 服务器 iMessage 灰掉**：服务器端检测平台（`sys.platform`），非 macOS（Linux / Docker）上用户设置页的 iMessage 通知选项自动变灰（`opacity:0.45` + `pointer-events:none` + checkbox `disabled`），标注"不可用 — iMessage 需要 macOS 环境"。新增 3 个测试（`test_user_routes.py`）。
+
+### 文档与工程 (Docs & Engineering)
+- **文档全面更新**：`README.md` / `README_cn.md` 加 Android 下载链接；`ANDROID_PLAN.md` 补当前快照表 + 架构实际落地说明 + RC1-RC4 通过标记；`FUTURE_PLAN.md` 更新路线图 + 里程碑；`API.md` 补条件缓存（ETag/304）章节、`/legal` 端点、`/admin/monitor/restart`；`dataflow_en.mmd` / `dataflow_ch.mmd` 补 FCM 分流、uptime 采样、条件缓存、webhook；`guide.html` / `guide_cn.html` 补移动 App 下载入口、修复 GitHub 仓库名；`openapi.json` 补 `/legal` 端点；`iOS_README.md` 更新状态和性能优化项。
+- **工程配置**：`.dockerignore` 加 `android/` + `.github/`；`.gitignore` 清理冗余 Xcode/Android IDE 条目，`*.p12` 归拢到 Android 段。
+
+### Android (Android)
+- **CI 自动构建 AAB**：`build.yml` 新增 `android` job，tag push 时自动构建 release `.aab` 并上传到 GitHub Release。
+- **版本号动态化**：`versionName` 从 `APP_VERSION` 环境变量注入（CI 从 git tag 派生，如 `v1.7.11` → `1.7.11`）；`versionCode` 自动派生（如 `1.7.11` → `1711`）。
+- **UI 版本字符串**：`LoginScreen` 的 `"UNOFFICIAL · v1.7.9"` 和 `SettingsScreen` 的 `"About FlatRadar 1.7.1"` 改为 `BuildConfig.VERSION_NAME`，跟随构建版本自动更新。
+- **签名配置兼容 CI**：`build.gradle.kts` 签名密码支持 `ANDROID_STORE_PASSWORD` / `ANDROID_KEY_PASSWORD` / `ANDROID_KEY_ALIAS` 环境变量，兼容 GitHub Secrets 注入。
+
 ## v1.7.10 (2026-05-30)
 
 ### Bug 修复 (Bug fixes)
