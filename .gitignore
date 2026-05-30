@@ -5,11 +5,14 @@
 __pycache__/
 *.pyc
 
-# data
-data/
+# data —— 仅忽略仓库根的 Python 数据库目录。
+# ⚠️ 必须用前导斜杠 /data/ 锚定到根：不带斜杠的 `data/` 会匹配**任意层级**的
+# data 目录，曾误伤 android/app/src/main/java/com/flatradar/app/data/（整个 DI
+# 源码包），导致 CI 缺文件编译失败。
+/data/
 
-# logs (runtime)
-logs/
+# logs (runtime) —— 同理锚定到根，避免误伤嵌套的 logs/ 源码目录
+/logs/
 
 # tool config
 .claude/
@@ -20,9 +23,9 @@ logs/
 # IDE
 .idea/
 
-# build outputs
+# build outputs —— 这个**故意**不锚定：要匹配 android/app/build/ 等所有嵌套构建目录
 build/
-dist/
+/dist/
 *.icns
 
 # Xcode
