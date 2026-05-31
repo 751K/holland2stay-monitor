@@ -24,9 +24,14 @@ struct LoginView: View {
     @State private var changes24h = 0
     @State private var lastScrapeAt: Date?
     @State private var breathe = false
-    /// "live" 小绿点的心跳脉冲：跟 dashboard 顶部 Live 徽章用同一节奏。
-    /// 独立于上面的 breathe（那个驱动 hero 房子图标的呼吸），互不干扰。
-    @State private var liveDotBreathing = false
+    /// "live" 小绿点的两段动画相位，**各自独立的状态 + 各自的 repeatForever 曲线**：
+    /// - liveRipple：外圈光晕，easeOut + 不回弹（放大渐隐后从头来）
+    /// - liveCore  ：内核实心点，easeInOut + 回弹（1.0↔1.12 原地呼吸）
+    /// 之前用单个 liveDotBreathing + `.animation(_, value:)` 驱动两段——那种写法
+    /// 的 repeatForever 会被视图出现/转场的 ambient 事务"捕获"，偶发变成一次性
+    /// 弹跳而不是持续呼吸。改成显式 withAnimation(.repeatForever) 驱动，稳定。
+    @State private var liveRipple = false
+    @State private var liveCore = false
     @State private var showTerms = false
     @State private var showPrivacy = false
     @State private var showRegister = false
@@ -326,31 +331,20 @@ struct LoginView: View {
             if animatesIcon {
                 ZStack {
                     if shouldAnimate {
-                        // 外层光晕：放大 + 渐隐反复（同 DashboardView.liveBadge）
+                        // 外层光晕：放大 + 渐隐反复。动画由 startLiveBreathing()
+                        // 的显式 withAnimation(.repeatForever) 驱动——这里不再挂
+                        // .animation(value:)，避免被外层转场事务捕获成弹跳。
                         Circle()
                             .fill(iconColor)
                             .frame(width: 7, height: 7)
-                            .scaleEffect(liveDotBreathing ? 2.4 : 1.0)
-                            .opacity(liveDotBreathing ? 0.0 : 0.45)
-                            .animation(
-                                .easeOut(duration: 1.6)
-                                    .repeatForever(autoreverses: false),
-                                value: liveDotBreathing
-                            )
+                            .scaleEffect(liveRipple ? 2.4 : 1.0)
+                            .opacity(liveRipple ? 0.0 : 0.45)
                     }
-                    // 内层实心点：固定 + 轻微缩放（在原地呼吸）
+                    // 内层实心点：原地轻微缩放呼吸（1.0↔1.12）
                     Circle()
                         .fill(iconColor)
                         .frame(width: 7, height: 7)
-                        .scaleEffect(shouldAnimate && liveDotBreathing ? 1.12 : 1.0)
-                        .animation(
-                            shouldAnimate
-                                ? .easeInOut(duration: 1.6).repeatForever(autoreverses: true)
-                                : .default,
-                            value: liveDotBreathing
-                        )
-                        // 跟 DashboardView 一致：给核心点加柔和光晕，让"原地呼吸"
-                        // 在小尺寸下也清晰可感（没有阴影时 7px 的核心点几乎看不出缩放）
+                        .scaleEffect(liveCore ? 1.12 : 1.0)
                         .shadow(color: iconColor.opacity(0.4), radius: 5, x: 0, y: 0)
                 }
                 // 锁定布局尺寸，光晕 / ripple 只在视觉上溢出
@@ -373,18 +367,45 @@ struct LoginView: View {
         .background(badgeBackground, in: RoundedRectangle(cornerRadius: 12))
         .shadow(color: .black.opacity(isDark ? 0 : 0.06), radius: 4, y: 2)
         .onAppear {
-            if shouldAnimate {
-                liveDotBreathing = true
+            if shouldAnimate { startLiveBreathing() }
+        }
+        // reduceMotion 切换时实时停/起。
+        .onChange(of: shouldAnimate) { _, willAnimate in
+            if willAnimate { startLiveBreathing() } else { stopLiveBreathing() }
+        }
+    }
+
+    /// 启动 live 绿点的持续呼吸。两段各用**自己的** repeatForever 曲线显式驱动。
+    /// 关键稳定点：
+    /// 1. 先用 disablesAnimations 事务把相位复位到 false——上一轮 repeatForever
+    ///    若被中途打断，残留中间态会和新动画 blend 成"弹跳"。
+    /// 2. 用 DispatchQueue.main.async 推迟到下一个 runloop 再启动——避开视图
+    ///    appear / 导航转场那一帧的 ambient 事务，否则 repeatForever 会被它
+    ///    捕获成一次性 spring。
+    private func startLiveBreathing() {
+        var reset = Transaction()
+        reset.disablesAnimations = true
+        withTransaction(reset) {
+            liveRipple = false
+            liveCore = false
+        }
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) {
+                liveRipple = true
+            }
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                liveCore = true
             }
         }
-        // 与 DashboardView 对齐：reduceMotion 切换时实时停起，否则
-        // 关闭后 liveDotBreathing 仍卡在 true，下次再开就不会触发新的 toggle。
-        .onChange(of: shouldAnimate) { _, willAnimate in
-            if willAnimate {
-                liveDotBreathing = true
-            } else {
-                withAnimation(.default) { liveDotBreathing = false }
-            }
+    }
+
+    /// 停止呼吸：无动画复位到静止态（reduceMotion 开启时调用）。
+    private func stopLiveBreathing() {
+        var reset = Transaction()
+        reset.disablesAnimations = true
+        withTransaction(reset) {
+            liveRipple = false
+            liveCore = false
         }
     }
 

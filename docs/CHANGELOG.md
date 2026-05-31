@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.8.0 (2026-05-31)
+
+### iOS 崩溃诊断修复 (Crash Diagnostics Fixes)
+- **kind 解析 bug 修复**：`CrashDiagnosticsCollector.pendingDiagnostics()` 中从文件名解析 kind 时用 `split("-")` 取 `comps[1]`，但 ISO 时间戳含 `-` 分隔符（如 `2026-05-31T185748Z-other-UUID.json`），导致取到月份字符串（`"05"`）而非 kind。改为 `comps[comps.count - 2]` 从右往左取，兼容所有命名格式。
+- **iOS 26 `appLaunchDiagnostics` 支持**：iOS 26 将崩溃/挂起数据封装在 `MXDiagnosticPayload.appLaunchDiagnostics` 中而非 `crashDiagnostics`，旧逻辑未识别导致 kind 归为 `"other"`。新增 `launch` 分类并加入服务端白名单。
+- **`appLaunchDiagnostics` 体积大**：典型 MetricKit 诊断包 800–920 KB（远超旧 256 KB 限制），且 `json.dumps(indent=2)` 将嵌套堆栈树膨胀至 5–7 MB 磁盘占用。
+
+### iOS 性能优化 (iOS Performance)
+- **通知列表真正懒加载**：`NotificationsView` 原结构为 `LazyVStack → Section → VStack → ForEach`，VStack 包裹使懒加载失效，所有行一次性全建。改为每行作为 LazyVStack 直接子节点，各自绘制 `UnevenRoundedRectangle` 切片（首行圆上角、尾行圆下角、中间方角），0 间距堆叠成连续卡片。数百行通知时只渲染可视区。
+- **typeFilter 切换瞬时化**：旧逻辑每次切类型筛选都重做 O(n) 日期解析 + 动画式整列重建。改为双桶策略——数据变化时单次 O(n) 扫描产 `allToday/allYesterday/allEarlier`（全量未过滤），切类型时只从缓存桶按 `n.kind`（O(1) 存储字段）筛，零日期解析、零动画。
+- **NotificationItem 预计算**：`listingTitleHint`（正则去前缀）和 `parsedDate`（多格式日期解析）从 computed property 移到 decode 时一次性计算。之前每行渲染都重跑正则+日期解析（最贵的单行操作）× N 行 → 卡。
+- **通知 API 7 天窗口**：`mstorage/_notifications.py` 新增 `within_days` SQL 参数，`app/services/notification_service.py` 默认取最近 7 天；`unread` 从窗口内已过滤集计算，与列表/badge 一致。
+- **Live 绿点动画稳定性**：`LoginView` 的 live dot 呼吸从单布尔驱动两段 `.animation(value:)` 改为 `liveRipple`/`liveCore` 各自 `withAnimation(.repeatForever)` 显式驱动，修复转场事务把 repeatForever 捕获成一次性弹跳的 bug。
+
+### iOS 多语言适配 (Localization)
+- **简中 (zh-Hans)**：补全 21 条缺失翻译（崩溃诊断、通知设置、密码修改等界面文本）
+- **繁中 (zh-Hant)**：补全 57 条缺失翻译
+
+### 服务端 (Server)
+- **崩溃端点 payload 限制**：`MAX_PAYLOAD_BYTES` 从 256 KB → 2 MB，实测覆盖 iOS 26 诊断体积
+- **kind 白名单扩展**：`ALLOWED_KINDS` 加入 `launch`、`other`
+- **磁盘优化**：`crash_reports/*.json` 去掉 `indent=2` pretty-print，嵌套诊断树节省 80%+ 磁盘
+- **健康检查绕过代理 (NO_PROXY)**：容器配置抓取代理后 Python urllib 默认把所有请求（含 localhost 健康检查）都走代理 → 代理拒连 → 403 → 容器被标 unhealthy。`docker-compose.yml` 加 `NO_PROXY=localhost,127.0.0.1,::1` + 健康检查显式空 `ProxyHandler({})` 强制直连。
+
 ## v1.7.11 (2026-05-30)
 
 ### Bug 修复 (Bug fixes)

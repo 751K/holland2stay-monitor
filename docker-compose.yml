@@ -17,6 +17,12 @@ services:
       - ./Caddyfile:/app/Caddyfile.check:ro
     environment:
       - PYTHONUNBUFFERED=1
+      # ⚠️ 抓取代理（HTTPS_PROXY/ALL_PROXY，绕 Cloudflare）一旦设置，Python urllib
+      # 默认会把**所有**请求（含 localhost 健康检查）都走代理 → 代理拒连 localhost
+      # 返回 403 → 容器被标 unhealthy。NO_PROXY 把本机地址排除在代理之外，
+      # 让健康检查 + App 内部 localhost 调用直连。外部抓取目标仍走代理不受影响。
+      - NO_PROXY=localhost,127.0.0.1,::1
+      - no_proxy=localhost,127.0.0.1,::1
       # 本地/隔离网络部署时设为 1 可跳过安全预检
       # - H2S_SKIP_PREFLIGHT=1
       # 代理：将宿主机环境变量传入容器（需同时在 .env 中设置对应的值）。
@@ -28,7 +34,8 @@ services:
     networks:
       - web
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8088/health', timeout=5)\""]
+      # 显式空 ProxyHandler：即便 NO_PROXY 没生效也强制直连，不走抓取代理。
+      test: ["CMD-SHELL", "python -c \"import urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://localhost:8088/health', timeout=5)\""]
       interval: 30s
       timeout: 10s
       retries: 3

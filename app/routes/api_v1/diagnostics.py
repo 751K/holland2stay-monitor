@@ -34,8 +34,8 @@ from config import DATA_DIR
 logger = logging.getLogger(__name__)
 
 CRASH_DIR = DATA_DIR / "crash_reports"
-MAX_PAYLOAD_BYTES = 256 * 1024
-ALLOWED_KINDS = {"crash", "hang", "diskwrite", "cpuexception"}
+MAX_PAYLOAD_BYTES = 2 * 1024 * 1024  # 2 MB — 实测 MetricKit crash 包可达 ~800 KB
+ALLOWED_KINDS = {"crash", "hang", "diskwrite", "cpuexception", "launch", "other"}
 
 # 每 IP 每小时最多上传次数（防滥用）
 _RATE_PER_IP_PER_HOUR = 20
@@ -111,7 +111,7 @@ def _submit() -> Any:
         # 原子写入：先写 .tmp，再 rename，避免 admin grep 时撞见半写文件
         tmp = out.with_suffix(".json.tmp")
         tmp.write_text(
-            json.dumps(record, ensure_ascii=False, indent=2),
+            json.dumps(record, ensure_ascii=False),
             encoding="utf-8",
         )
         tmp.replace(out)

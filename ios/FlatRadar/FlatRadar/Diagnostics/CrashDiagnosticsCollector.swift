@@ -84,7 +84,8 @@ final class CrashDiagnosticsCollector: NSObject, MXMetricManagerSubscriber {
             // 含 timeStampBegin/End、crashDiagnostics[]、hangDiagnostics[] 等
             let data = payload.jsonRepresentation()
 
-            // 分类：取 payload 中第一个 crash/hang 决定 kind；都没有归为 "other"
+            // 分类：取 payload 中第一个 crash/hang 决定 kind；
+            // iOS 26+ 中 crash 可能封装在 appLaunchDiagnostics 里
             let kind: String
             if let _ = payload.crashDiagnostics?.first {
                 kind = "crash"
@@ -94,6 +95,8 @@ final class CrashDiagnosticsCollector: NSObject, MXMetricManagerSubscriber {
                 kind = "cpuexception"
             } else if let _ = payload.diskWriteExceptionDiagnostics?.first {
                 kind = "diskwrite"
+            } else if let _ = payload.appLaunchDiagnostics?.first {
+                kind = "launch"  // iOS 26+ 崩溃/挂起经启动诊断上报
             } else {
                 kind = "other"
             }
@@ -146,7 +149,8 @@ final class CrashDiagnosticsCollector: NSObject, MXMetricManagerSubscriber {
             .compactMap { url in
                 let comps = url.deletingPathExtension().lastPathComponent.split(separator: "-")
                 // 文件名格式：<isoStamp>-<kind>-<uuid8>
-                let kind = comps.count >= 3 ? String(comps[1]) : "other"
+                // isoStamp 如 2026-05-31T185748Z 含 `-`，从右往左取 kind
+                let kind = comps.count >= 2 ? String(comps[comps.count - 2]) : "other"
                 let date = (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date()
                 return PendingDiagnostic(
                     id: url.lastPathComponent,

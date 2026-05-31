@@ -88,3 +88,47 @@ class TestPrune:
             store.add_web_notification(type="a", title=str(i))
         removed = store.prune_notifications(keep=10)
         assert removed == 0
+
+
+class TestWithinDaysWindow:
+    """within_days 把 App Alerts 工作集压到最近 N 天（旧通知太多会让客户端卡）。"""
+
+    def _insert_at(self, store, *, days_ago: int, title: str):
+        store._conn.execute(
+            "INSERT INTO web_notifications (created_at, type, title) "
+            "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ','now',?), 'new_listing', ?)",
+            (f"-{days_ago} days", title),
+        )
+        store._conn.commit()
+
+    def test_within_days_excludes_old(self, store):
+        self._insert_at(store, days_ago=0, title="today")
+        self._insert_at(store, days_ago=3, title="recent")
+        self._insert_at(store, days_ago=10, title="old")
+
+        win = store.get_notifications(limit=50, within_days=7)
+        titles = {r["title"] for r in win}
+        assert titles == {"today", "recent"}, titles
+
+    def test_within_days_none_returns_all(self, store):
+        self._insert_at(store, days_ago=0, title="new")
+        self._insert_at(store, days_ago=100, title="ancient")
+        assert len(store.get_notifications(limit=50)) == 2
+        assert len(store.get_notifications(limit=50, within_days=None)) == 2
+
+    def test_within_days_with_user_filter(self, store):
+        # user 过滤 + 时间窗同时生效
+        store._conn.execute(
+            "INSERT INTO web_notifications (created_at, type, title, user_id) "
+            "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'new_listing', 'mine', 'u1')")
+        store._conn.execute(
+            "INSERT INTO web_notifications (created_at, type, title, user_id) "
+            "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ','now','-30 days'), 'new_listing', 'mine_old', 'u1')")
+        store._conn.execute(
+            "INSERT INTO web_notifications (created_at, type, title, user_id) "
+            "VALUES (strftime('%Y-%m-%dT%H:%M:%SZ','now'), 'new_listing', 'other', 'u2')")
+        store._conn.commit()
+
+        rows = store.get_notifications(limit=50, user_id="u1", within_days=7)
+        titles = {r["title"] for r in rows}
+        assert titles == {"mine"}, titles  # 排除别人的 + 排除 30 天前的

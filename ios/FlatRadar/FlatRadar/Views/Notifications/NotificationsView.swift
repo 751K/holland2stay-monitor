@@ -29,11 +29,18 @@ struct NotificationsView: View {
     /// Live pill 绿点呼吸动画相位
     @State private var liveDotBreathing = false
 
-    // 分桶 + 分类计数缓存——一次 O(n) 扫描产出所有 UI 需要的数据
+    // 当前**已按 typeFilter 过滤**的三个时间桶（直接喂给 List 渲染）
     @State private var todayItems: [NotificationItem] = []
     @State private var yesterdayItems: [NotificationItem] = []
     @State private var earlierItems: [NotificationItem] = []
     @State private var kindCounts: [NotificationItem.Kind: Int] = [:]
+
+    // **未过滤**的全量三桶——只在 notifications 数据变化时算一次（含唯一的
+    // 日期解析）。typeFilter 切换时直接从这里按 kind（O(1) 存储字段）过滤，
+    // 不再重复解析日期、不再触发动画式整列重建 → 切类型瞬时完成。
+    @State private var allToday: [NotificationItem] = []
+    @State private var allYesterday: [NotificationItem] = []
+    @State private var allEarlier: [NotificationItem] = []
 
     var body: some View {
         NavigationStack(path: $notificationsPath) {
@@ -69,13 +76,10 @@ struct NotificationsView: View {
                 rebucketDayGroups()
             }
             .onChange(of: typeFilter) { _, _ in
-                if reduceMotion {
-                    rebucketDayGroups()
-                } else {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        rebucketDayGroups()
-                    }
-                }
+                // 只做按 kind 的廉价过滤（无日期解析）。不用 withAnimation 包：
+                // 给整列 diff 加 0.22s 动画会让上百行逐行进出 + 与下面的 scrollTo
+                // 动画叠加 → 卡顿。过滤本身瞬时，列表直接换数据即可。
+                applyTypeFilter()
             }
             .alert(
                 store.lastError?.errorDescription ?? "Refresh Failed",
@@ -128,25 +132,25 @@ struct NotificationsView: View {
                     .padding(.bottom, 12)
 
                     Section {
-                        VStack(alignment: .leading, spacing: 20) {
-                            if !todayItems.isEmpty {
-                                section(title: "TODAY · \(todayItems.count)", items: todayItems)
-                            }
-                            if !yesterdayItems.isEmpty {
-                                section(title: "YESTERDAY · \(yesterdayItems.count)", items: yesterdayItems)
-                            }
-                            if !earlierItems.isEmpty {
-                                section(title: "EARLIER · \(earlierItems.count)", items: earlierItems)
-                            }
-
-                            if store.isLoadingMore {
-                                HStack { Spacer(); ProgressView(); Spacer() }
-                                    .padding(.vertical, 12)
-                            }
+                        // 行作为 LazyVStack 的**直接 ForEach 子节点**——真正懒加载，
+                        // 只渲染可视区行。卡片视觉由每行自绘 UnevenRoundedRectangle
+                        // 切片承担（首行圆上角 / 尾行圆下角），不再靠一个把所有行
+                        // 关进非懒 VStack 的统一卡片容器。
+                        if !todayItems.isEmpty {
+                            lazyGroup(title: "TODAY · \(todayItems.count)", items: todayItems)
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 10)
-                        .padding(.bottom, 28)
+                        if !yesterdayItems.isEmpty {
+                            lazyGroup(title: "YESTERDAY · \(yesterdayItems.count)", items: yesterdayItems)
+                        }
+                        if !earlierItems.isEmpty {
+                            lazyGroup(title: "EARLIER · \(earlierItems.count)", items: earlierItems)
+                        }
+
+                        if store.isLoadingMore {
+                            HStack { Spacer(); ProgressView(); Spacer() }
+                                .padding(.vertical, 12)
+                        }
+                        Color.clear.frame(height: 28)   // 底部留白
                     } header: {
                         stickyToolbar
                     }
@@ -183,52 +187,65 @@ struct NotificationsView: View {
             }
     }
 
+    /// 一个时间分组（TODAY / YESTERDAY / EARLIER）。返回「标题 + ForEach 行」，
+    /// 直接铺在 LazyVStack 的 Section 里 → ForEach 保持懒加载（只建可视行）。
+    ///
+    /// 卡片观感：每行自绘 ``UnevenRoundedRectangle`` 切片，首行圆上两角、尾行
+    /// 圆下两角、中间方角，0 间距堆叠成一张连续卡。去掉了原来整组外描边
+    /// （逐切片描边会在接缝出双线）；靠 grouped 背景与卡片填充的对比承载卡感，
+    /// 即 iOS 设置那种 inset-grouped 风格。
     @ViewBuilder
-    private func section(title: String, items: [NotificationItem]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                .tracking(0.8)
-                .foregroundStyle(.blue)
-                .textCase(nil)
-                .padding(.horizontal, 16)
+    private func lazyGroup(title: String, items: [NotificationItem]) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .tracking(0.8)
+            .foregroundStyle(.blue)
+            .textCase(nil)
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
+            .padding(.bottom, 8)
 
+        let firstID = items.first?.id
+        let lastID = items.last?.id
+        ForEach(items) { n in
             VStack(spacing: 0) {
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, n in
-                    NotificationRow(notification: n)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .contentShape(Rectangle())
-                        .onTapGesture { handleTap(n) }
-                        .contextMenu {
-                            if !n.isRead {
-                                Button("Mark as read") {
-                                    Task { await store.markRead(ids: [n.id]) }
-                                }
+                NotificationRow(notification: n)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                    .onTapGesture { handleTap(n) }
+                    .contextMenu {
+                        if !n.isRead {
+                            Button("Mark as read") {
+                                Task { await store.markRead(ids: [n.id]) }
                             }
                         }
-                        .onAppear {
-                            if n.id == visibleLastNotificationID {
-                                Task { await store.loadMore() }
-                            }
-                        }
-                    if index < items.count - 1 {
-                        Divider()
-                            .padding(.leading, 14)
                     }
+                    .onAppear {
+                        if n.id == visibleLastNotificationID {
+                            Task { await store.loadMore() }
+                        }
+                    }
+                if n.id != lastID {
+                    Divider().padding(.leading, 14)
                 }
             }
-            .background(Color(.secondarySystemGroupedBackground), in: sectionCardShape)
-            .overlay(sectionCardShape.strokeBorder(.separator.opacity(0.45), lineWidth: 0.5))
+            .background(
+                UnevenRoundedRectangle(
+                    topLeadingRadius: n.id == firstID ? 22 : 0,
+                    bottomLeadingRadius: n.id == lastID ? 22 : 0,
+                    bottomTrailingRadius: n.id == lastID ? 22 : 0,
+                    topTrailingRadius: n.id == firstID ? 22 : 0,
+                    style: .continuous
+                )
+                .fill(Color(.secondarySystemGroupedBackground))
+            )
+            .padding(.horizontal, 16)
         }
     }
 
     private var visibleLastNotificationID: Int? {
         earlierItems.last?.id ?? yesterdayItems.last?.id ?? todayItems.last?.id
-    }
-
-    private var sectionCardShape: RoundedRectangle {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
     }
 
     // MARK: - Header (custom, mirrors Dashboard's 28pt heavy title)
@@ -292,23 +309,18 @@ struct NotificationsView: View {
                 Text("System").tag(NotificationItem.Kind?.some(.system))
             } label: { Text("Filter type") }
         } label: {
-            ZStack(alignment: .leading) {
-                typeFilterPillContent(
-                    label: "Lottery",
-                    count: max(scope.count, store.notifications.count),
-                    dot: .statusLottery,
-                    fillsAvailableWidth: false
-                )
-                .hidden()
-                .overlay(alignment: .leading) {
-                    typeFilterPillContent(
-                        label: scope.label,
-                        count: scope.count,
-                        dot: scope.dot,
-                        fillsAvailableWidth: true
-                    )
-                }
-            }
+            // 直接按真实内容自适应宽度。之前用"隐藏 Lottery 模板撑宽 + overlay
+            // 真内容"的写法：模板用 fillsAvailableWidth:false（无 spacer）而真内容
+            // 用 true（有 Spacer(min:12)）→ 真内容恒比模板宽；且 "System"/"Status"
+            // 比硬编码的 "Lottery" 渲染还宽 → chevron 溢出胶囊。去掉模板，胶囊随
+            // 内容收缩，永不溢出。切类型时宽度会微调，但用 transaction 关了动画，
+            // 是干脆的 snap，不跳。
+            typeFilterPillContent(
+                label: scope.label,
+                count: scope.count,
+                dot: scope.dot,
+                fillsAvailableWidth: false
+            )
             // padding 与 Live capsule 完全相同 (14h / 9v)
             .padding(.horizontal, 14)
             .padding(.vertical, 9)
@@ -504,28 +516,41 @@ struct NotificationsView: View {
 
     // MARK: - Day grouping (cached)
 
-    /// 单次 O(n) 扫 notifications，同时产出：
-    /// - 三个时间桶（today / yesterday / earlier）
-    /// - 每种 kind 的总数（``kindCounts``，供 filter pill 用，避免二次扫描）
+    /// 数据变化时调用（首次加载 / store.revision）。**唯一**做日期解析的地方：
+    /// 单次 O(n) 扫 notifications，产出未过滤的全量三桶 + 每 kind 计数，然后
+    /// 套用当前 typeFilter。日期解析每条只发生一次/数据轮。
     private func rebucketDayGroups() {
         var today: [NotificationItem] = []
         var yesterday: [NotificationItem] = []
         var earlier: [NotificationItem] = []
         var counts: [NotificationItem.Kind: Int] = [:]
-        let filter = typeFilter
         for n in store.notifications {
             counts[n.kind, default: 0] += 1
-            if let f = filter, n.kind != f { continue }
-            switch n.dayBucket {
+            switch n.dayBucket {   // ← 日期解析仅此一处
             case .today:     today.append(n)
             case .yesterday: yesterday.append(n)
             case .earlier:   earlier.append(n)
             }
         }
-        todayItems = today
-        yesterdayItems = yesterday
-        earlierItems = earlier
+        allToday = today
+        allYesterday = yesterday
+        allEarlier = earlier
         kindCounts = counts
+        applyTypeFilter()
+    }
+
+    /// typeFilter 切换时调用：只按 kind（存储字段，O(1)）从全量三桶里筛，
+    /// **零日期解析**。这是切类型不再卡的关键。
+    private func applyTypeFilter() {
+        guard let f = typeFilter else {
+            todayItems = allToday
+            yesterdayItems = allYesterday
+            earlierItems = allEarlier
+            return
+        }
+        todayItems = allToday.filter { $0.kind == f }
+        yesterdayItems = allYesterday.filter { $0.kind == f }
+        earlierItems = allEarlier.filter { $0.kind == f }
     }
 }
 

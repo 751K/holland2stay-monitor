@@ -63,6 +63,11 @@ def filter_for_user_view(rows: list[dict], user: Any) -> list[dict]:
 GUEST_ALLOWED_TYPES = {"status_change", "new_listing"}
 
 
+# App Alerts 只取最近 N 天——旧通知堆积太多会让客户端切类型筛选卡顿
+# （要 diff 上千行）。7 天足够覆盖用户关心的窗口；SSE 仍实时推新通知。
+_API_NOTIFICATION_WINDOW_DAYS = 7
+
+
 def list_api_notifications(
     *,
     role: str,
@@ -77,19 +82,27 @@ def list_api_notifications(
                 limit=limit * 3 + 200,
                 offset=0,
                 user_id=user.id,
+                within_days=_API_NOTIFICATION_WINDOW_DAYS,
             )
         else:
-            raw = st.get_notifications(limit=limit + offset, offset=0)
-        unread = st.count_unread_notifications()
+            raw = st.get_notifications(
+                limit=limit + offset,
+                offset=0,
+                within_days=_API_NOTIFICATION_WINDOW_DAYS,
+            )
 
     if role == "user":
         filtered = filter_for_user_view(raw, user)
-        unread = sum(1 for row in filtered if not int(row.get("read") or 0))
     elif role == "guest":
         filtered = [r for r in raw if r.get("type") in GUEST_ALLOWED_TYPES]
-        unread = 0
     else:
         filtered = raw
+    # unread 从窗口内已过滤集算，跟列表/badge 显示一致（不再用全量
+    # count_unread_notifications，避免 badge 数 > 可见未读数）
+    unread = (
+        0 if role == "guest"
+        else sum(1 for row in filtered if not int(row.get("read") or 0))
+    )
     total = len(filtered)
     page = filtered[offset : offset + limit]
     return {

@@ -12,6 +12,16 @@ struct NotificationItem: Decodable, Identifiable, Sendable {
     /// Decode 时计算一次，后续访问 O(1)，避免每次 filter 都重复做 lowercased + contains。
     let kind: Kind
 
+    /// 去掉前缀/emoji/[标签] 后的纯标题——**预计算**（含一次正则）。
+    /// 之前是 computed property，每次行渲染都现跑 `.regularExpression`（最贵的
+    /// 单行操作），列表滚动/切类型时 ×N 行触发 N 次正则编译+执行 → 卡。
+    /// 移到 decode 时算一次存起来，渲染只读字段。
+    let listingTitleHint: String
+
+    /// `createdAt` 的解析结果——**预计算**一次。createdDate / ageText / dayBucket
+    /// 之前每次行渲染都重解析日期；这里 decode 时解一次，渲染只读。
+    let parsedDate: Date?
+
     enum CodingKeys: String, CodingKey {
         case id, type, title, body, url, read
         case createdAt = "created_at"
@@ -29,6 +39,8 @@ struct NotificationItem: Decodable, Identifiable, Sendable {
         listingID = try c.decodeIfPresent(String.self, forKey: .listingID) ?? ""
         read = try c.decodeIfPresent(Int.self, forKey: .read) ?? 0
         kind = Self.classifyKind(type: type, title: title, body: body)
+        listingTitleHint = Self.computeListingTitleHint(title)
+        parsedDate = Self.parseCreatedDate(createdAt)
     }
 
     /// 用于 markedRead() / 测试构造的手动 init
@@ -43,6 +55,8 @@ struct NotificationItem: Decodable, Identifiable, Sendable {
         self.listingID = listingID
         self.read = read
         self.kind = Self.classifyKind(type: type, title: title, body: body)
+        self.listingTitleHint = Self.computeListingTitleHint(title)
+        self.parsedDate = Self.parseCreatedDate(createdAt)
     }
 
     var isRead: Bool { read != 0 }
@@ -53,7 +67,8 @@ struct NotificationItem: Decodable, Identifiable, Sendable {
                          listingID: listingID, read: 1)
     }
 
-    var listingTitleHint: String {
+    /// 纯函数：title → 去前缀标题。decode 时调一次，结果存进 ``listingTitleHint``。
+    static func computeListingTitleHint(_ title: String) -> String {
         let separators = ["：", ":"]
         var value = title
         for sep in separators {
@@ -169,18 +184,21 @@ extension NotificationItem {
         return f
     }()
 
-    /// 把 `createdAt` 解成 Date —— 复用 listing 那套多格式解析。
+    /// 纯函数：解析 `createdAt` → Date。decode 时调一次，结果存进 ``parsedDate``。
     /// 用 Europe/Amsterdam 算相对年龄，避免本地时区漂移。
-    var createdDate: Date? {
+    static func parseCreatedDate(_ createdAt: String) -> Date? {
         let raw = createdAt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return nil }
-        if let d = Self.isoFractional.date(from: raw) { return d }
-        if let d = Self.isoPlain.date(from: raw) { return d }
-        for f in Self.fallbackParsers {
+        if let d = isoFractional.date(from: raw) { return d }
+        if let d = isoPlain.date(from: raw) { return d }
+        for f in fallbackParsers {
             if let d = f.date(from: raw) { return d }
         }
         return nil
     }
+
+    /// 兼容旧调用点：直接返回预计算好的 ``parsedDate``（零解析）。
+    var createdDate: Date? { parsedDate }
 
     /// 相对年龄串：`now` / `38m` / `5h` / `2d`。
     var ageText: String {
