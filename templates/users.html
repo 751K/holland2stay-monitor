@@ -22,9 +22,16 @@
 </div>
 {% endif %}
 
-<div class="user-grid">
+<div class="user-grid" id="user-grid">
 {% for user in users %}
-<div class="user-card {% if not user.enabled %}disabled{% endif %}">
+<div class="user-card {% if not user.enabled %}disabled{% endif %}" draggable="true" data-user-id="{{ user.id }}">
+
+  <!-- Drag handle -->
+  {% if is_admin %}
+  <div class="drag-handle" title="{{ _('users_drag_hint') }}">
+    <i class="bi bi-grip-vertical"></i>
+  </div>
+  {% endif %}
 
   <!-- Header -->
   <div class="user-card-header">
@@ -161,6 +168,116 @@
 
 {% block scripts %}
 <script>
+// ── Drag-and-drop user reorder ──
+(function(){
+  var grid = document.getElementById('user-grid');
+  if (!grid) return;
+
+  var cards = grid.querySelectorAll('.user-card[draggable]');
+  var draggedEl = null;
+  var placeholder = document.createElement('div');
+  placeholder.className = 'user-card drag-placeholder';
+  placeholder.style.cssText = 'border:2px dashed var(--border);background:var(--bg);min-height:120px;opacity:.5;pointer-events:none;';
+
+  cards.forEach(function(card){
+    card.addEventListener('dragstart', function(e){
+      if (e.target.closest('a, button, input, form, .btn, .rank-btn')) {
+        e.preventDefault(); return;
+      }
+      draggedEl = card;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', card.dataset.userId || '');
+      // Hide ghost image for cleaner look
+      var ghost = card.cloneNode(true);
+      ghost.style.position = 'absolute'; ghost.style.top = '-9999px';
+      document.body.appendChild(ghost);
+      e.dataTransfer.setDragImage(ghost, 0, 0);
+      setTimeout(function(){ document.body.removeChild(ghost); }, 0);
+    });
+
+    card.addEventListener('dragend', function(){
+      card.classList.remove('dragging');
+      draggedEl = null;
+      grid.querySelectorAll('.user-card').forEach(function(c){ c.classList.remove('drag-over','drag-over-top','drag-over-bottom'); });
+      if (placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+    });
+
+    card.addEventListener('dragover', function(e){
+      e.preventDefault();
+      if (!draggedEl || draggedEl === card) return;
+      e.dataTransfer.dropEffect = 'move';
+      var rect = card.getBoundingClientRect();
+      var midY = rect.top + rect.height / 2;
+      card.classList.remove('drag-over-top','drag-over-bottom');
+      if (e.clientY < midY) {
+        card.classList.add('drag-over-top');
+      } else {
+        card.classList.add('drag-over-bottom');
+      }
+    });
+
+    card.addEventListener('dragleave', function(){
+      card.classList.remove('drag-over-top','drag-over-bottom');
+    });
+
+    card.addEventListener('drop', function(e){
+      e.preventDefault();
+      card.classList.remove('drag-over-top','drag-over-bottom');
+      if (!draggedEl || draggedEl === card) return;
+
+      // Move card in DOM
+      var rect = card.getBoundingClientRect();
+      var midY = rect.top + rect.height / 2;
+      if (e.clientY < midY) {
+        grid.insertBefore(draggedEl, card);
+      } else {
+        grid.insertBefore(draggedEl, card.nextSibling);
+      }
+
+      // Send new order to server
+      var orderedIds = [];
+      grid.querySelectorAll('.user-card[draggable]').forEach(function(c){
+        orderedIds.push(c.dataset.userId || '');
+      });
+      updateRankBadges();
+      saveOrder(orderedIds);
+    });
+  });
+
+  function updateRankBadges() {
+    grid.querySelectorAll('.user-card .rank-badge').forEach(function(badge, i){
+      badge.textContent = '#' + (i + 1);
+    });
+  }
+
+  function saveOrder(orderedIds) {
+    var csrf = document.querySelector('meta[name="csrf-token"]');
+    fetch('/api/users/reorder', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrf ? csrf.getAttribute('content') : '',
+      },
+      body: JSON.stringify({order: orderedIds}),
+    }).then(function(r){ return r.json(); }).then(function(d){
+      if (d.ok) {
+        var wrap = document.getElementById('toast-container');
+        if (wrap) {
+          var div = document.createElement('div');
+          div.className = 'toast toast-success';
+          var langMeta = document.querySelector('meta[name="lang"]');
+          var zh = langMeta && langMeta.getAttribute('content') === 'zh';
+          div.textContent = zh ? '优先级已更新' : 'Priority updated';
+          wrap.appendChild(div);
+          setTimeout(function(){ div.style.opacity='0'; div.style.transition='opacity .3s'; setTimeout(function(){ div.remove(); }, 300); }, 2000);
+        }
+      }
+    });
+  }
+})();
+
+// ── Delete modal ──
 function confirmDelete(userId, userName) {
   document.getElementById('deleteUserName').textContent = userName;
   document.getElementById('deleteForm').action = '/users/' + encodeURIComponent(userId) + '/delete';

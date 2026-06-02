@@ -1,4 +1,4 @@
-Last updated: May 25, 2026
+Last updated: June 3, 2026
 
 This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
 
@@ -48,6 +48,7 @@ Location Data
 - If you use the map location button, your device may provide your current location to the app so the map can center near you.
 - FlatRadar uses this location only on your device for the map feature.
 - FlatRadar does not upload, store, retain, or associate your precise device location with your account.
+- The iOS app map is powered by Apple Maps (MapKit). The Android app and web map are powered by Google Maps. When loading Google Maps, Google may collect and process technical data (such as IP address and browser information) in accordance with Google's Privacy Policy (https://policies.google.com/privacy).
 
 Saved Preferences and Alert Data
 - Saved filters, city, price range, availability, listing type, listing status, and other search preferences.
@@ -90,7 +91,7 @@ FlatRadar uses Cloudflare for DNS, traffic routing, security, performance, and r
 
 8. Push Notifications
 
-FlatRadar uses Apple Push Notification service to deliver listing alerts. We store your APNs device token and associate it with your account. You can disable push notifications at any time in iOS Settings.
+FlatRadar delivers listing alerts via: Apple Push Notification service (APNs) for iOS devices; Firebase Cloud Messaging (FCM) for Android devices. We store your device push token and associate it with your account. You can disable push notifications at any time in your device Settings.
 
 9. Housing Platforms and Listing Data
 
@@ -98,7 +99,7 @@ FlatRadar may fetch listing information from publicly accessible services, APIs,
 
 10. Third-Party Services
 
-FlatRadar may interact with: housing platforms (listing data), Apple Push Notification service (notifications), Cloudflare (DNS and security), hosting and backend providers, and email or support providers.
+FlatRadar may interact with: housing platforms (listing data), Apple Push Notification service (iOS notifications), Firebase Cloud Messaging (Android notifications), Cloudflare (DNS and security), Apple Maps (iOS map), Google Maps (Android and web map), hosting and backend providers, and email or support providers.
 
 11. Data Sharing
 

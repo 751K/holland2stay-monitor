@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.8.1 (2026-06-03)
+
+### 功能改进 (Features)
+- **用户优先级拖拽排序**：用户管理页原先只能通过每个卡片上的 ▲/▼ 按钮一次一格调整自动预订优先级，每次点击整页刷新。现改为 HTML5 拖拽排序——抓住卡片左侧 `⠿` 手柄拖到目标位置松手即完成，DOM 即时更新排名数字，后台 `POST /api/users/reorder` 一次请求批量持久化所有 `sort_order`。▲/▼ 按钮保留作为移动端备选方案。
+  - `templates/users.html`：user card 加 `draggable="true"` + 拖拽手柄 + ~80 行 JS（dragstart/dragover/drop → DOM 重排 → fetch API 持久化）
+  - `static/design.css`：`.drag-handle` grab 光标/hover 高亮，`.dragging` 半透明，`.drag-over-*` 蓝色落点指示线
+  - `app/routes/users.py`：新增 `POST /api/users/reorder`，接收 `{order: [id, ...]}` 批量更新
+  - `mstorage/_user_configs.py`：新增 `reorder_users_bulk()`，单事务完成全部 `sort_order` 重编号
+
+### 法律文件更新 (Legal)
+- **Google Maps / FCM 披露**：隐私政策与使用条款按平台区分第三方服务——iOS 推送=APNs / Android 推送=FCM (Firebase)；iOS 地图=Apple Maps / Android+网页地图=Google Maps。新增 Google Maps Platform ToS 引用及 Google 隐私政策链接。`app/legal/privacy.txt` / `privacyzh.txt` / `terms.txt` / `termszh.txt` 四份文件同步更新至 2026-06-03。
+
+### Bug 修复 (Bug fixes)
+- **地图刷新按钮失效**：Google Maps 迁移（v1.7.6）将 `templates/map.html` 内所有 JS 包入 IIFE，但 geocode 按钮仍用 HTML `onclick="runGeocode()"` 属性绑定事件。HTML onclick 在全局作用域执行，`runGeocode` 被 IIFE 隔离后不可访问 → 按钮完全无响应。修复：IIFE 末尾加 `window.runGeocode = runGeocode` 暴露全局引用。
+- **Geocode 完成后自动刷新地图**：geocode 进度轮询结束后直接调用 `loadMapData()`（延迟 800ms 等缓存写入落盘），不再要求用户额外点一次手动"刷新地图"按钮。恢复 v1.4.5 原有行为（Google Maps 迁移时误删）。
+
 ## v1.8.0 (2026-05-31)
 
 ### iOS 崩溃诊断修复 (Crash Diagnostics Fixes)

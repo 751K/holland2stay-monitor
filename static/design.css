@@ -708,6 +708,26 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 }
 .rank-btn:hover:not(:disabled){color:var(--accent);background:var(--accent-soft)}
 .rank-btn:disabled{color:var(--text4);cursor:default;opacity:.35}
+/* drag-and-drop reorder */
+.drag-handle{
+  position:absolute;left:0;top:0;bottom:0;width:32px;
+  display:flex;align-items:center;justify-content:center;
+  color:var(--text4);cursor:grab;font-size:18px;
+  transition:color .15s;user-select:none;-webkit-user-select:none;
+}
+.drag-handle:hover{color:var(--accent)}
+.drag-handle:active{cursor:grabbing}
+.user-card{position:relative}
+.user-card:has(.drag-handle){padding-left:44px}
+.user-card.dragging{opacity:.4;box-shadow:var(--shadow-lg)}
+.user-card.drag-over{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent),var(--shadow-md)}
+.user-card.drag-over-top::before,
+.user-card.drag-over-bottom::after{
+  content:'';position:absolute;left:8px;right:8px;height:3px;
+  background:var(--accent);border-radius:3px;z-index:2;pointer-events:none;
+}
+.user-card.drag-over-top::before{top:-2px}
+.user-card.drag-over-bottom::after{bottom:-2px}
 .channel-pill{
   display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;
   padding:3px 10px;border-radius:100px;

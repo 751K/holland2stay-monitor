@@ -1,4 +1,4 @@
-Last updated: May 25, 2026
+Last updated: June 3, 2026
 
 These Terms of Use govern your access to and use of FlatRadar.
 
@@ -60,11 +60,13 @@ You are responsible for checking official listing pages yourself before making a
 
 You can disable push notifications through the app settings or your device settings.
 
-7. Location Use
+7. Location Use and Google Maps
 
 If you use map features, FlatRadar may ask for your device location to center the map near your current position.
 
 Your device location is used only on your device for this map interaction. FlatRadar does not upload, store, or retain your precise device location.
+
+The iOS app map is powered by Apple Maps (MapKit). The Android app and web map are powered by Google Maps. By using Google Maps features, you agree to be bound by the Google Maps Platform Terms of Service (https://cloud.google.com/maps-platform/terms) and Google's Privacy Policy (https://policies.google.com/privacy).
 
 8. Authentication and Credentials
 

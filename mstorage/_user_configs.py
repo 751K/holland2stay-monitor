@@ -182,6 +182,15 @@ class UserConfigOps:
                 )
         return True
 
+    def reorder_users_bulk(self, ordered_ids: list[str]) -> None:
+        """批量更新 sort_order，按 ordered_ids 的顺序从 0 开始编号。"""
+        with self._conn:
+            for idx, uid in enumerate(ordered_ids):
+                self._conn.execute(
+                    "UPDATE user_configs SET sort_order = ? WHERE id = ?",
+                    (idx, uid),
+                )
+
     @staticmethod
     def dumps_json(value) -> str:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

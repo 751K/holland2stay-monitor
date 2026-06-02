@@ -1,4 +1,4 @@
-最后更新日期：2026年5月25日
+最后更新日期：2026年6月3日
 
 本隐私政策说明 FlatRadar 如何收集、使用、存储和保护您的数据。
 
@@ -48,6 +48,7 @@ FlatRadar 账户密码不以明文形式存储。密码使用 bcrypt（一种单
 - 如果您使用地图定位按钮，您的设备可能会向应用程序提供您的当前位置，以便地图以您为中心显示。
 - FlatRadar 仅在您的设备上本地使用此位置信息以提供地图功能。
 - FlatRadar 不会上传、存储、保留或将您的精确设备位置与您的账户关联。
+- iOS 应用地图由 Apple Maps（MapKit）提供。Android 应用及网页版地图由 Google Maps 提供。加载 Google Maps 时，Google 可能会根据其隐私政策（https://policies.google.com/privacy）收集和处理技术数据（如 IP 地址、浏览器信息）。
 
 已保存的偏好设置与提醒数据
 - 已保存的筛选条件、城市、价格范围、可用性、房源类型、房源状态及其他搜索偏好设置。
@@ -90,7 +91,7 @@ FlatRadar 使用 Cloudflare 提供 DNS、流量路由、安全、性能及相关
 
 8. 推送通知
 
-FlatRadar 使用 Apple 推送通知服务发送房源提醒。我们存储您的 APNs 设备令牌并将其与您的账户关联。您可以随时在 iOS 设置中禁用推送通知。
+FlatRadar 通过以下服务发送房源提醒：iOS 设备使用 Apple 推送通知服务（APNs）；Android 设备使用 Firebase Cloud Messaging（FCM）。我们存储您的设备推送令牌并将其与您的账户关联。您可以随时在设备设置中禁用推送通知。
 
 9. 房源平台与数据
 
@@ -98,7 +99,7 @@ FlatRadar 可能会从公开可访问的各房源平台（包括但不限于 Hol
 
 10. 第三方服务
 
-FlatRadar 可能会与以下服务交互：各房源平台（房源数据）、Apple 推送通知服务（通知）、Cloudflare（DNS 和安全）、托管和后端提供商以及电子邮件或支持服务提供商。
+FlatRadar 可能会与以下服务交互：各房源平台（房源数据）、Apple 推送通知服务（iOS 通知）、Firebase Cloud Messaging（Android 通知）、Cloudflare（DNS 和安全）、Apple Maps（iOS 地图）、Google Maps（Android 及网页地图）、托管和后端提供商以及电子邮件或支持服务提供商。
 
 11. 数据共享
 

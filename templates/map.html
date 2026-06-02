@@ -433,10 +433,10 @@ function runGeocode() {
           if (s.finished) {
             clearInterval(timer);
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-arrow-repeat mr-1"></i>' + (zh ? '刷新地图' : 'Refresh map');
-            var origClick = btn.onclick;
-            btn.onclick = function(){ loadMapData(); btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode'); btn.onclick = origClick; };
+            btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode');
             loading.textContent = (zh ? '完成 ' : 'Done ') + s.done + (s.failed > 0 ? (zh ? ' 失败 ' : ' fail ') + s.failed : '');
+            // Auto-refresh map after geocoding so new coords appear immediately
+            if (s.done > 0) setTimeout(function(){ loadMapData(); }, 800);
             var errDiv = document.getElementById('geocode-errors');
             if (errDiv && s.errors && s.errors.length > 0) {
               errDiv.innerHTML = '';
@@ -492,6 +492,10 @@ setTimeout(function() {
       '</div>';
   }
 }, 10000);
+
+  // Expose for the HTML onclick handler (must be global since onclick attribute
+  // evaluates in global scope, but runGeocode is defined inside this IIFE).
+  window.runGeocode = runGeocode;
 })();
 </script>
 {% else %}

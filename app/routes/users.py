@@ -490,6 +490,26 @@ def user_toggle(user_id: str) -> Any:
     return redirect(url_for("users_list"))
 
 
+@admin_required
+@csrf_required
+def api_users_reorder() -> Any:
+    """批量更新用户抢房优先级顺序（拖拽排序）。"""
+    data = request.get_json(silent=True) or {}
+    order: list[str] = data.get("order", [])
+    if not order or not isinstance(order, list):
+        return jsonify({"ok": False, "error": "缺少 order 数组"}), 400
+
+    from app.db import storage
+    st = storage()
+    try:
+        st.reorder_users_bulk(order)
+    finally:
+        st.close()
+
+    logger.info("用户优先级已批量更新（%d 位用户）", len(order))
+    return jsonify({"ok": True, "count": len(order)})
+
+
 def register(app: Flask) -> None:
     app.add_url_rule("/users",                       endpoint="users_list",       view_func=users_list,       methods=["GET"])
     app.add_url_rule("/users/new",                   endpoint="user_new",         view_func=user_new,         methods=["GET", "POST"])
@@ -498,3 +518,4 @@ def register(app: Flask) -> None:
     app.add_url_rule("/users/<user_id>/test",        endpoint="user_test_notify", view_func=user_test_notify, methods=["POST"])
     app.add_url_rule("/users/<user_id>/toggle",      endpoint="user_toggle",      view_func=user_toggle,      methods=["POST"])
     app.add_url_rule("/users/<user_id>/move",       endpoint="user_move",        view_func=user_move,       methods=["POST"])
+    app.add_url_rule("/api/users/reorder",         endpoint="api_users_reorder", view_func=api_users_reorder, methods=["POST"])
