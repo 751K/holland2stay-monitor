@@ -114,7 +114,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
 
-      - name: Build release AAB
+      - name: Build release AAB (for Google Play)
         if: startsWith(github.ref, 'refs/tags/') && env.ANDROID_SIGNING_READY == 'true'
         working-directory: android
         env:
@@ -123,13 +123,21 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           MAPS_API_KEY: ${{ secrets.MAPS_API_KEY || '' }}
-        run: ./gradlew :app:bundleRelease
+        run: |
+          ./gradlew :app:bundleRelease
+          ./gradlew :app:assembleRelease
 
-      - name: Upload AAB to Release
+      - name: Upload AAB to Release (for Google Play)
         if: startsWith(github.ref, 'refs/tags/') && env.ANDROID_SIGNING_READY == 'true'
         uses: softprops/action-gh-release@v2
         with:
           files: android/app/build/outputs/bundle/release/app-release.aab
+
+      - name: Upload APK to Release (for direct download)
+        if: startsWith(github.ref, 'refs/tags/') && env.ANDROID_SIGNING_READY == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/release/app-release.apk
 
       - name: Build debug APK (manual trigger)
         if: github.event_name == 'workflow_dispatch'

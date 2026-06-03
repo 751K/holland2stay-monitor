@@ -158,19 +158,71 @@ _POOL_WEIGHTS = [4, 4, 2, 3, 2, 3, 1, 1]
 _last_impersonate: Optional[str] = None
 
 
-def get_proxy_url() -> str:
-    """
-    统一的代理 URL 读取：HTTPS_PROXY > HTTP_PROXY > ALL_PROXY。
+# ── 代理池 + 故障切换 ───────────────────────────────────────────────
+#
+# 主代理（HTTPS_PROXY/HTTP_PROXY/ALL_PROXY）+ 备用代理（SCRAPE_PROXIES_FALLBACK，
+# 逗号/换行分隔多个）。主代理挂了（webshare 502 之类）自动切到下一个可用的。
+#
+# 故障的代理进 cooldown（默认 10 min），期间 get_proxy_url 跳过它；冷却结束
+# 后自动重新纳入候选。状态进程级，monitor 重启清零（重启即重新从主代理试）。
+import time as _time  # noqa: E402  (局部别名，避免与文件其它 time 用法冲突)
 
-    返回空字符串表示未配置代理。所有需要代理的模块（scraper、booker、
-    monitor）均通过此函数获取，避免各自重复 os.environ.get 链条，
-    消除遗漏 ALL_PROXY 或优先级不一致的问题。
-    """
-    return (
+_PROXY_COOLDOWN_SEC = 600  # 10 分钟
+_proxy_cooldown_until: dict[str, float] = {}  # proxy_url -> monotonic 截止
+
+
+def _proxy_pool() -> list[str]:
+    """主代理 + 备用代理，去重保序，去空。"""
+    primary = (
         os.environ.get("HTTPS_PROXY", "")
         or os.environ.get("HTTP_PROXY", "")
         or os.environ.get("ALL_PROXY", "")
     ).strip()
+    fallback_raw = os.environ.get("SCRAPE_PROXIES_FALLBACK", "")
+    pool = [primary] + [p.strip() for p in re.split(r"[,\n]", fallback_raw)]
+    return list(dict.fromkeys(p for p in pool if p))  # 去重保序 + 去空
+
+
+def get_proxy_url() -> str:
+    """
+    统一的代理 URL 读取，**带故障切换**。
+
+    返回当前**未在冷却**的第一个代理（主代理优先；主代理被
+    ``report_proxy_failure`` 标记故障后自动落到备用）。全部都在冷却时，
+    返回冷却最早结束的那个（兜底——至少试一个，总比不抓强）。无配置返回空串。
+
+    所有需要代理的模块（scraper、booker、monitor）均通过此函数获取。
+    """
+    pool = _proxy_pool()
+    if not pool:
+        return ""
+    now = _time.monotonic()
+    for p in pool:
+        if _proxy_cooldown_until.get(p, 0.0) <= now:
+            return p
+    # 全在冷却——返回最接近恢复的那个
+    return min(pool, key=lambda p: _proxy_cooldown_until.get(p, 0.0))
+
+
+def report_proxy_failure(url: str = "") -> str:
+    """
+    把一个代理标记为故障，进 cooldown。``url`` 留空时标记**当前选中**的那个
+    （即刚刚用过、刚失败的那个）。返回切换后 get_proxy_url 会用的新代理
+    （便于日志显示"主→备"），无备用时返回同一个。
+    """
+    pool = _proxy_pool()
+    target = url.strip() or (pool[0] if pool else "")
+    # 标记当前选中的（不是 pool[0]，因为 pool[0] 可能已在冷却）
+    if not url:
+        target = get_proxy_url()
+    if target:
+        _proxy_cooldown_until[target] = _time.monotonic() + _PROXY_COOLDOWN_SEC
+    return get_proxy_url()
+
+
+def proxy_pool_size() -> int:
+    """配置的代理总数（主 + 备）。0=没配代理，1=只有主代理（无备用）。"""
+    return len(_proxy_pool())
 
 
 def get_impersonate() -> str:

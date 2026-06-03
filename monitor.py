@@ -58,6 +58,7 @@ from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
 from scrapers import (
     BlockedError,
+    ProxyError,
     RateLimitError,
     ScrapeNetworkError,
     UpstreamMaintenanceError,
@@ -282,6 +283,21 @@ def _should_notify_maintenance() -> bool:
         or now - _last_maintenance_notify_at >= _MAINTENANCE_NOTIFY_INTERVAL
     ):
         _last_maintenance_notify_at = now
+        return True
+    return False
+
+
+# 代理失效通知节流：代理挂了 admin 也只需要知道一次，30 min 一条够。
+_last_proxy_notify_at: float = 0.0
+_PROXY_NOTIFY_INTERVAL = 1800  # 30 分钟
+
+
+def _should_notify_proxy() -> bool:
+    """是否该给 admin 发代理失效通知。30 分钟最多一次。"""
+    global _last_proxy_notify_at
+    now = time.monotonic()
+    if _last_proxy_notify_at <= 0 or now - _last_proxy_notify_at >= _PROXY_NOTIFY_INTERVAL:
+        _last_proxy_notify_at = now
         return True
     return False
 
@@ -1002,6 +1018,37 @@ async def run_once(
                 )
                 await web_notifier.send_error(hint)
         raise
+    except ProxyError as e:
+        # 抓取代理失效（HTTPS_PROXY 502 / 隧道失败）。ProxyError 是
+        # ScrapeNetworkError 子类——控制流仍走网络失败冷却，但：
+        # 1. 把失败的代理标记进 cooldown → 下一轮 get_proxy_url 自动切到备用
+        #    （SCRAPE_PROXIES_FALLBACK 配了的话）
+        # 2. 给 admin 发一条明确告警（30 min 节流）。不发普通用户——改不了代理
+        from config import proxy_pool_size, report_proxy_failure
+        await _stash_pending_prewarms()
+        new_proxy = report_proxy_failure()      # 冷却当前代理，返回切换后会用的
+        has_backup = proxy_pool_size() > 1
+        logger.error(
+            "🛰️ 抓取代理失效，已标记冷却%s: %s",
+            "，下一轮切换到备用代理" if has_backup else "（无备用代理可切）", e,
+        )
+        if not dry_run and _should_notify_proxy():
+            if has_backup:
+                tail = "已自动切换到备用代理，下一轮重试。请尽快修复主代理。"
+            else:
+                tail = (
+                    "监控已暂停抓取（代理不通时无法绕过 Cloudflare）。"
+                    "请检查 HTTPS_PROXY，或配置 SCRAPE_PROXIES_FALLBACK 备用代理。"
+                )
+            msg = f"🛰️ 抓取代理失效\n\n{e}\n\n{tail}\n30 分钟内不重复通知。"
+            if web_notifier:
+                await web_notifier.send_error(msg)
+            from mcore import push as _push
+            try:
+                await _push.dispatch_admin(storage, msg, kind="proxy")
+            except Exception:
+                logger.debug("代理失效 admin push 失败（已忽略）", exc_info=True)
+        raise
     except ScrapeNetworkError as e:
         # 全部城市第 1 页网络失败 → 不更新 last_scrape_at（非有效抓取），
         # 上传让 main_loop 做连续失败计数和冷却。不发给用户通知——
@@ -1448,6 +1495,22 @@ async def main_loop(
                 cooldown,
             )
             await asyncio.sleep(cooldown)
+        except ProxyError as e:
+            # 代理失效：run_once 已把坏代理标记冷却，下一轮 get_proxy_url 会切到
+            # 备用。有备用就**短冷却**（很快用备用重试）；没备用退化到普通网络冷却。
+            from config import proxy_pool_size
+            if proxy_pool_size() > 1:
+                cooldown = apply_jitter(20, cfg.jitter_ratio)
+                logger.warning(
+                    "🛰️ 代理失效，%d 秒后用备用代理重试: %s", cooldown, e,
+                )
+                await asyncio.sleep(cooldown)
+            else:
+                # 无备用——和普通网络失败一样攒计数 + 长冷却
+                network_fail_streak += 1
+                cooldown = apply_jitter(_NETWORK_FAIL_COOLDOWN, cfg.jitter_ratio)
+                logger.error("🛰️ 代理失效且无备用，冷却 %d 秒: %s", cooldown, e)
+                await asyncio.sleep(cooldown)
         except ScrapeNetworkError as e:
             network_fail_streak += 1
             if network_fail_streak >= _NETWORK_FAIL_THRESHOLD:

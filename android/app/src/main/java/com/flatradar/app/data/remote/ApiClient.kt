@@ -90,4 +90,28 @@ class ApiException(
 ) : Exception(message) {
     val isAuthError: Boolean
         get() = code == "unauthorized" || code == "forbidden"
+
+    companion object {
+        /**
+         * 从 Retrofit HttpException 的 error body 里提取错误信息。
+         * 服务端返回 {"ok":false, "error":{"code":"...", "message":"..."}}
+         */
+        fun fromHttpException(e: retrofit2.HttpException): ApiException {
+            return try {
+                val body = e.response()?.errorBody()?.string() ?: ""
+                val json = org.json.JSONObject(body)
+                val errObj = json.optJSONObject("error")
+                if (errObj != null) {
+                    ApiException(
+                        errObj.optString("code", "http_${e.code()}"),
+                        errObj.optString("message", "请求失败 (${e.code()})")
+                    )
+                } else {
+                    ApiException("http_${e.code()}", "请求失败 (${e.code()})")
+                }
+            } catch (_: Exception) {
+                ApiException("http_${e.code()}", "请求失败 (${e.code()})")
+            }
+        }
+    }
 }

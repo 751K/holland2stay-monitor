@@ -72,6 +72,39 @@ class ScrapeNetworkError(Exception):
     """
 
 
+class ProxyError(ScrapeNetworkError):
+    """
+    抓取代理（``HTTPS_PROXY`` / ``ALL_PROXY``）本身故障——CONNECT 502 /
+    隧道建立失败 / 连接被拒等。**注意是代理层挂了，不是 H2S 挂了。**
+
+    继承 ``ScrapeNetworkError``：沿用"网络失败"的连续计数 + 冷却路径，
+    无需改 monitor 的现有控制流。但 monitor 会 ``isinstance`` 出它来额外
+    发一条专门的"代理失效"admin 告警——之前代理 502 只会默默进网络冷却，
+    dashboard 不报警，运维以为"服务器崩了"却看不出根因。
+    """
+
+
+def is_proxy_error(exc: BaseException) -> bool:
+    """
+    判断异常是否为抓取代理层故障。
+
+    curl_cffi 代理失败抛 ``curl_cffi.requests.exceptions.ProxyError``（类名
+    含 Proxy）；底层 libcurl 的代理错误 message 含 "CONNECT tunnel failed" /
+    "Proxy CONNECT" / curl 错误码 (56)（隧道失败）/ (97)（代理握手）。
+    """
+    name = type(exc).__name__.lower()
+    if "proxy" in name:
+        return True
+    msg = str(exc).lower()
+    return (
+        "connect tunnel failed" in msg
+        or "proxy connect" in msg
+        or "tunnel connection failed" in msg
+        or "curl: (56)" in msg
+        or "curl: (97)" in msg
+    )
+
+
 class UpstreamMaintenanceError(Exception):
     """
     抓取目标平台正在做计划内维护（主站显示"We'll be back soon" /

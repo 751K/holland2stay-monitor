@@ -10,6 +10,7 @@ import com.flatradar.app.data.local.TokenManager
 import com.flatradar.app.data.remote.ApiClient
 import com.flatradar.app.data.remote.ApiException
 import com.flatradar.app.data.remote.AuthInterceptor
+import retrofit2.HttpException
 import com.flatradar.app.domain.model.LoginRequest
 import com.flatradar.app.domain.model.UserInfo
 import com.flatradar.app.navigation.NavigationCoordinator
@@ -71,6 +72,12 @@ class AuthViewModel @Inject constructor(
                 if (resp.ok && resp.data != null) {
                     applyMe(resp.data.role, resp.data.user)
                 }
+            } catch (e: HttpException) {
+                val apiErr = ApiException.fromHttpException(e)
+                if (apiErr.isAuthError) {
+                    tokenManager.clearToken()
+                }
+                _uiState.value = _uiState.value.copy(isLoading = false)
             } catch (e: ApiException) {
                 if (e.isAuthError) {
                     tokenManager.clearToken()
@@ -113,6 +120,13 @@ class AuthViewModel @Inject constructor(
                     )
                     errorBus.show(message)
                 }
+            } catch (e: HttpException) {
+                val apiErr = ApiException.fromHttpException(e)
+                errorBus.show(apiErr.message)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = apiErr.message
+                )
             } catch (e: ApiException) {
                 errorBus.show(e.message)
                 _uiState.value = _uiState.value.copy(
@@ -159,6 +173,13 @@ class AuthViewModel @Inject constructor(
                     )
                     errorBus.show(message)
                 }
+            } catch (e: HttpException) {
+                val apiErr = ApiException.fromHttpException(e)
+                errorBus.show(apiErr.message)
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    errorMessage = apiErr.message
+                )
             } catch (e: ApiException) {
                 errorBus.show(e.message)
                 _uiState.value = _uiState.value.copy(

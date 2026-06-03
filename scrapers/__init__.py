@@ -29,6 +29,7 @@ from .base import (
     RATE_LIMIT_BACKOFF,
     AbstractScraper,
     BlockedError,
+    ProxyError,
     RateLimitError,
     ScrapeNetworkError,
     ScrapeResult,
@@ -36,6 +37,7 @@ from .base import (
     UpstreamMaintenanceError,
     is_cloudflare_body,
     is_maintenance_body,
+    is_proxy_error,
     probe_h2s_maintenance,
 )
 from .holland2stay import HollandStayScraper
@@ -97,6 +99,7 @@ def dispatch_scrape_tasks(
     completeness: dict[str, bool] = {}
     success_count = 0
     network_failures: list[str] = []
+    proxy_failure: Optional[ProxyError] = None   # 任一任务遇到代理故障就记下
     hard_failures: list[tuple[str, Exception]] = []
 
     for source, source_tasks in by_source.items():
@@ -131,6 +134,10 @@ def dispatch_scrape_tasks(
                     logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
                 except ScrapeNetworkError as e:
                     network_failures.append(ckey)
+                    # ProxyError 是 ScrapeNetworkError 子类——单独记下，便于全失败
+                    # 时上抛 ProxyError 让 monitor 发"代理失效"告警。
+                    if isinstance(e, ProxyError) and proxy_failure is None:
+                        proxy_failure = e
                     logger.error("%s 抓取网络失败，已隔离该任务: %s", ckey, e)
                     # 单 city 网络失败不进 completeness（与现有 scrape_all 行为一致）
 
@@ -145,8 +152,14 @@ def dispatch_scrape_tasks(
         )
         raise maint if maint is not None else hard_failures[0][1]
 
-    # 全部任务都网络失败 → 上抛，让 monitor 做连续失败计数
+    # 全部任务都网络失败 → 上抛，让 monitor 做连续失败计数。
+    # 若失败是代理故障，上抛 ProxyError（ScrapeNetworkError 子类，控制流不变），
+    # monitor 据此额外发"代理失效"告警。
     if success_count == 0 and network_failures and len(network_failures) == len(tasks):
+        if proxy_failure is not None:
+            raise ProxyError(
+                f"全部 {len(tasks)} 个任务因代理故障失败: {', '.join(network_failures)}"
+            ) from proxy_failure
         raise ScrapeNetworkError(
             f"全部 {len(tasks)} 个任务网络失败: {', '.join(network_failures)}"
         )
@@ -175,6 +188,7 @@ __all__ = [
     "HollandStayScraper",
     "OurDomainScraper",
     "XiorScraper",
+    "ProxyError",
     "RateLimitError",
     "SCRAPER_REGISTRY",
     "ScrapeNetworkError",
@@ -185,5 +199,6 @@ __all__ = [
     "get_scraper",
     "is_cloudflare_body",
     "is_maintenance_body",
+    "is_proxy_error",
     "probe_h2s_maintenance",
 ]

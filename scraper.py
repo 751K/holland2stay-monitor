@@ -48,10 +48,12 @@ GQL_URL = "https://api.holland2stay.com/graphql/"
 from scrapers.base import (  # noqa: F401  (re-export for backwards compat)
     RATE_LIMIT_BACKOFF,
     BlockedError,
+    ProxyError,
     RateLimitError,
     ScrapeNetworkError,
     UpstreamMaintenanceError,
     is_cloudflare_body,
+    is_proxy_error,
     probe_h2s_maintenance,
 )
 
@@ -157,6 +159,12 @@ def _post_gql(session: req.Session, query: str) -> dict:
                 attempt, GQL_URL, e,
                 exc_info=True,
             )
+            # 代理层故障（HTTPS_PROXY 502 / 隧道失败）单独归类，让 monitor 能发
+            # "代理失效" admin 告警（区别于 H2S 自身网络抖动）。
+            if is_proxy_error(e):
+                raise ProxyError(
+                    f"抓取代理故障（HTTPS_PROXY 不可用）：{e}"
+                ) from e
             raise
         # 403 → Cloudflare WAF 屏蔽 *或者* 平台维护。两者都返回 403，但语义不同：
         #   - Cloudflare 屏蔽 → 需要换代理/重启，发用户告警
@@ -478,8 +486,10 @@ def _scrape_city_pages(
         logger.info("[%s] 抓取第 %d 页", city_name, current_page)
         try:
             data = _post_gql(session, query)
-        except (RateLimitError, BlockedError, UpstreamMaintenanceError):
-            raise   # 直接上传：429/403/维护都不是单页失败，monitor 各自处理
+        except (RateLimitError, BlockedError, UpstreamMaintenanceError, ProxyError):
+            # ProxyError 必须保留类型（不被下面包成普通 ScrapeNetworkError），
+            # monitor 才能据此发"代理失效"告警。代理挂了任何页都直接上传。
+            raise
         except Exception as e:
             logger.error(
                 "[%s] 请求失败 page=%d city_ids=%s avail_ids=%s: %s",

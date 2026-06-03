@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.8.2 (2026-06-03)
+
+### Bug 修复 (Bug fixes)
+- **Android 登录 401 错误消息丢失**：服务端 `/api/v1/auth/login` 登录失败时返回 HTTP 401 + JSON `{"ok":false,"error":{"code":"unauthorized","message":"用户名或密码错误"}}`，但 Retrofit 对非 2xx 响应直接抛 `HttpException` 而非解析为 `ApiResponse` 对象。旧代码未捕获 `HttpException`，错误落到泛型 `catch (e: Exception)` 分支，显示 "Network error" 而非服务端真实消息。修复：
+  - `ApiClient.kt`：`ApiException` 新增 `fromHttpException()` 静态方法，从 `HttpException.errorBody` 解析 JSON 提取 error.message
+  - `AuthViewModel.kt`：`login()` / `register()` / `restoreSession()` 三个方法新增 `catch (e: HttpException)` 分支（排在 `ApiException` 前），用 `ApiException.fromHttpException()` 提取真实错误消息展示给用户
+
+### CI / 构建 (CI/CD)
+- **Release APK 自动构建**：GitHub Actions tag 推送时原先只构建 AAB（仅限 Google Play 分发）。现同时运行 `:app:assembleRelease` 产出签名 release APK，与 AAB 一起上传到 GitHub Release。用户可从 Release 页直接下载 APK 安装，不再局限于 Google Play。
+  - `build.yml`：`Build release AAB` step 添加 `./gradlew :app:assembleRelease`，新增 `Upload APK to Release` step 上传 `app-release.apk`
+
 ## v1.8.1 (2026-06-03)
 
 ### 功能改进 (Features)
