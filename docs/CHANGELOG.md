@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### 功能改进 (Features)
+- **代理故障直连降级**：抓取代理全部进入 10 分钟 cooldown 时，不再继续硬试故障代理，而是临时降级为服务器原生 IP 直连；monitor 在该状态下把抓取频率限制为最多 10 分钟一次，代理 cooldown 到期后自动恢复优先使用代理。
+
 ## v1.8.2 (2026-06-03)
 
 ### Bug 修复 (Bug fixes)

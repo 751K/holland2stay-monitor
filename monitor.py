@@ -50,7 +50,7 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from booker import PrewarmedSession
-from config import DATA_DIR, ENV_PATH, get_proxy_url, load_config
+from config import DATA_DIR, ENV_PATH, get_proxy_url, is_proxy_native_fallback_active, load_config
 from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.booking import RetryQueue, area_key, book_with_fallback
@@ -251,6 +251,7 @@ _MAINTENANCE_COOLDOWN = 900  # 15 分钟
 # 避免坏代理/断网时监控空转刷屏 error log
 _NETWORK_FAIL_THRESHOLD = 3
 _NETWORK_FAIL_COOLDOWN = 300  # 5 分钟
+_NATIVE_PROXY_FALLBACK_INTERVAL = 600  # 10 分钟；代理全挂时直连原生 IP 的最高频率
 
 # 屏蔽通知节流：避免每轮抓取都给用户推一次相同的告警。
 # 状态是模块级，进程重启后清零（重启后第一轮屏蔽会再发通知，符合预期）。
@@ -1028,13 +1029,26 @@ async def run_once(
         await _stash_pending_prewarms()
         new_proxy = report_proxy_failure()      # 冷却当前代理，返回切换后会用的
         has_backup = proxy_pool_size() > 1
+        native_fallback = is_proxy_native_fallback_active()
         logger.error(
             "🛰️ 抓取代理失效，已标记冷却%s: %s",
-            "，下一轮切换到备用代理" if has_backup else "（无备用代理可切）", e,
+            (
+                "，下一轮切换到备用代理"
+                if has_backup and new_proxy
+                else "，下一轮降级为服务器原生 IP 直连"
+                if native_fallback
+                else "（无备用代理可切）"
+            ),
+            e,
         )
         if not dry_run and _should_notify_proxy():
-            if has_backup:
+            if has_backup and new_proxy:
                 tail = "已自动切换到备用代理，下一轮重试。请尽快修复主代理。"
+            elif native_fallback:
+                tail = (
+                    "所有已配置代理都在冷却中，监控将临时降级为服务器原生 IP 直连。"
+                    "降级期间抓取频率最多 10 分钟一次，代理冷却结束后会自动恢复。"
+                )
             else:
                 tail = (
                     "监控已暂停抓取（代理不通时无法绕过 Cloudflare）。"
@@ -1325,6 +1339,18 @@ async def main_loop(
                 adaptive_peak = float(cfg.peak_interval)
                 peak_tag = ""
 
+            native_fallback_active = is_proxy_native_fallback_active()
+            if native_fallback_active:
+                prev_interval = effective_interval
+                effective_interval = max(effective_interval, _NATIVE_PROXY_FALLBACK_INTERVAL)
+                if effective_interval != prev_interval:
+                    logger.warning(
+                        "🛰️ 代理全冷却，降级为服务器原生 IP 直连；本轮间隔限制为 %d 秒（原 %d 秒）",
+                        effective_interval,
+                        prev_interval,
+                    )
+                peak_tag = f"{peak_tag}【代理降级直连】"
+
             logger.info("===== 第 %d 轮 %s=====", round_count, peak_tag)
 
             # booking_deadline：在此时刻后不再尝试备选房源，让下一轮扫描优先进行
@@ -1404,6 +1430,8 @@ async def main_loop(
                 last_heartbeat_time = time.monotonic()
 
             actual = apply_jitter(effective_interval, cfg.jitter_ratio)
+            if native_fallback_active:
+                actual = max(actual, _NATIVE_PROXY_FALLBACK_INTERVAL)
             dev_pct = (actual - effective_interval) / effective_interval * 100
             logger.info(
                 "等待 %d 秒（基准 %d s，%+.0f%%）%s",
@@ -1497,9 +1525,20 @@ async def main_loop(
             await asyncio.sleep(cooldown)
         except ProxyError as e:
             # 代理失效：run_once 已把坏代理标记冷却，下一轮 get_proxy_url 会切到
-            # 备用。有备用就**短冷却**（很快用备用重试）；没备用退化到普通网络冷却。
+            # 备用；若所有代理都在冷却，则临时直连原生 IP，并把频率压到 10 min。
             from config import proxy_pool_size
-            if proxy_pool_size() > 1:
+            if is_proxy_native_fallback_active():
+                cooldown = max(
+                    apply_jitter(_NATIVE_PROXY_FALLBACK_INTERVAL, cfg.jitter_ratio),
+                    _NATIVE_PROXY_FALLBACK_INTERVAL,
+                )
+                logger.warning(
+                    "🛰️ 代理失效且全部代理在冷却，降级直连原生 IP；%d 秒后再试: %s",
+                    cooldown,
+                    e,
+                )
+                await asyncio.sleep(cooldown)
+            elif proxy_pool_size() > 1:
                 cooldown = apply_jitter(20, cfg.jitter_ratio)
                 logger.warning(
                     "🛰️ 代理失效，%d 秒后用备用代理重试: %s", cooldown, e,

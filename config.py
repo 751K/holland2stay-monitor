@@ -164,7 +164,9 @@ _last_impersonate: Optional[str] = None
 # 逗号/换行分隔多个）。主代理挂了（webshare 502 之类）自动切到下一个可用的。
 #
 # 故障的代理进 cooldown（默认 10 min），期间 get_proxy_url 跳过它；冷却结束
-# 后自动重新纳入候选。状态进程级，monitor 重启清零（重启即重新从主代理试）。
+# 后自动重新纳入候选。若所有代理都在 cooldown，则抓取降级为直连服务器原生
+# IP；monitor 会把轮询频率降到最多 10 min 一次，避免原生 IP 被快速打穿。
+# 状态进程级，monitor 重启清零（重启即重新从主代理试）。
 import time as _time  # noqa: E402  (局部别名，避免与文件其它 time 用法冲突)
 
 _PROXY_COOLDOWN_SEC = 600  # 10 分钟
@@ -188,8 +190,8 @@ def get_proxy_url() -> str:
     统一的代理 URL 读取，**带故障切换**。
 
     返回当前**未在冷却**的第一个代理（主代理优先；主代理被
-    ``report_proxy_failure`` 标记故障后自动落到备用）。全部都在冷却时，
-    返回冷却最早结束的那个（兜底——至少试一个，总比不抓强）。无配置返回空串。
+    ``report_proxy_failure`` 标记故障后自动落到备用）。全部都在冷却时返回
+    空串，表示抓取临时降级为直连服务器原生 IP。无配置也返回空串。
 
     所有需要代理的模块（scraper、booker、monitor）均通过此函数获取。
     """
@@ -200,15 +202,29 @@ def get_proxy_url() -> str:
     for p in pool:
         if _proxy_cooldown_until.get(p, 0.0) <= now:
             return p
-    # 全在冷却——返回最接近恢复的那个
-    return min(pool, key=lambda p: _proxy_cooldown_until.get(p, 0.0))
+    # 全在冷却——降级为直连原生 IP；monitor 会降频到最多 10 min 一次。
+    return ""
+
+
+def is_proxy_native_fallback_active() -> bool:
+    """
+    是否因所有已配置代理都在冷却中而进入直连 fallback。
+
+    注意无代理配置不算 fallback；那是用户主动选择直连。
+    """
+    pool = _proxy_pool()
+    if not pool:
+        return False
+    now = _time.monotonic()
+    return all(_proxy_cooldown_until.get(p, 0.0) > now for p in pool)
 
 
 def report_proxy_failure(url: str = "") -> str:
     """
     把一个代理标记为故障，进 cooldown。``url`` 留空时标记**当前选中**的那个
     （即刚刚用过、刚失败的那个）。返回切换后 get_proxy_url 会用的新代理
-    （便于日志显示"主→备"），无备用时返回同一个。
+    （便于日志显示"主→备"），若所有代理都进入冷却则返回空串，表示下一轮
+    将直连服务器原生 IP。
     """
     pool = _proxy_pool()
     target = url.strip() or (pool[0] if pool else "")
