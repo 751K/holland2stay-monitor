@@ -17,6 +17,7 @@ from scrapers.base import (
     ScrapeNetworkError,
     ScrapeTask,
     is_proxy_error,
+    is_proxy_service_error,
 )
 
 
@@ -36,6 +37,30 @@ class TestIsProxyError:
         class ProxyError(Exception):  # 模拟 curl_cffi 的 ProxyError
             pass
         assert is_proxy_error(ProxyError("anything")) is True
+
+
+class TestIsProxyServiceError:
+    def test_webshare_502_headers_confirm_service_error(self):
+        msg = (
+            "HTTP/1.1 502 Bad Gateway\n"
+            "X-Webshare-Error: 502\n"
+            "X-Webshare-Reason: internal_error_auth_circuit_breaker_open"
+        )
+        assert is_proxy_service_error(Exception(msg)) is True
+
+    def test_proxy_connect_502_confirms_service_error(self):
+        assert is_proxy_service_error(
+            Exception("curl: (56) CONNECT tunnel failed, response 502")
+        ) is True
+
+    def test_plain_timeout_is_not_service_error(self):
+        assert is_proxy_service_error(Exception("Connection timed out")) is False
+
+    def test_exception_chain_is_checked(self):
+        inner = Exception("X-Webshare-Reason: internal_error_auth_circuit_breaker_open")
+        outer = ProxyError("抓取代理故障")
+        outer.__cause__ = inner
+        assert is_proxy_service_error(outer) is True
 
 
 class TestProxyErrorIsNetworkSubclass:

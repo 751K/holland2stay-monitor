@@ -63,6 +63,7 @@ from scrapers import (
     ScrapeNetworkError,
     UpstreamMaintenanceError,
     dispatch_scrape_tasks,
+    is_proxy_service_error,
 )
 from update_checker import check_for_updates
 from storage import Storage
@@ -251,6 +252,7 @@ _MAINTENANCE_COOLDOWN = 900  # 15 分钟
 # 避免坏代理/断网时监控空转刷屏 error log
 _NETWORK_FAIL_THRESHOLD = 3
 _NETWORK_FAIL_COOLDOWN = 300  # 5 分钟
+_PROXY_CONFIRM_RETRY_DELAY = 60  # 单次代理故障先短冷却复核，不立刻切换/直连
 _NATIVE_PROXY_FALLBACK_INTERVAL = 600  # 10 分钟；代理全挂时直连原生 IP 的最高频率
 
 # 屏蔽通知节流：避免每轮抓取都给用户推一次相同的告警。
@@ -1025,30 +1027,49 @@ async def run_once(
         # 1. 把失败的代理标记进 cooldown → 下一轮 get_proxy_url 自动切到备用
         #    （SCRAPE_PROXIES_FALLBACK 配了的话）
         # 2. 给 admin 发一条明确告警（30 min 节流）。不发普通用户——改不了代理
-        from config import proxy_pool_size, report_proxy_failure
+        from config import is_proxy_in_cooldown, proxy_failure_mark_count, proxy_pool_size, report_proxy_failure
         await _stash_pending_prewarms()
-        new_proxy = report_proxy_failure()      # 冷却当前代理，返回切换后会用的
+        old_proxy = get_proxy_url()
+        service_error = is_proxy_service_error(e)
+        new_proxy = report_proxy_failure(service_error_confirmed=service_error)
+        confirmed_down = is_proxy_in_cooldown(old_proxy)
         has_backup = proxy_pool_size() > 1
         native_fallback = is_proxy_native_fallback_active()
+        switched_proxy = bool(new_proxy and new_proxy != old_proxy)
         logger.error(
-            "🛰️ 抓取代理失效，已标记冷却%s: %s",
+            "🛰️ 抓取代理故障%s: %s",
             (
                 "，下一轮切换到备用代理"
-                if has_backup and new_proxy
+                if switched_proxy
                 else "，下一轮降级为服务器原生 IP 直连"
                 if native_fallback
+                else f"，服务端异常待确认（{proxy_failure_mark_count(old_proxy)}/2）"
+                if old_proxy and not confirmed_down and service_error
+                else "，未确认代理服务端异常，按普通网络失败处理"
+                if old_proxy and not service_error
                 else "（无备用代理可切）"
             ),
             e,
         )
         if not dry_run and _should_notify_proxy():
-            if has_backup and new_proxy:
+            if switched_proxy:
                 tail = "已自动切换到备用代理，下一轮重试。请尽快修复主代理。"
             elif native_fallback:
                 tail = (
                     "所有已配置代理都在冷却中，监控将临时降级为服务器原生 IP 直连。"
                     "降级期间抓取频率最多 10 分钟一次，代理冷却结束后会自动恢复。"
                 )
+            elif old_proxy and not confirmed_down:
+                if service_error:
+                    tail = (
+                        "已看到代理服务端异常特征，但尚未达到连续确认阈值。"
+                        "下一轮会继续使用当前代理复核；连续确认后才会切换备用或降级直连。"
+                    )
+                else:
+                    tail = (
+                        "这次错误未包含代理服务端异常特征，暂不切换/直连降级。"
+                        "监控会按网络失败路径短暂冷却后复查。"
+                    )
             else:
                 tail = (
                     "监控已暂停抓取（代理不通时无法绕过 Cloudflare）。"
@@ -1526,7 +1547,8 @@ async def main_loop(
         except ProxyError as e:
             # 代理失效：run_once 已把坏代理标记冷却，下一轮 get_proxy_url 会切到
             # 备用；若所有代理都在冷却，则临时直连原生 IP，并把频率压到 10 min。
-            from config import proxy_pool_size
+            from config import proxy_failure_mark_count, proxy_pool_size
+            active_proxy = get_proxy_url()
             if is_proxy_native_fallback_active():
                 cooldown = max(
                     apply_jitter(_NATIVE_PROXY_FALLBACK_INTERVAL, cfg.jitter_ratio),
@@ -1534,6 +1556,14 @@ async def main_loop(
                 )
                 logger.warning(
                     "🛰️ 代理失效且全部代理在冷却，降级直连原生 IP；%d 秒后再试: %s",
+                    cooldown,
+                    e,
+                )
+                await asyncio.sleep(cooldown)
+            elif active_proxy and proxy_failure_mark_count(active_proxy) > 0:
+                cooldown = apply_jitter(_PROXY_CONFIRM_RETRY_DELAY, cfg.jitter_ratio)
+                logger.warning(
+                    "🛰️ 代理故障尚未确认，%d 秒后继续使用当前代理复核: %s",
                     cooldown,
                     e,
                 )

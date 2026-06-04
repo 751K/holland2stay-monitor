@@ -38,6 +38,7 @@ from .base import (
     is_cloudflare_body,
     is_maintenance_body,
     is_proxy_error,
+    is_proxy_service_error,
     probe_h2s_maintenance,
 )
 from .holland2stay import HollandStayScraper
@@ -200,5 +201,6 @@ __all__ = [
     "is_cloudflare_body",
     "is_maintenance_body",
     "is_proxy_error",
+    "is_proxy_service_error",
     "probe_h2s_maintenance",
 ]

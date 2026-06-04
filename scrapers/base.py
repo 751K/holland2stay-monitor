@@ -105,6 +105,49 @@ def is_proxy_error(exc: BaseException) -> bool:
     )
 
 
+def is_proxy_service_error(exc: BaseException) -> bool:
+    """
+    判断一次代理错误是否足以确认“代理服务端异常”。
+
+    这比 ``is_proxy_error`` 更严格：普通连接抖动、timeout、TLS 中断只算疑似
+    代理故障；只有代理服务明确返回 502/Bad Gateway 或 provider 自己的错误
+    头/原因（如 Webshare 的 X-Webshare-* / circuit breaker）才允许进入
+    cooldown/fallback。
+    """
+    text = _exception_chain_text(exc)
+    if not text:
+        return False
+
+    provider_markers = (
+        "x-webshare-error",
+        "x-webshare-reason",
+        "internal_error_auth_circuit_breaker_open",
+        "webshare",
+    )
+    if any(marker in text for marker in provider_markers) and (
+        "502" in text or "bad gateway" in text or "circuit_breaker" in text
+    ):
+        return True
+
+    return (
+        ("connect tunnel failed" in text or "tunnel connection failed" in text or "proxy connect" in text)
+        and ("502" in text or "bad gateway" in text)
+    )
+
+
+def _exception_chain_text(exc: BaseException) -> str:
+    """合并异常链文本，避免 curl_cffi 把代理响应细节藏在 __cause__ 里。"""
+    parts: list[str] = []
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        parts.append(type(cur).__name__)
+        parts.append(str(cur))
+        cur = cur.__cause__ or cur.__context__
+    return "\n".join(parts).lower()
+
+
 class UpstreamMaintenanceError(Exception):
     """
     抓取目标平台正在做计划内维护（主站显示"We'll be back soon" /

@@ -163,14 +163,18 @@ _last_impersonate: Optional[str] = None
 # 主代理（HTTPS_PROXY/HTTP_PROXY/ALL_PROXY）+ 备用代理（SCRAPE_PROXIES_FALLBACK，
 # 逗号/换行分隔多个）。主代理挂了（webshare 502 之类）自动切到下一个可用的。
 #
-# 故障的代理进 cooldown（默认 10 min），期间 get_proxy_url 跳过它；冷却结束
-# 后自动重新纳入候选。若所有代理都在 cooldown，则抓取降级为直连服务器原生
-# IP；monitor 会把轮询频率降到最多 10 min 一次，避免原生 IP 被快速打穿。
+# 代理连续确认故障后进 cooldown（默认 10 min），期间 get_proxy_url 跳过它；
+# 冷却结束后自动重新纳入候选。若所有代理都在 cooldown，则抓取降级为直连
+# 服务器原生 IP；monitor 会把轮询频率降到最多 10 min 一次，避免原生 IP
+# 被快速打穿。
 # 状态进程级，monitor 重启清零（重启即重新从主代理试）。
 import time as _time  # noqa: E402  (局部别名，避免与文件其它 time 用法冲突)
 
 _PROXY_COOLDOWN_SEC = 600  # 10 分钟
+_PROXY_FAILURE_CONFIRM_THRESHOLD = 2
+_PROXY_FAILURE_CONFIRM_WINDOW_SEC = 600
 _proxy_cooldown_until: dict[str, float] = {}  # proxy_url -> monotonic 截止
+_proxy_failure_marks: dict[str, tuple[int, float]] = {}  # proxy_url -> (count, first_seen)
 
 
 def _proxy_pool() -> list[str]:
@@ -219,21 +223,53 @@ def is_proxy_native_fallback_active() -> bool:
     return all(_proxy_cooldown_until.get(p, 0.0) > now for p in pool)
 
 
-def report_proxy_failure(url: str = "") -> str:
+def report_proxy_failure(url: str = "", *, service_error_confirmed: bool = True) -> str:
     """
-    把一个代理标记为故障，进 cooldown。``url`` 留空时标记**当前选中**的那个
-    （即刚刚用过、刚失败的那个）。返回切换后 get_proxy_url 会用的新代理
-    （便于日志显示"主→备"），若所有代理都进入冷却则返回空串，表示下一轮
-    将直连服务器原生 IP。
+    记录一次代理故障。``url`` 留空时记录**当前选中**的那个（即刚刚用过、
+    刚失败的那个）。
+
+    只有同一代理在确认窗口内连续失败达到阈值，且本次错误已确认是代理
+    服务端异常时，才把它放入 cooldown。返回下一轮 get_proxy_url 会用的
+    代理；若所有代理都进入冷却则返回空串，表示下一轮将直连服务器原生 IP。
     """
     pool = _proxy_pool()
     target = url.strip() or (pool[0] if pool else "")
     # 标记当前选中的（不是 pool[0]，因为 pool[0] 可能已在冷却）
     if not url:
         target = get_proxy_url()
-    if target:
+    if target and _record_proxy_failure_mark(target) and service_error_confirmed:
         _proxy_cooldown_until[target] = _time.monotonic() + _PROXY_COOLDOWN_SEC
+        _proxy_failure_marks.pop(target, None)
     return get_proxy_url()
+
+
+def is_proxy_in_cooldown(url: str) -> bool:
+    """指定代理是否已进入 cooldown。"""
+    if not url:
+        return False
+    return _proxy_cooldown_until.get(url, 0.0) > _time.monotonic()
+
+
+def proxy_failure_mark_count(url: str) -> int:
+    """指定代理当前确认窗口内的失败标记次数，用于日志/测试。"""
+    if not url:
+        return 0
+    count, first_seen = _proxy_failure_marks.get(url, (0, 0.0))
+    if first_seen and _time.monotonic() - first_seen <= _PROXY_FAILURE_CONFIRM_WINDOW_SEC:
+        return count
+    return 0
+
+
+def _record_proxy_failure_mark(url: str) -> bool:
+    """记录一次故障标记；达到确认阈值返回 True。"""
+    now = _time.monotonic()
+    count, first_seen = _proxy_failure_marks.get(url, (0, 0.0))
+    if not first_seen or now - first_seen > _PROXY_FAILURE_CONFIRM_WINDOW_SEC:
+        count = 0
+        first_seen = now
+    count += 1
+    _proxy_failure_marks[url] = (count, first_seen)
+    return count >= _PROXY_FAILURE_CONFIRM_THRESHOLD
 
 
 def proxy_pool_size() -> int:
