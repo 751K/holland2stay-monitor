@@ -161,15 +161,34 @@ def _lf_from_dict(d: dict) -> ListingFilter:
 
 
 def _ab_from_dict(d: dict) -> AutoBookConfig:
-    """从 dict 构造 AutoBookConfig，内含 listing_filter 嵌套反序列化。"""
+    """从 dict 构造 AutoBookConfig，内含 listing_filter 嵌套反序列化。
+
+    迁移：旧版本只有共用的 ``email``/``password``。新版 H2S / Xior / OurDomain
+    三套独立。当某平台的 email/password **缺失**（旧数据）时回退到旧共用值；
+    若字段存在（含空串，表示用户主动清空）则原样采用。
+    """
+    old_email = d.get("email", "")
+    old_password = decrypt(d.get("password", ""))
+
+    def _platform_pw(key: str) -> str:
+        # key 缺失 = 旧数据 → 回退旧共用密码；存在（含空串）= 新数据 → 按值解密
+        return decrypt(d[key]) if key in d else old_password
+
     return AutoBookConfig(
         enabled=d.get("enabled", False),
         dry_run=d.get("dry_run", True),
-        email=d.get("email", ""),
-        password=decrypt(d.get("password", "")),
         listing_filter=_lf_from_dict(d.get("listing_filter", {})),
         cancel_enabled=d.get("cancel_enabled", False),
+        # H2S
+        email=old_email,
+        password=old_password,
         payment_method=d.get("payment_method", "idealcheckout_ideal"),
+        # Xior
+        xior_email=d.get("xior_email", old_email),
+        xior_password=_platform_pw("xior_password"),
+        # OurDomain
+        ourdomain_email=d.get("ourdomain_email", old_email),
+        ourdomain_password=_platform_pw("ourdomain_password"),
     )
 
 
@@ -273,8 +292,9 @@ def _user_to_row(u: UserConfig) -> dict:
         if d.get(field_name):
             d[field_name] = encrypt(d[field_name])
     ab = d.get("auto_book") or {}
-    if ab.get("password"):
-        ab["password"] = encrypt(ab["password"])
+    for _pw_key in ("password", "xior_password", "ourdomain_password"):
+        if ab.get(_pw_key):
+            ab[_pw_key] = encrypt(ab[_pw_key])
 
     return {
         "id": d["id"],

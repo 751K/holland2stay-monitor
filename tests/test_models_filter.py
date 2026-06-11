@@ -282,3 +282,74 @@ class TestListingFilterCompound:
             features=["Type: Studio", "Area: 26 m²"],
         )
         assert f.passes(l) is False
+
+
+# ─── 多平台维度能力（一套过滤条件作用于 H2S / Xior / OurDomain）─────────
+
+class TestCrossPlatformDims:
+    """平台抓不到的维度 → 对该平台跳过该条件（fail-open，避免误杀）；
+    平台支持的维度 → 维持严格匹配（保自动预订安全）。"""
+
+    def _xior(self, **ov):
+        # Xior feature_map 只有 area（无 floor/occupancy/type/neighborhood/energy）
+        base = dict(id="xr1", name="X", status="Available to book", price_raw="€800",
+                    available_from=None, features=["Area: 19 m²", "Floorplan: Comfy"],
+                    url="http://x", city="Eindhoven", source="xior")
+        base.update(ov)
+        return Listing(**base)
+
+    def _od(self, **ov):
+        # OurDomain 有 floor/occupancy/type/area（无 neighborhood/energy/contract...）
+        base = dict(id="od1", name="O", status="Available to book", price_raw="€800",
+                    available_from=None,
+                    features=["Area: 22 m²", "Floor: 3", "Occupancy: Single", "Type: Studio"],
+                    url="http://o", city="Amsterdam", source="ourdomain")
+        base.update(ov)
+        return Listing(**base)
+
+    def test_xior_skips_floor_filter(self):
+        # Xior 无楼层 → min_floor 不该把它过滤掉
+        assert ListingFilter(min_floor=5).passes(self._xior()) is True
+
+    def test_xior_skips_neighborhood_and_type_and_energy(self):
+        f = ListingFilter(allowed_neighborhoods=["Strijp"], allowed_types=["Studio"],
+                          allowed_energy="A")
+        assert f.passes(self._xior()) is True  # 三个维度 Xior 都没有 → 全跳过
+
+    def test_xior_energy_filter_no_crash(self):
+        # energy 块旧实现对缺 energy_label 的平台会 UnboundLocalError
+        assert ListingFilter(allowed_energy="B").passes(self._xior()) is True
+
+    def test_xior_universal_dims_still_enforced(self):
+        # 通用维度（价格/面积/城市）对 Xior 仍然严格
+        assert ListingFilter(max_rent=500.0).passes(self._xior(price_raw="€800")) is False
+        assert ListingFilter(min_area=25.0).passes(self._xior()) is False  # 19 < 25
+        assert ListingFilter(allowed_cities=["Amsterdam"]).passes(self._xior()) is False
+
+    def test_ourdomain_enforces_floor_and_type(self):
+        # OD 支持 floor/type → 维持严格
+        assert ListingFilter(min_floor=5).passes(self._od()) is False        # 3 < 5
+        assert ListingFilter(min_floor=1).passes(self._od()) is True         # 3 >= 1
+        assert ListingFilter(allowed_types=["Loft"]).passes(self._od()) is False
+        assert ListingFilter(allowed_types=["Studio"]).passes(self._od()) is True
+
+    def test_ourdomain_skips_neighborhood(self):
+        # OD 无 neighborhood → 跳过
+        assert ListingFilter(allowed_neighborhoods=["Strijp"]).passes(self._od()) is True
+
+    def test_h2s_strictness_preserved(self):
+        # H2S 支持全部维度 → 严格匹配不被削弱
+        h2s = _make_listing(source="holland2stay",
+                            features=["Type: Studio", "Area: 26 m²", "Floor: 2",
+                                      "Neighborhood: Centrum", "Energy: A"])
+        assert ListingFilter(allowed_neighborhoods=["Strijp"]).passes(h2s) is False
+        assert ListingFilter(allowed_neighborhoods=["Centrum"]).passes(h2s) is True
+
+    def test_unknown_source_only_universal_dims(self):
+        unknown = Listing(id="z1", name="Z", status="Available to book", price_raw="€800",
+                          available_from=None, features=["Area: 20 m²"], url="http://z",
+                          city="Eindhoven", source="newplatform")
+        # 平台专有维度跳过
+        assert ListingFilter(min_floor=9, allowed_types=["Studio"]).passes(unknown) is True
+        # 通用维度仍生效
+        assert ListingFilter(max_rent=500.0).passes(unknown) is False

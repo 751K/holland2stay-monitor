@@ -1,9 +1,38 @@
 # Changelog
 
-## Unreleased
+## v1.8.3 (2026-06-11)
+
+### 自动预订 — Xior / OurDomain (Auto-Booking)
+- **RENTCafe 自动预订引擎**：新增 `bookers/rentcafe.py`，实现 RENTCafe（`securerc.co.uk`）多步表单自动化，Xior 和 OurDomain 共用同一引擎。
+  - `RentCafeSession`：封装 HTTP 会话 + `cafeportalkey` 管理 + 自动 reCAPTCHA 求解
+  - `RentCafeBooker`：`AbstractBooker` 子类，按 `self.source` 取平台专属凭据（`xior_*` / `ourdomain_*`），只做登录不自动注册
+  - `XiorBooker` / `OurDomainBooker`：按平台区分配置
+  - `bookers/__init__.py`：BOOKER_REGISTRY 新增 `xior`、`ourdomain`
+  - **状态**：引擎框架已完成，但 RENTCafe 多步表单余下步骤（Applicant Info 等）尚未侦察，Web 面板标记为"开发中，暂不可用"
+- **reCAPTCHA 求解模块**：新增 `captcha/`（`solver.py`），基于 2Captcha API 自动求解 reCAPTCHA v2/v3 Enterprise。
+  - RENTCafe 固定 sitekey：v2=`6LfAdx8T...` / v3=`6LfBeqEa...`
+  - v3 → v2 回退策略：v3 求解器 token 得分恒为 0.10（Google 指纹识别），RENTCafe 自动降级到 v2 checkbox → 用 2Captcha 真人求解（准确率 99%）
+  - 新增依赖：`2captcha-python>=2.0.0`
+- **Xior RENTCafe 侦察更新（2026-06-04）**：`docs/XIOR.md` §11 根据最新实测全面修订。
+  - 纠正旧结论：`register.aspx` 和 `guestlogin.aspx` **现在都有** reCAPTCHA v3 Enterprise
+  - 新增完整 sitekey 记录、v3→v2 回退 JS 逻辑
+  - 注册链接被 Xior JS 隐藏，但后端接口仍存活
+  - 预订流程 reCAPTCHA 成本估算：$0.003-0.005/次
+  - 确认 WordPress AJAX 数据可靠性：19/20 交叉验证准确率
+- **平台独立账号配置**：`AutoBookConfig` 拆分为三套独立凭据——H2S（`email`/`password`）、Xior（`xior_email`/`xior_password`/`xior_first_name`/`xior_last_name`/`xior_phone`/`xior_birth_date`）、OurDomain（`ourdomain_*` 同）。Web 面板对应拆分为三个独立区段，Xior/OurDomain 加"开发中"标记。
+- **移除自动取消旧订单**：`cancel_enabled` 功能不可用且不再计划实现，Web 面板入口已删除（数据模型保留字段兼容旧数据）
+- **依赖更新**：`requirements.txt` 新增 `2captcha-python>=2.0.0`
 
 ### 功能改进 (Features)
 - **代理故障直连降级**：抓取代理连续失败且错误内容可确认代理服务端异常（如 Webshare `502 Bad Gateway`、`X-Webshare-Error`、`internal_error_auth_circuit_breaker_open`、CONNECT 502）后才进入 10 分钟 cooldown；全部代理都进入 cooldown 时，不再继续硬试故障代理，而是临时降级为服务器原生 IP 直连。monitor 在该状态下把抓取频率限制为最多 10 分钟一次，代理 cooldown 到期后自动恢复优先使用代理。
+- **H2S Cloudflare 403 降噪**：预登录 prewarm 从「抓取前并发」改为「抓取成功后再启动」，避免当前出口被 WAF 屏蔽时每轮额外打出多用户登录 GraphQL；prewarm 一旦遇到 Cloudflare 403，会清理缓存并在 15 分钟内停止主动预登录。连续 H2S 403 冷却改为指数退避（15 → 30 → 60 → 120 分钟，上限 2 小时），减少同一出口反复撞 WAF。
+
+### Bug 修复 (Bug fixes)
+- **Xior 可订假阳性**：WP `yardi_room_availability` feed 会把「实际订不了」的单元报成「Available to book」，新增两道可用性校验闸（均作用于 `scrapers/xior.py` 的 `_to_listing`，下调时降级为 `Occupied` 但留库，便于日后状态变更通知）：
+  - **① 可用日期 60 天窗口**：`Notice Unrented` 的 `availableDate` 距今 > 60 天（现住户远期才搬走，实测见过 `2027-07-01`）→ 不报可订。日期缺失/不可解析时保守保留（不漏报）。
+  - **② floorplans.aspx 权威校验**：用 RentCafe OLE 的 `floorplans.aspx`（curl_cffi 直取，无 CF challenge）求出真正可订（`(Available)`+`applyButton`）的户型集合，单元 `floorplanId` 不在集合内 → 降级（解决"点 apply 链接进去说没了"）。仅当有窗口内候选时才多查一次/栋，**fail-open**：抓不到就信 feed，绝不漏报真房源。
+- **monitor 错误类型补全**：抓取后管线（入库/通知）异常过去裸冒泡到 main_loop 只打日志不告警，现统一归类为「数据/通知管线错误」给 admin 发带类型告警（30 min 节流）；抓取阶段未分类异常改为 admin-only + 节流（不再每轮广播给普通用户）。
+- **代理失效通知去掉 emoji**。
 
 ## v1.8.2 (2026-06-03)
 

@@ -40,6 +40,7 @@ from .base import (
     ScrapeNetworkError,
     ScrapeResult,
     ScrapeTask,
+    is_cloudflare_body,
 )
 
 logger = logging.getLogger(__name__)
@@ -136,13 +137,65 @@ class XiorScraper(AbstractScraper):
                         if uid and uid not in all_units:
                             all_units[uid] = unit
 
+        today = date.today()
+
+        # floorplans.aspx 权威校验：仅当存在「窗口内的候选可订单元」时才多查一次
+        # 该楼的 floorplans.aspx（绝大多数轮次没有候选 → 零额外请求）。fail-open：
+        # 拿不到（None）就不 gate，信 WP feed，绝不漏报真房源。
+        bookable_fp_ids = self._verify_bookable_floorplans(
+            list(all_units.values()), today, proxies, display,
+        )
+
         listings = [
-            _to_listing(u, display=display, building_url=bldg.get("url", ""))
+            _to_listing(
+                u, display=display, building_url=bldg.get("url", ""),
+                today=today, bookable_floorplan_ids=bookable_fp_ids,
+            )
             for u in all_units.values()
         ]
 
         logger.info("[%s] Xior 共抓取 %d 个单元", display, len(listings))
         return ScrapeResult(task=task, listings=listings, complete=complete)
+
+    def _verify_bookable_floorplans(
+        self,
+        units: list[dict],
+        today: date,
+        proxies: dict,
+        display: str,
+    ) -> Optional[set[int]]:
+        """对窗口内的候选可订单元，抓 floorplans.aspx 求权威可订 floorplan 集合。
+
+        - 无候选 → 返回 None（不 gate，省一次请求）
+        - 有候选但无法推导/抓取 floorplans.aspx → 返回 None（fail-open）
+        """
+        candidates = [u for u in units if _is_candidate_available(u, today)]
+        if not candidates:
+            return None
+        apply_url = next(
+            (u.get("applyOnlineURL") for u in candidates if u.get("applyOnlineURL")),
+            "",
+        )
+        fp_url = _floorplans_url(apply_url or "")
+        if not fp_url:
+            logger.warning(
+                "[%s] Xior 无法从 applyOnlineURL 推导 floorplans.aspx，"
+                "fail-open 按 WP feed 结果", display,
+            )
+            return None
+        with req.Session(impersonate=get_impersonate(), proxies=proxies) as vs:
+            ids = _fetch_bookable_floorplan_ids(vs, fp_url)
+        if ids is None:
+            logger.warning(
+                "[%s] Xior floorplans.aspx 验证不可用，fail-open 按 WP feed 结果"
+                "（可能含已订走的房源）", display,
+            )
+        else:
+            logger.info(
+                "[%s] Xior floorplans.aspx 权威可订户型: %s（候选 %d 个单元）",
+                display, sorted(ids), len(candidates),
+            )
+        return ids
 
     def _building_for_task(self, task: ScrapeTask) -> dict:
         key = (task.city_key or "").strip().lower()
@@ -240,13 +293,124 @@ _STATUS_MAP = {
     "vacant unrented not ready": "Available in lottery",
 }
 
+# 这些状态才算「可订/可抽签」，受可用日期窗口约束。
+_AVAILABLE_STATUSES = ("Available to book", "Available in lottery")
+
+# 可用日期窗口（天）：只有 availableDate 落在 [今天, 今天+N] 内的单元才算
+# 「现在真·可订」。Xior 的 Yardi 数据里大量 "Notice Unrented" 是「现住户已
+# 递交退租通知、但要到很久以后（甚至一年多）才搬走」的单元——它们挂在可用
+# feed 里只是给人提前申请，对「现在就要找房」的用户是噪音。超出窗口的降级为
+# Occupied（仍留库跟踪：日后进入窗口会触发 Occupied→可订 的状态变更通知）。
+_AVAILABLE_HORIZON_DAYS = 60
+
+
+def _days_until(iso_date: Optional[str], today: date) -> Optional[int]:
+    """``YYYY-MM-DD`` 距 today 的天数；无法解析/为空返回 None。"""
+    if not iso_date:
+        return None
+    try:
+        return (date.fromisoformat(iso_date) - today).days
+    except ValueError:
+        return None
+
+
+# ── floorplans.aspx 权威可订校验 ─────────────────────────────────────────
+#
+# WordPress 的 yardi_room_availability feed 会滞后/宽松——单元已被订走或从可订
+# 池移除后仍可能列在 feed 里（用户点 apply 链接发现「没了」）。RentCafe OLE 的
+# floorplans.aspx 是权威来源：每个户型 tile 要么
+#   (Available)              + <button class="applyButton" ... floorPlans=<id>>   真能订
+#   (Contact for Availability) + <button class="contactButton" data-function='contactUsLink'>  订不了
+# 我们抓这一页，取出「真正可订」的 floorplan id 集合，用来 gate WP feed 的单元
+# （join key：WP 单元的 floorplanId == floorplans.aspx 的 floorPlans=<id>）。
+_FP_TILE_SPLIT = re.compile(r'data-selenium-id\s*=\s*"FloorPlanAvailability"')
+_FP_APPLY_BTN = re.compile(r'<button[^>]*data-selenium-id\s*=\s*"ApplyNow"[^>]*>')
+_FP_FLOORPLAN_ID = re.compile(r'floorPlans=(\d+)')
+
+
+def _floorplans_url(apply_url: str) -> Optional[str]:
+    """从单元的 ``applyOnlineURL`` 推导出该楼的 floorplans.aspx URL。
+
+    applyOnlineURL 形如::
+
+        https://<slug>.securerc.co.uk/onlineleasing/<path>/oleapplication.aspx
+            ?stepname=RentalOptions&myLeaseCafeType=2&myOlePropertyId=185589&...
+
+    无法识别（缺 oleapplication.aspx 或 myOlePropertyId）时返回 None。
+    """
+    if not apply_url or "oleapplication.aspx" not in apply_url:
+        return None
+    base = apply_url.split("oleapplication.aspx", 1)[0]  # .../onlineleasing/<path>/
+    m = re.search(r"[?&]myOlePropertyId=(\d+)", apply_url)
+    if not m:
+        return None
+    pid = m.group(1)
+    lct = re.search(r"[?&]myLeaseCafeType=(\d+)", apply_url)
+    lct_val = lct.group(1) if lct else "2"
+    return (
+        f"{base}floorplans.aspx?stepname=Floorplan&myOlePropertyId={pid}"
+        f"&propertyId={pid}&IsFromBrochure=False&myLeaseCafeType={lct_val}"
+        f"&myStuApplicantType=Student"
+    )
+
+
+def parse_bookable_floorplan_ids(html_body: str) -> set[int]:
+    """解析 floorplans.aspx HTML，返回「真正可订」（applyButton）的 floorplan id 集合。"""
+    ids: set[int] = set()
+    for tile in _FP_TILE_SPLIT.split(html_body)[1:]:
+        seg = tile[:4000]  # 一个户型 tile 的范围；apply 按钮+floorPlans id 都在内
+        btn = _FP_APPLY_BTN.search(seg)
+        if not btn or "applyButton" not in btn.group(0):
+            continue  # contactButton / 无按钮 = 订不了
+        m = _FP_FLOORPLAN_ID.search(seg)
+        if m:
+            ids.add(int(m.group(1)))
+    return ids
+
+
+def _fetch_bookable_floorplan_ids(
+    session: req.Session, url: str
+) -> Optional[set[int]]:
+    """GET floorplans.aspx 并解析可订 floorplan id 集合。
+
+    返回 None 表示「无法判定」（网络异常 / 非 200 / Cloudflare challenge）——
+    调用方据此 **fail-open**（信 WP feed，不漏报真房源）。
+    """
+    try:
+        resp = session.get(url, timeout=30)
+    except Exception as exc:
+        logger.warning("Xior floorplans.aspx 请求异常 url=%s: %s", url, exc)
+        return None
+    if resp.status_code != 200:
+        logger.warning("Xior floorplans.aspx HTTP %d url=%s", resp.status_code, url)
+        return None
+    if is_cloudflare_body(resp.text):
+        logger.warning("Xior floorplans.aspx 命中 Cloudflare challenge url=%s", url)
+        return None
+    return parse_bookable_floorplan_ids(resp.text)
+
+
+def _is_candidate_available(unit: dict, today: date) -> bool:
+    """该单元是否「窗口内的候选可订」——即映射为可订/可抽签且 availableDate 不超窗。
+
+    只有存在这类候选时才值得去抓 floorplans.aspx 做权威校验。
+    """
+    raw_status = (unit.get("unitStatus") or "").strip().lower()
+    if _STATUS_MAP.get(raw_status, "Occupied") not in _AVAILABLE_STATUSES:
+        return False
+    days = _days_until(_normalise_date(unit.get("availableDate", "")), today)
+    return not (days is not None and days > _AVAILABLE_HORIZON_DAYS)
+
 
 def _to_listing(
     unit: dict,
     *,
     display: str,
     building_url: str,
+    today: Optional[date] = None,
+    bookable_floorplan_ids: Optional[set[int]] = None,
 ) -> Listing:
+    today = today or date.today()
     apt_id = str(unit.get("apartmentId", ""))
     apt_name = unit.get("apartmentName") or f"#{apt_id}"
     fp_name = unit.get("floorplanName") or ""
@@ -258,6 +422,33 @@ def _to_listing(
     raw_status = (unit.get("unitStatus") or "").strip().lower()
 
     status = _STATUS_MAP.get(raw_status, "Occupied")
+
+    # 可用日期窗口闸：远期才空出的单元不算现在可订。只在「有明确日期且超窗」
+    # 时降级——日期缺失/不可解析时保守保留可订状态（不过度隐藏真房源）。
+    if status in _AVAILABLE_STATUSES:
+        days = _days_until(avail_date, today)
+        if days is not None and days > _AVAILABLE_HORIZON_DAYS:
+            logger.debug(
+                "Xior 单元 %s available_date=%s 超出 %d 天窗口（%d 天后），"
+                "降级为 Occupied 不报可订",
+                apt_id, avail_date, _AVAILABLE_HORIZON_DAYS, days,
+            )
+            status = "Occupied"
+        elif bookable_floorplan_ids is not None:
+            # floorplans.aspx 权威校验：户型不在可订集合 = WP feed 滞后/已订走。
+            # bookable_floorplan_ids 为 None 时不进此分支（fail-open，信 feed）。
+            # floorplanId 解析不出来也不 gate（保守，避免误杀真房源）。
+            try:
+                fp_id = int(unit.get("floorplanId"))
+            except (TypeError, ValueError):
+                fp_id = None
+            if fp_id is not None and fp_id not in bookable_floorplan_ids:
+                logger.debug(
+                    "Xior 单元 %s floorplan %s 不在 floorplans.aspx 权威可订集合，"
+                    "降级为 Occupied（feed 滞后/已订走）",
+                    apt_id, fp_id,
+                )
+                status = "Occupied"
 
     price_raw = f"€{min_rent}"
     if max_rent and max_rent != min_rent:

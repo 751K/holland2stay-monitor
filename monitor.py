@@ -49,7 +49,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from booker import PrewarmedSession
+from booker import BookingBlockedError, PrewarmedSession
 from config import DATA_DIR, ENV_PATH, get_proxy_url, is_proxy_native_fallback_active, load_config
 from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
@@ -242,6 +242,7 @@ _ADAPTIVE_INCREASE = 2.0
 # Cloudflare 403 屏蔽冷却时间（秒）。比 429 的 5 min 更长 —— 等待无法自动恢复，
 # 给用户/运维时间换代理或重启进程。
 _BLOCKED_COOLDOWN = 900  # 15 分钟
+_BLOCKED_COOLDOWN_MAX = 7200  # 连续 Cloudflare 403 时最长冷却 2 小时
 
 # 平台维护冷却时间（秒）。H2S 公告通常 1–2 小时窗口，15 分钟一次再探即可：
 # 探到还在维护 → 继续冷却；探到恢复 → 当轮成功，正常回到 check_interval。
@@ -254,6 +255,7 @@ _NETWORK_FAIL_THRESHOLD = 3
 _NETWORK_FAIL_COOLDOWN = 300  # 5 分钟
 _PROXY_CONFIRM_RETRY_DELAY = 60  # 单次代理故障先短冷却复核，不立刻切换/直连
 _NATIVE_PROXY_FALLBACK_INTERVAL = 600  # 10 分钟；代理全挂时直连原生 IP 的最高频率
+_PREWARM_BLOCKED_SUPPRESS_SEC = 900  # prewarm 遇到 WAF 后 15 分钟内不再主动预登录
 
 # 屏蔽通知节流：避免每轮抓取都给用户推一次相同的告警。
 # 状态是模块级，进程重启后清零（重启后第一轮屏蔽会再发通知，符合预期）。
@@ -305,6 +307,45 @@ def _should_notify_proxy() -> bool:
     return False
 
 
+# 未分类/管线错误通知节流：某个反复抛错的内部异常（如 DB 锁死、磁盘满）若每轮
+# 都通知会刷屏 admin。和代理/屏蔽一样 30 min 一条。
+_last_internal_notify_at: float = 0.0
+_INTERNAL_NOTIFY_INTERVAL = 1800  # 30 分钟
+
+
+def _should_notify_internal() -> bool:
+    """是否该给 admin 发未分类/管线内部错误通知。30 分钟最多一次。"""
+    global _last_internal_notify_at
+    now = time.monotonic()
+    if (
+        _last_internal_notify_at <= 0
+        or now - _last_internal_notify_at >= _INTERNAL_NOTIFY_INTERVAL
+    ):
+        _last_internal_notify_at = now
+        return True
+    return False
+
+
+def _prewarm_suppressed_remaining() -> int:
+    """prewarm 是否因 H2S Cloudflare 403 被临时抑制；返回剩余秒数。"""
+    return max(0, int(_prewarm_blocked_until - time.monotonic()))
+
+
+def _mark_prewarm_blocked(reason: BaseException | str) -> None:
+    """prewarm 遇到 Cloudflare 403 后，短期内停止主动预登录。"""
+    global _prewarm_blocked_until
+    _prewarm_blocked_until = max(
+        _prewarm_blocked_until,
+        time.monotonic() + _PREWARM_BLOCKED_SUPPRESS_SEC,
+    )
+    prewarm_cache.clear()
+    logger.warning(
+        "🚫 prewarm 遇到 Cloudflare WAF，未来 %d 秒内跳过主动预登录: %s",
+        _PREWARM_BLOCKED_SUPPRESS_SEC,
+        reason,
+    )
+
+
 _PID_FILE = DATA_DIR / "monitor.pid"
 _RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
 
@@ -317,6 +358,7 @@ UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
 # mcore 服务实例（进程生命周期内单例）
 retry_queue = RetryQueue()
 prewarm_cache = PrewarmCache()
+_prewarm_blocked_until: float = 0.0
 
 
 # ------------------------------------------------------------------ #
@@ -392,6 +434,30 @@ async def _broadcast_error(
         await notifier.send_error(msg)
     if web_notifier:
         await web_notifier.send_error(msg)
+
+
+async def _notify_admin_only(
+    storage: "Storage",
+    web_notifier: "WebNotifier | None",
+    msg: str,
+    *,
+    kind: str,
+) -> None:
+    """把一条错误只发给 admin（web 面板 + admin push），不打扰普通用户。
+
+    用于普通用户无法采取行动的内部/系统级错误（代理失效、数据库/通知管线
+    故障、未分类异常）。两个渠道各自吞异常——告警通道本身不该再把 run_once
+    带崩。"""
+    if web_notifier:
+        try:
+            await web_notifier.send_error(msg)
+        except Exception:
+            logger.debug("admin web 告警发送失败（已忽略）", exc_info=True)
+    from mcore import push as _push
+    try:
+        await _push.dispatch_admin(storage, msg, kind=kind)
+    except Exception:
+        logger.debug("admin push 告警发送失败（已忽略）", exc_info=True)
 
 
 def _print_dry_run(fresh: list["Listing"], user_notifiers: "UserNotifiers") -> None:
@@ -884,11 +950,26 @@ async def run_once(
 
     loop = asyncio.get_running_loop()
 
-    # ── Phase B：缓存查询 → 命中复用 / 未命中刷新（与 scrape 并行）── #
+    # ── Phase B：缓存查询 → 命中复用 / 未命中刷新 ─────────────────── #
+    # 重要：prewarm 不能在 scrape 前启动。当前出口被 Cloudflare 403 时，如果
+    # 同一轮先给 10+ 个自动预订用户并发预登录，会在正式 scrape 失败前额外
+    # 打出一串 generateCustomerToken GraphQL，把已被封的出口继续打热。
+    # 因此先做轻量 scrape 探测；只有 scrape 成功后才刷新 prewarm 缓存。
     prewarm_cached: dict[str, "PrewarmedSession"] = {}  # 命中：同步可用
     prewarm_futures: dict[str, "asyncio.Future"] = {}  # 未命中：后台刷新
 
-    if not dry_run:
+    def _start_prewarm_after_success() -> None:
+        """抓取成功后再启动预登录刷新，避免 403 轮次放大 GraphQL 请求量。"""
+        if dry_run:
+            return
+        suppressed = _prewarm_suppressed_remaining()
+        if suppressed > 0:
+            logger.warning(
+                "跳过 prewarm：H2S Cloudflare 403 抑制窗口仍剩 %d 秒",
+                suppressed,
+            )
+            return
+
         # 1) 失效不再合格的缓存（用户被禁用 / 移除自动预订 / 删除账号）
         active_user_ids = set()
         for user, _ in user_notifiers:
@@ -904,6 +985,9 @@ async def run_once(
         def _on_prewarm_done(user_id: str, fut) -> None:
             try:
                 ps = fut.result()
+            except BookingBlockedError as e:
+                _mark_prewarm_blocked(e)
+                ps = None
             except Exception:
                 ps = None
             if ps:
@@ -942,6 +1026,9 @@ async def run_once(
                 continue
             try:
                 ps = fut.result()
+            except BookingBlockedError as e:
+                _mark_prewarm_blocked(e)
+                ps = None
             except Exception:
                 ps = None
             if ps:
@@ -958,6 +1045,7 @@ async def run_once(
         )
         fresh, completeness = _unpack_scrape_result(scrape_result)
         _log_scrape_completeness(completeness)
+        _start_prewarm_after_success()
     except BlockedError as e:
         # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。
         # 给 main_loop 一个长 cooldown（15 min），并节流通知避免刷屏。
@@ -1027,13 +1115,12 @@ async def run_once(
         # 1. 把失败的代理标记进 cooldown → 下一轮 get_proxy_url 自动切到备用
         #    （SCRAPE_PROXIES_FALLBACK 配了的话）
         # 2. 给 admin 发一条明确告警（30 min 节流）。不发普通用户——改不了代理
-        from config import is_proxy_in_cooldown, proxy_failure_mark_count, proxy_pool_size, report_proxy_failure
+        from config import is_proxy_in_cooldown, proxy_failure_mark_count, report_proxy_failure
         await _stash_pending_prewarms()
         old_proxy = get_proxy_url()
         service_error = is_proxy_service_error(e)
         new_proxy = report_proxy_failure(service_error_confirmed=service_error)
         confirmed_down = is_proxy_in_cooldown(old_proxy)
-        has_backup = proxy_pool_size() > 1
         native_fallback = is_proxy_native_fallback_active()
         switched_proxy = bool(new_proxy and new_proxy != old_proxy)
         logger.error(
@@ -1051,7 +1138,14 @@ async def run_once(
             ),
             e,
         )
-        if not dry_run and _should_notify_proxy():
+        # admin 告警只在「已确认且可操作」时发，避免一次瞬时失败就刷消息：
+        #   - switched_proxy   切到了备用代理
+        #   - native_fallback  全部代理冷却、降级直连原生 IP
+        #   - not old_proxy    根本没代理可用、彻底卡住
+        # 未达连续确认阈值的单次失败、或非代理服务端特征的普通网络抖动 →
+        # 只记日志，不打扰 admin（由 main_loop 的网络失败计数兜底）。
+        should_alert = switched_proxy or native_fallback or not old_proxy
+        if not dry_run and should_alert and _should_notify_proxy():
             if switched_proxy:
                 tail = "已自动切换到备用代理，下一轮重试。请尽快修复主代理。"
             elif native_fallback:
@@ -1059,23 +1153,12 @@ async def run_once(
                     "所有已配置代理都在冷却中，监控将临时降级为服务器原生 IP 直连。"
                     "降级期间抓取频率最多 10 分钟一次，代理冷却结束后会自动恢复。"
                 )
-            elif old_proxy and not confirmed_down:
-                if service_error:
-                    tail = (
-                        "已看到代理服务端异常特征，但尚未达到连续确认阈值。"
-                        "下一轮会继续使用当前代理复核；连续确认后才会切换备用或降级直连。"
-                    )
-                else:
-                    tail = (
-                        "这次错误未包含代理服务端异常特征，暂不切换/直连降级。"
-                        "监控会按网络失败路径短暂冷却后复查。"
-                    )
             else:
                 tail = (
                     "监控已暂停抓取（代理不通时无法绕过 Cloudflare）。"
                     "请检查 HTTPS_PROXY，或配置 SCRAPE_PROXIES_FALLBACK 备用代理。"
                 )
-            msg = f"🛰️ 抓取代理失效\n\n{e}\n\n{tail}\n30 分钟内不重复通知。"
+            msg = f"抓取代理失效\n\n{e}\n\n{tail}\n30 分钟内不重复通知。"
             if web_notifier:
                 await web_notifier.send_error(msg)
             from mcore import push as _push
@@ -1097,15 +1180,23 @@ async def run_once(
         )
         raise
     except Exception as e:
+        # 抓取阶段未被归类的异常（不属于 Blocked/RateLimit/Maintenance/Proxy/
+        # Network）。普通用户对内部异常无能为力——改为只告警 admin 并加 30 min
+        # 节流，避免某个反复抛错的内部 bug 每轮刷屏所有用户渠道。
         await _stash_pending_prewarms()
         logger.error(
-            "抓取全部失败 cities=%s users=%d: %s",
+            "抓取阶段未分类错误 cities=%s users=%d: %s",
             _task_labels(scrape_tasks), len(user_notifiers), e,
             exc_info=True,
         )
-        if not dry_run:
-            err_msg = f"抓取失败: {e}"
-            await _broadcast_error(user_notifiers, web_notifier, err_msg)
+        if not dry_run and _should_notify_internal():
+            await _notify_admin_only(
+                storage, web_notifier,
+                f"抓取阶段未分类错误\n\n{type(e).__name__}: {e}\n\n"
+                f"这是一条未被归类的内部异常，请查看服务器日志排查。"
+                f"30 分钟内不重复通知。",
+                kind="error",
+            )
         return {}
 
     logger.info("本次抓取共 %d 条房源", len(fresh))
@@ -1114,70 +1205,96 @@ async def run_once(
         _print_dry_run(fresh, user_notifiers)
         return completeness
 
-    new_listings, status_changes = storage.diff(fresh)
+    # ── 抓取后管线：对比入库 → 预订 → 通知 → 推送 ─────────────────── #
+    # 这段过去裸跑在 run_once 顶层，没有任何 except——一旦 storage.diff() /
+    # set_meta() / 通知分发抛异常（DB 锁死、磁盘满、schema 损坏等），会一路
+    # 冒泡到 main_loop 的 generic except，只打日志、不通知任何人，等于监控
+    # 静默瘫痪。这里统一兜底：归类为"数据/通知管线错误"，给 admin 发一条
+    # 带类型的告警（30 min 节流），然后 return {} 走正常间隔——避免 re-raise
+    # 触发 main_loop 的 10s 紧重试反复重新抓站。
+    try:
+        new_listings, status_changes = storage.diff(fresh)
 
-    # diff() 成功后再写时间戳，确保面板显示的 last_scrape_at 对应一次完整的
-    # "抓取 + 入库" 操作；若 diff() 抛异常，时间戳不会被更新。
-    storage.set_meta("last_scrape_at", datetime.now(timezone.utc).isoformat())
-    storage.set_meta("last_scrape_count", str(len(fresh)))
+        # diff() 成功后再写时间戳，确保面板显示的 last_scrape_at 对应一次完整的
+        # "抓取 + 入库" 操作；若 diff() 抛异常，时间戳不会被更新。
+        storage.set_meta("last_scrape_at", datetime.now(timezone.utc).isoformat())
+        storage.set_meta("last_scrape_count", str(len(fresh)))
 
-    # 维护态恢复：本轮成功就清掉 maintenance meta，让 dashboard banner 消失。
-    _clear_maintenance_meta_if_recovered(storage)
+        # 维护态恢复：本轮成功就清掉 maintenance meta，让 dashboard banner 消失。
+        _clear_maintenance_meta_if_recovered(storage)
 
-    # ── 快速候选预扫描：纯内存收集候选，抢在发通知之前提交预订 ──────── #
-    ab_candidates, status_transition = _collect_booking_candidates(
-        new_listings, status_changes, fresh, user_notifiers,
-    )
+        # ── 快速候选预扫描：纯内存收集候选，抢在发通知之前提交预订 ──────── #
+        ab_candidates, status_transition = _collect_booking_candidates(
+            new_listings, status_changes, fresh, user_notifiers,
+        )
 
-    # ── 立即将 book_with_fallback() 提交到线程池（快速通道）──────── #
-    # 新上线可预订 / 状态变更 → Available to book 均立即提交 run_in_executor，
-    # 预订请求在发出通知之前就进入 Holland2Stay 服务器（节省 1-3 秒）。
-    ab_futures = _submit_bookings(
-        loop, ab_candidates, user_notifiers,
-        prewarm_cached, prewarm_futures, status_transition, booking_deadline,
-    )
+        # ── 立即将 book_with_fallback() 提交到线程池（快速通道）──────── #
+        # 新上线可预订 / 状态变更 → Available to book 均立即提交 run_in_executor，
+        # 预订请求在发出通知之前就进入 Holland2Stay 服务器（节省 1-3 秒）。
+        ab_futures = _submit_bookings(
+            loop, ab_candidates, user_notifiers,
+            prewarm_cached, prewarm_futures, status_transition, booking_deadline,
+        )
 
-    # 没有候选的用户的 prewarm（如果是新刷新的）存入缓存供下轮复用
-    await _stash_pending_prewarms()
+        # 没有候选的用户的 prewarm（如果是新刷新的）存入缓存供下轮复用
+        await _stash_pending_prewarms()
 
-    # ── 新房源通知（预订已在后台线程并行运行）───────────────────── #
-    # 标记策略：任意用户通知成功即标记为"已通知"。若部分用户渠道失败，
-    # 该 listing 不会补发——实际业务中多用户同渠道很少部分失败。
-    # APNs 推送：与现有 4 渠道并行，fire-and-forget；
-    # 同一用户本轮匹配 ≥ push.aggregate_threshold() 套时改聚合一条。
-    from mcore import push as _push  # 局部 import，避免冷启动加载 httpx
+        # ── 新房源通知（预订已在后台线程并行运行）───────────────────── #
+        # 标记策略：任意用户通知成功即标记为"已通知"。若部分用户渠道失败，
+        # 该 listing 不会补发——实际业务中多用户同渠道很少部分失败。
+        # APNs 推送：与现有 4 渠道并行，fire-and-forget；
+        # 同一用户本轮匹配 ≥ push.aggregate_threshold() 套时改聚合一条。
+        from mcore import push as _push  # 局部 import，避免冷启动加载 httpx
 
-    total_notified, new_push = await _notify_new_listings(
-        new_listings, user_notifiers, web_notifier, storage, _push,
-    )
-    sc_push = await _notify_status_changes(
-        status_changes, user_notifiers, web_notifier, storage, _push,
-    )
-    booking_push = await _process_booking_results(
-        ab_futures, web_notifier, storage, _push,
-    )
-    push_tasks = [*new_push, *sc_push, *booking_push]
+        total_notified, new_push = await _notify_new_listings(
+            new_listings, user_notifiers, web_notifier, storage, _push,
+        )
+        sc_push = await _notify_status_changes(
+            status_changes, user_notifiers, web_notifier, storage, _push,
+        )
+        booking_push = await _process_booking_results(
+            ab_futures, web_notifier, storage, _push,
+        )
+        push_tasks = [*new_push, *sc_push, *booking_push]
 
-    # ── 等待本轮所有 APNs 推送完成 ───────────────────────────────── #
-    # asyncio.create_task() 的 fire-and-forget 任务，在 run_once 返回前等齐；
-    # 否则下一轮可能在 APNs 网络 IO 完成前重叠开始。各 task 自身吞异常。
-    if push_tasks:
-        try:
-            results = await asyncio.gather(*push_tasks, return_exceptions=True)
-            sent = sum(r for r in results if isinstance(r, int))
-            errs = sum(1 for r in results if isinstance(r, Exception))
-            logger.info("APNs 本轮推送结果: %d 设备成功 / %d 任务异常", sent, errs)
-        except Exception:
-            logger.exception("等待 push tasks 异常")
+        # ── 等待本轮所有 APNs 推送完成 ───────────────────────────────── #
+        # asyncio.create_task() 的 fire-and-forget 任务，在 run_once 返回前等齐；
+        # 否则下一轮可能在 APNs 网络 IO 完成前重叠开始。各 task 自身吞异常。
+        if push_tasks:
+            try:
+                results = await asyncio.gather(*push_tasks, return_exceptions=True)
+                sent = sum(r for r in results if isinstance(r, int))
+                errs = sum(1 for r in results if isinstance(r, Exception))
+                logger.info("APNs 本轮推送结果: %d 设备成功 / %d 任务异常", sent, errs)
+            except Exception:
+                logger.exception("等待 push tasks 异常")
 
-    # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
-    retry_queue.save(storage)
+        # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
+        retry_queue.save(storage)
 
-    logger.info(
-        "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
-        len(new_listings), total_notified, len(status_changes), storage.count_all(),
-    )
-    return completeness
+        logger.info(
+            "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
+            len(new_listings), total_notified, len(status_changes), storage.count_all(),
+        )
+        return completeness
+    except Exception as e:
+        # 抓取已成功、但入库/通知管线挂了。给 admin 一条带类型的告警，return {}
+        # 走正常间隔，避免对已抓到的数据做无意义的 10s 紧重试。
+        await _stash_pending_prewarms()
+        logger.error(
+            "抓取后管线错误（入库/通知）listings=%d: %s",
+            len(fresh), e, exc_info=True,
+        )
+        if _should_notify_internal():
+            await _notify_admin_only(
+                storage, web_notifier,
+                f"数据/通知管线错误\n\n{type(e).__name__}: {e}\n\n"
+                f"房源已抓到 {len(fresh)} 条，但写库或发通知阶段失败"
+                f"（如数据库锁死/磁盘满）。请尽快查看服务器日志与磁盘。"
+                f"30 分钟内不重复通知。",
+                kind="error",
+            )
+        return {}
 
 
 def _apns_startup_diag(st, users: list[UserConfig]) -> None:
@@ -1344,6 +1461,7 @@ async def main_loop(
             logger.info("自动预订 [%s]: 已关闭", user.name)
 
     network_fail_streak = 0  # ScrapeNetworkError 连续计数
+    blocked_fail_streak = 0  # Cloudflare 403 连续计数
 
     while True:
         round_count += 1
@@ -1395,6 +1513,9 @@ async def main_loop(
             if network_fail_streak:
                 logger.info("网络恢复，连续失败计数已清零（之前 %d 次）", network_fail_streak)
                 network_fail_streak = 0
+            if blocked_fail_streak:
+                logger.info("Cloudflare 403 已恢复，连续屏蔽计数已清零（之前 %d 次）", blocked_fail_streak)
+                blocked_fail_streak = 0
 
             # 成功：高峰期将自适应间隔缩短 5%（逐步逼近 min_interval）
             if is_peak:
@@ -1524,12 +1645,18 @@ async def main_loop(
             await asyncio.sleep(cooldown)
         except BlockedError:
             # 被 Cloudflare 屏蔽：等待无法恢复，但仍然冷却 15 分钟以减少
-            # 错误日志刷屏。真正恢复要靠用户换代理或重启进程。
-            cooldown = apply_jitter(_BLOCKED_COOLDOWN, cfg.jitter_ratio)
+            # 错误日志刷屏。连续命中时指数退避到最多 2 小时，避免同一出口
+            # 每 15 分钟反复撞 GraphQL 把 WAF 状态越打越热。
+            blocked_fail_streak += 1
+            base = min(
+                _BLOCKED_COOLDOWN_MAX,
+                _BLOCKED_COOLDOWN * (2 ** max(0, blocked_fail_streak - 1)),
+            )
+            cooldown = apply_jitter(base, cfg.jitter_ratio)
             logger.error(
-                "🚫 被 Cloudflare 屏蔽，冷却 %d 秒后再试。"
-                "持续屏蔽请考虑：换 HTTPS_PROXY 出口 / 重启 monitor / 暂停几小时。",
-                cooldown,
+                "🚫 被 Cloudflare 屏蔽（连续 %d 次），冷却 %d 秒后再试。"
+                "持续屏蔽请考虑：换 HTTPS_PROXY 出口 / 暂停几小时。",
+                blocked_fail_streak, cooldown,
             )
             await asyncio.sleep(cooldown)
         except UpstreamMaintenanceError:

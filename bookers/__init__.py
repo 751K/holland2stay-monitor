@@ -33,11 +33,14 @@ from booker import BookingResult
 
 from .base import AbstractBooker, BookingRequest
 from .holland2stay import HollandStayBooker
+from .rentcafe import XiorBooker, OurDomainBooker
 
 
 BOOKER_REGISTRY: dict[str, type[AbstractBooker]] = {
     cls.source: cls for cls in [
         HollandStayBooker,
+        XiorBooker,
+        OurDomainBooker,
     ]
 }
 

@@ -216,11 +216,44 @@ Listing(
 
 ### 状态映射
 
-| `unitStatus` | 含义 | 映射 |
+| `unitStatus` | 含义 | 初步映射 |
 |---|---|---|
-| `Notice Unrented` | 可预订（租约通知期内，未出租） | `"Available to book"` |
+| `Notice Unrented` | 租约通知期内、未出租（到期才空出） | `"Available to book"` |
 | `Vacant Unrented Not Ready` | 尚未准备好（远期可预订） | `"Available in lottery"` |
-| `units` 为空 | 完全无房 | `"Occupied"` |
+| 其它 / `units` 为空 | 完全无房 | `"Occupied"`（fail-closed） |
+
+> ⚠️ 初步映射只是第一步。WP `yardi_room_availability` feed **会产生假阳性**，
+> 实际可订状态还要过下面两道校验闸（`_to_listing` 内实现）。
+
+### 可用性校验（2026-06-04 修订）
+
+WP feed 的「可订」并不等于「现在真能抢」，实测两类假阳性：
+
+1. **远期单元**：`Notice Unrented` 的 `availableDate` 可能在一年多以后（现住户
+   还没搬走）。生产实测见过 `2027-07-01` 的单元被报成「现在可订」。
+2. **滞后/已订走**：feed 比 RENTCafe 实时库存更新慢，单元已被订走仍列在 feed，
+   用户点 `applyOnlineURL` 进去发现「没了」。
+
+对应两道闸（仅作用于映射成「可订/可抽签」的单元；下调时降级为 `Occupied`，
+仍留库 → 日后重新满足条件会触发 `Occupied→可订` 的状态变更通知）：
+
+| 闸 | 信号源 | 规则 | 失败策略 |
+|---|---|---|---|
+| **① 可用日期窗口** | WP feed 单元级 `availableDate` | 距今 **> 60 天**（`_AVAILABLE_HORIZON_DAYS`）→ 降级 | 日期缺失/不可解析 → **不降级**（保守） |
+| **② floorplans.aspx 权威校验** | RentCafe OLE `floorplans.aspx` | 单元 `floorplanId` 不在「真正可订」户型集合 → 降级 | 抓不到（网络/CF/非200）→ **fail-open** 信 feed |
+
+**floorplans.aspx 权威信号**（curl_cffi 直取，HTTP 200，无 CF challenge）：
+每个户型 tile 二选一——
+
+- `(Available)` + `<button class="applyButton" … floorPlans=<id>>` → **真能订**
+- `(Contact for Availability)` + `<button class="contactButton" data-function='contactUsLink'>` → **订不了**（点了只弹「联系我们」对话框，正是用户遇到的"点进去没了"）
+
+join key：WP 单元的 `floorplanId` == floorplans.aspx 的 `floorPlans=<id>`。
+
+**性能**：仅当某栋楼存在「窗口内候选可订单元」时，才额外 GET 一次该栋的
+floorplans.aspx（URL 由 `applyOnlineURL` 推导）；绝大多数轮次 0 候选 → 零额外
+请求。相关函数：`_floorplans_url()` / `parse_bookable_floorplan_ids()` /
+`_fetch_bookable_floorplan_ids()` / `XiorScraper._verify_bookable_floorplans()`。
 
 ### 租金处理
 
@@ -357,7 +390,7 @@ M1.30.53 (Essential 2nd–5th floor) 可预订
 
 ## 11. 自动预订（Auto-Book）可行性分析
 
-> 2026-05-22 实测：Xior 的 RENTCafe 预订流程与 OurDomain **完全相同**——同一套 `termsandotheritems` → `rcformsave.ashx` 多步表单，受 reCAPTCHA v3+v2 保护。
+> **2026-06-04 更新**：重新实测 `register.aspx`、`guestlogin.aspx`、`flexregistrationlandingpage.aspx`，发现 RENTCafe **全线已上 reCAPTCHA Enterprise (v3 + v2 fallback)**，2026-05-22 的"注册无 reCAPTCHA"结论已过时。本章已根据最新实测结果全面修订。
 
 ### 11.1 预订入口
 
@@ -376,60 +409,132 @@ https://brouwersweg-xiorstudenthousing.securerc.co.uk/onlineleasing/
 
 **优于 OurDomain**：URL 含所有预填参数，跳过选房步骤，直达条款页。
 
-### 11.2 预订流程（P2 手动侦察，2026-05-22）
+### 11.2 预订流程（P2 手动侦察，2026-05-22 + 2026-06-04 更新）
 
 ```
 Step 1 — Xior 建筑页 → Yardi modal（WordPress 路径）
-  点 "Check Availability" → Cloudflare Turnstile 验证
+  点 "Check Availability" → Cloudflare Turnstile 验证（WordPress 层）
   → 选房型 → 选单元 → 跳转 RENTCafe
 
 Step 2 — oleapplication.aspx（Rental Options）
   侧边栏完整暴露 9 步流程：
     1. Floorplan              ← 已选
     2. Rental Options         ← 当前步骤，点 "Start Application"
-    3. Applicant Info         ← 个人信息
+    3. Applicant Info         ← 个人信息，需登录/注册
     4. Additional Applicants
     5. Additional Rental Options
     6. Applicant Charges
     7. Lease Summary
-    8. Lease Creation         ← 最终签约
+    8. Lease Creation         ← 最终签约（此处有 reCAPTCHA）
     9. (Review/Confirm)
   前 2 步已完成（房型+租金选项），第 3 步开始需登录/注册。
 
 Step 3 — Registration / Login
-  注册表单: FirstName, LastName, Email, Password（无 reCAPTCHA ✅）
-  注册成功 ✅ 实测可创建账号
-  登录: guestlogin.aspx → 输入 Email → Continue
-  登录后行为: session 重置，回到 Step 1（需重选单元）
+  注册 (register.aspx):
+    - 表单字段: FirstName, LastName, Email, Password, BirthDate, Phone
+    - ⚠️ reCAPTCHA v3 Enterprise（sitekey: 6LfBeqEa...，action: GuestRegistration）
+    - 如果 v3 分数不够 → 回退到 v2 checkbox（sitekey: 6LfAdx8T...）
+    - 表单提交到: POST /onlineleasing/rcformsave.ashx
+    - reCAPTCHA badge 隐藏（invisible 模式）
+
+  登录 (guestlogin.aspx):
+    - ⚠️ 同样有 reCAPTCHA v3 Enterprise（action: UserLogin）
+    - 相同的 v3+v2 回退机制，相同的 sitekey
+    - 表单包含 OTP 二次验证字段（SMS/邮件验证码？）
+    - 之前认为 "Email → Continue" 流程——实际是 Email + Password + reCAPTCHA v3
+
+  备用入口 (flexregistrationlandingpage.aspx):
+    - ✅ 无 reCAPTCHA
+    - 仅 3 个字段: formName, myOlePropertyId, cafeportalkey
+    - 功能: 选择租约类型（Student Lease / Traditional Lease）
+    - 可能作为绕过注册 reCAPTCHA 的入口（尚待验证）
+
   注意: RENTCafe IP 级 attempt-limit，连续失败锁 30 分钟
 
 Step 4-9 — 未到达（登录后 session 重置，且当前无房可继续）
+  推测条款提交 (termsandotheritems.aspx) 同样有 reCAPTCHA，与 OurDomain 一致
 ```
 
-### 11.3 关键发现
+### 11.3 关键发现（2026-06-04 修订）
 
 | | OurDomain | Xior |
 |---|---|---|
 | 步骤数 | 未知（未探明） | **9 步（侧边栏暴露）** |
 | RENTCafe 表单 | termsandotheritems → rcformsave.ashx | 相同 |
 | 条款页 reCAPTCHA | v3+v2，硬校验 | v3+v2，硬校验 |
-| 注册页 reCAPTCHA | ✅ 有 | **❌ 无** |
-| 登录方式 | Username + Password | **Email → Continue**（后续步骤未探明） |
+| 注册页 reCAPTCHA | ✅ 有 | **⚠️ 也有（2026-06 新增）** |
+| 登录页 reCAPTCHA | ✅ 有 | **⚠️ 也有（v3 Enterprise）** |
+| 登录方式 | Username + Password | **Email + Password + OTP 可选** |
+| 注册页隐藏 | 未知 | **JS 隐藏了注册链接**（`$('a#ClickHereToRegisterLink').hide()`） |
 | 预填参数 | 无 | ✅ oleapplication URL 含全部参数 |
-| 反机器人 | reCAPTCHA | reCAPTCHA + **IP 级 attempt limit** |
+| 反机器人 | reCAPTCHA | reCAPTCHA（全线 v3 Enterprise）+ **IP 级 attempt limit** |
 
-### 11.4 可行性评估
+### 11.4 reCAPTCHA 详情（2026-06-04 实测提取）
 
-**比 OurDomain 好很多：**
+**RENTCafe 在 Xior 上使用 Google reCAPTCHA Enterprise（`enterprise.js`）**，每页两级回退：
+
+| 属性 | 值 |
+|------|-----|
+| reCAPTCHA v3 sitekey | `6LfBeqEaAAAAALsbENKGUsE98xFoA3ZpqkbzogBI` |
+| reCAPTCHA v2 sitekey (fallback) | `6LfAdx8TAAAAAOiesnT8CNKNtb1C6doK-RKnB1V0` |
+| v3 JS 加载 | `https://www.google.com/recaptcha/enterprise.js?render=<sitekey>&hl=en` |
+| 各页 action | `GuestRegistration` / `UserLogin` / 等等 |
+| 表单隐藏字段 | `g-recaptcha-response-v3` (v3 token) |
+|  | `failed-captcha-3` ("true"/"false"，v3 失败则渲染 v2) |
+|  | `recaptchaEnterpriseFormId` |
+| v2 容器 | `<div id="recaptcha-container">`，动态渲染 |
+
+**执行流程（所有 RENTCafe 页面统一逻辑）：**
+
+```
+表单验证 ($('#form').valid())
+  → grecaptcha.enterprise.execute(sitekey, {action})
+    → 成功: token 填入 #g-recaptcha-response-v3
+    → 失败: $('#failed-captcha-3').val() == 'false'
+      → grecaptcha.enterprise.render('recaptcha-container', {sitekey: v2key})
+      → 用户点击 v2 checkbox
+      → token 填入 #g-recaptcha-response
+```
+
+**注意：注册链接被 Xior JS 隐藏。** 在 `oleapplication.aspx` 页面中，以下元素被 jQuery 动态隐藏：
+- `$('a#ClickHereToRegisterLink').hide()`
+- `$('a[href*="flexregistrationlandingpage.aspx"]').hide()`
+- `$('a[href*="register.aspx"]').hide()`
+
+这意味着 Xior 意图阻止用户在 RENTCafe 上自注册（可能统一走 WordPress 侧的注册流程），但后端接口仍然存活。
+
+### 11.5 可行性评估（修订）
+
+**整体结论：技术上可行，但比之前预计的多 2-3 次 reCAPTCHA 求解。**
+
+定量的成本预估：
+
+| 步骤 | 页面 | reCAPTCHA | 求解方式 | 耗时 | 成本 |
+|------|------|-----------|----------|------|------|
+| 登录 | guestlogin.aspx | v3 Enterprise | Capsolver `ReCaptchaV3TaskProxyLess` | 10-20s | ~$0.001 |
+| 注册（如需） | register.aspx | v3 Enterprise | 同上 | 10-20s | ~$0.001 |
+| 条款提交 | termsandotheritems.aspx | v3+v2 | v3 先试，失败则 v2 | 15-30s | ~$0.002 |
+| **总计** | | | | **30-60s** | **~$0.003-0.005** |
+
+**优势（不变）：**
 - Step 1-2 结构已明确（选房 → 条款），第三步是登录/注册
 - Step 4-9 的步骤名已知——不再需要猜测流程
-- 注册无 reCAPTCHA → 账号创建可全自动
-- 登录只需 Email → 可能为无密码登录（magic link 或验证码）
+- oleapplication URL 含全部预填参数
+- reCAPTCHA sitekey 已提取，Capsolver 可直接对接
+
+**挑战（新增）：**
+- 注册和登录现在都有 reCAPTCHA v3，不再是无障碍自动化
+- 注册链接被 JS 隐藏，但后端接口仍存活——直接 POST `register.aspx` 即可
+- reCAPTCHA v3 是打分制，如果分数不够会触发 v2 回退（多了 ~15s + $0.001）
+
+**待探索：**
+- `flexregistrationlandingpage.aspx`（无 reCAPTCHA）能否作为绕过入口——选择租约类型后是否直接跳转到无 reCAPTCHA 的表单？
+- v3 token 是否可以跨步骤复用（同一个 sitekey）？如果可以，只需 1 次求解
+- 服务端对 v3 score 的阈值设得多高？如果阈值低，v3 token 几乎不会触发 v2 回退
 
 **仍需确认：**
-- Email 之后的登录方式（密码？验证码？magic link？）
+- 登录时的 OTP 二次验证是否强制（`guestlogin.aspx` 中的 `OtpOption` / `otpVerification` 字段）
 - Step 4 Applicant Info 有哪些字段
 - 中间是否有文件上传或人工审核
-- 条款提交的 reCAPTCHA 是否能被解决服务绕过
 
-**下一步：** 等 IP 解封后，登录已有账号，记录 Step 4 的表单字段。
+**下一步：** 用 Capsolver 跑一遍完整注册→登录→预订流程，验证 token 是否被 RENTCafe 服务端接受。

@@ -416,15 +416,11 @@
           <span class="badge badge-warning ml-1 text-xs">{{ _('badge_recommend') }}</span>
         </label>
         <input type="hidden" id="ab_dry_h" name="AUTO_BOOK_DRY_RUN" value="{{ 'false' if ab and not ab.dry_run else 'true' }}">
-        <label class="toggle">
-          <input type="checkbox" id="ab_cancel" {% if ab and ab.cancel_enabled %}checked{% endif %}
-                 onchange="document.getElementById('ab_cancel_h').value=this.checked?'true':'false'">
-          <span class="toggle-track"></span>{{ _('user_form_ab_cancel') }}
-        </label>
-        <input type="hidden" id="ab_cancel_h" name="AUTO_BOOK_CANCEL_ENABLED" value="{{ 'true' if ab and ab.cancel_enabled else 'false' }}">
       </div>
 
-      <div class="form-row mb-3">
+      <!-- ── H2S ── -->
+      <div class="mb-2"><span class="text-xs font-semibold text-secondary">{{ _('user_form_ab_h2s') }}</span></div>
+      <div class="form-row mb-3" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
         <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_EMAIL" value="{{ ab.email if ab else '' }}"></div>
         <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.password else '' }}" autocomplete="new-password"></div>
         <div class="form-group">
@@ -436,6 +432,20 @@
             <option value="idealcheckout_mastercard" {% if cur_pm=='idealcheckout_mastercard' %}selected{% endif %}>{{ _('user_form_ab_mc') }}</option>
           </select>
         </div>
+      </div>
+
+      <!-- ── Xior（RENTCafe）── -->
+      <div class="mb-2"><span class="text-xs font-semibold text-secondary">{{ _('user_form_ab_xior') }}</span><span class="badge badge-warning ml-2 text-xs">{{ _('badge_wip') }}</span></div>
+      <div class="form-row mb-3" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+        <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_XIOR_EMAIL" value="{{ ab.xior_email if ab else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_XIOR_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.xior_password else '' }}" autocomplete="new-password"></div>
+      </div>
+
+      <!-- ── OurDomain（RENTCafe）── -->
+      <div class="mb-2"><span class="text-xs font-semibold text-secondary">{{ _('user_form_ab_ourdomain') }}</span><span class="badge badge-warning ml-2 text-xs">{{ _('badge_wip') }}</span></div>
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+        <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_OURDOMAIN_EMAIL" value="{{ ab.ourdomain_email if ab else '' }}"></div>
+        <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_OURDOMAIN_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.ourdomain_password else '' }}" autocomplete="new-password"></div>
       </div>
 
       <div class="flex items-center gap-2 mb-2">

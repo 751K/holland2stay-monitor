@@ -9,3 +9,5 @@ bcrypt>=4.0.0
 pyjwt[crypto]>=2.8.0
 httpx>=0.27.0
 h2>=4.0.0
+# reCAPTCHA solving (Xior / OurDomain auto-booking)
+2captcha-python>=2.0.0

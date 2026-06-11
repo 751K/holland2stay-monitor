@@ -400,6 +400,41 @@ class XiorCityFilter:
     key: str
 
 
+# ── 多平台过滤维度能力表 ─────────────────────────────────────────────
+#
+# 同一套过滤条件作用于三个平台，但各平台 feature_map 能稳定提供的属性不同
+# （Xior 没有楼层/户型/片区，RENTCafe 两家都没有 H2S 专有的 contract/tenant/
+# offer/finishing/energy）。若直接用「白名单匹配不到就拒绝」会把整批抓不到该
+# 属性的房源误杀。
+#
+# 处理原则：平台**不支持**某维度 → 对该平台跳过该条件（fail-open）；平台支持
+# 但本条房源恰好缺值 → 维持原策略（数值 fail-closed / 白名单 no-match 拒绝），
+# 不削弱该平台的过滤严格度（对自动预订安全很重要）。
+#
+# 新增 scraper 时在此登记它能稳定产出的可过滤维度即可。
+_UNIVERSAL_FILTER_DIMS = frozenset({"max_rent", "min_area", "city", "source"})
+_SOURCE_FILTER_DIMS: dict[str, frozenset] = {
+    "holland2stay": _UNIVERSAL_FILTER_DIMS | {
+        "floor", "occupancy", "type", "neighborhood",
+        "contract", "tenant", "offer", "finishing", "energy",
+    },
+    "ourdomain": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type"},
+    "xior": _UNIVERSAL_FILTER_DIMS,
+}
+
+
+def _source_supports_dim(source: Optional[str], dim: str) -> bool:
+    """该平台是否稳定提供某过滤维度。
+
+    未登记的平台默认只认通用维度（price/area/city/source），其余平台专有维度
+    一律跳过——多平台场景下宁可放行也别误杀；新平台需要更严的过滤时在
+    ``_SOURCE_FILTER_DIMS`` 里登记。
+    """
+    caps = _SOURCE_FILTER_DIMS.get((source or "holland2stay").strip().lower(),
+                                   _UNIVERSAL_FILTER_DIMS)
+    return dim in caps
+
+
 @dataclass
 class ListingFilter:
     """
@@ -557,7 +592,9 @@ class ListingFilter:
                 return False
             if area < self.min_area:
                 return False
-        if self.min_floor is not None:
+        # min_floor：floor 是平台相关维度（Xior 不返回楼层）——平台不支持时跳过，
+        # 支持的平台仍 fail-closed（缺值即拒绝，保自动预订安全）。
+        if self.min_floor is not None and _source_supports_dim(listing.source, "floor"):
             floor_str = fm.get("floor", "")
             floor = parse_int(floor_str)
             if floor is None:
@@ -569,17 +606,21 @@ class ListingFilter:
             if floor < self.min_floor:
                 return False
 
-        if self.allowed_occupancy:
+        # ── 平台相关白名单维度 ─────────────────────────────────────────
+        # 这些维度并非每个平台都有（见 _SOURCE_FILTER_DIMS）。平台**不支持**该
+        # 维度 → 跳过该条件（fail-open，避免一套过滤条件误杀整批房源）；平台
+        # 支持但本条缺值 → 白名单匹配失败照常拒绝（不削弱该平台过滤严格度）。
+        if self.allowed_occupancy and _source_supports_dim(listing.source, "occupancy"):
             occ = fm.get("occupancy", "")
             if not any(a.lower() in occ.lower() for a in self.allowed_occupancy):
                 return False
 
-        if self.allowed_types:
+        if self.allowed_types and _source_supports_dim(listing.source, "type"):
             rtype = fm.get("type", "")
             if not any(a.lower() in rtype.lower() for a in self.allowed_types):
                 return False
 
-        if self.allowed_neighborhoods:
+        if self.allowed_neighborhoods and _source_supports_dim(listing.source, "neighborhood"):
             nbhd = fm.get("neighborhood", "")
             if not any(a.lower() in nbhd.lower() for a in self.allowed_neighborhoods):
                 return False
@@ -594,34 +635,36 @@ class ListingFilter:
             if not any(a.lower() == source.lower() for a in self.allowed_sources):
                 return False
 
-        if self.allowed_contract:
+        # ── H2S 专有维度（contract / tenant / offer / finishing / energy）──
+        # 只有 H2S 稳定返回；其它平台不支持 → _source_supports_dim 返回 False
+        # 而整体跳过。
+        if self.allowed_contract and _source_supports_dim(listing.source, "contract"):
             contract = fm.get("contract", "")
             if not any(a.lower() in contract.lower() for a in self.allowed_contract):
                 return False
 
-        if self.allowed_tenant:
+        if self.allowed_tenant and _source_supports_dim(listing.source, "tenant"):
             tenant = fm.get("tenant", "")
             if not any(a.lower() in tenant.lower() for a in self.allowed_tenant):
                 return False
 
-        if self.allowed_offer:
+        if self.allowed_offer and _source_supports_dim(listing.source, "offer"):
             offer = fm.get("offer", "")
             if not any(a.lower() in offer.lower() for a in self.allowed_offer):
                 return False
 
-        if self.allowed_finishing:
+        if self.allowed_finishing and _source_supports_dim(listing.source, "finishing"):
             furnishing = fm.get("furnishing", "")
             if not any(a.lower() in furnishing.lower() for a in self.allowed_finishing):
                 return False
 
-        if isinstance(self.allowed_energy, str) and self.allowed_energy.strip():
-            energy = fm.get("energy_label", "").strip().upper()
-            if not energy:
-                return False  # 房源无能耗标签，设置了最低要求则拒绝
+        if (isinstance(self.allowed_energy, str) and self.allowed_energy.strip()
+                and _source_supports_dim(listing.source, "energy")):
             min_rank = energy_rank(self.allowed_energy)
             if min_rank is None:
                 logger.warning("无效能耗等级配置 %r，过滤条件忽略", self.allowed_energy)
                 return False  # 配置了无效等级（如 "banana"）→ fail-closed
+            energy = fm.get("energy_label", "").strip().upper()
             actual_rank = energy_rank(energy)
             if actual_rank is None:
                 logger.warning("房源 %r 能耗标签不在白名单中: %r", listing.name, energy)
@@ -655,14 +698,39 @@ class AutoBookConfig:
                         "idealcheckout_visa"        → Visa 信用卡
                         "idealcheckout_mastercard"  → Mastercard 信用卡
                       注意：Visa / Mastercard 仅适用于已在 H2S 账号绑定对应卡的用户。
+
+    平台凭据独立
+    ------------
+    H2S、Xior、OurDomain 是三个不同平台、不同账号（Xior 与 OurDomain 还是
+    不同的 RENTCafe 租户，账号不互通），各自一套凭据：
+
+    - H2S：``email`` / ``password`` / ``payment_method``
+    - Xior：``xior_email`` / ``xior_password``
+    - OurDomain：``ourdomain_email`` / ``ourdomain_password``
+
+    RENTCafe 平台只存账号凭据——用户须自行在浏览器注册账号，个人信息
+    （姓名/电话/出生日期）注册时已录入 RENTCafe，booker 登录后无需再填。
+
+    迁移：旧版共用一套 ``email``/``password``，``users._ab_from_dict`` 在加载时
+    把旧值回填进各平台 email/password 字段（见该函数）。
     """
     enabled: bool = False
     dry_run: bool = True
-    email: str = ""
-    password: str = ""
     listing_filter: ListingFilter = field(default_factory=ListingFilter)
     cancel_enabled: bool = False
+
+    # ── H2S ──
+    email: str = ""
+    password: str = ""
     payment_method: str = "idealcheckout_ideal"
+
+    # ── Xior（RENTCafe 租户 xiorstudenthousing）──
+    xior_email: str = ""
+    xior_password: str = ""
+
+    # ── OurDomain（RENTCafe 租户 thisisourdomain）──
+    ourdomain_email: str = ""
+    ourdomain_password: str = ""
 
 
 @dataclass
