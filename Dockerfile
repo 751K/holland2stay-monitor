@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.lock \
 COPY *.py ./
 COPY app/ app/
 COPY bookers/ bookers/
+COPY captcha/ captcha/
 COPY mcore/ mcore/
 COPY mstorage/ mstorage/
 COPY notifier_channels/ notifier_channels/
