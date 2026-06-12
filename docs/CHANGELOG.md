@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.8.4 (2026-06-12)
+
+### 功能改进 (Features)
+- **H2S 防封策略收紧**：H2S GraphQL 403 现在进入 source-level circuit breaker，只暂停 Holland2Stay，Xior / OurDomain 等其它 source 继续抓取；冷却到期后只用 1 个 H2S 城市做 canary，成功后下一轮恢复完整 H2S 扫描。H2S prewarm 也从「抓取成功后刷新所有自动预订用户」改为「本轮确实有 H2S 自动预订候选时才为对应用户预登录」；登录/预订 403 后 1 小时内暂停 H2S 登录链路。连续第 3 次 H2S 403 起视为长时间 block，给 admin-only 发送“需要检查服务器”的告警，6 小时内不重复。
+- **Web 监控暂停可见化**：Dashboard 在 monitor 未运行时向所有登录用户显示“系统监控已暂停”横幅，说明新房源通知、状态变更和自动预订均暂停。System Info 增加 admin-only 启动 / 暂停 / 重启监控按钮，复用现有 `/api/monitor/*` 控制接口。
+
 ## v1.8.3 (2026-06-11)
 
 ### 自动预订 — Xior / OurDomain (Auto-Booking)

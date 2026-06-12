@@ -100,11 +100,20 @@ def get_web_status() -> dict[str, Any]:
     """Return legacy Web panel status payload."""
     pid = monitor_pid()
     users = load_users()
+    running = pid is not None
     return {
-        "running": pid is not None,
+        "running": running,
+        "paused": not running,
         "pid": pid,
         "users": len(users),
         "active_users": sum(1 for u in users if u.enabled),
+        "status": "running" if running else "paused",
+        "status_label": "Monitor running" if running else "System paused",
+        "status_message": (
+            "Monitoring is active."
+            if running
+            else "Monitoring is paused. New listings, status changes, and auto-booking are not running until an admin starts the monitor."
+        ),
     }
 
 
@@ -219,4 +228,3 @@ def restart_monitor() -> dict[str, Any]:
         "was_running": was_running,
         **{k: v for k, v in result.items() if k != "started"},
     }
-

@@ -172,7 +172,7 @@ class TestPrewarmCacheLifecycle:
             "Phase B：空轮不应消耗 login。Phase A 行为会是 6"
         assert "aaaa" in _pc, "空轮后缓存应保留"
 
-    def test_low_ttl_triggers_refresh(
+    def test_low_ttl_refresh_waits_for_next_candidate(
         self, clean_cache, fake_storage, cfg, user_ab,
     ):
         prewarm_log = []
@@ -187,6 +187,12 @@ class TestPrewarmCacheLifecycle:
 
         self._run(cfg, fake_storage, notifs, prewarm_log,
                   scrape_fn=lambda *a, **k: [])
+
+        assert len(prewarm_log) == 1, "无候选空轮不应为了刷新 TTL 触碰登录接口"
+        assert _pc.get("aaaa") is old
+
+        self._run(cfg, fake_storage, notifs, prewarm_log,
+                  scrape_fn=lambda *a, **k: [_make_listing(2)])
 
         assert len(prewarm_log) == 2, "TTL 不足应触发刷新"
         assert old.session.closed is True, "旧 session 应被关闭"

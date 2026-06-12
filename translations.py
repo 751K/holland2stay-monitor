@@ -27,6 +27,13 @@ TRANSLATIONS = {
     # ── Monitor badge ────────────────────────────────────
     "monitor_running":      {"zh": "监控运行中",              "en": "Monitor running"},
     "monitor_stopped":      {"zh": "监控未启动",              "en": "Monitor stopped"},
+    "monitor_paused_short": {"zh": "系统暂停",                "en": "System paused"},
+    "monitor_paused_title": {"zh": "系统监控已暂停",           "en": "Monitoring is paused"},
+    "monitor_paused_hint":  {"zh": "后台监控当前未运行；新房源、状态变更通知和自动预订都会暂停，直到管理员重新启动监控。",
+                             "en": "The background monitor is not running. New listing alerts, status updates, and auto-booking are paused until an admin starts it again."},
+    "monitor_control_hint": {"zh": "管理员控制",              "en": "Admin controls"},
+    "monitor_start":        {"zh": "启动监控",                "en": "Start monitor"},
+    "monitor_stop":         {"zh": "暂停监控",                "en": "Pause monitor"},
     "monitor_checking":     {"zh": "检测中",                  "en": "Checking"},
     "upstream_maintenance_title":   {"zh": "Holland2Stay 平台维护中",
                                      "en": "Holland2Stay under maintenance"},

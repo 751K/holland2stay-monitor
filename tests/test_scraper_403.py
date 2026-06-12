@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -261,8 +261,8 @@ class TestMonitorBlockedHandling:
         finally:
             storage.close()
 
-    def test_run_once_reraises_blocked_error(self, tmp_path):
-        """run_once 必须 re-raise 让 main_loop 应用 cooldown。"""
+    def test_run_once_opens_h2s_circuit_on_blocked_error(self, tmp_path):
+        """H2S 403 不再拖垮全局轮次，而是打开 H2S source 熔断。"""
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
@@ -270,8 +270,10 @@ class TestMonitorBlockedHandling:
         )
         scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("cf block"))
 
-        with pytest.raises(BlockedError):
-            self._run(tmp_path, scrape, user)
+        self._run(tmp_path, scrape, user)
+
+        assert monitor._h2s_circuit_fail_streak == 1
+        assert monitor._h2s_circuit_open_until > 0
 
     def test_run_once_notifies_user_on_block(self, tmp_path):
         """首次屏蔽必须给用户发通知（通过其配置的通知渠道）。"""
@@ -283,11 +285,11 @@ class TestMonitorBlockedHandling:
         scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("Cloudflare WAF 屏蔽（HTTP 403）"))
         notifs_received: list[str] = []
 
-        with pytest.raises(BlockedError):
-            self._run(tmp_path, scrape, user, notifs_received)
+        self._run(tmp_path, scrape, user, notifs_received)
 
         assert len(notifs_received) == 1, "首次屏蔽必须发 1 条通知"
         assert "403" in notifs_received[0]
+        assert "H2S" in notifs_received[0]
         assert "Cloudflare" in notifs_received[0] or "屏蔽" in notifs_received[0]
 
     def test_notification_throttle_30min(self, tmp_path):
@@ -302,8 +304,9 @@ class TestMonitorBlockedHandling:
 
         # 连续触发 3 次屏蔽
         for _ in range(3):
-            with pytest.raises(BlockedError):
-                self._run(tmp_path, scrape, user, notifs_received)
+            self._run(tmp_path, scrape, user, notifs_received)
+            # 模拟 canary 到期，否则后两轮会被 circuit 直接跳过而不触发通知路径。
+            monitor._h2s_circuit_open_until = 0.0
 
         assert len(notifs_received) == 1, (
             f"30 分钟内多次屏蔽应该只发 1 通知，实际 {len(notifs_received)}"
@@ -320,14 +323,68 @@ class TestMonitorBlockedHandling:
         notifs_received: list[str] = []
 
         # 第一次
-        with pytest.raises(BlockedError):
-            self._run(tmp_path, scrape, user, notifs_received)
+        self._run(tmp_path, scrape, user, notifs_received)
         assert len(notifs_received) == 1
 
         # 模拟时间过去 31 分钟（移动节流戳）
         monitor._last_block_notify_at -= 31 * 60
+        monitor._h2s_circuit_open_until = 0.0
 
         # 第二次应该重新发
-        with pytest.raises(BlockedError):
-            self._run(tmp_path, scrape, user, notifs_received)
+        self._run(tmp_path, scrape, user, notifs_received)
         assert len(notifs_received) == 2, "超过 30 分钟后应该重新通知"
+
+    def test_long_h2s_block_notifies_admin_to_check_server(self, tmp_path):
+        """连续 H2S 403 进入长冷却后，应给 admin-only 发检查服务器提示。"""
+        user = UserConfig(
+            name="A", id="aaaa", enabled=True, notifications_enabled=True,
+            notification_channels=[],
+            auto_book=AutoBookConfig(enabled=False),
+        )
+        cfg = Config(
+            check_interval=300,
+            cities=[CityFilter(name="E", id=29)],
+            availability_filters=[AvailabilityFilter(label="A", id=179)],
+            db_path=tmp_path / "test.db", log_level="WARNING",
+        )
+        storage = Storage(tmp_path / "test.db", timezone_str="UTC")
+
+        class CapturingNotifier(BaseNotifier):
+            has_channels = True
+            async def _send(self, t): return True
+            async def close(self): pass
+
+        class CapturingAdmin:
+            def __init__(self):
+                self.errors: list[str] = []
+            async def send_error(self, msg):
+                self.errors.append(msg)
+                return True
+
+        admin = CapturingAdmin()
+        scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("Cloudflare WAF 屏蔽（HTTP 403）"))
+
+        async def go():
+            with patch("monitor.dispatch_scrape_tasks", side_effect=scrape), \
+                 patch("mcore.push.dispatch_admin", new=AsyncMock(return_value=1)):
+                for _ in range(3):
+                    await run_once(
+                        cfg,
+                        storage,
+                        [(user, CapturingNotifier())],
+                        web_notifier=admin,
+                        dry_run=False,
+                    )
+                    monitor._h2s_circuit_open_until = 0.0
+
+        try:
+            asyncio.run(go())
+        finally:
+            storage.close()
+
+        long_block_msgs = [
+            msg for msg in admin.errors
+            if "H2S 长时间被 block" in msg
+        ]
+        assert len(long_block_msgs) == 1
+        assert "需要检查服务器" in long_block_msgs[0]

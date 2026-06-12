@@ -81,6 +81,24 @@ function timeAgo(iso) {
   } catch(e) { return iso; }
 }
 
+function resultToast(ok, msg) {
+  var wrap = document.getElementById('toast-container');
+  if(!wrap) return;
+  var div = document.createElement('div');
+  div.className = 'toast';
+  div.style.borderColor = ok ? 'var(--success)' : 'var(--danger)';
+  div.innerHTML =
+    '<div class="toast-title" style="color:' + (ok ? 'var(--success)' : 'var(--danger)') + '">' +
+    escapeHtml(ok ? (getLang() === 'zh' ? '成功' : 'Success') : (getLang() === 'zh' ? '失败' : 'Failed')) +
+    '</div><div class="toast-body">' + escapeHtml(msg || '') + '</div>';
+  wrap.appendChild(div);
+  setTimeout(function(){
+    div.style.transition = 'opacity .2s';
+    div.style.opacity = '0';
+    setTimeout(function(){ div.remove(); }, 220);
+  }, 3500);
+}
+
 // ── Flash Dismiss ─────────────────────────────────────────────────
 document.addEventListener('click', function(e) {
   var btn = e.target.closest('.alert-dismiss');
@@ -95,6 +113,36 @@ document.addEventListener('click', function(e) {
 // 道理：活跃定时器在某些浏览器（Safari 尤甚）会阻止 bfcache。
 var _monitorTimer = null;
 
+function updateMonitorPausedBanner(d) {
+  var banner = document.getElementById('monitor-paused-banner');
+  if(banner) banner.classList.toggle('hidden', !!d.running);
+  var inline = document.getElementById('system-monitor-paused-note');
+  if(inline) inline.classList.toggle('hidden', !!d.running);
+}
+
+function updateSystemMonitorControls(d) {
+  var startBtn = document.getElementById('monitor-start-btn');
+  var stopBtn = document.getElementById('monitor-stop-btn');
+  var restartBtn = document.getElementById('monitor-restart-btn');
+  if(startBtn) startBtn.classList.toggle('hidden', !!d.running);
+  if(stopBtn) stopBtn.classList.toggle('hidden', !d.running);
+  if(restartBtn) restartBtn.disabled = false;
+  var cell = document.getElementById('system-monitor-status-cell');
+  if(cell) {
+    var zh = getLang() === 'zh';
+    if(d.running) {
+      cell.innerHTML = '<span class="badge badge-success">' +
+        (zh ? '监控运行中' : 'Monitor running') +
+        (d.pid ? ' (PID ' + escapeHtml(String(d.pid)) + ')' : '') +
+        '</span>';
+    } else {
+      cell.innerHTML = '<span class="badge badge-danger">' +
+        (zh ? '系统暂停' : 'System paused') +
+        '</span>';
+    }
+  }
+}
+
 function updateMonitorBadge() {
   var badge = document.getElementById('mon-badge');
   if(!badge) return;
@@ -104,9 +152,57 @@ function updateMonitorBadge() {
     var txt = badge.querySelector('.mon-text');
     if(txt) {
       var zh = getLang() === 'zh';
-      txt.textContent = d.running ? (zh ? '监控运行中' : 'Monitor running') : (zh ? '监控未启动' : 'Monitor stopped');
+      txt.textContent = d.running ? (zh ? '监控运行中' : 'Monitor running') : (zh ? '系统暂停' : 'System paused');
     }
+    updateMonitorPausedBanner(d);
+    updateSystemMonitorControls(d);
   }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
+}
+
+function controlMonitor(btn, action) {
+  var lang = getLang();
+  var labels = {
+    start: lang === 'zh' ? '启动中...' : 'Starting...',
+    stop: lang === 'zh' ? '停止中...' : 'Stopping...',
+    restart: lang === 'zh' ? '重启中...' : 'Restarting...'
+  };
+  if(action === 'stop') {
+    var stopMsg = lang === 'zh'
+      ? '确定要暂停监控吗？\\n\\n暂停后所有用户都不会收到新房源/状态变更，自动预订也会停止。'
+      : 'Pause monitoring?\\n\\nAll users will stop receiving new listing/status updates and auto-booking will stop.';
+    if(!confirm(stopMsg)) return;
+  } else if(action === 'restart') {
+    var restartMsg = lang === 'zh'
+      ? '确定要重启监控进程吗？\\n\\n这会中断本轮抓取并重新加载代码。'
+      : 'Restart the monitor process?\\n\\nThis interrupts the current scrape and reloads code.';
+    if(!confirm(restartMsg)) return;
+  }
+  var csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+  var orig = btn ? btn.innerHTML : '';
+  if(btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner mr-1"></span>' + (labels[action] || labels.restart);
+  }
+  fetch('/api/monitor/' + action, {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrf },
+  }).then(function(r){ return r.json().then(function(d){ d._status = r.status; return d; }); })
+    .then(function(d) {
+      var ok = !!d.ok;
+      var msg = ok ? d.message : (d.error || (lang === 'zh' ? '未知错误' : 'Unknown error'));
+      resultToast(ok, msg);
+      updateMonitorBadge();
+      setTimeout(updateMonitorBadge, 1500);
+    })
+    .catch(function() {
+      resultToast(false, lang === 'zh' ? '请求失败' : 'Request failed');
+    })
+    .finally(function() {
+      if(btn) {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+      }
+    });
 }
 
 function startMonitorPoll() {

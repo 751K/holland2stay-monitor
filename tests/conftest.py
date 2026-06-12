@@ -154,6 +154,30 @@ def _reset_login_failures():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _reset_monitor_h2s_guards():
+    """隔离 monitor 的 H2S 熔断/登录抑制内存状态。"""
+    try:
+        import monitor
+        monitor._h2s_login_blocked_until = 0.0
+        monitor._h2s_circuit_open_until = 0.0
+        monitor._h2s_circuit_fail_streak = 0
+        monitor._h2s_circuit_reason = ""
+        monitor._last_h2s_long_block_notify_at = 0.0
+    except ImportError:
+        pass
+    yield
+    try:
+        import monitor
+        monitor._h2s_login_blocked_until = 0.0
+        monitor._h2s_circuit_open_until = 0.0
+        monitor._h2s_circuit_fail_streak = 0
+        monitor._h2s_circuit_reason = ""
+        monitor._last_h2s_long_block_notify_at = 0.0
+    except ImportError:
+        pass
+
+
 @pytest.fixture
 def test_app(monkeypatch, isolated_data_dir):
     """

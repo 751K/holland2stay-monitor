@@ -39,6 +39,17 @@
   </div>
 </div>
 
+<div id="monitor-paused-banner"
+     class="monitor-paused-banner{% if monitor_running %} hidden{% endif %}"
+     role="status"
+     aria-live="polite">
+  <i class="bi bi-pause-circle"></i>
+  <div>
+    <div class="monitor-paused-title">{{ _('monitor_paused_title') }}</div>
+    <div class="monitor-paused-text">{{ _('monitor_paused_hint') }}</div>
+  </div>
+</div>
+
 <!-- Modular Dashboard Grid -->
 <div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 32px;">
   

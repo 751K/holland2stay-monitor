@@ -117,7 +117,8 @@ class TestUserNew:
         assert "pointer-events:none" not in html
         assert 'onclick="toggleChannel(\'imessage\')"' in html
         assert "Unavailable" not in html
-        assert "不可用" not in html
+        assert "iMessage requires macOS" not in html
+        assert "iMessage 需要 macOS" not in html
 
 # ─── Edit user + 密码保留 E2E ────────────────────────────────
 

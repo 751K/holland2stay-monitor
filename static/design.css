@@ -515,6 +515,29 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .maintenance-banner-hint{color:var(--text2);font-size:13px}
 .maintenance-banner-since{color:var(--text3);font-variant-numeric:tabular-nums}
 
+.monitor-paused-banner{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:14px 16px;margin-bottom:20px;
+  background:var(--danger-soft);color:var(--danger);
+  border:1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+  border-radius:var(--radius-lg);
+  font-size:14px;line-height:1.45;
+}
+.monitor-paused-banner.hidden{display:none}
+.monitor-paused-banner i{font-size:20px;line-height:1;flex-shrink:0;margin-top:1px}
+.monitor-paused-title{font-weight:650;font-size:15px}
+.monitor-paused-text{color:var(--text2);font-size:13px}
+.monitor-paused-inline{
+  margin-top:14px;padding:10px 12px;border-radius:var(--radius);
+  display:flex;align-items:flex-start;gap:8px;
+  background:var(--danger-soft);color:var(--danger);
+  font-size:13px;line-height:1.4;
+}
+.monitor-paused-inline span{color:var(--text2)}
+.monitor-control-panel{
+  margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+
 /* ── Page Header ───────────────────────────────────────────────── */
 .page-header{
   display:flex;align-items:flex-start;justify-content:space-between;

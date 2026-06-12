@@ -255,12 +255,19 @@ _NETWORK_FAIL_THRESHOLD = 3
 _NETWORK_FAIL_COOLDOWN = 300  # 5 分钟
 _PROXY_CONFIRM_RETRY_DELAY = 60  # 单次代理故障先短冷却复核，不立刻切换/直连
 _NATIVE_PROXY_FALLBACK_INTERVAL = 600  # 10 分钟；代理全挂时直连原生 IP 的最高频率
-_PREWARM_BLOCKED_SUPPRESS_SEC = 900  # prewarm 遇到 WAF 后 15 分钟内不再主动预登录
+_H2S_SOURCE = "holland2stay"
+_PREWARM_CANDIDATE_WAIT_SEC = 2.0  # 有真实候选时最多等 2s 让预登录赶上快速通道
+_H2S_LOGIN_BLOCKED_SUPPRESS_SEC = 3600  # H2S 登录/预订 403 后 1 小时内不碰登录链路
+_H2S_CIRCUIT_BASE_COOLDOWN = 1800  # H2S 抓取 403 后 30 分钟后做 canary
+_H2S_CIRCUIT_MAX_COOLDOWN = 21600  # H2S 抓取连续 403 时最多暂停 6 小时
+_H2S_LONG_BLOCK_STREAK = 3  # 第 3 次连续 H2S 403 起视为长时间被 block
+_H2S_LONG_BLOCK_NOTIFY_INTERVAL = 21600  # 长时间 block admin 告警 6 小时最多一次
 
 # 屏蔽通知节流：避免每轮抓取都给用户推一次相同的告警。
 # 状态是模块级，进程重启后清零（重启后第一轮屏蔽会再发通知，符合预期）。
 _last_block_notify_at: float = 0.0
 _BLOCK_NOTIFY_INTERVAL = 1800  # 30 分钟
+_last_h2s_long_block_notify_at: float = 0.0
 
 # 维护通知节流：admin 已经在 dashboard banner 上看到维护态了，再叠加 web 通知
 # 主要是让 admin 在收 push（如果接了）/ 刷通知面板时也能看到一条记录。
@@ -275,6 +282,19 @@ def _should_notify_block() -> bool:
     now = time.monotonic()
     if _last_block_notify_at <= 0 or now - _last_block_notify_at >= _BLOCK_NOTIFY_INTERVAL:
         _last_block_notify_at = now
+        return True
+    return False
+
+
+def _should_notify_h2s_long_block() -> bool:
+    """H2S 长时间 403 后是否该通知 admin。6 小时最多一次。"""
+    global _last_h2s_long_block_notify_at
+    now = time.monotonic()
+    if (
+        _last_h2s_long_block_notify_at <= 0
+        or now - _last_h2s_long_block_notify_at >= _H2S_LONG_BLOCK_NOTIFY_INTERVAL
+    ):
+        _last_h2s_long_block_notify_at = now
         return True
     return False
 
@@ -326,24 +346,100 @@ def _should_notify_internal() -> bool:
     return False
 
 
-def _prewarm_suppressed_remaining() -> int:
-    """prewarm 是否因 H2S Cloudflare 403 被临时抑制；返回剩余秒数。"""
-    return max(0, int(_prewarm_blocked_until - time.monotonic()))
+def _h2s_login_suppressed_remaining() -> int:
+    """H2S 登录/预订链路是否因 403 被临时抑制；返回剩余秒数。"""
+    return max(0, int(_h2s_login_blocked_until - time.monotonic()))
 
 
-def _mark_prewarm_blocked(reason: BaseException | str) -> None:
-    """prewarm 遇到 Cloudflare 403 后，短期内停止主动预登录。"""
-    global _prewarm_blocked_until
-    _prewarm_blocked_until = max(
-        _prewarm_blocked_until,
-        time.monotonic() + _PREWARM_BLOCKED_SUPPRESS_SEC,
+def _mark_h2s_login_blocked(reason: BaseException | str) -> None:
+    """H2S 登录/预订遇到 Cloudflare 403 后，短期内停止触碰登录链路。"""
+    global _h2s_login_blocked_until
+    _h2s_login_blocked_until = max(
+        _h2s_login_blocked_until,
+        time.monotonic() + _H2S_LOGIN_BLOCKED_SUPPRESS_SEC,
     )
     prewarm_cache.clear()
     logger.warning(
-        "🚫 prewarm 遇到 Cloudflare WAF，未来 %d 秒内跳过主动预登录: %s",
-        _PREWARM_BLOCKED_SUPPRESS_SEC,
+        "🚫 H2S 登录/预订遇到 Cloudflare WAF，未来 %d 秒内暂停登录链路: %s",
+        _H2S_LOGIN_BLOCKED_SUPPRESS_SEC,
         reason,
     )
+
+
+def _h2s_circuit_remaining() -> int:
+    """H2S 抓取 circuit breaker 剩余暂停秒数。"""
+    return max(0, int(_h2s_circuit_open_until - time.monotonic()))
+
+
+def _mark_h2s_scrape_blocked(reason: BaseException | str) -> int:
+    """H2S 抓取被 Cloudflare 403 后，打开 source-level circuit breaker。"""
+    global _h2s_circuit_fail_streak, _h2s_circuit_open_until, _h2s_circuit_reason
+    _h2s_circuit_fail_streak += 1
+    cooldown = min(
+        _H2S_CIRCUIT_MAX_COOLDOWN,
+        _H2S_CIRCUIT_BASE_COOLDOWN * (2 ** max(0, _h2s_circuit_fail_streak - 1)),
+    )
+    _h2s_circuit_open_until = time.monotonic() + cooldown
+    _h2s_circuit_reason = str(reason)
+    _mark_h2s_login_blocked(reason)
+    logger.error(
+        "🚫 H2S source 熔断：连续抓取 403=%d，暂停 H2S %d 秒；其他 source 继续运行。原因: %s",
+        _h2s_circuit_fail_streak,
+        cooldown,
+        reason,
+    )
+    return cooldown
+
+
+def _mark_h2s_scrape_recovered() -> None:
+    """H2S canary 成功后关闭 circuit breaker，下一轮恢复完整 H2S 抓取。"""
+    global _h2s_circuit_fail_streak, _h2s_circuit_open_until, _h2s_circuit_reason
+    if _h2s_circuit_fail_streak or _h2s_circuit_open_until:
+        logger.info(
+            "✅ H2S canary 抓取成功，关闭 source 熔断（之前连续 403=%d）",
+            _h2s_circuit_fail_streak,
+        )
+    _h2s_circuit_fail_streak = 0
+    _h2s_circuit_open_until = 0.0
+    _h2s_circuit_reason = ""
+
+
+def _split_h2s_tasks(tasks) -> tuple[list, list]:
+    """拆分 H2S 与其它 source 任务，便于只熔断 H2S。"""
+    h2s_tasks = [t for t in tasks if t.source == _H2S_SOURCE]
+    other_tasks = [t for t in tasks if t.source != _H2S_SOURCE]
+    return other_tasks, h2s_tasks
+
+
+def _select_h2s_tasks_for_circuit(h2s_tasks: list) -> tuple[list, str]:
+    """
+    根据 H2S circuit 状态选择本轮 H2S 任务。
+
+    Returns
+    -------
+    (selected_tasks, mode)
+      normal  : circuit 未打开，抓全部 H2S 城市
+      open    : circuit 冷却中，不抓 H2S
+      canary  : 冷却到期，只抓 1 个 H2S 城市探测恢复
+    """
+    if not h2s_tasks:
+        return [], "none"
+    remaining = _h2s_circuit_remaining()
+    if remaining > 0:
+        logger.warning(
+            "🚫 H2S source 熔断中，跳过 %d 个 H2S 任务，%d 秒后 canary。最近原因: %s",
+            len(h2s_tasks),
+            remaining,
+            _h2s_circuit_reason or "unknown",
+        )
+        return [], "open"
+    if _h2s_circuit_fail_streak > 0 or _h2s_circuit_open_until > 0:
+        logger.warning(
+            "🚫 H2S source 熔断到期，本轮只用 1 个城市做 canary: %s",
+            h2s_tasks[0].city_display,
+        )
+        return h2s_tasks[:1], "canary"
+    return h2s_tasks, "normal"
 
 
 _PID_FILE = DATA_DIR / "monitor.pid"
@@ -358,7 +454,10 @@ UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
 # mcore 服务实例（进程生命周期内单例）
 retry_queue = RetryQueue()
 prewarm_cache = PrewarmCache()
-_prewarm_blocked_until: float = 0.0
+_h2s_login_blocked_until: float = 0.0
+_h2s_circuit_open_until: float = 0.0
+_h2s_circuit_fail_streak: int = 0
+_h2s_circuit_reason: str = ""
 
 
 # ------------------------------------------------------------------ #
@@ -608,6 +707,14 @@ def _submit_bookings(
         candidates = ab_candidates.get(user.id, [])
         if not (user.auto_book.enabled and candidates):
             continue
+        suppressed = _h2s_login_suppressed_remaining()
+        if suppressed > 0:
+            logger.warning(
+                "[%s] 跳过 H2S 自动预订：登录/预订 403 抑制窗口仍剩 %d 秒",
+                user.name,
+                suppressed,
+            )
+            continue
 
         # 取出该用户的预登录：优先命中缓存（同步），其次取已完成的刷新结果。
         # 未完成的 future 不 await — 让 try_book() 走正常登录 fallback，
@@ -619,6 +726,9 @@ def _submit_bookings(
             if pre_fut is not None and pre_fut.done():
                 try:
                     prewarmed = pre_fut.result()
+                except BookingBlockedError as e:
+                    _mark_h2s_login_blocked(e)
+                    prewarmed = None
                 except Exception:
                     prewarmed = None
                 if prewarmed:
@@ -626,6 +736,15 @@ def _submit_bookings(
             elif pre_fut is not None:
                 # 仍在运行中，放回 futures 让 _stash_pending_prewarms 收尾
                 prewarm_futures[user.id] = pre_fut
+
+        suppressed = _h2s_login_suppressed_remaining()
+        if suppressed > 0:
+            logger.warning(
+                "[%s] 跳过 H2S 自动预订：prewarm 已确认 403，登录抑制窗口剩 %d 秒",
+                user.name,
+                suppressed,
+            )
+            continue
 
         if prewarmed:
             age = time.monotonic() - prewarmed.created_at
@@ -824,6 +943,7 @@ async def _process_booking_results(
             elif result.phase == "blocked":
                 # blocked 是 IP/指纹级，不是房源级问题；保留 retry_queue 状态不动，
                 # 等下轮换指纹后再决定是否重试。
+                _mark_h2s_login_blocked(result.message)
                 pass
             else:
                 for c in sorted_cands:
@@ -950,22 +1070,58 @@ async def run_once(
 
     loop = asyncio.get_running_loop()
 
-    # ── Phase B：缓存查询 → 命中复用 / 未命中刷新 ─────────────────── #
-    # 重要：prewarm 不能在 scrape 前启动。当前出口被 Cloudflare 403 时，如果
-    # 同一轮先给 10+ 个自动预订用户并发预登录，会在正式 scrape 失败前额外
-    # 打出一串 generateCustomerToken GraphQL，把已被封的出口继续打热。
-    # 因此先做轻量 scrape 探测；只有 scrape 成功后才刷新 prewarm 缓存。
+    # ── H2S source-level circuit breaker ─────────────────────────── #
+    # H2S GraphQL 403 只应该暂停 H2S；OurDomain / Xior 等其它 source 仍可
+    # 正常抓取、入库、通知。H2S 熔断期间完全跳过 H2S 任务；冷却到期后只放
+    # 1 个城市做 canary，成功后下一轮再恢复完整 H2S 扫描。
+    async def _dispatch_with_h2s_circuit(tasks):
+        other_tasks, h2s_tasks = _split_h2s_tasks(tasks)
+        selected_h2s, h2s_mode = _select_h2s_tasks_for_circuit(h2s_tasks)
+
+        fresh_all: list[Listing] = []
+        completeness_all: dict[str, bool] = {}
+        h2s_blocked: BlockedError | None = None
+
+        async def _dispatch(selected):
+            result = await loop.run_in_executor(
+                None, lambda: dispatch_scrape_tasks(selected)
+            )
+            return _unpack_scrape_result(result)
+
+        if other_tasks:
+            fresh_part, completeness_part = await _dispatch(other_tasks)
+            fresh_all.extend(fresh_part)
+            completeness_all.update(completeness_part)
+
+        if selected_h2s:
+            try:
+                fresh_part, completeness_part = await _dispatch(selected_h2s)
+            except BlockedError as e:
+                h2s_blocked = e
+                _mark_h2s_scrape_blocked(e)
+            else:
+                fresh_all.extend(fresh_part)
+                completeness_all.update(completeness_part)
+                if h2s_mode == "canary":
+                    _mark_h2s_scrape_recovered()
+
+        return fresh_all, completeness_all, h2s_blocked, h2s_mode
+
+    # ── Candidate-only prewarm：只对本轮真实候选登录 ──────────────── #
+    # 重要：prewarm 不能在 scrape 前启动，也不能每轮给所有自动预订用户刷新。
+    # 当前策略是：先完成只读 scrape + diff，确认本轮确实有 H2S 可订候选后，
+    # 只给被分配到候选的用户准备预登录；没有候选的轮次完全不碰 H2S 登录接口。
     prewarm_cached: dict[str, "PrewarmedSession"] = {}  # 命中：同步可用
     prewarm_futures: dict[str, "asyncio.Future"] = {}  # 未命中：后台刷新
 
-    def _start_prewarm_after_success() -> None:
-        """抓取成功后再启动预登录刷新，避免 403 轮次放大 GraphQL 请求量。"""
+    def _start_prewarm_for_candidates(candidate_user_ids: set[str]) -> None:
+        """只为本轮实际有 H2S 自动预订候选的用户启动预登录。"""
         if dry_run:
             return
-        suppressed = _prewarm_suppressed_remaining()
+        suppressed = _h2s_login_suppressed_remaining()
         if suppressed > 0:
             logger.warning(
-                "跳过 prewarm：H2S Cloudflare 403 抑制窗口仍剩 %d 秒",
+                "跳过 H2S prewarm：登录/预订 403 抑制窗口仍剩 %d 秒",
                 suppressed,
             )
             return
@@ -979,6 +1135,9 @@ async def run_once(
         for stale_uid in set(prewarm_cache.keys()) - active_user_ids:
             prewarm_cache.invalidate(stale_uid)
 
+        if not candidate_user_ids:
+            return
+
         # 2) 对合格用户：命中复用，未命中提交刷新。
         # 给每个 future 加 done_callback：完成后自动写入 prewarm_cache，
         # 确保慢 future（跨轮完成）的 session 不会泄漏。
@@ -986,7 +1145,7 @@ async def run_once(
             try:
                 ps = fut.result()
             except BookingBlockedError as e:
-                _mark_prewarm_blocked(e)
+                _mark_h2s_login_blocked(e)
                 ps = None
             except Exception:
                 ps = None
@@ -995,6 +1154,8 @@ async def run_once(
 
         for user, _ in user_notifiers:
             if user.id not in active_user_ids:
+                continue
+            if user.id not in candidate_user_ids:
                 continue
             cached = prewarm_cache.get(user.id)
             if prewarm_cache.is_valid(cached, user.auto_book.email):
@@ -1018,6 +1179,22 @@ async def run_once(
                 len(prewarm_cached), len(prewarm_futures),
             )
 
+    async def _wait_for_candidate_prewarms() -> None:
+        """候选轮次给 prewarm 最多 2 秒赶上快速通道，避免额外正常登录。"""
+        if not prewarm_futures:
+            return
+        done, pending = await asyncio.wait(
+            list(prewarm_futures.values()),
+            timeout=_PREWARM_CANDIDATE_WAIT_SEC,
+        )
+        if done or pending:
+            logger.debug(
+                "candidate prewarm 等待 %.1fs：完成 %d / 未完成 %d",
+                _PREWARM_CANDIDATE_WAIT_SEC,
+                len(done),
+                len(pending),
+            )
+
     async def _stash_pending_prewarms() -> None:
         """收集已完成的 prewarm future，供本轮 booking 快速通道使用。
         未完成的 future 由 done_callback 兜底——完成后自动写入缓存。"""
@@ -1027,7 +1204,7 @@ async def run_once(
             try:
                 ps = fut.result()
             except BookingBlockedError as e:
-                _mark_prewarm_blocked(e)
+                _mark_h2s_login_blocked(e)
                 ps = None
             except Exception:
                 ps = None
@@ -1040,12 +1217,46 @@ async def run_once(
     # booking 快速通道之后（line ~530），提前 stash 会导致 booking
     # 代码无法从 prewarm_futures 中取出刚完成的 session。
     try:
-        scrape_result = await loop.run_in_executor(
-            None, lambda: dispatch_scrape_tasks(scrape_tasks)
-        )
-        fresh, completeness = _unpack_scrape_result(scrape_result)
+        fresh, completeness, h2s_blocked, h2s_mode = await _dispatch_with_h2s_circuit(scrape_tasks)
         _log_scrape_completeness(completeness)
-        _start_prewarm_after_success()
+        if h2s_blocked is not None:
+            proxy_on = bool(get_proxy_url())
+            if not dry_run and _should_notify_block():
+                cooldown = _h2s_circuit_remaining()
+                err_msg = (
+                    f"🚫 H2S 抓取被 403 屏蔽\n\n{h2s_blocked}\n\n"
+                    f"代理状态: {'已启用' if proxy_on else '未启用'}\n"
+                    f"H2S 已进入 source 熔断，约 {cooldown // 60} 分钟后只做一次 canary 探测；"
+                    f"其他平台会继续监控。30 分钟内不会重复通知。"
+                )
+                await _broadcast_error(user_notifiers, web_notifier, err_msg)
+            if (
+                not dry_run
+                and _h2s_circuit_fail_streak >= _H2S_LONG_BLOCK_STREAK
+                and _should_notify_h2s_long_block()
+            ):
+                cooldown = _h2s_circuit_remaining()
+                await _notify_admin_only(
+                    storage,
+                    web_notifier,
+                    (
+                        "H2S 长时间被 block，需要检查服务器\n\n"
+                        f"连续 H2S 403: {_h2s_circuit_fail_streak} 次\n"
+                        f"当前 H2S 熔断剩余: 约 {max(1, cooldown // 60)} 分钟\n"
+                        f"最近错误: {h2s_blocked}\n\n"
+                        "请检查服务器网络、代理出口、Webshare 状态和 H2S GraphQL 访问情况。"
+                    ),
+                    kind="blocked",
+                )
+            if not fresh:
+                logger.warning(
+                    "H2S %s 触发 403 且没有其它 source 成功，本轮不更新数据库。",
+                    h2s_mode,
+                )
+                return completeness
+        elif h2s_mode == "open" and not fresh:
+            logger.warning("H2S source 熔断中且本轮没有其它 source 任务，本轮不更新数据库。")
+            return completeness
     except BlockedError as e:
         # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。
         # 给 main_loop 一个长 cooldown（15 min），并节流通知避免刷屏。
@@ -1227,6 +1438,11 @@ async def run_once(
         ab_candidates, status_transition = _collect_booking_candidates(
             new_listings, status_changes, fresh, user_notifiers,
         )
+        candidate_user_ids = {
+            uid for uid, candidates in ab_candidates.items() if candidates
+        }
+        _start_prewarm_for_candidates(candidate_user_ids)
+        await _wait_for_candidate_prewarms()
 
         # ── 立即将 book_with_fallback() 提交到线程池（快速通道）──────── #
         # 新上线可预订 / 状态变更 → Available to book 均立即提交 run_in_executor，
