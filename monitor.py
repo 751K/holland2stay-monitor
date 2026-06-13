@@ -45,6 +45,7 @@ import os
 import signal
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -69,6 +70,33 @@ from update_checker import check_for_updates
 from storage import Storage
 from users import UserConfig, load_users, save_users
 from models import Listing
+
+
+async def _dispatch_scrape_tasks_async(
+    loop: asyncio.AbstractEventLoop,
+    selected: list,
+    *,
+    isolated: bool = False,
+):
+    """
+    Run the synchronous scraper dispatcher from async monitor code.
+
+    CloakBrowser wraps Playwright's Sync API. On Linux containers, launching it
+    from the long-lived default executor can inherit enough asyncio state for
+    Playwright to reject startup with "Sync API inside the asyncio loop". H2S
+    therefore uses a short-lived dedicated thread, while non-browser sources
+    keep using the default executor.
+    """
+    if isolated:
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="h2s-scrape") as executor:
+            return await loop.run_in_executor(
+                executor,
+                lambda: dispatch_scrape_tasks(selected),
+            )
+    return await loop.run_in_executor(
+        None,
+        lambda: dispatch_scrape_tasks(selected),
+    )
 
 
 def _setup_logging(level: str) -> None:
@@ -1082,9 +1110,11 @@ async def run_once(
         completeness_all: dict[str, bool] = {}
         h2s_blocked: BlockedError | None = None
 
-        async def _dispatch(selected):
-            result = await loop.run_in_executor(
-                None, lambda: dispatch_scrape_tasks(selected)
+        async def _dispatch(selected, *, isolated: bool = False):
+            result = await _dispatch_scrape_tasks_async(
+                loop,
+                selected,
+                isolated=isolated,
             )
             return _unpack_scrape_result(result)
 
@@ -1095,7 +1125,7 @@ async def run_once(
 
         if selected_h2s:
             try:
-                fresh_part, completeness_part = await _dispatch(selected_h2s)
+                fresh_part, completeness_part = await _dispatch(selected_h2s, isolated=True)
             except BlockedError as e:
                 h2s_blocked = e
                 _mark_h2s_scrape_blocked(e)

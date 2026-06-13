@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -59,6 +61,32 @@ def test_dispatch_still_raises_blocked_when_all_sources_blocked(monkeypatch):
         scrapers.dispatch_scrape_tasks([
             ScrapeTask(source="blocked", city_key="2", city_display="Diemen"),
         ])
+
+
+def test_monitor_isolated_dispatch_runs_without_thread_asyncio_loop(monkeypatch):
+    import monitor
+
+    main_thread = threading.get_ident()
+
+    def fake_dispatch(tasks):
+        assert threading.get_ident() != main_thread
+        with pytest.raises(RuntimeError):
+            asyncio.get_running_loop()
+        return [], {"holland2stay:Eindhoven": True}
+
+    monkeypatch.setattr(monitor, "dispatch_scrape_tasks", fake_dispatch)
+
+    async def run():
+        return await monitor._dispatch_scrape_tasks_async(
+            asyncio.get_running_loop(),
+            [ScrapeTask(source="holland2stay", city_key="29", city_display="Eindhoven")],
+            isolated=True,
+        )
+
+    listings, completeness = asyncio.run(run())
+
+    assert listings == []
+    assert completeness == {"holland2stay:Eindhoven": True}
 
 
 # ── Browser 复用回归 ────────────────────────────────────────────

@@ -6,6 +6,7 @@
 - **H2S GraphQL 403 请求形态修正**：`BrowserFetcher.fetch_gql()` 的浏览器内请求显式使用 `credentials: "include"` / `mode: "same-origin"` / 当前页面 referrer，并补齐 Magento storefront 常用的 `Accept`、`Store`、`Content-Currency` headers，避免页面级 CF challenge 已通过但 GraphQL 请求因过于“裸 fetch”被 WAF 拒绝。403 重建会话后若重试成功，现在会刷新 HTTP status；仍失败时记录脱敏响应头和 body 摘要，便于区分 Cloudflare、H2S API 与代理服务端错误。
 - **H2S 维护页识别**：CloakBrowser 主站加载后如果页面标题或 HTML 命中维护页（例如 `H2S-Maintenance`），立即抛 `UpstreamMaintenanceError`，让 monitor 进入平台维护冷却，不再继续打 GraphQL 并误报为 Cloudflare 403。
 - **Web 维护横幅动态更新**：`/api/status` 现在返回 upstream maintenance 状态，Dashboard 顶部横幅会在后台 monitor 检测到 H2S 维护后通过轮询自动显示，无需刷新页面。
+- **H2S 抓取线程隔离**：H2S/CloakBrowser 抓取改用短生命周期专用线程执行，避免 Playwright Sync API 在 monitor 的 asyncio 环境中误判为“inside the asyncio loop”并拒绝启动。
 - **macOS 本地调试**：CloakBrowser macOS headless v145 可能 SIGABRT；本地运行时自动使用 headed 调试模式，Docker/Linux 生产环境仍保持 headless，并只在 Linux 注入 `--disable-dev-shm-usage` / `--disable-gpu`。
 - **Docker 镜像补齐 captcha 包**：Dockerfile 显式复制 `captcha/`，修复镜像内 `bookers/rentcafe.py` 导入 `captcha` 失败导致 monitor 无法启动的问题。
 - **Docker 构建兼容性**：`python:3.11-slim-bookworm` 使用 Bookworm 包名（非 `t64` 包名），修复 apt 安装 Chromium 依赖失败；同时将 `CLOAKBROWSER_CACHE_DIR` 固定到 `/app/.cloakbrowser` 并关闭 build-time auto-update，确保 root 构建阶段下载的 patched Chromium 对运行时 `appuser` 可用。
