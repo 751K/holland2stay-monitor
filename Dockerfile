@@ -2,17 +2,20 @@ FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
+ENV CLOAKBROWSER_AUTO_UPDATE=false \
+    CLOAKBROWSER_CACHE_DIR=/app/.cloakbrowser
+
 # supervisord + CloakBrowser / Chromium 系统依赖
 RUN apt-get update \
     && apt-get install -y --no-install-recommends supervisor \
     # CloakBrowser / Chromium 运行时依赖
-    libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 \
+    libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 \
     libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
-    libasound2t64 libatspi2.0-0t64 \
+    libasound2 libatspi2.0-0 \
     # Chromium headless 额外依赖
     libx11-6 libx11-xcb1 libxcb1 libxext6 libxrender1 libxi6 \
-    libxtst6 libglib2.0-0t64 libgl1-mesa-glx libgl1 \
+    libxtst6 libglib2.0-0 libgl1-mesa-glx libgl1 \
     fonts-liberation libfontconfig1 \
     && rm -rf /var/lib/apt/lists/*
 
