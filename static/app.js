@@ -116,6 +116,8 @@ var _monitorTimer = null;
 function updateMonitorPausedBanner(d) {
   var banner = document.getElementById('monitor-paused-banner');
   if(banner) banner.classList.toggle('hidden', !!d.running);
+  var row = document.getElementById('system-monitor-paused-note-row');
+  if(row) row.classList.toggle('hidden', !!d.running);
   var inline = document.getElementById('system-monitor-paused-note');
   if(inline) inline.classList.toggle('hidden', !!d.running);
 }

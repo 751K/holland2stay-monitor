@@ -27,31 +27,41 @@
           {% endif %}
         </td></tr>
       <tr><td class="text-tertiary">{{ _('web_process') }}</td><td>PID {{ info.web_pid }}</td></tr>
+      <tr class="monitor-control-row">
+        <td class="text-tertiary"></td>
+        <td>
+          <div class="monitor-control-panel" data-monitor-running="{{ '1' if info.monitor_running else '0' }}">
+            <button type="button"
+                    id="monitor-start-btn"
+                    class="btn btn-primary btn-sm{% if info.monitor_running %} hidden{% endif %}"
+                    onclick="controlMonitor(this, 'start')">
+              <i class="bi bi-play-fill mr-1"></i>{{ _('monitor_start') }}
+            </button>
+            <button type="button"
+                    id="monitor-stop-btn"
+                    class="btn btn-ghost btn-sm{% if not info.monitor_running %} hidden{% endif %}"
+                    onclick="controlMonitor(this, 'stop')">
+              <i class="bi bi-pause-fill mr-1"></i>{{ _('monitor_stop') }}
+            </button>
+            <button type="button"
+                    id="monitor-restart-btn"
+                    class="btn btn-ghost btn-sm"
+                    onclick="controlMonitor(this, 'restart')">
+              <i class="bi bi-arrow-repeat mr-1"></i>{{ _('settings_restart') }}
+            </button>
+          </div>
+        </td>
+      </tr>
+      <tr id="system-monitor-paused-note-row" class="{% if info.monitor_running %}hidden{% endif %}">
+        <td class="text-tertiary"></td>
+        <td>
+          <div id="system-monitor-paused-note" class="monitor-paused-inline">
+            <i class="bi bi-exclamation-triangle"></i>
+            <span>{{ _('monitor_paused_hint') }}</span>
+          </div>
+        </td>
+      </tr>
     </table>
-    <div class="monitor-control-panel" data-monitor-running="{{ '1' if info.monitor_running else '0' }}">
-      <button type="button"
-              id="monitor-start-btn"
-              class="btn btn-primary btn-sm{% if info.monitor_running %} hidden{% endif %}"
-              onclick="controlMonitor(this, 'start')">
-        <i class="bi bi-play-fill mr-1"></i>{{ _('monitor_start') }}
-      </button>
-      <button type="button"
-              id="monitor-stop-btn"
-              class="btn btn-ghost btn-sm{% if not info.monitor_running %} hidden{% endif %}"
-              onclick="controlMonitor(this, 'stop')">
-        <i class="bi bi-pause-fill mr-1"></i>{{ _('monitor_stop') }}
-      </button>
-      <button type="button"
-              id="monitor-restart-btn"
-              class="btn btn-ghost btn-sm"
-              onclick="controlMonitor(this, 'restart')">
-        <i class="bi bi-arrow-repeat mr-1"></i>{{ _('settings_restart') }}
-      </button>
-    </div>
-    <div id="system-monitor-paused-note" class="monitor-paused-inline{% if info.monitor_running %} hidden{% endif %}">
-      <i class="bi bi-exclamation-triangle"></i>
-      <span>{{ _('monitor_paused_hint') }}</span>
-    </div>
   </div>
 
   <!-- 数据库 -->

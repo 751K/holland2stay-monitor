@@ -528,15 +528,16 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .monitor-paused-title{font-weight:650;font-size:15px}
 .monitor-paused-text{color:var(--text2);font-size:13px}
 .monitor-paused-inline{
-  margin-top:14px;padding:10px 12px;border-radius:var(--radius);
+  margin-top:0;padding:10px 12px;border-radius:var(--radius);
   display:flex;align-items:flex-start;gap:8px;
   background:var(--danger-soft);color:var(--danger);
   font-size:13px;line-height:1.4;
 }
 .monitor-paused-inline span{color:var(--text2)}
 .monitor-control-panel{
-  margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
 }
+.monitor-control-row td{padding-top:6px}
 
 /* ── Page Header ───────────────────────────────────────────────── */
 .page-header{
