@@ -4,9 +4,14 @@
 
 ---
 
-## 当前路线图（2026-05-30）
+## 当前路线图（2026-06-13）
 
-接下来三个阶段的重点工作：
+### 已完成：H2S 传输层迁移至 CloakBrowser
+- H2S 将 API 迁至 `www.holland2stay.com/api/graphql` + Cloudflare Turnstile，旧 curl_cffi 路径封锁
+- **scraper**：`scrapers/holland2stay.py` 重写，`browser_fetcher.py` 共享模块，CloakBrowser 绕过 Turnstile + 浏览器内调用 GraphQL
+- **booker**：同步迁移，所有 GraphQL mutation 走 BrowserFetcher
+- **新 API**：扁平字段替代 `custom_attributesV2`；attribute ID→label 通过 aggregations 接口映射
+- 为 Pararius / Funda 等 CF 保护的平台提供了通用基建
 
 ### 第一期：Android Play Store 上架
 - Android 客户端 A0–A5 已完成（57 文件，~9.5k 行，47 单测）

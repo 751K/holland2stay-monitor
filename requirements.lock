@@ -47,3 +47,13 @@ packaging==24.2
 
 # ── cffi 传递依赖（cryptography / curl_cffi 共享）────────────────────
 pycparser==2.21
+
+# ── reCAPTCHA solving (Xior / OurDomain) ────────────────────────────────
+2captcha-python==2.0.7
+
+# ── CloakBrowser (H2S Cloudflare bypass) + Playwright ──────────────────
+cloakbrowser==0.3.31
+playwright==1.60.0
+greenlet==3.5.1
+pyee==13.0.1
+typing_extensions==4.12.2

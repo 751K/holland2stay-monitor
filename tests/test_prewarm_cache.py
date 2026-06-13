@@ -39,7 +39,7 @@ def _make_fake_prewarmed(email: str, ttl: float = 3300):
         sess.closed = True
     sess.close = MagicMock(side_effect=close_impl)
     return PrewarmedSession(
-        session=sess, token="tok",
+        fetcher=sess, token="tok",
         created_at=time.monotonic(),
         token_expiry=time.monotonic() + ttl,
         email=email,
@@ -146,13 +146,13 @@ class TestPrewarmCacheLifecycle:
         scrape = lambda *a, **k: [_make_listing(1)]
 
         self._run(cfg, fake_storage, notifs, prewarm_log, scrape)
-        cached_session_id = id(_pc.get("aaaa").session)
+        cached_session_id = id(_pc.get("aaaa").fetcher)
 
         scrape2 = lambda *a, **k: [_make_listing(2)]
         self._run(cfg, fake_storage, notifs, prewarm_log, scrape2)
 
         assert len(prewarm_log) == 1, "缓存命中应该不再登录"
-        assert id(_pc.get("aaaa").session) == cached_session_id, \
+        assert id(_pc.get("aaaa").fetcher) == cached_session_id, \
             "缓存应保留同一个 session 实例"
 
     def test_empty_round_cache_survives(
@@ -195,8 +195,8 @@ class TestPrewarmCacheLifecycle:
                   scrape_fn=lambda *a, **k: [_make_listing(2)])
 
         assert len(prewarm_log) == 2, "TTL 不足应触发刷新"
-        assert old.session.closed is True, "旧 session 应被关闭"
-        assert _pc.get("aaaa").session is not old.session
+        assert old.fetcher.closed is True, "旧 session 应被关闭"
+        assert _pc.get("aaaa").fetcher is not old.fetcher
 
     def test_email_change_invalidates_cache(
         self, clean_cache, fake_storage, cfg, user_ab,
@@ -216,7 +216,7 @@ class TestPrewarmCacheLifecycle:
         assert len(prewarm_log) == 2
         assert prewarm_log[1] == "NEW@x.com"
         assert _pc.get("aaaa").email == "NEW@x.com"
-        assert old.session.closed is True
+        assert old.fetcher.closed is True
 
     def test_unknown_error_invalidates_cache(
         self, clean_cache, fake_storage, cfg, user_ab,
@@ -236,7 +236,7 @@ class TestPrewarmCacheLifecycle:
                   try_book_fn=unknown_fn)
 
         assert "aaaa" not in _pc, "unknown_error 应使缓存失效"
-        assert old.session.closed is True
+        assert old.fetcher.closed is True
 
     def test_race_lost_keeps_cache(
         self, clean_cache, fake_storage, cfg, user_ab,
@@ -269,7 +269,7 @@ class TestPrewarmCacheLifecycle:
                   scrape_fn=lambda *a, **k: [])
 
         assert "aaaa" not in _pc, "auto_book 禁用后缓存应被淘汰"
-        assert old.session.closed is True
+        assert old.fetcher.closed is True
 
     def test_clear_prewarm_cache_closes_all(self, clean_cache):
         sess1 = _make_fake_prewarmed("u1@x.com")
@@ -280,8 +280,8 @@ class TestPrewarmCacheLifecycle:
         _pc.clear()
 
         assert len(_pc) == 0
-        assert sess1.session.closed
-        assert sess2.session.closed
+        assert sess1.fetcher.closed
+        assert sess2.fetcher.closed
 
 
 class TestPhaseBLongRunEconomy:

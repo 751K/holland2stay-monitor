@@ -4,8 +4,9 @@ services:
     image: h2s-monitor
     container_name: h2s
     restart: unless-stopped
-    mem_limit: 512M
+    mem_limit: 1G
     cpus: 1.0
+    shm_size: 2gb
     # 不对外暴露端口，由 Caddy 反代
     expose:
       - "8088"

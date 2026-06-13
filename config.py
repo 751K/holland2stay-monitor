@@ -130,6 +130,10 @@ TIMEZONE = os.environ.get("TIMEZONE", "Europe/Amsterdam")
 
 BASE_URL = "https://www.holland2stay.com/residences"
 
+# CloakBrowser 设置（用于 H2S CF Turnstile 绕过）
+CLOAKBROWSER_HEADLESS = os.environ.get("CLOAKBROWSER_HEADLESS", "true").lower() != "false"
+"""True=无头模式（Docker/生产），False=可视化（本地调试）"""
+
 # curl_cffi TLS 指纹模拟池，绕过 Cloudflare WAF。
 # 配合代理使用时每个 IP 随机选取不同指纹，模拟真实多用户浏览器分布。
 # 池中指纹均来自 curl_cffi 支持的现代浏览器版本。

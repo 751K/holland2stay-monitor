@@ -19,7 +19,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from booker import BookingBlockedError, PrewarmedSession, create_prewarmed_session
+from booker import PrewarmedSession, create_prewarmed_session
+from scrapers.base import BlockedError
 
 if TYPE_CHECKING:
     from users import UserConfig
@@ -73,7 +74,7 @@ class PrewarmCache:
                 "[%s] 预登录失败 (%s)，下单时将回退到正常登录路径",
                 user.name, e,
             )
-            if isinstance(e, BookingBlockedError):
+            if isinstance(e, BlockedError):
                 raise
             return None
 
@@ -84,7 +85,7 @@ class PrewarmCache:
         ps = self._cache.pop(user_id, None)
         if ps:
             try:
-                ps.session.close()
+                ps.fetcher.close()
             except Exception:
                 pass
 

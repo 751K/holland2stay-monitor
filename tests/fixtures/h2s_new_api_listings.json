@@ -1,0 +1,355 @@
+{
+  "data": {
+    "products": {
+      "items": [
+        {
+          "name": "Kastanjelaan 1-108",
+          "sku": "r-pbs-1-108",
+          "url_key": "kastanjelaan-1-108",
+          "city": 29,
+          "basic_rent": 1395,
+          "living_area": "66",
+          "energy_label": "A",
+          "building_name": 614,
+          "no_of_rooms": "6137",
+          "floor": "6060",
+          "finishing": 71,
+          "maximum_number_of_persons": 23,
+          "available_to_book": 179,
+          "available_startdate": "2026-05-22 00:00:00",
+          "next_contract_startdate": "2026-06-17 00:00:00",
+          "minimum_stay": "12 Months",
+          "type_of_contract": 21,
+          "price_range": {
+            "minimum_price": {
+              "regular_price": {
+                "value": 1664,
+                "__typename": "Money"
+              },
+              "__typename": "ProductPrice"
+            },
+            "__typename": "PriceRange"
+          },
+          "media_gallery": [
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Kastanjelaan 1-108"
+            }
+          ]
+        },
+        {
+          "name": "Frederik van Eedenplein 69",
+          "sku": "r-cpe-69",
+          "url_key": "frederik-van-eedenplein-69",
+          "city": 29,
+          "basic_rent": 2175,
+          "living_area": "123.97",
+          "energy_label": "A++",
+          "building_name": 381,
+          "no_of_rooms": "106",
+          "floor": "6062",
+          "finishing": 6261,
+          "maximum_number_of_persons": 380,
+          "available_to_book": 179,
+          "available_startdate": "2026-05-31 00:00:00",
+          "next_contract_startdate": "2026-06-17 00:00:00",
+          "minimum_stay": "12 months",
+          "type_of_contract": 21,
+          "price_range": {
+            "minimum_price": {
+              "regular_price": {
+                "value": 2526,
+                "__typename": "Money"
+              },
+              "__typename": "ProductPrice"
+            },
+            "__typename": "PriceRange"
+          },
+          "media_gallery": [
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 69"
+            }
+          ]
+        },
+        {
+          "name": "Frederik van Eedenplein 87",
+          "sku": "r-cpe-87",
+          "url_key": "frederik-van-eedenplein-87",
+          "city": 29,
+          "basic_rent": 2198,
+          "living_area": "123.97",
+          "energy_label": "A++",
+          "building_name": 381,
+          "no_of_rooms": "106",
+          "floor": "6063",
+          "finishing": 6261,
+          "maximum_number_of_persons": 380,
+          "available_to_book": 179,
+          "available_startdate": "2026-06-12 00:00:00",
+          "next_contract_startdate": "2026-06-17 00:00:00",
+          "minimum_stay": "12 months",
+          "type_of_contract": 21,
+          "price_range": {
+            "minimum_price": {
+              "regular_price": {
+                "value": 2549,
+                "__typename": "Money"
+              },
+              "__typename": "ProductPrice"
+            },
+            "__typename": "PriceRange"
+          },
+          "media_gallery": [
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            },
+            {
+              "url": "https://account.holland2stay.com/media/catalog/product/placeholder/default/logo-blue-1.jpg",
+              "label": "Frederik van Eedenplein 87"
+            }
+          ]
+        }
+      ],
+      "page_info": {
+        "current_page": 1,
+        "page_size": 3,
+        "total_pages": 1
+      },
+      "total_count": 3
+    }
+  }
+}

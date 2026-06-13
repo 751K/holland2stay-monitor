@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.9.0 (2026-06-13)
+
+### Breaking — H2S 传输层迁移至 CloakBrowser
+- **背景**：Holland2Stay 将 GraphQL API 从 `api.holland2stay.com/graphql` 迁移至 `www.holland2stay.com/api/graphql`，并对旧子域名启用 Cloudflare Turnstile 保护。curl_cffi TLS impersonation 已无法通过（Turnstile 需要真实浏览器执行 JS challenge）。
+- **抓取（scraper）**：`scrapers/holland2stay.py` 重写主体，新增 `BrowserFetcher`（共享模块 `browser_fetcher.py`），通过 CloakBrowser（patched Chromium，58 C++ 源码级反指纹 patch）自动执行 Turnstile challenge，然后通过 `page.evaluate(fetch)` 调用同域 GraphQL API。旧的 `scraper.py`（570 行）精简为 re-export 向后兼容。
+- **自动预订（booker）**：`booker.py` 同步迁移，所有 GraphQL mutation 通过 `BrowserFetcher` 发送。`PrewarmedSession.session` → `.fetcher`。下单流程与真实浏览器对齐：
+  - `AddNewBooking` 参数精简：移除 `contract_id`、`option_selected`（浏览器未传），仅保留 `cart_id` + `sku` + `contract_startDate`
+  - 新增 `GetCheckoutAgreements` 步骤（照浏览器抓包，`setPaymentMethod` 后 `placeOrder` 前），fail-open
+  - 完整链路：`CreateEmptyCart → AddNewBooking → SetPaymentMethodOnCart → GetCheckoutAgreements → PlaceOrder → IdealCheckOut`
+- **新 API 字段变化**：H2S GraphQL 响应从 `custom_attributesV2` 嵌套对象变为扁平字段（`city: 29`, `basic_rent: 1395`, `energy_label: "A"` 等直接 int/string），大部分枚举字段返回 attribute option ID，通过 aggregations 接口构建 ID→label 映射。
+- **工具链**：新增依赖 `cloakbrowser>=0.3.0`，Docker 镜像新增 Chromium 系统依赖 + `cloakbrowser install`（~300MB）。
+- **资源开销**：CloakBrowser 空闲 ~190MB RAM，scraper 和 booker 各自独立实例。
+
+### 改进
+- **代码清洁**：`scraper.py` 从 570 行缩减至 28 行 re-export。H2S 爬取主体正式入驻 `scrapers/holland2stay.py`（当初 P0 多源重构的遗留 TODO）。
+- **macOS 支持**：本地开发 CloakBrowser 可工作（v145，26 patches），但官方推荐 Linux 生产环境（v146，58 patches），后者 patches 更全、CF 绕过更稳定。
+- **浏览器跨轮复用**：scraper 浏览器不再每轮创建/关闭，改为懒创建 + 跨轮复用。CF Turnstile 挑战从 ~40 次/小时降至 ~2 次/小时（首次创建 + token 过期重建）。BlockedError 时自动关闭重建；超过 2 小时主动重建避免会话过期。
+- **Docker 兼容**：`BrowserFetcher` 内置 `--disable-dev-shm-usage` `--disable-gpu`（解决 `/dev/shm` 64MB 限制）。`docker-compose.yml` 内存限额 512M→1G，新增 `shm_size: 2gb`。`requirements.lock` 补全 `cloakbrowser`/`playwright`/`greenlet`/`pyee`/`2captcha-python` 精确版本。
+- **Prewarm 异常修正**：`PrewarmCache.create()` 的 CF 屏蔽检测从 `BookingBlockedError` 改为 `BlockedError`（与 BrowserFetcher 抛出的异常类型一致）。
+
+### 已知限制
+- booker.py 迁移已完成代码层，尚未用真实 H2S 账号跑完整下单流程验证。
+
 ## v1.8.4 (2026-06-12)
 
 ### 功能改进 (Features)

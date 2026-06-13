@@ -54,7 +54,7 @@ Platform coverage changes over time as third-party websites change. Always verif
 
 ### Docker
 
-Docker is recommended for a VPS or always-on home server.
+Docker is recommended for a VPS or always-on home server. **Minimum 1 GB RAM** required (CloakBrowser ~190 MB + Python/Gunicorn).
 
 ```bash
 cp .env.example .env
@@ -78,11 +78,15 @@ SUPPORT_EMAIL=support@example.com
 
 ```bash
 pip install -r requirements.txt
+# Install CloakBrowser patched Chromium for H2S Cloudflare bypass (~300MB)
+python -m cloakbrowser install
 cp .env.example .env
 python web.py
 ```
 
 Open `http://127.0.0.1:8088`.
+
+> **macOS note**: CloakBrowser on macOS uses a slightly older Chromium build (v145, 26 patches vs v146, 58 patches on Linux). For production use, Docker (Linux) is recommended.
 
 ### Desktop Releases
 

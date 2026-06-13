@@ -20,7 +20,7 @@ def _make_fake_prewarmed(email: str, ttl: float = 3300):
 
     sess.close = MagicMock(side_effect=close_impl)
     return PrewarmedSession(
-        session=sess,
+        fetcher=sess,
         token="tok",
         created_at=time.monotonic(),
         token_expiry=time.monotonic() + ttl,
@@ -105,7 +105,7 @@ class TestPrewarmCacheInvalidate:
         pc.set("u1", ps)
         pc.invalidate("u1")
         assert "u1" not in pc
-        assert ps.session.closed is True
+        assert ps.fetcher.closed is True
 
     def test_invalidate_unknown_is_noop(self):
         pc = PrewarmCache()
@@ -130,8 +130,8 @@ class TestPrewarmCacheClear:
         pc.set("u2", ps2)
         pc.clear()
         assert len(pc) == 0
-        assert ps1.session.closed is True
-        assert ps2.session.closed is True
+        assert ps1.fetcher.closed is True
+        assert ps2.fetcher.closed is True
 
     def test_clear_empty_is_noop(self):
         pc = PrewarmCache()

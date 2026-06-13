@@ -1,6 +1,10 @@
 # 多平台抓取侦察报告
 
-P1 候选平台技术可行性 + 合规性汇总。所有结论来自 2026-05-22 的真实 HTTP 探测。
+P1 候选平台技术可行性 + 合规性汇总。
+
+> **2026-06-13 更新**：H2S 已将 GraphQL API 从 `api.holland2stay.com/graphql` 迁移至 `www.holland2stay.com/api/graphql`（与主站同域），并对旧子域名启用了 Cloudflare Turnstile 保护。curl_cffi TLS impersonation 已无法通过。已迁移至 **CloakBrowser**（patched Chromium，58 C++ 源码级反指纹 patch）——浏览器自动执行 Turnstile JS challenge，通过后通过 `page.evaluate(fetch)` 调用同域 GraphQL API。详见 scaper / booker 源码。
+
+所有结论来自真实 HTTP 探测，除非单独标注更新日期。
 
 ---
 
@@ -11,7 +15,7 @@ P1 候选平台技术可行性 + 合规性汇总。所有结论来自 2026-05-22
 | 1 | **Xior** | ✅ 完全 | **Turnstile 不验证** | AJAX JSON（`admin-ajax.php?action=yardi_room_availability`） | 57 栋 NL+BE（100+ 全欧） | 低 | 🟢🟢🟢 **最推荐** |
 | 2 | **HousingAnywhere** | ✅ 完全 | 无 | JSON-LD + `__PRELOADED_STATE__` + 全 data-test-locator 标签 | 196 条 Amsterdam | 低（robots 禁 `/api/*`，但 HTML OK） | 🟢🟢🟢 **强烈推荐** |
 | 3 | **SSH (sshxl.nl)** | ✅ 但 SPA | 无 | Angular SPA + sitemap-offers.xml | 44 条全国 | 低 | 🟢 推荐（需挖 API） |
-| 4 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | ❌ 需 Playwright |
+| 4 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可用 CloakBrowser（H2S 同方案） |
 | 5 | **OurDomain (thisisourdomain)** | ✅ 完全 | SecureRC CF challenge → **curl_cffi 可过** | Unit 级 HTML table（server-rendered，data-selenium-id 锚点） | 8 单元（1 栋） | 低 | 🟢 已接入 |
 | 6 | DUWO/ROOM | ❌ | 无（但 **auth-wall + paid registration**） | API 仅登录后可见 | ? | **高**（登录后内容转发）| ❌ 不建议 |
 | 7 | Kamernet | — | paid model | — | — | 高 | ❌ |
@@ -172,9 +176,9 @@ Disallow: /contact/*, /report-*, /account/*, /checkout/*, /*/Kamer-te-huur/*
 
 robots.txt 友好，但 Cloudflare WAF 不认 robots——它认请求指纹。
 
-### 工程评估
+### 工程评估（2026-06-13 更新）
 
-需要 **Playwright** 或 **cf_clearance cookie 注入**。运行时成本 10–50× ↑，CI / Docker 部署复杂度也涨。推迟到有 Playwright 基建后做。
+现可用 **CloakBrowser**（H2S scraping/booker 已在用）：patched Chromium 自动执行 CF JS challenge，通过后拿 cf_clearance 即可调 API。之前评估"需 Playwright"，现在基建已到位，可行性大幅提升。但 Pararius 的反爬可能比 H2S 更严（DataDome 等），需实际探测验证。
 
 ---
 
@@ -351,7 +355,7 @@ POST https://www.xiorstudenthousing.eu/wp-admin/admin-ajax.php
 4. **SSH — 填空城市（2–3 周）**
    - 全国 44 条覆盖 9 城，填 H2S 没覆盖的 Utrecht / Maastricht / Groningen
    - 工程量略大（需 SPA bundle 分析）
-5. **Pararius — 推迟到引入 Playwright 基建后**，届时一起做 Pararius + Funda
+5. **Pararius — 现在有 CloakBrowser 基建**，H2S 已验证可行。可以考虑启动探测（Funda 同理）
 6. **DUWO / Kamernet — 放弃**（合规 / 商业模式不允许）
 
 ### 替代发现：可考虑加入候选

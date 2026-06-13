@@ -1,18 +1,9 @@
 """
-平台维护态测试。
+平台维护态测试（适配新 CloakBrowser 路径）。
 
-需求：H2S 有时一直 403 是因为他们整站在维护（不是 Cloudflare 屏蔽）。
-旧路径会把所有 403 当 Cloudflare WAF 屏蔽，发用户告警 + 走 15 min cooldown。
-维护态下用户什么都做不了，告警是噪音；正确做法是连续 403 后探主站，
-命中维护页就抛 UpstreamMaintenanceError 让 monitor 安静等待。
-
-契约
-----
-1. 连续 N 次 403 时，_post_gql 会 GET 主站
-2. 主站 body 含 "We'll be back soon" / "scheduled maintenance" → 抛 UpstreamMaintenanceError
-3. 主站正常 → 仍然走 BlockedError 路径（旧行为）
-4. dispatcher 优先把 UpstreamMaintenanceError 上抛（vs BlockedError）
-5. is_maintenance_body 对正常 HTML / JSON 不误判
+旧 curl_cffi _post_gql 的 403 streak / maintenance probe 逻辑已退役。
+is_maintenance_body / probe_h2s_maintenance 仍保留在 scrapers.base，
+但仅作为未来可能的探测工具。dispatcher 优先级 + monitor admin 通知逻辑不变。
 """
 from __future__ import annotations
 
@@ -20,11 +11,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import scraper
 from scrapers.base import (
     UpstreamMaintenanceError,
     is_maintenance_body,
     probe_h2s_maintenance,
+    BlockedError,
+    ScrapeTask,
 )
 
 
@@ -42,7 +34,6 @@ def _fake_response(status_code, body=""):
     resp.text = body
     resp.ok = 200 <= status_code < 300
     resp.json = MagicMock(return_value={"data": {}})
-
     def raise_for_status():
         if not resp.ok:
             raise Exception(f"HTTP Error {status_code}")
@@ -50,14 +41,12 @@ def _fake_response(status_code, body=""):
     return resp
 
 
-# ─── is_maintenance_body 单元测试 ─────────────────────────────────
-
+# ─── is_maintenance_body 单元测试（不变）─────────────────────────
 
 class TestIsMaintenanceBody:
     def test_we_will_be_back_soon(self):
         assert is_maintenance_body("We'll be back soon")
         assert is_maintenance_body("We will be back soon")
-        # case insensitive
         assert is_maintenance_body("WE'LL BE BACK SOON")
 
     def test_scheduled_maintenance(self):
@@ -78,8 +67,7 @@ class TestIsMaintenanceBody:
         assert is_maintenance_body('{"data":{"products":{"items":[]}}}') is False
 
 
-# ─── probe_h2s_maintenance 单元测试 ───────────────────────────────
-
+# ─── probe_h2s_maintenance 单元测试（不变）───────────────────────
 
 class TestProbeH2sMaintenance:
     def test_probe_returns_true_when_main_site_in_maintenance(self):
@@ -93,132 +81,18 @@ class TestProbeH2sMaintenance:
         assert probe_h2s_maintenance(session) is False
 
     def test_probe_swallows_network_errors(self):
-        """探测自己挂了不应该升级成更严重错误，返回 False 就好。"""
         session = MagicMock()
         session.get.side_effect = TimeoutError("probe timeout")
         assert probe_h2s_maintenance(session) is False
 
 
-# ─── _post_gql 403 streak → maintenance 探测 ─────────────────────
-
-
-class TestPostGqlMaintenanceProbe:
-    def setup_method(self):
-        # 跨测试不要把 streak 状态泄露过去
-        scraper._consecutive_403_count = 0
-
-    def teardown_method(self):
-        scraper._consecutive_403_count = 0
-
-    def test_single_403_does_not_probe(self):
-        """阈值是 3，前 2 次 403 不应该触发探测。"""
-        from scraper import _post_gql, BlockedError
-
-        session = MagicMock()
-        session.post.return_value = _fake_response(403, "Cloudflare challenge")
-
-        with pytest.raises(BlockedError):
-            _post_gql(session, "query{}")
-        with pytest.raises(BlockedError):
-            _post_gql(session, "query{}")
-
-        # 仍然没有 GET 主站（streak=2 < 阈值 3）
-        assert session.get.call_count == 0
-
-    def test_consecutive_403_triggers_probe_and_raises_maintenance(self):
-        """连续 3 次 403 + 主站维护 → UpstreamMaintenanceError，非 BlockedError。"""
-        from scraper import _post_gql, BlockedError
-
-        session = MagicMock()
-        session.post.return_value = _fake_response(403, "Cloudflare challenge")
-        # 主站显示维护页（探测会命中）
-        session.get.return_value = _fake_response(503, _MAINT_HTML)
-
-        # 前 2 次：BlockedError（不探测）
-        with pytest.raises(BlockedError):
-            _post_gql(session, "query{}")
-        with pytest.raises(BlockedError):
-            _post_gql(session, "query{}")
-        assert session.get.call_count == 0
-
-        # 第 3 次：跨过阈值，探测命中，抛 UpstreamMaintenanceError
-        with pytest.raises(UpstreamMaintenanceError) as excinfo:
-            _post_gql(session, "query{}")
-        assert session.get.call_count == 1
-        assert "维护" in str(excinfo.value) or "maintenance" in str(excinfo.value).lower()
-
-    def test_consecutive_403_with_normal_main_site_still_blocked(self):
-        """连续 3 次 403 但主站正常 → 走 BlockedError 路径（非维护）。"""
-        from scraper import _post_gql, BlockedError
-
-        session = MagicMock()
-        session.post.return_value = _fake_response(403, "Cloudflare challenge")
-        # 主站正常 → 不是维护
-        session.get.return_value = _fake_response(200, "<html>OK</html>")
-
-        with pytest.raises(BlockedError):
-            _post_gql(session, "query{}")
-        with pytest.raises(BlockedError):
-            _post_gql(session, "query{}")
-        with pytest.raises(BlockedError):
-            _post_gql(session, "query{}")
-
-        # 探测被触发过一次（streak 跨阈值时）
-        assert session.get.call_count == 1
-
-    def test_success_resets_streak(self):
-        """成功响应后 streak 清零，下次 403 重新从 1 开始计数。"""
-        from scraper import _post_gql, BlockedError
-
-        session = MagicMock()
-        # 403, 403, 403（应该探测）, 200, 403, 403 → 此 streak=2，不应该再探测
-        ok = _fake_response(200, "")
-        ok.json = MagicMock(return_value={"data": {"products": {"items": []}}})
-
-        responses = [
-            _fake_response(403, "cf"),
-            _fake_response(403, "cf"),
-            _fake_response(403, "cf"),
-            ok,
-            _fake_response(403, "cf"),
-            _fake_response(403, "cf"),
-        ]
-        session.post.side_effect = responses
-        # 主站探测：正常（不是维护）→ Block 仍抛
-        session.get.return_value = _fake_response(200, "<html>OK</html>")
-
-        # 1st, 2nd 403 - 不探
-        with pytest.raises(BlockedError):
-            _post_gql(session, "q1")
-        with pytest.raises(BlockedError):
-            _post_gql(session, "q2")
-        assert session.get.call_count == 0
-        # 3rd 403 - 跨阈值，探测
-        with pytest.raises(BlockedError):
-            _post_gql(session, "q3")
-        assert session.get.call_count == 1
-        # 成功响应
-        _post_gql(session, "q4")
-        assert scraper._consecutive_403_count == 0, "成功后 streak 必须清零"
-        # 5th, 6th 403 - streak 重新计数，到 2 < 3 不再探测
-        with pytest.raises(BlockedError):
-            _post_gql(session, "q5")
-        with pytest.raises(BlockedError):
-            _post_gql(session, "q6")
-        assert session.get.call_count == 1, "新一轮 streak 还没到阈值不应再探"
-
-
-# ─── dispatcher 上抛优先级测试 ───────────────────────────────────
-
+# ─── dispatcher 上抛优先级测试（不变）───────────────────────────
 
 class TestDispatcherMaintenancePriority:
-    """所有任务失败时，UpstreamMaintenanceError 应该比 BlockedError 优先上抛。"""
-
     def test_maintenance_wins_over_blocked(self):
+        from contextlib import contextmanager
         from scrapers import dispatch_scrape_tasks
-        from scrapers.base import BlockedError, ScrapeTask
 
-        # 1 个 H2S task：抛维护；1 个 OurDomain task：抛 Block
         tasks = [
             ScrapeTask(source="holland2stay", city_key="29", city_display="Eindhoven"),
             ScrapeTask(source="ourdomain", city_key="amsterdam", city_display="Amsterdam"),
@@ -229,18 +103,20 @@ class TestDispatcherMaintenancePriority:
                 raise UpstreamMaintenanceError("h2s maintenance")
             raise BlockedError("ourdomain blocked")
 
+        @contextmanager
+        def _noop_batch(self):
+            yield
+
         with patch("scrapers.holland2stay.HollandStayScraper.scrape", fake_scrape), \
+             patch("scrapers.holland2stay.HollandStayScraper.batch_session", _noop_batch), \
              patch("scrapers.ourdomain.OurDomainScraper.scrape", fake_scrape):
             with pytest.raises(UpstreamMaintenanceError):
                 dispatch_scrape_tasks(tasks)
 
 
-# ─── monitor 维护态 → admin 通知 ─────────────────────────────────
-
+# ─── monitor 维护态 → admin 通知（不变）─────────────────────────
 
 class TestMonitorMaintenanceAdminNotify:
-    """run_once 遇到维护时：不发普通用户告警，但给 admin web 通知面板发一条。"""
-
     def setup_method(self):
         import monitor
         monitor._last_maintenance_notify_at = 0.0
@@ -252,7 +128,6 @@ class TestMonitorMaintenanceAdminNotify:
         monitor.prewarm_cache.clear()
 
     def _run(self, tmp_path, *, user_notify_capture, admin_notify_capture):
-        """跑一次 run_once，分别捕获 user 渠道和 admin web 渠道收到的消息。"""
         import asyncio
         from monitor import run_once
         from notifier import BaseNotifier
@@ -273,7 +148,6 @@ class TestMonitorMaintenanceAdminNotify:
                 user_notify_capture.append(t)
                 return True
             async def close(self): pass
-            # send_error 默认走 _send；不另外覆盖
 
         class CapAdminNotifier(BaseNotifier):
             has_channels = True
@@ -313,16 +187,13 @@ class TestMonitorMaintenanceAdminNotify:
                 user_notify_capture=user_msgs,
                 admin_notify_capture=admin_msgs,
             )
-        # 普通用户：零通知（凌晨维护不该吵醒人）
         assert user_msgs == [], f"用户通道不应该收到维护通知，实际收到 {user_msgs}"
-        # admin：1 条
         assert len(admin_msgs) == 1, f"admin 应该收到 1 条，实际 {len(admin_msgs)}"
         assert "维护" in admin_msgs[0] or "maintenance" in admin_msgs[0].lower()
 
     def test_maintenance_notify_throttled_1h(self, tmp_path):
         user_msgs: list[str] = []
         admin_msgs: list[str] = []
-        # 连续 3 次维护
         for _ in range(3):
             with pytest.raises(UpstreamMaintenanceError):
                 self._run(
@@ -330,7 +201,6 @@ class TestMonitorMaintenanceAdminNotify:
                     user_notify_capture=user_msgs,
                     admin_notify_capture=admin_msgs,
                 )
-        # 1 小时窗口内应该只发 1 次
         assert len(admin_msgs) == 1, (
             f"1 小时内多次维护应该只发 1 条，实际 {len(admin_msgs)}"
         )
@@ -340,15 +210,12 @@ class TestMonitorMaintenanceAdminNotify:
         user_msgs: list[str] = []
         admin_msgs: list[str] = []
 
-        # 第一次
         with pytest.raises(UpstreamMaintenanceError):
             self._run(tmp_path, user_notify_capture=user_msgs, admin_notify_capture=admin_msgs)
         assert len(admin_msgs) == 1
 
-        # 把节流戳往回拨 61 分钟
         monitor._last_maintenance_notify_at -= 61 * 60
 
-        # 第二次：应该再发
         with pytest.raises(UpstreamMaintenanceError):
             self._run(tmp_path, user_notify_capture=user_msgs, admin_notify_capture=admin_msgs)
         assert len(admin_msgs) == 2
@@ -359,7 +226,6 @@ class TestMonitorMaintenanceAdminNotify:
         admin_msgs: list[str] = []
         with pytest.raises(UpstreamMaintenanceError):
             self._run(tmp_path, user_notify_capture=user_msgs, admin_notify_capture=admin_msgs)
-        # 验证 meta 被写
         st = Storage(tmp_path / "test.db", timezone_str="UTC")
         try:
             assert st.get_meta("upstream_maintenance_seen_at", default="") != ""

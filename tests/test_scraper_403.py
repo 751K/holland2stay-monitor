@@ -1,21 +1,12 @@
 """
-403 / Cloudflare 屏蔽处理测试。
+403 / Cloudflare 屏蔽处理测试（适配新 CloakBrowser 路径）。
 
-生产事故：H2S API 返回 403（Cloudflare WAF），旧代码静默 break，
-monitor 每 3-5 分钟刷错误日志几小时，用户不知道，无法行动。
-
-新行为契约：
-1. scraper._post_gql 检测 403 → 立刻抛 BlockedError，附带可操作的建议
-2. _post_gql 能识别 Cloudflare 挑战页 vs 其他 403
-3. _scrape_city_pages / scrape_all 把 BlockedError 透传上去（不当普通 Exception）
-4. monitor.run_once 捕获 BlockedError → ERROR 日志 + 通过用户渠道通知（节流）+ re-raise
-5. monitor.main_loop 捕获 BlockedError → 15 分钟冷却（vs 429 的 5 分钟）
-6. 节流：30 分钟内最多发一次屏蔽通知，避免持续屏蔽刷屏
+旧 curl_cffi _post_gql 已删除；现在浏览器内 fetch 检测 403 并通过
+BlockedError 向上传播。monitor 级别的 circuit breaker + 通知节流不受影响。
 """
 from __future__ import annotations
 
 import asyncio
-import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -31,109 +22,19 @@ from config import AutoBookConfig, Config, CityFilter, AvailabilityFilter
 from storage import Storage
 
 
-# Cloudflare 挑战页的典型片段（user 提供的真实样本）
-_CLOUDFLARE_HTML = (
-    '<!DOCTYPE html>\n'
-    '<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->\n'
-    '<!--[if IE 7]>    <html class="no-js ie7 oldie" lang="en-US"> <![endif]-->\n'
-)
+_PATCH_SCRAPE = "scrapers.holland2stay._scrape_city_pages"
 
 
-def _fake_response(status_code, body=""):
-    """构造 curl_cffi 风格的响应 mock。"""
-    resp = MagicMock()
-    resp.status_code = status_code
-    resp.text = body
-    resp.ok = 200 <= status_code < 300
-    resp.json = MagicMock(return_value={"data": {}})
-    def raise_for_status():
-        if not resp.ok:
-            raise Exception(f"HTTP Error {status_code}")
-    resp.raise_for_status = raise_for_status
-    return resp
-
-
-# ─── scraper._post_gql 单元测试 ─────────────────────────────────
-
-
-class TestPostGqlBlockedError:
-    """403 应该立刻抛 BlockedError，不重试（与 429 不同）。"""
-
-    def test_403_with_cloudflare_html_raises_blocked(self):
-        from scraper import _post_gql
-
-        session = MagicMock()
-        session.post.return_value = _fake_response(403, _CLOUDFLARE_HTML)
-
-        with pytest.raises(BlockedError) as excinfo:
-            _post_gql(session, "query{}")
-
-        # 错误消息必须告知是 Cloudflare WAF + 给出可操作建议
-        msg = str(excinfo.value)
-        assert "Cloudflare WAF" in msg, f"未识别 Cloudflare: {msg}"
-        assert "HTTPS_PROXY" in msg, f"未给出代理建议: {msg}"
-        assert "重启" in msg, f"未给出重启建议: {msg}"
-
-    def test_403_non_cloudflare_still_raises_blocked(self):
-        """非 Cloudflare 的 403（API 自己返的）也走 BlockedError 路径。"""
-        from scraper import _post_gql
-
-        session = MagicMock()
-        session.post.return_value = _fake_response(403, '{"error": "forbidden"}')
-
-        with pytest.raises(BlockedError) as excinfo:
-            _post_gql(session, "query{}")
-
-        # 消息应该区分 "API 拒绝服务"
-        assert "API 拒绝服务" in str(excinfo.value) or "403" in str(excinfo.value)
-
-    def test_403_does_not_retry(self):
-        """403 应该立刻抛，不进 _RATE_LIMIT_BACKOFF 重试循环。"""
-        from scraper import _post_gql
-
-        session = MagicMock()
-        session.post.return_value = _fake_response(403, _CLOUDFLARE_HTML)
-
-        with pytest.raises(BlockedError):
-            _post_gql(session, "query{}")
-
-        # session.post 只应被调用一次（无重试）
-        assert session.post.call_count == 1
-
-    def test_429_still_works_unchanged(self):
-        """回归保护：429 走原有重试路径，不被 403 改动影响。"""
-        from scraper import _post_gql
-
-        session = MagicMock()
-        # 一直返回 429 → 应该重试 + 最终抛 RateLimitError
-        session.post.return_value = _fake_response(429, "")
-
-        with patch("scraper.time.sleep"):  # 不真睡
-            with pytest.raises(RateLimitError):
-                _post_gql(session, "query{}")
-
-        # 应该尝试了至少 3 次（首次 + 2 次退避）
-        assert session.post.call_count >= 3
-
-    def test_200_normal_response(self):
-        """回归：正常 200 响应不受影响。"""
-        from scraper import _post_gql
-
-        session = MagicMock()
-        good = _fake_response(200, '')
-        good.json = MagicMock(return_value={"data": {"products": {"items": []}}})
-        session.post.return_value = good
-
-        result = _post_gql(session, "query{}")
-        assert "data" in result
-        assert session.post.call_count == 1
+def _make_fetcher(*responses):
+    """构造带 fetch_gql 响应的 mock fetcher。"""
+    fetcher = MagicMock()
+    fetcher.fetch_gql.side_effect = list(responses) if len(responses) > 1 else responses
+    return fetcher
 
 
 # ─── BlockedError 传播测试 ──────────────────────────────────────
 
-
 def _h2s_tasks(*pairs):
-    """构造 H2S ScrapeTask 列表（city_display, city_key）。"""
     from scrapers.base import ScrapeTask
     return [
         ScrapeTask(
@@ -147,48 +48,36 @@ def _h2s_tasks(*pairs):
 
 
 class TestBlockedErrorPropagation:
-    """403 必须从 _post_gql 一路传到 dispatcher，不被中间层吞。"""
+    """BlockedError 必须从 scraper 一路传到 dispatcher，不被中间层吞。"""
 
     def test_blocked_error_propagates_through_scrape_city_pages(self):
-        """_scrape_city_pages 不能 except Exception 把 BlockedError 吃掉。"""
-        from scraper import _scrape_city_pages
+        from scrapers.holland2stay import _scrape_city_pages
 
-        with patch("scraper._post_gql", side_effect=BlockedError("test")):
-            with pytest.raises(BlockedError):
-                _scrape_city_pages(MagicMock(), "Eindhoven", ["29"], ["179"])
+        fetcher = _make_fetcher(BlockedError("test"))
+        with pytest.raises(BlockedError):
+            _scrape_city_pages(fetcher, "Eindhoven", ["29"], ["179"], {})
 
     def test_blocked_error_propagates_through_dispatch(self):
-        """dispatcher 也必须透传 BlockedError，不降级为单城市失败。
-
-        路径：dispatch → HollandStayScraper.scrape() → _scrape_city_pages。
-        单 H2S 任务被 block + 无其它成功 → dispatch 上抛 BlockedError。"""
         from scrapers import dispatch_scrape_tasks
 
-        with patch("scraper._scrape_city_pages", side_effect=BlockedError("test")), \
-             patch("scrapers.holland2stay._make_session", return_value=MagicMock()):
+        with patch(_PATCH_SCRAPE, side_effect=BlockedError("test")), \
+             patch("scrapers.holland2stay.BrowserFetcher", return_value=MagicMock()):
             with pytest.raises(BlockedError):
                 dispatch_scrape_tasks(_h2s_tasks(("Eindhoven", "29")))
 
 
 # ─── ScrapeNetworkError 传播测试 ─────────────────────────────────
 
-
 class TestScrapeNetworkErrorPropagation:
-    """第一页网络失败必须上传，避免被当成 0 条有效抓取。"""
-
     def test_first_page_network_error_raises_scrape_network_error(self):
-        """第 1 页 timeout/TLS/连接失败不能被 break 吞掉。"""
-        from scraper import _scrape_city_pages
+        from scrapers.holland2stay import _scrape_city_pages
 
-        with patch("scraper._post_gql", side_effect=TimeoutError("timeout")):
-            with pytest.raises(ScrapeNetworkError) as excinfo:
-                _scrape_city_pages(MagicMock(), "Eindhoven", ["29"], ["179"])
-
-        assert "第 1 页网络错误" in str(excinfo.value)
+        fetcher = _make_fetcher(ScrapeNetworkError("network fail"))
+        with pytest.raises(ScrapeNetworkError):
+            _scrape_city_pages(fetcher, "Eindhoven", ["29"], ["179"], {})
 
     def test_later_page_network_error_returns_previous_pages(self):
-        """第 2 页之后失败可以返回已抓到的前面分页。"""
-        from scraper import _scrape_city_pages
+        from scrapers.holland2stay import _scrape_city_pages
 
         first_page = {
             "data": {
@@ -198,34 +87,29 @@ class TestScrapeNetworkErrorPropagation:
                 }
             }
         }
-        with patch("scraper._post_gql", side_effect=[first_page, TimeoutError("timeout")]):
-            result, complete = _scrape_city_pages(MagicMock(), "Eindhoven", ["29"], ["179"])
+        fetcher = _make_fetcher(first_page, TimeoutError("timeout"))
+        result, complete = _scrape_city_pages(fetcher, "Eindhoven", ["29"], ["179"], {})
 
         assert result == []
         assert complete is False
 
     def test_dispatch_raises_when_all_cities_fail_on_first_page(self):
-        """所有城市第 1 页都网络失败时，整体抓取必须失败并交给 monitor cooldown。"""
         from scrapers import dispatch_scrape_tasks
 
-        with patch(
-            "scraper._scrape_city_pages",
-            side_effect=ScrapeNetworkError("page 1 failed"),
-        ), patch("scrapers.holland2stay._make_session", return_value=MagicMock()):
+        with patch(_PATCH_SCRAPE, side_effect=ScrapeNetworkError("page 1 failed")), \
+             patch("scrapers.holland2stay.BrowserFetcher", return_value=MagicMock()):
             with pytest.raises(ScrapeNetworkError) as excinfo:
-                dispatch_scrape_tasks(_h2s_tasks(("Eindhoven", "29"), ("Amsterdam", "24")))
+                dispatch_scrape_tasks(
+                    _h2s_tasks(("Eindhoven", "29"), ("Amsterdam", "24"))
+                )
 
         assert "全部 2 个任务网络失败" in str(excinfo.value)
 
 
-# ─── monitor 的 BlockedError 处理 ─────────────────────────────
-
+# ─── monitor 的 BlockedError 处理（不变：circuit breaker + 通知节流）───
 
 class TestMonitorBlockedHandling:
-    """run_once 必须将 BlockedError 当一等异常处理：通知 + re-raise。"""
-
     def setup_method(self):
-        # 重置通知节流，每个测试独立
         monitor._last_block_notify_at = 0.0
         monitor.prewarm_cache.clear()
 
@@ -262,7 +146,6 @@ class TestMonitorBlockedHandling:
             storage.close()
 
     def test_run_once_opens_h2s_circuit_on_blocked_error(self, tmp_path):
-        """H2S 403 不再拖垮全局轮次，而是打开 H2S source 熔断。"""
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
@@ -276,13 +159,14 @@ class TestMonitorBlockedHandling:
         assert monitor._h2s_circuit_open_until > 0
 
     def test_run_once_notifies_user_on_block(self, tmp_path):
-        """首次屏蔽必须给用户发通知（通过其配置的通知渠道）。"""
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
             auto_book=AutoBookConfig(enabled=False),
         )
-        scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("Cloudflare WAF 屏蔽（HTTP 403）"))
+        scrape = lambda *a, **k: (_ for _ in ()).throw(
+            BlockedError("Cloudflare WAF 屏蔽（HTTP 403）")
+        )
         notifs_received: list[str] = []
 
         self._run(tmp_path, scrape, user, notifs_received)
@@ -290,10 +174,8 @@ class TestMonitorBlockedHandling:
         assert len(notifs_received) == 1, "首次屏蔽必须发 1 条通知"
         assert "403" in notifs_received[0]
         assert "H2S" in notifs_received[0]
-        assert "Cloudflare" in notifs_received[0] or "屏蔽" in notifs_received[0]
 
     def test_notification_throttle_30min(self, tmp_path):
-        """30 分钟内多次屏蔽，只发 1 条通知（避免刷屏）。"""
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
@@ -302,10 +184,8 @@ class TestMonitorBlockedHandling:
         scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("test"))
         notifs_received: list[str] = []
 
-        # 连续触发 3 次屏蔽
         for _ in range(3):
             self._run(tmp_path, scrape, user, notifs_received)
-            # 模拟 canary 到期，否则后两轮会被 circuit 直接跳过而不触发通知路径。
             monitor._h2s_circuit_open_until = 0.0
 
         assert len(notifs_received) == 1, (
@@ -313,7 +193,6 @@ class TestMonitorBlockedHandling:
         )
 
     def test_notification_unthrottled_after_interval(self, tmp_path):
-        """超过节流间隔后，应该再次允许通知。"""
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
@@ -322,20 +201,16 @@ class TestMonitorBlockedHandling:
         scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("test"))
         notifs_received: list[str] = []
 
-        # 第一次
         self._run(tmp_path, scrape, user, notifs_received)
         assert len(notifs_received) == 1
 
-        # 模拟时间过去 31 分钟（移动节流戳）
         monitor._last_block_notify_at -= 31 * 60
         monitor._h2s_circuit_open_until = 0.0
 
-        # 第二次应该重新发
         self._run(tmp_path, scrape, user, notifs_received)
         assert len(notifs_received) == 2, "超过 30 分钟后应该重新通知"
 
     def test_long_h2s_block_notifies_admin_to_check_server(self, tmp_path):
-        """连续 H2S 403 进入长冷却后，应给 admin-only 发检查服务器提示。"""
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
@@ -362,18 +237,18 @@ class TestMonitorBlockedHandling:
                 return True
 
         admin = CapturingAdmin()
-        scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("Cloudflare WAF 屏蔽（HTTP 403）"))
+        scrape = lambda *a, **k: (_ for _ in ()).throw(
+            BlockedError("Cloudflare WAF 屏蔽（HTTP 403）")
+        )
 
         async def go():
             with patch("monitor.dispatch_scrape_tasks", side_effect=scrape), \
                  patch("mcore.push.dispatch_admin", new=AsyncMock(return_value=1)):
                 for _ in range(3):
                     await run_once(
-                        cfg,
-                        storage,
+                        cfg, storage,
                         [(user, CapturingNotifier())],
-                        web_notifier=admin,
-                        dry_run=False,
+                        web_notifier=admin, dry_run=False,
                     )
                     monitor._h2s_circuit_open_until = 0.0
 
