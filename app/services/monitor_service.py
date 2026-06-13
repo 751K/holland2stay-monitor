@@ -101,6 +101,12 @@ def get_web_status() -> dict[str, Any]:
     pid = monitor_pid()
     users = load_users()
     running = pid is not None
+    st = storage()
+    try:
+        maintenance_seen = st.get_meta("upstream_maintenance_seen_at", default="")
+        maintenance_last = st.get_meta("upstream_maintenance_last_at", default="")
+    finally:
+        st.close()
     return {
         "running": running,
         "paused": not running,
@@ -114,6 +120,11 @@ def get_web_status() -> dict[str, Any]:
             if running
             else "Monitoring is paused. New listings, status changes, and auto-booking are not running until an admin starts the monitor."
         ),
+        "upstream_maintenance": {
+            "active": bool(maintenance_seen),
+            "since": maintenance_seen,
+            "last_seen": maintenance_last,
+        },
     }
 
 

@@ -45,6 +45,7 @@ from .base import (
     ScrapeNetworkError,
     ScrapeResult,
     ScrapeTask,
+    UpstreamMaintenanceError,
 )
 
 logger = logging.getLogger(__name__)
@@ -470,13 +471,17 @@ class HollandStayScraper(AbstractScraper):
 
         # 新建浏览器
         self._fetcher = BrowserFetcher(headless=CLOAKBROWSER_HEADLESS)
-        self._fetcher.__enter__()
-        self._fetcher.ensure_initialized()
-        self._attr_labels = _fetch_attr_labels(self._fetcher)
-        self._browser_created_at = time.monotonic()
-        logger.info("浏览器已创建并完成 CF 挑战 (第 %d 次)", getattr(self, '_browser_create_count', 0) + 1)
-        setattr(self, '_browser_create_count', getattr(self, '_browser_create_count', 0) + 1)
-        return self._fetcher
+        try:
+            self._fetcher.__enter__()
+            self._fetcher.ensure_initialized()
+            self._attr_labels = _fetch_attr_labels(self._fetcher)
+            self._browser_created_at = time.monotonic()
+            logger.info("浏览器已创建并完成 CF 挑战 (第 %d 次)", getattr(self, '_browser_create_count', 0) + 1)
+            setattr(self, '_browser_create_count', getattr(self, '_browser_create_count', 0) + 1)
+            return self._fetcher
+        except Exception:
+            self._close_browser()
+            raise
 
     def _close_browser(self) -> None:
         """关闭浏览器，释放资源。BlockedError 时调用。"""
@@ -499,9 +504,9 @@ class HollandStayScraper(AbstractScraper):
         try:
             self._ensure_browser()
             yield
-        except BlockedError:
+        except (BlockedError, UpstreamMaintenanceError):
             # CF 会话被标记：关闭当前浏览器，下轮重建
-            logger.warning("抓取遇 BlockedError，关闭浏览器（下轮将重建 CF 会话）")
+            logger.warning("抓取遇 H2S 浏览器会话不可复用状态，关闭浏览器")
             self._close_browser()
             raise
 

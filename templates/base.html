@@ -196,20 +196,23 @@
 
   <!-- Main content -->
   <main class="main-content content-enter" id="main-content">
-    {% if upstream_maintenance and upstream_maintenance.active %}
-    <div class="maintenance-banner" role="status" aria-live="polite">
+    <div id="upstream-maintenance-banner"
+         class="maintenance-banner{% if not upstream_maintenance or not upstream_maintenance.active %} hidden{% endif %}"
+         role="status"
+         aria-live="polite">
       <i class="bi bi-tools" aria-hidden="true"></i>
       <div class="maintenance-banner-body">
         <div class="maintenance-banner-title">{{ _('upstream_maintenance_title') }}</div>
-        <div class="maintenance-banner-hint">
+        <div id="upstream-maintenance-hint" class="maintenance-banner-hint">
           {{ _('upstream_maintenance_hint') }}
           {% if upstream_maintenance.since %}
-          <span class="maintenance-banner-since">· {{ _('upstream_maintenance_since') }} {{ upstream_maintenance.since | time_ago }}</span>
+          <span id="upstream-maintenance-since" class="maintenance-banner-since">· {{ _('upstream_maintenance_since') }} {{ upstream_maintenance.since | time_ago }}</span>
+          {% else %}
+          <span id="upstream-maintenance-since" class="maintenance-banner-since hidden"></span>
           {% endif %}
         </div>
       </div>
     </div>
-    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
       <div class="alert alert-{{ 'success' if cat=='success' else ('warning' if cat=='warning' else 'danger') }}">
@@ -242,7 +245,7 @@
 <div class="toast-container" id="toast-container"></div>
 
 <script>window._isAdmin = {{ 'true' if is_admin else 'false' }};</script>
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=10"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

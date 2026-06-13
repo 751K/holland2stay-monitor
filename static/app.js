@@ -120,6 +120,25 @@ function updateMonitorPausedBanner(d) {
   if(inline) inline.classList.toggle('hidden', !!d.running);
 }
 
+function updateMaintenanceBanner(d) {
+  var banner = document.getElementById('upstream-maintenance-banner');
+  if(!banner) return;
+  var maintenance = d && d.upstream_maintenance ? d.upstream_maintenance : {};
+  var active = !!maintenance.active;
+  banner.classList.toggle('hidden', !active);
+
+  var since = document.getElementById('upstream-maintenance-since');
+  if(!since) return;
+  if(active && maintenance.since) {
+    var zh = getLang() === 'zh';
+    since.textContent = '· ' + (zh ? '自 ' : 'Since ') + String(maintenance.since);
+    since.classList.remove('hidden');
+  } else {
+    since.textContent = '';
+    since.classList.add('hidden');
+  }
+}
+
 function updateSystemMonitorControls(d) {
   var startBtn = document.getElementById('monitor-start-btn');
   var stopBtn = document.getElementById('monitor-stop-btn');
@@ -155,6 +174,7 @@ function updateMonitorBadge() {
       txt.textContent = d.running ? (zh ? '监控运行中' : 'Monitor running') : (zh ? '系统暂停' : 'System paused');
     }
     updateMonitorPausedBanner(d);
+    updateMaintenanceBanner(d);
     updateSystemMonitorControls(d);
   }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
 }
