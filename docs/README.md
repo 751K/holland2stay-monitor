@@ -4,6 +4,8 @@
 
 > Chinese version: [README_cn.md](README_cn.md)
 
+预计八月重新开始更新DDDDDD
+
 FlatRadar is a self-hostable rental listing monitor for the Dutch housing market. It watches supported housing platforms, tracks new listings and status changes, sends real-time alerts, and provides a web dashboard with listings, map, calendar, charts, and account management.
 
 It currently supports **Holland2Stay**, **OurDomain**, and **Xior**. Holland2Stay listings can optionally use the built-in auto-booking flow; OurDomain and Xior are notify-only.
