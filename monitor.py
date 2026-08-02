@@ -1765,6 +1765,20 @@ async def main_loop(
 
             logger.info("===== 第 %d 轮 %s=====", round_count, peak_tag)
 
+            # 心跳：**在抓取之前**写，抓取成功与否都刷新。
+            #
+            # 它回答的是「监控循环还活着吗」，和 last_scrape_at 的「抓到数据了
+            # 吗」是两个问题。H2S 熔断冷却最长 4 小时，那期间没有任何成功抓取，
+            # 但 monitor 完全健康、只是在按设计退避——拿 last_scrape_at 做健康
+            # 判定会把正常退避误报成故障。
+            try:
+                storage.set_meta(
+                    "monitor_heartbeat_at",
+                    datetime.now(timezone.utc).isoformat(),
+                )
+            except Exception:
+                logger.debug("写 monitor 心跳失败（已忽略）", exc_info=True)
+
             # booking_deadline：在此时刻后不再尝试备选房源，让下一轮扫描优先进行
             booking_deadline = time.monotonic() + effective_interval
             city_completeness = await run_once(

@@ -40,9 +40,14 @@ class TestUnauthenticated:
         assert r.status_code == 401
 
     def test_health_no_auth_required(self, client):
-        """/health 用于 docker healthcheck，必须开放。"""
+        """/health 用于 docker healthcheck，必须开放。
+
+        只断言「不要求鉴权」——状态码本身取决于 monitor 是否健康
+        （测试环境里没有 monitor 在跑），那部分由 test_health_endpoint 覆盖。
+        """
         r = client.get("/health")
-        assert r.status_code == 200
+        assert r.status_code not in (401, 403)
+        assert r.get_json() is not None
 
     def test_login_page_accessible(self, client):
         r = client.get("/login")

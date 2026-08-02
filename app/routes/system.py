@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import subprocess as _sp
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
@@ -28,6 +29,10 @@ from app.auth import admin_api_required, admin_required, api_login_required
 from app.csrf import csrf_required
 from app.db import storage
 from app.process_ctrl import monitor_pid
+
+# monitor 心跳容许的最大停滞秒数。默认 15 分钟 ≈ 3–4 个抓取轮次，既能容忍
+# 管理员为部署 / 调试短暂停掉监控，也不会让一次被遗忘的暂停无限期潜伏。
+_HEARTBEAT_MAX_AGE = int(os.environ.get("MONITOR_HEARTBEAT_MAX_AGE", "900"))
 from app.services.monitor_service import get_web_status, is_monitor_running
 
 _LOG_PATH = DATA_DIR / "monitor.log"
@@ -334,12 +339,65 @@ def api_platform():
     return jsonify({"macos": sys.platform == "darwin", "platform": sys.platform})
 
 
+def _heartbeat_age_seconds() -> float | None:
+    """monitor 心跳距今多少秒；从未写过返回 None。"""
+    st = storage()
+    try:
+        raw = st.get_meta("monitor_heartbeat_at", default="")
+    finally:
+        st.close()
+    if not raw:
+        return None
+    try:
+        beat = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if beat.tzinfo is None:
+        beat = beat.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - beat).total_seconds()
+
+
 def health():
-    """无需鉴权：只检查 Web 进程是否存活（能响应 HTTP 即代表存活）。
-    monitor 运行状态通过 "monitor" 字段透出，供外部观测，
-    但不影响 HTTP 状态码——管理员主动停止监控不应让容器变 unhealthy。"""
+    """无需鉴权的容器健康检查：Web **和** monitor 都要正常才算 healthy。
+
+    以前这里只看 Web 能否响应，monitor 状态仅作为字段透出、不影响状态码。
+    代价是 2026-06-13 起 monitor 停了 7 周，容器全程报 healthy，21 个活跃用户
+    没有任何通知，也没有任何告警——盲区正好盖住了唯一重要的进程。
+
+    判据用**心跳新鲜度**，不是「进程是否存在」：
+
+    - 进程还在但循环卡死时，PID 检查看不出来，心跳能。
+    - H2S 熔断冷却最长 4 小时，期间没有成功抓取但循环仍在转、心跳照常刷新。
+      若改用 last_scrape_at，正常退避会被误报成故障。
+
+    保留原来那条顾虑的合理部分：管理员为部署 / 调试短暂停掉监控，在
+    ``MONITOR_HEARTBEAT_MAX_AGE`` 之内不会翻红；只有停够久（默认 15 分钟，
+    约 3–4 个轮次）才暴露出来。心跳尚未写过时（全新部署、首轮未跑完）退回
+    进程存活判断，避免冷启动误杀。
+    """
     monitor_ok = is_monitor_running()
-    return jsonify({"ok": True, "monitor": monitor_ok}), 200
+    age = _heartbeat_age_seconds()
+
+    if age is None:
+        # 还没有心跳：新装或首轮未完成，只能看进程在不在
+        healthy = monitor_ok
+        reason = "monitor 未运行" if not healthy else ""
+    else:
+        healthy = age <= _HEARTBEAT_MAX_AGE
+        reason = (
+            f"monitor 心跳已停滞 {int(age)}s（上限 {_HEARTBEAT_MAX_AGE}s）"
+            if not healthy else ""
+        )
+
+    payload = {
+        "ok": healthy,
+        "monitor": monitor_ok,
+        "heartbeat_age": int(age) if age is not None else None,
+        "heartbeat_max_age": _HEARTBEAT_MAX_AGE,
+    }
+    if reason:
+        payload["reason"] = reason
+    return jsonify(payload), (200 if healthy else 503)
 
 
 def register(app: Flask) -> None:
