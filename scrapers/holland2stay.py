@@ -493,6 +493,10 @@ class HollandStayScraper(AbstractScraper):
             self._fetcher = None
             self._attr_labels = {}
 
+    def invalidate_session(self) -> None:
+        """未预期异常后丢弃浏览器——坏掉的会话留着会让后续每轮重复失败。"""
+        self._close_browser()
+
     @contextmanager
     def batch_session(self):
         """

@@ -2,6 +2,22 @@
 
 ## v1.9.9 (2026-08-02)
 
+### Bug 修复 — 未预期异常会拖垮整轮
+
+dispatcher 的 per-task `try/except` 只捕获 `UpstreamMaintenanceError` / `RateLimitError` / `BlockedError` / `ScrapeNetworkError`，**其它异常直接穿透**，把同轮里已经抓好的其它 source 结果一起带走。实测：Xior 的 `greenlet.error` 导致 H2S（20 条房源）和 OurDomain 的结果全部丢失，日志显示「本轮无完整扫描城市」。
+
+这违背了 dispatcher 自己的设计意图——代码注释写着「避免 OurDomain 被挡时拖垮 H2S」，但那个隔离只对已知异常成立。
+
+现在未预期异常同样按 task 隔离。连带处理一个问题：异常被 per-task 吞掉后 `batch_session` 就看不到了，**坏掉的浏览器会跨轮残留**，导致后续每轮重复失败。新增 `AbstractScraper.invalidate_session()` 钩子（默认 no-op），dispatcher 在捕获未预期异常时调用；H2S 和 Xior 实现为关闭浏览器，下轮重建。
+
+### Xior 改用轮换出口 IP
+
+Xior 的 AJAX 端点按 IP **累积**限流。5s 间隔只解决了轮内突发，解决不了跨轮累积——固定出口下每轮 12 个请求，实测第 2 轮的第一个请求就被 429 拒绝。
+
+`SiteProfile.rotating_proxy` 新字段，Xior 置 True：每次创建浏览器换一个代理 session（即换出口 IP）。单个浏览器会话内 IP 仍然稳定，所以 clearance 照常可用；换浏览器才换 IP。配合把 Xior 的 `_BROWSER_MAX_AGE` 从 2 小时缩短到 15 分钟（≈3–4 轮 ≈40 请求/IP），代价是每小时多 4 次 CF 挑战——Xior 的挑战约 7–9s，比 H2S 便宜。
+
+H2S 保持固定出口（`rotating_proxy=False`）：它的限流压力小得多，而稳定 IP 是 clearance 复用的前提。
+
 ### Bug 修复 — 浏览器型 source 的线程模型（两个连环问题）
 
 **其一：Xior 浏览器被跨线程调用**，`greenlet.error: Cannot switch to a different thread`，整轮失败。

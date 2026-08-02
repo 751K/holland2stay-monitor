@@ -323,6 +323,16 @@ class AbstractScraper(ABC):
 
     # ── 可选钩子（多数平台不实现，留空 no-op 默认即可）───────────────
 
+    def invalidate_session(self) -> None:
+        """丢弃本 source 持有的长生命周期资源（浏览器 / 会话）。
+
+        dispatcher 在捕获到**未预期异常**时调用。这类异常（例如 Playwright 的
+        ``greenlet.error``）通常意味着底层会话已进入不可用状态，留着只会让
+        后续每一轮都重复失败——必须丢掉，下轮重建。
+
+        默认 no-op：不持有跨 task 资源的 scraper 无需实现。
+        """
+
     @contextmanager
     def batch_session(self):
         """

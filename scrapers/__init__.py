@@ -163,6 +163,8 @@ def dispatch_scrape_tasks(
                     hard_failures.append((ckey, e))
                     completeness[ckey] = False
                     logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
+                except (KeyboardInterrupt, SystemExit):
+                    raise
                 except ScrapeNetworkError as e:
                     network_failures.append(ckey)
                     # ProxyError 是 ScrapeNetworkError 子类——单独记下，便于全失败
@@ -171,6 +173,25 @@ def dispatch_scrape_tasks(
                         proxy_failure = e
                     logger.error("%s 抓取网络失败，已隔离该任务: %s", ckey, e)
                     # 单 city 网络失败不进 completeness（与现有 scrape_all 行为一致）
+                except Exception as e:
+                    # 未预期的异常同样要**按 task 隔离**。此前它会穿透整个
+                    # dispatcher，把同轮里已经抓好的其它 source 结果一起带走
+                    # ——2026-08-02 实测：Xior 的 greenlet.error 导致 H2S 和
+                    # OurDomain 的结果全部丢失，整轮无完整扫描城市。
+                    #
+                    # 这类异常通常意味着底层会话已不可用，留着会让后续每轮
+                    # 重复失败，所以顺带丢弃该 source 的长生命周期资源。
+                    hard_failures.append((ckey, e))
+                    completeness[ckey] = False
+                    logger.error(
+                        "%s 抓取出现未预期异常，已隔离该任务: %s: %s",
+                        ckey, type(e).__name__, e, exc_info=True,
+                    )
+                    try:
+                        scraper.invalidate_session()
+                    except Exception:
+                        logger.debug("%s invalidate_session 失败（已忽略）",
+                                     ckey, exc_info=True)
 
     # 429 / 403 / 维护：若没有任何任务成功，维持旧行为让 monitor 进入冷却；
     # 若已有其它平台成功，则返回部分结果，避免 OurDomain 被挡时拖垮 H2S。

@@ -111,8 +111,13 @@ class XiorScraper(AbstractScraper):
     }
 
     # ── 浏览器生命周期 ─────────────────────────────────────────────────
-    # 浏览器最大存活时间（秒）：超过后主动重建，避免会话过期被 CF 拦
-    _BROWSER_MAX_AGE = 7200  # 2 小时
+    # 浏览器最大存活时间（秒）。比 H2S 的 2 小时短得多，因为重建浏览器同时
+    # **换出口 IP**（XIOR_PROFILE.rotating_proxy=True）——这是把「按 IP 累积
+    # 的限流」摊开的手段。
+    #
+    # 15 分钟 ≈ 3–4 轮 ≈ 40 个请求/IP，对 ~15–20 req/window 的端点留有余量。
+    # 代价是每小时多 4 次 CF 挑战（Xior 的挑战约 7–9s，比 H2S 便宜）。
+    _BROWSER_MAX_AGE = 900  # 15 分钟
 
     def __init__(self) -> None:
         self._fetcher: Optional[BrowserFetcher] = None
@@ -153,6 +158,10 @@ class XiorScraper(AbstractScraper):
             except Exception:
                 pass
             self._fetcher = None
+
+    def invalidate_session(self) -> None:
+        """未预期异常后丢弃浏览器——坏掉的会话留着会让后续每轮重复失败。"""
+        self._close_browser()
 
     @contextmanager
     def batch_session(self):

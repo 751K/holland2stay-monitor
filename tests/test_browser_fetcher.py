@@ -333,7 +333,7 @@ def test_launch_receives_proxy_explicitly(monkeypatch):
     calls = _patch_launch(monkeypatch)
     monkeypatch.setattr(
         browser_fetcher_config(), "get_proxy_url",
-        lambda source="": "http://u:p@p.webshare.io:80",
+        lambda source="", **kw: "http://u:p@p.webshare.io:80",
     )
 
     BrowserFetcher(headless=True).__enter__()
@@ -344,7 +344,9 @@ def test_launch_receives_proxy_explicitly(monkeypatch):
 def test_launch_proxy_is_none_when_unconfigured(monkeypatch):
     """没配代理时传 None，而不是空串——空串会被当成非法代理。"""
     calls = _patch_launch(monkeypatch)
-    monkeypatch.setattr(browser_fetcher_config(), "get_proxy_url", lambda source="": "")
+    monkeypatch.setattr(
+        browser_fetcher_config(), "get_proxy_url", lambda source="", **kw: ""
+    )
 
     BrowserFetcher(headless=True).__enter__()
 
@@ -366,3 +368,28 @@ def browser_fetcher_config():
 def test_proxy_redaction_strips_credentials(url, expected):
     """日志里不能出现代理的用户名密码。"""
     assert browser_fetcher._redact_proxy(url) == expected
+
+
+def test_rotating_profile_requests_a_fresh_proxy_session(monkeypatch):
+    """标了 rotating_proxy 的 profile，每次建浏览器都要换出口 IP。
+
+    Xior 的 AJAX 端点按 IP 累积限流，固定出口跑几轮必然 429（实测第 2 轮
+    第一个请求即被拒）。换浏览器就换 IP，把累积量摊开；单个会话内 IP 仍然
+    稳定，所以 clearance 照常可用。
+    """
+    from browser_fetcher import XIOR_PROFILE, H2S_PROFILE
+
+    calls = _patch_launch(monkeypatch)
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        browser_fetcher_config(), "get_proxy_url",
+        lambda source="", *, rotating=False: (
+            seen.append(rotating) or "http://u:p@h:80"
+        ),
+    )
+
+    BrowserFetcher(headless=True, profile=XIOR_PROFILE).__enter__()
+    BrowserFetcher(headless=True, profile=H2S_PROFILE).__enter__()
+
+    assert seen == [True, False], seen
+    assert len(calls) == 2

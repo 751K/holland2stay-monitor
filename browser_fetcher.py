@@ -157,6 +157,10 @@ class SiteProfile:
                     重新导航即可），而不是这个 IP 被封（换 IP 才有用）。
     maintenance_check
                     可选钩子，收到 (title, html) —— 仅在挑战解开后调用。
+    rotating_proxy  True 时每次创建浏览器都换一个代理 session（即换出口 IP）。
+                    给**按 IP 累积限流**的站点用：出口 IP 在单个浏览器会话内
+                    仍然稳定（clearance 因此可用），但换浏览器就换 IP，避免
+                    同一个 IP 上的请求无限累积。
     """
 
     name: str
@@ -166,6 +170,7 @@ class SiteProfile:
     clearance_probe: Optional[ProbeRequest] = None
     clearance_pending_markers: tuple[str, ...] = _CF_CHALLENGE_PENDING_MARKERS
     maintenance_check: Optional[Callable[[str, str], None]] = None
+    rotating_proxy: bool = False
 
 
 H2S_PROFILE = SiteProfile(
@@ -193,6 +198,10 @@ XIOR_PROFILE = SiteProfile(
     source="xior",
     challenge_url=_XIOR_MAIN_PAGE,
     default_headers=_XIOR_AJAX_HEADERS,
+    # Xior 的 AJAX 端点按 IP 累积限流（~15–20 req/window）。固定出口 IP 上
+    # 每轮 12 个请求，几轮之后必然 429——2026-08-02 实测，第 2 轮第一个请求
+    # 就被拒。换浏览器就换 IP，把累积量摊开。
+    rotating_proxy=True,
 )
 
 
@@ -274,7 +283,9 @@ class BrowserFetcher:
         # 变量，这里只是把它已经解析好的值显式交给浏览器。
         from config import get_proxy_url  # 延迟导入，避免循环依赖
 
-        proxy_url = get_proxy_url(self._profile.source) or None
+        proxy_url = get_proxy_url(
+            self._profile.source, rotating=self._profile.rotating_proxy
+        ) or None
         if proxy_url:
             logger.info(
                 "%s 浏览器走代理 %s",
