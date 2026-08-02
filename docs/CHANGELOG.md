@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.9.6 (2026-08-02)
+
+### 多 source 现状核实
+
+启用前对两个闲置 source 各跑了一次真实抓取（上次成功抓取还是 5 月下旬）：
+
+- **OurDomain：可用**。Amsterdam Diemen 正常返回，当前 0 个可用单元是真实结果——站点页面显示的是「unit may become available at any time」这类候补文案，不是解析失败（403 会抛 `BlockedError`，本次没有抛）。已启用。
+- **Xior：不可用**。AJAX 端点被 Cloudflare 挑战页拦下（`403` + `Just a moment...`），`curl_cffi` 过不去。保持停用，直到传输层能过 CF。
+
+### Bug 修复 — Xior 403 被当成可重试的限流
+
+- **403 退避用尽后抛 `BlockedError`**，不再返回 `None`。返回 `None` 只把本轮标成 incomplete，**source 级熔断因此永远不会对 Xior 生效**：每轮都重来一遍、每栋楼白等 90s 退避，而 Cloudflare 挡着永远不可能成功。5xx 等其它错误维持原来的 `None` 语义不变。
+- **退避日志报实际状态码**。此前恒定写死 `"Xior 429"`，于是 Cloudflare 的 403 也被记成限流——排查方向被直接带偏（以为该降轮询频率，实际该换出口 IP）。
+- 澄清一处此前的误判：`complete=False` 一直有正确设置，所以 stale listing 状态收敛被完整性标志挡住了，**不存在**把已有房源误标成已租的风险。问题只在于白白重试和日志误导。
+
+### 说明
+
+启用 OurDomain 不等于给 H2S 做冗余——两者是不同的房源池（OurDomain 只覆盖 Amsterdam Diemen）。H2S 熔断期间仍然拿不到 H2S 房源；收益是轮次不再整体空转，以及多一份覆盖。
+
 ## v1.9.5 (2026-08-02)
 
 ### Bug 修复 — Telegram 渠道刷错

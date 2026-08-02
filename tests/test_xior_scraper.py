@@ -389,6 +389,43 @@ def test_post_ajax_business_failure_returns_none(monkeypatch):
     assert result is None
 
 
+def test_post_ajax_persistent_403_raises_blocked(monkeypatch):
+    """403 用尽退避后必须抛 BlockedError，不能悄悄返回 None。
+
+    回归：返回 None 只把本轮标成 incomplete，source 级熔断不会触发，于是每轮
+    重来一遍、每栋楼白等 90s 退避，而 Cloudflare 挡着永远不可能成功。
+    实测 2026-08-02：Xior 的 AJAX 端点已被 CF 挑战页拦下。
+    """
+    import scrapers.xior as xior
+    from scrapers.base import BlockedError
+
+    monkeypatch.setattr(xior.time, "sleep", lambda _: None)
+    cf_page = "<html><head><title>Just a moment...</title></head></html>"
+    session = FakeSession(*[
+        FakeResponse(403, cf_page)
+        for _ in range(len(xior.RATE_LIMIT_BACKOFF) + 1)
+    ])
+
+    with pytest.raises(BlockedError, match="403"):
+        xior._post_ajax(
+            session, property_page_id=1114, room_type_id=33934, semester_id=3281
+        )
+
+
+def test_post_ajax_other_http_errors_still_return_none(monkeypatch):
+    """5xx 之类不是屏蔽，维持原来的 None（本轮 incomplete）语义。"""
+    import scrapers.xior as xior
+
+    monkeypatch.setattr(xior.time, "sleep", lambda _: None)
+    session = FakeSession(*[
+        FakeResponse(500, "boom") for _ in range(len(xior.RATE_LIMIT_BACKOFF) + 1)
+    ])
+
+    assert xior._post_ajax(
+        session, property_page_id=1114, room_type_id=33934, semester_id=3281
+    ) is None
+
+
 def test_post_ajax_business_failure_returns_none():
     """success=false in envelope → None."""
     from scrapers.xior import _post_ajax

@@ -238,11 +238,15 @@ def _post_ajax(
         "semester_id": str(semester_id),
     }
     total_wait = 0
+    last_status: int | None = None
     for attempt, wait in enumerate([0] + list(RATE_LIMIT_BACKOFF)):
         if wait:
             total_wait += wait
+            # 报实际状态码：这里以前恒写 "429"，于是 Cloudflare 403 也被记成
+            # 限流，排查方向直接被带偏（该换 IP，却去调轮询频率）。
             logger.warning(
-                "Xior 429，第 %d/%d 次退避，等待 %d 秒（累计 %ds）",
+                "Xior HTTP %s，第 %d/%d 次退避，等待 %d 秒（累计 %ds）",
+                last_status if last_status is not None else "?",
                 attempt, len(RATE_LIMIT_BACKOFF), wait, total_wait,
             )
             time.sleep(wait)
@@ -255,6 +259,8 @@ def _post_ajax(
                 continue
             return None
 
+        last_status = resp.status_code
+
         if resp.status_code == 429:
             continue
 
@@ -265,6 +271,15 @@ def _post_ajax(
             )
             if attempt < len(RATE_LIMIT_BACKOFF):
                 continue
+            if resp.status_code == 403:
+                # 退避用尽仍是 403 = 被 Cloudflare 挡住，不是限流。必须抛出来：
+                # 返回 None 只会把本轮标为 incomplete，source 级熔断不会触发，
+                # 于是每轮都重来一遍（每栋楼白等 90s 退避）却永远不可能成功。
+                raise BlockedError(
+                    f"Xior AJAX 持续返回 403（已重试 {len(RATE_LIMIT_BACKOFF)} 次）。"
+                    "curl_cffi 过不了 Cloudflare 挑战，需要更换出口 IP "
+                    "（HTTPS_PROXY），或改用浏览器传输层。"
+                )
             return None
 
         try:
