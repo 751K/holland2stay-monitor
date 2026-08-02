@@ -51,6 +51,10 @@ AJAX_URL = "https://www.xiorstudenthousing.eu/wp-admin/admin-ajax.php"
 # 同源请求只需要路径——origin 由 XIOR_PROFILE.challenge_url 决定
 _AJAX_PATH = "/wp-admin/admin-ajax.php"
 
+# Xior 上游（Yardi）用 204 表示「该房型当前无可用单元」，是正常结果而非故障。
+# 官方前端走完整流程收到的也是它 —— 见 _post_ajax 里的说明。
+_UPSTREAM_NO_AVAILABILITY = 204
+
 
 class XiorScraper(AbstractScraper):
     """Unit-level scraper for Xior properties backed by RENTCafe."""
@@ -331,20 +335,26 @@ def _post_ajax(
 
         data = envelope.get("data", {}) or {}
 
-        # WordPress 层成功 ≠ 上游成功。Xior 的 WP 端点在向 Yardi 取可用性失败时
-        # 依然回 success=true + units=[]，只把真实错误塞进 availability_response。
-        # 不查这个字段就会把「上游挂了」读成「没有房源」——静默、且完全无法与
-        # 真实的零可用性区分。返回 None 让本轮标记为 incomplete。
+        # WordPress 层成功 ≠ 上游成功：真实结果在 availability_response 里。
+        #
+        # 但 204 是例外，它就是 Xior 表达「该房型当前无可用单元」的方式，属于
+        # 正常结果。这一点用官方前端验证过：在站点自己的 modal 里选房型、走完
+        # 带 Turnstile 的完整流程，前端收到的同样是
+        # ``{"success":true,"units":[],"total":0}`` + errorCode 204。
+        # 把 204 当失败会让每一轮零可用都被标成 incomplete，stale 收敛永远不
+        # 执行——那是把「没房」误报成「抓取坏了」。
         upstream = data.get("availability_response")
-        if isinstance(upstream, dict) and upstream.get("errorCode"):
-            logger.warning(
-                "Xior 上游可用性查询失败 attempt=%d: errorCode=%s msg=%s params=%s",
-                attempt,
-                upstream.get("errorCode"),
-                upstream.get("errorMessage"),
-                data.get("availability_params"),
-            )
-            return None
+        if isinstance(upstream, dict):
+            code = upstream.get("errorCode")
+            if code and int(code) != _UPSTREAM_NO_AVAILABILITY:
+                logger.warning(
+                    "Xior 上游可用性查询失败 attempt=%d: errorCode=%s msg=%s params=%s",
+                    attempt,
+                    code,
+                    upstream.get("errorMessage"),
+                    data.get("availability_params"),
+                )
+                return None
 
         return data
 

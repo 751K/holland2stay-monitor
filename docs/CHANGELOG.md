@@ -24,11 +24,20 @@
 
 `success=true` 不代表上游成功：Xior 的 WordPress 端点在向 Yardi 取可用性失败时，仍然返回 `success=true` + `units=[]`，真实错误只出现在 `availability_response.errorCode` 里。不查这个字段就会把「上游挂了」读成「零可用」，两者完全无法区分。现在命中即返回 `None`（本轮标记 incomplete），并把 `errorCode` / `availability_params` 记进日志。
 
-### 已知限制 — Xior 仍无可用数据，保持停用
+### Xior 已启用
 
-传输层问题已修复且验证通过，但 Xior 目前仍拿不到任何单元：上游对**正确的** `academicTermId=3281`（已核对，与站点当前页面一致，未过期）返回 `errorCode: 204 / "Unknown error"`，实测覆盖 8 栋楼全部为空。
+`errorCode: 204` 的语义已查清：**它就是「该房型当前无可用单元」，不是故障**。
 
-`204` 的语义无法从这个端点区分——可能是上游故障，也可能是 Xior 用它表示「该学期无库存」。当前按错误处理（保守：只影响 stale 收敛，不会产生误通知），待出现有房源的样本后再回头确认。因此 `SOURCES` 保持不变，Xior 未启用。
+判定方式是拿官方前端做对照——在 Xior 自己的 modal 里选房型、走完带 Turnstile 的完整流程，抓包看到前端收到的同样是 `{"success":true,"units":[],"total":0}` + `errorCode 204`。既然官方站点自己也显示空，我们的抓取结果就是对的。
+
+据此修正上一版的判断：只有 **204 之外**的 `errorCode` 才按上游故障处理（返回 `None` → 本轮 incomplete）；204 视为正常的零可用。否则每一轮零可用都会被标成 incomplete，stale 收敛永远不执行，等于把「没房」误报成「抓取坏了」。
+
+顺带排除的两条线索，记录下来免得重复排查：
+
+- **`academicTermId=3281` 没有过期**：它出现在站点当前页面的 `input[name="semester"]` 里，与配置一致。
+- **Turnstile token 不是必需的**：页面 JS 确实会带 `cf-turnstile-response`，但实测「无 token」「垃圾 token」「浏览器内 render 出的有效 token」三者响应完全相同——该端点并不校验它。
+
+`SOURCES=holland2stay,ourdomain,xior`。
 
 ## v1.9.6 (2026-08-02)
 

@@ -405,13 +405,12 @@ def test_post_ajax_business_failure_returns_none():
     ) is None
 
 
-def test_post_ajax_detects_upstream_availability_error():
-    """WP 层 success=true 但上游 Yardi 报错时，不能当成「没有房源」。
+def test_post_ajax_treats_204_as_genuine_zero_availability():
+    """204 是 Xior 表达「当前无可用单元」的方式，不是故障。
 
-    实测 2026-08-02：Xior 的 WP 端点在上游失败时仍回
-    ``success=true`` + ``units=[]``，真实错误只出现在
-    ``availability_response.errorCode``。不查这个字段就无法把「上游挂了」
-    和「真的零可用」区分开。
+    用官方前端验证过：在站点自己的 modal 里选房型、走完带 Turnstile 的完整
+    流程，前端收到的同样是 ``success=true`` + ``units=[]`` + errorCode 204。
+    把它当失败会让每一轮零可用都被标成 incomplete，stale 收敛永远不执行。
     """
     from scrapers.xior import _post_ajax
 
@@ -425,25 +424,48 @@ def test_post_ajax_detects_upstream_availability_error():
         },
     })
 
+    result = _post_ajax(
+        fetcher, property_page_id=1126, room_type_id=33944, semester_id=3281
+    )
+    assert result is not None
+    assert result["units"] == []
+
+
+def test_post_ajax_detects_real_upstream_error():
+    """204 之外的 errorCode 才是真故障 → None（本轮 incomplete）。
+
+    WP 层的 success=true 只说明请求到了它那里；上游 Yardi 的结果在
+    availability_response 里，不查就会把上游挂掉读成「没有房源」。
+    """
+    from scrapers.xior import _post_ajax
+
+    fetcher = FakeFetcher({
+        "success": True,
+        "data": {
+            "units": [],
+            "total": 0,
+            "availability_response": {"errorCode": 500, "errorMessage": "Server error"},
+        },
+    })
+
     assert _post_ajax(
         fetcher, property_page_id=1126, room_type_id=33944, semester_id=3281
     ) is None
 
 
-def test_post_ajax_accepts_genuine_zero_availability():
-    """上游正常、确实没房 → 返回空 units，而不是判失败。"""
+def test_post_ajax_accepts_response_without_upstream_error():
     from scrapers.xior import _post_ajax
 
     fetcher = FakeFetcher({
         "success": True,
-        "data": {"units": [], "total": 0, "availability_response": {}},
+        "data": {"units": [SAMPLE_UNIT], "total": 1, "availability_response": {}},
     })
 
     result = _post_ajax(
         fetcher, property_page_id=1126, room_type_id=33944, semester_id=3281
     )
     assert result is not None
-    assert result["units"] == []
+    assert len(result["units"]) == 1
 
 
 def test_post_ajax_propagates_blocked_without_retrying(monkeypatch):
