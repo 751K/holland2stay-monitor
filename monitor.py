@@ -459,6 +459,12 @@ def _mark_h2s_scrape_recovered() -> None:
     _h2s_circuit_reason = ""
 
 
+# 需要浏览器传输层的 source。它们的 Playwright 对象绑定创建线程，因此**必须**
+# 全部跑在 ``_get_h2s_executor()`` 那个进程级长存单线程上；放到默认 executor
+# 里会因线程漂移抛 ``greenlet.error: Cannot switch to a different thread``。
+_BROWSER_SOURCES = frozenset({"holland2stay", "xior"})
+
+
 def _split_h2s_tasks(tasks) -> tuple[list, list]:
     """拆分 H2S 与其它 source 任务，便于只熔断 H2S。"""
     h2s_tasks = [t for t in tasks if t.source == _H2S_SOURCE]
@@ -1145,8 +1151,25 @@ async def run_once(
             )
             return _unpack_scrape_result(result)
 
-        if other_tasks:
-            fresh_part, completeness_part = await _dispatch(other_tasks)
+        # 非 H2S 的任务里，浏览器型 source（Xior）必须和 H2S 一样跑在长存
+        # 单线程 executor 上：Playwright 的对象绑定创建线程，默认 executor
+        # 的线程不固定，跨线程调用会抛
+        # ``greenlet.error: Cannot switch to a different thread``。
+        #
+        # 这个 bug 潜伏过一段时间——默认 executor 会复用线程，碰巧命中同一个
+        # 时一切正常，直到某轮换了线程才炸。
+        browser_others = [t for t in other_tasks if t.source in _BROWSER_SOURCES]
+        plain_others = [t for t in other_tasks if t.source not in _BROWSER_SOURCES]
+
+        if plain_others:
+            fresh_part, completeness_part = await _dispatch(plain_others)
+            fresh_all.extend(fresh_part)
+            completeness_all.update(completeness_part)
+
+        if browser_others:
+            fresh_part, completeness_part = await _dispatch(
+                browser_others, isolated=True
+            )
             fresh_all.extend(fresh_part)
             completeness_all.update(completeness_part)
 

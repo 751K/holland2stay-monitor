@@ -2,6 +2,16 @@
 
 ## v1.9.9 (2026-08-02)
 
+### Bug 修复 — Xior 浏览器被跨线程调用
+
+`greenlet.error: Cannot switch to a different thread`，Xior 整轮抓取失败。
+
+v1.9.7 把 Xior 迁到浏览器传输层时，只改了传输层，**没改任务路由**：`_dispatch_with_h2s_circuit()` 里只有 `source == "holland2stay"` 走 `_get_h2s_executor()` 那个长存单线程，Xior 仍留在默认 executor。Playwright 的对象绑定创建线程，默认 executor 的线程会漂移，跨线程调用即抛。
+
+潜伏了一段时间才暴露——线程池会复用线程，碰巧命中同一个时一切正常。
+
+新增 `_BROWSER_SOURCES` 常量，所有浏览器型 source 统一路由到隔离线程；纯 HTTP 的 OurDomain 保持在默认 executor（它没有 Playwright 对象，挤进去只会和浏览器抢那一个线程）。H2S 的熔断逻辑不受影响。
+
 ### OurDomain 恢复 IP 轮换
 
 按 source 隔离 session 时**把 OurDomain 也固定住了，这是个回归**。

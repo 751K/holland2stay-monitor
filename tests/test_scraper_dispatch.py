@@ -218,3 +218,21 @@ def test_holland2stay_standalone_scrape_still_self_manages_browser(monkeypatch):
 
     # 独立调用：建了 1 个 BrowserFetcher
     assert len(browser_instances) == 1
+
+
+def test_browser_backed_sources_all_run_on_the_isolated_thread(monkeypatch):
+    """Xior 也必须走长存单线程，不能留在默认 executor。
+
+    回归：`_split_h2s_tasks` 只把 holland2stay 路由到隔离线程，Xior 迁到
+    浏览器传输层后仍留在默认 executor。Playwright 对象绑定创建线程，默认
+    executor 的线程会漂移，最终抛
+    ``greenlet.error: Cannot switch to a different thread``。
+    潜伏期取决于线程池碰巧复用了哪个线程。
+    """
+    import monitor
+
+    assert "holland2stay" in monitor._BROWSER_SOURCES
+    assert "xior" in monitor._BROWSER_SOURCES
+    # 纯 HTTP 的 source 不该被拉进浏览器线程——它没有 Playwright 对象，
+    # 挤进去只会和浏览器抢那一个线程。
+    assert "ourdomain" not in monitor._BROWSER_SOURCES
