@@ -39,8 +39,9 @@ import smtplib
 import sys
 from abc import ABC, abstractmethod
 from email.message import EmailMessage
+from functools import partial
 from html import escape as html_escape
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import curl_cffi.requests as req
 
@@ -274,6 +275,87 @@ class IMessageNotifier(BaseNotifier):
 # Telegram Bot
 # ------------------------------------------------------------------ #
 
+# Telegram 的**永久性**失败：重试不会好转，要用户去改配置或解除拉黑。
+# 和限流 / 5xx / 网络抖动那类临时故障必须分开——后者该重试，前者重试只会
+# 每轮刷同一条错误日志（实测每轮 4–6 条）。
+_TELEGRAM_PERMANENT_ERRORS: tuple[str, ...] = (
+    "bot was blocked by the user",
+    "user is deactivated",
+    "chat not found",
+    "bot can't initiate conversation with a user",
+    "the bot can't send messages to the bot",
+    "bot was kicked from the group chat",
+    "bot is not a member of the channel chat",
+)
+
+
+def _telegram_permanent_reason(status_code: int, body: str) -> str | None:
+    """命中永久性失败时返回 Telegram 给的 description，否则 None。"""
+    if status_code not in (400, 403):
+        return None
+    lowered = body.lower()
+    for marker in _TELEGRAM_PERMANENT_ERRORS:
+        if marker in lowered:
+            return marker
+    return None
+
+
+def _disable_telegram_channel(user_id: str, user_name: str, reason: str) -> None:
+    """把该用户的 telegram 渠道摘掉并落库。
+
+    只动 ``notification_channels``，``telegram_token`` / ``telegram_chat_id``
+    保留原样——用户解除拉黑后在面板上重新勾选即可，不用重新填凭据。
+    """
+    from users import get_user, update_users  # 延迟 import，避免循环依赖
+
+    def _mutate(users) -> bool:
+        u = get_user(users, user_id)
+        if u is None:
+            return False
+        kept = [c for c in u.notification_channels if c.strip().lower() != "telegram"]
+        if len(kept) == len(u.notification_channels):
+            return False
+        u.notification_channels = kept
+        return True
+
+    try:
+        changed = update_users(_mutate)
+    except Exception:
+        logger.exception("[%s] 关闭 Telegram 渠道失败", user_name)
+        return
+
+    if not changed:
+        return
+
+    logger.warning(
+        "[%s] Telegram 渠道已自动关闭：%s。"
+        "凭据已保留，解决后在面板重新勾选 Telegram 即可恢复。",
+        user_name, reason,
+    )
+
+    # 用户在 Telegram 上已经收不到任何东西了，只能从别的地方告诉他
+    try:
+        from app.db import storage  # 延迟 import：notifier 也被 CLI 场景复用
+
+        st = storage()
+        try:
+            st.add_web_notification(
+                type="channel_disabled",
+                title="Telegram 通知已自动关闭",
+                body=(
+                    f"Telegram 返回「{reason}」，这属于需要你处理的永久性错误，"
+                    "继续重试没有意义。请解除对 bot 的拉黑或修正 Chat ID，"
+                    "然后在「设置」里重新勾选 Telegram。"
+                ),
+                user_id=user_id,
+            )
+        finally:
+            st.close()
+    except Exception:
+        logger.debug("[%s] 写 Telegram 关闭的 Web 通知失败（已忽略）",
+                     user_name, exc_info=True)
+
+
 class TelegramNotifier(BaseNotifier):
     """
     通过 Telegram Bot API 发送消息，使用 Telegram 支持的受限 HTML。
@@ -298,10 +380,20 @@ class TelegramNotifier(BaseNotifier):
 
     _API = "https://api.telegram.org/bot{token}/sendMessage"
 
-    def __init__(self, token: str, chat_id: str) -> None:
+    def __init__(
+        self,
+        token: str,
+        chat_id: str,
+        on_permanent_failure: Callable[[str], None] | None = None,
+    ) -> None:
         self._token = token
         self._chat_id = chat_id
         self._session = req.Session(impersonate=get_impersonate())
+        # 回调只触发一次；触发后本实例直接短路，不再打 API。
+        # 光靠回调里的「关闭渠道」不够——那要等下次热重载才会重建 notifier，
+        # 这中间每轮仍会照打照错。
+        self._on_permanent_failure = on_permanent_failure
+        self._permanently_failed = False
 
     async def _send(self, text: str) -> bool:
         url = self._API.format(token=self._token)
@@ -314,6 +406,10 @@ class TelegramNotifier(BaseNotifier):
             return False
 
     def _post(self, url: str, text: str) -> bool:
+        if self._permanently_failed:
+            logger.debug("Telegram 渠道已因永久性错误停用，跳过 → %s", self._chat_id)
+            return False
+
         html_text = _format_telegram_html(text)
         resp = self._session.post(
             url,
@@ -325,11 +421,29 @@ class TelegramNotifier(BaseNotifier):
             },
             timeout=15,
         )
-        if not resp.ok:
-            logger.error("Telegram 发送失败 %d: %s", resp.status_code, resp.text[:200])
+        if resp.ok:
+            logger.debug("Telegram 发送成功 → %s", self._chat_id)
+            return True
+
+        body = resp.text[:200]
+        reason = _telegram_permanent_reason(resp.status_code, body)
+        if reason is None:
+            # 临时故障（限流 / 5xx / 网络抖动）：照常报错，下轮还会重试
+            logger.error("Telegram 发送失败 %d: %s", resp.status_code, body)
             return False
-        logger.debug("Telegram 发送成功 → %s", self._chat_id)
-        return True
+
+        # 永久性失败：这一条按 warning 记一次，之后本实例不再打 API
+        self._permanently_failed = True
+        logger.warning(
+            "Telegram 永久性失败 %d（%s），停止对 chat_id=%s 的重试",
+            resp.status_code, reason, self._chat_id,
+        )
+        if self._on_permanent_failure is not None:
+            try:
+                self._on_permanent_failure(reason)
+            except Exception:
+                logger.exception("Telegram 永久失败回调执行出错")
+        return False
 
     async def close(self) -> None:
         self._session.close()
@@ -882,7 +996,13 @@ def create_user_notifier(user) -> BaseNotifier:
                 logger.warning("[%s] iMessage 渠道缺少收件人，跳过", user.name)
         elif ch == "telegram":
             if user.telegram_token and user.telegram_chat_id:
-                notifiers.append(TelegramNotifier(user.telegram_token, user.telegram_chat_id))
+                notifiers.append(TelegramNotifier(
+                    user.telegram_token,
+                    user.telegram_chat_id,
+                    on_permanent_failure=partial(
+                        _disable_telegram_channel, user.id, user.name
+                    ),
+                ))
                 logger.info("[%s] 通知渠道: Telegram → chat_id=%s", user.name, user.telegram_chat_id)
             else:
                 logger.warning("[%s] Telegram 渠道 TOKEN 或 CHAT_ID 为空，跳过", user.name)

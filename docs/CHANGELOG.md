@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.9.5 (2026-08-02)
+
+### Bug 修复 — Telegram 渠道刷错
+
+- **区分永久性失败与临时故障**。用户拉黑 bot 后 Telegram 每次都回 `403 Forbidden: bot was blocked by the user`，旧实现把它和限流 / 5xx 一视同仁，于是每轮重试、每轮刷 4–6 条 ERROR，而且永远不会自愈。现在按 Telegram 的 `description` 分类：
+  - **永久性**（`bot was blocked by the user`、`chat not found`、`user is deactivated`、`bot was kicked from the group chat` 等）→ 停止重试。
+  - **临时性**（429 限流、5xx、`message is too long` 等）→ 行为不变，继续按原逻辑重试。
+- **双层停用，缺一不可**：
+  - 实例级——命中永久性错误后该 `TelegramNotifier` 直接短路，后续 `_post()` 不再打 API。只做持久化不够：notifier 要等下次热重载才重建，这中间每轮仍会照打照错。
+  - 持久级——把 `telegram` 从该用户的 `notification_channels` 摘掉并落库，重启后不复发。
+- **凭据保留**：只动 `notification_channels`，`telegram_token` / `telegram_chat_id` 原样保留，用户解除拉黑后在面板重新勾选即可恢复，无需重填。
+- **告知用户**：Telegram 这条路已经不通，改为写一条 per-user Web 通知说明原因和恢复方式。
+- 回调内的落库异常被吞掉并记日志，不会把通知链路带崩。
+
+### 运维
+
+- **容器内存上限 1G → 2G**。浏览器改为常驻后稳态约 500–800MB（实测峰值 789MB），1G 只剩约 23% 余量，抓取一旦扩到多城市就可能触顶。宿主 3.7G、caddy + 系统约 1.2G，给到 2G 仍有富余。
+
 ## v1.9.4 (2026-08-02)
 
 ### 依赖升级

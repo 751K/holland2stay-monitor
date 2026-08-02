@@ -4,7 +4,10 @@ services:
     image: h2s-monitor
     container_name: h2s
     restart: unless-stopped
-    mem_limit: 1G
+    # 常驻 CloakBrowser 稳态约 500–800MB（峰值实测 789MB），1G 上限只剩 ~23%
+    # 余量；抓取一旦扩到多城市就可能触顶。宿主 3.7G，caddy + 系统约 1.2G，
+    # 给到 2G 仍有富余。
+    mem_limit: 2G
     cpus: 1.0
     shm_size: 2gb
     # 不对外暴露端口，由 Caddy 反代
