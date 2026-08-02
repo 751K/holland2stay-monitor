@@ -226,17 +226,30 @@ def test_maintenance_check_skipped_while_still_on_challenge_page():
 
 
 def test_is_clearance_required_only_matches_transient_403():
-    assert BrowserFetcher._is_clearance_required(
-        {"status": 403, "text": _CLEARANCE_403}
-    )
-    # 真正的屏蔽：403 但没有 clearance_required 标记
-    assert not BrowserFetcher._is_clearance_required(
-        {"status": 403, "text": "Forbidden"}
-    )
+    f = BrowserFetcher()  # 默认 H2S profile
+    assert f._is_clearance_required({"status": 403, "text": _CLEARANCE_403})
+    # 真正的屏蔽：403 但没有任何「还在校验」的标记
+    assert not f._is_clearance_required({"status": 403, "text": "Forbidden"})
     # 状态码正常时不该误判
-    assert not BrowserFetcher._is_clearance_required(
-        {"status": 200, "text": "clearance_required"}
-    )
+    assert not f._is_clearance_required({"status": 200, "text": "clearance_required"})
+
+
+def test_clearance_pending_falls_back_to_cf_challenge_markers():
+    """没有站点专属标记的 profile，靠 CF 挑战页特征判定。
+
+    Xior 被挡时直接回 CF 挑战页，不像 H2S 那样回自己的 clearance_required
+    JSON——两种形态都得认出来，否则会把「重新导航就能好」误判成「IP 被封」。
+    """
+    from browser_fetcher import XIOR_PROFILE
+
+    f = BrowserFetcher(profile=XIOR_PROFILE)
+    assert f._is_clearance_required({
+        "status": 403,
+        "text": "<html><head><title>Just a moment...</title></head></html>",
+    })
+    assert f._is_clearance_required({"status": 403, "text": _CHALLENGE_HTML})
+    # 403 但不是挑战页 → 真的被封
+    assert not f._is_clearance_required({"status": 403, "text": "Access denied"})
 
 
 def test_fetch_gql_renavigates_when_clearance_expires(monkeypatch):

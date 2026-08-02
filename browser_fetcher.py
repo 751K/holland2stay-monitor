@@ -17,7 +17,8 @@ from __future__ import annotations
 import logging
 import platform
 import time
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Callable, Mapping, Optional
 from json import dumps as _json_dumps
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,8 @@ def _exc(name: str) -> type:
 
 _H2S_MAIN_PAGE = "https://www.holland2stay.com/residences"
 _H2S_GQL_PATH = "/api/graphql"
+_XIOR_MAIN_PAGE = "https://www.xiorstudenthousing.eu/netherlands/"
+_XIOR_AJAX_PATH = "/wp-admin/admin-ajax.php"
 
 # CF 挑战页判据。几个看起来能用但实测不能用的候选：
 #   - ``challenges.cloudflare.com`` / ``/cdn-cgi/challenge-platform/``：
@@ -59,6 +62,14 @@ _H2S_GQL_PATH = "/api/graphql"
 #     用它判定会把正常会话误判成被挡。
 # 只有挑战页脚本自身的 ``_cf_chl_opt`` 会随文档被真实页面替换而消失。
 _CF_CHALLENGE_HTML_MARKER = "_cf_chl_opt"
+
+# 响应体里出现这些 = 拿到的是 CF 挑战页而不是真实响应。用于把「clearance 还
+# 没生效」和「这个 IP 被封了」区分开——前者重新导航就好，后者得换 IP。
+_CF_CHALLENGE_PENDING_MARKERS: tuple[str, ...] = (
+    _CF_CHALLENGE_HTML_MARKER,
+    "just a moment",
+    "cdn-cgi/challenge-platform",
+)
 
 # 挑战解开的等待上限。实测差异很大：macOS 本地约 3s，1 CPU 的生产 VPS 上
 # headless Chromium 跑完 challenge 要 30s 量级。上限按最慢的环境留足余量，
@@ -88,31 +99,136 @@ _H2S_GQL_HEADERS = {
     "Store": "default",
     "Content-Currency": "EUR",
 }
+_XIOR_AJAX_HEADERS = {
+    "Accept": "*/*",
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
+
+def _h2s_maintenance_check(title: str, html: str) -> None:
+    """H2S 专有：识别平台维护页，命中则抛 UpstreamMaintenanceError。"""
+    if "maintenance" in title.lower():
+        raise _exc("UpstreamMaintenanceError")(
+            f"H2S 平台维护中（页面标题: {title}）"
+        )
+    if not html:
+        return
+    from scrapers.base import is_maintenance_body  # 延迟导入，避免循环导入
+
+    if is_maintenance_body(html):
+        raise _exc("UpstreamMaintenanceError")("H2S 平台维护中")
+
+
+@dataclass(frozen=True)
+class ProbeRequest:
+    """初始化阶段用来确认 clearance 已生效的最小请求。"""
+
+    path: str
+    method: str = "POST"
+    body: str = ""
+    headers: Mapping[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SiteProfile:
+    """一个受 Cloudflare 保护的站点，需要浏览器传输层才能访问。
+
+    把「过挑战 → 等 clearance → 发同源请求」这套流程里所有**站点相关**的
+    部分收进来，其余逻辑（挑战判据、重试、超时）对所有站点通用。
+
+    字段
+    ----
+    name            日志用的站点名
+    challenge_url   过 CF 挑战时导航到的页面。它同时决定了同源请求的 origin，
+                    所以必须和后续请求同域。
+    default_headers 该站点请求的默认头
+    clearance_probe 可选。有的话，初始化最后一步会用它确认 clearance 真的生效
+                    （见 ``_wait_for_clearance``）。没有就跳过，交给首个真实
+                    请求遇到 403 时重新导航。
+    clearance_pending_markers
+                    403 响应里出现这些标记 = clearance 还没生效（**瞬时**，
+                    重新导航即可），而不是这个 IP 被封（换 IP 才有用）。
+    maintenance_check
+                    可选钩子，收到 (title, html) —— 仅在挑战解开后调用。
+    """
+
+    name: str
+    challenge_url: str
+    default_headers: Mapping[str, str] = field(default_factory=dict)
+    clearance_probe: Optional[ProbeRequest] = None
+    clearance_pending_markers: tuple[str, ...] = _CF_CHALLENGE_PENDING_MARKERS
+    maintenance_check: Optional[Callable[[str, str], None]] = None
+
+
+H2S_PROFILE = SiteProfile(
+    name="Holland2Stay",
+    challenge_url=_H2S_MAIN_PAGE,
+    default_headers=_H2S_GQL_HEADERS,
+    clearance_probe=ProbeRequest(
+        path=_H2S_GQL_PATH,
+        body=_json_dumps({"query": _CLEARANCE_PROBE_QUERY, "variables": {}}),
+        headers=_H2S_GQL_HEADERS,
+    ),
+    # H2S 不回 CF 挑战页，而是自己的 JSON：
+    #   403 {"error":"Browser verification required","code":"clearance_required"}
+    clearance_pending_markers=(_CLEARANCE_REQUIRED_MARKER,)
+    + _CF_CHALLENGE_PENDING_MARKERS,
+    maintenance_check=_h2s_maintenance_check,
+)
+
+# Xior 的 AJAX 端点要 property/room id 才能拿到有意义的响应，profile 层拿不到，
+# 所以不配 probe：初始化只等挑战解开，clearance 没生效时由首个真实请求触发
+# 重新导航（fetch() 内处理）。
+XIOR_PROFILE = SiteProfile(
+    name="Xior",
+    challenge_url=_XIOR_MAIN_PAGE,
+    default_headers=_XIOR_AJAX_HEADERS,
+)
 
 
 class BrowserFetcher:
     """
-    管理 CloakBrowser 生命周期，提供 ``fetch_gql()`` 在浏览器内发 GraphQL 请求。
+    管理 CloakBrowser 生命周期，在浏览器内发**同源**请求。
+
+    浏览器内 fetch() 自带 cookies / TLS 指纹 / CF clearance token，这是绕过
+    Cloudflare 挑战的关键——脱离浏览器把 cookie 搬给 HTTP 客户端通常无效，
+    因为 clearance 同时绑定了 TLS 指纹。
+
+    站点差异全部收在 ``SiteProfile`` 里（见该类）；本类只负责通用流程：
+    过挑战 → 等 clearance → 发请求 → 处理 clearance 过期。
 
     用法
     ----
     ::
 
-        with BrowserFetcher(headless=True) as fetcher:
-            data = fetcher.fetch_gql(query, variables)
-            auth_data = fetcher.fetch_gql(mutation, vars, extra_headers={"Authorization": "Bearer xxx"})
+        with BrowserFetcher(profile=H2S_PROFILE) as f:
+            data = f.fetch_gql(query, variables)
+
+        with BrowserFetcher(profile=XIOR_PROFILE) as f:
+            resp = f.fetch_form("/wp-admin/admin-ajax.php", {"action": "..."})
 
     资源
     ----
     空闲 ~190MB，3 个 tab ~280MB。使用完后必须 close() 或通过上下文管理器释放。
     """
 
-    def __init__(self, headless: bool = True):
+    def __init__(
+        self,
+        headless: bool = True,
+        profile: "SiteProfile" = None,  # type: ignore[assignment]
+    ):
+        # 默认 H2S：booker 和 H2S scraper 都按位置参数调用，保持向后兼容
+        self._profile = profile if profile is not None else H2S_PROFILE
         self._headless = headless
         self._browser = None
         self._page = None
         self._initialized = False
         self._effective_headless = headless
+
+    @property
+    def profile(self) -> "SiteProfile":
+        return self._profile
 
     # ── 上下文管理器 ──────────────────────────────────────────────────
     def __enter__(self) -> "BrowserFetcher":
@@ -206,18 +322,21 @@ class BrowserFetcher:
         换一次导航重试。``UpstreamMaintenanceError`` 不在重试之列——平台维护
         重试多少次都一样。
         """
-        logger.info("CloakBrowser 加载主站完成 CF 挑战...（第 %d 次）", attempt)
+        logger.info(
+            "CloakBrowser 加载 %s 主站完成 CF 挑战...（第 %d 次）",
+            self._profile.name, attempt,
+        )
         start = time.monotonic()
         try:
             self._page.goto(
-                _H2S_MAIN_PAGE,
+                self._profile.challenge_url,
                 wait_until="domcontentloaded",
                 timeout=30_000,
             )
         except Exception as e:
-            logger.error("主站加载失败: %s", e)
+            logger.error("%s 主站加载失败: %s", self._profile.name, e)
             raise _exc("ScrapeNetworkError")(
-                f"H2S 主站加载失败（CF 挑战可能未通过）: {e}"
+                f"{self._profile.name} 主站加载失败（CF 挑战可能未通过）: {e}"
             ) from e
 
         # goto(domcontentloaded) 返回时页面通常还是 CF 挑战页，必须先等挑战
@@ -262,74 +381,70 @@ class BrowserFetcher:
                 return
             if time.monotonic() >= deadline:
                 raise _exc("BlockedError")(
-                    f"CF 挑战 {timeout:.0f}s 内未解开，H2S 主站仍停在挑战页。"
-                    "可能需要更换 IP 或等待冷却。"
+                    f"CF 挑战 {timeout:.0f}s 内未解开，{self._profile.name} "
+                    "主站仍停在挑战页。可能需要更换 IP 或等待冷却。"
                 )
             time.sleep(_CHALLENGE_POLL_INTERVAL)
 
     def _raise_if_maintenance_page(self) -> None:
-        """浏览器已打开主站时，识别 H2S 维护页并走维护冷却分支。
+        """挑战解开后，让 profile 的钩子判断站点是否处于维护态。
 
         必须在 CF 挑战解开后调用：挑战页是 Cloudflare 生成的，其标题和正文
-        与 H2S 的真实状态无关，在挑战解开前判定等于拿 CF 的页面去猜 H2S 在
-        不在维护。
+        与站点的真实状态无关，在挑战解开前判定等于拿 CF 的页面去猜站点在
+        不在维护。没有配钩子的站点直接跳过。
         """
-        if self._is_challenge_page():
+        check = self._profile.maintenance_check
+        if check is None or self._is_challenge_page():
             return
 
         try:
             title = (self._page.title() or "").strip()
         except Exception:
             title = ""
-        if "maintenance" in title.lower():
-            raise _exc("UpstreamMaintenanceError")(
-                f"H2S 平台维护中（页面标题: {title}）"
-            )
-
         try:
             html = self._page.content()[:4000]
         except Exception:
             html = ""
-        if not html:
-            return
-        from scrapers.base import is_maintenance_body  # 延迟导入，避免循环导入
 
-        if is_maintenance_body(html):
-            raise _exc("UpstreamMaintenanceError")("H2S 平台维护中")
+        check(title, html)
 
     @property
     def is_initialized(self) -> bool:
         return self._initialized
 
-    # ── GraphQL fetch ──────────────────────────────────────────────────
-    def _raw_fetch_gql(
+    # ── 通用同源请求 ────────────────────────────────────────────────────
+    def _raw_fetch(
         self,
-        query: str,
-        variables: dict | None = None,
+        path: str,
         *,
+        method: str = "POST",
+        body: str = "",
+        headers: Mapping[str, str] | None = None,
         timeout_ms: int = 30_000,
-        extra_headers: dict[str, str] | None = None,
     ) -> dict:
-        """在页面里发一次 GraphQL fetch，原样返回 ``{status, ok, text, headers}``。
+        """在页面里发一次同源请求，原样返回 ``{status, ok, text, headers}``。
 
         不做任何状态码处理，也**不会**触发 ``ensure_initialized``——
-        clearance 探测要在初始化过程中调用它，走公开的 fetch_gql 会无限递归。
+        clearance 探测要在初始化过程中调用它，走公开方法会无限递归。
         """
-        headers = dict(_H2S_GQL_HEADERS)
-        if extra_headers:
-            headers.update(extra_headers)
+        merged = dict(self._profile.default_headers)
+        if headers:
+            merged.update(headers)
 
-        body = _json_dumps({"query": query, "variables": variables or {}})
-        headers_json = _json_dumps(headers)
+        headers_json = _json_dumps(merged)
         body_json = _json_dumps(body)
+        path_json = _json_dumps(path)
+        method_json = _json_dumps(method.upper())
+        # GET / HEAD 不能带 body，带了浏览器直接抛 TypeError
+        send_body = method.upper() not in ("GET", "HEAD")
 
         js_code = f"""
             async () => {{
                 const controller = new AbortController();
                 const timeout = setTimeout(() => controller.abort(), {timeout_ms});
                 try {{
-                    const resp = await fetch('{_H2S_GQL_PATH}', {{
-                        method: 'POST',
+                    const init = {{
+                        method: {method_json},
                         credentials: 'include',
                         mode: 'same-origin',
                         cache: 'no-store',
@@ -337,9 +452,12 @@ class BrowserFetcher:
                         referrer: window.location.href,
                         referrerPolicy: 'strict-origin-when-cross-origin',
                         headers: {headers_json},
-                        body: {body_json},
                         signal: controller.signal,
-                    }});
+                    }};
+                    if ({'true' if send_body else 'false'}) {{
+                        init.body = {body_json};
+                    }}
+                    const resp = await fetch({path_json}, init);
                     clearTimeout(timeout);
                     const text = await resp.text();
                     const headers = {{}};
@@ -358,18 +476,40 @@ class BrowserFetcher:
         """
         return self._page.evaluate(js_code)
 
-    @staticmethod
-    def _is_clearance_required(result: dict) -> bool:
+    def _raw_fetch_gql(
+        self,
+        query: str,
+        variables: dict | None = None,
+        *,
+        timeout_ms: int = 30_000,
+        extra_headers: dict[str, str] | None = None,
+    ) -> dict:
+        """GraphQL 形态的 ``_raw_fetch``。"""
+        return self._raw_fetch(
+            _H2S_GQL_PATH,
+            method="POST",
+            body=_json_dumps({"query": query, "variables": variables or {}}),
+            headers=extra_headers,
+            timeout_ms=timeout_ms,
+        )
+
+    def _is_clearance_required(self, result: dict) -> bool:
         """403 是否属于「clearance 还没落地」这种**瞬时**状态。
 
-        H2S 在这种情况下回一个明确的 JSON：
-        ``{"error":"Browser verification required","code":"clearance_required"}``
-        它和「这个 IP 被 CF 挡了」是两回事——前者再等一两秒就好，后者
+        两者都是 403，但含义相反：clearance 未生效重新导航就好，IP 被封则
         换 IP 才有用。混为一谈会把马上要生效的会话反复推倒重建。
+
+        判据由 profile 给：
+        - H2S 回自己的 JSON ``{"code":"clearance_required"}``
+        - 多数站点直接回 CF 挑战页（``_cf_chl_opt`` / ``Just a moment``）
         """
         if result.get("status") != 403:
             return False
-        return _CLEARANCE_REQUIRED_MARKER in (result.get("text") or "")
+        text = (result.get("text") or "").lower()
+        return any(
+            marker.lower() in text
+            for marker in self._profile.clearance_pending_markers
+        )
 
     def _wait_for_clearance(self, timeout: float = _CLEARANCE_TIMEOUT) -> None:
         """轮询到 GraphQL 不再回 clearance_required 为止。
@@ -378,10 +518,21 @@ class BrowserFetcher:
         已经生效——实测两者之间有约 2s 的空窗，这期间发请求必然 403。
         真正的「初始化完成」是这个探测通过。
         """
+        probe = self._profile.clearance_probe
+        if probe is None:
+            # 没配探针的站点跳过：由首个真实请求遇到 403 时重新导航兜底
+            return
+
         deadline = time.monotonic() + timeout
         while True:
             try:
-                result = self._raw_fetch_gql(_CLEARANCE_PROBE_QUERY, timeout_ms=15_000)
+                result = self._raw_fetch(
+                    probe.path,
+                    method=probe.method,
+                    body=probe.body,
+                    headers=probe.headers,
+                    timeout_ms=15_000,
+                )
             except Exception as e:
                 # 页面还在动（导航 / 重绘）时 evaluate 可能直接抛，等下一轮
                 logger.debug("clearance 探测异常，重试: %s", e)
@@ -391,8 +542,8 @@ class BrowserFetcher:
                 return
             if time.monotonic() >= deadline:
                 raise _exc("BlockedError")(
-                    f"CF clearance {timeout:.0f}s 内未生效，GraphQL 持续要求浏览器校验。"
-                    "可能需要更换 IP 或等待冷却。"
+                    f"CF clearance {timeout:.0f}s 内未生效，{self._profile.name} "
+                    "持续要求浏览器校验。可能需要更换 IP 或等待冷却。"
                 )
             time.sleep(_CLEARANCE_POLL_INTERVAL)
 
@@ -424,9 +575,78 @@ class BrowserFetcher:
         RateLimitError        HTTP 429 (限流)
         ScrapeNetworkError    网络/超时错误 / 非 JSON 响应
         """
+        result = self.fetch(
+            _H2S_GQL_PATH,
+            method="POST",
+            body=_json_dumps({"query": query, "variables": variables or {}}),
+            headers=extra_headers,
+            timeout_ms=timeout_ms,
+        )
+
+        import json
+
+        try:
+            return json.loads(result["text"])
+        except json.JSONDecodeError as e:
+            raise _exc("ScrapeNetworkError")(
+                f"{self._profile.name} 响应非 JSON: {e}"
+            ) from e
+
+    def fetch_form(
+        self,
+        path: str,
+        data: Mapping[str, str],
+        *,
+        timeout_ms: int = 30_000,
+        headers: Mapping[str, str] | None = None,
+    ) -> dict:
+        """发一次 ``application/x-www-form-urlencoded`` POST，返回解析后的 JSON。
+
+        给 WordPress admin-ajax 这类表单端点用（Xior）。
+        """
+        from urllib.parse import urlencode
+
+        result = self.fetch(
+            path,
+            method="POST",
+            body=urlencode(dict(data)),
+            headers=headers,
+            timeout_ms=timeout_ms,
+        )
+
+        import json
+
+        try:
+            return json.loads(result["text"])
+        except json.JSONDecodeError as e:
+            raise _exc("ScrapeNetworkError")(
+                f"{self._profile.name} 响应非 JSON: {e}"
+            ) from e
+
+    def fetch(
+        self,
+        path: str,
+        *,
+        method: str = "POST",
+        body: str = "",
+        headers: Mapping[str, str] | None = None,
+        timeout_ms: int = 30_000,
+    ) -> dict:
+        """发一次同源请求并处理 CF 相关的失败，返回 ``{status, ok, text, headers}``。
+
+        这是所有站点共用的请求入口：``fetch_gql`` / ``fetch_form`` 只是在它
+        外面套一层响应解析。
+
+        Raises
+        ------
+        BlockedError          403 且重建会话后仍被挡
+        RateLimitError        429
+        ScrapeNetworkError    网络/超时错误
+        UpstreamMaintenanceError  重建过程中发现站点在维护
+        """
         self.ensure_initialized()
-        result = self._raw_fetch_gql(
-            query, variables, timeout_ms=timeout_ms, extra_headers=extra_headers
+        result = self._raw_fetch(
+            path, method=method, body=body, headers=headers, timeout_ms=timeout_ms
         )
         if "error" in result:
             raise _exc("ScrapeNetworkError")(f"浏览器内 fetch 失败: {result['error']}")
@@ -441,11 +661,13 @@ class BrowserFetcher:
         # 屏蔽。ensure_initialized() 里的 _wait_for_clearance 之所以有效，
         # 是因为那里刚做完 goto，等的是 cookie 落地而不是 token 重签。
         if self._is_clearance_required(result):
-            logger.info("GraphQL 要求重新校验，重新走主站挑战流程...")
+            logger.info(
+                "%s 要求重新校验，重新走主站挑战流程...", self._profile.name
+            )
             self._initialized = False
             self.ensure_initialized()
-            result = self._raw_fetch_gql(
-                query, variables, timeout_ms=timeout_ms, extra_headers=extra_headers
+            result = self._raw_fetch(
+                path, method=method, body=body, headers=headers, timeout_ms=timeout_ms
             )
             if "error" in result:
                 raise _exc("ScrapeNetworkError")(
@@ -455,7 +677,8 @@ class BrowserFetcher:
 
         if status == 403:
             logger.warning(
-                "GraphQL 返回 403，尝试重建 CF 会话... headers=%s body=%s",
+                "%s 返回 403，尝试重建 CF 会话... headers=%s body=%s",
+                self._profile.name,
                 result.get("headers", {}),
                 result.get("text", "")[:300],
             )
@@ -468,39 +691,35 @@ class BrowserFetcher:
                 raise
             except Exception as e:
                 raise _exc("BlockedError")(
-                    "H2S GraphQL 返回 403，CF 会话重建失败。"
+                    f"{self._profile.name} 返回 403，CF 会话重建失败。"
                     "可能需要更换 IP 或等待冷却。"
                 ) from e
-            retry = self._raw_fetch_gql(
-                query, variables, timeout_ms=timeout_ms, extra_headers=extra_headers
+            retry = self._raw_fetch(
+                path, method=method, body=body, headers=headers, timeout_ms=timeout_ms
             )
             if "error" in retry:
                 raise _exc("ScrapeNetworkError")(f"重建后重试失败: {retry['error']}")
             if retry["status"] == 403:
                 logger.warning(
-                    "GraphQL 重建会话后仍返回 403 headers=%s body=%s",
+                    "%s 重建会话后仍返回 403 headers=%s body=%s",
+                    self._profile.name,
                     retry.get("headers", {}),
                     retry.get("text", "")[:300],
                 )
                 raise _exc("BlockedError")(
-                    "H2S GraphQL 持续返回 403。可能需要更换 IP 或等待冷却。"
+                    f"{self._profile.name} 持续返回 403。可能需要更换 IP 或等待冷却。"
                 )
             result = retry
             status = result["status"]
 
         if status == 429:
-            raise _exc("RateLimitError")("H2S GraphQL 返回 429 Too Many Requests")
+            raise _exc("RateLimitError")(
+                f"{self._profile.name} 返回 429 Too Many Requests"
+            )
 
         if not result["ok"] and status >= 400:
             raise _exc("ScrapeNetworkError")(
-                f"H2S GraphQL HTTP {status}: {result['text'][:300]}"
+                f"{self._profile.name} HTTP {status}: {result['text'][:300]}"
             )
 
-        import json
-
-        try:
-            return json.loads(result["text"])
-        except json.JSONDecodeError as e:
-            raise _exc("ScrapeNetworkError")(
-                f"H2S GraphQL 响应非 JSON: {e}"
-            ) from e
+        return result

@@ -22,13 +22,14 @@ from __future__ import annotations
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import date
 from threading import Lock
 from typing import Optional
 
 import curl_cffi.requests as req
 
+from browser_fetcher import XIOR_PROFILE, BrowserFetcher
 from config import get_impersonate, get_proxy_url
 from models import Listing
 
@@ -40,12 +41,15 @@ from .base import (
     ScrapeNetworkError,
     ScrapeResult,
     ScrapeTask,
+    UpstreamMaintenanceError,
     is_cloudflare_body,
 )
 
 logger = logging.getLogger(__name__)
 
 AJAX_URL = "https://www.xiorstudenthousing.eu/wp-admin/admin-ajax.php"
+# 同源请求只需要路径——origin 由 XIOR_PROFILE.challenge_url 决定
+_AJAX_PATH = "/wp-admin/admin-ajax.php"
 
 
 class XiorScraper(AbstractScraper):
@@ -88,10 +92,64 @@ class XiorScraper(AbstractScraper):
         "p0196061": {"url":"https://www.xiorstudenthousing.eu/netherlands/aachen-vaals/katzensprung-student-accommodation/","display":"Aachen Vaals Katzensprung","property_page_id":1134,"semester_id":3281,"room_type_ids":[29889]},
     }
 
+    # ── 浏览器生命周期 ─────────────────────────────────────────────────
+    # 浏览器最大存活时间（秒）：超过后主动重建，避免会话过期被 CF 拦
+    _BROWSER_MAX_AGE = 7200  # 2 小时
+
+    def __init__(self) -> None:
+        self._fetcher: Optional[BrowserFetcher] = None
+        self._browser_created_at: float = 0.0
+
+    def _ensure_browser(self) -> BrowserFetcher:
+        """懒创建或复用浏览器实例。BlockedError 后自动重建。"""
+        from config import CLOAKBROWSER_HEADLESS
+
+        now = time.monotonic()
+        if self._fetcher is not None:
+            if now - self._browser_created_at > self._BROWSER_MAX_AGE:
+                logger.info(
+                    "Xior 浏览器已存活 %.0f 分钟，主动重建",
+                    (now - self._browser_created_at) / 60,
+                )
+                self._close_browser()
+            else:
+                return self._fetcher
+
+        self._fetcher = BrowserFetcher(
+            headless=CLOAKBROWSER_HEADLESS, profile=XIOR_PROFILE
+        )
+        try:
+            self._fetcher.__enter__()
+            self._fetcher.ensure_initialized()
+            self._browser_created_at = time.monotonic()
+            logger.info("Xior 浏览器已创建并完成 CF 挑战")
+            return self._fetcher
+        except Exception:
+            self._close_browser()
+            raise
+
+    def _close_browser(self) -> None:
+        if self._fetcher is not None:
+            try:
+                self._fetcher.__exit__(None, None, None)
+            except Exception:
+                pass
+            self._fetcher = None
+
+    @contextmanager
+    def batch_session(self):
+        """批次上下文：确保浏览器存活，跨轮复用。"""
+        try:
+            self._ensure_browser()
+            yield
+        except (BlockedError, UpstreamMaintenanceError):
+            logger.warning("抓取遇 Xior 浏览器会话不可复用状态，关闭浏览器")
+            self._close_browser()
+            raise
+
     # ── public API ─────────────────────────────────────────────────────
 
-    # 并发请求时每个线程用自己的 session（curl_cffi session 非线程安全），
-    # 但共享同一个限流锁以保证全局 1.5s 间隔——CF 按 IP 限流，并发不会绕过。
+    # 全局限流：CF 按 IP 限流，这里保证请求之间至少间隔 1.5s。
     _rate_lock = Lock()
     _last_request_at = 0.0
 
@@ -104,38 +162,34 @@ class XiorScraper(AbstractScraper):
         proxy = get_proxy_url()
         proxies = {"https": proxy, "http": proxy} if proxy else {}
 
+        fetcher = self._fetcher or self._ensure_browser()
+
         all_units: dict[str, dict] = {}
         complete = True
-        unit_lock = Lock()
-        max_workers = min(4, len(room_ids))
 
-        def _fetch_one(room_id: int) -> Optional[dict]:
+        # 串行，不再用 ThreadPoolExecutor：Playwright 的对象绑定创建线程，
+        # 浏览器传输层不能跨线程并发调用。实际也没损失——原来的 4 个 worker
+        # 共享同一把 1.5s 全局限流锁，吞吐本来就等于串行。
+        for room_id in room_ids:
             with self._rate_lock:
                 elapsed = time.monotonic() - self._last_request_at
                 if elapsed < 1.5:
                     time.sleep(1.5 - elapsed)
-                self._last_request_at = time.monotonic()
+                XiorScraper._last_request_at = time.monotonic()
 
-            with req.Session(impersonate=get_impersonate(), proxies=proxies) as session:
-                return _post_ajax(
-                    session,
-                    property_page_id=prop_id,
-                    room_type_id=room_id,
-                    semester_id=semester,
-                )
-
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            futures = {pool.submit(_fetch_one, rid): rid for rid in room_ids}
-            for future in as_completed(futures):
-                data = future.result()
-                if data is None:
-                    complete = False
-                    continue
-                with unit_lock:
-                    for unit in data.get("units", []):
-                        uid = str(unit.get("apartmentId", ""))
-                        if uid and uid not in all_units:
-                            all_units[uid] = unit
+            data = _post_ajax(
+                fetcher,
+                property_page_id=prop_id,
+                room_type_id=room_id,
+                semester_id=semester,
+            )
+            if data is None:
+                complete = False
+                continue
+            for unit in data.get("units", []):
+                uid = str(unit.get("apartmentId", ""))
+                if uid and uid not in all_units:
+                    all_units[uid] = unit
 
         today = date.today()
 
@@ -223,14 +277,21 @@ class XiorScraper(AbstractScraper):
 # ── HTTP helpers ─────────────────────────────────────────────────────────
 
 def _post_ajax(
-    session: req.Session,
+    fetcher: "BrowserFetcher",
     *,
     property_page_id: int,
     room_type_id: int,
     semester_id: int,
 ) -> Optional[dict]:
-    """POST the Yardi AJAX endpoint.  Returns decoded *data* dict, or None on
-    non-retryable failure (the caller marks the round incomplete)."""
+    """POST the Yardi AJAX endpoint through the browser transport.
+
+    Returns the decoded *data* dict, or None on non-retryable failure (the
+    caller marks the round incomplete).
+
+    走浏览器而不是 curl_cffi：该端点已被 Cloudflare 挑战保护，TLS 指纹伪装
+    过不去（2026-08-02 实测恒 403 + 挑战页）。CF 相关的失败——挑战、clearance
+    过期、屏蔽——统一由 BrowserFetcher 处理，这里只管业务语义和限流退避。
+    """
     payload = {
         "action": "yardi_room_availability",
         "property_page_id": str(property_page_id),
@@ -238,54 +299,29 @@ def _post_ajax(
         "semester_id": str(semester_id),
     }
     total_wait = 0
-    last_status: int | None = None
     for attempt, wait in enumerate([0] + list(RATE_LIMIT_BACKOFF)):
         if wait:
             total_wait += wait
-            # 报实际状态码：这里以前恒写 "429"，于是 Cloudflare 403 也被记成
-            # 限流，排查方向直接被带偏（该换 IP，却去调轮询频率）。
             logger.warning(
-                "Xior HTTP %s，第 %d/%d 次退避，等待 %d 秒（累计 %ds）",
-                last_status if last_status is not None else "?",
+                "Xior 限流，第 %d/%d 次退避，等待 %d 秒（累计 %ds）",
                 attempt, len(RATE_LIMIT_BACKOFF), wait, total_wait,
             )
             time.sleep(wait)
 
         try:
-            resp = session.post(AJAX_URL, data=payload, timeout=30)
-        except Exception as exc:
-            logger.error("Xior AJAX 网络异常 attempt=%d: %s", attempt, exc, exc_info=True)
+            envelope = fetcher.fetch_form(_AJAX_PATH, payload, timeout_ms=30_000)
+        except RateLimitError:
+            # 429：退避后重试；退完还不行就把异常抛给上层
             if attempt < len(RATE_LIMIT_BACKOFF):
                 continue
-            return None
-
-        last_status = resp.status_code
-
-        if resp.status_code == 429:
-            continue
-
-        if not resp.ok:
-            logger.error(
-                "Xior AJAX HTTP %d attempt=%d body=%r",
-                resp.status_code, attempt, resp.text[:300],
-            )
+            raise
+        except (BlockedError, UpstreamMaintenanceError):
+            # CF 屏蔽 / 平台维护：重试没有意义，交给 source 级熔断
+            raise
+        except ScrapeNetworkError as exc:
+            logger.error("Xior AJAX 请求失败 attempt=%d: %s", attempt, exc)
             if attempt < len(RATE_LIMIT_BACKOFF):
                 continue
-            if resp.status_code == 403:
-                # 退避用尽仍是 403 = 被 Cloudflare 挡住，不是限流。必须抛出来：
-                # 返回 None 只会把本轮标为 incomplete，source 级熔断不会触发，
-                # 于是每轮都重来一遍（每栋楼白等 90s 退避）却永远不可能成功。
-                raise BlockedError(
-                    f"Xior AJAX 持续返回 403（已重试 {len(RATE_LIMIT_BACKOFF)} 次）。"
-                    "curl_cffi 过不了 Cloudflare 挑战，需要更换出口 IP "
-                    "（HTTPS_PROXY），或改用浏览器传输层。"
-                )
-            return None
-
-        try:
-            envelope = resp.json()
-        except Exception:
-            logger.error("Xior AJAX JSON 解析失败 body=%r", resp.text[:300], exc_info=True)
             return None
 
         if not envelope.get("success"):
@@ -293,7 +329,24 @@ def _post_ajax(
             logger.warning("Xior AJAX 业务失败 attempt=%d: %s", attempt, msg)
             return None
 
-        return envelope.get("data", {})
+        data = envelope.get("data", {}) or {}
+
+        # WordPress 层成功 ≠ 上游成功。Xior 的 WP 端点在向 Yardi 取可用性失败时
+        # 依然回 success=true + units=[]，只把真实错误塞进 availability_response。
+        # 不查这个字段就会把「上游挂了」读成「没有房源」——静默、且完全无法与
+        # 真实的零可用性区分。返回 None 让本轮标记为 incomplete。
+        upstream = data.get("availability_response")
+        if isinstance(upstream, dict) and upstream.get("errorCode"):
+            logger.warning(
+                "Xior 上游可用性查询失败 attempt=%d: errorCode=%s msg=%s params=%s",
+                attempt,
+                upstream.get("errorCode"),
+                upstream.get("errorMessage"),
+                data.get("availability_params"),
+            )
+            return None
+
+        return data
 
     raise RateLimitError(
         f"Xior 持续返回 429（已退避重试 {len(RATE_LIMIT_BACKOFF)} 次，"

@@ -354,101 +354,164 @@ class FakeResponse:
         return self._json
 
 
-class FakeSession:
-    """Records calls; returns canned responses."""
-    def __init__(self, *responses):
-        self.responses = list(responses)
+class FakeFetcher:
+    """BrowserFetcher 替身：按序返回 envelope，或抛出预置异常。
+
+    Xior 的 AJAX 端点已被 Cloudflare 挡住，传输层因此换成了浏览器；
+    CF 相关的失败由 BrowserFetcher 抛出，_post_ajax 只处理业务语义和限流。
+    """
+
+    def __init__(self, *outcomes):
+        self.outcomes = list(outcomes)
         self.calls = []
 
-    def post(self, url, data, timeout):
-        self.calls.append((url, data))
-        if self.responses:
-            return self.responses.pop(0)
-        return FakeResponse(200, {"success": True, "data": {"units": [], "total": 0}})
+    def fetch_form(self, path, data, *, timeout_ms=30_000, headers=None):
+        self.calls.append((path, dict(data)))
+        outcome = (
+            self.outcomes.pop(0) if self.outcomes
+            else {"success": True, "data": {"units": [], "total": 0}}
+        )
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
 
 
-def test_post_ajax_success(monkeypatch):
-    """Integration: _post_ajax parses a successful response."""
+def test_post_ajax_success():
+    """成功响应被正确解包。"""
     from scrapers.xior import _post_ajax
 
-    session = FakeSession(
-        FakeResponse(200, {"success": True, "data": {"units": [SAMPLE_UNIT], "total": 1}})
+    fetcher = FakeFetcher(
+        {"success": True, "data": {"units": [SAMPLE_UNIT], "total": 1}}
     )
-    result = _post_ajax(session, property_page_id=1114, room_type_id=33934, semester_id=3281)
+    result = _post_ajax(
+        fetcher, property_page_id=1114, room_type_id=33934, semester_id=3281
+    )
     assert result is not None
     assert len(result["units"]) == 1
+    # 走同源路径而不是绝对 URL——origin 由 profile 的 challenge_url 决定
+    assert fetcher.calls[0][0] == "/wp-admin/admin-ajax.php"
+    assert fetcher.calls[0][1]["action"] == "yardi_room_availability"
 
 
-def test_post_ajax_business_failure_returns_none(monkeypatch):
+def test_post_ajax_business_failure_returns_none():
+    """success=false 是业务失败，不是屏蔽 → None（本轮 incomplete）。"""
     from scrapers.xior import _post_ajax
 
-    session = FakeSession(
-        FakeResponse(200, {"success": False, "data": {"message": "too many requests"}})
+    fetcher = FakeFetcher(
+        {"success": False, "data": {"message": "too many requests"}}
     )
-    result = _post_ajax(session, property_page_id=1114, room_type_id=33934, semester_id=3281)
-    assert result is None
+    assert _post_ajax(
+        fetcher, property_page_id=1114, room_type_id=33934, semester_id=3281
+    ) is None
 
 
-def test_post_ajax_persistent_403_raises_blocked(monkeypatch):
-    """403 用尽退避后必须抛 BlockedError，不能悄悄返回 None。
+def test_post_ajax_detects_upstream_availability_error():
+    """WP 层 success=true 但上游 Yardi 报错时，不能当成「没有房源」。
 
-    回归：返回 None 只把本轮标成 incomplete，source 级熔断不会触发，于是每轮
-    重来一遍、每栋楼白等 90s 退避，而 Cloudflare 挡着永远不可能成功。
-    实测 2026-08-02：Xior 的 AJAX 端点已被 CF 挑战页拦下。
+    实测 2026-08-02：Xior 的 WP 端点在上游失败时仍回
+    ``success=true`` + ``units=[]``，真实错误只出现在
+    ``availability_response.errorCode``。不查这个字段就无法把「上游挂了」
+    和「真的零可用」区分开。
+    """
+    from scrapers.xior import _post_ajax
+
+    fetcher = FakeFetcher({
+        "success": True,
+        "data": {
+            "units": [],
+            "total": 0,
+            "availability_params": {"academicTermId": 3281},
+            "availability_response": {"errorCode": 204, "errorMessage": "Unknown error"},
+        },
+    })
+
+    assert _post_ajax(
+        fetcher, property_page_id=1126, room_type_id=33944, semester_id=3281
+    ) is None
+
+
+def test_post_ajax_accepts_genuine_zero_availability():
+    """上游正常、确实没房 → 返回空 units，而不是判失败。"""
+    from scrapers.xior import _post_ajax
+
+    fetcher = FakeFetcher({
+        "success": True,
+        "data": {"units": [], "total": 0, "availability_response": {}},
+    })
+
+    result = _post_ajax(
+        fetcher, property_page_id=1126, room_type_id=33944, semester_id=3281
+    )
+    assert result is not None
+    assert result["units"] == []
+
+
+def test_post_ajax_propagates_blocked_without_retrying(monkeypatch):
+    """CF 屏蔽必须原样上抛给 source 级熔断，且不该继续重试。
+
+    回归：以前 403 被当成可重试的失败，最终返回 None 只把本轮标成
+    incomplete，熔断不触发，于是每轮重来一遍、每栋楼白等 90s 退避，
+    而 Cloudflare 挡着永远不可能成功。
     """
     import scrapers.xior as xior
     from scrapers.base import BlockedError
 
     monkeypatch.setattr(xior.time, "sleep", lambda _: None)
-    cf_page = "<html><head><title>Just a moment...</title></head></html>"
-    session = FakeSession(*[
-        FakeResponse(403, cf_page)
+    fetcher = FakeFetcher(BlockedError("CF 持续 403"))
+
+    with pytest.raises(BlockedError):
+        xior._post_ajax(
+            fetcher, property_page_id=1114, room_type_id=33934, semester_id=3281
+        )
+    assert len(fetcher.calls) == 1, "被屏蔽后不该继续重试"
+
+
+def test_post_ajax_propagates_maintenance(monkeypatch):
+    import scrapers.xior as xior
+    from scrapers.base import UpstreamMaintenanceError
+
+    monkeypatch.setattr(xior.time, "sleep", lambda _: None)
+    fetcher = FakeFetcher(UpstreamMaintenanceError("维护中"))
+
+    with pytest.raises(UpstreamMaintenanceError):
+        xior._post_ajax(
+            fetcher, property_page_id=1114, room_type_id=33934, semester_id=3281
+        )
+    assert len(fetcher.calls) == 1
+
+
+def test_post_ajax_retries_rate_limit_then_succeeds(monkeypatch):
+    """429 是临时的，退避后重试。"""
+    import scrapers.xior as xior
+    from scrapers.base import RateLimitError
+
+    monkeypatch.setattr(xior.time, "sleep", lambda _: None)
+    fetcher = FakeFetcher(
+        RateLimitError("429"),
+        {"success": True, "data": {"units": [SAMPLE_UNIT], "total": 1}},
+    )
+
+    result = xior._post_ajax(
+        fetcher, property_page_id=1114, room_type_id=33934, semester_id=3281
+    )
+    assert result is not None
+    assert len(fetcher.calls) == 2
+
+
+def test_post_ajax_network_errors_exhaust_to_none(monkeypatch):
+    """网络类错误重试用尽 → None（本轮 incomplete），不升级成屏蔽。"""
+    import scrapers.xior as xior
+    from scrapers.base import ScrapeNetworkError
+
+    monkeypatch.setattr(xior.time, "sleep", lambda _: None)
+    fetcher = FakeFetcher(*[
+        ScrapeNetworkError("boom")
         for _ in range(len(xior.RATE_LIMIT_BACKOFF) + 1)
     ])
 
-    with pytest.raises(BlockedError, match="403"):
-        xior._post_ajax(
-            session, property_page_id=1114, room_type_id=33934, semester_id=3281
-        )
-
-
-def test_post_ajax_other_http_errors_still_return_none(monkeypatch):
-    """5xx 之类不是屏蔽，维持原来的 None（本轮 incomplete）语义。"""
-    import scrapers.xior as xior
-
-    monkeypatch.setattr(xior.time, "sleep", lambda _: None)
-    session = FakeSession(*[
-        FakeResponse(500, "boom") for _ in range(len(xior.RATE_LIMIT_BACKOFF) + 1)
-    ])
-
     assert xior._post_ajax(
-        session, property_page_id=1114, room_type_id=33934, semester_id=3281
+        fetcher, property_page_id=1114, room_type_id=33934, semester_id=3281
     ) is None
-
-
-def test_post_ajax_business_failure_returns_none():
-    """success=false in envelope → None."""
-    from scrapers.xior import _post_ajax
-
-    session = FakeSession(
-        FakeResponse(200, {"success": False, "data": {"message": "too many requests"}})
-    )
-    result = _post_ajax(session, property_page_id=1114, room_type_id=33934, semester_id=3281)
-    assert result is None
-
-
-def test_post_ajax_retry_exhausted_returns_none(monkeypatch):
-    """Three consecutive non-200 (non-429) responses → None after retries."""
-    from scrapers.xior import _post_ajax
-
-    monkeypatch.setattr("scrapers.xior.time.sleep", lambda _: None)
-    session = FakeSession(
-        FakeResponse(500, "err"),
-        FakeResponse(500, "err"),
-        FakeResponse(500, "err"),
-    )
-    result = _post_ajax(session, property_page_id=1114, room_type_id=33934, semester_id=3281)
-    assert result is None
 
 
 # ── Scraper registration ─────────────────────────────────────────────

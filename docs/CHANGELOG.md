@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.9.7 (2026-08-02)
+
+### BrowserFetcher 泛化为通用浏览器传输层
+
+`BrowserFetcher` 此前把 H2S 的细节硬编码在内部（主站 URL、GraphQL 路径、Magento 头、维护页判定、clearance 探针），只能服务一个站点。现在站点差异全部收进 `SiteProfile`，通用流程（过挑战 → 等 clearance → 发同源请求 → 处理 clearance 过期 / 屏蔽 / 限流）对所有站点复用。
+
+- 新增 `SiteProfile` / `ProbeRequest`，内置 `H2S_PROFILE`、`XIOR_PROFILE`。
+- 新增通用 `fetch()`（任意 method / path / body / headers），`fetch_gql()` 与新增的 `fetch_form()` 都只是在它外面套一层响应解析。GET/HEAD 自动不带 body。
+- **clearance 判据可配**：H2S 回自己的 JSON `{"code":"clearance_required"}`，多数站点直接回 CF 挑战页——两种形态都要认出来，否则会把「重新导航就能好」误判成「IP 被封」。`_is_clearance_required` 因此从 staticmethod 变为实例方法。
+- **clearance 探针可选**：没有廉价探针的站点（Xior 的端点需要 property/room id，profile 层拿不到）跳过初始化探测，由首个真实请求遇到 403 时触发重新导航兜底。
+- 维护页判定改为 profile 提供的钩子，只有 H2S 配了。
+- `BrowserFetcher(headless=...)` 默认仍是 H2S profile，booker 与 H2S scraper 调用方式不变。
+
+### Xior 改用浏览器传输层
+
+- **CF 403 已解决**。`curl_cffi` 的 TLS 指纹伪装过不了 Xior AJAX 端点的 Cloudflare 挑战（实测恒 403 + 挑战页）；改走浏览器后返回正常 envelope，`success=true`，结构完整。
+- **并发改串行**。Playwright 对象绑定创建线程，浏览器传输层不能跨线程并发调用，`ThreadPoolExecutor` 移除。实际没有损失——原来 4 个 worker 共享同一把 1.5s 全局限流锁，吞吐本就等于串行。
+- **浏览器跨轮复用**：与 H2S 同样的 `batch_session()` + 2 小时主动重建。
+- `_post_ajax` 职责收窄为业务语义 + 限流退避；CF 屏蔽 / 维护由传输层抛出并原样上抛给 source 级熔断。
+
+### Bug 修复 — Xior 把上游错误读成「没有房源」
+
+`success=true` 不代表上游成功：Xior 的 WordPress 端点在向 Yardi 取可用性失败时，仍然返回 `success=true` + `units=[]`，真实错误只出现在 `availability_response.errorCode` 里。不查这个字段就会把「上游挂了」读成「零可用」，两者完全无法区分。现在命中即返回 `None`（本轮标记 incomplete），并把 `errorCode` / `availability_params` 记进日志。
+
+### 已知限制 — Xior 仍无可用数据，保持停用
+
+传输层问题已修复且验证通过，但 Xior 目前仍拿不到任何单元：上游对**正确的** `academicTermId=3281`（已核对，与站点当前页面一致，未过期）返回 `errorCode: 204 / "Unknown error"`，实测覆盖 8 栋楼全部为空。
+
+`204` 的语义无法从这个端点区分——可能是上游故障，也可能是 Xior 用它表示「该学期无库存」。当前按错误处理（保守：只影响 stale 收敛，不会产生误通知），待出现有房源的样本后再回头确认。因此 `SOURCES` 保持不变，Xior 未启用。
+
 ## v1.9.6 (2026-08-02)
 
 ### 多 source 现状核实
