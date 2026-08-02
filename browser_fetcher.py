@@ -392,12 +392,17 @@ class BrowserFetcher:
 
         status = result["status"]
 
-        # clearance 过期是长会话里的常态（token 有寿命），不是被封。
-        # 先原地等它重新生效再重试，等不到才按屏蔽处理——直接推倒重建
-        # 浏览器代价高，且重建过程本身也要重新过挑战，容易连锁失败。
+        # clearance 过期是长会话里的常态（token 有寿命，且实测生产环境的
+        # token 比本地短得多），不是被封。
+        #
+        # 恢复方式只有一种：重新导航主站把挑战跑完——token 是页面通过挑战时
+        # 下发的，对着 API 轮询永远换不出新 token，只会白等到超时再误判成
+        # 屏蔽。ensure_initialized() 里的 _wait_for_clearance 之所以有效，
+        # 是因为那里刚做完 goto，等的是 cookie 落地而不是 token 重签。
         if self._is_clearance_required(result):
-            logger.info("GraphQL 要求重新校验，等待 clearance 生效后重试...")
-            self._wait_for_clearance()
+            logger.info("GraphQL 要求重新校验，重新走主站挑战流程...")
+            self._initialized = False
+            self.ensure_initialized()
             result = self._raw_fetch_gql(
                 query, variables, timeout_ms=timeout_ms, extra_headers=extra_headers
             )

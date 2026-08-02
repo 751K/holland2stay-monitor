@@ -179,20 +179,17 @@ def test_is_clearance_required_only_matches_transient_403():
     )
 
 
-def test_fetch_gql_waits_for_clearance_instead_of_rebuilding_session(monkeypatch):
-    """clearance 未生效是瞬时态，应原地等待重试，而不是推倒重建浏览器。"""
+def test_fetch_gql_renavigates_when_clearance_expires(monkeypatch):
+    """clearance 过期要重新走挑战流程，而不是对着 API 轮询。
+
+    token 由页面通过 CF 挑战时下发，轮询 GraphQL 换不出新 token——
+    只会白等到超时，再把一个本可恢复的会话误判成被屏蔽。
+    """
     monkeypatch.setattr(browser_fetcher.time, "sleep", lambda _: None)
     page = _FakePage(
-        # 首次请求：clearance 还没落地
+        # 长会话中 token 过期
         {"status": 403, "ok": False, "text": _CLEARANCE_403, "headers": {}},
-        # _wait_for_clearance 的探测：已生效
-        {
-            "status": 200,
-            "ok": True,
-            "text": json.dumps({"data": {"products": {"total_count": 1}}}),
-            "headers": {},
-        },
-        # 原地重试原查询
+        # 重新初始化后重试成功
         {
             "status": 200,
             "ok": True,
@@ -215,8 +212,10 @@ def test_fetch_gql_waits_for_clearance_instead_of_rebuilding_session(monkeypatch
     data = fetcher.fetch_gql("query Test { ok }")
 
     assert data == {"data": {"recovered": True}}
-    # 只有 fetch_gql 开头那一次；走重建分支的话会是 2 次
-    assert len(calls) == 1
+    # 开头一次 + clearance 过期后重新导航一次
+    assert len(calls) == 2
+    # 没有滑到通用 403 分支（那条路径会再多一次 ensure_initialized）
+    assert len(page.scripts) == 2
 
 
 def test_macos_headless_launch_uses_headed_directly(monkeypatch):

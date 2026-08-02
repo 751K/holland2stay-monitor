@@ -7,7 +7,9 @@
 - **CF 挑战通过与否的判据修正（根因）**：`ensure_initialized()` 此前用 `[data-cy="FilterList-item"]` 选择器判断挑战是否完成，等不到只打一条 warning 就继续，并照样置 `_initialized = True`。实测该元素与「能否发请求」无关（GraphQL 已经 200 时它仍可能未渲染），于是挑战没过也把 GraphQL 打出去 → 必然 403 → 触发会话重建 → 重建时 `Page.goto` 崩溃 → source 熔断。改为轮询挑战页脚本标记 `_cf_chl_opt` 是否消失，超时抛 `BlockedError` 交给熔断，不再硬发注定失败的请求。
   - 顺带记录几个**不能**用作判据的信号：`challenges.cloudflare.com` 和 `/cdn-cgi/challenge-platform/` 在挑战解开后的真实页面里同样存在（CSP 头 + 站点自带 turnstile）；URL 上的 `__cf_chl_rt_tk` 由 CF 通过 `history.replaceState` 回写，时机不定，挑战早已解开时仍可能残留。
 - **新增 clearance 就绪探测**：挑战页消失不等于 `cf_clearance` 已生效——实测两者之间有约 2s 空窗，期间 GraphQL 稳定返回 `403 {"code":"clearance_required"}`。初始化最后一步改为直接探一次最小 GraphQL 查询，拿到响应才算就绪，替换掉原来那个与可用性无关的 DOM 等待（同时省掉 25s 无谓超时）。
-- **区分「clearance 未生效」与「被 CF 屏蔽」**：两者都是 403，旧代码一律按屏蔽处理并重建整个浏览器会话，等于把再等两秒就能用的会话反复推倒重来。现在 `clearance_required` 走原地等待 + 重试，只有真正的屏蔽才升级为 `BlockedError`。
+- **区分「clearance 未生效」与「被 CF 屏蔽」**：两者都是 403，旧代码一律按屏蔽处理并升级为 `BlockedError` + 熔断。现在按 `clearance_required` 标记区分：token 过期走重新导航 + 重试，只有真正的屏蔽才熔断。
+  - 恢复方式必须是**重新导航主站走完挑战**：token 由页面通过挑战时下发，对着 GraphQL 轮询换不出新 token（生产验证：跨轮复用的浏览器在第 2 轮必然 `clearance_required`，轮询 60s 无效，重新导航即恢复）。初始化阶段的 `_wait_for_clearance` 轮询之所以有效，是因为那里刚做完 `goto`，等的是 cookie 落地而非 token 重签——两者不能混用。
+  - 生产环境的 clearance 比本地短命得多：macOS 本地复用 6 分钟仍有效，1 CPU VPS 上约 5 分钟就要重签。
 - **维护检测移到挑战解开之后**：挑战页由 Cloudflare 生成，其标题/正文与 H2S 真实状态无关，在挑战解开前判定等于拿 CF 的页面猜平台在不在维护。同时 `_raise_if_maintenance_page()` 增加防御性早退。
 - **重建会话时不再吞掉维护异常**：`fetch_gql` 的 403 分支此前把重建过程中的所有异常压成 `BlockedError`，`UpstreamMaintenanceError` 也在内——会让 monitor 走熔断 + admin 告警而不是安静的维护冷却。现在维护异常原样上抛，其余异常保留 `__cause__`。
 
