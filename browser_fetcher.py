@@ -145,6 +145,7 @@ class SiteProfile:
     字段
     ----
     name            日志用的站点名
+    source          对应的 source 名，用于取该 source 专属的代理 session
     challenge_url   过 CF 挑战时导航到的页面。它同时决定了同源请求的 origin，
                     所以必须和后续请求同域。
     default_headers 该站点请求的默认头
@@ -159,6 +160,7 @@ class SiteProfile:
     """
 
     name: str
+    source: str
     challenge_url: str
     default_headers: Mapping[str, str] = field(default_factory=dict)
     clearance_probe: Optional[ProbeRequest] = None
@@ -168,6 +170,7 @@ class SiteProfile:
 
 H2S_PROFILE = SiteProfile(
     name="Holland2Stay",
+    source="holland2stay",
     challenge_url=_H2S_MAIN_PAGE,
     default_headers=_H2S_GQL_HEADERS,
     clearance_probe=ProbeRequest(
@@ -187,6 +190,7 @@ H2S_PROFILE = SiteProfile(
 # 重新导航（fetch() 内处理）。
 XIOR_PROFILE = SiteProfile(
     name="Xior",
+    source="xior",
     challenge_url=_XIOR_MAIN_PAGE,
     default_headers=_XIOR_AJAX_HEADERS,
 )
@@ -270,7 +274,7 @@ class BrowserFetcher:
         # 变量，这里只是把它已经解析好的值显式交给浏览器。
         from config import get_proxy_url  # 延迟导入，避免循环依赖
 
-        proxy_url = get_proxy_url() or None
+        proxy_url = get_proxy_url(self._profile.source) or None
         if proxy_url:
             logger.info(
                 "%s 浏览器走代理 %s",

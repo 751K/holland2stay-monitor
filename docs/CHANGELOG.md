@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.9.9 (2026-08-02)
+
+### 各 source 使用独立的代理 sticky session
+
+换成 sticky 代理后所有 source 挤在同一个出口 IP，**共享了限流额度**：Xior 一轮 12 个请求（4 栋楼共 12 个房型）触发 `429 Too Many Requests`，四栋楼全部失败，该轮只剩 2/6。是「新增阿姆两栋楼」和「固定出口 IP」两件事叠加才触发的。
+
+但出口 IP 稳定又是 Cloudflare clearance 能复用的前提，不能退回每请求轮换。所以按 source 拆分 session：
+
+- `get_proxy_url(source)` 新增可选参数，为该 source 派生稳定且互不相同的 sticky session id（webshare 用户名形如 `{user}-{country}-{session_id}`，替换末段数字）。
+- 各平台因此拥有**各自稳定的出口 IP**，互不挤占限流额度。
+- 不传 `source` 时返回基础 URL，`monitor` / `doctor` 只判断有没有配代理，行为不变。
+- 只在用户名**已经**以数字 session id 结尾时才替换；`-rotate` 端点、无 session 段、无鉴权等形态一律原样返回——凭空拼接可能被 webshare 解析成国家码，反而把配置搞坏。
+- 故障切换与冷却逻辑不受影响。
+
+配置来源仍然只有 `.env` 一处。
+
 ## v1.9.8 (2026-08-02)
 
 ### Bug 修复 — 浏览器与其它抓取器走在不同出口 IP

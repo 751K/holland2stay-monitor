@@ -173,6 +173,14 @@ _last_impersonate: Optional[str] = None
 # 被快速打穿。
 # 状态进程级，monitor 重启清零（重启即重新从主代理试）。
 import time as _time  # noqa: E402  (局部别名，避免与文件其它 time 用法冲突)
+import hashlib as _hashlib  # noqa: E402
+import re as _re  # noqa: E402
+from urllib.parse import (  # noqa: E402
+    quote as _quote,
+    unquote as _unquote,
+    urlparse as _urlparse,
+    urlunparse as _urlunparse,
+)
 
 _PROXY_COOLDOWN_SEC = 600  # 10 分钟
 _PROXY_FAILURE_CONFIRM_THRESHOLD = 2
@@ -193,7 +201,49 @@ def _proxy_pool() -> list[str]:
     return list(dict.fromkeys(p for p in pool if p))  # 去重保序 + 去空
 
 
-def get_proxy_url() -> str:
+# webshare sticky 端点的用户名形如 ``{user}-{country}-{session_id}``，
+# 末段是纯数字的 session id；``-rotate`` 则表示每请求换 IP。
+_STICKY_SESSION_RE = _re.compile(r"^(?P<head>.+)-(?P<session>\d+)$")
+
+
+def _derive_session_id(source: str) -> str:
+    """由 source 名派生一个稳定的 6 位 session id。
+
+    同一个 source 每次都得到同一个 id（出口 IP 才稳得住），不同 source
+    之间必然不同。
+    """
+    digest = _hashlib.sha1(source.encode("utf-8")).hexdigest()
+    return str(100000 + int(digest[:8], 16) % 900000)
+
+
+def _with_source_session(url: str, source: str) -> str:
+    """把代理 URL 的 sticky session id 换成该 source 专属的。
+
+    只在用户名**已经**以数字 session id 结尾时才替换；其它形态（如
+    ``-rotate``、或根本没有 session 段）原样返回——凭空拼接可能被
+    webshare 解析成国家码之类，反而把配置搞坏。
+    """
+    try:
+        parsed = _urlparse(url)
+        username = _unquote(parsed.username or "")
+        password = parsed.password or ""
+    except Exception:
+        return url
+    if not username or not parsed.hostname:
+        return url
+
+    m = _STICKY_SESSION_RE.match(username)
+    if not m:
+        return url  # rotate 端点或无 session 段：保持原样
+
+    new_user = f"{m.group('head')}-{_derive_session_id(source)}"
+    netloc = f"{_quote(new_user, safe='')}:{password}@{parsed.hostname}"
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    return _urlunparse(parsed._replace(netloc=netloc))
+
+
+def get_proxy_url(source: str = "") -> str:
     """
     统一的代理 URL 读取，**带故障切换**。
 
@@ -202,6 +252,19 @@ def get_proxy_url() -> str:
     空串，表示抓取临时降级为直连服务器原生 IP。无配置也返回空串。
 
     所有需要代理的模块（scraper、booker、monitor）均通过此函数获取。
+
+    Parameters
+    ----------
+    source
+        传入 source 名（``holland2stay`` / ``xior`` / ``ourdomain``）时，为该
+        source 派生**独立的 sticky session**，使各平台拥有各自稳定的出口 IP。
+
+        为什么要分开：出口 IP 稳定是 Cloudflare clearance 能复用的前提，但共用
+        一个 IP 就等于共用限流额度。2026-08-02 实测——所有 source 挤在同一个
+        sticky IP 上时，Xior 一轮 12 个请求触发 `429 Too Many Requests`，四栋楼
+        全部失败。各自独立 session 后两者兼得：IP 稳定，额度不互相挤占。
+
+        不传则返回基础 URL（monitor / doctor 只判断有没有配代理，用这个即可）。
     """
     pool = _proxy_pool()
     if not pool:
@@ -209,7 +272,7 @@ def get_proxy_url() -> str:
     now = _time.monotonic()
     for p in pool:
         if _proxy_cooldown_until.get(p, 0.0) <= now:
-            return p
+            return _with_source_session(p, source) if source else p
     # 全在冷却——降级为直连原生 IP；monitor 会降频到最多 10 min 一次。
     return ""
 

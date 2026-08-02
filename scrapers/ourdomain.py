@@ -159,7 +159,7 @@ class OurDomainScraper(AbstractScraper):
         display = task.city_display or building["display"]
         move_in_date = task.extra.get("move_in_date") or _next_month_first()
 
-        proxy = get_proxy_url()
+        proxy = get_proxy_url(self.source)
         proxies = {"https": proxy, "http": proxy} if proxy else {}
 
         floorplans_url = f"{base}/{slug}/floorplans.aspx"

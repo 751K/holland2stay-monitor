@@ -213,7 +213,7 @@ def test_parse_ourdomain_floor(detail, expected):
 def test_scrape_builds_unit_level_listings(monkeypatch):
     monkeypatch.setattr("scrapers.ourdomain.req.Session", FakeSession)
     monkeypatch.setattr("scrapers.ourdomain.get_impersonate", lambda: "chrome131")
-    monkeypatch.setattr("scrapers.ourdomain.get_proxy_url", lambda: "")
+    monkeypatch.setattr("scrapers.ourdomain.get_proxy_url", lambda source="": "")
 
     task = ScrapeTask(
         source="ourdomain",
@@ -256,7 +256,7 @@ def test_scrape_builds_unit_level_listings(monkeypatch):
 def test_scrape_raises_blocked_error(monkeypatch):
     monkeypatch.setattr("scrapers.ourdomain.req.Session", BlockedSession)
     monkeypatch.setattr("scrapers.ourdomain.get_impersonate", lambda: "chrome131")
-    monkeypatch.setattr("scrapers.ourdomain.get_proxy_url", lambda: "")
+    monkeypatch.setattr("scrapers.ourdomain.get_proxy_url", lambda source="": "")
     monkeypatch.setenv("OURDOMAIN_WAF_RETRIES", "2")
     monkeypatch.setenv("OURDOMAIN_IMPERSONATES", "chrome131,safari17_0")
 
@@ -270,7 +270,7 @@ def test_scrape_retries_cloudflare_with_next_tls_fingerprint(monkeypatch):
     FirstBlockedThenOkSession.instance_count = 0
     FirstBlockedThenOkSession.instances = []
     monkeypatch.setattr("scrapers.ourdomain.req.Session", FirstBlockedThenOkSession)
-    monkeypatch.setattr("scrapers.ourdomain.get_proxy_url", lambda: "")
+    monkeypatch.setattr("scrapers.ourdomain.get_proxy_url", lambda source="": "")
     monkeypatch.setenv("OURDOMAIN_WAF_RETRIES", "2")
     monkeypatch.setenv("OURDOMAIN_IMPERSONATES", "chrome131,safari17_0")
 

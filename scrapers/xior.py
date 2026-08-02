@@ -163,7 +163,7 @@ class XiorScraper(AbstractScraper):
         prop_id = bldg["property_page_id"]
         semester = bldg["semester_id"]
         room_ids = bldg["room_type_ids"]
-        proxy = get_proxy_url()
+        proxy = get_proxy_url(self.source)
         proxies = {"https": proxy, "http": proxy} if proxy else {}
 
         fetcher = self._fetcher or self._ensure_browser()

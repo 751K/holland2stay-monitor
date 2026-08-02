@@ -100,3 +100,57 @@ class TestProxyPool:
         assert config.get_proxy_url() == "http://p:1"
         assert config.proxy_failure_mark_count("http://p:1") == 2
         assert config.is_proxy_native_fallback_active() is False
+
+
+class TestPerSourceStickySession:
+    """各 source 用独立的 sticky session，避免共享出口 IP 的限流额度。
+
+    背景（2026-08-02 实测）：换成 sticky 代理后所有 source 挤在同一个出口 IP，
+    Xior 一轮 12 个请求触发 429，四栋楼全部失败。而出口 IP 稳定又是 Cloudflare
+    clearance 能复用的前提，不能退回每请求轮换——所以按 source 分 session。
+    """
+
+    STICKY = "http://acct-nl-790346:pw@p.webshare.io:80"
+
+    def test_each_source_gets_a_distinct_session(self, monkeypatch):
+        monkeypatch.setenv("HTTPS_PROXY", self.STICKY)
+        urls = {s: config.get_proxy_url(s)
+                for s in ("holland2stay", "xior", "ourdomain")}
+        assert len(set(urls.values())) == 3, urls
+        for u in urls.values():
+            assert u.startswith("http://acct-nl-")
+            assert "@p.webshare.io:80" in u
+
+    def test_session_is_stable_across_calls(self, monkeypatch):
+        """同一 source 每次都要拿到同一个 session，否则出口 IP 稳不住。"""
+        monkeypatch.setenv("HTTPS_PROXY", self.STICKY)
+        assert config.get_proxy_url("xior") == config.get_proxy_url("xior")
+
+    def test_no_source_returns_base_url_unchanged(self, monkeypatch):
+        """不传 source 时保持原样——monitor / doctor 只判断有没有配代理。"""
+        monkeypatch.setenv("HTTPS_PROXY", self.STICKY)
+        assert config.get_proxy_url() == self.STICKY
+
+    def test_credentials_are_preserved(self, monkeypatch):
+        monkeypatch.setenv("HTTPS_PROXY", self.STICKY)
+        assert ":pw@" in config.get_proxy_url("xior")
+
+    @pytest.mark.parametrize("url", [
+        "http://acct-us-rotate:pw@p.webshare.io:80",   # 用户明确要求每请求轮换
+        "http://plainuser:pw@proxy.local:8080",        # 没有 session 段
+        "http://proxy.local:8080",                     # 无鉴权
+    ])
+    def test_unrecognised_shapes_pass_through(self, monkeypatch, url):
+        """只在用户名已以数字 session 结尾时才替换。
+
+        凭空拼接可能被 webshare 解析成国家码之类，反而把配置搞坏。
+        """
+        monkeypatch.setenv("HTTPS_PROXY", url)
+        assert config.get_proxy_url("xior") == url
+
+    def test_cooldown_still_applies_with_source(self, monkeypatch):
+        """故障切换逻辑不受 source 影响。"""
+        monkeypatch.setenv("HTTPS_PROXY", self.STICKY)
+        config.report_proxy_failure()
+        config.report_proxy_failure()
+        assert config.get_proxy_url("xior") == ""

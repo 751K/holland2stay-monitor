@@ -333,7 +333,7 @@ def test_launch_receives_proxy_explicitly(monkeypatch):
     calls = _patch_launch(monkeypatch)
     monkeypatch.setattr(
         browser_fetcher_config(), "get_proxy_url",
-        lambda: "http://u:p@p.webshare.io:80",
+        lambda source="": "http://u:p@p.webshare.io:80",
     )
 
     BrowserFetcher(headless=True).__enter__()
@@ -344,7 +344,7 @@ def test_launch_receives_proxy_explicitly(monkeypatch):
 def test_launch_proxy_is_none_when_unconfigured(monkeypatch):
     """没配代理时传 None，而不是空串——空串会被当成非法代理。"""
     calls = _patch_launch(monkeypatch)
-    monkeypatch.setattr(browser_fetcher_config(), "get_proxy_url", lambda: "")
+    monkeypatch.setattr(browser_fetcher_config(), "get_proxy_url", lambda source="": "")
 
     BrowserFetcher(headless=True).__enter__()
 
