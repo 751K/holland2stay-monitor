@@ -89,6 +89,57 @@ def test_monitor_isolated_dispatch_runs_without_thread_asyncio_loop(monkeypatch)
     assert completeness == {"holland2stay:Eindhoven": True}
 
 
+def test_isolated_dispatch_reuses_one_thread_across_rounds(monkeypatch):
+    """H2S 必须每轮落在同一个线程上。
+
+    回归：以前每轮 ``with ThreadPoolExecutor(...)`` 新建又销毁线程。
+    Playwright 对象绑定创建线程，线程一换浏览器就作废，于是每轮都要重建
+    浏览器并完整重过一次 CF 挑战。
+    """
+    import monitor
+
+    seen: list[int] = []
+
+    def fake_dispatch(tasks):
+        seen.append(threading.get_ident())
+        return [], {}
+
+    monkeypatch.setattr(monitor, "dispatch_scrape_tasks", fake_dispatch)
+
+    async def run_rounds():
+        loop = asyncio.get_running_loop()
+        for _ in range(3):
+            await monitor._dispatch_scrape_tasks_async(loop, [], isolated=True)
+
+    asyncio.run(run_rounds())
+
+    assert len(seen) == 3
+    assert len(set(seen)) == 1, f"H2S 抓取跨轮换了线程: {seen}"
+    assert seen[0] != threading.get_ident()
+
+
+def test_get_scraper_reuses_instance_across_calls(monkeypatch):
+    """实例跨轮复用——H2S 的浏览器挂在实例上。"""
+    monkeypatch.setitem(scrapers.SCRAPER_REGISTRY, "ok", _OkScraper)
+
+    first = scrapers.get_scraper("ok")
+    second = scrapers.get_scraper("ok")
+
+    assert first is second
+
+
+def test_get_scraper_rebuilds_when_registered_class_changes(monkeypatch):
+    """注册表被换掉时不能继续返回用旧类建的实例。"""
+    monkeypatch.setitem(scrapers.SCRAPER_REGISTRY, "ok", _OkScraper)
+    first = scrapers.get_scraper("ok")
+
+    monkeypatch.setitem(scrapers.SCRAPER_REGISTRY, "ok", _BlockedScraper)
+    second = scrapers.get_scraper("ok")
+
+    assert second is not first
+    assert isinstance(second, _BlockedScraper)
+
+
 # ── Browser 复用回归 ────────────────────────────────────────────
 
 _PATCH_SCRAPE = "scrapers.holland2stay._scrape_city_pages"

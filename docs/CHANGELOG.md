@@ -15,6 +15,11 @@
 
 - **超时按最慢环境取值**：生产实测挑战耗时 macOS 本地约 2s、1 CPU 的 VPS 上约 35s（正是旧代码 25s 选择器超时必然误判的原因）。挑战上限取 90s、clearance 取 60s 留足余量；初始化日志改为分别记录两段耗时——挑战慢通常是机器/网络慢，clearance 慢更像 CF 在加码校验，排查方向不同。
 
+- **恢复真正的浏览器跨轮复用（v1.9.0 起实际从未生效）**：CF 挑战次数从每轮一次降到按需重建时才有一次。两处都得改才成立：
+  - `monitor._dispatch_scrape_tasks_async()` 以前每轮 `with ThreadPoolExecutor(...)` 新建又销毁 H2S 专用线程。Playwright 对象绑定创建线程，线程一换浏览器即作废。改为进程级长存单线程（仍不用默认 executor，保留 c9f9b3a 规避 "Sync API inside the asyncio loop" 的意图）。
+  - `scrapers.get_scraper()` 以前每次调用 `cls()` 新建实例，而浏览器挂在实例上，于是 `HollandStayScraper` 里的跨轮复用分支永远命不中。改为按 source 缓存实例（连注册的类一起存，注册表被替换时跟着重建）。
+  - 影响：数据中心 IP 上，每轮一次 CF 挑战会被 CF 逐步升级难度，表现为挑战耗时越来越长直至超时熔断——这是修掉主因后仍每隔几轮失败一次的原因。
+
 ### 重构
 
 - 抽出 `BrowserFetcher._raw_fetch_gql()`：只发请求、原样返回 `{status, ok, text, headers}`，不做状态码处理也不触发 `ensure_initialized`（clearance 探测需要在初始化过程中调用，走公开的 `fetch_gql` 会无限递归）。`fetch_gql` 的首次请求、clearance 重试、会话重建后重试统一走它，不再各自内联一份 JS。

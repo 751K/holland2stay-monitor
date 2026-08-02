@@ -57,10 +57,40 @@ SCRAPER_REGISTRY: dict[str, type[AbstractScraper]] = {
 }
 
 
+# source → (注册的类, 实例)。跨轮复用，见 get_scraper 的说明。
+# 连类一起存：注册表被替换时（测试里常见）实例要跟着换，否则会拿到用旧类
+# 建的对象。
+_SCRAPER_INSTANCES: dict[str, tuple[type, AbstractScraper]] = {}
+
+
+def reset_scraper_instances() -> None:
+    """丢弃所有缓存实例（H2S 的浏览器随实例一起被丢弃）。
+
+    给测试用——保证用例之间不会共享 scraper 状态。
+    """
+    _SCRAPER_INSTANCES.clear()
+
+
 def get_scraper(source: str) -> Optional[AbstractScraper]:
-    """根据 source 名取一个 scraper 实例；未注册返回 None。"""
+    """根据 source 名取 scraper 实例；未注册返回 None。
+
+    实例按 source 缓存并**跨轮复用**。H2S 的浏览器挂在实例上，每轮新建实例
+    会让 ``HollandStayScraper`` 的跨轮复用逻辑永远命不中，退化成每轮重建浏览
+    器 + 完整重过一次 CF 挑战。
+
+    线程安全：H2S 的抓取恒定跑在同一个专用线程里（monitor
+    ``_get_h2s_executor``），dispatcher 又是逐 source 串行调用，所以缓存实例
+    不会导致 Playwright 对象被跨线程使用。
+    """
     cls = SCRAPER_REGISTRY.get(source)
-    return cls() if cls else None
+    if cls is None:
+        return None
+    cached = _SCRAPER_INSTANCES.get(source)
+    if cached is not None and cached[0] is cls:
+        return cached[1]
+    instance = cls()
+    _SCRAPER_INSTANCES[source] = (cls, instance)
+    return instance
 
 
 def dispatch_scrape_tasks(

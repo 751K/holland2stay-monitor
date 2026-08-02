@@ -72,6 +72,37 @@ from users import UserConfig, load_users, save_users
 from models import Listing
 
 
+_h2s_executor: ThreadPoolExecutor | None = None
+
+
+def _get_h2s_executor() -> ThreadPoolExecutor:
+    """H2S 专用的**进程级长存**单线程 executor。
+
+    形状由两个约束共同决定：
+
+    - CloakBrowser 包的是 Playwright 同步 API。在 Linux 容器里从长生命周期的
+      默认 executor 启动，会继承到足够的 asyncio 状态，被判成 "Sync API inside
+      the asyncio loop" 而拒绝启动——所以不能用默认 executor。
+    - Playwright 的对象绑定创建它的线程，换线程即失效——所以这个线程必须活
+      得比一轮长，否则浏览器无法跨轮存活。
+
+    早先的实现每轮 ``with ThreadPoolExecutor(...)`` 新建又销毁，只满足了第一
+    条：``HollandStayScraper`` 里的跨轮复用逻辑因此永远命不中，退化成每轮重建
+    浏览器 + 完整重过一次 CF 挑战。数据中心 IP 被这么挑战十几次/小时后，CF 会
+    升级挑战难度，反过来推高「挑战解不开」的概率。
+
+    非浏览器 source 仍走默认 executor：H2S 任务恒以 ``isolated=True`` 进入
+    （见 ``_dispatch_with_h2s_circuit``），所有 Playwright 对象因此始终只被这
+    一个线程碰到。
+    """
+    global _h2s_executor
+    if _h2s_executor is None:
+        _h2s_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="h2s-scrape"
+        )
+    return _h2s_executor
+
+
 async def _dispatch_scrape_tasks_async(
     loop: asyncio.AbstractEventLoop,
     selected: list,
@@ -81,18 +112,14 @@ async def _dispatch_scrape_tasks_async(
     """
     Run the synchronous scraper dispatcher from async monitor code.
 
-    CloakBrowser wraps Playwright's Sync API. On Linux containers, launching it
-    from the long-lived default executor can inherit enough asyncio state for
-    Playwright to reject startup with "Sync API inside the asyncio loop". H2S
-    therefore uses a short-lived dedicated thread, while non-browser sources
-    keep using the default executor.
+    H2S goes to a dedicated long-lived thread (see ``_get_h2s_executor``);
+    non-browser sources keep using the default executor.
     """
     if isolated:
-        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="h2s-scrape") as executor:
-            return await loop.run_in_executor(
-                executor,
-                lambda: dispatch_scrape_tasks(selected),
-            )
+        return await loop.run_in_executor(
+            _get_h2s_executor(),
+            lambda: dispatch_scrape_tasks(selected),
+        )
     return await loop.run_in_executor(
         None,
         lambda: dispatch_scrape_tasks(selected),

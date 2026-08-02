@@ -155,6 +155,22 @@ def _reset_login_failures():
 
 
 @pytest.fixture(autouse=True)
+def _reset_scraper_instances():
+    """清掉跨轮复用的 scraper 实例缓存，避免用例间共享 scraper 状态。"""
+    try:
+        from scrapers import reset_scraper_instances
+        reset_scraper_instances()
+    except ImportError:
+        pass
+    yield
+    try:
+        from scrapers import reset_scraper_instances
+        reset_scraper_instances()
+    except ImportError:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _reset_monitor_h2s_guards():
     """隔离 monitor 的 H2S 熔断/登录抑制内存状态。"""
     try:
