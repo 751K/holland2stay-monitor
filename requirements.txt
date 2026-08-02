@@ -12,4 +12,5 @@ h2>=4.0.0
 # reCAPTCHA solving (Xior / OurDomain auto-booking)
 2captcha-python>=2.0.0
 # CloakBrowser: stealth Chromium for H2S Cloudflare bypass
-cloakbrowser>=0.3.0
+# 下限锁在 0.5.x：0.4/0.5 在 0.x 语义下允许破坏性变更，只有 >=0.5.3 实测验证过。
+cloakbrowser>=0.5.3

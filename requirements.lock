@@ -52,7 +52,9 @@ pycparser==2.21
 2captcha-python==2.0.7
 
 # ── CloakBrowser (H2S Cloudflare bypass) + Playwright ──────────────────
-cloakbrowser==0.3.31
+cloakbrowser==0.5.3
+# playwright 保持 1.60.0：cloakbrowser 只要求 >=1.40，升级 wrapper 不需要动它，
+# 实测用到的 API 只有 goto/content/evaluate/title 四个核心方法。
 playwright==1.60.0
 greenlet==3.5.1
 pyee==13.0.1

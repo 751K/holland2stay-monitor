@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.9.4 (2026-08-02)
+
+### 依赖升级
+
+- **CloakBrowser 0.3.31 → 0.5.3**（`requirements.txt` 下限提到 `>=0.5.3`）。跨两个 minor，在 0.x 语义下允许破坏性变更，因此先在隔离 venv 里验证再落地：
+  - **API 未变**：`launch(headless=, humanize=, args=)` 三个参数签名一致，仓库用到的 Playwright API 只有 `goto` / `content` / `evaluate` / `title` 四个核心方法。
+  - **Chromium 不变**：0.5.3 bundle 的免费构建正是服务器已在用的 `v146.0.7680.177.5`，升级只换 Python wrapper，不动过 CF 的那一层。
+  - **Playwright 保持 1.60.0**：`cloakbrowser` 只要求 `>=1.40`，无需连带升级。
+  - **仍是 free tier**：`binary_info()["tier"] == "free"`，不需要 license。
+  - macOS 本地仍是 v145（免费 v146 只发布 Linux 构建，darwin-arm64 返回 404），与既有情况一致。
+- **`CLOAKBROWSER_AUTO_UPDATE` 仍然有效**：该变量在 0.5.3 里从 `config.py` 移到了 `download.py` / `__main__.py`，Dockerfile 里那行不是空操作。实测确认：不设时每次 `launch()` 会 GET `pypi.org/pypi/cloakbrowser/json`，设为 `false` 后无任何外网请求——生产环境不会因升级多出对外调用（也不会误走抓取代理）。
+
+### 备注
+
+- 0.5.x 起 v150 构建对免费用户开放，但需要注册 key 且限 1 个并发会话。本项目 scraper 与 booker 各持一个浏览器实例，可能超出该限制，故未采用；如需评估请自行在 <https://cloakbrowser.dev/free> 申请。
+
 ## v1.9.3 (2026-08-02)
 
 ### 健康检查纳入 monitor
