@@ -60,9 +60,10 @@ _H2S_GQL_PATH = "/api/graphql"
 # 只有挑战页脚本自身的 ``_cf_chl_opt`` 会随文档被真实页面替换而消失。
 _CF_CHALLENGE_HTML_MARKER = "_cf_chl_opt"
 
-# 挑战解开的等待上限。实测正常 2–4s；给到 40s 覆盖慢网络和二次挑战，
+# 挑战解开的等待上限。实测差异很大：macOS 本地约 3s，1 CPU 的生产 VPS 上
+# headless Chromium 跑完 challenge 要 30s 量级。上限按最慢的环境留足余量，
 # 超时说明这个 IP 当前过不去，交给上层熔断而不是硬发请求。
-_CHALLENGE_CLEAR_TIMEOUT = 40.0
+_CHALLENGE_CLEAR_TIMEOUT = 90.0
 _CHALLENGE_POLL_INTERVAL = 1.0
 
 # clearance 未生效时 H2S 返回的标记（403 + 这段 JSON）
@@ -71,7 +72,7 @@ _CLEARANCE_REQUIRED_MARKER = "clearance_required"
 _CLEARANCE_PROBE_QUERY = (
     '{products(filter:{category_uid:{eq:"Nw=="}},pageSize:1){total_count}}'
 )
-_CLEARANCE_TIMEOUT = 30.0
+_CLEARANCE_TIMEOUT = 60.0
 _CLEARANCE_POLL_INTERVAL = 2.0
 _H2S_GQL_HEADERS = {
     "Accept": "application/json",
@@ -175,6 +176,7 @@ class BrowserFetcher:
         # 真正解开，再做任何基于页面内容的判定——否则读到的标题和正文是
         # Cloudflare 的，不是 H2S 的。
         self._wait_for_challenge_clear()
+        challenge_elapsed = time.monotonic() - start
 
         # 挑战已解开，此刻的标题/正文才代表站点真实状态
         self._raise_if_maintenance_page()
@@ -186,8 +188,13 @@ class BrowserFetcher:
         # 能拿到响应才算初始化完成。
         self._wait_for_clearance()
 
+        # 两段耗时分开记：挑战慢通常是机器/网络慢，clearance 慢更像 CF 在
+        # 加码校验，排查时是两个方向。
         elapsed = time.monotonic() - start
-        logger.info("CF 挑战完成，clearance 已生效 (%.1fs)", elapsed)
+        logger.info(
+            "CF 挑战完成，clearance 已生效 (共 %.1fs：挑战 %.1fs + clearance %.1fs)",
+            elapsed, challenge_elapsed, elapsed - challenge_elapsed,
+        )
         self._initialized = True
 
     def _is_challenge_page(self) -> bool:

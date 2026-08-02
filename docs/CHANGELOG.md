@@ -11,6 +11,8 @@
 - **维护检测移到挑战解开之后**：挑战页由 Cloudflare 生成，其标题/正文与 H2S 真实状态无关，在挑战解开前判定等于拿 CF 的页面猜平台在不在维护。同时 `_raise_if_maintenance_page()` 增加防御性早退。
 - **重建会话时不再吞掉维护异常**：`fetch_gql` 的 403 分支此前把重建过程中的所有异常压成 `BlockedError`，`UpstreamMaintenanceError` 也在内——会让 monitor 走熔断 + admin 告警而不是安静的维护冷却。现在维护异常原样上抛，其余异常保留 `__cause__`。
 
+- **超时按最慢环境取值**：生产实测挑战耗时 macOS 本地约 2s、1 CPU 的 VPS 上约 35s（正是旧代码 25s 选择器超时必然误判的原因）。挑战上限取 90s、clearance 取 60s 留足余量；初始化日志改为分别记录两段耗时——挑战慢通常是机器/网络慢，clearance 慢更像 CF 在加码校验，排查方向不同。
+
 ### 重构
 
 - 抽出 `BrowserFetcher._raw_fetch_gql()`：只发请求、原样返回 `{status, ok, text, headers}`，不做状态码处理也不触发 `ensure_initialized`（clearance 探测需要在初始化过程中调用，走公开的 `fetch_gql` 会无限递归）。`fetch_gql` 的首次请求、clearance 重试、会话重建后重试统一走它，不再各自内联一份 JS。
