@@ -14,8 +14,9 @@ Three-stage flow
 3. Deduplicate units by ``apartmentId``, map to ``Listing``.
 
 Cloudflare rate-limits the AJAX endpoint at ~15–20 req/window (IP-level
-429).  The scraper paces requests at ~2 req/s and retries on 429 with the
-shared ``RATE_LIMIT_BACKOFF`` from ``scrapers/base.py``.
+429).  Requests are paced by ``_MIN_REQUEST_INTERVAL`` through a global
+lock shared by every building, and 429s retry with the shared
+``RATE_LIMIT_BACKOFF`` from ``scrapers/base.py``.
 """
 from __future__ import annotations
 
@@ -54,6 +55,19 @@ _AJAX_PATH = "/wp-admin/admin-ajax.php"
 # Xior 上游（Yardi）用 204 表示「该房型当前无可用单元」，是正常结果而非故障。
 # 官方前端走完整流程收到的也是它 —— 见 _post_ajax 里的说明。
 _UPSTREAM_NO_AVAILABILITY = 204
+
+# 请求最小间隔（秒）。CF 对这个端点按 IP 限流在 ~15–20 req/window。
+#
+# 限流是**按速率**而不是按轮次算的，所以关键是瞬时突发而非总量：
+# 2026-08-02 实测，4 栋楼共 12 个房型、间隔 1.5s → 18 秒内打完 12 个请求
+# （瞬时约 40 req/min），稳定触发 429，整轮退化成 2/6。
+#
+# 5s 间隔把同样 12 个请求摊到 60 秒（12 req/min），留出安全余量。轮次间隔
+# 本身是 3–5 分钟，这点耗时完全放得下。
+#
+# 注意：楼栋数增加时单轮耗时线性增长（每栋楼的房型数 × 5s）。楼栋很多时
+# 应考虑分轮抓取，而不是把这个值调小。
+_MIN_REQUEST_INTERVAL = 5.0
 
 
 class XiorScraper(AbstractScraper):
@@ -153,7 +167,8 @@ class XiorScraper(AbstractScraper):
 
     # ── public API ─────────────────────────────────────────────────────
 
-    # 全局限流：CF 按 IP 限流，这里保证请求之间至少间隔 1.5s。
+    # 全局限流锁：CF 按 IP 限流，所有 building 的请求共用这一把，
+    # 保证跨 task 也满足 _MIN_REQUEST_INTERVAL。
     _rate_lock = Lock()
     _last_request_at = 0.0
 
@@ -172,13 +187,13 @@ class XiorScraper(AbstractScraper):
         complete = True
 
         # 串行，不再用 ThreadPoolExecutor：Playwright 的对象绑定创建线程，
-        # 浏览器传输层不能跨线程并发调用。实际也没损失——原来的 4 个 worker
-        # 共享同一把 1.5s 全局限流锁，吞吐本来就等于串行。
+        # 浏览器传输层不能跨线程并发调用。实际也没损失——所有 worker 本来就
+        # 共享同一把全局限流锁，吞吐等于串行。
         for room_id in room_ids:
             with self._rate_lock:
                 elapsed = time.monotonic() - self._last_request_at
-                if elapsed < 1.5:
-                    time.sleep(1.5 - elapsed)
+                if elapsed < _MIN_REQUEST_INTERVAL:
+                    time.sleep(_MIN_REQUEST_INTERVAL - elapsed)
                 XiorScraper._last_request_at = time.monotonic()
 
             data = _post_ajax(
