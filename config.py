@@ -175,6 +175,7 @@ _last_impersonate: Optional[str] = None
 import time as _time  # noqa: E402  (局部别名，避免与文件其它 time 用法冲突)
 import hashlib as _hashlib  # noqa: E402
 import re as _re  # noqa: E402
+import itertools as _itertools  # noqa: E402
 from urllib.parse import (  # noqa: E402
     quote as _quote,
     unquote as _unquote,
@@ -206,17 +207,25 @@ def _proxy_pool() -> list[str]:
 _STICKY_SESSION_RE = _re.compile(r"^(?P<head>.+)-(?P<session>\d+)$")
 
 
-def _derive_session_id(source: str) -> str:
-    """由 source 名派生一个稳定的 6 位 session id。
+_rotating_counter = _itertools.count(1)
 
-    同一个 source 每次都得到同一个 id（出口 IP 才稳得住），不同 source
-    之间必然不同。
+
+def _derive_session_id(source: str, rotating: bool = False) -> str:
+    """由 source 名派生 6 位 session id。
+
+    ``rotating=False``（默认）——同一个 source 每次都得到同一个 id，出口 IP
+    因此稳定，Cloudflare clearance 才能复用。H2S / Xior 用这个。
+
+    ``rotating=True``——每次调用都换一个新 id，即每次拿到不同出口 IP。
+    给**不依赖 clearance、反而依赖换 IP 来解 403** 的 source 用（OurDomain）。
     """
+    if rotating:
+        return str(100000 + next(_rotating_counter) * 7919 % 900000)
     digest = _hashlib.sha1(source.encode("utf-8")).hexdigest()
     return str(100000 + int(digest[:8], 16) % 900000)
 
 
-def _with_source_session(url: str, source: str) -> str:
+def _with_source_session(url: str, source: str, rotating: bool = False) -> str:
     """把代理 URL 的 sticky session id 换成该 source 专属的。
 
     只在用户名**已经**以数字 session id 结尾时才替换；其它形态（如
@@ -236,14 +245,14 @@ def _with_source_session(url: str, source: str) -> str:
     if not m:
         return url  # rotate 端点或无 session 段：保持原样
 
-    new_user = f"{m.group('head')}-{_derive_session_id(source)}"
+    new_user = f"{m.group('head')}-{_derive_session_id(source, rotating)}"
     netloc = f"{_quote(new_user, safe='')}:{password}@{parsed.hostname}"
     if parsed.port:
         netloc += f":{parsed.port}"
     return _urlunparse(parsed._replace(netloc=netloc))
 
 
-def get_proxy_url(source: str = "") -> str:
+def get_proxy_url(source: str = "", *, rotating: bool = False) -> str:
     """
     统一的代理 URL 读取，**带故障切换**。
 
@@ -265,6 +274,13 @@ def get_proxy_url(source: str = "") -> str:
         全部失败。各自独立 session 后两者兼得：IP 稳定，额度不互相挤占。
 
         不传则返回基础 URL（monitor / doctor 只判断有没有配代理，用这个即可）。
+    rotating
+        每次调用换一个新 session（即换出口 IP）。给**不依赖 clearance、反而
+        依赖换 IP 来解 403** 的 source 用。
+
+        OurDomain 就是这种：它没有 clearance 可复用，抗封手段是轮换 TLS 指纹。
+        但那套机制此前是搭了「每请求换 IP」的便车——2026-08-02 把它固定到专属
+        sticky IP 后，同一个 IP 被 CF 盯上时四个指纹轮完全部 403，无法自愈。
     """
     pool = _proxy_pool()
     if not pool:
@@ -272,7 +288,7 @@ def get_proxy_url(source: str = "") -> str:
     now = _time.monotonic()
     for p in pool:
         if _proxy_cooldown_until.get(p, 0.0) <= now:
-            return _with_source_session(p, source) if source else p
+            return _with_source_session(p, source, rotating) if source else p
     # 全在冷却——降级为直连原生 IP；monitor 会降频到最多 10 min 一次。
     return ""
 

@@ -154,3 +154,37 @@ class TestPerSourceStickySession:
         config.report_proxy_failure()
         config.report_proxy_failure()
         assert config.get_proxy_url("xior") == ""
+
+
+class TestRotatingSession:
+    """OurDomain 需要的是**换 IP**，不是固定 IP。
+
+    它没有 clearance 可复用，抗封手段是轮换 TLS 指纹——而那只在换 IP 的前提下
+    才有效。2026-08-02 实测：固定到专属 sticky IP 后，同一个 IP 被 CF 盯上时
+    四个指纹轮完仍然全是 403，无法自愈。
+    """
+
+    STICKY = "http://acct-nl-790346:pw@p.webshare.io:80"
+
+    def test_rotating_changes_every_call(self, monkeypatch):
+        monkeypatch.setenv("HTTPS_PROXY", self.STICKY)
+        seen = {config.get_proxy_url("ourdomain", rotating=True) for _ in range(5)}
+        assert len(seen) == 5, seen
+
+    def test_non_rotating_stays_stable(self, monkeypatch):
+        """默认仍是稳定的——H2S / Xior 靠它复用 clearance。"""
+        monkeypatch.setenv("HTTPS_PROXY", self.STICKY)
+        seen = {config.get_proxy_url("holland2stay") for _ in range(5)}
+        assert len(seen) == 1
+
+    def test_rotating_preserves_account_and_country(self, monkeypatch):
+        monkeypatch.setenv("HTTPS_PROXY", self.STICKY)
+        url = config.get_proxy_url("ourdomain", rotating=True)
+        assert url.startswith("http://acct-nl-")
+        assert ":pw@p.webshare.io:80" in url
+
+    def test_rotating_respects_unrecognised_shapes(self, monkeypatch):
+        """非 sticky 形态照样不改写。"""
+        monkeypatch.setenv("HTTPS_PROXY", "http://acct-us-rotate:pw@p.webshare.io:80")
+        assert config.get_proxy_url("ourdomain", rotating=True) == \
+            "http://acct-us-rotate:pw@p.webshare.io:80"

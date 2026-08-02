@@ -159,9 +159,6 @@ class OurDomainScraper(AbstractScraper):
         display = task.city_display or building["display"]
         move_in_date = task.extra.get("move_in_date") or _next_month_first()
 
-        proxy = get_proxy_url(self.source)
-        proxies = {"https": proxy, "http": proxy} if proxy else {}
-
         floorplans_url = f"{base}/{slug}/floorplans.aspx"
         attempts = _impersonate_attempts()
         tried: list[str] = []
@@ -169,6 +166,15 @@ class OurDomainScraper(AbstractScraper):
 
         for idx, impersonate in enumerate(attempts, start=1):
             tried.append(impersonate)
+            # **每次尝试都换出口 IP**。OurDomain 的抗封手段是轮换 TLS 指纹，
+            # 但那只在换 IP 的前提下才有效——同一个 IP 被 CF 盯上时，四个指纹
+            # 轮完仍然全是 403（2026-08-02 实测）。此前它跑在每请求换 IP 的
+            # 代理上，是搭了那个便车；改成按 source 固定 sticky IP 后便车没了。
+            #
+            # 与 H2S / Xior 相反：它们需要出口 IP 稳定才能复用 clearance，
+            # OurDomain 没有 clearance 可复用，换 IP 才是它的恢复手段。
+            proxy = get_proxy_url(self.source, rotating=True)
+            proxies = {"https": proxy, "http": proxy} if proxy else {}
             try:
                 all_units, complete, fp_names_by_id = self._scrape_once(
                     display=display,

@@ -2,6 +2,16 @@
 
 ## v1.9.9 (2026-08-02)
 
+### OurDomain 恢复 IP 轮换
+
+按 source 隔离 session 时**把 OurDomain 也固定住了，这是个回归**。
+
+H2S / Xior 需要出口 IP 稳定（clearance 才能复用），但 OurDomain 没有 clearance 可复用——它的抗封手段是轮换 TLS 指纹，而那套机制此前是搭了「每请求换 IP」的便车。固定 IP 后便车没了：同一个 IP 被 CF 盯上时，`chrome124 → edge101 → chrome136 → chrome131` 四个指纹轮完仍然全是 403，错误信息自己都写着「等待无法恢复」。
+
+`get_proxy_url(source, rotating=True)` 新增轮换模式，每次调用换一个新 session id（即换出口 IP）；OurDomain 在**每次指纹重试前**重新取代理，恢复「换指纹 + 换 IP」的组合。不需要在 webshare 额外配置端点——session id 本来就是我们自己生成的。
+
+已确认 OurDomain 的 403 是可解的 CF 挑战（`Just a moment...` + `_cf_chl_opt`），所以也可以像 Xior 那样改用浏览器传输层。没有这么做的原因：它有两个不同子域（`thisisourdomain` / `southeast-thisisourdomain`），同源传输层需要两套 profile；且会多出第三个常驻浏览器（再吃 200–400MB）。而它本来就不需要 clearance，换 IP 是更对症也更省的解法。
+
 ### Xior 请求间隔 1.5s → 5s
 
 按 source 隔离 session 后，H2S / OurDomain 不再被 Xior 拖累，但 **Xior 自己仍然超自己的额度**——单独一个出口 IP 上仍稳定触发 429。
