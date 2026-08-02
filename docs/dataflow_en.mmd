@@ -9,7 +9,7 @@ flowchart TD
     E --> G["dispatch_scrape_tasks(tasks)\nRoute ScrapeTask by source"]
 
     subgraph S["Multi-platform scraping layer scrapers/"]
-        G --> H1["holland2stay:Eindhoven...\nHollandStayScraper -> scraper.scrape_all()"]
+        G --> H1["holland2stay:Eindhoven...\nHollandStayScraper\nBrowserFetcher(H2S_PROFILE)"]
         G --> H2["ourdomain:Diemen / South-East\nOurDomainScraper"]
         H2 --> H21["RENTCafe floorplans.aspx\nDiscover floorplan ids / names"]
         H21 --> H22["rcLoadContent.ashx availableunits\nUnit-level listings"]
@@ -19,11 +19,11 @@ flowchart TD
         H25 --> H21
 
         G --> H3["xior:Eindhoven Kronehoefstraat...\nXiorScraper"]
-        H3 --> H31["POST admin-ajax.php\nyardi_room_availability"]
+        H3 --> H31["BrowserFetcher(XIOR_PROFILE)\nin-browser POST admin-ajax.php\nyardi_room_availability"]
         H31 --> H32["Parse JSON response\napartmentId / apartmentName / sqm / rent"]
         H32 --> H33["Unit-level listings\nListing.name = M1.30.53\nsource = xior"]
-        H3 --> H34{"429 rate limit?"}
-        H34 -->|Yes| H35["Backoff retry RATE_LIMIT_BACKOFF\n1.5s pacing between requests"]
+        H3 --> H34{"CF challenge\nor rate limit?"}
+        H34 -->|Yes| H35["Transport re-navigates to clear\nthe challenge; 429 backs off\n1.5s pacing between requests"]
         H35 --> H31
     end
 

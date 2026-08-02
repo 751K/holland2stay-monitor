@@ -1,71 +1,85 @@
 # FlatRadar
 
-[![Website](https://img.shields.io/badge/Website-flatradar.app-0057CC?style=flat-square)](https://flatradar.app) [![User Guide](https://img.shields.io/badge/Guide-docs-10B981?style=flat-square)](https://flatradar.app/guide) [![Support](https://img.shields.io/badge/Support-help-64748B?style=flat-square)](https://flatradar.app/support) [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/751K) [![License](https://img.shields.io/github/license/751K/holland2stay-monitor?style=flat-square)](../LICENSE) [![Release](https://img.shields.io/github/v/release/751K/holland2stay-monitor?style=flat-square)](https://github.com/751K/holland2stay-monitor/releases) [![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/) [![iOS](https://img.shields.io/badge/iOS-SwiftUI-000000?style=flat-square&logo=apple&logoColor=white)](../ios/FlatRadar) [![Android](https://img.shields.io/badge/Android-Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](../android)
+[![Website](https://img.shields.io/badge/Website-flatradar.app-0057CC?style=flat-square)](https://flatradar.app) [![User Guide](https://img.shields.io/badge/Guide-docs-10B981?style=flat-square)](https://flatradar.app/guide) [![Support](https://img.shields.io/badge/Support-help-64748B?style=flat-square)](https://flatradar.app/support) [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/751K) [![License](https://img.shields.io/github/license/751K/holland2stay-monitor?style=flat-square)](../LICENSE) [![Release](https://img.shields.io/github/v/release/751K/holland2stay-monitor?style=flat-square)](https://github.com/751K/holland2stay-monitor/releases) [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/) [![iOS](https://img.shields.io/badge/iOS-SwiftUI-000000?style=flat-square&logo=apple&logoColor=white)](../ios/FlatRadar) [![Android](https://img.shields.io/badge/Android-Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](../android)
 
-> Chinese version: [README_cn.md](README_cn.md)
+> 中文版：[README_cn.md](README_cn.md)
 
-FlatRadar is a self-hostable rental listing monitor for the Dutch housing market. It watches supported housing platforms, tracks new listings and status changes, sends real-time alerts, and provides a web dashboard with listings, map, calendar, charts, and account management.
+Dutch rental listings appear and disappear within hours. FlatRadar polls the
+platforms you care about, tells you the moment something matching your filters
+shows up, and — for Holland2Stay — can hold the booking up to the payment page
+while you are still reading the alert.
 
-It currently supports **Holland2Stay**, **OurDomain**, and **Xior**. Holland2Stay listings can optionally use the built-in auto-booking flow; OurDomain and Xior are notify-only.
+It is self-hostable: one container, one SQLite file, no external services
+required beyond the notification channels you choose to enable.
 
-FlatRadar is an independent, unofficial tool. It is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any housing platform it monitors. Use it only for personal, non-commercial purposes and follow each platform's terms.
+**Website:** [flatradar.app](https://flatradar.app) ·
+**User guide:** [flatradar.app/guide](https://flatradar.app/guide) ·
+**Support:** [flatradar.app/support](https://flatradar.app/support) ·
+**Contact:** [surrport@flatradar.app](mailto:surrport@flatradar.app)
 
-**Website:** [flatradar.app](https://flatradar.app)  
-**User guide:** [flatradar.app/guide](https://flatradar.app/guide)  
-**Support:** [flatradar.app/support](https://flatradar.app/support)
+> FlatRadar is an independent, unofficial tool. It is not affiliated with,
+> endorsed by, sponsored by, maintained by, or operated by any housing platform
+> it monitors. Use it only for personal, non-commercial purposes and follow each
+> platform's terms. Always verify listing details, prices, eligibility, and
+> booking status on the official platform before making decisions.
 
-**Contact**: [surrport@flatradar.app](mailto:surrport@flatradar.app)
+---
 
-> The demo environment has auto-booking disabled for user accounts. To enable it, please contact us via email or [deploy locally](#quick-start).
+## What you get
 
-## What It Does
+| | |
+|---|---|
+| **Monitoring** | Holland2Stay, OurDomain and Xior, polled on an adaptive interval that tightens during peak listing hours |
+| **Alerts** | Web, Telegram, Email, WhatsApp, iOS push, Android push, iMessage — each user picks their own channels and filters |
+| **Views** | List, map, calendar, dashboard and charts, in English or Chinese |
+| **Accounts** | Guest, user and admin roles; every user keeps independent filters and credentials |
+| **Auto-booking** | Holland2Stay only — see [Auto-booking](#auto-booking) for what it does and does not do |
 
-- Monitors listings across Holland2Stay, OurDomain, and Xior.
-- Sends alerts through Web, Telegram, Email, WhatsApp, iOS push, and Android push.
-- Lets each user keep independent filters, notification channels, and account settings.
-- Shows listings in list, map, calendar, dashboard, and chart views.
-- Supports guest, user, and admin roles.
-- Supports English and Chinese in the web dashboard.
-- Can auto-book eligible Holland2Stay listings and return the payment URL.
-- Runs locally, on a VPS with Docker, or as pre-built desktop packages.
+### Platform coverage
 
-## Supported Platforms
-
-| Platform | Coverage | Notes |
+| Platform | Coverage | Booking |
 |---|---|---|
-| Holland2Stay | Dutch cities configured in Settings | Listings, alerts, filters, and optional auto-booking |
-| OurDomain | Amsterdam Diemen / South-East | Listing alerts and dashboard views |
-| Xior | 30 Dutch buildings across 15 cities | Listing alerts and dashboard views |
+| Holland2Stay | Any Dutch city you configure | Auto-booking supported |
+| OurDomain | Amsterdam Diemen / South-East | Notify only |
+| Xior | 30 buildings across 15 cities | Notify only |
 
-Platform coverage changes over time as third-party websites change. Always verify listing details, prices, eligibility, and booking status on the official platform before making decisions.
+Coverage shifts as third-party sites change. The scrapers are documented in
+[XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
+[SCRAPING_RECON.md](SCRAPING_RECON.md).
 
-## Apps And Interfaces
+### Clients
 
-| Interface | Status | Notes |
+| Interface | Status |
+|---|---|
+| Web dashboard | Stable — the primary interface for self-hosting |
+| [iOS app](https://apps.apple.com/us/app/flarradar/id6769857080) | Maintenance — on the App Store, feature-complete for current scope |
+| [Android app](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.aab) | Beta — FCM push verified, Play Store prep in progress |
+| Desktop packages | macOS `.dmg` and Windows `.zip` from [Releases](https://github.com/751K/holland2stay-monitor/releases) |
+
+---
+
+## Requirements
+
+|  | Minimum | Notes |
 |---|---|---|
-| Web dashboard | Stable | Primary admin and self-hosted interface |
-| iOS app | Maintenance | Available on the App Store; feature-complete for current scope |
-| Android app | Beta | Kotlin + Compose client, feature-complete (57 files, ~9.5k lines), FCM push verified, Play Store prep in progress |
-| Desktop packages | Available | macOS `.dmg` and Windows `.zip` from GitHub Releases |
+| RAM | **2 GB** | Each Cloudflare-protected source keeps a headless Chromium resident (~200–400 MB each). 1 GB is only enough for a single source. |
+| Disk | ~1.5 GB | The patched Chromium alone unpacks to ~700 MB |
+| Python | 3.11+ | Docker image ships 3.11; CI and desktop builds use 3.12 |
+| OS | Linux recommended | See the [macOS note](#running-from-source) below |
 
-[Download on the App Store](https://apps.apple.com/us/app/flarradar/id6769857080) · [Download Android App](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.aab)
+---
 
-## Quick Start
+## Quick start
 
-### Docker
-
-Docker is recommended for a VPS or always-on home server. **Minimum 1 GB RAM** required (CloakBrowser ~190 MB + Python/Gunicorn).
+### Docker (recommended)
 
 ```bash
 cp .env.example .env
 mkdir -p data logs logs/caddy
-# Edit Caddyfile and .env before exposing the service publicly.
-docker compose up -d
 ```
 
-Then open your domain, sign in, add users and notification channels, choose monitored platforms/cities, and start the monitor from the dashboard.
-
-For public deployments, set at minimum:
+Edit `.env` before starting. For anything reachable from the internet, set at
+minimum:
 
 ```env
 WEB_PASSWORD=change-me
@@ -74,83 +88,133 @@ PUBLIC_BASE_URL=https://your.domain.com
 SUPPORT_EMAIL=support@example.com
 ```
 
-### Local Run
+Edit `Caddyfile` to point at your domain, then:
+
+```bash
+docker compose up -d
+```
+
+Confirm both processes came up — you should see `monitor` and `web` both
+`RUNNING`:
+
+```bash
+docker exec h2s supervisorctl -c /etc/supervisor/conf.d/app.conf status
+```
+
+The first scrape takes longer than later ones because it has to pass a
+Cloudflare challenge (10–35 s on a small VPS). Follow along with:
+
+```bash
+docker compose logs -f h2s
+```
+
+A healthy round ends with `本轮完整扫描: N/N 城市 (...)` — the count is the
+number of configured source/city pairs — followed by `本轮结束: ... 新房源`.
+
+Then open your domain, sign in, and add users, notification channels and the
+cities you want monitored.
+
+### Running from source
 
 ```bash
 pip install -r requirements.txt
-# Install CloakBrowser patched Chromium for H2S Cloudflare bypass (~300MB)
-python -m cloakbrowser install
+python -m cloakbrowser install   # patched Chromium, ~700 MB unpacked
 cp .env.example .env
 python web.py
 ```
 
 Open `http://127.0.0.1:8088`.
 
-> **macOS note**: CloakBrowser on macOS uses a slightly older Chromium build (v145, 26 patches vs v146, 58 patches on Linux). For production use, Docker (Linux) is recommended.
+> **macOS**: the free CloakBrowser build for macOS lags the Linux one, and
+> headless mode can abort, so local runs fall back to a visible browser window.
+> Use Linux/Docker for anything you actually depend on.
 
-### Desktop Releases
-
-Download the latest release from [GitHub Releases](https://github.com/751K/holland2stay-monitor/releases):
-
-- macOS: `.dmg`
-- Windows: `.zip`
-
-## Notification Channels
-
-FlatRadar can send alerts through:
-
-- Web dashboard notifications
-- Telegram bot messages
-- Email, including the shared Resend sender mode
-- WhatsApp through Twilio
-- iOS push through APNs
-- Android push through FCM
-- iMessage on macOS hosts
-
-Each user can have separate filters and channels.
-
-## Auto-Booking
-
-Auto-booking is available only for Holland2Stay. It uses the configured user account, attempts eligible directly bookable listings, and stops at the payment URL. It does not complete payment.
-
-OurDomain and Xior remain notify-only because their booking flows involve third-party forms and anti-abuse protections.
+---
 
 ## Configuration
 
-Most day-to-day settings are managed from the web dashboard:
+Day-to-day settings — sources, cities, intervals, filters, channels,
+auto-booking, theme — live in the web dashboard. Deployment-level settings live
+in `.env`; start from [.env.example](../.env.example), which documents every key.
 
-- monitored sources, cities, and buildings;
-- polling interval and peak-hour behavior;
-- user notification channels;
-- user filters;
-- auto-booking settings;
-- theme, language, and account management.
+The ones worth knowing up front:
 
-Global deployment settings live in `.env`. Start from [.env.example](../.env.example), then edit values for your server and notification channels.
+| Key | Default | What it controls |
+|---|---|---|
+| `SOURCES` | `holland2stay` | Which platforms to poll, comma-separated |
+| `CITIES` | `Eindhoven,29` | Holland2Stay cities, as `Name,id` pairs joined by `\|` |
+| `OURDOMAIN_CITIES` / `XIOR_CITIES` | — | Same format for the other sources; building keys are listed in each scraper |
+| `CHECK_INTERVAL` | `300` | Seconds between rounds outside peak hours |
+| `PEAK_INTERVAL` | `60` | Seconds between rounds during peak hours |
+| `MONITOR_HEARTBEAT_MAX_AGE` | `900` | How long the monitor may be silent before `/health` reports unhealthy |
+| `HTTPS_PROXY` | — | Route scraping through another exit IP when Cloudflare gets aggressive |
 
-Before a production deploy, run:
+Enabling a source requires **both** `SOURCES` and that source's city list.
+Setting only the city list does nothing.
+
+Before a production deploy:
 
 ```bash
 python -m tools.doctor --no-network
 ```
 
+---
+
+## Auto-booking
+
+Available for Holland2Stay only. It signs in with the account you configure,
+attempts eligible directly-bookable listings, and **stops at the payment URL** —
+it never completes a payment.
+
+OurDomain and Xior stay notify-only: their booking flows run through third-party
+forms with anti-abuse protection that is not reliably automatable.
+
+> The hosted demo has auto-booking disabled for user accounts. Email us or
+> [self-host](#quick-start) to use it.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| No alerts at all, dashboard shows stale listings | The monitor process is down. `supervisorctl status` to confirm, then `supervisorctl start monitor`. `/health` returns 503 once the heartbeat is older than `MONITOR_HEARTBEAT_MAX_AGE`. |
+| Logs repeat `H2S source 熔断` | Cloudflare is blocking your exit IP. The breaker pauses that one source and retries a single city later. If it persists, set `HTTPS_PROXY`. |
+| Logs repeat `CF 挑战 ... 未解开` | Same cause — usually IP reputation rather than anything local. |
+| One platform always returns 0 listings | May be genuine. Check whether the round was marked complete; see [ARCHITECTURE.md §5.7](ARCHITECTURE.md#57-completeness-决定能否做状态收敛). |
+| Container gets OOM-killed | Raise `mem_limit`. Each Cloudflare-protected source holds a resident browser. |
+| `supervisorctl` says "no such file" | Its socket is not at the default path. Add `-c /etc/supervisor/conf.d/app.conf`. |
+
+The container reporting `healthy` covers both web and monitor, but an unhealthy
+container is **not** restarted automatically — wire the health status into your
+own monitoring if you want to be paged.
+
+---
+
 ## Documentation
 
-- [User Guide](https://flatradar.app/guide) for screenshots and daily use.
-- [Backend API Reference](API.md) for mobile and integration contracts.
-- [Android Plan](ANDROID_PLAN.md) for current Android work.
-- [iOS Maintenance Notes](iOS_README.md) for iOS release checks.
-- [OurDomain Notes](OURDOMAIN.md), [Xior Notes](XIOR.md), and [Scraping Recon](SCRAPING_RECON.md) for source-specific research.
-- [Changelog](CHANGELOG.md) for detailed release history.
+| Document | For |
+|---|---|
+| [User Guide](https://flatradar.app/guide) | Screenshots and daily use |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | How the system runs, and every failure mode worth knowing before you debug one |
+| [API.md](API.md) | Backend contracts for mobile and integrations |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | Per-platform scraping research |
+| [ANDROID_PLAN.md](ANDROID_PLAN.md) · [iOS_README.md](iOS_README.md) | Mobile client work |
+| [dataflow_en.mmd](dataflow_en.mmd) · [dataflow_ch.mmd](dataflow_ch.mmd) | Full scrape/notify flow as a Mermaid diagram |
 
-## Contributing And Support
+---
 
-FlatRadar is a solo-driven open source project. Server costs, push infrastructure, and App Store maintenance are paid out of pocket.
+## Support the project
 
-- Star the repository if the project is useful.
-- Sponsor development through [GitHub Sponsors](https://github.com/sponsors/751K) or [flatradar.app/donate](https://flatradar.app/donate).
-- Use [flatradar.app/support](https://flatradar.app/support) for support and contact.
+FlatRadar is built and run by one person. Server costs, push infrastructure and
+App Store fees come out of pocket.
+
+- Star the repository if it is useful to you.
+- Sponsor via [GitHub Sponsors](https://github.com/sponsors/751K) or
+  [flatradar.app/donate](https://flatradar.app/donate).
+- Questions and bug reports: [flatradar.app/support](https://flatradar.app/support).
 
 ## License
 
-This project is licensed under the terms in [LICENSE](../LICENSE).
+See [LICENSE](../LICENSE).
