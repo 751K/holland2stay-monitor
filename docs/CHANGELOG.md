@@ -2,7 +2,15 @@
 
 ## v1.9.9 (2026-08-02)
 
-### Bug 修复 — Xior 浏览器被跨线程调用
+### Bug 修复 — 浏览器型 source 的线程模型（两个连环问题）
+
+**其一：Xior 浏览器被跨线程调用**，`greenlet.error: Cannot switch to a different thread`，整轮失败。
+
+v1.9.7 把 Xior 迁到浏览器传输层时只改了传输层，**没改任务路由**：只有 `source == "holland2stay"` 走长存单线程，Xior 仍留在默认 executor。Playwright 对象绑定创建线程，默认 executor 的线程会漂移。潜伏了一段时间才暴露——线程池复用线程，碰巧命中同一个时一切正常。
+
+**其二：修上面那条时把两个 source 塞进了同一线程**，于是撞上 `Playwright Sync API inside the asyncio loop`，这次轮到 H2S 整轮失败。根因是**两个独立的 Playwright sync 实例不能共存于一个线程**：第一个实例在该线程装上 event loop，第二个 `launch()` 立刻被判定为「在 asyncio loop 里用同步 API」。短生命周期线程每次都是干净的，长存线程会累积这个状态——这也是 c9f9b3a 当初用短线程规避问题的原因。
+
+最终形态：`_get_browser_executor(source)`，**每个浏览器型 source 一条专属长存线程**。同时满足三个约束：不用默认 executor（约束 1）、线程活得比一轮长以便浏览器跨轮复用（约束 2）、每线程只有一个 Playwright 实例（约束 3）。纯 HTTP 的 OurDomain 保持在默认 executor。
 
 `greenlet.error: Cannot switch to a different thread`，Xior 整轮抓取失败。
 

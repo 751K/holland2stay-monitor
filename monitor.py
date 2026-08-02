@@ -72,35 +72,35 @@ from users import UserConfig, load_users, save_users
 from models import Listing
 
 
-_h2s_executor: ThreadPoolExecutor | None = None
+# source -> 该 source 专属的长存单线程 executor（见 _get_browser_executor）
+_browser_executors: dict[str, ThreadPoolExecutor] = {}
 
 
-def _get_h2s_executor() -> ThreadPoolExecutor:
-    """H2S 专用的**进程级长存**单线程 executor。
+def _get_browser_executor(source: str) -> ThreadPoolExecutor:
+    """取某个浏览器型 source 的**进程级长存**单线程 executor。
 
-    形状由两个约束共同决定：
+    形状由三个约束共同决定：
 
-    - CloakBrowser 包的是 Playwright 同步 API。在 Linux 容器里从长生命周期的
-      默认 executor 启动，会继承到足够的 asyncio 状态，被判成 "Sync API inside
-      the asyncio loop" 而拒绝启动——所以不能用默认 executor。
-    - Playwright 的对象绑定创建它的线程，换线程即失效——所以这个线程必须活
-      得比一轮长，否则浏览器无法跨轮存活。
+    1. CloakBrowser 包的是 Playwright 同步 API。在 Linux 容器里从默认
+       executor 启动会继承到 asyncio 状态，被判成 "Sync API inside the
+       asyncio loop" 而拒绝启动——所以不能用默认 executor。
+    2. Playwright 的对象绑定创建它的线程，换线程即失效——所以线程必须活得
+       比一轮长，否则浏览器无法跨轮存活（早先每轮新建又销毁线程，跨轮复用
+       逻辑因此永远命不中，退化成每轮重建浏览器 + 重过一次 CF 挑战）。
+    3. **两个独立的 Playwright sync 实例不能共存于同一线程。** 第一个实例会
+       在该线程装上 event loop，第二个 launch() 随即撞上约束 1 的检查。
+       所以不能让 H2S 和 Xior 共用一个线程——每个 source 一条。
 
-    早先的实现每轮 ``with ThreadPoolExecutor(...)`` 新建又销毁，只满足了第一
-    条：``HollandStayScraper`` 里的跨轮复用逻辑因此永远命不中，退化成每轮重建
-    浏览器 + 完整重过一次 CF 挑战。数据中心 IP 被这么挑战十几次/小时后，CF 会
-    升级挑战难度，反过来推高「挑战解不开」的概率。
-
-    非浏览器 source 仍走默认 executor：H2S 任务恒以 ``isolated=True`` 进入
-    （见 ``_dispatch_with_h2s_circuit``），所有 Playwright 对象因此始终只被这
-    一个线程碰到。
+    非浏览器 source（OurDomain）仍走默认 executor：它没有 Playwright 对象，
+    挤进来只会和浏览器抢这唯一的线程。
     """
-    global _h2s_executor
-    if _h2s_executor is None:
-        _h2s_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="h2s-scrape"
+    ex = _browser_executors.get(source)
+    if ex is None:
+        ex = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=f"{source}-scrape"
         )
-    return _h2s_executor
+        _browser_executors[source] = ex
+    return ex
 
 
 async def _dispatch_scrape_tasks_async(
@@ -108,16 +108,17 @@ async def _dispatch_scrape_tasks_async(
     selected: list,
     *,
     isolated: bool = False,
+    browser_source: str = "",
 ):
     """
     Run the synchronous scraper dispatcher from async monitor code.
 
-    H2S goes to a dedicated long-lived thread (see ``_get_h2s_executor``);
-    non-browser sources keep using the default executor.
+    浏览器型 source 各自走专属的长存线程（见 ``_get_browser_executor``）；
+    非浏览器 source 继续用默认 executor。
     """
     if isolated:
         return await loop.run_in_executor(
-            _get_h2s_executor(),
+            _get_browser_executor(browser_source or _H2S_SOURCE),
             lambda: dispatch_scrape_tasks(selected),
         )
     return await loop.run_in_executor(
@@ -460,7 +461,7 @@ def _mark_h2s_scrape_recovered() -> None:
 
 
 # 需要浏览器传输层的 source。它们的 Playwright 对象绑定创建线程，因此**必须**
-# 全部跑在 ``_get_h2s_executor()`` 那个进程级长存单线程上；放到默认 executor
+# 各自跑在 ``_get_browser_executor(source)`` 的专属长存单线程上；放到默认 executor
 # 里会因线程漂移抛 ``greenlet.error: Cannot switch to a different thread``。
 _BROWSER_SOURCES = frozenset({"holland2stay", "xior"})
 
@@ -1143,11 +1144,12 @@ async def run_once(
         completeness_all: dict[str, bool] = {}
         h2s_blocked: BlockedError | None = None
 
-        async def _dispatch(selected, *, isolated: bool = False):
+        async def _dispatch(selected, *, isolated: bool = False, browser_source: str = ""):
             result = await _dispatch_scrape_tasks_async(
                 loop,
                 selected,
                 isolated=isolated,
+                browser_source=browser_source,
             )
             return _unpack_scrape_result(result)
 
@@ -1166,16 +1168,20 @@ async def run_once(
             fresh_all.extend(fresh_part)
             completeness_all.update(completeness_part)
 
-        if browser_others:
+        # 按 source 分组：每个浏览器型 source 有自己的线程和 Playwright 实例
+        for src in sorted({t.source for t in browser_others}):
+            group = [t for t in browser_others if t.source == src]
             fresh_part, completeness_part = await _dispatch(
-                browser_others, isolated=True
+                group, isolated=True, browser_source=src
             )
             fresh_all.extend(fresh_part)
             completeness_all.update(completeness_part)
 
         if selected_h2s:
             try:
-                fresh_part, completeness_part = await _dispatch(selected_h2s, isolated=True)
+                fresh_part, completeness_part = await _dispatch(
+                    selected_h2s, isolated=True, browser_source=_H2S_SOURCE
+                )
             except BlockedError as e:
                 h2s_blocked = e
                 _mark_h2s_scrape_blocked(e)

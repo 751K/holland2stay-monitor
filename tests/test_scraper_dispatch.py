@@ -109,7 +109,9 @@ def test_isolated_dispatch_reuses_one_thread_across_rounds(monkeypatch):
     async def run_rounds():
         loop = asyncio.get_running_loop()
         for _ in range(3):
-            await monitor._dispatch_scrape_tasks_async(loop, [], isolated=True)
+            await monitor._dispatch_scrape_tasks_async(
+                loop, [], isolated=True, browser_source="holland2stay"
+            )
 
     asyncio.run(run_rounds())
 
@@ -236,3 +238,41 @@ def test_browser_backed_sources_all_run_on_the_isolated_thread(monkeypatch):
     # 纯 HTTP 的 source 不该被拉进浏览器线程——它没有 Playwright 对象，
     # 挤进去只会和浏览器抢那一个线程。
     assert "ourdomain" not in monitor._BROWSER_SOURCES
+
+
+def test_each_browser_source_gets_its_own_thread(monkeypatch):
+    """两个 Playwright sync 实例不能共存于同一线程。
+
+    回归：把 Xior 和 H2S 路由到同一个长存线程后，第一个实例在该线程装上
+    event loop，第二个 launch() 随即报
+    ``Playwright Sync API inside the asyncio loop``，H2S 整轮失败。
+    """
+    import monitor
+
+    seen: dict[str, set[int]] = {}
+
+    def fake_dispatch(tasks):
+        src = tasks[0].source if tasks else "?"
+        seen.setdefault(src, set()).add(threading.get_ident())
+        return [], {}
+
+    monkeypatch.setattr(monitor, "dispatch_scrape_tasks", fake_dispatch)
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        for _ in range(2):                      # 两轮，确认各自线程还稳定
+            for src in ("holland2stay", "xior"):
+                await monitor._dispatch_scrape_tasks_async(
+                    loop,
+                    [ScrapeTask(source=src, city_key="1", city_display="C")],
+                    isolated=True,
+                    browser_source=src,
+                )
+
+    asyncio.run(run())
+
+    assert set(seen) == {"holland2stay", "xior"}
+    # 每个 source 跨轮固定在同一条线程上
+    assert all(len(v) == 1 for v in seen.values()), seen
+    # 但两个 source 不能是同一条
+    assert seen["holland2stay"] != seen["xior"], seen
