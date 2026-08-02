@@ -106,6 +106,11 @@ _XIOR_AJAX_HEADERS = {
 }
 
 
+def _redact_proxy(url: str) -> str:
+    """代理 URL 里含用户名密码，日志里只留 host:port。"""
+    return url.rsplit("@", 1)[-1] if "@" in url else url
+
+
 def _h2s_maintenance_check(title: str, html: str) -> None:
     """H2S 专有：识别平台维护页，命中则抛 UpstreamMaintenanceError。"""
     if "maintenance" in title.lower():
@@ -248,10 +253,35 @@ class BrowserFetcher:
         if platform.system() == "Linux":
             chromium_args = ["--disable-dev-shm-usage", "--disable-gpu"]
 
+        # 代理必须**显式**传给 launch()，不能指望 Chromium 自己解析
+        # HTTP_PROXY / HTTPS_PROXY 环境变量。
+        #
+        # 实测（2026-08-02，webshare sticky residential 端点）：
+        #   仅环境变量   → 浏览器 79.116.229.115 / curl_cffi 213.73.166.139
+        #   显式 proxy=  → 两者都是 213.10.194.180（连续两轮复现）
+        # 环境变量那条路拿到的出口甚至不在 sticky 端点指定的国家，说明
+        # Chromium 走的是另一套代理解析。
+        #
+        # 后果不止是「不一致」：Cloudflare 的 clearance 绑 IP，浏览器与
+        # 其它 curl_cffi 抓取器落在不同出口，就无法共享会话；而且浏览器
+        # 会完全绕过 get_proxy_url() 的故障切换与冷却逻辑。
+        #
+        # 配置来源仍然只有 .env 一处——get_proxy_url() 读的就是那几个环境
+        # 变量，这里只是把它已经解析好的值显式交给浏览器。
+        from config import get_proxy_url  # 延迟导入，避免循环依赖
+
+        proxy_url = get_proxy_url() or None
+        if proxy_url:
+            logger.info(
+                "%s 浏览器走代理 %s",
+                self._profile.name, _redact_proxy(proxy_url),
+            )
+
         self._browser = launch(
             headless=self._effective_headless,
             humanize=True,
             args=chromium_args,
+            proxy=proxy_url,
         )
         self._page = self._browser.new_page()
         return self

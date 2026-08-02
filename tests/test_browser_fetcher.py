@@ -291,7 +291,8 @@ def test_fetch_gql_renavigates_when_clearance_expires(monkeypatch):
     assert len(page.scripts) == 2
 
 
-def test_macos_headless_launch_uses_headed_directly(monkeypatch):
+def _patch_launch(monkeypatch, platform_name="Darwin"):
+    """替换 cloakbrowser.launch，返回记录 kwargs 的列表。"""
     calls: list[dict] = []
 
     class _FakeBrowser:
@@ -304,8 +305,13 @@ def test_macos_headless_launch_uses_headed_directly(monkeypatch):
 
     import cloakbrowser
 
-    monkeypatch.setattr(browser_fetcher.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(browser_fetcher.platform, "system", lambda: platform_name)
     monkeypatch.setattr(cloakbrowser, "launch", fake_launch)
+    return calls
+
+
+def test_macos_headless_launch_uses_headed_directly(monkeypatch):
+    calls = _patch_launch(monkeypatch)
 
     fetcher = BrowserFetcher(headless=True)
     fetcher.__enter__()
@@ -313,3 +319,50 @@ def test_macos_headless_launch_uses_headed_directly(monkeypatch):
     assert len(calls) == 1
     assert calls[0]["headless"] is False
     assert calls[0]["args"] == []
+
+
+def test_launch_receives_proxy_explicitly(monkeypatch):
+    """代理必须显式传给 launch()，不能只靠环境变量。
+
+    回归：Chromium 对 HTTP_PROXY / HTTPS_PROXY 的解析和 curl_cffi 不一致，
+    实测两者会落到**不同出口 IP**（浏览器 79.116.229.115 vs curl_cffi
+    213.73.166.139，且都不在 sticky 端点指定的国家）。Cloudflare 的 clearance
+    绑 IP，出口不一致就无法共享会话，浏览器还会绕过 get_proxy_url() 的
+    故障切换逻辑。
+    """
+    calls = _patch_launch(monkeypatch)
+    monkeypatch.setattr(
+        browser_fetcher_config(), "get_proxy_url",
+        lambda: "http://u:p@p.webshare.io:80",
+    )
+
+    BrowserFetcher(headless=True).__enter__()
+
+    assert calls[0]["proxy"] == "http://u:p@p.webshare.io:80"
+
+
+def test_launch_proxy_is_none_when_unconfigured(monkeypatch):
+    """没配代理时传 None，而不是空串——空串会被当成非法代理。"""
+    calls = _patch_launch(monkeypatch)
+    monkeypatch.setattr(browser_fetcher_config(), "get_proxy_url", lambda: "")
+
+    BrowserFetcher(headless=True).__enter__()
+
+    assert calls[0]["proxy"] is None
+
+
+def browser_fetcher_config():
+    """browser_fetcher 延迟 import config，测试要 patch 的是 config 模块本身。"""
+    import config
+
+    return config
+
+
+@pytest.mark.parametrize("url,expected", [
+    ("http://user:secret@p.webshare.io:80", "p.webshare.io:80"),
+    ("http://proxy.local:8080", "http://proxy.local:8080"),
+    ("", ""),
+])
+def test_proxy_redaction_strips_credentials(url, expected):
+    """日志里不能出现代理的用户名密码。"""
+    assert browser_fetcher._redact_proxy(url) == expected
