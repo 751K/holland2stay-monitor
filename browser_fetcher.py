@@ -72,8 +72,14 @@ _CLEARANCE_REQUIRED_MARKER = "clearance_required"
 _CLEARANCE_PROBE_QUERY = (
     '{products(filter:{category_uid:{eq:"Nw=="}},pageSize:1){total_count}}'
 )
-_CLEARANCE_TIMEOUT = 60.0
+# 单次导航后等 cookie 落地的上限。实测正常 2–3s（本地）到 10–22s（生产 VPS）。
+# 不宜再长：token 只能靠重新导航签发，超过这个窗口还没落地，继续轮询是白打
+# 必然 403 的请求，换一次导航才有意义。
+_CLEARANCE_TIMEOUT = 25.0
 _CLEARANCE_POLL_INTERVAL = 2.0
+
+# 初始化最多导航几次。每次都是一轮完整的 CF 挑战，次数过多反而加重怀疑。
+_INIT_ATTEMPTS = 3
 _H2S_GQL_HEADERS = {
     "Accept": "application/json",
     "Content-Type": "application/json",
@@ -158,7 +164,49 @@ class BrowserFetcher:
         if self._initialized:
             return
 
-        logger.info("CloakBrowser 加载主站完成 CF 挑战...")
+        start = time.monotonic()
+        last_error: Exception | None = None
+
+        # 每次尝试 = 一次完整导航 + 短暂等 cookie 落地。等不到就**重新导航**，
+        # 而不是继续对 API 轮询：token 由导航签发，轮询换不出来，只会朝一个
+        # 拿不到 clearance 的会话打几十个必然 403 的请求，反过来加重 CF 的
+        # 怀疑。（同理见 fetch_gql 里 clearance 过期的处理。）
+        for attempt in range(1, _INIT_ATTEMPTS + 1):
+            try:
+                challenge_elapsed, clearance_elapsed = self._navigate_and_verify(
+                    attempt
+                )
+            except _exc("BlockedError") as e:
+                last_error = e
+                logger.warning(
+                    "初始化第 %d/%d 次未通过：%s", attempt, _INIT_ATTEMPTS, e
+                )
+                continue
+
+            # 两段耗时按**成功的那次导航**分开记（不含前面失败尝试的耗时，
+            # 否则失败的等待会被算进 clearance）：挑战慢通常是机器/网络慢，
+            # clearance 慢更像 CF 在加码校验，排查时是两个方向。
+            logger.info(
+                "CF 挑战完成，clearance 已生效 "
+                "(第 %d 次导航：挑战 %.1fs + clearance %.1fs；累计 %.1fs)",
+                attempt, challenge_elapsed, clearance_elapsed,
+                time.monotonic() - start,
+            )
+            self._initialized = True
+            return
+
+        raise last_error  # type: ignore[misc]  # 循环至少跑一次，必非 None
+
+    def _navigate_and_verify(self, attempt: int) -> tuple[float, float]:
+        """导航主站 → 等挑战解开 → 查维护 → 等 clearance。
+
+        返回 ``(挑战耗时, clearance 耗时)``，单位秒，只计本次导航。
+
+        任一环节没过就抛 ``BlockedError``，由 ``ensure_initialized`` 决定是否
+        换一次导航重试。``UpstreamMaintenanceError`` 不在重试之列——平台维护
+        重试多少次都一样。
+        """
+        logger.info("CloakBrowser 加载主站完成 CF 挑战...（第 %d 次）", attempt)
         start = time.monotonic()
         try:
             self._page.goto(
@@ -186,16 +234,9 @@ class BrowserFetcher:
         # 无关（GraphQL 已经 200 时该元素仍可能没渲染），而且等不到还只告警
         # 就继续，等于把「没通过校验」当成「通过了」。改为直接探 GraphQL：
         # 能拿到响应才算初始化完成。
+        clearance_start = time.monotonic()
         self._wait_for_clearance()
-
-        # 两段耗时分开记：挑战慢通常是机器/网络慢，clearance 慢更像 CF 在
-        # 加码校验，排查时是两个方向。
-        elapsed = time.monotonic() - start
-        logger.info(
-            "CF 挑战完成，clearance 已生效 (共 %.1fs：挑战 %.1fs + clearance %.1fs)",
-            elapsed, challenge_elapsed, elapsed - challenge_elapsed,
-        )
-        self._initialized = True
+        return challenge_elapsed, time.monotonic() - clearance_start
 
     def _is_challenge_page(self) -> bool:
         """当前页面是否仍是 CF 挑战页。"""

@@ -157,6 +157,66 @@ def test_ensure_initialized_stays_uninitialized_when_challenge_fails(monkeypatch
     assert fetcher.is_initialized is False
 
 
+def test_ensure_initialized_renavigates_when_clearance_does_not_land(monkeypatch):
+    """一次导航拿不到 clearance 就换一次导航，而不是继续轮询。
+
+    token 由导航签发；轮询只会朝一个拿不到 clearance 的会话打一堆必然 403
+    的请求。生产上冷启动因此整轮失败并触发 30 分钟熔断。
+    """
+    attempts: list[int] = []
+
+    def _flaky(self, attempt):
+        attempts.append(attempt)
+        if attempt < 3:
+            raise BlockedError("clearance 未生效")
+        return 1.0, 0.5
+
+    monkeypatch.setattr(BrowserFetcher, "_navigate_and_verify", _flaky)
+    fetcher = BrowserFetcher()
+    fetcher._page = _FakePage()
+
+    fetcher.ensure_initialized()
+
+    assert attempts == [1, 2, 3]
+    assert fetcher.is_initialized is True
+
+
+def test_ensure_initialized_gives_up_after_max_attempts(monkeypatch):
+    attempts: list[int] = []
+
+    def _always_blocked(self, attempt):
+        attempts.append(attempt)
+        raise BlockedError("clearance 未生效")
+
+    monkeypatch.setattr(BrowserFetcher, "_navigate_and_verify", _always_blocked)
+    fetcher = BrowserFetcher()
+    fetcher._page = _FakePage()
+
+    with pytest.raises(BlockedError):
+        fetcher.ensure_initialized()
+
+    assert attempts == [1, 2, 3]
+    assert fetcher.is_initialized is False
+
+
+def test_ensure_initialized_does_not_retry_platform_maintenance(monkeypatch):
+    """平台维护重试多少次都一样，应立刻上抛走维护冷却。"""
+    attempts: list[int] = []
+
+    def _maintenance(self, attempt):
+        attempts.append(attempt)
+        raise UpstreamMaintenanceError("H2S 平台维护中")
+
+    monkeypatch.setattr(BrowserFetcher, "_navigate_and_verify", _maintenance)
+    fetcher = BrowserFetcher()
+    fetcher._page = _FakePage()
+
+    with pytest.raises(UpstreamMaintenanceError):
+        fetcher.ensure_initialized()
+
+    assert attempts == [1]
+
+
 def test_maintenance_check_skipped_while_still_on_challenge_page():
     """挑战页的标题由 Cloudflare 决定，不能拿它判断 H2S 是否在维护。"""
     fetcher = BrowserFetcher()
