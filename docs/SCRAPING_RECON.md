@@ -20,9 +20,10 @@
 | 2 | **HousingAnywhere** | ✅ 完全 | 无 | 页面内嵌结构化 JSON（`__staticRouterHydrationData`） | 207 条 Amsterdam，23 条/页 | 低（`/api/*` 禁；分页 query 在灰区） | 🟢🟢🟢 **下一个做它** |
 | 3 | **SSH (sshxl.nl)** | ✅ 但 SPA | 无 | Angular SPA + sitemap-offers.xml | 44 条全国 | 低 | 🟢 推荐（需挖 API） |
 | 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → **curl_cffi 首个指纹即过** | 与 OurDomain 同栈（RENTCafe HTML） | **1 栋楼** | 低 | ❌ 不做（等待期 16–18 个月） |
-| 5 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可用 CloakBrowser（H2S 同方案） |
-| 6 | DUWO/ROOM | ❌ | 无（但 **auth-wall + paid registration**） | API 仅登录后可见 | ? | **高**（登录后内容转发）| ❌ 不建议 |
-| 7 | Kamernet | — | paid model | — | — | 高 | ❌ |
+| 5 | **Student Experience** | ✅ 完全 | 无（自研前端） | 自家预订组件，可用性由 JS 拉取 | **1 栋可订**（Minervahaven，2 个房型） | 低 | ❌ 暂不做（可订面太小） |
+| 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可用 CloakBrowser（H2S 同方案） |
+| 7 | DUWO/ROOM | ❌ | 无（但 **auth-wall + paid registration**） | API 仅登录后可见 | ? | **高**（登录后内容转发）| ❌ 不建议 |
+| 8 | Kamernet | — | paid model | — | — | 高 | ❌ |
 
 ---
 
@@ -222,7 +223,56 @@ OurDomain Diemen，`unitrow=2` / `1`，正常解析。没有这个对照就会�
 
 ---
 
-## §5 DUWO/ROOM (room.nl) — **不建议**
+## §5 Student Experience (studentexperience.com) — **暂不做**
+
+自营学生公寓运营商，形态上最接近 Xior / H2S（自有房源池、单元级、非排队制）。
+但**线上可订的面太小**。
+
+### 荷兰楼盘（2026-08-03 实测）
+
+| 楼盘 | 线上可订 |
+|---|---|
+| Amsterdam Minervahaven | ✅ 唯一一个 |
+| Amsterdam Amstel | ❌ |
+| Amsterdam NDSM | ❌ |
+| Amsterdam Zuidas | ❌（站内公告 2026 年关闭） |
+| Leiden | ❌ |
+| Amstelveen Uilenstede | 在建 |
+
+「线上可订」的判据是它自家预订组件 `/studios` 的 `locationId` 下拉框——
+里面 NL 只有 `2 = Amsterdam Minervahaven`（另外两个是西班牙的 Granada、
+Madrid Pozuelo）。其余楼盘没有线上预订路径。
+
+Minervahaven 的两个房型：`14` Core Studio（€1.550/月起）、
+`11` Signature Studio（€1.799/月起）。
+
+### 两条路都不通
+
+**RENTCafe 路径**：后台确实是 SecureRC（`studentexperience.securerc.co.uk`），
+但只有 `amsterdam-minervahaven0` 这个 slug 存在（property_id `186778`），
+`amsterdam-amstel0` / `amsterdam-ndsm0` 都是 RentCafe 404。而且那个
+`floorplans.aspx` 76KB 里 **0 个 floorplan tile**（`subPointerId` /
+`myFloorPlanId` / `FloorPlanContainer` 全为 0）——它不走 online-leasing
+的 floorplan 流程，`OurDomainScraper` 那套用不上。
+
+**自家组件路径**：`/studios?los=shortstay&locationId=2&studioTypeId=14`
+是服务端渲染的，参数集为 `los` / `locationId` / `studioTypeId` /
+`academicTermId`。但**承载可用性的 `academicTermId` 下拉框始终是空的**，
+选完楼盘和房型也不填充——由 JS 异步拉取，对应的 XHR 端点我没找到。
+要拿到真实可用性得反 JS 或上浏览器。
+
+`los=longstay` 模式下连楼盘和房型的下拉框都没有。
+
+### 结论
+
+为 1 栋楼 × 2 个房型反 JS 或加一个常驻浏览器，不划算。
+
+**重新评估的触发条件**：它把 Leiden / NDSM / Amstel 开放线上预订
+（`locationId` 下拉框里出现新选项）。那时可订面变成 4–5 栋，值得再看。
+
+---
+
+## §6 DUWO/ROOM (room.nl) — **不建议**
 
 ### 端点
 - `GET /api/v1/PreferredCities` → 200 ✅（9 城市 + UUID）
@@ -245,7 +295,7 @@ OurDomain Diemen，`unitrow=2` / `1`，正常解析。没有这个对照就会�
 
 ---
 
-## §6 综合建议
+## §7 综合建议
 
 ### 下一个做谁（按投入产出比排序）
 
@@ -262,6 +312,25 @@ OurDomain Diemen，`unitrow=2` / `1`，正常解析。没有这个对照就会�
 
 > 接入新平台的实际成本远不止 scraper 本身：反爬会变（见页首），每加一个
 > Cloudflare 保护的平台就多常驻一个浏览器（~200–400MB）和一条专属线程。
+
+### 关于「再找几个 Xior / H2S 那样的运营商」
+
+扫过 OurCampus、Student Experience、Basecamp、Vesteda、Camelot、Yugo、
+The Social Hub 之后的规律：**荷兰专业学生公寓这块，Xior 已经是最大的那个**
+（NL 30 栋 / 全欧 100+）。剩下的自营运营商基本落进三类：
+
+| 类型 | 例子 | 为什么不做 |
+|---|---|---|
+| 规模太小 | OurCampus（1 栋）、Student Experience（1 栋可订） | 抓取成本固定，房源太少摊不平 |
+| 排队制 | DUWO/ROOM、Basecamp、社会住房那一整类 | 等待期以年计，「秒推」没有意义 |
+| 自研前端 | Vesteda、Camelot | 房源客户端渲染，要挖 API 或上浏览器，成本≈一个新平台 |
+
+所以继续往「运营商」方向找的边际收益在递减。**marketplace 那条线
+（HousingAnywhere）单城 207 条，是更划算的方向。**
+
+尚未排除、值得各花半天的：**Vesteda**（大型机构房东，自有门户，
+房源客户端渲染）和 **Camelot Europe**（Next.js + Storyblok，首页
+`__NEXT_DATA__` 只有 CMS 内容，房源在搜索页，没深挖）。
 
 ### 替代发现：可考虑加入候选
 
