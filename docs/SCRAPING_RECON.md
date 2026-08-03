@@ -17,9 +17,10 @@
 
 | # | 平台 | 公开可读 | 反爬 | 数据形态 | 量级 | ToS 风险 | 结论 |
 |---|---|---|---|---|---|---|---|
-| 2 | **HousingAnywhere** | ✅ 完全 | 无 | JSON-LD + `__PRELOADED_STATE__` + 全 data-test-locator 标签 | 196 条 Amsterdam | 低（robots 禁 `/api/*`，但 HTML OK） | 🟢🟢🟢 **强烈推荐** |
+| 2 | **HousingAnywhere** | ✅ 完全 | 无 | 页面内嵌结构化 JSON（`__staticRouterHydrationData`） | 207 条 Amsterdam，23 条/页 | 低（`/api/*` 禁；分页 query 在灰区） | 🟢🟢🟢 **下一个做它** |
 | 3 | **SSH (sshxl.nl)** | ✅ 但 SPA | 无 | Angular SPA + sitemap-offers.xml | 44 条全国 | 低 | 🟢 推荐（需挖 API） |
-| 4 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可用 CloakBrowser（H2S 同方案） |
+| 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → **curl_cffi 首个指纹即过** | 与 OurDomain 同栈（RENTCafe HTML） | **1 栋楼** | 低 | ❌ 不做（等待期 16–18 个月） |
+| 5 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可用 CloakBrowser（H2S 同方案） |
 | 6 | DUWO/ROOM | ❌ | 无（但 **auth-wall + paid registration**） | API 仅登录后可见 | ? | **高**（登录后内容转发）| ❌ 不建议 |
 | 7 | Kamernet | — | paid model | — | — | 高 | ❌ |
 
@@ -33,59 +34,45 @@ GET https://housinganywhere.com/s/{City}--{Country}
 e.g. https://housinganywhere.com/s/Amsterdam--Netherlands
 ```
 
-### 关键发现
+### 关键发现（2026-08-03 复测）
 
-- **HTTP 200 with 660 KB HTML，plain `Mozilla/5.0` UA 即可**
-- 无 Cloudflare challenge / WAF 阻拦
-- 设置 `ha_anonymous_id` cookie（匿名用户标识，跟踪 + 不阻断）
+- HTTP 200，507 KB HTML，**plain `Mozilla/5.0` UA 即可**，无 Cloudflare 挑战
+- 房源是**页面内嵌的结构化 JSON**，不需要解析 HTML 卡片
+- 每页 23 条，Amsterdam 共 207 条 → 约 9 页
 
-### 数据形态（3 种冗余结构，任选其一解析）
+### 数据形态
 
-#### A. JSON-LD schema.org（最稳）
-
-页面 `<script type="application/ld+json">` 里有两块：
-
-```json
-{
-  "@context": "http://schema.org",
-  "@type": ["Apartment", "Product"],
-  "name": "Accommodation for rent in Amsterdam, Netherlands",
-  "offers": {
-    "@type": "AggregateOffer",
-    "priceCurrency": "EUR",
-    "offerCount": 196,
-    "highPrice": 5928,
-    "lowPrice": 600
-  },
-  "hasMap": "http://www.google.com/maps/place/52.37403,4.88969"
-}
-```
-
-只给汇总（offerCount / highPrice / lowPrice），不给个体——但这是个信号：网站愿意公开聚合数据。
-
-#### B. `window.__PRELOADED_STATE__`（最全）
-
-页面里塞了 86 KB 的 Redux/Apollo state，含完整 listing 数据。Top key `hermes` 是他们的内部状态命名空间。Parse 出来后能拿到每条 listing 的所有字段。
-
-#### C. HTML data-test-locator（最直接）
-
-每条 listing 用 React 测试钩子打了标签，**直接当 scrape 锚点用**：
+房源数组在：
 
 ```
-ListingCard/Title         → 标题
-ListingCard/Price         → 价格
-ListingCard/Availability  → 入住时间
-ListingCard/AttributesSize       → 面积
-ListingCard/AttributesFacilities → 设施列表
-ListingCard/AttributesPlaces     → 容纳人数
-ListingCard/Highlight/NoDeposit  → 标签：无押金
-ListingCard/Highlight/FlexibleCancellation
-ListingCard/Highlight/Confirmed
-ListingCard/BadgeMultiplePlaces  → 多套房标识
-ListingCard/Anchor       → 详情页链接
+window.__staticRouterHydrationData = JSON.parse("…")
+  → .loaderData.<routeId>.listings          # 23 条
 ```
 
-外加 `<meta itemProp="price" content="1720">` 这种 schema.org microdata。
+注意这是**双层编码**：外层是 JS 字符串字面量，内层才是 JSON，要解两次。
+同一 blob 里还有 `undefined` 字面量（JS 不是 JSON），直接 `json.loads` 会炸，
+需要先把 `:undefined` 替换成 `:null`。
+
+单条 listing 的字段：
+
+```
+id, internalID, recordType, advertiserId, isPartner, depositPolicy,
+price (分), priceEUR, currency, street, city, country, countryCode,
+_geoloc {lat, lng},  ← 自带经纬度
+isNew, propertyType, previewImage, photos, photoCount,
+minimalRentalPeriod, maximumStay
+```
+
+`_geoloc` 是最大的额外收益：现有三个源都要走 geocode pipeline 才能上地图，
+这个直接带坐标。
+
+> **旧侦察记录的三条解析路径已经失效**，不要照着写代码：
+> - JSON-LD（`<script type="application/ld+json">`）现在只剩聚合值
+>   （`offerCount` / `lowPrice` / `highPrice`），**不含个体房源**
+> - `window.__PRELOADED_STATE__` 现在只剩搜索元数据（价格分布等），**不含房源**
+> - `data-test-locator="ListingCard/*"` 锚点仍在，但既然有干净 JSON 就没必要解 HTML
+>
+> 这正是页首那条判断的实例：**评估只代表探测当时**。
 
 ### robots.txt
 
@@ -99,16 +86,24 @@ Disallow: /admin
 sitemap: https://housinganywhere.com/sitemap.xml
 ```
 
-**Allow 浏览 listing 列表页 + 详情页**。只禁 `/api/*` 和用户私人区。**完全合规**。
+`/api/*` 明确禁止——所以只能走页面内嵌 JSON，不能直接调他们的 API。这正好是
+我们要的做法。
+
+**但有一条灰区：`Disallow: /*/s/*?*` 禁的是带 query string 的搜索页，而分页正是
+`?page=2`。** 这条模式要求 `/s/` 前面还有一段路径，我们用的 `/s/Amsterdam--Netherlands?page=2`
+在根路径下，严格讲不匹配；但不同 robots 解析器对 `*` 能否匹配空串处理不一致。
+
+保守做法：只抓第一页（23 条最新房源，对「新房源通知」已经够用），不翻页。
+真要翻页，先确认他们的 ToS。
 
 ### 工程评估
 
 | 项 | 评分 |
 |---|---|
-| 公开数据 | ⭐⭐⭐⭐⭐ 196 条 Amsterdam，覆盖荷兰全境 |
-| 抓取难度 | ⭐⭐⭐⭐⭐ Plain UA + HTML 解析，无任何技术阻碍 |
-| 数据稳定性 | ⭐⭐⭐⭐ JSON-LD + data-test-locator 双冗余，schema 变化风险低 |
-| 合规风险 | ⭐⭐⭐⭐⭐ Allow listing 页，仅禁 API + 私人区 |
+| 公开数据 | ⭐⭐⭐⭐⭐ 207 条 Amsterdam，覆盖荷兰全境 |
+| 抓取难度 | ⭐⭐⭐⭐⭐ Plain UA + 内嵌 JSON，无任何技术阻碍 |
+| 数据稳定性 | ⭐⭐⭐ 内嵌 blob 的路径两个月内已变过一次；`data-test-locator` 锚点可作兜底 |
+| 合规风险 | ⭐⭐⭐⭐ listing 页可抓；分页 query 在 robots 灰区 |
 | 用户重叠度 | ⭐⭐⭐⭐⭐ 国际学生 + young pro = FlatRadar 核心用户群 |
 
 **推荐工程量：1.5–2 周**（HTML 解析 + city 列表配置 + 入库适配）。
@@ -185,7 +180,49 @@ robots.txt 友好，但 Cloudflare WAF 不认 robots——它认请求指纹。
 
 ---
 
-## §4 DUWO/ROOM (room.nl) — **不建议**
+## §4 OurCampus (ourcampus.nl) — **不做**
+
+Greystar 的另一个学生住房品牌，与 OurDomain 同属一家。技术上几乎是白送，但产品上没价值。
+
+### 技术面（2026-08-03 实测，全部通过）
+
+| 项 | 值 |
+|---|---|
+| 栈 | Webflow 前台 + RENTCafe/SecureRC 后台，**与 OurDomain 完全同栈** |
+| RENTCafe host | `new-ourcampus-amsterdam-diemen-rentcafewebsiteuk.securerc.co.uk` |
+| slug / property_id | `new-ourcampus-amsterdam-diemen` / `186609` |
+| 反爬 | plain curl → 403 + 挑战页；**curl_cffi `chrome136` 首个指纹即 200** |
+| 已解析 | 3 个 floorplan：`1113259` Standard+ Studio 1P / `1112904` Furnished Student 1P / `1112905` Furnished Student 2P |
+
+### 为什么不做
+
+**1. 只有一栋楼。** `/en/apartments` 全站仅 Amsterdam Diemen，地址 Dalsteindreef 6002——
+与 OurDomain South-East（Dalsteindreef 20-40）同街隔壁。接进来只多一栋楼。
+
+**2. 等待期 16–18 个月（官网自述）。** 这是排队制不是先到先得，
+「房源出现即秒推」的核心价值不成立。与 DUWO/ROOM 是同一类否决理由，
+只不过那次是合规问题，这次是产品问题。
+
+**3. 不能直接复用 `OurDomainScraper`。** 它的单元查询是
+**POST + `floorPlans[]` 表单体**（页面 jQuery `.load(url, {floorPlans: names})`），
+OurDomain 是 GET + query string。同栈不等于同接口。
+
+### 一条未验证的事
+
+实测时该楼**零可订单元**（floorplans.aspx 上 0 个 apply 按钮、6 个 Get Notified；
+页面里唯一的 `applyButton` 字样在一行被注释掉的 JS 里）。所以
+`contentclass=availableunits` 返回的是 floorplan 网格而不是单元表，
+**它的单元表 HTML 结构未经验证**。
+
+判定「真没房」而不是「解析失败」的依据是对照实验：同一份代码、同一个指纹打
+OurDomain Diemen，`unitrow=2` / `1`，正常解析。没有这个对照就会掉进
+「没拿到数据 ≠ 确认没有数据」的坑（见 [ARCHITECTURE.md §5.10](ARCHITECTURE.md)）。
+
+真要接入，必须等它有房时重新验证一次单元表结构。
+
+---
+
+## §5 DUWO/ROOM (room.nl) — **不建议**
 
 ### 端点
 - `GET /api/v1/PreferredCities` → 200 ✅（9 城市 + UUID）
@@ -208,7 +245,7 @@ robots.txt 友好，但 Cloudflare WAF 不认 robots——它认请求指纹。
 
 ---
 
-## §5 综合建议
+## §6 综合建议
 
 ### 下一个做谁（按投入产出比排序）
 
