@@ -412,12 +412,20 @@ def _impersonate_attempts() -> list[str]:
     retries = _env_int("OURDOMAIN_WAF_RETRIES", min(4, len(unique)), min_value=1, max_value=8)
 
     # ── 按状态分桶 ─────────────────────────────────────────────
+    # cool 必须**先**算并从 last_good 里排除：``_mark_fingerprint_blocked`` 只写
+    # cooldown_until、不清 last_good_at，所以「成功过 + 正在冷却」的指纹会同时
+    # 落进两个桶。下面 dict.fromkeys 保留首次出现的位置，它就会被排到最前——
+    # 冷却对最该冷却的那个指纹完全失效，每轮白扔一次必然 403 的尝试。
+    cool = [imp for imp in unique if _is_in_cooldown(imp)]
     last_good = sorted(
-        (imp for imp in unique if _FINGERPRINT_STATE.get(imp, {}).get("last_good_at", 0)),
+        (
+            imp for imp in unique
+            if imp not in cool
+            and _FINGERPRINT_STATE.get(imp, {}).get("last_good_at", 0)
+        ),
         key=lambda imp: _FINGERPRINT_STATE[imp].get("last_good_at", 0),
         reverse=True,  # 最近成功的排最前
     )
-    cool = [imp for imp in unique if _is_in_cooldown(imp)]
     fresh = [imp for imp in unique if imp not in last_good and imp not in cool]
 
     # 合并：last_good → fresh → cooldown（去重保序）

@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.9.12 (2026-08-03)
+
+系统审阅 monitor + 三个平台 scraper 时找出的其余问题。
+
+### Bug 修复 — 403 后真的丢弃浏览器会话
+
+两个浏览器型 scraper 的 `batch_session()` 里都写着「捕获 `BlockedError` → `_close_browser()` → 下轮重建」，但 dispatcher 是**按 task 隔离**的，`scrape()` 抛的异常全在那圈 per-task `try` 里被吃掉，根本到不了 `yield`。这段 `except` 是死代码——`HollandStayScraper` 文档写的「仅在 BlockedError（CF 会话过期）或进程退出时关闭重建」实际从未发生过。
+
+后果：H2S 抓取 403 → source 熔断 30 分钟 → canary **复用同一个被烧的浏览器**（`_BROWSER_MAX_AGE` 2 小时内不重建）→ 大概率再 403 → 熔断翻倍，最长 6 小时。Xior 更直接：它靠重建浏览器来换出口 IP（`rotating_proxy=True`），不重建就一直卡在同一个被限流的 IP 上。
+
+改由 dispatcher 负责：批次里出现过 403，批次**结束后**调一次 `invalidate_session()`。时机是关键——批次中间丢的话，同 source 的后续 task 会各自触发一次浏览器重建（每次一轮完整 CF 挑战，H2S 实测最长 90s+25s 且失败会连锁重试 3 次），一栋楼的 403 能把整批拖成分钟级。429 和维护态不丢：前者「等等就好」，重建只是白白多过一次挑战；后者是对方的事，浏览器没坏。
+
+### Bug 修复 — OurDomain 指纹冷却对「成功过的指纹」失效
+
+`_mark_fingerprint_blocked` 只写 `cooldown_until`、不清 `last_good_at`，于是「成功过 + 正在冷却」的指纹同时落进 `last_good` 和 `cool` 两个桶，`dict.fromkeys` 保留首次出现的位置——它被排到**最前**。模块注释写的是「403 失败的指纹标记 cooldown_until，期内不再优先用」，代码做的正好相反。每轮白扔一次必然 403 的尝试（含 2 次请求 + 2s 同 session 重试）。
+
+现在先算 `cool` 并从 `last_good` 里排除。
+
+### Bug 修复 — completeness key 的 source 前缀永远加不上
+
+`_completeness_key` 靠 `len(by_source) <= 1` 判断要不要加前缀，但 monitor 从 v1.9.9 起按 source 分开调 dispatcher，每次调用里 `by_source` 恒为 1。生产日志里三个 source 同时开着，输出却是 `Amsterdam Diemen=✓, Eindhoven=✓` 这种裸城市名。
+
+连带后果：`_mark_stale_listings_for_complete_cities` 全部走 `complete_cities` 分支，`mark_stale_listings` 用的是不带 source 条件的 `city IN (...)`——为多源隔离准备的 `source_city_pairs` 在生产里永远是空的。当前配置下 6 个 display 名互不相同所以没出事，但只要哪天两个 source 用了同名城市，就会用一个 source 的完整性去收敛另一个 source 的 listing。
+
+新增 `dispatch_scrape_tasks(..., multi_source=)`，由知道整轮全貌的 monitor 给出。单源部署仍是裸城市名。
+
+### Bug 修复 — stale 收敛的 24 小时计时器会被空轮消耗
+
+原代码在 `finally` 里无条件重置 `last_stale_sweep_time`。run_once 的兜底路径（抓取阶段未分类错误 / 管线错误都 `return {}`）和 H2S 熔断期都会返回空 completeness，只要 24 小时那一轮刚好撞上，收敛就被白白跳过，鬼影 listing 再多挂一天。
+
+抽出 `_stale_sweep_decision()`：`run` / `wait` / `defer`，defer 时不重置计时器，下一轮有完整城市就立刻补跑。
+
+### Bug 修复 — H2S 响应结构异常时误判「完整扫描」
+
+`products.page_info.total_pages` 缺失时默认成 `1`，于是 `current_page(1) >= 1` 直接判 `complete=True`——**「没拿到数据」被当成了「确认没有数据」**，正是当年那次 7 周静默故障的判据类型。字段改名 / schema 变更会得到「0 条房源 + 完整扫描」，而这恰好是让 stale 收敛清空整城的组合。`products` 为 `null` 时还会直接 `AttributeError` 崩掉。
+
+现在拿不到 `total_pages` 就记 ERROR 并标不完整；已抓到的部分照常入库，只是不参与状态收敛。真正的零房源（结构完整、`total_pages=1`）仍判完整，否则 stale 永不收敛。
+
 ## v1.9.11 (2026-08-03)
 
 ### Bug 修复 — 单个 source 失败会炸掉整轮

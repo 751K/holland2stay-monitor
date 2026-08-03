@@ -109,21 +109,23 @@ async def _dispatch_scrape_tasks_async(
     *,
     isolated: bool = False,
     browser_source: str = "",
+    multi_source: bool = False,
 ):
     """
     Run the synchronous scraper dispatcher from async monitor code.
 
     浏览器型 source 各自走专属的长存线程（见 ``_get_browser_executor``）；
     非浏览器 source 继续用默认 executor。
+
+    ``multi_source`` 要透传给 dispatcher：本函数每次只喂一个 source 的任务，
+    dispatcher 自己看不出整轮是不是多源（见 ``_completeness_key``）。
     """
-    if isolated:
-        return await loop.run_in_executor(
-            _get_browser_executor(browser_source or _H2S_SOURCE),
-            lambda: dispatch_scrape_tasks(selected),
-        )
+    executor = (
+        _get_browser_executor(browser_source or _H2S_SOURCE) if isolated else None
+    )
     return await loop.run_in_executor(
-        None,
-        lambda: dispatch_scrape_tasks(selected),
+        executor,
+        lambda: dispatch_scrape_tasks(selected, multi_source=multi_source),
     )
 
 
@@ -228,6 +230,26 @@ def _mark_stale_listings_for_complete_cities(
         cities=complete_cities if complete_cities else None,
         source_city_pairs=complete_source_cities if complete_source_cities else None,
     )
+
+
+def _stale_sweep_decision(
+    completeness: dict[str, bool],
+    last_sweep_at: float,
+    interval_sec: float,
+    *,
+    now: float,
+) -> str:
+    """本轮该不该跑 stale 收敛。返回 ``"run"`` / ``"wait"`` / ``"defer"``。
+
+    ``defer`` = 到点了、但本轮一个完整扫描城市都没有。这时**不能重置计时器**：
+    run_once 的兜底路径（未分类错误 / 管线错误）和 H2S 熔断期都会返回空
+    completeness，24 小时那一次刚好撞上就会白白跳过，鬼影 listing 再多挂一天。
+    """
+    if now - last_sweep_at < interval_sec:
+        return "wait"
+    if not any(completeness.values()):
+        return "defer"
+    return "run"
 
 
 def _task_labels(tasks) -> list[str]:
@@ -1173,12 +1195,23 @@ async def run_once(
         source_failures: list[tuple[str, Exception]] = []
         succeeded_sources: list[str] = []
 
+        # 整轮是否跨多个 source。dispatcher 自己看不出来——它每次只收到一个
+        # source 的任务，所以 completeness key 的 source 前缀得靠这个开关。
+        # 用 tasks（本轮全部任务）而不是熔断后筛剩的：H2S 熔断期间前缀不该
+        # 忽然消失，否则同一批 listing 的 key 形态会在两轮之间跳变。
+        multi_source = len({t.source for t in tasks}) > 1
+
+        def _ckey(source: str, city_display: str) -> str:
+            """与 ``scrapers._completeness_key`` 保持一致的 key 构造。"""
+            return f"{source}:{city_display}" if multi_source else city_display
+
         async def _dispatch(selected, *, isolated: bool = False, browser_source: str = ""):
             result = await _dispatch_scrape_tasks_async(
                 loop,
                 selected,
                 isolated=isolated,
                 browser_source=browser_source,
+                multi_source=multi_source,
             )
             return _unpack_scrape_result(result)
 
@@ -1201,7 +1234,7 @@ async def run_once(
                 # 标 ✗ 而不是留空：完整扫描那行日志要看得出「这个 source 塌了」，
                 # 且 False 会正确挡住该城市的 stale 收敛。
                 for t in group:
-                    completeness_all.setdefault(t.city_display, False)
+                    completeness_all.setdefault(_ckey(src, t.city_display), False)
                 logger.error(
                     "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
                     src, len(group), type(e).__name__, e,
@@ -1897,7 +1930,17 @@ async def main_loop(
 
             # 状态收敛兜底：仅对本轮完整扫描成功的城市执行。
             # 整轮连接失败会在 run_once() 抛出并跳过这里；部分城市不完整则不收敛该城市。
-            if time.monotonic() - last_stale_sweep_time >= stale_sweep_interval_sec:
+            sweep = _stale_sweep_decision(
+                city_completeness,
+                last_stale_sweep_time,
+                stale_sweep_interval_sec,
+                now=time.monotonic(),
+            )
+            if sweep == "defer":
+                logger.info(
+                    "本轮无完整扫描城市，stale 收敛推迟到下一轮（不重置 24h 计时器）"
+                )
+            elif sweep == "run":
                 try:
                     stale = _mark_stale_listings_for_complete_cities(
                         storage,

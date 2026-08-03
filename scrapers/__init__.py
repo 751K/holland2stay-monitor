@@ -103,6 +103,8 @@ def _safe_invalidate(scraper: AbstractScraper, label: str) -> None:
 
 def dispatch_scrape_tasks(
     tasks: list[ScrapeTask],
+    *,
+    multi_source: bool = False,
 ) -> tuple[list, dict[str, bool]]:
     """
     P0 多源 dispatcher：按 source 分组、按注册表查实例、逐 task scrape，
@@ -119,6 +121,15 @@ def dispatch_scrape_tasks(
     - ``completeness`` 字典 key 是 ``city_display``——多 source 同名城市
       （例如 H2S 的 Amsterdam + OurDomain 的 Amsterdam）会前缀化 source
       避免覆盖：``"holland2stay:Amsterdam"`` / ``"ourdomain:Amsterdam"``
+
+    Parameters
+    ----------
+    multi_source
+        本轮**整体**是否跨多个 source。必须由调用方给，不能靠 ``tasks`` 自己
+        推断：monitor 是按 source 分开调用本函数的，每次调用里 ``by_source``
+        恒为 1，于是前缀永远加不上——防同名覆盖的机制形同虚设，且
+        ``mark_stale_listings`` 会退化成不带 source 条件的 ``city IN (...)``，
+        用一个 source 的完整性去收敛另一个 source 的 listing。
 
     调用方
     ------
@@ -146,7 +157,7 @@ def dispatch_scrape_tasks(
         if not scraper:
             # 未注册的 source 不抛异常，跳过——避免某条配置笔误把整个监控卡住
             for t in source_tasks:
-                completeness[_completeness_key(source, t.city_display, by_source)] = False
+                completeness[_completeness_key(source, t.city_display, by_source, multi_source)] = False
             continue
 
         # batch_session() 让 scraper 把 Session/TLS 指纹提升到批次级——H2S
@@ -157,6 +168,7 @@ def dispatch_scrape_tasks(
         # per-task try **之外**，它抛的异常（浏览器创建失败、CF 挑战没过、
         # Playwright 崩溃）会直接穿透整个 dispatcher，把同轮里已经抓好的其它
         # source 结果一起带走——正是 per-task 隔离想避免的事。
+
         # 本批次里是否出现过 403。出现过就在批次结束后丢掉该 source 的长生命
         # 周期资源（浏览器），下轮重建——被 CF 标记的会话留着只会一直 403。
         source_blocked: Optional[BlockedError] = None
@@ -164,7 +176,7 @@ def dispatch_scrape_tasks(
         try:
             with scraper.batch_session():
                 for t in source_tasks:
-                    ckey = _completeness_key(source, t.city_display, by_source)
+                    ckey = _completeness_key(source, t.city_display, by_source, multi_source)
                     try:
                         result = scraper.scrape(t)
                         success_count += 1
@@ -227,7 +239,7 @@ def dispatch_scrape_tasks(
             # 只补还没有结论的 task——异常若来自 ``__exit__``，前面已经跑完的
             # task 有自己的 completeness，不该被这里覆盖。
             for t in source_tasks:
-                ckey = _completeness_key(source, t.city_display, by_source)
+                ckey = _completeness_key(source, t.city_display, by_source, multi_source)
                 if ckey in completeness:
                     continue
                 completeness[ckey] = False
@@ -270,14 +282,19 @@ def _completeness_key(
     source: str,
     city_display: str,
     by_source: dict[str, list[ScrapeTask]],
+    multi_source: bool = False,
 ) -> str:
     """
     多源时 completeness 字典 key 加 source 前缀防同名城市覆盖。
     单源时退化为纯 city_display（保持与旧 scrape_all 输出兼容）。
+
+    ``by_source`` 只看得到**本次调用**的 source，而 monitor 是按 source 分开
+    调用 dispatcher 的——光看它永远是 1。所以还要 ``multi_source``：由知道
+    整轮全貌的调用方给出。
     """
-    if len(by_source) <= 1:
-        return city_display
-    return f"{source}:{city_display}"
+    if multi_source or len(by_source) > 1:
+        return f"{source}:{city_display}"
+    return city_display
 
 
 __all__ = [

@@ -307,3 +307,59 @@ class TestScrapeMarksFingerprint:
         assert impersonates_used[2] == "chrome124", (
             f"第二次应该优先 chrome124，实际顺序: {impersonates_used}"
         )
+
+
+# ─── 冷却对「成功过的指纹」也必须生效 ─────────────────────────────
+
+class TestCooldownAppliesToPreviouslyGoodFingerprint:
+    """``_mark_fingerprint_blocked`` 只写 cooldown_until、不清 last_good_at。
+
+    于是「成功过 + 正在冷却」的指纹会同时落进 last_good 和 cool 两个桶，而
+    ``dict.fromkeys`` 保留首次出现的位置——它被排到**最前**。冷却对最该冷却
+    的那个指纹完全失效，每轮白扔一次必然 403 的尝试（含 2 次请求 + 2s 同
+    session 重试）。模块注释写的是「403 失败的指纹标记 cooldown_until，期内
+    不再优先用」，代码做的正好相反。
+    """
+
+    def setup_method(self):
+        _reset_state()
+
+    def teardown_method(self):
+        _reset_state()
+
+    def test_blocked_after_good_is_not_tried_first(self, monkeypatch):
+        monkeypatch.setenv(
+            "OURDOMAIN_IMPERSONATES", "chrome136,chrome131,safari18_0,firefox135"
+        )
+        od._mark_fingerprint_good("chrome136")
+        od._mark_fingerprint_blocked("chrome136")
+
+        attempts = od._impersonate_attempts()
+
+        assert od._is_in_cooldown("chrome136")
+        assert attempts[0] != "chrome136", (
+            "冷却中的指纹不该排首位，即使它之前成功过"
+        )
+        assert attempts[-1] == "chrome136", "冷却中的指纹应该兜底排队尾"
+
+    def test_still_reachable_when_everything_cooled(self, monkeypatch):
+        """全员冷却时仍要给条出路，不能返回空列表。"""
+        monkeypatch.setenv("OURDOMAIN_IMPERSONATES", "chrome136,chrome131")
+        for imp in ("chrome136", "chrome131"):
+            od._mark_fingerprint_good(imp)
+            od._mark_fingerprint_blocked(imp)
+
+        attempts = od._impersonate_attempts()
+
+        assert sorted(attempts) == ["chrome131", "chrome136"]
+
+    def test_success_restores_priority(self, monkeypatch):
+        """重新成功一次就该解除冷却并回到首位。"""
+        monkeypatch.setenv("OURDOMAIN_IMPERSONATES", "chrome136,chrome131")
+        od._mark_fingerprint_good("chrome136")
+        od._mark_fingerprint_blocked("chrome136")
+        assert od._impersonate_attempts()[0] == "chrome131"
+
+        od._mark_fingerprint_good("chrome136")
+
+        assert od._impersonate_attempts()[0] == "chrome136"

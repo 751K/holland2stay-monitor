@@ -186,3 +186,53 @@ class TestDispatchCompleteness:
                 dispatch_scrape_tasks(
                     _h2s_tasks(("Eindhoven", "29"), ("Amsterdam", "24"))
                 )
+
+
+# ── GraphQL 响应结构异常时不得判 complete（P3）─────────────────────
+
+class TestMalformedProductsEnvelope:
+    """``products.page_info.total_pages`` 缺失时不能判完整扫描。
+
+    以前 ``total_pages`` 默认成 1，于是 ``current_page(1) >= 1`` 直接
+    ``complete=True``——**「没拿到数据」被当成了「确认没有数据」**，正是那次
+    7 周静默故障的判据类型。字段改名 / schema 变更会得到「0 条房源 + 完整
+    扫描」，而这恰好是让 stale 收敛清空整城的组合。
+    """
+
+    def _scrape(self, payload):
+        from unittest.mock import MagicMock
+        from scrapers.holland2stay import _scrape_city_pages
+
+        fetcher = MagicMock()
+        fetcher.fetch_gql.return_value = payload
+        return _scrape_city_pages(
+            fetcher, "Eindhoven", city_ids=["29"],
+            availability_ids=["179"], attr_labels={},
+        )
+
+    def test_missing_page_info_is_incomplete(self):
+        listings, complete = self._scrape({"data": {"products": {}}})
+        assert listings == []
+        assert complete is False, "拿不到 page_info 就不能声称扫全了"
+
+    def test_missing_total_pages_is_incomplete(self):
+        listings, complete = self._scrape(
+            {"data": {"products": {"items": [], "page_info": {"current_page": 1}}}}
+        )
+        assert complete is False
+
+    def test_null_products_is_incomplete_not_crash(self):
+        listings, complete = self._scrape({"data": {"products": None}})
+        assert listings == []
+        assert complete is False
+
+    def test_genuine_empty_page_is_still_complete(self):
+        """真的零房源（结构完整、total_pages=1）仍要判完整，否则 stale 永不收敛。"""
+        listings, complete = self._scrape(
+            {"data": {"products": {
+                "items": [],
+                "page_info": {"current_page": 1, "total_pages": 1},
+            }}}
+        )
+        assert listings == []
+        assert complete is True

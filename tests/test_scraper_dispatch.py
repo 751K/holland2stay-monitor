@@ -68,7 +68,7 @@ def test_monitor_isolated_dispatch_runs_without_thread_asyncio_loop(monkeypatch)
 
     main_thread = threading.get_ident()
 
-    def fake_dispatch(tasks):
+    def fake_dispatch(tasks, **kwargs):
         assert threading.get_ident() != main_thread
         with pytest.raises(RuntimeError):
             asyncio.get_running_loop()
@@ -100,7 +100,7 @@ def test_isolated_dispatch_reuses_one_thread_across_rounds(monkeypatch):
 
     seen: list[int] = []
 
-    def fake_dispatch(tasks):
+    def fake_dispatch(tasks, **kwargs):
         seen.append(threading.get_ident())
         return [], {}
 
@@ -251,7 +251,7 @@ def test_each_browser_source_gets_its_own_thread(monkeypatch):
 
     seen: dict[str, set[int]] = {}
 
-    def fake_dispatch(tasks):
+    def fake_dispatch(tasks, **kwargs):
         src = tasks[0].source if tasks else "?"
         seen.setdefault(src, set()).add(threading.get_ident())
         return [], {}

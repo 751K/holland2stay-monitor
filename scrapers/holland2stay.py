@@ -384,10 +384,24 @@ def _scrape_city_pages(
                 )
             break
 
-        products = gql_data.get("products", {})
+        products = gql_data.get("products") or {}
         items = products.get("items") or []
-        page_info = products.get("page_info", {})
-        total_pages = page_info.get("total_pages", 1)
+        page_info = products.get("page_info") or {}
+        total_pages = page_info.get("total_pages")
+
+        # total_pages 缺失以前默认成 1，于是 current_page(1) >= 1 直接判
+        # complete=True——**「没拿到数据」被当成了「确认没有数据」**，正是那次
+        # 7 周静默故障的判据类型。字段改名 / schema 变更时会得到「0 条房源 +
+        # 完整扫描」，而这恰好是让 stale 收敛清空整城的组合。
+        #
+        # 拿不到就标不完整：已抓到的部分照常入库，只是不参与状态收敛。
+        if total_pages is None:
+            logger.error(
+                "[%s] GraphQL 响应缺少 products.page_info.total_pages page=%d，"
+                "本轮标记为不完整（响应结构可能已变更）: %.300s",
+                city_name, current_page, gql_data,
+            )
+            break
 
         for item in items:
             listing = _to_listing(item, city_name, attr_labels)
