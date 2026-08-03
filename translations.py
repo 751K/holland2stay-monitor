@@ -96,6 +96,20 @@ TRANSLATIONS = {
     "no_logs_yet":          {"zh": "暂无日志",                "en": "No logs yet"},
     "clear_logs":           {"zh": "清空当前日志",            "en": "Clear current log"},
     "clear_logs_confirm":   {"zh": "确定要清空当前日志文件吗？", "en": "Delete all entries in this log file?"},
+    # ── Xior 按楼栋账号 ────────────────────────────────────
+    "user_form_xior_note": {
+        "zh": "Xior 每栋楼是独立的门户、独立账号。为哪栋楼填了账号，才会对那栋楼自动预订；"
+              "账号需自行在该楼的 RENTCafe 页面注册。",
+        "en": "Each Xior building is a separate portal with its own account. Auto-booking only "
+              "runs for buildings you add credentials for; register on that building's RENTCafe site first.",
+    },
+    "user_form_xior_pick":   {"zh": "选择楼栋…",        "en": "Pick a building…"},
+    "user_form_xior_add":    {"zh": "添加楼栋账号",      "en": "Add building"},
+    "user_form_xior_remove": {"zh": "移除该楼账号",      "en": "Remove"},
+    "user_form_xior_none_monitored": {
+        "zh": "当前未监控任何 Xior 楼栋（见 .env 的 XIOR_CITIES）",
+        "en": "No Xior buildings are being monitored (see XIOR_CITIES in .env)",
+    },
     # ── 公告群发 ──────────────────────────────────────────
     "announce_title":       {"zh": "发布公告",                 "en": "Announcement"},
     "announce_hint":        {"zh": "发给所有开启通知的用户",     "en": "Sent to all users with notifications on"},

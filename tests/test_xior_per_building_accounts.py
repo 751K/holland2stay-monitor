@@ -196,3 +196,141 @@ class TestAutoBookGate:
     def test_unknown_source_is_rejected(self):
         from monitor import _can_auto_book
         assert _can_auto_book(_user(), _listing("ourcampus")) is False
+
+
+# ── 表单解析 ────────────────────────────────────────────────────────
+
+
+def _form(**kw):
+    from werkzeug.datastructures import ImmutableMultiDict
+    items = []
+    for k, v in kw.items():
+        for x in (v if isinstance(v, list) else [v]):
+            items.append((k, x))
+    return ImmutableMultiDict(items)
+
+
+class TestFormParsing:
+    def test_parses_parallel_arrays(self):
+        from app.forms.user_form import parse_xior_accounts
+        f = _form(
+            AUTO_BOOK_XIOR_KEY=["p1", "p2"],
+            AUTO_BOOK_XIOR_EMAIL=["a@x.com", "b@x.com"],
+            AUTO_BOOK_XIOR_PW=["pw1", "pw2"],
+        )
+        assert parse_xior_accounts(f) == {
+            "p1": {"email": "a@x.com", "password": "pw1"},
+            "p2": {"email": "b@x.com", "password": "pw2"},
+        }
+
+    def test_blank_password_keeps_existing(self):
+        """密码不回填到 HTML，空提交只能理解为「不改」——否则用户每次编辑
+        别的字段都会把密码清空。"""
+        from app.forms.user_form import parse_xior_accounts
+        ex = AutoBookConfig(xior_accounts={"p1": {"email": "a@x.com", "password": "old"}})
+        f = _form(AUTO_BOOK_XIOR_KEY="p1", AUTO_BOOK_XIOR_EMAIL="a@x.com",
+                  AUTO_BOOK_XIOR_PW="")
+        assert parse_xior_accounts(f, ex)["p1"]["password"] == "old"
+
+    def test_new_password_overrides(self):
+        from app.forms.user_form import parse_xior_accounts
+        ex = AutoBookConfig(xior_accounts={"p1": {"email": "a@x.com", "password": "old"}})
+        f = _form(AUTO_BOOK_XIOR_KEY="p1", AUTO_BOOK_XIOR_EMAIL="a@x.com",
+                  AUTO_BOOK_XIOR_PW="new")
+        assert parse_xior_accounts(f, ex)["p1"]["password"] == "new"
+
+    def test_blank_email_deletes_the_building(self):
+        from app.forms.user_form import parse_xior_accounts
+        ex = AutoBookConfig(xior_accounts={"p1": {"email": "a@x.com", "password": "old"}})
+        f = _form(AUTO_BOOK_XIOR_KEY="p1", AUTO_BOOK_XIOR_EMAIL="", AUTO_BOOK_XIOR_PW="")
+        assert parse_xior_accounts(f, ex) == {}
+
+    def test_removed_row_is_dropped(self):
+        """前端删掉的行不再提交 → 结果里就没有它。"""
+        from app.forms.user_form import parse_xior_accounts
+        ex = AutoBookConfig(xior_accounts={
+            "p1": {"email": "a@x.com", "password": "pw1"},
+            "p2": {"email": "b@x.com", "password": "pw2"},
+        })
+        f = _form(AUTO_BOOK_XIOR_KEY="p1", AUTO_BOOK_XIOR_EMAIL="a@x.com",
+                  AUTO_BOOK_XIOR_PW="")
+        out = parse_xior_accounts(f, ex)
+        assert set(out) == {"p1"}
+
+    def test_empty_form(self):
+        from app.forms.user_form import parse_xior_accounts
+        assert parse_xior_accounts(_form()) == {}
+
+    def test_ragged_arrays_do_not_crash(self):
+        """浏览器理论上不会发出参差数组，但坏掉的客户端会。"""
+        from app.forms.user_form import parse_xior_accounts
+        f = _form(AUTO_BOOK_XIOR_KEY=["p1", "p2"], AUTO_BOOK_XIOR_EMAIL=["a@x.com"])
+        assert parse_xior_accounts(f) == {"p1": {"email": "a@x.com", "password": ""}}
+
+    def test_whitespace_only_key_skipped(self):
+        from app.forms.user_form import parse_xior_accounts
+        f = _form(AUTO_BOOK_XIOR_KEY="   ", AUTO_BOOK_XIOR_EMAIL="a@x.com",
+                  AUTO_BOOK_XIOR_PW="p")
+        assert parse_xior_accounts(f) == {}
+
+
+class TestFormIntegration:
+    def test_build_user_keeps_legacy_pair(self):
+        """表单已不再提供单对入口；直接清空会让还没按楼重配的老用户失去凭据。"""
+        from app.forms.user_form import build_user_from_form
+        from users import UserConfig
+        ex = UserConfig(id="u1", name="U", auto_book=AutoBookConfig(
+            xior_email="old@x.com", xior_password="oldpw"))
+        f = _form(NAME="U", AUTO_BOOK_XIOR_KEY="p1",
+                  AUTO_BOOK_XIOR_EMAIL="a@x.com", AUTO_BOOK_XIOR_PW="pw1")
+        u = build_user_from_form(f, user_id="u1", existing=ex)
+        assert u.auto_book.xior_email == "old@x.com"
+        assert u.auto_book.xior_accounts["p1"]["email"] == "a@x.com"
+        # 有按楼配置后，别的楼不再回退到存量值
+        assert u.auto_book.xior_account_for("p2") == ("", "")
+
+
+class TestFormRendering:
+    """保存后必须能回填——否则用户每次编辑都得重填一遍所有楼栋。"""
+
+    def _post(self, admin_client, **extra):
+        data = {"name": "xior-ui", "csrf_token": "test_csrf", **extra}
+        return admin_client.post("/users/new", data=data,
+                                 headers={"X-CSRF-Token": "test_csrf"},
+                                 follow_redirects=True)
+
+    def test_saved_accounts_render_as_rows(self, admin_client, monkeypatch):
+        import app.routes.users as ur
+        monkeypatch.setattr(ur, "_xior_building_options", lambda: [
+            {"key": "p0196062", "display": "Amsterdam Karspeldreef"},
+            {"key": "p0195855", "display": "Eindhoven Zernikestraat"},
+        ])
+        r = self._post(
+            admin_client,
+            AUTO_BOOK_XIOR_KEY="p0196062",
+            AUTO_BOOK_XIOR_EMAIL="a@x.com",
+            AUTO_BOOK_XIOR_PW="pw1",
+        )
+        assert r.status_code == 200
+
+        from users import load_users
+        u = next((x for x in load_users() if x.name == "xior-ui"), None)
+        assert u is not None, "用户未创建"
+        assert u.auto_book.xior_accounts == {
+            "p0196062": {"email": "a@x.com", "password": "pw1"}
+        }
+
+        page = admin_client.get(f"/users/{u.id}").get_data(as_text=True)
+        assert "a@x.com" in page, "已保存的邮箱应回填到行里"
+        assert 'value="p0196062"' in page, "楼栋 key 应作为隐藏字段回填"
+        assert "pw1" not in page, "密码绝不能回填到 HTML"
+        # 已配的楼不该再出现在「添加」下拉里
+        add_block = page.split('id="xior-add-select"', 1)[1].split("</select>", 1)[0]
+        assert "p0196062" not in add_block
+        assert "p0195855" in add_block, "未配置的楼仍应可选"
+
+    def test_no_monitored_buildings_shows_hint(self, admin_client, monkeypatch):
+        import app.routes.users as ur
+        monkeypatch.setattr(ur, "_xior_building_options", lambda: [])
+        page = admin_client.get("/users/new").get_data(as_text=True)
+        assert "XIOR_CITIES" in page, "没有监控楼栋时应提示去配 XIOR_CITIES"

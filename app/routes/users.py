@@ -49,6 +49,25 @@ from config import ENERGY_LABELS, energy_rank
 logger = logging.getLogger(__name__)
 
 
+
+def _xior_building_options() -> list[dict]:
+    """当前监控中的 Xior 楼栋，供用户表单选择要配哪栋楼的账号。
+
+    只列 XIOR_CITIES 里配了的——没在监控的楼永远不会产出候选，给它配账号
+    没有意义，只会把表单撑长。
+    """
+    try:
+        from config import load_config
+        from scrapers.xior import XiorScraper
+        cfg = load_config()
+        out = []
+        for c in cfg.xior_cities:
+            meta = XiorScraper.BUILDINGS.get(c.key) or {}
+            out.append({"key": c.key, "display": meta.get("display") or c.name})
+        return sorted(out, key=lambda x: x["display"])
+    except Exception:
+        return []
+
 def _run_async(coro: Any) -> Any:
     """安全运行 async 协程，兼容已有 event loop（Gunicorn gevent/asyncio worker）。"""
     try:
@@ -159,6 +178,7 @@ def user_new() -> Any:
     opts = _get_all_filter_options()
     return render_template(
         "user_form.html", user=None,
+        xior_buildings=_xior_building_options(),
         action=url_for("user_new"), title="新增用户",
         is_macos=(sys.platform == "darwin"),
         occupancy_options=localize_options("Occupancy", opts["Occupancy"]),
@@ -268,6 +288,7 @@ def user_edit(user_id: str) -> Any:
     opts = _get_all_filter_options()
     return render_template(
         "user_form.html", user=user,
+        xior_buildings=_xior_building_options(),
         action=url_for("user_edit", user_id=user_id),
         title=f"编辑用户 · {user.name}",
         is_macos=(sys.platform == "darwin"),

@@ -434,11 +434,47 @@
         </div>
       </div>
 
-      <!-- ── Xior（RENTCafe）── -->
-      <div class="mb-2"><span class="text-xs font-semibold text-secondary">{{ _('user_form_ab_xior') }}</span><span class="badge badge-warning ml-2 text-xs">{{ _('badge_wip') }}</span></div>
-      <div class="form-row mb-3" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-        <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_XIOR_EMAIL" value="{{ ab.xior_email if ab else '' }}"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_XIOR_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.xior_password else '' }}" autocomplete="new-password"></div>
+      <!-- ── Xior（RENTCafe）：一栋楼一个账号 ── -->
+      <div class="mb-2">
+        <span class="text-xs font-semibold text-secondary">{{ _('user_form_ab_xior') }}</span>
+        <span class="badge badge-warning ml-2 text-xs">{{ _('badge_wip') }}</span>
+      </div>
+      <div class="xior-note">{{ _('user_form_xior_note') }}</div>
+
+      <div id="xior-accts" class="mb-2">
+        {% set accts = (ab.xior_accounts if ab else {}) or {} %}
+        {% for b in xior_buildings %}
+          {% if b.key in accts %}
+          <div class="xior-row" data-key="{{ b.key }}">
+            <input type="hidden" name="AUTO_BOOK_XIOR_KEY" value="{{ b.key }}">
+            <span class="xior-bldg" title="{{ b.key }}">{{ b.display }}</span>
+            <input type="email" class="form-input" name="AUTO_BOOK_XIOR_EMAIL"
+                   value="{{ accts[b.key].email }}" placeholder="{{ _('user_form_ab_email') }}">
+            <input type="password" class="form-input" name="AUTO_BOOK_XIOR_PW"
+                   placeholder="{{ _('user_form_pw_keep') if is_edit and accts[b.key].password else _('user_form_ab_pass') }}"
+                   autocomplete="new-password">
+            <button type="button" class="btn btn-ghost btn-sm xior-del"
+                    onclick="removeXiorRow(this)" title="{{ _('user_form_xior_remove') }}">✕</button>
+          </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+
+      <div class="xior-add mb-3">
+        <select id="xior-add-select" class="form-select">
+          <option value="">{{ _('user_form_xior_pick') }}</option>
+          {% for b in xior_buildings %}
+            {% if b.key not in accts %}
+            <option value="{{ b.key }}" data-display="{{ b.display }}">{{ b.display }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addXiorRow()">
+          <i class="bi bi-plus-lg mr-1"></i>{{ _('user_form_xior_add') }}
+        </button>
+        {% if not xior_buildings %}
+        <span class="text-xs text-tertiary">{{ _('user_form_xior_none_monitored') }}</span>
+        {% endif %}
       </div>
 
       <!-- ── OurDomain（RENTCafe）── -->
@@ -525,10 +561,73 @@
   </div>
 
 </form>
+
+<style>
+.xior-note { font-size: 11.5px; color: var(--text2); margin-bottom: 8px; line-height: 1.5; }
+.xior-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.1fr) minmax(140px, 1.4fr) minmax(120px, 1fr) auto;
+  gap: 8px; align-items: center; margin-bottom: 6px;
+}
+.xior-bldg {
+  font-size: 12px; font-weight: 500; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.xior-row .form-input { margin: 0; }
+.xior-del { color: var(--danger); padding: 4px 8px; line-height: 1; }
+.xior-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.xior-add .form-select { width: auto; min-width: 190px; margin: 0; }
+@media (max-width: 640px) {
+  .xior-row { grid-template-columns: 1fr auto; }
+  .xior-bldg { grid-column: 1 / -1; }
+}
+</style>
 {% endblock %}
 
 {% block scripts %}
 <script>
+// ── Xior 按楼栋账号 ──
+// Xior 每栋楼是独立的 RENTCafe 门户、独立账号，所以凭据一栋楼一套。
+// 下拉里只有「监控中且还没配」的楼；配上的从下拉移走，删掉再放回去。
+function addXiorRow() {
+  var sel = document.getElementById('xior-add-select');
+  var opt = sel.options[sel.selectedIndex];
+  if (!sel.value || !opt) return;
+
+  var row = document.createElement('div');
+  row.className = 'xior-row';
+  row.dataset.key = sel.value;
+  row.innerHTML =
+    '<input type="hidden" name="AUTO_BOOK_XIOR_KEY">' +
+    '<span class="xior-bldg"></span>' +
+    '<input type="email" class="form-input" name="AUTO_BOOK_XIOR_EMAIL" placeholder="{{ _("user_form_ab_email") }}">' +
+    '<input type="password" class="form-input" name="AUTO_BOOK_XIOR_PW" placeholder="{{ _("user_form_ab_pass") }}" autocomplete="new-password">' +
+    '<button type="button" class="btn btn-ghost btn-sm xior-del" onclick="removeXiorRow(this)" title="{{ _("user_form_xior_remove") }}">✕</button>';
+  // 用 DOM 赋值而不是拼进 HTML 字符串——楼栋名来自配置，拼字符串等于给 XSS 开门
+  row.querySelector('input[name="AUTO_BOOK_XIOR_KEY"]').value = sel.value;
+  var label = row.querySelector('.xior-bldg');
+  label.textContent = opt.dataset.display || opt.textContent;
+  label.title = sel.value;
+
+  document.getElementById('xior-accts').appendChild(row);
+  row.querySelector('input[type="email"]').focus();
+  opt.remove();
+  sel.value = '';
+}
+
+function removeXiorRow(btn) {
+  var row = btn.closest('.xior-row');
+  if (!row) return;
+  // 放回下拉，方便误删后加回来
+  var sel = document.getElementById('xior-add-select');
+  var o = document.createElement('option');
+  o.value = row.dataset.key;
+  o.textContent = row.querySelector('.xior-bldg').textContent;
+  o.dataset.display = o.textContent;
+  sel.appendChild(o);
+  row.remove();
+}
+
 // 提交前自我禁用确认：user 角色把 enabled 关掉时，弹一次 confirm 兜底。
 // admin 永远直接放行；user 仅在确实把开关切到关闭时才询问。
 window._isSelfUser = {{ 'true' if is_user else 'false' }};

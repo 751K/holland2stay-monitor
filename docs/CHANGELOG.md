@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Xior 凭据改为按楼栋（一栋楼一个账号）
+
+实测发现 **Xior 每栋楼是独立的 RENTCafe property 门户**：各有自己的 host、property 代码和 `myOlePropertyId`，登录页原话是「your **<楼栋名>** Guest Account」，不是「Xior 账号」。生产库里 4 栋有数据的楼对应 4 个不同 host，cookie 不跨主机。
+
+| 楼栋 | 属性代码 | `myPropertyId` |
+|---|---|---|
+| Eindhoven Zernikestraat | NLEZERNS | 185589 |
+| Aachen Vaals Katzensprung | NLVSNEES | 185795 |
+| Utrecht Willem Dreeslaan | NLUWIDRS | 186237 |
+
+原来的单对 `xior_email` / `xior_password` 建立在「Xior 一个账号」的错误认知上。改为 `xior_accounts = {building_key: {email, password}}`，key 与 `XIOR_CITIES` / `BUILDINGS` 同一套，密码逐条加密。
+
+**查不到该楼凭据时绝不回退到别楼的。** 拿 A 楼账号去 B 楼门户登录必然失败，而失败计入 RENTCafe 的 IP 级尝试限制（连续失败锁 30 分钟）——等于用一次注定失败的请求去消耗真正需要它的额度。存量单对字段只在用户完全没配过按楼凭据时兜底，一旦开始按楼配置就彻底忽略（那对值只可能对某一栋楼有效，而无法判断是哪栋）。
+
+面板上改成按楼栋增删：下拉里只列**监控中且还没配**的楼（没在监控的楼不会产出候选，给它配账号没有意义），配上的移出下拉、删除后放回。密码留空 = 不修改，与其他平台字段一致；邮箱清空 = 删除该楼。
+
+`_collect_booking_candidates` 里三处硬编码的 `source == "holland2stay"` 收敛成 `_can_auto_book(user, listing)`，它同时回答「这个 source 的预订流程实现了没有」和「用户有没有这栋楼的账号」——正如设计意图，**凭据本身就是开关**，不需要额外的 per-building 开关。
+
+**Xior 暂不放进 `_AUTO_BOOK_SOURCES`**：`bookers/rentcafe.py` 里第 3 步之后的多步表单仍是没走过流程硬猜的草稿，放开等于拿用户真实账号提交半懂不懂的表单。凭据判定已就位，流程验证完只需改那个元组。
+
 ### 修正 — Xior 没有抽签，却有 23 条房源被标成「摇号中」
 
 `Vacant Unrented Not Ready` 一直被映射成 `Available in lottery`。**Xior 根本没有抽签机制**——"lottery" 是 Holland2Stay 专有概念（H2S 的 availability filter id=336 摇号池）。当初大概是想表达「不能立刻入住」，顺手抓了个最近的现成状态。

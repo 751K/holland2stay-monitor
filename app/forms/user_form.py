@@ -77,6 +77,44 @@ def _sanitize_display_name(raw: str) -> str:
     return cleaned
 
 
+def parse_xior_accounts(
+    form: "ImmutableMultiDict[str, str]",
+    existing: Optional[AutoBookConfig] = None,
+) -> dict[str, dict[str, str]]:
+    """从表单解析按楼栋的 Xior 账号。
+
+    Xior 每栋楼是独立的 RENTCafe property 门户、独立账号，所以凭据按楼栋 key
+    存。表单用三个同名数组并列提交::
+
+        AUTO_BOOK_XIOR_KEY[]    楼栋 key（与 BUILDINGS 一致）
+        AUTO_BOOK_XIOR_EMAIL[]  该楼账号邮箱
+        AUTO_BOOK_XIOR_PW[]     该楼账号密码（留空 = 不修改）
+
+    密码留空沿用旧值，与其他平台的密码字段一致——密码不回填到 HTML，
+    空提交只能理解为「不改」，否则用户每次编辑别的字段都会把密码清空。
+
+    邮箱为空的行视为删除该楼配置。
+    """
+    keys = form.getlist("AUTO_BOOK_XIOR_KEY")
+    emails = form.getlist("AUTO_BOOK_XIOR_EMAIL")
+    pws = form.getlist("AUTO_BOOK_XIOR_PW")
+
+    old = (existing.xior_accounts if existing else None) or {}
+    out: dict[str, dict[str, str]] = {}
+    for i, raw_key in enumerate(keys):
+        key = (raw_key or "").strip()
+        if not key:
+            continue
+        email = (emails[i] if i < len(emails) else "").strip()
+        if not email:
+            continue          # 邮箱清空 = 删除该楼
+        pw = (pws[i] if i < len(pws) else "").strip()
+        if not pw:
+            pw = (old.get(key) or {}).get("password", "")
+        out[key] = {"email": email, "password": pw}
+    return out
+
+
 def build_user_from_form(
     form: "ImmutableMultiDict[str, str]",
     user_id: Optional[str] = None,
@@ -183,9 +221,12 @@ def build_user_from_form(
         email=form.get("AUTO_BOOK_EMAIL", ""),
         password=_secret("AUTO_BOOK_PASSWORD", ex_ab.password if ex_ab else ""),
         payment_method=payment_method,
-        # ── Xior ──
-        xior_email=form.get("AUTO_BOOK_XIOR_EMAIL", ""),
-        xior_password=_secret("AUTO_BOOK_XIOR_PASSWORD", ex_ab.xior_password if ex_ab else ""),
+        # ── Xior：一栋楼一个账号 ──
+        xior_accounts=parse_xior_accounts(form, ex_ab),
+        # 存量单对字段原样保留（表单已不再提供入口）。清掉的话，还没来得及按楼
+        # 重配的老用户会突然失去凭据；留着由 xior_account_for() 决定何时忽略。
+        xior_email=ex_ab.xior_email if ex_ab else "",
+        xior_password=ex_ab.xior_password if ex_ab else "",
         # ── OurDomain ──
         ourdomain_email=form.get("AUTO_BOOK_OURDOMAIN_EMAIL", ""),
         ourdomain_password=_secret("AUTO_BOOK_OURDOMAIN_PASSWORD", ex_ab.ourdomain_password if ex_ab else ""),
