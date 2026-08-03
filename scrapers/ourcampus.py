@@ -31,18 +31,96 @@ OurCampus 是 Greystar 的另一个学生住房品牌，与 OurDomain 同属一�
 
 万一它的单元行结构真的不同，基类的完整性守卫会兜住——解析不出单元且响应又不
 像单元面板时标记 incomplete，而不是误报「没有房」。但如果结构不同却仍是合法
-面板，就会静默返回 0 个单元。**首次真实有房时应人工核对一次日志。**
+面板，就会静默返回 0 个单元。
+
+为此每次请求都往 ``data/ourcampus_capture.txt`` 记一行摘要，并在**有单元或
+疑似解析失配时**附完整 HTML——首次真实有房时拿它核对解析器。
 """
 from __future__ import annotations
 
 import logging
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 
 import curl_cffi.requests as req
 
 from .base import ScrapeTask
-from .ourdomain import OurDomainScraper, _get_text, _headers_for
+from .ourdomain import (
+    OurDomainScraper,
+    _extract_units,
+    _get_text,
+    _headers_for,
+    _looks_like_availability_panel,
+)
 
 logger = logging.getLogger(__name__)
+
+
+# ── 抓取留档 ────────────────────────────────────────────────────────
+#
+# 存在的唯一理由：**它的单元表 HTML 至今没有真实样本**（见模块文档）。等到这栋
+# 楼第一次真的有房时，需要拿原始 markup 核对解析器——只看日志里的「共抓取 N 个
+# 单元」不够，因为最危险的情况恰恰是「结构变了但仍是合法面板」，那会静默返回 0。
+#
+# 所以：每次请求都记一行摘要，**只在有看头的时候**才附完整 HTML：
+#   - 解析出单元了 → 第一份真实样本，必须留
+#   - 响应里有 unitrow 痕迹但解析出 0 个 → 正是解析器对不上的信号，更要留
+# 平时（零可订）只有摘要行，一天几百轮也就几十 KB。
+_CAPTURE_PATH_ENV = "OURCAMPUS_CAPTURE_PATH"
+_CAPTURE_MAX_BYTES = 8 * 1024 * 1024
+_UNITROW_HINT = re.compile(r'id=["\']unitrow_\d+', re.IGNORECASE)
+
+
+def _capture_path() -> Path:
+    override = os.environ.get(_CAPTURE_PATH_ENV, "").strip()
+    if override:
+        return Path(override)
+    from config import DATA_DIR  # 延迟导入，避免 config ↔ scrapers 循环
+    return DATA_DIR / "ourcampus_capture.txt"
+
+
+def _record_capture(fp_id: str, html: str) -> None:
+    """把一次 availableunits 响应记进留档文件。任何异常都不许影响抓取。"""
+    try:
+        path = _capture_path()
+        if path.exists() and path.stat().st_size > _CAPTURE_MAX_BYTES:
+            return  # 满了就停，不轮转——这是排查用的一次性证据，不是运行日志
+
+        parsed = len(_extract_units(html))
+        has_rows = bool(_UNITROW_HINT.search(html or ""))
+        panel = _looks_like_availability_panel(html)
+        interesting = parsed > 0 or has_rows
+
+        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        head = (
+            f"=== {stamp}  fp={fp_id}  bytes={len(html or '')}  "
+            f"panel={'yes' if panel else 'NO'}  unitrow={'yes' if has_rows else 'no'}  "
+            f"parsed={parsed} ===\n"
+        )
+        body = ""
+        if interesting:
+            body = (
+                "--- 完整响应（首次出现单元 / 解析器可能对不上，留作核对）---\n"
+                + (html or "") + "\n--- 响应结束 ---\n"
+            )
+            if parsed == 0:
+                logger.warning(
+                    "OurCampus 响应含 unitrow 但解析出 0 个单元——解析器可能与"
+                    "该主题不匹配，原始 HTML 已留档到 %s", path,
+                )
+            else:
+                logger.info(
+                    "OurCampus 首次解析出 %d 个单元，原始 HTML 已留档到 %s",
+                    parsed, path,
+                )
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(head + body)
+    except Exception:
+        logger.debug("OurCampus 抓取留档失败（已忽略）", exc_info=True)
 
 
 class OurCampusScraper(OurDomainScraper):
@@ -101,11 +179,13 @@ class OurCampusScraper(OurDomainScraper):
         （实测 HTTP 200）。同一套 RentCafe，WAF 策略按 host 配。
         """
         url = f"{base}/rcLoadContent.ashx?contentclass=availableunits"
-        return _get_text(
+        html = _get_text(
             session, url,
             headers=_headers_for(url, referer=floorplans_url, ajax=True),
             data=[("floorPlans[]", str(fp_id))],
         )
+        _record_capture(str(fp_id), html)
+        return html
 
     def _building_for_task(self, task: ScrapeTask) -> dict[str, str]:
         # 基类的报错文案写死了 "OurDomain"，这里换成本 source 的名字，

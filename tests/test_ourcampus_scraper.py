@@ -215,3 +215,96 @@ class TestListingMapping:
         # detail 为空时兜底用 source，不能写死成 "OurDomain"
         assert "Detail: ourcampus" in l.features
         assert not any("OurDomain" in f for f in l.features)
+
+
+# ── 抓取留档 ────────────────────────────────────────────────────────
+
+class TestCapture:
+    """存在理由：它的单元表 HTML 至今没有真实样本。
+
+    第一次真的有房时要拿原始 markup 核对解析器——只看日志里的「共抓取 N 个
+    单元」不够，最危险的情况恰恰是「结构变了但仍是合法面板」，那会静默返回 0。
+    """
+
+    @pytest.fixture
+    def cap(self, tmp_path, monkeypatch):
+        path = tmp_path / "cap.txt"
+        monkeypatch.setenv("OURCAMPUS_CAPTURE_PATH", str(path))
+        return path
+
+    def _read(self, path):
+        return path.read_text(encoding="utf-8") if path.exists() else ""
+
+    def test_empty_response_logs_summary_only(self, cap):
+        from scrapers.ourcampus import _record_capture
+        _record_capture("1112904", _EMPTY_UNITS)
+        txt = self._read(cap)
+        assert "fp=1112904" in txt and "parsed=0" in txt and "panel=yes" in txt
+        # 零可订是常态，不能每轮都塞一份 32KB HTML
+        assert "完整响应" not in txt
+        assert len(txt) < 500
+
+    def test_response_with_units_keeps_full_html(self, cap):
+        from scrapers.ourcampus import _record_capture
+        html = _EMPTY_UNITS.replace(
+            "Apartment Search Result",
+            'Apartment Search Result</div><tr id="unitrow_999" data-selenium-id="urow1">'
+            '<th data-selenium-id="Apt1" id="999">#OC1</th>'
+            '<td data-selenium-id="SqFt1">24</td></tr>',
+        )
+        _record_capture("1113259", html)
+        txt = self._read(cap)
+        assert "parsed=1" in txt and "unitrow=yes" in txt
+        assert "完整响应" in txt, "第一份真实样本必须完整留下来"
+        assert "unitrow_999" in txt
+
+    def test_unitrow_present_but_parsed_zero_is_kept(self, cap):
+        """守卫兜不住的那种情况：仍是合法面板，但解析器对不上。"""
+        from scrapers.ourcampus import _record_capture
+        html = _EMPTY_UNITS.replace(
+            "Apartment Search Result",
+            'Apartment Search Result</div><tr id="unitrow_888" class="brand-new-theme"></tr>',
+        )
+        _record_capture("1112905", html)
+        txt = self._read(cap)
+        assert "unitrow=yes" in txt and "parsed=0" in txt
+        assert "完整响应" in txt, "解析器可能失配时更要留原始 HTML"
+
+    def test_non_panel_response_is_flagged(self, cap):
+        from scrapers.ourcampus import _record_capture
+        _record_capture("1112904", "<html><body>Rentcafe Error</body></html>")
+        assert "panel=NO" in self._read(cap)
+
+    def test_appends_across_calls(self, cap):
+        from scrapers.ourcampus import _record_capture
+        for fp in ("a", "b", "c"):
+            _record_capture(fp, _EMPTY_UNITS)
+        heads = [l for l in self._read(cap).splitlines() if l.startswith("=== ")]
+        assert len(heads) == 3
+
+    def test_size_cap_stops_writing(self, cap, monkeypatch):
+        import scrapers.ourcampus as oc
+        monkeypatch.setattr(oc, "_CAPTURE_MAX_BYTES", 10)  # 一行摘要就超
+        oc._record_capture("a", _EMPTY_UNITS)
+        first = self._read(cap)
+        oc._record_capture("b", _EMPTY_UNITS)
+        assert self._read(cap) == first, "超过上限后不再写入"
+
+    def test_failure_never_breaks_scraping(self, cap, monkeypatch):
+        """留档是排查辅助，绝不能因为它抓取失败。"""
+        import scrapers.ourcampus as oc
+        monkeypatch.setattr(oc, "_capture_path", lambda: (_ for _ in ()).throw(OSError("boom")))
+        oc._record_capture("a", _EMPTY_UNITS)  # 不抛异常即通过
+
+    def test_hooked_into_fetch(self, cap):
+        """真实调用路径上确实会写——不是只有直接调 _record_capture 才写。"""
+        session = MagicMock()
+        resp = MagicMock(status_code=200, ok=True, text=_EMPTY_UNITS)
+        resp.raise_for_status = lambda: None
+        session.post.return_value = resp
+        OurCampusScraper()._fetch_units_html(
+            session, base="https://x.test/onlineleasing", fp_id="1112904",
+            property_id="186609", move_in_date="2026-09-01",
+            floorplans_url="https://x.test/onlineleasing/s/floorplans.aspx",
+        )
+        assert "fp=1112904" in self._read(cap)

@@ -2,6 +2,16 @@
 
 ## v1.10.0 (2026-08-03)
 
+### 新增 — OurCampus 抓取留档
+
+`data/ourcampus_capture.txt`（`OURCAMPUS_CAPTURE_PATH` 可改）。每次 availableunits 请求记一行摘要：时间、floorplan、响应字节数、是否是合法面板、有无 unitrow 痕迹、解析出几个单元。
+
+**只在有看头时才附完整 HTML**：解析出单元了（第一份真实样本），或响应里有 unitrow 痕迹但解析出 0 个（正是解析器对不上的信号，也正是完整性守卫兜不住的那种情况）。平时零可订只留摘要行，一天几百轮也就几十 KB；写满 8MB 后停止，不轮转——这是一次性证据，不是运行日志。
+
+存在理由：OurCampus 的单元表 HTML 至今没有真实样本，解析器是复用 OurDomain 的。等它第一次真有房时要拿原始 markup 核对——只看日志里的「共抓取 N 个单元」不够。
+
+留档失败不影响抓取（异常全吞）。
+
 ### 新增 — 影子 source（`SHADOW_SOURCES`）
 
 列出的 source 照常抓取、写库、参与 stale 收敛和面板统计，但**不发任何通知**——用户渠道、面板 notification feed、APNs/FCM 全部跳过。用于新平台上线前的静默验证：先确认它抓得对、数据长什么样，再决定是否对用户开放。
