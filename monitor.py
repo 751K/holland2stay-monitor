@@ -466,6 +466,33 @@ def _mark_h2s_scrape_recovered() -> None:
 _BROWSER_SOURCES = frozenset({"holland2stay", "xior"})
 
 
+# 全部 source 都失败时，挑一个最有代表性的异常上抛。顺序 = 「哪个根因更值得
+# main_loop 据以决策」：
+#   ProxyError    有明确修复动作（切备用代理 / 降级直连），而且全员失败时它
+#                 大概率就是其它 source 失败的共同根因 —— 排最前
+#   Maintenance   平台自己会恢复，安静长冷却、不告警用户
+#   Blocked       长冷却 + 指数退避
+#   RateLimit     短冷却 + 自适应间隔翻倍
+#   Network       连续失败计数
+# ProxyError 是 ScrapeNetworkError 子类，必须排在它前面才匹配得到。
+_ROUND_FAILURE_PRIORITY: tuple[type[BaseException], ...] = (
+    ProxyError,
+    UpstreamMaintenanceError,
+    BlockedError,
+    RateLimitError,
+    ScrapeNetworkError,
+)
+
+
+def _pick_round_failure(failures: list[tuple[str, Exception]]) -> Exception:
+    """从各 source 的失败里挑一个上抛给 main_loop。"""
+    for cls in _ROUND_FAILURE_PRIORITY:
+        for _, exc in failures:
+            if isinstance(exc, cls):
+                return exc
+    return failures[0][1]
+
+
 def _split_h2s_tasks(tasks) -> tuple[list, list]:
     """拆分 H2S 与其它 source 任务，便于只熔断 H2S。"""
     h2s_tasks = [t for t in tasks if t.source == _H2S_SOURCE]
@@ -1143,6 +1170,8 @@ async def run_once(
         fresh_all: list[Listing] = []
         completeness_all: dict[str, bool] = {}
         h2s_blocked: BlockedError | None = None
+        source_failures: list[tuple[str, Exception]] = []
+        succeeded_sources: list[str] = []
 
         async def _dispatch(selected, *, isolated: bool = False, browser_source: str = ""):
             result = await _dispatch_scrape_tasks_async(
@@ -1153,29 +1182,45 @@ async def run_once(
             )
             return _unpack_scrape_result(result)
 
-        # 非 H2S 的任务里，浏览器型 source（Xior）必须和 H2S 一样跑在长存
-        # 单线程 executor 上：Playwright 的对象绑定创建线程，默认 executor
-        # 的线程不固定，跨线程调用会抛
-        # ``greenlet.error: Cannot switch to a different thread``。
+        async def _dispatch_isolated(src: str, group: list) -> None:
+            """跑一个 source 的全部任务，失败只影响这个 source。
+
+            浏览器型 source（H2S / Xior）必须绑到各自的长存单线程
+            （见 ``_get_browser_executor``）：Playwright 的对象绑定创建线程，
+            默认 executor 的线程不固定，跨线程调用会抛
+            ``greenlet.error: Cannot switch to a different thread``。
+            """
+            try:
+                fresh_part, completeness_part = await _dispatch(
+                    group,
+                    isolated=src in _BROWSER_SOURCES,
+                    browser_source=src,
+                )
+            except Exception as e:
+                source_failures.append((src, e))
+                # 标 ✗ 而不是留空：完整扫描那行日志要看得出「这个 source 塌了」，
+                # 且 False 会正确挡住该城市的 stale 收敛。
+                for t in group:
+                    completeness_all.setdefault(t.city_display, False)
+                logger.error(
+                    "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
+                    src, len(group), type(e).__name__, e,
+                    exc_info=True,
+                )
+                return
+            succeeded_sources.append(src)
+            fresh_all.extend(fresh_part)
+            completeness_all.update(completeness_part)
+
+        # 逐 source 隔离。dispatcher 内部已经按 task 隔离，但它在「本次调用的
+        # 任务全部失败」时仍会上抛——而 monitor 是按 source 分开调用它的，于是
+        # 那个判定退化成了「单个 source 全失败」，等于没有跨 source 保护。
         #
-        # 这个 bug 潜伏过一段时间——默认 executor 会复用线程，碰巧命中同一个
-        # 时一切正常，直到某轮换了线程才炸。
-        browser_others = [t for t in other_tasks if t.source in _BROWSER_SOURCES]
-        plain_others = [t for t in other_tasks if t.source not in _BROWSER_SOURCES]
-
-        if plain_others:
-            fresh_part, completeness_part = await _dispatch(plain_others)
-            fresh_all.extend(fresh_part)
-            completeness_all.update(completeness_part)
-
-        # 按 source 分组：每个浏览器型 source 有自己的线程和 Playwright 实例
-        for src in sorted({t.source for t in browser_others}):
-            group = [t for t in browser_others if t.source == src]
-            fresh_part, completeness_part = await _dispatch(
-                group, isolated=True, browser_source=src
-            )
-            fresh_all.extend(fresh_part)
-            completeness_all.update(completeness_part)
+        # 2026-08-03 实测：Xior 四栋楼连续 429 让 RateLimitError 逃出整个
+        # dispatch，同轮 OurDomain 已抓到的结果被丢弃、H2S 排在后面根本没执行、
+        # 39 个用户收到「监控将暂停 5 分钟」。24 小时内三次。
+        for src in sorted({t.source for t in other_tasks}):
+            await _dispatch_isolated(src, [t for t in other_tasks if t.source == src])
 
         if selected_h2s:
             try:
@@ -1186,10 +1231,17 @@ async def run_once(
                 h2s_blocked = e
                 _mark_h2s_scrape_blocked(e)
             else:
+                succeeded_sources.append(_H2S_SOURCE)
                 fresh_all.extend(fresh_part)
                 completeness_all.update(completeness_part)
                 if h2s_mode == "canary":
                     _mark_h2s_scrape_recovered()
+
+        # 一个都没成功 = 本轮没有任何可用数据，维持旧契约上抛，让 main_loop 走
+        # 冷却而不是原速空转。h2s_blocked 不在此列——H2S 熔断本身就是退避，且
+        # run_once 对它有专门的分支。
+        if source_failures and not succeeded_sources and h2s_blocked is None:
+            raise _pick_round_failure(source_failures)
 
         return fresh_all, completeness_all, h2s_blocked, h2s_mode
 

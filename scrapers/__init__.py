@@ -144,54 +144,85 @@ def dispatch_scrape_tasks(
         # batch_session() 让 scraper 把 Session/TLS 指纹提升到批次级——H2S
         # 这样一批城市只握手一次、用同一个指纹（恢复 P0 之前 scrape_all 的
         # 行为）。默认 no-op，OurDomain 等仍各 task 自管会话。
-        with scraper.batch_session():
+        #
+        # 整个 with 再包一层 try：``batch_session()`` 的进入/退出发生在下面那圈
+        # per-task try **之外**，它抛的异常（浏览器创建失败、CF 挑战没过、
+        # Playwright 崩溃）会直接穿透整个 dispatcher，把同轮里已经抓好的其它
+        # source 结果一起带走——正是 per-task 隔离想避免的事。
+        try:
+            with scraper.batch_session():
+                for t in source_tasks:
+                    ckey = _completeness_key(source, t.city_display, by_source)
+                    try:
+                        result = scraper.scrape(t)
+                        success_count += 1
+                        all_listings.extend(result.listings)
+                        completeness[ckey] = result.complete
+                    except UpstreamMaintenanceError as e:
+                        # 平台维护是站点级状态——不和其它 source 隔离尝试也无意义，
+                        # 但仍然走 hard_failures 计数：让"全部任务都失败"判定成立时
+                        # 直接上抛维护异常，monitor 据此走长冷却 + 安静等。
+                        hard_failures.append((ckey, e))
+                        completeness[ckey] = False
+                        logger.info("%s 平台维护中，已隔离该任务: %s", ckey, e)
+                    except (RateLimitError, BlockedError) as e:
+                        hard_failures.append((ckey, e))
+                        completeness[ckey] = False
+                        logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
+                    except (KeyboardInterrupt, SystemExit):
+                        raise
+                    except ScrapeNetworkError as e:
+                        network_failures.append(ckey)
+                        # ProxyError 是 ScrapeNetworkError 子类——单独记下，便于全失败
+                        # 时上抛 ProxyError 让 monitor 发"代理失效"告警。
+                        if isinstance(e, ProxyError) and proxy_failure is None:
+                            proxy_failure = e
+                        logger.error("%s 抓取网络失败，已隔离该任务: %s", ckey, e)
+                        # 单 city 网络失败不进 completeness（与现有 scrape_all 行为一致）
+                    except Exception as e:
+                        # 未预期的异常同样要**按 task 隔离**。此前它会穿透整个
+                        # dispatcher，把同轮里已经抓好的其它 source 结果一起带走
+                        # ——2026-08-02 实测：Xior 的 greenlet.error 导致 H2S 和
+                        # OurDomain 的结果全部丢失，整轮无完整扫描城市。
+                        #
+                        # 这类异常通常意味着底层会话已不可用，留着会让后续每轮
+                        # 重复失败，所以顺带丢弃该 source 的长生命周期资源。
+                        hard_failures.append((ckey, e))
+                        completeness[ckey] = False
+                        logger.error(
+                            "%s 抓取出现未预期异常，已隔离该任务: %s: %s",
+                            ckey, type(e).__name__, e, exc_info=True,
+                        )
+                        try:
+                            scraper.invalidate_session()
+                        except Exception:
+                            logger.debug("%s invalidate_session 失败（已忽略）",
+                                         ckey, exc_info=True)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
+            # 批次会话本身失败（浏览器建不起来 / CF 挑战没过 / Playwright 崩）。
+            # 只补还没有结论的 task——异常若来自 ``__exit__``，前面已经跑完的
+            # task 有自己的 completeness，不该被这里覆盖。
+            batch_failed = False
             for t in source_tasks:
                 ckey = _completeness_key(source, t.city_display, by_source)
+                if ckey in completeness:
+                    continue
+                completeness[ckey] = False
+                hard_failures.append((ckey, e))
+                batch_failed = True
+            logger.error(
+                "%s 批次会话失败，已隔离该 source: %s: %s",
+                source, type(e).__name__, e, exc_info=True,
+            )
+            if batch_failed:
+                # 会话已不可用，丢掉长生命周期资源让下轮重建
                 try:
-                    result = scraper.scrape(t)
-                    success_count += 1
-                    all_listings.extend(result.listings)
-                    completeness[ckey] = result.complete
-                except UpstreamMaintenanceError as e:
-                    # 平台维护是站点级状态——不和其它 source 隔离尝试也无意义，
-                    # 但仍然走 hard_failures 计数：让"全部任务都失败"判定成立时
-                    # 直接上抛维护异常，monitor 据此走长冷却 + 安静等。
-                    hard_failures.append((ckey, e))
-                    completeness[ckey] = False
-                    logger.info("%s 平台维护中，已隔离该任务: %s", ckey, e)
-                except (RateLimitError, BlockedError) as e:
-                    hard_failures.append((ckey, e))
-                    completeness[ckey] = False
-                    logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
-                except (KeyboardInterrupt, SystemExit):
-                    raise
-                except ScrapeNetworkError as e:
-                    network_failures.append(ckey)
-                    # ProxyError 是 ScrapeNetworkError 子类——单独记下，便于全失败
-                    # 时上抛 ProxyError 让 monitor 发"代理失效"告警。
-                    if isinstance(e, ProxyError) and proxy_failure is None:
-                        proxy_failure = e
-                    logger.error("%s 抓取网络失败，已隔离该任务: %s", ckey, e)
-                    # 单 city 网络失败不进 completeness（与现有 scrape_all 行为一致）
-                except Exception as e:
-                    # 未预期的异常同样要**按 task 隔离**。此前它会穿透整个
-                    # dispatcher，把同轮里已经抓好的其它 source 结果一起带走
-                    # ——2026-08-02 实测：Xior 的 greenlet.error 导致 H2S 和
-                    # OurDomain 的结果全部丢失，整轮无完整扫描城市。
-                    #
-                    # 这类异常通常意味着底层会话已不可用，留着会让后续每轮
-                    # 重复失败，所以顺带丢弃该 source 的长生命周期资源。
-                    hard_failures.append((ckey, e))
-                    completeness[ckey] = False
-                    logger.error(
-                        "%s 抓取出现未预期异常，已隔离该任务: %s: %s",
-                        ckey, type(e).__name__, e, exc_info=True,
-                    )
-                    try:
-                        scraper.invalidate_session()
-                    except Exception:
-                        logger.debug("%s invalidate_session 失败（已忽略）",
-                                     ckey, exc_info=True)
+                    scraper.invalidate_session()
+                except Exception:
+                    logger.debug("%s invalidate_session 失败（已忽略）",
+                                 source, exc_info=True)
 
     # 429 / 403 / 维护：若没有任何任务成功，维持旧行为让 monitor 进入冷却；
     # 若已有其它平台成功，则返回部分结果，避免 OurDomain 被挡时拖垮 H2S。

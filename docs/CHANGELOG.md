@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.9.11 (2026-08-03)
+
+### Bug 修复 — 单个 source 失败会炸掉整轮
+
+v1.9.9 给 dispatcher 加了 per-task 隔离，但那层保护在生产里基本没生效，原因有两条，互相放大。
+
+**其一：跨 source 的保护被调用方式抵消。** `dispatch_scrape_tasks` 在「本次调用的任务**全部**失败」时仍会上抛（这是给 monitor 冷却用的契约）。但 monitor 从 v1.9.9 起是**按 source 分开调用**它的，于是「全部失败」退化成了「单个 source 全失败」——跨 source 隔离等于不存在。
+
+实测（2026-08-03 07:41–07:45）：Xior 四栋楼连续 429 → `RateLimitError` 逃出整个 dispatch → 同轮 OurDomain 已抓到的结果被丢弃、H2S 排在最后根本没被执行、39 个用户收到「监控将暂停 5 分钟」（这条路径**没有节流**，不像 403 有 30 分钟窗口）、全局冷却 5 分钟 + 自适应间隔翻倍。24 小时内三次。
+
+OurDomain 更危险：它只有 1 个 task，任何一次 403 都满足「全失败」，会触发 `blocked_fail_streak` 指数退避，把**全局**冷却推到 15min → 30 → 60 → 120min，而 H2S 完全健康。
+
+现在 monitor 逐 source 隔离，失败的 source 在完整扫描日志里标 `✗`（而不是从统计里消失），其余 source 照常入库通知。只有**所有** source 都失败时才上抛，让 main_loop 照旧冷却——新增 `_pick_round_failure()` 按「哪个根因更值得据以决策」挑异常：ProxyError → Maintenance → Blocked → RateLimit → Network。
+
+**其二：`batch_session()` 的异常绕过 per-task 隔离。** 那圈 `try/except` 在 `with scraper.batch_session():` **内部**，而批次会话的进入/退出在外面。浏览器创建失败、CF 挑战没过、Playwright 崩溃都从这里抛出，直接穿透整个 dispatcher——正是 per-task 隔离想避免的事。8-03 00:58 的 `Xior 主站仍停在挑战页` 只差没连挂 3 次就会踩到。
+
+现在整个 `with` 再包一层 try：批次会话失败按该 source 的所有未决 task 记账并 `invalidate_session()`，异常若来自 `__exit__` 则不覆盖已经跑完的 task 的结论。
+
 ## v1.9.10 (2026-08-03)
 
 ### Bug 修复 — Xior 把上游的成功码当成故障
