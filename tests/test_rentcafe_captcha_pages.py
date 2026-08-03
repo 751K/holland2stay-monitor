@@ -122,3 +122,21 @@ class TestSolverHonoursEnterpriseFlag:
             action="UserLogin", sitekey="k", enterprise=True,
         )
         assert captured["enterprise"] == 1
+
+
+class TestV2FieldIsDistinct:
+    """v2 token 不能塞进 v3 字段。
+
+    2026-08-03 实测踩过：塞错字段后服务端一直回「Please verify that you are
+    not a robot」，既不报字段错误也不报 token 无效，只能靠对着页面 JS 才看
+    得出来——v2 由 grecaptcha.render() 渲染，token 落在标准的
+    g-recaptcha-response 上。
+    """
+
+    def test_v2_and_v3_fields_differ(self):
+        for name in ("oleapplication", "guestlogin", "register"):
+            p = page_captcha(name)
+            assert p.v2_field != p.v3_field, f"{name} 的 v2/v3 字段不该相同"
+
+    def test_v2_field_is_the_standard_one(self):
+        assert page_captcha("oleapplication").v2_field == "g-recaptcha-response"

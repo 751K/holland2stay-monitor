@@ -79,14 +79,52 @@ class RentCafeSession:
     # ------------------------------------------------------------------
 
     def open(self, apply_url: str) -> dict:
-        """Open the ``oleapplication.aspx`` page and return its hidden fields.
+        """打开 ``oleapplication.aspx``，返回页面的隐藏字段。
 
-        This is always the first step.  It sets session cookies and extracts
-        the ``cafeportalkey`` that must be carried through every subsequent
-        request.
+        永远是第一步：它建立会话 cookie，并取出后续每个请求都要带的
+        ``cafeportalkey``。
+
+        TLS 指纹要轮换
+        --------------
+        SecureRC 的 WAF 按 TLS 指纹拒绝——2026-08-03 实测同一 URL 同一时刻，
+        ``chrome124`` / ``chrome136`` / ``safari18_0`` / ``firefox135`` 返 200，
+        而 ``chrome131`` / ``edge101`` 返 403。``get_impersonate()`` 是从池里
+        随机取的，所以不轮换的话每次预订都有约四分之一的概率一上来就 403。
+
+        直接复用 ``scrapers.ourdomain`` 那套指纹冷却状态机——**打的是同一个
+        SecureRC 集群**，某个指纹被烧对抓取和预订同时生效，共享状态等于互相
+        提供情报，各记一套反而会重复踩同一个坑。
         """
-        self._session = req.Session()
-        resp = self._session.get(apply_url, impersonate=self._impersonate, timeout=30)
+        from scrapers.ourdomain import (
+            _impersonate_attempts, _mark_fingerprint_blocked, _mark_fingerprint_good,
+        )
+
+        attempts = _impersonate_attempts() or [self._impersonate]
+        resp = None
+        tried: list[str] = []
+        for idx, impersonate in enumerate(attempts, start=1):
+            tried.append(impersonate)
+            self._session = req.Session()
+            r = self._session.get(apply_url, impersonate=impersonate, timeout=30)
+            if r.status_code != 403:
+                _mark_fingerprint_good(impersonate)
+                self._impersonate = impersonate   # 后续步骤沿用这个成功的指纹
+                resp = r
+                break
+            _mark_fingerprint_blocked(impersonate)
+            if idx < len(attempts):
+                logger.warning(
+                    "RENTCafe 403，切换 TLS 指纹重试 %d/%d: %s → %s",
+                    idx + 1, len(attempts), impersonate, attempts[idx],
+                )
+        if resp is None:
+            # 全部指纹都 403 = 出口 IP 被盯上了，换指纹救不回来。
+            # 归类为 blocked（可重试）而不是 unknown_error——后者会让上层
+            # 当成代码 bug，而这其实是环境问题。
+            raise RentCafeBlockedError(
+                f"oleapplication.aspx 全部 TLS 指纹均返回 403（{', '.join(tried)}）。"
+                "多半是出口 IP 被 WAF 盯上，换 HTTPS_PROXY 或稍后再试。"
+            )
 
         if resp.status_code != 200:
             raise RentCafeError(
@@ -251,6 +289,23 @@ class RentCafeSession:
             data[cfg.fallback_flag] = "false"
 
         resp = self._post(self._post_url, data, referer=ref)
+
+        # v3 分数不够时服务端不报错，而是回一段要求走 v2 的 JS。实测
+        # （2026-08-03）2Captcha 的 v3 token **一次都没过**过这一页的阈值，
+        # 所以 v2 回退是常态路径而不是例外——成本要按 v2 算，不是 §8.4 里
+        # 那个乐观的 v3 估值。
+        if cfg and cfg.has_captcha and _needs_v2_fallback(resp.text):
+            logger.info("v3 未通过服务端阈值，改解 v2 重试")
+            data[cfg.v2_field] = self._solver.solve_v2(
+                page_url=ref, sitekey=cfg.v2_sitekey,
+            )
+            data[cfg.fallback_flag] = "true"     # 告诉服务端这是回退后的提交
+            resp = self._post(self._post_url, data, referer=ref)
+            if _needs_v2_fallback(resp.text):
+                raise RentCafeError(
+                    "条款页 reCAPTCHA 连 v2 回退也未通过——服务端仍要求验证。"
+                )
+
         self._last_html = self._follow(resp, ref)
         return self._last_html
 
@@ -576,6 +631,20 @@ def _extract_cafeportalkey(html: str) -> str:
     """Extract the encrypted session token ``cafeportalkey`` from a page."""
     m = re.search(r'name=["\']cafeportalkey["\'][^>]*value=["\']([^"\']+)["\']', html)
     return m.group(1) if m else ""
+
+
+#: 服务端要求走 v2 回退时会回的标记。它返回 HTTP 200 + 一段 JS，不是错误码，
+#: 所以只能靠内容判断——照抄实测响应里的两个特征。
+_V2_FALLBACK_MARKERS = (
+    "callReCaptchaV2",              # 渲染 v2 checkbox 的函数
+    "Please verify that you are not a robot",
+)
+
+
+def _needs_v2_fallback(html: str) -> bool:
+    """响应是不是在要求 v2 回退。"""
+    body = html or ""
+    return any(m in body for m in _V2_FALLBACK_MARKERS)
 
 
 def _extract_js_redirect(html: str) -> str:

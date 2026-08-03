@@ -51,7 +51,12 @@ class PageCaptcha:
     kind: str            # KIND_*
     v3_sitekey: str = ""
     action: str = ""     # grecaptcha.execute 的 action，必须与页面 JS 一致
-    v3_field: str = "g-recaptcha-response-v3"   # token 填进哪个隐藏字段
+    v3_field: str = "g-recaptcha-response-v3"   # v3 token 填进哪个隐藏字段
+    #: v2 回退的 token 字段。**和 v3 不是同一个**——v2 由 grecaptcha.render()
+    #: 渲染成 checkbox，token 落在标准的 g-recaptcha-response 上。
+    #: 2026-08-03 实测踩过：把 v2 token 塞进 v3 字段，服务端一直回
+    #: 「Please verify that you are not a robot」，看不出是字段错了。
+    v2_field: str = "g-recaptcha-response"
     fallback_flag: str = ""                     # 触发 v2 回退的标志字段
     v2_sitekey: str = RENTCAFE_V2_SITEKEY
     form_name: str = ""                         # 主表单的 id / formName2
