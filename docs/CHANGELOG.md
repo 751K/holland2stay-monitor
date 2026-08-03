@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### CI — Android 只出 APK
+
+`build.yml` 的 Android job 去掉 `bundleRelease` 和 AAB 上传步骤。AAB 是给 Google Play 上架用的，当前分发渠道只有 Release 页直接下载——留着白白多一次 bundle 构建。要上架时把这两步加回来即可。
+
+**连带修掉一个一直存在的问题**：README（中英）、guide（中英）、登录页下载按钮总共 7 处 Android 下载链接指向的都是 `app-release.aab`。`.aab` 是 Google Play 的分发格式，**用户下载了装不上**——Android 不能直接安装 bundle。现已全部改为 `app-release.apk`。
+
+（这些链接在停止产出 AAB 之后还会直接 404，与 v1.6.x 修过的那次「Android 下载链接 404」是同一个坑。）
+
 ## v1.10.0 (2026-08-03)
 
 接入第四个平台 OurCampus，并为「新平台已上线、但先不对用户开放」这件事补上机制。
