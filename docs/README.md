@@ -144,7 +144,8 @@ The ones worth knowing up front:
 |---|---|---|
 | `SOURCES` | `holland2stay` | Which platforms to poll, comma-separated |
 | `CITIES` | `Eindhoven,29` | Holland2Stay cities, as `Name,id` pairs joined by `\|` |
-| `OURDOMAIN_CITIES` / `XIOR_CITIES` | — | Same format for the other sources; building keys are listed in each scraper |
+| `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | Same format for the other sources; building keys are listed in each scraper |
+| `SHADOW_SOURCES` | — | Sources that are scraped and stored but send **no** notifications. For validating a new platform before exposing it to users |
 | `CHECK_INTERVAL` | `300` | Seconds between rounds outside peak hours |
 | `PEAK_INTERVAL` | `60` | Seconds between rounds during peak hours |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | How long the monitor may be silent before `/health` reports unhealthy |

@@ -10,6 +10,8 @@ flowchart TD
     subgraph S["Multi-platform scraping layer scrapers/"]
         G --> H1["holland2stay:Eindhoven...\nHollandStayScraper\nBrowserFetcher(H2S_PROFILE)"]
         G --> H2["ourdomain:Diemen / South-East\nOurDomainScraper"]
+        G --> H2C["ourcampus:Diemen\nOurCampusScraper (extends OurDomain)\nunit query via POST + floorPlans[]"]
+        H2C --> H21
         H2 --> H21["RENTCafe floorplans.aspx\nDiscover floorplan ids / names"]
         H21 --> H22["rcLoadContent.ashx availableunits\nUnit-level listings"]
         H22 --> H23["Parse Unit / Area / Floor / Date\nListing.name = Diemen #6045\nsource = ourdomain"]
@@ -42,7 +44,9 @@ flowchart TD
     N --> O["mark_stale_listings() (once per 24h)\nConverge stale rows by complete source:city\nNo complete city: defer, keep the timer"]
     O --> P["Update last_scrape_at / last_scrape_count"]
 
-    P --> Q["Send notifications\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
+    P --> SH{"source in SHADOW_SOURCES?"}
+    SH -->|Yes| SHX["Stored, but no notification at all\n(silent validation of a new platform)"]
+    SH -->|No| Q["Send notifications\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
     Q --> Q1["Title/body include platform badge\nH2S / OD / XR"]
     Q1 --> Q2["Push: mcore/push.py platform dispatch\niOS→APNs  Android→FCM data-only"]
     Q2 --> R["Record notified state"]

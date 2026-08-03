@@ -390,7 +390,8 @@ docker exec h2s supervisorctl -c /etc/supervisor/conf.d/app.conf status
 docker exec h2s python -c "import urllib.request as u; \
   print(u.build_opener(u.ProxyHandler({})).open('http://localhost:8088/health').read())"
 
-# 部署前预检
+# 部署前预检。注意这条在**宿主机的仓库目录**跑，不是容器里
+# ——Dockerfile 没有 COPY tools/，镜像里没有这个模块
 python -m tools.doctor --no-network
 ```
 

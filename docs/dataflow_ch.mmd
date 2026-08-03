@@ -10,6 +10,8 @@ flowchart TD
     subgraph S["多平台抓取层 scrapers/"]
         G --> H1["holland2stay:Eindhoven...\nHollandStayScraper\nBrowserFetcher(H2S_PROFILE)"]
         G --> H2["ourdomain:Diemen / South-East\nOurDomainScraper"]
+        G --> H2C["ourcampus:Diemen\nOurCampusScraper（继承 OurDomain）\n单元查询走 POST + floorPlans[]"]
+        H2C --> H21
         H2 --> H21["RENTCafe floorplans.aspx\n发现 floorplan ids / names"]
         H21 --> H22["rcLoadContent.ashx availableunits\n单元级房源"]
         H22 --> H23["解析 Unit / Area / Floor / Date\nListing.name = Diemen #6045\nsource = ourdomain"]
@@ -42,7 +44,9 @@ flowchart TD
     N --> O["mark_stale_listings()（每 24h 一次）\n按 source:city 完整扫描结果收敛\n无完整城市则推迟且不重置计时器"]
     O --> P["更新 last_scrape_at / last_scrape_count"]
 
-    P --> Q["发送通知\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
+    P --> SH{"source 在 SHADOW_SOURCES 里？"}
+    SH -->|是| SHX["已入库，但不发任何通知\n（新平台静默验证期）"]
+    SH -->|否| Q["发送通知\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
     Q --> Q1["标题/正文带平台 badge\nH2S / OD / XR"]
     Q1 --> Q2["Push: mcore/push.py 平台分流\niOS→APNs  Android→FCM data-only"]
     Q2 --> R["记录已通知状态"]

@@ -2,27 +2,13 @@
 
 ## v1.10.0 (2026-08-03)
 
-### 新增 — OurCampus 抓取留档
+接入第四个平台 OurCampus，并为「新平台已上线、但先不对用户开放」这件事补上机制。
+顺带修掉一个与前几个版本同源的判据 bug，以及把三份平台文档改成只写当前判断。
 
-`data/ourcampus_capture.txt`（`OURCAMPUS_CAPTURE_PATH` 可改）。每次 availableunits 请求记一行摘要：时间、floorplan、响应字节数、是否是合法面板、有无 unitrow 痕迹、解析出几个单元。
+**升级须知**：无破坏性变更，无需数据迁移。新平台默认不启用——要开启需要同时设
+`SOURCES` 里加 `ourcampus` 和 `OURCAMPUS_CITIES`。
 
-**只在有看头时才附完整 HTML**：解析出单元了（第一份真实样本），或响应里有 unitrow 痕迹但解析出 0 个（正是解析器对不上的信号，也正是完整性守卫兜不住的那种情况）。平时零可订只留摘要行，一天几百轮也就几十 KB；写满 8MB 后停止，不轮转——这是一次性证据，不是运行日志。
-
-存在理由：OurCampus 的单元表 HTML 至今没有真实样本，解析器是复用 OurDomain 的。等它第一次真有房时要拿原始 markup 核对——只看日志里的「共抓取 N 个单元」不够。
-
-留档失败不影响抓取（异常全吞）。
-
-### 新增 — 影子 source（`SHADOW_SOURCES`）
-
-列出的 source 照常抓取、写库、参与 stale 收敛和面板统计，但**不发任何通知**——用户渠道、面板 notification feed、APNs/FCM 全部跳过。用于新平台上线前的静默验证：先确认它抓得对、数据长什么样，再决定是否对用户开放。
-
-过滤发生在 `storage.diff()` **之后**——diff 必须照常执行，房源才会进库、状态变更才会被记录；被拦掉的只有「告诉谁」这一步。
-
-配置校验：不在 `SOURCES` 里的条目会被剔除（不在里面就压根不会抓，写了是笔误）。
-
-一个刻意的取舍：影子期间这些 listing 的 `notified` 一直是 0，但解除影子后**不会补发历史**——`diff()` 只对真正的新 id 产出 `new_listings`，老的不会再冒出来。这是想要的，否则解除影子会给用户灌一堆积压通知。
-
-OurCampus 首次上线即以影子模式运行。
+---
 
 ### 新增平台 — OurCampus
 
@@ -30,13 +16,34 @@ Greystar 旗下与 OurDomain 同属一家的学生住房品牌，同一套 RentC
 
 `OurCampusScraper` **继承** `OurDomainScraper`，只覆盖 `_fetch_units_html()` 一个方法。复用的部分：TLS 指纹池与冷却状态机（模块级共享——两边打的是同一个 SecureRC 集群，某个指纹被烧对双方同时生效）、每次尝试换出口 IP、同 session 内 403 重试、floorplans.aspx 发现、单元行解析的 `data-selenium-id` / `data-label` 双策略、状态映射、Occupancy 反推、Listing 映射。
 
-覆盖的那一个方法是请求形状：OurCampus 用 **POST + `floorPlans[]` 表单体**（照抄它自己前端的 `$.load(url, {floorPlans: names})`），OurDomain 用 GET + query string。同栈不等于同接口；两边 host 的 WAF 策略也不同——OurDomain 的 host 上 POST 会 403，OurCampus 的不会。
+覆盖的那一个是请求形状：OurCampus 用 **POST + `floorPlans[]` 表单体**（照抄它自己前端的 `$.load(url, {floorPlans: names})`），OurDomain 用 GET + query string。同栈不等于同接口；两边 host 的 WAF 策略也不同——OurDomain 的 host 上 POST 会 403，OurCampus 的不会。
 
 `Listing.id` 用独立前缀 `oc_`（OurDomain 是 `od_`）。两者是不同的 RentCafe property（186609 vs 184283 / 182801），unit id 跨 property 是否全局唯一没有保证，撞车会让两条房源在 `storage.diff()` 里合并成同一行、互相覆盖字段。
 
-配置：`SOURCES` 加 `ourcampus`，`OURCAMPUS_CITIES` 默认 `OurCampus Amsterdam Diemen,diemen`。
+配置：`SOURCES` 加 `ourcampus`，`OURCAMPUS_CITIES` 默认 `OurCampus Amsterdam Diemen,diemen`。UI 平台标签 `OurCampus` / `OC`，过滤维度与 OurDomain 相同。
 
-**期望值要放低**：只有一栋楼，且官网自述等待期 16–18 个月（排队制而非先到先得），「秒级通知」在这里的价值远低于 H2S。接入是产品决策，评估结论见 `docs/SCRAPING_RECON.md` §4。
+**两条要如实说明的局限**：
+
+1. **期望值要放低。** 只有一栋楼，且官网自述等待期 16–18 个月——排队制而非先到先得，「秒级通知」在这里的价值远低于 H2S。接入是产品决策，不是因为投入产出比划算；评估结论见 `docs/SCRAPING_RECON.md` §4。
+2. **单元表 HTML 至今没有真实样本。** 接入时该楼零可订，所以解析器是复用 OurDomain 的、赌两边同模板——依据是两边空响应的结构指纹完全一致。选 POST 同样无法用响应验证（两种形状都只能拿到空面板），依据是「和它自己前端一致」。为此加了下面两道保险。
+
+### 新增 — 影子 source（`SHADOW_SOURCES`）
+
+列出的 source 照常抓取、写库、参与 stale 收敛和面板统计，但**不发任何通知**——用户渠道、面板 notification feed、APNs/FCM 全部跳过。用于新平台对用户开放前的静默验证。
+
+过滤发生在 `storage.diff()` **之后**：diff 必须照常执行，房源才会进库、状态变更才会被记录；被拦掉的只有「告诉谁」这一步。`last_scrape_count` 仍按 `fresh` 计数——它回答的是「抓到多少」，不是「通知了多少」。
+
+配置校验：不在 `SOURCES` 里的条目会被剔除（不在里面就压根不会抓，写了是笔误）。
+
+一个刻意的取舍：影子期间这些 listing 的 `notified` 一直是 0，但解除影子后**不会补发历史**——`diff()` 只对真正的新 id 产出 `new_listings`，老的不会再冒出来。否则解除影子会给用户灌一堆积压通知。
+
+OurCampus 首次上线即以影子模式运行。
+
+### 新增 — OurCampus 抓取留档
+
+`data/ourcampus_capture.txt`（`OURCAMPUS_CAPTURE_PATH` 可改）。每次 availableunits 请求记一行摘要：时间、floorplan、响应字节数、是否是合法面板、有无 unitrow 痕迹、解析出几个单元。
+
+**只在有看头时才附完整 HTML**：解析出单元了（第一份真实样本），或响应里有 unitrow 痕迹但解析出 0 个（正是解析器对不上的信号，也正是下面那道守卫兜不住的情况，会同时打 WARNING）。平时零可订只留摘要行，一天几百轮几十 KB；写满 8MB 后停止，不轮转——这是一次性证据，不是运行日志。留档失败全吞异常，不影响抓取。
 
 ### Bug 修复 — 零单元不再等同于「没有房」
 
@@ -44,13 +51,26 @@ RentCafe 在无可用单元时返回的仍是一张**结构完整**的搜索结�
 
 现在零单元时额外检查响应里有没有 `Apartment Search Result` 这个面板标题：有 → 真没房（`complete` 不变）；没有 → 标记 `complete=False`。OurDomain 一并受益。
 
-这是 `ARCHITECTURE.md` §5.10 记录的同一类判据错误的第四个实例（前三个：CF 挑战判据、Xior errorCode、H2S 分页）。
+这是 `ARCHITECTURE.md` §5.10 记录的同一类判据错误的**第四个实例**（前三个：CF 挑战判据、Xior `errorCode`、H2S 分页）——「没拿到数据」不等于「确认没有数据」。
+
+### 文档 — 平台状态文档改为只写当前判断
+
+`XIOR.md`（540 → 307 行）、`OURDOMAIN.md`（534 → 304 行）、`SCRAPING_RECON.md`（384 → 252 行）全部重写为单一时态，删掉动手前的设计草稿、工程量估算、带日期的数据快照，以及已被上游推翻的结论。历史留在 git 里，文档只回答「现在是什么」。
+
+期间修正一处**事实错误**：`OURDOMAIN.md` 写着 Diemen 与 South-East「共用同一个 RentCafe property 184283，只需抓一次」，实际是两个 host、两个 property_id（184283 / 182801）、两个独立 task。照原文改代码会直接删掉一个楼盘的抓取。
+
+补上了 OurDomain 此前一条都没写的反爬机制：每次尝试换出口 IP（与 H2S/Xior 相反——它没有 clearance 可复用，换 IP 才是解法）、指纹池的选取与冷却状态机、同 session 403 重试、`data-label` 双策略提取、以及「单元重复出现在所有 FP 下，因此 `floorPlans` 过滤器不可信」这个推论。
+
+`SCRAPING_RECON.md` 定位收窄为「还没接入的平台值不值得做」，新增 OurCampus 与 Student Experience 两份实测记录，并按复测结果更正 HousingAnywhere——它的 JSON-LD 和 `__PRELOADED_STATE__` 两个月内已不再含房源数据，实际在 `window.__staticRouterHydrationData`。
 
 ### 其它
 
-- `_get_text()` 支持 POST（给了 `data` 时），日志文案里写死的 "OurDomain" 改为中性的 "RentCafe" 或按 `self.source` 参数化——这些代码路径现在被两个 source 共用
+- `_get_text()` 支持 POST（给了 `data` 时）；被两个 source 共用的日志文案去掉写死的 "OurDomain"，改为中性的 "RentCafe" 或按 `self.source` 参数化
 - `_to_listing()` 的 `detail` 兜底从写死的 `"OurDomain"` 改为 `source`
 - 通知渠道的平台短标签补上 `xior`（此前会 fallback 成 `XIOR`）和 `ourcampus`
+- `.env.example` 补上从未记录过的 `CLOAKBROWSER_HEADLESS`
+- dataflow 图补上 OurCampus 与影子过滤环节
+- `ARCHITECTURE.md` 注明 `tools.doctor` 要在宿主机仓库目录跑——Dockerfile 没有 `COPY tools/`，镜像里没这个模块
 
 ## v1.9.12 (2026-08-03)
 

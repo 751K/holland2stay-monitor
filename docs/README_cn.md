@@ -137,7 +137,8 @@ python web.py
 |---|---|---|
 | `SOURCES` | `holland2stay` | 启用哪些平台，逗号分隔 |
 | `CITIES` | `Eindhoven,29` | Holland2Stay 的城市，格式 `名称,id`，多个用 `\|` 分隔 |
-| `OURDOMAIN_CITIES` / `XIOR_CITIES` | — | 其它 source 的同格式配置，楼栋 key 在各自 scraper 里 |
+| `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | 其它 source 的同格式配置，楼栋 key 在各自 scraper 里 |
+| `SHADOW_SOURCES` | — | 列出的 source 照常抓取入库但**不发任何通知**，用于新平台对用户开放前的静默验证 |
 | `CHECK_INTERVAL` | `300` | 非高峰时段的轮询间隔（秒） |
 | `PEAK_INTERVAL` | `60` | 高峰时段的轮询间隔（秒） |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默多久后 `/health` 报 unhealthy |
