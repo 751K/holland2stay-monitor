@@ -67,6 +67,31 @@ source **之后**执行，不分片等于每轮把真正出房源的那个 sourc
 （≈70 秒），6 轮覆盖一遍，游标持久化在 SQLite 里、重启后接着转。
 实现见 `monitor._apply_task_sharding()`。
 
+#### 预订侧另有一道限流：按「IP × 写接口」（2026-08-03 实测）
+
+抓取和预订打的是**不同的主机**（抓取是 API 端点，预订是
+`*.securerc.co.uk`），限流规则也不一样。预订侧实测：
+
+- 同一出口 IP 连着跑 3 轮预订之后，`POST rcformsave.ashx` 开始**整片 403**；
+- **同一时刻 `GET oleapplication.aspx` 完全正常**——所以不是整站封 IP，
+  是写接口被单独盯上了；
+- 等 7 分钟不放行（30 分钟量级的冷却，未精确测定）。
+
+两个后果：
+
+1. **预订会话必须走代理池。** 抓取侧一直走代理，预订侧原来是裸
+   `req.Session()` 直连——等于把整条链路上最要紧、最不能失败的一步，放在
+   了最容易被限流的位置。已改为 `RentCafeSession._new_session()` 从池里取
+   出口。
+2. **一条会话固定一个出口 IP。** 流程状态存在服务端会话里，中途换 IP 可能
+   被直接判失效。换 IP 只发生在 `open()` 因 403 重建会话时——那时本来就要
+   从头来过，换出口是免费的逃生口（和 H2S 那边 `rotating_proxy=True` 同一
+   个道理）。
+
+TLS 指纹轮换救不了这一种：403 发生在会话中途，换指纹要重建 Session、丢掉
+已有 cookie，等于整个流程从头开始。所以中途 403 只能归类为 `blocked` 交给
+上层稍后重试，不要在会话内重试。
+
 ### 2.3 Turnstile 不校验服务端
 
 Yardi modal 里集成了 Cloudflare Turnstile：
@@ -393,6 +418,42 @@ GET  oleapplication.aspx?…&stepname=<下一步>&…&CallMessage=1 → 200
 **登录后会恢复上次的申请上下文**——如果账号里有未完成的申请，直接落到那一步
 （实测落到 ApplicantInfo，而不是 Apartments）。
 
+##### 四个把登录卡死的细节（2026-08-03 逐个实测确认）
+
+这四条各自都会让登录**静默失败**：HTTP 200、无报错、body 全空。表面症状统一
+是流程走到选房时报「该单元已被他人选走」，极具误导性。
+
+| 字段 / 行为 | 想当然的写法 | 实测真值 | 依据 |
+|---|---|---|---|
+| `formName2` | 表单 id `Login` | **`mylistlogin`** | 表单自带的 hidden 值，原样回传 |
+| `CheckUserAuth` | 探测 `1` / 登录 `0` | 探测 `1` / 登录 **空串 `''`** | 页面 JS：`f['CheckUserAuth'].value=''` |
+| 空响应体 | 当成失败 | **空 = 成功** | AJAX 成功回调只把返回 HTML 塞进错误框，无错则无内容 |
+| 跳转指令 | `window.location=` | **`location.href=`**（无前缀） | 登录成功返回的原文 |
+
+用哪个表单也容易搞错。`guestlogin.aspx` 上有 4 个表单：
+
+```
+Login       Username + Password + CheckUserAuth   ← 密码登录走这个，无 reCAPTCHA
+UserLogin   Username + Enterprise reCAPTCHA + otpclickedUserLogin  ← OTP/免密
+OtpOptions / VerifyOTP                            ← OTP 后续
+```
+
+`captcha/rentcafe_pages.py` 里 `guestlogin` 那行记的 `form_name="UserLogin"`
+说的是**验证码长在哪个表单上**，不是密码登录该用哪个——别照抄。
+
+成功长这样（第二段 POST 的响应）：
+
+```javascript
+ClickTrack._trackEvent("PropertySite", "Login", { ce_UserId: 1075991 })
+location.href='/onlineleasing/…/multiloginwrapper.aspx?AllowRedirect=1'
+```
+
+`multiloginwrapper.aspx` 还会再跳一次才回到申请流程，所以跟跳转要能**连跳**
+（实现里限 5 跳并带环检测）。
+
+另外：`EncodeFormElementsToBase64()` 只作用于带 `IsBase64Encode="True"` 属性的
+字段，登录页上**一个都没有**——不需要为它做任何编码。查过了，别再查一遍。
+
 #### ApplicantInfo 表单契约
 
 表单 `ApplicantInformation` → POST `/onlineleasing/rcformsave.ashx`，
@@ -462,6 +523,18 @@ ContinueClick('398336','1111515','185795','16-8-2026','',
 
 **`unitId` 就是抓取侧 `xr_<id>` 里的那个 id**（例：`398336` ↔ `xr_398336`），
 自动化不需要额外映射。
+
+> ⚠️ 上面这段是**解码后**的样子（从 DevTools 抄的，DevTools 显示时已解码）。
+> 服务端实际发的字节里，onclick 内部的引号是 HTML 实体：
+>
+> ```html
+> onclick="ContinueClick(&#39;398336&#39;,&#39;1111515&#39;,&#39;185795&#39;,…)"
+> ```
+>
+> 2026-08-03 踩过：解析器按真引号写正则，真实页面上 20 个单元一个都没解析
+> 出来，`find_unit()` 返回 None，流程如实报告「该单元已被他人选走」——而单元
+> 就好端端在页面上。**解析失败伪装成了业务结论**，全链路无任何报错。
+> 解析前先 `html.unescape()`。
 
 #### 第 3 步 Applicant Info 的字段
 
@@ -600,6 +673,15 @@ RENTCafe 还有 IP 级 attempt limit，连续失败锁 30 分钟——自动化�
 - ~~证件上传是否阻塞流程~~ → **不阻塞**。`isDocumentSetupAvailbleAtThisStep=0`，
   上传控件是 iframe 内嵌的独立控件，`Save` / `Save & Continue` 均可点。
 - ~~登录请求形状~~ → 两段式，都 POST `rcformsave.ashx`，见上。
+- ~~密码登录能否走通~~ → **能，已端到端实测**（2026-08-03，Vaals 账号）。
+  第 1–3 步全部走通：TLS 指纹轮换 → 条款页 v2 回退 → 登录 → 连跳
+  `multiloginwrapper.aspx` → Apartments 页解析出 20 个单元并定位到目标。
+  四个曾把登录卡死的细节见上面的表。
+- ~~密码登录要不要解 reCAPTCHA~~ → **不要**。验证码在 `UserLogin`（OTP）
+  那条路上，密码表单 `Login` 上一个验证码字段都没有。
+- ~~服务端 v3 score 阈值高不高~~ → **高**。条款页实测 **每次**都拒绝 2Captcha
+  的 v3 token（回 `callReCaptchaV2Rentable()`），v2 回退是常态而非例外。
+  §8.4 的成本要按「每次都解 v2」（约 100 秒 / 次）算，不能按乐观值。
 
 **未确认（按优先级）**
 
@@ -617,4 +699,132 @@ RENTCafe 还有 IP 级 attempt limit，连续失败锁 30 分钟——自动化�
    （用户连续输错密码后无法登录）。文档 §2.2 记的是 IP 级——**若真是 IP 级，
    服务器上跑的 booker 会被同一机制打到，一个用户输错密码可能连累同出口 IP
    的其他人**。这条对部署形态影响很大，需要单独验证。
-5. 服务端 v3 score 阈值多高——阈值低则几乎不触发 v2 回退，成本按 §8.4 的乐观值走。
+5. **application fee 之外，「存草稿」这条路本身走不通**——见下面 §8.6。
+
+---
+
+## 8.6 端到端实测结论（2026-08-03，真实账号 + 真实单元）
+
+6 步全部跑通过一遍。前 5 步成立，**第 6 步被平台挡住**。
+
+| 步骤 | 结论 |
+|---|---|
+| ① open | ✅ TLS 指纹轮换有效（chrome131/edge101 会 403） |
+| ② submit_terms | ✅ v3 **每次**被拒，v2 回退是常态（约 100 秒/次） |
+| ③ login | ✅ 见 §「四个把登录卡死的细节」 |
+| ④ find_unit | ✅ 20 个单元全部解析（onclick 是实体编码，见上） |
+| ⑤ select_unit | ✅ 落到 ApplicantInfo，服务端建了 ProspectId |
+| ⑥ save | ❌ `Please upload required documents before Proceeding.` |
+
+### 「先存草稿、再让用户传证件」这个分工不成立
+
+ApplicantInfo 页面上有一项必填文档 `ID/Passport Upload*`（iframe 上传控件，
+状态 "Not Uploaded"），**服务端在它上传前拒绝保存任何内容**。
+
+注意 `isDocumentSetupAvailbleAtThisStep=0` **不等于**「这一步不需要文档」——
+先前把它读成「证件上传不阻塞流程」是错的。当时的依据是「Save 按钮可点」，
+但**按钮可点 ≠ 服务端接受**。这是同一类错误的第五次：把 UI 表象当成了服务端
+行为。
+
+### 15 个字段名曾经全是错的
+
+修 ⑥ 时才发现：上一版的 `FIELD_MAP` **命中 0 / 15**。名字是从页面**可见标签**
+抄的（「First Name」→ `FirstName`），真名是 `ProspectFirstName`。
+
+后果不是报错——服务端对不认识的字段是**静默丢弃**的，提交上去的是一份空白
+申请。而单元测试全绿，因为它是这么写的：
+
+```python
+assert got[FIELD_MAP["first_name"]] == "J"    # 拿映射表去查映射表的输出
+```
+
+**它在验证自己**，跟页面上真实叫什么毫无关系。
+
+真实字段名有三个反直觉的地方，任何硬编码方案都会栽：
+
+```
+drpGender2057105              ← 名字里嵌着 prospect id，每份申请都不同
+drpCurrentCountry = "2"       ← 提交内部数字 id，不是 "Netherlands"
+STU_IDGUESTCARD_ADDITIOALINFO ← ADDITIOAL 是上游的拼写错误，照抄
+```
+
+所以现在字段名一律由 `bookers/rentcafe_form.py` 从**当前页面**解析。用真实的
+235 KB 页面复核过：18/18 字段全部存在。
+
+另有三个字段是 `disabled` 的，**不能发**（jQuery 也不序列化它们，值由服务端
+按选中的单元自己算）：`LeaseTerm`、`ProspectEmail`、`PrefMoveinDate{pid}`。
+
+### 背景调查三问不由系统作答
+
+`drpEverEvicted` / `drpEverConvicted` / `drpCriminalCharges` 是关于用户本人的
+**事实陈述**（是否曾被驱逐 / 定罪 / 有未决刑事指控）。代勾「我授权你做背景
+调查」是用户在面板授权过的；代答「我没有前科」不是——答错了是用户在承担
+后果。实现上：留空即视为「未回答」，档案判定为不完整，**不提交**。
+
+---
+
+## 8.7 完整流程与边界（2026-08-03 侦察确认）
+
+登录后的步骤导航暴露了**完整流程，共 11 步**（此前文档记的 9 步是不全的）：
+
+```
+Floorplan → Rental Options → Applicant Info → Additional Applicants
+→ Additional Rental Options → Application Charges → Lease Summary
+→ Lease Creation → Move-in Charges → Email Summary → Documents
+```
+
+### 锁定发生在付款那一步（不再是推测）
+
+`ApplicationCharges` 的表单 `PaymentApplicationChargeStep1` 要填：
+
+```
+sAcct *          银行账号 / IBAN
+sSwiftCode *     SWIFT
+sName *          账户名
+sCPAShortName *  账户别名
+drecurMaxAmt     最大扣款额
+```
+
+页面原文：「in order to continue the application process, all administration
+fees will need to be paid」。
+
+**代填银行账户是硬限制，不是设计选择**——所以系统的边界只能停在 Save，往前
+一步都没有。这也意味着 `draft_saved` **不代表抢到房**：通知文案必须明写
+「房源还没占住，请立刻去付款」。
+
+### 后面几步不能深链
+
+`oleapplication.aspx?stepname=<后面的步骤>` 只返回页面外壳（form 数为 0），
+真正的内容走 `rcLoadContent.ashx?contentclass=<步骤名>&stepname=<步骤名>
+&myOlePropertyId=…&ProspectId=<加密串>` 拉。`ProspectId` 是 base64 + 签名的形式
+（`MjA1NzEwNQ%3d%3d-8z%2faMtjeL9g%3d`），缺了它一律 500。
+
+### 证件上传接口
+
+```
+POST {base}/onlineleasing/rcLoadContent.ashx?contentclass=PropertySiteImageUpload
+     &objType=3&objPointer=<propertyId>&docType=8
+     &ProspectID=<id>&VoyProspectID=<id>&SetupID=<id>
+     &SetupType=Other&SetupTitle=ID/Passport+Upload*
+Content-Type: multipart/form-data
+     image[]  文件
+     objType / objPointer / objSubPointer / docType    ← 值就在 URL 查询串里
+```
+
+无验证码、无额外 token（iframe 的 `<form action="">` 就提交回它自己那个 URL）。
+限制：≤5 MB；扩展名 gif/jpeg/png/jpg/pjpeg/bmp/x-png/pdf/doc/docx/xlsx；
+文件名 ≤100 字符且不含 `\ / : * ? " < > |`。
+
+**URL 里带 `ProspectID` —— 文档是按「申请」传的，不是按账号。** 每抢一个新
+单元都要重传一次，所以「用户预先手动传一次一劳永逸」不成立。实现上由系统代传
+（文件加密落盘，见 `applicant_docs.py`）。
+
+### 已适配但**尚未端到端验证**的部分
+
+代传证件之后的保存**没有实测过**。已知在证件缺失时，Gender 和背景调查三问
+（`drpGender{pid}` / `drpEverEvicted` / `drpEverConvicted` / `drpCriminalCharges`）
+是**唯一四个不落库**的字段，其余 13 个即使保存被拒也照样写进了申请。推测这四个
+属于筛查区块、写入被证件要求挡住，传了证件应当一并落库——**但这是推测，没验证**。
+
+`monitor._AUTO_BOOK_SOURCES` 里**仍然没有 `xior`**，这条链路对用户是关闭的。
+验证完再开。

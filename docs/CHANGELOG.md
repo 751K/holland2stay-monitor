@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+### Xior 半自动预订：整条链路实测走通，并修掉 6 个「不报错的错」
+
+2026-08-03 用真实账号对真实单元逐步实测，前 5 步全部走通（open → 条款 → 登录 → 选房 → 申请表），第 6 步保存被平台的证件要求挡住，已改为由系统代传证件。
+
+这一轮暴露的错误有一个共同点：**全都不会报错**。服务端对不认识的字段静默丢弃，HTTP 一律 200，日志干干净净。
+
+#### 登录：四个细节，任一错都是 200 + 空 body
+
+| 字段 / 行为 | 原实现 | 实测真值 |
+|---|---|---|
+| `formName2` | 写死表单 id `Login` | 服务端下发的 `mylistlogin` |
+| `CheckUserAuth` | 探测 `1` / 登录 `0` | 探测 `1` / 登录**空串** |
+| 空响应体 | 当成失败 | **空 = 成功**（AJAX 成功回调只填错误框） |
+| JS 跳转 | 只认 `window.location` | 还有无前缀的 `location.href=` |
+
+把空 body 当失败的后果特别有迷惑性：登录其实早就成功了，流程却一路报到 `race_lost`。
+
+#### 选房：解析失败伪装成了业务结论
+
+`onclick` 里的引号是 HTML 实体 `&#39;`，正则按真引号写，页面上 **20 个单元一个都没解析出来**，`find_unit()` 返回 None，流程如实报告「该单元已被他人选走」——而单元就好端端在页面上。
+
+#### 申请表：15 个字段名全是错的，命中 0
+
+字段名是从页面**可见标签**抄的（「First Name」→ `FirstName`），真名是 `ProspectFirstName`。而旧测试全绿，因为它写的是 `got[FIELD_MAP["first_name"]]`——**拿映射表去查映射表的输出，在验证自己**。
+
+真实字段名有三处根本无法硬编码：名字里嵌 prospect id（`drpGender2057105`）、下拉提交内部数字 id（Netherlands→`2`）、Xior 自定义字段带上游的拼写错误（`ADDITIOAL`）。新增 `bookers/rentcafe_form.py` 从**当前页面**解析字段名、下拉取值和标签。
+
+还有两格是**改了标签复用字段**，只看字段名会填错格：`Currentaddr{pid}Addr2` 标签是「University」，`drpDLCountry` 标签是「Nationality」。现在按标签判断这一格实际在要什么。
+
+#### 保存被拒却报成功
+
+`save_applicant_info()` 压根没检查响应体，服务端回「Please upload required documents before Proceeding.」，`book()` 照样返回 `draft_saved / success=True`。这是这条链路上后果最重的一种错法——用户读到「已为你起草申请」会安心去准备证件，而实际一个字都没存下。新增 `save_rejected` phase，并把「响应体空=成功、有 showMessage error=失败」这条全站判据抽成一个函数。
+
+#### 预订链路没走代理
+
+抓取侧一直走代理池，预订侧却是裸 `req.Session()` 直连。实测同一 IP 连跑 3 轮后 `POST rcformsave.ashx` **整片 403，而同时 GET 完全正常**——WAF 按「IP × 写接口」限流。等于把整条链路上最要紧的一步放在最容易被限流的位置。已改为从代理池取出口，且**一条会话固定一个 IP**（流程状态在服务端会话里，中途换 IP 可能被判失效）。
+
+### 系统代传证件（`applicant_docs.py`）
+
+平台在 `ID/Passport Upload*` 到位前**拒绝保存申请表的任何内容**，而自动预订是异步触发的——所以不存在「用完即走的透传」，文件必须提前存好。上传 URL 里带 `ProspectID`，文档是**按申请**传的，用户手动预先传一次并不能一劳永逸。
+
+这是一个知情的取舍（当前部署只服务少量熟人，自动预订未对外开放）。取舍既然做了就把风险降到底：加密落盘、不进每轮都要加载的用户配置、面板上看得到也删得掉、校验规则抄自上传控件自己的 JS 好在面板上就拦下来。
+
+### 边界确认：锁定在付款那一步
+
+`ApplicationCharges` 的表单 `PaymentApplicationChargeStep1` 要填 `sAcct`(IBAN) / `sSwiftCode` / `sName`，页面原文「all administration fees will need to be paid」。代填银行账户是硬限制，所以边界只能停在 Save。`draft_saved` 因此**不代表抢到房**，通知文案据此写成「请点击链接付款，否则可能被他人抢先」。
+
+完整流程实为 **11 步**（此前文档记的 9 步不全），且后面几步不能深链——内容走 `rcLoadContent.ashx?contentclass=<步骤名>` 拉。
+
+### 申请人档案扩充
+
+对着真实表单发现要的东西比档案里存的多：地址拆成四格（原来 `postcode_city` 一格塞两样）、住所性质、背景调查三问。
+
+**背景调查三问不由系统作答。** `drpEverEvicted` / `drpEverConvicted` / `drpCriminalCharges` 是关于用户本人的**事实陈述**，代勾「我授权你做背景调查」是用户授权过的，代答「我没有前科」不是——留空即视为未回答，档案判为不完整，不提交。
+
+老档案的 `postcode_city` 有兼容拆分，不会因为字段拆开就突然被判不完整；顺带修掉一个静默错标：只填邮编没填城市时，旧逻辑把整串当城市填进 City 格。
+
+> `monitor._AUTO_BOOK_SOURCES` 里**仍然没有 `xior`**，这条链路对用户是关闭的。代传证件之后的保存尚未端到端验证（已知证件缺失时 Gender 和背景三问是唯一四个不落库的字段，推测传了证件会一并落库，但没验证）。
+
 ### H2S 被 Cloudflare 拦死后无法自愈——sticky 出口 IP 没有逃生口
 
 2026-08-03 生产事故：H2S 在 18:45 收到「要求重新校验」，重解挑战连续 3 次 90s 全部失败，熔断退避 30 分钟。

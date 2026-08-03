@@ -151,6 +151,18 @@ def parse_applicant_profile(
         place_of_birth=_s("PLACE_OF_BIRTH"),
         id_number=_s("ID_NUMBER"),
         student_number=_s("STUDENT_NUMBER"),
+        # 2026-08-03 对着真实表单补的。修正字段名时才发现表单要的东西比
+        # 档案里存的多——漏填不会报错，服务端会静默丢弃。
+        address_line2=_s("ADDRESS_LINE2"),
+        postcode=_s("POSTCODE"),
+        city=_s("CITY"),
+        id_country=_s("ID_COUNTRY"),
+        housing_type=_s("HOUSING_TYPE"),
+        # 背景调查三问：留空 = 用户还没回答。**不要给默认值**——代答
+        # 「我没有前科」和代勾「我授权你调查」不是一回事。
+        ever_evicted=_s("EVER_EVICTED"),
+        ever_convicted=_s("EVER_CONVICTED"),
+        criminal_charges=_s("CRIMINAL_CHARGES"),
     )
 
 

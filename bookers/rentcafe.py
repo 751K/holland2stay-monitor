@@ -22,7 +22,8 @@ import logging
 import os
 import re
 from typing import Optional
-from urllib.parse import urljoin
+from html import unescape
+from urllib.parse import parse_qsl, urljoin, urlparse
 
 import curl_cffi.requests as req
 
@@ -48,6 +49,22 @@ class RentCafeBlockedError(RentCafeError):
     """IP blocked / 403 — retry later with different IP."""
 
 
+class RentCafeSaveRejectedError(RentCafeError):
+    """服务端拒绝保存申请表。
+
+    单独一类，是为了让「草稿没存下」永远不可能被报成 ``draft_saved``——
+    那条消息会让用户以为表单已经填好、安心去传证件，而实际什么都没有。
+    """
+
+
+class RentCafeAuthError(RentCafeError):
+    """凭据被服务端拒绝。
+
+    和 :class:`RentCafeError` 分开，是因为处置方式完全不同：这个要提示用户去
+    面板改这栋楼的账号密码，重试多少次都没用。
+    """
+
+
 # ---------------------------------------------------------------------------
 # RentCafeSession — low-level HTTP + multi-step form engine
 # ---------------------------------------------------------------------------
@@ -62,8 +79,9 @@ class RentCafeSession:
         2Captcha API key.
     """
 
-    def __init__(self, captcha_api_key: str) -> None:
+    def __init__(self, captcha_api_key: str, source: str = "xior") -> None:
         self._solver = CaptchaSolver(captcha_api_key)
+        self._source = source
         self._session: req.Session | None = None
         self._base_url: str = ""
         self._ole_path: str = ""
@@ -104,7 +122,7 @@ class RentCafeSession:
         tried: list[str] = []
         for idx, impersonate in enumerate(attempts, start=1):
             tried.append(impersonate)
-            self._session = req.Session()
+            self._session = self._new_session()
             r = self._session.get(apply_url, impersonate=impersonate, timeout=30)
             if r.status_code != 403:
                 _mark_fingerprint_good(impersonate)
@@ -133,6 +151,9 @@ class RentCafeSession:
 
         self._base_url, self._ole_path = _parse_base_and_path(resp.url)
         self._post_url = f"{self._base_url}/onlineleasing/rcformsave.ashx"
+        #: 登录成功后要重新进入的落地页。登录响应体是空的（见 login()），
+        #: 里面没有 window.location 可跟，只能自己回到这个入口。
+        self._apply_url = str(resp.url)
         self._cafeportalkey = _extract_cafeportalkey(resp.text)
 
         self._last_html = resp.text
@@ -206,28 +227,42 @@ class RentCafeSession:
         cpk = _extract_cafeportalkey(resp.text) or self._cafeportalkey
 
         base = dict(fields)
-        base["formName2"] = self._LOGIN_FORM
+        # formName2 **必须原样带回服务端下发的值**（实测是 "mylistlogin"，不是
+        # 表单 id）。2026-08-03 踩过：这里曾写成 base["formName2"] = "Login"，
+        # 服务端认不出这个表单身份，两次 POST 都回 200 + 空 body，登录静默失败。
         base["cafeportalkey"] = cpk
         base["Username"] = email
 
-        # ① 账号探测。服务端据此决定要不要收密码；返回里可能带更新过的隐藏字段。
+        # ① 账号探测。服务端据此决定要不要收密码。
         probe = dict(base)
         probe["CheckUserAuth"] = "1"
         probe_resp = self._post(self._post_url, probe, referer=login_url)
-        probed = _extract_form_fields(probe_resp.text, self._LOGIN_FORM)
+        _raise_if_login_error(probe_resp.text, "账号探测")
+        # 探测响应通常是空的（没有错误就没有内容），这是正常的；只有真下发了
+        # 表单才更新字段。
+        probed = _extract_form_fields(
+            probe_resp.text, self._LOGIN_FORM, required=False,
+        )
         if probed:
             base.update(probed)
             base["Username"] = email
-            base.setdefault("formName2", self._LOGIN_FORM)
 
-        # ② 带密码正式登录
+        # ② 带密码正式登录。CheckUserAuth 在展开密码框时被页面 JS 置为**空串**
+        #    （`f['CheckUserAuth'].value=''`），不是 "0"——发 "0" 服务端当成未知
+        #    状态，同样静默失败。
         data = dict(base)
         data["Password"] = password
-        data["CheckUserAuth"] = "0"
+        data["CheckUserAuth"] = ""
         resp2 = self._post(self._post_url, data, referer=login_url)
-        # 登录响应多半是一段 JS 跳转；跟过去拿到真正的落地页，
-        # 后面 find_unit() 要在它上面找单元。
-        self._last_html = self._follow(resp2, login_url)
+        _raise_if_login_error(resp2.text, "登录")
+
+        # 登录响应体为空 = 没有错误提示要显示 = 成功（页面 JS 只把返回的 HTML
+        # 塞进错误提示框）。因为里面没有 window.location 可跟，得自己回到申请
+        # 入口；服务端会话已带上登录态，会恢复到选房那一步。
+        followed = self._follow(resp2, login_url)
+        self._last_html = followed if _has_unit_list(followed) else self._get(
+            getattr(self, "_apply_url", "") or login_url
+        ).text
         return self._handle_response(resp2, "login")
 
     def submit_step(self, step_name: str, form_data: dict, page_path: str = "") -> dict:
@@ -335,6 +370,57 @@ class RentCafeSession:
         self._last_html = self._get(url).text
         return self._last_html
 
+    #: Applicant Info 页里那个证件上传 iframe。
+    _UPLOAD_IFRAME_RE = re.compile(
+        r"""src=['"](?P<url>[^'"]*rcLoadContent\.ashx\?"""
+        r"""contentclass=PropertySiteImageUpload[^'"]*)['"]""",
+        re.I,
+    )
+
+    def upload_document(self, page_html: str, filename: str, data: bytes) -> bool:
+        """把证件传到申请上。返回是否上传成功。
+
+        服务端在这份文档到位之前**拒绝保存申请表的任何内容**（2026-08-03 实测，
+        错误文案 ``Please upload required documents before Proceeding.``）。
+
+        接口契约（抄自 iframe 自己的 ``uploadImage()``）::
+
+            POST  <iframe 自己的 URL>          # form 的 action="" → 提交回本页
+            Content-Type: multipart/form-data
+                image[]      文件
+                objType / objPointer / objSubPointer / docType   ← 页面下发，原样带
+
+        没有验证码，也没有额外 token。URL 里带着 ``ProspectID``——**每份申请一个**，
+        所以文档是按申请上传的，不能只传一次到账号上。
+        """
+        m = self._UPLOAD_IFRAME_RE.search(unescape(page_html or ""))
+        if not m:
+            logger.warning("Applicant Info 页上找不到证件上传控件")
+            return False
+
+        src = m.group("url")
+        url = src if "://" in src else f"{self._base_url}{src}"
+        # iframe 内那几个隐藏字段，值就在 URL 的查询串里，原样回传。
+        qs = dict(parse_qsl(urlparse(url).query))
+        fields = {
+            "objType": qs.get("objType", ""),
+            "objPointer": qs.get("objPointer", ""),
+            "objSubPointer": qs.get("objSubPointer", ""),
+            "docType": qs.get("docType", ""),
+        }
+        resp = self._session.post(
+            url, data=fields, files={"image[]": (filename, data)},
+            headers={"Referer": url}, impersonate=self._impersonate, timeout=120,
+        )
+        if resp.status_code == 403:
+            raise RentCafeBlockedError(f"403 on document upload {url}")
+        ok = resp.status_code == 200
+        logger.info(
+            "证件上传 %s：%s（%d 字节，HTTP %d）",
+            "成功" if ok else "失败", filename, len(data), resp.status_code,
+        )
+        return ok
+
     def save_applicant_info(self, page_html: str, profile_fields: dict) -> str:
         """填 Applicant Info 并点 **Save**（只存草稿），返回结果页 HTML。
 
@@ -349,16 +435,32 @@ class RentCafeSession:
         data = dict(fields)
         data.update(carry_over_fields(fields))   # 反自动化字段原样回传
         data.update(profile_fields)
-        data["formName2"] = "ApplicantInformation"
+        data["formName2"] = "ApplicantInformation"   # 实测页面自带值就是它
         data["cafeportalkey"] = (
             _extract_cafeportalkey(page_html) or self._cafeportalkey
         )
-        # 告诉服务端点的是 Save 而不是 Next
+        # 点 Save 时页面 JS（onclickfunctions('Save')）**只**动这三个字段：
+        #
+        #     myButtonClicked = 'Save'
+        #     ContentclassName = 'ApplicantInformation'
+        #     FormError = $(".formError").length      // 客户端校验错误数
+        #
+        # 它**从不碰 IsSave 和 SaveContinueClicked**——这两个在页面上的默认值
+        # 都是空串。2026-08-03 踩过：这里凭空发了 IsSave="1"，服务端切到「提交
+        # 申请」的校验路径，回「Please upload required documents before
+        # Proceeding.」，草稿一个字都没存下。**页面 JS 不设的字段就别自己编。**
         data["myButtonClicked"] = "Save"
-        data["IsSave"] = "1"
-        data["SaveContinueClicked"] = "0"
+        data.setdefault("ContentclassName", "ApplicantInformation")
+        data["FormError"] = "0"                 # 我们是程序填的，没有客户端校验错误
+        data.pop("IsSave", None)
+        data.pop("SaveContinueClicked", None)
 
         resp = self._post(self._post_url, data, referer=ref)
+        # 必须验收。服务端拒绝时照样回 HTTP 200，错误只藏在响应体的
+        # showMessage 里——不检查就会把「什么都没存下」报成「已起草申请」。
+        err = server_error_message(resp.text)
+        if err:
+            raise RentCafeSaveRejectedError(f"申请表保存被 RENTCafe 拒绝：{err}")
         self._last_html = self._follow(resp, ref)
         return self._last_html
 
@@ -373,15 +475,48 @@ class RentCafeSession:
         而不是 302，所以不能只靠 HTTP 重定向。
         """
         html = resp.text or ""
-        target = _extract_js_redirect(html)
-        if not target:
-            return html
-        url = target if "://" in target else urljoin(referer, target)
-        return self._get(url).text
+        # 会连跳：登录成功先跳 multiloginwrapper.aspx，它再跳回申请流程。
+        # 限 5 跳，跳环了就把手上这页交出去，别把自己转死。
+        seen: set[str] = set()
+        for _ in range(5):
+            target = _extract_js_redirect(html)
+            if not target:
+                break
+            url = target if "://" in target else urljoin(referer, target)
+            if url in seen:
+                break
+            seen.add(url)
+            referer = url
+            html = self._get(url).text
+        return html
 
     # ------------------------------------------------------------------
     # internal helpers
     # ------------------------------------------------------------------
+
+    def _new_session(self) -> req.Session:
+        """新建一条走代理的会话。
+
+        为什么必须走代理
+        ----------------
+        2026-08-03 实测：从同一个出口 IP 连着跑几轮预订后，``rcformsave.ashx``
+        的 **POST 开始整片 403，而 GET 仍然正常**——WAF 是按「IP × 写接口」限流
+        的，等 7 分钟都不放行。抓取侧（``scrapers.ourdomain``）一直是走代理池的，
+        预订侧却在用裸 Session 直连，等于把真正要紧的那条链路暴露在最容易被限
+        流的位置上。
+
+        为什么整条会话固定一个出口
+        --------------------------
+        RENTCafe 的流程状态存在服务端会话里，中途换 IP 既会显得可疑，也可能被
+        直接判失效。所以只在 :meth:`open` 重建会话（换 TLS 指纹）时才顺带换
+        IP——那时本来就要从头来过，换个出口正好是免费的逃生口。
+        """
+        from config import get_proxy_url
+
+        proxy = get_proxy_url(self._source, rotating=True)
+        if not proxy:
+            return req.Session()
+        return req.Session(proxies={"https": proxy, "http": proxy})
 
     def _get(self, url: str) -> req.Response:
         assert self._session is not None
@@ -491,17 +626,24 @@ class RentCafeBooker(AbstractBooker):
         替一群用户保管护照扫描件是拿一个巨大的泄露责任去换几十秒，替用户付钱
         更不用说。所以 booker 走到 **Save**（存草稿）就停。
 
-        **它不保证抢到房。** 实测选中单元只是跳到申请表，不是当场锁房；页面
-        写着「until you have paid the application fees」，所以锁定大概率在付费
-        环节。返回的 phase 是 ``draft_saved`` 而不是 ``success``，通知文案也
-        据此写成「请迅速上传证件」——把它当成功报给用户，用户会以为房到手了，
-        慢悠悠去传证件，结果被别人抢走。
+        **它不保证抢到房，锁定发生在付款那一步**（2026-08-03 侦察确认，不再是
+        推测）：``ApplicationCharges`` 步骤的表单 ``PaymentApplicationChargeStep1``
+        要填 ``sAcct``（IBAN）/ ``sSwiftCode`` / ``sName``，页面原文是
+        「in order to continue the application process, all administration fees
+        will need to be paid」。
+
+        **填银行账户是硬限制，不是设计选择**——所以边界只能是 Save，往前一步
+        都没有。返回的 phase 是 ``draft_saved`` 而不是 ``success``，通知文案
+        明写「房源还没占住，请立刻去付款」：把它当成功报给用户，用户会以为房
+        到手了，慢悠悠去付款，结果被别人抢走。
 
         每一步都先核对落到了哪里再往下走：这条流程里猜错一步的后果不是报错，
         而是在用户真实账号下默默提交一份错的申请。
         """
+        import applicant_docs
+        from bookers.rentcafe_form import parse_applicant_form
         from bookers.rentcafe_applicant import (
-            ProfileIncompleteError, build_form_fields,
+            FormShapeChangedError, ProfileIncompleteError, build_form_fields,
         )
         from bookers.rentcafe_units import find_unit
         from scrapers.xior import building_key_for
@@ -544,7 +686,7 @@ class RentCafeBooker(AbstractBooker):
                 message=f"试运行：凭据与档案齐备，可为 {listing.name} 起草申请。",
             )
 
-        session = RentCafeSession(self._api_key)
+        session = RentCafeSession(self._api_key, source=self.source)
         try:
             # ① 打开 applyOnlineURL。这是唯一入口——选房步骤的上下文存在服务端
             #    会话里，直接深链 stepname=Apartments 会得到一个空搜索。
@@ -568,9 +710,41 @@ class RentCafeBooker(AbstractBooker):
             # ⑤ 选中单元 → 落到 Applicant Info
             applicant_html = session.select_unit(unit)
 
+            # ⑤b 传证件。服务端在这份文档到位前**拒绝保存申请表的任何内容**，
+            #     所以必须排在填表之前。文档是**按申请**上传的（URL 里带
+            #     ProspectID），每抢一个新单元都要重传一次。
+            doc = applicant_docs.load(request.user.id)
+            if doc is None:
+                return BookingResult(
+                    listing=listing, success=False, phase="not_configured",
+                    message=(
+                        "还没上传证件，申请表存不了。\n"
+                        "请在面板的自动预订设置里上传护照/身份证。"
+                    ),
+                )
+            if not session.upload_document(applicant_html, doc[0], doc[1]):
+                return BookingResult(
+                    listing=listing, success=False, phase="unknown_error",
+                    message=f"证件上传失败，申请未提交。\n{listing.url}",
+                )
+            # 上传后页面上的隐藏字段会变（文档状态、ProspectId 之类），
+            # **重新取一遍**再填表——拿上传前的那份去解析，字段值可能已经过期。
+            applicant_html = session.select_unit(unit)
+
             # ⑥ 填表并**只存草稿**
+            #
+            # 字段名必须从**这一页**解析：有一批名字里嵌着 prospect id
+            # （drpGender2057105），硬编码不了。2026-08-03 踩过：上一版 15 个
+            # 字段名全写错，命中 0，提交上去的是一份空白申请，且毫无报错。
+            form = parse_applicant_form(applicant_html)
+            if form is None:
+                return BookingResult(
+                    listing=listing, success=False, phase="unknown_error",
+                    message="申请表页面结构无法识别（可能已改版），已中止。",
+                )
             fields = build_form_fields(
-                profile, move_in_date=unit.available_date,
+                profile, form,
+                school_id=unit.school_id,
                 screening_consent=ab.has_screening_consent(),
             )
             session.save_applicant_info(applicant_html, fields)
@@ -579,17 +753,37 @@ class RentCafeBooker(AbstractBooker):
             return BookingResult(
                 listing=listing, success=True, phase="draft_saved",
                 message=(
-                    f"已为你起草 {listing.name} 的申请。\n\n"
-                    f"**请迅速上传证件**并完成付款，否则房源可能被他人抢先。\n"
+                    f"已为你起草 {listing.name} 的申请，证件也已上传。\n\n"
+                    f"**请点击链接付款**，否则可能被他人抢先。\n"
                     f"{listing.url}"
                 ),
                 pay_url=listing.url,
                 contract_start_date=unit.available_date,
             )
 
+        except FormShapeChangedError as exc:
+            # 上游改版了。必须显式失败——默默提交一份缺项的申请，用户看不出
+            # 任何异常，等发现时房子已经没了。
+            logger.error("Xior 申请表结构变化: %s", exc)
+            return BookingResult(
+                listing=listing, success=False, phase="unknown_error",
+                message=f"{exc}\n请到网站上手动完成。\n{listing.url}",
+            )
         except ProfileIncompleteError as exc:
             return BookingResult(listing=listing, success=False,
                                  phase="not_configured", message=str(exc))
+        except RentCafeSaveRejectedError as exc:
+            logger.error("Xior 申请表保存被拒: %s", exc)
+            return BookingResult(
+                listing=listing, success=False, phase="save_rejected",
+                message=f"{exc}\n申请**没有**保存，请到网站上手动完成。\n{listing.url}",
+            )
+        except RentCafeAuthError as exc:
+            logger.error("Xior 登录失败: %s", exc)
+            return BookingResult(
+                listing=listing, success=False, phase="auth_failed",
+                message=f"{exc}\n请在面板里核对这栋楼的 Xior 账号密码。",
+            )
         except RentCafeBlockedError as exc:
             logger.error("Xior 预订被屏蔽: %s", exc)
             return BookingResult(listing=listing, success=False,
@@ -636,7 +830,9 @@ def _extract_hidden_fields(html: str) -> dict[str, str]:
 _FORM_RE_TMPL = r'<form[^>]*\bid=["\']{fid}["\'][^>]*>(?P<body>.*?)</form>'
 
 
-def _extract_form_fields(html: str, form_id: str) -> dict[str, str]:
+def _extract_form_fields(
+    html: str, form_id: str, *, required: bool = True,
+) -> dict[str, str]:
     """只取**某一个 form 内部**的隐藏字段。
 
     为什么不能整页抓：``guestlogin.aspx`` 上有 4 个表单（Login / UserLogin /
@@ -646,12 +842,19 @@ def _extract_form_fields(html: str, form_id: str) -> dict[str, str]:
 
     找不到该 form 时返回空 dict，由调用方决定怎么办（**不要**退回整页抓，
     那正是这个函数要避免的东西）。
+
+    ``required=False`` 时不打 WARNING：有些响应**本来就不含表单**（登录探测那
+    步返回的是一句 ``ShowPasswordInline();``），在成功路径上稳定刷警告只会让人
+    学会无视警告。
     """
     m = re.search(
         _FORM_RE_TMPL.format(fid=re.escape(form_id)), html or "", re.S | re.I,
     )
     if not m:
-        logger.warning("页面里找不到 form#%s", form_id)
+        if required:
+            logger.warning("页面里找不到 form#%s", form_id)
+        else:
+            logger.debug("响应里没有 form#%s（该步骤可以没有）", form_id)
         return {}
     return _extract_hidden_fields(m.group("body"))
 
@@ -676,13 +879,70 @@ def _needs_v2_fallback(html: str) -> bool:
     return any(m in body for m in _V2_FALLBACK_MARKERS)
 
 
+#: 服务端把错误提示当成一段 JS 返回，由页面塞进 ``#noticeboxdiv_*``。
+#: 形如 ``$.showMessage({type: "error",text:"Invalid login credentials.",…})``。
+_SHOW_MESSAGE_RE = re.compile(
+    r"""showMessage\s*\(\s*\{[^}]*?type:\s*['"]error['"][^}]*?"""
+    r"""text:\s*['"](?P<text>[^'"]*)['"]""",
+    re.S | re.I,
+)
+
+
+def server_error_message(html: str) -> str:
+    """从任一步的响应里取出服务端的错误文案；没有错误返回空串。
+
+    **全站统一的成败判据**，登录、条款、申请表都是这一套：每个表单都用 AJAX
+    提交，成功回调只是把返回的 HTML 追加进那一步自己的错误提示框
+    （``$('#noticeboxdiv_<表单名>').append(...)``）。所以：
+
+    - 响应体为空 → 没有错误要显示 → **成功**
+    - 响应体里有 ``$.showMessage({type:"error", text:"…"})`` → **失败**
+
+    两个方向都踩过（2026-08-03）：
+
+    - 把空 body 当失败 → 登录其实早已成功，流程却一路报到 race_lost；
+    - 不检查错误就当成功 → 服务端回了「Please upload required documents
+      before Proceeding.」，代码照样告诉用户「已为你起草申请，请迅速上传
+      证件」。**这个方向危险得多**：用户会以为表单已经填好了，安心去传证件，
+      实际上什么都没存下。
+    """
+    m = _SHOW_MESSAGE_RE.search(html or "")
+    return m.group("text").strip() if m else ""
+
+
+def _raise_if_login_error(html: str, stage: str) -> None:
+    msg = server_error_message(html)
+    if msg:
+        raise RentCafeAuthError(f"{stage}被 RENTCafe 拒绝：{msg}")
+
+
+def _has_unit_list(html: str) -> bool:
+    """页面上有没有可选单元（``ContinueClick(...)`` 是选房按钮的处理器）。"""
+    return "ContinueClick(" in (html or "")
+
+
 def _extract_js_redirect(html: str) -> str:
-    """Extract ``window.location.href = '...'`` or ``window.location = '...'``."""
+    """取出响应里的 JS 跳转目标。
+
+    四种写法都要认——RENTCafe 在不同步骤用的不是同一种：
+
+        window.location.href = '…'
+        window.location      = '…'
+        location.href        = '…'   ← 登录成功用的就是这个（无 window. 前缀）
+        location.replace('…')
+
+    2026-08-03 踩过：正则只写了带 ``window.`` 的两种，登录成功返回的
+    ``location.href='…/multiloginwrapper.aspx?AllowRedirect=1'`` 跟不上，
+    于是登录明明成功却停在原页面，找不到单元列表。
+    """
     m = re.search(
-        r"""window\.location(?:\.href)?\s*=\s*['"]([^'"]+)['"]""",
-        html,
+        r"""(?:window\.)?location(?:\.href)?\s*=\s*['"]([^'"]+)['"]"""
+        r"""|(?:window\.)?location\.replace\(\s*['"]([^'"]+)['"]""",
+        html or "",
     )
-    return m.group(1) if m else ""
+    if not m:
+        return ""
+    return m.group(1) or m.group(2) or ""
 
 
 # ---------------------------------------------------------------------------

@@ -23,8 +23,38 @@ REAL_BUTTON = (
 )
 
 
+#: 服务端**实际发**的样子：onclick 里的单引号是 HTML 实体。
+#: 上面那份是解码后的形状（当初是从浏览器 DevTools 里抄的，DevTools 显示的
+#: 已经解码过了）。两份都要能解析。
+REAL_BUTTON_ENTITY_ENCODED = REAL_BUTTON.replace("'", "&#39;")
+
+
 def _button(unit_id: str, label: str) -> str:
     return REAL_BUTTON.replace("398336", unit_id).replace("1.S127", label)
+
+
+class TestEntityEncodedOnclick:
+    """服务端发的 onclick 里引号是 ``&#39;``，不是 ``'``。
+
+    2026-08-03 踩过：正则按真引号写，真实页面上 20 个单元一个都没解析出来。
+    表现极具误导性——``find_unit()`` 返回 None，流程报「该单元已被他人选走」，
+    而单元其实好端端地就在页面上。这类「解析失败伪装成业务结果」的 bug 不会
+    有任何报错，只能靠拿服务端原样的字节测。
+    """
+
+    def test_parses_entity_encoded_button(self):
+        opts = parse_unit_options(REAL_BUTTON_ENTITY_ENCODED)
+        assert len(opts) == 1, "实体编码的按钮必须能解析"
+        assert opts[0].unit_id == "398336"
+        assert opts[0].label == "1.S127"
+
+    def test_both_encodings_give_the_same_result(self):
+        assert parse_unit_options(REAL_BUTTON) == parse_unit_options(
+            REAL_BUTTON_ENTITY_ENCODED
+        )
+
+    def test_find_unit_works_on_entity_encoded_page(self):
+        assert find_unit(REAL_BUTTON_ENTITY_ENCODED, "xr_398336") is not None
 
 
 class TestParse:

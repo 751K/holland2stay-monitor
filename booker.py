@@ -501,6 +501,12 @@ BookingPhase = Literal[
     "draft_saved",
     # 前置校验没过（缺凭据 / 档案不完整），压根没触网。
     "not_configured",
+    # 凭据被平台拒了。和 not_configured 分开：那个是"没填"，这个是"填了但不对"，
+    # 用户看到的提示不一样；也和 blocked 分开——重试和换 IP 都救不回来。
+    "auth_failed",
+    # 走到了最后一步但服务端拒绝保存。**绝不能报成 draft_saved**——那条消息
+    # 让用户以为表单已填好、安心去传证件，而实际上什么都没存下。
+    "save_rejected",
 ]
 
 

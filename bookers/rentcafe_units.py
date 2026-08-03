@@ -23,6 +23,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from html import unescape as _unescape
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,9 @@ class UnitOption:
     property_id: str      # 第 3 参数
     available_date: str   # 第 4 参数，d-m-yyyy
     next_url: str         # 第 6 参数：选中后要跳的相对 URL
+    #: 第 9 参数：学生类别 SchoolId（实测 648=Dutch）。申请表上的 ``drpSchool``
+    #: 是必填下拉，值就是它——从单元推出来，不用让用户填。
+    school_id: str = ""
     label: str = ""       # 按钮的 name/id，形如 "1.S127"（房号，给日志用）
 
     @property
@@ -63,6 +67,12 @@ def parse_unit_options(html: str) -> list[UnitOption]:
     """
     if not html:
         return []
+    # 实测页面里 onclick 内部的引号是 HTML 实体：
+    #   onclick="ContinueClick(&#39;398336&#39;,&#39;1111515&#39;,…)"
+    # 上面文档里那段是解码后的样子。2026-08-03 踩过：正则按真引号写，结果
+    # 页面上 21 个单元一个都没解析出来，流程报「已被他人选走」——**明明单元
+    # 就在页面上**。先整体解码再匹配。
+    html = _unescape(html)
     out: list[UnitOption] = []
     for m in _UNIT_BUTTON_RE.finditer(html):
         tag = m.group(0)
@@ -83,6 +93,7 @@ def parse_unit_options(html: str) -> list[UnitOption]:
             property_id=(args[2] or "").strip(),
             available_date=(args[3] or "").strip(),
             next_url=(args[5] or "").strip(),
+            school_id=(args[8] or "").strip() if len(args) > 8 else "",
             label=(attrs.get("name") or attrs.get("id") or "").strip(),
         ))
     return out

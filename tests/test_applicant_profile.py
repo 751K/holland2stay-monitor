@@ -31,6 +31,8 @@ def _full(**over) -> ApplicantProfile:
         address="Dorpsstraat 1", postcode_city="5612 AB Eindhoven",
         university="TU Eindhoven",
         place_of_birth="China", id_number="E12345678",
+        id_country="China", housing_type="Rent",
+        ever_evicted="No", ever_convicted="No", criminal_charges="No",
     )
     base.update(over)
     return ApplicantProfile(**base)
@@ -71,13 +73,29 @@ class TestCompleteness:
 
     @pytest.mark.parametrize("field", [
         "first_name", "last_name", "gender", "date_of_birth",
-        "nationality", "country", "address", "postcode_city", "university",
-        "place_of_birth", "id_number",
+        "country", "address",
+        "place_of_birth", "id_number", "nationality", "housing_type",
+        # 背景调查三问：留空表示用户还没回答，不能当成答 "No"
+        "ever_evicted", "ever_convicted", "criminal_charges",
     ])
     def test_each_required_field_blocks_completion(self, field):
         p = _full(**{field: ""})
         assert p.is_complete() is False
         assert field in p.missing_fields()
+
+    def test_address_needs_a_postcode_and_city_from_somewhere(self):
+        """邮编/城市可以来自新字段，也可以来自旧的 postcode_city 一格。
+
+        表单把地址拆成 Addr1/Addr2/ZipCode/City 四格，而老档案是一格塞两样。
+        老用户不该因为字段拆开就突然被判档案不完整——但两边都空就是真的缺。
+        """
+        legacy = _full(postcode="", city="", postcode_city="5612 AB Eindhoven")
+        assert legacy.is_complete() is True
+
+        blank = _full(postcode="", city="", postcode_city="")
+        assert blank.is_complete() is False
+        assert "postcode" in blank.missing_fields()
+        assert "city" in blank.missing_fields()
 
     def test_middle_name_needs_value_or_explicit_none(self):
         """表单上「中间名」是必填 + 带一个「我没有中间名」勾选。
@@ -87,7 +105,7 @@ class TestCompleteness:
         assert _full(middle_name="", no_middle_name=True).is_complete() is True
 
     def test_whitespace_is_not_a_value(self):
-        assert _full(university="   ").is_complete() is False
+        assert _full(place_of_birth="   ").is_complete() is False
 
     def test_optional_fields_do_not_block(self):
         """电话、称谓、最短租期留空不影响——表单上它们不带星号。"""
@@ -160,6 +178,9 @@ class TestFormParsing:
             COUNTRY="Netherlands", ADDRESS="Dorpsstraat 1",
             POSTCODE_CITY="5612 AB Eindhoven", UNIVERSITY="TU Eindhoven",
             MIN_LEASE_TERM="12", PLACE_OF_BIRTH="China", ID_NUMBER="E12345678",
+            POSTCODE="5612 AB", CITY="Eindhoven",
+            ID_COUNTRY="China", HOUSING_TYPE="Rent",
+            EVER_EVICTED="No", EVER_CONVICTED="No", CRIMINAL_CHARGES="No",
         ))
         assert p.is_complete() is True
         assert p.no_middle_name is True
@@ -205,6 +226,13 @@ class TestFormRendering:
             "AUTO_BOOK_PROFILE_UNIVERSITY": "TU Eindhoven",
             "AUTO_BOOK_PROFILE_PLACE_OF_BIRTH": "China",
             "AUTO_BOOK_PROFILE_ID_NUMBER": "E12345678",
+            "AUTO_BOOK_PROFILE_POSTCODE": "5612 AB",
+            "AUTO_BOOK_PROFILE_CITY": "Eindhoven",
+            "AUTO_BOOK_PROFILE_ID_COUNTRY": "China",
+            "AUTO_BOOK_PROFILE_HOUSING_TYPE": "Rent",
+            "AUTO_BOOK_PROFILE_EVER_EVICTED": "No",
+            "AUTO_BOOK_PROFILE_EVER_CONVICTED": "No",
+            "AUTO_BOOK_PROFILE_CRIMINAL_CHARGES": "No",
         }, headers={"X-CSRF-Token": "test_csrf"}, follow_redirects=True)
         assert r.status_code == 200
 

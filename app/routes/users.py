@@ -151,6 +151,34 @@ def users_list() -> Any:
     return render_template("users.html", users=users)
 
 
+def _handle_id_document(user_id: str) -> None:
+    """处理面板上传/删除的证件文件。
+
+    平台在证件到位前拒绝保存申请表，而抢房是系统异步触发的——所以文件必须提前
+    存好，没有「用完即走的透传」。存储细节（加密、大小/格式校验）在
+    ``applicant_docs`` 里。
+
+    校验不通过只 flash 提示、不中断保存：表单其余部分是用户刚填的，为一个文件
+    把它们全丢掉更糟。
+    """
+    import applicant_docs
+
+    if (request.form.get("AUTO_BOOK_ID_DOC_DELETE") or "") == "true":
+        if applicant_docs.delete(user_id):
+            flash("已删除已保存的证件", "success")
+        return
+
+    f = request.files.get("AUTO_BOOK_ID_DOC")
+    if f is None or not (f.filename or "").strip():
+        return
+    try:
+        applicant_docs.save(user_id, f.filename, f.read())
+    except applicant_docs.DocumentRejected as e:
+        flash(f"证件未保存：{e}", "danger")
+        return
+    flash("✅ 证件已加密保存", "success")
+
+
 @admin_required
 @csrf_required
 def user_new() -> Any:
@@ -170,6 +198,7 @@ def user_new() -> Any:
         except ValueError as e:
             flash(str(e), "danger")
             return redirect(request.url)
+        _handle_id_document(user.id)
         _log_user_change("创建", user)
         flash(f"✅ 用户「{user.name}」已创建", "success")
         return redirect(url_for("users_list"))
@@ -177,7 +206,7 @@ def user_new() -> Any:
     city_names = sorted(c["name"] for c in KNOWN_CITIES)
     opts = _get_all_filter_options()
     return render_template(
-        "user_form.html", user=None,
+        "user_form.html", user=None, id_doc=None,
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
         applicant_genders=APPLICANT_GENDERS,
@@ -238,6 +267,7 @@ def user_edit(user_id: str) -> Any:
         # 避免泄漏的旧密码继续生效。app_login_enabled 切到 False 同理。
         pw_changed = (updated.app_password_hash != user.app_password_hash)
         login_disabled = (user.app_login_enabled and not updated.app_login_enabled)
+        _handle_id_document(user_id)
         _log_user_change("更新", updated)
         if pw_changed or login_disabled:
             from app.api_auth import invalidate_token_cache
@@ -290,6 +320,7 @@ def user_edit(user_id: str) -> Any:
     opts = _get_all_filter_options()
     return render_template(
         "user_form.html", user=user,
+        id_doc=__import__("applicant_docs").info(user_id),
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
         applicant_genders=APPLICANT_GENDERS,

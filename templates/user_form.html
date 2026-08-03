@@ -24,7 +24,10 @@
 </div>
 {% endif %}
 
-<form method="post" action="{{ action }}" onsubmit="return confirmSelfDisable();">
+{# enctype 是证件上传必需的；漏了它 request.files 永远是空的，而表单其余部分
+   照常保存，看起来完全正常。 #}
+<form method="post" action="{{ action }}" enctype="multipart/form-data"
+      onsubmit="return confirmSelfDisable();">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   <!-- Step 1: Basic info -->
@@ -530,9 +533,21 @@
         <label class="form-group"><span class="form-label">{{ _('profile_address') }} *</span>
           <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_ADDRESS"
                  value="{{ prof.address if prof else '' }}"></label>
-        <label class="form-group"><span class="form-label">{{ _('profile_postcode_city') }} *</span>
-          <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_POSTCODE_CITY"
-                 value="{{ prof.postcode_city if prof else '' }}" placeholder="5612 AB Eindhoven"></label>
+        <label class="form-group"><span class="form-label">{{ _('profile_address_line2') }}</span>
+          <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_ADDRESS_LINE2"
+                 value="{{ prof.address_line2 if prof else '' }}"></label>
+        <label class="form-group"><span class="form-label">{{ _('profile_postcode') }} *</span>
+          <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_POSTCODE"
+                 value="{{ prof.postcode if prof else '' }}" placeholder="5612 AB"></label>
+        <label class="form-group"><span class="form-label">{{ _('profile_city') }} *</span>
+          <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_CITY"
+                 value="{{ prof.city if prof else '' }}" placeholder="Eindhoven"></label>
+        <label class="form-group"><span class="form-label">{{ _('profile_housing_type') }} *</span>
+          <select class="form-select" name="AUTO_BOOK_PROFILE_HOUSING_TYPE">
+            {% for v in ['', 'Rent', 'Own', 'Other'] %}
+            <option value="{{ v }}" {% if prof and prof.housing_type == v %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+          </select></label>
 
         <label class="form-group"><span class="form-label">{{ _('profile_university') }} *</span>
           <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_UNIVERSITY"
@@ -550,6 +565,44 @@
         <label class="form-group"><span class="form-label">{{ _('profile_student_number') }}</span>
           <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_STUDENT_NUMBER"
                  value="{{ prof.student_number if prof else '' }}"></label>
+        <label class="form-group"><span class="form-label">{{ _('profile_id_country') }} *</span>
+          <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_ID_COUNTRY"
+                 value="{{ prof.id_country if prof else '' }}" placeholder="China"></label>
+      </div>
+
+      {# 背景调查三问。和上面那些字段有本质区别：这是关于你本人的**事实陈述**，
+         系统不会替你答——留空就不提交，宁可存不上申请。 #}
+      <div class="profile-grid">
+        {% for name, label in [
+             ('EVER_EVICTED', 'profile_ever_evicted'),
+             ('EVER_CONVICTED', 'profile_ever_convicted'),
+             ('CRIMINAL_CHARGES', 'profile_criminal_charges')] %}
+        <label class="form-group"><span class="form-label">{{ _(label) }} *</span>
+          <select class="form-select" name="AUTO_BOOK_PROFILE_{{ name }}">
+            {% set cur = (prof|attr(name.lower())) if prof else '' %}
+            {% for v in ['', 'No', 'Yes'] %}
+            <option value="{{ v }}" {% if cur == v %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+          </select></label>
+        {% endfor %}
+      </div>
+
+      {# 证件。平台在这份文档到位前**拒绝保存申请表的任何内容**，而自动预订是
+         异步触发的，所以文件必须先存在系统里——没有「用完即走的透传」。 #}
+      <div class="consent-box mb-3">
+        <div class="form-label">{{ _('profile_id_doc') }} *</div>
+        {% if id_doc %}
+        <div class="mb-2">
+          ✓ {{ id_doc[0] }}（{{ '%.1f'|format(id_doc[1] / 1048576) }} MB）
+          <label class="prof-check ms-2">
+            <input type="checkbox" name="AUTO_BOOK_ID_DOC_DELETE" value="true">
+            <span>{{ _('profile_id_doc_delete') }}</span>
+          </label>
+        </div>
+        {% endif %}
+        <input type="file" class="form-input" name="AUTO_BOOK_ID_DOC"
+               accept=".gif,.jpeg,.jpg,.png,.bmp,.pdf,.doc,.docx,.xlsx">
+        <div class="text-sm muted mt-1">{{ _('profile_id_doc_hint') }}</div>
       </div>
 
       <div class="consent-box mb-3">

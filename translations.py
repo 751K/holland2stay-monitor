@@ -113,10 +113,13 @@ TRANSLATIONS = {
     # ── 申请人档案（RENTCafe Applicant Info 自动填）────────
     "user_form_profile": {"zh": "申请人档案", "en": "Applicant profile"},
     "user_form_profile_note": {
-        "zh": "半自动预订用这些资料自动填 RENTCafe 的申请表。**证件不在此收集**"
-              "——流程里那个必填的护照/身份证上传由你自己在浏览器里完成。",
-        "en": "Used to auto-fill the RENTCafe application form. **No ID documents are "
-              "collected here** — the required passport/ID upload stays with you, in your browser.",
+        "zh": "半自动预订用这些资料自动填 RENTCafe 的申请表，并代传证件——"
+              "平台在证件上传前拒绝保存申请表，而抢房是自动触发的。"
+              "**系统只填表，不付款**：付款要填银行账号，那一步必须你自己做。",
+        "en": "Used to auto-fill the RENTCafe application form and upload your ID — "
+              "the platform refuses to save anything until the ID is there, and booking "
+              "fires automatically. **The system never pays**: the payment step needs "
+              "your bank details and stays with you.",
     },
     "profile_title":           {"zh": "称谓",       "en": "Title"},
     "profile_first_name":      {"zh": "名",         "en": "First name"},
@@ -135,6 +138,26 @@ TRANSLATIONS = {
     "profile_place_of_birth":  {"zh": "出生地（国家）", "en": "Place of birth (country)"},
     "profile_id_number":       {"zh": "证件号（护照/身份证）", "en": "ID / passport number"},
     "profile_student_number":  {"zh": "学号",         "en": "Student number"},
+    # 2026-08-03 对着真实申请表补的字段（地址原来一格塞两样，对不上表单的四格）
+    "profile_address_line2":   {"zh": "地址第二行（选填）", "en": "Address line 2 (optional)"},
+    "profile_postcode":        {"zh": "邮编",       "en": "Post code"},
+    "profile_city":            {"zh": "城市",       "en": "City"},
+    "profile_housing_type":    {"zh": "当前住所性质", "en": "Current housing"},
+    "profile_id_country":      {"zh": "证件签发国", "en": "ID issuing country"},
+    # 背景调查三问：申请表上的原文提问，系统不替用户作答
+    "profile_ever_evicted":    {"zh": "是否曾被驱逐出租住房？", "en": "Have you ever been evicted?"},
+    "profile_ever_convicted":  {"zh": "是否曾被定罪？", "en": "Have you ever been convicted of a felony?"},
+    "profile_criminal_charges": {"zh": "是否有未决刑事指控？", "en": "Any pending criminal charges?"},
+    "profile_id_doc":        {"zh": "护照 / 身份证扫描件",
+                              "en": "Passport / ID document"},
+    "profile_id_doc_delete": {"zh": "删除已上传的证件", "en": "Delete stored document"},
+    "profile_id_doc_hint": {
+        "zh": "平台在证件上传前拒绝保存申请表，而抢房是系统自动触发的，"
+              "所以文件需要提前存好（加密落盘）。≤5MB，支持 pdf/jpg/png/doc 等。",
+        "en": "The platform refuses to save the application until the ID is "
+              "uploaded, and booking fires automatically, so the file must be "
+              "stored in advance (encrypted at rest). Max 5MB.",
+    },
     "profile_consent_label": {
         "zh": "授权系统代我勾选申请表上的信用/背景调查声明",
         "en": "Authorise the system to accept the screening declarations on my behalf",

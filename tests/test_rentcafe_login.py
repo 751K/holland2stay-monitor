@@ -52,6 +52,7 @@ class _Session(RentCafeSession):
             '<form id="Login">'
             '<input type="hidden" name="formName" value="F1">'
             '<input type="hidden" name="myQS" value="Q1">'
+            '<input type="hidden" name="formName2" value="mylistlogin">'
             '</form>'
             '<form id="UserLogin">'
             '<input type="hidden" name="formName" value="WRONG">'
@@ -77,16 +78,40 @@ class TestTwoRequestShape:
         probe, real = s.posts
         assert probe["CheckUserAuth"] == "1"
         assert "Password" not in probe, "探测阶段不该带密码"
-        assert real["CheckUserAuth"] == "0"
         assert real["Password"] == "pw"
+
+    def test_credentials_post_blanks_check_user_auth(self):
+        """展开密码框那一步，页面 JS 把 CheckUserAuth 置成**空串**。
+
+        原文（guestlogin.aspx 内联 JS）::
+
+            var f=(document.forms['Login']||document.forms['UserLogin']);
+            if(f['CheckUserAuth']){ f['CheckUserAuth'].value=''; }
+
+        2026-08-03 踩过：这里发的是 "0"，服务端当成未知状态，200 + 空 body
+        静默失败，一路报到 race_lost。
+        """
+        s = _Session()
+        s.login("a@x.com", "pw")
+        assert s.posts[1]["CheckUserAuth"] == ""
 
     def test_both_carry_username_and_form_name(self):
         s = _Session()
         s.login("a@x.com", "pw")
         for p in s.posts:
             assert p["Username"] == "a@x.com"
-            assert p["formName2"] == "Login", "必须是 Login 而不是 UserLogin"
             assert p["cafeportalkey"] == "CPK-1"
+
+    def test_form_name2_is_the_servers_value_not_the_form_id(self):
+        """formName2 是服务端下发的表单身份，不是表单 id。
+
+        实测 form#Login 里的值是 ``mylistlogin``。2026-08-03 踩过：这里写死成
+        了表单 id "Login"，服务端认不出这个身份，两次 POST 全回空 body。
+        """
+        s = _Session()
+        s.login("a@x.com", "pw")
+        for p in s.posts:
+            assert p["formName2"] == "mylistlogin"
 
     def test_carries_server_hidden_fields(self):
         s = _Session()
@@ -144,6 +169,60 @@ class TestFormScoping:
             assert p["formName"] == "F1", "拿到了别的表单的 formName"
             assert "otpclickedUserLogin" not in p, "OTP 表单的字段不该混进来"
 
+
+class TestEmptyBodyMeansSuccess:
+    """登录走 AJAX，成功回调只把返回的 HTML 塞进错误提示框——没错误就没内容。
+
+    guestlogin.aspx 的提交处理器（原文）::
+
+        $.ajax({ url: "/onlineleasing/rcformsave.ashx", type: "POST",
+                 data: $('#Login').serialize(),
+                 success: function(html){
+                     $('#noticeboxdiv_Login').append($.format(html, …)); } });
+
+    也就是说**响应体为空 = 没有错误 = 登录成功**。2026-08-03 踩过：把空 body
+    当失败，实际上登录早已成功，流程却一路报到 race_lost。
+    """
+
+    def test_empty_probe_and_login_bodies_do_not_raise(self):
+        s = _Session(probe_html="", final_html="")
+        s.login("a@x.com", "pw")           # 不抛异常就是通过
+        assert len(s.posts) == 2
+
+    def test_error_body_raises_auth_error(self):
+        from bookers.rentcafe import RentCafeAuthError
+
+        err = (
+            '<script>$.showMessage({type: "error",'
+            'text:"Invalid login credentials.",time:5000});</script>'
+        )
+        with pytest.raises(RentCafeAuthError, match="Invalid login credentials"):
+            _Session(final_html=err).login("a@x.com", "wrong")
+
+    def test_error_during_probe_raises_too(self):
+        from bookers.rentcafe import RentCafeAuthError
+
+        err = ('<script>$.showMessage({type: "error",'
+               'text:"No account found.",time:5000});</script>')
+        with pytest.raises(RentCafeAuthError, match="No account found"):
+            _Session(probe_html=err).login("nobody@x.com", "pw")
+
+    def test_auth_error_is_not_confused_with_blocked(self):
+        """两者处置完全不同：blocked 可换 IP 重试，凭据错重试多少次都没用。"""
+        from bookers.rentcafe import RentCafeAuthError, RentCafeBlockedError
+
+        assert not issubclass(RentCafeAuthError, RentCafeBlockedError)
+
+    def test_success_notice_is_not_read_as_an_error(self):
+        """只有 type:"error" 才算失败，别把提示类消息也当错误。"""
+        from bookers.rentcafe import server_error_message
+
+        assert server_error_message(
+            '$.showMessage({type: "success",text:"Welcome back."})'
+        ) == ""
+
+
+class TestFormScopingMissing:
     def test_missing_login_form_raises(self):
         """页面结构变了要显式失败，而不是发一个注定被忽略的请求。"""
         from bookers.rentcafe import RentCafeError
