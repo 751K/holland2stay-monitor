@@ -1755,7 +1755,13 @@ async def run_once(
                 )
                 return completeness
         elif h2s_mode == "open" and not fresh:
-            logger.warning("H2S source 熔断中且本轮没有其它 source 任务，本轮不更新数据库。")
+            # 条件是 `not fresh`（本轮一条房源都没抓到），不是「没有配置其它 source
+            # 的任务」——原文案写成后者，会把人引去查 SOURCES 配置，而真实原因通常
+            # 是其它 source 确实各自返回了 0 条。Xior 分轮抓之后这尤其常见：某一片
+            # 正好全是没库存的楼，整轮合计就是 0。
+            logger.warning(
+                "H2S 熔断中，且其它 source 本轮未抓到任何房源，无数据可入库。"
+            )
             return completeness
     except BlockedError as e:
         # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。

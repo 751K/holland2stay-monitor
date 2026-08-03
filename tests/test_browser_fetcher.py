@@ -371,11 +371,18 @@ def test_proxy_redaction_strips_credentials(url, expected):
 
 
 def test_rotating_profile_requests_a_fresh_proxy_session(monkeypatch):
-    """标了 rotating_proxy 的 profile，每次建浏览器都要换出口 IP。
+    """两个 profile 建浏览器时都要换出口 IP，理由不同但结论一致。
 
-    Xior 的 AJAX 端点按 IP 累积限流，固定出口跑几轮必然 429（实测第 2 轮
-    第一个请求即被拒）。换浏览器就换 IP，把累积量摊开；单个会话内 IP 仍然
-    稳定，所以 clearance 照常可用。
+    Xior：AJAX 端点按 IP 累积限流，固定出口跑几轮必然 429（实测第 2 轮第一个
+    请求即被拒）。换浏览器就换 IP，把累积量摊开。
+
+    H2S：2026-08-03 生产事故——出口 IP 被 CF 盯上后连续 3 次 90s 挑战全失败，
+    熔断 30 分钟。而 sticky session id 是 sha1(source) 的**常量**，403 之后
+    invalidate_session() 重建拿到的还是同一个 IP，恢复路径形同虚设。
+
+    换 IP 不损失 clearance 复用：clearance 只在单个浏览器生命周期内有效
+    （_BROWSER_MAX_AGE=2h），这期间 IP 依然稳定；而**重建浏览器本来就要重解
+    挑战**，那一刻换个新 IP 是免费的。
     """
     from browser_fetcher import XIOR_PROFILE, H2S_PROFILE
 
@@ -391,5 +398,19 @@ def test_rotating_profile_requests_a_fresh_proxy_session(monkeypatch):
     BrowserFetcher(headless=True, profile=XIOR_PROFILE).__enter__()
     BrowserFetcher(headless=True, profile=H2S_PROFILE).__enter__()
 
-    assert seen == [True, False], seen
+    assert seen == [True, True], seen
     assert len(calls) == 2
+
+
+def test_sticky_session_id_is_constant_so_rotation_is_the_only_escape():
+    """回归说明：sticky 模式下 session id 恒定，被烧的 IP 换不掉。
+
+    这正是 2026-08-03 H2S 事故的根因，也是两个 profile 都开 rotating 的理由。
+    """
+    from config import _derive_session_id
+
+    sticky = {_derive_session_id("holland2stay", False) for _ in range(5)}
+    assert len(sticky) == 1, "sticky 必须恒定——否则 clearance 在会话内就不稳了"
+
+    rot = {_derive_session_id("holland2stay", True) for _ in range(5)}
+    assert len(rot) == 5, "rotating 每次都要给出新 session，才能真正换掉被烧的 IP"

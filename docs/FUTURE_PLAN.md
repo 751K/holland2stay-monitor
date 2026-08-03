@@ -16,7 +16,7 @@ v2.0 只做两件事。
 已落地：`round_stats` 轮次遥测表、`mcore/health.py` 分 source 健康判定、
 `mcore/watchdog.py` 退化告警（含恢复通知，节流持久化）、`/logs` 服务端过滤、
 `/monitoring` 面板。方案与验收标准见
-[OBSERVABILITY_PLAN.md](OBSERVABILITY_PLAN.md)，判据设计理由见 ARCHITECTURE §5.11。
+[OBSERVABILITY_PLAN.md](OBSERVABILITY_PLAN.md)，判据设计理由见 ARCHITECTURE §5.12。
 
 后续可继续：把遥测接进 `/api/v1` 供移动端消费；抓取耗时趋势图；
 按 city 而不只是按 source 的细分。

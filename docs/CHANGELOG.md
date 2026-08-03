@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### H2S 被 Cloudflare 拦死后无法自愈——sticky 出口 IP 没有逃生口
+
+2026-08-03 生产事故：H2S 在 18:45 收到「要求重新校验」，重解挑战连续 3 次 90s 全部失败，熔断退避 30 分钟。
+
+根因不是「该不该固定出口 IP」——固定是对的，浏览器跨轮复用 2 小时，clearance 在这期间可复用。错的是把「稳定」实现成了**永久固定**：sticky session id 是 `sha1(source)` 的常量，同一个 source 永远拿到同一个出口 IP。于是 403 的恢复路径（`invalidate_session()` → 下轮重建浏览器）拿到的**还是那个被烧掉的 IP**，形同虚设。
+
+修法是给 H2S 也开 `rotating_proxy=True`。关键在于**换 IP 的时机是「建浏览器」而不是「每请求」**：浏览器存活期内 IP 不变，clearance 照常复用；而重建浏览器本来就要重解挑战，那一刻换个新 IP 是免费的。也就是说固定 IP 在重建那一刻省不下任何东西，却让被烧的 IP 永远换不掉。
+
+一般规律记进 ARCHITECTURE §5.11：**任何「为了稳定而固定」的资源，都要想清楚它坏掉之后怎么换。**
+
+顺带修一条误导性日志：熔断期间原本打「H2S source 熔断中且本轮**没有其它 source 任务**」，但触发条件其实是 `not fresh`（本轮一条房源都没抓到）。Xior 分轮抓之后这很常见——某一片正好全是没库存的楼。旧文案会把人引去查 `SOURCES` 配置。
+
 ### Xior 凭据改为按楼栋（一栋楼一个账号）
 
 实测发现 **Xior 每栋楼是独立的 RENTCafe property 门户**：各有自己的 host、property 代码和 `myOlePropertyId`，登录页原话是「your **<楼栋名>** Guest Account」，不是「Xior 账号」。生产库里 4 栋有数据的楼对应 4 个不同 host，cookie 不跨主机。
@@ -73,7 +85,7 @@ v2.0 两个方向之一。起因很直接：这套系统里**每一个 bug 都�
 
 问题在于 `/health` 只回答「循环还活着吗」，`last_scrape_count` 又是个每轮被覆盖的标量。「昨晚 Xior 为什么只有 2/6」这类问题在系统里**没有数据源**，只能翻日志。
 
-方案与验收标准见 [OBSERVABILITY_PLAN.md](OBSERVABILITY_PLAN.md)，判据的设计理由见 ARCHITECTURE §5.11。
+方案与验收标准见 [OBSERVABILITY_PLAN.md](OBSERVABILITY_PLAN.md)，判据的设计理由见 ARCHITECTURE §5.12。
 
 **轮次遥测落库。** 新表 `round_stats`，每轮每 source 一行：房源数、任务数、完整数、耗时、错误类型。数据全部来自 `_dispatch_isolated()` 已有的局部变量，不新增任何抓取动作。每个 source 跑完立即写，不攒到整轮结束——「整轮全失败」恰恰是最该留痕的情形，而那条路径会直接上抛。保留 30 天，剪枝自带每小时一次的节流。
 

@@ -193,7 +193,7 @@ mismatch and would only interrupt a scrape in progress.
 | Symptom | Cause and fix |
 |---|---|
 | No alerts at all, dashboard shows stale listings | The monitor process is down. `supervisorctl status` to confirm, then `supervisorctl start monitor`. `/health` returns 503 once the heartbeat is older than `MONITOR_HEARTBEAT_MAX_AGE`. |
-| A source shows `down` or `warn` on `/monitoring` | The card lists which rule fired. Thresholds and their rationale: [ARCHITECTURE.md §5.11](ARCHITECTURE.md). |
+| A source shows `down` or `warn` on `/monitoring` | The card lists which rule fired. Thresholds and their rationale: [ARCHITECTURE.md §5.12](ARCHITECTURE.md). |
 | Need logs from a specific time window | `/logs` filters server-side by keyword, level and `since`/`until` — it is not limited to what is currently on screen. |
 | Logs repeat `H2S source 熔断` | Cloudflare is blocking your exit IP. The breaker pauses that one source and retries a single city later. If it persists, set `HTTPS_PROXY`. |
 | Logs repeat `CF 挑战 ... 未解开` | Same cause — usually IP reputation rather than anything local. |

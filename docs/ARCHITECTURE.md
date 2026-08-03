@@ -160,7 +160,7 @@ cookie 搬给 HTTP 客户端——Cloudflare 的 clearance 同时绑定 TLS 指�
 | `web_notifications` | 面板内通知（支持 per-user） |
 | `device_tokens` / `app_tokens` | APNs / FCM 设备与 App 登录令牌 |
 | `geocode_cache` | 地址 → 坐标缓存，避免重复请求 |
-| `round_stats` | 每轮每 source 一行的抓取遥测，保留 30 天（见 §5.11） |
+| `round_stats` | 每轮每 source 一行的抓取遥测，保留 30 天（见 §5.12） |
 
 几个常用的 `meta` 键：
 
@@ -169,7 +169,7 @@ cookie 搬给 HTTP 客户端——Cloudflare 的 clearance 同时绑定 TLS 指�
 | `monitor_heartbeat_at` | 每轮**开始时**刷新，`/health` 据此判断 monitor 是否还活着 |
 | `last_scrape_at` | 最后一次**成功抓取**。与心跳不同，熔断期间不刷新 |
 | `upstream_maintenance_seen_at` | 首次探测到平台维护的时间 |
-| `watchdog_active` / `watchdog_fired:*` | 退化告警的活跃集与节流时间戳（见 §5.11） |
+| `watchdog_active` / `watchdog_fired:*` | 退化告警的活跃集与节流时间戳（见 §5.12） |
 
 > `monitor_heartbeat_at` 和 `last_scrape_at` 回答的是两个问题：「循环还在转吗」
 > 和「抓到数据了吗」。健康检查必须用前者——H2S 熔断冷却最长 6 小时，那期间没有
@@ -390,7 +390,28 @@ OurDomain / OurCampus / Xior 的 RENTCafe 预订引擎（[`bookers/rentcafe.py`]
 
 ---
 
-### 5.11 「循环还活着」和「数据还对」是两个问题
+### 5.11 sticky 出口 IP 必须留逃生口
+
+H2S 的浏览器跨轮复用 2 小时（`_BROWSER_MAX_AGE`），CF clearance 在这期间可复用，
+所以出口 IP 需要稳定——这部分是对的。错的是把「稳定」实现成了**永久固定**：
+sticky session id 是 `sha1(source)` 的常量，同一个 source 永远拿到同一个出口 IP。
+
+2026-08-03 实测后果：那个 IP 被 CF 盯上后，连续 3 次 90s 挑战全部失败，
+H2S 熔断退避。而 403 的恢复路径（`invalidate_session()` → 下轮重建浏览器）
+拿到的**还是同一个 IP**，等于原地打转。
+
+修法是给两个 profile 都开 `rotating_proxy=True`。关键在于**换 IP 的时机是
+「建浏览器」而不是「每请求」**：
+
+- 浏览器存活期内 IP 不变 → clearance 照常复用，没有损失
+- 重建浏览器本来就要重解挑战 → 那一刻换个新 IP 是**免费的**
+
+也就是说固定 IP 在重建那一刻省不下任何东西，却让被烧的 IP 永远换不掉。
+
+> 一般规律：**任何「为了稳定而固定」的资源，都要想清楚它坏掉之后怎么换。**
+> 稳定和可替换不矛盾——只要换的时机选在本来就要重建的地方。
+
+### 5.12 「循环还活着」和「数据还对」是两个问题
 
 `/health` 只回答前者——monitor 心跳新鲜度（§5.1）。它答不了后者，而后者才是
 更常见的故障形态：进程活着、心跳正常、容器全程 healthy，但解析器被上游改版
@@ -445,11 +466,11 @@ OurDomain / OurCampus / Xior 的 RENTCafe 预订引擎（[`bookers/rentcafe.py`]
 |---|---|
 | 没有任何新房源通知 | `/health` 是否 200；`supervisorctl status` 里 monitor 是否 RUNNING |
 | 某平台昨晚只有 2/6 完整 | `/monitoring` 轮次表格，格式 `房源数 (完整/任务)` |
-| 某平台状态是 `down` / `warn` | 卡片上的 reasons 写了触发哪条规则；判据见 §5.11 |
+| 某平台状态是 `down` / `warn` | 卡片上的 reasons 写了触发哪条规则；判据见 §5.12 |
 | 想查某个时间段的日志 | `/logs` 的 `since` / `until` / `level` / 关键字（服务端过滤，不是只搜当前屏） |
 | 日志刷 `H2S source 熔断` | §5.5；检查出口 IP 是否被 CF 盯上，考虑配 `HTTPS_PROXY` |
 | 日志刷 `CF 挑战 90s 内未解开` | §5.3；多为 IP 信誉问题，换出口 IP |
-| 某平台一直 0 条 | §5.7 + §5.11；确认是真没房还是上游查询失败 |
+| 某平台一直 0 条 | §5.7 + §5.12；确认是真没房还是上游查询失败 |
 | 容器内存接近上限 | 每个浏览器常驻约 200–400MB，多 source 时需 2G |
 
 常用命令：

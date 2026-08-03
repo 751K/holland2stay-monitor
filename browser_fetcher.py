@@ -168,9 +168,18 @@ class SiteProfile:
     maintenance_check
                     可选钩子，收到 (title, html) —— 仅在挑战解开后调用。
     rotating_proxy  True 时每次创建浏览器都换一个代理 session（即换出口 IP）。
-                    给**按 IP 累积限流**的站点用：出口 IP 在单个浏览器会话内
-                    仍然稳定（clearance 因此可用），但换浏览器就换 IP，避免
-                    同一个 IP 上的请求无限累积。
+
+                    **换 IP 的时机是「建浏览器」，不是「每请求」**，所以它
+                    并不牺牲 clearance 复用：clearance 本来就只在单个浏览器
+                    的生命周期内有效，而**新建浏览器无论如何都要重解一次挑战**
+                    ——那一刻用旧 IP 还是新 IP，成本完全一样。
+
+                    反过来，固定 IP 在这一刻省不下任何东西，却带来一个真实
+                    代价：**IP 一旦被 CF 盯上就再也换不掉**（session id 是
+                    source 名的哈希，恒定），403 之后 invalidate_session()
+                    重建出来的还是同一个 IP，恢复路径形同虚设。
+
+                    结论：除非有理由要长期钉住某个出口 IP，否则都该开。
     """
 
     name: str
@@ -198,6 +207,14 @@ H2S_PROFILE = SiteProfile(
     clearance_pending_markers=(_CLEARANCE_REQUIRED_MARKER,)
     + _CF_CHALLENGE_PENDING_MARKERS,
     maintenance_check=_h2s_maintenance_check,
+    # 2026-08-03 生产事故：出口 IP 被 CF 盯上后，H2S 连续 3 次 90s 挑战全失败，
+    # 熔断退避 30 分钟。而 sticky session id 是 sha1(source) 的常量——重建浏览器
+    # 拿到的还是同一个 IP，403 恢复路径根本走不出去。
+    #
+    # 开 rotating 不损失 clearance 复用：浏览器存活 2 小时（_BROWSER_MAX_AGE），
+    # 这期间 IP 和 clearance 都稳定；而重建浏览器本来就要重解挑战，那一刻换个
+    # 新 IP 是免费的。
+    rotating_proxy=True,
 )
 
 # Xior 的 AJAX 端点要 property/room id 才能拿到有意义的响应，profile 层拿不到，

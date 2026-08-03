@@ -182,7 +182,7 @@ unhealthy：重启治不好解析器对不上，只会打断正在进行的抓�
 | 现象 | 原因与处理 |
 |---|---|
 | 完全没有通知，面板显示旧数据 | monitor 进程挂了。用 `supervisorctl status` 确认，再 `supervisorctl start monitor`。心跳超过 `MONITOR_HEARTBEAT_MAX_AGE` 后 `/health` 会返回 503。 |
-| 某平台在 `/monitoring` 上是 `down` / `warn` | 卡片上写了触发哪条规则。阈值与设计理由见 [ARCHITECTURE.md §5.11](ARCHITECTURE.md)。 |
+| 某平台在 `/monitoring` 上是 `down` / `warn` | 卡片上写了触发哪条规则。阈值与设计理由见 [ARCHITECTURE.md §5.12](ARCHITECTURE.md)。 |
 | 想查某个时间段的日志 | `/logs` 支持关键字 / 级别 / `since`–`until`，服务端过滤，不限于当前屏幕上那几百行。 |
 | 日志反复出现 `H2S source 熔断` | Cloudflare 在拦你的出口 IP。熔断只暂停该 source，稍后用单个城市试探恢复。持续出现就配 `HTTPS_PROXY`。 |
 | 日志反复出现 `CF 挑战 ... 未解开` | 同上，通常是 IP 信誉问题，不是本地配置问题。 |
