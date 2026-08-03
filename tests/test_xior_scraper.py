@@ -431,6 +431,31 @@ def test_post_ajax_treats_204_as_genuine_zero_availability():
     assert result["units"] == []
 
 
+def test_post_ajax_treats_200_as_success():
+    """errorCode 200 是成功，不是故障。
+
+    回归：曾用「非 204 即故障」当判据，结果 Naritaweg 返回的 200 被当成错误，
+    整晚 36 轮（每轮 4 个房型 = 144 次）被误标为 incomplete。该字段装的是
+    HTTP 风格状态码，2xx 都是成功。
+    """
+    from scrapers.xior import _post_ajax
+
+    fetcher = FakeFetcher({
+        "success": True,
+        "data": {
+            "units": [SAMPLE_UNIT],
+            "total": 1,
+            "availability_response": {"errorCode": 200, "errorMessage": ""},
+        },
+    })
+
+    result = _post_ajax(
+        fetcher, property_page_id=499, room_type_id=29891, semester_id=3281
+    )
+    assert result is not None
+    assert len(result["units"]) == 1
+
+
 def test_post_ajax_detects_real_upstream_error():
     """204 之外的 errorCode 才是真故障 → None（本轮 incomplete）。
 

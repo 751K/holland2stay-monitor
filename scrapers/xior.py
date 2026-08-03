@@ -52,9 +52,14 @@ AJAX_URL = "https://www.xiorstudenthousing.eu/wp-admin/admin-ajax.php"
 # 同源请求只需要路径——origin 由 XIOR_PROFILE.challenge_url 决定
 _AJAX_PATH = "/wp-admin/admin-ajax.php"
 
-# Xior 上游（Yardi）用 204 表示「该房型当前无可用单元」，是正常结果而非故障。
-# 官方前端走完整流程收到的也是它 —— 见 _post_ajax 里的说明。
-_UPSTREAM_NO_AVAILABILITY = 204
+# ``availability_response.errorCode`` 装的是 **HTTP 风格状态码**，2xx 都表示
+# 上游调用成功：
+#   200 —— 正常返回（units 可能为空）
+#   204 —— 无可用单元；官方前端走完整流程收到的也是它
+# 只有 2xx 之外才是真故障。
+#
+# 曾经把「非 204 即故障」当判据，结果 Naritaweg 返回的 200 被当成错误，整晚
+# 36 轮（每轮 4 个房型 = 144 次）被误标为 incomplete。
 
 # 请求最小间隔（秒）。CF 对这个端点按 IP 限流在 ~15–20 req/window。
 #
@@ -68,6 +73,18 @@ _UPSTREAM_NO_AVAILABILITY = 204
 # 注意：楼栋数增加时单轮耗时线性增长（每栋楼的房型数 × 5s）。楼栋很多时
 # 应考虑分轮抓取，而不是把这个值调小。
 _MIN_REQUEST_INTERVAL = 5.0
+
+
+def _is_upstream_ok(code) -> bool:
+    """上游 errorCode 是否表示成功（2xx）。无法解析时保守当作成功。
+
+    保守方向的理由：误判成失败会把正常的零可用标成 incomplete，stale 收敛
+    因此永不执行；误判成成功最多是少记一次故障，代价小得多。
+    """
+    try:
+        return 200 <= int(code) < 300
+    except (TypeError, ValueError):
+        return True
 
 
 class XiorScraper(AbstractScraper):
@@ -370,7 +387,7 @@ def _post_ajax(
         upstream = data.get("availability_response")
         if isinstance(upstream, dict):
             code = upstream.get("errorCode")
-            if code and int(code) != _UPSTREAM_NO_AVAILABILITY:
+            if code and not _is_upstream_ok(code):
                 logger.warning(
                     "Xior 上游可用性查询失败 attempt=%d: errorCode=%s msg=%s params=%s",
                     attempt,
