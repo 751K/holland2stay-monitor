@@ -102,54 +102,40 @@ class RentCafeSession:
         )
         return fields
 
-    def register(
-        self,
-        first_name: str,
-        last_name: str,
-        email: str,
-        password: str,
-        phone: str = "",
-        birth_date: str = "",
-    ) -> dict:
-        """Create a new RENTCafe account and return the next-step page data.
-
-        Returns the hidden fields from the page after successful registration
-        (typically the Applicant Info step).
-        """
-        reg_url = f"{self._base_url}{self._ole_path}/register.aspx"
-        logger.info("Navigating to register: %s", reg_url)
-
-        resp = self._get(reg_url)
-        fields = _extract_hidden_fields(resp.text)
-        cpk = _extract_cafeportalkey(resp.text) or self._cafeportalkey
-
-        # Solve v2 (our v3 score will be too low, so v2 fallback is inevitable).
-        v2_token = self._solver.solve_v2(page_url=reg_url)
-        # Also grab a v3 token — some server-side checks want it present.
-        v3_token = self._solver.solve_v3(page_url=reg_url, action="GuestRegistration")
-
-        data = dict(fields)
-        data.update({
-            "txtName": first_name,
-            "txtName2": last_name,
-            "txtEmail": email,
-            "txtPassword": password,
-            "txtPhone": phone,
-            "BirthDate": birth_date,
-            "Prefer": "byEmail",
-            "SubscribeToEmails": "false",
-            "g-recaptcha-response-v3": v2_token,  # v2 token → v3 hidden field
-            "failed-captcha-3": "false",
-            "cafeportalkey": cpk,
-        })
-
-        resp2 = self._post(self._post_url, data, referer=reg_url)
-        return self._handle_response(resp2, "register")
+    # ------------------------------------------------------------------
+    # 这里原本有一个 register()，2026-08-03 删掉了。两条理由：
+    #
+    # 1. **它是错的。** 实测注册表单的字段是 txtName / txtName2 / txtEmail /
+    #    txtPassword / drpCurrentCountry / txtPhone / ddlLanguage /
+    #    HowDidYouHear / SubscribeToEmails，外加反自动化的 txtCodeVal /
+    #    txtRenderTime / txtvalue1 / txtvalue2。而它发的是 BirthDate 和
+    #    Prefer=byEmail —— 这两个字段**根本不存在**；它还把 v2 的 token 塞进
+    #    了 v3 的隐藏字段。没有任何调用方，所以这些错误一直没被发现。
+    #
+    # 2. **按设计它就不该存在。** 账号由用户自己在浏览器里注册，系统只使用
+    #    用户填进面板的凭据。批量自动注册账号对平台是滥用。
+    # ------------------------------------------------------------------
 
     def login(self, email: str, password: str) -> dict:
         """Log in to an existing RENTCafe account.
 
-        Returns the hidden fields from the page after successful login.
+        .. warning::
+
+           **这个实现尚未在真实账号上验证，且已知与实际页面不符。**
+
+           实测（2026-08-03）登录是**两段式**的：先只填邮箱 → 点 Continue →
+           页面再要密码。而下面是把 Username + Password 一次性 POST 出去，
+           大概率过不了。
+
+           另外没有携带 ``txtRenderTime`` 一类的反自动化字段——那个字段记录
+           页面渲染时刻，提交过快很可能被判为机器人。
+
+           reCAPTCHA 的用法也要按 :mod:`captcha.rentcafe_pages` 走：登录页是
+           **Enterprise** v3（sitekey 与条款页不同），下面写死的那套是旧的
+           错误假设。
+
+           实现之前先把流程走通并抓下真实请求，不要在这段之上继续叠代码——
+           上一版 register() 就是这么烂掉的。
         """
         login_url = f"{self._base_url}{self._ole_path}/guestlogin.aspx"
         logger.info("Navigating to login: %s", login_url)
