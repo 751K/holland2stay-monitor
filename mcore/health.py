@@ -101,6 +101,9 @@ class SourceHealth:
     max_listings: int = 0
     last_listings: int = 0
     last_error: str = ""
+    # 本轮抓的 target 数 < 该 source 配置的总数 → 说明启用了分轮抓取。
+    # 分片下每轮覆盖不同子集，"这一轮 0 条" 和上一轮的非零没有可比性。
+    sharded: bool = False
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -118,6 +121,7 @@ class SourceHealth:
             "max_listings": self.max_listings,
             "last_listings": self.last_listings,
             "last_error": self.last_error,
+            "sharded": self.sharded,
         }
 
 
@@ -138,12 +142,19 @@ def _judge(h: SourceHealth) -> None:
             + (f"（{h.last_error}）" if h.last_error else "")
         )
 
-    # 「抓到 0 条」单独看没有意义——Xior 四栋楼常态零可订，OurCampus 官网自述
-    # 排队 16–18 个月，把它们钉在告警上只会让真信号被噪音淹掉。
+    # 「抓到 0 条」单独看没有意义——Xior 常态零可订，OurCampus 官网自述排队
+    # 16–18 个月，把它们钉在告警上只会让真信号被噪音淹掉。
     #
     # 加上「该 source 自己在窗口内出现过非零」这个前提，规则就变成了
     # **本来有房、突然全没了**——这正是解析器被上游改版打坏的特征。
-    if h.zero_streak >= ZERO_STREAK_WARN and h.max_listings > 0:
+    #
+    # ⚠️ 但**分轮抓取会打破这个前提**：分片之后每轮抓的是不同的 target 子集，
+    # 某一轮 0 条只说明「这一片的楼没房」，和上一轮的非零根本不是同一批楼，
+    # 没有可比性。2026-08-03 Xior 扩到 30 栋分片后立刻误报了一次。
+    # 分片 source 的这条规则整个跳过，交给 fail_streak 和全局静默规则兜底。
+    if h.sharded:
+        pass
+    elif h.zero_streak >= ZERO_STREAK_WARN and h.max_listings > 0:
         reasons.append(
             f"连续 {h.zero_streak} 轮零房源，但窗口内曾抓到 {h.max_listings} 条"
         )
@@ -175,6 +186,10 @@ def source_health_from_rows(source: str, rows: list[dict[str, Any]]) -> SourceHe
     h.last_round_at = rows[0]["round_at"]
     h.last_listings = int(rows[0]["listings"])
     h.last_error = rows[0]["error_type"] or ""
+    # total_targets 为 0 = 老行或未记录，按不分片处理（保守：规则照常生效）
+    h.sharded = any(
+        int(r.get("total_targets") or 0) > int(r.get("targets") or 0) for r in rows
+    )
 
     for r in rows:
         if not r["error_type"] and not h.last_success_at:

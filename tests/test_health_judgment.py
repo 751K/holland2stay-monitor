@@ -328,3 +328,64 @@ class TestWatchdog:
         assert len(watchdog.snapshot(st)) == 1
         # snapshot 不写节流，poll 仍然能发出来
         assert watchdog.poll(st, now=1000.0)
+
+
+# ── 分轮抓取 ────────────────────────────────────────────────────────
+
+
+def _row(listings, targets, total, err=""):
+    return {
+        "round_at": "2026-08-03T10:00:00+00:00", "source": "s",
+        "listings": listings, "targets": targets, "complete": targets,
+        "duration_ms": 0, "error_type": err, "error_msg": "",
+        "total_targets": total,
+    }
+
+
+class TestShardedSourcesSkipZeroRule:
+    """分轮抓取会打破 zero_streak 规则的前提。
+
+    分片后每轮抓的是不同的 target 子集，某一轮 0 条只说明「这一片的楼没房」，
+    和上一轮的非零根本不是同一批楼。2026-08-03 Xior 扩到 30 栋分片后立刻误报。
+    """
+
+    def test_sharded_zero_streak_does_not_warn(self):
+        rows = [_row(0, 3, 30)] * 3 + [_row(38, 3, 30)]
+        h = health.source_health_from_rows("xior", rows)
+        assert h.sharded is True
+        assert h.zero_streak == 3          # 仍然如实统计
+        assert h.status == health.STATUS_OK  # 但不据此告警
+
+    def test_unsharded_zero_streak_still_warns(self):
+        rows = [_row(0, 6, 6)] * 3 + [_row(284, 6, 6)]
+        h = health.source_health_from_rows("holland2stay", rows)
+        assert h.sharded is False
+        assert h.status == health.STATUS_WARN
+
+    def test_missing_total_targets_treated_as_unsharded(self):
+        """老行没有这一列，保守按不分片处理，规则照常生效。"""
+        rows = [_row(0, 6, 0)] * 3 + [_row(284, 6, 0)]
+        h = health.source_health_from_rows("holland2stay", rows)
+        assert h.sharded is False
+        assert h.status == health.STATUS_WARN
+
+    def test_sharded_still_reports_fail_streak(self):
+        """分片只跳过零房源规则，连续失败照常判 down。"""
+        rows = [_row(0, 3, 30, "RateLimitError")] * 3 + [_row(38, 3, 30)]
+        h = health.source_health_from_rows("xior", rows)
+        assert h.status == health.STATUS_DOWN
+
+    def test_sharded_flag_is_exposed(self):
+        h = health.source_health_from_rows("xior", [_row(0, 3, 30)])
+        assert h.as_dict()["sharded"] is True
+
+
+class TestAlertTextIsTerse:
+    """告警文案只陈述发生了什么，不写解读。"""
+
+    def test_no_interpretive_prose(self, st):
+        _seed(st, "s", [(12, 2, 2, "")] * 5 + [(0, 2, 0, "RateLimitError")] * 3)
+        body = watchdog.poll(st)[0].body
+        for banned in ("就是这个样子", "请求仍是 200", "会一直挂着", "只是不产出数据"):
+            assert banned not in body, f"告警文案不该含解读性文字: {body}"
+        assert "\n" not in body, "单行，便于推送展示"

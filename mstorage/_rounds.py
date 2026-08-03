@@ -47,6 +47,7 @@ class RoundStatsOps:
         duration_ms: int = 0,
         error_type: str = "",
         error_msg: str = "",
+        total_targets: int = 0,
     ) -> bool:
         """记一行轮次遥测。任何异常都吞掉并返回 False。"""
         try:
@@ -54,12 +55,13 @@ class RoundStatsOps:
                 self._conn.execute(
                     "INSERT INTO round_stats "
                     "(round_at, source, listings, targets, complete, "
-                    " duration_ms, error_type, error_msg) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
+                    " duration_ms, error_type, error_msg, total_targets) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
                     (
                         round_at, source, int(listings), int(targets),
                         int(complete), int(duration_ms),
                         error_type or "", (error_msg or "")[:_ERR_MSG_MAX],
+                        int(total_targets or 0),
                     ),
                 )
             return True
@@ -116,7 +118,7 @@ class RoundStatsOps:
         """最近的遥测行，最新在前。"""
         sql = (
             "SELECT round_at, source, listings, targets, complete, "
-            "       duration_ms, error_type, error_msg "
+            "       duration_ms, error_type, error_msg, total_targets "
             "FROM round_stats "
         )
         params: list[Any] = []
@@ -167,7 +169,7 @@ class RoundStatsOps:
         placeholders = ",".join("?" * len(stamps))
         rows = self._conn.execute(
             "SELECT round_at, source, listings, targets, complete, "
-            "       duration_ms, error_type, error_msg "
+            "       duration_ms, error_type, error_msg, total_targets "
             f"FROM round_stats WHERE round_at IN ({placeholders}) "
             "ORDER BY round_at DESC, source",
             stamps,

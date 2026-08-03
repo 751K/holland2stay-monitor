@@ -314,6 +314,7 @@ def _record_source_round(
         error: BaseException | None = None,
         error_type: str = "",
         error_msg: str = "",
+        total_targets: int = 0,
 ) -> None:
     """给 ``round_stats`` 记一行。
 
@@ -343,6 +344,7 @@ def _record_source_round(
             duration_ms=duration_ms,
             error_type=error_type,
             error_msg=error_msg,
+            total_targets=total_targets,
         )
     except Exception:
         logger.debug("轮次遥测记录失败（已忽略）", exc_info=True)
@@ -1407,6 +1409,13 @@ async def run_once(
         logger.warning("未配置任何抓取任务，本轮不抓取。请检查 .env 中 SOURCES / CITIES / OURDOMAIN_CITIES 设置。")
         return {}
 
+    # 分片**之前**的每 source 总 target 数。遥测要同时记「本轮抓了几个」和
+    # 「一共配了几个」——健康判定靠两者是否相等来区分「这一片没房」和
+    # 「整个 source 没房」（见 mcore/health.py 的 zero_streak 规则）。
+    source_totals: dict[str, int] = {}
+    for _t in scrape_tasks:
+        source_totals[_t.source] = source_totals.get(_t.source, 0) + 1
+
     # target 多的 source 分轮抓，避免单轮顶破轮次预算（见 _apply_task_sharding）
     scrape_tasks = _apply_task_sharding(scrape_tasks, cfg, storage, dry_run=dry_run)
 
@@ -1480,6 +1489,7 @@ async def run_once(
                     _record_source_round(
                         storage, round_at=round_at, source=src,
                         targets=len(group), started_at=started_at, error=e,
+                        total_targets=source_totals.get(src, len(group)),
                     )
                 return
             succeeded_sources.append(src)
@@ -1492,6 +1502,7 @@ async def run_once(
                     listings=len(fresh_part),
                     targets=total_n or len(group), complete=complete_n,
                     started_at=started_at,
+                    total_targets=source_totals.get(src, len(group)),
                 )
 
         # 逐 source 隔离。dispatcher 内部已经按 task 隔离，但它在「本次调用的
@@ -1517,6 +1528,7 @@ async def run_once(
                     _record_source_round(
                         storage, round_at=round_at, source=_H2S_SOURCE,
                         targets=len(selected_h2s), started_at=started_at, error=e,
+                        total_targets=source_totals.get(_H2S_SOURCE, len(selected_h2s)),
                     )
             except Exception as e:
                 # H2S 的非 Blocked 异常按旧契约照常上抛（熔断只管 403），
@@ -1525,6 +1537,7 @@ async def run_once(
                     _record_source_round(
                         storage, round_at=round_at, source=_H2S_SOURCE,
                         targets=len(selected_h2s), started_at=started_at, error=e,
+                        total_targets=source_totals.get(_H2S_SOURCE, len(selected_h2s)),
                     )
                 raise
             else:
@@ -1540,6 +1553,7 @@ async def run_once(
                         listings=len(fresh_part),
                         targets=total_n or len(selected_h2s), complete=complete_n,
                         started_at=started_at,
+                        total_targets=source_totals.get(_H2S_SOURCE, len(selected_h2s)),
                     )
         elif h2s_tasks and h2s_mode == "open" and not dry_run:
             # 熔断期完全跳过 H2S。不记这一行的话，遥测里 H2S 会直接消失，面板
@@ -1548,6 +1562,7 @@ async def run_once(
             _record_source_round(
                 storage, round_at=round_at, source=_H2S_SOURCE,
                 targets=len(h2s_tasks),
+                total_targets=source_totals.get(_H2S_SOURCE, len(h2s_tasks)),
                 error_type="CircuitOpen",
                 error_msg=_h2s_circuit_reason or "circuit open",
             )

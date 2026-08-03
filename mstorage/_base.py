@@ -260,6 +260,14 @@ class StorageBase:
                 "ON web_notifications(user_id, id)"
             )
 
+        # 分轮抓取下 targets 只是「本轮这一片」，total_targets 才是该 source 配了
+        # 多少个。两者不等即说明本轮是分片——健康判定要靠它区分「这一片没房」和
+        # 「整个 source 没房」（见 mcore/health.py 的 zero_streak 规则）。
+        # 0 表示未知（老行 / 未记录），此时按不分片处理。
+        self._add_column_if_missing(
+            "round_stats", "total_targets", "INTEGER NOT NULL DEFAULT 0",
+        )
+
         # email_mode：shared (Resend) / custom (SMTP)；新库默认 shared。
         # 老库迁移：填过 email_smtp_host 的存量用户视为 custom，避免行为突变。
         added = self._add_column_if_missing(

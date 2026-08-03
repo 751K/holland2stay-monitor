@@ -78,9 +78,9 @@ def evaluate(storage, *, window: int | None = None) -> list[Alert]:
                 level=LEVEL_DOWN,
                 title=f"⛔ {h.source} 连续抓取失败",
                 body=(
-                    f"连续 {h.fail_streak} 轮失败"
-                    + (f"，最近错误 {h.last_error}" if h.last_error else "")
-                    + f"。最近一次成功: {fmt_ts(h.last_success_at, fallback='窗口内没有')}"
+                    f"连续失败 {h.fail_streak} 轮"
+                    + (f"｜错误 {h.last_error}" if h.last_error else "")
+                    + f"｜最近成功 {fmt_ts(h.last_success_at, fallback='无')}"
                 ),
             ))
             # down 期间不再叠加该 source 的 warn——它们说的是同一件事。
@@ -97,10 +97,9 @@ def evaluate(storage, *, window: int | None = None) -> list[Alert]:
                 level=LEVEL_WARN,
                 title=f"⚠️ {h.source} 抓取成功但零房源",
                 body=(
-                    f"连续 {h.zero_streak} 轮抓到 0 条，而窗口内曾抓到 "
-                    f"{h.max_listings} 条。上游改版打坏解析器时就是这个样子——"
-                    f"请求仍是 200，只是解析不出东西。\n"
-                    f"最近一次非零: {fmt_ts(h.last_nonzero_at, fallback='窗口内没有')}"
+                    f"连续 {h.zero_streak} 轮抓到 0 条"
+                    f"｜窗口内最高 {h.max_listings} 条"
+                    f"｜最近非零 {fmt_ts(h.last_nonzero_at, fallback='无')}"
                 ),
             ))
         if 0 <= h.completeness_rate < 1.0 and any(
@@ -110,10 +109,7 @@ def evaluate(storage, *, window: int | None = None) -> list[Alert]:
                 key=f"completeness_low:{h.source}",
                 level=LEVEL_WARN,
                 title=f"⚠️ {h.source} 完整扫描率偏低",
-                body=(
-                    f"窗口内完整扫描率 {h.completeness_rate:.0%}。"
-                    f"不完整的城市不会执行 stale 收敛，已下架房源会一直挂着。"
-                ),
+                body=f"窗口内完整扫描率 {h.completeness_rate:.0%}",
             ))
 
     streak = silent_round_streak(storage, **({"limit": window} if window else {}))
@@ -122,10 +118,7 @@ def evaluate(storage, *, window: int | None = None) -> list[Alert]:
             key="silent_rounds",
             level=LEVEL_DOWN,
             title="⛔ 全局连续零房源",
-            body=(
-                f"连续 {streak} 轮所有 source 加起来都是 0 条，"
-                f"但库里仍有房源记录。进程还活着、心跳正常，只是不产出数据。"
-            ),
+            body=f"连续 {streak} 轮全部 source 合计 0 条｜库内仍有房源记录",
         ))
 
     return alerts
