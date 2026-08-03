@@ -182,14 +182,16 @@ class XiorScraper(AbstractScraper):
 
     @contextmanager
     def batch_session(self):
-        """批次上下文：确保浏览器存活，跨轮复用。"""
-        try:
-            self._ensure_browser()
-            yield
-        except (BlockedError, UpstreamMaintenanceError):
-            logger.warning("抓取遇 Xior 浏览器会话不可复用状态，关闭浏览器")
-            self._close_browser()
-            raise
+        """批次上下文：确保浏览器存活，跨轮复用。
+
+        这里**不**捕获抓取期的异常。dispatcher 是按 task 隔离的，``scrape()``
+        抛的东西根本到不了 ``yield``——曾经写在这里的 ``except BlockedError:
+        self._close_browser()`` 因此是死代码，「403 后关闭浏览器下轮重建」
+        实际从未发生过。现在由 dispatcher 在批次结束后统一调
+        ``invalidate_session()``。
+        """
+        self._ensure_browser()
+        yield
 
     # ── public API ─────────────────────────────────────────────────────
 

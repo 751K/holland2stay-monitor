@@ -93,6 +93,14 @@ def get_scraper(source: str) -> Optional[AbstractScraper]:
     return instance
 
 
+def _safe_invalidate(scraper: AbstractScraper, label: str) -> None:
+    """丢弃 scraper 的长生命周期资源；失效动作本身不该再把 dispatcher 带崩。"""
+    try:
+        scraper.invalidate_session()
+    except Exception:
+        logger.debug("%s invalidate_session 失败（已忽略）", label, exc_info=True)
+
+
 def dispatch_scrape_tasks(
     tasks: list[ScrapeTask],
 ) -> tuple[list, dict[str, bool]]:
@@ -149,6 +157,10 @@ def dispatch_scrape_tasks(
         # per-task try **之外**，它抛的异常（浏览器创建失败、CF 挑战没过、
         # Playwright 崩溃）会直接穿透整个 dispatcher，把同轮里已经抓好的其它
         # source 结果一起带走——正是 per-task 隔离想避免的事。
+        # 本批次里是否出现过 403。出现过就在批次结束后丢掉该 source 的长生命
+        # 周期资源（浏览器），下轮重建——被 CF 标记的会话留着只会一直 403。
+        source_blocked: Optional[BlockedError] = None
+
         try:
             with scraper.batch_session():
                 for t in source_tasks:
@@ -168,6 +180,10 @@ def dispatch_scrape_tasks(
                     except (RateLimitError, BlockedError) as e:
                         hard_failures.append((ckey, e))
                         completeness[ckey] = False
+                        # 403 记下来批次结束后丢会话；429 不丢——「等等就好」，
+                        # 重建只是白白多过一次 CF 挑战。
+                        if isinstance(e, BlockedError) and source_blocked is None:
+                            source_blocked = e
                         logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
                     except (KeyboardInterrupt, SystemExit):
                         raise
@@ -193,36 +209,36 @@ def dispatch_scrape_tasks(
                             "%s 抓取出现未预期异常，已隔离该任务: %s: %s",
                             ckey, type(e).__name__, e, exc_info=True,
                         )
-                        try:
-                            scraper.invalidate_session()
-                        except Exception:
-                            logger.debug("%s invalidate_session 失败（已忽略）",
-                                         ckey, exc_info=True)
+                        _safe_invalidate(scraper, ckey)
+
+            # 403 后丢会话，**批次结束后**才丢：批次中间丢的话，同 source 的
+            # 后续 task 会各自触发一次浏览器重建（每次都是一轮完整 CF 挑战，
+            # 失败还会连锁重试），一栋楼的 403 能把整批拖成分钟级。
+            if source_blocked is not None:
+                logger.warning(
+                    "%s 本批次遭遇 403，丢弃该 source 的浏览器/会话，下轮重建: %s",
+                    source, source_blocked,
+                )
+                _safe_invalidate(scraper, source)
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as e:
             # 批次会话本身失败（浏览器建不起来 / CF 挑战没过 / Playwright 崩）。
             # 只补还没有结论的 task——异常若来自 ``__exit__``，前面已经跑完的
             # task 有自己的 completeness，不该被这里覆盖。
-            batch_failed = False
             for t in source_tasks:
                 ckey = _completeness_key(source, t.city_display, by_source)
                 if ckey in completeness:
                     continue
                 completeness[ckey] = False
                 hard_failures.append((ckey, e))
-                batch_failed = True
             logger.error(
                 "%s 批次会话失败，已隔离该 source: %s: %s",
                 source, type(e).__name__, e, exc_info=True,
             )
-            if batch_failed:
-                # 会话已不可用，丢掉长生命周期资源让下轮重建
-                try:
-                    scraper.invalidate_session()
-                except Exception:
-                    logger.debug("%s invalidate_session 失败（已忽略）",
-                                 source, exc_info=True)
+            # 无条件丢：能走到这里就说明批次会话的建立或收尾出了问题，
+            # 留着可疑会话的代价远大于下轮多一次冷启动。
+            _safe_invalidate(scraper, source)
 
     # 429 / 403 / 维护：若没有任何任务成功，维持旧行为让 monitor 进入冷却；
     # 若已有其它平台成功，则返回部分结果，避免 OurDomain 被挡时拖垮 H2S。

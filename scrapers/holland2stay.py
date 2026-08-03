@@ -45,7 +45,6 @@ from .base import (
     ScrapeNetworkError,
     ScrapeResult,
     ScrapeTask,
-    UpstreamMaintenanceError,
 )
 
 logger = logging.getLogger(__name__)
@@ -441,9 +440,13 @@ class HollandStayScraper(AbstractScraper):
     --------------
     浏览器**跨轮复用**——首轮创建，后续轮复用同一个实例，避免每轮重新执行
     CF Turnstile 挑战（~4s 冷启动 + CF challenge 频率过高会被标记）。
-    仅在 BlockedError（CF 会话过期）或进程退出时关闭重建。
 
-    batch_session() 不再创建/关闭浏览器，只负责让 dispatcher 拿到共享实例。
+    关闭重建发生在三种情况：
+    - 超过 ``_BROWSER_MAX_AGE``（2 小时）→ ``_ensure_browser`` 主动重建
+    - 本批次出现过 403 或未预期异常 → dispatcher 调 ``invalidate_session()``
+    - 进程退出
+
+    batch_session() 不创建/关闭浏览器，只负责让 dispatcher 拿到共享实例。
     """
 
     source = "holland2stay"
@@ -502,17 +505,16 @@ class HollandStayScraper(AbstractScraper):
         """
         批次上下文：确保浏览器存活，dispatcher 通过此入口拿到共享实例。
 
-        浏览器跨轮复用——不再每批次创建/关闭。CF 挑战只在浏览器首次创建
-        或 BlockedError 后重建时执行。
+        浏览器跨轮复用——不再每批次创建/关闭。
+
+        这里**不**捕获抓取期的异常。dispatcher 是按 task 隔离的，``scrape()``
+        抛的东西根本到不了 ``yield``——曾经写在这里的 ``except BlockedError:
+        self._close_browser()`` 因此是死代码，「403 后关闭浏览器下轮重建」
+        实际从未发生过。现在由 dispatcher 在批次结束后统一调
+        ``invalidate_session()``。
         """
-        try:
-            self._ensure_browser()
-            yield
-        except (BlockedError, UpstreamMaintenanceError):
-            # CF 会话被标记：关闭当前浏览器，下轮重建
-            logger.warning("抓取遇 H2S 浏览器会话不可复用状态，关闭浏览器")
-            self._close_browser()
-            raise
+        self._ensure_browser()
+        yield
 
     def scrape(self, task: ScrapeTask) -> ScrapeResult:
         availability_ids = task.extra.get("availability_ids") or ["179", "336"]
