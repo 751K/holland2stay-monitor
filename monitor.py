@@ -269,6 +269,38 @@ def _stale_sweep_decision(
     return "run"
 
 
+def _drop_shadow_sources(
+    cfg,
+    new_listings: list["Listing"],
+    status_changes: list[tuple["Listing", str, str]],
+) -> tuple[list["Listing"], list[tuple["Listing", str, str]]]:
+    """滤掉影子 source 的通知事件（房源本身已经入库，这里只拦「告诉谁」）。
+
+    影子 source 用于新平台上线前的静默验证：照常抓取、写库、参与 stale 收敛
+    和面板统计，但不发用户渠道通知、不写面板 notification feed、不推 APNs/FCM。
+
+    ``cfg.shadow_sources`` 为空时零开销直接返回原对象。
+    """
+    shadow = {s.lower() for s in getattr(cfg, "shadow_sources", None) or ()}
+    if not shadow:
+        return new_listings, status_changes
+
+    def _shadowed(listing) -> bool:
+        return (getattr(listing, "source", "") or "").lower() in shadow
+
+    kept_new = [l for l in new_listings if not _shadowed(l)]
+    kept_sc = [t for t in status_changes if not _shadowed(t[0])]
+
+    dropped_new = len(new_listings) - len(kept_new)
+    dropped_sc = len(status_changes) - len(kept_sc)
+    if dropped_new or dropped_sc:
+        logger.info(
+            "🔇 影子 source %s：%d 条新房源 + %d 条状态变更已入库但不通知",
+            ",".join(sorted(shadow)), dropped_new, dropped_sc,
+        )
+    return kept_new, kept_sc
+
+
 def _task_labels(tasks) -> list[str]:
     return [f"{t.source}:{t.city_display}" for t in tasks]
 
@@ -1614,8 +1646,21 @@ async def run_once(
     try:
         new_listings, status_changes = storage.diff(fresh)
 
+        # ── 影子 source：入库了，但不通知 ─────────────────────────────── #
+        # 新平台上线前的静默验证期：先确认它抓得对、数据长什么样，再决定是否
+        # 对用户开放。**必须在 diff() 之后过滤**——diff 要照常执行，房源才会
+        # 进库、状态变更才会被记录；被拦掉的只有「告诉谁」这一步。
+        #
+        # 副作用是这些 listing 的 notified 一直是 0。取消影子后不会补发历史
+        # ——diff() 只对真正的新 id 产出 new_listings，老的不会再冒出来。
+        # 这是想要的：解除影子不该给用户灌一堆积压通知。
+        new_listings, status_changes = _drop_shadow_sources(
+            cfg, new_listings, status_changes,
+        )
+
         # diff() 成功后再写时间戳，确保面板显示的 last_scrape_at 对应一次完整的
         # "抓取 + 入库" 操作；若 diff() 抛异常，时间戳不会被更新。
+        # 计数用 fresh（含影子 source）——它回答的是「抓到多少」，不是「通知了多少」。
         storage.set_meta("last_scrape_at", datetime.now(timezone.utc).isoformat())
         storage.set_meta("last_scrape_count", str(len(fresh)))
 

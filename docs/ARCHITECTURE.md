@@ -348,6 +348,8 @@ main_loop 据以决策的异常。
 过滤条件，再分发到他启用的渠道。渠道实现在 [`notifier.py`](../notifier.py) 和
 [`notifier_channels/`](../notifier_channels/)。
 
+`SHADOW_SOURCES` 里列出的 source 会在 `diff()` 之后、分发之前被整体滤掉：房源照常入库、状态变更照常记录、stale 收敛照常参与，但一条通知都不发。用于新平台上线前的静默验证。
+
 永久性失败要与临时故障分开。例：用户拉黑 Telegram bot 后每次都回
 `403 bot was blocked by the user`，这个状态不会自愈——现在会停止重试并自动关闭该
 用户的 Telegram 渠道（保留凭据，解除拉黑后重新勾选即可），同时写一条面板通知

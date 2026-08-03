@@ -880,6 +880,10 @@ class Config:
     timezone: str = "Europe/Amsterdam"
     heartbeat_interval_minutes: int = 60
     sources: list[str] = field(default_factory=lambda: ["holland2stay"])
+    # 影子 source：照常抓取入库，但**不发任何通知**（用户渠道 + 面板 feed + 推送）。
+    # 用于新平台上线前的静默验证——先确认它抓得对、数据长什么样，再决定是否
+    # 对用户开放。必须是 sources 的子集才有意义（不在 sources 里就压根不会抓）。
+    shadow_sources: list[str] = field(default_factory=list)
     ourdomain_cities: list[OurDomainCityFilter] = field(default_factory=list)
     ourcampus_cities: list[OurCampusCityFilter] = field(default_factory=list)
     xior_cities: list[XiorCityFilter] = field(default_factory=list)
@@ -949,13 +953,18 @@ class Config:
         return tasks
 
 
-def _parse_sources(raw: str) -> list[str]:
+def _parse_sources_raw(raw: str) -> list[str]:
+    """拆 source 列表，不做任何默认值填充。"""
     values = [
         p.strip().lower()
         for p in re.split(r"[,|]", raw or "")
         if p.strip()
     ]
-    return list(dict.fromkeys(values)) or ["holland2stay"]
+    return list(dict.fromkeys(values))
+
+
+def _parse_sources(raw: str) -> list[str]:
+    return _parse_sources_raw(raw) or ["holland2stay"]
 
 
 def _parse_name_key_list(raw: str, cls: type):
@@ -994,6 +1003,8 @@ def load_config() -> Config:
     CITIES                  格式 "城市名,ID|城市名,ID"，默认 "Eindhoven,29"
     OURDOMAIN_CITIES        格式 "显示名,key|显示名,key"，启用 ourdomain 时默认 Amsterdam Diemen
     OURCAMPUS_CITIES        同上格式，启用 ourcampus 时默认 OurCampus Amsterdam Diemen
+    SHADOW_SOURCES          逗号分隔。列出的 source 照常抓取入库但**不发通知**，
+                            用于新平台的静默验证。必须是 SOURCES 的子集
     AVAILABILITY_FILTERS    格式 "标签,ID|标签,ID"，默认包含 179 和 336
     DB_PATH                 str，默认 "data/listings.db"
     LOG_LEVEL               str，默认 "INFO"
@@ -1038,6 +1049,10 @@ def load_config() -> Config:
     if "ourdomain" in sources:
         raw_od_cities = os.environ.get("OURDOMAIN_CITIES", "Amsterdam Diemen,diemen")
         ourdomain_cities = _parse_ourdomain_cities(raw_od_cities)
+
+    # 影子 source：抓但不通知。只保留同时也在 sources 里的，否则是配置笔误
+    shadow_sources = [s for s in _parse_sources_raw(
+        os.environ.get("SHADOW_SOURCES", "")) if s in sources]
 
     ourcampus_cities: list[OurCampusCityFilter] = []
     if "ourcampus" in sources:
@@ -1089,6 +1104,7 @@ def load_config() -> Config:
         timezone=timezone_str,
         heartbeat_interval_minutes=max(0, int(os.environ.get("HEARTBEAT_INTERVAL_MINUTES") or "60")),
         sources=sources,
+        shadow_sources=shadow_sources,
         ourdomain_cities=ourdomain_cities,
         ourcampus_cities=ourcampus_cities,
         xior_cities=xior_cities,
