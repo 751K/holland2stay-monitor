@@ -295,6 +295,34 @@ Listing(
 第 1–2 步的侦察不必等到有房。RENTCafe 侧也**不需要浏览器**：`securerc.co.uk`
 不在 §2.1 那道 Cloudflare 挑战后面，curl_cffi 直连即可，与 OurDomain 一致。
 
+#### 选房步骤**不能深链**，必须按顺序走完前面
+
+实测：直接访问
+
+```
+oleapplication.aspx?stepname=Apartments&myOlePropertyId=185795&FloorPlanID=1111515
+```
+
+页面能打开，但隐藏字段 `myOlePropertyId` / `FloorPlanID` / `UnitID` / `MoveInDate`
+**全是空的**，结果恒为「No apartments were found matching your search request」。
+补上入住日再点 GO 也一样——不是筛选条件的问题，是页面压根不知道要搜哪个
+property。
+
+也就是说这一步的上下文存在**服务端会话**里，由前面几步依次建立，URL 参数
+不认。自动化必须老老实实走：
+
+```
+applyOnlineURL（stepname=RentalOptions，带 property/floorplan 参数）
+  → 提交条款表单（btnStart）
+  → 登录 / 注册
+  → 落到 Apartments，此时上下文才齐
+  → ContinueClick 选中单元
+  → ApplicantInfo
+```
+
+`applyOnlineURL` 是**唯一入口**，跳不过去。这也意味着抢房天然要好几个来回，
+设计重试和超时的时候要按这个往返数算，别按「一个请求」估。
+
 #### 第 3 步 Applicant Info（实测，2026-08-03）
 
 **不需要登录就能到达。** 第 2 步点 Start Application 之后直接落到注册表单
