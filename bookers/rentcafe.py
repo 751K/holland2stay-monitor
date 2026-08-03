@@ -116,47 +116,66 @@ class RentCafeSession:
     #    用户填进面板的凭据。批量自动注册账号对平台是滥用。
     # ------------------------------------------------------------------
 
+    #: 密码登录用的表单名。``guestlogin.aspx`` 上一共 4 个表单，别搞混：
+    #:
+    #:   Login       Username + Password + CheckUserAuth，按钮 Continue  ← 就是它
+    #:   UserLogin   Username + reCAPTCHA + otpclickedUserLogin
+    #:               → 「Send Verification Code」/「Email a Link to Login」，
+    #:                 是 **OTP / 免密登录**那条路，不是密码登录
+    #:   OtpOptions  选 OTP 发送方式
+    #:   VerifyOTP   6 位验证码
+    #:
+    #: **密码登录这个表单上没有任何 reCAPTCHA 字段**（实测 2026-08-03）。
+    #: 验证码在 UserLogin 那条 OTP 路径上。所以走密码登录不需要解验证码——
+    #: 旧实现在这里解了 v2+v3 又塞进不存在的字段，纯属浪费还可能被当异常流量。
+    _LOGIN_FORM = "Login"
+
     def login(self, email: str, password: str) -> dict:
-        """Log in to an existing RENTCafe account.
+        """用密码登录已有的 RENTCafe 账号。
 
-        .. warning::
+        页面上看起来是「先填邮箱 → Continue → 再填密码」的两段式，但那只是
+        **前端的渐进显示**：``Login`` 表单本身同时含 Username 和 Password。
+        实测网络层是两个 POST，都打 ``rcformsave.ashx``，靠 ``CheckUserAuth``
+        区分——第一次探测账号是否存在，第二次带密码真正登录。
 
-           **这个实现尚未在真实账号上验证，且已知与实际页面不符。**
+        这里按同样的顺序发：先探测（拿到服务端更新后的隐藏字段），再登录。
+        两步都用服务端下发的字段，不自己编。
 
-           实测（2026-08-03）登录是**两段式**的：先只填邮箱 → 点 Continue →
-           页面再要密码。而下面是把 Username + Password 一次性 POST 出去，
-           大概率过不了。
+        .. note::
 
-           另外没有携带 ``txtRenderTime`` 一类的反自动化字段——那个字段记录
-           页面渲染时刻，提交过快很可能被判为机器人。
+           不解 reCAPTCHA：密码登录表单上没有那些字段（见 :attr:`_LOGIN_FORM`）。
 
-           reCAPTCHA 的用法也要按 :mod:`captcha.rentcafe_pages` 走：登录页是
-           **Enterprise** v3（sitekey 与条款页不同），下面写死的那套是旧的
-           错误假设。
-
-           实现之前先把流程走通并抓下真实请求，不要在这段之上继续叠代码——
-           上一版 register() 就是这么烂掉的。
+        Returns
+        -------
+        登录后页面的隐藏字段。RENTCafe 会**恢复上次的申请上下文**——账号里有
+        未完成的申请时直接落到那一步（实测落到 ApplicantInfo 而不是 Apartments）。
         """
         login_url = f"{self._base_url}{self._ole_path}/guestlogin.aspx"
-        logger.info("Navigating to login: %s", login_url)
+        logger.info("RENTCafe 登录: %s", login_url)
 
         resp = self._get(login_url)
         fields = _extract_hidden_fields(resp.text)
         cpk = _extract_cafeportalkey(resp.text) or self._cafeportalkey
 
-        v2_token = self._solver.solve_v2(page_url=login_url)
-        v3_token = self._solver.solve_v3(page_url=login_url, action="UserLogin")
+        base = dict(fields)
+        base["formName2"] = self._LOGIN_FORM
+        base["cafeportalkey"] = cpk
+        base["Username"] = email
 
-        data = dict(fields)
-        data.update({
-            "Username": email,
-            "Password": password,
-            "CheckUserAuth": "1",
-            "g-recaptcha-response-v3": v2_token,
-            "failed-captcha-3": "false",
-            "cafeportalkey": cpk,
-        })
+        # ① 账号探测。服务端据此决定要不要收密码；返回里可能带更新过的隐藏字段。
+        probe = dict(base)
+        probe["CheckUserAuth"] = "1"
+        probe_resp = self._post(self._post_url, probe, referer=login_url)
+        probed = _extract_hidden_fields(probe_resp.text)
+        if probed:
+            base.update(probed)
+            base["Username"] = email
+            base.setdefault("formName2", self._LOGIN_FORM)
 
+        # ② 带密码正式登录
+        data = dict(base)
+        data["Password"] = password
+        data["CheckUserAuth"] = "0"
         resp2 = self._post(self._post_url, data, referer=login_url)
         return self._handle_response(resp2, "login")
 
