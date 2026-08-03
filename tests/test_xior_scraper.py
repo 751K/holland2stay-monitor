@@ -250,11 +250,29 @@ def test_is_candidate_available():
 
 
 def test_to_listing_maps_status_vacant_unrented():
+    """``Vacant Unrented Not Ready`` 也是可订，不是「抽签」。
+
+    **Xior 没有抽签机制**——"lottery" 是 Holland2Stay 专有概念（H2S 的
+    availability filter id=336 摇号池）。这里曾经映射成 ``Available in lottery``，
+    实测那批单元和 ``Notice Unrented`` 一样带 ``applyOnlineURL``、
+    ``availableDate`` 分布重叠、同样要过闸②，用户看到的却是一个不存在的摇号。
+
+    错标还会连累 stale 收敛：lottery 用的是 2 天阈值而非 7 天，这些单元会以
+    3.5 倍的速度被推测成 Occupied。
+    """
     from scrapers.xior import _to_listing
 
     unit = dict(SAMPLE_UNIT, unitStatus="Vacant Unrented Not Ready")
     listing = _to_listing(unit, display="Maastricht Annadal", building_url="https://example.com")
-    assert listing.status == "Available in lottery"
+    assert listing.status == "Available to book"
+
+
+def test_xior_never_produces_lottery_status():
+    """回归：Xior 平台不该产出任何 lottery 状态。"""
+    from scrapers.xior import _AVAILABLE_STATUSES, _STATUS_MAP
+
+    assert "Available in lottery" not in _STATUS_MAP.values()
+    assert "Available in lottery" not in _AVAILABLE_STATUSES
 
 
 def test_to_listing_unknown_status_falls_back_to_occupied():

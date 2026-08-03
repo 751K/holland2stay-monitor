@@ -168,9 +168,23 @@ WP feed 的「可订」不等于「现在真能抢」，有两类假阳性，对
 
 | `unitStatus` | 含义 | 映射 |
 |---|---|---|
-| `Notice Unrented` | 租约通知期内、未出租 | `Available to book` |
-| `Vacant Unrented Not Ready` | 尚未准备好 | `Available in lottery` |
+| `Notice Unrented` | 现住户已递交退租通知，人还没搬走 | `Available to book` |
+| `Vacant Unrented Not Ready` | 已空置，房间还没收拾好 | `Available to book` |
 | 其它 / `units` 为空 | 无房 | `Occupied`（fail-closed） |
+
+两个 Yardi 状态的区别只在**为什么现在没人住**，对用户没有差别——都能立刻提交
+申请。实测两类单元都带 `applyOnlineURL`，`availableDate` 分布完全重叠，且都要
+过闸②，过不了的一律降级 `Occupied`。
+
+> **Xior 没有抽签机制。** `Vacant Unrented Not Ready` 曾被映射成
+> `Available in lottery`，那是错的——"lottery" 是 Holland2Stay 专有概念
+> （H2S availability filter id=336 摇号池）。这个错标有两个实际后果：
+> 面板给用户显示橙色 "Lottery" 徽标，等于告诉他们去参加一个不存在的摇号；
+> 而且 stale 收敛对 lottery 用 **2 天**阈值而非 7 天，这些单元会以 3.5 倍
+> 速度被推测成 `Occupied`。
+>
+> 「还不能入住」这层信息由 `available_from` 表达，闸① 已经把太远的滤掉了，
+> 不需要再借一个语义不符的状态来编码。
 
 ### 4.2 两道闸
 

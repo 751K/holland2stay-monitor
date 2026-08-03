@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### 修正 — Xior 没有抽签，却有 23 条房源被标成「摇号中」
+
+`Vacant Unrented Not Ready` 一直被映射成 `Available in lottery`。**Xior 根本没有抽签机制**——"lottery" 是 Holland2Stay 专有概念（H2S 的 availability filter id=336 摇号池）。当初大概是想表达「不能立刻入住」，顺手抓了个最近的现成状态。
+
+两个 Yardi 状态的区别只在**为什么现在没人住**（`Notice Unrented` = 住户递交了退租通知还没搬；`Vacant Unrented Not Ready` = 已空置但房间没收拾好），对用户没有差别。实测两类单元都带 `applyOnlineURL`、`availableDate` 分布完全重叠、都得过闸② 的 floorplans.aspx 权威校验——**同样可订**。
+
+错标的后果不只是标签难看：
+
+- 面板给用户显示橙色 "Lottery" 徽标，等于告诉他们去参加一个不存在的摇号；
+- stale 收敛对 lottery 用的是 **2 天**阈值而非 7 天（`_STALE_LOTTERY_STATUS`），这些单元会以 3.5 倍速度被推测成 `Occupied`。
+
+改为映射到 `Available to book`。「还不能入住」这层信息由 `available_from` 表达，闸①（60 天窗口）已经把太远的滤掉了，不需要再借一个语义不符的状态来编码。
+
+OurDomain 也有一条 `text-warning` / 含 `wait` → `Available in lottery` 的映射（`OURDOMAIN.md` 记作「等位中」），语义上更接近排队但仍不是摇号；目前库里 0 条命中，暂未改动，待有真实样本时再判断。
+
 ### Xior 监控扩到全部 30 栋，配分轮抓取
 
 此前只监控 4/30 栋。扩容的前提是先解决单轮预算：新上线的轮次遥测量出 Xior **每栋楼 13.9 秒**（其余三个 source 每 target 只要 1–4 秒），30 栋 ≈ 417 秒/轮，而 `CHECK_INTERVAL` 是 300 秒。而且 H2S 排在其它 source **之后**执行——直接配 30 栋等于每轮把真正出房源、自动预订已跑通的那个 source 推迟 7 分钟。

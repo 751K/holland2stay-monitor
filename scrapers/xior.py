@@ -431,13 +431,33 @@ def _post_ajax(
 
 # ── Listing mapping ────────────────────────────────────────────────────────
 
+# Yardi 的 unitStatus → 本项目的统一状态。
+#
+# 两个 Yardi 状态的区别只在**为什么现在没人住**：
+#   Notice Unrented           现住户已递交退租通知，人还没搬走
+#   Vacant Unrented Not Ready 已经空了，但房间还没收拾好（保洁/维修）
+#
+# 对用户而言两者没有差别——**都能立刻提交申请**。实测这两类单元都带
+# ``applyOnlineURL``，``availableDate`` 分布也完全重叠，而且都得过闸②
+# （floorplans.aspx 权威校验），过不了的一律降级 Occupied。
+#
+# ⚠️ ``Vacant Unrented Not Ready`` 曾被映射成 ``Available in lottery``。那是错的：
+# **Xior 没有抽签机制**，"lottery" 是 Holland2Stay 专有概念（H2S 的
+# availability filter id=336 摇号池）。这个错标有两个实际后果，不只是标签难看：
+#   1. 面板给用户显示橙色 "Lottery" 徽标，等于告诉他们要去参加一个不存在的摇号
+#   2. stale 收敛对 lottery 用的是 **2 天**阈值而非 7 天（见
+#      ``mstorage/_listings.py`` 的 ``_STALE_LOTTERY_STATUS``），这些单元会比
+#      应有的速度快 3.5 倍被推测成 Occupied
+#
+# 「还不能入住」这层信息由 ``available_from`` 表达，闸①（60 天窗口）已经把太
+# 远的滤掉了，不需要再借一个语义不符的状态来编码。
 _STATUS_MAP = {
     "notice unrented": "Available to book",
-    "vacant unrented not ready": "Available in lottery",
+    "vacant unrented not ready": "Available to book",
 }
 
-# 这些状态才算「可订/可抽签」，受可用日期窗口约束。
-_AVAILABLE_STATUSES = ("Available to book", "Available in lottery")
+# 这些状态才算「可订」，受可用日期窗口约束。
+_AVAILABLE_STATUSES = ("Available to book",)
 
 # 可用日期窗口（天）：只有 availableDate 落在 [今天, 今天+N] 内的单元才算
 # 「现在真·可订」。Xior 的 Yardi 数据里大量 "Notice Unrented" 是「现住户已
