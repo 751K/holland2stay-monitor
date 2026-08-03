@@ -14,7 +14,10 @@ from typing import Any
 
 from app.services.listing_service import apply_user_filter, storage_ctx
 
-USER_ALLOWED_TYPES = {"new_listing", "status_change", "booking"}
+# announcement = 管理员显式发的公告。必须在这里列出，否则它会被
+# filter_for_user_view 当成系统内部事件滤掉，用户在 App Alerts 里根本看不到
+# ——而公告的全部意义就是让用户看到。
+USER_ALLOWED_TYPES = {"new_listing", "status_change", "booking", "announcement"}
 SSE_POLL_SECONDS = 5
 SSE_MAX_AGE_SECONDS = 300
 

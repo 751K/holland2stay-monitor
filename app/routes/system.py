@@ -589,8 +589,32 @@ def api_monitoring():
     return jsonify(report)
 
 
+@admin_api_required
+@csrf_required
+def api_announcement():
+    """给所有开启通知的用户群发一条公告。
+
+    ``dry_run: true`` 只回报送达范围、不发送——群发不可撤回，发之前先看清楚
+    会打扰到多少人。
+    """
+    from app.services.announcement_service import broadcast
+
+    data = request.get_json(silent=True) or {}
+    title = data.get("title") or ""
+    body = data.get("body") or ""
+    dry_run = bool(data.get("dry_run"))
+    try:
+        res = broadcast(title, body, dry_run=dry_run)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    return jsonify({"ok": True, "dry_run": dry_run, **res.as_dict()})
+
+
 def register(app: Flask) -> None:
     app.add_url_rule("/system",         endpoint="system_info",    view_func=system_info,    methods=["GET"])
+    app.add_url_rule("/api/announcement", endpoint="api_announcement", view_func=api_announcement, methods=["POST"])
     app.add_url_rule("/monitoring",     endpoint="monitoring_view", view_func=monitoring_view, methods=["GET"])
     app.add_url_rule("/api/monitoring", endpoint="api_monitoring",  view_func=api_monitoring,  methods=["GET"])
     app.add_url_rule("/logs",           endpoint="logs_view",      view_func=logs_view,      methods=["GET"])

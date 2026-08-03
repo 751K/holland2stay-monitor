@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}{{ _('system_info') }}{% endblock %}
-{% block head %}<meta http-equiv="refresh" content="30">{% endblock %}
+{# 原来是 <meta http-equiv="refresh" content="30">。改成 JS 定时刷新，因为公告
+   表单在这一页上——meta refresh 会在管理员打字打到一半时把整页刷掉，输入全丢。
+   下面的 scheduleReload() 在表单有内容时不刷新。 #}
+{% block head %}{% endblock %}
 
 {% block content %}
 
@@ -64,6 +67,29 @@
     </table>
   </div>
 
+  <!-- 公告群发 -->
+  <div class="card">
+    <div class="card-header">
+      <span>{{ _('announce_title') }}</span>
+      <span class="text-xs text-tertiary">{{ _('announce_hint') }}</span>
+    </div>
+    <div style="padding:12px;display:flex;flex-direction:column;gap:8px;">
+      <input type="text" id="ann-title" class="ann-input"
+             placeholder="{{ _('announce_title_ph') }}" maxlength="120" autocomplete="off">
+      <textarea id="ann-body" class="ann-input" rows="3"
+                placeholder="{{ _('announce_body_ph') }}" maxlength="1000"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="sendAnnouncement(true)">
+          {{ _('announce_preview') }}
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="sendAnnouncement(false)">
+          {{ _('announce_send') }}
+        </button>
+        <span id="ann-status" class="text-xs text-tertiary"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- 数据库 -->
   <div class="card">
     <div class="card-header">{{ _('database_stats') }}</div>
@@ -119,5 +145,71 @@
     </div>
   </div>
 </div>
+
+<script>
+// ── 定时刷新（替代原来的 meta refresh）──
+// 公告表单在这一页上，打字打到一半被整页刷掉会丢输入，所以有内容时不刷新。
+function annHasDraft() {
+  return !!(document.getElementById('ann-title').value.trim()
+         || document.getElementById('ann-body').value.trim());
+}
+function scheduleReload() {
+  setTimeout(function () {
+    if (annHasDraft()) { scheduleReload(); return; }   // 有草稿就再等一轮
+    location.reload();
+  }, 30000);
+}
+scheduleReload();
+
+// ── 公告群发 ──
+async function sendAnnouncement(dryRun) {
+  var title = document.getElementById('ann-title').value.trim();
+  var body  = document.getElementById('ann-body').value.trim();
+  var el    = document.getElementById('ann-status');
+  if (!title) { el.textContent = '{{ _("announce_need_title") }}'; return; }
+
+  // 真发之前二次确认——群发不可撤回
+  if (!dryRun && !confirm('{{ _("announce_confirm") }}\n\n' + title + '\n' + body)) return;
+
+  el.textContent = '…';
+  try {
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+    var resp = await fetch('/api/announcement', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({title: title, body: body, dry_run: !!dryRun}),
+    });
+    var d = await resp.json();
+    if (!d.ok) { el.textContent = 'Error: ' + (d.error || resp.status); return; }
+    if (d.dry_run) {
+      el.textContent = '{{ _("announce_preview_result") }} ' + d.recipients
+        + ' / {{ _("announce_skipped") }} ' + d.skipped_disabled;
+    } else {
+      el.textContent = '{{ _("announce_sent") }} ' + d.channel_ok + '/' + d.recipients
+        + ' · ' + d.push_devices + ' {{ _("announce_devices") }}'
+        + (d.errors && d.errors.length ? ' · ' + d.errors.length + ' err' : '');
+      document.getElementById('ann-title').value = '';
+      document.getElementById('ann-body').value = '';
+    }
+  } catch (e) {
+    el.textContent = 'Error: ' + e;
+  }
+}
+</script>
+
+<style>
+.ann-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+  resize: vertical;
+}
+.ann-input::placeholder { color: var(--text3); }
+</style>
 
 {% endblock %}

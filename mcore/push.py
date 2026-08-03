@@ -356,6 +356,42 @@ def _payload_round_aggregate(listings, round_id: str, *, lang: str = "en") -> di
     }
 
 
+def _payload_announcement(title: str, body: str, *, lang: str = "en") -> dict:
+    """管理员公告。标题用管理员自己写的，不套 "Monitor error"。
+
+    ``thread-id`` 也和 errors 分开——公告和故障告警混在同一个通知串里，会让
+    真正的故障告警被日常公告稀释。
+    """
+    return {
+        "aps": {
+            "alert": {
+                "title": _trim(title, 64),
+                "body": _trim(body, 180),
+            },
+            "sound": "default",
+            "thread-id": "announcements",
+        },
+        "kind": "announcement",
+    }
+
+
+def _fcm_payload_announcement(title: str, body: str, *, lang: str = "en") -> dict:
+    return {
+        "message": {
+            "data": {
+                "title": _trim(title, 64),
+                "body": _trim(body, 180),
+                "kind": "announcement",
+                "deep_link": "",
+            },
+            "android": {
+                "priority": "normal",   # 公告不是紧急事件
+                "collapse_key": "announcement",
+            },
+        },
+    }
+
+
 def _payload_error(text: str, kind: str = "blocked", *, lang: str = "en") -> dict:
     return {
         "aps": {
@@ -876,6 +912,23 @@ async def dispatch_admin(storage, message: str, *, kind: str = "blocked") -> int
         return sum(1 for r in results if r.ok) + sum(1 for r in fcm_results if r.ok)
     except Exception:
         logger.exception("push.dispatch_admin 异常 kind=%s", kind)
+        return 0
+
+
+async def dispatch_announcement_to_user(storage, user_id: str, title: str, body: str) -> int:
+    """给单个用户的所有活跃设备推一条公告（APNs + FCM）。
+
+    **不走 ``_allow_send`` 的 dedup / 限流**：那套是给自动产生的通知用的，
+    公告是管理员显式点发的，被静默丢掉只会让人以为发送失败又点一次。
+    """
+    try:
+        payload_fn = lambda lang: _payload_announcement(title, body, lang=lang)
+        fcm_payload_fn = lambda lang: _fcm_payload_announcement(title, body, lang=lang)
+        results = await _send_to_user(storage, user_id, payload_fn)
+        fcm_results = await _send_fcm_to_user(storage, user_id, fcm_payload_fn)
+        return sum(1 for r in results if r.ok) + sum(1 for r in fcm_results if r.ok)
+    except Exception:
+        logger.exception("push.dispatch_announcement_to_user 异常 user=%s", user_id)
         return 0
 
 

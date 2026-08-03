@@ -129,6 +129,16 @@ class BaseNotifier(ABC):
         """发送监控异常告警（抓取失败等）。"""
         return await self._send(f"Monitor Error\n{message}")
 
+    async def send_announcement(self, title: str, body: str = "") -> bool:
+        """发送管理员公告。
+
+        与 ``send_error`` 分开是因为两者性质完全不同：告警是系统检测到的故障，
+        公告是人主动发的通知。此前没有公告类型时只能借用 ``send_error``，结果
+        是一条「近期在扩展房源覆盖」的说明会顶着 "Monitor Error" 的标题发到
+        用户手机上——既误导又降低真告警的可信度。
+        """
+        return await self._send(f"{title}\n{body}" if body else title)
+
     async def send_booking_success(
         self,
         listing: Listing,
@@ -907,6 +917,15 @@ class WebNotifier(BaseNotifier):
             type="error",
             title="Monitor Error",
             body=message,
+        )
+        return True
+
+    async def send_announcement(self, title: str, body: str = "") -> bool:
+        # 独立的 type，面板据此换配色/图标——公告不该长得像故障告警
+        self._storage.add_web_notification(
+            type="announcement",
+            title=title,
+            body=body,
         )
         return True
 
