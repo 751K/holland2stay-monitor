@@ -11,19 +11,27 @@ monitor.py — 监控主程序
 
 核心流程（每轮）
 ----------------
-1. `dispatch_scrape_tasks()`（sync，在 executor 线程中运行）抓取所有 source 房源 + 完整扫描信号
-2. 记录完整扫描信号（Phase 2 仅观察，不参与状态收敛）
+1. 写心跳 meta（抓取**之前**，与成败无关——它回答的是「循环还活着吗」）
+2. 逐 source 调 `dispatch_scrape_tasks()`（sync，在 executor 线程中运行），
+   拿到房源 + 每个城市的完整扫描信号。一个 source 失败只隔离它自己
 3. `storage.diff()` 对比库中快照，产出 new_listings / status_changes
-4. 遍历启用的用户，构建自动预订候选；立即将 try_book() 提交到线程池
-5. 发送新房源/状态变更通知（与步骤 4 中的预订并发进行）
+4. 收集自动预订候选（纯内存）；**只对本轮真有候选的用户**做 H2S 预登录，
+   然后立即把 try_book() 提交到线程池
+5. 发送新房源/状态变更通知（与步骤 4 的预订并发进行）
 6. 等待预订完成，推送预订结果通知
-7. 写 meta（last_scrape_at）；按时间间隔发心跳
+7. 写 meta（last_scrape_at）；按完整扫描信号决定是否做 stale 收敛；
+   按时间间隔发心跳通知
+
+完整扫描信号（completeness）不是只用来看的：只有本轮抓全了的城市才会执行
+stale listing 收敛，否则「没抓到」会被误判成「已下架」。
 
 智能轮询
 --------
-get_interval() 根据荷兰本地时间判断是否处于高峰期（默认 8:30-10:00 工作日）。
-高峰期使用 PEAK_INTERVAL（默认 60s），其余时间使用 CHECK_INTERVAL（默认 300s）。
-实际等待时间在基准值 ±20% 随机抖动，避免多实例同步。
+get_interval() 根据荷兰本地时间判断是否处于高峰期，**两个窗口**：默认工作日
+8:30–10:00（PEAK_START/PEAK_END）和 13:30–15:00（PEAK_START_2/PEAK_END_2）。
+高峰期使用 PEAK_INTERVAL（默认 60s）并逐轮自适应收紧，其余时间使用
+CHECK_INTERVAL（默认 300s）。实际等待时间在基准值 ±JITTER_RATIO（默认 20%）
+随机抖动，避免固定周期特征。
 
 热重载
 ------
@@ -32,8 +40,9 @@ Web 面板的「立即应用」按钮通过发送 SIGHUP（`kill -HUP <PID>`）�
 
 依赖模块
 --------
-scraper → storage → notifier → booker（单向，无循环）
+scrapers/ → storage → notifier → booker（单向，无循环）
 config / users：被各模块按需 import
+（顶层 `scraper.py` 只剩向后兼容的 re-export 壳，抓取实现都在 `scrapers/`）
 """
 from __future__ import annotations
 
@@ -184,7 +193,11 @@ def _unpack_scrape_result(result):
 
 
 def _log_scrape_completeness(completeness: dict[str, bool]) -> None:
-    """Phase 2: 只记录城市完整扫描信号，不参与任何收敛行为。"""
+    """打一行本轮完整扫描概览。
+
+    只负责日志；真正消费 completeness 的是
+    ``_mark_stale_listings_for_complete_cities``（见 main_loop 的收敛分支）。
+    """
     if not completeness:
         return
     complete_n = sum(1 for ok in completeness.values() if ok)
@@ -203,7 +216,11 @@ def _mark_stale_listings_for_complete_cities(
         days: int = 7,
         lottery_days: int = 2,
 ) -> int:
-    """Phase 3: 只对本轮完整扫描成功的城市执行 stale listing 收敛。"""
+    """只对本轮完整扫描成功的城市执行 stale listing 收敛。
+
+    key 带 ``source:`` 前缀时按 (source, city) 精确限定，避免用一个 source
+    的完整性去收敛另一个 source 的同名城市。
+    """
     complete_cities: list[str] = []
     complete_source_cities: list[tuple[str, str]] = []
     for key, ok in completeness.items():
@@ -1154,7 +1171,7 @@ async def run_once(
     流程说明
     --------
     1. dispatch_scrape_tasks() 在 executor 线程中运行（同步 → 异步桥接）
-    2. 记录城市完整扫描信号，并返回给 main_loop 的 Phase 3 收敛逻辑
+    2. 记录城市完整扫描信号，并返回给 main_loop 的 stale 收敛逻辑
     3. storage.diff() 识别 new_listings 和 status_changes
     4. 快速候选预扫描（纯内存，无网络）：
        - 同时扫描 new_listings 和 status_changes，收集每个用户的自动预订候选
@@ -1882,7 +1899,7 @@ async def main_loop(
             # 心跳：**在抓取之前**写，抓取成功与否都刷新。
             #
             # 它回答的是「监控循环还活着吗」，和 last_scrape_at 的「抓到数据了
-            # 吗」是两个问题。H2S 熔断冷却最长 4 小时，那期间没有任何成功抓取，
+            # 吗」是两个问题。H2S 熔断冷却最长 6 小时（_H2S_CIRCUIT_MAX_COOLDOWN），那期间没有任何成功抓取，
             # 但 monitor 完全健康、只是在按设计退避——拿 last_scrape_at 做健康
             # 判定会把正常退避误报成故障。
             try:

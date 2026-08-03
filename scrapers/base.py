@@ -204,40 +204,19 @@ def is_maintenance_body(body: str) -> bool:
 
     判定基于多个英文短语任一命中——H2S 维护页是固定模板，命中率高。
     对短 body / JSON 不会误伤（这些字符串不会出现在正常 GraphQL 响应里）。
+
+    调用方是 ``browser_fetcher._h2s_maintenance_check``（H2S_PROFILE 的
+    ``maintenance_check`` 钩子），在 CF 挑战解开**之后**拿页面正文来判——
+    挑战页是 Cloudflare 生成的，解开前的标题/正文与站点真实状态无关。
+
+    曾经还有一个 ``probe_h2s_maintenance(session)``：连续 403 时用 curl_cffi
+    另开一次主站 GET 来探维护。H2S 迁到浏览器传输层后它再无调用者（浏览器
+    导航本来就会经过主站，顺手判掉即可），已删除。
     """
     if not body:
         return False
     lower = body.lower()
     return any(marker in lower for marker in _MAINTENANCE_MARKERS)
-
-
-# 主站探测 URL：维护时这个 URL 直接返回维护 HTML（200 或 503 都可能），
-# 不走 Cloudflare WAF，所以即便 GraphQL 端点被 403，主站也能看到真正状态。
-H2S_MAIN_SITE_URL = "https://www.holland2stay.com/"
-
-
-def probe_h2s_maintenance(session, *, timeout: float = 10.0) -> bool:
-    """
-    用现有 curl_cffi Session GET 主站，看是否命中维护页。
-
-    用法
-    ----
-    连续 N 次 403 时（每次 403 = 一轮抓取被拒），调一次本函数。
-    True  → 抛 UpstreamMaintenanceError，让 monitor 走长冷却 + 安静等。
-    False → 维持原来的 BlockedError 路径，按 Cloudflare 屏蔽处理。
-
-    异常安全
-    --------
-    探测本身的网络异常一律吞掉，返回 False——探测失败不应该升级成更严重
-    的错误，让上层继续按 Block 路径走即可。
-    """
-    try:
-        resp = session.get(H2S_MAIN_SITE_URL, timeout=timeout)
-    except Exception:
-        return False
-    body = getattr(resp, "text", "") or ""
-    # 即便 status_code 是 503，body 里照样含 "We'll be back soon" — 不限制 status。
-    return is_maintenance_body(body[:4000])
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -295,9 +274,16 @@ class AbstractScraper(ABC):
 
     线程模型
     --------
-    scrape() 在 monitor 的 executor 线程里跑，每个 scraper 实例可能被
-    多个线程并发使用——内部状态（session / cookie）需自行加锁或每次
-    新建。Holland2Stay 用的就是"每次新建 Session"策略，无需锁。
+    实例由 ``get_scraper()`` 按 source 缓存并**跨轮复用**，dispatcher 逐
+    source 串行调用，所以同一实例不会被并发进入。
+
+    浏览器型 source（H2S / Xior）还有一条更强的约束：Playwright 对象**绑定
+    创建它的线程**，换线程即失效，且两个独立的 Playwright sync 实例不能共存
+    于同一线程。因此它们各自恒定跑在 ``monitor._get_browser_executor(source)``
+    的专属长存单线程上。往这类 scraper 里塞自己的线程池会直接抛
+    ``greenlet.error: Cannot switch to a different thread``。
+
+    纯 HTTP 的 source（OurDomain）没有这个约束，跑在默认 executor 上。
     """
 
     # 子类必须覆盖。例：``source = "holland2stay"``
@@ -326,9 +312,17 @@ class AbstractScraper(ABC):
     def invalidate_session(self) -> None:
         """丢弃本 source 持有的长生命周期资源（浏览器 / 会话）。
 
-        dispatcher 在捕获到**未预期异常**时调用。这类异常（例如 Playwright 的
-        ``greenlet.error``）通常意味着底层会话已进入不可用状态，留着只会让
-        后续每一轮都重复失败——必须丢掉，下轮重建。
+        dispatcher 在三种情况下调用：
+
+        - **未预期异常**（例如 Playwright 的 ``greenlet.error``）——底层会话
+          已进入不可用状态，留着只会让后续每一轮都重复失败
+        - **本批次出现过 403**——批次跑完后调用（不是抓到就调：批次中间丢会话
+          会让同 source 的后续 task 各自触发一次浏览器重建，每次一轮完整 CF
+          挑战）。被 CF 标记的会话留着只会一直 403
+        - **批次会话本身失败**（``batch_session()`` 的进入或退出抛异常）
+
+        429 和平台维护**不**调用：前者「等等就好」，重建只是白白多过一次挑战；
+        后者是对方的事，本地会话没坏。
 
         默认 no-op：不持有跨 task 资源的 scraper 无需实现。
         """

@@ -4,7 +4,7 @@ P1 候选平台技术可行性 + 合规性汇总。
 
 > **2026-06-13 更新**：H2S 已将 GraphQL API 从 `api.holland2stay.com/graphql` 迁移至 `www.holland2stay.com/api/graphql`（与主站同域），并对旧子域名启用了 Cloudflare Turnstile 保护。curl_cffi TLS impersonation 已无法通过。已迁移至 **CloakBrowser**（patched Chromium，58 C++ 源码级反指纹 patch）——浏览器自动执行 Turnstile JS challenge，通过后通过 `page.evaluate(fetch)` 调用同域 GraphQL API。详见 scaper / booker 源码。
 
-所有结论来自真实 HTTP 探测，除非单独标注更新日期。
+所有结论来自真实 HTTP 探测，除非单独标注更新日期。**反爬现状会随上游变化失效——以 [ARCHITECTURE.md §3](ARCHITECTURE.md) 和各 scraper 源码为准。**
 
 ---
 
@@ -12,7 +12,7 @@ P1 候选平台技术可行性 + 合规性汇总。
 
 | # | 平台 | 公开可读 | 反爬 | 数据形态 | 量级 | ToS 风险 | 推荐 |
 |---|---|---|---|---|---|---|---|
-| 1 | **Xior** | ✅ 完全 | **Turnstile 不验证** | AJAX JSON（`admin-ajax.php?action=yardi_room_availability`） | 57 栋 NL+BE（100+ 全欧） | 低 | 🟢🟢🟢 **最推荐** |
+| 1 | **Xior** | ✅ 完全 | **Turnstile 不验证**；但 2026-08-02 起端点已上 CF 托管挑战，需浏览器 | AJAX JSON（`admin-ajax.php`，POST 表单） | 57 栋 NL+BE（100+ 全欧） | 低 | 🟢🟢 已接入（浏览器传输层） |
 | 2 | **HousingAnywhere** | ✅ 完全 | 无 | JSON-LD + `__PRELOADED_STATE__` + 全 data-test-locator 标签 | 196 条 Amsterdam | 低（robots 禁 `/api/*`，但 HTML OK） | 🟢🟢🟢 **强烈推荐** |
 | 3 | **SSH (sshxl.nl)** | ✅ 但 SPA | 无 | Angular SPA + sitemap-offers.xml | 44 条全国 | 低 | 🟢 推荐（需挖 API） |
 | 4 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可用 CloakBrowser（H2S 同方案） |

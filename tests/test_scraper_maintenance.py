@@ -1,20 +1,22 @@
 """
 平台维护态测试（适配新 CloakBrowser 路径）。
 
-旧 curl_cffi _post_gql 的 403 streak / maintenance probe 逻辑已退役。
-is_maintenance_body / probe_h2s_maintenance 仍保留在 scrapers.base，
-但仅作为未来可能的探测工具。dispatcher 优先级 + monitor admin 通知逻辑不变。
+旧 curl_cffi ``_post_gql`` 的 403 streak / maintenance probe 逻辑已退役，
+``probe_h2s_maintenance`` 也随之删除（浏览器导航本来就经过主站，顺手判掉即可）。
+
+现在的判定路径：``browser_fetcher._h2s_maintenance_check`` 作为 H2S_PROFILE 的
+``maintenance_check`` 钩子，在 CF 挑战解开**之后**拿页面标题/正文调
+``is_maintenance_body``。dispatcher 优先级 + monitor admin 通知逻辑不变。
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from scrapers.base import (
     UpstreamMaintenanceError,
     is_maintenance_body,
-    probe_h2s_maintenance,
     BlockedError,
     ScrapeTask,
 )
@@ -28,17 +30,6 @@ We anticipate being back online by 11:30(CET).</p>
 </body></html>"""
 
 
-def _fake_response(status_code, body=""):
-    resp = MagicMock()
-    resp.status_code = status_code
-    resp.text = body
-    resp.ok = 200 <= status_code < 300
-    resp.json = MagicMock(return_value={"data": {}})
-    def raise_for_status():
-        if not resp.ok:
-            raise Exception(f"HTTP Error {status_code}")
-    resp.raise_for_status = raise_for_status
-    return resp
 
 
 # ─── is_maintenance_body 单元测试（不变）─────────────────────────
@@ -65,25 +56,6 @@ class TestIsMaintenanceBody:
 
     def test_graphql_json_returns_false(self):
         assert is_maintenance_body('{"data":{"products":{"items":[]}}}') is False
-
-
-# ─── probe_h2s_maintenance 单元测试（不变）───────────────────────
-
-class TestProbeH2sMaintenance:
-    def test_probe_returns_true_when_main_site_in_maintenance(self):
-        session = MagicMock()
-        session.get.return_value = _fake_response(503, _MAINT_HTML)
-        assert probe_h2s_maintenance(session) is True
-
-    def test_probe_returns_false_for_normal_site(self):
-        session = MagicMock()
-        session.get.return_value = _fake_response(200, "<html><body>Welcome</body></html>")
-        assert probe_h2s_maintenance(session) is False
-
-    def test_probe_swallows_network_errors(self):
-        session = MagicMock()
-        session.get.side_effect = TimeoutError("probe timeout")
-        assert probe_h2s_maintenance(session) is False
 
 
 # ─── dispatcher 上抛优先级测试（不变）───────────────────────────

@@ -41,7 +41,7 @@ required beyond the notification channels you choose to enable.
 |---|---|---|
 | Holland2Stay | Any Dutch city you configure | Auto-booking supported |
 | OurDomain | Amsterdam Diemen / South-East | Notify only |
-| Xior | 30 buildings across 15 cities | Notify only |
+| Xior | 30 buildings across 14 cities | Notify only |
 
 Coverage shifts as third-party sites change. The scrapers are documented in
 [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and

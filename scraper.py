@@ -25,5 +25,4 @@ from scrapers.base import (  # noqa: F401  (re-export for backwards compat)
     is_maintenance_body,
     is_proxy_error,
     is_proxy_service_error,
-    probe_h2s_maintenance,
 )

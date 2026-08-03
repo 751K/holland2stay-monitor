@@ -1,16 +1,26 @@
 """
-mcore/browser_fetcher.py — 共享 CloakBrowser 管理 + GraphQL fetch
-==================================================================
+browser_fetcher.py — 站点无关的浏览器传输层
+==============================================
 
-为 scraper 和 booker 提供统一的浏览器内 GraphQL 请求能力。
+给被 Cloudflare 挑战保护的站点提供统一的请求能力：过挑战 → 等 clearance →
+在浏览器内发**同源**请求。浏览器内 fetch() 自动携带 cookies / TLS 指纹 /
+CF clearance token，无需手动管理会话。
 
-浏览器内 fetch() 自动携带所有 cookies / TLS 指纹 / CF clearance token，
-无需手动管理会话。CF Turnstile 挑战在首次请求时自动完成。
+站点差异全部收在 ``SiteProfile`` 里（challenge_url / 默认头 / clearance 判据
+/ 维护检测钩子 / 是否轮换出口 IP），其余流程对所有站点通用。当前有两个
+profile：``H2S_PROFILE``（GraphQL）和 ``XIOR_PROFILE``（WordPress admin-ajax）。
+
+使用者：``scrapers/holland2stay.py``、``scrapers/xior.py``、``booker.py``。
 
 线程安全
 --------
-每个 BrowserFetcher 实例绑定单线程——Scraper 在 executor 线程内用，
-Booker 在 ThreadPoolExecutor 线程内用，各自独立实例，无共享状态。
+每个 BrowserFetcher 实例**绑定创建它的线程**——Playwright 对象换线程即失效。
+Scraper 侧由 ``monitor._get_browser_executor(source)`` 保证每个浏览器型
+source 恒定跑在自己的长存单线程上；Booker 在自己的线程里另建实例。
+
+两个独立的 Playwright sync 实例**不能共存于同一线程**（第一个会在该线程装上
+event loop，第二个 launch() 随即被判成「在 asyncio loop 里用同步 API」），
+所以 executor 必须按 source 分开，不能共用一条。
 """
 from __future__ import annotations
 

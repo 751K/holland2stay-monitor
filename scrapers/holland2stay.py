@@ -474,7 +474,12 @@ class HollandStayScraper(AbstractScraper):
         self._browser_created_at: float = 0.0
 
     def _ensure_browser(self) -> BrowserFetcher:
-        """懒创建或复用浏览器实例。BlockedError 后自动重建。"""
+        """懒创建或复用浏览器实例。
+
+        只在两种情况下真正重建：实例还没有，或已超过 ``_BROWSER_MAX_AGE``。
+        抓取期的 403 由 dispatcher 在批次结束后调 ``invalidate_session()``
+        丢弃会话，下一轮再走到这里时自然重建。
+        """
         from config import CLOAKBROWSER_HEADLESS
 
         now = time.monotonic()
@@ -501,7 +506,7 @@ class HollandStayScraper(AbstractScraper):
             raise
 
     def _close_browser(self) -> None:
-        """关闭浏览器，释放资源。BlockedError 时调用。"""
+        """关闭浏览器，释放资源。由 ``invalidate_session()`` 和超龄重建调用。"""
         if self._fetcher is not None:
             try:
                 self._fetcher.__exit__(None, None, None)

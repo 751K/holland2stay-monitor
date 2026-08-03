@@ -1,6 +1,20 @@
 # Xior 监控 — 设计文档
 
-> 2026-05-22 侦察结论：Xior 使用 WordPress + Yardi (RENTCafe) 后端，房间数据通过 AJAX JSON 返回，**无反爬、无需浏览器**。三个平台里最容易抓。
+> **状态更新 2026-08-02：下面这份 2026-05-22 的侦察结论已被上游改变推翻。**
+> Cloudflare 现在对 `admin-ajax.php` 启用了托管挑战，curl_cffi 的 TLS 指纹伪装
+> 恒返回 403 + 挑战页。Xior 已改走**浏览器传输层**（`BrowserFetcher` +
+> `XIOR_PROFILE`），并按 IP 限流（~15–20 req/window，跨轮累积）——靠 5s 全局
+> 请求间隔 + 每 15 分钟重建浏览器换出口 IP 来应对。
+>
+> 「Turnstile 不验证服务端」这一条仍然成立：过了 CF 挑战之后，端点本身不校验
+> token。以实现为准：[`scrapers/xior.py`](../scrapers/xior.py) 和
+> [ARCHITECTURE.md §3](ARCHITECTURE.md)。
+>
+> ---
+>
+> 以下为 2026-05-22 的原始侦察记录，保留作为历史依据：Xior 使用 WordPress +
+> Yardi (RENTCafe) 后端，房间数据通过 AJAX JSON 返回，当时**无反爬、无需浏览器**，
+> 三个平台里最容易抓。
 
 ---
 
@@ -280,7 +294,9 @@ floorplans.aspx（URL 由 `applyOnlineURL` 推导）；绝大多数轮次 0 候�
 
 ---
 
-## 7. 实现设计
+## 7. 实现设计（已被实际实现取代）
+
+> 这一节是 2026-05-22 动手前的设计草稿，与现在的代码有实质差异：传输层已换成浏览器（不再是 `curl_cffi`）、增加了全局限流锁与 floorplans.aspx 权威校验、`AJAX_URL` 常量已删除。读实现请直接看 [`scrapers/xior.py`](../scrapers/xior.py)。
 
 ### 7.1 新文件
 

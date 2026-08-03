@@ -2,21 +2,37 @@
 scrapers/xior.py — Xior Student Housing scraper
 =================================================
 
-Xior uses WordPress + Yardi (RENTCafe) backend. Room data is returned as
-JSON via ``admin-ajax.php?action=yardi_room_availability``. The Turnstile
-widget is a client-side decoration — the server does not validate tokens.
+Xior uses a WordPress + Yardi (RENTCafe) backend. Room data comes from a
+form POST to ``admin-ajax.php`` with ``action=yardi_room_availability``.
+The Turnstile widget on the page is a client-side decoration — the endpoint
+does not validate tokens.
 
-Three-stage flow
-----------------
-1. Extract ``property_page_id`` + ``semester_id`` + room-type IDs from
-   the building page's Yardi modal HTML.
-2. POST ``yardi_room_availability`` for each room type.
+Per-task flow
+-------------
+1. Look up the building in ``BUILDINGS`` (a **hardcoded registry**:
+   ``property_page_id`` / ``semester_id`` / room-type IDs, auto-discovered
+   once on 2026-05-22). ``discover_buildings()`` at the bottom of this file
+   can regenerate it, but is not part of the scrape path.
+2. POST ``yardi_room_availability`` once per room type, **through the
+   browser transport** (``BrowserFetcher`` + ``XIOR_PROFILE``) — the
+   endpoint sits behind a Cloudflare challenge since 2026-08-02 and TLS
+   fingerprint spoofing no longer gets through.
 3. Deduplicate units by ``apartmentId``, map to ``Listing``.
+4. If any unit looks bookable within the availability window, cross-check
+   against RentCafe's ``floorplans.aspx`` (the authoritative source) — the
+   WordPress feed lags and keeps listing units that are already taken.
+   Fail-open: if that page is unreachable, trust the feed.
 
-Cloudflare rate-limits the AJAX endpoint at ~15–20 req/window (IP-level
-429).  Requests are paced by ``_MIN_REQUEST_INTERVAL`` through a global
-lock shared by every building, and 429s retry with the shared
-``RATE_LIMIT_BACKOFF`` from ``scrapers/base.py``.
+Rate limiting
+-------------
+Cloudflare rate-limits this endpoint **per IP** at ~15–20 req/window, and it
+accumulates across rounds. Two mechanisms together:
+
+- ``_MIN_REQUEST_INTERVAL`` paces requests through a process-wide lock shared
+  by every building, so bursts stay under the window.
+- ``XIOR_PROFILE.rotating_proxy=True`` + a short ``_BROWSER_MAX_AGE`` means
+  rebuilding the browser also rotates the exit IP, which spreads the
+  accumulated count. 429s additionally retry with ``RATE_LIMIT_BACKOFF``.
 """
 from __future__ import annotations
 
@@ -48,8 +64,9 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
-AJAX_URL = "https://www.xiorstudenthousing.eu/wp-admin/admin-ajax.php"
-# 同源请求只需要路径——origin 由 XIOR_PROFILE.challenge_url 决定
+# 同源请求只需要路径——origin 由 XIOR_PROFILE.challenge_url 决定。
+# 完整 URL 是 https://www.xiorstudenthousing.eu/wp-admin/admin-ajax.php，
+# 但**不要**直接拿它去 curl：该端点在 CF 挑战后面，2026-08-02 实测恒 403。
 _AJAX_PATH = "/wp-admin/admin-ajax.php"
 
 # ``availability_response.errorCode`` 装的是 **HTTP 风格状态码**，2xx 都表示
@@ -141,7 +158,12 @@ class XiorScraper(AbstractScraper):
         self._browser_created_at: float = 0.0
 
     def _ensure_browser(self) -> BrowserFetcher:
-        """懒创建或复用浏览器实例。BlockedError 后自动重建。"""
+        """懒创建或复用浏览器实例。
+
+        只在两种情况下真正重建：实例还没有，或已超过 ``_BROWSER_MAX_AGE``。
+        抓取期的 403 由 dispatcher 在批次结束后调 ``invalidate_session()``
+        丢弃会话，下一轮再走到这里时自然重建。
+        """
         from config import CLOAKBROWSER_HEADLESS
 
         now = time.monotonic()

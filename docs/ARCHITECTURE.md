@@ -52,18 +52,20 @@ flowchart TD
     CB -->|冷却到期| CAN["只放 1 个城市做 canary"]
     CB -->|否| ALL["全部 H2S 任务"]
 
-    SKIP --> D["dispatch_scrape_tasks()"]
+    SKIP --> D["按 source 分组<br/>逐 source 调 dispatch_scrape_tasks()"]
     CAN --> D
     ALL --> D
 
-    D --> SC["按 source 分组<br/>每组用缓存的 scraper 实例"]
+    D --> SC["每组用缓存的 scraper 实例<br/>某个 source 抛异常只隔离它自己"]
     SC --> R["合并 listings + completeness"]
     R --> DIFF["storage.diff(fresh)<br/>→ new_listings / status_changes"]
     DIFF --> BOOK["自动预订候选<br/>（仅 H2S）"]
     DIFF --> NOTIF["按用户过滤条件分发通知"]
-    NOTIF --> STALE{"本轮有完整扫描的城市？"}
-    STALE -->|有| CONV["stale listing 状态收敛"]
-    STALE -->|无| SKIP2["跳过收敛<br/>避免把「没抓到」误判成「已下架」"]
+    NOTIF --> DUE{"距上次收敛满 24h？"}
+    DUE -->|否| WAIT["本轮不收敛"]
+    DUE -->|是| STALE{"本轮有完整扫描的城市？"}
+    STALE -->|有| CONV["stale listing 状态收敛<br/>按 (source, city) 限定"]
+    STALE -->|无| SKIP2["跳过收敛且不重置计时器<br/>下轮有完整城市就补跑"]
 ```
 
 ### 轮询节奏
@@ -82,7 +84,11 @@ flowchart TD
 `ScrapeTask` 是 `(source, city_key, city_display)` 三元组，定义在
 [`scrapers/base.py`](../scrapers/base.py)。一个城市 / 一栋楼 = 一个 task。
 `SOURCES=holland2stay,ourdomain,xior` 且各源配了城市时，一轮就是多个 task
-混合派发——某个 source 全挂不影响其它 source 的结果入库。
+混合派发。monitor **按 source 分组、逐组调 dispatcher**，某个 source 全挂不
+影响其它 source 的结果入库——这层隔离是显式做的，不是自动成立的，见 §5.8。
+
+completeness 的 key 在多源同轮时带 `source:` 前缀（`holland2stay:Eindhoven`），
+单源部署退化为裸城市名。前缀决定了 stale 收敛能否按 (source, city) 精确限定。
 
 ---
 
@@ -116,8 +122,10 @@ clearance → 发同源请求」抽象成站点无关的流程，站点差异收
 ```python
 XIOR_PROFILE = SiteProfile(
     name="Xior",
+    source="xior",                    # 取该源专属的代理 session
     challenge_url="https://www.xiorstudenthousing.eu/netherlands/",
     default_headers=_XIOR_AJAX_HEADERS,
+    rotating_proxy=True,              # 重建浏览器 = 换出口 IP
 )
 ```
 
@@ -127,7 +135,9 @@ XIOR_PROFILE = SiteProfile(
 | `default_headers` | 该站点请求的默认头 |
 | `clearance_probe` | 可选。初始化最后一步用它确认 clearance 生效；没有就跳过 |
 | `clearance_pending_markers` | 403 响应里出现这些 = clearance 未生效（可恢复），而非 IP 被封 |
-| `maintenance_check` | 可选钩子，只在挑战解开后调用 |
+| `maintenance_check` | 可选钩子，只在挑战解开后调用（挑战页是 CF 生成的，解开前的正文与站点状态无关） |
+| `source` | 该 profile 属于哪个 source，决定用哪条代理 sticky session |
+| `rotating_proxy` | `True` 时每次建浏览器换一个 session（即换出口 IP）。给**按 IP 累积限流**的站点用：单个浏览器会话内 IP 仍稳定，所以 clearance 照常可复用 |
 
 **关键：请求必须在浏览器内发出**（`page.evaluate` 里的 `fetch`），不能把
 cookie 搬给 HTTP 客户端——Cloudflare 的 clearance 同时绑定 TLS 指纹，脱离
@@ -158,7 +168,7 @@ cookie 搬给 HTTP 客户端——Cloudflare 的 clearance 同时绑定 TLS 指�
 | `upstream_maintenance_seen_at` | 首次探测到平台维护的时间 |
 
 > `monitor_heartbeat_at` 和 `last_scrape_at` 回答的是两个问题：「循环还在转吗」
-> 和「抓到数据了吗」。健康检查必须用前者——H2S 熔断冷却最长 4 小时，那期间没有
+> 和「抓到数据了吗」。健康检查必须用前者——H2S 熔断冷却最长 6 小时，那期间没有
 > 成功抓取，但系统完全健康。
 
 ---
@@ -217,18 +227,27 @@ Cloudflare 会升级挑战难度，表现为挑战耗时越来越长直至超时
 复用需要**两个条件同时成立**，缺一个就静默退化：
 
 1. `get_scraper()` 缓存实例——浏览器挂在实例上。
-2. H2S/Xior 的抓取跑在**进程级长存**的单线程 executor 里
-   （`monitor._get_h2s_executor()`）。Playwright 对象绑定创建线程，线程一换
-   浏览器即作废。
+2. 每个浏览器型 source 跑在**自己的**进程级长存单线程 executor 里
+   （`monitor._get_browser_executor(source)`）。
 
-v1.9.0 声称实现了跨轮复用，但这两条都不满足，实际从未生效。
+第 2 条有两层约束，缺一不可：Playwright 对象绑定创建线程，线程一换浏览器即
+作废（所以线程必须活得比一轮长）；而两个独立的 Playwright sync 实例**不能
+共存于同一线程**——第一个会在该线程装上 event loop，第二个 `launch()` 随即被
+判成「在 asyncio loop 里用同步 API」（所以 H2S 和 Xior 不能共用一条线程）。
+
+v1.9.0 声称实现了跨轮复用，但这两条都不满足，实际从未生效；v1.9.9 修第一层
+时又一度把两个 source 塞进同一条线程，踩中了第二层。
 
 ### 5.5 source 级熔断
 
-H2S 连续抓取失败会触发熔断，**只暂停 H2S**，其它 source 继续。冷却到期后先用
-1 个城市做 canary，成功才恢复完整扫描。
+H2S 抓取抛 `BlockedError`（**只有 403 这一种**，不是任何失败）会打开熔断，
+**只暂停 H2S**，其它 source 继续。冷却 30 min 起、连续失败翻倍、上限 6 小时；
+到期后先用 1 个城市做 canary，成功才恢复完整扫描。
 
-因此只启用一个 source 时，这套设计等于空转——H2S 一熔断，整轮变成空操作。
+只启用一个 source 时，这套设计等于空转——H2S 一熔断，整轮变成空操作。
+
+Xior / OurDomain **没有**对等的熔断，只有 §5.8 的逐 source 隔离。它们的失败
+不会累积成暂停，每轮照常重试。
 
 ### 5.6 「屏蔽」「维护」「限流」要分开
 
@@ -239,7 +258,7 @@ H2S 连续抓取失败会触发熔断，**只暂停 H2S**，其它 source 继续
 | `BlockedError` | CF 屏蔽、clearance 无法恢复 | source 熔断 + admin 告警 |
 | `UpstreamMaintenanceError` | 平台维护页 | 安静冷却，**不打扰普通用户**（他们什么也做不了） |
 | `RateLimitError` | 429 | 退避重试 |
-| `ScrapeNetworkError` | 网络 / 超时 / 非预期响应 | 本轮标记 incomplete |
+| `ScrapeNetworkError` | 网络 / 超时 / 非预期响应 | 该 task 不进 completeness（缺席≠完整），连续失败到阈值才冷却 |
 
 维护异常曾被 403 处理分支压成 `BlockedError`，导致平台维护走了熔断 + 告警路径。
 
@@ -251,8 +270,67 @@ H2S 连续抓取失败会触发熔断，**只暂停 H2S**，其它 source 继续
 **上游返回空要区分「真没房」和「查询失败」。** Xior 的 WordPress 端点在向 Yardi
 取可用性失败时仍返回 `success=true` + `units=[]`，真实错误只在
 `availability_response.errorCode` 里——不查这个字段就会把上游故障读成零可用。
-其中 `errorCode: 204` 是例外，它就是「当前无可用单元」的正常表达（用官方前端
-对照验证过）。
+
+但这个字段装的是 **HTTP 风格状态码，2xx 全部表示上游调用成功**：`200` 是正常
+返回（units 可能为空），`204` 是「当前无可用单元」（用官方前端走完整流程对照
+验证过）。只有 2xx 之外才是真故障。
+
+反向的误判代价更大，所以判据要往「成功」一侧保守：把正常的零可用误标成
+incomplete，会让 stale 收敛永不执行。v1.9.6 用「非 204 即故障」当判据，整晚
+36 轮里返回 `200` 的那栋楼（Amsterdam Naritaweg，4 个房型 × 36 轮 = 144 次）
+全被判成抓取失败——而真正的 429 只有 8 次。
+
+### 5.8 一个 source 失败不能带走整轮
+
+`dispatch_scrape_tasks()` 内部按 task 隔离，但它在「本次调用的任务**全部**
+失败」时仍会上抛——这是给 monitor 做冷却的契约。而 monitor 是**按 source 分开
+调用**它的，于是这个判定退化成「单个 source 全失败」，跨 source 的保护等于不存在。
+
+2026-08-03 实测：Xior 四栋楼连续 429 让 `RateLimitError` 逃出整个 dispatch，
+同轮 OurDomain 已抓到的结果被丢弃、H2S 排在最后根本没被执行、39 个用户收到
+「监控将暂停 5 分钟」（429 这条通知路径没有节流）。24 小时内三次。
+
+现在 monitor 逐 source 隔离：失败的 source 在完整扫描日志里标 `✗`，其余照常
+入库通知；只有**所有** source 都失败才上抛，由 `_pick_round_failure()` 按
+`ProxyError → Maintenance → Blocked → RateLimit → Network` 挑一个最值得
+main_loop 据以决策的异常。
+
+还有一处同类漏洞：`batch_session()` 的进入/退出发生在 per-task `try` **之外**，
+浏览器创建失败、CF 挑战没过、Playwright 崩溃都会从那里穿透整个 dispatcher。
+现在整个 `with` 外面再包一层。
+
+### 5.9 403 之后必须丢弃浏览器会话
+
+两个浏览器型 scraper 的 `batch_session()` 里曾写着「捕获 `BlockedError` →
+关浏览器 → 下轮重建」。但 dispatcher 按 task 隔离，`scrape()` 抛的异常到不了
+`yield`——那段 `except` 是死代码，这条恢复路径**从未执行过**。
+
+后果：H2S 403 → 熔断 30 分钟 → canary **复用同一个被烧的浏览器**（`_BROWSER_MAX_AGE`
+2 小时内不重建）→ 大概率再 403 → 熔断翻倍。Xior 更直接：它靠重建浏览器来换
+出口 IP，不重建就一直卡在被限流的那个 IP 上。
+
+现在由 dispatcher 负责：批次里出现过 403，**批次结束后**调一次
+`invalidate_session()`。时机是关键——批次中间丢会话，同 source 的后续 task 会
+各自触发一次浏览器重建，每次一轮完整 CF 挑战（最长 90s+25s，失败还连锁重试
+3 次），一栋楼的 403 能把整批拖成分钟级。429 和维护态不丢会话。
+
+### 5.10 「没拿到数据」不等于「确认没有数据」
+
+这是本项目反复踩的同一类判据错误，值得单独记一条：
+
+| 案例 | 错误判据 | 后果 |
+|---|---|---|
+| CF 挑战（§5.2） | DOM 元素等不到 → 只 warning 然后继续，并标记已初始化 | 7 周静默停摆 |
+| Xior errorCode（§5.7） | 非 204 即故障 | 整栋楼 144 次误判为 incomplete |
+| H2S 分页 | `page_info.total_pages` 缺失 → 默认 1 → 直接判 complete | 0 条房源 + 完整扫描，正好是让 stale 收敛清空整城的组合 |
+
+前两条已修。第三条现在拿不到 `total_pages` 就记 ERROR 并标不完整——已抓到的
+部分照常入库，只是不参与收敛；真正的零房源（结构完整、`total_pages=1`）仍判
+完整，否则 stale 永不收敛。
+
+顺带一条时序上的同类问题：stale 收敛的 24 小时计时器原本在 `finally` 里无条件
+重置，于是 run_once 的兜底路径或 H2S 熔断期返回空 completeness 时，那一次机会
+被白白用掉。现在没有完整城市就 `defer`，不动计时器。
 
 ---
 

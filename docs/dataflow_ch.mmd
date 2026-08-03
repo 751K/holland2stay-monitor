@@ -5,8 +5,7 @@ flowchart TD
     C --> D["进入 main_loop 轮询"]
 
     D --> E["run_once()"]
-    E --> F["预热 H2S 自动预订登录 session"]
-    E --> G["dispatch_scrape_tasks(tasks)\n按 source 路由 ScrapeTask"]
+    E --> G["逐 source 调 dispatch_scrape_tasks(tasks)\n某个 source 失败只隔离它自己"]
 
     subgraph S["多平台抓取层 scrapers/"]
         G --> H1["holland2stay:Eindhoven...\nHollandStayScraper\nBrowserFetcher(H2S_PROFILE)"]
@@ -23,7 +22,7 @@ flowchart TD
         H31 --> H32["解析 JSON 响应\napartmentId / apartmentName / sqm / rent"]
         H32 --> H33["单元级房源\nListing.name = M1.30.53\nsource = xior"]
         H3 --> H34{"CF 挑战\n或限流?"}
-        H34 -->|是| H35["传输层重新导航过挑战；\n429 走退避重试\n请求间 1.5s 间隔"]
+        H34 -->|是| H35["传输层重新导航过挑战；\n429 走退避重试\n请求间 5s 间隔（全局锁）"]
         H35 --> H31
     end
 
@@ -40,7 +39,7 @@ flowchart TD
 
     M --> J
     J --> N["storage.diff(fresh)\nsource-aware upsert / 状态变化"]
-    N --> O["mark_stale_listings()\n按 source:city 完整扫描结果收敛"]
+    N --> O["mark_stale_listings()（每 24h 一次）\n按 source:city 完整扫描结果收敛\n无完整城市则推迟且不重置计时器"]
     O --> P["更新 last_scrape_at / last_scrape_count"]
 
     P --> Q["发送通知\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
@@ -48,8 +47,10 @@ flowchart TD
     Q1 --> Q2["Push: mcore/push.py 平台分流\niOS→APNs  Android→FCM data-only"]
     Q2 --> R["记录已通知状态"]
 
-    P --> T["扫描自动预订候选"]
-    T --> U{"listing.source == holland2stay\n且可直接预订?"}
+    P --> T["扫描自动预订候选（纯内存）"]
+    T --> T1["仅对有候选的用户做 H2S 预登录\n无候选的轮次不碰登录接口"]
+    T1 --> U
+    U{"listing.source == holland2stay\n且可直接预订?"}
     U -->|是| V["立即提交 try_book()\n线程池并发执行"]
     U -->|否| W["跳过自动预订\nOD / XR 仅通知不预订"]
 

@@ -39,7 +39,6 @@ from .base import (
     is_maintenance_body,
     is_proxy_error,
     is_proxy_service_error,
-    probe_h2s_maintenance,
 )
 from .holland2stay import HollandStayScraper
 from .ourdomain import OurDomainScraper
@@ -78,8 +77,9 @@ def get_scraper(source: str) -> Optional[AbstractScraper]:
     会让 ``HollandStayScraper`` 的跨轮复用逻辑永远命不中，退化成每轮重建浏览
     器 + 完整重过一次 CF 挑战。
 
-    线程安全：H2S 的抓取恒定跑在同一个专用线程里（monitor
-    ``_get_h2s_executor``），dispatcher 又是逐 source 串行调用，所以缓存实例
+    线程安全：每个浏览器型 source 恒定跑在**自己**的专用长存线程里（monitor
+    ``_get_browser_executor(source)``，每 source 一条——两个 Playwright sync
+    实例不能共存于同一线程），dispatcher 又是逐 source 串行调用，所以缓存实例
     不会导致 Playwright 对象被跨线程使用。
     """
     cls = SCRAPER_REGISTRY.get(source)
@@ -317,5 +317,4 @@ __all__ = [
     "is_maintenance_body",
     "is_proxy_error",
     "is_proxy_service_error",
-    "probe_h2s_maintenance",
 ]
