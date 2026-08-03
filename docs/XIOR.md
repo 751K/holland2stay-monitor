@@ -357,7 +357,62 @@ ddlLanguage  HowDidYouHear  SubscribeToEmails
 
 第 4–8 步仍未到达（需要真实账号）。
 
-#### ⚠️ 存在必填的证件上传（2026-08-03 用真实账号走到 Applicant Info 后确认）
+#### 证件上传**不阻塞**流程（2026-08-03 用真实账号登录后确认）
+
+上一节说这是「最关键的约束」，实测下来**没那么严重**。ApplicantInfo 页面上：
+
+```
+isDocumentSetupAvailbleAtThisStep = "0"      ← 隐藏字段
+<input type=file> 数量 = 0                    ← 上传控件是 iframe 内嵌的
+按钮：Save（btnSave）· Save & Continue（btnNext），两个都 enabled
+```
+
+上传控件由 `rcLoadContent.ashx?contentclass=PropertySiteImageUpload…&
+myBeforeOrAfterRequiredPage=False&SetupTitle=ID/Passport+Upload*` 单独加载，
+**是嵌在页面里的独立控件，不是这一步表单的必填项**。
+
+所以半自动化成立：booker 填完 Applicant Info 点 **Save**（草稿存服务端），
+用户随后自己登录、上传证件、付款。页面上那句
+
+> If you do not finish your application now, you may log in at a later time
+> to complete it
+
+也是这套用法的官方说明。
+
+#### 登录：两段式，都打同一个端点
+
+```
+GET  guestlogin.aspx                → 200
+POST /onlineleasing/rcformsave.ashx → 200   第一段：邮箱
+POST /onlineleasing/rcformsave.ashx → 200   第二段：密码
+GET  multiloginwrapper.aspx?AllowRedirect=1 → ERR_ABORTED（被重定向打断，正常）
+GET  oleapplication.aspx?…&stepname=<下一步>&…&CallMessage=1 → 200
+```
+
+和站内其它表单一样，两段都 POST 到 `rcformsave.ashx`，靠 `formName2` 区分。
+**登录后会恢复上次的申请上下文**——如果账号里有未完成的申请，直接落到那一步
+（实测落到 ApplicantInfo，而不是 Apartments）。
+
+#### ApplicantInfo 表单契约
+
+表单 `ApplicantInformation` → POST `/onlineleasing/rcformsave.ashx`，
+`formName2=ApplicantInformation`。
+
+```javascript
+btnSave: $('#chkAgreement').addClass('required'); validate();
+         if (valid) onclickfunctions('Save');
+btnNext: onclickfunctions('Next');        // 注意：不做客户端校验
+```
+
+点了哪个按钮通过隐藏字段传给服务端：`myButtonClicked` / `IsSave` /
+`SaveContinueClicked`。**半自动化要的是 `Save`**——它只存草稿，不往
+付费和签约方向推进。
+
+其余需要原样回传的隐藏字段：`ProspectId` / `ObjectId`（同值，申请人在 Yardi
+里的 id）、`TableName=GUESTCARD_ADDITIOALINFO`、`ContentclassName`、
+`cafeportalkey`、`isDocumentSetupAvailbleAtThisStep`。
+
+#### 上一版结论（已被上面推翻，保留以说明推断过程）
 
 `stepname=DocumentSummary` 页面上：
 
@@ -542,12 +597,17 @@ RENTCafe 还有 IP 级 attempt limit，连续失败锁 30 分钟——自动化�
   `DocumentSummary` 上的 `ID/Passport Upload*` 是必填。见上面的警告小节。
 - 完整 9 步流程、`ContinueClick` 选房动作、Applicant Info 字段清单，均已实测记录。
 
+- ~~证件上传是否阻塞流程~~ → **不阻塞**。`isDocumentSetupAvailbleAtThisStep=0`，
+  上传控件是 iframe 内嵌的独立控件，`Save` / `Save & Continue` 均可点。
+- ~~登录请求形状~~ → 两段式，都 POST `rcformsave.ashx`，见上。
+
 **未确认（按优先级）**
 
-1. **单元究竟在哪一步被锁住？** 这是决定整个方向成不成立的唯一问题。
-   若锁定发生在 Application Charges（付费）之前/之时，而证件可以事后补传，
-   自动抢房仍然成立；若必须先传证件才能锁定，秒级抢房不成立，该转向
-   「预填好参数的一键跳转」。
+1. **单元究竟在哪一步被锁住？** 仍是决定「秒抢」价值的关键。已知选中单元
+   （`ContinueClick`）只是跳到 ApplicantInfo，不是当场锁房；页面又写着
+   「until you have paid the application fees」——所以锁定大概率在付费环节。
+   若如此，半自动化的价值是「表单已填好，用户只差上传+付款」，而不是
+   「已经替你占住了」。这两者对用户的承诺完全不同，实现前必须说清楚。
 2. **application fee 是多少、怎么付。** 页面写「until you have paid the
    application fees」，但金额和支付方式未见。
 3. 反自动化字段的服务端校验强度：`txtRenderTime`（渲染时刻，疑似用于「提交
