@@ -70,6 +70,9 @@ class RentCafeSession:
         self._post_url: str = ""  # e.g. https://host/onlineleasing/rcformsave.ashx
         self._cafeportalkey: str = ""
         self._impersonate: str = get_impersonate()
+        # 最近一次拿到的页面 HTML。多步流程里每一步都要在下一步之前核对
+        # 「我落到哪儿了」，把它存下来省得每步都重新 GET 一次。
+        self._last_html: str = ""
 
     # ------------------------------------------------------------------
     # public API
@@ -94,6 +97,7 @@ class RentCafeSession:
         self._post_url = f"{self._base_url}/onlineleasing/rcformsave.ashx"
         self._cafeportalkey = _extract_cafeportalkey(resp.text)
 
+        self._last_html = resp.text
         fields = _extract_hidden_fields(resp.text)
         logger.info(
             "RENTCafe session opened base=%s cpk=%s…",
@@ -177,6 +181,9 @@ class RentCafeSession:
         data["Password"] = password
         data["CheckUserAuth"] = "0"
         resp2 = self._post(self._post_url, data, referer=login_url)
+        # 登录响应多半是一段 JS 跳转；跟过去拿到真正的落地页，
+        # 后面 find_unit() 要在它上面找单元。
+        self._last_html = self._follow(resp2, login_url)
         return self._handle_response(resp2, "login")
 
     def submit_step(self, step_name: str, form_data: dict, page_path: str = "") -> dict:
@@ -213,6 +220,103 @@ class RentCafeSession:
         logger.info("Submitting step '%s' to %s", step_name, self._post_url)
         resp = self._post(self._post_url, form_data, referer=ref)
         return self._handle_response(resp, step_name)
+
+    # ------------------------------------------------------------------
+    # 半自动预订：条款 → 选房 → 填申请表 → 存草稿
+    #
+    # 每一步都**先核对落到了哪里再往下走**。这条流程里任何一步猜错，后果不是
+    # 报错而是「在用户真实账号下默默提交一份错的申请」，所以宁可停下来报失败。
+    # ------------------------------------------------------------------
+
+    def submit_terms(self, page_fields: dict, *, move_in_date: str = "") -> str:
+        """提交第 2 步的条款表单（页面上的 Start Application），返回结果页 HTML。
+
+        这一页是**标准 v3** reCAPTCHA，不是 Enterprise，sitekey 也和登录页不同
+        （见 :mod:`captcha.rentcafe_pages`）。用错类型或 sitekey，服务端不认。
+        """
+        from captcha import page_captcha
+
+        cfg = page_captcha("oleapplication")
+        ref = f"{self._base_url}{self._ole_path}/oleapplication.aspx"
+
+        data = dict(page_fields)
+        data["cafeportalkey"] = data.get("cafeportalkey") or self._cafeportalkey
+        if move_in_date:
+            data["sMoveInDate"] = move_in_date
+        if cfg and cfg.has_captcha:
+            data[cfg.v3_field] = self._solver.solve_v3(
+                page_url=ref, action=cfg.action,
+                sitekey=cfg.v3_sitekey, enterprise=cfg.is_enterprise,
+            )
+            data[cfg.fallback_flag] = "false"
+
+        resp = self._post(self._post_url, data, referer=ref)
+        self._last_html = self._follow(resp, ref)
+        return self._last_html
+
+    def select_unit(self, unit) -> str:
+        """选中某个具体单元（页面上的 Reserve this room），返回结果页 HTML。
+
+        ``unit`` 是 :class:`bookers.rentcafe_units.UnitOption`。按钮的 onclick
+        是 ``ContinueClick(unitId, floorPlanId, propertyId, availableDate, …,
+        nextUrl)``，这里把这些参数带到它自己指定的 ``nextUrl`` 上。
+
+        名字唬人，但实测这一步**只是跳到 ApplicantInfo，不是当场锁房**。
+        """
+        target = unit.next_url or "oleapplication.aspx?stepname=ApplicantInfo"
+        sep = "&" if "?" in target else "?"
+        url = (
+            f"{self._base_url}{self._ole_path}/{target}{sep}"
+            f"UnitID={unit.unit_id}&FloorPlanID={unit.floor_plan_id}"
+            f"&myOlePropertyId={unit.property_id}&MoveInDate={unit.available_date}"
+        )
+        logger.info("选中单元 %s（%s）", unit.label or unit.unit_id, unit.listing_id)
+        self._last_html = self._get(url).text
+        return self._last_html
+
+    def save_applicant_info(self, page_html: str, profile_fields: dict) -> str:
+        """填 Applicant Info 并点 **Save**（只存草稿），返回结果页 HTML。
+
+        用 ``Save`` 而不是 ``Save & Continue``：前者把申请存在用户账号下就停住，
+        不往付费和签约方向推进——那两步该由用户自己做。
+        """
+        from bookers.rentcafe_applicant import carry_over_fields
+
+        fields = _extract_hidden_fields(page_html)
+        ref = f"{self._base_url}{self._ole_path}/oleapplication.aspx"
+
+        data = dict(fields)
+        data.update(carry_over_fields(fields))   # 反自动化字段原样回传
+        data.update(profile_fields)
+        data["formName2"] = "ApplicantInformation"
+        data["cafeportalkey"] = (
+            _extract_cafeportalkey(page_html) or self._cafeportalkey
+        )
+        # 告诉服务端点的是 Save 而不是 Next
+        data["myButtonClicked"] = "Save"
+        data["IsSave"] = "1"
+        data["SaveContinueClicked"] = "0"
+
+        resp = self._post(self._post_url, data, referer=ref)
+        self._last_html = self._follow(resp, ref)
+        return self._last_html
+
+    def current_page_html(self) -> str:
+        """最近一次落地页的 HTML。多步流程里用来核对「我到哪一步了」。"""
+        return self._last_html
+
+    def _follow(self, resp, referer: str) -> str:
+        """跟随响应里的 JS 跳转，返回最终页面 HTML。
+
+        RENTCafe 的 ``rcformsave.ashx`` 常返回一段 ``window.location=...``
+        而不是 302，所以不能只靠 HTTP 重定向。
+        """
+        html = resp.text or ""
+        target = _extract_js_redirect(html)
+        if not target:
+            return html
+        url = target if "://" in target else urljoin(referer, target)
+        return self._get(url).text
 
     # ------------------------------------------------------------------
     # internal helpers
@@ -318,98 +422,118 @@ class RentCafeBooker(AbstractBooker):
     # ------------------------------------------------------------------
 
     def book(self, request: BookingRequest) -> BookingResult:
-        """Execute the full RENTCafe booking flow.
+        """半自动预订：把申请起草到「只差上传证件和付款」为止。
 
-        Reads credentials from ``request.user.auto_book``.  The listing URL
-        must be a valid ``applyOnlineURL`` (stored in ``listing.url`` by
-        XiorScraper / OurDomainScraper).
+        为什么不做完整自动化
+        --------------------
+        流程里有必填的 ID/Passport 上传，且最后要付款。这两步系统都不该代劳——
+        替一群用户保管护照扫描件是拿一个巨大的泄露责任去换几十秒，替用户付钱
+        更不用说。所以 booker 走到 **Save**（存草稿）就停。
+
+        **它不保证抢到房。** 实测选中单元只是跳到申请表，不是当场锁房；页面
+        写着「until you have paid the application fees」，所以锁定大概率在付费
+        环节。返回的 phase 是 ``draft_saved`` 而不是 ``success``，通知文案也
+        据此写成「请迅速上传证件」——把它当成功报给用户，用户会以为房到手了，
+        慢悠悠去传证件，结果被别人抢走。
+
+        每一步都先核对落到了哪里再往下走：这条流程里猜错一步的后果不是报错，
+        而是在用户真实账号下默默提交一份错的申请。
         """
+        from bookers.rentcafe_applicant import (
+            ProfileIncompleteError, build_form_fields,
+        )
+        from bookers.rentcafe_units import find_unit
+        from scrapers.xior import building_key_for
+
+        listing = request.listing
         ab = request.user.auto_book
-        dry_run = ab.dry_run if ab.dry_run else request.dry_run
-        if self.source == "xior":
-            email, password = ab.xior_email, ab.xior_password
-        elif self.source == "ourdomain":
-            email, password = ab.ourdomain_email, ab.ourdomain_password
-        else:
-            email, password = ab.email, ab.password
+
+        # ── 前置校验：不触网 ──────────────────────────────────────────
+        # RENTCafe 连续失败会锁 30 分钟。缺凭据/缺档案时先在本地挡掉，别拿
+        # 一次注定失败的请求去消耗真正需要它的额度。
+        building = building_key_for(listing)
+        if not building:
+            return BookingResult(
+                listing=listing, success=False, phase="unsupported",
+                message=f"无法从 listing 反查 Xior 楼栋（city={listing.city!r}）",
+            )
+        email, password = ab.xior_account_for(building)
+        if not (email and password):
+            return BookingResult(
+                listing=listing, success=False, phase="not_configured",
+                message=f"未配置该楼栋（{listing.city}）的 Xior 账号，已跳过。",
+            )
+        profile = ab.applicant_profile
+        if not profile.is_complete():
+            return BookingResult(
+                listing=listing, success=False, phase="not_configured",
+                message="申请人档案不完整，已跳过。缺：" + ", ".join(profile.missing_fields()),
+            )
+        if request.dry_run or ab.dry_run:
+            return BookingResult(
+                listing=listing, success=True, phase="dry_run", dry_run=True,
+                message=f"试运行：凭据与档案齐备，可为 {listing.name} 起草申请。",
+            )
 
         session = RentCafeSession(self._api_key)
-
         try:
-            # 1. Open the oleapplication session.
-            _fields = session.open(request.listing.url)
-            logger.info("Step 1/2: oleapplication opened (email=%s)", email)
+            # ① 打开 applyOnlineURL。这是唯一入口——选房步骤的上下文存在服务端
+            #    会话里，直接深链 stepname=Apartments 会得到一个空搜索。
+            page_fields = session.open(listing.url)
 
-            # 2. Log in with user's pre-registered account.
-            #    We do NOT auto-register — the user must create their
-            #    RENTCafe account manually in a browser first.
-            if not email or not password:
+            # ② 条款页 → Start Application（标准 v3 reCAPTCHA）
+            session.submit_terms(page_fields)
+
+            # ③ 登录。登录后 RENTCafe 会恢复上次的申请上下文。
+            session.login(email, password)
+
+            # ④ 找到目标单元。找不到就是被人抢先了——交给上层换备选房源。
+            html = session.current_page_html()
+            unit = find_unit(html, listing.id)
+            if unit is None:
                 return BookingResult(
-                    success=False,
-                    message="RENTCafe 账号未配置（邮箱/密码为空），请在 Web 面板填写后重试。",
-                    phase="no_credentials",
-                )
-            next_page = session.login(email, password)
-            logger.info("Step 3: logged in, next page keys=%s", list(next_page.keys())[:10])
-
-            # 3. Walk through remaining form steps.
-            #    Each step returns a dict; if it contains ``_redirect``
-            #    we follow that URL; otherwise we submit the returned
-            #    fields to the next step.
-            form_data = next_page
-            for _step_index in range(6):  # safety cap: max 6 form steps
-                redirect = form_data.pop("_redirect", None)
-                if redirect:
-                    # Follow JS redirect to next page.
-                    full_url = urljoin(session._base_url, redirect) if "://" not in redirect else redirect
-                    logger.info("Following redirect → %s", full_url[:120])
-                    resp = session._get(full_url)
-                    form_data = _extract_hidden_fields(resp.text)
-                    cpk = _extract_cafeportalkey(resp.text)
-                    if cpk:
-                        form_data["cafeportalkey"] = cpk
-                    continue
-
-                # Check if we're done.
-                step_type = form_data.get("type", form_data.get("_raw", ""))
-                if isinstance(step_type, str) and "success" in step_type.lower():
-                    logger.info("Booking flow complete: %s", form_data)
-                    return BookingResult(success=True, message="Booking submitted")
-
-                # If we have a formName2, that tells us the next page.
-                next_form = form_data.get("formName2", "")
-                if not next_form:
-                    logger.info("No formName2 in response — flow complete or blocked")
-                    break
-
-                logger.info("Submitting step → %s", next_form)
-                form_data = session.submit_step(
-                    step_name=next_form,
-                    form_data=form_data,
-                    page_path=f"{next_form}.aspx",
+                    listing=listing, success=False, phase="race_lost",
+                    message="该单元已不在可订列表中（可能已被他人选走）。",
                 )
 
-            # 4. Final submission (if not dry_run).
-            if dry_run:
-                return BookingResult(
-                    success=True,
-                    message="Dry run: booking flow validated (stopped before final commit)",
-                )
+            # ⑤ 选中单元 → 落到 Applicant Info
+            applicant_html = session.select_unit(unit)
 
-            return BookingResult(success=True, message="Booking submitted (check email)")
+            # ⑥ 填表并**只存草稿**
+            fields = build_form_fields(profile, move_in_date=unit.available_date)
+            session.save_applicant_info(applicant_html, fields)
 
+            logger.info("Xior 申请已起草：%s（%s）", listing.name, unit.listing_id)
+            return BookingResult(
+                listing=listing, success=True, phase="draft_saved",
+                message=(
+                    f"已为你起草 {listing.name} 的申请。\n\n"
+                    f"**请迅速上传证件**并完成付款，否则房源可能被他人抢先。\n"
+                    f"{listing.url}"
+                ),
+                pay_url=listing.url,
+                contract_start_date=unit.available_date,
+            )
+
+        except ProfileIncompleteError as exc:
+            return BookingResult(listing=listing, success=False,
+                                 phase="not_configured", message=str(exc))
         except RentCafeBlockedError as exc:
-            logger.error("RENTCafe booking blocked: %s", exc)
-            return BookingResult(success=False, message=str(exc), should_retry=True)
-        except RentCafeError as exc:
-            logger.error("RENTCafe booking failed: %s", exc)
-            return BookingResult(success=False, message=str(exc))
+            logger.error("Xior 预订被屏蔽: %s", exc)
+            return BookingResult(listing=listing, success=False,
+                                 phase="blocked", message=str(exc))
         except CaptchaError as exc:
-            logger.error("reCAPTCHA solving failed: %s", exc)
-            return BookingResult(success=False, message=str(exc), should_retry=True)
+            logger.error("Xior 预订 reCAPTCHA 求解失败: %s", exc)
+            return BookingResult(listing=listing, success=False,
+                                 phase="blocked", message=str(exc))
+        except RentCafeError as exc:
+            logger.error("Xior 预订失败: %s", exc)
+            return BookingResult(listing=listing, success=False,
+                                 phase="unknown_error", message=str(exc))
         except Exception as exc:
-            logger.error("Unexpected booking error: %s", exc, exc_info=True)
-            return BookingResult(success=False, message=str(exc))
+            logger.error("Xior 预订未预期错误: %s", exc, exc_info=True)
+            return BookingResult(listing=listing, success=False,
+                                 phase="unknown_error", message=str(exc))
 
 
 # ---------------------------------------------------------------------------

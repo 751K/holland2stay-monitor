@@ -495,6 +495,12 @@ BookingPhase = Literal[
     "reserved_conflict", "cancel+retry", "unknown_error",
     "blocked",
     "unsupported",
+    # 半自动预订：申请已起草并存在用户账号下，但**没有占住房**——
+    # 还差用户自己上传证件和付款。与 "success" 必须分开：把它当成功报给
+    # 用户，用户会以为房到手了、慢悠悠去传证件，结果被别人抢走。
+    "draft_saved",
+    # 前置校验没过（缺凭据 / 档案不完整），压根没触网。
+    "not_configured",
 ]
 
 
