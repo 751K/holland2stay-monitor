@@ -46,8 +46,18 @@ class _Session(RentCafeSession):
         self._solver = _NoSolver()
 
     def _get(self, url):
-        return _Resp('<input type="hidden" name="formName" value="F1">'
-                     '<input type="hidden" name="myQS" value="Q1">')
+        # 必须放在 form#Login 里——login() 现在按表单取字段，整页抓会把
+        # guestlogin.aspx 上另外三个表单的同名字段混进来。
+        return _Resp(
+            '<form id="Login">'
+            '<input type="hidden" name="formName" value="F1">'
+            '<input type="hidden" name="myQS" value="Q1">'
+            '</form>'
+            '<form id="UserLogin">'
+            '<input type="hidden" name="formName" value="WRONG">'
+            '<input type="hidden" name="otpclickedUserLogin" value="X">'
+            '</form>'
+        )
 
     def _post(self, url, data, referer=""):
         self.posts.append(dict(data))
@@ -86,7 +96,9 @@ class TestTwoRequestShape:
 
     def test_probe_response_fields_are_merged(self):
         """服务端在探测后可能下发更新的隐藏字段，第二次要用新的。"""
-        s = _Session(probe_html='<input type="hidden" name="SecurityCode" value="S2">')
+        s = _Session(probe_html='<form id="Login">'
+                                '<input type="hidden" name="SecurityCode" value="S2">'
+                                '</form>')
         s.login("a@x.com", "pw")
         assert s.posts[1]["SecurityCode"] == "S2"
         assert s.posts[1]["Username"] == "a@x.com", "合并不能把 Username 冲掉"
@@ -115,3 +127,30 @@ class TestFormChoice:
     def test_register_is_gone(self):
         """账号由用户自己注册；批量自动注册对平台是滥用。"""
         assert not hasattr(RentCafeSession, "register")
+
+
+class TestFormScoping:
+    """只能取 form#Login 自己的字段。
+
+    guestlogin.aspx 上有 4 个表单，各有自己的 formName / SecurityCode* /
+    myFormName*。整页抓会让它们互相覆盖，拼出来的请求服务端不认——实测表现是
+    POST 返回 HTTP 200 但 body 全空，既不报错也不跳转（2026-08-03）。
+    """
+
+    def test_only_login_form_fields_are_sent(self):
+        s = _Session()
+        s.login("a@x.com", "pw")
+        for p in s.posts:
+            assert p["formName"] == "F1", "拿到了别的表单的 formName"
+            assert "otpclickedUserLogin" not in p, "OTP 表单的字段不该混进来"
+
+    def test_missing_login_form_raises(self):
+        """页面结构变了要显式失败，而不是发一个注定被忽略的请求。"""
+        from bookers.rentcafe import RentCafeError
+
+        class _NoForm(_Session):
+            def _get(self, url):
+                return _Resp("<html>no forms here</html>")
+
+        with pytest.raises(RentCafeError, match="form#Login"):
+            _NoForm().login("a@x.com", "pw")

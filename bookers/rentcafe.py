@@ -196,7 +196,13 @@ class RentCafeSession:
         logger.info("RENTCafe 登录: %s", login_url)
 
         resp = self._get(login_url)
-        fields = _extract_hidden_fields(resp.text)
+        # 只取 Login 表单自己的隐藏字段——整页抓会把另外三个表单的同名字段
+        # 混进来（见 _extract_form_fields）。
+        fields = _extract_form_fields(resp.text, self._LOGIN_FORM)
+        if not fields:
+            raise RentCafeError(
+                f"登录页上找不到 form#{self._LOGIN_FORM}，页面结构可能已变。"
+            )
         cpk = _extract_cafeportalkey(resp.text) or self._cafeportalkey
 
         base = dict(fields)
@@ -208,7 +214,7 @@ class RentCafeSession:
         probe = dict(base)
         probe["CheckUserAuth"] = "1"
         probe_resp = self._post(self._post_url, probe, referer=login_url)
-        probed = _extract_hidden_fields(probe_resp.text)
+        probed = _extract_form_fields(probe_resp.text, self._LOGIN_FORM)
         if probed:
             base.update(probed)
             base["Username"] = email
@@ -625,6 +631,29 @@ def _extract_hidden_fields(html: str) -> dict[str, str]:
         if name:
             fields[name.group(1)] = value.group(1) if value else ""
     return fields
+
+
+_FORM_RE_TMPL = r'<form[^>]*\bid=["\']{fid}["\'][^>]*>(?P<body>.*?)</form>'
+
+
+def _extract_form_fields(html: str, form_id: str) -> dict[str, str]:
+    """只取**某一个 form 内部**的隐藏字段。
+
+    为什么不能整页抓：``guestlogin.aspx`` 上有 4 个表单（Login / UserLogin /
+    OtpOptions / VerifyOTP），它们各有自己的 ``formName``、``SecurityCode*``、
+    ``myFormName*``。整页抓会让它们互相覆盖，拼出来的请求服务端不认——实测
+    表现是 POST 返回 HTTP 200 但 body 全空，既不报错也不跳转（2026-08-03）。
+
+    找不到该 form 时返回空 dict，由调用方决定怎么办（**不要**退回整页抓，
+    那正是这个函数要避免的东西）。
+    """
+    m = re.search(
+        _FORM_RE_TMPL.format(fid=re.escape(form_id)), html or "", re.S | re.I,
+    )
+    if not m:
+        logger.warning("页面里找不到 form#%s", form_id)
+        return {}
+    return _extract_hidden_fields(m.group("body"))
 
 
 def _extract_cafeportalkey(html: str) -> str:
