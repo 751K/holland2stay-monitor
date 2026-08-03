@@ -1236,6 +1236,8 @@ def _source_short(source: str | None) -> str:
     return {
         "holland2stay": "H2S",
         "ourdomain": "OD",
+        "ourcampus": "OC",
+        "xior": "XR",
     }.get(value, value.upper() or "H2S")
 
 

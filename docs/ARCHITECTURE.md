@@ -26,7 +26,7 @@ flowchart LR
     W <--> DB[("SQLite<br/>data/listings.db")]
     M <--> DB
     M --> N["通知渠道<br/>Telegram / Email / APNs / FCM ..."]
-    M --> S["房源平台<br/>H2S / OurDomain / Xior"]
+    M --> S["房源平台<br/>H2S / OurDomain / OurCampus / Xior"]
 ```
 
 两个进程**只通过 SQLite 通信**，没有 IPC。这带来两个后果：
@@ -100,6 +100,7 @@ scrapers/
 ├── __init__.py       SCRAPER_REGISTRY + get_scraper() + dispatch_scrape_tasks()
 ├── holland2stay.py   GraphQL over 浏览器传输层
 ├── ourdomain.py      RENTCafe HTML/AJAX over curl_cffi
+├── ourcampus.py      继承 OurDomain，只换取单元表的请求形状
 └── xior.py           WordPress admin-ajax over 浏览器传输层
 ```
 
@@ -110,6 +111,7 @@ scrapers/
 | Holland2Stay | 浏览器（CloakBrowser） | GraphQL 端点在 Cloudflare 托管挑战后面，TLS 指纹伪装过不去 |
 | Xior | 浏览器（CloakBrowser） | 同上，2026-08-02 起 AJAX 端点也上了挑战 |
 | OurDomain | curl_cffi + TLS 指纹轮换 | 目前只有 WAF 级 403，换指纹即可通过 |
+| OurCampus | 同 OurDomain | 同一套 RentCafe/SecureRC 后端，同属 Greystar |
 
 > **`get_scraper()` 返回的是缓存实例，不是新对象。** 浏览器挂在实例上，每次
 > 新建实例会让跨轮复用彻底失效。见 §5.4。
@@ -323,10 +325,16 @@ main_loop 据以决策的异常。
 | CF 挑战（§5.2） | DOM 元素等不到 → 只 warning 然后继续，并标记已初始化 | 7 周静默停摆 |
 | Xior errorCode（§5.7） | 非 204 即故障 | 整栋楼 144 次误判为 incomplete |
 | H2S 分页 | `page_info.total_pages` 缺失 → 默认 1 → 直接判 complete | 0 条房源 + 完整扫描，正好是让 stale 收敛清空整城的组合 |
+| RentCafe 单元表 | 解析出 0 个单元就当「没房」 | 「响应结构变了 / 拿到别的页面」也是 0 个单元，且同样是 HTTP 200 |
 
 前两条已修。第三条现在拿不到 `total_pages` 就记 ERROR 并标不完整——已抓到的
 部分照常入库，只是不参与收敛；真正的零房源（结构完整、`total_pages=1`）仍判
 完整，否则 stale 永不收敛。
+
+第四条同理：OurDomain / OurCampus 在解析出 0 个单元时，额外检查响应里有没有
+`Apartment Search Result` 这个面板标题。RentCafe 无可用单元时返回的仍是一张
+**结构完整**的搜索结果页，标题在；拿到别的页面则不在。有标题 = 真没房，
+没标题 = 标记 incomplete。
 
 顺带一条时序上的同类问题：stale 收敛的 24 小时计时器原本在 `finally` 里无条件
 重置，于是 run_once 的兜底路径或 H2S 熔断期返回空 completeness 时，那一次机会

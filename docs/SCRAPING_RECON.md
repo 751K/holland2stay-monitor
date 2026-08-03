@@ -19,7 +19,7 @@
 |---|---|---|---|---|---|---|---|
 | 2 | **HousingAnywhere** | ✅ 完全 | 无 | 页面内嵌结构化 JSON（`__staticRouterHydrationData`） | 207 条 Amsterdam，23 条/页 | 低（`/api/*` 禁；分页 query 在灰区） | 🟢🟢🟢 **下一个做它** |
 | 3 | **SSH (sshxl.nl)** | ✅ 但 SPA | 无 | Angular SPA + sitemap-offers.xml | 44 条全国 | 低 | 🟢 推荐（需挖 API） |
-| 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → **curl_cffi 首个指纹即过** | 与 OurDomain 同栈（RENTCafe HTML） | **1 栋楼** | 低 | ❌ 不做（等待期 16–18 个月） |
+| 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ✅ **已接入** |
 | 5 | **Student Experience** | ✅ 完全 | 无（自研前端） | 自家预订组件，可用性由 JS 拉取 | **1 栋可订**（Minervahaven，2 个房型） | 低 | ❌ 暂不做（可订面太小） |
 | 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可用 CloakBrowser（H2S 同方案） |
 | 7 | DUWO/ROOM | ❌ | 无（但 **auth-wall + paid registration**） | API 仅登录后可见 | ? | **高**（登录后内容转发）| ❌ 不建议 |
@@ -181,9 +181,13 @@ robots.txt 友好，但 Cloudflare WAF 不认 robots——它认请求指纹。
 
 ---
 
-## §4 OurCampus (ourcampus.nl) — **不做**
+## §4 OurCampus (ourcampus.nl) — **已接入**
 
-Greystar 的另一个学生住房品牌，与 OurDomain 同属一家。技术上几乎是白送，但产品上没价值。
+Greystar 的另一个学生住房品牌，与 OurDomain 同属一家。
+
+> **本节记录的评估结论是「投入产出比不划算」，接入是在知道这一点之后做的产品决策。**
+> 下面的分析保留原样——它解释了为什么这个 source 的期望值应该放低，以及
+> 运维时该注意什么。实现见 [`scrapers/ourcampus.py`](../scrapers/ourcampus.py)。
 
 ### 技术面（2026-08-03 实测，全部通过）
 
@@ -195,7 +199,7 @@ Greystar 的另一个学生住房品牌，与 OurDomain 同属一家。技术上
 | 反爬 | plain curl → 403 + 挑战页；**curl_cffi `chrome136` 首个指纹即 200** |
 | 已解析 | 3 个 floorplan：`1113259` Standard+ Studio 1P / `1112904` Furnished Student 1P / `1112905` Furnished Student 2P |
 
-### 为什么不做
+### 为什么它的期望值应该放低
 
 **1. 只有一栋楼。** `/en/apartments` 全站仅 Amsterdam Diemen，地址 Dalsteindreef 6002——
 与 OurDomain South-East（Dalsteindreef 20-40）同街隔壁。接进来只多一栋楼。
@@ -204,9 +208,16 @@ Greystar 的另一个学生住房品牌，与 OurDomain 同属一家。技术上
 「房源出现即秒推」的核心价值不成立。与 DUWO/ROOM 是同一类否决理由，
 只不过那次是合规问题，这次是产品问题。
 
-**3. 不能直接复用 `OurDomainScraper`。** 它的单元查询是
-**POST + `floorPlans[]` 表单体**（页面 jQuery `.load(url, {floorPlans: names})`），
-OurDomain 是 GET + query string。同栈不等于同接口。
+**3. 同栈不等于同接口。** 它的单元查询是 **POST + `floorPlans[]` 表单体**
+（页面 jQuery `.load(url, {floorPlans: names})`），OurDomain 是 GET + query string。
+
+实现上的处理：`OurCampusScraper` 继承 `OurDomainScraper`，只覆盖
+`_fetch_units_html()` 这一个方法，其余（指纹池与冷却、每次换 IP、同 session
+403 重试、单元行解析、状态映射、Occupancy 反推、Listing 映射）全部复用。
+
+> 注意接入时**无法用响应区分 GET 和 POST 谁对**——该楼零可订，两种形状都只
+> 能拿到空面板。选 POST 的依据是「和它自己前端一致」，那是唯一有证据支持的
+> 形状。基类的 GET 对 OurDomain 是实测有效的，没有动。
 
 ### 一条未验证的事
 
@@ -219,7 +230,15 @@ OurDomain 是 GET + query string。同栈不等于同接口。
 OurDomain Diemen，`unitrow=2` / `1`，正常解析。没有这个对照就会掉进
 「没拿到数据 ≠ 确认没有数据」的坑（见 [ARCHITECTURE.md §5.10](ARCHITECTURE.md)）。
 
-真要接入，必须等它有房时重新验证一次单元表结构。
+**接入后仍然如此：第一次真实有房时必须人工核对一次日志。**
+
+为此加了一道守卫（基类实现，OurDomain 一并受益）：零单元时检查响应里有没有
+`Apartment Search Result` 这个面板标题。有 → 是一张结构完整的搜索结果页，
+「真没房」；没有 → 拿到的不是单元面板，标记 `complete=False` 而不是报「零可用」。
+两种情况的 HTTP 状态都是 200，没有这道守卫就会让 stale 收敛把存量 listing 清掉。
+
+守卫兜不住的情况：单元行结构变了、但页面仍是合法面板——那会静默返回 0 个单元。
+只能靠人工核对。
 
 ---
 

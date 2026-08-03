@@ -123,6 +123,12 @@ class OurDomainScraper(AbstractScraper):
 
     source = "ourdomain"
 
+    # Listing.id 前缀。**每个 RentCafe property 必须用不同前缀**——
+    # unit id 来自 RentCafe 的 ``unitrow_<id>``，跨 property 是否全局唯一
+    # 没有保证，撞车会让两条不同房源在 storage.diff() 里合并成同一行、
+    # 互相覆盖字段。前缀是这件事上唯一的隔离手段。
+    ID_PREFIX = "od_"
+
     BASE = "https://thisisourdomain.securerc.co.uk/onlineleasing"
 
     # 每栋楼一份元数据：slug + property_id（用于 RentCafe URL）+ street_address
@@ -194,8 +200,8 @@ class OurDomainScraper(AbstractScraper):
                 _mark_fingerprint_blocked(impersonate)
                 if idx < len(attempts):
                     logger.warning(
-                        "[%s] OurDomain 403，切换 TLS 指纹重试 %d/%d: %s → %s",
-                        display, idx + 1, len(attempts), impersonate, attempts[idx],
+                        "[%s] %s 403，切换 TLS 指纹重试 %d/%d: %s → %s",
+                        display, self.source, idx + 1, len(attempts), impersonate, attempts[idx],
                     )
                     continue
                 raise BlockedError(
@@ -206,7 +212,7 @@ class OurDomainScraper(AbstractScraper):
             except RateLimitError:
                 raise
             except Exception as e:
-                raise ScrapeNetworkError(f"[{display}] OurDomain 抓取失败: {e}") from e
+                raise ScrapeNetworkError(f"[{display}] {self.source} 抓取失败: {e}") from e
         else:
             if last_blocked is not None:
                 raise last_blocked
@@ -222,10 +228,11 @@ class OurDomainScraper(AbstractScraper):
                 default_type=building.get("type"),
                 fp_names_by_id=fp_names_by_id,
                 street_address=building.get("street_address"),
+                id_prefix=self.ID_PREFIX,
             )
             for unit in all_units.values()
         ]
-        logger.info("[%s] OurDomain 共抓取 %d 个单元", display, len(listings))
+        logger.info("[%s] %s 共抓取 %d 个单元", display, self.source, len(listings))
         return ScrapeResult(task=task, listings=listings, complete=complete)
 
     def _scrape_once(
@@ -249,7 +256,7 @@ class OurDomainScraper(AbstractScraper):
             )
             fp_ids = _extract_floorplan_ids(fp_html)
             if not fp_ids:
-                logger.warning("[%s] OurDomain 未发现 floorplan id", display)
+                logger.warning("[%s] %s 未发现 floorplan id", display, self.source)
                 return {}, False, {}
 
             # 顺手抓 FP id→name 映射，只作为 _infer_occupancy 的 sqft 兜底。
@@ -262,32 +269,74 @@ class OurDomainScraper(AbstractScraper):
                 )
 
             for fp_id in fp_ids:
-                url = (
-                    f"{base}/rcLoadContent.ashx"
-                    f"?contentclass=availableunits"
-                    f"&floorPlans={fp_id}"
-                    f"&MoveInDate={move_in_date}"
-                    f"&myolePropertyID={property_id}"
-                )
                 try:
-                    unit_html = _get_text(
+                    unit_html = self._fetch_units_html(
                         session,
-                        url,
-                        headers=_headers_for(url, referer=floorplans_url, ajax=True),
+                        base=base,
+                        fp_id=fp_id,
+                        property_id=property_id,
+                        move_in_date=move_in_date,
+                        floorplans_url=floorplans_url,
                     )
                 except (RateLimitError, BlockedError):
                     raise
                 except Exception as e:
                     complete = False
                     logger.error(
-                        "[%s] OurDomain availableunits 失败 fp_id=%s: %s",
-                        display, fp_id, e,
+                        "[%s] %s availableunits 失败 fp_id=%s: %s",
+                        display, self.source, fp_id, e,
                         exc_info=True,
                     )
                     continue
-                for unit in _extract_units(unit_html):
+
+                units = _extract_units(unit_html)
+                # 零单元要区分「真没房」和「这压根不是单元面板」。RentCafe 在无
+                # 可用单元时返回的仍是一张**结构完整**的搜索结果页（含
+                # ``Apartment Search Result`` 标题），只是没有 unitrow——两种
+                # 情况的 HTTP 状态都是 200，只看解析结果为空就会把「响应结构变
+                # 了 / 拿到别的页面」误报成「这栋楼没房」，进而让 stale 收敛把
+                # 存量 listing 全清掉。见 ARCHITECTURE.md §5.10。
+                if not units and not _looks_like_availability_panel(unit_html):
+                    complete = False
+                    logger.error(
+                        "[%s] %s availableunits 响应不像单元面板（缺 %r），"
+                        "本轮标记不完整 fp_id=%s len=%d",
+                        display, self.source, _AVAILABILITY_PANEL_MARKER,
+                        fp_id, len(unit_html),
+                    )
+                    continue
+
+                for unit in units:
                     _merge_unit(all_units, unit, fp_id)
         return all_units, complete, fp_names_by_id
+
+    def _fetch_units_html(
+        self,
+        session: req.Session,
+        *,
+        base: str,
+        fp_id: str,
+        property_id: str,
+        move_in_date: str,
+        floorplans_url: str,
+    ) -> str:
+        """取某个 floorplan 的单元表 HTML。
+
+        OurDomain 用 GET + query string（该 host 上 POST 会触发 403）。
+        子类可覆盖——同为 RentCafe/SecureRC 的站点，这一步的请求形状并不统一，
+        取决于各自前端怎么调（见 ``OurCampusScraper``）。
+        """
+        url = (
+            f"{base}/rcLoadContent.ashx"
+            f"?contentclass=availableunits"
+            f"&floorPlans={fp_id}"
+            f"&MoveInDate={move_in_date}"
+            f"&myolePropertyID={property_id}"
+        )
+        return _get_text(
+            session, url,
+            headers=_headers_for(url, referer=floorplans_url, ajax=True),
+        )
 
     def _building_for_task(self, task: ScrapeTask) -> dict[str, str]:
         key = (task.city_key or "").strip().lower()
@@ -310,9 +359,32 @@ class OurDomainScraper(AbstractScraper):
         return building
 
 
-def _get_text(session: req.Session, url: str, *, headers: Optional[dict[str, str]] = None) -> str:
+def _send(
+    session: req.Session,
+    url: str,
+    *,
+    headers: Optional[dict[str, str]] = None,
+    data: Optional[object] = None,
+):
+    """GET，或在给了 data 时 POST。"""
+    if data is None:
+        return session.get(url, headers=headers or {}, timeout=30)
+    return session.post(url, data=data, headers=headers or {}, timeout=30)
+
+
+def _get_text(
+    session: req.Session,
+    url: str,
+    *,
+    headers: Optional[dict[str, str]] = None,
+    data: Optional[object] = None,
+) -> str:
     """
-    GET text with 429 retry, 403 Cloudflare classification, **+ same-session 403 retry**.
+    取文本，带 429 退避、403 Cloudflare 分类、**同 session 内 403 重试**。
+
+    ``data`` 不为 None 时改发 POST（表单体）。OurDomain 自己一律用 GET——
+    它的 host 上 POST 会触发 403；但同为 SecureRC 的 OurCampus 前端就是用
+    POST 的，且实测不 403。WAF 策略按 host 配，所以这里做成可选而不是二选一。
 
     Same-session 403 retry
     ----------------------
@@ -335,12 +407,12 @@ def _get_text(session: req.Session, url: str, *, headers: Optional[dict[str, str
         if wait:
             total_wait += wait
             logger.warning(
-                "OurDomain 429，第 %d/%d 次退避，等待 %d 秒（累计 %ds）",
+                "RentCafe 429，第 %d/%d 次退避，等待 %d 秒（累计 %ds）",
                 attempt, len(RATE_LIMIT_BACKOFF), wait, total_wait,
             )
             time.sleep(wait)
 
-        resp = session.get(url, headers=headers or {}, timeout=30)
+        resp = _send(session, url, headers=headers, data=data)
         if resp.status_code == 403:
             body = resp.text[:500]
             is_cf = is_cloudflare_body(body)
@@ -352,11 +424,11 @@ def _get_text(session: req.Session, url: str, *, headers: Optional[dict[str, str
             if is_cf and not in_session_403_retried:
                 in_session_403_retried = True
                 logger.info(
-                    "OurDomain 首次 403 (Cloudflare)，同 session 内短退避重试一次 url=%s",
+                    "RentCafe 首次 403 (Cloudflare)，同 session 内短退避重试一次 url=%s",
                     url,
                 )
                 time.sleep(2)  # 短等待让 CF cookie 生效
-                resp = session.get(url, headers=headers or {}, timeout=30)
+                resp = _send(session, url, headers=headers, data=data)
                 if resp.ok:
                     return resp.text
                 # 仍 403 / 其他错 → 落到下方常规处理
@@ -367,11 +439,11 @@ def _get_text(session: req.Session, url: str, *, headers: Optional[dict[str, str
 
             if resp.status_code == 403:
                 logger.warning(
-                    "OurDomain GET HTTP 403 (%s) url=%s body=%r",
+                    "RentCafe HTTP 403 (%s) url=%s body=%r",
                     reason, url, body[:200],
                 )
                 raise BlockedError(
-                    f"OurDomain {reason}（HTTP 403）。等待无法恢复。请尝试："
+                    f"RentCafe {reason}（HTTP 403）。等待无法恢复。请尝试："
                     f"1) 更换 HTTPS_PROXY 出口 IP；"
                     f"2) 重启 monitor（重建 curl_cffi session + TLS 指纹）；"
                     f"3) 暂停几小时让 Cloudflare 冷却。"
@@ -381,12 +453,12 @@ def _get_text(session: req.Session, url: str, *, headers: Optional[dict[str, str
         if resp.status_code == 429:
             continue
         if not resp.ok:
-            logger.error("OurDomain GET HTTP %d url=%s body=%r", resp.status_code, url, resp.text[:300])
+            logger.error("RentCafe HTTP %d url=%s body=%r", resp.status_code, url, resp.text[:300])
         resp.raise_for_status()
         return resp.text
 
     raise RateLimitError(
-        f"OurDomain 持续返回 429（已退避重试 {len(RATE_LIMIT_BACKOFF)} 次，"
+        f"RentCafe 持续返回 429（已退避重试 {len(RATE_LIMIT_BACKOFF)} 次，"
         f"累计等待 {total_wait}s）。请降低轮询频率或配置 HTTPS_PROXY。"
     )
 
@@ -591,6 +663,17 @@ def _infer_occupancy(
     return None
 
 
+# RentCafe 的 availableunits 面板标题。无论有没有可用单元都会渲染，所以它能
+# 回答「这是不是一张有效的搜索结果页」，而 unitrow 的数量回答「有没有房」。
+# 两栋 OurDomain 楼 + OurCampus 的空响应实测都含且只含一次。
+_AVAILABILITY_PANEL_MARKER = "Apartment Search Result"
+
+
+def _looks_like_availability_panel(html: str) -> bool:
+    """响应是否是一张真正的 availableunits 面板（不论有无单元）。"""
+    return _AVAILABILITY_PANEL_MARKER.lower() in (html or "").lower()
+
+
 def _extract_units(html: str) -> list[dict]:
     units: list[dict] = []
     for row in re.finditer(
@@ -681,9 +764,11 @@ def _to_listing(
     default_type: Optional[str] = None,
     fp_names_by_id: Optional[dict[str, str]] = None,
     street_address: Optional[str] = None,
+    id_prefix: str = "od_",
 ) -> Listing:
     apt = unit.get("apt") or f"#{unit['unit_id']}"
-    detail = unit.get("detail") or "OurDomain"
+    # detail 兜底用 source 而不是写死 "OurDomain"——本函数被 OurCampus 复用
+    detail = unit.get("detail") or source
     sqft = unit.get("sqft") or ""
     listing_name = _format_listing_name(city_display, apt, building_label)
 
@@ -724,7 +809,7 @@ def _to_listing(
         features.append(f"Floorplans: {', '.join(unit['fp_ids'])}")
 
     return Listing(
-        id=f"od_{unit['unit_id']}",
+        id=f"{id_prefix}{unit['unit_id']}",
         name=listing_name,
         status=unit.get("status") or "Occupied",
         price_raw=unit.get("rent") or None,

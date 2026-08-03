@@ -41,6 +41,7 @@ from .base import (
     is_proxy_service_error,
 )
 from .holland2stay import HollandStayScraper
+from .ourcampus import OurCampusScraper
 from .ourdomain import OurDomainScraper
 from .xior import XiorScraper
 
@@ -50,6 +51,7 @@ logger = logging.getLogger(__name__)
 SCRAPER_REGISTRY: dict[str, type[AbstractScraper]] = {
     cls.source: cls for cls in [
         HollandStayScraper,
+        OurCampusScraper,
         OurDomainScraper,
         XiorScraper,
     ]
@@ -302,6 +304,7 @@ __all__ = [
     "AbstractScraper",
     "BlockedError",
     "HollandStayScraper",
+    "OurCampusScraper",
     "OurDomainScraper",
     "XiorScraper",
     "ProxyError",

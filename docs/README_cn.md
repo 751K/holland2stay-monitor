@@ -38,6 +38,7 @@
 |---|---|---|
 | Holland2Stay | 任意配置的荷兰城市 | 支持自动预订 |
 | OurDomain | Amsterdam Diemen / South-East | 仅通知 |
+| OurCampus | Amsterdam Diemen（1 栋） | 仅通知 |
 | Xior | 14 个城市共 30 栋楼 | 仅通知 |
 
 第三方站点会变，覆盖范围随之变化。各平台的抓取实现见

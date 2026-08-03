@@ -1,0 +1,473 @@
+<script src="/js/bootstrap-modal.js" type="text/javascript" ></script>
+<h1>
+	Floor Plans
+</h1>
+<div id="OuterDiv" class="">
+	<ul class="breadcrumb" role="navigation">
+		<li><a href="floorplans.aspx">Floor Plans</a>
+		<span class="divider">>></span></li><li><span>Apartment Search Result</span></li>
+	</ul>
+	<div id='move-in-outer-container' class='block'><div id="refineunitsearch" class="well well-small"><div class='row-fluid'><div class='span4'>     <div class='form-search' id='move-in-date'><label for='FtxtMoveInDate'><i class='icon-calendar'></i> Move-In Date</label> <input id="FtxtMoveInDate" autocomplete="xoff" name="FtxtMoveInDate" type="text" onchange="datemask(document.getElementById(&#39;FtxtMoveInDate&#39;)); if(IsValidDate(document.getElementById(&#39;FtxtMoveInDate&#39;).value)) { } else { document.getElementById(&#39;FtxtMoveInDate&#39;).value = &#39;&#39;; }" aria-label="Move in date" aria-live="polite" title="Select a Move-In date for more accurate pricing and availability." class=" required maskdate excludeDays input-small isdate" value="" />     </div></div><div class='span8 flush'><div id='new-search-unit'> <ul class="inline form-search">
+	<li><label for="FtxtMaxRent">Max-Rent</label>  <input id="FtxtMaxRent" autocomplete="xoff" name="FtxtMaxRent" type="text" class="input-small" placeholder="€" title="Max Rent" aria-label="Max Rent" class=" nothing" value="" /></li><li><div onMouseOver='toggleDiv("FBed",1)' onkeydown="KeyDown('FBed',event)" onMouseOut='toggleDiv("FBed",0)' onfocus='toggleDiv("FBed",1)' onblur='toggleDiv("FBed",0)'><a class='btn dropdown-toggle' href="javascript:void(0)">Beds <span class="caret"></span></a><div id="FBed" class="well well-small" style="visibility: hidden;position: absolute; z-index: 2">
+		<ul class="unstyled"><li><label class="checkbox " for="0Bed"><input id="0Bed" name="0Bed" type="checkbox" />Studio Bedroom</label>
+		</li> </ul>
+	</div> </div></li><li><div onMouseOver='toggleDiv("FBath",1)' onkeydown="KeyDown('FBath',event)" onMouseOut='toggleDiv("FBath",0)'><a class='btn dropdown-toggle' href="javascript:void(0)">Baths <span class="caret"></span></a><div id="FBath" class="well well-small" style="visibility: hidden;position: absolute; z-index: 2">
+		<ul class="unstyled"><li><label class="checkbox " for="1,00Bath"><input id="1,00Bath" name="1,00Bath" type="checkbox" />1,00 Bath</label>
+		</li> </ul>
+	</div></div></li><li><div onMouseOver='toggleDiv("FFloorPlan",1)' onkeydown="KeyDown('FFloorPlan',event)"  onMouseOut='toggleDiv("FFloorPlan",0)'><a class='btn dropdown-toggle' href="javascript:void(0)">Floor Plans <span class="caret"></span></a><div id="FFloorPlan" class="well well-small" style="visibility: hidden;position: absolute; z-index: 2">
+		<ul class="unstyled"><li><label class="checkbox " for="1112904"><input id="1112904" name="1112904" type="checkbox" checked="true" />Furnished Student Apartment - 1 Person</label>
+		</li><li><label class="checkbox " for="1112905"><input id="1112905" name="1112905" type="checkbox" />Furnished Student Apartment - 2 Person</label>
+		</li><li><label class="checkbox " for="1113259"><input id="1113259" name="1113259" type="checkbox" />Standard+ Studio Apartment - 1 Person</label>
+		</li> </ul>
+	</div></div></li><li><button class="btn btn btn-primary" name="btnRefine" id="btnRefine">GO</button>
+	</li>
+</ul></div></div></div></div></div><ul role='tablist' id='propertyMapTabs' class="nav nav-tabs hidden-phone hidden-tablet" style='display:none;'>     <li class='active' role='presntation'><a href="#hideMap" role='tab' data-toggle="tab">Grid View</a></li>     <li role='presntation'><a id='mapViewTabLink' href="#mapView" role='tab' data-toggle="tab">Map View</a></li></ul><div class='tab-content' style='overflow:visible;'>     <div id='hideMap' class='tab-pane active'><div id="innerformdiv" class="">
+	<script>
+$(document).ready(function(){
+     $('div[data-specials], div[data-amenities]').each(function(ind, div){ 
+         if($(this).attr('data-specials')){ $(this).popover({ trigger: 'hover focus', html: true, container: 'body', content: $('#' +$(this).attr('data-specials')).html() }); } 
+         if($(this).attr('data-amenities')){ $(this).popover({ trigger: 'hover focus', html: true, container: 'body', content: $('#' +$(this).attr('data-amenities')).html() }); $('#' +$(this).attr('data-amenities')).hide(); } 
+     })
+     $('span[data-specials], span[data-amenities]').each(function(ind, span){ 
+         if($(this).attr('data-specials')){ $(this).popover({ trigger: 'hover focus', html: true, container: 'body', content: $('#' +$(this).attr('data-specials')).html() }); } 
+         if($(this).attr('data-amenities')){ $(this).popover({ trigger: 'hover focus', html: true, container: 'body', content: $('#' +$(this).attr('data-amenities')).html() }); $('#' +$(this).attr('data-amenities')).hide(); } 
+     })
+});
+</script>
+
+<script type='text/javascript'>                  
+function ToggleDiv(DivID) {              
+	var ele = document.getElementById(DivID);   
+	if(ele.style.display == 'block') {         
+    		ele.style.display = 'none';         
+  	}                                          
+	else {                                     
+		ele.style.display = 'block';            
+	}                                          
+}                                              
+</script>
+<div class="callout callout-info">
+
+Get notified as soon as it becomes available.<br><a class= "link1 btn btn-flat btn-info btn-small m-t-sm" href = "javascript:void(0)" data-function='contactUsLink' onclick="showDialog('Contact Us','contactusdialog','&myPropertyId=186609&isDialog=1&IsNotify=1&myFloorPlanId=1112904','auto');return false;">Get Notified</a>
+</div>
+<script type='text/javascript'>function SetTermsUrl(url) { location.href=url; } </script> 
+</tbody></table></div></div><form name="Aptavail" id="Aptavail" method="post" action="" onsubmit="return false">
+
+<input name="isViaForm" type="hidden" id="isViaForm" value="1"/> 
+<input name="UnitID" type="hidden" id="UnitID" value=""/> 
+<input name="FloorPlanID" type="hidden" id="FloorPlanID" value=""/> 
+<input name="myOlePropertyId" type="hidden" id="myOlePropertyId" value=""/> 
+<input name="MoveInDate" type="hidden" id="MoveInDate" value=""/> 
+<input name="src" type="hidden" id="src" value=""/> 
+    
+</form>
+
+
+<div id="EstimatedMonthlyCostModal" class="modal fade" tabindex="-1" role="dialog" aria-hidden="true" style="display:none; width: 500px;">
+  <div class="modal-dialog" role="document" style="">
+    <div class="modal-content">
+      <div class="modal-header m-b-lg">
+        <button type="button" class="close"   data-dismiss="modal" aria-hidden="true">&times;</button>
+        <h2 class="text-xxxl"><span class="heavy"></span></h2>
+      </div>
+      <div  class="modal-body">
+         <div id="EstimatedMonthlyCost_CT" class="container-fluid-bs3">
+      </div> </div>
+      <div class="modal-footer m-md m-t-sm p-t-md text-right b-t">
+        <button type="button" class="btn btn-default btn-flat w-xs"  data-dismiss="modal" data-selenium-id="CloseEMCM">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+ <script type="text/javascript">
+
+      $('.showEMC').click(function (e) {
+            e.preventDefault();
+            var el = $(this);
+			$('.lease-card').removeClass('flipped');			
+			$('#EstimatedMonthlyCost_CT').load('/rcloadcontent.ashx?contentclass=OLEEstimatedMonthlyCost&Rent=' + el.data('baserent') + '&UnitTypeId=' + el.data('unittypeid') + '&UnitId=0&PropertyId=' + el.data('forpropertyid'));
+            if (typeof gtag !== 'undefined') {
+                try {
+                    var pn = (document.querySelector('meta[name="author"]') || {}).content || '';
+                    var fpName = (el.data('fpname') || '').trim();
+                    var fpBeds = el.data('fpbeds');
+                    var fpSize = (fpBeds !== undefined && fpBeds !== null && fpBeds !== '') ? (parseInt(fpBeds) === 0 ? 'Studio' : parseInt(fpBeds) + ' Bed(s)') : '';
+                    var sqft = (el.data('sqft') || '').trim();
+                    var priceMin = el.data('baserent') || '';
+                    var priceMax = el.data('basemaxrent') || '';
+                    var price = (priceMax && parseFloat(priceMax) > parseFloat(priceMin)) ? priceMin + ' - ' + priceMax : String(priceMin);
+                    var unitNum = (el.closest('tr').find('th[data-label="Apartment"]').first().text() || '').trim().replace(/^#/, '');
+                    gtag('event', 'open_modal', {
+                        'property_name': pn,
+                        'button_label': 'info_icon',
+                        'page_name': document.title,
+                        'page_url': window.location.href,
+                        'floorplan_name': fpName,
+                        'floorplan_size': fpSize,
+                        'square_footage': sqft,
+                        'price': price,
+                        'unit_number': unitNum
+                    });
+                } catch (ex) { /* no-op */ }
+            }
+			return true;
+        });
+
+
+                               function BuildAptavailUrl(action)
+                               {
+                                   var Aptavail = document.getElementById('Aptavail');
+                                   var query = [];
+                                   action = action || Aptavail.action || window.location.pathname;
+
+                                   for (var i = 0; i < Aptavail.elements.length; i++) {
+                                       var field = Aptavail.elements[i];
+                                       if (!field.name) {
+                                           continue;
+                                       }
+                                       query.push(encodeURIComponent(field.name) + '=' + encodeURIComponent(field.value || ''));
+                                   }
+
+                                   if (query.length === 0) {
+                                       return action;
+                                   }
+
+                                   var separator = action.indexOf('?') >= 0 ? '&' : '?';
+                                   if (action.charAt(action.length - 1) === '?' || action.charAt(action.length - 1) === '&') {
+                                       separator = '';
+                                   }
+                                   return action + separator + query.join('&');
+                               }
+
+                               function ApplyNowClick(unitid,floorplanid,propertyid,midate,action)
+                               {
+                                   if ('False' == 'True') {
+                                       window.location.href = '' + unitid + '/' + floorplanid;
+                                   } else {
+                                       document.getElementById('UnitID').value = unitid;
+                                       document.getElementById('FloorPlanID').value = floorplanid;
+                                       document.getElementById('myOlePropertyId').value = propertyid;
+                                       document.getElementById('MoveInDate').value = midate;
+                                       var Aptavail = document.getElementById('Aptavail');
+                                       Aptavail.action = action
+                                       Aptavail.target = '_self';
+                                       if ('True' == 'True') {
+                                           window.location.href = BuildAptavailUrl(action);
+                                       } else {
+                                           Aptavail.submit();
+                                       }
+                                       return false;
+                                   }
+                               }
+
+
+                               function ContinueClick(unitid,floorplanid,propertyid,midate,src,action)
+                               {
+                               document.getElementById('UnitID').value=unitid;
+                               document.getElementById('FloorPlanID').value=floorplanid;
+                               document.getElementById('myOlePropertyId').value=propertyid;
+                               document.getElementById('MoveInDate').value=midate;
+                               document.getElementById('src').value=src;
+                               var Aptavail=document.getElementById('Aptavail');
+                               Aptavail.action=action
+                               Aptavail.target='_self';
+                               if ('True' == 'True') {
+                                    window.location.href = BuildAptavailUrl(action);
+                               } else {
+                                    Aptavail.submit();
+                               }
+                               return false;
+                               }
+                               
+                              $(document).ready(function () {
+													      
+													       	windowWidth = $(window).width();
+															   	if (windowWidth < 1025 ) { 
+																  	$('.availableunits .view-floor-plan a').removeAttr("onmouseover").removeAttr("onmouseout");
+																  	$('.AvailUnitRow a').removeAttr("onmouseover").removeAttr("onmouseout");
+																  }
+																	$(document).ajaxComplete(function () {
+																		 	windowWidth = $(window).width();
+		   																if (windowWidth < 1025 ) { 
+															  				$('.availableunits .view-floor-plan a').removeAttr("onmouseover").removeAttr("onmouseout");
+															  				$('.AvailUnitRow a').removeAttr("onmouseover").removeAttr("onmouseout");
+															  			}
+															  	});
+                              });
+
+
+
+     $(document).keyup(function (e) {
+         if (e.keyCode === 27) {
+             $(".amenityborder").popover('hide');
+         }
+
+         $(".amenityborder").each(function () {
+             if (e.keyCode === 13 && $(this).is(':focus')) {
+                 $(this).popover('show');
+             }
+         });
+     });
+
+     $(document).keyup(function (e) {
+         if (e.keyCode === 27) {
+             $("[rel='tooltip']").popover('hide');
+         }
+
+         $("[rel='tooltip']").each(function () {
+             if (e.keyCode === 13 && $(this).is(':focus')) {
+                 $(this).popover('show');
+             }
+         });
+     });
+
+  </script><script type="text/javascript">
+        if(typeof ClickTrack != "undefined"){
+	        
+	            ClickTrack._trackEvent("OLE", "Available Units", { ce_FloorplanIds: "1112904" });
+	        
+        }
+</script><div class='row-fluid'><div class='block'><script type="text/javascript">
+  function ShowIMG(id, sId, bShow, imgLnk, side) { 
+    var e = (window.event); 
+var container = $('#RentCafeContent.availableunits #innerformdiv, #RentCafeContent.oleapplication #OLEInnerContainer');
+
+ var holderDivT = container.offset().top;
+
+ var camIconT = $(sId).offset().top;
+
+ var holderDivL = container.offset().left;
+
+ var camIconL = $(sId).offset().left;
+
+var nTop = parseInt(camIconT) - parseInt(holderDivT);
+
+ var nLeft = parseInt(camIconL) - parseInt(holderDivL);
+
+    if (bShow == true) { 
+      id.style.backgroundColor = "white"; 
+      $(id).attr("src",imgLnk); 
+      if(side == 'left'){
+        $(id).css( { top: nTop - 120, left: nLeft - ($(id).width() + 50) });
+      } else { 
+        $(id).css( { top: nTop - 120, left: nLeft + 50 });
+      } 
+      $(id).fadeIn();
+    } 
+    else { 
+      $(id).fadeOut();
+    } 
+  } 
+       $(".UnitSelect").click(function() {  
+        if (typeof ga != 'undefined') { ga('send', 'event', 'FloorPlans', 'Unit Selection',$(this).attr('id')); ga('rc.send', 'event', 'FloorPlans', 'Unit Selection',$(this).attr('id')); };
+        if (typeof gtag != 'undefined') { gtag('event','Unit Selection', {'event_category': 'FloorPlans', 'event_label':$(this).attr('id')}); gtag('rc.send', 'Unit Selection',  {'event_category': 'FloorPlans', 'event_label':$(this).attr('id')}); };
+              }); 
+</script>
+<script>function loadVideo(PropertyID, FloorplanID)
+                            {$.ajax({ url: "/rcLoadContent.ashx?contentclass=VideoDialog&method=GetContent&myPropertyId=" + PropertyID + "&floorplans=" + FloorplanID,
+                            success: function (html) {$("#video-loc-"+ FloorplanID).html(html);}});}</script>
+
+<label class="">Prices and special offers valid for new residents only.  Pricing and availability subject to change at any time.</label></div></div>
+</div>     </div>     <div id='mapView' class='tab-pane'> <div class='row-fluid' id='CustMsgDivTop' style='margin-bottom: 10px'> 
+
+</div>
+<div class='alert alert-danger'>No apartments were found matching your search request.</div>
+ <div class='row-fluid' id='CustMsgDivBottom' style='margin-bottom: 10px'> 
+
+</div>
+     </div></div><script type='text/javascript'>$(document).ready(function(){      $('#propertyMapTabs a[data-toggle=tab]').click(function(e){          $('#svgWrap svg polygon, #svgWrap svg image').popover('hide');         setTimeout( function(){ $('.reset').click()}, 200);     });});</script>
+</div><script>function loadVideo(PropertyID, FloorplanID) {$.ajax({ url: "/rcLoadContent.ashx?contentclass=VideoDialog&method=GetContent&myPropertyId=" + PropertyID + "&floorplans=" + FloorplanID,
+            success: function (html) {$("#video-loc-"+ FloorplanID).html(html);}});}</script>
+<script src="https://cdngeneral.rentcafe.co.uk/js/svg-pan-zoom.min.1784754770.js" type="text/javascript" ></script>
+<script src="https://cdngeneral.rentcafe.co.uk/js/Intdate.min.1784754748.js" type="text/javascript" ></script>
+<script src="https://cdngeneral.rentcafe.co.uk/js/ysiPortalValidation.min.1784754774.js" type="text/javascript" ></script>
+<script src="https://cdngeneral.rentcafe.co.uk/js/cafe.forms.min.1784754742.js" type="text/javascript" ></script>
+<script src="https://cdngeneral.rentcafe.co.uk/js/jquery.touchSwipe.min.1784754758.js" type="text/javascript" ></script>
+
+	 <script type='text/javascript' type='text/javascript'> var strMoveInDateLabel='Move In Date';var strMaxRentLabel = 'Max Rent';</script> <script type='text/javascript' type='text/javascript'>  function ClearFieldValue(elm,svalue){ if (elm.value == svalue) {elm.value = '';}}function SetFieldValue(elm,svalue){ if (elm.value == '') {elm.value = svalue;} }</script>
+
+	<script type="text/javascript">
+function IsValidDate(value) { if(value == 'Move In Date' || value == '') { return true; }  var enteredDate = Globalize.parseDate(value,'','nl-NL'); if (isNaN(enteredDate)) { $.showMessage({'type':'warning', 'text':'Please enter a valid date.' }); return false; } var startDate = Globalize.parseDate('3-8-2026','','nl-NL'); if(startDate > enteredDate) { alert('Date can not be past'); return false; } return true;  }</script>
+
+
+	<script type="text/javascript">
+$(document).ready(function() { $('#FtxtMoveInDate').datepicker({dateFormat: 'dd-m-yy',changeMonth: true,changeYear: true,monthRange: '1:12', yearRange: '1920:2050', minDate: '3-8-2026'  });});</script>
+
+
+	<script type="text/javascript">
+$(document).ready(function() { if($.browser.msie) { $('#FtxtMaxRent, #FtxtMoveInDate , #FtxtUnitCode ').inputWatermark(); }});</script>
+
+
+	<script type="text/javascript">
+ function DoCurrencyValidation(numObj)
+ {
+var str = numObj.value;
+var charset="€0123456789.,";
+for ( var i=0; i<str.length; i++ )
+{
+if(charset.indexOf(str.substr(i, 1)) < 0) 
+{
+return false;
+}		
+}
+if((str.indexOf('€') >= 1) || (str.indexOf('€') == 0 && str.length == 1)) 
+{
+return false;
+}		
+return true;
+}
+</script>
+
+
+	<script language='javascript'>                                                  
+ 	function datestringreplace(fullString,text,by) {	                                
+ 	// Replaces text with by in string	                                                
+ 	    var strLength = fullString.length, txtLength = text.length;	                    
+ 	    if ((strLength == 0) || (txtLength == 0)) return fullString;	                
+ 	    var i = fullString.indexOf(text);	                                            
+ 	    if ((!i) && (text != fullString.substring(0,txtLength))) return fullString;	    
+ 	    if (i == -1) return fullString;	                                                
+ 	    var newstr = fullString.substring(0,i) + by;	                                
+ 	    if (i+txtLength < strLength)	                                                
+ 	        newstr += datestringreplace(fullString.substring(i+txtLength,strLength),text,by);	
+ 	    return newstr;	                                                                
+ 	}	                                                                                
+ 	function datemask(mydate){	                                                        
+ 	    var mm='';                                                                      
+ 	    var dd='';                                                                      
+ 	    var yy='';                                                                      
+ var mmLength = 0;                                                                    
+ var ismasked = mydate.value.indexOf('-');                                            
+ if (ismasked >= 0)  {                                                                
+      var month1digitarr = mydate.value.split('-');                                   
+      if (month1digitarr[1].length == 1) { mmLength = 1; }                               
+     }                                                                                
+ 	    mydate.value = datestringreplace(mydate.value,'-','');	                        
+ 	    var dtlen = mydate.value.length;	                                            
+ 	    if (dtlen==0) {  return true ;}                                                 
+ 	    if (dtlen==4) {  mydate.value = '0' + mydate.value.substring(0,1) + '0' + mydate.value.substring(1) ;}  
+ 	    if (dtlen==6) {                                                                 
+ 	                    yy= mydate.value.substring(2,4);	                            
+ 	                    if (yy=='19' || yy=='20')                                       
+ 	                        {                                                           
+ 	                            mydate.value = '0' + mydate.value.substring(0,1) + '0' + mydate.value.substring(1) ; 
+ 	                        }                                                           
+ 	                    }                                                               
+ 	    if (dtlen==7) {                                                                 
+                                      if (mmLength == 1){                            
+ 	                                        mydate.value = mydate.value.substring(0,2) + '0' + mydate.value.substring(2) ; 
+                                          }else{                                      
+ 	                                            mydate.value = '0' + mydate.value ;     
+                                          }                                           
+ 	                   }                                                                
+ 	    if (dtlen==9) {  mydate.value = '0' + mydate.value ;}                           
+ 	    mm= mydate.value.substring(0,2);	                                        
+ 	    dd= mydate.value.substring(2,4);	                                        
+ 	    yy= mydate.value.substring(4);	                                        
+ 	    if (yy.length == 2){	                                                        
+ 	        if (yy<50){	yy = '20'+yy; }                                                 
+ 	        else{	yy = '19'+yy; }	                                                    
+ 	    }	                                                                            
+ 	    mydate.value =  mm+'-'+dd+'-'+yy;	                                            
+ 	    return true ;	                                                                
+ 	}	                                                                                
+</script>                                                                             
+
+
+	<script type="text/javascript">$(document).ready(function() { $("#FtxtMoveInDate").blur(function() { formatDate(this);});});</script>
+
+	<script type="text/javascript">$(document).ready(function() { $("#FtxtMoveInDate").datepicker({dateFormat: "d-m-yy", minDate: Globalize.parseDate(""), maxDate: Globalize.parseDate("31-12-9999")});});</script>
+
+	<script type='text/javascript'>		 $(document).ready(function(){$('body').on('click', '#btnRefine', function (){var sMaxrent = $('#FtxtMaxRent').val(); var sMoveInDate = $('#FtxtMoveInDate').val(); var ShowMaxRentText = 'Max Rent'; if (sMaxrent != ShowMaxRentText && sMaxrent != '' && sMaxrent != '$' ) {  if(DoCurrencyValidation(document.getElementById("FtxtMaxRent"))==false) { 
+ $.showMessage({'type':'warning', 'text':'Please enter valid rent.' }); return false; 
+    }
+ 		}  if(IsValidDate($('#FtxtMoveInDate').val())) { }  else { $.showMessage({'type':'warning', 'text':'Please enter valid date.' });  return false; }   if(sMoveInDate != 'Move In Date' && sMoveInDate != '') {  var myMoveIn = formatDates(Globalize.parseDate($('#FtxtMoveInDate').val()),'MM/dd/yyyy');  if(IsValidDate2(myMoveIn)) { }  else { $.showMessage({'type':'warning', 'text':'Please enter valid date.' });  return false; }   } var Beds = [];var sBed; $('#FBed input:checked').each(function() {       sBed = $(this).attr('id').substring(0,1); Beds.push(sBed); }); var Bath = []; $('#FBath input:checked').each(function() {       sBath = $(this).attr('id').substring(0,4); Bath.push(sBath); }); var Floorplan = []; $('#FFloorPlan input:checked').each(function() {       sFloorplan = $(this).attr('id'); Floorplan.push(sFloorplan); }); var Amenities = []; $('#FAmenities input:checked').each(function() {       sAmenities = $(this).attr('id'); Amenities.push(sAmenities); });  var UnitCode;  UnitCode = ''; if (sMaxrent == 'Max Rent') sMaxrent =''; if (sMoveInDate == 'Move In Date') sMoveInDate ='';debugger; $('#RentCafeContent').load('/onlineleasing/rcLoadContent.ashx?contentclass=availableunits&IsBP=0&t=' + Math.random() + '&control=1' , {'Bed': Beds ,'FloorPlans' : Floorplan ,'Bath' : Bath , 'Rent' : sMaxrent  , 'MoveInDate': sMoveInDate  ,'Amenities' : Amenities ,'myolePropertyID':186609 , 'UnitCode' : UnitCode }); return false;}); }); </script><script language=javascript>function KeyDown(id,evt) { evt = evt || window.event;
+                                    if (evt.keyCode == 27) {
+                                    toggleDiv(id,0)
+                                    }
+                                }function toggleDiv(id,flagit) { if (flagit=='1'){ if (document.layers) document.layers[id].visibility = 'show'; else if (document.all) document.all[id].style.visibility = 'visible'; else if (document.getElementById) document.getElementById(id).style.visibility = 'visible'; document.getElementById(id).setAttribute('aria-expanded', 'true');}else if (flagit=='0'){ if (document.layers) document.layers[id].visibility = 'hide'; else if (document.all) document.all[id].style.visibility = 'hidden'; else if (document.getElementById) document.getElementById(id).style.visibility = 'hidden'; document.getElementById(id).setAttribute('aria-expanded', 'false');}} </script><script>$('div[onmouseover] > a').on('focus', function() {  $(this).parent('div').children('.well').css('visibility', 'visible').addClass('tabindex-opened');if($('div[onmouseover] > .well').hasClass('tabindex-opened')){$('div[onmouseover] > a, button#btnRefine, input#FtxtMoveInDate').on('focus', function() {$('.tabindex-opened').css('visibility', 'hidden').removeClass('tabindex-opened');$(this).parent('div').children('.well').css('visibility', 'visible').addClass('tabindex-opened');});}});</script>
+<script type="text/javascript">
+
+    if (typeof ClickTrack != "undefined") {
+        ClickTrack._PageDisplayName = '';
+        ClickTrack.SiteSection = 'OLE';
+        ClickTrack._CCDisplayName = 'QXZhaWxhYmxlIFVuaXRzIzAsMjA2MDE3Mg%3d%3d-4Qp47FDy6NA%3d';
+        ClickTrack.CCQS = '';
+        ClickTrack._ULI = '';
+        ClickTrack._Property = 'MTg2NjA5IzAsNDgyNDI4MQ%3d%3d-r6jKPqyDD6Q%3d';
+        ClickTrack.isPreview = '0';
+        
+        
+        ClickTrack.init();
+    }
+
+    function CheckAndPassCTUserAndVisit() {
+        var fnCTUVCnt = 0;
+        var fnCTUVParamCheck;
+
+        fnCTUVParamCheck = setInterval(AddClickTrackUserAndVisitToURL, 1000);
+
+        function AddClickTrackUserAndVisitToURL() {
+            fnCTUVCnt = fnCTUVCnt + .5;
+            if (fnCTUVCnt >= 5) {
+                $('.AddClickTrackParams').each(function () {
+                    if ($(this).hasClass('ShowOnClickTrackParams')) $(this).css('display', '');
+                });
+                clearInterval(fnCTUVParamCheck);
+            }
+            if (typeof ClickTrack != "undefined") {
+                if (typeof ClickTrack.getCookie('_yTrackVisit') != 'undefined' && ClickTrack.getCookie('_yTrackVisit') != null && ClickTrack.getCookie('_yTrackVisit') != 'null') {
+                    $('.AddClickTrackParams').each(function () {
+                        var sURLVal = $(this).attr("href");
+                        $(this).attr('href', ClickTrack.GetTrackingCrossDomainURLParams(sURLVal));
+                        if ($(this).hasClass('ShowOnClickTrackParams')) $(this).css('display', '');
+                    });
+
+                    $('#logo-container a').each(function () {
+                        $(this).attr('href', ClickTrack.GetTrackingCrossDomainURLParams($(this).attr('href')));
+                        // Use Alttest of image and use it for anchor tag aria-label. Check for null, empty, or 'NA'
+                        var imgAlt = $(this).find('img').attr('alt');                       
+                        if (!imgAlt || $.trim(imgAlt).toLowerCase() === 'na') {
+                            imgAlt = 'Logo';
+                        }
+                        $(this).attr('aria-label', imgAlt);                        
+                    });
+                       
+                    $('#apldiv a').each(function () {
+                        $(this).attr('href', ClickTrack.GetTrackingCrossDomainURLParams($(this).attr('href')));
+                    });
+                        
+                    $('#rpdiv a').each(function () {
+                        $(this).attr('href', ClickTrack.GetTrackingCrossDomainURLParams($(this).attr('href')));
+                    });
+
+                    $('#mainNavbar ul li a:not(.donottrack)').each(function () {
+                        $(this).attr('href', ClickTrack.GetTrackingCrossDomainURLParams($(this).attr('href')));
+                    });
+
+                    $('#login-links li a').each(function () {
+                        $(this).attr('href', ClickTrack.GetTrackingCrossDomainURLParams($(this).attr('href')));
+                    });
+
+                    /* Seach Each Anchor Tag from where user navigting to the Secure Site then contact CT Variables */
+                    $("a:not(.donottrack)").each(function () {
+                        var href = $(this).attr('href');
+                        if (href != undefined) {
+                            if (href.trim().toLowerCase().indexOf('securerc.co.uk'.toLowerCase()) > -1) {
+                                $(this).attr('href', ClickTrack.GetTrackingCrossDomainURLParams(href));
+                            }
+                        }
+                    });
+
+                    clearInterval(fnCTUVParamCheck);
+                }
+            }
+        }
+    }
+
+    $(document).ready(CheckAndPassCTUserAndVisit());
+
+    $(document).ajaxComplete(CheckAndPassCTUserAndVisit());
+
+</script>

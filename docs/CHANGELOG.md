@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.10.0 (2026-08-03)
+
+### 新增平台 — OurCampus
+
+Greystar 旗下与 OurDomain 同属一家的学生住房品牌，同一套 RentCafe/SecureRC 后端。
+
+`OurCampusScraper` **继承** `OurDomainScraper`，只覆盖 `_fetch_units_html()` 一个方法。复用的部分：TLS 指纹池与冷却状态机（模块级共享——两边打的是同一个 SecureRC 集群，某个指纹被烧对双方同时生效）、每次尝试换出口 IP、同 session 内 403 重试、floorplans.aspx 发现、单元行解析的 `data-selenium-id` / `data-label` 双策略、状态映射、Occupancy 反推、Listing 映射。
+
+覆盖的那一个方法是请求形状：OurCampus 用 **POST + `floorPlans[]` 表单体**（照抄它自己前端的 `$.load(url, {floorPlans: names})`），OurDomain 用 GET + query string。同栈不等于同接口；两边 host 的 WAF 策略也不同——OurDomain 的 host 上 POST 会 403，OurCampus 的不会。
+
+`Listing.id` 用独立前缀 `oc_`（OurDomain 是 `od_`）。两者是不同的 RentCafe property（186609 vs 184283 / 182801），unit id 跨 property 是否全局唯一没有保证，撞车会让两条房源在 `storage.diff()` 里合并成同一行、互相覆盖字段。
+
+配置：`SOURCES` 加 `ourcampus`，`OURCAMPUS_CITIES` 默认 `OurCampus Amsterdam Diemen,diemen`。
+
+**期望值要放低**：只有一栋楼，且官网自述等待期 16–18 个月（排队制而非先到先得），「秒级通知」在这里的价值远低于 H2S。接入是产品决策，评估结论见 `docs/SCRAPING_RECON.md` §4。
+
+### Bug 修复 — 零单元不再等同于「没有房」
+
+RentCafe 在无可用单元时返回的仍是一张**结构完整**的搜索结果页，与「拿到了别的页面 / 响应结构变了」一样都是 HTTP 200 + 解析出 0 个单元。此前只看解析结果，两种情况无法区分——后者会被当成「这栋楼没房」，进而让 stale 收敛把存量 listing 全部标记为已下架。
+
+现在零单元时额外检查响应里有没有 `Apartment Search Result` 这个面板标题：有 → 真没房（`complete` 不变）；没有 → 标记 `complete=False`。OurDomain 一并受益。
+
+这是 `ARCHITECTURE.md` §5.10 记录的同一类判据错误的第四个实例（前三个：CF 挑战判据、Xior errorCode、H2S 分页）。
+
+### 其它
+
+- `_get_text()` 支持 POST（给了 `data` 时），日志文案里写死的 "OurDomain" 改为中性的 "RentCafe" 或按 `self.source` 参数化——这些代码路径现在被两个 source 共用
+- `_to_listing()` 的 `detail` 兜底从写死的 `"OurDomain"` 改为 `source`
+- 通知渠道的平台短标签补上 `xior`（此前会 fallback 成 `XIOR`）和 `ourcampus`
+
 ## v1.9.12 (2026-08-03)
 
 系统审阅 monitor + 三个平台 scraper 时找出的其余问题。
