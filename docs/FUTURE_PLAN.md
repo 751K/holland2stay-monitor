@@ -16,7 +16,7 @@
 ### 第一期：Android Play Store 上架
 - Android 客户端 A0–A5 已完成（57 文件，~9.5k 行，47 单测）
 - FCM 推送端到端拉通并真机验收通过
-- CI 自动构建 AAB 已配置（`build.yml` android job）
+- CI 自动构建签名 APK（`build.yml` android job）。AAB 步骤已于 2026-08-03 移除——当前分发渠道只有 Release 页直接下载；启动本期时需把 `bundleRelease` 和 AAB 上传加回来
 - 剩余：Google Play Billing、Data Safety、截图、封闭测试、提交审核
 - 详见下方 [§1 Android 客户端](#1-android-客户端)
 
@@ -37,7 +37,7 @@
 
 ## 1. Android 客户端
 
-> 状态更新（2026-05-30）：iOS 客户端进入维护阶段。Android 客户端 A0–A5 已完成，FCM 推送端到端拉通，CI 自动构建 AAB 已配置。剩余 A6 Play Store 上架。详见 `docs/ANDROID_PLAN.md` 进度复盘。
+> 状态更新（2026-05-30）：iOS 客户端进入维护阶段。Android 客户端 A0–A5 已完成，FCM 推送端到端拉通，CI 自动构建签名 APK（AAB 步骤已于 2026-08-03 移除，启动 A6 时加回）。剩余 A6 Play Store 上架。详见 `docs/ANDROID_PLAN.md` 进度复盘。
 
 ### 目标
 

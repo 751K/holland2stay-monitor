@@ -10,6 +10,8 @@
 
 （这些链接在停止产出 AAB 之后还会直接 404，与 v1.6.x 修过的那次「Android 下载链接 404」是同一个坑。）
 
+README 的 Android 状态行改为写明「已签名 `.apk`，直接安装；尚未上架 Play Store」。另外 `ANDROID_PLAN.md` 和 `FUTURE_PLAN.md` 里三处「CI 自动构建 AAB 已配置」在这次改动后变成了假话，一并更正，并注明启动 A6 上架时需要把 `bundleRelease` 和 AAB 上传步骤加回来——Play Store 上架计划本身没有取消。
+
 ## v1.10.0 (2026-08-03)
 
 接入第四个平台 OurCampus，并为「新平台已上线、但先不对用户开放」这件事补上机制。

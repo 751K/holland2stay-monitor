@@ -524,7 +524,7 @@ private val LightColors = lightColorScheme(
 | 主题 | Material 3，System / Light / Dark 三档 |
 | 自适应 | NavigationBar（手机 4-tab）+ NavigationRail（平板 6-tab） |
 | 测试 | MockK + kotlinx-coroutines-test，覆盖 Auth / Dashboard / Listings / Calendar / Notifications |
-| Play Store | 尚未上架（A6 待启动）；CI 自动构建 AAB 已配置（`build.yml` android job） |
+| Play Store | 尚未上架（A6 待启动）。**CI 现在只构建签名 APK**——AAB 步骤已从 `build.yml` 移除，因为当前分发渠道只有 Release 页直接下载。启动 A6 时把 `bundleRelease` 和 AAB 上传步骤加回来 |
 
 ### 架构实际落地情况
 
