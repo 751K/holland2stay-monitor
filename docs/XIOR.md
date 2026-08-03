@@ -50,6 +50,23 @@ Cloudflare 对这个端点按 **IP** 限流，阈值约 15–20 req/window，而
 > 楼栋数增加时单轮耗时线性增长（每栋楼房型数 × 5s）。楼很多时应该分轮抓，
 > 而不是把间隔调小。
 
+**实测成本（2026-08-03，取自 `round_stats` 遥测）**：
+
+| source | 每轮中位 | 每 target |
+|---|---|---|
+| **xior** | **55.5s** | **13.9s** |
+| ourdomain | 4.1s | 4.1s |
+| ourcampus | 2.2s | 2.2s |
+| holland2stay | 1.0s | 1.0s |
+
+Xior 一家就占掉一轮 62 秒里的 55 秒。按 13.9s/栋 外推，注册表里的 30 栋
+≈ **417 秒/轮**，而 `CHECK_INTERVAL` 是 300 秒——更要命的是 H2S 排在其它
+source **之后**执行，不分片等于每轮把真正出房源的那个 source 推迟 7 分钟。
+
+所以监控全部 30 栋是靠 `SHARD_SIZES=xior:5` 分轮抓实现的：每轮 5 栋
+（≈70 秒），6 轮覆盖一遍，游标持久化在 SQLite 里、重启后接着转。
+实现见 `monitor._apply_task_sharding()`。
+
 ### 2.3 Turnstile 不校验服务端
 
 Yardi modal 里集成了 Cloudflare Turnstile：
@@ -259,33 +276,88 @@ Listing(
 
 第 4 步之后未到达（登录后 session 重置，且侦察时无房可继续）。
 
+**用过期单元的参数也能打开这一页**（实测：拿 2026-05-28 那条已 Occupied 的
+`applyOnlineURL`，2026-08-03 仍返回 HTTP 200 完整表单）。这条对推进很关键——
+第 1–2 步的侦察不必等到有房。RENTCafe 侧也**不需要浏览器**：`securerc.co.uk`
+不在 §2.1 那道 Cloudflare 挑战后面，curl_cffi 直连即可，与 OurDomain 一致。
+
+#### 第 2 步的字段契约（实测）
+
+表单 `termsandotheritems` → POST `/onlineleasing/rcformsave.ashx`。
+
+服务端下发、**必须原样回填**的：
+
+```
+formName2=termsandotheritems   formName=<base64>      cafeportalkey=<key>-<sig>
+FloorplanId  FloorplanName     UnitTypeId  SchoolId   AcademicTermId/Name
+RentalLevel  strRentalLevel    myOlePropertyId        myLeaseCafeType
+IsRCOLE      leasingtype       PropLeadSource_<propId>
+```
+
+带签名、**不能伪造**的：
+
+```
+MoveInDateEncr = <base64(日期)>-<签名>     例 My04LTIwMjY=-z8g85jGXmr8=  →  3-8-2026
+QuotedRentEncr = <base64(金额)>-<签名>
+```
+
+> 这两个是入住日和租金的加签副本。想改入住日就不能只改明文字段——签名对不上。
+> 换日期要走服务端重新下发，具体接口未确认。**这是目前最可能卡住自动化的机制**，
+> 优先级高于 reCAPTCHA。
+
+需要用户输入的：`sMoveInDate`（Expected Move-In Date，客户端强制校验非空 +
+`IsValidDate()`；Xior 把它的界面文案改成了 "Start application date"）。
+
+附加租赁项：`hRentableitemstype` 由 JS 拼成 `<itemTypeId>^<qty>` 逗号串，
+不选就是空串。
+
 ### 8.3 reCAPTCHA
 
-RENTCafe **全线**使用 Google reCAPTCHA Enterprise，每页两级回退：
+> 这一节 2026-08-03 按真实页面重写过。原来写的是「RENTCafe **全线**使用
+> reCAPTCHA Enterprise，一个 v3 sitekey 通吃」——**不成立**。条款页用的是
+> 标准 v3 和另一个 sitekey。按原描述去解，token 服务端不认。
 
-| 属性 | 值 |
-|---|---|
-| v3 sitekey | `6LfBeqEaAAAAALsbENKGUsE98xFoA3ZpqkbzogBI` |
-| v2 sitekey（回退） | `6LfAdx8TAAAAAOiesnT8CNKNtb1C6doK-RKnB1V0` |
-| JS | `https://www.google.com/recaptcha/enterprise.js?render=<sitekey>` |
-| 各页 action | `GuestRegistration` / `UserLogin` / … |
-| 隐藏字段 | `g-recaptcha-response-v3`、`failed-captcha-3`、`recaptchaEnterpriseFormId` |
+三个页面实测各不相同：
 
-统一执行逻辑：
+| 页面 | v3 类型 | v3 sitekey | action | 回退标志字段 |
+|---|---|---|---|---|
+| `oleapplication.aspx`（第 2 步条款） | **标准 v3**（`api.js`） | `6LcjBc4UAAAAABfXlERv_hq_KE3IWDAqbiWkbPzl` | `start_application` | `failed-captcha-3-rentable` |
+| `guestlogin.aspx` | Enterprise（`enterprise.js`） | `6LfBeqEaAAAAALsbENKGUsE98xFoA3ZpqkbzogBI` | `UserLogin` | `failed-captcha-3` |
+| `register.aspx` | Enterprise | 同上 | `GuestRegistration` | `failed-captcha-3` |
+| `flexregistrationlandingpage.aspx` | **无** | — | — | — |
 
+共同点只有两条：v2 回退 sitekey 都是
+`6LfAdx8TAAAAAOiesnT8CNKNtb1C6doK-RKnB1V0`，token 都填进
+`g-recaptcha-response-v3`。
+
+这张表已经编码进 [`captcha/rentcafe_pages.py`](../captcha/rentcafe_pages.py)，
+新增页面往那里补，不要在调用点写死。
+
+条款页的执行链（实测抄录）：
+
+```javascript
+submitTermsForm()
+  └─ failed-captcha-3-rentable === 'false'
+       ├─ 是 → getCaptchaTokenRentable()
+       │        grecaptcha.execute('6LcjBc4U…', {action:'start_application'})
+       │          → token 填入 #g-recaptcha-response-v3 → 点 #divbtnStart 提交
+       └─ 否 → 直接点 #divbtnStart（此时页面上已有解好的 v2）
 ```
-表单验证 → grecaptcha.enterprise.execute(sitekey, {action})
-  成功 → token 填入 #g-recaptcha-response-v3
-  失败 → failed-captcha-3 == 'false' → 渲染 v2 checkbox → token 填入 #g-recaptcha-response
-```
 
-覆盖范围：注册（`register.aspx`）、登录（`guestlogin.aspx`）、条款提交
-（`termsandotheritems.aspx`）都有。唯一没有 reCAPTCHA 的入口是
-`flexregistrationlandingpage.aspx`（仅 3 个字段，功能是选租约类型），
-能否作为绕过入口尚未验证。
+v2 回退由**服务端**决定：v3 分数不够时响应会触发
+`callReCaptchaV2Rentable()`，它把 `failed-captcha-3-rentable` 置 `true` 并
+渲染 checkbox。所以正常路径每次提交只需要 **1 个 v3 token**。
 
-另外：Xior 用 JS 隐藏了 RENTCafe 上的注册链接（`$('a#ClickHereToRegisterLink').hide()`
-等），意图是让用户走 WordPress 侧注册，但后端接口仍然存活，可以直接 POST。
+**`flexregistrationlandingpage.aspx` 不是绕过入口。** 它确实没有任何
+reCAPTCHA（实测 0 个 sitekey、无 recaptcha 脚本），但它只是个「选租约类型」
+的落地页，两个出口（Market / Student）都指回带 Enterprise 验证码的
+`register.aspx`，只是换了个入口而已。§8.5 原来的第一个问号到此有答案了，
+答案是否定的。
+
+另外：Xior 用 JS 隐藏了 RENTCafe 上的注册入口——实测隐藏的是
+`a#ClickHereToRegisterLink`、`a[href*="flexregistrationlandingpage.aspx"]`、
+`a[href*="register.aspx"]` 三处，意图是让用户走 WordPress 侧注册。
+后端接口仍然存活，可以直接 GET/POST。
 
 ### 8.4 成本估算
 
@@ -298,10 +370,31 @@ RENTCafe **全线**使用 Google reCAPTCHA Enterprise，每页两级回退：
 
 RENTCafe 还有 IP 级 attempt limit，连续失败锁 30 分钟——自动化重试要非常克制。
 
-### 8.5 未确认
+### 8.5 已确认 / 未确认
 
-- `flexregistrationlandingpage.aspx` 选完租约类型后，是否直接跳到无 reCAPTCHA 的表单
-- v3 token 能否跨步骤复用（同一 sitekey）；可以的话只需求解 1 次
-- 服务端 v3 score 阈值多高——阈值低则几乎不触发 v2 回退
-- 登录的 OTP 二次验证是否强制（`guestlogin.aspx` 的 `OtpOption` / `otpVerification`）
-- 第 4 步 Applicant Info 的字段清单，以及中途是否有文件上传或人工审核
+2026-08-03 侦察后的状态。
+
+**已确认（不必再查）**
+
+- ~~`flexregistrationlandingpage.aspx` 是否是无 reCAPTCHA 的旁路~~ → **不是**。
+  它自身确实无验证码，但两个出口都回到带 Enterprise 验证码的 `register.aspx`。
+- ~~v3 token 能否跨步骤复用（同一 sitekey）~~ → **不能**，因为压根不是同一个
+  sitekey：条款页标准 v3 `6LcjBc4U…`，登录/注册 Enterprise `6LfBeqEa…`，
+  action 也三者互异。每页必须单独解。
+- 第 1–2 步可以用过期单元的参数侦察，且不需要浏览器（见 §8.2）。
+
+**未确认（按优先级）**
+
+1. **`MoveInDateEncr` / `QuotedRentEncr` 的签名怎么来。** 换入住日期时客户端
+   如何取到新的加签值？若只能由服务端在特定交互中下发，自动化就必须复刻那次
+   交互。**这是当前最可能卡死流程的点，排在 reCAPTCHA 之前。**
+2. **第 3 步 Applicant Info 的字段清单，以及是否有文件上传或人工审核。**
+   若需要上传收入证明或有人工审核环节，「秒抢」这件事本身就不成立，整个方向
+   要重新评估。
+3. 登录的 OTP 是否强制。页面上 `OtpOptionsSection` 默认 `display:none`，
+   `Username`+`Password` 是主路径，OTP 看起来是**替代**登录方式而非二次验证
+   （另有 `VerifyOTP` 表单和 `otpclickedUserLogin` 标志位）——但没有真实账号
+   登录过，不能确认服务端不会在密码通过后追加 OTP。
+4. 服务端 v3 score 阈值多高——阈值低则几乎不触发 v2 回退，成本按 §8.4 的乐观值走。
+
+后三项都需要**真实 RENTCafe 账号**才能继续，第 2 项还额外需要**一个在售单元**。

@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Xior 监控扩到全部 30 栋，配分轮抓取
+
+此前只监控 4/30 栋。扩容的前提是先解决单轮预算：新上线的轮次遥测量出 Xior **每栋楼 13.9 秒**（其余三个 source 每 target 只要 1–4 秒），30 栋 ≈ 417 秒/轮，而 `CHECK_INTERVAL` 是 300 秒。而且 H2S 排在其它 source **之后**执行——直接配 30 栋等于每轮把真正出房源、自动预订已跑通的那个 source 推迟 7 分钟。
+
+慢是 2026-08-02 `4d71b9d` 有意为之：请求间隔 1.5s → 5s，因为限流按速率算，1.5s 时瞬时 ~40 req/min 撞上端点 ~15–20/window 的限制。那条 commit 当时就写明了「楼栋数增加时应改为分轮抓取，而不是把这个值调小」。
+
+新增 `SHARD_SIZES`（默认 `xior:5`）：target 数超过阈值的 source 每轮只抓一个切片，游标存 SQLite 逐轮轮转，6 轮覆盖 30 栋，单轮 Xior ≈70 秒。游标持久化是必要的——放内存的话每次重启都从第一片开始，后面的楼栋会被系统性少抓。任何读写异常都回退成全量抓取：宁可慢一轮，也不能悄悄漏抓楼栋。
+
+### Xior 自动预订：侦察（尚未实现）
+
+**修正 `XIOR.md` §8.3 一处会花冤枉钱的错误。** 原文写「RENTCafe 全线使用 reCAPTCHA Enterprise，一个 v3 sitekey 通吃」。实测三页各不相同：
+
+| 页面 | v3 类型 | sitekey | action |
+|---|---|---|---|
+| `oleapplication`（第 2 步条款） | **标准 v3**（`api.js`） | `6LcjBc4U…` | `start_application` |
+| `guestlogin` | Enterprise | `6LfBeqEa…` | `UserLogin` |
+| `register` | Enterprise | 同上 | `GuestRegistration` |
+| `flexregistrationlandingpage` | **无** | — | — |
+
+`captcha/solver.py` 的 `solve_v3()` 把 `enterprise=1` 写死、默认用 `6LfBeqEa`——对条款页两项都错，解出来的 token 服务端不认。已改为按页传参，实测表编码进新增的 `captcha/rentcafe_pages.py`（未侦察过的页返回 `None`，**不给默认值兜底**——随便挑一个当默认等于把踩过的坑重新埋回去）。
+
+其余进展：
+
+- **第 1–2 步可以脱离库存侦察。** 拿一条 2026-05 就已 Occupied 的 `applyOnlineURL`，2026-08-03 仍返回 HTTP 200 完整表单。RENTCafe 侧也不需要浏览器，curl_cffi 直连即可。
+- **`flexregistrationlandingpage.aspx` 不是验证码旁路**（§8.5 原第一个问号，答案是否定的）。它自身确实无验证码，但两个出口都指回带 Enterprise 验证码的 `register.aspx`。
+- **发现一个排在 reCAPTCHA 之前的风险**：`MoveInDateEncr` / `QuotedRentEncr` 是入住日与租金的**加签副本**（`base64(明文)-签名`）。改明文签名就对不上，换日期必须由服务端重新下发，接口未知。验证码是花钱能解的，签名机制不是。
+- 第 2 步的完整字段契约已记录。
+
+**第 3 步（Applicant Info）及之后仍未到达**，需要真实账号登录 + 一个在售单元。刻意没有继续写那部分代码——现有 `book()` 里那个 `for _step_index in range(6)` 循环就是没走过流程硬猜的，再加一层猜测只会让后面更难拆。
+
 ### 可观测性 — 排查不再依赖 ssh
 
 v2.0 两个方向之一。起因很直接：这套系统里**每一个 bug 都是靠人肉 grep 日志找到的**。逐 source 隔离那条是数了 36 轮日志，errorCode 误判是统计了 144 次出现，完整率下滑是逐行读 `完整扫描 N/M`。而 2026-06-13 起那次 7 周静默停摆是同一短板的极端形态——进程活着、心跳正常、容器全程 healthy，只是不干活了。

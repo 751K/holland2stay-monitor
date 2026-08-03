@@ -884,6 +884,15 @@ class Config:
     # 用于新平台上线前的静默验证——先确认它抓得对、数据长什么样，再决定是否
     # 对用户开放。必须是 sources 的子集才有意义（不在 sources 里就压根不会抓）。
     shadow_sources: list[str] = field(default_factory=list)
+    # 分轮抓取：``{source: 每轮最多抓几个 target}``。target 数超过它时，本轮只抓
+    # 一个切片，游标持久化在 meta 里逐轮轮转，若干轮覆盖一遍全部。
+    #
+    # 为什么需要：Xior 的请求间隔是 5s（限流按速率算，见 XIOR.md §2.2），实测
+    # **每栋楼 13.9 秒**。30 栋 ≈ 417 秒/轮，而 CHECK_INTERVAL 才 300 秒；更糟的是
+    # H2S 排在其它 source 之后执行，等于每轮把真正出房源的那个 source 推迟 7 分钟。
+    #
+    # 正确解法是分轮抓，不是把请求间隔调小——间隔调小会直接撞回 429。
+    shard_sizes: dict[str, int] = field(default_factory=dict)
     ourdomain_cities: list[OurDomainCityFilter] = field(default_factory=list)
     ourcampus_cities: list[OurCampusCityFilter] = field(default_factory=list)
     xior_cities: list[XiorCityFilter] = field(default_factory=list)
@@ -951,6 +960,39 @@ class Config:
             )
 
         return tasks
+
+
+#: ``SHARD_SIZES`` 未配置时的默认分片大小。
+#:
+#: 只给 xior 设默认值，因为只有它的单 target 成本高到会顶破轮次预算（实测
+#: 13.9s/栋，其余三个 source 都在 1–4s）。5 栋 ≈ 70 秒，与它现在的 55 秒相当，
+#: 而官方注册表里的 30 栋正好 6 轮覆盖一遍。
+#:
+#: 值 ≥ 实际 target 数时分片自动失效，所以对只配了 4 栋的存量部署是无操作的。
+_DEFAULT_SHARD_SIZES: dict[str, int] = {"xior": 5}
+
+
+def _parse_shard_sizes(raw: str) -> dict[str, int]:
+    """解析 ``SHARD_SIZES``，形如 ``xior:5,ourdomain:3``。
+
+    留空用 :data:`_DEFAULT_SHARD_SIZES`；显式写 ``xior:0`` 可以关掉某个 source
+    的分片（0 表示不限制）。非法条目忽略而不是报错——配置写错不该让监控起不来。
+    """
+    if not (raw or "").strip():
+        return dict(_DEFAULT_SHARD_SIZES)
+    out = dict(_DEFAULT_SHARD_SIZES)
+    for part in raw.split(","):
+        if ":" not in part:
+            continue
+        name, _, size = part.partition(":")
+        name = name.strip().lower()
+        try:
+            n = int(size.strip())
+        except (TypeError, ValueError):
+            continue
+        if name and n >= 0:
+            out[name] = n
+    return out
 
 
 def _parse_sources_raw(raw: str) -> list[str]:
@@ -1054,6 +1096,8 @@ def load_config() -> Config:
     shadow_sources = [s for s in _parse_sources_raw(
         os.environ.get("SHADOW_SOURCES", "")) if s in sources]
 
+    shard_sizes = _parse_shard_sizes(os.environ.get("SHARD_SIZES", ""))
+
     ourcampus_cities: list[OurCampusCityFilter] = []
     if "ourcampus" in sources:
         raw_oc_cities = os.environ.get(
@@ -1105,6 +1149,7 @@ def load_config() -> Config:
         heartbeat_interval_minutes=max(0, int(os.environ.get("HEARTBEAT_INTERVAL_MINUTES") or "60")),
         sources=sources,
         shadow_sources=shadow_sources,
+        shard_sizes=shard_sizes,
         ourdomain_cities=ourdomain_cities,
         ourcampus_cities=ourcampus_cities,
         xior_cities=xior_cities,
