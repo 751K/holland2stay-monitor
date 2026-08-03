@@ -295,6 +295,53 @@ Listing(
 第 1–2 步的侦察不必等到有房。RENTCafe 侧也**不需要浏览器**：`securerc.co.uk`
 不在 §2.1 那道 Cloudflare 挑战后面，curl_cffi 直连即可，与 OurDomain 一致。
 
+#### 第 3 步 Applicant Info（实测，2026-08-03）
+
+**不需要登录就能到达。** 第 2 步点 Start Application 之后直接落到注册表单
+（`formName2=mylistregister`，`IsRegister=-1`）；页面上有「Log in」链接指向
+`guestlogin.aspx` 供已有账号走。侧边栏这栋楼是 **8 步**（Floorplan → Lease
+Creation），不是文档原先记的 9 步。
+
+**没有文件上传。** 实测 `input[type=file]` 数量为 0，正文也无 upload / proof /
+bewijs 一类字样。这一条此前被列为「若存在则整个方向不成立」的头号风险，
+到此排除。
+
+可见字段：
+
+```
+txtName  txtName2  txtEmail  txtPassword        # 必填四项
+drpCurrentCountry(默认 2=Netherlands)  txtPhone
+ddlLanguage  HowDidYouHear  SubscribeToEmails
+```
+
+反自动化字段（比 reCAPTCHA 更需要注意）：
+
+| 字段 | 观察到的值 | 推测作用 |
+|---|---|---|
+| `txtRenderTime` | `3-8-2026 15:12:16` | 页面渲染时刻。**提交过快很可能被判为机器人** |
+| `txtCodeVal` | `MTczNjc2Njk3OA==-ha0nQzH…` | 又一个 `base64-签名` 对 |
+| `txtvalue1` | 随机串 | 服务端下发，需回传 |
+| `txtvalue2` | 空 textarea | 疑似蜜罐——**必须留空** |
+
+隐藏字段把租约上下文带到下一步：`FloorPlanID` / `UnitTypeID` /
+`txtExpectedMoveInDate` / `txtPreferredRent` / `hdnAcademicTermId` /
+`hdnSchoolId` / `myOlePropertyId` / `cafeportalkey` 等。
+
+第 4–8 步仍未到达（需要真实账号）。
+
+#### `MoveInDateEncr` 不是障碍（实测推翻了先前判断）
+
+先前把它列为「最可能卡死自动化」的机制。实测**不成立**：
+
+- 页面上改 `sMoveInDate`（3-8-2026 → 15-9-2026），`MoveInDateEncr` **不变**，
+  仍是签好名的原值——客户端根本不重算签名。
+- 同一日期在**不同楼栋**下签名完全相同（Zernikestraat 与 Vaals 都是
+  `My04LTIwMjY=-z8g85jGXmr8=`），说明签名只与明文有关，与房源/会话无关。
+- 页面明写这个日期是「**开始申请的日期**」，合同日期由单元自身的可用日期决定。
+
+格式是 `base64(明文)-签名`（`NDk5LjAw-…` → `499.00`）。结论：**自动化原样回传
+服务端下发的值即可，不需要伪造签名**。
+
 #### 第 2 步的字段契约（实测）
 
 表单 `termsandotheritems` → POST `/onlineleasing/rcformsave.ashx`。
@@ -397,18 +444,21 @@ RENTCafe 还有 IP 级 attempt limit，连续失败锁 30 分钟——自动化�
   action 也三者互异。每页必须单独解。
 - 第 1–2 步可以用过期单元的参数侦察，且不需要浏览器（见 §8.2）。
 
+- ~~`MoveInDateEncr` / `QuotedRentEncr` 的签名怎么来~~ → **不需要伪造**，原样回传
+  服务端下发的值即可。详见上面「`MoveInDateEncr` 不是障碍」。
+- ~~第 3 步是否有文件上传或人工审核~~ → **没有文件上传**（实测 file input 数为 0）。
+  第 3 步的完整字段清单已记录，且**不需要登录就能到达**。
+
 **未确认（按优先级）**
 
-1. **`MoveInDateEncr` / `QuotedRentEncr` 的签名怎么来。** 换入住日期时客户端
-   如何取到新的加签值？若只能由服务端在特定交互中下发，自动化就必须复刻那次
-   交互。**这是当前最可能卡死流程的点，排在 reCAPTCHA 之前。**
-2. **第 3 步 Applicant Info 的字段清单，以及是否有文件上传或人工审核。**
-   若需要上传收入证明或有人工审核环节，「秒抢」这件事本身就不成立，整个方向
-   要重新评估。
+1. **第 4–8 步（Additional Applicants → Lease Creation）**。需要真实账号登录。
+   人工审核若存在，最可能出现在 Lease Summary / Lease Creation 附近。
+2. **反自动化字段的服务端校验强度**：`txtRenderTime` 是否真的用于「提交过快」
+   判定、`txtvalue2` 是不是蜜罐。这两个比 reCAPTCHA 更容易在实现时踩到。
 3. 登录的 OTP 是否强制。页面上 `OtpOptionsSection` 默认 `display:none`，
    `Username`+`Password` 是主路径，OTP 看起来是**替代**登录方式而非二次验证
    （另有 `VerifyOTP` 表单和 `otpclickedUserLogin` 标志位）——但没有真实账号
    登录过，不能确认服务端不会在密码通过后追加 OTP。
 4. 服务端 v3 score 阈值多高——阈值低则几乎不触发 v2 回退，成本按 §8.4 的乐观值走。
 
-后三项都需要**真实 RENTCafe 账号**才能继续，第 2 项还额外需要**一个在售单元**。
+只有第 1、3 项需要**真实 RENTCafe 账号**。
