@@ -7,6 +7,7 @@
   _notifications— web_notifications CRUD
   _map_calendar — 地图坐标缓存 + 日历查询
   _retry        — 竞败重试队列持久化
+  _rounds       — 抓取轮次遥测（每轮每 source 一行）
 
 对外接口不变：from storage import Storage（纯 re-export）。
 """
@@ -19,6 +20,7 @@ from mstorage._listings import ListingOps
 from mstorage._map_calendar import MapCalendarOps
 from mstorage._notifications import NotificationOps
 from mstorage._retry import RetryQueueOps
+from mstorage._rounds import RoundStatsOps
 from mstorage._tokens import TokenOps
 from mstorage._user_configs import UserConfigOps
 
@@ -29,6 +31,7 @@ class Storage(
     ChartOps,
     MapCalendarOps,
     RetryQueueOps,
+    RoundStatsOps,
     TokenOps,
     UserConfigOps,
     DeviceOps,

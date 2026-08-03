@@ -209,6 +209,57 @@ def _log_scrape_completeness(completeness: dict[str, bool]) -> None:
     )
 
 
+def _completeness_stats(completeness: dict[str, bool]) -> tuple[int, int]:
+    """把 completeness 字典压成 (完整数, 总数)，用于轮次遥测。"""
+    return sum(1 for ok in completeness.values() if ok), len(completeness)
+
+
+def _record_source_round(
+        storage: Storage,
+        *,
+        round_at: str,
+        source: str,
+        listings: int = 0,
+        targets: int = 0,
+        complete: int = 0,
+        started_at: float | None = None,
+        error: BaseException | None = None,
+        error_type: str = "",
+        error_msg: str = "",
+) -> None:
+    """给 ``round_stats`` 记一行。
+
+    每个 source 跑完就立即写，不攒到整轮结束——「整轮全失败」恰恰是最该留痕的
+    情形，而那条路径会直接上抛，攒着的记录就丢了。
+
+    失败可以用 ``error=`` 传异常（类名即 error_type），也可以用
+    ``error_type=`` / ``error_msg=`` 直接写——后者是给「没有异常对象、但确实
+    没抓成」的情形用的，比如熔断期跳过。
+
+    storage 写失败不上抛（``record_round_stat`` 内部已吞），这里再兜一层是防
+    round_at 之类的参数构造本身出错。观测不该把被观测的东西弄崩。
+    """
+    try:
+        duration_ms = (
+            int((time.monotonic() - started_at) * 1000) if started_at is not None else 0
+        )
+        if error is not None:
+            error_type = error_type or type(error).__name__
+            error_msg = error_msg or str(error)
+        storage.record_round_stat(
+            round_at=round_at,
+            source=source,
+            listings=listings,
+            targets=targets,
+            complete=complete,
+            duration_ms=duration_ms,
+            error_type=error_type,
+            error_msg=error_msg,
+        )
+    except Exception:
+        logger.debug("轮次遥测记录失败（已忽略）", exc_info=True)
+
+
 def _mark_stale_listings_for_complete_cities(
         storage: Storage,
         completeness: dict[str, bool],
@@ -717,6 +768,46 @@ async def _notify_admin_only(
         await _push.dispatch_admin(storage, msg, kind=kind)
     except Exception:
         logger.debug("admin push 告警发送失败（已忽略）", exc_info=True)
+
+
+async def _dispatch_watchdog_alerts(
+        storage: "Storage",
+        web_notifier: "WebNotifier | None",
+) -> int:
+    """跑一次退化告警巡检，把该发的发给 admin。返回发出条数。
+
+    只发 admin：完整扫描率下滑、解析器可能坏了这类事，普通用户既看不懂也做不了
+    什么，发给他们只是制造焦虑。
+
+    节流和恢复判定都在 ``watchdog.poll()`` 里做完了（状态存 meta，重启后仍生效），
+    这里只负责投递。整个函数吞异常——告警通道不该把 monitor 带崩。
+
+    调用点在 main_loop 的正常路径上，**run_once 上抛时不会执行**。这是有意的：
+    run_once 只在「所有 source 都失败」时上抛，而那种情况 main_loop 自己的
+    network / blocked 连续失败计数已经在告警了，这里再报一遍只是重复。遥测行
+    在上抛之前就已经写好，所以恢复后的第一轮巡检仍能看到这段历史。
+
+    也没做成 ``finally``：那样关停时（CancelledError）也会跑一次 DB 写 + 推送。
+    """
+    try:
+        from mcore import watchdog
+
+        alerts = watchdog.poll(storage)
+        if not alerts:
+            return 0
+        for a in alerts:
+            log = logger.info if a.level == watchdog.LEVEL_RECOVERED else logger.warning
+            log("watchdog[%s] %s", a.level, a.title)
+            # kind 带上 alert key：push 的 dedup 键是 (admin, kind, kind)，
+            # 所有 watchdog 告警共用一个 kind 的话，同一轮里「xior 挂了」和
+            # 「h2s 完整率低」会被压成一条。
+            await _notify_admin_only(
+                storage, web_notifier, a.message(), kind=f"watchdog:{a.key}",
+            )
+        return len(alerts)
+    except Exception:
+        logger.debug("watchdog 巡检失败（已忽略）", exc_info=True)
+        return 0
 
 
 def _print_dry_run(fresh: list["Listing"], user_notifiers: "UserNotifiers") -> None:
@@ -1250,6 +1341,10 @@ async def run_once(
         # 忽然消失，否则同一批 listing 的 key 形态会在两轮之间跳变。
         multi_source = len({t.source for t in tasks}) > 1
 
+        # 整轮共用一个时间戳，各 source 的遥测行靠它分组。用 dispatch 开始的
+        # 时刻而不是各 source 各自的完成时刻——否则同一轮的行会散成好几组。
+        round_at = datetime.now(timezone.utc).isoformat()
+
         def _ckey(source: str, city_display: str) -> str:
             """与 ``scrapers._completeness_key`` 保持一致的 key 构造。"""
             return f"{source}:{city_display}" if multi_source else city_display
@@ -1272,6 +1367,7 @@ async def run_once(
             默认 executor 的线程不固定，跨线程调用会抛
             ``greenlet.error: Cannot switch to a different thread``。
             """
+            started_at = time.monotonic()
             try:
                 fresh_part, completeness_part = await _dispatch(
                     group,
@@ -1289,10 +1385,23 @@ async def run_once(
                     src, len(group), type(e).__name__, e,
                     exc_info=True,
                 )
+                if not dry_run:
+                    _record_source_round(
+                        storage, round_at=round_at, source=src,
+                        targets=len(group), started_at=started_at, error=e,
+                    )
                 return
             succeeded_sources.append(src)
             fresh_all.extend(fresh_part)
             completeness_all.update(completeness_part)
+            if not dry_run:
+                complete_n, total_n = _completeness_stats(completeness_part)
+                _record_source_round(
+                    storage, round_at=round_at, source=src,
+                    listings=len(fresh_part),
+                    targets=total_n or len(group), complete=complete_n,
+                    started_at=started_at,
+                )
 
         # 逐 source 隔离。dispatcher 内部已经按 task 隔离，但它在「本次调用的
         # 任务全部失败」时仍会上抛——而 monitor 是按 source 分开调用它的，于是
@@ -1305,6 +1414,7 @@ async def run_once(
             await _dispatch_isolated(src, [t for t in other_tasks if t.source == src])
 
         if selected_h2s:
+            started_at = time.monotonic()
             try:
                 fresh_part, completeness_part = await _dispatch(
                     selected_h2s, isolated=True, browser_source=_H2S_SOURCE
@@ -1312,12 +1422,44 @@ async def run_once(
             except BlockedError as e:
                 h2s_blocked = e
                 _mark_h2s_scrape_blocked(e)
+                if not dry_run:
+                    _record_source_round(
+                        storage, round_at=round_at, source=_H2S_SOURCE,
+                        targets=len(selected_h2s), started_at=started_at, error=e,
+                    )
+            except Exception as e:
+                # H2S 的非 Blocked 异常按旧契约照常上抛（熔断只管 403），
+                # 但先留痕——否则遥测里 H2S 会在这类失败时凭空消失。
+                if not dry_run:
+                    _record_source_round(
+                        storage, round_at=round_at, source=_H2S_SOURCE,
+                        targets=len(selected_h2s), started_at=started_at, error=e,
+                    )
+                raise
             else:
                 succeeded_sources.append(_H2S_SOURCE)
                 fresh_all.extend(fresh_part)
                 completeness_all.update(completeness_part)
                 if h2s_mode == "canary":
                     _mark_h2s_scrape_recovered()
+                if not dry_run:
+                    complete_n, total_n = _completeness_stats(completeness_part)
+                    _record_source_round(
+                        storage, round_at=round_at, source=_H2S_SOURCE,
+                        listings=len(fresh_part),
+                        targets=total_n or len(selected_h2s), complete=complete_n,
+                        started_at=started_at,
+                    )
+        elif h2s_tasks and h2s_mode == "open" and not dry_run:
+            # 熔断期完全跳过 H2S。不记这一行的话，遥测里 H2S 会直接消失，面板
+            # 只能看到 last_round_at 不断变老——与「进程挂了」无从区分。
+            # 记成一次带 CircuitOpen 标记的失败，让「按设计退避」本身可见。
+            _record_source_round(
+                storage, round_at=round_at, source=_H2S_SOURCE,
+                targets=len(h2s_tasks),
+                error_type="CircuitOpen",
+                error_msg=_h2s_circuit_reason or "circuit open",
+            )
 
         # 一个都没成功 = 本轮没有任何可用数据，维持旧契约上抛，让 main_loop 走
         # 冷却而不是原速空转。h2s_blocked 不在此列——H2S 熔断本身就是退避，且
@@ -1971,6 +2113,13 @@ async def main_loop(
                 storage.record_uptime_sample()
             except Exception:
                 logger.debug("record_uptime_sample 失败（已忽略）", exc_info=True)
+
+            # 轮次遥测的保留期剪枝。方法自带每小时一次的节流，这里每轮直接调。
+            storage.prune_round_stats()
+
+            # 数据退化告警。和上面那些「对异常触发」的告警是互补的：这里看的是
+            # 没有异常的故障——一直"成功"返回 0 条、完整率悄悄下滑。
+            await _dispatch_watchdog_alerts(storage, web_notifier)
 
             # 成功：重置网络失败连续计数
             if network_fail_streak:

@@ -25,11 +25,24 @@
   <button class="log-tab" data-file="errors">{{ _('logs_errors') }}</button>
 </div>
 
-<!-- Search bar -->
+<!-- Search bar：服务端过滤。以前这里是纯前端过滤，只能在已拉取的 500 行里找，
+     所以"凌晨三点发生了什么"这类问题仍然只能 ssh 上去 grep。 -->
 <div class="log-search-bar">
   <i class="bi bi-search"></i>
   <input type="text" id="log-search" placeholder="{{ _('logs_search') }}"
-         oninput="applySearch()" autocomplete="off">
+         oninput="scheduleSearch()" autocomplete="off">
+  <select id="log-level" onchange="applySearch()" class="log-filter-input" style="width:auto;">
+    <option value="">{{ _('logs_level_all') }}</option>
+    <option value="ERROR,CRITICAL">ERROR</option>
+    <option value="WARNING">WARNING</option>
+    <option value="INFO">INFO</option>
+    <option value="DEBUG">DEBUG</option>
+  </select>
+  <input type="text" id="log-since" class="log-filter-input" style="width:150px;"
+         placeholder="{{ _('logs_since_hint') }}" oninput="scheduleSearch()" autocomplete="off">
+  <input type="text" id="log-until" class="log-filter-input" style="width:150px;"
+         placeholder="{{ _('logs_until_hint') }}" oninput="scheduleSearch()" autocomplete="off">
+  <button type="button" class="btn btn-ghost btn-sm" onclick="resetSearch()">{{ _('logs_filter_reset') }}</button>
   <span id="search-count" style="display:none;font-size:11px;color:var(--text2);margin-left:8px;"></span>
 </div>
 
@@ -105,19 +118,31 @@ function switchFile(key) {
   lastSize = 0;
   document.querySelectorAll('.log-tab').forEach(t => t.classList.toggle('active', t.dataset.file === key));
   document.getElementById('log-search').value = '';
+  document.getElementById('log-level').value  = '';
+  document.getElementById('log-since').value  = '';
+  document.getElementById('log-until').value  = '';
   document.getElementById('search-count').style.display = 'none';
   fetchLogs();
 }
 
 // ── Fetch & render ──
+//
+// seq：过滤改成服务端之后，一次改动会同时存在多个在途请求（3 秒轮询 + 每次
+// 输入）。它们的返回顺序没有保证，先发的后到就会用旧结果盖掉新结果——实测
+// 表现是清空过滤后页面反而空了。每个请求带一个序号，只有最新的那个允许渲染。
+let fetchSeq = 0;
+
 async function fetchLogs() {
   if (paused) return;
+  const mySeq = ++fetchSeq;
+  const myFilter = filterQuery();
   try {
     const csrf = document.querySelector('meta[name="csrf-token"]').content;
-    const resp = await fetch('/api/logs?file=' + currentFile + '&lines=500', {
+    const resp = await fetch('/api/logs?file=' + currentFile + '&lines=500' + myFilter, {
       headers: {'X-CSRF-Token': csrf}
     });
     const data = await resp.json();
+    if (mySeq !== fetchSeq) return;   // 已有更新的请求发出，本次结果作废
 
     // Update file sizes (for tab labels)
     const kb = (data.size / 1024).toFixed(1);
@@ -140,8 +165,12 @@ async function fetchLogs() {
 
     const lines = data.lines;
     if (!lines.length) {
-      container.innerHTML = '<span style="color:#888">{{ _("no_logs_yet") }}</span>';
-      info.textContent = '0 lines · 0 KB';
+      // 用发起请求时的过滤条件判断文案，不用当前输入框的值——两者可能已经不同了
+      container.innerHTML = '<span style="color:#888">'
+        + (myFilter ? '{{ _("logs_no_match") }}' : '{{ _("no_logs_yet") }}') + '</span>';
+      info.textContent = '0 lines · ' + kb + ' KB';
+      lastSize = data.size;
+      renderSearchCount(data, myFilter);
       return;
     }
 
@@ -169,8 +198,9 @@ async function fetchLogs() {
       container.scrollTop = container.scrollHeight;
     }
 
-    // Re-apply search filter
-    applySearch();
+    // 过滤已经在服务端做完了，这里只更新命中统计。
+    // 注意不能再调 applySearch()——它现在会触发 fetchLogs，直接变成死循环。
+    renderSearchCount(data, myFilter);
 
     // Also refresh file list occasionally (every 10 fetches)
     if (!fetchLogs._count) fetchLogs._count = 0;
@@ -202,32 +232,57 @@ async function fetchLogFiles() {
   } catch(err) { /* silent */ }
 }
 
-// ── Search filter ──
+// ── Search filter（服务端）──
+//
+// 过滤在服务端做，前端只负责把参数拼进 query。这样搜索范围是"日志尾部
+// scan MB"，而不是"已经渲染在页面上的 500 行"——后者搜不到任何历史。
+function filterQuery() {
+  const q     = document.getElementById('log-search').value.trim();
+  const level = document.getElementById('log-level').value;
+  const since = document.getElementById('log-since').value.trim();
+  const until = document.getElementById('log-until').value.trim();
+  let s = '';
+  if (q)     s += '&q='     + encodeURIComponent(q);
+  if (level) s += '&level=' + encodeURIComponent(level);
+  if (since) s += '&since=' + encodeURIComponent(since);
+  if (until) s += '&until=' + encodeURIComponent(until);
+  // 有过滤条件时把扫描窗口放大：过滤本来就是为了找远处的东西
+  if (q || level || since || until) s += '&scan=32';
+  return s;
+}
+
+let searchTimer = null;
+function scheduleSearch() {
+  // 打字防抖：每个字符都发一次服务端扫描太浪费
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(applySearch, 350);
+}
+
 function applySearch() {
-  const query = document.getElementById('log-search').value.toLowerCase();
-  const container = document.getElementById('log-view');
-  const lines = container.querySelectorAll('.log-line');
+  lastSize = 0;   // 强制重渲染，否则 size 没变时会沿用旧内容
+  fetchLogs();
+}
+
+function resetSearch() {
+  document.getElementById('log-search').value = '';
+  document.getElementById('log-level').value  = '';
+  document.getElementById('log-since').value  = '';
+  document.getElementById('log-until').value  = '';
+  applySearch();
+}
+
+function renderSearchCount(data, activeFilter) {
   const countEl = document.getElementById('search-count');
-  let visible = 0;
-
-  if (!query) {
-    lines.forEach(l => l.style.display = '');
-    countEl.style.display = 'none';
-    return;
-  }
-
-  lines.forEach(l => {
-    const text = l.textContent.toLowerCase();
-    if (text.includes(query)) {
-      l.style.display = '';
-      visible++;
-    } else {
-      l.style.display = 'none';
-    }
-  });
-
+  if (!activeFilter) { countEl.style.display = 'none'; return; }
   countEl.style.display = '';
-  countEl.textContent = visible + ' / ' + lines.length + ' lines';
+  let txt = (data.returned || 0) + ' / ' + (data.matched || 0) + ' matched'
+          + ' (of ' + (data.records || 0) + ' scanned)';
+  // 命中 0 条时，"没有这条日志"和"没扫到那么远"是天差地别的两件事
+  if (data.truncated) {
+    txt += ' · {{ _("logs_scan_truncated") }} '
+        + ((data.scanned_bytes || 0) / 1048576).toFixed(0) + ' MB';
+  }
+  countEl.textContent = txt;
 }
 
 // ── Pause / Resume ──
@@ -311,6 +366,21 @@ timer = setInterval(fetchLogs, 3000);
 }
 .log-search-bar input::placeholder {
   color: var(--text3);
+}
+/* 级别 / 时间范围过滤控件：不像关键字输入框那样 flex:1 撑满 */
+.log-search-bar .log-filter-input {
+  flex: 0 0 auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text);
+  font-family: inherit;
+}
+@media (max-width: 780px) {
+  .log-search-bar { flex-wrap: wrap; }
+  .log-search-bar .log-filter-input { flex: 1 1 120px; width: auto !important; }
 }
 
 /* ── Log lines ── */

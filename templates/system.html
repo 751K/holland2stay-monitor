@@ -69,7 +69,7 @@
     <div class="card-header">{{ _('database_stats') }}</div>
     <table class="table-minimal">
       <tr><td class="text-tertiary">{{ _('total_listings') }}</td><td>{{ info.total_listings }}</td></tr>
-      <tr><td class="text-tertiary">{{ _('last_scrape') }}</td><td>{{ info.last_scrape }}</td></tr>
+      <tr><td class="text-tertiary">{{ _('last_scrape') }}</td><td>{{ info.last_scrape | local_time }}</td></tr>
       <tr><td class="text-tertiary">{{ _('last_count') }}</td><td>{{ info.last_count }}</td></tr>
       <tr><td class="text-tertiary">{{ _('status_changes') }}</td><td>{{ info.total_changes }}</td></tr>
       <tr><td class="text-tertiary">{{ _('web_notifications') }}</td><td>{{ info.total_notifications }} ({{ info.unread_notifications }} {{ _('unread') }})</td></tr>

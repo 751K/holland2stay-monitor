@@ -124,6 +124,9 @@
       <a href="{{ url_for('app_accounts') }}" class="{% if request.endpoint in ['app_accounts','app_accounts_revoke','app_accounts_test_push','app_accounts_disable_device'] %}active{% endif %}">
         <i class="bi bi-phone"></i> {{ _('app_accounts_title') }}
       </a>
+      <a href="{{ url_for('monitoring_view') }}" class="{% if request.endpoint=='monitoring_view' %}active{% endif %}">
+        <i class="bi bi-activity"></i> {{ _('monitoring_title') }}
+      </a>
       <a href="{{ url_for('logs_view') }}" class="{% if request.endpoint=='logs_view' %}active{% endif %}">
         <i class="bi bi-terminal"></i> {{ _('log_viewer') }}
       </a>

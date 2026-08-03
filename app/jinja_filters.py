@@ -46,6 +46,30 @@ def time_ago(iso_str: str) -> str:
         return iso_str
 
 
+def local_time(iso_str: str, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """UTC ISO 时间戳 → 配置时区（``TIMEZONE``）的可读时间。
+
+    库里所有时间戳都存 UTC（``last_scrape_at`` / ``first_seen`` / ``round_at``），
+    但页面必须按 ``TIMEZONE`` 显示——容器跑在 ``TZ=Europe/Amsterdam``，日志的
+    asctime 就是那个时区。直接把 UTC 原文渲染出来，夏令时期间会和 ``/logs``
+    差两小时，而这两处本来就是对着看的。
+
+    解析不了就原样返回：这是展示层，不该因为一个脏时间戳把整页打崩。
+    """
+    if not iso_str or iso_str == "—":
+        return "—"
+    try:
+        from zoneinfo import ZoneInfo
+
+        from config import TIMEZONE
+        dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo(TIMEZONE)).strftime(fmt)
+    except Exception:
+        return iso_str
+
+
 def price_short(price_raw: str) -> str:
     """从原始价格串中抽出第一段 €xxx 数字部分。"""
     if not price_raw:
@@ -165,6 +189,7 @@ def source_short(source: str) -> str:
 def register(app: "Flask") -> None:
     """把上述过滤器/全局函数挂到 Flask app 的 Jinja 环境。"""
     app.add_template_filter(time_ago,       "time_ago")
+    app.add_template_filter(local_time,     "local_time")
     app.add_template_filter(price_short,    "price_short")
     app.add_template_filter(parse_features, "parse_features")
     app.add_template_filter(source_label,    "source_label")

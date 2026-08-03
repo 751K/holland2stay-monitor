@@ -221,6 +221,31 @@ class StorageBase:
                 count INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (scope, key, day)
             );
+
+            -- 每轮每 source 一行的抓取遥测。
+            --
+            -- 存在的理由：在此之前，一轮抓取的结果只以 meta.last_scrape_count
+            -- 这个「每轮被覆盖的标量」形式存在，任何关于历史或分 source 的问题
+            -- （某某昨晚为什么只有 2/6）都只能去 grep 日志。
+            --
+            -- round_at 是整轮共用的时间戳，同一轮的各 source 靠它分组。
+            -- error_type 为空串表示该 source 本轮成功。
+            -- 保留期见 prune_round_stats()。
+            CREATE TABLE IF NOT EXISTS round_stats (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                round_at    TEXT    NOT NULL,
+                source      TEXT    NOT NULL,
+                listings    INTEGER NOT NULL DEFAULT 0,
+                targets     INTEGER NOT NULL DEFAULT 0,
+                complete    INTEGER NOT NULL DEFAULT 0,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                error_type  TEXT    NOT NULL DEFAULT '',
+                error_msg   TEXT    NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS idx_round_stats_at
+                ON round_stats(round_at);
+            CREATE INDEX IF NOT EXISTS idx_round_stats_source_at
+                ON round_stats(source, round_at DESC);
         """)
         # 增量列：CREATE TABLE IF NOT EXISTS 不会给老库补字段；
         # ALTER TABLE ADD COLUMN 在 SQLite 上幂等需自己捕获 OperationalError。
@@ -455,7 +480,8 @@ class StorageBase:
             self._conn.execute("DELETE FROM app_tokens")
             self._conn.execute("DELETE FROM user_configs")
             self._conn.execute("DELETE FROM device_tokens")
-        logger.info("数据库已清空（全部 8 张表）")
+            self._conn.execute("DELETE FROM round_stats")
+        logger.info("数据库已清空（全部 9 张表）")
 
     def close(self) -> None:
         if not self._teardown_managed:

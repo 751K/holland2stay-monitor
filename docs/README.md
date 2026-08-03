@@ -149,6 +149,7 @@ The ones worth knowing up front:
 | `CHECK_INTERVAL` | `300` | Seconds between rounds outside peak hours |
 | `PEAK_INTERVAL` | `60` | Seconds between rounds during peak hours |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | How long the monitor may be silent before `/health` reports unhealthy |
+| `HEALTH_*` / `WATCHDOG_*` | see `.env.example` | Thresholds for the data-degradation alerts behind `/monitoring` |
 | `HTTPS_PROXY` | — | Route scraping through another exit IP when Cloudflare gets aggressive |
 
 Enabling a source requires **both** `SOURCES` and that source's city list.
@@ -178,9 +179,22 @@ forms with anti-abuse protection that is not reliably automatable.
 
 ## Troubleshooting
 
+Start at **`/monitoring`** (admin). It shows per-source health, the last 30 rounds
+broken down as `listings (complete/targets)`, and any active alerts — most of the
+table below can be answered there without shelling into the container.
+
+`/health` and `/monitoring` answer different questions. `/health` is *"is the loop
+alive"* (heartbeat freshness) and drives the container's health status.
+`/monitoring` is *"is the data still right"* — a parser broken by an upstream
+redesign leaves `/health` green. Data degradation alerts admins; it deliberately
+does **not** flip the container unhealthy, because restarting cannot fix a parser
+mismatch and would only interrupt a scrape in progress.
+
 | Symptom | Cause and fix |
 |---|---|
 | No alerts at all, dashboard shows stale listings | The monitor process is down. `supervisorctl status` to confirm, then `supervisorctl start monitor`. `/health` returns 503 once the heartbeat is older than `MONITOR_HEARTBEAT_MAX_AGE`. |
+| A source shows `down` or `warn` on `/monitoring` | The card lists which rule fired. Thresholds and their rationale: [ARCHITECTURE.md §5.11](ARCHITECTURE.md). |
+| Need logs from a specific time window | `/logs` filters server-side by keyword, level and `since`/`until` — it is not limited to what is currently on screen. |
 | Logs repeat `H2S source 熔断` | Cloudflare is blocking your exit IP. The breaker pauses that one source and retries a single city later. If it persists, set `HTTPS_PROXY`. |
 | Logs repeat `CF 挑战 ... 未解开` | Same cause — usually IP reputation rather than anything local. |
 | One platform always returns 0 listings | May be genuine. Check whether the round was marked complete; see [ARCHITECTURE.md §5.7](ARCHITECTURE.md#57-completeness-决定能否做状态收敛). |

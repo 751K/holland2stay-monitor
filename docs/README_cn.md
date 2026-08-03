@@ -142,6 +142,7 @@ python web.py
 | `CHECK_INTERVAL` | `300` | 非高峰时段的轮询间隔（秒） |
 | `PEAK_INTERVAL` | `60` | 高峰时段的轮询间隔（秒） |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默多久后 `/health` 报 unhealthy |
+| `HEALTH_*` / `WATCHDOG_*` | 见 `.env.example` | `/monitoring` 背后那套数据退化告警的阈值 |
 | `HTTPS_PROXY` | — | Cloudflare 拦得紧时，让抓取走另一个出口 IP |
 
 启用一个 source 需要**同时**配 `SOURCES` 和该 source 的城市列表。只配城市列表
@@ -169,9 +170,20 @@ OurDomain 和 Xior 保持仅通知：它们的预订流程走第三方表单，�
 
 ## 排障
 
+先开 **`/monitoring`**（admin）：分 source 健康卡、最近 30 轮明细（格式
+`房源数 (完整/任务)`）、当前活跃告警。下面这张表里大部分问题它能直接回答，
+不用进容器。
+
+`/health` 和 `/monitoring` 回答的是两个问题。前者是**「循环还活着吗」**
+（心跳新鲜度），它决定容器的健康状态；后者是**「数据还对吗」**——解析器被
+上游改版打坏时，`/health` 是绿的。数据退化只告警 admin，**不会**把容器标成
+unhealthy：重启治不好解析器对不上，只会打断正在进行的抓取。
+
 | 现象 | 原因与处理 |
 |---|---|
 | 完全没有通知，面板显示旧数据 | monitor 进程挂了。用 `supervisorctl status` 确认，再 `supervisorctl start monitor`。心跳超过 `MONITOR_HEARTBEAT_MAX_AGE` 后 `/health` 会返回 503。 |
+| 某平台在 `/monitoring` 上是 `down` / `warn` | 卡片上写了触发哪条规则。阈值与设计理由见 [ARCHITECTURE.md §5.11](ARCHITECTURE.md)。 |
+| 想查某个时间段的日志 | `/logs` 支持关键字 / 级别 / `since`–`until`，服务端过滤，不限于当前屏幕上那几百行。 |
 | 日志反复出现 `H2S source 熔断` | Cloudflare 在拦你的出口 IP。熔断只暂停该 source，稍后用单个城市试探恢复。持续出现就配 `HTTPS_PROXY`。 |
 | 日志反复出现 `CF 挑战 ... 未解开` | 同上，通常是 IP 信誉问题，不是本地配置问题。 |
 | 某个平台一直 0 条 | 可能是真没房。先看该轮是否标记为完整扫描，参考 [ARCHITECTURE.md §5.7](ARCHITECTURE.md#57-completeness-决定能否做状态收敛)。 |

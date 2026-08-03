@@ -4,7 +4,32 @@
 
 ---
 
-## 当前路线图（2026-06-13）
+## v2.0 方向（2026-08-03 决定）
+
+v2.0 只做两件事。
+
+### 方向一：可观测性 —— **已完成第一批**
+
+排查完全依赖 ssh：这套系统里每一个 bug 都是靠人肉 grep 日志找到的，而
+2026-06-13 起那次 7 周静默停摆是同一短板的极端形态。
+
+已落地：`round_stats` 轮次遥测表、`mcore/health.py` 分 source 健康判定、
+`mcore/watchdog.py` 退化告警（含恢复通知，节流持久化）、`/logs` 服务端过滤、
+`/monitoring` 面板。方案与验收标准见
+[OBSERVABILITY_PLAN.md](OBSERVABILITY_PLAN.md)，判据设计理由见 ARCHITECTURE §5.11。
+
+后续可继续：把遥测接进 `/api/v1` 供移动端消费；抓取耗时趋势图；
+按 city 而不只是按 source 的细分。
+
+### 方向二：Xior 自动预订
+
+见下方[第三期](#第三期xior-自动预订研究)。**下一步是侦察，不是编码**——
+`oleapplication.aspx` 九步流程的第 4 步（Applicant Info）之后没有人走过，
+其中若有文件上传或人工审核，这条路直接不通。在这之前写代码等于在赌。
+
+---
+
+## 历史路线图（2026-06-13）
 
 ### 已完成：H2S 传输层迁移至 CloakBrowser
 - H2S 将 API 迁至 `www.holland2stay.com/api/graphql` + Cloudflare Turnstile，旧 curl_cffi 路径封锁

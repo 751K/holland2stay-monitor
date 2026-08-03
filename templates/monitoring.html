@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% block title %}{{ _('monitoring_title') }}{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <h1><i class="bi bi-activity mr-2"></i>{{ _('monitoring_title') }}</h1>
+  <span class="meta" style="display:flex;align-items:center;gap:12px;">
+    <span id="mon-updated">—</span>
+    <label style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;">
+      <input type="checkbox" id="mon-pause"> {{ _('pause') }}
+    </label>
+  </span>
+</div>
+
+<!-- 活跃告警 -->
+<div id="mon-alerts" class="mon-alerts"></div>
+
+<!-- 分 source 健康卡 -->
+<div class="card">
+  <div class="card-header">
+    <span>{{ _('monitoring_sources') }}</span>
+    <span class="text-xs text-tertiary" id="mon-window">—</span>
+  </div>
+  <div id="mon-cards" class="mon-cards">{{ _('loading') }}...</div>
+</div>
+
+<!-- 最近轮次明细 -->
+<div class="card" style="margin-top:16px;">
+  <div class="card-header">
+    <span>{{ _('monitoring_recent_rounds') }}</span>
+    <span class="text-xs text-tertiary">
+      {{ _('monitoring_cell_hint') }} · {{ _('monitoring_times_in') }} {{ tz }}
+    </span>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="table-minimal" id="mon-rounds">
+      <thead><tr><th>{{ _('monitoring_round') }}</th></tr></thead>
+      <tbody><tr><td>{{ _('loading') }}...</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const STATUS_LABEL = {
+  ok:      '{{ _("monitoring_status_ok") }}',
+  warn:    '{{ _("monitoring_status_warn") }}',
+  down:    '{{ _("monitoring_status_down") }}',
+  unknown: '{{ _("monitoring_status_unknown") }}',
+};
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// 后端所有时间戳都是 UTC ISO；这里转成配置的 TIMEZONE 再显示。
+//
+// 必须转：容器跑在 TZ=Europe/Amsterdam，日志的 asctime 就是那个时区。面板要是
+// 直接渲染 UTC 原文，夏令时期间会和 /logs 差两小时——而这两个页面本来就是
+// 对着看的（在日志里定位到某个时刻，再回面板看那一轮的各 source 明细）。
+//
+// 只留 'MM-DD HH:MM'：整页都是同一天量级的时间，年份和秒是噪音。
+const PANEL_TZ = '{{ tz }}';
+
+// 用 formatToParts 自己拼 MM-DD HH:MM，不靠 toLocaleString 的成品串。
+// 后者在只给 month/day 时会退化成 locale 默认排序（sv-SE 给的是 "03/08"），
+// 既分不清月日、也和 /logs 的 "2026-08-03 14:23" 对不上——而这两个页面就是
+// 要对着看的。
+function _tzParts(d) {
+  const opts = {month: '2-digit', day: '2-digit', hour: '2-digit',
+                minute: '2-digit', hour12: false};
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-GB', {...opts, timeZone: PANEL_TZ})
+      .formatToParts(d);
+  } catch (e) {
+    // TIMEZONE 配了个非法 IANA 名字：退回浏览器本地时区，而不是整页崩掉
+    parts = new Intl.DateTimeFormat('en-GB', opts).formatToParts(d);
+  }
+  const p = {};
+  parts.forEach(x => { p[x.type] = x.value; });
+  return p;
+}
+
+function shortTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const p = _tzParts(d);
+  return `${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
+
+function pct(v) {
+  return (v == null || v < 0) ? '—' : Math.round(v * 100) + '%';
+}
+
+function renderAlerts(alerts) {
+  const box = document.getElementById('mon-alerts');
+  if (!alerts || !alerts.length) { box.innerHTML = ''; return; }
+  box.innerHTML = alerts.map(a =>
+    '<div class="mon-alert mon-alert-' + esc(a.level) + '">'
+    + '<div class="mon-alert-title">' + esc(a.title) + '</div>'
+    + '<div class="mon-alert-body">' + esc(a.body) + '</div>'
+    + '</div>'
+  ).join('');
+}
+
+function renderCards(sources) {
+  const box = document.getElementById('mon-cards');
+  if (!sources || !sources.length) {
+    box.innerHTML = '<div class="text-tertiary" style="padding:16px;">'
+      + '{{ _("monitoring_no_data") }}</div>';
+    return;
+  }
+  box.innerHTML = sources.map(s => {
+    const reasons = (s.reasons || []).length
+      ? '<ul class="mon-reasons">' + s.reasons.map(r => '<li>' + esc(r) + '</li>').join('') + '</ul>'
+      : '';
+    return '<div class="mon-card mon-' + esc(s.status) + '">'
+      + '<div class="mon-card-head">'
+      +   '<span class="mon-src">' + esc(s.source) + '</span>'
+      +   '<span class="badge mon-badge-' + esc(s.status) + '">'
+      +     esc(STATUS_LABEL[s.status] || s.status) + '</span>'
+      + '</div>'
+      + '<table class="mon-kv">'
+      +   '<tr><td>{{ _("monitoring_last_round") }}</td><td>' + esc(shortTime(s.last_round_at)) + '</td></tr>'
+      +   '<tr><td>{{ _("monitoring_last_listings") }}</td><td>' + s.last_listings
+      +       ' <span class="text-tertiary">(avg ' + s.avg_listings + ')</span></td></tr>'
+      +   '<tr><td>{{ _("monitoring_completeness") }}</td><td>' + pct(s.completeness_rate) + '</td></tr>'
+      +   '<tr><td>{{ _("monitoring_fail_streak") }}</td><td>' + s.fail_streak + '</td></tr>'
+      +   '<tr><td>{{ _("monitoring_zero_streak") }}</td><td>' + s.zero_streak + '</td></tr>'
+      +   '<tr><td>{{ _("monitoring_last_success") }}</td><td>' + esc(shortTime(s.last_success_at)) + '</td></tr>'
+      + '</table>'
+      + reasons
+      + '</div>';
+  }).join('');
+}
+
+function renderRounds(rounds) {
+  const table = document.getElementById('mon-rounds');
+  if (!rounds || !rounds.length) {
+    table.innerHTML = '<tbody><tr><td class="text-tertiary">'
+      + '{{ _("monitoring_no_data") }}</td></tr></tbody>';
+    return;
+  }
+  // 列 = 出现过的 source 并集。某轮缺某个 source 时留空——那本身就是信息
+  const cols = [];
+  rounds.forEach(r => (r.sources || []).forEach(s => {
+    if (!cols.includes(s.source)) cols.push(s.source);
+  }));
+  cols.sort();
+
+  const head = '<thead><tr><th>{{ _("monitoring_round") }}</th>'
+    + cols.map(c => '<th>' + esc(c) + '</th>').join('') + '</tr></thead>';
+
+  const body = '<tbody>' + rounds.map(r => {
+    const bySrc = {};
+    (r.sources || []).forEach(s => { bySrc[s.source] = s; });
+    const cells = cols.map(c => {
+      const s = bySrc[c];
+      if (!s) return '<td class="text-tertiary">—</td>';
+      if (s.error_type) {
+        return '<td class="mon-cell-err" title="' + esc(s.error_msg) + '">'
+          + esc(s.error_type) + '</td>';
+      }
+      const incomplete = s.complete < s.targets;
+      return '<td class="' + (incomplete ? 'mon-cell-warn' : '') + '">'
+        + s.listings + ' <span class="text-tertiary">('
+        + s.complete + '/' + s.targets + ')</span></td>';
+    }).join('');
+    return '<tr><td class="mon-ts">' + esc(shortTime(r.round_at)) + '</td>' + cells + '</tr>';
+  }).join('') + '</tbody>';
+
+  table.innerHTML = head + body;
+}
+
+async function fetchMonitoring() {
+  if (document.getElementById('mon-pause').checked) return;
+  try {
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    const resp = await fetch('/api/monitoring?rounds=30', {headers: {'X-CSRF-Token': csrf}});
+    const data = await resp.json();
+
+    renderAlerts(data.alerts);
+    renderCards(data.sources);
+    renderRounds(data.rounds);
+
+    document.getElementById('mon-window').textContent =
+      '{{ _("monitoring_window") }} ' + data.window;
+    const beat = shortTime(data.heartbeat_at);
+    document.getElementById('mon-updated').textContent =
+      '{{ _("monitoring_heartbeat") }} ' + beat
+      + (data.monitor_running ? '' : ' · {{ _("monitor_paused_short") }}');
+  } catch (err) {
+    // 静默重试，下一轮再说
+  }
+}
+
+fetchMonitoring();
+setInterval(fetchMonitoring, 30000);
+</script>
+
+<style>
+.mon-alerts { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
+.mon-alert {
+  border:1px solid var(--border); border-left-width:3px;
+  border-radius:8px; padding:10px 14px; background:var(--bg2);
+}
+.mon-alert-down { border-left-color: var(--danger); }
+.mon-alert-warn { border-left-color: var(--warning, #f0a040); }
+.mon-alert-title { font-weight:600; font-size:14px; margin-bottom:4px; }
+.mon-alert-body { font-size:12.5px; color:var(--text2); white-space:pre-wrap; }
+
+.mon-cards {
+  display:grid; gap:12px; padding:12px;
+  grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));
+}
+.mon-card {
+  border:1px solid var(--border); border-top-width:3px;
+  border-radius:8px; padding:12px;
+}
+.mon-ok      { border-top-color: var(--success, #3fb950); }
+.mon-warn    { border-top-color: var(--warning, #f0a040); }
+.mon-down    { border-top-color: var(--danger); }
+.mon-unknown { border-top-color: var(--border); }
+
+.mon-card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.mon-src { font-weight:600; font-size:14px; }
+.mon-badge-ok      { background:var(--success, #3fb950); color:#fff; }
+.mon-badge-warn    { background:var(--warning, #f0a040); color:#fff; }
+.mon-badge-down    { background:var(--danger); color:#fff; }
+.mon-badge-unknown { background:var(--border); color:var(--text2); }
+
+.mon-kv { width:100%; font-size:12px; }
+.mon-kv td { padding:2px 0; }
+.mon-kv td:first-child { color:var(--text2); width:52%; }
+.mon-reasons { margin:8px 0 0; padding-left:16px; font-size:12px; color:var(--text2); }
+
+.mon-ts { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.mon-cell-err  { color:var(--danger); }
+.mon-cell-warn { color:var(--warning, #f0a040); }
+#mon-rounds td, #mon-rounds th { font-size:12px; white-space:nowrap; }
+</style>
+
+{% endblock %}
