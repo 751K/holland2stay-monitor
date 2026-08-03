@@ -264,3 +264,48 @@ class TestScreeningConsent:
             ImmutableMultiDict([]),
             AutoBookConfig(screening_consent_at="2026-01-01T00:00:00+00:00"))
         assert got == ""
+
+
+class TestNoFieldSilentlyDropped:
+    """回归：``_ab_from_dict`` 用显式 kwargs 构造 AutoBookConfig，
+    加了新字段却忘了在这里接，就会「存得进、读不出」——而且不报错。
+
+    screening_consent_at 就这么丢过一次：面板上勾了、库里也写了，但每次读回来
+    都是空的，表现为「打了勾点保存不生效」。
+
+    这条测试遍历 AutoBookConfig 的全部字段做往返，所以下次再加字段忘了接，
+    这里会直接红。
+    """
+
+    def test_every_autobook_field_survives_round_trip(self):
+        import json
+        from dataclasses import fields as dc_fields
+
+        from users import _user_to_row
+
+        probe = {
+            "enabled": True, "dry_run": False, "cancel_enabled": True,
+            "email": "h@x.com", "password": "pw-h",
+            "payment_method": "idealcheckout_visa",
+            "xior_email": "x@x.com", "xior_password": "pw-x",
+            "ourdomain_email": "o@x.com", "ourdomain_password": "pw-o",
+            "screening_consent_at": "2026-08-03T19:00:00+00:00",
+            "xior_accounts": {"p1": {"email": "a@x.com", "password": "pw1"}},
+        }
+        ab = AutoBookConfig(**probe, applicant_profile=_full())
+        back = _ab_from_dict(json.loads(
+            _user_to_row(UserConfig(id="u", name="t", auto_book=ab))["auto_book_json"]))
+
+        skip = {"listing_filter", "applicant_profile", "xior_accounts"}
+        checked = 0
+        for f in dc_fields(AutoBookConfig):
+            if f.name in skip:
+                continue
+            assert getattr(back, f.name) == getattr(ab, f.name), (
+                f"{f.name} 没能往返——多半是 _ab_from_dict 里漏接了"
+            )
+            checked += 1
+        assert checked >= 10, "探针字段覆盖不足，加了新字段请一并补进 probe"
+        # 嵌套结构单独确认
+        assert back.applicant_profile.is_complete() is True
+        assert back.xior_accounts["p1"]["password"] == "pw1"

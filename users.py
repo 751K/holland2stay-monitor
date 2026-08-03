@@ -231,6 +231,7 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         # Xior：按楼栋一套账号（每栋楼是独立的 RENTCafe 门户）
         xior_accounts=_xior_accounts_from_dict(d.get("xior_accounts")),
         applicant_profile=_profile_from_dict(d.get("applicant_profile")),
+        screening_consent_at=d.get("screening_consent_at", ""),
         # 存量单对字段，只在用户还没配过按楼凭据时兜底（见 xior_account_for）
         xior_email=d.get("xior_email", old_email),
         xior_password=_platform_pw("xior_password"),
