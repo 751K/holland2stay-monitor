@@ -643,6 +643,28 @@ def _to_listing(
     )
 
 
+def building_key_for(listing) -> str:
+    """从一条 Xior ``Listing`` 反查它属于哪栋楼（``BUILDINGS`` 的 key）。
+
+    自动预订需要这个：Xior **一栋楼一个账号**（每栋楼是独立的 RENTCafe
+    property 门户），必须按楼栋取对应凭据。
+
+    按 ``listing.city`` 反查——对 Xior 而言 city 存的就是楼栋的 display 名
+    （见 ``_to_listing``）。没有用 ``applyOnlineURL`` 的 host 做主键，是因为
+    ``BUILDINGS`` 注册表里根本没有 securerc host：它是抓取时才从单元数据里带
+    出来的，注册表只有 Xior 官网 URL。
+
+    对不上就返回空串，调用方据此跳过。**不要猜**——猜错等于拿 A 楼账号去 B 楼
+    门户登录，必然失败，还白白消耗 RENTCafe 的 IP 级尝试额度（连续失败锁 30 分钟）。
+    """
+    city = (getattr(listing, "city", "") or "").strip()
+    if city:
+        for key, meta in XiorScraper.BUILDINGS.items():
+            if (meta.get("display") or "").strip() == city:
+                return key
+    return ""
+
+
 def _normalise_date(raw: str) -> Optional[str]:
     """``DD/MM/YYYY`` → ``YYYY-MM-DD``.  Returns None on unparseable input."""
     raw = raw.strip()

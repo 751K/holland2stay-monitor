@@ -160,6 +160,28 @@ def _lf_from_dict(d: dict) -> ListingFilter:
     )
 
 
+def _xior_accounts_from_dict(raw) -> dict[str, dict[str, str]]:
+    """反序列化按楼栋的 Xior 账号，逐条解密密码。
+
+    结构不对的条目直接丢弃而不是抛异常——一个坏条目不该让整个用户配置加载失败，
+    那会连带停掉这个用户的全部通知。
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for key, acct in raw.items():
+        if not isinstance(acct, dict):
+            continue
+        email = str(acct.get("email") or "").strip()
+        if not email:
+            continue
+        out[str(key).strip()] = {
+            "email": email,
+            "password": decrypt(acct.get("password", "")),
+        }
+    return out
+
+
 def _ab_from_dict(d: dict) -> AutoBookConfig:
     """从 dict 构造 AutoBookConfig，内含 listing_filter 嵌套反序列化。
 
@@ -183,7 +205,9 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         email=old_email,
         password=old_password,
         payment_method=d.get("payment_method", "idealcheckout_ideal"),
-        # Xior
+        # Xior：按楼栋一套账号（每栋楼是独立的 RENTCafe 门户）
+        xior_accounts=_xior_accounts_from_dict(d.get("xior_accounts")),
+        # 存量单对字段，只在用户还没配过按楼凭据时兜底（见 xior_account_for）
         xior_email=d.get("xior_email", old_email),
         xior_password=_platform_pw("xior_password"),
         # OurDomain
@@ -295,6 +319,13 @@ def _user_to_row(u: UserConfig) -> dict:
     for _pw_key in ("password", "xior_password", "ourdomain_password"):
         if ab.get(_pw_key):
             ab[_pw_key] = encrypt(ab[_pw_key])
+    # 按楼栋的 Xior 账号：逐条加密密码，规则与上面那些单字段一致
+    accts = ab.get("xior_accounts")
+    if isinstance(accts, dict):
+        ab["xior_accounts"] = {
+            k: {**v, "password": encrypt(v["password"])} if (v or {}).get("password") else v
+            for k, v in accts.items()
+        }
 
     return {
         "id": d["id"],

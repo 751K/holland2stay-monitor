@@ -802,14 +802,34 @@ class AutoBookConfig:
     不同的 RENTCafe 租户，账号不互通），各自一套凭据：
 
     - H2S：``email`` / ``password`` / ``payment_method``
-    - Xior：``xior_email`` / ``xior_password``
+    - Xior：``xior_accounts``（**按楼栋**，见下）
     - OurDomain：``ourdomain_email`` / ``ourdomain_password``
 
     RENTCafe 平台只存账号凭据——用户须自行在浏览器注册账号，个人信息
     （姓名/电话/出生日期）注册时已录入 RENTCafe，booker 登录后无需再填。
 
+    Xior 是**一栋楼一个账号**
+    -------------------------
+    2026-08-03 实测：Xior 的每栋楼是一个独立的 RENTCafe property 门户，各有
+    自己的 host、property 代码和 ``myOlePropertyId``；登录页原话是「your
+    <楼栋名> Guest Account」。cookie 不跨主机，账号也不互通。
+
+    ======================  ==========================================  ========
+    楼栋                     host                                        属性代码
+    ======================  ==========================================  ========
+    Eindhoven Zernikestraat  zernikestraat-xiorstudenthousing…           NLEZERNS
+    Aachen Vaals             sneeuwberglaan-xiorstudenthousing…          NLVSNEES
+    Utrecht Willem Dreeslaan willemdreeslaan-xiorstudenthousing…         NLUWIDRS
+    ======================  ==========================================  ========
+
+    所以 Xior 凭据按楼栋 key 存：``{building_key: {"email": …, "password": …}}``，
+    key 与 ``XIOR_CITIES`` / ``XiorScraper.BUILDINGS`` 用的是同一套（如
+    ``p0196062``）。**没有该楼凭据 = 该楼不参与自动预订**，凭据本身就是开关，
+    不需要额外的 per-building 开关。
+
     迁移：旧版共用一套 ``email``/``password``，``users._ab_from_dict`` 在加载时
-    把旧值回填进各平台 email/password 字段（见该函数）。
+    把旧值回填进各平台字段；更早的单对 ``xior_email``/``xior_password`` 保留
+    为只读兼容字段，见 ``xior_account_for()``。
     """
     enabled: bool = False
     dry_run: bool = True
@@ -821,13 +841,44 @@ class AutoBookConfig:
     password: str = ""
     payment_method: str = "idealcheckout_ideal"
 
-    # ── Xior（RENTCafe 租户 xiorstudenthousing）──
+    # ── Xior（RENTCafe 租户 xiorstudenthousing，一栋楼一个账号）──
+    #: ``{building_key: {"email": str, "password": str}}``
+    xior_accounts: dict[str, dict[str, str]] = field(default_factory=dict)
+
+    # 旧的单对字段。保留只为兼容存量配置——**新代码不要读它**，
+    # 走 xior_account_for()，那里会处理回退。
     xior_email: str = ""
     xior_password: str = ""
 
     # ── OurDomain（RENTCafe 租户 thisisourdomain）──
     ourdomain_email: str = ""
     ourdomain_password: str = ""
+
+    def xior_account_for(self, building_key: str) -> tuple[str, str]:
+        """取某栋楼的 Xior 账号，返回 ``(email, password)``；没有则返回 ``("", "")``。
+
+        找不到时**不回退到任何其他楼的凭据**——拿 A 楼的账号去 B 楼的门户登录
+        只会失败，而且失败会计入 RENTCafe 的 IP 级尝试限制（连续失败锁 30 分钟），
+        等于用一次注定失败的请求去消耗真正需要它的额度。
+
+        存量的单对 ``xior_email``/``xior_password`` 只在**用户还没配过任何按楼
+        凭据**时兜底：那批配置是在「Xior 一个账号」的错误认知下填的，只可能对
+        其中某一栋楼有效，无法判断是哪栋，所以一旦用户开始按楼配置就彻底忽略它。
+        """
+        key = (building_key or "").strip()
+        acct = (self.xior_accounts or {}).get(key)
+        if acct:
+            return acct.get("email", ""), acct.get("password", "")
+        if not self.xior_accounts and self.xior_email:
+            return self.xior_email, self.xior_password
+        return "", ""
+
+    def xior_buildings(self) -> list[str]:
+        """已配置凭据的楼栋 key 列表（email 和 password 都非空才算）。"""
+        return sorted(
+            k for k, v in (self.xior_accounts or {}).items()
+            if (v or {}).get("email") and (v or {}).get("password")
+        )
 
 
 @dataclass

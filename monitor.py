@@ -937,6 +937,34 @@ def _clear_maintenance_meta_if_recovered(storage: Storage) -> None:
         logger.info("🔧→✅ H2S 平台维护已结束，抓取恢复正常")
 
 
+# 目前只有 H2S 的预订流程真正跑通过（2026-05-22 真实下单成功，见 ARCHITECTURE §7）。
+#
+# **Xior 先不放进来**：bookers/rentcafe.py 里第 3 步之后的多步表单是没走过流程
+# 硬猜出来的草稿，放开等于拿用户的真实账号去提交半懂不懂的表单。等流程侦察完
+# 并验证过再加 "xior"。凭据判定（_can_auto_book）已经就位，到时只改这个元组。
+_AUTO_BOOK_SOURCES: tuple[str, ...] = ("holland2stay",)
+
+
+def _can_auto_book(user, listing) -> bool:
+    """该用户能不能对这条 listing 触发自动预订。
+
+    除了「这个 source 的预订流程实现了没有」，还要回答「用户有没有**这栋楼**的
+    账号」——Xior 是一栋楼一个账号（每栋楼是独立的 RENTCafe property 门户），
+    没有该楼凭据就不该产生候选。凭据本身就是开关，不需要额外的 per-building 开关。
+    """
+    if listing.source not in _AUTO_BOOK_SOURCES:
+        return False
+    if listing.source == "xior":
+        from scrapers.xior import building_key_for
+        key = building_key_for(listing)
+        if not key:
+            logger.debug("Xior listing %s 无法反查楼栋，跳过自动预订", listing.id)
+            return False
+        email, password = user.auto_book.xior_account_for(key)
+        return bool(email and password)
+    return True
+
+
 def _collect_booking_candidates(
     new_listings: list["Listing"],
     status_changes: list[tuple["Listing", str, str]],
@@ -965,7 +993,7 @@ def _collect_booking_candidates(
                     user.auto_book.enabled
                     and user.notifications_enabled
                     and notifier.has_channels
-                    and listing.source == "holland2stay"
+                    and _can_auto_book(user, listing)
                     and listing.status.lower() == STATUS_AVAILABLE
                     and (user.auto_book.listing_filter.is_empty()
                          or user.auto_book.listing_filter.passes(listing))
@@ -980,7 +1008,7 @@ def _collect_booking_candidates(
                     user.auto_book.enabled
                     and user.notifications_enabled
                     and notifier.has_channels
-                    and listing.source == "holland2stay"
+                    and _can_auto_book(user, listing)
                     and new_status.lower() == STATUS_AVAILABLE
                     and (user.auto_book.listing_filter.is_empty()
                          or user.auto_book.listing_filter.passes(listing))
@@ -990,10 +1018,12 @@ def _collect_booking_candidates(
     # 重试队列检查：上次 race_lost 的候选，若仍 Available to book 则补入候选。
     # 处理"前一个预订者未付款、房子被重新放出"但状态未变的场景：
     # storage.diff() 对此类房源不产出任何事件，必须从重试队列中手动补入。
+    # 这一层只按 source 粗筛（与用户无关）；「有没有这栋楼的账号」是 per-user
+    # 判定，放在下面的循环里做。
     _fresh_avail = {
         l.id: l
         for l in fresh
-        if l.source == "holland2stay" and l.status.lower() == STATUS_AVAILABLE
+        if l.source in _AUTO_BOOK_SOURCES and l.status.lower() == STATUS_AVAILABLE
     }
     for user, notifier in user_notifiers:
         if not user.auto_book.enabled or not user.notifications_enabled or not notifier.has_channels:
@@ -1013,6 +1043,8 @@ def _collect_booking_candidates(
             if lid in existing_ids:
                 continue  # 已经由 status_changes 路径加入，跳过
             listing = _fresh_avail[lid]
+            if not _can_auto_book(user, listing):
+                continue
             if user.auto_book.listing_filter.is_empty() or user.auto_book.listing_filter.passes(listing):
                 ab_candidates[user.id].append(listing)
                 logger.info(
