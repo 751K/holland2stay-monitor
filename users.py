@@ -182,6 +182,29 @@ def _xior_accounts_from_dict(raw) -> dict[str, dict[str, str]]:
     return out
 
 
+def _profile_from_dict(raw) -> "ApplicantProfile":
+    """反序列化申请人档案，解密敏感字段。
+
+    未知 key 直接丢弃（而不是塞进构造器炸掉）——上游加字段、用户手改 JSON、
+    版本回退都可能带来多余 key，一个坏 key 不该让整个用户配置加载失败。
+    """
+    from config import _ENCRYPTED_PROFILE_FIELDS, ApplicantProfile
+
+    if not isinstance(raw, dict):
+        return ApplicantProfile()
+    known = {f.name for f in dc_fields(ApplicantProfile)}
+    kw = {}
+    for k, v in raw.items():
+        if k not in known:
+            continue
+        kw[k] = decrypt(v) if (k in _ENCRYPTED_PROFILE_FIELDS and isinstance(v, str)) else v
+    try:
+        return ApplicantProfile(**kw)
+    except Exception:
+        logger.warning("申请人档案反序列化失败，已退回空档案", exc_info=True)
+        return ApplicantProfile()
+
+
 def _ab_from_dict(d: dict) -> AutoBookConfig:
     """从 dict 构造 AutoBookConfig，内含 listing_filter 嵌套反序列化。
 
@@ -207,6 +230,7 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         payment_method=d.get("payment_method", "idealcheckout_ideal"),
         # Xior：按楼栋一套账号（每栋楼是独立的 RENTCafe 门户）
         xior_accounts=_xior_accounts_from_dict(d.get("xior_accounts")),
+        applicant_profile=_profile_from_dict(d.get("applicant_profile")),
         # 存量单对字段，只在用户还没配过按楼凭据时兜底（见 xior_account_for）
         xior_email=d.get("xior_email", old_email),
         xior_password=_platform_pw("xior_password"),
@@ -319,6 +343,15 @@ def _user_to_row(u: UserConfig) -> dict:
     for _pw_key in ("password", "xior_password", "ourdomain_password"):
         if ab.get(_pw_key):
             ab[_pw_key] = encrypt(ab[_pw_key])
+    # 申请人档案：只加密真正抬高身份盗用风险的那两项（见 _ENCRYPTED_PROFILE_FIELDS）
+    prof = ab.get("applicant_profile")
+    if isinstance(prof, dict):
+        from config import _ENCRYPTED_PROFILE_FIELDS
+        ab["applicant_profile"] = {
+            k: (encrypt(v) if (k in _ENCRYPTED_PROFILE_FIELDS and v) else v)
+            for k, v in prof.items()
+        }
+
     # 按楼栋的 Xior 账号：逐条加密密码，规则与上面那些单字段一致
     accts = ab.get("xior_accounts")
     if isinstance(accts, dict):

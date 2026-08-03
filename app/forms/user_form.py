@@ -115,6 +115,42 @@ def parse_xior_accounts(
     return out
 
 
+def parse_applicant_profile(
+    form: "ImmutableMultiDict[str, str]",
+    existing: Optional[AutoBookConfig] = None,
+) -> "ApplicantProfile":
+    """从表单解析申请人档案（RENTCafe Applicant Info 的个人资料）。
+
+    **不收集任何证件。** 流程里那个必填的 ID/Passport 上传留给用户自己做——
+    替一群用户保管护照扫描件，是拿一个巨大的泄露责任去换几十秒。
+
+    敏感字段（生日/地址）留空时沿用旧值，与密码字段同理：它们在 GET 时**会**
+    回填到 HTML（不像密码），所以留空确实表示用户想清空——这里不做「留空即
+    保留」，直接按提交值走。
+    """
+    from config import ApplicantProfile
+
+    def _s(key: str) -> str:
+        return (form.get("AUTO_BOOK_PROFILE_" + key, "") or "").strip()
+
+    return ApplicantProfile(
+        title=_s("TITLE"),
+        first_name=_s("FIRST_NAME"),
+        middle_name=_s("MIDDLE_NAME"),
+        no_middle_name=form.get("AUTO_BOOK_PROFILE_NO_MIDDLE_NAME") == "true",
+        last_name=_s("LAST_NAME"),
+        phone=_s("PHONE"),
+        gender=_s("GENDER"),
+        date_of_birth=_s("DOB"),
+        nationality=_s("NATIONALITY"),
+        country=_s("COUNTRY") or "Netherlands",
+        address=_s("ADDRESS"),
+        postcode_city=_s("POSTCODE_CITY"),
+        university=_s("UNIVERSITY"),
+        min_lease_term=_s("MIN_LEASE_TERM"),
+    )
+
+
 def build_user_from_form(
     form: "ImmutableMultiDict[str, str]",
     user_id: Optional[str] = None,
@@ -223,6 +259,7 @@ def build_user_from_form(
         payment_method=payment_method,
         # ── Xior：一栋楼一个账号 ──
         xior_accounts=parse_xior_accounts(form, ex_ab),
+        applicant_profile=parse_applicant_profile(form, ex_ab),
         # 存量单对字段原样保留（表单已不再提供入口）。清掉的话，还没来得及按楼
         # 重配的老用户会突然失去凭据；留着由 xior_account_for() 决定何时忽略。
         xior_email=ex_ab.xior_email if ex_ab else "",

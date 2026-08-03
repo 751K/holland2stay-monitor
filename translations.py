@@ -110,6 +110,32 @@ TRANSLATIONS = {
         "zh": "当前未监控任何 Xior 楼栋（见 .env 的 XIOR_CITIES）",
         "en": "No Xior buildings are being monitored (see XIOR_CITIES in .env)",
     },
+    # ── 申请人档案（RENTCafe Applicant Info 自动填）────────
+    "user_form_profile": {"zh": "申请人档案", "en": "Applicant profile"},
+    "user_form_profile_note": {
+        "zh": "半自动预订用这些资料自动填 RENTCafe 的申请表。**证件不在此收集**"
+              "——流程里那个必填的护照/身份证上传由你自己在浏览器里完成。",
+        "en": "Used to auto-fill the RENTCafe application form. **No ID documents are "
+              "collected here** — the required passport/ID upload stays with you, in your browser.",
+    },
+    "profile_title":           {"zh": "称谓",       "en": "Title"},
+    "profile_first_name":      {"zh": "名",         "en": "First name"},
+    "profile_middle_name":     {"zh": "中间名",     "en": "Middle name"},
+    "profile_no_middle_name":  {"zh": "我没有中间名", "en": "I don't have a middle name"},
+    "profile_last_name":       {"zh": "姓",         "en": "Last name"},
+    "profile_phone":           {"zh": "电话",       "en": "Phone"},
+    "profile_gender":          {"zh": "性别",       "en": "Gender"},
+    "profile_dob":             {"zh": "出生日期",   "en": "Date of birth"},
+    "profile_nationality":     {"zh": "国籍",       "en": "Nationality"},
+    "profile_country":         {"zh": "当前所在国", "en": "Country"},
+    "profile_address":         {"zh": "地址",       "en": "Address"},
+    "profile_postcode_city":   {"zh": "邮编 + 城市", "en": "Post code + city"},
+    "profile_university":      {"zh": "就读大学",   "en": "University"},
+    "profile_min_lease_term":  {"zh": "最短租期（月）", "en": "Min lease term (months)"},
+    "profile_incomplete": {
+        "zh": "档案不完整，半自动预订不会触发。还缺：",
+        "en": "Profile incomplete — semi-automated booking will not run. Missing:",
+    },
     # ── 公告群发 ──────────────────────────────────────────
     "announce_title":       {"zh": "发布公告",                 "en": "Announcement"},
     "announce_hint":        {"zh": "发给所有开启通知的用户",     "en": "Sent to all users with notifications on"},

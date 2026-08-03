@@ -28,7 +28,7 @@ from flask import (
 
 import sys
 
-from config import KNOWN_CITIES
+from config import APPLICANT_GENDERS, APPLICANT_TITLES, KNOWN_CITIES
 from users import get_user, load_users, update_users
 
 from app.auth import (
@@ -179,6 +179,8 @@ def user_new() -> Any:
     return render_template(
         "user_form.html", user=None,
         xior_buildings=_xior_building_options(),
+        applicant_titles=APPLICANT_TITLES,
+        applicant_genders=APPLICANT_GENDERS,
         action=url_for("user_new"), title="新增用户",
         is_macos=(sys.platform == "darwin"),
         occupancy_options=localize_options("Occupancy", opts["Occupancy"]),
@@ -289,6 +291,8 @@ def user_edit(user_id: str) -> Any:
     return render_template(
         "user_form.html", user=user,
         xior_buildings=_xior_building_options(),
+        applicant_titles=APPLICANT_TITLES,
+        applicant_genders=APPLICANT_GENDERS,
         action=url_for("user_edit", user_id=user_id),
         title=f"编辑用户 · {user.name}",
         is_macos=(sys.platform == "darwin"),

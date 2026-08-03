@@ -772,6 +772,90 @@ class ListingFilter:
         return True
 
 
+#: 申请人档案里**加密存储**的字段。
+#:
+#: 只加密真正抬高身份盗用风险的两项。其余（姓名、电话、大学）与库里既有的
+#: email / telegram_chat_id 同级，保持明文——全都加密会让这张表和其它表的
+#: 处理方式不一致，反而容易在某处漏掉。
+_ENCRYPTED_PROFILE_FIELDS = ("date_of_birth", "address")
+
+#: RENTCafe 申请表的下拉选项，抄自实测页面（Vaals / Katzensprung）。
+#: 值必须与页面 option 文本完全一致，否则提交时匹配不上。
+APPLICANT_TITLES = ("Mr.", "Ms.", "Mrs.", "Dr.")
+APPLICANT_GENDERS = ("Male", "Female", "Gender Nonbinary", "Prefer Not to Disclose")
+
+
+@dataclass
+class ApplicantProfile:
+    """RENTCafe 申请表（Applicant Info）里的个人资料。
+
+    **刻意不包含任何证件扫描件。** 流程里确实有必填的 `ID/Passport Upload`
+    （2026-08-03 实测），但替 40 个用户保管护照扫描件是拿一个巨大的泄露责任
+    去换几十秒——那一步留给用户自己在浏览器里完成。
+
+    字段与实测表单一一对应：
+
+    ==================  ================================================
+    表单字段             说明
+    ==================  ================================================
+    Title               见 :data:`APPLICANT_TITLES`
+    First/Middle/Last   中间名可用 ``no_middle_name`` 勾选「我没有中间名」
+    Phone / Gender      Gender 见 :data:`APPLICANT_GENDERS`
+    Date Of Birth       Screening 区块，`YYYY-MM-DD` 存储，提交时转 `d-m-yyyy`
+    Nationality         国家名（存显示名而非页面的数字 id——id 会随上游改版
+                        失效，显示名更稳，提交时再匹配）
+    Country / Address / Post Code-City
+    University          Xior 特有的必填项（学生住房）
+    min_lease_term      最短租期（月）
+    ==================  ================================================
+    """
+
+    title: str = ""
+    first_name: str = ""
+    middle_name: str = ""
+    no_middle_name: bool = False
+    last_name: str = ""
+    phone: str = ""
+    gender: str = ""
+    date_of_birth: str = ""      # YYYY-MM-DD
+    nationality: str = ""
+    country: str = "Netherlands"
+    address: str = ""
+    postcode_city: str = ""
+    university: str = ""
+    min_lease_term: str = ""
+
+    def is_complete(self) -> bool:
+        """是否够填完 Applicant Info 的全部必填项。
+
+        不完整时不该触发半自动预订——填一半的表单提交不上去，只会白白消耗
+        RENTCafe 的尝试额度，还在用户账号下留一条废弃申请。
+        """
+        required = (
+            self.first_name, self.last_name, self.gender,
+            self.date_of_birth, self.nationality, self.country,
+            self.address, self.postcode_city, self.university,
+        )
+        if not all(str(v).strip() for v in required):
+            return False
+        # 中间名要么填了，要么显式勾了「没有」——留空且没勾，表单过不了校验
+        return bool(str(self.middle_name).strip()) or self.no_middle_name
+
+    def missing_fields(self) -> list[str]:
+        """还缺哪些必填项，给面板提示用。"""
+        checks = {
+            "first_name": self.first_name, "last_name": self.last_name,
+            "gender": self.gender, "date_of_birth": self.date_of_birth,
+            "nationality": self.nationality, "country": self.country,
+            "address": self.address, "postcode_city": self.postcode_city,
+            "university": self.university,
+        }
+        out = [k for k, v in checks.items() if not str(v).strip()]
+        if not str(self.middle_name).strip() and not self.no_middle_name:
+            out.append("middle_name")
+        return out
+
+
 @dataclass
 class AutoBookConfig:
     """
@@ -844,6 +928,10 @@ class AutoBookConfig:
     # ── Xior（RENTCafe 租户 xiorstudenthousing，一栋楼一个账号）──
     #: ``{building_key: {"email": str, "password": str}}``
     xior_accounts: dict[str, dict[str, str]] = field(default_factory=dict)
+
+    #: RENTCafe 申请表的个人资料。半自动预订用它自动填 Applicant Info，
+    #: 用户只需自己上传证件 + 付款——那两步系统不该代劳。
+    applicant_profile: ApplicantProfile = field(default_factory=ApplicantProfile)
 
     # 旧的单对字段。保留只为兼容存量配置——**新代码不要读它**，
     # 走 xior_account_for()，那里会处理回退。
