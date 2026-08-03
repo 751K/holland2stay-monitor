@@ -30,19 +30,32 @@ def _full(**over) -> ApplicantProfile:
         date_of_birth="2003-09-14", nationality="China", country="Netherlands",
         address="Dorpsstraat 1", postcode_city="5612 AB Eindhoven",
         university="TU Eindhoven",
+        place_of_birth="China", id_number="E12345678",
     )
     base.update(over)
     return ApplicantProfile(**base)
 
 
-class TestNoDocuments:
-    def test_profile_has_no_document_fields(self):
-        """整个方向的前提：系统不收集证件。"""
+class TestDataBoundary:
+    """边界：不存**证件扫描件**，但存**证件号**（用户 2026-08-03 决定）。
+
+    申请表上 `ID number or Passport number *` 是必填，不填就存不了草稿，
+    半自动化也就没了意义。所以证件号进档案，并与生日/地址同级加密。
+    扫描件仍然不碰——那一步的上传由用户自己在浏览器里完成。
+    """
+
+    def test_no_document_upload_fields(self):
         from dataclasses import fields
         names = {f.name for f in fields(ApplicantProfile)}
-        for banned in ("id_document", "passport", "id_scan", "document",
-                       "upload", "attachment", "id_number", "passport_number"):
+        for banned in ("id_document", "id_scan", "document", "upload",
+                       "attachment", "file", "scan"):
             assert not any(banned in n for n in names), f"档案里不该有 {banned}"
+
+    def test_id_number_is_present_and_encrypted(self):
+        from dataclasses import fields
+        names = {f.name for f in fields(ApplicantProfile)}
+        assert "id_number" in names, "申请表必填，缺了存不了草稿"
+        assert "id_number" in _ENCRYPTED_PROFILE_FIELDS, "证件号必须加密存储"
 
 
 class TestCompleteness:
@@ -59,6 +72,7 @@ class TestCompleteness:
     @pytest.mark.parametrize("field", [
         "first_name", "last_name", "gender", "date_of_birth",
         "nationality", "country", "address", "postcode_city", "university",
+        "place_of_birth", "id_number",
     ])
     def test_each_required_field_blocks_completion(self, field):
         p = _full(**{field: ""})
@@ -107,7 +121,14 @@ class TestPersistence:
         assert back.is_complete() is True
 
     def test_encrypted_field_list_matches_reality(self):
-        assert set(_ENCRYPTED_PROFILE_FIELDS) == {"date_of_birth", "address"}
+        assert set(_ENCRYPTED_PROFILE_FIELDS) == {
+            "date_of_birth", "address", "id_number"}
+
+    def test_id_number_is_encrypted(self):
+        """护照号/身份证号和姓名生日地址国籍凑在一起就是完整身份信息包。"""
+        u = UserConfig(id="u1", name="T",
+                       auto_book=AutoBookConfig(applicant_profile=_full()))
+        assert "E12345678" not in _user_to_row(u)["auto_book_json"]
 
     @pytest.mark.parametrize("bad", ["notadict", None, 123, [], {"bogus_key": 1}])
     def test_malformed_input_is_tolerated(self, bad):
@@ -138,7 +159,7 @@ class TestFormParsing:
             PHONE="+31600", GENDER="Male", DOB="2003-09-14", NATIONALITY="China",
             COUNTRY="Netherlands", ADDRESS="Dorpsstraat 1",
             POSTCODE_CITY="5612 AB Eindhoven", UNIVERSITY="TU Eindhoven",
-            MIN_LEASE_TERM="12",
+            MIN_LEASE_TERM="12", PLACE_OF_BIRTH="China", ID_NUMBER="E12345678",
         ))
         assert p.is_complete() is True
         assert p.no_middle_name is True
@@ -182,6 +203,8 @@ class TestFormRendering:
             "AUTO_BOOK_PROFILE_ADDRESS": "Dorpsstraat 1",
             "AUTO_BOOK_PROFILE_POSTCODE_CITY": "5612 AB Eindhoven",
             "AUTO_BOOK_PROFILE_UNIVERSITY": "TU Eindhoven",
+            "AUTO_BOOK_PROFILE_PLACE_OF_BIRTH": "China",
+            "AUTO_BOOK_PROFILE_ID_NUMBER": "E12345678",
         }, headers={"X-CSRF-Token": "test_csrf"}, follow_redirects=True)
         assert r.status_code == 200
 
@@ -194,3 +217,50 @@ class TestFormRendering:
         # 生日和地址会回填（它们不像密码那样必须隐藏），但库里是加密的
         assert "2003-09-14" in page
         assert "TU Eindhoven" in page
+
+
+class TestScreeningConsent:
+    """代勾法律声明的授权记录。
+
+    申请表上那两句是「我授权做信用/参考/背景调查」和「我确认所填属实」。
+    系统替人勾这种声明和替人填地址不是一回事，所以要有显式授权，且授权要
+    **能追溯到时刻**——布尔值只能回答「有没有」，回答不了「什么时候」。
+    """
+
+    def test_default_is_not_authorised(self):
+        assert AutoBookConfig().has_screening_consent() is False
+
+    def test_timestamp_counts_as_authorised(self):
+        ab = AutoBookConfig(screening_consent_at="2026-08-03T20:00:00+00:00")
+        assert ab.has_screening_consent() is True
+
+    def test_blank_is_not_authorised(self):
+        assert AutoBookConfig(screening_consent_at="   ").has_screening_consent() is False
+
+    def test_form_records_a_timestamp_not_a_boolean(self):
+        from werkzeug.datastructures import ImmutableMultiDict
+
+        from app.forms.user_form import parse_screening_consent
+        got = parse_screening_consent(
+            ImmutableMultiDict([("AUTO_BOOK_SCREENING_CONSENT", "true")]))
+        assert got and got[:2] == "20", f"应是 ISO 时间戳，得到 {got!r}"
+
+    def test_existing_timestamp_is_not_refreshed(self):
+        """每次保存都刷新会把最初的授权时刻抹掉，争议时说不清。"""
+        from werkzeug.datastructures import ImmutableMultiDict
+
+        from app.forms.user_form import parse_screening_consent
+        old = "2026-01-01T00:00:00+00:00"
+        got = parse_screening_consent(
+            ImmutableMultiDict([("AUTO_BOOK_SCREENING_CONSENT", "true")]),
+            AutoBookConfig(screening_consent_at=old))
+        assert got == old
+
+    def test_unchecking_clears_it(self):
+        from werkzeug.datastructures import ImmutableMultiDict
+
+        from app.forms.user_form import parse_screening_consent
+        got = parse_screening_consent(
+            ImmutableMultiDict([]),
+            AutoBookConfig(screening_consent_at="2026-01-01T00:00:00+00:00"))
+        assert got == ""

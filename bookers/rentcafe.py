@@ -469,6 +469,14 @@ class RentCafeBooker(AbstractBooker):
                 listing=listing, success=False, phase="not_configured",
                 message="申请人档案不完整，已跳过。缺：" + ", ".join(profile.missing_fields()),
             )
+        if not ab.has_screening_consent():
+            return BookingResult(
+                listing=listing, success=False, phase="not_configured",
+                message=(
+                    "未授权系统代勾申请表上的信用/背景调查声明，已跳过。"
+                    "请在面板的自动预订设置里先行授权。"
+                ),
+            )
         if request.dry_run or ab.dry_run:
             return BookingResult(
                 listing=listing, success=True, phase="dry_run", dry_run=True,
@@ -500,7 +508,10 @@ class RentCafeBooker(AbstractBooker):
             applicant_html = session.select_unit(unit)
 
             # ⑥ 填表并**只存草稿**
-            fields = build_form_fields(profile, move_in_date=unit.available_date)
+            fields = build_form_fields(
+                profile, move_in_date=unit.available_date,
+                screening_consent=ab.has_screening_consent(),
+            )
             session.save_applicant_info(applicant_html, fields)
 
             logger.info("Xior 申请已起草：%s（%s）", listing.name, unit.listing_id)

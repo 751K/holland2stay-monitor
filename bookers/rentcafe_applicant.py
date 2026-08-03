@@ -35,6 +35,9 @@ FIELD_MAP: dict[str, str] = {
     "postcode_city": "PostCodeCity",
     "university": "University",
     "min_lease_term": "MinimumLeaseTerm",
+    "place_of_birth": "PlaceOfBirth",
+    "id_number": "IDNumber",
+    "student_number": "StudentNumber",
 }
 
 #: 「我没有中间名」勾选框。中间名在表单上是必填 + 带这个勾选，
@@ -43,6 +46,16 @@ NO_MIDDLE_NAME_FIELD = "NoMiddleName"
 
 #: 生日字段单列：它要转格式（见 :func:`to_rentcafe_date`）。
 DOB_FIELD = "DateOfBirth"
+
+#: 申请表底部那两个法律声明的勾选框。
+#:
+#: 一句是「我授权做信用/参考/背景调查」，一句是「我确认所填属实，并同意在
+#: 支付申请费后接受审查」。``btnSave`` 的 onclick 会把它标成 required，
+#: 所以不勾就存不了草稿。
+#:
+#: **只有在用户已于面板显式授权（``AutoBookConfig.screening_consent_at``）
+#: 时才允许代勾**——代人做法律声明和代人填地址不是一回事。
+AGREEMENT_FIELD = "chkAgreement"
 
 #: 入住日字段。值不来自档案，来自选中单元的 ``available_date``。
 MOVE_IN_FIELD = "MoveInDate"
@@ -112,6 +125,7 @@ def build_form_fields(
     *,
     move_in_date: str = "",
     strict: bool = True,
+    screening_consent: bool = False,
 ) -> dict[str, str]:
     """把 :class:`config.ApplicantProfile` 映射成申请表字段。
 
@@ -152,5 +166,10 @@ def build_form_fields(
 
     if move_in_date:
         out[MOVE_IN_FIELD] = move_in_date.strip()
+
+    # 法律声明只在用户预先授权过时才勾。没授权就留空——服务端会拒，
+    # 那正是想要的结果：宁可存不上草稿，也不替人做没授权的法律声明。
+    if screening_consent:
+        out[AGREEMENT_FIELD] = "on"
 
     return out

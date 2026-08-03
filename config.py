@@ -777,7 +777,7 @@ class ListingFilter:
 #: 只加密真正抬高身份盗用风险的两项。其余（姓名、电话、大学）与库里既有的
 #: email / telegram_chat_id 同级，保持明文——全都加密会让这张表和其它表的
 #: 处理方式不一致，反而容易在某处漏掉。
-_ENCRYPTED_PROFILE_FIELDS = ("date_of_birth", "address")
+_ENCRYPTED_PROFILE_FIELDS = ("date_of_birth", "address", "id_number")
 
 #: RENTCafe 申请表的下拉选项，抄自实测页面（Vaals / Katzensprung）。
 #: 值必须与页面 option 文本完全一致，否则提交时匹配不上。
@@ -824,6 +824,13 @@ class ApplicantProfile:
     postcode_city: str = ""
     university: str = ""
     min_lease_term: str = ""
+    #: Screening 区块的两个必填项（实测在页面底部的 Information 小节）。
+    place_of_birth: str = ""
+    #: 护照号 / 身份证号。**加密存储**——它和姓名/生日/地址/国籍凑在一起
+    #: 就是一份完整身份信息包，泄露后果与证件扫描件同级。
+    id_number: str = ""
+    #: 学号，非必填（Xior 是学生住房，填了有助于审核）。
+    student_number: str = ""
 
     def is_complete(self) -> bool:
         """是否够填完 Applicant Info 的全部必填项。
@@ -835,6 +842,7 @@ class ApplicantProfile:
             self.first_name, self.last_name, self.gender,
             self.date_of_birth, self.nationality, self.country,
             self.address, self.postcode_city, self.university,
+            self.place_of_birth, self.id_number,
         )
         if not all(str(v).strip() for v in required):
             return False
@@ -849,6 +857,7 @@ class ApplicantProfile:
             "nationality": self.nationality, "country": self.country,
             "address": self.address, "postcode_city": self.postcode_city,
             "university": self.university,
+            "place_of_birth": self.place_of_birth, "id_number": self.id_number,
         }
         out = [k for k, v in checks.items() if not str(v).strip()]
         if not str(self.middle_name).strip() and not self.no_middle_name:
@@ -932,6 +941,20 @@ class AutoBookConfig:
     #: RENTCafe 申请表的个人资料。半自动预订用它自动填 Applicant Info，
     #: 用户只需自己上传证件 + 付款——那两步系统不该代劳。
     applicant_profile: ApplicantProfile = field(default_factory=ApplicantProfile)
+
+    #: 用户预先授权系统代勾申请表上那两个法律声明的时间（ISO，UTC）。空 = 未授权。
+    #:
+    #: 那两句是「我授权做信用/背景调查」和「我确认所填属实」。系统替人勾这种
+    #: 声明和替人填地址不是一回事，所以：
+    #:
+    #: 1. 必须由用户在面板上显式授权一次；
+    #: 2. **存时间戳而不是布尔值**——将来若有争议，要能说清是哪一刻授权的。
+    #:    布尔值只能回答「有没有」，回答不了「什么时候」。
+    #: 3. 没有它，booker 不会提交（见 XiorBooker.book 的前置校验）。
+    screening_consent_at: str = ""
+
+    def has_screening_consent(self) -> bool:
+        return bool((self.screening_consent_at or "").strip())
 
     # 旧的单对字段。保留只为兼容存量配置——**新代码不要读它**，
     # 走 xior_account_for()，那里会处理回退。

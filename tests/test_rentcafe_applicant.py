@@ -30,7 +30,7 @@ def _full(**over) -> ApplicantProfile:
         phone="+31600", gender="Male", date_of_birth="2003-09-14",
         nationality="China", country="Netherlands", address="Dorpsstraat 1",
         postcode_city="5612 AB Eindhoven", university="TU Eindhoven",
-        min_lease_term="12",
+        min_lease_term="12", place_of_birth="China", id_number="E12345678",
     )
     base.update(over)
     return ApplicantProfile(**base)

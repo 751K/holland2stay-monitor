@@ -132,6 +132,21 @@ TRANSLATIONS = {
     "profile_postcode_city":   {"zh": "邮编 + 城市", "en": "Post code + city"},
     "profile_university":      {"zh": "就读大学",   "en": "University"},
     "profile_min_lease_term":  {"zh": "最短租期（月）", "en": "Min lease term (months)"},
+    "profile_place_of_birth":  {"zh": "出生地（国家）", "en": "Place of birth (country)"},
+    "profile_id_number":       {"zh": "证件号（护照/身份证）", "en": "ID / passport number"},
+    "profile_student_number":  {"zh": "学号",         "en": "Student number"},
+    "profile_consent_label": {
+        "zh": "授权系统代我勾选申请表上的信用/背景调查声明",
+        "en": "Authorise the system to accept the screening declarations on my behalf",
+    },
+    "profile_consent_note": {
+        "zh": "申请表上有两句法律声明：授权做信用/参考/背景调查，以及确认所填属实。"
+              "不授权则系统只填表、不提交，需你自己在浏览器里勾选并保存。",
+        "en": "The application carries two legal declarations: authorising a credit / "
+              "reference / background check, and confirming the details are true. "
+              "Without this, the system fills the form but will not submit it.",
+    },
+    "profile_consent_given_at": {"zh": "已于", "en": "Authorised at"},
     "profile_incomplete": {
         "zh": "档案不完整，半自动预订不会触发。还缺：",
         "en": "Profile incomplete — semi-automated booking will not run. Missing:",

@@ -540,6 +540,29 @@
         <label class="form-group"><span class="form-label">{{ _('profile_min_lease_term') }}</span>
           <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_MIN_LEASE_TERM"
                  value="{{ prof.min_lease_term if prof else '' }}" placeholder="12"></label>
+
+        <label class="form-group"><span class="form-label">{{ _('profile_place_of_birth') }} *</span>
+          <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_PLACE_OF_BIRTH"
+                 value="{{ prof.place_of_birth if prof else '' }}" placeholder="China"></label>
+        <label class="form-group"><span class="form-label">{{ _('profile_id_number') }} *</span>
+          <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_ID_NUMBER"
+                 value="{{ prof.id_number if prof else '' }}" autocomplete="off"></label>
+        <label class="form-group"><span class="form-label">{{ _('profile_student_number') }}</span>
+          <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_STUDENT_NUMBER"
+                 value="{{ prof.student_number if prof else '' }}"></label>
+      </div>
+
+      <div class="consent-box mb-3">
+        <label class="prof-check">
+          <input type="checkbox" name="AUTO_BOOK_SCREENING_CONSENT" value="true"
+                 {% if ab and ab.has_screening_consent() %}checked{% endif %}>
+          <span>{{ _('profile_consent_label') }}</span>
+        </label>
+        <div class="consent-note">{{ _('profile_consent_note') }}</div>
+        {% if ab and ab.has_screening_consent() %}
+        <div class="consent-when">{{ _('profile_consent_given_at') }}
+          {{ ab.screening_consent_at | local_time }}</div>
+        {% endif %}
       </div>
 
       {% if prof and not prof.is_complete() %}
@@ -656,6 +679,12 @@
 .prof-grid .form-group { margin: 0; display: flex; flex-direction: column; gap: 4px; }
 .prof-grid .form-label { font-size: 11.5px; }
 .prof-check { flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 12px; }
+.consent-box {
+  border: 1px solid var(--border); border-left: 3px solid var(--warning, #f0a040);
+  border-radius: 6px; padding: 10px 12px; background: var(--bg2);
+}
+.consent-note { font-size: 11.5px; color: var(--text2); margin-top: 6px; line-height: 1.5; }
+.consent-when { font-size: 11px; color: var(--text3); margin-top: 4px; font-variant-numeric: tabular-nums; }
 .prof-incomplete {
   font-size: 12px; color: var(--warning, #f0a040);
   background: var(--bg2); border: 1px solid var(--border);

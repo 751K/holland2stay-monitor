@@ -31,15 +31,16 @@ def _profile(**over) -> ApplicantProfile:
         first_name="J", last_name="Kong", no_middle_name=True, gender="Male",
         date_of_birth="2003-09-14", nationality="China", country="Netherlands",
         address="Dorpsstraat 1", postcode_city="5612 AB Eindhoven",
-        university="TU Eindhoven",
+        university="TU Eindhoven", place_of_birth="China", id_number="E12345678",
     )
     base.update(over)
     return ApplicantProfile(**base)
 
 
-def _user(*, accounts=None, profile=None, dry_run=False) -> UserConfig:
+def _user(*, accounts=None, profile=None, dry_run=False, consent=True) -> UserConfig:
     return UserConfig(id="u1", name="U", auto_book=AutoBookConfig(
         enabled=True, dry_run=dry_run,
+        screening_consent_at="2026-08-03T20:00:00+00:00" if consent else "",
         xior_accounts=accounts if accounts is not None
         else {BUILDING: {"email": "a@x.com", "password": "pw"}},
         applicant_profile=profile if profile is not None else _profile(),
@@ -219,3 +220,24 @@ class TestFailures:
         _book(_req())
         s = _FakeSession.instances[0]
         assert not any("next" in c.lower() or "pay" in c.lower() for c in s.calls)
+
+
+class TestScreeningConsent:
+    """代勾法律声明必须有用户预先授权，且授权要能追溯到时刻。"""
+
+    def test_without_consent_nothing_is_submitted(self):
+        r = _book(_req(user=_user(consent=False)))
+        assert r.success is False and r.phase == "not_configured"
+        assert "授权" in r.message
+        assert _FakeSession.instances == [], "没授权就不该触网"
+
+    def test_agreement_is_ticked_only_with_consent(self):
+        from bookers.rentcafe_applicant import AGREEMENT_FIELD
+        _book(_req())
+        assert _FakeSession.instances[0].saved_fields[AGREEMENT_FIELD] == "on"
+
+    def test_id_number_reaches_the_form(self):
+        _book(_req())
+        f = _FakeSession.instances[0].saved_fields
+        assert f["IDNumber"] == "E12345678"
+        assert f["PlaceOfBirth"] == "China"

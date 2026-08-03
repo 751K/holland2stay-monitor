@@ -148,7 +148,29 @@ def parse_applicant_profile(
         postcode_city=_s("POSTCODE_CITY"),
         university=_s("UNIVERSITY"),
         min_lease_term=_s("MIN_LEASE_TERM"),
+        place_of_birth=_s("PLACE_OF_BIRTH"),
+        id_number=_s("ID_NUMBER"),
+        student_number=_s("STUDENT_NUMBER"),
     )
+
+
+def parse_screening_consent(
+    form: "ImmutableMultiDict[str, str]",
+    existing: Optional[AutoBookConfig] = None,
+) -> str:
+    """解析「授权系统代勾背景调查声明」，返回授权时间戳（ISO，UTC）。
+
+    存时间戳而不是布尔值：将来若有争议，要能说清是**哪一刻**授权的。
+    已经授权过就保留原时间戳，别每次保存都刷新——那会把最初的授权时刻抹掉。
+    取消勾选则清空。
+    """
+    from datetime import datetime, timezone
+
+    checked = form.get("AUTO_BOOK_SCREENING_CONSENT") == "true"
+    if not checked:
+        return ""
+    old = (existing.screening_consent_at if existing else "") or ""
+    return old or datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def build_user_from_form(
@@ -260,6 +282,7 @@ def build_user_from_form(
         # ── Xior：一栋楼一个账号 ──
         xior_accounts=parse_xior_accounts(form, ex_ab),
         applicant_profile=parse_applicant_profile(form, ex_ab),
+        screening_consent_at=parse_screening_consent(form, ex_ab),
         # 存量单对字段原样保留（表单已不再提供入口）。清掉的话，还没来得及按楼
         # 重配的老用户会突然失去凭据；留着由 xior_account_for() 决定何时忽略。
         xior_email=ex_ab.xior_email if ex_ab else "",
