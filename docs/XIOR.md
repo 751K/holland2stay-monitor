@@ -329,6 +329,69 @@ ddlLanguage  HowDidYouHear  SubscribeToEmails
 
 第 4–8 步仍未到达（需要真实账号）。
 
+#### ⚠️ 存在必填的证件上传（2026-08-03 用真实账号走到 Applicant Info 后确认）
+
+`stepname=DocumentSummary` 页面上：
+
+```
+Additional Documents
+ID/Passport Upload*        ← 星号 = 必填
+```
+
+这是**整个自动预订方向最关键的一条约束**。此前只在第 3 步注册表单上看到
+`input[type=file]` 数为 0 就判断「没有文件上传」——那是错的，注册页确实没有，
+但**登录后的申请流程里有**。
+
+它到底挡不挡得住自动化，取决于一件尚未确认的事：**单元是在哪一步被锁住的**。
+申请页原文写着
+
+> Prices and specials are not guaranteed until you have paid the application fees.
+
+暗示锁定发生在 **Application Charges（付费）**，而不是文件上传。若如此，自动化
+仍可能先抢到锁定、证件事后补传；若不然，秒级抢房不成立。**下一步要确认的就是
+这一点**，而不是继续做实现。
+
+#### 完整流程（实测，9 步）
+
+```
+1 Floorplan            2 Rental Options       3 Applicant Info
+4 Additional Applicants 5 Additional Rental Options
+6 Application Charges  7 Lease Summary        8 Lease Creation
+9 Move-in Charges
+```
+
+另有 `Documents` / `Alerts` / `Summary` 三个横向标签页（不在主流程里）。
+
+**注册即登录，不强制 OTP**（§8.5 原第 3 项，到此有答案）。注册成功后直接跳
+`stepname=Apartments&FromRegistration=1`。
+
+#### 选房动作：`ContinueClick`
+
+Apartments 步骤里每个可订单元一个「Reserve this room」按钮。名字唬人，实际是
+**选中单元并跳到 ApplicantInfo**，不是当场锁房：
+
+```javascript
+ContinueClick('398336','1111515','185795','16-8-2026','',
+  'oleapplication.aspx?myLeaseCafeType=2&stepname=ApplicantInfo&FromUnitSelection=1',
+  '0','0','648','3281','1','16-8-2026','1-11-2026', …)
+//            ↑ unitId    ↑ floorPlanId ↑ propertyId ↑ availableDate
+```
+
+**`unitId` 就是抓取侧 `xr_<id>` 里的那个 id**（例：`398336` ↔ `xr_398336`），
+自动化不需要额外映射。
+
+#### 第 3 步 Applicant Info 的字段
+
+```
+个人      Title  FirstName*  MiddleName*(+「我没有中间名」勾选)  LastName*
+          Phone  Email*  MoveInDate*  MinimumLeaseTerm*  Gender*
+地址      Country*  Address*  University*  PostCode-City*
+筛查      DateOfBirth*  Nationality*  …
+```
+
+`University*` 是 Xior 特有的必填项；`Screening Information` 区块意味着有背景
+审查环节。这一步本身仍然全是文本/下拉，**没有** file input。
+
 #### `MoveInDateEncr` 不是障碍（实测推翻了先前判断）
 
 先前把它列为「最可能卡死自动化」的机制。实测**不成立**：
@@ -446,19 +509,24 @@ RENTCafe 还有 IP 级 attempt limit，连续失败锁 30 分钟——自动化�
 
 - ~~`MoveInDateEncr` / `QuotedRentEncr` 的签名怎么来~~ → **不需要伪造**，原样回传
   服务端下发的值即可。详见上面「`MoveInDateEncr` 不是障碍」。
-- ~~第 3 步是否有文件上传或人工审核~~ → **没有文件上传**（实测 file input 数为 0）。
-  第 3 步的完整字段清单已记录，且**不需要登录就能到达**。
+- ~~注册/登录是否强制 OTP~~ → **不强制**。注册成功即登录，直接进 Apartments 步骤。
+- ~~第 3 步是否有文件上传~~ → 第 3 步本身没有，但**流程里有**：
+  `DocumentSummary` 上的 `ID/Passport Upload*` 是必填。见上面的警告小节。
+- 完整 9 步流程、`ContinueClick` 选房动作、Applicant Info 字段清单，均已实测记录。
 
 **未确认（按优先级）**
 
-1. **第 4–8 步（Additional Applicants → Lease Creation）**。需要真实账号登录。
-   人工审核若存在，最可能出现在 Lease Summary / Lease Creation 附近。
-2. **反自动化字段的服务端校验强度**：`txtRenderTime` 是否真的用于「提交过快」
-   判定、`txtvalue2` 是不是蜜罐。这两个比 reCAPTCHA 更容易在实现时踩到。
-3. 登录的 OTP 是否强制。页面上 `OtpOptionsSection` 默认 `display:none`，
-   `Username`+`Password` 是主路径，OTP 看起来是**替代**登录方式而非二次验证
-   （另有 `VerifyOTP` 表单和 `otpclickedUserLogin` 标志位）——但没有真实账号
-   登录过，不能确认服务端不会在密码通过后追加 OTP。
-4. 服务端 v3 score 阈值多高——阈值低则几乎不触发 v2 回退，成本按 §8.4 的乐观值走。
-
-只有第 1、3 项需要**真实 RENTCafe 账号**。
+1. **单元究竟在哪一步被锁住？** 这是决定整个方向成不成立的唯一问题。
+   若锁定发生在 Application Charges（付费）之前/之时，而证件可以事后补传，
+   自动抢房仍然成立；若必须先传证件才能锁定，秒级抢房不成立，该转向
+   「预填好参数的一键跳转」。
+2. **application fee 是多少、怎么付。** 页面写「until you have paid the
+   application fees」，但金额和支付方式未见。
+3. 反自动化字段的服务端校验强度：`txtRenderTime`（渲染时刻，疑似用于「提交
+   过快」判定）、`txtvalue2`（空 textarea，疑似蜜罐）。这两个比 reCAPTCHA
+   更容易在实现时踩到。
+4. **连续登录失败锁定的作用域是账号还是 IP。** 2026-08-03 实测确实会锁
+   （用户连续输错密码后无法登录）。文档 §2.2 记的是 IP 级——**若真是 IP 级，
+   服务器上跑的 booker 会被同一机制打到，一个用户输错密码可能连累同出口 IP
+   的其他人**。这条对部署形态影响很大，需要单独验证。
+5. 服务端 v3 score 阈值多高——阈值低则几乎不触发 v2 回退，成本按 §8.4 的乐观值走。
