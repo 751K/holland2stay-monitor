@@ -1,6 +1,8 @@
-# OurDomain 监控 — 设计文档
+# OurDomain — 平台状态
 
-> 2026-05-22 实测验证。监控粒度从 FP 级升级为**单元级**——满足按价格/面积/楼层/朝向过滤的需求。
+OurDomain 的抓取现状：端点长什么样、反爬是什么、代码怎么应对、自动预订卡在哪。
+实现以 [`scrapers/ourdomain.py`](../scrapers/ourdomain.py) 为准，本文档描述的是
+那份实现所依赖的外部事实。
 
 ---
 
@@ -8,52 +10,142 @@
 
 | 项 | 值 |
 |---|---|
-| 官网 | `https://www.thisisourdomain.nl` (Webflow) |
+| 官网 | `https://www.thisisourdomain.nl`（Webflow） |
 | PMS | RENTCafe by Yardi（SecureRC） |
-| 监控粒度 | **单元级**（具体房间号 #6045，含面积/楼层/朝向） |
-| 覆盖楼宇 | Amsterdam Diemen + South-East（同一 RENTCafe property ID 184283） |
-| 物理单元数 | **8 个**（共享于 8 个 FP 类型之下） |
-| 每个单元字段 | 单元号、面积（单值 m²）、月租（单值 €）、押金、楼层、朝向、可入住日期 |
+| 数据形态 | HTML table，两阶段 GET |
+| 监控粒度 | 单元级（具体房间号 #6045，含面积/楼层/朝向） |
+| 传输方式 | curl_cffi + **TLS 指纹轮换**（不走浏览器） |
+
+**两栋楼是两个独立的 RENTCafe property，各自一个 host**：
+
+| city_key | host | property_id |
+|---|---|---|
+| `diemen` | `thisisourdomain.securerc.co.uk` | `184283` |
+| `south-east` | `southeast-thisisourdomain.securerc.co.uk` | `182801` |
+
+每栋楼是一个独立的 `ScrapeTask`。楼盘规模很小，单栋常年只有个位数可订单元。
 
 ---
 
-## 2. 架构：两阶段抓取
+## 2. 反爬现状
 
-### 阶段 1：floorplans.aspx — 发现 FP ID
+OurDomain 是三个平台里唯一**不需要浏览器**的：SecureRC 只做 WAF 级 403，没有
+托管挑战。但它有自己的麻烦——per-fingerprint + per-IP 跟踪。
+
+### 2.1 403 的两个维度
+
+| 维度 | 表现 | 解法 |
+|---|---|---|
+| TLS 指纹 | 同一指纹短时间重复打就进「挑战中」，返回 403 + `Just a moment...` | 换指纹 |
+| 出口 IP | 同一 IP 被盯上时，**四个指纹轮完仍全是 403** | 换 IP |
+
+第二条是关键：换指纹只在换 IP 的前提下才有效。所以 `scrape()` 的重试循环里
+**每次尝试都重新取一次代理**，且用 `rotating=True`：
+
+```python
+proxy = get_proxy_url(self.source, rotating=True)
+```
+
+这与 H2S / Xior 相反——那两个需要出口 IP 稳定才能复用 CF clearance，OurDomain
+没有 clearance 可复用，换 IP 才是它的恢复手段。这一点踩过坑：把它固定到专属
+sticky IP 之后，同一个 IP 被盯上时四个指纹轮完全部 403，无法自愈。
+
+### 2.2 指纹池与冷却
+
+默认池 8 个，覆盖 4 个家族 × 桌面/移动（`_DEFAULT_IMPERSONATES`）。选它们的
+理由是**扩大可用指纹空间**：同家族同平台的 JA3/JA4 和 h2 settings 差异很小，
+混进 Safari / Firefox / 移动端，某个家族被烧时还有完全不同的回路可走。
+
+排除：老版本（chrome99–110，已被标「可疑/过时浏览器」）、`tor145`（触发高强度
+挑战）、带 `beta` 后缀的不稳定版本。
+
+进程级状态机（`_FINGERPRINT_STATE`，重启清空）：
+
+- 成功 → 记 `last_good_at`，并**清除** cooldown
+- 403 → 记 `cooldown_until = now + 30min`
+- 排序：`last_good`（未冷却的）→ `fresh` → `cooldown 中的兜底`
+
+冷却中的指纹必须先从 `last_good` 桶里排除再排序——否则「成功过 + 正在冷却」的
+指纹会同时落进两个桶，去重时保留首次出现的位置，反而被排到最前，冷却对最该
+冷却的那个指纹完全失效。
+
+单轮尝试次数由 `OURDOMAIN_WAF_RETRIES` 控制（默认 4，上限 8）；指纹顺序可用
+`OURDOMAIN_IMPERSONATES` 覆盖。
+
+### 2.3 同 session 内 403 重试
+
+第一次 403 时 Cloudflare **同时下发了 `cf_clearance` cookie**。curl_cffi 不跑 JS
+算不出最终 token，但 cookie 已经攒在 session 上——很多时候短等 2s 后第二次 GET
+同 URL 就直接过了（CF 见到部分 cookie 会放宽到 light challenge）。
+
+所以拿到 CF 类 403 先在同 session 内重试**一次**，仍失败才抛 `BlockedError` 让
+上层换指纹。稳态下一个指纹就能稳定服务，这一步省下大量换指纹开销。
+
+### 2.4 只用 GET
+
+POST 会触发 403。两个数据端点都是 GET。
+
+---
+
+## 3. 端点契约
+
+### 3.1 阶段一：floorplans.aspx —— 发现 FP ID
 
 ```
-GET https://thisisourdomain.securerc.co.uk/onlineleasing/
-    ourdomain-amsterdam-diemen/floorplans.aspx
+GET {base}/{slug}/floorplans.aspx
 ```
 
-提取 8 个 FP ID（`subPointerId=N`），供阶段 2 使用。FP 级别的按钮 class/text **不可靠**——实测 `contactButton`("Get Notified") 的 FP 在单元级仍然全部 "Available"。
+提取 floorplan ID，两种格式二选一（不同楼用不同主题）：
 
-### 阶段 2：availableunits — 获取单元
+| 格式 | 出现在 | 用于 |
+|---|---|---|
+| `subPointerId=NNNN` | photo gallery 的 onclick | Diemen |
+| `myFloorPlanId=NNNN` | Get Notified / Contact Us 链接 | South-East |
+
+顺带解析 `{fp_id: fp_name}`，只作为 Occupancy 推断的兜底。可用来源是每个 FP 的
+anchor：
 
 ```
-GET https://thisisourdomain.securerc.co.uk/onlineleasing/
-    rcLoadContent.ashx
+onclick="showDialog('Floor Plan Executive Studio | Furnished | Contract 1-5 years',
+                    'photogallery', 'imagetype=floorplan&...&subPointerId=1106316&...');"
+```
+
+第一个参数是干净的 FP 名，同一 onclick 里的 `subPointerId` 是它的 ID，两者强耦合。
+
+> 试过两条走不通的路：`#FFloorPlan` dropdown 的 checkbox label 是 JS hydrated 的，
+> curl_cffi 看不到；anchor 的 `title` 属性在生产 server-side HTML 里全是 `"1"` /
+> `"Max Rent"` 等占位文本，不含 FP 名。
+
+**FP 级别的按钮状态不可靠**——实测 `contactButton`（"Get Notified"）的 FP 在单元级
+仍然全部 "Available"。判定必须以单元级为准。
+
+### 3.2 阶段二：availableunits —— 获取单元
+
+```
+GET {base}/rcLoadContent.ashx
     ?contentclass=availableunits
-    &floorPlans=1107060          ← FP ID（可逗号分隔多个）
-    &MoveInDate=2026-06-01       ← 目标入住月份（YYYY-MM-DD）
-    &myolePropertyID=184283
+    &floorPlans={fp_id}
+    &MoveInDate={YYYY-MM-DD}
+    &myolePropertyID={property_id}
 ```
 
-返回每单元一行，`data-selenium-id` 锚点完整：
+`MoveInDate` 取下个月 1 号。实测 5 月到 9 月的不同日期返回相同单元，所以只查一个
+日期；如果未来发现结果随日期显著变化，再扩成两个日期并行。
 
-```
+每单元一行：
+
+```html
 <tr id="unitrow_307195" data-selenium-id="urow1">
-  <th data-selenium-id="Apt1"  id="307195">#6045</th>            ← 单元号 + 数字 ID
-  <td data-selenium-id="SqFt1">22</td>                            ← m² 单值
-  <td data-selenium-id="Rent1">€ 1.587</td>                      ← 月租单值
-  <td data-selenium-id="Deposit1">€ 2.622</td>                   ← 押金
-  <td data-selenium-id="Amenity1">                                ← 详情浮层
+  <th data-selenium-id="Apt1"  id="307195">#6045</th>
+  <td data-selenium-id="SqFt1" data-label="Sq.M.">22</td>
+  <td data-selenium-id="Rent1">€ 1.587</td>
+  <td data-selenium-id="Deposit1">€ 2.622</td>
+  <td data-selenium-id="Amenity1">
     <label>Ground Floor</label>
-    <label>Courtyard View</label>   ← 部分单元有多个 label
+    <label>Courtyard View</label>
   </td>
-  <td data-selenium-id="AvailDate1">                              ← 状态
-    <span class="text-success">Available</span>                   ← 可预订
-    <span class="text-warning">Wait List</span>                   ← 等位
+  <td data-selenium-id="AvailDate1">
+    <span class="text-success">Available</span>     <!-- 或 text-warning / Wait List -->
   </td>
   <td data-selenium-id="Action1">
     <input value="Book now" onclick="ApplyNowClick('307195','1107060','184283','6-6-2026',...)" />
@@ -61,474 +153,152 @@ GET https://thisisourdomain.securerc.co.uk/onlineleasing/
 </tr>
 ```
 
-**HTTP 层：** `curl_cffi chrome131` 即可，GET 请求无需 session cookie，与 H2S 完全相同的策略。注意 POST 会触发 Cloudflare 403——一律用 GET。
+**字段提取要双策略**：两栋楼用了不同的 RentCafe 主题，`data-selenium-id` 编号
+不一致。先按 selenium-id 精确匹配，不中再按 `data-label`（用户可见列标题：
+`Sq.M.` / `Apartment` / `Rent` / `Deposit` / `Amenities` / `Availability`）兜底——
+后者跨主题更稳定。核心字段全空时会打一条 WARNING，方便回看哪些主题还需要加
+label 兜底。
+
+`available_from` 从 `ApplyNowClick(...)` 的 `DD-MM-YYYY` 参数提取。
+
+### 3.3 单元会重复出现在多个 FP 下
+
+同一个物理单元（如 #6045，ID `307195`）会出现在该楼**所有** FP 的查询结果里——
+FP 是合同类型标签，单元才是物理房间。`_merge_unit()` 按 `unit_id` 去重，只收集
+FP 标签不重复建 Listing。
+
+推论：**`floorPlans` 过滤器不可信**，不能靠 FP→unit 映射判断单元类型。所以
+Occupancy 用 `sqft` 反推（< 30 m² → One，30–60 → Two，≥ 60 → Family），FP 名
+只在 sqft 缺失时兜底。
 
 ---
 
-## 3. 当前单元清单（2026-05-22，MoveInDate=2026-06-01）
+## 4. 状态映射
 
-```
-  单元号    ID       面积   月租       押金      楼层/朝向              状态
-  ─────────────────────────────────────────────────────────────────────
-  #6045   307195    22m²   €1.587    €2.622    Ground Floor            Available
-  #6023   307174    22m²   €1.572    €2.598    Ground Floor            Available
-  #6043   307193    22m²   €1.587    €2.834    Ground Floor            Available
-  #6057   307202    22m²   €1.572    €2.834    Ground Floor            Available
-  #6028   307179    23m²   €1.595    €2.635    Ground Floor, Courtyard Available
-  #6222   307302    23m²   €1.563    €0        Floor 1-4, Courtyard    Available
-  #6171   307277    28m²   €1.647    €2.721    Floor 1-4               Available
-  #6134   307250    28m²   €1.662    €2.746    Floor 1-4, Courtyard    Available
-```
-
-**统计：**
-
-| 维度 | 范围 |
-|---|---|
-| 面积 | 22 / 23 / 28 m²（3 档） |
-| 月租 | €1,563 – €1,662（差距仅 €99） |
-| 押金 | €0 – €2,834（#6222 免押金） |
-| 楼层 | Ground Floor ×6、Floor 1-4 ×3 |
-| 朝向 | 3 间带 Courtyard View |
-
-### 关键发现
-
-1. **同一个单元出现在所有 8 个 FP 下。** 例如 #6045 在 FP 1107060 (Short Stay) 和 FP 1106316 (1-5y Contract) 都出现。FP = 合同类型标签，单元 = 物理房间。
-2. **Diemen 和 South-East 是同一个 RENTCafe property（184283）**，数据完全一致。只需抓一次。
-3. **MoveInDate 对结果影响很小。** 实测 2026-05-23、06-01、07-01、09-01 返回相同 8 个单元。建监控时每个 FP 只需查最近 1–2 个月。
-4. **FP 级按钮状态不可靠。** "Get Notified" 的 FP 在单元级仍全部 "Available"+"Book now"。监控必须以单元级状态为准。
-5. **单元级租金是单值，不是范围。** 与 FP 级 `"€1,797–€1,900"` 不同，单元级 `€1.587` 是精确值——`parse_float` 直接可用，无需特殊处理。
-
----
-
-## 4. 与 H2S 的架构差异
-
-| 维度 | H2S | OurDomain |
+| `<span>` class / 文本 | 含义 | 映射 |
 |---|---|---|
-| HTTP 客户端 | `curl_cffi` | `curl_cffi`（相同） |
-| CF 绕过 | TLS 指纹模拟 | TLS 指纹模拟（相同） |
-| 数据格式 | GraphQL JSON | HTML table（两阶段：FP 列表 + 单元列表） |
-| 翻页 | 有 | 无（每页 ≤8 行） |
-| 抓取请求数 | 1 req/city/page | 1 (floorplans) + 8 FP × 1 = **9 req/轮** |
-| 状态来源 | `available_to_book[].label` | `<span class="text-success">Available</span>` |
-| 数据粒度 | 单元级（具体房间号） | 单元级（具体房间号 #6045） |
-| 房源生命周期 | 出现/消失 | 状态翻转（Available ↔ Wait List） |
-| 价格格式 | 单值 `"707.000000"` | 单值 `"€ 1.587"`（单元级） |
-| ID 格式 | 字母 slug | 纯数字 `307195` |
-| 详情页 | `residences/{url_key}.html` | 按钮 onclick 直接跳到预订流程 |
-| 额外字段 | — | 单元号、楼层、朝向、入住日期、免押金标记 |
+| `text-success` / `Available` | 可预订 | `Available to book` |
+| `text-warning` / 含 `wait` | 等位中 | `Available in lottery` |
+| 其它 / 行不存在 | 已租 | `Occupied` |
+
+Wait List 仍算可预订（用户可能愿意等），与 `Listing.is_available` 的语义一致。
+
+单元级租金是**单值**（`€ 1.587`），不是 FP 级的范围，`parse_float` 直接可用。
 
 ---
 
-## 5. 实现设计
-
-### 5.1 新文件
-
-```
-scrapers/ourdomain.py    # OurDomainScraper(AbstractScraper)
-```
-
-零新依赖（`curl_cffi` + `re`）。
-
-### 5.2 Scraper 流程
-
-```python
-class OurDomainScraper(AbstractScraper):
-    source = "ourdomain"
-
-    BASE = "https://thisisourdomain.securerc.co.uk/onlineleasing"
-    PROPERTY_ID = "184283"
-
-    # city_key → URL slug + display name
-    BUILDINGS = {
-        "diemen": {"slug": "ourdomain-amsterdam-diemen", "display": "Amsterdam Diemen"},
-    }
-
-    def scrape(self, task: ScrapeTask) -> ScrapeResult:
-        session = req.Session(impersonate="chrome131")
-
-        # ── 阶段 1：获取 FP ID 列表 ──
-        fp_html = session.get(f"{self.BASE}/{slug}/floorplans.aspx")
-        fp_ids = re.findall(r"subPointerId=(\d+)", fp_html.text)  # 8 个
-
-        # ── 阶段 2：对每个 FP 获取单元 ──
-        all_units: dict[str, dict] = {}  # unit_id → data
-        for fp_id in fp_ids:
-            url = (
-                f"{self.BASE}/rcLoadContent.ashx"
-                f"?contentclass=availableunits"
-                f"&floorPlans={fp_id}"
-                f"&MoveInDate={self._next_month()}"  # 下个月 1 号
-                f"&myolePropertyID={self.PROPERTY_ID}"
-            )
-            unit_html = session.get(url)
-            for urow in re.finditer(
-                r"id='unitrow_(\d+)'.*?</tr>", unit_html.text, re.DOTALL
-            ):
-                self._merge_unit(all_units, urow, fp_id)
-
-        # ── 阶段 3：去重 + 构建 Listing ──
-        listings = []
-        for unit_id, data in all_units.items():
-            listings.append(Listing(
-                id=f"od_{unit_id}",
-                name=f"{data['apt']} - {data['detail']}, {data['sqft']}m²",
-                status=data["status"],
-                price_raw=data["rent"],
-                available_from=data.get("avail_date"),
-                features=[
-                    f"Unit: {data['apt']}",
-                    f"Area: {data['sqft']} m²",
-                    f"Deposit: {data['dep']}",
-                    f"Detail: {data['detail']}",
-                    f"Building: {task.city_display}",
-                ],
-                url=f"{self.BASE}/{slug}/floorplans.aspx",
-                city=task.city_display,
-                source=self.source,
-            ))
-        return ScrapeResult(task, listings, complete=True)
-```
-
-### 5.3 去重逻辑
-
-同一个物理单元（如 #6045, ID=307195）会出现在多个 FP 下。`_merge_unit()` 收集 FP 标签但不重复创建 Listing。
-
-```python
-def _merge_unit(self, all_units, urow_match, fp_id):
-    unit_id = urow_match.group(1)
-    if unit_id not in all_units:
-        all_units[unit_id] = self._extract_unit(urow_match)
-    all_units[unit_id]["fp_ids"].append(fp_id)
-```
-
-### 5.4 字段提取
-
-```python
-def _extract_unit(self, urow):
-    html = urow.group(0)
-    idx = re.search(r"data-selenium-id='urow(\d+)'", html).group(1)
-
-    apt   = re.search(rf"Apt{idx}'[^>]*>([^<]+)<", html).group(1)
-    sqft  = re.search(rf"SqFt{idx}'[^>]*>([^<]+)<", html)
-    rent  = re.search(rf"Rent{idx}'[^>]*>([^<]+)<", html)
-    dep   = re.search(rf"Deposit{idx}'[^>]*>([^<]+)<", html)
-
-    # 状态：span class 决定
-    avail_span = re.search(rf"AvailDate{idx}'[^>]*>.*?<span[^>]*class='([^']*)'[^>]*>([^<]*)<",
-                           html, re.DOTALL)
-    status = "Available to book" if "success" in (avail_span.group(1) or "") else "Occupied"
-
-    # 详情：所有 <label> 文本拼接
-    details = [m.group(1).strip() for m in re.finditer(r"<label[^>]*>([^<]+)<", html)
-               if m.group(1).strip() not in ("Max-Rent", "Prices and special offers...")]
-    # 例：["Ground Floor", "Courtyard View"]
-
-    # 可入住日期：从 ApplyNowClick onclick 提取
-    onclick_date = re.search(r"ApplyNowClick[^)]+'(\d+-\d+-\d+)'", html)
-
-    return {
-        "apt": apt.strip(),
-        "sqft": sqft.group(1).strip() if sqft else "",
-        "rent": rent.group(1).strip() if rent else "",
-        "dep": dep.group(1).strip() if dep else "",
-        "status": status,
-        "detail": ", ".join(details),
-        "avail_date": onclick_date.group(1) if onclick_date else "",
-        "fp_ids": [],
-    }
-```
-
-### 5.5 状态映射
-
-单元级状态比 FP 级更精确：
-
-| `<span>` class | 含义 | 映射 |
-|---|---|---|
-| `text-success` → "Available" | 可预订 | `"Available to book"` |
-| `text-warning` → "Wait List" | 等位中 | `"Available in lottery"`（语义最接近） |
-| 其他 / 行不存在 | 已租 | `"Occupied"` |
-
-`Listing.is_available` 检查 `status.lower() in ("available to book", "available in lottery")`，Wait List 单元仍算可预订（用户可能愿意等），语义合理。
-
-### 5.6 MoveInDate 策略
-
-实测不同日期（5 月到 9 月）返回相同单元。保守策略：
-
-```python
-def _next_month(self) -> str:
-    """返回下个月 1 号。例：2026-06-01"""
-    from datetime import date
-    today = date.today()
-    year = today.year + (today.month // 12)
-    month = (today.month % 12) + 1
-    return f"{year}-{month:02d}-01"
-```
-
-如果未来发现单元随日期显著变化，可扩展为 `[下个月, 下下个月]` 两个日期×8 FP = 16 请求/轮。
-
-### 5.7 Listing 字段映射
+## 5. Listing 映射
 
 ```python
 Listing(
-    id              = f"od_{unit_id}",        # "od_307195"
-    name            = "#6045 - Ground Floor, Courtyard View, 23m²",
-    status          = "Available to book",
-    price_raw       = "€ 1.595",              # 单值，parse_float → 1595.0
-    available_from  = "2026-06-06",            # 从 ApplyNowClick 提取
-    features        = [
+    id             = f"od_{unit_id}",              # "od_307195"
+    name           = "Diemen #6045",               # 楼栋短名 + 房号
+    status         = <见 §4>,
+    price_raw      = "€ 1.587",
+    available_from = "2026-06-06",
+    features       = [
         "Unit: #6045",
-        "Area: 23 m²",
-        "Deposit: € 2.635",
-        "Detail: Ground Floor, Courtyard View",
         "Building: Amsterdam Diemen",
+        "Address: Wenckebachweg 51, 1096 AN Amsterdam",   # 建筑级真实街道地址
+        "Type: Studio",
+        "Area: 22 m²",
+        "Occupancy: One",                                  # 由 sqft 反推
+        "Floor: 0",
+        "Deposit: € 2.622",
+        "Detail: Ground Floor, Courtyard View",
+        "Floorplans: 1107060, 1106316",
     ],
-    url             = "https://thisisourdomain.securerc.co.uk/onlineleasing/"
-                      "ourdomain-amsterdam-diemen/floorplans.aspx",
-    city            = "Amsterdam Diemen",
-    source          = "ourdomain",
+    url            = f"{base}/{slug}/floorplans.aspx",
+    city           = "Amsterdam Diemen",
+    source         = "ourdomain",
 )
 ```
 
-### 5.8 过滤维度
+`Address` 是**建筑级的真实街道地址**（写死在 `BUILDINGS` 里），供 geocode 用——
+unit 名 "Diemen #6045" 是内部单元号，不可 geocode。同栋楼所有单元共享一个 pin，
+符合物理事实。
 
-与现有 `ListingFilter` 的匹配关系：
-
-| 过滤条件 | OurDomain 数据源 | 备注 |
-|---|---|---|
-| `max_rent` | `€ 1.587` → `parse_float` → `1595.0` | 单值，直接可用 |
-| `min_area` | `23` (m²) | `parse_float` 直接可用 |
-| `min_floor` | `"Ground Floor"` / `"Floor 1-4"` | 需新增 `parse_ourdomain_floor()` |
-| `allowed_cities` | `"Amsterdam Diemen"` | 与 H2S 共用 city 白名单 |
-| `allowed_types` | `"Studio"` (来自 FP 元数据) | 如需户型过滤，在 feature_map 加 Beds 字段 |
-| 朝向/视野 | `"Courtyard View"` 在 Detail 中 | 没有现有过滤匹配 → 可作为 `allowed_*` 扩展 |
-| 押金 | `"€ 0"` / `"€ 2.622"` | 没有现有过滤匹配 → 新增 `max_deposit` 字段 |
-
-**楼层映射函数：**
-
-```python
-def parse_ourdomain_floor(detail: str) -> int:
-    """从 Detail 字符串提取最低楼层号。Ground Floor → 0。"""
-    if "ground" in detail.lower():
-        return 0
-    m = re.search(r"Floor\s*(\d+)", detail)
-    if m:
-        return int(m.group(1))  # "Floor 1-4" → 1
-    return None
-```
-
-### 5.9 ID 前缀化
-
-| 源 | ID 格式 | 示例 |
-|---|---|---|
-| H2S | `{url_key}`（原样，不改） | `kastanjelaan-1-108` |
-| OurDomain | `od_{unit_id}` | `od_307195` |
-
-### 5.10 单 building 简化
-
-Diemen 和 South-East 共用同一个 RENTCafe property（184283），数据完全一致。Config 只配一个 city：
-
-```python
-# config.py
-ScrapeTask(source="ourdomain", city_key="diemen", city_display="Amsterdam Diemen")
-```
-
-如果未来两栋楼在 RENTCafe 拆分为不同 property，再添加第二个 ScrapeTask。
+`Occupancy` 用与 H2S 相同的词汇表（`One` / `Two (only couples)` /
+`Family (parents with children)`），Web 端的 Occupancy 多选过滤器因此能跨 source
+自然合并。楼层由 `parse_ourdomain_floor()` 从 Detail 提取（`Ground Floor` → 0，
+`Floor 1-4` → 1）。
 
 ---
 
-## 6. 通知模板
+## 6. 风险
 
-```
-🏠 OurDomain Amsterdam Diemen
-#6045 - Ground Floor, 22m² is now Available to book
-€1,587/month | Dep: €2,622 | Move-in: 2026-06-06
-```
-
-与 H2S 通知格式一致（`status_change` / `new_listing` 走相同 pipeline）。首次抓取时 8 个单元全部触发 `new_listing`，后续仅状态变化触发 `status_change`。
-
----
-
-## 7. 请求量估算
-
-```
-每轮：1 (floorplans.aspx) + 8 (FP × availableunits) = 9 GET
-每次 GET：TCP 复用（同一 session），~200ms/req
-每轮总耗时：< 2 秒
-```
-
-在 H2S 的 5 分钟间隔下，9 个额外请求完全不可见。即使扩展为 2 个 MoveInDate（16 请求/轮），仍在 3 秒以内。
+| 风险 | 现状 |
+|---|---|
+| SecureRC 上托管挑战 | 尚未发生。真发生则需和 H2S / Xior 一样改走浏览器传输层 |
+| 403 频率上升 | 已在缓解范围内（每次尝试换 IP + 指纹池 + 同 session 重试）；实测每小时几次，指纹轮换后恢复 |
+| `data-selenium-id` 变更 | 那是 Yardi 的测试锚点，删除代价大；且已有 `data-label` 兜底 |
+| 新主题 / 新字段名 | 核心字段全空会打 WARNING，据此再加 label 兜底 |
+| 楼盘规模小 | 固有——单栋常年个位数可订单元。开新楼时加一条 `BUILDINGS` 记录即可 |
 
 ---
 
-## 8. 风险与限制
+## 7. 自动预订可行性
 
-| 风险 | 可能性 | 缓解 |
-|---|---|---|
-| RENTCafe 改版 | 低 | `data-selenium-id` 是 Yardi 测试锚点，删除需改大量回归测试 |
-| CF 升级 | 低 | 与 H2S 共享 curl_cffi 策略 |
-| MoveInDate 未来差异化 | 中 | 当前均返回相同单元；如变化，多日期并行查询即可 |
-| 单元共享于多个 FP | 已处理 | 通过 unit_id 去重 |
-| 仅 8 个单元 | 固有 | OurDomain Diemen 是小型楼盘。如 Greystar 开新楼，新 property ID 加入即可 |
+框架在 [`bookers/rentcafe.py`](../bookers/rentcafe.py)，面板标记为「开发中」。
+**阻塞点不是 reCAPTCHA，是多步 ASP.NET 表单流未探明。**
 
----
+### 7.1 已探明的部分
 
----
+**Step 1 — 单元选择（HTTP 可行）**
 
-## 10. 自动预订（Auto-Book）可行性分析
-
-> 2026-05-22 实测：RENTCafe 预订流程受 **reCAPTCHA v3 + v2** 保护，纯 HTTP（curl_cffi）无法突破。结论：**不可行，除非引入 Playwright。**
-
-### 10.1 预订流程
+`ApplyNowClick` 提交 ASP.NET 表单：
 
 ```
-选择单元 → termsandotheritems.aspx → rcformsave.ashx → 个人信息 → 审核 → 支付
-```
-
-**Step 1 — 单元选择（✅ HTTP 可行）**
-
-`ApplyNowClick` 函数提交 ASP.NET 表单至 `termsandotheritems.aspx`：
-
-```
-POST /onlineleasing/.../termsandotheritems.aspx
+POST {base}/{slug}/termsandotheritems.aspx
 Content-Type: application/x-www-form-urlencoded
 
-isViaForm=1
-UnitID=307195
-FloorPlanID=1107060
-myOlePropertyId=184283
-MoveInDate=6-6-2026
-src=
+isViaForm=1&UnitID=307195&FloorPlanID=1107060&myOlePropertyId=184283&MoveInDate=6-6-2026&src=
 ```
 
-实测：`curl_cffi` + `safari17_0` impersonation → HTTP 200。Chrome 指纹在此路径被拦截，Safari 指纹可过。
+实测 curl_cffi + `safari17_0` → HTTP 200。**Chrome 指纹在这条路径被拦，Safari 可过**。
 
-**Step 2 — 条款页 + 表单提交（❌ reCAPTCHA 阻断）**
+**Step 2 — 条款页（reCAPTCHA 阻断）**
 
-`termsandotheritems.aspx` 页面含 25 个隐藏字段 + reCAPTCHA v3 埋点。表单 POST 至 `rcformsave.ashx` 时：
+`termsandotheritems.aspx` 含 22 个 hidden field + reCAPTCHA v3 埋点。无有效 token
+时 `rcformsave.ashx` 硬拒绝，不走业务逻辑：
 
 ```json
-// 服务端响应
 {"type": "error", "text": "Please verify that you are not a robot."}
 ```
 
-同时触发 reCAPTCHA v2 显式挑战：`callReCaptchaV2Rentable()`，sitekey = `6LfAdx8TAAAAAOiesnT8CNKNtb1C6doK-RKnB1V0`。
+v3 打分不够时降级到 v2 显式挑战（`callReCaptchaV2Rentable()`，sitekey
+`6LfAdx8TAAAAAOiesnT8CNKNtb1C6doK-RKnB1V0`）。
 
-v3 在后台打分，分数不够时降级为 v2 视觉验证。无有效 token 时表单**硬拒绝**，不走业务逻辑。
+**Step 3+ — 未到达。** 根据页面 CSS 引用（`#applicantloginmkt`、`form#Login`）推测
+需要登录/注册、填个人信息、审核、支付。
 
-**Step 3+ — 个人信息 / 审核 / 支付**
+### 7.2 reCAPTCHA 不是硬障碍
 
-未到达（被 Step 2 阻断）。根据页面 CSS 引用（`#applicantloginmkt`、`form#Login`）推测后续需要：
-- 登录 RENTCafe 账号或创建新账号
-- 填写个人信息（姓名、出生日期、联系方式、收入/工作信息）
-- 审核确认
-- 支付押金/首月租金
+第三方解题服务通过 HTTP API 返回有效 token，不需要 Playwright：
 
-### 10.2 reCAPTCHA 绕过方案
-
-**方案 A：reCAPTCHA 解决服务（推荐，无需 Playwright）**
-
-第三方服务通过 HTTP API 返回有效 token：
-
-| 服务 | 价格 | 延迟 |
+| 服务 | 价格（v3） | 延迟 |
 |---|---|---|
-| [capsolver.com](https://capsolver.com) | ~$1/1000 v3 | 1–3s |
-| [2captcha.com](https://2captcha.com) | ~$3/1000 v3 | 5–15s |
-| [anti-captcha.com](https://anti-captcha.com) | ~$1/1000 v3 | 2–5s |
+| capsolver.com | ~$1/1000 | 1–3s |
+| anti-captcha.com | ~$1/1000 | 2–5s |
+| 2captcha.com | ~$3/1000 | 5–15s |
 
-流程：
-```python
-# 1. 从页面提取 sitekey
-v3_sitekey = "6LcjBc4UAAAAABfXlERv_hq_KE3IWDAqbiWkbPzl"
+token 有效期约 2 分钟，够一次表单提交。每次预订约需 2–4 次 token，
+成本 $0.01–0.04。
 
-# 2. 调解决服务获取 token
-token = captcha_solver.get_recaptcha_v3_token(
-    sitekey=v3_sitekey,
-    url="https://thisisourdomain.securerc.co.uk/onlineleasing/.../termsandotheritems.aspx",
-    action="start_application",
-)
+**登录端点没有 captcha**（`POST /residentservices/ResidentCafeHandler.ashx`，
+Username + Password + SecurityCode），可以在启动时先登录维持 session。注册有
+v2，但注册一劳永逸。
 
-# 3. 填入表单并提交
-post_data["g-recaptcha-response-v3"] = token
-resp = session.post(rcformsave_url, data=post_data)
-```
-
-token 有效期约 2 分钟，足够一次表单提交。每次预订约需 2–4 次 token（条款→个人信息→审核→确认），成本 $0.01–0.04/次。
-
-**方案 B：Playwright 浏览器（也可行，但更重）**
-
-真实浏览器执行 reCAPTCHA JS 自然获得 token。优势是不依赖第三方服务，劣势是 ~300MB 依赖 + 资源占用高。
-
-**结论：reCAPTCHA 不是硬障碍。** 真正的复杂度在多步表单的状态管理。
-
-### 10.3 账号体系
-
-| 步骤 | reCAPTCHA | 关键字段 |
-|---|---|---|
-| 注册 | ✅ v2（sitekey 同上） | FirstName, LastName, EmailAddress, Password, SecurityAnswer, UnitCode |
-| 登录 | ❌ 无 | Username, Password, SecurityCode |
-| 条款提交 | ✅ v3 + v2 降级 | 22 个 hidden fields + sMoveInDate + term(3-12月) |
-| 后续步骤 | 未到达（被 captcha 阻断），推测含个人信息/审核/支付 |
-
-**登录端点：**
-```
-POST /residentservices/ResidentCafeHandler.ashx
-Username={email}&Password={pw}&SecurityCode=&myFormName=...&PortalNameInput=...
-```
-
-登录无 captcha——这是好消息。可以在 scraper 启动时先登录，维持 session。后续预订表单用方案 A 的 token 逐个提交。
-
-### 10.4 真正的工程难点
-
-即使有了 captcha 解决方案，以下问题仍在：
+### 7.3 真正的难点
 
 | 难点 | 说明 |
 |---|---|
-| **多步表单状态** | 每一步 POST 到 `rcformsave.ashx`（可能是不同 `contentclass`），依赖 `cafeportalkey` 等加密 token 维持 session 连续性 |
-| **表单字段未知** | 已确认条款页（22 hidden + 2 visible）。条款之后的页面（个人信息等）尚未到达——字段结构靠猜测 |
-| **个人信息需求** | RENTCafe 可能需要姓名、出生日期、联系方式、收入/工作信息、紧急联系人等。用户需提前在 Web 面板录入 |
-| **脆弱性** | RENTCafe 页面结构变更（表单字段、步骤顺序、JS 验证逻辑）会导致预订断裂 |
-| **测试困难** | 每次测试都是一次真实预订尝试（可能真的创建订单），没有 sandbox |
+| 多步表单状态 | 每步 POST 到 `rcformsave.ashx`（不同 `contentclass`），靠 `cafeportalkey` 等加密 token 维持连续性 |
+| 表单字段未知 | 只确认了条款页；之后的页面字段结构全靠猜 |
+| 个人信息需求 | 可能要姓名、出生日期、联系方式、收入/工作信息、紧急联系人——用户需提前在面板录入 |
+| 脆弱性 | RENTCafe 改字段/步骤/JS 验证就断 |
+| 测试困难 | 每次测试都是一次真实预订尝试，没有 sandbox |
 
-### 10.5 对比总结
-
-| | H2S | OurDomain (RENTCafe) |
-|---|---|---|
-| HTTP 层 | GraphQL mutation + Bearer token | ASP.NET form POST + session cookie |
-| 反机器人 | 无（仅 rate limit 429） | reCAPTCHA v3 + v2 → **可用解决服务绕过** |
-| 解决成本 | — | $0.01–0.04/次预订 |
-| 状态管理 | 无状态 | 有状态（cafeportalkey 加密 token） |
-| 账号 | H2S 账号 | RENTCafe 账号（注册含 captcha → 一劳永逸） |
-| 表单步骤 | 1 步 | 4+ 步 |
-| 个人信息 | 已预设 | 每步填写 |
-| 实现难度 | ~200 行 HTTP | **~800 行 HTTP + captcha 解决服务集成** |
-
-### 10.6 结论
-
-**不需要 Playwright。** reCAPTCHA 可通过第三方解决服务（capsolver/2captcha）绕过，成本可忽略。
-
-真正的难点是**多步 ASP.NET 表单流**——目前只探明了第一步（条款页），后续步骤未到达。每条未知路径都是工程风险。建议分阶段：
-
-| 阶段 | 内容 | 时间 |
-|---|---|---|
-| **P1 当前** | 监控 + 通知（已完成） | — |
-| **P2 侦察** | 用真实 RENTCafe 账号手动走一遍完整预订流程，记录每步的 URL、字段、验证逻辑 | 2–3 小时 |
-| **P3 实现** | 基于侦察结果实现自动预订：登录预热 + captcha 解决服务 + 表单自动填充 | 1–1.5 周 |
-
-P2 是最关键的前置——不看到完整流程，无法准确估算 P3 工作量。如果流程中有文件上传（收入证明等）或人工审核环节，自动预订就直接不可行。
-
----
-
-## 11. 工程量
-
-| 任务 | 时间 |
-|---|---|
-| `OurDomainScraper`（两阶段 + 去重 + 字段提取） | 3–4 小时 |
-| `parse_ourdomain_floor()` + filter 适配 | 1 小时 |
-| 单元测试（HTML fixture） | 1 小时 |
-| `--test` 模式验证 | 0.5 小时 |
-| ID 前缀化迁移 | 1 小时 |
-| monitor 接线 + `dispatch_scrape_tasks` | 1 小时 |
-| 通知模板 | 0.5 小时 |
-| **合计** | **8–10 小时** |
-
-相比初版 FP 级方案（6–8 小时），多了去重逻辑和楼层解析，但换来了真正可过滤的单元数据。
+**下一步是侦察不是编码**：用真实 RENTCafe 账号手动走完整流程，记录每步的 URL、
+字段、验证逻辑。不看到完整流程无法估算工作量；如果中途有文件上传（收入证明）
+或人工审核，自动预订直接不可行。
