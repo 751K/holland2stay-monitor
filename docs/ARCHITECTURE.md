@@ -365,8 +365,23 @@ SetPaymentMethodOnCart → GetCheckoutAgreements → PlaceOrder → IdealCheckOu
 
 为降低延迟，本轮确实有候选时会提前为对应用户预登录（prewarm）。
 
-OurDomain 和 Xior 的 RENTCafe 预订引擎（[`bookers/rentcafe.py`](../bookers/rentcafe.py)）
-框架已完成，但多步表单的剩余步骤尚未侦察，面板标记为「开发中」。
+**已在真实账号上跑通。** 2026-05-22 05:34:44 抢到 Eindhoven `beukenlaan-143-163`
+（€1120/月，入住 2026-06-04），拿到真实 order_id 和 iDEAL 付款链接。
+
+同一次事件也暴露了多用户竞争：另外两个用户在**同一秒内**尝试了同一套房，
+分别收到「房源已被他人抢先预订」和「A process is already handling this
+booking」。这是 `_assign_auto_book_candidates()` 存在的理由——同一 listing
+每轮只交给一个用户，多用户并发抢同一套只会制造无意义竞态、还更容易触发
+平台风控。
+
+三种失败要分开看：`race_lost`（被别人抢先，进重试队列等房源重新放出）、
+`blocked`（403，IP/指纹级问题，不是房源级，保留重试队列不动）、其它下单
+失败（如上面那条 UNDEFINED，平台侧并发锁）。
+
+OurDomain / OurCampus / Xior 的 RENTCafe 预订引擎（[`bookers/rentcafe.py`](../bookers/rentcafe.py)）
+框架已完成，但**卡在 reCAPTCHA 和未侦察的多步表单**，面板标记为「开发中」。
+阻塞点不是技术不可行（reCAPTCHA 可用第三方解题服务，约 $0.003–0.005/次），
+而是条款页之后的步骤没人走过——下一步是侦察不是编码。见 [OURDOMAIN.md](OURDOMAIN.md) §7 / [XIOR.md](XIOR.md) §8。
 
 ---
 
@@ -399,7 +414,9 @@ python -m tools.doctor --no-network
 
 ## 9. 已知限制
 
-- 三个 source 是**不同的房源池**，不构成互为冗余。H2S 挂掉时仍然拿不到 H2S 房源。
+- 各 source 是**不同的房源池**，不构成互为冗余。H2S 挂掉时仍然拿不到 H2S 房源。
+  而且体量极不均衡——实测库里 297 条 listing 中 H2S 占 284 条，其余三个平台合计 13 条。
 - 单机 SQLite，没有水平扩展设计；`--workers=1` 是为了避免写锁冲突。
 - Cloudflare 策略随时可能变化，抓取层的稳定性本质上依赖出口 IP 的信誉。
-- 自动预订只覆盖 H2S，且未在真实账号上跑通完整下单验证。
+- 自动预订只覆盖 H2S。RENTCafe 那条线（OurDomain / OurCampus / Xior）卡在
+  reCAPTCHA 和未侦察的多步表单，见各平台文档。

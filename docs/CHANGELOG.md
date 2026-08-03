@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### 文档更正 — 自动预订早已在真实账号上跑通
+
+`ARCHITECTURE.md` §9 一直写着「自动预订只覆盖 H2S，且**未在真实账号上跑通完整下单验证**」。这条不成立：2026-05-22 05:34:44 真实抢到 Eindhoven `beukenlaan-143-163`（€1120/月，入住 2026-06-04），库里留有真实 order_id 和 iDEAL 付款链接。
+
+这条错误说法有实际代价——生产上有 8 个用户开着自动预订且 `dry_run=0`，按文档看等于他们在依赖一条从未验证过的路径。
+
+同一次事件的记录还暴露了多用户竞争：另外两个用户在**同一秒内**尝试同一套房，分别收到「房源已被他人抢先预订」和「A process is already handling this booking」。§7 补上了这段，作为 `_assign_auto_book_candidates()`（同一 listing 每轮只交给一个用户）存在的实证理由，以及三种预订失败（`race_lost` / `blocked` / 平台侧并发锁）的区分。
+
+顺带：§7 里 RENTCafe 预订引擎的说明补上 OurCampus，并写明阻塞点是 reCAPTCHA + 未侦察的多步表单（技术上可行，约 $0.003–0.005/次解题，缺的是有人把条款页之后的流程走一遍）；§9「三个 source」改为「各 source」并补上实测体量分布——297 条里 H2S 占 284 条。
+
+
 ### 决定 — 放弃 Android Play Store 上架
 
 Android 客户端的分发方式定为 **Release 页直接下载签名 APK**，不进 Google Play。
