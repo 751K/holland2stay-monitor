@@ -50,7 +50,7 @@
 |---|---|
 | Web 面板 | 稳定 —— 自部署的主要入口 |
 | [iOS App](https://apps.apple.com/us/app/flarradar/id6769857080) | 维护中 —— 已上架 App Store，当前范围内功能完整 |
-| [Android App](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk) | Beta —— 已签名 `.apk`，直接安装。FCM 推送已验证；尚未上架 Play Store |
+| [Android App](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk) | Beta —— 已签名 `.apk`，直接安装。FCM 推送已验证。不上架 Play Store，直接下载就是分发方式 |
 | 桌面版 | macOS `.dmg` / Windows `.zip`，见 [Releases](https://github.com/751K/holland2stay-monitor/releases) |
 
 ---

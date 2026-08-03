@@ -54,7 +54,7 @@ Coverage shifts as third-party sites change. The scrapers are documented in
 |---|---|
 | Web dashboard | Stable — the primary interface for self-hosting |
 | [iOS app](https://apps.apple.com/us/app/flarradar/id6769857080) | Maintenance — on the App Store, feature-complete for current scope |
-| [Android app](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk) | Beta — signed `.apk`, sideload it. FCM push verified; not on Play Store yet |
+| [Android app](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk) | Beta — signed `.apk`, sideload it. FCM push verified. Not going to Play Store — direct download is the distribution channel |
 | Desktop packages | macOS `.dmg` and Windows `.zip` from [Releases](https://github.com/751K/holland2stay-monitor/releases) |
 
 ---

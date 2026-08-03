@@ -1,6 +1,8 @@
 # FlatRadar iOS Maintenance Notes
 
-The iOS app is feature-complete for the current FlatRadar product scope and is now in maintenance mode. Large feature development has moved to Android Play Store launch (A6), backend reliability, and multi-platform data quality. Android parity (A0–A5) is complete.
+The iOS app is feature-complete for the current FlatRadar product scope and is now in maintenance mode. Large feature development has moved to backend reliability and multi-platform data quality.
+
+For the Android client — its status, distribution, and roadmap — see [ANDROID_PLAN.md](ANDROID_PLAN.md). This document is iOS only.
 
 [Download on the App Store](https://apps.apple.com/us/app/flarradar/id6769857080)
 

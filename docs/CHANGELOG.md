@@ -2,15 +2,27 @@
 
 ## Unreleased
 
+### 决定 — 放弃 Android Play Store 上架
+
+Android 客户端的分发方式定为 **Release 页直接下载签名 APK**，不进 Google Play。
+
+连带取消：Google Play Billing 内购（它依附于 Play，脱离 Play 无法使用）、Data Safety 表格、12 人 14 天封闭测试、商店截图、Google Play App Signing（改为本地 upload key 自签，CI 已在这么做）。A6 里唯一与上架无关的 Material 3 视觉打磨不受影响，若要做则独立成项。
+
+`ANDROID_PLAN.md` 顶部加了决定说明，A6 / RC5 / 依赖图 / 风险表 / 技术选型表里与上架相关的条目全部标注已放弃；规划内容本身保留，作为「当初考虑过什么」的记录。`FUTURE_PLAN.md` 的「第一期：Android Play Store 上架」同样标注放弃。
+
 ### CI — Android 只出 APK
 
-`build.yml` 的 Android job 去掉 `bundleRelease` 和 AAB 上传步骤。AAB 是给 Google Play 上架用的，当前分发渠道只有 Release 页直接下载——留着白白多一次 bundle 构建。要上架时把这两步加回来即可。
+`build.yml` 的 Android job 去掉 `bundleRelease` 和 AAB 上传步骤——AAB 只有上架才用得上。
 
 **连带修掉一个一直存在的问题**：README（中英）、guide（中英）、登录页下载按钮总共 7 处 Android 下载链接指向的都是 `app-release.aab`。`.aab` 是 Google Play 的分发格式，**用户下载了装不上**——Android 不能直接安装 bundle。现已全部改为 `app-release.apk`。
 
 （这些链接在停止产出 AAB 之后还会直接 404，与 v1.6.x 修过的那次「Android 下载链接 404」是同一个坑。）
 
-README 的 Android 状态行改为写明「已签名 `.apk`，直接安装；尚未上架 Play Store」。另外 `ANDROID_PLAN.md` 和 `FUTURE_PLAN.md` 里三处「CI 自动构建 AAB 已配置」在这次改动后变成了假话，一并更正，并注明启动 A6 上架时需要把 `bundleRelease` 和 AAB 上传步骤加回来——Play Store 上架计划本身没有取消。
+### 文档 — iOS 维护说明里不该有 Android 的事
+
+`iOS_README.md` 开头一直在讲 Android 的进度与分发（原文：大型功能开发已转向 Android Play Store 上架 A6……Android parity A0–A5 已完成）。那是 Android 的状态，放在 iOS 文档里既容易过时、又没人会去那儿找——事实上这次就是它先过时的。改为一句指向 `ANDROID_PLAN.md` 的链接，并写明本文件只讲 iOS。
+
+保留的三处 Android 提及是 iOS 与 Android 的**接口关系**（共享 API 契约、共享 `openapi.json`、推送路由共用 `platform` 字段），那些属于 iOS 文档该说的。
 
 ## v1.10.0 (2026-08-03)
 

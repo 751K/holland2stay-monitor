@@ -114,9 +114,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
 
-      # 只出 APK。AAB 是给 Google Play 上架用的，当前分发渠道只有 Release 页
-      # 直接下载 APK——留着白白多一次 bundleRelease。要上架时把 bundleRelease
-      # 和对应的上传步骤加回来即可。
+      # 只出 APK。AAB 只有 Google Play 上架才用得上，而上架计划已放弃
+      # （2026-08-03）——分发渠道就是 Release 页直接下载 APK。
+      # 若将来改主意，加回 `./gradlew :app:bundleRelease` 和一个上传
+      # bundle/release/app-release.aab 的 action-gh-release 步骤即可。
       - name: Build signed release APK
         if: startsWith(github.ref, 'refs/tags/') && env.ANDROID_SIGNING_READY == 'true'
         working-directory: android

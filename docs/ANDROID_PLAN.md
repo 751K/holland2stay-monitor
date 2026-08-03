@@ -1,5 +1,11 @@
 # Android 客户端开发方案
 
+> **2026-08-03 决定：放弃 Play Store 上架。** Android 客户端以 Release 页直接下载
+> 签名 APK 的方式分发，不进 Google Play。连带取消的还有 Google Play Billing
+> 内购（它依附于 Play，脱离 Play 无法使用）、Data Safety 表格、封闭测试、
+> 商店截图。A6 里唯一与上架无关的 **Material 3 视觉打磨**不受影响，若要做则
+> 独立成项。下面 A6 相关的规划内容保留，作为当初考虑过什么的记录。
+
 ## 1. 背景
 
 FlatRadar iOS 客户端已于 v1.6.0 上架 App Store。国际学生 / young professional 群体里 Android 占比 ~40-50%，需要补齐 Android 端才能覆盖全量用户。
@@ -524,7 +530,7 @@ private val LightColors = lightColorScheme(
 | 主题 | Material 3，System / Light / Dark 三档 |
 | 自适应 | NavigationBar（手机 4-tab）+ NavigationRail（平板 6-tab） |
 | 测试 | MockK + kotlinx-coroutines-test，覆盖 Auth / Dashboard / Listings / Calendar / Notifications |
-| Play Store | 尚未上架（A6 待启动）。**CI 现在只构建签名 APK**——AAB 步骤已从 `build.yml` 移除，因为当前分发渠道只有 Release 页直接下载。启动 A6 时把 `bundleRelease` 和 AAB 上传步骤加回来 |
+| Play Store | **不上架（2026-08-03 决定）**。分发方式为 Release 页直接下载签名 APK；`build.yml` 只构建 APK，AAB 步骤已移除 |
 
 ### 架构实际落地情况
 
@@ -546,7 +552,7 @@ private val LightColors = lightColorScheme(
 | A3 Notifications + SSE | 已完成 | 通知列表：TODAY/YESTERDAY/EARLIER 分组、筛选 chips（All/Book/Lottery/Status/System）、swipe-to-read、mark all read FAB、顶部 stats pill、unread badge。SSE：OkHttp streaming + `withContext(Dispatchers.IO)`、`SseEvent.Data/Retry/Keepalive`。NotificationsViewModel（10 测试）。 |
 | A4 FCM 推送 | 已完成 | **客户端**：Firebase 项目 `flatradar-66342`，`google-services.json` 已配置，`FcmService` + `FcmTokenManager` + 通知渠道 + POST_NOTIFICATIONS 运行时权限 + deep link 全部接入。**后端**：`notifier_channels/fcm.py`（~260 行，OAuth2 服务账号认证 + FCM HTTP v1 API），`mcore/push.py` 按 `platform` 字段分流 iOS（APNs）/ Android（FCM）双发，`FcmTokenManager` 异常已加日志不再静默吞错。服务端已部署 `FCM_ENABLED=true` + service account JSON 密钥（`/secrets/`）。端到端推送通道已拉通。 |
 | A5 Settings + 多语言 + 深色模式 | 已完成 | Settings 已支持 DataStore 持久化、System/Light/Dark 主题、反馈、法律文档、改密码、GDPR 数据导出、删号、Admin Users/Monitor；法律文案已统一为 `app/legal/*.txt` 单一数据源，三端均通过 API 获取 + 本地缓存 fallback；中文字符串 `values-zh/strings.xml` 已覆盖 ~170 条目；Crash 诊断已实现（`CrashReporter` 全局异常捕获 + 后端 `platform`/`os_version` 字段支持）。 |
-| A6 打磨 + 内购 + 上架 | 未开始 | Google Play Billing、截图、Data Safety、封闭测试和上架流程尚未启动。 |
+| A6 打磨 + 内购 + 上架 | 已放弃 | 上架计划取消（2026-08-03），Billing/截图/Data Safety/封闭测试随之取消。仅 Material 3 视觉打磨可独立进行。 |
 
 本轮关键复盘：
 
@@ -578,11 +584,11 @@ private val LightColors = lightColorScheme(
 
 ### 架构师视角：下一阶段策略
 
-当前 Android 端已从”功能空壳”进入”核心功能完成、A0-A5 全部闭环”的阶段。RC1-RC4 均已通过，下一阶段应聚焦 **RC5 上架准备**：Google Play Billing、Data Safety、截图、封闭测试和正式提交审核。
+当前 Android 端已从”功能空壳”进入”核心功能完成、A0-A5 全部闭环”的阶段。RC1-RC4 均已通过，原计划的下一阶段是 RC5 上架准备，**该阶段已于 2026-08-03 取消**（见文首）。Android 端就此进入维护状态：随后端一起发版、CI 出签名 APK 挂到 Release 页。
 
-架构原则（上架准备阶段）：
+架构原则（下列各条写于上架准备阶段，该阶段已取消，保留作记录）：
 
-1. **冻结核心功能，聚焦上架合规**
+1. **冻结核心功能**（原文为「聚焦上架合规」）
    - 核心路径（登录 → Dashboard → Listings → Detail → Map/Calendar → Notifications → Settings）已稳定，不再新增功能。
    - 当前唯一待办为 A6：Google Play Billing、”Buy me a coffee” 内购、Data Safety、截图、封闭测试、提交审核。
 
@@ -600,7 +606,7 @@ private val LightColors = lightColorScheme(
 
 ### 下一步待完成
 
-下一轮按“验证 → 测试 → 合规 → 后端集成 → 上架”的顺序推进：
+下一轮原计划按“验证 → 测试 → 合规 → 后端集成 → 上架”推进；上架一环已取消，前四环仍适用：
 
 1. **R1 手动验证矩阵收口（最高优先级）**
    - [x] A1：验证 Biometric 保存、登出后解锁、Settings 移除、无生物识别设备 fallback（已通过模拟器验证正常）。
@@ -628,7 +634,7 @@ private val LightColors = lightColorScheme(
    - [x] 服务端 `FCM_ENABLED=true` + service account JSON 已部署
    - [x] 真机验收：Android 设备收到 FCM 推送，点击通知进入对应 listing ✅
 
-5. **R5 A6 上架准备**
+5. ~~**R5 A6 上架准备**~~ ❌ 已放弃（2026-08-03）
    - Google Play Billing coffee、Data Safety、截图、多设备/多语言测试、封闭测试计划进入 A6。
    - 开始招募封闭测试用户应提前于最终功能完成，避免 Google Play 14 天测试周期卡发布时间。
 
@@ -688,7 +694,7 @@ Gradle 会把该值注入 `AndroidManifest.xml` 的 `com.google.android.geo.API_
 | | 中英文完整翻译 + locale 切换 | | |
 | | 全局错误 snackbar + 401 自动登出 | | |
 | | Crash 诊断上报（对标 iOS CrashDiagnosticsCollector） | | |
-| **A6** | 打磨 + 内购 + Play Store 上架 | 6 | 2 周 |
+| **A6** | ~~打磨 + 内购 + Play Store 上架~~ ❌ 已放弃 | 6 | — |
 | | Material 3 视觉对齐（spacing/elevation/shape token 逐页校对） | | |
 | | Google Play Billing 6 — "Buy me a coffee" 内购（一次性集成） | | |
 | | Data Safety 表格 + 隐私政策链接 + 非官方关系声明 | | |
@@ -704,7 +710,7 @@ Gradle 会把该值注入 `AndroidManifest.xml` 的 `com.google.android.geo.API_
 | **RC2 测试补齐** | 锁住最容易回归的状态逻辑 | RC1 阻塞 bug 修完 | 47 个 ViewModel 单测覆盖 Auth/Dashboard/Notifications/Calendar/Listings 关键状态 ✅ |
 | **RC3 本地化与合规** | 达到可给测试用户使用的文本和合规水位 | RC2 通过 | `values-zh` 170 条目完整覆盖，法律文本三端统一 ✅ |
 | **RC4 FCM 集成** | 端到端推送通道已拉通 | 后端 FCM sender + 客户端均已就绪 | 真机验收 FCM 收发 ✅ |
-| **RC5 上架准备** | 进入 Google Play 发布流程 | RC4 通过 | Billing/Data Safety/截图/封闭测试计划完成（**当前阶段**） |
+| **RC5 上架准备** | ~~进入 Google Play 发布流程~~ | — | ❌ 已放弃（2026-08-03） |
 
 **总工时：约 10 周**（一个全职 Android 开发）。
 
@@ -717,7 +723,7 @@ A0 (骨架)
       ├─► A3 (Notifications+SSE) —— 可与 A2 并行
       │    └─► A4 (FCM) —— 依赖 A3 的 SSE 跑通 + 后端 FCM 通道就绪
       └─► A5 (Settings+多语言+深色模式) —— 可与 A2/A3 并行
-           └─► A6 (打磨+上架) —— 依赖全部完成
+           └─► A6 (打磨+上架) —— ❌ 已放弃，上架部分取消
 ```
 
 关键路径：A0 → A1 → A3 → A4 → A6。最长路径约 8 周。
@@ -739,12 +745,10 @@ A0 (骨架)
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| **Google Play 20 人封闭测试要求** | 个人开发者账号 2024 年起强制要求 12+ 人连续 14 天测试 | 提前招募测试用户（可从现有 iOS 用户群征集），A5 阶段就开始攒 |
 | **Material 3 vs HIG 视觉一致性** | 两端 "同一款 App" 但视觉风格不同 | 接受合理差异，不对齐像素级；用户对平台原生风格有预期 |
 | **FCM 服务端 token 失效** | 用户收不到推送 | 同 APNs `Unregistered` 处理路径，`FlatRadarMessagingService.onNewToken` 自动刷新 |
 | **Google Maps API 计费** | 单月 $200 credit 用完后计费 | 地图页非高频（用户每天开几次），远低于免费额度，不影响实际使用 |
 | **无 GMS 设备**（华为等） | FCM + Google Maps 不可用 | Android 12+ 设备 GMS 覆盖率极高，不作备选处理 |
-| **Play Store Data Safety 审核** | 被拒上架 | 与 iOS 隐私标签内容一致复用；非官方关系声明与 App Store 版本对齐 |
 
 ---
 
@@ -770,5 +774,5 @@ A0 (骨架)
 |---|---|
 | **minSdk** | **31 (Android 12)**。Material You 动态取色原生支持，省一套主题切换逻辑。荷兰/欧洲学生用户设备普遍 2021 年后，覆盖率 > 80% |
 | **地图引擎** | **Google Maps Compose**。目标用户 100% 有 GMS，无 osmdroid 备选 |
-| **内购时机** | **A6 阶段一次性集成**。前期不分散精力 |
-| **App 签名** | **Google Play App Signing**。本地 upload key + Google 托管 signing key，对标 iOS Xcode 自动签名 |
+| **内购时机** | ~~A6 阶段一次性集成~~ ❌ 取消——Google Play Billing 依附于 Play，不上架就用不了 |
+| **App 签名** | **本地 upload key 自签**（`ANDROID_KEYSTORE_BASE64` secret，CI 里解码使用）。原计划的 Google Play App Signing 随上架计划一起取消 |

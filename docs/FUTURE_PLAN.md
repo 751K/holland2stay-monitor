@@ -13,11 +13,12 @@
 - **新 API**：扁平字段替代 `custom_attributesV2`；attribute ID→label 通过 aggregations 接口映射
 - 为 Pararius / Funda 等 CF 保护的平台提供了通用基建
 
-### 第一期：Android Play Store 上架
-- Android 客户端 A0–A5 已完成（57 文件，~9.5k 行，47 单测）
+### 第一期：Android Play Store 上架 —— **已放弃（2026-08-03）**
+- Android 客户端 A0–A5 已完成（57 文件，~9.5k 行，47 单测），功能上没有欠账
 - FCM 推送端到端拉通并真机验收通过
-- CI 自动构建签名 APK（`build.yml` android job）。AAB 步骤已于 2026-08-03 移除——当前分发渠道只有 Release 页直接下载；启动本期时需把 `bundleRelease` 和 AAB 上传加回来
-- 剩余：Google Play Billing、Data Safety、截图、封闭测试、提交审核
+- CI 自动构建签名 APK（`build.yml` android job）；AAB 步骤已移除
+- **不再上架**：分发方式就是 Release 页直接下载 APK。原计划中的 Google Play
+  Billing 内购、Data Safety、封闭测试、商店截图一并取消
 - 详见下方 [§1 Android 客户端](#1-android-客户端)
 
 ### 第二期：iOS 性能优化
@@ -37,11 +38,11 @@
 
 ## 1. Android 客户端
 
-> 状态更新（2026-05-30）：iOS 客户端进入维护阶段。Android 客户端 A0–A5 已完成，FCM 推送端到端拉通，CI 自动构建签名 APK（AAB 步骤已于 2026-08-03 移除，启动 A6 时加回）。剩余 A6 Play Store 上架。详见 `docs/ANDROID_PLAN.md` 进度复盘。
+> 状态更新（2026-05-30）：iOS 客户端进入维护阶段。Android 客户端 A0–A5 已完成，FCM 推送端到端拉通，CI 自动构建签名 APK。Play Store 上架已于 2026-08-03 放弃，改为 Release 页直接下载。详见 `docs/ANDROID_PLAN.md` 进度复盘。
 
 ### 目标
 
-把 FlatRadar 的核心租客体验稳定带到 Android，覆盖另一半潜在用户群。国际学生 / 流动 young professional 群体里 Android 占比 ~40-50%，Android parity 和 Play Store 上架是当前客户端侧主要推进方向。
+把 FlatRadar 的核心租客体验稳定带到 Android，覆盖另一半潜在用户群。国际学生 / 流动 young professional 群体里 Android 占比 ~40-50%，Android parity 已完成；Play Store 上架已于 2026-08-03 放弃，改为 Release 页直接下载签名 APK。
 
 ### 技术栈
 
@@ -85,12 +86,11 @@
 | **A3** | SSE + 通知列表：OkHttp 实时推送、TODAY/YESTERDAY/EARLIER 分组、滑动已读、导航 unread 角标 | ✅ 已完成 |
 | **A4** | FCM 集成：Firebase 初始化、token 注册/刷新、后端推送通道适配、深链跳转 | ✅ 已完成 |
 | **A5** | Settings + 多语言 + 深色模式 + 错误处理：DataStore、System/Light/Dark、~170 中英字符串、CrashReporter | ✅ 已完成 |
-| **A6** | 打磨 + Play Store 上架：Google Play Billing、Data Safety、截图、封闭测试 → 正式发布 | 🔜 当前 |
+| **A6** | 打磨 + Play Store 上架 | ❌ 已放弃（2026-08-03）。上架相关全部取消；只剩 Material 3 视觉打磨可独立进行 |
 
 ### 风险
 
 - **Material vs HIG 设计差异**：Dashboard / List 卡片样式要重新对齐 Material 3 token（spacing、elevation、shape），不能照搬 iOS HIG 数值
-- **Google Play 审核**：比 App Store 宽松，但 Data Safety / Permissions 声明表格仍需准确填写，非官方关系声明与 iOS 保持一致
 - **FCM token 失效回收**：服务端做 `NotRegistered` 清理，与 APNs `unregistered` 处理路径共用逻辑
 - **地图组件选型**：Google Maps Compose 需 API key + Play Services；若考虑无 GMS 设备（华为等），需 osmdroid 备选方案
 
