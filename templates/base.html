@@ -248,7 +248,11 @@
 <div class="toast-container" id="toast-container"></div>
 
 <script>window._isAdmin = {{ 'true' if is_admin else 'false' }};</script>
-<script src="/static/app.js?v=11"></script>
+{# 改 static/app.js 必须同步 +1，否则浏览器继续用缓存里的旧文件：
+   新增的函数在旧文件里不存在，调用它的页面会静默炸掉。
+   2026-08-04 踩过：加了 sourceLabel/sourceShort 没改版本号，
+   统计页的平台分布图在老浏览器缓存下直接不渲染。 #}
+<script src="/static/app.js?v=12"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

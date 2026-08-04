@@ -112,8 +112,12 @@ function statusColor(s) {
   return 'rgba(128,128,128,.6)';
 }
 
-// 图表轴用缩写（全名会挤成一团）；实现见 static/app.js
-function sourceLabel(s) { return window.sourceShort(s); }
+// 图表轴用缩写（全名会挤成一团）；实现见 static/app.js。
+// 带兜底：app.js 若因浏览器缓存是旧版本，这里抛异常会让 render() 整个中断，
+// 页面上**所有**图表一起空白——一个标签函数不该有这种影响半径。
+function srcLabel(s) {
+  return window.sourceShort ? window.sourceShort(s) : String(s || '').toUpperCase();
+}
 
 function themeColors() {
   var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -236,7 +240,7 @@ function renderCharts(d) {
   buildLineChart('chartDailyChanges', zh ? '状态变更' : 'Status changes', d.daily_changes, '#f59e0b');
 
   var sourceDist = d.source_dist || [];
-  var srcLabels = sourceDist.map(function(r){ return sourceLabel(r.source); });
+  var srcLabels = sourceDist.map(function(r){ return srcLabel(r.source); });
   var srcCounts = sourceDist.map(function(r){ return r.count; });
   buildDoughnutChart('chartSource', srcLabels, srcCounts, ['#10b981', '#0284c7', '#f59e0b', '#ef4444']);
 

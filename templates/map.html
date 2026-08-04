@@ -121,6 +121,12 @@ function isDark() {
   return document.documentElement.getAttribute('data-theme') === 'dark';
 }
 
+// 实现见 static/app.js。**不能叫 sourceLabel**——顶层的同名函数声明会覆盖
+// window.sourceLabel，于是里面那句变成调自己，直接无限递归。
+function srcLabel(s) {
+  return window.sourceLabel ? window.sourceLabel(s) : String(s || '');
+}
+
 function statusClass(s) {
   var sl = (s||'').toLowerCase();
   if (sl.indexOf('book') !== -1) return 'book';
@@ -179,7 +185,7 @@ function buildPopupContent(l) {
   var badgeText = sc === 'book' ? (zh ? '直订' : 'Direct')
     : sc === 'lottery' ? (zh ? '摇号' : 'Lottery')
     : l.status;
-  var platformText = sourceLabel(l.source);
+  var platformText = srcLabel(l.source);
 
   var div = document.createElement('div');
 
