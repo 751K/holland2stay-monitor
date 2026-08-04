@@ -167,76 +167,51 @@
   <div class="card mb-4">
     <div class="section-header">
       <i class="bi bi-building mr-2" style="color:var(--accent);"></i>{{ _('settings_xior_cities') }}
-      {# 计数放标题里：折叠状态下也能一眼看出选了多少，不用逐个展开 #}
-      <span id="xiorCount" class="badge badge-neutral" style="margin-left:10px;"></span>
+      <span id="xiorCount" class="text-tertiary" style="margin-left:10px;font-weight:400;font-size:12.5px;"></span>
       <button type="button" id="xiorToggleAll" class="btn btn-ghost btn-sm"
               style="margin-left:auto;">{{ _('select_all') }}</button>
     </div>
     <div class="card-body">
       <style>
-        /* 多列流式而不是 grid：grid 里展开一个卡片会把**整行**撑高，旁边
-           留下大片空洞（原来的实现就是这样，看着像坏了）。多列布局下卡片
-           纵向流动，展开只影响自己那一列。
-           城市按字母序排列，列优先的阅读顺序反而更像索引。 */
-        .xior-grid{ columns:230px 4; column-gap:10px; }
-        .xior-city-card{
-          break-inside:avoid; margin-bottom:10px;
-          border:1px solid var(--border);
-          border-radius:var(--radius-lg); background:var(--surface);
-          transition:border-color .15s, box-shadow .15s;
+        /* 和同页「H2S 监控城市」保持同一套语言：朴素的多列复选框清单，
+           没有边框、没有填色。上一版做成描边+染色的卡片，全选时 14 个块
+           一起高亮，整片都在喊，和页面其它部分完全不是一路。
+
+           楼栋总共只有 30 个，所以**不折叠**——展开/收起本身就是多余的
+           交互，还会引入「折叠时看不见选了什么」的新问题。层级改用缩进
+           和字重表达。 */
+        .xior-list{ columns:200px 4; column-gap:28px; }
+        .xior-group{ break-inside:avoid; margin:0 0 14px; }
+        /* 城市是分组标题，不是主体——压暗、缩小，让楼栋成为视觉主角 */
+        .xior-group > .xior-city-row{
+          display:flex; align-items:center; gap:8px; margin-bottom:4px;
+          font-size:11.5px; font-weight:600; letter-spacing:.04em;
+          text-transform:uppercase; color:var(--text3); cursor:pointer;
         }
-        .xior-city-card:hover{ border-color:var(--text3); }
-        /* 选中状态用边框+底色表达，折叠时也看得出来 */
-        .xior-city-card.is-some{ border-color:var(--accent); }
-        .xior-city-card.is-all{ border-color:var(--accent); background:var(--accent-soft); }
-        .xior-summary{
-          list-style:none; user-select:none; cursor:pointer;
-          display:flex; align-items:center; gap:8px; padding:10px 12px;
-        }
-        .xior-summary::-webkit-details-marker{ display:none; }
-        .xior-summary .xior-name{ font-weight:600; font-size:13.5px; flex:1; min-width:0;
-          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-        /* 每城的 已选/总数。0 选中时压暗，避免一屏全是高对比数字 */
-        .xior-tally{ font-size:11.5px; color:var(--text3); font-variant-numeric:tabular-nums; }
-        .xior-city-card.is-some .xior-tally,
-        .xior-city-card.is-all  .xior-tally{ color:var(--accent); font-weight:600; }
-        .xior-chev{ color:var(--text3); font-size:11px; transition:transform .18s; }
-        .xior-details[open] .xior-chev{ transform:rotate(180deg); }
-        .xior-bldgs{ display:flex; flex-wrap:wrap; gap:6px; padding:0 12px 12px; }
-        /* 楼栋做成 chip：勾选态一眼可辨，比一排裸 checkbox 好扫 */
+        .xior-group > .xior-city-row input{ margin:0; }
         .xior-bldg{
-          display:inline-flex; align-items:center; gap:6px; margin:0;
-          padding:4px 9px; border:1px solid var(--border); border-radius:999px;
-          font-size:12px; font-weight:400; cursor:pointer; white-space:nowrap;
-          transition:background .15s, border-color .15s;
+          display:flex; align-items:center; gap:8px;
+          padding:3px 0 3px 22px; margin:0; font-size:13px; cursor:pointer;
         }
-        .xior-bldg:hover{ background:var(--surface-hover); }
         .xior-bldg input{ margin:0; }
-        .xior-bldg.on{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
       </style>
 
-      <div class="xior-grid">
+      <div class="xior-list">
         {% for city, buildings in xior_by_city | dictsort %}
-        <details class="xior-details xior-city-card">
-          <summary class="xior-summary">
-            {# 城市勾选框独立于 summary 的展开行为：点名字展开，点框全选该城 #}
-            <input type="checkbox" class="xior-city" onclick="event.stopPropagation();"
-                   {% if xior_city_all_checked.get(city) %}checked{% endif %}>
-            <span class="xior-name">{{ city }}</span>
-            <span class="xior-tally"></span>
-            <i class="bi bi-chevron-down xior-chev"></i>
-          </summary>
-          <div class="xior-bldgs">
-            {% for b in buildings %}
-            <label class="xior-bldg">
-              <input type="checkbox" name="xior_city_selected"
-                     value="{{ city }} {{ b.bldg }},{{ b.key }}"
-                     {% if b.key in selected_xior_keys %}checked{% endif %}>
-              {{ b.bldg }}
-            </label>
-            {% endfor %}
-          </div>
-        </details>
+        <div class="xior-group">
+          <label class="xior-city-row">
+            <input type="checkbox" class="xior-city">
+            {{ city }}
+          </label>
+          {% for b in buildings %}
+          <label class="xior-bldg">
+            <input type="checkbox" name="xior_city_selected"
+                   value="{{ city }} {{ b.bldg }},{{ b.key }}"
+                   {% if b.key in selected_xior_keys %}checked{% endif %}>
+            {{ b.bldg }}
+          </label>
+          {% endfor %}
+        </div>
         {% endfor %}
       </div>
       <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_xior_hint') }}</div>
@@ -357,61 +332,56 @@ function restartMonitor(btn) {
 }
 
 /* ── Xior 楼盘选择 ───────────────────────────────────────────────
-   折叠时也要能看出「这个城市选了几栋」，否则只能一个个展开去找。
-   三处状态保持同步：城市勾选框（含 indeterminate）、每城计数、总计数。 */
+   楼栋不折叠（总共 30 个），所以这里只做三件事：城市勾选框的
+   全选/indeterminate、标题栏总计、全选/清空按钮。 */
 (function () {
-  var grid = document.querySelector('.xior-grid');
-  if (!grid) return;
-  var cards = Array.prototype.slice.call(grid.querySelectorAll('.xior-city-card'));
-  var total = grid.querySelectorAll('.xior-bldg input').length;
+  var list = document.querySelector('.xior-list');
+  if (!list) return;
+  var groups = [].slice.call(list.querySelectorAll('.xior-group'));
+  var total = list.querySelectorAll('.xior-bldg input').length;
   var countEl = document.getElementById('xiorCount');
   var toggleBtn = document.getElementById('xiorToggleAll');
-  var L = (document.documentElement.lang === 'zh');
+  var zh = (document.documentElement.lang === 'zh');
 
-  function syncCard(card) {
-    var boxes = Array.prototype.slice.call(card.querySelectorAll('.xior-bldg input'));
-    var on = boxes.filter(function (b) { return b.checked; }).length;
-    card.querySelector('.xior-tally').textContent = on + '/' + boxes.length;
-    var cityBox = card.querySelector('.xior-city');
-    cityBox.checked = on > 0 && on === boxes.length;
-    /* 部分选中用 indeterminate 表示——原来只有全选/全不选两态，
-       勾了一半的城市看起来和一栋没勾完全一样。 */
-    cityBox.indeterminate = on > 0 && on < boxes.length;
-    card.classList.toggle('is-all', on === boxes.length && on > 0);
-    card.classList.toggle('is-some', on > 0 && on < boxes.length);
-    boxes.forEach(function (b) { b.closest('.xior-bldg').classList.toggle('on', b.checked); });
-    return on;
+  function boxesOf(el) {
+    return [].slice.call(el.querySelectorAll('.xior-bldg input'));
   }
 
-  function syncAll() {
-    var on = cards.reduce(function (n, c) { return n + syncCard(c); }, 0);
-    countEl.textContent = L ? ('已选 ' + on + ' / ' + total + ' 栋')
-                            : (on + ' of ' + total + ' selected');
+  function sync() {
+    var on = 0;
+    groups.forEach(function (g) {
+      var boxes = boxesOf(g);
+      var n = boxes.filter(function (b) { return b.checked; }).length;
+      on += n;
+      var city = g.querySelector('.xior-city');
+      city.checked = n === boxes.length && n > 0;
+      /* 部分选中用 indeterminate——否则勾了一半的城市和一栋没勾长得一样 */
+      city.indeterminate = n > 0 && n < boxes.length;
+    });
+    countEl.textContent = zh ? ('已选 ' + on + ' / ' + total + ' 栋')
+                             : (on + ' of ' + total + ' selected');
     toggleBtn.textContent = (on === total)
-      ? (L ? '清空' : 'Clear all')
-      : (L ? '全选' : 'Select all');
+      ? (zh ? '清空' : 'Clear all')
+      : (zh ? '全选' : 'Select all');
   }
 
-  grid.addEventListener('change', function (e) {
-    var t = e.target;
-    if (t.classList.contains('xior-city')) {
-      /* 点城市勾选框 = 整城全选/全不选。indeterminate 时按「全选」处理，
-         这是用户点它时最可能想要的。 */
-      var card = t.closest('.xior-city-card');
-      var want = t.checked;
-      card.querySelectorAll('.xior-bldg input').forEach(function (b) { b.checked = want; });
+  list.addEventListener('change', function (e) {
+    if (e.target.classList.contains('xior-city')) {
+      /* indeterminate 时点它按「整城全选」处理——那是用户此时最可能想要的 */
+      var want = e.target.checked;
+      boxesOf(e.target.closest('.xior-group')).forEach(function (b) { b.checked = want; });
     }
-    syncAll();
+    sync();
   });
 
   toggleBtn.addEventListener('click', function () {
-    var boxes = Array.prototype.slice.call(grid.querySelectorAll('.xior-bldg input'));
+    var boxes = boxesOf(list);
     var allOn = boxes.every(function (b) { return b.checked; });
     boxes.forEach(function (b) { b.checked = !allOn; });
-    syncAll();
+    sync();
   });
 
-  syncAll();
+  sync();
 })();
 </script>
 {% endblock %}
