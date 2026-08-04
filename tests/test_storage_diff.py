@@ -155,50 +155,45 @@ class TestDiffMixed:
 
 
 class TestMarkStaleListings:
-    def test_marks_old_available_listing_as_inferred_occupied(self, temp_db):
+    """两段式收敛：消失 30 分钟 → 推测 Reserved，消失 2 小时 → Occupied。
+
+    细节和边界见 tests/test_stale_convergence.py；这里只覆盖 diff() 那侧的
+    衔接和范围限定。
+    """
+
+    def test_vanished_listing_goes_reserved_then_occupied(self, temp_db):
         temp_db.diff([_l("a", status="Available to book")])
         _set_last_seen(temp_db, "a", days_ago=8)
 
-        updated = temp_db.mark_stale_listings(days=7)
-
+        assert temp_db.mark_stale_listings() == 1
         row = temp_db.get_listing("a")
-        assert updated == 1
+        assert row["status"] == "Reserved"
+        assert row["status_is_inferred"] == 1
+
+        assert temp_db.mark_stale_listings() == 1
+        row = temp_db.get_listing("a")
         assert row["status"] == "Occupied"
         assert row["last_status"] == "Occupied"
         assert row["status_is_inferred"] == 1
+
+        # 推测转换不写 status_changes：不触发通知 / auto_book
         assert temp_db.get_recent_changes(hours=24) == []
 
-    def test_recent_available_listing_is_not_marked(self, temp_db):
+    def test_recent_listing_is_not_marked(self, temp_db):
         temp_db.diff([_l("a", status="Available to book")])
-        _set_last_seen(temp_db, "a", days_ago=6)
 
-        updated = temp_db.mark_stale_listings(days=7)
-
+        assert temp_db.mark_stale_listings() == 0
         row = temp_db.get_listing("a")
-        assert updated == 0
         assert row["status"] == "Available to book"
         assert row["status_is_inferred"] == 0
-
-    def test_lottery_uses_shorter_stale_window(self, temp_db):
-        temp_db.diff([
-            _l("book", status="Available to book"),
-            _l("lottery", status="Available in lottery"),
-        ])
-        _set_last_seen(temp_db, "book", days_ago=3)
-        _set_last_seen(temp_db, "lottery", days_ago=3)
-
-        updated = temp_db.mark_stale_listings(days=7, lottery_days=2)
-
-        assert updated == 1
-        assert temp_db.get_listing("book")["status"] == "Available to book"
-        assert temp_db.get_listing("lottery")["status"] == "Occupied"
 
     def test_marking_is_idempotent(self, temp_db):
         temp_db.diff([_l("a", status="Available in lottery")])
         _set_last_seen(temp_db, "a", days_ago=8)
 
-        assert temp_db.mark_stale_listings(days=7) == 1
-        assert temp_db.mark_stale_listings(days=7) == 0
+        assert temp_db.mark_stale_listings() == 1     # → Reserved
+        assert temp_db.mark_stale_listings() == 1     # → Occupied
+        assert temp_db.mark_stale_listings() == 0
 
     def test_city_filter_limits_stale_marking_to_current_monitor_cities(self, temp_db):
         temp_db.diff([
@@ -208,10 +203,10 @@ class TestMarkStaleListings:
         _set_last_seen(temp_db, "a", days_ago=8)
         _set_last_seen(temp_db, "b", days_ago=8)
 
-        updated = temp_db.mark_stale_listings(days=7, cities=["Eindhoven"])
+        updated = temp_db.mark_stale_listings(cities=["Eindhoven"])
 
         assert updated == 1
-        assert temp_db.get_listing("a")["status"] == "Occupied"
+        assert temp_db.get_listing("a")["status"] == "Reserved"
         assert temp_db.get_listing("b")["status"] == "Available to book"
 
     def test_source_city_filter_limits_stale_marking_to_source(self, temp_db):
@@ -223,19 +218,18 @@ class TestMarkStaleListings:
         _set_last_seen(temp_db, "od", days_ago=8)
 
         updated = temp_db.mark_stale_listings(
-            days=7,
             source_city_pairs=[("ourdomain", "Amsterdam Diemen")],
         )
 
         assert updated == 1
         assert temp_db.get_listing("h2s")["status"] == "Available to book"
-        assert temp_db.get_listing("od")["status"] == "Occupied"
+        assert temp_db.get_listing("od")["status"] == "Reserved"
 
     def test_empty_city_filter_is_noop(self, temp_db):
         temp_db.diff([_l("a", status="Available to book", city="Eindhoven")])
         _set_last_seen(temp_db, "a", days_ago=8)
 
-        updated = temp_db.mark_stale_listings(days=7, cities=[])
+        updated = temp_db.mark_stale_listings(cities=[])
 
         assert updated == 0
         assert temp_db.get_listing("a")["status"] == "Available to book"
@@ -243,7 +237,8 @@ class TestMarkStaleListings:
     def test_real_api_return_resets_inferred_flag_and_records_status_change(self, temp_db):
         temp_db.diff([_l("a", status="Available to book")])
         _set_last_seen(temp_db, "a", days_ago=8)
-        assert temp_db.mark_stale_listings(days=7) == 1
+        temp_db.mark_stale_listings()       # → Reserved
+        temp_db.mark_stale_listings()       # → Occupied
 
         new, changes = temp_db.diff([_l("a", status="Available to book")])
 

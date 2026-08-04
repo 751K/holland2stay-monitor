@@ -157,25 +157,37 @@ class TestFailOpen:
         assert _status(store, "anything") == ("Available to book", 0)
 
 
-class TestExistingBehaviourUnchanged:
-    def test_monitored_city_still_ages_on_the_short_threshold(self, store):
-        """老路径不能被新分支带偏：在监控的城市仍按 7 天 / 2 天。"""
+class TestAgingPathStillWorks:
+    """孤儿那条分支不能把老化那条带偏——两者范围互斥，各管各的。
+
+    老化的阈值本身已经从「7 天 / 2 天」改成统一的「30 分钟 → Reserved，
+    2 小时 → Occupied」，细节见 tests/test_stale_convergence.py。
+    """
+
+    def test_monitored_city_still_ages(self, store):
         _add(store, "eind-book", source="holland2stay", city="Eindhoven", days_ago=10)
         _add(store, "eind-lot", source="holland2stay", city="Eindhoven",
              status="Available in lottery", days_ago=3)
-        _add(store, "eind-fresh", source="holland2stay", city="Eindhoven", days_ago=1)
+        _add(store, "eind-fresh", source="holland2stay", city="Eindhoven", days_ago=0)
 
         store.mark_stale_listings(
-            days=7, lottery_days=2,
             source_city_pairs=MONITORED, monitored_pairs=MONITORED,
         )
 
-        assert _status(store, "eind-book") == ("Occupied", 1)
-        assert _status(store, "eind-lot") == ("Occupied", 1)
+        assert _status(store, "eind-book") == ("Reserved", 1)
+        assert _status(store, "eind-lot") == ("Reserved", 1)
         assert _status(store, "eind-fresh") == ("Available to book", 0)
 
-    def test_reserved_in_a_monitored_city_is_still_left_alone(self, store):
-        """H2S 的 Reserved 能合法挂很久，在监控范围内不收敛。"""
+    def test_a_long_vanished_platform_reserved_also_converges(self, store):
+        """前提变了，记一下为什么。
+
+        原来这里断言的是「H2S 的 Reserved 在监控范围内永不收敛」，于是线上那
+        32 条（最久 86 天没见到）永远卡着。
+
+        现在它也会收敛：H2S 的 Reserved 是真实状态（有人下单未付款），但那个
+        状态**有硬性时限**——官方付款限时 2 小时，超时未付就作废并重新上架。
+        所以一条消失超过 2 小时的 Reserved，必然已经落定。
+        """
         _add(store, "eind-res", source="holland2stay", city="Eindhoven",
              status="Reserved", days_ago=90)
 
@@ -183,7 +195,7 @@ class TestExistingBehaviourUnchanged:
             source_city_pairs=MONITORED, monitored_pairs=MONITORED,
         )
 
-        assert _status(store, "eind-res") == ("Reserved", 0)
+        assert _status(store, "eind-res") == ("Occupied", 1)
 
     def test_no_scope_at_all_behaves_as_before(self, store):
         """完全不传范围时是老语义：全库按老化阈值收敛。"""

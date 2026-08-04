@@ -440,12 +440,54 @@ def _monitored_pairs(cfg) -> list[tuple[str, str]]:
         return []
 
 
+#: 「消失多久算不再可订 / 算彻底没了」。四个平台、所有状态统一一套。
+#:
+#: 曾经按 (source, 状态类) 分开配过，最后收掉了：那些差别描述的是「feed 会不会
+#: 保留下架房源」，而实测下来四个平台的终态都是**从 feed 里消失**——H2S 227 条
+#: 推测 Occupied vs 4 条平台报的，OurDomain 9 vs 1。既然消失是共同的下架信号，
+#: 就不该有四套判据。
+#:
+#: 数怎么定的：轮次约 1 分钟一次，30 分钟 ≈ 30 轮连续完整扫描里都没有它，
+#: 而同一次响应里通常还有二十几条别的房源作旁证。OurDomain / OurCampus 另有
+#: 一道闸——``scrapers.ourdomain`` 要求连续 3 轮返回 0 个单元才承认「真没房」。
+#:
+#: 收得太早的代价不是「少通知」而是「多通知」：房源被误判之后又出现在 feed 里，
+#: 会产生一次状态变更，用户收到一条假的重新上架。中间那站 Reserved 就是为此
+#: 存在的——2 小时内回来只是 ``Reserved → 可订``，是最常见的正常迁移。
+_STALE_RESERVED_HOURS = 0.5
+#: 2 小时对齐 **H2S 官方的付款限时**：消失超过它，预留必然已经落定。
+_STALE_OCCUPIED_HOURS = 2.0
+
+
+def _stale_hours() -> tuple[float, float]:
+    """``(消失多久转 Reserved, 消失多久判 Occupied)``，环境变量可覆盖。"""
+    def _read(name: str, default: float) -> float:
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return default
+        try:
+            return max(0.25, min(24.0 * 30, float(raw)))
+        except ValueError:
+            logger.warning("%s=%r 不是数字，改用默认值 %s", name, raw, default)
+            return default
+
+    reserved = _read("STALE_RESERVED_HOURS", _STALE_RESERVED_HOURS)
+    occupied = _read("STALE_OCCUPIED_HOURS", _STALE_OCCUPIED_HOURS)
+    # 终态窗口必须 >= 中间站，否则第二段会抢在第一段之前把房源直接判死，
+    # 中间那一站形同虚设——而它正是「判错时代价小」的全部来源。
+    if occupied < reserved:
+        logger.warning(
+            "STALE_OCCUPIED_HOURS(%s) 小于 STALE_RESERVED_HOURS(%s)，"
+            "会让 Reserved 那一站失效；已按 reserved 取齐。", occupied, reserved,
+        )
+        occupied = reserved
+    return reserved, occupied
+
+
 def _mark_stale_listings_for_complete_cities(
         storage: Storage,
         completeness: dict[str, bool],
         *,
-        days: int = 7,
-        lottery_days: int = 2,
         monitored_pairs: list[tuple[str, str]] | None = None,
         orphan_days: int = 30,
 ) -> int:
@@ -455,8 +497,8 @@ def _mark_stale_listings_for_complete_cities(
     的完整性去收敛另一个 source 的同名城市。
 
     ``monitored_pairs`` 是**配置里**的全部目标，和上面那个"本轮扫全了的"
-    不是一回事——分片和节流会让正常监控的城市这轮不出现。它只用于第二条
-    路径：把已经彻底移出监控的城市里的鬼影 listing 也收敛掉。
+    不是一回事——分片和节流会让正常监控的城市这轮不出现。它只用于孤儿路径：
+    把已经彻底移出监控的城市里的鬼影 listing 也收敛掉。
     """
     complete_cities: list[str] = []
     complete_source_cities: list[tuple[str, str]] = []
@@ -473,19 +515,35 @@ def _mark_stale_listings_for_complete_cities(
         logger.info("跳过 stale listing 状态收敛：本轮无完整扫描城市")
         return 0
 
-    labels = sorted(complete_cities + [f"{s}:{c}" for s, c in complete_source_cities])
-    logger.info(
-        "执行 stale listing 状态收敛：完整城市 %s",
-        ", ".join(labels),
-    )
+    reserved_hours, occupied_hours = _stale_hours()
     return storage.mark_stale_listings(
-        days=days,
-        lottery_days=lottery_days,
         cities=complete_cities if complete_cities else None,
         source_city_pairs=complete_source_cities if complete_source_cities else None,
         monitored_pairs=monitored_pairs,
         orphan_days=orphan_days,
+        reserved_hours=reserved_hours,
+        occupied_hours=occupied_hours,
     )
+
+
+def _sweep_aging(storage: Storage, completeness: dict[str, bool]) -> int:
+    """每轮跑一趟老化收敛（不含孤儿路径），返回收敛条数。
+
+    为什么必须每轮跑
+    ----------------
+    孤儿那趟 24 小时一次。那个节奏对 30 天的宽限期是合适的，但会把小时级的
+    老化窗口整个吃掉——房源满 2 小时该判终态了，实际要等到下一次 24 小时的
+    整点，最坏挂 26 小时。**阈值调了不改节奏，等于没调。**
+
+    每轮跑没有累积开销：到终态的行之后一律被 WHERE 排除，稳态下命中 0 行。
+    **阈值本身就是节流器**，不需要再加一个间隔开关。
+
+    抽成函数不是为了复用（只有一个调用点），是为了让**调用点本身**可测：
+    这里最容易写错的是「顺手把 ``monitored_pairs`` 也传进去」，那会把扫全库
+    的孤儿收敛拉进一条每轮都跑的路径上。那种错误在功能上看不出来——孤儿本来
+    也该被收敛，只是不该由这一趟来做——只有盯着调用参数才能发现。
+    """
+    return _mark_stale_listings_for_complete_cities(storage, completeness)
 
 
 def _stale_sweep_decision(
@@ -2383,8 +2441,23 @@ async def main_loop(
                         int(prev), int(adaptive_peak), cfg.min_interval,
                     )
 
-            # 状态收敛兜底：仅对本轮完整扫描成功的城市执行。
+            # 状态收敛：仅对本轮完整扫描成功的城市执行。
             # 整轮连接失败会在 run_once() 抛出并跳过这里；部分城市不完整则不收敛该城市。
+            #
+            # 老化那两段**每轮都跑**：它们是小时级的，等 24 小时那一趟等于阈值
+            # 白调。每轮跑没有累积开销——到终态的行之后一律被 WHERE 排除。
+            try:
+                aged = _sweep_aging(storage, city_completeness)
+                if aged:
+                    r_h, o_h = _stale_hours()
+                    logger.info(
+                        "已收敛 %d 条未见 listing（消失 %gh 转推测 Reserved，"
+                        "%gh 判 Occupied——后者对齐 H2S 官方付款限时）",
+                        aged, r_h, o_h,
+                    )
+            except Exception:
+                logger.exception("老化收敛失败（已忽略）")
+
             sweep = _stale_sweep_decision(
                 city_completeness,
                 last_stale_sweep_time,
@@ -2400,15 +2473,13 @@ async def main_loop(
                     stale = _mark_stale_listings_for_complete_cities(
                         storage,
                         city_completeness,
-                        days=7,
-                        lottery_days=2,
                         monitored_pairs=_monitored_pairs(cfg),
                         orphan_days=30,
                     )
                     if stale:
                         logger.info(
-                            "已将 %d 条未见 listing 推测为 Occupied"
-                            "（在监控城市 book 7 天 / lottery 2 天；已移出监控的城市 30 天）",
+                            "孤儿收敛：已将 %d 条未见 listing 推测为 Occupied"
+                            "（已移出监控范围的城市，宽限期 30 天）",
                             stale,
                         )
                 except Exception:

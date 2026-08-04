@@ -12,6 +12,31 @@ from models import Listing, canonical_feature
 
 logger = logging.getLogger(__name__)
 
+#: 「消失多久算不再可订」/「消失多久算彻底没了」的默认小时数。
+#:
+#: 四个平台、所有状态**统一一套**。曾经按 (source, 状态类) 分开配过，最后收掉
+#: 了：那些差别描述的是「feed 会不会保留下架房源」，而实测下来四个平台的终态
+#: 都是**从 feed 里消失**——H2S 有 227 条推测 Occupied vs 4 条平台报的，
+#: OurDomain 9 vs 1。既然消失是共同的下架信号，就不该有四套判据。
+DEFAULT_RESERVED_HOURS = 0.5
+DEFAULT_OCCUPIED_HOURS = 2.0
+
+#: 2 小时不是随手取的：**H2S 官方的付款限时就是 2 小时**。
+#:
+#: 这个数同时管住两种 Reserved，而且都成立：
+#:
+#: - 我们推出来的（消失了但还没到终态）——2 小时够久，足以排除单次抓取抖动；
+#: - **平台自己报的**（有人下单未付款）——一条已经消失超过 2 小时的 Reserved，
+#:   付款窗口必然已经关闭：要么付成了，要么作废了；作废的话它会以「可订」重新
+#:   出现在 feed 里，而我们没看到它。所以判 Occupied 是对的。
+#:
+#: 线上配对出的 Reserved 时段中位 6.3 小时、最长 21 天，看起来和 2 小时的付款
+#: 限时矛盾——但那些时段量的是「第一次看到它 Reserved」到「它以可订回来」的
+#: 间隔，中间大部分时间它根本不在 feed 里（``available_to_book`` 过滤器把
+#: Reserved 挡掉了，只有状态刚翻转那一两轮因为索引没跟上才漏出来）。也就是说
+#: 那不是付款窗口，是「预留 + 作废 + 重新上架」的整个周期。这类回归会产生
+#: ``Occupied → 可订``，而那是**真的重新可订了**，本来就该通知。
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -201,62 +226,71 @@ class ListingOps:
                 listing_ids,
             )
 
-    # ── 状态收敛：last_seen 老化兜底 ─────────────────────────────────
-    # 当前抓取源只返回 Available to book / lottery 子集；一旦 listing 转入
-    # Reserved/Occupied，API 不再返回，DB 里就会永远停在 "Available" → 鬼影。
+    # ── 状态收敛：从 feed 里消失 = 唯一的下架信号 ────────────────────
     #
-    # 时间窗兜底：listing 已经 N 天没有刷新 last_seen，几乎可以肯定不再可订，
-    # 直接标为 ``Occupied`` 让 UI/统计自然处理；同时 ``status_is_inferred=1``
-    # 留下"这是推测值"的标记，供 Phase 3 的鬼影回归检测使用。
+    # 四个平台的终态都是**从 feed 里消失**，而不是被报成 Occupied：
+    # H2S 227 条推测 Occupied vs 4 条平台报的，OurDomain 9 vs 1。平台不会说
+    # 「这套没了」，只是不再返回它。所以「多久没见到」是我们唯一的判据。
     #
-    # Lottery 的生命周期通常更短：从完整扫描结果里消失后，大概率已经被
-    # reserve/occupy，因此使用独立、更短的缺席窗口。
+    # 两段
+    # ----
+    # 消失 ``reserved_hours``  → Reserved（推测）：够强到不该再说「可订」
+    # 消失 ``occupied_hours``  → Occupied（推测）：终态
     #
-    # 不写 status_changes：推测转换不触发通知/auto_book。Phase 3 引入
-    # synthetic 列后才会写审计行。
+    # 中间那一站是有意的。「没见到了」够强到不该再当可订，但不足以断言
+    # 「已出租」，直接跳终态是把推断当事实：判错时房源从面板上彻底消失，等
+    # feed 恢复再出现会产生 ``Occupied → 可订``，用户收到一批假的「重新上架」。
+    # 落在 Reserved 上代价小得多——它本来就是过渡态，``Reserved → 可订`` 在
+    # H2S 上是最常见的迁移之一，语义就是「别人的预留没成」。而且
+    # ``Listing.is_available`` 不含 Reserved，「不再显示为可订」这件正事第一段
+    # 就办到了。
     #
-    # 仅作用于"看起来还可用"的 listing；已经 Occupied / 已 inferred 的不动。
-    _STALE_GENERAL_STATUSES = (
+    # 不写 status_changes：推测转换不触发通知 / auto_book。
+    _STALE_AVAILABLE_STATUSES = (
         "Available to book",
+        "Available in lottery",
         "Unknown",
     )
-    _STALE_LOTTERY_STATUS = "Available in lottery"
+    _STALE_INTERMEDIATE_STATUS = "Reserved"
 
     def mark_stale_listings(
         self,
-        days: int = 7,
         cities: Optional[list[str]] = None,
-        lottery_days: int = 2,
         source_city_pairs: Optional[list[tuple[str, str]]] = None,
         monitored_pairs: Optional[list[tuple[str, str]]] = None,
         orphan_days: int = 30,
+        reserved_hours: float = DEFAULT_RESERVED_HOURS,
+        occupied_hours: float = DEFAULT_OCCUPIED_HOURS,
     ) -> int:
-        """
-        把 `last_seen` 早于 cutoff 且状态仍是"看起来可用"的 listing
-        标为 ``Occupied`` + ``status_is_inferred=1``。
+        """按「多久没见到」收敛 listing 状态。
 
-        两条收敛路径
-        ------------
-        1. **仍在监控的城市**：按 ``days`` / ``lottery_days`` 老化。范围由
-           ``cities`` / ``source_city_pairs`` 限定——传的是"本轮完整扫描成功
-           的城市"，只有确认扫全了才敢说"没见到 = 没了"。
+        三条路径
+        --------
+        1. **消失 ``reserved_hours``** → ``Reserved`` + ``status_is_inferred=1``。
+           范围由 ``cities`` / ``source_city_pairs`` 限定——传的是"本轮完整扫描
+           成功的城市"，只有确认扫全了才敢说"没见到 = 没了"。
 
-        2. **已经掉出监控范围的 (source, city)**：按 ``orphan_days`` 老化。
-           这条是 2026-08-04 补的。第 1 条的范围限定有个副作用：一旦某个城市
-           被移出监控，它就再也不会出现在"完整扫描"名单里，于是**永远不会被
-           收敛**——7 天阈值根本没机会生效。线上因此攒了 173 条鬼影：38 条
-           Xior Vaals，以及 135 条 H2S 的（Rotterdam 64 条、The Hague 11 条
-           等），绝大多数最后一次见到是 2026-05-08，快三个月了还挂着"可订"。
+        2. **Reserved 消失 ``occupied_hours``** → ``Occupied``（终态）。
+           不分「我们推的」和「平台报的」——H2S 官方付款限时就是 2 小时，
+           一条消失超过 2 小时的 Reserved，付款窗口必然已经关闭（详见模块顶部
+           ``DEFAULT_OCCUPIED_HOURS`` 的说明）。线上那 32 条 H2S Reserved
+           （最久 86 天没见到）也是这么清掉的。
 
-           这条路径收敛 ``status != 'Occupied'`` 的全部状态，不只是
-           book/lottery：一个已经完全不再观察的城市，我们手上任何非 Occupied
-           的状态都同样无从核实，Reserved 也不例外。
+        3. **已经掉出监控范围的 (source, city)**：按 ``orphan_days`` 老化。
+           第 1 条的范围限定有个副作用：一旦某个城市被移出监控，它就再也不会
+           出现在"完整扫描"名单里，于是**永远不会被收敛**。线上因此攒过 173 条
+           鬼影，绝大多数最后一次见到是三个月前还挂着"可订"。
+
+           这条路径收敛 ``status != 'Occupied'`` 的全部状态：一个已经完全不再
+           观察的城市，我们手上任何非 Occupied 的状态都同样无从核实。
+
+        执行顺序是**第 2 条先跑**。反过来的话，一条消失很久的房源会在同一次
+        调用里被连改两次（先 Reserved 再 Occupied），返回的行数把它算两遍，
+        「本轮收敛了几条」就不再等于「几条房源变了状态」。
 
         Parameters
         ----------
-        days : book/unknown 老化阈值；默认 7 天（保守，避免误伤）
         cities : 限定当前仍在监控的城市；传入空列表时不更新任何 listing
-        lottery_days : lottery 老化阈值；默认 2 天
         source_city_pairs : 限定 source + city 组合，用于多源同名城市隔离
         monitored_pairs : **当前配置里**全部 (source, city) 目标。注意这和
             ``source_city_pairs`` 不是一回事：后者是"本轮扫全了的"，前者是
@@ -266,10 +300,11 @@ class ListingOps:
             把整库判死）。
         orphan_days : 掉出监控范围后的宽限期；默认 30 天。取长是为了防误伤
             ——临时关一天再打开的城市不该被判死。
+        reserved_hours / occupied_hours : 见模块顶部 ``DEFAULT_*`` 的说明。
 
         Returns
         -------
-        本次实际更新的行数（已 Occupied / inferred=1 的不会被命中，幂等）
+        本次实际更新的行数（幂等：到终态的不会被重复命中）
         """
         city_filter = [c for c in (cities or []) if c]
         source_city_filter = [
@@ -285,67 +320,79 @@ class ListingOps:
             return 0
 
         now = datetime.now(timezone.utc)
-        cutoff_general = (now - timedelta(days=max(1, int(days)))).isoformat()
-        cutoff_lottery = (now - timedelta(days=max(1, int(lottery_days)))).isoformat()
-        general_placeholders = ",".join("?" * len(self._STALE_GENERAL_STATUSES))
 
-        # ── 路径 1：仍在监控的城市，按老化阈值 ────────────────────────── #
-        aged_sql = (
-            f"(last_seen < ? AND status IN ({general_placeholders})) "
-            f"OR (last_seen < ? AND status = ?)"
-        )
-        aged_params: list[str] = [
-            cutoff_general,
-            *self._STALE_GENERAL_STATUSES,
-            cutoff_lottery,
-            self._STALE_LOTTERY_STATUS,
-        ]
+        def _cutoff(hours: float) -> str:
+            # 下限 15 分钟：配成 0 会把整个监控范围里的房源当场判死，而这种
+            # 配置错误在日志里看不出来——只会表现成「房源突然全没了」。
+            return (now - timedelta(hours=max(0.25, float(hours)))).isoformat()
+
+        # 范围子句：城市名 和 / 或 (source, city) 组合。
         scope_clauses: list[str] = []
-        scope_params: list[str] = []
+        scope_params: list = []
         if city_filter:
-            city_placeholders = ",".join("?" * len(city_filter))
-            scope_clauses.append(f"city IN ({city_placeholders})")
+            scope_clauses.append("city IN (" + ",".join("?" * len(city_filter)) + ")")
             scope_params.extend(city_filter)
         if source_city_filter:
-            pair_clause = " OR ".join("(source = ? AND city = ?)" for _ in source_city_filter)
+            pair_clause = " OR ".join(
+                "(source = ? AND city = ?)" for _ in source_city_filter
+            )
             scope_clauses.append(f"({pair_clause})")
             for source, city in source_city_filter:
                 scope_params.extend([source, city])
-
-        branch_sql = f"({aged_sql})"
-        params: list[str] = list(aged_params)
-        if scope_clauses:
-            branch_sql += " AND (" + " OR ".join(scope_clauses) + ")"
-            params.extend(scope_params)
-        branches = [f"({branch_sql})"]
-
-        # ── 路径 2：已掉出监控范围的，按更长的宽限期 ──────────────────── #
-        monitored = [
-            (source, city)
-            for source, city in (monitored_pairs or [])
-            if source and city
-        ]
-        if monitored:
-            cutoff_orphan = (now - timedelta(days=max(1, int(orphan_days)))).isoformat()
-            not_monitored = " AND ".join(
-                "NOT (source = ? AND city = ?)" for _ in monitored
-            )
-            branches.append(
-                f"(last_seen < ? AND status <> 'Occupied' AND {not_monitored})"
-            )
-            params.append(cutoff_orphan)
-            for source, city in monitored:
-                params.extend([source, city])
-
-        sql = (
-            "UPDATE listings "
-            "SET status='Occupied', last_status='Occupied', status_is_inferred=1 "
-            "WHERE status_is_inferred = 0 "
-            "AND (" + " OR ".join(branches) + ")"
+        scope_sql = (
+            " AND (" + " OR ".join(scope_clauses) + ")" if scope_clauses else ""
         )
+
+        def _run(target: str, where: str, prm: list) -> int:
+            cur = self._conn.execute(
+                f"UPDATE listings "
+                f"SET status='{target}', last_status='{target}', status_is_inferred=1 "
+                f"WHERE {where}",
+                prm,
+            )
+            return cur.rowcount or 0
+
+        avail_placeholders = ",".join("?" * len(self._STALE_AVAILABLE_STATUSES))
+
         with self._conn:
-            cur = self._conn.execute(sql, params)
-        return cur.rowcount or 0
+            # ① Reserved 消失够久 → 终态。先跑，理由见上面的「执行顺序」。
+            #    不分是谁说的：官方付款限时 2 小时，消失超过它就必然已经落定。
+            n = _run(
+                "Occupied",
+                f"last_seen < ? AND status = ?{scope_sql}",
+                [_cutoff(occupied_hours), self._STALE_INTERMEDIATE_STATUS,
+                 *scope_params],
+            )
+
+            # ② 消失了但还不够久 → 不再当可订。
+            n += _run(
+                "Reserved",
+                f"last_seen < ? AND status IN ({avail_placeholders}){scope_sql}",
+                [_cutoff(reserved_hours), *self._STALE_AVAILABLE_STATUSES,
+                 *scope_params],
+            )
+
+            # ③ 孤儿：已经掉出监控范围的，按更长的宽限期直接判终态。
+            monitored = [
+                (source, city)
+                for source, city in (monitored_pairs or [])
+                if source and city
+            ]
+            if monitored:
+                not_monitored = " AND ".join(
+                    "NOT (source = ? AND city = ?)" for _ in monitored
+                )
+                prm: list = [
+                    (now - timedelta(days=max(1, int(orphan_days)))).isoformat()
+                ]
+                for source, city in monitored:
+                    prm.extend([source, city])
+                n += _run(
+                    "Occupied",
+                    f"last_seen < ? AND status <> 'Occupied' AND {not_monitored}",
+                    prm,
+                )
+        return n
 
     # ── 基础查询 ────────────────────────────────────────────────────
 
