@@ -167,29 +167,71 @@
   <div class="card mb-4">
     <div class="section-header">
       <i class="bi bi-building mr-2" style="color:var(--accent);"></i>{{ _('settings_xior_cities') }}
-      <button type="button" class="btn btn-ghost btn-sm" onclick="var cbs=this.parentElement.parentElement.querySelectorAll('.xior-bldg input[type=checkbox]');var all=Array.from(cbs).every(c=>c.checked);cbs.forEach(c=>c.checked=!all);this.textContent=all?'{{ _('select_all') }}':'{{ _('deselect_all') }}'" style="margin-left:auto;">{{ _('select_all') }}</button>
+      {# 计数放标题里：折叠状态下也能一眼看出选了多少，不用逐个展开 #}
+      <span id="xiorCount" class="badge badge-neutral" style="margin-left:10px;"></span>
+      <button type="button" id="xiorToggleAll" class="btn btn-ghost btn-sm"
+              style="margin-left:auto;">{{ _('select_all') }}</button>
     </div>
     <div class="card-body">
       <style>
-        .xior-details summary { list-style: none; user-select: none; }
-        .xior-details summary::-webkit-details-marker { display: none; }
-        .xior-details[open] summary .bi-chevron-down { transform: rotate(180deg); }
+        /* 多列流式而不是 grid：grid 里展开一个卡片会把**整行**撑高，旁边
+           留下大片空洞（原来的实现就是这样，看着像坏了）。多列布局下卡片
+           纵向流动，展开只影响自己那一列。
+           城市按字母序排列，列优先的阅读顺序反而更像索引。 */
+        .xior-grid{ columns:230px 4; column-gap:10px; }
+        .xior-city-card{
+          break-inside:avoid; margin-bottom:10px;
+          border:1px solid var(--border);
+          border-radius:var(--radius-lg); background:var(--surface);
+          transition:border-color .15s, box-shadow .15s;
+        }
+        .xior-city-card:hover{ border-color:var(--text3); }
+        /* 选中状态用边框+底色表达，折叠时也看得出来 */
+        .xior-city-card.is-some{ border-color:var(--accent); }
+        .xior-city-card.is-all{ border-color:var(--accent); background:var(--accent-soft); }
+        .xior-summary{
+          list-style:none; user-select:none; cursor:pointer;
+          display:flex; align-items:center; gap:8px; padding:10px 12px;
+        }
+        .xior-summary::-webkit-details-marker{ display:none; }
+        .xior-summary .xior-name{ font-weight:600; font-size:13.5px; flex:1; min-width:0;
+          overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        /* 每城的 已选/总数。0 选中时压暗，避免一屏全是高对比数字 */
+        .xior-tally{ font-size:11.5px; color:var(--text3); font-variant-numeric:tabular-nums; }
+        .xior-city-card.is-some .xior-tally,
+        .xior-city-card.is-all  .xior-tally{ color:var(--accent); font-weight:600; }
+        .xior-chev{ color:var(--text3); font-size:11px; transition:transform .18s; }
+        .xior-details[open] .xior-chev{ transform:rotate(180deg); }
+        .xior-bldgs{ display:flex; flex-wrap:wrap; gap:6px; padding:0 12px 12px; }
+        /* 楼栋做成 chip：勾选态一眼可辨，比一排裸 checkbox 好扫 */
+        .xior-bldg{
+          display:inline-flex; align-items:center; gap:6px; margin:0;
+          padding:4px 9px; border:1px solid var(--border); border-radius:999px;
+          font-size:12px; font-weight:400; cursor:pointer; white-space:nowrap;
+          transition:background .15s, border-color .15s;
+        }
+        .xior-bldg:hover{ background:var(--surface-hover); }
+        .xior-bldg input{ margin:0; }
+        .xior-bldg.on{ border-color:var(--accent); background:var(--accent-soft); color:var(--accent); }
       </style>
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;">
+
+      <div class="xior-grid">
         {% for city, buildings in xior_by_city | dictsort %}
-        <details class="xior-details" style="background:transparent;">
-          <summary style="padding:8px 0;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
-            <label class="checkbox" style="margin:0;" onclick="event.stopPropagation();var cbs=this.closest('details').querySelectorAll('.xior-bldg input');var ch=this.querySelector('input').checked;cbs.forEach(c=>c.checked=ch);">
-              <input type="checkbox" class="xior-city" onchange="this.parentElement.click()"
-                     {% if xior_city_all_checked.get(city) %}checked{% endif %}>
-              {{ city }}
-            </label>
-            <i class="bi bi-chevron-down text-tertiary" style="transition:transform 0.2s;"></i>
+        <details class="xior-details xior-city-card">
+          <summary class="xior-summary">
+            {# 城市勾选框独立于 summary 的展开行为：点名字展开，点框全选该城 #}
+            <input type="checkbox" class="xior-city" onclick="event.stopPropagation();"
+                   {% if xior_city_all_checked.get(city) %}checked{% endif %}>
+            <span class="xior-name">{{ city }}</span>
+            <span class="xior-tally"></span>
+            <i class="bi bi-chevron-down xior-chev"></i>
           </summary>
-          <div style="padding:4px 0 12px 28px;display:flex;flex-wrap:wrap;gap:8px 16px;">
+          <div class="xior-bldgs">
             {% for b in buildings %}
-            <label class="checkbox xior-bldg" style="white-space:nowrap;font-size:12.5px;font-weight:400;">
-              <input type="checkbox" name="xior_city_selected" value="{{ city }} {{ b.bldg }},{{ b.key }}" {% if b.key in selected_xior_keys %}checked{% endif %}>
+            <label class="xior-bldg">
+              <input type="checkbox" name="xior_city_selected"
+                     value="{{ city }} {{ b.bldg }},{{ b.key }}"
+                     {% if b.key in selected_xior_keys %}checked{% endif %}>
               {{ b.bldg }}
             </label>
             {% endfor %}
@@ -313,5 +355,63 @@ function restartMonitor(btn) {
     .catch(function() { showResultToast(false, lang === 'zh' ? '请求失败' : 'Request failed'); })
     .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
 }
+
+/* ── Xior 楼盘选择 ───────────────────────────────────────────────
+   折叠时也要能看出「这个城市选了几栋」，否则只能一个个展开去找。
+   三处状态保持同步：城市勾选框（含 indeterminate）、每城计数、总计数。 */
+(function () {
+  var grid = document.querySelector('.xior-grid');
+  if (!grid) return;
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.xior-city-card'));
+  var total = grid.querySelectorAll('.xior-bldg input').length;
+  var countEl = document.getElementById('xiorCount');
+  var toggleBtn = document.getElementById('xiorToggleAll');
+  var L = (document.documentElement.lang === 'zh');
+
+  function syncCard(card) {
+    var boxes = Array.prototype.slice.call(card.querySelectorAll('.xior-bldg input'));
+    var on = boxes.filter(function (b) { return b.checked; }).length;
+    card.querySelector('.xior-tally').textContent = on + '/' + boxes.length;
+    var cityBox = card.querySelector('.xior-city');
+    cityBox.checked = on > 0 && on === boxes.length;
+    /* 部分选中用 indeterminate 表示——原来只有全选/全不选两态，
+       勾了一半的城市看起来和一栋没勾完全一样。 */
+    cityBox.indeterminate = on > 0 && on < boxes.length;
+    card.classList.toggle('is-all', on === boxes.length && on > 0);
+    card.classList.toggle('is-some', on > 0 && on < boxes.length);
+    boxes.forEach(function (b) { b.closest('.xior-bldg').classList.toggle('on', b.checked); });
+    return on;
+  }
+
+  function syncAll() {
+    var on = cards.reduce(function (n, c) { return n + syncCard(c); }, 0);
+    countEl.textContent = L ? ('已选 ' + on + ' / ' + total + ' 栋')
+                            : (on + ' of ' + total + ' selected');
+    toggleBtn.textContent = (on === total)
+      ? (L ? '清空' : 'Clear all')
+      : (L ? '全选' : 'Select all');
+  }
+
+  grid.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.classList.contains('xior-city')) {
+      /* 点城市勾选框 = 整城全选/全不选。indeterminate 时按「全选」处理，
+         这是用户点它时最可能想要的。 */
+      var card = t.closest('.xior-city-card');
+      var want = t.checked;
+      card.querySelectorAll('.xior-bldg input').forEach(function (b) { b.checked = want; });
+    }
+    syncAll();
+  });
+
+  toggleBtn.addEventListener('click', function () {
+    var boxes = Array.prototype.slice.call(grid.querySelectorAll('.xior-bldg input'));
+    var allOn = boxes.every(function (b) { return b.checked; });
+    boxes.forEach(function (b) { b.checked = !allOn; });
+    syncAll();
+  });
+
+  syncAll();
+})();
 </script>
 {% endblock %}
