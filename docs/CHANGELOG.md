@@ -1,5 +1,56 @@
 # Changelog
 
+## v1.13.2 (2026-08-04)
+
+### 新建用户时填的收件邮箱，永远收不到验证邮件
+
+`send_verification_email_sync` 只有两个调用点：`user_edit()` 里「`email_to` 变了」
+那个分支，和用户手点的「重发验证邮件」按钮。**`user_new()` 一个都没有。**
+
+于是在创建表单里直接填了 shared 收件邮箱的用户，形成一条走不出去的死路：
+
+```
+建完 → email_verified=0
+     → 不会再经过「邮箱变了」分支（除非把邮箱改成别的再改回来）
+     → 收不到验证链接
+     → notifier 直接跳过整个 email 渠道
+```
+
+线上表现是用户一封通知都收不到，而日志里只有一行
+
+```
+[WARNING] [Yixin] Email(shared) 邮箱未验证，跳过（请到设置页完成邮箱验证）
+```
+
+没有报错、没有异常，面板上看一切正常——用户以为配好了，实际一直在等一封永远
+不会到的邮件。已按此定位到线上一个真实用户并手工置位恢复。
+
+修法是把判断和发送抽成两个函数，新建与编辑共用，避免两条路径继续各写一份：
+
+- `_needs_email_verification(user, previous_email=None)` —— shared 模式、填了
+  邮箱、尚未验证。`previous_email` 只有编辑路径传：邮箱没变说明是在保存别的
+  字段，不该重发；新建路径没有「上一个邮箱」可比，有邮箱就得发。
+- `_flash_verification_email(user)` —— 发送并 flash 四种结果。**只 flash 不抛**：
+  调到这里时用户已经落库，发信失败不能把「创建成功」一起搭进去。
+
+编辑路径的限流原样保留——普通用户发验证邮件和「发测试通知」共用一个配额，
+否则它就成了一个不限次的对外发信接口。`user_new` 是 `@admin_required`，
+不需要那道闸。
+
+自助注册的两条路径（Web `/register` 与 `POST /api/v1/auth/register`）不受影响：
+它们建出来的用户根本没有 `email_to`。
+
+新增 `tests/test_user_new_email_verification.py`（7 条）。先跑测试确认能复现，
+再改代码；改完做了三次变异，每次都被对应用例抓住：
+
+| 变异 | 被抓住的用例 |
+|---|---|
+| 删掉新建路径的发送（还原成 bug） | `test_shared_email_triggers_verification` |
+| custom 模式也发（越权借用 shared 发件域） | `test_custom_mode_no_send` |
+| 编辑丢掉「邮箱没变就不重发」 | `test_edit_without_email_change_does_not_resend` |
+
+---
+
 ## v1.13.1 (2026-08-04)
 
 纯文档与注释，无行为变更。三件事：文档跟不上代码、文档里不该有生产库的数字、
