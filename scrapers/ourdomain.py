@@ -137,6 +137,18 @@ class OurDomainScraper(AbstractScraper):
     # street_address 必须是 OurDomain 该楼的**真实街道地址**——unit 名（如
     # "Diemen #6045"）是内部单元号，不可 geocode。每栋楼所有单元共享同一
     # 街道地址（地图上同一个 pin），符合"同栋楼"的物理事实。
+    #
+    # 2026-08-04 修正：两栋楼的地址原来是错的，而且互相串了。
+    # Diemen 挂的是 "Wenckebachweg 51, 1096 AN Amsterdam"（第三个地方），
+    # South East 挂的是 Diemen 那栋的 Dalsteindreef——两个 pin 各偏 4–5 km。
+    # 现在的值取自 RentCafe 页脚，也就是**平台自己写的建筑地址**：
+    #
+    #     OurDomain Amsterdam Diemen      Dalsteindreef, DIEMEN 1112 XJ
+    #     OurDomain Amsterdam South East  Markelerbergpad 5, Amsterdam 1105 AW
+    #
+    # 两条都和楼名自洽（Diemen 在 Diemen，South East 在阿姆斯特丹东南），
+    # 交叉验证过。Diemen 那条平台没给门牌号，只给到街道 + 邮编——荷兰邮编
+    # 精确到一个街区，geocode 足够，别为了"看起来完整"自己编一个门牌号。
     BUILDINGS: dict[str, dict[str, str]] = {
         "diemen": {
             "slug": "ourdomain-amsterdam-diemen",
@@ -144,7 +156,7 @@ class OurDomainScraper(AbstractScraper):
             "short_display": "Diemen",
             "property_id": "184283",
             "type": "Studio",
-            "street_address": "Wenckebachweg 51, 1096 AN Amsterdam",
+            "street_address": "Dalsteindreef, 1112 XJ Diemen",
         },
         "south-east": {
             "base": "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing",
@@ -153,7 +165,7 @@ class OurDomainScraper(AbstractScraper):
             "short_display": "South East",
             "property_id": "182801",
             "type": "Studio",
-            "street_address": "Dalsteindreef 20-40, 1112 XC Diemen",
+            "street_address": "Markelerbergpad 5, 1105 AW Amsterdam",
         },
     }
 
