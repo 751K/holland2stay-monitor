@@ -112,13 +112,8 @@ function statusColor(s) {
   return 'rgba(128,128,128,.6)';
 }
 
-function sourceLabel(s) {
-  var v = (s || 'holland2stay').toLowerCase();
-  if(v === 'holland2stay') return 'H2S';
-  if(v === 'ourdomain') return 'OD';
-  if(v === 'xior') return 'XR';
-  return (s || 'H2S').toUpperCase();
-}
+// 图表轴用缩写（全名会挤成一团）；实现见 static/app.js
+function sourceLabel(s) { return window.sourceShort(s); }
 
 function themeColors() {
   var isDark = document.documentElement.getAttribute('data-theme') === 'dark';

@@ -572,3 +572,39 @@ window.refreshMultiSelect = function(ms) {
     });
   }
 };
+
+/* ── 平台显示名 ────────────────────────────────────────────────────
+ * 原本 map / calendar / stats 各写了一份 sourceLabel，**三份都漏了
+ * ourcampus**，于是它在界面上以裸的 source key 露出来（monitoring 页更
+ * 直接，连转换都没有，四个平台全是小写 key）。收成一处，新增平台只要改
+ * 这里一个地方。
+ *
+ * 两种写法都要：全名给卡片/徽章，缩写给图表轴（轴上放全名会挤成一团）。
+ */
+window.SOURCE_LABELS = {
+  holland2stay: 'Holland2Stay',
+  ourdomain: 'OurDomain',
+  ourcampus: 'OurCampus',
+  xior: 'Xior',
+};
+
+window.SOURCE_SHORT = {
+  holland2stay: 'H2S',
+  ourdomain: 'OD',
+  ourcampus: 'OC',
+  xior: 'XR',
+};
+
+/** 平台全名。认不出的 key 首字母大写后返回，而不是硬套一个默认平台名——
+ *  把未知 source 显示成 "Holland2Stay" 会让人以为数据是那边来的。 */
+window.sourceLabel = function (source) {
+  var key = String(source || '').toLowerCase();
+  if (window.SOURCE_LABELS[key]) return window.SOURCE_LABELS[key];
+  return key ? key.charAt(0).toUpperCase() + key.slice(1) : '';
+};
+
+/** 平台缩写，给图表轴之类空间紧张的地方用。 */
+window.sourceShort = function (source) {
+  var key = String(source || '').toLowerCase();
+  return window.SOURCE_SHORT[key] || window.sourceLabel(source);
+};

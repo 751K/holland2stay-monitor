@@ -102,14 +102,6 @@ function priceShort(raw) {
   return m ? m[0] : raw;
 }
 
-function sourceLabel(source) {
-  var s = (source || 'holland2stay').toLowerCase();
-  if (s === 'ourdomain') return 'OurDomain';
-  if (s === 'holland2stay') return 'Holland2Stay';
-  if (s === 'xior') return 'Xior';
-  return source || 'Holland2Stay';
-}
-
 function statusClass(s) {
   var sl = (s||'').toLowerCase();
   if(sl.indexOf('book') !== -1) return 'book';

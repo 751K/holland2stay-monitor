@@ -119,7 +119,7 @@ function renderCards(sources) {
       : '';
     return '<div class="mon-card mon-' + esc(s.status) + '">'
       + '<div class="mon-card-head">'
-      +   '<span class="mon-src">' + esc(s.source) + '</span>'
+      +   '<span class="mon-src">' + esc(window.sourceLabel(s.source)) + '</span>'
       +   '<span class="badge mon-badge-' + esc(s.status) + '">'
       +     esc(STATUS_LABEL[s.status] || s.status) + '</span>'
       + '</div>'
@@ -152,7 +152,7 @@ function renderRounds(rounds) {
   cols.sort();
 
   const head = '<thead><tr><th>{{ _("monitoring_round") }}</th>'
-    + cols.map(c => '<th>' + esc(c) + '</th>').join('') + '</tr></thead>';
+    + cols.map(c => '<th>' + esc(window.sourceLabel(c)) + '</th>').join('') + '</tr></thead>';
 
   const body = '<tbody>' + rounds.map(r => {
     const bySrc = {};

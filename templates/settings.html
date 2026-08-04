@@ -192,7 +192,9 @@
         .xior-city-row{
           display:flex; align-items:center; gap:8px;
           padding:5px 6px; margin:0; border-radius:var(--radius);
-          font-size:13px; cursor:pointer; list-style:none;
+          /* 16px 对齐 .checkbox（同页 H2S 城市清单用的就是它），
+             否则两块并排看字号明显不一样 */
+          font-size:16px; cursor:pointer; list-style:none;
         }
         .xior-city-row::-webkit-details-marker{ display:none; }
         /* 唯一的视觉反馈是 hover 时的浅底——静态时整块是干净的 */
@@ -201,14 +203,14 @@
         .xior-city-name{ flex:1; min-width:0; overflow:hidden;
           text-overflow:ellipsis; white-space:nowrap; }
         /* 折叠状态下靠它知道这座城市选了几栋，不用展开去找 */
-        .xior-tally{ font-size:11.5px; color:var(--text3);
+        .xior-tally{ font-size:12.5px; color:var(--text3);
           font-variant-numeric:tabular-nums; }
-        .xior-chev{ font-size:10px; color:var(--text3); transition:transform .18s; }
+        .xior-chev{ font-size:11px; color:var(--text3); transition:transform .18s; }
         .xior-group[open] .xior-chev{ transform:rotate(180deg); }
-        .xior-bldgs{ padding:1px 0 6px 28px; }
+        .xior-bldgs{ padding:1px 0 8px 30px; }
         .xior-bldg{
           display:flex; align-items:center; gap:8px; margin:0;
-          padding:3px 0; font-size:12.5px; color:var(--text2); cursor:pointer;
+          padding:3px 0; font-size:15px; color:var(--text2); cursor:pointer;
         }
         .xior-bldg input{ margin:0; }
       </style>

@@ -191,7 +191,10 @@ TRANSLATIONS = {
     "monitoring_title":         {"zh": "数据健康",             "en": "Data Health"},
     "monitoring_sources":       {"zh": "各平台状态",           "en": "Per-source status"},
     "monitoring_recent_rounds": {"zh": "最近轮次",             "en": "Recent rounds"},
-    "monitoring_cell_hint":     {"zh": "格式：房源数（完整/任务）", "en": "Format: listings (complete/targets)"},
+    # 「—」必须解释。Xior 按 source 节流后每 10 分钟才跑一轮，表里于是出现
+    # 一长列「—」，看起来像这个平台挂了——实际只是那几轮没安排它。
+    "monitoring_cell_hint":     {"zh": "格式：房源数（完整/任务）；「—」表示该轮未安排此平台",
+                                 "en": "Format: listings (complete/targets); “—” = platform not scheduled that round"},
     "monitoring_round":         {"zh": "轮次",                 "en": "Round"},
     "monitoring_window":        {"zh": "判定窗口（轮）",        "en": "Window (rounds)"},
     "monitoring_heartbeat":     {"zh": "心跳",                 "en": "Heartbeat"},
