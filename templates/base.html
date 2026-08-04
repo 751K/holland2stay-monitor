@@ -54,8 +54,8 @@
       明确不接受。代价是 LCP 等字体到位，preconnect 已经能省点。
     - logo-small.png：preload —— sidebar 品牌 logo 在首屏视口内，是 LCP 候选。
   #}
-  <link rel="preload" href="/static/design.css?v=34" as="style" fetchpriority="high">
-  <link rel="stylesheet" href="/static/design.css?v=34">
+  <link rel="preload" href="{{ asset('design.css') }}" as="style" fetchpriority="high">
+  <link rel="stylesheet" href="{{ asset('design.css') }}">
   <link rel="preload" href="/static/logo-small.png" as="image" type="image/png">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -248,11 +248,11 @@
 <div class="toast-container" id="toast-container"></div>
 
 <script>window._isAdmin = {{ 'true' if is_admin else 'false' }};</script>
-{# 改 static/app.js 必须同步 +1，否则浏览器继续用缓存里的旧文件：
-   新增的函数在旧文件里不存在，调用它的页面会静默炸掉。
-   2026-08-04 踩过：加了 sourceLabel/sourceShort 没改版本号，
-   统计页的平台分布图在老浏览器缓存下直接不渲染。 #}
-<script src="/static/app.js?v=13"></script>
+{# 版本号由 web.asset() 按文件内容自动算，不用再手动 +1。
+   之所以要有版本号：新增的函数在浏览器缓存的旧文件里不存在，调用它的页面
+   会静默炸掉——2026-08-04 踩过，加了 sourceLabel/sourceShort 忘了改当时
+   写死的 ?v=，统计页的平台分布图直接不渲染。 #}
+<script src="{{ asset('app.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

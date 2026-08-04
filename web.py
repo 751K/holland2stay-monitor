@@ -25,6 +25,7 @@ Docker 容器中由 Gunicorn 启动（supervisord.conf）：
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging.handlers
 import os
 import sys
@@ -169,6 +170,34 @@ def _add_security_headers(resp):
 # ------------------------------------------------------------------ #
 jinja_filters.register(app)
 _csrf.register(app)
+
+
+_ASSET_VERSIONS: dict[str, str] = {}
+
+
+@app.template_global()
+def asset(path: str) -> str:
+    """/static 资源带上按文件内容算的版本号，例如 ``asset('design.css')``。
+
+    以前每个模板自己写死 ``?v=34``，改了 CSS 就得记得手动 +1。两个后果都
+    真实发生过：
+    - 改了 app.js 忘了改版本号 → 用户拿到旧脚本，整个统计页空白；
+    - login.html 有自己的一份 ``?v=28``，跟着 base.html 漏了 6 次 → 登录页
+      （新访客看到的第一个页面）一直在发过期样式表。
+
+    改成按 mtime+size 算摘要：文件一变版本号自动变，没有需要记住的步骤。
+    结果进程内缓存，正常请求不碰磁盘；debug 模式下每次重算，方便边改边看。
+    """
+    if not app.debug and path in _ASSET_VERSIONS:
+        return f"/static/{path}?v={_ASSET_VERSIONS[path]}"
+    try:
+        st = os.stat(os.path.join(app.static_folder or "static", path))
+        digest = hashlib.sha1(f"{st.st_mtime_ns}-{st.st_size}".encode()).hexdigest()[:8]
+    except OSError:
+        # 文件不在（打包/部署出错）时不要连页面一起崩，退化成无版本号
+        return f"/static/{path}"
+    _ASSET_VERSIONS[path] = digest
+    return f"/static/{path}?v={digest}"
 
 
 @app.context_processor
