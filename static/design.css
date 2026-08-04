@@ -458,6 +458,10 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .ms-tag .ms-rm:hover{opacity:1}
 .ms-arrow{font-size:12px;color:var(--text3);flex-shrink:0;transition:transform .15s}
 .multi-select.open .ms-arrow{transform:rotate(180deg)}
+/* .card 有 overflow:hidden（为了让内容贴合圆角），会把绝对定位的下拉裁掉——
+   卡片最后一行的多选展开后只能看见半截。只给含多选的卡片放开裁剪，其它卡片
+   的圆角裁切行为不变。 */
+.card:has(.multi-select){overflow:visible}
 .ms-dropdown{display:none;position:absolute;top:calc(100% + 4px);left:0;right:auto;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);min-width:max(100%,180px);max-height:220px;overflow-y:auto;padding:6px 0}
 .multi-select.open .ms-dropdown{display:block}
 .ms-option{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:14px;color:var(--text2);cursor:pointer;transition:background .1s}
