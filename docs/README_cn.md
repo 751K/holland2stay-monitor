@@ -91,9 +91,11 @@ SQLite 文件。
 
 ## 快速开始
 
-以下提供两条路径：若仅需确认其能否运行，采用第一条；若需长期依赖，采用第二条。
+两条路径：仅需确认能否运行，走第一条；要长期使用，走第二条。
 
-### 一、本地试运行（无需域名与证书）
+### 一、本地试运行
+
+不需要域名和证书。依次执行：
 
 ```bash
 git clone https://github.com/751K/holland2stay-monitor.git
@@ -103,29 +105,26 @@ mkdir -p data logs
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
 ```
 
-首次构建需数分钟，其中包含下载 patched Chromium（压缩包约 140 MB）。构建完成后
-访问 `http://127.0.0.1:8088`。
+首次构建需数分钟。完成后访问 `http://127.0.0.1:8088`，无需登录。
 
-命令末尾的 `h2s` 不可省略：它指定仅启动应用容器，不启动 Caddy。该覆盖层完成两件
-事——将 8088 端口发布到**回环地址**，以及跳过 entrypoint 的安全预检（否则在缺少
-真实域名与密码时容器将拒绝启动）。**未经修改的 `.env` 中 `WEB_PASSWORD` 为空，
-因此面板以明文 HTTP 提供服务且无需登录。** 这正是其仅绑定 127.0.0.1 的原因：请
-勿修改该地址，亦不得将此覆盖层用于公网主机。
+> ⚠️ 该模式下面板是明文 HTTP、且没有密码，只监听本机地址。**请勿用于公网服务器**，
+> 正式部署走下面第二条。
 
-默认仅监控 Holland2Stay 的 Eindhoven，其余平台均未启用。可在面板中调整，或修改
-`.env`（见[配置](#配置)）。
+默认只监控 Holland2Stay 的 Eindhoven，其余平台在面板中按需启用。
 
-### 二、带域名部署
+### 二、部署到服务器
 
-需准备一台已安装 Docker 的服务器、一个 A/AAAA 记录指向该服务器的域名，以及放行
-的 80/443 端口。证书由 Caddy 自动申请并续期。
+**开始之前**需备齐三项：一台已装 Docker 的服务器、一个 A/AAAA 记录指向它的域名、
+放行的 80/443 端口。
+
+**第 1 步**，创建配置与数据目录：
 
 ```bash
 cp .env.example .env
 mkdir -p data logs logs/caddy
 ```
 
-`.env` 中至少需设置以下各项：
+**第 2 步**，编辑 `.env`，至少填写这五项：
 
 ```env
 WEB_PASSWORD=一串足够长的随机字符
@@ -135,23 +134,23 @@ SUPPORT_EMAIL=support@example.com
 TIMEZONE=Europe/Amsterdam
 ```
 
-> **登录用户名为 `admin`**，除非另行设置 `WEB_USERNAME`。而**鉴权本身由
-> `WEB_PASSWORD` 启用**：该项留空意味着面板对任何可访问者开放。密码为空时容器
-> 将拒绝启动，因此不会在无意间进入该状态。
+**第 3 步**，编辑 `Caddyfile`，把其中的 `your.domain.com` 换成实际域名。
 
-随后将 `Caddyfile` 中的 `your.domain.com` 替换为实际域名，并执行：
+**第 4 步**，启动：
 
 ```bash
 docker compose up -d
 ```
 
-entrypoint 会先于其余流程执行一次预检：若 `Caddyfile` 仍保留占位域名，或
-`WEB_PASSWORD` 为空，均会输出一行 `FATAL` 并终止启动。两条提示均已写明需要
-修改的内容。
+证书由 Caddy 自动申请与续期。启动完成后访问域名，用户名 `admin`、密码为第 2 步
+所设的 `WEB_PASSWORD` 登录。
+
+> 若容器没能起来、日志里是一行 `FATAL`，说明第 2 步或第 3 步没做完——提示中已
+> 写明缺什么。
 
 ### 确认运行状态
 
-两个进程均应处于 `RUNNING`：
+两个进程都应是 `RUNNING`：
 
 ```bash
 docker exec h2s supervisorctl -c /etc/supervisor/conf.d/app.conf status
@@ -163,12 +162,11 @@ docker exec h2s supervisorctl -c /etc/supervisor/conf.d/app.conf status
 docker compose logs -f h2s
 ```
 
-首轮耗时长于后续轮次，因需先通过一次 Cloudflare 挑战（本地约 2–3 秒，小型 VPS
-上 10–35 秒）。正常轮次以 `本轮完整扫描: N/N 城市 (...)` 结束（N 为配置的
-source×城市组合数），其后为 `本轮结束: ... 新房源`。
+首轮比之后慢，属正常。一轮正常结束时会看到 `本轮完整扫描: N/N 城市 (...)`，
+随后是 `本轮结束: ... 新房源`。
 
-随后打开面板登录，添加用户、通知渠道与待监控的城市。用户级配置全部位于面板中，
-此后一般无需再修改 `.env`。
+登录后在面板中添加用户、通知渠道与待监控的城市。用户级配置全部在面板里，此后
+一般不需要再改 `.env`。
 
 ### 从源码运行
 
@@ -193,8 +191,7 @@ python monitor.py                # 抓取循环，需另开终端
 
 ## 升级与备份
 
-代码打包在镜像内，**并未**挂载，因此升级必须重新构建。`.env` 与 `data/` 为挂载
-项，升级后保留。
+升级必须重新构建镜像——只执行 `git pull` 不会生效。`.env` 与 `data/` 会保留。
 
 ```bash
 cd /path/to/holland2stay-monitor
@@ -204,14 +201,18 @@ docker compose build h2s
 docker compose up -d --force-recreate h2s
 ```
 
-若省略 `--force-recreate`，旧容器将继续以旧代码运行；若省略 `build`，则升级不会
-生效。
+后两条命令缺一不可：漏掉 `build` 等于没升级，漏掉 `--force-recreate` 则旧容器
+仍在跑旧代码。
 
-需要备份的仅有两处：`data/listings.db`（房源、用户、凭据、设备 token）与 `.env`
-（各类密钥，尤其是 `DATA_ENCRYPTION_KEY`）。**两者必须一并备份。** 库中的用户
-密码与平台凭据均以 `.env` 中的密钥加密，仅恢复其中之一将得到一批无法解密的凭据。
+需要备份的有两处，且**必须一起备份**：
 
-SQLite 启用了 WAL，容器运行期间直接复制文件会遗漏最近的写入。获取一致快照请使用：
+- `data/listings.db` —— 房源、用户、凭据、设备 token
+- `.env` —— 各类密钥，尤其是 `DATA_ENCRYPTION_KEY`
+
+库中的密码与平台凭据是用 `.env` 里的密钥加密的，只恢复其中一个会得到一批无法
+解密的凭据。
+
+容器运行期间**不要直接复制数据库文件**，会遗漏最近的写入。取一致快照用：
 
 ```bash
 docker exec h2s python -c "import sqlite3; \

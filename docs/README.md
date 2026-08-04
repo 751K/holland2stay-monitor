@@ -106,7 +106,9 @@ telemetry backend. State is one SQLite file.
 Two paths: the first to confirm it runs, the second for anything you intend to
 depend on.
 
-### 1. Try it locally — no domain, no certificate
+### 1. Try it locally
+
+No domain and no certificate required. Run:
 
 ```bash
 git clone https://github.com/751K/holland2stay-monitor.git
@@ -116,31 +118,29 @@ mkdir -p data logs
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
 ```
 
-The first build takes a few minutes — it downloads a patched Chromium (~140 MB
-compressed). When it finishes, open `http://127.0.0.1:8088`.
+The first build takes a few minutes. When it finishes, open
+`http://127.0.0.1:8088` — no login required.
 
-The `h2s` at the end of the command matters: it starts the app container only,
-leaving Caddy out of it. The override file publishes port 8088 on the loopback
-interface and skips the entrypoint's security preflight, which otherwise refuses
-to start without a real domain and a password. **A stock `.env` has no
-`WEB_PASSWORD`, so the panel is plain HTTP with no login at all.** That is why it
-binds to 127.0.0.1. Do not change that address, and do not use this override on a
-public host.
+> ⚠️ In this mode the panel is plain HTTP with no password and listens on the
+> loopback address only. **Do not use it on a public server**; for that, use the
+> second path below.
 
-Out of the box it monitors Holland2Stay in Eindhoven and nothing else. Change
-that in the panel, or in `.env` (see [Configuration](#configuration)).
+Out of the box it monitors Holland2Stay in Eindhoven only. Enable the rest from
+the panel.
 
-### 2. Deploy behind a domain
+### 2. Deploy to a server
 
-You need a server with Docker, a domain whose A/AAAA record points at it, and
-ports 80/443 open. Caddy obtains and renews the certificate on its own.
+**Before you start** you need three things: a server with Docker installed, a
+domain whose A/AAAA record points at it, and ports 80/443 open.
+
+**Step 1** — create the config and data directories:
 
 ```bash
 cp .env.example .env
 mkdir -p data logs logs/caddy
 ```
 
-Set at minimum, in `.env`:
+**Step 2** — edit `.env` and fill in at least these five keys:
 
 ```env
 WEB_PASSWORD=a-long-random-string
@@ -150,20 +150,19 @@ SUPPORT_EMAIL=support@example.com
 TIMEZONE=Europe/Amsterdam
 ```
 
-> **The sign-in username is `admin`** unless you set `WEB_USERNAME`. Setting
-> `WEB_PASSWORD` is what turns authentication on at all — leave it empty and the
-> panel is open to anyone who can reach it. The container refuses to start with
-> an empty password, so you will not get there by accident.
+**Step 3** — edit `Caddyfile` and replace `your.domain.com` with your domain.
 
-Replace `your.domain.com` in `Caddyfile` with your domain, then:
+**Step 4** — start it:
 
 ```bash
 docker compose up -d
 ```
 
-The entrypoint runs a preflight before anything else and stops with a `FATAL`
-line if the `Caddyfile` still has the placeholder domain or `WEB_PASSWORD` is
-empty. Both messages tell you exactly what to fix.
+Caddy obtains and renews the certificate on its own. Once it is up, open your
+domain and sign in as `admin` with the password you set in step 2.
+
+> If the container does not come up and the log shows a `FATAL` line, step 2 or
+> step 3 is incomplete — the message says which.
 
 ### Confirming it works
 
@@ -179,14 +178,12 @@ Follow the first round:
 docker compose logs -f h2s
 ```
 
-The first scrape is slower than later ones because it has to pass a Cloudflare
-challenge (2–3 s locally, 10–35 s on a small VPS). A healthy round ends with
-`本轮完整扫描: N/N 城市 (...)` — N is the number of configured source/city pairs
-— followed by `本轮结束: ... 新房源`.
+The first round is slower than later ones; that is expected. A healthy round ends
+with `本轮完整扫描: N/N 城市 (...)` followed by `本轮结束: ... 新房源`.
 
-Then open the panel, sign in, and add users, notification channels and the
-cities you want monitored. Everything user-facing lives there; you should not
-need to touch `.env` again.
+Once signed in, add users, notification channels and the cities you want
+monitored. Everything user-facing lives in the panel; you should not need to
+touch `.env` again.
 
 ### Running from source
 
@@ -213,8 +210,8 @@ gives you a panel that never gets new data.
 
 ## Upgrading and backups
 
-Code is baked into the image — it is not bind-mounted — so a rebuild is
-mandatory. `.env` and `data/` are mounted and survive.
+Upgrading requires rebuilding the image — `git pull` alone has no effect.
+`.env` and `data/` are preserved.
 
 ```bash
 cd /path/to/holland2stay-monitor
@@ -224,17 +221,21 @@ docker compose build h2s
 docker compose up -d --force-recreate h2s
 ```
 
-Skipping `--force-recreate` leaves the old container running against the new
-image. Skipping `build` does nothing at all.
+Neither of the last two commands is optional: without `build` nothing is
+upgraded, and without `--force-recreate` the old container keeps running the old
+code.
 
-Everything worth keeping is in two places: `data/listings.db` (listings, users,
-credentials, device tokens) and `.env` (secrets, including
-`DATA_ENCRYPTION_KEY`). **Back them up together.** The database stores user
-passwords and API credentials encrypted with the key in `.env` — restoring one
-without the other leaves you with credentials nobody can decrypt.
+Two things need backing up, and they **must be backed up together**:
 
-SQLite is in WAL mode, so copying the file while the container runs can miss the
-most recent writes. For a consistent snapshot:
+- `data/listings.db` — listings, users, credentials, device tokens
+- `.env` — the secrets, in particular `DATA_ENCRYPTION_KEY`
+
+Passwords and platform credentials in the database are encrypted with the key in
+`.env`; restoring one without the other leaves you with credentials nobody can
+decrypt.
+
+**Do not copy the database file directly while the container is running** — you
+will miss recent writes. For a consistent snapshot:
 
 ```bash
 docker exec h2s python -c "import sqlite3; \
