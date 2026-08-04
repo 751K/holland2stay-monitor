@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 USERS_FILE = DATA_DIR / "users.json"
 USERS_MIGRATION_META_KEY = "users_storage_migrated_v1"
+#: 一次性清理：把当年被回填进 Xior / OurDomain 的 H2S 凭据抹掉。
+#: 详见 :func:`_ensure_rentcafe_creds_unbackfilled`。
+RENTCAFE_CRED_CLEANUP_META_KEY = "rentcafe_creds_unbackfilled_v1"
 DEFAULT_EMAIL_SMTP_PORT = 587
 _T = TypeVar("_T")
 
@@ -208,16 +211,31 @@ def _profile_from_dict(raw) -> "ApplicantProfile":
 def _ab_from_dict(d: dict) -> AutoBookConfig:
     """从 dict 构造 AutoBookConfig，内含 listing_filter 嵌套反序列化。
 
-    迁移：旧版本只有共用的 ``email``/``password``。新版 H2S / Xior / OurDomain
-    三套独立。当某平台的 email/password **缺失**（旧数据）时回退到旧共用值；
-    若字段存在（含空串，表示用户主动清空）则原样采用。
+    平台凭据不互相回退
+    ------------------
+    旧版本只有共用的 ``email``/``password``，新版 H2S / Xior / OurDomain 三套
+    独立。当年拆分时给 Xior / OurDomain 的字段留了「缺失就回退到旧共用值」的
+    兜底，**那是错的**：
+
+    - 旧的共用凭据实际上就是 **H2S 的账号密码**（当时只有 H2S 支持自动预订），
+      回填进另外两个平台不是"保住了旧配置"，而是**凭空替用户编了两个他从来
+      没注册过的账号**；
+    - 三个平台是三家不同公司、三个独立的 RENTCafe 租户，账号不通用；
+    - 后果不是登录失败这么简单：会把用户的 H2S 密码发给第三方站点，而且
+      RENTCafe 按 **IP** 记登录失败次数（连续失败锁 30 分钟），同一代理池上的
+      其他用户跟着遭殃；
+    - 它还把 Xior 那条「**没配该楼凭据 = 该楼不参与自动预订**」的设计短路了
+      ——凭据本身就是开关，凭空造一份等于把开关焊死在"开"上。
+
+    2026-08-04 实测：线上 7 个开了自动预订的用户，``ourdomain_email`` /
+    ``xior_email`` 与 H2S 的**逐字相同**，全是这么来的。两个平台当时都没开
+    （``monitor._AUTO_BOOK_SOURCES`` 里只有 holland2stay），所以没爆。
+
+    现在缺失一律取空串 = 未配置。存量数据的清理见
+    :func:`_ensure_rentcafe_creds_unbackfilled`。
     """
     old_email = d.get("email", "")
     old_password = decrypt(d.get("password", ""))
-
-    def _platform_pw(key: str) -> str:
-        # key 缺失 = 旧数据 → 回退旧共用密码；存在（含空串）= 新数据 → 按值解密
-        return decrypt(d[key]) if key in d else old_password
 
     return AutoBookConfig(
         enabled=d.get("enabled", False),
@@ -232,12 +250,13 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         xior_accounts=_xior_accounts_from_dict(d.get("xior_accounts")),
         applicant_profile=_profile_from_dict(d.get("applicant_profile")),
         screening_consent_at=d.get("screening_consent_at", ""),
-        # 存量单对字段，只在用户还没配过按楼凭据时兜底（见 xior_account_for）
-        xior_email=d.get("xior_email", old_email),
-        xior_password=_platform_pw("xior_password"),
+        # 存量单对字段，只在用户还没配过按楼凭据时兜底（见 xior_account_for）。
+        # **不回退到 H2S 凭据**——理由见上面的 docstring。
+        xior_email=d.get("xior_email", ""),
+        xior_password=decrypt(d.get("xior_password", "")),
         # OurDomain
-        ourdomain_email=d.get("ourdomain_email", old_email),
-        ourdomain_password=_platform_pw("ourdomain_password"),
+        ourdomain_email=d.get("ourdomain_email", ""),
+        ourdomain_password=decrypt(d.get("ourdomain_password", "")),
     )
 
 
@@ -327,6 +346,7 @@ def load_users() -> list[UserConfig]:
     st = _open_storage()
     try:
         _ensure_sqlite_users_migrated(st)
+        _ensure_rentcafe_creds_unbackfilled(st)
         return _rows_to_users(st.list_user_config_rows())
     finally:
         st.close()
@@ -521,6 +541,103 @@ def _ensure_sqlite_users_migrated(st) -> None:
         raise
 
 
+#: 被回填的平台凭据字段，按 (邮箱字段, 密码字段) 成对处理。
+_BACKFILLED_CRED_PAIRS = (
+    ("xior_email", "xior_password"),
+    ("ourdomain_email", "ourdomain_password"),
+)
+
+
+def _ensure_rentcafe_creds_unbackfilled(st) -> None:
+    """一次性清理：抹掉当年被回填进 Xior / OurDomain 的 H2S 凭据。
+
+    为什么光改 :func:`_ab_from_dict` 不够
+    ------------------------------------
+    回填只在**加载时**发生，但之后任何一次保存都会把回填出来的值**固化到库
+    里**。2026-08-04 线上实测：41 个用户的 ``ourdomain_email`` /
+    ``xior_email`` 全都已经存盘了。所以去掉加载时的回退只能防住以后，存量的
+    那份还躺在 ``auto_book_json`` 里，一旦哪天把这两个 source 加进
+    ``_AUTO_BOOK_SOURCES``，它们立刻就会被拿去登录。
+
+    判据：**整对**与 H2S 那对逐字相同才清
+    ------------------------------------
+    邮箱和密码两者都相同，才是回填留下的指纹。只对上一半的不动——那多半是
+    用户自己填的（比如两个平台用同一个邮箱、不同密码）。
+
+    这条判据会误伤一种情况：用户在两个平台上**真的**用了完全相同的邮箱和
+    密码。代价是他要重新填一次，而这是安全的方向——凭据要发给第三方站点，
+    宁可当成没配。清理是一次性的（meta flag），清完之后用户填什么就是什么，
+    不会再被比对。
+
+    密码在库里是 Fernet 加密的，而 Fernet **不是确定性加密**（同一明文每次
+    密文都不同），所以必须解密后再比，不能直接比密文。
+    """
+    if st.get_meta(RENTCAFE_CRED_CLEANUP_META_KEY, default="") == "1":
+        return
+
+    conn = st.conn
+    started = not conn.in_transaction
+    if started:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT value FROM meta WHERE key = ?",
+            (RENTCAFE_CRED_CLEANUP_META_KEY,),
+        ).fetchone()
+        if row and row[0] == "1":      # 另一个进程刚清完
+            if started:
+                conn.commit()
+            return
+
+        cleaned = 0
+        for uid, raw in conn.execute(
+            "SELECT id, auto_book_json FROM user_configs"
+        ).fetchall():
+            try:
+                ab = json.loads(raw or "{}")
+            except (TypeError, ValueError):
+                logger.warning("用户 %s 的 auto_book_json 解析失败，跳过凭据清理", uid)
+                continue
+            h2s_email = ab.get("email", "")
+            h2s_pw = decrypt(ab.get("password", ""))
+            if not (h2s_email or h2s_pw):
+                continue               # 没配过 H2S，谈不上被回填
+            touched = False
+            for email_key, pw_key in _BACKFILLED_CRED_PAIRS:
+                if email_key not in ab and pw_key not in ab:
+                    continue
+                same_email = ab.get(email_key, "") == h2s_email
+                same_pw = decrypt(ab.get(pw_key, "")) == h2s_pw
+                if same_email and same_pw:
+                    ab[email_key] = ""
+                    ab[pw_key] = ""
+                    touched = True
+            if touched:
+                cleaned += 1
+                conn.execute(
+                    "UPDATE user_configs SET auto_book_json = ? WHERE id = ?",
+                    (json.dumps(ab, ensure_ascii=False), uid),
+                )
+
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+            (RENTCAFE_CRED_CLEANUP_META_KEY, "1"),
+        )
+        if started:
+            conn.commit()
+        if cleaned:
+            logger.warning(
+                "已清理 %d 个用户被回填的 Xior / OurDomain 凭据（原值是他们的 "
+                "H2S 账号密码）。这两个平台需要在各自网站上单独注册账号，"
+                "请到面板的自动预订设置里重新填写。",
+                cleaned,
+            )
+    except Exception:
+        if started:
+            conn.rollback()
+        raise
+
+
 def save_users(users: list[UserConfig]) -> None:
     """将用户列表完整覆盖写入 SQLite `user_configs`。"""
     st = _open_storage()
@@ -528,6 +645,7 @@ def save_users(users: list[UserConfig]) -> None:
     try:
         conn.execute("BEGIN IMMEDIATE")
         _ensure_sqlite_users_migrated(st)
+        _ensure_rentcafe_creds_unbackfilled(st)
         st.replace_user_config_rows_unlocked(_users_to_rows(users))
         conn.commit()
     except Exception:
@@ -549,6 +667,7 @@ def update_users(mutator: Callable[[list[UserConfig]], _T]) -> _T:
     try:
         conn.execute("BEGIN IMMEDIATE")
         _ensure_sqlite_users_migrated(st)
+        _ensure_rentcafe_creds_unbackfilled(st)
         users = _rows_to_users(st.list_user_config_rows())
         result = mutator(users)
         st.replace_user_config_rows_unlocked(_users_to_rows(users))
