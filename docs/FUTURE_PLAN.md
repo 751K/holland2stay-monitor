@@ -10,22 +10,42 @@ v2.0 只做两件事。
 
 ### 方向一：可观测性 —— **已完成第一批**
 
-排查完全依赖 ssh：这套系统里每一个 bug 都是靠人肉 grep 日志找到的，而
-2026-06-13 起那次 7 周静默停摆是同一短板的极端形态。
+排查工作完全依赖登录服务器：本系统中的每一个缺陷均是通过人工 grep 日志定位的，
+而 2026-06-13 起的那次 7 周静默停摆，正是同一短板的极端表现。
 
 已落地：`round_stats` 轮次遥测表、`mcore/health.py` 分 source 健康判定、
 `mcore/watchdog.py` 退化告警（含恢复通知，节流持久化）、`/logs` 服务端过滤、
 `/monitoring` 面板。方案与验收标准见
 [OBSERVABILITY_PLAN.md](OBSERVABILITY_PLAN.md)，判据设计理由见 ARCHITECTURE §5.12。
 
-后续可继续：把遥测接进 `/api/v1` 供移动端消费；抓取耗时趋势图；
-按 city 而不只是按 source 的细分。
+后续可继续推进的方向：将遥测数据接入 `/api/v1` 供移动端使用；增加抓取耗时趋势图；
+提供按城市而不仅按 source 的细分维度。
 
-### 方向二：Xior 自动预订
+### 方向二：RENTCafe 自动预订 —— **侦察和编码都做完了，卡在验证**
 
-见下方[第三期](#第三期xior-自动预订研究)。**下一步是侦察，不是编码**——
-`oleapplication.aspx` 九步流程的第 4 步（Applicant Info）之后没有人走过，
-其中若有文件上传或人工审核，这条路直接不通。在这之前写代码等于在赌。
+本条最初的判断是「下一步是侦察，而非编码」。侦察已于 2026-08-03/04 完成，其结论
+推翻了当时的顾虑：`oleapplication.aspx` 九步流程的第 4 步之后既无人工审核，也无
+阻塞流程的文件上传（证件需要上传，但**不阻塞**表单保存）。`bookers/rentcafe.py`
+随之完成，reCAPTCHA 对接 2Captcha，OurDomain 与 Xior 共用一份实现。详见
+[XIOR.md](XIOR.md) §8.6 / §8.7 与 [OURDOMAIN.md](OURDOMAIN.md) §7。
+
+当前真正余下的三项工作均不属于编码：
+
+1. **Xior 的最后一步尚未确认。** 系统代为上传证件后申请表能否正常保存，仅差一次
+   真实尝试。需注意 Xior 的草稿**不锁定房源**——它比 Holland2Stay 提前一步终止，
+   下一页即需填写 IBAN/SWIFT。因此即使走通，其价值也远低于 Holland2Stay 一线。
+2. **OurDomain 欠缺一个真实账号。** 登录之后的环节全部未验证，且该流程不含选房
+   页，一旦脱离流程便没有重选入口。验证需要一个 OurDomain 的 RENTCafe 账号
+   （含完整申请人资料、背景调查同意及已上传的证件）。
+3. **账号粒度尚不明确。** 两栋 OurDomain 楼分属两个 securerc 主机，cookie 不跨
+   主机。参照 Xior 的经验，很可能需要一栋楼一套账号；目前使用的是面板上单一的
+   `ourdomain_email` / `ourdomain_password`，待验证暴露问题后再照 `xior_accounts`
+   拆分。
+
+在完成上述三项之前，`monitor._AUTO_BOOK_SOURCES` 保持仅含 `holland2stay`。
+
+**OurCampus 不在该线之内**：其预订流程从未侦察，且至今未出现过任何房源，不存在
+可预订的标的。
 
 ---
 
@@ -39,11 +59,12 @@ v2.0 只做两件事。
 - 为 Pararius / Funda 等 CF 保护的平台提供了通用基建
 
 ### 第一期：Android Play Store 上架 —— **已放弃（2026-08-03）**
-- Android 客户端 A0–A5 已完成（57 文件，~9.5k 行，47 单测），功能上没有欠账
-- FCM 推送端到端拉通并真机验收通过
-- CI 自动构建签名 APK（`build.yml` android job）；AAB 步骤已移除
-- **不再上架**：分发方式就是 Release 页直接下载 APK。原计划中的 Google Play
-  Billing 内购、Data Safety、封闭测试、商店截图一并取消
+- Android 客户端 A0–A5 已完成（57 个文件，约 9.5k 行代码，47 项单元测试），功能上
+  无遗留
+- FCM 推送已完成端到端联调并通过真机验收
+- CI 自动构建签名 APK（`build.yml` 的 android job）；AAB 相关步骤已移除
+- **不再上架**：分发方式确定为自 Release 页直接下载 APK。原计划中的 Google Play
+  Billing 内购、Data Safety、封闭测试与商店截图一并取消
 - 详见下方 [§1 Android 客户端](#1-android-客户端)
 
 ### 第二期：iOS 性能优化
@@ -53,11 +74,13 @@ v2.0 只做两件事。
 - SwiftUI 视图 diff 优化，减少不必要的 body 重算
 - Instruments profiling（Time Profiler / Allocations / SwiftUI View Body）
 
-### 第三期：Xior 自动预订研究
-- 在已有 Xior 抓取基础上，推进 RENTCafe 自动预订流程
-- 基于 `docs/XIOR.md` §11 的可行性分析继续深挖
-- 重点攻克：登录流程、多步表单自动填写、reCAPTCHA 解决方案
-- 目标：实现 Xior 房源出现后自动提交预订申请
+### 第三期：Xior 自动预订研究 —— **研究部分已完成（2026-08-04）**
+- 三个攻坚项均已落地：登录流程（两段式，四处陷阱逐一实测）、多步表单自动填写
+  （字段由页面驱动，15 个字段名经实测校正）、reCAPTCHA（对接 2Captcha，
+  `captcha/rentcafe_pages.py` 逐页记录所用版本为 v2 或 v3）
+- 实现位于 `bookers/rentcafe.py`，OurDomain / OurCampus 共用同一份
+- 分析原文见 [XIOR.md](XIOR.md) §8（此处早先所写的 §11 系笔误，XIOR.md 无该节）
+- 余下的三项工作见上方[方向二](#方向二rentcafe-自动预订--侦察和编码都做完了卡在验证)
 
 ---
 
@@ -127,7 +150,9 @@ v2.0 只做两件事。
 
 ### 目标
 
-FlatRadar 已从 Holland2Stay 单源演进为多平台监控。荷兰国际学生 / young professional 群体租房的主要平台仍有十几家，继续扩展更多平台后能进一步接近**一站式房源雷达**，对用户价值继续提升。
+FlatRadar 已由 Holland2Stay 单源演进为多平台监控。面向荷兰国际学生与年轻职场人群的
+主要租房平台仍有十余家，继续扩展平台覆盖可进一步接近**一站式房源雷达**的目标，
+从而持续提升对用户的价值。
 
 ### 平台调研（按优先级）
 
@@ -148,12 +173,18 @@ FlatRadar 已从 Holland2Stay 单源演进为多平台监控。荷兰国际学�
 
 ### 架构现状（已完成）
 
-多源抓取架构已实现。`scrapers/` 包：`base.py`（`AbstractScraper` + `ScrapeTask` + `ScrapeResult`）、`holland2stay.py`、`ourdomain.py`、`xior.py`。核心设计：
-- `Listing.source` + 前缀化 ID（`h2s_` / `od_` / `xr_`），全局唯一
-- DB 已迁移：`source` 列 + 前缀化 backfill + 索引
-- `monitor.py` 按 source 隔离故障，每 source 独立 stale 阈值
-- 通知模板已加 source badge（iMessage / Email / Telegram / APNs / FCM）
-- iOS 端 `SourceBadge` view 已上线，Web 端 Source 列 + 筛选已上线
+多源抓取架构已实现。`scrapers/` 包包含 `base.py`（`AbstractScraper`、`ScrapeTask`、
+`ScrapeResult`）、`holland2stay.py`、`ourdomain.py`、`ourcampus.py` 与 `xior.py`。
+核心设计如下：
+
+- `Listing.source` 配合前缀化 ID（`h2s_` / `od_` / `oc_` / `xr_`），保证全局唯一
+- 数据库已完成迁移：新增 `source` 列、前缀化 backfill 与索引
+- `monitor.py` 按 source 隔离故障
+- 通知模板已加入 source badge（iMessage / Email / Telegram / APNs / FCM）
+- iOS 端 `SourceBadge` view 已上线，Web 端的 Source 列与筛选亦已上线
+
+> 其中「每 source 独立 stale 阈值」一项已于 v1.13.0 撤销：四个平台的终态信号一致，
+> 现统一为一套两段式收敛，见 [ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号)。
 
 #### Filter 跨 source 归一化参考
 
@@ -171,7 +202,7 @@ FlatRadar 已从 Holland2Stay 单源演进为多平台监控。荷兰国际学�
 |---|---|---|
 | **P0** | 架构重构（`scrapers/` 包 + `Listing.source` + DB 迁移 + monitor.py 改造） | ✅ 已完成 |
 | **P1** | **OurDomain** + **Xior** —— 实现 scraper，验证多源 pipeline；UI 加 source badge | ✅ 已完成 |
-| **P1.5** | **Xior 自动预订** —— RENTCafe 多步表单自动填写 + reCAPTCHA 解决，实现房源出现后自动提交预订申请（详见 `docs/XIOR.md` §11） | 🔜 当前 |
+| **P1.5** | **RENTCafe 自动预订** —— 多步表单自动填写与 reCAPTCHA 求解（详见 [XIOR.md](XIOR.md) §8） | ⚠️ 代码已完成，待端到端验证 |
 | **P2** | **DUWO / ROOM.nl** + **SSH Student Housing** —— 覆盖 Amsterdam / Delft / Leiden / Utrecht 高校城市；需处理登录态 cookie | 3 周 |
 | **P3** | **HousingAnywhere**（公开 API 优先）+ **Studentenwoningweb** | 2 周 |
 | **P4** | **Pararius** / **Kamernet** —— 难度高，量大；Pararius 可能需 Playwright | 3 周 |
@@ -191,7 +222,7 @@ FlatRadar 已从 Holland2Stay 单源演进为多平台监控。荷兰国际学�
 
 #### 技术风险
 
-- **反爬升级**：Pararius / Funda 有 Cloudflare + behavioral 检测，`curl_cffi` 的 chrome110 impersonate 可能不够。备用方案：`playwright` headless（运行时成本 10–50× 提升）——只在 ROI 高的平台上
+- **反爬升级**：Pararius 与 Funda 采用 Cloudflare 加行为检测，`curl_cffi` 的 chrome110 impersonate 可能不足以应对。备用方案为 headless Playwright（运行时成本提升 10–50 倍），仅在投入产出比高的平台上采用
 - **登录态平台**（DUWO / SSH / Studentenwoningweb）：账号密码存 `.env`，cookie 定期刷新；账号被锁就 fall-back 到游客可见的子集 + 推送 admin 告警
 - **每平台轮询节奏分开**：高频平台（H2S）保 5min；低频学生平台（DUWO / SSH）放宽到 30min。每个 source 自己的 `INTERVAL` env 变量，monitor 循环里独立调度
 - **后端流量放大**：从 1 source 到 10 source，出口流量 × N。监控 Docker / VPS 带宽配额；nginx 加 limit_req 兜底
@@ -199,11 +230,11 @@ FlatRadar 已从 Holland2Stay 单源演进为多平台监控。荷兰国际学�
 
 #### 运维风险
 
-- **每平台 schema 变更可能性高**：第三方网站 redesign 一次，scraper 就崩。建议：
+- **各平台的 schema 变更概率较高**：第三方网站每次改版都可能导致 scraper 失效。建议：
   - 每个 scraper 在 CI 跑 daily smoke test（拉 1 个城市，断言至少 1 条结果）
   - smoke test 连续 3 天失败时自动告警（推送 admin APNs + 邮件）
   - `mstorage/_meta` 记录每个 source 最后成功时间 + 最近一次错误，Web admin 系统页可视化 "source health"
-- **故障隔离**：一个 source 挂了不能影响其他 source。`run_once()` 用 try/except 隔离每个 source 的 scrape 阶段（见前面 `monitor.py` 改造示例）
+- **故障隔离**：单个 source 发生故障不得影响其余 source。`run_once()` 以 try/except 隔离每个 source 的 scrape 阶段（见前文 `monitor.py` 的改造示例）
 - **回滚预案**：DB 迁移用 idempotent ALTER + meta flag；如果 source 列的引入暴露了未预期的查询性能问题，可临时把 `SOURCES=holland2stay` 退化到单 source 行为
 
 ---
@@ -237,15 +268,19 @@ FlatRadar 已从 Holland2Stay 单源演进为多平台监控。荷兰国际学�
 
 `PUT /me/filter` ✅ v1.5.0；`DELETE /me` ✅ v1.5.0；`POST /auth/register` ✅ v1.5.0；`POST /auth/password` ✅ v1.6.0；`POST /diagnostics/crash` ✅ v1.6.0。
 
-待补：
-- `POST /api/v1/admin/users` —— admin 端 user CRUD API（目前只有 Web 后台，没暴露 API）
+待补充的项目：
+
+- `POST /api/v1/admin/users`：admin 端的用户 CRUD API（目前仅有 Web 后台，尚未
+  暴露为 API）
 - `POST /api/v1/admin/monitor/{start,stop,reload,restart}` ✅ 已全部暴露为 API（v1.7.x）
 
-### 多平台后的统计 / 图表扩展
+### 多平台之后的统计与图表扩展
 
-- Dashboard "按平台占比"饼图
-- Stats 页"哪个平台房源更新最快"对比
-- 每个 source 独立的 stale 阈值（H2S 7 天 / OurDomain 待调研 / DUWO 学生短期周期可能 3 天）
+- Dashboard 增加「按平台占比」饼图
+- Stats 页增加「各平台房源更新速度」对比
+- ~~每个 source 独立的 stale 阈值~~ —— **该方向已放弃**。四个平台的终态信号一致，
+  分设阈值描述的是一个并不存在的差异，v1.13.0 已统一为一套两段式收敛，见
+  [ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号)。
 
 ---
 

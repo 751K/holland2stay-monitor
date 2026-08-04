@@ -41,8 +41,9 @@ flowchart TD
 
     M --> J
     J --> N["storage.diff(fresh)\nsource-aware upsert / 状态变化"]
-    N --> O["mark_stale_listings()（每 24h 一次）\n按 source:city 完整扫描结果收敛\n无完整城市则推迟且不重置计时器"]
-    O --> P["更新 last_scrape_at / last_scrape_count"]
+    N --> O1["① 老化收敛（每轮）\n消失 0.5h → Reserved（推测）\n消失 2h → Occupied（推测）\n仅限本轮完整扫描的 source:city"]
+    O1 --> O2["② 孤儿收敛（每 24h 一次）\n已移出监控的 source:city，宽限 30 天\n无完整城市则推迟且不重置计时器"]
+    O2 --> P["更新 last_scrape_at / last_scrape_count"]
 
     P --> SH{"source 在 SHADOW_SOURCES 里？"}
     SH -->|是| SHX["已入库，但不发任何通知\n（新平台静默验证期）"]

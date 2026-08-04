@@ -199,6 +199,7 @@
           {"name": "cities", "in": "query", "schema": {"type": "string"}, "description": "Comma-separated city list."},
           {"name": "q", "in": "query", "schema": {"type": "string"}},
           {"name": "types", "in": "query", "schema": {"type": "string"}, "description": "Comma-separated type list."},
+          {"name": "occupancies", "in": "query", "schema": {"type": "string"}, "description": "Comma-separated occupancy list, for example Single,Two."},
           {"name": "contract", "in": "query", "schema": {"type": "string"}},
           {"name": "energy", "in": "query", "schema": {"type": "string"}},
           {"$ref": "#/components/parameters/LimitQuery"},

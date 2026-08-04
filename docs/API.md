@@ -2,7 +2,7 @@
 
 本文档整理 FlatRadar 移动端和第三方客户端使用的后端 API。当前稳定接口集中在 `/api/v1/*`，Web 后台的 HTML 页面和 `/api/*` 旧接口不作为移动端契约。
 
-最后更新：2026-05-21
+最后更新：2026-08-04（v1.13.0）
 
 机器可读契约：
 
@@ -399,14 +399,20 @@ Query：
 | 参数 | 类型 | 说明 |
 |---|---|---|
 | `status` | string | 精确匹配状态，例如 `Available to book` |
+| `source` | string | 单平台过滤，旧兼容参数，例如 `holland2stay` |
+| `sources` | string | 多平台逗号分隔，例如 `holland2stay,ourdomain` |
 | `city` | string | 单城市过滤，旧兼容参数 |
 | `cities` | string | 多城市逗号分隔，例如 `Eindhoven,Amsterdam` |
 | `q` | string | 名称搜索 |
 | `types` | string | 房型逗号分隔，例如 `Studio,Apartment` |
+| `occupancies` | string | 入住人数逗号分隔，例如 `Single,Two` |
 | `contract` | string | 合同类型子串匹配 |
 | `energy` | string | 最低能耗等级，例如 `B` |
 | `limit` | int | 1-500，默认 100 |
 | `offset` | int | 默认 0 |
+
+`source` / `city` 是 `sources` / `cities` 的单值旧写法；两者同时给出时以复数形式
+为准。
 
 返回：
 
@@ -419,6 +425,8 @@ Query：
         "id": "listing-id",
         "name": "Victoriapark 875",
         "status": "Reserved",
+        "status_is_inferred": true,
+        "source": "holland2stay",
         "price_raw": "€2,088",
         "price_value": 2088.0,
         "available_from": "2026-06-22",
@@ -437,6 +445,22 @@ Query：
   }
 }
 ```
+
+#### `status_is_inferred`
+
+**客户端必须展示该字段。** `status` 的取值不区分来源——平台上报的 `Occupied`
+与系统推断的 `Occupied` 是同一个字符串，仅此布尔值可将两者区分开。
+
+各平台均不提供「房源已下架」的显式信号，只是停止返回该房源。因此系统依据「消失
+时长」推断状态：消失 30 分钟推定为 `Reserved`，消失 2 小时判定为 `Occupied`
+（2 小时对齐 Holland2Stay 官方的付款限时）。据此推断的行，其
+`status_is_inferred` 为 `true`。实际运行中绝大多数终态均为推断结果；Web 面板的
+处理方式是在状态徽标旁附加一枚「推测」标记，客户端可照此实现。
+
+房源在 feed 中重新出现时，`status` 与该标记会一并复位。推测产生的状态变更
+**不会**触发通知，因此客户端不会因其收到推送。
+
+详见 [ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号)。
 
 ### GET `/listings/<id>`
 
@@ -468,6 +492,7 @@ Query：
         "id": "listing-id",
         "name": "Victoriapark 875",
         "status": "Reserved",
+        "source": "holland2stay",
         "price_raw": "€2,088",
         "available_from": "2026-06-22",
         "city": "Eindhoven",
@@ -486,6 +511,9 @@ Query：
 - `uncached` 表示有多少房源没有坐标缓存。
 - user 会按 `listing_filter` 过滤。
 - guest 可访问，但只读取缓存，不产生外部请求或写入。
+- **本端点不返回 `status_is_inferred`**，`/calendar` 同样不返回，该字段仅由
+  `/listings` 提供。需区分平台上报与系统推断时，请以 `id` 向 `/listings`
+  或 `/listings/<id>` 查询。
 
 ## Calendar
 
@@ -506,6 +534,7 @@ Query：
         "id": "listing-id",
         "name": "Victoriapark 875",
         "status": "Reserved",
+        "source": "holland2stay",
         "price_raw": "€2,088",
         "available_from": "2026-06-22",
         "url": "https://...",

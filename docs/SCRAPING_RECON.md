@@ -1,28 +1,30 @@
 # 候选平台侦察
 
-**这份文档只管「还没接入的平台值不值得做」。** 已接入的三个平台的现状不在这里：
-- Holland2Stay / Xior / OurDomain 的传输方式与反爬对抗 → [ARCHITECTURE.md §3](ARCHITECTURE.md)
-- Xior 端点契约与自动预订 → [XIOR.md](XIOR.md)
-- OurDomain 端点契约与自动预订 → [OURDOMAIN.md](OURDOMAIN.md)
+**本文档仅评估「尚未接入的平台是否值得接入」。** 已接入平台的现状不在此处：
 
-结论来自真实 HTTP 探测。反爬现状会随上游变化——**下面每条评估都只代表探测当时**，
-真要接入前必须重测一遍。已接入的三个平台里有两个的反爬在半年内变过（H2S 迁域名 +
-上 Turnstile，Xior 端点上托管挑战），这不是小概率事件。
+- Holland2Stay / Xior / OurDomain 的传输方式与反爬对抗见 [ARCHITECTURE.md §3](ARCHITECTURE.md)
+- Xior 的端点契约与自动预订见 [XIOR.md](XIOR.md)
+- OurDomain 的端点契约与自动预订见 [OURDOMAIN.md](OURDOMAIN.md)
+
+以下结论均来自真实的 HTTP 探测。反爬现状会随上游变化，**每条评估仅代表探测当时的
+情况**，正式接入前必须重新测试。已接入的平台中已有两个的反爬在半年内发生过变更
+（Holland2Stay 迁移域名并启用 Turnstile，Xior 的端点启用托管挑战），此类变更并非
+小概率事件。
 
 ---
 
 ## 速览矩阵
 
-> Xior 和 OurDomain 已接入，不在此表——见上面的文档指针。
+> Xior 与 OurDomain 均已接入，不列入此表，相关文档见上文指引。
 
 | # | 平台 | 公开可读 | 反爬 | 数据形态 | 量级 | ToS 风险 | 结论 |
 |---|---|---|---|---|---|---|---|
-| 2 | **HousingAnywhere** | ✅ 完全 | 无 | 页面内嵌结构化 JSON（`__staticRouterHydrationData`） | 207 条 Amsterdam，23 条/页 | 低（`/api/*` 禁；分页 query 在灰区） | 🟢🟢🟢 **下一个做它** |
-| 3 | **SSH (sshxl.nl)** | ✅ 但 SPA | 无 | Angular SPA + sitemap-offers.xml | 44 条全国 | 低 | 🟢 推荐（需挖 API） |
-| 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ✅ **已接入** |
-| 5 | **Student Experience** | ✅ 完全 | 无（自研前端） | 自家预订组件，可用性由 JS 拉取 | **1 栋可订**（Minervahaven，2 个房型） | 低 | ❌ 暂不做（可订面太小） |
-| 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可用 CloakBrowser（H2S 同方案） |
-| 7 | DUWO/ROOM | ❌ | 无（但 **auth-wall + paid registration**） | API 仅登录后可见 | ? | **高**（登录后内容转发）| ❌ 不建议 |
+| 2 | **HousingAnywhere** | ✅ 完全 | 无 | 页面内嵌结构化 JSON（`__staticRouterHydrationData`） | Amsterdam 207 条，每页 23 条 | 低（`/api/*` 被禁；分页 query 处于灰区） | 🟢🟢🟢 **建议作为下一个接入对象** |
+| 3 | **SSH (sshxl.nl)** | ✅ 但为 SPA | 无 | Angular SPA 加 sitemap-offers.xml | 全国 44 条 | 低 | 🟢 推荐（需先定位其 API） |
+| 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ⚠️ **已接入但从未出过房源**，解析器未经真实数据验证，见 §4 |
+| 5 | **Student Experience** | ✅ 完全 | 无（自研前端） | 自有预订组件，可用性由 JS 拉取 | **仅 1 栋可订**（Minervahaven，2 个房型） | 低 | ❌ 暂不接入（可订范围过小） |
+| 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可采用 CloakBrowser（与 Holland2Stay 同一方案） |
+| 7 | DUWO/ROOM | ❌ | 无，但存在 **auth-wall 与付费注册** | API 仅登录后可见 | 未知 | **高**（涉及转发登录后内容）| ❌ 不建议 |
 | 8 | Kamernet | — | paid model | — | — | 高 | ❌ |
 
 ---
@@ -37,9 +39,10 @@ e.g. https://housinganywhere.com/s/Amsterdam--Netherlands
 
 ### 关键发现（2026-08-03 复测）
 
-- HTTP 200，507 KB HTML，**plain `Mozilla/5.0` UA 即可**，无 Cloudflare 挑战
-- 房源是**页面内嵌的结构化 JSON**，不需要解析 HTML 卡片
-- 每页 23 条，Amsterdam 共 207 条 → 约 9 页
+- 返回 HTTP 200 与 507 KB 的 HTML，**使用普通的 `Mozilla/5.0` UA 即可**，无
+  Cloudflare 挑战
+- 房源以**页面内嵌的结构化 JSON** 形式提供，无需解析 HTML 卡片
+- 每页 23 条，Amsterdam 共 207 条，约合 9 页
 
 ### 数据形态
 
@@ -50,9 +53,9 @@ window.__staticRouterHydrationData = JSON.parse("…")
   → .loaderData.<routeId>.listings          # 23 条
 ```
 
-注意这是**双层编码**：外层是 JS 字符串字面量，内层才是 JSON，要解两次。
-同一 blob 里还有 `undefined` 字面量（JS 不是 JSON），直接 `json.loads` 会炸，
-需要先把 `:undefined` 替换成 `:null`。
+需注意该数据为**双层编码**：外层是 JS 字符串字面量，内层才是 JSON，须解码两次。
+同一 blob 中还含有 `undefined` 字面量（JS 并非 JSON），直接调用 `json.loads` 会
+抛出异常，须先将 `:undefined` 替换为 `:null`。
 
 单条 listing 的字段：
 
@@ -64,16 +67,18 @@ isNew, propertyType, previewImage, photos, photoCount,
 minimalRentalPeriod, maximumStay
 ```
 
-`_geoloc` 是最大的额外收益：现有三个源都要走 geocode pipeline 才能上地图，
-这个直接带坐标。
+`_geoloc` 是最主要的额外收益：现有的三个 source 均须经由 geocode pipeline 才能
+在地图上呈现，而该平台直接提供坐标。
 
-> **旧侦察记录的三条解析路径已经失效**，不要照着写代码：
-> - JSON-LD（`<script type="application/ld+json">`）现在只剩聚合值
->   （`offerCount` / `lowPrice` / `highPrice`），**不含个体房源**
-> - `window.__PRELOADED_STATE__` 现在只剩搜索元数据（价格分布等），**不含房源**
-> - `data-test-locator="ListingCard/*"` 锚点仍在，但既然有干净 JSON 就没必要解 HTML
+> **旧侦察记录中的三条解析路径均已失效**，不应据此编写代码：
 >
-> 这正是页首那条判断的实例：**评估只代表探测当时**。
+> - JSON-LD（`<script type="application/ld+json">`）现仅保留聚合值
+>   （`offerCount` / `lowPrice` / `highPrice`），**不含单条房源**；
+> - `window.__PRELOADED_STATE__` 现仅保留搜索元数据（价格分布等），**不含房源**；
+> - `data-test-locator="ListingCard/*"` 锚点仍然存在，但既然已有结构清晰的 JSON，
+>   便无需再解析 HTML。
+>
+> 这正是文首那条判断的实例：**评估仅代表探测当时的情况**。
 
 ### robots.txt
 
@@ -87,27 +92,28 @@ Disallow: /admin
 sitemap: https://housinganywhere.com/sitemap.xml
 ```
 
-`/api/*` 明确禁止——所以只能走页面内嵌 JSON，不能直接调他们的 API。这正好是
-我们要的做法。
+`/api/*` 被明确禁止，因此只能采用页面内嵌 JSON，不得直接调用其 API。这与既定的
+实现方式恰好一致。
 
-**但有一条灰区：`Disallow: /*/s/*?*` 禁的是带 query string 的搜索页，而分页正是
-`?page=2`。** 这条模式要求 `/s/` 前面还有一段路径，我们用的 `/s/Amsterdam--Netherlands?page=2`
-在根路径下，严格讲不匹配；但不同 robots 解析器对 `*` 能否匹配空串处理不一致。
+**但存在一处灰区：`Disallow: /*/s/*?*` 所禁止的是带 query string 的搜索页，而分页
+恰好使用 `?page=2`。** 该模式要求 `/s/` 之前另有一段路径，而所用的
+`/s/Amsterdam--Netherlands?page=2` 位于根路径之下，严格而言并不匹配；但各 robots
+解析器对于 `*` 能否匹配空串的处理并不一致。
 
-保守做法：只抓第一页（23 条最新房源，对「新房源通知」已经够用），不翻页。
-真要翻页，先确认他们的 ToS。
+保守做法是仅抓取第一页（23 条最新房源，对「新房源通知」的用途已经足够），不做
+翻页。若确需翻页，应先确认其服务条款。
 
 ### 工程评估
 
 | 项 | 评分 |
 |---|---|
-| 公开数据 | ⭐⭐⭐⭐⭐ 207 条 Amsterdam，覆盖荷兰全境 |
-| 抓取难度 | ⭐⭐⭐⭐⭐ Plain UA + 内嵌 JSON，无任何技术阻碍 |
-| 数据稳定性 | ⭐⭐⭐ 内嵌 blob 的路径两个月内已变过一次；`data-test-locator` 锚点可作兜底 |
-| 合规风险 | ⭐⭐⭐⭐ listing 页可抓；分页 query 在 robots 灰区 |
-| 用户重叠度 | ⭐⭐⭐⭐⭐ 国际学生 + young pro = FlatRadar 核心用户群 |
+| 公开数据 | ⭐⭐⭐⭐⭐ Amsterdam 207 条，覆盖荷兰全境 |
+| 抓取难度 | ⭐⭐⭐⭐⭐ 普通 UA 加内嵌 JSON，无任何技术障碍 |
+| 数据稳定性 | ⭐⭐⭐ 内嵌 blob 的路径两个月内已变更过一次；`data-test-locator` 锚点可作备选 |
+| 合规风险 | ⭐⭐⭐⭐ listing 页可抓取；分页 query 处于 robots 灰区 |
+| 用户重叠度 | ⭐⭐⭐⭐⭐ 国际学生与年轻职场人群，与 FlatRadar 的核心用户高度重合 |
 
-**推荐工程量：1.5–2 周**（HTML 解析 + city 列表配置 + 入库适配）。
+**预计工程量：1.5–2 周**（HTML 解析、城市列表配置与入库适配）。
 
 ---
 
@@ -121,10 +127,11 @@ GET https://www.sshxl.nl/sitemap-offers.xml   ← listings 全量索引
 
 ### 关键发现
 
-- **`sitemap-offers.xml` 直接列出 44 条当前活跃 offer URLs**
-- 每条 URL 是 `/en/rental-offer/{numeric_id}-` 这样的稳定 ID
-- 但**详情页是 SPA**（Angular 风格）—— title 只有 `<title>View</title>`，HTML 不含数据
-- 真实数据需要从 `/api/...` 拿，但我没在初步探测里找到端点
+- **`sitemap-offers.xml` 直接列出了 44 条当前活跃的 offer URL**
+- 每条 URL 形如 `/en/rental-offer/{numeric_id}-`，为稳定 ID
+- 但**详情页为 SPA**（Angular 风格）：title 仅为 `<title>View</title>`，HTML 中不含
+  数据
+- 真实数据须自 `/api/...` 获取，但初步探测中尚未定位到具体端点
 
 ### Backend 指纹
 
@@ -142,16 +149,19 @@ Disallow: /hangfire/, /admin/, /my-ssh/, /mijn-ssh/, /styleguide/
 Sitemap: https://www.sshxl.nl/sitemap-offers.xml ← 公开
 ```
 
-**listings 不在 Disallow 列表，offer 抓取合规**。
+**listings 不在 Disallow 列表中，抓取 offer 合规**。
 
 ### 工程评估
 
-- 量小（44 条），但全国分布（Utrecht / Eindhoven / Amsterdam / Maastricht 等 9 城）
-- **需要先反编译/解析他们的 SPA bundle 找出 listing API endpoint**——这是 P1 的真实工作量
-- 备选方案：用 Playwright 抓 SPA 渲染后的 HTML（简单但慢 + 资源贵）
-- 数据可能依赖 antiforgery cookie（一次 GET 主页拿 cookie，后续带 cookie 调 API）
+- 数量较少（44 条），但分布于全国 9 个城市（Utrecht、Eindhoven、Amsterdam、
+  Maastricht 等）
+- **须先解析其 SPA bundle 以定位 listing API 端点**，这是主要的工作量所在
+- 备选方案为使用 Playwright 抓取 SPA 渲染后的 HTML，实现简单但速度慢且资源开销大
+- 数据可能依赖 antiforgery cookie（先 GET 主页取得 cookie，后续携带 cookie 调用
+  API）
 
-**推荐工程量：2–3 周**（SPA bundle 分析 + API 端点测试 + 入库适配）。SPA bundle 分析有不确定性，可能踩坑。
+**预计工程量：2–3 周**（SPA bundle 分析、API 端点测试与入库适配）。其中 SPA bundle
+分析存在不确定性，实际耗时可能超出预估。
 
 ---
 
@@ -164,7 +174,7 @@ GET https://www.pararius.com/apartments/amsterdam
 → HTTP 403 + cf-mitigated: challenge + "Just a moment..."
 ```
 
-普通 `Mozilla/5.0` UA 触发 Cloudflare 5 秒挑战。`curl_cffi` 能否过尚未实测——OurDomain 的 SecureRC 同样被判成「CF hard block」但 curl_cffi 可过，所以值得先试轻方案。过不去就走浏览器传输层。
+普通 `Mozilla/5.0` UA 会触发 Cloudflare 的 5 秒挑战。`curl_cffi` 能否通过尚未实测——OurDomain 的 SecureRC 同样曾被判定为「CF hard block」，而 curl_cffi 可以通过，因此值得先尝试轻量方案；若无法通过，再改走浏览器传输层。
 
 ### robots.txt（允许浏览）
 
@@ -173,21 +183,24 @@ User-agent: *
 Disallow: /contact/*, /report-*, /account/*, /checkout/*, /*/Kamer-te-huur/*
 ```
 
-robots.txt 友好，但 Cloudflare WAF 不认 robots——它认请求指纹。
+robots.txt 本身较为宽松，但 Cloudflare WAF 并不依据 robots 判定，而是依据请求指纹。
 
 ### 工程评估
 
-浏览器传输层已经是现成基建（`BrowserFetcher` + 一个新的 `SiteProfile` 即可），所以「需要浏览器」不再是阻塞理由。真正的未知是 Pararius 的反爬强度——可能比 H2S 更严（DataDome 之类），必须实测。成本上要记住：多一个 Cloudflare 平台 = 多一个常驻浏览器（~200–400MB）+ 一条专属线程。
+浏览器传输层已是现成基建（只需 `BrowserFetcher` 加一个新的 `SiteProfile`），因此
+「需要浏览器」不再构成阻塞理由。真正的未知在于 Pararius 的反爬强度——其可能严于
+Holland2Stay（例如采用 DataDome 一类方案），必须实测确认。成本方面需注意：每增加
+一个 Cloudflare 平台，即意味着增加一个常驻浏览器（约 200–400MB）与一条专属线程。
 
 ---
 
 ## §4 OurCampus (ourcampus.nl) — **已接入**
 
-Greystar 的另一个学生住房品牌，与 OurDomain 同属一家。
+Greystar 旗下的另一个学生住房品牌，与 OurDomain 同属一家公司。
 
-> **本节记录的评估结论是「投入产出比不划算」，接入是在知道这一点之后做的产品决策。**
-> 下面的分析保留原样——它解释了为什么这个 source 的期望值应该放低，以及
-> 运维时该注意什么。实现见 [`scrapers/ourcampus.py`](../scrapers/ourcampus.py)。
+> **本节记录的评估结论为「投入产出比不划算」，接入是在明知这一点之后作出的产品
+> 决策。** 以下分析保留原貌：它说明了为何应当降低对该 source 的预期，以及运维时
+> 需要注意的事项。实现见 [`scrapers/ourcampus.py`](../scrapers/ourcampus.py)。
 
 ### 技术面（2026-08-03 实测，全部通过）
 
@@ -196,98 +209,114 @@ Greystar 的另一个学生住房品牌，与 OurDomain 同属一家。
 | 栈 | Webflow 前台 + RENTCafe/SecureRC 后台，**与 OurDomain 完全同栈** |
 | RENTCafe host | `new-ourcampus-amsterdam-diemen-rentcafewebsiteuk.securerc.co.uk` |
 | slug / property_id | `new-ourcampus-amsterdam-diemen` / `186609` |
-| 反爬 | plain curl → 403 + 挑战页；**curl_cffi `chrome136` 首个指纹即 200** |
+| 反爬 | 普通 curl 返回 403 与挑战页；**curl_cffi 使用 `chrome136`，首个指纹即返回 200** |
 | 已解析 | 3 个 floorplan：`1113259` Standard+ Studio 1P / `1112904` Furnished Student 1P / `1112905` Furnished Student 2P |
 
 ### 为什么它的期望值应该放低
 
-**1. 只有一栋楼。** `/en/apartments` 全站仅 Amsterdam Diemen，地址 Dalsteindreef 6002——
-与 OurDomain South-East（Dalsteindreef 20-40）同街隔壁。接进来只多一栋楼。
+**其一，仅有一栋楼。** `/en/apartments` 全站仅列出 Amsterdam Diemen，地址为
+Dalsteindreef 6002，与 OurDomain South-East（Dalsteindreef 20-40）位于同一街道且
+相邻。接入后仅增加一栋楼。
 
-**2. 等待期 16–18 个月（官网自述）。** 这是排队制不是先到先得，
-「房源出现即秒推」的核心价值不成立。与 DUWO/ROOM 是同一类否决理由，
-只不过那次是合规问题，这次是产品问题。
+**其二，等待期为 16–18 个月（官网自述）。** 该平台采用排队制而非先到先得，
+「房源出现即刻推送」这一核心价值并不成立。其否决理由与 DUWO/ROOM 属同一类型，
+区别在于前者是合规问题，此处则是产品问题。
 
-**3. 同栈不等于同接口。** 它的单元查询是 **POST + `floorPlans[]` 表单体**
-（页面 jQuery `.load(url, {floorPlans: names})`），OurDomain 是 GET + query string。
+**其三，同栈并不等同于同接口。** 其单元查询采用 **POST 与 `floorPlans[]` 表单体**
+（页面 jQuery 为 `.load(url, {floorPlans: names})`），而 OurDomain 采用 GET 与
+query string。
 
-实现上的处理：`OurCampusScraper` 继承 `OurDomainScraper`，只覆盖
-`_fetch_units_html()` 这一个方法，其余（指纹池与冷却、每次换 IP、同 session
-403 重试、单元行解析、状态映射、Occupancy 反推、Listing 映射）全部复用。
+实现上的处理方式：`OurCampusScraper` 继承 `OurDomainScraper`，仅覆盖
+`_fetch_units_html()` 一个方法，其余部分（指纹池与冷却、每次尝试更换 IP、同一
+session 内 403 重试、单元行解析、状态映射、Occupancy 反推、Listing 映射）全部复用。
 
-> 注意接入时**无法用响应区分 GET 和 POST 谁对**——该楼零可订，两种形状都只
-> 能拿到空面板。选 POST 的依据是「和它自己前端一致」，那是唯一有证据支持的
-> 形状。基类的 GET 对 OurDomain 是实测有效的，没有动。
+> 需注意接入时**无法依据响应判断 GET 与 POST 孰为正确**——该楼零可订，两种请求
+> 形态均只能取得空面板。选择 POST 的依据是「与其自身前端保持一致」，这是唯一有
+> 证据支持的形态。基类的 GET 对 OurDomain 实测有效，未作改动。
 
 ### 一条未验证的事
 
-实测时该楼**零可订单元**（floorplans.aspx 上 0 个 apply 按钮、6 个 Get Notified；
-页面里唯一的 `applyButton` 字样在一行被注释掉的 JS 里）。所以
-`contentclass=availableunits` 返回的是 floorplan 网格而不是单元表，
-**它的单元表 HTML 结构未经验证**。
+实测时该楼**没有任何可订单元**（floorplans.aspx 上 apply 按钮数量为 0，Get
+Notified 为 6 个；页面中唯一出现的 `applyButton` 字样位于一行被注释掉的 JS 中）。
+因此 `contentclass=availableunits` 返回的是 floorplan 网格而非单元表，**其单元表的
+HTML 结构未经验证**。
 
-判定「真没房」而不是「解析失败」的依据是对照实验：同一份代码、同一个指纹打
-OurDomain Diemen，`unitrow=2` / `1`，正常解析。没有这个对照就会掉进
-「没拿到数据 ≠ 确认没有数据」的坑（见 [ARCHITECTURE.md §5.10](ARCHITECTURE.md)）。
+判定为「确无房源」而非「解析失败」的依据是对照实验：以同一份代码、同一个指纹请求
+OurDomain Diemen，`unitrow` 分别为 2 与 1，解析正常。缺少该对照即会落入
+「未取得数据不等于确认不存在数据」这一类判据错误（见
+[ARCHITECTURE.md §5.10](ARCHITECTURE.md)）。
 
 **接入后仍然如此：第一次真实有房时必须人工核对一次日志。**
 
-为此加了一道守卫（基类实现，OurDomain 一并受益）：零单元时检查响应里有没有
-`Apartment Search Result` 这个面板标题。有 → 是一张结构完整的搜索结果页，
-「真没房」；没有 → 拿到的不是单元面板，标记 `complete=False` 而不是报「零可用」。
-两种情况的 HTTP 状态都是 200，没有这道守卫就会让 stale 收敛把存量 listing 清掉。
+**截至 2026-08-04 该情形尚未出现**：接入以来 `unitrow=yes` 一次都未曾出现，
+`data/ourcampus_capture.txt` 中始终为 `panel=yes unitrow=no parsed=0`。也就是说
+该 source 的解析器、状态映射、阈值，以及「feed 仅列出可订单元」这一前提，至今
+**未经任何真实数据验证**。（本地实例的情况可查阅同一文件。）
 
-守卫兜不住的情况：单元行结构变了、但页面仍是合法面板——那会静默返回 0 个单元。
-只能靠人工核对。
+为此增设了两道守卫，二者均位于基类中，OurDomain 一并受益：
+
+**① 结构判据。** 解析出零单元时，检查响应中是否存在 `Apartment Search Result`
+面板标题。存在则说明这是一张结构完整的搜索结果页，可判定为确无可订单元；不存在
+则说明取到的并非单元面板，此时标记 `complete=False` 而非上报「零可用」。两种情形
+的 HTTP 状态均为 200，缺少该守卫将导致 stale 收敛清空存量 listing。
+
+**② 连续确认**（v1.13.0）。结构判据无法识别「确实是目标表格，但本次渲染异常」
+——URL 相同、面板标题相同，仅单元行未渲染，两种响应在特征上无从区分。因此要求
+**同一栋楼连续 3 轮解析出 0 个单元，才允许其参与 stale 收敛**
+（`OURDOMAIN_ZERO_ROUNDS_TO_CONFIRM`）。未达计数时房源照常入库，仅本轮不参与。
+
+两道守卫均无法覆盖的情形：**单元行结构发生永久性变更，而页面仍是合法面板**
+——此时会稳定返回 0 个单元，连续 3 轮同样会达成计数。该情形只能依靠人工核对，
+capture 文件正是为此保留。
 
 ---
 
 ## §5 Student Experience (studentexperience.com) — **暂不做**
 
-自营学生公寓运营商，形态上最接近 Xior / H2S（自有房源池、单元级、非排队制）。
-但**线上可订的面太小**。
+自营学生公寓运营商，形态上最接近 Xior 与 Holland2Stay（自有房源池、单元级粒度、
+非排队制）。但其**线上可订的范围过小**。
 
 ### 荷兰楼盘（2026-08-03 实测）
 
 | 楼盘 | 线上可订 |
 |---|---|
-| Amsterdam Minervahaven | ✅ 唯一一个 |
+| Amsterdam Minervahaven | ✅ 唯一可订 |
 | Amsterdam Amstel | ❌ |
 | Amsterdam NDSM | ❌ |
 | Amsterdam Zuidas | ❌（站内公告 2026 年关闭） |
 | Leiden | ❌ |
 | Amstelveen Uilenstede | 在建 |
 
-「线上可订」的判据是它自家预订组件 `/studios` 的 `locationId` 下拉框——
-里面 NL 只有 `2 = Amsterdam Minervahaven`（另外两个是西班牙的 Granada、
-Madrid Pozuelo）。其余楼盘没有线上预订路径。
+「线上可订」的判据是其自有预订组件 `/studios` 的 `locationId` 下拉框：其中属于荷兰
+的仅有 `2 = Amsterdam Minervahaven`，另外两项为西班牙的 Granada 与 Madrid Pozuelo。
+其余楼盘不提供线上预订路径。
 
 Minervahaven 的两个房型：`14` Core Studio（€1.550/月起）、
 `11` Signature Studio（€1.799/月起）。
 
-### 两条路都不通
+### 两条路径均不可行
 
-**RENTCafe 路径**：后台确实是 SecureRC（`studentexperience.securerc.co.uk`），
-但只有 `amsterdam-minervahaven0` 这个 slug 存在（property_id `186778`），
-`amsterdam-amstel0` / `amsterdam-ndsm0` 都是 RentCafe 404。而且那个
-`floorplans.aspx` 76KB 里 **0 个 floorplan tile**（`subPointerId` /
-`myFloorPlanId` / `FloorPlanContainer` 全为 0）——它不走 online-leasing
-的 floorplan 流程，`OurDomainScraper` 那套用不上。
+**RENTCafe 路径**：其后台确为 SecureRC（`studentexperience.securerc.co.uk`），但
+仅 `amsterdam-minervahaven0` 这一 slug 存在（property_id 为 `186778`），
+`amsterdam-amstel0` 与 `amsterdam-ndsm0` 在 RentCafe 上均返回 404。且该
+`floorplans.aspx` 的 76KB 内容中 **不含任何 floorplan tile**（`subPointerId`、
+`myFloorPlanId`、`FloorPlanContainer` 的数量均为 0）——它并不走 online-leasing 的
+floorplan 流程，`OurDomainScraper` 的实现无法套用。
 
-**自家组件路径**：`/studios?los=shortstay&locationId=2&studioTypeId=14`
-是服务端渲染的，参数集为 `los` / `locationId` / `studioTypeId` /
-`academicTermId`。但**承载可用性的 `academicTermId` 下拉框始终是空的**，
-选完楼盘和房型也不填充——由 JS 异步拉取，对应的 XHR 端点我没找到。
-要拿到真实可用性得反 JS 或上浏览器。
+**自有组件路径**：`/studios?los=shortstay&locationId=2&studioTypeId=14` 为服务端
+渲染，参数集包括 `los`、`locationId`、`studioTypeId` 与 `academicTermId`。但
+**承载可用性信息的 `academicTermId` 下拉框始终为空**，即便选定楼盘与房型后亦不
+填充——其内容由 JS 异步拉取，对应的 XHR 端点未能定位。要取得真实可用性，须逆向
+其 JS 或引入浏览器。
 
-`los=longstay` 模式下连楼盘和房型的下拉框都没有。
+在 `los=longstay` 模式下，楼盘与房型的下拉框均不存在。
 
 ### 结论
 
-为 1 栋楼 × 2 个房型反 JS 或加一个常驻浏览器，不划算。
+为 1 栋楼、2 个房型而逆向其 JS 或增加一个常驻浏览器，投入产出不成比例。
 
-**重新评估的触发条件**：它把 Leiden / NDSM / Amstel 开放线上预订
-（`locationId` 下拉框里出现新选项）。那时可订面变成 4–5 栋，值得再看。
+**重新评估的触发条件**：该平台为 Leiden、NDSM 或 Amstel 开放线上预订（表现为
+`locationId` 下拉框中出现新选项）。届时可订范围将扩大至 4–5 栋楼，值得重新评估。
 
 ---
 
@@ -298,70 +327,78 @@ Minervahaven 的两个房型：`14` Core Studio（€1.550/月起）、
 - `GET /api/v1/product-search?pageIndex=0&pageSize=20&...` → **404 anonymous**
 
 ### 业务模型
-- ROOM.nl 是 DUWO + 其他学生住房组织的统一搜索平台
-- **用户必须先注册 + 付 ~€30/年 waiting list 会员费** 才能看 listings
-- API 设计本身就是 `credentials: "include"`——必须登录态 cookie
-- 这是 ROOM 商业模式核心：卖 waiting list 服务
+- ROOM.nl 是 DUWO 与其它学生住房组织的统一搜索平台
+- **用户必须先完成注册并支付约 €30/年的 waiting list 会员费**，方可查看 listings
+- 其 API 设计本身即为 `credentials: "include"`，必须携带登录态 cookie
+- 这正是 ROOM 商业模式的核心：出售 waiting list 服务
 
-### 工程上能做 vs 合规上该做
+### 技术可行性与合规适当性
 
-- 技术上能做：拿一个真账号，scraper 登录维持 session，调 `product-search`
-- 合规上不该做：DUWO ToS 明确禁止"将通过本服务获得的信息再分发"。FlatRadar 把 DUWO 数据推送给非账户持有者 = 高风险违 ToS
-- 单点故障：账号被锁 = 所有用户的 DUWO 监控停摆
-- 学生身份验证：DUWO 注册要 student ID + paid status，不是随便能搞
+- 技术上可行：使用一个真实账号，由 scraper 登录并维持 session，调用 `product-search`
+- 合规上不宜：DUWO 的服务条款明确禁止「将通过本服务获得的信息再行分发」。FlatRadar
+  若将 DUWO 数据推送给非账户持有者，属高风险的条款违反行为
+- 存在单点故障：账号一旦被锁定，全部用户的 DUWO 监控随即停摆
+- 存在身份验证门槛：DUWO 注册需要 student ID 与已付费状态，难以批量获取
 
-**推荐：不做**。学生想监控 DUWO 应该自己注册 + 用 ROOM 自带的 mail alert 功能。
+**结论：不予接入**。有意监控 DUWO 的用户应自行注册，并使用 ROOM 自带的邮件提醒
+功能。
 
 ---
 
 ## §7 综合建议
 
-### 下一个做谁（按投入产出比排序）
+### 接入优先级（按投入产出比排序）
 
-1. **HousingAnywhere — 最大覆盖**
-   - 工程量低、合规清楚、用户群匹配、量大（196 条仅 Amsterdam 一城）
-   - 无 Cloudflare，plain UA 即可；直接复用现有 `scrapers/` 包架构
-2. **SSH — 填空城市**
-   - 全国 44 条覆盖 9 城，正好补 H2S 没覆盖的 Utrecht / Maastricht / Groningen
-   - 工程量略大，需要先挖 Angular SPA bundle 找 API
-3. **Pararius / Funda — 可以启动探测**
-   - 之前判断「需 Playwright，推迟」，现在浏览器传输层已经是现成基建
-   - 但它们的反爬可能比 H2S 更严（DataDome 之类），要先实测
-4. **DUWO / Kamernet — 放弃**（合规 / 商业模式不允许，不是技术问题）
+1. **HousingAnywhere —— 覆盖范围最大**
+   - 工程量低、合规边界清晰、用户群匹配，且数量可观（仅 Amsterdam 一城即 196 条）
+   - 无 Cloudflare，普通 UA 即可；可直接复用现有 `scrapers/` 包的架构
+2. **SSH —— 补足城市覆盖**
+   - 全国 44 条覆盖 9 个城市，恰好补足 Holland2Stay 未覆盖的 Utrecht、Maastricht、
+     Groningen
+   - 工程量略大，须先解析 Angular SPA bundle 以定位 API
+3. **Pararius / Funda —— 可以启动探测**
+   - 此前判断为「需 Playwright，暂缓」，而浏览器传输层现已是现成基建
+   - 但其反爬可能严于 Holland2Stay（例如 DataDome 一类），须先实测
+4. **DUWO / Kamernet —— 放弃**（受限于合规与商业模式，而非技术问题）
 
-> 接入新平台的实际成本远不止 scraper 本身：反爬会变（见页首），每加一个
-> Cloudflare 保护的平台就多常驻一个浏览器（~200–400MB）和一条专属线程。
+> 接入新平台的实际成本远不止 scraper 本身：反爬机制会变化（见文首），且每增加一个
+> 受 Cloudflare 保护的平台，就需多常驻一个浏览器（约 200–400MB）与一条专属线程。
 
 ### 关于「再找几个 Xior / H2S 那样的运营商」
 
-扫过 OurCampus、Student Experience、Basecamp、Vesteda、Camelot、Yugo、
-The Social Hub 之后的规律：**荷兰专业学生公寓这块，Xior 已经是最大的那个**
-（NL 30 栋 / 全欧 100+）。剩下的自营运营商基本落进三类：
+在考察 OurCampus、Student Experience、Basecamp、Vesteda、Camelot、Yugo 与
+The Social Hub 之后可以得出以下规律：**在荷兰的专业学生公寓领域，Xior 已是规模
+最大者**（荷兰 30 栋，全欧 100 余栋）。其余自营运营商基本可归为三类：
 
-| 类型 | 例子 | 为什么不做 |
+| 类型 | 例子 | 不予接入的原因 |
 |---|---|---|
-| 规模太小 | OurCampus（1 栋）、Student Experience（1 栋可订） | 抓取成本固定，房源太少摊不平 |
-| 排队制 | DUWO/ROOM、Basecamp、社会住房那一整类 | 等待期以年计，「秒推」没有意义 |
-| 自研前端 | Vesteda、Camelot | 房源客户端渲染，要挖 API 或上浏览器，成本≈一个新平台 |
+| 规模过小 | OurCampus（1 栋）、Student Experience（1 栋可订） | 抓取成本固定，房源数量过少难以摊薄 |
+| 排队制 | DUWO/ROOM、Basecamp 及社会住房整体 | 等待期以年计，即时推送没有意义 |
+| 自研前端 | Vesteda、Camelot | 房源由客户端渲染，须逆向 API 或引入浏览器，成本接近接入一个新平台 |
 
-所以继续往「运营商」方向找的边际收益在递减。**marketplace 那条线
-（HousingAnywhere）单城 207 条，是更划算的方向。**
+因此继续沿「运营商」方向寻找的边际收益正在递减。**marketplace 方向
+（HousingAnywhere）单城即有 207 条，是更划算的选择。**
 
-尚未排除、值得各花半天的：**Vesteda**（大型机构房东，自有门户，
-房源客户端渲染）和 **Camelot Europe**（Next.js + Storyblok，首页
-`__NEXT_DATA__` 只有 CMS 内容，房源在搜索页，没深挖）。
+尚未排除、各值得投入约半天进行评估的有：**Vesteda**（大型机构房东，自有门户，
+房源由客户端渲染）与 **Camelot Europe**（Next.js 加 Storyblok，首页的
+`__NEXT_DATA__` 仅含 CMS 内容，房源位于搜索页，尚未深入分析）。
 
 ### 替代发现：可考虑加入候选
 
-侦察过程中发现的其他可能值得做的平台：
-- **`hoppinger.com`** 是 ROOM.nl / 多个 Dutch 房产平台的承包商，他们的其他客户（非 DUWO 链路）可能用同一个 Drupal + .NET stack，开放程度更高。可探索。
-- **OurCampus.nl**（thisisourdomain 链接里出现）—— 可能是 Greystar 的另一个学生住房品牌
+侦察过程中发现的其它可能值得评估的平台：
+
+- **`hoppinger.com`** 是 ROOM.nl 及多个荷兰房产平台的承包商，其其余客户（不经
+  DUWO 链路）可能采用同一套 Drupal 加 .NET 技术栈，开放程度或更高，值得进一步
+  探索。
+- **OurCampus.nl**（自 thisisourdomain 的链接中发现）——推测为 Greystar 旗下的另一个
+  学生住房品牌。（该平台其后已接入，见 §4。）
 
 ---
 
 ## 附录：完整探测命令记录
 
-复现这些结论的命令都在文档生成过程中真实运行过，存档于 git commit 历史。关键命令：
+用于复现上述结论的命令均在文档撰写过程中实际执行过，并存档于 git 提交历史中。
+关键命令如下：
 
 ```bash
 # Tech stack

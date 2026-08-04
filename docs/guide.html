@@ -100,17 +100,22 @@ python web.py</pre>
 <!-- ─────────────────────────────────────────────── -->
 <h2 id="platforms">Supported Platforms</h2>
 
-<p>FlatRadar monitors three housing platforms. The <strong>Platform</strong> badge (H2S / OD / XR) on each listing shows where it came from.</p>
+<p>FlatRadar monitors four housing platforms. The <strong>Platform</strong> badge (H2S / OD / OC / XR) on each listing shows where it came from.</p>
 
 <table>
   <tr><th>Platform</th><th>Coverage</th><th>Data Level</th><th>Auto-Booking</th></tr>
   <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>26 Dutch cities</td><td>Unit (room number, rent, area)</td><td>✅ Full GraphQL flow</td></tr>
   <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam (Diemen + South-East)</td><td>Unit (#6045, sqm, floor, view)</td><td>❌ Notify only</td></tr>
-  <tr><td><strong>Xior</strong> (XR)</td><td>NL 30 buildings (15 cities)</td><td>Unit (M1.30.53, sqm, rent, deposit)</td><td>❌ Notify only</td></tr>
+  <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen (1 building)</td><td>Same as OurDomain (unverified)</td><td>❌ Notify only</td></tr>
+  <tr><td><strong>Xior</strong> (XR)</td><td>30 buildings across 14 Dutch cities</td><td>Unit (M1.30.53, sqm, rent, deposit)</td><td>❌ Notify only</td></tr>
 </table>
 
 <div class="tip">
 <strong>Tip:</strong> Go to <strong>Settings → Platforms</strong> to enable or disable platforms, and <strong>Settings → Cities</strong> to pick which buildings to monitor.
+</div>
+
+<div class="tip warn">
+<strong>On OurCampus:</strong> it has never returned a bookable listing since it was added. Its parser is inherited from OurDomain and has never been checked against real data, so treat its results as unverified until a first listing appears.
 </div>
 
 <!-- ─────────────────────────────────────────────── -->
@@ -127,6 +132,7 @@ python web.py</pre>
 <div class="card">
 <h3>Listings</h3>
 <p>Browse all listings in the database. Filter by <strong>status</strong>, <strong>city</strong>, <strong>source</strong> (platform), <strong>type</strong>, <strong>max rent</strong>, <strong>min area</strong>, <strong>contract</strong>, <strong>energy</strong>, and more. Click any listing to open its detail page on the source platform.</p>
+<p>A status may carry a small <strong>inferred</strong> badge, meaning <em>we worked this status out ourselves — the platform did not report it</em>. Platforms never announce that a unit is gone; they simply stop listing it. So a listing that disappears from the feed is marked <strong>Reserved</strong> after 30 minutes and <strong>Occupied</strong> after 2 hours (that is Holland2Stay's own payment deadline). The badge clears the moment the listing shows up again. <strong>Always confirm on the platform before acting</strong> — an inferred status is our best guess, not a fact.</p>
 </div>
 
 <div class="card">
@@ -211,7 +217,7 @@ python web.py</pre>
   <li>Send you the payment link immediately</li>
 </ol>
 <p><strong>It does NOT auto-pay.</strong> You receive the payment URL and complete payment manually.</p>
-<p>OurDomain and Xior are notify-only — their booking flows are protected by reCAPTCHA and not yet automated.</p>
+<p>OurDomain, OurCampus and Xior are notify-only. Their booking code is written and reCAPTCHA solving is wired up, but the flow has not been verified end to end, so it is not exposed to users.</p>
 </div>
 
 <div class="card">
@@ -270,7 +276,7 @@ python web.py</pre>
 
 <div class="card">
 <h3>Platforms & Cities</h3>
-<p>Enable/disable H2S, OurDomain, and Xior independently. For each platform, select which cities or buildings to monitor. Xior buildings are grouped by city.</p>
+<p>Enable or disable Holland2Stay, OurDomain, OurCampus and Xior independently. For each platform, select which cities or buildings to monitor. Xior buildings are grouped by city.</p>
 <p>After saving, click <strong>Apply Now</strong> to hot-reload — no restart needed.</p>
 </div>
 

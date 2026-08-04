@@ -10,19 +10,25 @@
 
 FlatRadar iOS 客户端已于 v1.6.0 上架 App Store。国际学生 / young professional 群体里 Android 占比 ~40-50%，需要补齐 Android 端才能覆盖全量用户。
 
-### 现状盘点
+### 立项时的现状盘点
+
+> 下表记录的是本文档撰写时（Android 客户端立项阶段）的状态，其中「FCM 通道尚未
+> 开发」一项已经过时——FCM 推送通道已完成并通过真机验收，详见下文的阶段进度表。
 
 | 维度 | 现状 |
 |---|---|
-| iOS 代码量 | ~50 个 Swift 文件，~5000 行（不含测试） |
-| 架构模式 | SwiftUI + @Observable + MVVM，Stores 层承载所有业务逻辑 |
-| 后端 API | Flask `/api/v1/*`，统一的 `{ok, data, error}` 信封，Bearer token 鉴权 |
-| 后端推送 | APNs 已跑通；FCM 通道尚未开发 |
-| 设计系统 | iOS HIG 原生组件，Material 3 需要重新映射 |
+| iOS 代码量 | 约 50 个 Swift 文件，约 5000 行（不含测试） |
+| 架构模式 | SwiftUI 加 @Observable 与 MVVM，全部业务逻辑承载于 Stores 层 |
+| 后端 API | Flask `/api/v1/*`，统一的 `{ok, data, error}` 信封，采用 Bearer token 鉴权 |
+| 后端推送 | APNs 已完成联调；FCM 通道尚未开发 |
+| 设计系统 | 采用 iOS HIG 原生组件，Material 3 需要重新映射 |
 
-完整后端接口契约见：[Backend API Reference](API.md)；Android/iOS 共用的机器可读 OpenAPI 3.1 契约见：[openapi.json](openapi.json)。Android 开工前应先按该文档确认 `/devices/register`、`/devices/test` 和推送分发的 Android/FCM 待办。
+完整的后端接口契约见 [Backend API Reference](API.md)；Android 与 iOS 共用的机器
+可读 OpenAPI 3.1 契约见 [openapi.json](openapi.json)。Android 开发启动前，应先依据
+该文档确认 `/devices/register`、`/devices/test` 及推送分发中与 Android/FCM 相关的
+待办事项。
 
-后端改动量小——FCM 推送通道 + `platform` 字段扩展，大约 300 行 Python。
+后端改动量较小：新增 FCM 推送通道并扩展 `platform` 字段，约 300 行 Python 代码。
 
 ---
 
@@ -721,7 +727,7 @@ A0 (骨架)
  └─► A1 (鉴权+Dashboard+Listings)
       ├─► A2 (Map+Calendar) ── 可与 A1 并行的部分：Map/Calendar ViewModel + Screen
       ├─► A3 (Notifications+SSE) —— 可与 A2 并行
-      │    └─► A4 (FCM) —— 依赖 A3 的 SSE 跑通 + 后端 FCM 通道就绪
+      │    └─► A4 (FCM) —— 依赖 A3 的 SSE 完成联调，以及后端 FCM 通道就绪
       └─► A5 (Settings+多语言+深色模式) —— 可与 A2/A3 并行
            └─► A6 (打磨+上架) —— ❌ 已放弃，上架部分取消
 ```

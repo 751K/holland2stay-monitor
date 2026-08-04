@@ -4,11 +4,11 @@
 
 > English version: [README.md](README.md)
 
-荷兰的房源常常几小时内就上线又消失。FlatRadar 帮你盯住关心的平台，一旦出现
-符合过滤条件的房源立刻通知；对 Holland2Stay 还能在你刚看到通知时，就把预订
-推进到支付页面。
+荷兰的租房房源往往在数小时内上线又下架。FlatRadar 持续轮询所配置的平台，在出现
+符合过滤条件的房源时立即发出通知；对 Holland2Stay 还可在通知送达的同时，将预订
+推进至支付页面。
 
-可自部署：一个容器、一个 SQLite 文件，除了你自己选用的通知渠道之外不依赖任何
+本项目支持自部署：一个容器、一个 SQLite 文件，除所选用的通知渠道外不依赖任何
 外部服务。
 
 **官网：** [flatradar.app](https://flatradar.app) ·
@@ -26,38 +26,43 @@
 
 | | |
 |---|---|
-| **监控** | Holland2Stay、OurDomain、OurCampus、Xior，采用自适应轮询间隔，上架高峰时段自动加密 |
-| **通知** | Web、Telegram、邮件、WhatsApp、iOS 推送、Android 推送、iMessage —— 每个用户独立选择渠道和过滤条件 |
+| **监控** | Holland2Stay、OurDomain、OurCampus、Xior，采用自适应轮询间隔，上架高峰时段自动收紧 |
+| **通知** | Web、Telegram、邮件、WhatsApp、iOS 推送、Android 推送、iMessage；每个用户独立选择渠道与过滤条件 |
 | **视图** | 列表、地图、日历、仪表盘、图表，支持中英文 |
 | **账号** | 访客 / 用户 / 管理员三种角色，各用户的过滤条件与凭据互相独立 |
-| **自动预订** | 仅 Holland2Stay —— 边界见[自动预订](#自动预订) |
+| **自动预订** | 仅 Holland2Stay，边界见[自动预订](#自动预订) |
 
 ### 平台覆盖
 
 | 平台 | 覆盖范围 | 抓取成熟度 | 预订 |
 |---|---|---|---|
-| Holland2Stay | 任意配置的荷兰城市 | 稳定 —— 房源主要来源 | 支持自动预订 |
-| OurDomain | Amsterdam Diemen / South-East | 稳定 | 仅通知（预订链路已建，未开放）|
-| Xior | 14 个城市共 30 栋楼，按需选 | 稳定 | 仅通知（预订链路已建，未开放）|
-| OurCampus | Amsterdam Diemen（1 栋） | **未经验证** —— 见下 | 仅通知 |
+| Holland2Stay | 任意配置的荷兰城市 | 稳定，为房源的主要来源 | 支持自动预订 |
+| OurDomain | Amsterdam Diemen / South-East | 稳定 | 仅通知（预订链路已实现，未开放）|
+| Xior | 14 个城市共 30 栋楼，可按需选择 | 稳定 | 仅通知（预订链路已实现，未开放）|
+| OurCampus | Amsterdam Diemen（1 栋） | **未经验证**，见下文 | 仅通知 |
 
-**OurCampus 至今没出现过一条可订房源。** 它照常被轮询，户型面板也返回正常，
-但解析器期待的那张单元表在约 900 轮里一次都没出现过——那个解析器是从
-OurDomain 抄来的，从没跟真实 markup 核对过。每次请求都会往
-`data/ourcampus_capture.txt` 写一行摘要，第一次真解析出单元时会把完整 HTML
-一起存进去。在那份样本出现之前，OurCampus 的结果都当作未经验证看待。
+**OurCampus 至今未出现过任何可订房源。** 它照常被轮询，户型面板亦返回正常，但
+解析器所期待的单元表始终未曾出现。该解析器完全继承自 OurDomain，从未与真实
+markup 核对——其状态映射、阈值，以及「feed 仅列出可订单元」这一前提，均未经
+验证。每次请求都会向 `data/ourcampus_capture.txt` 写入一行摘要，首次成功解析出
+单元时会一并存入完整 HTML；本地实例的进展可查阅该文件。在该样本出现之前，应将
+OurCampus 视为尚未验证的代码。
 
-第三方站点会变，覆盖范围随之变化。各平台的抓取实现见
+各平台体量本身即不均衡：Holland2Stay 按城市覆盖，是房源的主要来源；其余三个均为
+单栋楼粒度，数栋楼合计也难以形成可比的规模。各 source 是互不相同的房源池，彼此
+不构成冗余。
+
+第三方站点随时可能变更，覆盖范围亦随之变化。各平台的抓取实现见
 [XIOR.md](XIOR.md)、[OURDOMAIN.md](OURDOMAIN.md)、[SCRAPING_RECON.md](SCRAPING_RECON.md)。
 
 ### 客户端
 
 | 入口 | 状态 |
 |---|---|
-| Web 面板 | 稳定 —— 自部署的主要入口 |
-| [iOS App](https://apps.apple.com/us/app/flarradar/id6769857080) | 维护中 —— 已上架 App Store，当前范围内功能完整 |
-| [Android App](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk) | Beta —— 已签名 `.apk`，直接安装。FCM 推送已验证。不上架 Play Store，直接下载就是分发方式 |
-| 桌面版 | macOS `.dmg` / Windows `.zip`，见 [Releases](https://github.com/751K/holland2stay-monitor/releases) |
+| Web 面板 | 稳定，为自部署的主要入口 |
+| [iOS App](https://apps.apple.com/us/app/flarradar/id6769857080) | 维护阶段，已上架 App Store，在当前范围内功能完整 |
+| [Android App](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk) | Beta，提供已签名的 `.apk`，直接安装即可。FCM 推送已验证。不上架 Play Store，直接下载即为其分发方式 |
+| 桌面版 | macOS `.dmg` 与 Windows `.zip`，见 [Releases](https://github.com/751K/holland2stay-monitor/releases) |
 
 ---
 
@@ -65,65 +70,113 @@ OurDomain 抄来的，从没跟真实 markup 核对过。每次请求都会往
 
 |  | 最低 | 说明 |
 |---|---|---|
-| 内存 | **2 GB** | 每个受 Cloudflare 保护的 source 会常驻一个 headless Chromium（各约 200–400 MB）。1 GB 只够跑单个 source。 |
-| 磁盘 | 约 1.5 GB | 仅 patched Chromium 解压后就约 700 MB |
-| Python | 3.11+ | Docker 镜像用 3.11；CI 与桌面版构建用 3.12 |
+| 内存 | **2 GB** | 每个受 Cloudflare 保护的 source 会常驻一个 headless Chromium（各约 200–400 MB）。1 GB 仅够运行单个 source。 |
+| 磁盘 | 约 1.5 GB | 仅 patched Chromium 解压后即约 700 MB |
+| Docker | Engine 20.10+，含 Compose 插件 | 使用 `docker compose`，而非旧版 `docker-compose` 脚本 |
+| Python | 3.11+ | 仅从源码运行时需要。Docker 镜像使用 3.11；CI 与桌面版构建使用 3.12 |
 | 系统 | 推荐 Linux | macOS 的限制见下方[从源码运行](#从源码运行) |
+| 域名 | 可选 | 仅 HTTPS 部署需要，下文的本地路径无需域名 |
+
+除此之外无其它依赖：不需要外部数据库、消息队列或指标后端，全部状态存放于单个
+SQLite 文件。
 
 ---
 
 ## 快速开始
 
-### Docker（推荐）
+以下提供两条路径：若仅需确认其能否运行，采用第一条；若需长期依赖，采用第二条。
+
+### 一、本地试运行（无需域名与证书）
+
+```bash
+git clone https://github.com/751K/holland2stay-monitor.git
+cd holland2stay-monitor
+cp .env.example .env
+mkdir -p data logs
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
+```
+
+首次构建需数分钟，其中包含下载 patched Chromium（压缩包约 140 MB）。构建完成后
+访问 `http://127.0.0.1:8088`。
+
+命令末尾的 `h2s` 不可省略：它指定仅启动应用容器，不启动 Caddy。该覆盖层完成两件
+事——将 8088 端口发布到**回环地址**，以及跳过 entrypoint 的安全预检（否则在缺少
+真实域名与密码时容器将拒绝启动）。**未经修改的 `.env` 中 `WEB_PASSWORD` 为空，
+因此面板以明文 HTTP 提供服务且无需登录。** 这正是其仅绑定 127.0.0.1 的原因：请
+勿修改该地址，亦不得将此覆盖层用于公网主机。
+
+默认仅监控 Holland2Stay 的 Eindhoven，其余平台均未启用。可在面板中调整，或修改
+`.env`（见[配置](#配置)）。
+
+### 二、带域名部署
+
+需准备一台已安装 Docker 的服务器、一个 A/AAAA 记录指向该服务器的域名，以及放行
+的 80/443 端口。证书由 Caddy 自动申请并续期。
 
 ```bash
 cp .env.example .env
 mkdir -p data logs logs/caddy
 ```
 
-启动前先改 `.env`。任何公网可访问的部署至少要设置：
+`.env` 中至少需设置以下各项：
 
 ```env
-WEB_PASSWORD=change-me
+WEB_PASSWORD=一串足够长的随机字符
 SESSION_COOKIE_SECURE=true
 PUBLIC_BASE_URL=https://your.domain.com
 SUPPORT_EMAIL=support@example.com
+TIMEZONE=Europe/Amsterdam
 ```
 
-再把 `Caddyfile` 里的域名换成你自己的，然后：
+> **登录用户名为 `admin`**，除非另行设置 `WEB_USERNAME`。而**鉴权本身由
+> `WEB_PASSWORD` 启用**：该项留空意味着面板对任何可访问者开放。密码为空时容器
+> 将拒绝启动，因此不会在无意间进入该状态。
+
+随后将 `Caddyfile` 中的 `your.domain.com` 替换为实际域名，并执行：
 
 ```bash
 docker compose up -d
 ```
 
-确认两个进程都起来了——`monitor` 和 `web` 应该都是 `RUNNING`：
+entrypoint 会先于其余流程执行一次预检：若 `Caddyfile` 仍保留占位域名，或
+`WEB_PASSWORD` 为空，均会输出一行 `FATAL` 并终止启动。两条提示均已写明需要
+修改的内容。
+
+### 确认运行状态
+
+两个进程均应处于 `RUNNING`：
 
 ```bash
 docker exec h2s supervisorctl -c /etc/supervisor/conf.d/app.conf status
 ```
 
-首轮会比之后慢，因为要先过一次 Cloudflare 挑战（小型 VPS 上 10–35 秒）。可以
-跟着日志看：
+跟踪首轮抓取：
 
 ```bash
 docker compose logs -f h2s
 ```
 
-正常的一轮以 `本轮完整扫描: N/N 城市 (...)` 结尾（N 是配置的 source×城市
-组合数），随后是 `本轮结束: ... 新房源`。
+首轮耗时长于后续轮次，因需先通过一次 Cloudflare 挑战（本地约 2–3 秒，小型 VPS
+上 10–35 秒）。正常轮次以 `本轮完整扫描: N/N 城市 (...)` 结束（N 为配置的
+source×城市组合数），其后为 `本轮结束: ... 新房源`。
 
-然后打开你的域名登录，添加用户、通知渠道和要监控的城市。
+随后打开面板登录，添加用户、通知渠道与待监控的城市。用户级配置全部位于面板中，
+此后一般无需再修改 `.env`。
 
 ### 从源码运行
+
+仅供开发使用。生产环境应采用 Docker：容器已固定 Chromium 版本与 supervisor 配置。
 
 ```bash
 pip install -r requirements.txt
 python -m cloakbrowser install   # patched Chromium，解压后约 700 MB
 cp .env.example .env
-python web.py
+python web.py                    # 仅启动面板
+python monitor.py                # 抓取循环，需另开终端
 ```
 
-打开 `http://127.0.0.1:8088`。
+访问 `http://127.0.0.1:8088`。注意 `web.py` 与 `monitor.py` 是两个**互相独立**的
+进程，仅通过 SQLite 通信：只运行 `web.py` 将得到一个永远不会更新数据的面板。
 
 > **macOS**：免费版 CloakBrowser 的 macOS 构建落后于 Linux，且 headless 模式
 > 可能崩溃，所以本地运行会自动退回到可见窗口模式。真正依赖的部署请用
@@ -131,82 +184,164 @@ python web.py
 
 ---
 
+## 升级与备份
+
+代码打包在镜像内，**并未**挂载，因此升级必须重新构建。`.env` 与 `data/` 为挂载
+项，升级后保留。
+
+```bash
+cd /path/to/holland2stay-monitor
+cp data/listings.db "data/listings.db.bak.$(date +%Y%m%dT%H%M%S)"
+git pull
+docker compose build h2s
+docker compose up -d --force-recreate h2s
+```
+
+若省略 `--force-recreate`，旧容器将继续以旧代码运行；若省略 `build`，则升级不会
+生效。
+
+需要备份的仅有两处：`data/listings.db`（房源、用户、凭据、设备 token）与 `.env`
+（各类密钥，尤其是 `DATA_ENCRYPTION_KEY`）。**两者必须一并备份。** 库中的用户
+密码与平台凭据均以 `.env` 中的密钥加密，仅恢复其中之一将得到一批无法解密的凭据。
+
+SQLite 启用了 WAL，容器运行期间直接复制文件会遗漏最近的写入。获取一致快照请使用：
+
+```bash
+docker exec h2s python -c "import sqlite3; \
+  sqlite3.connect('data/listings.db').execute('VACUUM INTO \"data/backup.db\"')"
+```
+
+---
+
 ## 配置
 
-日常设置——source、城市、间隔、过滤条件、通知渠道、自动预订、主题——都在 Web
-面板里改。部署级设置在 `.env`，从 [.env.example](../.env.example) 开始，里面
-对每个键都有说明。
+日常设置（source、城市、轮询间隔、过滤条件、通知渠道、自动预订、主题）均在 Web
+面板中调整。部署级设置位于 `.env`，请以 [.env.example](../.env.example) 为起点，
+其中对每个键均有说明。
 
-先了解这几个：
+以下几项需优先了解：
 
 | 键 | 默认值 | 作用 |
 |---|---|---|
 | `SOURCES` | `holland2stay` | 启用哪些平台，逗号分隔 |
-| `CITIES` | `Eindhoven,29` | Holland2Stay 的城市，格式 `名称,id`，多个用 `\|` 分隔 |
-| `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | 其它 source 的同格式配置，楼栋 key 在各自 scraper 里 |
-| `SHADOW_SOURCES` | — | 列出的 source 照常抓取入库但**不发任何通知**，用于新平台对用户开放前的静默验证。不在 `SOURCES` 里的条目会被忽略并打警告——只写在这里而没写进 `SOURCES` 的平台是「关着」，不是「影子」 |
+| `CITIES` | `Eindhoven,29` | Holland2Stay 的城市，格式为 `名称,id`，多项以 `\|` 分隔 |
+| `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | 其余 source 的同格式配置，楼栋 key 见各自的 scraper |
+| `SHADOW_SOURCES` | — | 列出的 source 照常抓取入库但**不发送任何通知**，用于新平台对用户开放前的静默验证。不在 `SOURCES` 中的条目会被忽略并记录警告——仅写入此处而未写入 `SOURCES` 的平台属于「未启用」，而非「影子」 |
 | `CHECK_INTERVAL` | `300` | 非高峰时段的轮询间隔（秒） |
 | `PEAK_INTERVAL` | `60` | 高峰时段的轮询间隔（秒） |
-| `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默多久后 `/health` 报 unhealthy |
-| `HEALTH_*` / `WATCHDOG_*` | 见 `.env.example` | `/monitoring` 背后那套数据退化告警的阈值 |
-| `HTTPS_PROXY` | — | Cloudflare 拦得紧时，让抓取走另一个出口 IP |
+| `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默多长时间后 `/health` 报告 unhealthy |
+| `HEALTH_*` / `WATCHDOG_*` | 见 `.env.example` | `/monitoring` 所依托的数据退化告警阈值 |
+| `STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` | `0.5` / `2` | 房源从 feed 里消失多久之后推定为 Reserved、再多久判 Occupied——见[房源状态](#房源状态) |
+| `HTTPS_PROXY` | — | Cloudflare 拦截较严时，令抓取改走另一个出口 IP |
 
-启用一个 source 需要**同时**配 `SOURCES` 和该 source 的城市列表。只配城市列表
-不会生效。
+启用某个 source 需要**同时**配置 `SOURCES` 与该 source 的城市列表，仅配置城市
+列表不会生效。
 
-上生产前建议跑一次预检：
+上线生产前建议执行一次预检：
 
 ```bash
 python -m tools.doctor --no-network
 ```
 
+要在**宿主机的仓库目录**里跑，不是容器里——`tools/` 是有意不打进镜像的。它是
+只读的：不写配置、不发通知、不碰 monitor 进程。
+
+---
+
+## 房源状态
+
+**四个平台均不提供「房源已下架」的显式信号**，只是停止在 feed 中返回该房源。
+Xior 是其中唯一 feed 里确实带有 `Occupied` 的平台，且覆盖并不完整；其余平台的
+终态全部由系统推断得出，而非平台上报。
+
+因此「消失」即为判据，分两段判定：
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    state "可订 / 抽签 / Unknown" as A
+    state "Reserved" as R
+    state "Occupied" as O
+
+    [*] --> A: feed 中首次出现
+    A --> R: 消失 30 分钟
+    R --> O: 消失 2 小时
+    R --> A: feed 中再次出现
+    O --> A: feed 中再次出现
+```
+
+凡系统推断得出的状态，面板上均会在状态旁显示一枚**「推测」**徽标，API 中对应
+`status_is_inferred` 字段，使平台上报与系统推断始终可区分。实际运行中，所见的
+`Occupied` 多数为推断结果。推测转换**不产生通知**。
+
+2 小时并非任意取值，而是 **Holland2Stay 官方的付款限时**：一条消失超过 2 小时的
+预留，其结果必然已经确定。中间态 `Reserved` 的作用是降低判错的代价——
+`Reserved → 可订` 本就是常见迁移；若直接判定为 Occupied 而房源随后回归，则会向
+一批用户推送失实的「重新上架」通知。两个阈值均可配置（`STALE_RESERVED_HOURS` /
+`STALE_OCCUPIED_HOURS`），设计理由与相关教训见
+[ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号)。
+
+收敛**仅对本轮完整扫描成功**的 source×城市执行，抓取失败绝不会被读作「房源已
+下架」。
+
 ---
 
 ## 自动预订
 
-仅对 Holland2Stay 开放。它用你配置的账号登录，尝试符合条件的可直订房源，
-**停在支付 URL —— 不会完成支付**。
+仅对 Holland2Stay 开放。系统以所配置的账号登录，尝试符合条件的可直接预订房源，
+**止于支付 URL，不会完成支付**。
 
-**Xior：链路已建成并实测驱动过，但没开。** 它的 RENTCafe 流程在真实楼盘上
-跑到过申请表这一步——系统填表并代传证件（不传证件平台拒绝保存申请）。它比
-Holland2Stay 早停一步：下一页要填 IBAN/SWIFT，所以 Xior 的草稿并不占住房源。
-系统代传证件之后表单能否顺利保存尚未确认，因此 `monitor._AUTO_BOOK_SOURCES`
-里仍然只有 holland2stay，用户触发不了。细节见 [XIOR.md](XIOR.md)。
+Xior、OurDomain、OurCampus 运行的是同一套 RENTCafe 后端，共用一份实现
+（[`bookers/rentcafe.py`](../bookers/rentcafe.py)）。代码已完整，reCAPTCHA 已
+对接，流程亦已对真实站点走通。该线目前仍处于**关闭**状态——
+`monitor._AUTO_BOOK_SOURCES` 中仅含 holland2stay，面板上无法启用。欠缺的是验证，
+而非代码：
 
-**OurDomain：和 Xior 同一套 RENTCafe，共用同一份实现。** 契约实测逐字相同，
-差别只在怎么进到申请表——入口段已对着真站跑通，登录之后的部分还没验证过。
-同样没开。细节见 [OURDOMAIN.md](OURDOMAIN.md) §7。
+| 平台 | 已完成的部分 | 尚待验证的部分 |
+|---|---|---|
+| Xior | 已推进至申请表、保存草稿并代为上传证件（2026-08-03，真实账号） | 代传证件后表单能否正常保存尚未确认。此外 Xior 的草稿**并不锁定房源**——它比 Holland2Stay 提前一步终止，下一页即需填写 IBAN/SWIFT |
+| OurDomain | 入口段已对真实站点走通（2026-08-04）：floorplans → 可用单元 → 条款页 POST，18 个字段全部落位 | 登录之后的环节全部未验证。该流程**不含选房页**，一旦脱离流程便没有重选入口——代码的处理方式为明确报错中止，绝不携带错位的上下文继续执行。验证需要一个真实的 OurDomain 账号 |
+| OurCampus | 无 | 预订流程尚未侦察 |
 
-OurCampus 保持仅通知：它的预订流程还没侦察过。
+两条线最终止于同一处限制，与 Holland2Stay 相同：再往前是 `ApplicationCharges`，
+需填写 IBAN / SWIFT，代填金融凭据是硬性限制。详见 [XIOR.md](XIOR.md) §8 与
+[OURDOMAIN.md](OURDOMAIN.md) §7。
 
-> 线上 demo 对普通用户关闭了自动预订。需要的话请邮件联系，或[自行部署](#快速开始)。
+> 线上演示环境对普通用户关闭了自动预订。如有需要请邮件联系，或[自行部署](#快速开始)。
 
 ---
 
 ## 排障
 
-先开 **`/monitoring`**（admin）：分 source 健康卡、最近 30 轮明细（格式
-`房源数 (完整/任务)`）、当前活跃告警。下面这张表里大部分问题它能直接回答，
-不用进容器。
+排障应首先打开 **`/monitoring`**（admin）：其中包含分 source 的健康卡片、最近
+30 轮明细（格式为 `房源数 (完整/任务)`）以及当前活跃的告警。下表中的多数问题
+它可直接回答，无需进入容器。
 
-`/health` 和 `/monitoring` 回答的是两个问题。前者是**「循环还活着吗」**
-（心跳新鲜度），它决定容器的健康状态；后者是**「数据还对吗」**——解析器被
-上游改版打坏时，`/health` 是绿的。数据退化只告警 admin，**不会**把容器标成
-unhealthy：重启治不好解析器对不上，只会打断正在进行的抓取。
+`/health` 与 `/monitoring` 回答的是两个不同的问题。前者判断**「循环是否仍在
+运行」**（依据心跳新鲜度），并决定容器的健康状态；后者判断**「数据是否仍然
+正确」**——当解析器被上游改版破坏时，`/health` 仍为正常。数据退化仅向 admin
+告警，**不会**将容器标记为 unhealthy：重启无法修复解析器与上游结构不匹配的
+问题，只会中断正在进行的抓取。
 
 | 现象 | 原因与处理 |
 |---|---|
-| 完全没有通知，面板显示旧数据 | monitor 进程挂了。用 `supervisorctl status` 确认，再 `supervisorctl start monitor`。心跳超过 `MONITOR_HEARTBEAT_MAX_AGE` 后 `/health` 会返回 503。 |
-| 某平台在 `/monitoring` 上是 `down` / `warn` | 卡片上写了触发哪条规则。阈值与设计理由见 [ARCHITECTURE.md §5.12](ARCHITECTURE.md)。 |
-| 想查某个时间段的日志 | `/logs` 支持关键字 / 级别 / `since`–`until`，服务端过滤，不限于当前屏幕上那几百行。 |
-| 日志反复出现 `H2S source 熔断` | Cloudflare 在拦你的出口 IP。熔断只暂停该 source，稍后用单个城市试探恢复。持续出现就配 `HTTPS_PROXY`。 |
-| 日志反复出现 `CF 挑战 ... 未解开` | 同上，通常是 IP 信誉问题，不是本地配置问题。 |
-| 某个平台一直 0 条 | 可能是真没房。先看该轮是否标记为完整扫描，参考 [ARCHITECTURE.md §5.7](ARCHITECTURE.md#57-completeness-决定能否做状态收敛)。 |
-| 容器被 OOM 杀掉 | 调高 `mem_limit`。每个受 CF 保护的 source 会常驻一个浏览器。 |
-| `supervisorctl` 报 "no such file" | 它的 socket 不在默认路径，命令要带 `-c /etc/supervisor/conf.d/app.conf`。 |
+| 完全没有通知，面板显示陈旧数据 | monitor 进程已停止。先用 `supervisorctl status` 确认，再执行 `supervisorctl start monitor`。心跳超过 `MONITOR_HEARTBEAT_MAX_AGE` 后 `/health` 将返回 503。 |
+| 某平台在 `/monitoring` 上显示为 `down` / `warn` | 卡片上已注明触发了哪条规则。阈值与设计理由见 [ARCHITECTURE.md §5.12](ARCHITECTURE.md)。 |
+| 需查询某时间段的日志 | `/logs` 支持关键字、级别与 `since`–`until` 过滤，且在服务端执行，不限于当前屏幕内的内容。 |
+| 日志反复出现 `H2S source 熔断` | Cloudflare 正在拦截该出口 IP。熔断仅暂停该 source，稍后会以单个城市试探恢复。若持续出现，请配置 `HTTPS_PROXY`。 |
+| 日志反复出现 `CF 挑战 ... 未解开` | 同上，通常属 IP 信誉问题，而非本地配置问题。 |
+| 某个平台持续返回 0 条 | 可能确无房源。先查看该轮是否被标记为完整扫描，参考 [ARCHITECTURE.md §5.7](ARCHITECTURE.md#57-completeness-决定能否做状态收敛)。 |
+| 已出租的房源仍显示为「可订」 | 该城市未被完整扫描，因而未进入收敛范围。查看 `/monitoring` 轮次表格中的 `(完整/任务)`。 |
+| 一批房源同时转为 Occupied | 若均带**「推测」**徽标则属正常：这是老化收敛的补偿执行（阈值刚调整过，或停机后首轮恢复），该过程**不发送通知**。不带徽标者才是平台实际上报。 |
+| 日志反复出现 `抓到 0 个单元，第 N/3 轮` | 属正常行为。OurDomain / OurCampus 的空结果需连续 3 轮确认，以防单轮抖动收敛整栋楼。 |
+| 容器被 OOM 终止 | 调高 `mem_limit`。每个受 Cloudflare 保护的 source 会常驻一个浏览器。 |
+| 容器无法启动，日志中出现 `FATAL` | entrypoint 的安全预检未通过：或 `Caddyfile` 仍为 `your.domain.com`，或 `WEB_PASSWORD` 为空。两者均属于拒绝暴露无鉴权面板的保护措施。 |
+| 已设置 `WEB_PASSWORD` 但无法登录 | 用户名为 `admin`，除非另行设置 `WEB_USERNAME`。 |
+| `supervisorctl` 报 "no such file" | 其 socket 不在默认路径，命令需附加 `-c /etc/supervisor/conf.d/app.conf`。 |
 
-容器的 `healthy` 状态已经覆盖 web 和 monitor 两者，但 unhealthy **不会**自动
-重启——想要告警，需要把健康状态接到你自己的监控上。
+容器的 `healthy` 状态已同时覆盖 web 与 monitor，但 unhealthy **不会**触发自动
+重启。若需告警，须将容器健康状态接入自有的监控系统。
 
 ---
 
@@ -214,23 +349,23 @@ unhealthy：重启治不好解析器对不上，只会打断正在进行的抓�
 
 | 文档 | 用途 |
 |---|---|
-| [使用指南](https://flatradar.app/guide?lang=zh) | 截图和日常使用 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统怎么跑，以及排障前值得先知道的所有失败模式 |
-| [API.md](API.md) | 移动端与集成的后端契约 |
+| [使用指南](https://flatradar.app/guide?lang=zh) | 截图与日常使用 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统运行方式，以及排障前应先了解的全部失败模式 |
+| [API.md](API.md) | 面向移动端与外部集成的后端契约 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
 | [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | 各平台抓取侦察 |
 | [ANDROID_PLAN.md](ANDROID_PLAN.md) · [iOS_README.md](iOS_README.md) | 移动端开发 |
-| [dataflow_ch.mmd](dataflow_ch.mmd) · [dataflow_en.mmd](dataflow_en.mmd) | 完整抓取/通知流程的 Mermaid 图 |
+| [dataflow_ch.mmd](dataflow_ch.mmd) · [dataflow_en.mmd](dataflow_en.mmd) | 完整抓取与通知流程的 Mermaid 图 |
 
 ---
 
 ## 支持开发
 
-FlatRadar 由一个人开发和维护，服务器、推送基础设施和 App Store 费用都是自掏
-腰包。
+FlatRadar 由个人独立开发与维护，服务器、推送基础设施及 App Store 相关费用均为
+自行承担。
 
-- 觉得有用的话给个 Star。
-- 通过 [GitHub Sponsors](https://github.com/sponsors/751K) 或
+- 如觉得本项目有用，欢迎 Star。
+- 可通过 [GitHub Sponsors](https://github.com/sponsors/751K) 或
   [flatradar.app/donate](https://flatradar.app/donate) 赞助。
 - 问题反馈：[flatradar.app/support](https://flatradar.app/support)。
 

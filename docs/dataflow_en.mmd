@@ -41,8 +41,9 @@ flowchart TD
 
     M --> J
     J --> N["storage.diff(fresh)\nsource-aware upsert / status changes"]
-    N --> O["mark_stale_listings() (once per 24h)\nConverge stale rows by complete source:city\nNo complete city: defer, keep the timer"]
-    O --> P["Update last_scrape_at / last_scrape_count"]
+    N --> O1["1. Aging sweep (every round)\nGone 0.5h -> Reserved (inferred)\nGone 2h -> Occupied (inferred)\nOnly source:city scanned completely this round"]
+    O1 --> O2["2. Orphan sweep (once per 24h)\nsource:city dropped from monitoring, 30-day grace\nNo complete city: defer, keep the timer"]
+    O2 --> P["Update last_scrape_at / last_scrape_count"]
 
     P --> SH{"source in SHADOW_SOURCES?"}
     SH -->|Yes| SHX["Stored, but no notification at all\n(silent validation of a new platform)"]

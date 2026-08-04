@@ -46,11 +46,18 @@ required beyond the notification channels you choose to enable.
 
 **OurCampus has never returned a single available unit.** It is polled normally
 and its floorplan panels come back valid, but the unit table its parser expects
-has never appeared in ~900 rounds — the parser is inherited from OurDomain and
-has never been checked against real markup. Every request writes a summary line
-to `data/ourcampus_capture.txt`, and the first response that actually parses a
-unit gets its full HTML archived there. Treat OurCampus results as unverified
-until that sample exists.
+has not shown up once. The parser is inherited from OurDomain and has never been
+checked against real markup, so its status mapping, its thresholds and the
+premise that the feed lists only bookable units are all unverified. Every request
+writes a summary line to `data/ourcampus_capture.txt`, and the first response
+that actually parses a unit gets its full HTML archived there — check that file
+to see where your own instance stands. Until such a sample exists, treat
+OurCampus as untested code that happens to run.
+
+Expect lopsided volume in general. Holland2Stay covers whole cities and is where
+most listings come from; the other three are individual buildings, so a handful
+of them will never add up to a comparable pool. The sources are separate pools,
+not redundancy for each other.
 
 Coverage shifts as third-party sites change. The scrapers are documented in
 [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
@@ -73,70 +80,155 @@ Coverage shifts as third-party sites change. The scrapers are documented in
 |---|---|---|
 | RAM | **2 GB** | Each Cloudflare-protected source keeps a headless Chromium resident (~200–400 MB each). 1 GB is only enough for a single source. |
 | Disk | ~1.5 GB | The patched Chromium alone unpacks to ~700 MB |
-| Python | 3.11+ | Docker image ships 3.11; CI and desktop builds use 3.12 |
+| Docker | Engine 20.10+ with the Compose plugin | `docker compose`, not the old `docker-compose` script |
+| Python | 3.11+ | Only for running from source. The Docker image ships 3.11; CI and desktop builds use 3.12 |
 | OS | Linux recommended | See the [macOS note](#running-from-source) below |
+| Domain | Optional | Needed only for the HTTPS deployment. The local path below runs without one |
+
+Nothing else is required — no external database, no message broker, no
+telemetry backend. State is one SQLite file.
 
 ---
 
 ## Quick start
 
-### Docker (recommended)
+Two paths. Take the first one if you just want to see it work; take the second
+for anything you actually depend on.
+
+### 1. Try it locally — no domain, no certificate
+
+```bash
+git clone https://github.com/751K/holland2stay-monitor.git
+cd holland2stay-monitor
+cp .env.example .env
+mkdir -p data logs
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
+```
+
+The first build takes a few minutes — it downloads a patched Chromium (~140 MB
+compressed). When it finishes, open `http://127.0.0.1:8088`.
+
+The `h2s` at the end of the command matters: it starts the app container only,
+leaving Caddy out of it. The override file publishes port 8088 on the loopback
+interface and skips the entrypoint's security preflight, which otherwise refuses
+to start without a real domain and a password. **A stock `.env` has no
+`WEB_PASSWORD`, so the panel is plain HTTP with no login at all.** That is why it
+binds to 127.0.0.1. Do not change that address, and do not use this override on a
+public host.
+
+Out of the box it monitors Holland2Stay in Eindhoven and nothing else. Change
+that in the panel, or in `.env` (see [Configuration](#configuration)).
+
+### 2. Deploy behind a domain
+
+You need a server with Docker, a domain whose A/AAAA record points at it, and
+ports 80/443 open. Caddy obtains and renews the certificate on its own.
 
 ```bash
 cp .env.example .env
 mkdir -p data logs logs/caddy
 ```
 
-Edit `.env` before starting. For anything reachable from the internet, set at
-minimum:
+Set at minimum, in `.env`:
 
 ```env
-WEB_PASSWORD=change-me
+WEB_PASSWORD=a-long-random-string
 SESSION_COOKIE_SECURE=true
 PUBLIC_BASE_URL=https://your.domain.com
 SUPPORT_EMAIL=support@example.com
+TIMEZONE=Europe/Amsterdam
 ```
 
-Edit `Caddyfile` to point at your domain, then:
+> **The sign-in username is `admin`** unless you set `WEB_USERNAME`. Setting
+> `WEB_PASSWORD` is what turns authentication on at all — leave it empty and the
+> panel is open to anyone who can reach it. The container refuses to start with
+> an empty password, so you will not get there by accident.
+
+Replace `your.domain.com` in `Caddyfile` with your domain, then:
 
 ```bash
 docker compose up -d
 ```
 
-Confirm both processes came up — you should see `monitor` and `web` both
-`RUNNING`:
+The entrypoint runs a preflight before anything else and stops with a `FATAL`
+line if the `Caddyfile` still has the placeholder domain or `WEB_PASSWORD` is
+empty. Both messages tell you exactly what to fix.
+
+### Confirming it works
+
+Both processes should report `RUNNING`:
 
 ```bash
 docker exec h2s supervisorctl -c /etc/supervisor/conf.d/app.conf status
 ```
 
-The first scrape takes longer than later ones because it has to pass a
-Cloudflare challenge (10–35 s on a small VPS). Follow along with:
+Follow the first round:
 
 ```bash
 docker compose logs -f h2s
 ```
 
-A healthy round ends with `本轮完整扫描: N/N 城市 (...)` — the count is the
-number of configured source/city pairs — followed by `本轮结束: ... 新房源`.
+The first scrape is slower than later ones because it has to pass a Cloudflare
+challenge (2–3 s locally, 10–35 s on a small VPS). A healthy round ends with
+`本轮完整扫描: N/N 城市 (...)` — N is the number of configured source/city pairs
+— followed by `本轮结束: ... 新房源`.
 
-Then open your domain, sign in, and add users, notification channels and the
-cities you want monitored.
+Then open the panel, sign in, and add users, notification channels and the
+cities you want monitored. Everything user-facing lives there; you should not
+need to touch `.env` again.
 
 ### Running from source
+
+For development. Production should use Docker — the container pins the Chromium
+build and the supervisor setup.
 
 ```bash
 pip install -r requirements.txt
 python -m cloakbrowser install   # patched Chromium, ~700 MB unpacked
 cp .env.example .env
-python web.py
+python web.py                    # panel only
+python monitor.py                # scraper loop, separate terminal
 ```
 
-Open `http://127.0.0.1:8088`.
+Open `http://127.0.0.1:8088`. Note that `web.py` and `monitor.py` are two
+independent processes that only talk through SQLite — running just `web.py`
+gives you a panel that never gets new data.
 
 > **macOS**: the free CloakBrowser build for macOS lags the Linux one, and
 > headless mode can abort, so local runs fall back to a visible browser window.
 > Use Linux/Docker for anything you actually depend on.
+
+---
+
+## Upgrading and backups
+
+Code is baked into the image — it is not bind-mounted — so a rebuild is
+mandatory. `.env` and `data/` are mounted and survive.
+
+```bash
+cd /path/to/holland2stay-monitor
+cp data/listings.db "data/listings.db.bak.$(date +%Y%m%dT%H%M%S)"
+git pull
+docker compose build h2s
+docker compose up -d --force-recreate h2s
+```
+
+Skipping `--force-recreate` leaves the old container running against the new
+image. Skipping `build` does nothing at all.
+
+Everything worth keeping is in two places: `data/listings.db` (listings, users,
+credentials, device tokens) and `.env` (secrets, including
+`DATA_ENCRYPTION_KEY`). **Back them up together.** The database stores user
+passwords and API credentials encrypted with the key in `.env` — restoring one
+without the other leaves you with credentials nobody can decrypt.
+
+SQLite is in WAL mode, so copying the file while the container runs can miss the
+most recent writes. For a consistent snapshot:
+
+```bash
+docker exec h2s python -c "import sqlite3; \
+  sqlite3.connect('data/listings.db').execute('VACUUM INTO \"data/backup.db\"')"
+```
 
 ---
 
@@ -158,6 +250,7 @@ The ones worth knowing up front:
 | `PEAK_INTERVAL` | `60` | Seconds between rounds during peak hours |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | How long the monitor may be silent before `/health` reports unhealthy |
 | `HEALTH_*` / `WATCHDOG_*` | see `.env.example` | Thresholds for the data-degradation alerts behind `/monitoring` |
+| `STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` | `0.5` / `2` | How long a listing must be absent from the feed before it is inferred Reserved, then Occupied — see [Listing status](#listing-status) |
 | `HTTPS_PROXY` | — | Route scraping through another exit IP when Cloudflare gets aggressive |
 
 Enabling a source requires **both** `SOURCES` and that source's city list.
@@ -169,6 +262,54 @@ Before a production deploy:
 python -m tools.doctor --no-network
 ```
 
+Run it on the host, in the repository directory — `tools/` is deliberately not
+copied into the image. It is read-only: it never writes config, sends
+notifications, or touches the monitor process.
+
+---
+
+## Listing status
+
+No platform tells you a unit is gone. They simply stop returning it. Xior is the
+only source whose feed carries a real `Occupied` state, and even there it covers
+just part of the picture. Everywhere else, a terminal status is something the
+system worked out rather than something a platform said.
+
+So absence is the signal, and it is read in two steps:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+
+    state "Available / lottery / Unknown" as A
+    state "Reserved" as R
+    state "Occupied" as O
+
+    [*] --> A: first seen in the feed
+    A --> R: gone 30 min
+    R --> O: gone 2 h
+    R --> A: seen again
+    O --> A: seen again
+```
+
+Anything the system inferred carries an **inferred** badge in the panel and a
+`status_is_inferred` flag in the API, so a reported status and a deduced one are
+never confused — in practice most `Occupied` rows you see will be inferred.
+Inferred transitions do not generate notifications.
+
+Two hours is not arbitrary — it is Holland2Stay's own payment deadline. A
+reservation that has been out of the feed longer than that has resolved one way
+or the other. The intermediate Reserved stop exists so that being wrong is
+cheap: `Reserved → Available` is an ordinary transition, whereas jumping
+straight to Occupied and then seeing the listing return produces a wave of false
+"back on the market" alerts. Both thresholds are configurable
+(`STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS`); the reasoning and the failure
+modes behind them are in
+[ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号).
+
+Convergence only runs for source/city pairs that were **completely** scanned
+that round. A failed scrape is never read as "the listings are gone".
+
 ---
 
 ## Auto-booking
@@ -177,21 +318,23 @@ Enabled for Holland2Stay only. It signs in with the account you configure,
 attempts eligible directly-bookable listings, and **stops at the payment URL** —
 it never completes a payment.
 
-**Xior: built and driven end-to-end, but switched off.** Its RENTCafe flow has
-been run against a live property up to and including the applicant form — the
-system fills the form and uploads the ID document (the site refuses to save the
-application without one). It stops one step earlier than Holland2Stay does: the
-next page asks for IBAN/SWIFT, so a Xior draft never holds the unit. Whether the
-form saves cleanly once the system supplies the document has not been confirmed,
-so `monitor._AUTO_BOOK_SOURCES` still lists Holland2Stay only and no user can
-trigger it. Details in [XIOR.md](XIOR.md).
+Xior, OurDomain and OurCampus run the same RENTCafe backend and share one
+implementation ([`bookers/rentcafe.py`](../bookers/rentcafe.py)). The code is
+complete, reCAPTCHA solving is wired up, and the flow has been walked end-to-end
+against a live site. It is still **switched off** —
+`monitor._AUTO_BOOK_SOURCES` lists Holland2Stay only, and no user can turn it
+on from the panel. What is missing is verification, not code:
 
-**OurDomain runs the same RENTCafe as Xior and shares the same implementation.**
-The contracts are byte-for-byte identical in practice; the only difference is how
-you reach the application form. That entry leg is verified against the live site,
-but everything after login is not. Also not enabled. See [OURDOMAIN.md](OURDOMAIN.md) §7.
+| Platform | Reached | Missing |
+|---|---|---|
+| Xior | Applicant form, draft saved, ID document uploaded (2026-08-03, real account) | Whether the form saves cleanly once the system supplies the document. And a Xior draft **does not hold the unit** — it stops a step earlier than Holland2Stay, because the next page asks for IBAN/SWIFT |
+| OurDomain | Entry leg verified against the live site (2026-08-04): floorplans → available units → terms POST, all 18 form fields landing | Everything after login. This flow has no unit-picker page, so falling out of it has no recovery path — the code aborts loudly rather than continuing with a mismatched context. Needs a real OurDomain account |
+| OurCampus | Nothing | Booking flow has never been scouted |
 
-OurCampus stays notify-only: its booking flow has not been scouted yet.
+Both stop at the same wall Holland2Stay does: the next step is
+`ApplicationCharges`, which wants IBAN/SWIFT. Entering financial credentials is
+a hard limit. Details in [XIOR.md](XIOR.md) §8 and
+[OURDOMAIN.md](OURDOMAIN.md) §7.
 
 > The hosted demo has auto-booking disabled for user accounts. Email us or
 > [self-host](#quick-start) to use it.
@@ -219,7 +362,12 @@ mismatch and would only interrupt a scrape in progress.
 | Logs repeat `H2S source 熔断` | Cloudflare is blocking your exit IP. The breaker pauses that one source and retries a single city later. If it persists, set `HTTPS_PROXY`. |
 | Logs repeat `CF 挑战 ... 未解开` | Same cause — usually IP reputation rather than anything local. |
 | One platform always returns 0 listings | May be genuine. Check whether the round was marked complete; see [ARCHITECTURE.md §5.7](ARCHITECTURE.md#57-completeness-决定能否做状态收敛). |
+| A listing you know is taken still shows as available | Its city was not completely scanned, so it never became eligible for convergence. Check `(complete/targets)` on `/monitoring`. |
+| A batch of listings turned Occupied at once | Expected if they carry the **inferred** badge — that is aging catching up after a restart or a threshold change, and it generates no notifications. Without the badge, the platform actually reported it. |
+| Logs repeat `抓到 0 个单元，第 N/3 轮` | Normal. An empty result from OurDomain/OurCampus has to repeat for 3 rounds before it counts, so a single bad round cannot converge a whole building. |
 | Container gets OOM-killed | Raise `mem_limit`. Each Cloudflare-protected source holds a resident browser. |
+| Container will not start, log says `FATAL` | The entrypoint preflight. Either `Caddyfile` still says `your.domain.com` or `WEB_PASSWORD` is empty. Both are refusals to expose an unauthenticated panel. |
+| Cannot sign in after setting `WEB_PASSWORD` | The username is `admin` unless you set `WEB_USERNAME`. |
 | `supervisorctl` says "no such file" | Its socket is not at the default path. Add `-c /etc/supervisor/conf.d/app.conf`. |
 
 The container reporting `healthy` covers both web and monitor, but an unhealthy
