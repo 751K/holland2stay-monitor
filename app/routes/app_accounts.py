@@ -24,6 +24,8 @@ from app.api_auth import invalidate_token_cache
 from app.auth import admin_required
 from app.csrf import csrf_required
 from app.db import storage
+from app.i18n import get_lang
+from translations import tr
 from users import load_users
 
 logger = logging.getLogger(__name__)
@@ -94,9 +96,10 @@ def app_accounts_revoke(token_id: int) -> Any:
     if ok:
         invalidate_token_cache()
         logger.info("admin 撤销了 App token id=%d", token_id)
-        flash("会话已撤销", "success")
+        # 翻译键早就有了，只是这里一直在写死中文字面量
+        flash(tr("app_accounts_revoked_ok", get_lang()), "success")
     else:
-        flash("撤销失败（可能已撤销）", "warning")
+        flash(tr("app_accounts_revoke_fail", get_lang()), "warning")
     nxt = request.args.get("next") or request.referrer or url_for("app_accounts")
     return redirect(nxt)
 

@@ -12,7 +12,8 @@
 """
 from __future__ import annotations
 
-from mstorage._charts import _FEATURE_SYNONYMS, _merge_synonyms
+from models import FEATURE_SYNONYMS as _FEATURE_SYNONYMS
+from mstorage._charts import _merge_synonyms
 
 
 class TestMerging:

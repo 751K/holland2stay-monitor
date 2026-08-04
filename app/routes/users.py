@@ -43,8 +43,9 @@ from app.auth import (
 from app.csrf import csrf_required
 from app.db import storage
 from app.forms.user_form import build_user_from_form, build_user_from_form_self
-from app.i18n import DEFAULTS, localize_options
+from app.i18n import DEFAULTS, get_lang, localize_options
 from config import ENERGY_LABELS, energy_rank
+from translations import tr
 
 logger = logging.getLogger(__name__)
 
@@ -210,7 +211,9 @@ def user_new() -> Any:
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
         applicant_genders=APPLICANT_GENDERS,
-        action=url_for("user_new"), title="新增用户",
+        # title 会同时进 <title> 和面包屑；写死中文的话英文界面标签页上
+        # 也是「新增用户」
+        action=url_for("user_new"), title=tr("user_new_title", get_lang()),
         is_macos=(sys.platform == "darwin"),
         occupancy_options=localize_options("Occupancy", opts["Occupancy"]),
         type_options=localize_options("Type", opts["Type"]),
@@ -328,7 +331,7 @@ def user_edit(user_id: str) -> Any:
         applicant_titles=APPLICANT_TITLES,
         applicant_genders=APPLICANT_GENDERS,
         action=url_for("user_edit", user_id=user_id),
-        title=f"编辑用户 · {user.name}",
+        title=f"{tr('user_edit_title', get_lang())} · {user.name}",
         is_macos=(sys.platform == "darwin"),
         occupancy_options=localize_options("Occupancy", opts["Occupancy"]),
         type_options=localize_options("Type", opts["Type"]),

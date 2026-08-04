@@ -11,6 +11,9 @@ a{color:inherit;text-decoration:none}
 
 /* ── Design Tokens ─────────────────────────────────────────────── */
 :root{
+  /* 下拉箭头。原生 <select> 和自定义多选（.ms-arrow）共用同一张图，
+     否则一行里两种控件一个是描边 chevron、一个是实心 ▾ 三角，大小还不一样。 */
+  --caret:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239b9b9b' stroke-width='1.5'/%3E%3C/svg%3E");
   --bg:#fafafa;
   --surface:#fff;
   --surface-hover:#f5f5f5;
@@ -318,13 +321,10 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   overflow:hidden;
   font-variant-numeric:tabular-nums;
 }
-/* 字间距经过实测（12px Inter / weight 550 / 72px 总宽 / 6px 两侧 padding =
-   60px 文字区）。短文案拉间距填满文字区；长的（Reserved / Occupied）
-   不动。 */
-.badge-status.badge-book{letter-spacing:.5em;text-indent:.5em}
-.badge-status.badge-lottery{letter-spacing:.08em;text-indent:.08em}
-.badge-status.badge-reserved,
-.badge-status.badge-secondary{letter-spacing:.01em;text-indent:.01em}
+/* 曾经用 letter-spacing 把短文案拉开去"填满"文字区（Book 拉到 .5em）。
+   实测的结果是 "B o o k"——看着像渲染坏了，而不像排版。等宽由上面的
+   width:72px 保证，字本身居中就够，不需要拉伸。 */
+.badge-status{letter-spacing:.01em}
 
 /* ── Buttons ───────────────────────────────────────────────────── */
 .btn{
@@ -363,15 +363,19 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .form-input,.form-select{
   width:100%;padding:9px 12px;
   font-size:15px;border:none;
-  border-radius:var(--radius);background:var(--bg);color:var(--text);
-  transition:box-shadow .12s,background .12s;outline:none;
+  border-radius:var(--radius);background-color:var(--bg);color:var(--text);
+  transition:box-shadow .12s,background-color .12s;outline:none;
 }
+/* ⚠️ 这一节里凡是给 .form-select 改底色的，一律用 `background-color` 而不是
+   `background` 简写。简写会把 background-image 一并重置成 none，而下拉箭头
+   正是 .form-select 的 background-image（见下）——2026-08 实测：筛选卡片和
+   设置页的 <select> 因此完全没有箭头，看上去和文本框一模一样。 */
 .form-input:focus,.form-select:focus{
-  background:var(--surface);
+  background-color:var(--surface);
   box-shadow:0 0 0 2px var(--accent-soft),0 0 0 1px var(--accent);
 }
 .form-input::placeholder{color:var(--text3)}
-.form-select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239b9b9b' stroke-width='1.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+.form-select{appearance:none;background-image:var(--caret);background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
 .form-help{font-size:12px;color:var(--text3);margin-top:4px}
 .form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px}
 .form-inline{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -391,16 +395,26 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   font-weight:650;
   margin-bottom:8px;
 }
+/* 一行里 <select>/<input> 和多选（.ms-trigger）并排，三者必须同高，否则
+   整个筛选网格的标签基线会一行高一行低——实测原生控件 40px、多选 42px。
+   两种控件要用不同的属性才压得住：
+   - input/select：min-height 拦不住它们自带的 padding + line-height，得用 height；
+   - .ms-trigger：基础样式是 min-height:42px（min-height 优先于 height），
+     且里面是 flex-wrap，写死 height 会把内容裁掉——所以改写 min-height。 */
 .listing-filter-card .form-input,
 .listing-filter-card .form-select,
 .listing-filter-card .ms-trigger{
-  min-height:38px;
+  --filter-control-h:38px;
+  box-sizing:border-box;
   border:1px solid color-mix(in srgb, var(--border) 78%, var(--surface));
-  background:color-mix(in srgb, var(--surface) 92%, var(--bg));
+  background-color:color-mix(in srgb, var(--surface) 92%, var(--bg));
   color:var(--text);
   font-size:13px!important;
   box-shadow:0 1px 0 rgba(255,255,255,.5) inset;
 }
+.listing-filter-card .form-input,
+.listing-filter-card .form-select{height:var(--filter-control-h)}
+.listing-filter-card .ms-trigger{min-height:var(--filter-control-h)}
 .listing-filter-card .form-select{
   background-position:right 8px center;
   padding-left:10px;
@@ -411,10 +425,11 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .listing-filter-card .form-select:hover,
 .listing-filter-card .ms-trigger:hover{
   border-color:color-mix(in srgb, var(--accent) 28%, var(--border));
-  background:var(--surface);
+  background-color:var(--surface);
 }
 .listing-filter-card .ms-text{color:var(--text2)!important}
-.listing-filter-card .ms-arrow{color:var(--text2)!important}
+/* .ms-arrow 现在是背景图（见 --caret），改 color 已经不起作用；
+   箭头颜色由 SVG 里的 stroke 决定，和 <select> 保持一致。 */
 .listing-filter-card .filter-actions{align-self:end}
 
 /* Settings forms need stronger input contrast on large glass panels. */
@@ -422,7 +437,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .settings-form .form-select{
   min-height:40px;
   border:1px solid color-mix(in srgb, var(--border) 80%, var(--surface));
-  background:color-mix(in srgb, var(--surface) 94%, var(--bg));
+  background-color:color-mix(in srgb, var(--surface) 94%, var(--bg));
   color:var(--text);
   font-size:15px;
   box-shadow:0 1px 0 rgba(255,255,255,.55) inset;
@@ -430,7 +445,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .settings-form .form-input:hover,
 .settings-form .form-select:hover{
   border-color:color-mix(in srgb, var(--accent) 26%, var(--border));
-  background:var(--surface);
+  background-color:var(--surface);
 }
 .settings-form .form-input::placeholder{color:var(--text3)}
 .settings-form .form-help{color:var(--text3)}
@@ -456,7 +471,13 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .ms-tag{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:500;padding:2px 8px;border-radius:4px;line-height:1.5}
 .ms-tag .ms-rm{font-size:14px;cursor:pointer;opacity:.6;line-height:1}
 .ms-tag .ms-rm:hover{opacity:1}
-.ms-arrow{font-size:12px;color:var(--text3);flex-shrink:0;transition:transform .15s}
+/* 元素里写的是字面量 ▾，这里用背景图盖掉它（font-size:0 藏字符），
+   好让多选和 <select> 用同一个箭头。 */
+.ms-arrow{
+  width:12px;height:12px;font-size:0;flex-shrink:0;
+  background-image:var(--caret);background-repeat:no-repeat;background-position:center;
+  transition:transform .15s;
+}
 .multi-select.open .ms-arrow{transform:rotate(180deg)}
 /* .card 有 overflow:hidden（为了让内容贴合圆角），会把绝对定位的下拉裁掉——
    卡片最后一行的多选展开后只能看见半截。只给含多选的卡片放开裁剪，其它卡片
@@ -657,7 +678,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   padding:13px 16px;
   font-size:15px;font-weight:600;flex-shrink:0;
 }
-.notif-list{flex:1;overflow-y:auto;min-height:0}
+.notif-list{flex:1;overflow-y:auto;overflow-x:hidden;min-height:0}
 .notif-item{
   display:flex;flex-direction:column;gap:3px;
   padding:13px 16px;cursor:pointer;transition:background .1s;color:inherit;
@@ -665,7 +686,16 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .notif-item:hover{background:var(--accent-soft)}
 .notif-item.unread{background:var(--accent-soft)}
 .notif-item-title{font-size:15px;font-weight:550}
-.notif-item-body{font-size:14px;color:var(--text2)}
+/* 通知正文不一定是人写的句子——"Monitor Error" 这类会把整段异常栈塞进来。
+   实测一条 TargetClosedError 的堆栈把 .notif-list 撑到 2632px（面板才 365px），
+   整个通知面板出现横向滚动条。anywhere 让没有空格的长串也能断行；
+   再截到 6 行，免得一条错误占满整个面板。 */
+.notif-item-body{
+  font-size:14px;color:var(--text2);
+  overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;
+  overflow:hidden;
+}
 .notif-item-time{font-size:12px;color:var(--text3);margin-top:3px}
 .notif-empty{padding:36px 16px;text-align:center;font-size:15px;color:var(--text3)}
 

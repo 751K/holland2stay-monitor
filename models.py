@@ -95,6 +95,27 @@ def parse_features_list(features: list[str]) -> dict[str, str]:
     return result
 
 
+#: 同一个概念在上游有多种写法，不归一就会被当成两个不同的值。
+#:
+#: 2026-08-04 生产实测：**同一个平台**（holland2stay）对同一种合同既返回
+#: ``Indefinite``（178 条）又返回 ``Onbepaalde tijd``（38 条）。这不是翻译问题
+#: ——翻译只会让两边都变成中文，该合的还是没合。
+#:
+#: 放在读取层而不是抓取层：抓取层只能修以后的数据，库里已有的 38 条还是错的。
+#: 放在 models 而不是某一处调用点：图表要合并计数，筛选下拉要去重，
+#: ``ListingFilter.passes`` 要按归一后的值比对——三处必须用同一张表，
+#: 否则下拉里只剩 "Indefinite"，匹配时却还在拿原始的 "Onbepaalde tijd" 比，
+#: 用户勾了照样收不到。
+FEATURE_SYNONYMS: dict[str, str] = {
+    "onbepaalde tijd": "Indefinite",
+}
+
+
+def canonical_feature(value: str) -> str:
+    """把上游 feature 取值归一到规范写法；未收录的原样返回。"""
+    return FEATURE_SYNONYMS.get(str(value).strip().casefold(), str(value).strip())
+
+
 @dataclass
 class Listing:
     """

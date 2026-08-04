@@ -5,7 +5,8 @@
 
 <div class="page-header">
   <h1>{{ _('listings') }}</h1>
-  <span class="meta">共 {{ listings | length }} {{ _('items_unit') }}</span>
+  {# 「共」曾经是硬编码的，英文界面里会显示成 "共 49"。量词前缀也走翻译。 #}
+  <span class="meta">{{ _('items_total_prefix') }}{{ listings | length }} {{ _('items_unit') }}</span>
 </div>
 
 <!-- Filter bar -->
@@ -48,7 +49,7 @@
         <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
-            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+            <span class="ms-arrow">▾</span>
           </div>
           <div class="ms-dropdown">
             {% for c in cities %}
@@ -62,7 +63,7 @@
         <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
-            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+            <span class="ms-arrow">▾</span>
           </div>
           <div class="ms-dropdown">
             {% for s in sources %}
@@ -97,7 +98,7 @@
         <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
-            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+            <span class="ms-arrow">▾</span>
           </div>
           <div class="ms-dropdown">
             {% for t in types %}
@@ -111,7 +112,7 @@
         <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
-            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+            <span class="ms-arrow">▾</span>
           </div>
           <div class="ms-dropdown">
             {% for o in occupancies %}
@@ -125,7 +126,7 @@
         <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
-            <span class="ms-arrow" style="font-size:10px;margin-left:6px;">▾</span>
+            <span class="ms-arrow">▾</span>
           </div>
           <div class="ms-dropdown">
             {% for t in tenants %}

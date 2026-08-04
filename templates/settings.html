@@ -22,7 +22,10 @@
         <div class="form-group">
           <label class="form-label">{{ _('settings_interval') }}</label>
           <input type="number" class="form-input" name="CHECK_INTERVAL" value="{{ env.get('CHECK_INTERVAL','300') }}" min="1">
-          <div class="form-help">{{ _('settings_interval_hint') }}<span style="color:var(--warning);"><i class="bi bi-exclamation-triangle mr-1"></i>{{ _('settings_interval_warn') }}</span></div>
+          {# 警告另起一行：原来紧跟在上一句句号后面，⚠ 图标直接贴着"（5 分钟）。"，
+             看着像少打了一个空格 #}
+          <div class="form-help">{{ _('settings_interval_hint') }}</div>
+          <div class="form-help" style="color:var(--warning);"><i class="bi bi-exclamation-triangle mr-1"></i>{{ _('settings_interval_warn') }}</div>
         </div>
         <div class="form-group">
           <label class="form-label">{{ _('settings_log_level') }}</label>

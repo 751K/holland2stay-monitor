@@ -16,6 +16,8 @@ TRANSLATIONS = {
     "calendar":             {"zh": "日历",                    "en": "Calendar"},
     "stats":                {"zh": "统计",                    "en": "Statistics"},
     "users":                {"zh": "用户",                    "en": "Users"},
+    "user_new_title":       {"zh": "新增用户",                "en": "New User"},
+    "user_edit_title":      {"zh": "编辑用户",                "en": "Edit User"},
     "settings":             {"zh": "设置",                    "en": "Settings"},
     "notifications":        {"zh": "通知",                    "en": "Notifications"},
     "mark_all_read":        {"zh": "全部已读",                "en": "Mark all read"},
@@ -113,12 +115,14 @@ TRANSLATIONS = {
     # ── 申请人档案（RENTCafe Applicant Info 自动填）────────
     "user_form_profile": {"zh": "申请人档案", "en": "Applicant profile"},
     "user_form_profile_note": {
+        # 这里是纯文本，模板不做 Markdown 渲染——写 **粗体** 只会把星号
+        # 原样显示出来
         "zh": "半自动预订用这些资料自动填 RENTCafe 的申请表，并代传证件——"
               "平台在证件上传前拒绝保存申请表，而抢房是自动触发的。"
-              "**系统只填表，不付款**：付款要填银行账号，那一步必须你自己做。",
+              "系统只填表，不付款：付款要填银行账号，那一步必须你自己做。",
         "en": "Used to auto-fill the RENTCafe application form and upload your ID — "
               "the platform refuses to save anything until the ID is there, and booking "
-              "fires automatically. **The system never pays**: the payment step needs "
+              "fires automatically. The system never pays: the payment step needs "
               "your bank details and stays with you.",
     },
     "profile_title":           {"zh": "称谓",       "en": "Title"},
@@ -211,11 +215,12 @@ TRANSLATIONS = {
     "monitoring_status_down":    {"zh": "故障",                "en": "Down"},
     "monitoring_status_unknown": {"zh": "无数据",              "en": "Unknown"},
     # ── Dashboard ────────────────────────────────────────
-    "dashboard_title":      {"zh": "仪表盘 · FlatRadar",      "en": "Dashboard · FlatRadar"},
-    "auto_refresh":         {"zh": "每 60 秒自动刷新",         "en": "Auto-refresh every 60s"},
+    # 文案要和 templates/system.html 里 scheduleReload() 的 30000ms 对上
+    "auto_refresh":         {"zh": "每 30 秒自动刷新",         "en": "Auto-refresh every 30s"},
     "total_listings":       {"zh": "数据库房源",              "en": "DB listings"},
     "last_scrape":          {"zh": "最近抓取",                "en": "Last scrape"},
     "items_unit":           {"zh": "条",                     "en": ""},
+    "items_total_prefix":   {"zh": "共 ",                    "en": ""},
     "recent_listings":      {"zh": "最新房源",                "en": "Recent listings"},
     "view_all":             {"zh": "查看全部",                "en": "View all"},
     "changes_48h":          {"zh": "近 48h 状态变更",         "en": "Status changes (48h)"},
@@ -229,6 +234,7 @@ TRANSLATIONS = {
     "dash_uptime":          {"zh": "持续运行时间",            "en": "System Uptime"},
     "dash_active_cities":   {"zh": "活跃城市",                "en": "Active Cities"},
     "dash_of_targets":      {"zh": "配置目标",                "en": "of"},
+    "dash_cities_with_listings": {"zh": "个城市有房源",        "en": "with listings"},
     "dash_platforms":       {"zh": "支持平台",                "en": "Platforms"},
     "dash_of_total":        {"zh": "共",                     "en": "of"},
     "monitor_live":         {"zh": "运行中",                  "en": "Live"},
@@ -296,7 +302,6 @@ TRANSLATIONS = {
     "map_load_error":       {"zh": "地图数据加载失败",        "en": "Map data load failed"},
 
     # ── Calendar ─────────────────────────────────────────
-    "calendar_title":       {"zh": "入住日历 · FlatRadar",     "en": "Calendar · FlatRadar"},
     "cal_direct_book":      {"zh": "可直订",                  "en": "Direct book"},
     "cal_lottery":          {"zh": "摇号",                    "en": "Lottery"},
     "cal_select_date":      {"zh": "请选择日期",              "en": "Select a date"},
@@ -384,12 +389,15 @@ TRANSLATIONS = {
     "settings_heartbeat_default":  {"zh": "默认 60",             "en": "default 60"},
     "settings_heartbeat_hint":     {"zh": "定时发送汇总心跳通知，确认监控进程仍在运行。设为 0 禁用心跳。", "en": "Send periodic summary heartbeat to confirm the monitor is alive. Set 0 to disable."},
     "settings_sources":     {"zh": "监控平台",                "en": "Monitored Platforms"},
-    "settings_sources_hint":{"zh": "可单独启用 H2S 或 OurDomain，也可以同时启用。至少需要保留一个平台。", "en": "Enable H2S, OurDomain, or both. At least one platform must remain enabled."},
+    # 平台从 2 个涨到 4 个时这句没跟着改，一直只提 H2S / OurDomain。
+    # 别再往里数平台名——加平台时又会漏。
+    "settings_sources_hint":{"zh": "可以任意组合，至少需要保留一个平台。", "en": "Enable any combination. At least one platform must remain enabled."},
     "settings_cities":      {"zh": "监控城市",                "en": "Monitored Cities"},
     "settings_h2s_cities":  {"zh": "H2S 监控城市",            "en": "H2S Monitored Cities"},
     "settings_cities_hint": {"zh": "至少选一个城市。监控多个城市会略增加抓取时间。", "en": "Select at least one city. More cities slightly increase scrape time."},
     "settings_ourdomain_cities": {"zh": "OurDomain 监控楼盘",  "en": "OurDomain Buildings"},
-    "settings_ourdomain_hint": {"zh": "当前支持 Amsterdam Diemen。只有启用 OurDomain 平台时才会抓取。", "en": "Currently supports Amsterdam Diemen. Scraped only when the OurDomain platform is enabled."},
+    # 同上：这句写"当前支持 Amsterdam Diemen"时只有一个楼盘，现在列了两个
+    "settings_ourdomain_hint": {"zh": "只有启用 OurDomain 平台时才会抓取。", "en": "Scraped only when the OurDomain platform is enabled."},
     "settings_xior_cities":     {"zh": "Xior 监控楼盘",       "en": "Xior Buildings"},
     "settings_xior_hint":       {"zh": "荷兰 30 栋楼（15 城市）。只有启用 Xior 平台时才会抓取。", "en": "30 buildings across 15 Dutch cities. Scraped only when the Xior platform is enabled."},
     "settings_save":        {"zh": "保存配置",                "en": "Save Config"},
@@ -533,6 +541,24 @@ TRANSLATIONS = {
     "app_accounts_title":     {"zh": "客户端管理",                "en": "Client Management"},
     "app_accounts_meta":      {"zh": "查看和撤销 iOS App / 第三方客户端签发的 Bearer Token。", "en": "View and revoke Bearer Tokens issued to iOS App / third-party clients."},
     "app_accounts_empty":     {"zh": "暂无活跃会话",                "en": "No active sessions"},
+    # 「推送设备」这一整个 tab 之前是硬编码中文，英文界面照样是中文表头
+    "app_accounts_tab_sessions": {"zh": "App 会话",                 "en": "App sessions"},
+    "app_accounts_tab_devices":  {"zh": "推送设备",                 "en": "Push devices"},
+    "devices_empty":          {"zh": "暂无推送设备注册。",           "en": "No push devices registered."},
+    "devices_col_device":     {"zh": "设备",                        "en": "Device"},
+    "devices_col_platform":   {"zh": "平台",                        "en": "Platform"},
+    "devices_col_user":       {"zh": "用户",                        "en": "User"},
+    "devices_col_model":      {"zh": "型号",                        "en": "Model"},
+    "devices_col_env":        {"zh": "环境",                        "en": "Environment"},
+    "devices_col_created":    {"zh": "注册时间",                    "en": "Registered"},
+    "devices_col_last_seen":  {"zh": "最后活跃",                    "en": "Last seen"},
+    "devices_col_status":     {"zh": "状态",                        "en": "Status"},
+    "devices_col_actions":    {"zh": "操作",                        "en": "Actions"},
+    "devices_disabled":       {"zh": "已禁用",                      "en": "Disabled"},
+    "devices_active":         {"zh": "活跃",                        "en": "Active"},
+    "devices_disable":        {"zh": "禁用",                        "en": "Disable"},
+    "devices_disable_confirm":{"zh": "禁用此设备？不再接收推送。",    "en": "Disable this device? It will stop receiving push."},
+    "devices_test_push_hint": {"zh": "发送测试推送（APNs + FCM）",   "en": "Send a test push (APNs + FCM)"},
     "app_accounts_show_revoked":{"zh": "显示已撤销",                "en": "Show revoked"},
     "app_accounts_hide_revoked":{"zh": "隐藏已撤销",                "en": "Hide revoked"},
     "app_accounts_device":    {"zh": "设备",                       "en": "Device"},

@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Optional
 
 from dotenv import load_dotenv
 
-from models import parse_float, parse_int
+from models import canonical_feature, parse_float, parse_int
 
 
 # 已知能耗等级白名单（大写），按优→差排序
@@ -629,6 +629,23 @@ class ListingFilter:
     等级排序：A+++ > A++ > A+ > A > B > C > D > E > F...
     """
 
+    def __post_init__(self) -> None:
+        """把同义的合同取值归一后再落库。
+
+        匹配那一侧已经两边都归一了（见 ``passes``），所以就算存的是荷兰语
+        原文也能匹配上。但 ``/api/v1/filter/options`` 现在只返回归一后的
+        ``Indefinite``——如果用户存的还是 ``Onbepaalde tijd``，iOS 端拿
+        options 渲染勾选框时就找不到这一项：界面上 Indefinite 没打勾，
+        实际过滤却生效着，成了一个看不见的选中项。
+
+        在这里统一（而不是在 API 和表单各写一遍）：所有构造路径——API PUT、
+        Web 表单、从 DB 读回——都要经过 ``__init__``，存量数据下次保存时
+        自动收敛。
+        """
+        self.allowed_contract = list(dict.fromkeys(
+            canonical_feature(v) for v in (self.allowed_contract or [])
+        ))
+
     def is_empty(self) -> bool:
         """所有条件均未设置时返回 True，表示全部放行。"""
         # 通过遍历 dataclass fields 自动判断，新增过滤字段无需手动同步此处
@@ -736,8 +753,12 @@ class ListingFilter:
         # 只有 H2S 稳定返回；其它平台不支持 → _source_supports_dim 返回 False
         # 而整体跳过。
         if self.allowed_contract and _source_supports_dim(listing.source, "contract"):
-            contract = fm.get("contract", "")
-            if not any(a.lower() in contract.lower() for a in self.allowed_contract):
+            # 两边都先归一：房源上写的可能是 "Onbepaalde tijd"，而下拉里只剩
+            # 归一后的 "Indefinite"（老用户存下来的值也可能是荷兰语原文）。
+            # 不归一就会出现「勾了 Indefinite 却收不到 38 条同义房源」。
+            contract = canonical_feature(fm.get("contract", ""))
+            if not any(canonical_feature(a).lower() in contract.lower()
+                       for a in self.allowed_contract):
                 return False
 
         if self.allowed_tenant and _source_supports_dim(listing.source, "tenant"):

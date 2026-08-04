@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ _('dashboard_title') }}{% endblock %}
+{% block title %}{{ _('dashboard') }} · FlatRadar{% endblock %}
 
 {% block head %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
@@ -56,7 +56,9 @@
   <!-- Card 1: Hero Metric & Chart (Flex 3) -->
   <div class="dashboard-hero-card">
     <div class="dashboard-hero-copy">
-      <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text3); margin-bottom: 12px;">
+      {# 同一排卡片的标签统一 13px / 500 / 原样大小写。这里曾经是 12px 大写
+         加字距，和右边四张卡片对不上。 #}
+      <div style="font-size: 13px; font-weight: 500; color: var(--text2); margin-bottom: 12px;">
         {{ _('dash_total_listings') }}
       </div>
       <div class="text-gradient-blue" style="font-size: 64px; font-weight: 800; line-height: 1; letter-spacing: -0.04em; margin-bottom: 12px;">
@@ -104,8 +106,11 @@
   <div style="flex: 2; min-width: 260px; background: var(--glass-bg); backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur); border: 1px solid var(--glass-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); display: flex; position: relative; overflow: hidden;">
     <div style="flex: 1; padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">
       <div style="font-size: 13px; font-weight: 500; color: var(--text2);">{{ _('dash_active_cities') }}</div>
-      <div style="font-size: 40px; font-weight: 700; color: var(--text); line-height: 1; margin: 12px 0;">{{ all_cities|length }}</div>
-      <div style="font-size: 12px; color: var(--text3); font-weight: 500;">{{ _('dash_of_targets') }} {{ stats.configured_targets }}</div>
+      {# 大数字必须是「当前配置的抓取目标数」。曾经取 all_cities|length（库里
+         出现过的城市），而副标题取 configured_targets，两个口径拼成一个比值 →
+         线上出现过「3 / of 1」。副标题改成不含 of 的独立说明，不再暗示比例。 #}
+      <div style="font-size: 40px; font-weight: 700; color: var(--text); line-height: 1; margin: 12px 0;">{{ stats.configured_targets }}</div>
+      <div style="font-size: 12px; color: var(--text3); font-weight: 500;">{{ all_cities|length }} {{ _('dash_cities_with_listings') }}</div>
     </div>
     <div style="width: 1px; background: var(--glass-border); margin: 20px 0;"></div>
     <div style="flex: 1; padding: 20px; display: flex; flex-direction: column; justify-content: space-between;">

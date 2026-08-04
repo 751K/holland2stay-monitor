@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ _('system_info') }}{% endblock %}
+{% block title %}{{ _('system_info') }} · FlatRadar{% endblock %}
 {# 原来是 <meta http-equiv="refresh" content="30">。改成 JS 定时刷新，因为公告
    表单在这一页上——meta refresh 会在管理员打字打到一半时把整页刷掉，输入全丢。
    下面的 scheduleReload() 在表单有内容时不刷新。 #}

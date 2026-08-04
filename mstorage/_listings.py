@@ -8,7 +8,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from models import Listing
+from models import Listing, canonical_feature
 
 logger = logging.getLogger(__name__)
 
@@ -464,4 +464,11 @@ class ListingOps:
                    ORDER BY val""",
                 (pattern,),
             ).fetchall()
-        return [r[0] for r in rows if r[0]]
+        # 归一 + 去重：上游对同一种合同既写 Indefinite 又写 Onbepaalde tijd，
+        # 不合并的话筛选下拉里会并排出现两个同义选项，用户勾了其中一个就
+        # 收不到另一半房源（见 models.FEATURE_SYNONYMS）。
+        seen: dict[str, None] = {}
+        for r in rows:
+            if r[0]:
+                seen.setdefault(canonical_feature(r[0]), None)
+        return list(seen)
