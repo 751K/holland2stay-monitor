@@ -180,6 +180,42 @@ def _handle_id_document(user_id: str) -> None:
     flash("✅ 证件已加密保存", "success")
 
 
+def _needs_email_verification(user, previous_email: str | None = None) -> bool:
+    """该不该给这个用户发收件邮箱验证邮件。
+
+    只有 shared 模式需要：它借的是 admin 自己的发件域，必须用 double opt-in
+    确认用户对收件邮箱有控制权，否则等于给任何人做代发。custom 模式用户自管
+    SMTP，不走这条路。
+
+    ``previous_email`` 只在编辑路径传：邮箱没变说明是在保存别的字段，不该重发。
+    新建路径不传——那时没有「上一个邮箱」可比，有邮箱就得发。
+    """
+    if user.email_mode != "shared" or not user.email_to or user.email_verified:
+        return False
+    return previous_email is None or user.email_to != previous_email
+
+
+def _flash_verification_email(user) -> None:
+    """发验证邮件并把结果 flash 出去。是否该发、要不要限流由调用方决定。
+
+    四种结果都只 flash 不抛：调用到这里时用户已经落库了，发信失败不能把
+    「用户创建/保存成功」这件事一起搭进去。
+    """
+    from app.email_verify import EmailVerifyConfigError, send_verification_email_sync
+    try:
+        sent = send_verification_email_sync(user.id, user.name, user.email_to)
+        if sent:
+            flash("📧 验证邮件已发送，请查收并点击链接确认", "success")
+        else:
+            flash("⚠️ 邮箱已保存，但验证邮件未能发出（服务器未配置 Resend 或临时故障），通知暂不会发到此邮箱", "warning")
+    except EmailVerifyConfigError as e:
+        logger.error("邮箱验证未就绪: %s", e)
+        flash("⚠️ 邮箱已保存，但系统未配置 PUBLIC_BASE_URL，暂时无法发送验证邮件", "warning")
+    except Exception as e:
+        logger.exception("发送邮箱验证邮件异常: %s", e)
+        flash("⚠️ 邮箱已保存但验证邮件发送失败，请稍后重试", "warning")
+
+
 @admin_required
 @csrf_required
 def user_new() -> Any:
@@ -202,6 +238,16 @@ def user_new() -> Any:
         _handle_id_document(user.id)
         _log_user_change("创建", user)
         flash(f"✅ 用户「{user.name}」已创建", "success")
+        # 建的时候就填了 shared 收件邮箱，必须当场发验证邮件。
+        #
+        # 这里漏掉会形成一条走不出去的死路：用户建完是 email_verified=0，
+        # 而下面 user_edit 只在「邮箱变了」时才发，于是他既收不到验证链接、
+        # 也不会再触发发送，notifier 那边则直接跳过整个 email 渠道。
+        # 线上真出过（2026-08-04），日志里只有一行「邮箱未验证，跳过」。
+        #
+        # user_new 是 @admin_required，不需要 user_edit 那道给普通用户的限流。
+        if _needs_email_verification(user):
+            _flash_verification_email(user)
         return redirect(url_for("users_list"))
     # GET：空白表单
     city_names = sorted(c["name"] for c in KNOWN_CITIES)
@@ -289,35 +335,17 @@ def user_edit(user_id: str) -> Any:
                     updated.name, user_id, n,
                 )
 
-        # shared 模式下 email_to 变化 → 发验证邮件。custom 模式跳过（用户自管）。
-        # 同一邮箱第二次保存（已 verified 继承）不会发；只有真的换了邮箱才发。
-        if (
-            updated.email_mode == "shared"
-            and updated.email_to
-            and not updated.email_verified
-            and updated.email_to != user.email_to  # 真的改了，不是其他字段保存
-        ):
+        # 只有真的换了邮箱才重发；同一邮箱第二次保存（已 verified 继承）不发。
+        if _needs_email_verification(updated, previous_email=user.email_to):
+            # 普通用户走这条路时要限流：发验证邮件和「发测试通知」共用一个配额，
+            # 否则它就成了一个不限次的对外发信接口。admin 不限。
             if not is_admin():
                 allowed, reason = check_test_notify_rate(user_id)
                 if not allowed:
                     flash(reason, "warning")
                     return redirect(url_for("user_edit", user_id=user_id))
                 record_test_notify(user_id)
-            from app.email_verify import EmailVerifyConfigError, send_verification_email_sync
-            try:
-                sent = send_verification_email_sync(
-                    updated.id, updated.name, updated.email_to,
-                )
-                if sent:
-                    flash("📧 验证邮件已发送到新邮箱，请查收并点击链接确认", "success")
-                else:
-                    flash("⚠️ 邮箱已保存，但验证邮件未能发出（服务器未配置 Resend 或临时故障），通知暂不会发到此邮箱", "warning")
-            except EmailVerifyConfigError as e:
-                logger.error("邮箱验证未就绪: %s", e)
-                flash("⚠️ 邮箱已保存，但系统未配置 PUBLIC_BASE_URL，暂时无法发送验证邮件", "warning")
-            except Exception as e:
-                logger.exception("发送邮箱验证邮件异常: %s", e)
-                flash("⚠️ 邮箱已保存但验证邮件发送失败，请稍后重试", "warning")
+            _flash_verification_email(updated)
         else:
             flash(f"✅ 用户「{updated.name}」已保存", "success")
         return redirect(url_for("user_edit", user_id=user_id))
