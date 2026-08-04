@@ -173,45 +173,67 @@
     </div>
     <div class="card-body">
       <style>
-        /* 和同页「H2S 监控城市」保持同一套语言：朴素的多列复选框清单，
-           没有边框、没有填色。上一版做成描边+染色的卡片，全选时 14 个块
-           一起高亮，整片都在喊，和页面其它部分完全不是一路。
+        /* 折叠是必要的：30 栋太多，而多数人只关心自己那座城市。
+           但视觉要跟同页的「H2S 监控城市」一致——朴素清单，**不做卡片**。
 
-           楼栋总共只有 30 个，所以**不折叠**——展开/收起本身就是多余的
-           交互，还会引入「折叠时看不见选了什么」的新问题。层级改用缩进
-           和字重表达。 */
-        .xior-list{ columns:200px 4; column-gap:28px; }
-        .xior-group{ break-inside:avoid; margin:0 0 14px; }
-        /* 城市是分组标题，不是主体——压暗、缩小，让楼栋成为视觉主角 */
-        .xior-group > .xior-city-row{
-          display:flex; align-items:center; gap:8px; margin-bottom:4px;
-          font-size:11.5px; font-weight:600; letter-spacing:.04em;
-          text-transform:uppercase; color:var(--text3); cursor:pointer;
+           上一版把每个城市做成描边+染色的块，而全选是默认状态，于是 14 个块
+           一起高亮，整片都在喊。这一版一个色块都没有：选没选中只由复选框和
+           右侧计数表达，颜色不参与。 */
+        /* 网格而不是多列：多列下展开一个城市会把后面的城市挤到别的列去，
+           点几下整块就乱了——动的全是你没在操作的东西。网格里各归各位，
+           展开只增高自己那一格。
+           当初改用多列是为了躲「展开撑高整行、旁边留空洞」，但那个洞之所以
+           显眼是因为当时每个城市都是带边框的卡片；现在没有边框和填色，多出来
+           的空白就只是空白。 */
+        .xior-list{
+          display:grid; gap:0 24px; align-items:start;
+          grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
         }
-        .xior-group > .xior-city-row input{ margin:0; }
-        .xior-bldg{
+        .xior-city-row{
           display:flex; align-items:center; gap:8px;
-          padding:3px 0 3px 22px; margin:0; font-size:13px; cursor:pointer;
+          padding:5px 6px; margin:0; border-radius:var(--radius);
+          font-size:13px; cursor:pointer; list-style:none;
+        }
+        .xior-city-row::-webkit-details-marker{ display:none; }
+        /* 唯一的视觉反馈是 hover 时的浅底——静态时整块是干净的 */
+        .xior-city-row:hover{ background:var(--surface-hover); }
+        .xior-city-row input{ margin:0; }
+        .xior-city-name{ flex:1; min-width:0; overflow:hidden;
+          text-overflow:ellipsis; white-space:nowrap; }
+        /* 折叠状态下靠它知道这座城市选了几栋，不用展开去找 */
+        .xior-tally{ font-size:11.5px; color:var(--text3);
+          font-variant-numeric:tabular-nums; }
+        .xior-chev{ font-size:10px; color:var(--text3); transition:transform .18s; }
+        .xior-group[open] .xior-chev{ transform:rotate(180deg); }
+        .xior-bldgs{ padding:1px 0 6px 28px; }
+        .xior-bldg{
+          display:flex; align-items:center; gap:8px; margin:0;
+          padding:3px 0; font-size:12.5px; color:var(--text2); cursor:pointer;
         }
         .xior-bldg input{ margin:0; }
       </style>
 
       <div class="xior-list">
         {% for city, buildings in xior_by_city | dictsort %}
-        <div class="xior-group">
-          <label class="xior-city-row">
-            <input type="checkbox" class="xior-city">
-            {{ city }}
-          </label>
-          {% for b in buildings %}
-          <label class="xior-bldg">
-            <input type="checkbox" name="xior_city_selected"
-                   value="{{ city }} {{ b.bldg }},{{ b.key }}"
-                   {% if b.key in selected_xior_keys %}checked{% endif %}>
-            {{ b.bldg }}
-          </label>
-          {% endfor %}
-        </div>
+        <details class="xior-group">
+          <summary class="xior-city-row">
+            {# 点复选框只选中整座城市，不展开；点名字才展开 #}
+            <input type="checkbox" class="xior-city" onclick="event.stopPropagation();">
+            <span class="xior-city-name">{{ city }}</span>
+            <span class="xior-tally"></span>
+            <i class="bi bi-chevron-down xior-chev"></i>
+          </summary>
+          <div class="xior-bldgs">
+            {% for b in buildings %}
+            <label class="xior-bldg">
+              <input type="checkbox" name="xior_city_selected"
+                     value="{{ city }} {{ b.bldg }},{{ b.key }}"
+                     {% if b.key in selected_xior_keys %}checked{% endif %}>
+              {{ b.bldg }}
+            </label>
+            {% endfor %}
+          </div>
+        </details>
         {% endfor %}
       </div>
       <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_xior_hint') }}</div>
@@ -332,8 +354,8 @@ function restartMonitor(btn) {
 }
 
 /* ── Xior 楼盘选择 ───────────────────────────────────────────────
-   楼栋不折叠（总共 30 个），所以这里只做三件事：城市勾选框的
-   全选/indeterminate、标题栏总计、全选/清空按钮。 */
+   折叠状态下也要能看出「这座城市选了几栋」，否则只能一个个展开去找——
+   所以每个城市带一个计数，标题栏带总计。 */
 (function () {
   var list = document.querySelector('.xior-list');
   if (!list) return;
@@ -343,9 +365,7 @@ function restartMonitor(btn) {
   var toggleBtn = document.getElementById('xiorToggleAll');
   var zh = (document.documentElement.lang === 'zh');
 
-  function boxesOf(el) {
-    return [].slice.call(el.querySelectorAll('.xior-bldg input'));
-  }
+  function boxesOf(el) { return [].slice.call(el.querySelectorAll('.xior-bldg input')); }
 
   function sync() {
     var on = 0;
@@ -353,6 +373,7 @@ function restartMonitor(btn) {
       var boxes = boxesOf(g);
       var n = boxes.filter(function (b) { return b.checked; }).length;
       on += n;
+      g.querySelector('.xior-tally').textContent = n + '/' + boxes.length;
       var city = g.querySelector('.xior-city');
       city.checked = n === boxes.length && n > 0;
       /* 部分选中用 indeterminate——否则勾了一半的城市和一栋没勾长得一样 */
@@ -367,7 +388,7 @@ function restartMonitor(btn) {
 
   list.addEventListener('change', function (e) {
     if (e.target.classList.contains('xior-city')) {
-      /* indeterminate 时点它按「整城全选」处理——那是用户此时最可能想要的 */
+      /* indeterminate 时点它按「整城全选」处理——那是此时最可能想要的 */
       var want = e.target.checked;
       boxesOf(e.target.closest('.xior-group')).forEach(function (b) { b.checked = want; });
     }
