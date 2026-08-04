@@ -1109,6 +1109,9 @@ class Config:
     #
     # 正确解法是分轮抓，不是把请求间隔调小——间隔调小会直接撞回 429。
     shard_sizes: dict[str, int] = field(default_factory=dict)
+    #: ``{source: 最小间隔秒数}``。控制「多久抓一次」，和分片的
+    #: 「每轮抓几个」是两回事——见 _DEFAULT_SOURCE_MIN_INTERVALS。
+    source_min_intervals: dict[str, int] = field(default_factory=dict)
     ourdomain_cities: list[OurDomainCityFilter] = field(default_factory=list)
     ourcampus_cities: list[OurCampusCityFilter] = field(default_factory=list)
     xior_cities: list[XiorCityFilter] = field(default_factory=list)
@@ -1186,6 +1189,46 @@ class Config:
 #:
 #: 值 ≥ 实际 target 数时分片自动失效，所以对只配了 4 栋的存量部署是无操作的。
 _DEFAULT_SHARD_SIZES: dict[str, int] = {"xior": 5}
+
+
+#: ``SOURCE_MIN_INTERVALS`` 未配置时的默认值（秒）。
+#:
+#: **分片管的是「每轮抓几个 target」，这个管的是「多久抓一次」——两者解决的
+#: 不是同一个问题。** 2026-08-04 生产实测把两者混为一谈的后果：
+#:
+#: Xior 从 30 栋缩到 4 栋后，分片 3/轮 意味着几乎每栋楼每轮都被抓；而高峰时段
+#: 轮次间隔只有 60–90 秒（``MIN_INTERVAL=20`` + PEAK 窗口），于是**单栋楼的
+#: 请求频率从「每 10–15 分钟一次」涨到「每 60–90 秒一次」，约 10 倍**，直接
+#: 撞进限流：持续 429、退避 30s+60s，单轮从 40 秒拖到 270 秒。
+#:
+#: 楼栋数变少反而更容易被限流，是因为限流按「同一个 target 被打的频率」算，
+#: 而不是按总请求量——30 栋轮着抓时每栋自然稀疏，4 栋轮着抓就全挤在一起了。
+#:
+#: 600 秒 ≈ 恢复到 30 栋时期每栋楼的实测频率（每 10–15 分钟）。
+_DEFAULT_SOURCE_MIN_INTERVALS: dict[str, int] = {"xior": 600}
+
+
+def _parse_source_min_intervals(raw: str) -> dict[str, int]:
+    """解析 ``SOURCE_MIN_INTERVALS``，形如 ``xior:600,ourdomain:120``（秒）。
+
+    留空用 :data:`_DEFAULT_SOURCE_MIN_INTERVALS`；显式写 ``xior:0`` 关掉该
+    source 的节流。非法条目忽略而不是报错——配置写错不该让监控起不来。
+    """
+    out = dict(_DEFAULT_SOURCE_MIN_INTERVALS)
+    if not (raw or "").strip():
+        return out
+    for part in raw.split(","):
+        if ":" not in part:
+            continue
+        name, _, secs = part.partition(":")
+        name = name.strip().lower()
+        try:
+            n = int(secs.strip())
+        except (TypeError, ValueError):
+            continue
+        if name and n >= 0:
+            out[name] = n
+    return out
 
 
 def _parse_shard_sizes(raw: str) -> dict[str, int]:
@@ -1313,6 +1356,8 @@ def load_config() -> Config:
         os.environ.get("SHADOW_SOURCES", "")) if s in sources]
 
     shard_sizes = _parse_shard_sizes(os.environ.get("SHARD_SIZES", ""))
+    source_min_intervals = _parse_source_min_intervals(
+        os.environ.get("SOURCE_MIN_INTERVALS", ""))
 
     ourcampus_cities: list[OurCampusCityFilter] = []
     if "ourcampus" in sources:
@@ -1366,6 +1411,7 @@ def load_config() -> Config:
         sources=sources,
         shadow_sources=shadow_sources,
         shard_sizes=shard_sizes,
+        source_min_intervals=source_min_intervals,
         ourdomain_cities=ourdomain_cities,
         ourcampus_cities=ourcampus_cities,
         xior_cities=xior_cities,

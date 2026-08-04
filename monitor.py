@@ -236,6 +236,82 @@ def _shard_source_tasks(
     return [tasks[i] for i in idx], (start + size) % n
 
 
+_SOURCE_LAST_SCRAPE_PREFIX = "source_last_scrape:"
+
+
+def _apply_source_intervals(
+        tasks: list,
+        cfg,
+        storage: Storage,
+        *,
+        now: float | None = None,
+        dry_run: bool = False,
+) -> list:
+    """按 ``cfg.source_min_intervals`` 跳过「刚抓过」的 source。
+
+    和分片解决的**不是同一个问题**：分片管「每轮抓几个 target」，这个管
+    「同一个 target 多久被打一次」。
+
+    2026-08-04 生产实测的教训：Xior 从 30 栋缩到 4 栋后，分片 3/轮 等于每栋楼
+    几乎每轮都被抓，而高峰时段轮次间隔只有 60–90 秒——单栋楼的请求频率涨了约
+    10 倍，直接撞进限流（持续 429，单轮从 40 秒拖到 270 秒）。**楼栋数变少反而
+    更容易被限流**，因为限流按单个 target 被打的频率算，30 栋轮着抓时每栋自然
+    稀疏，4 栋轮着抓就全挤在一起了。
+
+    时间戳存 meta，重启后仍然生效——否则频繁重启会绕过节流，正是限流最狠的
+    时候（重启往往就是因为出问题了）。
+
+    任何异常都回退成「不跳过」：宁可多抓一轮，也不能因为读写 meta 失败就把
+    整个 source 静默停掉。
+    """
+    intervals = getattr(cfg, "source_min_intervals", None) or {}
+    if not intervals:
+        return tasks
+
+    now = time.time() if now is None else now
+    out: list = []
+    by_source: dict[str, list] = {}
+    for t in tasks:
+        by_source.setdefault(t.source, []).append(t)
+
+    for src, group in by_source.items():
+        gap = int(intervals.get(src, 0) or 0)
+        if gap <= 0:
+            out.extend(group)
+            continue
+        key = _SOURCE_LAST_SCRAPE_PREFIX + src
+        try:
+            last = float(storage.get_meta(key, default="") or 0)
+        except (TypeError, ValueError):
+            last = 0.0
+        except Exception:
+            logger.debug("读取 %s 上次抓取时刻失败，本轮照常抓", src, exc_info=True)
+            out.extend(group)
+            continue
+
+        waited = now - last
+        # last <= 0 = 从没抓过（或时间戳读坏了），必须放行——否则首轮就被跳过。
+        # waited < 0 = 时间戳在未来（改过系统时间/时钟回拨），也放行，
+        # 不能让 source 卡到时间追上为止。
+        if last > 0 and 0 <= waited < gap:
+            logger.info(
+                "source %s 距上次抓取仅 %.0f 秒（< %d 秒），本轮跳过"
+                "——抓太频繁会撞限流，反而更慢",
+                src, waited, gap,
+            )
+            continue
+
+        if not dry_run:
+            try:
+                storage.set_meta(key, str(now))
+            except Exception:
+                # 写不进去就不节流：否则时间戳永远是旧的，每轮都照抓，
+                # 至少行为退化成「和没配一样」，而不是把 source 停掉。
+                logger.warning("写 %s 抓取时刻失败，本轮不节流", src, exc_info=True)
+        out.extend(group)
+    return out
+
+
 def _apply_task_sharding(
         tasks: list,
         cfg,
@@ -1448,7 +1524,9 @@ async def run_once(
     for _t in scrape_tasks:
         source_totals[_t.source] = source_totals.get(_t.source, 0) + 1
 
-    # target 多的 source 分轮抓，避免单轮顶破轮次预算（见 _apply_task_sharding）
+    # 先按 source 节流（多久抓一次），再分片（每轮抓几个）——两者管的不是
+    # 同一件事，顺序不能反：先分片会让被跳过的 source 白白推进分片游标。
+    scrape_tasks = _apply_source_intervals(scrape_tasks, cfg, storage, dry_run=dry_run)
     scrape_tasks = _apply_task_sharding(scrape_tasks, cfg, storage, dry_run=dry_run)
 
     loop = asyncio.get_running_loop()
