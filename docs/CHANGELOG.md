@@ -1,5 +1,100 @@
 # Changelog
 
+## v1.13.1 (2026-08-04)
+
+纯文档与注释，无行为变更。三件事：文档跟不上代码、文档里不该有生产库的数字、
+以及新手照 README 走部署不下去。
+
+### 文档里有三处说法已经被自己的侦察结果推翻
+
+`ARCHITECTURE.md` §7 和 §9 都写着 RENTCafe 预订「卡在 reCAPTCHA 和未侦察的多步
+表单，面板标记为开发中」——三句全错。reCAPTCHA 在 v1.12.0 就接了 2Captcha，多步
+表单 08-03 用真实账号走完了，而「开发中」这个标记全仓 grep 不到。改成新增的
+§7.1，用一张表对照早先记的阻塞点和现状。
+
+同一类的还有一批：
+
+- §2 流程图停在「距上次收敛满 24h」的旧模型，`dataflow_ch/en.mmd` 同错；
+- 两段式收敛（v1.13.0 最大的行为改动）整个没进架构文档，新增 §5.13；
+- §5.11 / §5.12 物理位置在 §7 和 §8 之间，章节顺序是坏的；
+- `FUTURE_PLAN.md` 两处把「每 source 独立 stale 阈值」当待办，而 v1.13.0 恰恰是
+  撤销了它；引用的 `XIOR.md §11` 也不存在（该文档只到 §8.7）；
+- `ANDROID_PLAN.md` 现状表说 FCM 未开发，同文档下面的阶段表写着已完成；
+- `XIOR.md` §8.5 把「证件上传不阻塞流程」列在已确认里，而 §8.6 明确推翻了它；
+- 两份 `guide.html` 说「监控三个平台」，平台表里没有 OurCampus，Xior 城市数写的
+  是 15（实际 14），且仍在讲 reCAPTCHA 是阻塞点；
+- `API.md` 缺 `status_is_inferred` 和 `source` 两个返回字段，缺 `source` /
+  `sources` / `occupancies` 三个查询参数；`openapi.json` 也漏了 `occupancies`。
+
+顺带发现一处真实的接口不一致（本次未改代码）：`/map` 和 `/calendar` 返回 `status`
+却不返回 `status_is_inferred`，移动端在这两个页面上分不出平台报的和系统推的。
+已在 `API.md` 写明并给了绕法。
+
+### 文档和注释里不再出现生产库的数字
+
+房源存量与分平台体量、用户数、残留记录条数、Reserved 时长分位、轮次计数、误判
+次数，全部改成定性表述。范围覆盖 `docs/`（含 CHANGELOG 历史条目）、代码注释
+（`mstorage/_listings.py`、`monitor.py`、`users.py`、两个 scraper）以及测试
+docstring。
+
+平台自身的行为常量保留：H2S 的 2 小时付款限时、CF 挑战 10–35 秒、Xior 每栋楼约
+14 秒和 5/10 分钟不触发 429——这些是调 `STALE_*` / `SHARD_SIZES` /
+`SOURCE_MIN_INTERVALS` 必须知道的，删了文档就没法用。
+
+### 新手照 README 走部署不下去
+
+`cp .env.example .env` 之后 `docker compose up -d`，entrypoint 预检直接 FATAL
+退出（占位域名 + 空 `WEB_PASSWORD`）。两条都是对的保护，但文档只给了「买个域名」
+这一条出路，而 `H2S_SKIP_PREFLIGHT` 在文档里一次都没出现过；compose 里 h2s 是
+`expose` 不是 `ports`，单独 up 也连不上。
+
+新增 `docker-compose.local.yml`：端口发布到 `127.0.0.1:8088`、跳过预检，末尾点名
+`h2s` 就不会拉起 caddy。绑回环是有意的——该模式下面板是明文 HTTP 且默认无密码。
+
+README 的快速开始随之拆成「本地试跑」和「带域名部署」两条路，并补上：
+
+- 登录用户名默认是 `admin`（原来只说「留空则无需登录」，设了密码之后没人猜得到）；
+- 预检 FATAL 的两种成因和对应处理；
+- 原先完全缺失的**升级与备份**一节——代码不是挂载的，必须 `build` 加
+  `--force-recreate`；`.env` 和库必须一起备份，否则拿到一堆解不开的凭据；WAL 下
+  直接 `cp` 会漏写入，给了 `VACUUM INTO` 的命令。
+
+### `.env.example` 补了九个代码在读、文档没提的键
+
+`STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` / `OURDOMAIN_ZERO_ROUNDS_TO_CONFIRM`
+（前三个是 v1.13.0 刚加的，等于整套新行为对自部署者完全不可见）、
+`CAPTCHA_API_KEY` / `BOOKING_STATUS_HOLD_MINUTES` / `SOURCE_MIN_INTERVALS` /
+`GOOGLE_MAPS_API_KEY` / `DATA_DIR` / `OURDOMAIN_IMPERSONATES`，外加
+`HTTP_PROXY` / `ALL_PROXY`。
+
+修两处错：`SHARD_SIZES` 默认值写的是 `xior:5`，代码里是 `4`；`GOOGLE_MAPS_API_KEY`
+的注释原本写「留空则退回不需要 key 的底图」，查 `templates/map.html` 发现是错的
+——`{% else %}` 分支直接输出「未配置」，没有降级底图，`/map` 整页不可用。
+
+### 中文文档统一改成书面语
+
+通读逐段改写，覆盖 `ARCHITECTURE`、`README_cn`、`XIOR`、`OURDOMAIN`、
+`SCRAPING_RECON`、`FUTURE_PLAN`、`OBSERVABILITY_PLAN`、`ANDROID_PLAN`、
+`guide_cn.html`。引述界面文案的地方保留原样。CHANGELOG 的历史条目只清数据、
+不改语体——它是按发布时间追加的记录，重写往期措辞会让它和当时的 tag 对不上。
+
+### 补六张 mermaid
+
+都用 `mermaid-cli` 实际渲染验证过（仓库现共 13 张，一起验，全通过）：
+
+| 位置 | 讲什么 |
+|---|---|
+| `ARCHITECTURE` §3.1 | 过 CF 挑战的五方时序，含 clearance 那 2 秒空窗和两类 403 的分岔 |
+| `ARCHITECTURE` §5.13 | 房源状态机 + 三条收敛路径的触发条件 |
+| `ARCHITECTURE` §7 | H2S 自动预订，含候选分配、booking hold、不代付的边界 |
+| `XIOR` §8.6 | RENTCafe 端到端六步，v2 回退和两段式登录都展开 |
+| `XIOR` §8.2 | 深链失败画成旁支 |
+| `OURDOMAIN` §7.2 | 入口三步 |
+
+两份 README 和上述几处的 ASCII 图一并换成 mermaid。代价是纯文本查看会看到源码。
+
+---
+
 ## v1.13.0 (2026-08-04)
 
 ### 房源状态收敛重做：消失 30 分钟转 Reserved，2 小时判 Occupied
