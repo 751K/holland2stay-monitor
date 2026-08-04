@@ -1,0 +1,19 @@
+# 本地试运行用的 compose 覆盖层：不使用域名，不签发证书，不启动 Caddy。
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
+#
+# 命令末尾显式指定 h2s，Caddy 便不会启动（它监听 80/443，需要域名与证书）。
+#
+# 与生产配置的差异仅两处：
+#   1. 端口直接发布到宿主机的 127.0.0.1:8088（生产为 expose，仅 Caddy 可访问）
+#   2. 跳过 entrypoint 的安全预检（占位域名与空 WEB_PASSWORD 两项检查）
+#
+# ⚠️ 面板将以**明文 HTTP、且可能无密码**的形式提供服务。此处绑定的是回环地址，
+#    仅本机可访问——请勿改为 0.0.0.0，亦不得将本覆盖层用于公网主机。
+#    正式部署请使用 docker-compose.yml 配合 Caddyfile，见 docs/README.md。
+services:
+  h2s:
+    ports:
+      - "127.0.0.1:8088:8088"
+    environment:
+      - H2S_SKIP_PREFLIGHT=1
