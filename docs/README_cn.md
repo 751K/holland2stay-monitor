@@ -4,9 +4,15 @@
 
 > English version: [README.md](README.md)
 
-荷兰的租房房源往往在数小时内上线又下架。FlatRadar 持续轮询所配置的平台，在出现
-符合过滤条件的房源时立即发出通知；对 Holland2Stay 还可在通知送达的同时，将预订
-推进至支付页面。
+在荷兰租房，困难之处通常不在于找到房源，而在于**在其被他人预订之前发现它**。
+条件较好的房源自上线至订满往往只有数十分钟，而持续刷新页面并不现实。
+
+FlatRadar 承担这部分工作：同时监控多个租房平台，一旦出现符合所设条件的房源，
+即通过所选渠道发出通知，通知中附有直达链接。对 Holland2Stay 更进一步——先将预订
+推进至支付页面，再连同付款链接一并发出，因此收到通知时仅余付款一步。
+
+其边界需一并说明：**系统不代为付款，亦不保证预订成功。** 它所缩短的是「房源上线」
+至「用户获知」之间的时间差，此外的结果仍取决于平台上的实际竞争。
 
 本项目支持自部署：一个容器、一个 SQLite 文件，除所选用的通知渠道外不依赖任何
 外部服务。
@@ -22,15 +28,16 @@
 
 ---
 
-## 能做什么
+## 功能概览
 
 | | |
 |---|---|
-| **监控** | Holland2Stay、OurDomain、OurCampus、Xior，采用自适应轮询间隔，上架高峰时段自动收紧 |
-| **通知** | Web、Telegram、邮件、WhatsApp、iOS 推送、Android 推送、iMessage；每个用户独立选择渠道与过滤条件 |
-| **视图** | 列表、地图、日历、仪表盘、图表，支持中英文 |
-| **账号** | 访客 / 用户 / 管理员三种角色，各用户的过滤条件与凭据互相独立 |
-| **自动预订** | 仅 Holland2Stay，边界见[自动预订](#自动预订) |
+| **监控范围** | Holland2Stay、OurDomain、OurCampus、Xior 共四个平台；新房源集中上架的时段轮询更为频繁 |
+| **通知渠道** | Web、Telegram、邮件、WhatsApp、iOS 推送、Android 推送、iMessage，可同时启用多个 |
+| **筛选条件** | 租金上限、面积下限、楼层下限、户型、入住人数、城市、街区、平台、合同类型、租客要求等 |
+| **浏览方式** | 列表、地图、日历、仪表盘、图表，界面支持中英文 |
+| **多用户** | 支持。设访客、用户、管理员三种角色，各用户的过滤条件与凭据互相独立 |
+| **自动预订** | 仅 Holland2Stay，且止于支付页面；边界见[自动预订](#自动预订) |
 
 ### 平台覆盖
 
@@ -179,8 +186,8 @@ python monitor.py                # 抓取循环，需另开终端
 进程，仅通过 SQLite 通信：只运行 `web.py` 将得到一个永远不会更新数据的面板。
 
 > **macOS**：免费版 CloakBrowser 的 macOS 构建落后于 Linux，且 headless 模式
-> 可能崩溃，所以本地运行会自动退回到可见窗口模式。真正依赖的部署请用
-> Linux / Docker。
+> 可能崩溃，因此本地运行会自动退回可见窗口模式。需长期依赖的部署请使用
+> Linux 或 Docker。
 
 ---
 
@@ -223,15 +230,15 @@ docker exec h2s python -c "import sqlite3; \
 
 | 键 | 默认值 | 作用 |
 |---|---|---|
-| `SOURCES` | `holland2stay` | 启用哪些平台，逗号分隔 |
+| `SOURCES` | `holland2stay` | 启用的平台，以逗号分隔 |
 | `CITIES` | `Eindhoven,29` | Holland2Stay 的城市，格式为 `名称,id`，多项以 `\|` 分隔 |
 | `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | 其余 source 的同格式配置，楼栋 key 见各自的 scraper |
 | `SHADOW_SOURCES` | — | 列出的 source 照常抓取入库但**不发送任何通知**，用于新平台对用户开放前的静默验证。不在 `SOURCES` 中的条目会被忽略并记录警告——仅写入此处而未写入 `SOURCES` 的平台属于「未启用」，而非「影子」 |
 | `CHECK_INTERVAL` | `300` | 非高峰时段的轮询间隔（秒） |
 | `PEAK_INTERVAL` | `60` | 高峰时段的轮询间隔（秒） |
-| `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默多长时间后 `/health` 报告 unhealthy |
+| `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默超过该时长后 `/health` 报告 unhealthy |
 | `HEALTH_*` / `WATCHDOG_*` | 见 `.env.example` | `/monitoring` 所依托的数据退化告警阈值 |
-| `STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` | `0.5` / `2` | 房源从 feed 里消失多久之后推定为 Reserved、再多久判 Occupied——见[房源状态](#房源状态) |
+| `STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` | `0.5` / `2` | 房源自 feed 中消失多久后推定为 Reserved，再经多久判定为 Occupied，见[房源状态](#房源状态) |
 | `HTTPS_PROXY` | — | Cloudflare 拦截较严时，令抓取改走另一个出口 IP |
 
 启用某个 source 需要**同时**配置 `SOURCES` 与该 source 的城市列表，仅配置城市
@@ -243,8 +250,8 @@ docker exec h2s python -c "import sqlite3; \
 python -m tools.doctor --no-network
 ```
 
-要在**宿主机的仓库目录**里跑，不是容器里——`tools/` 是有意不打进镜像的。它是
-只读的：不写配置、不发通知、不碰 monitor 进程。
+该命令须在**宿主机的仓库目录**中执行，而非容器内——`tools/` 是有意不打入镜像的。
+它为只读操作：不写入配置、不发送通知、不干预 monitor 进程。
 
 ---
 
@@ -272,7 +279,7 @@ stateDiagram-v2
 ```
 
 凡系统推断得出的状态，面板上均会在状态旁显示一枚**「推测」**徽标，API 中对应
-`status_is_inferred` 字段，使平台上报与系统推断始终可区分。实际运行中，所见的
+`status_is_inferred` 字段，使平台上报与系统推断始终可以区分。实际运行中，所见的
 `Occupied` 多数为推断结果。推测转换**不产生通知**。
 
 2 小时并非任意取值，而是 **Holland2Stay 官方的付款限时**：一条消失超过 2 小时的

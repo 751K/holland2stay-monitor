@@ -4,13 +4,23 @@
 
 > 中文版：[README_cn.md](README_cn.md)
 
-Dutch rental listings appear and disappear within hours. FlatRadar polls the
-platforms you care about, tells you the moment something matching your filters
-shows up, and — for Holland2Stay — can hold the booking up to the payment page
-while you are still reading the alert.
+In the Dutch rental market the difficulty is rarely finding a listing. It is
+**seeing it before someone else books it**: a good unit can go from published to
+taken within the hour, and refreshing a search page all day is not practical.
 
-It is self-hostable: one container, one SQLite file, no external services
-required beyond the notification channels you choose to enable.
+FlatRadar takes over that part. It monitors several rental platforms at once and,
+as soon as a listing matches your criteria, sends a notification through the
+channels you enabled, with a direct link included. For Holland2Stay it goes one
+step further: it first carries the booking through to the payment page, then
+sends the payment link along with the alert, so only the payment itself remains.
+
+Its limits should be stated alongside that: **the system never pays on your
+behalf, and it cannot guarantee a booking succeeds.** What it shortens is the
+interval between a listing going live and you learning of it. Everything beyond
+that still depends on the competition on the platform.
+
+The project is self-hostable: one container, one SQLite file, no external
+services beyond the notification channels you choose to enable.
 
 **Website:** [flatradar.app](https://flatradar.app) ·
 **User guide:** [flatradar.app/guide](https://flatradar.app/guide) ·
@@ -25,15 +35,16 @@ required beyond the notification channels you choose to enable.
 
 ---
 
-## What you get
+## Feature overview
 
 | | |
 |---|---|
-| **Monitoring** | Holland2Stay, OurDomain, OurCampus and Xior, polled on an adaptive interval that tightens during peak listing hours |
-| **Alerts** | Web, Telegram, Email, WhatsApp, iOS push, Android push, iMessage — each user picks their own channels and filters |
+| **Coverage** | Four platforms: Holland2Stay, OurDomain, OurCampus and Xior. Polling tightens during the hours when new listings tend to appear |
+| **Alert channels** | Web, Telegram, Email, WhatsApp, iOS push, Android push, iMessage; several may be enabled at once |
+| **Filters** | Maximum rent, minimum area, minimum floor, type, occupancy, city, neighbourhood, platform, contract type, tenant requirements, and others |
 | **Views** | List, map, calendar, dashboard and charts, in English or Chinese |
-| **Accounts** | Guest, user and admin roles; every user keeps independent filters and credentials |
-| **Auto-booking** | Holland2Stay only — see [Auto-booking](#auto-booking) for what it does and does not do |
+| **Multiple users** | Supported. Guest, user and admin roles; every user keeps independent filters and credentials |
+| **Auto-booking** | Holland2Stay only, and it stops at the payment page — see [Auto-booking](#auto-booking) |
 
 ### Platform coverage
 
@@ -92,8 +103,8 @@ telemetry backend. State is one SQLite file.
 
 ## Quick start
 
-Two paths. Take the first one if you just want to see it work; take the second
-for anything you actually depend on.
+Two paths: the first to confirm it runs, the second for anything you intend to
+depend on.
 
 ### 1. Try it locally — no domain, no certificate
 
