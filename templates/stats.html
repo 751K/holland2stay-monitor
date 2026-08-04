@@ -115,6 +115,22 @@ function statusColor(s) {
 // 图表轴用缩写（全名会挤成一团）；实现见 static/app.js。
 // 带兜底：app.js 若因浏览器缓存是旧版本，这里抛异常会让 render() 整个中断，
 // 页面上**所有**图表一起空白——一个标签函数不该有这种影响半径。
+/* 图表里的 feature 取值是上游返回的**数据**，不是界面文案，所以原本一直以
+   英文/荷兰语原样显示。这里按取值查显示名，查不到就原样输出——新出现的取值
+   不该变成空白。同义值（Indefinite / Onbepaalde tijd）已在读取层合并。 */
+var FEATURE_LABELS = {
+  'indefinite':           '{{ _("feat_indefinite") }}',
+  '6 months max':         '{{ _("feat_6_months_max") }}',
+  '4 months max':         '{{ _("feat_4_months_max") }}',
+  'employed only':        '{{ _("feat_employed_only") }}',
+  'student and employed': '{{ _("feat_student_employed") }}',
+  'student only':         '{{ _("feat_student_only") }}',
+  'custom':               '{{ _("feat_custom") }}',
+};
+function featLabel(v) {
+  return FEATURE_LABELS[String(v || '').toLowerCase().trim()] || v;
+}
+
 function srcLabel(s) {
   return window.sourceShort ? window.sourceShort(s) : String(s || '').toUpperCase();
 }
@@ -191,6 +207,10 @@ function buildLineChart(id, label, data, color) {
 
 function buildDoughnutChart(id, labels, data, colors) {
   destroyChart(id);
+  /* 没数据时画一张空图，卡片里只剩标题，看起来和「坏了」一模一样。
+     2026-08-04：「租客要求分布」就是这样——窗口内的房源全来自不提供该字段的
+     平台，图是真空的，但用户没法从界面上知道这一点。 */
+  if (!showEmptyIfNoData(id, data)) return;
   var c = themeColors();
   Chart.defaults.color = c.muted;
   charts[id] = new Chart(document.getElementById(id), {
@@ -207,6 +227,25 @@ function buildDoughnutChart(id, labels, data, colors) {
       },
     },
   });
+}
+
+/** 数据为空时在画布位置显示一行说明；返回 false 表示不必再画图。 */
+function showEmptyIfNoData(id, data) {
+  var el = document.getElementById(id);
+  if (!el) return false;
+  var box = el.parentElement;
+  var old = box.querySelector('.chart-empty');
+  if (old) old.remove();
+  var total = (data || []).reduce(function (a, b) { return a + (Number(b) || 0); }, 0);
+  if (total > 0) { el.style.display = ''; return true; }
+  el.style.display = 'none';
+  var msg = document.createElement('div');
+  msg.className = 'chart-empty text-tertiary';
+  msg.style.cssText = 'display:flex;align-items:center;justify-content:center;'
+    + 'height:100%;min-height:120px;font-size:13px;';
+  msg.textContent = '{{ _("chart_no_data") }}';
+  box.appendChild(msg);
+  return false;
 }
 
 function buildBarChart(id, labels, data, color) {
@@ -260,11 +299,11 @@ function renderCharts(d) {
   var hrCounts = d.hourly_dist.map(function(r){ return r.count; });
   buildBarChart('chartHourly', hrLabels, hrCounts, '#0f766e');
 
-  var tnLabels = d.tenant_dist.map(function(r){ return r.label; });
+  var tnLabels = d.tenant_dist.map(function(r){ return featLabel(r.label); });
   var tnCounts = d.tenant_dist.map(function(r){ return r.count; });
   buildDoughnutChart('chartTenant', tnLabels, tnCounts, colors(tnLabels.length));
 
-  var ctLabels = d.contract_dist.map(function(r){ return r.label; });
+  var ctLabels = d.contract_dist.map(function(r){ return featLabel(r.label); });
   var ctCounts = d.contract_dist.map(function(r){ return r.count; });
   buildDoughnutChart('chartContract', ctLabels, ctCounts, colors(ctLabels.length));
 

@@ -194,7 +194,9 @@ class ChartOps:
             ORDER BY cnt DESC
         """
         rows = self._conn.execute(sql, params).fetchall()
-        return [{"label": r["label"], "count": r["cnt"]} for r in rows]
+        return _merge_synonyms(
+            [{"label": r["label"], "count": r["cnt"]} for r in rows]
+        )
 
     def _bucketed_number_dist(
         self, category: str, buckets: dict[str, int], classifier, days: int | None = None
@@ -282,3 +284,28 @@ class ChartOps:
             elif floor <= 5: b["3-5"] += 1
             else:            b["6+"] += 1
         return self._bucketed_number_dist("Floor", buckets, _classify, days=days)
+
+
+#: 同一个概念在上游有多种写法，图表里会被算成两类。
+#:
+#: 2026-08-04 生产实测：**同一个平台**（holland2stay）对同一种合同既返回
+#: ``Indefinite``（178 条）又返回 ``Onbepaalde tijd``（38 条），于是「合同类型
+#: 分布」把一件事画成了两块。这不是翻译问题——翻译只会让两块都变成中文，
+#: 该合的还是没合。
+#:
+#: 在读取层合并而不是在抓取层改写：抓取层只能修以后的数据，库里已有的 38 条
+#: 还是错的；而这里一改，历史数据同时正确。
+_FEATURE_SYNONYMS: dict[str, str] = {
+    "onbepaalde tijd": "Indefinite",
+}
+
+
+def _merge_synonyms(rows: list[dict]) -> list[dict]:
+    """把同义的 label 合并计数，按数量重新排序。"""
+    merged: dict[str, int] = {}
+    for r in rows:
+        label = str(r.get("label", "")).strip()
+        canonical = _FEATURE_SYNONYMS.get(label.casefold(), label)
+        merged[canonical] = merged.get(canonical, 0) + int(r.get("count", 0))
+    return [{"label": k, "count": v}
+            for k, v in sorted(merged.items(), key=lambda kv: -kv[1])]

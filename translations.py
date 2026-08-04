@@ -332,6 +332,18 @@ TRANSLATIONS = {
     "stats_status_dist":    {"zh": "状态分布",                "en": "Status distribution"},
     "stats_price_dist":     {"zh": "租金分布",                "en": "Rent distribution"},
     "stats_hourly_dist":    {"zh": "房源上线时间分布（荷兰时间）", "en": "Listing drop time (NL time)"},
+    # 图表里的 feature 取值。这些是**上游返回的数据值**，不是界面文案，所以
+    # 原本一直以英文/荷兰语原样显示。合同类的同义值已在读取层合并
+    # （见 mstorage/_charts._FEATURE_SYNONYMS），这里只负责显示。
+    "feat_indefinite":      {"zh": "不定期",          "en": "Indefinite"},
+    "feat_6_months_max":    {"zh": "最长 6 个月",      "en": "6 months max"},
+    "feat_4_months_max":    {"zh": "最长 4 个月",      "en": "4 months max"},
+    "feat_employed_only":   {"zh": "仅限在职",         "en": "Employed only"},
+    "feat_student_employed":{"zh": "学生或在职",       "en": "Student or employed"},
+    "feat_student_only":    {"zh": "仅限学生",         "en": "Student only"},
+    "feat_custom":          {"zh": "其它要求",         "en": "Custom"},
+    "chart_no_data":        {"zh": "该时间范围内暂无数据",
+                             "en": "No data in this time range"},
     "stats_tenant_dist":    {"zh": "租客要求分布",              "en": "Tenant requirement distribution"},
     "stats_contract_dist":  {"zh": "合同类型分布",              "en": "Contract type distribution"},
     "stats_type_dist":      {"zh": "户型分布",                  "en": "Type distribution"},
