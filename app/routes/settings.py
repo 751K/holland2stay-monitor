@@ -12,7 +12,7 @@ from typing import Any
 from dotenv import dotenv_values
 from flask import Flask, flash, redirect, render_template, request, url_for
 
-from config import ENV_PATH, KNOWN_CITIES, KNOWN_OURDOMAIN_CITIES, KNOWN_XIOR_CITIES
+from config import KNOWN_SOURCES, source_display_name, ENV_PATH, KNOWN_CITIES, KNOWN_OURDOMAIN_CITIES, KNOWN_XIOR_CITIES
 
 from app.auth import admin_required
 from app.csrf import csrf_required
@@ -49,8 +49,11 @@ def settings() -> Any:
             ENV_PATH.touch()
 
         selected_sources = request.form.getlist("source_selected")
-        allowed_sources = {"holland2stay", "ourdomain", "xior"}
-        sources = [s for s in selected_sources if s in allowed_sources]
+        # 用 config.KNOWN_SOURCES（模块级已导入；**别在这里再 import 一次**，
+        # 函数内的 import 会把它变成整个函数的局部变量，GET 分支渲染时就会
+        # UnboundLocalError）。原先这里写死了三个平台，漏掉 ourcampus，从面板
+        # 保存一次就会把它从 SOURCES 里悄悄删掉。
+        sources = [s for s in selected_sources if s in KNOWN_SOURCES]
         if not sources:
             sources = ["holland2stay"]
             flash(tr("settings_no_source", lang), "warning")
@@ -153,6 +156,7 @@ def settings() -> Any:
         xior_by_city=xior_by_city,
         xior_city_all_checked=xior_city_all_checked,
         selected_sources=selected_sources,
+        source_options=[(k, source_display_name(k)) for k in KNOWN_SOURCES],
         selected_city_ids=selected_city_ids,
         selected_ourdomain_keys=selected_ourdomain_keys,
         selected_xior_keys=selected_xior_keys,

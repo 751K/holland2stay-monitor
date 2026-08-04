@@ -276,6 +276,10 @@ def build_user_from_form(
         allowed_tenant=_lv("ALLOWED_TENANT"),
         allowed_offer=_lv("ALLOWED_OFFER"),
         allowed_cities=_lv("ALLOWED_CITIES"),
+        # 2026-08-04 补：模型和匹配逻辑一直支持 allowed_sources，手机 API 也
+        # 能设，唯独面板表单没解析它——于是从面板保存一次就会把用户设过的
+        # 平台过滤清空。这不是「没做」，是静默丢数据。
+        allowed_sources=_lv("ALLOWED_SOURCES"),
         allowed_finishing=_lv("ALLOWED_FINISHING"),
         allowed_energy=_sanitize_energy("ALLOWED_ENERGY"),
     )
@@ -313,6 +317,7 @@ def build_user_from_form(
             allowed_types=_lv("AUTO_BOOK_ALLOWED_TYPES"),
             allowed_neighborhoods=_lv("AUTO_BOOK_ALLOWED_NEIGHBORHOODS"),
             allowed_cities=_lv("AUTO_BOOK_ALLOWED_CITIES"),
+            allowed_sources=_lv("AUTO_BOOK_ALLOWED_SOURCES"),
             allowed_finishing=_lv("AUTO_BOOK_ALLOWED_FINISHING"),
             allowed_energy=_sanitize_energy("AUTO_BOOK_ALLOWED_ENERGY"),
         ),
@@ -481,6 +486,10 @@ def build_user_from_form_self(
         allowed_tenant=_lv("ALLOWED_TENANT"),
         allowed_offer=_lv("ALLOWED_OFFER"),
         allowed_cities=_lv("ALLOWED_CITIES"),
+        # 2026-08-04 补：模型和匹配逻辑一直支持 allowed_sources，手机 API 也
+        # 能设，唯独面板表单没解析它——于是从面板保存一次就会把用户设过的
+        # 平台过滤清空。这不是「没做」，是静默丢数据。
+        allowed_sources=_lv("ALLOWED_SOURCES"),
         allowed_finishing=_lv("ALLOWED_FINISHING"),
         allowed_energy=_sanitize_energy("ALLOWED_ENERGY"),
     )

@@ -339,6 +339,13 @@
       </div>
       <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
         <div class="form-group">
+          <label class="form-label">{{ _('user_form_sources') }}</label>
+          <div class="multi-select">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown">{% set sel_src = lf.allowed_sources if lf else [] %}{% for key, label in source_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_SOURCES" value="{{ key }}"{% if key in sel_src %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
           <label class="form-label">{{ _('user_form_cities') }}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
@@ -654,6 +661,10 @@
         <div class="form-group">
           <label class="form-label">{{ _('user_form_cities') }}</label>
           <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_city = ab_lf.allowed_cities if ab_lf else [] %}{% for c in city_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CITIES" value="{{ c }}"{% if c in ab_city %} checked{% endif %}> {{ c }}</label>{% endfor %}</div></div></div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_sources') }}</label>
+          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_src = ab_lf.allowed_sources if ab_lf else [] %}{% for key, label in source_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_SOURCES" value="{{ key }}"{% if key in ab_src %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div>
+        </div>
         <div class="form-group">
           <label class="form-label">{{ _('user_form_hoods') }}</label>
           <div class="multi-select" id="ms-ab-neighborhood">

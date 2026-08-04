@@ -1272,6 +1272,30 @@ def _parse_shard_sizes(raw: str) -> dict[str, int]:
     return out
 
 
+#: 系统支持的全部平台。**新增平台只改这里。**
+#:
+#: 这个常量是补出来的：原先每处各自维护一份平台清单，于是 ``ourcampus``
+#: 被漏了三次——前端的 sourceLabel（三份实现都没有它）、monitoring 页（干脆
+#: 不转换）、以及全局设置的白名单（从面板保存一次就会把它从 SOURCES 里悄悄
+#: 删掉）。漏的都是同一个平台，因为它是最后加的那个。
+KNOWN_SOURCES: tuple[str, ...] = ("holland2stay", "ourdomain", "ourcampus", "xior")
+
+#: 平台显示名。前端另有一份同样的表（static/app.js 的 SOURCE_LABELS），
+#: 因为那边是客户端渲染；两边都从这份注释里的同一个事实来。
+SOURCE_DISPLAY_NAMES: dict[str, str] = {
+    "holland2stay": "Holland2Stay",
+    "ourdomain": "OurDomain",
+    "ourcampus": "OurCampus",
+    "xior": "Xior",
+}
+
+
+def source_display_name(source: str) -> str:
+    """平台显示名；未知 key 首字母大写后返回，不套用某个已知平台名。"""
+    key = (source or "").strip().lower()
+    return SOURCE_DISPLAY_NAMES.get(key, key.capitalize() if key else "")
+
+
 def _parse_sources_raw(raw: str) -> list[str]:
     """拆 source 列表，不做任何默认值填充。"""
     values = [

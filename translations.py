@@ -482,6 +482,7 @@ TRANSLATIONS = {
     "user_form_hoods":      {"zh": "允许片区",                "en": "Allowed neighborhoods"},
     "user_form_cities":     {"zh": "允许城市",                "en": "Allowed cities"},
     "user_form_offer":      {"zh": "合同类型",                "en": "Contract type"},
+    "user_form_sources":    {"zh": "平台",           "en": "Platform"},
     "user_form_tenant":     {"zh": "租客要求",                "en": "Tenant requirement"},
     "user_form_promo":      {"zh": "标签/促销",              "en": "Offer / Promo"},
     "user_form_section4":   {"zh": "自动预订",                "en": "Auto Booking"},

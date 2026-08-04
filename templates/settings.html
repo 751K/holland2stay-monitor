@@ -108,19 +108,15 @@
       <i class="bi bi-broadcast-pin mr-2" style="color:var(--accent);"></i>{{ _('settings_sources') }}
     </div>
     <div class="card-body">
+      {# 从 config.KNOWN_SOURCES 渲染。原先这里写死了三个平台，漏掉 ourcampus，
+         从面板保存一次就会把它从 SOURCES 里悄悄删掉。 #}
       <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+        {% for key, label in source_options %}
         <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="source_selected" value="holland2stay" {% if 'holland2stay' in selected_sources %}checked{% endif %}>
-          H2S · Holland2Stay
+          <input type="checkbox" name="source_selected" value="{{ key }}" {% if key in selected_sources %}checked{% endif %}>
+          {{ label }}
         </label>
-        <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="source_selected" value="ourdomain" {% if 'ourdomain' in selected_sources %}checked{% endif %}>
-          OD · OurDomain
-        </label>
-        <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="source_selected" value="xior" {% if 'xior' in selected_sources %}checked{% endif %}>
-          XR · Xior
-        </label>
+        {% endfor %}
       </div>
       <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_sources_hint') }}</div>
     </div>
