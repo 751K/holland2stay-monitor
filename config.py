@@ -1416,9 +1416,23 @@ def load_config() -> Config:
         raw_od_cities = os.environ.get("OURDOMAIN_CITIES", "Amsterdam Diemen,diemen")
         ourdomain_cities = _parse_ourdomain_cities(raw_od_cities)
 
-    # 影子 source：抓但不通知。只保留同时也在 sources 里的，否则是配置笔误
-    shadow_sources = [s for s in _parse_sources_raw(
-        os.environ.get("SHADOW_SOURCES", "")) if s in sources]
+    # 影子 source：抓但不通知。只保留同时也在 sources 里的，否则是配置笔误。
+    #
+    # 但"静默丢弃"会造出一个很难看穿的假象：SHADOW_SOURCES 里列着 ourcampus，
+    # 而 SOURCES 里没有它——看配置像是"影子模式跑着"，实际上它压根没被抓，
+    # 数据健康面板上自然也没有它的卡片。2026-08-04 线上就是这个状态，
+    # 而且是从设置面板保存一次（旧版白名单漏了 ourcampus）无声造成的。
+    # 所以留一条 WARNING：影子名单里的 source 不在 sources 里，一定要说出来。
+    _shadow_raw = _parse_sources_raw(os.environ.get("SHADOW_SOURCES", ""))
+    shadow_sources = [s for s in _shadow_raw if s in sources]
+    _shadow_dangling = [s for s in _shadow_raw if s not in sources]
+    if _shadow_dangling:
+        logger.warning(
+            "SHADOW_SOURCES 里的 %s 不在 SOURCES 中，已忽略——这几个平台"
+            "既不会被抓取，也不会出现在数据健康面板上。若想让它们跑起来，"
+            "要先加进 SOURCES；若只是残留配置，从 SHADOW_SOURCES 里删掉。",
+            ", ".join(sorted(_shadow_dangling)),
+        )
 
     shard_sizes = _parse_shard_sizes(os.environ.get("SHARD_SIZES", ""))
     source_min_intervals = _parse_source_min_intervals(
