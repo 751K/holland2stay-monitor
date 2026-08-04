@@ -128,10 +128,15 @@ class TestFailOpen:
 
 class TestDefaults:
     def test_xior_is_throttled_by_default(self):
-        """默认值要能直接修好生产上那个问题，不该等人去配。"""
+        """默认值要能直接修好生产上那个问题，不该等人去配。
+
+        下界守的是「明显比轮次间隔松」——实测每栋楼 60–90 秒一次会持续吃
+        429，单轮从 40 秒拖到 274 秒。具体数值会按实测继续调，所以这里不钉
+        死某个数。
+        """
         from config import _DEFAULT_SOURCE_MIN_INTERVALS
 
-        assert _DEFAULT_SOURCE_MIN_INTERVALS.get("xior", 0) >= 600
+        assert _DEFAULT_SOURCE_MIN_INTERVALS.get("xior", 0) >= 180
 
     def test_other_sources_have_no_default_throttle(self):
         """H2S 是真正出房源的那个，高峰高频轮询是有意为之。"""
