@@ -1,5 +1,102 @@
 # Changelog
 
+## v1.12.0 (2026-08-04)
+
+### OurDomain 的预订和 Xior 是同一套，但 booker 是个跑不通的空壳
+
+侦察确认 OurDomain 和 Xior 跑的是**同一套 RENTCafe，契约逐字相同**：条款页的
+reCAPTCHA 类型 / sitekey / action / 回退字段名一样，登录页的四个表单和「密码
+登录那条路没有验证码」一样，表单提交端点、错误判据、证件上传接口也一样，连
+页面 JS 的函数名都一样。
+
+而 `OurDomainBooker` 当时只是 `source = "ourdomain"` 一行的子类，`book()` 整个
+方法体写死 Xior——`building_key_for` 来自 `scrapers.xior`，对 OurDomain 的城市
+恒返回空串，于是**第一步就退出，一个请求都发不出去**。另外 `find_unit` 只认
+`xr_` 前缀，`od_211053` 恒找不到；而「找不到」这条路径的表现是 race_lost
+（「已被他人选走」），所以就算前面的都对，它也只会静默失败。
+
+`monitor._AUTO_BOOK_SOURCES` 里没有 `ourdomain`，这条链路对用户一直是关的，
+没有线上影响。
+
+**重构**：`RentCafeBooker` 现在只装两个平台真正共享的部分（会话层、登录、
+验证码、表单解析、证件上传、存草稿），按平台不同的只剩「怎么从一条 listing
+走到 Applicant Info」，收敛成几个钩子。`book()` 里不再有任何平台分支——一旦
+那里出现 `if self.source == ...`，说明钩子切得不对。
+
+**OurDomain 入口段**（已对着真站实测跑通）：
+
+```
+① GET  {base}/{slug}/floorplans.aspx                建会话 + 轮换 TLS 指纹
+② GET  rcLoadContent.ashx?contentclass=availableunits…   拿 Book now 的参数
+③ POST {base}/{slug}/termsandotheritems.aspx        单元上下文进服务端会话
+```
+
+`ApplyNowClick` 的第 5 参数是 ③ 的目标页，和 Xior `ContinueClick` 的第 6 参数
+同构——位置不同，写错不会报错，只会带着一组错位的参数去提交，所以两个平台各
+一个解析函数。单元参数**每次现查、不持久化**：存下来的会过期，而且回答不了
+「这个单元现在还在不在」；现查那张表顺带就是竞争检测。
+
+登录之后的部分**尚未端到端验证**（要真账号 + 验证码开销）。代码里的处理是：
+核对是不是 Applicant Info → 不是就重 POST 一次 Book now → 还不是就明确报错
+中止。不允许猜一个 stepname 深链过去——那只会拿到空壳页，而在空壳页上填表
+等于在用户真实账号下提交一份空白申请。
+
+### 用户的 H2S 密码被回填成了 Xior / OurDomain 的账号
+
+拆分三套平台凭据时，给 Xior / OurDomain 留了「缺失就回退到旧共用值」的兜底。
+那个「旧共用值」实际上就是**用户的 H2S 账号密码**（当时只有 H2S 支持自动
+预订），所以回填不是「保住了旧配置」，而是**凭空替用户编了两个他从来没注册
+过的账号**。三个平台是三家不同公司、三个独立的 RENTCafe 租户，账号不通用。
+
+线上实测：41 个用户的 `ourdomain_email` / `xior_email` 与 H2S 的**逐字相同**，
+7 个开了自动预订的用户里没有一个真的注册过那两个平台。
+
+后果不止「登录失败」：
+
+- 把用户的 H2S 密码发给第三方站点；
+- RENTCafe 按 **IP** 记登录失败（连续失败锁 30 分钟），同一代理池上的其他
+  用户跟着遭殃；
+- 它把 Xior「**没配该楼凭据 = 该楼不参与**」的设计短路了——凭据本身就是
+  开关，凭空造一份等于把开关焊死在「开」上。
+
+两个 source 都不在 `_AUTO_BOOK_SOURCES` 里，所以一直没爆。
+
+改两处：加载时不再回退（缺失一律取空串 = 未配置），另加一次性清理
+`_ensure_rentcafe_creds_unbackfilled` 洗存量——回填只发生在加载时，但之后任何
+一次保存都把它固化进了 `auto_book_json`，光改加载层防不住已经落库的那份。
+
+清理判据是**整对**与 H2S 那对逐字相同才清；只对上一半的不动（多半是用户两边
+用了同一个邮箱、不同密码）。密码在库里是 Fernet 加密的，而 Fernet 不是确定性
+加密，必须解密后再比——比密文的话一条都清不掉，且完全不报错。
+
+清理会误伤一种情况：用户在两个平台上真的用了完全相同的邮箱和密码，得重填
+一次。这是安全的方向。清理是一次性的（meta flag），清完之后填什么就是什么。
+
+### 两栋 OurDomain 楼的地址是错的，地图 pin 各偏 4–5 km
+
+`street_address` 只有一个用途：geocode。它错了不会有任何报错——房源照常抓、
+照常通知，只是地图上钉在别的地方。而两条**都是错的，还互相串了**：
+
+| | 原来 | 实际（取自 RentCafe 页脚） |
+|---|---|---|
+| Amsterdam Diemen | Wenckebachweg 51, 1096 AN Amsterdam | Dalsteindreef, 1112 XJ Diemen |
+| Amsterdam South East | Dalsteindreef 20-40, 1112 XC Diemen | Markelerbergpad 5, 1105 AW Amsterdam |
+
+South East 挂的是 Diemen 那栋的街道，Diemen 挂的是第三个地方。两条新值都和
+楼名自洽（Diemen 在 Diemen，South East 在阿姆斯特丹东南），交叉验证过。
+geocode 缓存按地址串做 key，改地址等于自然失效，不用迁移。
+
+### 其它
+
+- `bookers/__init__.py` 的支持矩阵还写着「ourdomain → （无）」，和代码里明明
+  注册了 `OurDomainBooker` 矛盾——查问题的人会先信文档。改对并补上状态列。
+- `captcha/rentcafe_pages.py` 加 `termsandotheritems` 一行（OurDomain 的条款页）。
+  和 `oleapplication` 分列两行而不是做别名：那张表的用途是记录「哪一页实测是
+  什么样」，合并会把「两页碰巧一致」写成「本来就是一页」。
+  对应地，`test_every_captcha_page_has_a_distinct_action` 的前提被实测推翻了
+  （同一步骤在两个平台上是两页，action 当然相同），改成断言**同 action 必须
+  整份契约一致**——这才是真正要守的不变量。
+
 ## v1.11.1 (2026-08-04)
 
 ### 被移出监控的城市，它的房源永远收不了敛
