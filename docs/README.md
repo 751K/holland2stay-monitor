@@ -29,7 +29,7 @@ required beyond the notification channels you choose to enable.
 
 | | |
 |---|---|
-| **Monitoring** | Holland2Stay, OurDomain and Xior, polled on an adaptive interval that tightens during peak listing hours |
+| **Monitoring** | Holland2Stay, OurDomain, OurCampus and Xior, polled on an adaptive interval that tightens during peak listing hours |
 | **Alerts** | Web, Telegram, Email, WhatsApp, iOS push, Android push, iMessage — each user picks their own channels and filters |
 | **Views** | List, map, calendar, dashboard and charts, in English or Chinese |
 | **Accounts** | Guest, user and admin roles; every user keeps independent filters and credentials |
@@ -37,12 +37,20 @@ required beyond the notification channels you choose to enable.
 
 ### Platform coverage
 
-| Platform | Coverage | Booking |
-|---|---|---|
-| Holland2Stay | Any Dutch city you configure | Auto-booking supported |
-| OurDomain | Amsterdam Diemen / South-East | Notify only |
-| OurCampus | Amsterdam Diemen (1 building) | Notify only |
-| Xior | 30 buildings across 14 cities | Notify only |
+| Platform | Coverage | Scraper maturity | Booking |
+|---|---|---|---|
+| Holland2Stay | Any Dutch city you configure | Proven — the bulk of what lands | Auto-booking supported |
+| OurDomain | Amsterdam Diemen / South-East | Proven | Notify only |
+| Xior | Any of 30 buildings across 14 cities | Proven | Notify only (booking flow built, not enabled) |
+| OurCampus | Amsterdam Diemen (1 building) | **Unproven** — see below | Notify only |
+
+**OurCampus has never returned a single available unit.** It is polled normally
+and its floorplan panels come back valid, but the unit table its parser expects
+has never appeared in ~900 rounds — the parser is inherited from OurDomain and
+has never been checked against real markup. Every request writes a summary line
+to `data/ourcampus_capture.txt`, and the first response that actually parses a
+unit gets its full HTML archived there. Treat OurCampus results as unverified
+until that sample exists.
 
 Coverage shifts as third-party sites change. The scrapers are documented in
 [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
@@ -145,7 +153,7 @@ The ones worth knowing up front:
 | `SOURCES` | `holland2stay` | Which platforms to poll, comma-separated |
 | `CITIES` | `Eindhoven,29` | Holland2Stay cities, as `Name,id` pairs joined by `\|` |
 | `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | Same format for the other sources; building keys are listed in each scraper |
-| `SHADOW_SOURCES` | — | Sources that are scraped and stored but send **no** notifications. For validating a new platform before exposing it to users |
+| `SHADOW_SOURCES` | — | Sources that are scraped and stored but send **no** notifications. For validating a new platform before exposing it to users. Entries missing from `SOURCES` are ignored with a warning — a source listed here but not there is simply off, not shadowed |
 | `CHECK_INTERVAL` | `300` | Seconds between rounds outside peak hours |
 | `PEAK_INTERVAL` | `60` | Seconds between rounds during peak hours |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | How long the monitor may be silent before `/health` reports unhealthy |
@@ -165,12 +173,21 @@ python -m tools.doctor --no-network
 
 ## Auto-booking
 
-Available for Holland2Stay only. It signs in with the account you configure,
+Enabled for Holland2Stay only. It signs in with the account you configure,
 attempts eligible directly-bookable listings, and **stops at the payment URL** —
 it never completes a payment.
 
-OurDomain and Xior stay notify-only: their booking flows run through third-party
-forms with anti-abuse protection that is not reliably automatable.
+**Xior: built and driven end-to-end, but switched off.** Its RENTCafe flow has
+been run against a live property up to and including the applicant form — the
+system fills the form and uploads the ID document (the site refuses to save the
+application without one). It stops one step earlier than Holland2Stay does: the
+next page asks for IBAN/SWIFT, so a Xior draft never holds the unit. Whether the
+form saves cleanly once the system supplies the document has not been confirmed,
+so `monitor._AUTO_BOOK_SOURCES` still lists Holland2Stay only and no user can
+trigger it. Details in [XIOR.md](XIOR.md).
+
+OurDomain and OurCampus stay notify-only: their booking flows run through
+third-party forms with anti-abuse protection that is not reliably automatable.
 
 > The hosted demo has auto-booking disabled for user accounts. Email us or
 > [self-host](#quick-start) to use it.

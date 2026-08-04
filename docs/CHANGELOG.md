@@ -1,6 +1,145 @@
 # Changelog
 
-## Unreleased
+## v1.11.0 (2026-08-04)
+
+四个平台全部对用户可见（OurCampus / Xior 移出影子模式），外加一轮逐页走查
+挖出来的一批问题——其中五个有实际功能影响，都不报错。
+
+### 现状盘点
+
+| 平台 | 累计轮次 | 出错轮次 | 均产出 | 入库 | 判断 |
+|---|---|---|---|---|---|
+| holland2stay | 411 | 27 (6.6%) | 17.9 条 | 289 | 稳定，主力 |
+| ourdomain | 420 | 1 (0.2%) | 0.4 条 | 17 | 稳定 |
+| xior | 288 | 12 (4.2%) | 2.8 条 | 66 | 稳定 |
+| ourcampus | 267 | 0 | **0.0 条** | **0** | **解析器未经验证** |
+
+出错率里 H2S 的 6.6% 和 Xior 的 4.2% 基本都是 Cloudflare 与限流退避，有重试
+兜底。OurCampus 零出错但也零产出——见下。
+
+自动预订：H2S 实装并在真实账号上跑通；Xior 的链路**实测驱动到申请表这一步**
+（系统填表 + 代传证件），但 `_AUTO_BOOK_SOURCES` 仍只有 holland2stay，用户
+触发不了。
+
+### OurCampus / Xior 移出影子模式
+
+Xior 现在会正常给用户发通知了。解除影子不会补发积压：`diff()` 只对真正的新
+id 产出 `new_listings`，库里那 39 条已存在的 Xior 房源不会再冒出来一次；
+stale 收敛走的是直接 UPDATE（同时改 `status` 和 `last_status`），也不经过
+diff，所以不会伪造出一批「变成 Occupied」的通知。自动预订仍然只对 H2S 开。
+
+OurCampus 那边发现的其实不是「影子模式」，是**它压根没在跑**：
+
+    SOURCES=holland2stay,ourdomain,xior          ← 没有 ourcampus
+    SHADOW_SOURCES=ourcampus,xior
+
+`load_config` 会把不在 `sources` 里的影子项静默丢掉，于是 ourcampus 既没被
+抓取，也不会出现在数据健康面板的最近轮次里——而配置文件读起来完全正常，
+日志里也没有任何线索。成因是设置面板保存一次就会重写 `SOURCES`，而旧版那个
+白名单漏了 ourcampus（已修），它被无声删掉之后，`SHADOW_SOURCES` 里的残留项
+就成了一个「它还开着」的假象。
+
+静默丢弃本身是对的——影子名单不该反过来把一个没启用的平台打开。补的是一条
+WARNING：配置读起来像开着、实际是关着，这种落差必须有地方能看见。
+
+### 合同类型筛选把同一种合同拆成了两个选项
+
+`Indefinite` 和 `Onbepaalde tijd` 是上游对同一件事的两种写法。图表层
+（v1.10.0）已经合并，**筛选层完全没跟上**：下拉里两个并排列着，
+`ListingFilter` 按字面子串比对——勾了 `Indefinite` 的用户收不到写着
+`Onbepaalde tijd` 的房源。
+
+线上 41 个用户里有 10 个设了 `allowed_contract=['Indefinite']`，而 216 条
+长租房源里有 38 条写的是荷兰语原文。这 10 个人一直在少收约 18% 的房源，
+不报错、不留日志。
+
+同义表提到 `models.FEATURE_SYNONYMS`，三处共用一张表：图表合并计数、筛选
+下拉去重、`ListingFilter.passes` 比对前归一。再加 `__post_init__` 在落库前
+归一——这一条是给 iOS 端补的：`/api/v1/filter/options` 不再返回荷兰语原文，
+而 `FilterEditView` 的勾选行只从 options 渲染，存量用户会看到「1 selected」
+但一行都没打勾。归一放在 dataclass 而不是 API 和表单各写一遍，所以存量数据
+读一次就自愈。
+
+### 打开 /system 会改写整个进程的环境变量
+
+这一页为了显示 `.env` 的当前值调了 `load_dotenv(override=True)`。那不是
+「读」是「写」：它把 `.env` 里每个键强灌进 `os.environ` 且永久生效，而这一页
+每 30 秒整页自动刷新一次。
+
+后果是 docker-compose `environment:` 里设的值（`NO_PROXY`、代理等）会被
+`.env` 的同名键顶掉；`WEB_PASSWORD` / `FLASK_SECRET` 一变，正在用的会话当场
+失效。走查时就是被它踢回登录页才发现的——起初进程里 `WEB_PASSWORD` 是空的
+（鉴权关着），打开 `/system` 之后 `.env` 里的真密码被灌进来，鉴权自己开了。
+
+改成读前快照、读完还原，副作用不出这个函数。页面显示的仍是 `.env` 的当前值。
+
+### 静态资源版本号改成按文件内容自动算
+
+部署后验证线上时发现：`base.html` 已经是 `?v=34`，而 `/login` 返回的还是
+`?v=28`——`login.html` 不 extends `base.html`，自己写了一份版本号，跟着漏了
+6 次。**登录页是新访客看到的第一个页面**，它一直在发过期样式表。
+
+同一个坑 v1.10.0 刚踩过一次（改了 `app.js` 忘了改版本号，统计页在有缓存的
+浏览器里整页空白）。两个地方各写一份要手动维护的版本号，就一定有一份会忘。
+改成 `web.asset('design.css')` 按 mtime+size 算摘要，文件一变版本号自动变。
+
+### 全站 `<select>` 没有下拉箭头
+
+`.listing-filter-card` / `.settings-form` 用 `background:` 简写设底色，简写会
+把 `background-image` 一并重置成 `none`，而箭头正是 `.form-select` 的
+`background-image`。筛选卡片和设置页的每一个下拉框看上去都和文本框一模一样。
+
+改成 `background-color:`，并把箭头提成 `--caret` 变量，让原生 `<select>` 和
+自定义多选共用同一张图。
+
+### 一条错误通知能撑爆通知面板
+
+`.notif-item-body` 没有 `overflow-wrap`，一条含 `TargetClosedError` 堆栈的
+Monitor Error 把列表撑到 2632px（面板才 365px），整个通知面板出现横向滚动
+条。通知正文不一定是人写的句子，加 `overflow-wrap:anywhere` 并截到 6 行。
+
+### 仪表盘出现过「Active Cities 3 / of 1」
+
+分子取的是库里出现过的城市数，分母取的是当前配置的目标数，两个口径拼成一个
+比值，于是分子能大于分母。大数字改成配置目标数，副标题改成不含 “of” 的独立
+说明。
+
+### 排版一致性
+
+- 筛选控件原生 `select`/`input` 40px、多选 42px → 统一 38px。两种控件要用
+  不同属性才压得住：前者 `min-height` 拦不住自带的 padding + line-height，
+  得用 `height`；后者基础样式是 `min-height:42px` 且内部 `flex-wrap`，写死
+  `height` 会裁掉内容
+- 状态徽标 `letter-spacing:.5em` 把 Book 渲染成 `B o o k`，看着像渲染坏了。
+  去掉拉伸，等宽由 `width:72px` 保证
+- 仪表盘首张卡标签 12px 大写，和同排另外四张（13px 原样大小写）对不上
+- 设置页警告图标紧贴上一句句号，看着像少打了空格
+
+### 中英文串台
+
+逐页切中英文走了一遍 16 个页面：
+
+- `/listings` 英文界面显示 “共 49”——模板把「共」写死了
+- `/users/new` 标签页和面包屑显示「新增用户」——路由里 `title` 写死中文
+- 客户端管理「推送设备」整个 tab 是硬编码中文：9 个表头 + 2 个状态徽标 +
+  空态 + confirm 文案；`flash("会话已撤销")` 也绕开了早就存在的翻译键
+- 设置页 “Enable H2S, OurDomain, or both” 只提了 4 个平台里的 2 个；
+  OurDomain 楼盘提示写「当前支持 Amsterdam Diemen」但底下列了两个
+- 4 个页面标题缺 `· FlatRadar`；`/system` 写「每 60 秒刷新」而代码是 30 秒
+- 申请人档案说明里的 `**系统只填表，不付款**` 星号被原样显示——那里是纯文本，
+  模板不做 Markdown 渲染
+
+`test_templates_i18n` 盯着不让它们回来。这类问题不报错，只有真的把界面切成
+英文一页页翻才看得见。
+
+### 测试
+
+新增 `test_system_env_isolation` / `test_contract_synonym_filter` /
+`test_templates_i18n` / `test_asset_versioning` / `test_shadow_sources_config`，
+每一个都验证过「去掉修复就会红」。1727 → 1757 passed。
+
+API 侧用真实 Bearer token 打了 40 个路由复核：GET 全 200，写操作全 200，
+鉴权边界 403/401/401 正确。
 
 ### 楼栋数变少反而更容易被限流——分片管不了「多久抓一次」
 

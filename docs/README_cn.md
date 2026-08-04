@@ -26,7 +26,7 @@
 
 | | |
 |---|---|
-| **监控** | Holland2Stay、OurDomain、Xior，采用自适应轮询间隔，上架高峰时段自动加密 |
+| **监控** | Holland2Stay、OurDomain、OurCampus、Xior，采用自适应轮询间隔，上架高峰时段自动加密 |
 | **通知** | Web、Telegram、邮件、WhatsApp、iOS 推送、Android 推送、iMessage —— 每个用户独立选择渠道和过滤条件 |
 | **视图** | 列表、地图、日历、仪表盘、图表，支持中英文 |
 | **账号** | 访客 / 用户 / 管理员三种角色，各用户的过滤条件与凭据互相独立 |
@@ -34,12 +34,18 @@
 
 ### 平台覆盖
 
-| 平台 | 覆盖范围 | 预订 |
-|---|---|---|
-| Holland2Stay | 任意配置的荷兰城市 | 支持自动预订 |
-| OurDomain | Amsterdam Diemen / South-East | 仅通知 |
-| OurCampus | Amsterdam Diemen（1 栋） | 仅通知 |
-| Xior | 14 个城市共 30 栋楼 | 仅通知 |
+| 平台 | 覆盖范围 | 抓取成熟度 | 预订 |
+|---|---|---|---|
+| Holland2Stay | 任意配置的荷兰城市 | 稳定 —— 房源主要来源 | 支持自动预订 |
+| OurDomain | Amsterdam Diemen / South-East | 稳定 | 仅通知 |
+| Xior | 14 个城市共 30 栋楼，按需选 | 稳定 | 仅通知（预订链路已建，未开放）|
+| OurCampus | Amsterdam Diemen（1 栋） | **未经验证** —— 见下 | 仅通知 |
+
+**OurCampus 至今没出现过一条可订房源。** 它照常被轮询，户型面板也返回正常，
+但解析器期待的那张单元表在约 900 轮里一次都没出现过——那个解析器是从
+OurDomain 抄来的，从没跟真实 markup 核对过。每次请求都会往
+`data/ourcampus_capture.txt` 写一行摘要，第一次真解析出单元时会把完整 HTML
+一起存进去。在那份样本出现之前，OurCampus 的结果都当作未经验证看待。
 
 第三方站点会变，覆盖范围随之变化。各平台的抓取实现见
 [XIOR.md](XIOR.md)、[OURDOMAIN.md](OURDOMAIN.md)、[SCRAPING_RECON.md](SCRAPING_RECON.md)。
@@ -138,7 +144,7 @@ python web.py
 | `SOURCES` | `holland2stay` | 启用哪些平台，逗号分隔 |
 | `CITIES` | `Eindhoven,29` | Holland2Stay 的城市，格式 `名称,id`，多个用 `\|` 分隔 |
 | `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | 其它 source 的同格式配置，楼栋 key 在各自 scraper 里 |
-| `SHADOW_SOURCES` | — | 列出的 source 照常抓取入库但**不发任何通知**，用于新平台对用户开放前的静默验证 |
+| `SHADOW_SOURCES` | — | 列出的 source 照常抓取入库但**不发任何通知**，用于新平台对用户开放前的静默验证。不在 `SOURCES` 里的条目会被忽略并打警告——只写在这里而没写进 `SOURCES` 的平台是「关着」，不是「影子」 |
 | `CHECK_INTERVAL` | `300` | 非高峰时段的轮询间隔（秒） |
 | `PEAK_INTERVAL` | `60` | 高峰时段的轮询间隔（秒） |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默多久后 `/health` 报 unhealthy |
@@ -158,11 +164,17 @@ python -m tools.doctor --no-network
 
 ## 自动预订
 
-仅 Holland2Stay 可用。它用你配置的账号登录，尝试符合条件的可直订房源，
+仅对 Holland2Stay 开放。它用你配置的账号登录，尝试符合条件的可直订房源，
 **停在支付 URL —— 不会完成支付**。
 
-OurDomain 和 Xior 保持仅通知：它们的预订流程走第三方表单，带有反滥用保护，
-无法可靠自动化。
+**Xior：链路已建成并实测驱动过，但没开。** 它的 RENTCafe 流程在真实楼盘上
+跑到过申请表这一步——系统填表并代传证件（不传证件平台拒绝保存申请）。它比
+Holland2Stay 早停一步：下一页要填 IBAN/SWIFT，所以 Xior 的草稿并不占住房源。
+系统代传证件之后表单能否顺利保存尚未确认，因此 `monitor._AUTO_BOOK_SOURCES`
+里仍然只有 holland2stay，用户触发不了。细节见 [XIOR.md](XIOR.md)。
+
+OurDomain 和 OurCampus 保持仅通知：它们的预订流程走第三方表单，带有反滥用
+保护，无法可靠自动化。
 
 > 线上 demo 对普通用户关闭了自动预订。需要的话请邮件联系，或[自行部署](#快速开始)。
 
