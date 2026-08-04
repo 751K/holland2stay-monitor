@@ -56,9 +56,29 @@ class TestPagesActuallyDiffer:
     def test_terms_sitekey_differs_from_login(self):
         assert page_captcha("oleapplication").v3_sitekey != page_captcha("guestlogin").v3_sitekey
 
-    def test_every_captcha_page_has_a_distinct_action(self):
-        acts = [p.action for p in RENTCAFE_PAGES.values() if p.has_captcha]
-        assert len(acts) == len(set(acts)), "action 必须逐页不同，Google 按 action 计分"
+    def test_pages_sharing_an_action_share_the_whole_contract(self):
+        """同一个 action = 同一个**步骤**，那就必须整份契约都一样。
+
+        原来这里断言的是「action 逐页不同」。2026-08-04 实测推翻了那条前提：
+        条款步骤在 Xior 上嵌在 ``oleapplication.aspx``、在 OurDomain 上是独立的
+        ``termsandotheritems.aspx``，两页是**同一步**，action 当然一样。
+
+        真正要守的不变量是这个：action 相同就说明是同一步，那么 kind /
+        sitekey / 回退字段名必须全都对得上。哪天只有一边改了，这里会红——
+        而那正是最需要被发现的时刻（另一边会继续用旧参数解题，拿到无效
+        token，服务端只回一句「请证明你不是机器人」，看不出是哪一页错了）。
+        """
+        by_action: dict[str, list] = {}
+        for p in RENTCAFE_PAGES.values():
+            if p.has_captcha:
+                by_action.setdefault(p.action, []).append(p)
+        for action, pages in by_action.items():
+            shapes = {(p.kind, p.v3_sitekey, p.v2_sitekey,
+                       p.v3_field, p.v2_field, p.fallback_flag) for p in pages}
+            assert len(shapes) == 1, (
+                f"action={action!r} 出现在 {[p.page for p in pages]} 上，"
+                "但验证码契约不一致——要么其中一页记错了，要么它们其实不是同一步"
+            )
 
     def test_fallback_flag_field_differs(self):
         assert page_captcha("oleapplication").fallback_flag == "failed-captcha-3-rentable"

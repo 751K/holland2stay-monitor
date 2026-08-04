@@ -271,7 +271,13 @@ Listing(
 | 反机器人 | Turnstile | reCAPTCHA v3+v2 | Turnstile（不校验） |
 | 每轮请求数 | N×城市（含翻页） | 1 + N 个 FP | N 个房型（~2–5/栋） |
 | 预订链接 | 无 | 无 | `applyOnlineURL` |
-| 自动预订 | 已实现 | 框架就绪，卡 reCAPTCHA | 框架就绪，卡 reCAPTCHA |
+| 自动预订 | 已实现，**已开** | 半自动到「存草稿」，未开 | 半自动到「存草稿」，未开 |
+
+OurDomain 和 Xior 是**同一套 RENTCafe，契约逐字相同**（2026-08-04 实测），共用
+`bookers/rentcafe.py` 的 `RentCafeBooker`。唯一按平台不同的是「怎么从一条
+listing 走到 Applicant Info」——Xior 的单元预填在 `applyOnlineURL` 里、选房在
+登录**之后**；OurDomain 要自己打入口、选房在登录**之前**。详见
+[`docs/OURDOMAIN.md`](OURDOMAIN.md) §7.2。
 
 ---
 

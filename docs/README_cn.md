@@ -37,7 +37,7 @@
 | 平台 | 覆盖范围 | 抓取成熟度 | 预订 |
 |---|---|---|---|
 | Holland2Stay | 任意配置的荷兰城市 | 稳定 —— 房源主要来源 | 支持自动预订 |
-| OurDomain | Amsterdam Diemen / South-East | 稳定 | 仅通知 |
+| OurDomain | Amsterdam Diemen / South-East | 稳定 | 仅通知（预订链路已建，未开放）|
 | Xior | 14 个城市共 30 栋楼，按需选 | 稳定 | 仅通知（预订链路已建，未开放）|
 | OurCampus | Amsterdam Diemen（1 栋） | **未经验证** —— 见下 | 仅通知 |
 
@@ -173,8 +173,11 @@ Holland2Stay 早停一步：下一页要填 IBAN/SWIFT，所以 Xior 的草稿�
 系统代传证件之后表单能否顺利保存尚未确认，因此 `monitor._AUTO_BOOK_SOURCES`
 里仍然只有 holland2stay，用户触发不了。细节见 [XIOR.md](XIOR.md)。
 
-OurDomain 和 OurCampus 保持仅通知：它们的预订流程走第三方表单，带有反滥用
-保护，无法可靠自动化。
+**OurDomain：和 Xior 同一套 RENTCafe，共用同一份实现。** 契约实测逐字相同，
+差别只在怎么进到申请表——入口段已对着真站跑通，登录之后的部分还没验证过。
+同样没开。细节见 [OURDOMAIN.md](OURDOMAIN.md) §7。
+
+OurCampus 保持仅通知：它的预订流程还没侦察过。
 
 > 线上 demo 对普通用户关闭了自动预订。需要的话请邮件联系，或[自行部署](#快速开始)。
 

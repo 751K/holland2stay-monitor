@@ -40,7 +40,7 @@ required beyond the notification channels you choose to enable.
 | Platform | Coverage | Scraper maturity | Booking |
 |---|---|---|---|
 | Holland2Stay | Any Dutch city you configure | Proven — the bulk of what lands | Auto-booking supported |
-| OurDomain | Amsterdam Diemen / South-East | Proven | Notify only |
+| OurDomain | Amsterdam Diemen / South-East | Proven | Notify only (booking flow built, not enabled) |
 | Xior | Any of 30 buildings across 14 cities | Proven | Notify only (booking flow built, not enabled) |
 | OurCampus | Amsterdam Diemen (1 building) | **Unproven** — see below | Notify only |
 
@@ -186,8 +186,12 @@ form saves cleanly once the system supplies the document has not been confirmed,
 so `monitor._AUTO_BOOK_SOURCES` still lists Holland2Stay only and no user can
 trigger it. Details in [XIOR.md](XIOR.md).
 
-OurDomain and OurCampus stay notify-only: their booking flows run through
-third-party forms with anti-abuse protection that is not reliably automatable.
+**OurDomain runs the same RENTCafe as Xior and shares the same implementation.**
+The contracts are byte-for-byte identical in practice; the only difference is how
+you reach the application form. That entry leg is verified against the live site,
+but everything after login is not. Also not enabled. See [OURDOMAIN.md](OURDOMAIN.md) §7.
+
+OurCampus stays notify-only: its booking flow has not been scouted yet.
 
 > The hosted demo has auto-booking disabled for user accounts. Email us or
 > [self-host](#quick-start) to use it.

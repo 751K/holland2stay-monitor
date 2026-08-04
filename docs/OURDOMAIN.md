@@ -199,7 +199,7 @@ Listing(
     features       = [
         "Unit: #6045",
         "Building: Amsterdam Diemen",
-        "Address: Wenckebachweg 51, 1096 AN Amsterdam",   # 建筑级真实街道地址
+        "Address: Dalsteindreef, 1112 XJ Diemen",          # 建筑级真实街道地址
         "Type: Studio",
         "Area: 22 m²",
         "Occupancy: One",                                  # 由 sqft 反推
@@ -237,68 +237,83 @@ unit 名 "Diemen #6045" 是内部单元号，不可 geocode。同栋楼所有单
 
 ---
 
-## 7. 自动预订可行性
+## 7. 自动预订（2026-08-04 侦察重写）
 
-框架在 [`bookers/rentcafe.py`](../bookers/rentcafe.py)，面板标记为「开发中」。
-**阻塞点不是 reCAPTCHA，是多步 ASP.NET 表单流未探明。**
+实现在 [`bookers/rentcafe.py`](../bookers/rentcafe.py) 的 `OurDomainBooker`。
+`monitor._AUTO_BOOK_SOURCES` 里**没有** `ourdomain`，这条链路对用户是关的。
 
-### 7.1 已探明的部分
+### 7.1 结论：和 Xior 是同一套，只有入口不同
 
-**Step 1 — 单元选择（HTTP 可行）**
+本文档此前记的「多步 ASP.NET 表单流未探明」已经过时。实测下来 OurDomain 和
+Xior 跑的是**同一套 RENTCafe，契约逐字相同**：
 
-`ApplyNowClick` 提交 ASP.NET 表单：
-
-```
-POST {base}/{slug}/termsandotheritems.aspx
-Content-Type: application/x-www-form-urlencoded
-
-isViaForm=1&UnitID=307195&FloorPlanID=1107060&myOlePropertyId=184283&MoveInDate=6-6-2026&src=
-```
-
-实测 curl_cffi + `safari17_0` → HTTP 200。**Chrome 指纹在这条路径被拦，Safari 可过**。
-
-**Step 2 — 条款页（reCAPTCHA 阻断）**
-
-`termsandotheritems.aspx` 含 22 个 hidden field + reCAPTCHA v3 埋点。无有效 token
-时 `rcformsave.ashx` 硬拒绝，不走业务逻辑：
-
-```json
-{"type": "error", "text": "Please verify that you are not a robot."}
-```
-
-v3 打分不够时降级到 v2 显式挑战（`callReCaptchaV2Rentable()`，sitekey
-`6LfAdx8TAAAAAOiesnT8CNKNtb1C6doK-RKnB1V0`）。
-
-**Step 3+ — 未到达。** 根据页面 CSS 引用（`#applicantloginmkt`、`form#Login`）推测
-需要登录/注册、填个人信息、审核、支付。
-
-### 7.2 reCAPTCHA 不是硬障碍
-
-第三方解题服务通过 HTTP API 返回有效 token，不需要 Playwright：
-
-| 服务 | 价格（v3） | 延迟 |
+| | Xior | OurDomain（两栋楼都测了） |
 |---|---|---|
-| capsolver.com | ~$1/1000 | 1–3s |
-| anti-captcha.com | ~$1/1000 | 2–5s |
-| 2captcha.com | ~$3/1000 | 5–15s |
+| 条款页验证码 | 标准 v3 `api.js` | 同 |
+| v3 sitekey | `6LcjBc4U…bzl` | 同 |
+| action | `start_application` | 同 |
+| 回退标志字段 | `failed-captcha-3-rentable` | 同 |
+| v2 sitekey | `6LfAdx8T…B1V0` | 同 |
+| 条款表单 id / action | `termsandotheritems` → `/onlineleasing/rcformsave.ashx` | 同 |
+| 登录页表单 | `Login` / `UserLogin` / `OtpOptions` / `VerifyOTP` | 同 |
+| **密码登录有没有验证码** | 没有（验证码在 OTP 那条路上） | 同 |
 
-token 有效期约 2 分钟，够一次表单提交。每次预订约需 2–4 次 token，
-成本 $0.01–0.04。
+连页面 JS 的函数名（`callReCaptchaV2Rentable` / `getCaptchaTokenRentable`）都
+一样。所以 [`docs/XIOR.md`](XIOR.md) §8 里那一整套侦察结论——会话层、登录的四个
+坑、验证码契约、申请表字段由页面驱动、证件上传接口、成败判据、锁定发生在付款
+那一步——**对 OurDomain 同样成立**，不再重复。
 
-**登录端点没有 captcha**（`POST /residentservices/ResidentCafeHandler.ashx`，
-Username + Password + SecurityCode），可以在启动时先登录维持 session。注册有
-v2，但注册一劳永逸。
+`captcha/rentcafe_pages.py` 里 `oleapplication` 和 `termsandotheritems` 分列两行
+而不是做别名：那张表的用途是记录「哪一页实测是什么样」，合并会把「两页碰巧
+一致」写成「本来就是一页」，Yardi 哪天只改其中一边就看不出来了。
 
-### 7.3 真正的难点
+### 7.2 唯一的差异：入口
 
-| 难点 | 说明 |
+**Xior** 的 `applyOnlineURL` 直达 `oleapplication.aspx`，单元预填在 URL 里，
+选房发生在**登录之后**。
+
+**OurDomain** 的条款步骤是独立页，选房发生在**登录之前**，而且入口要自己打出来：
+
+```
+① GET  {base}/{slug}/floorplans.aspx                    建会话 + 轮换指纹
+② GET  {base}/rcLoadContent.ashx?contentclass=availableunits&…
+                                                        拿「Book now」的参数
+③ POST {base}/{slug}/termsandotheritems.aspx
+        isViaForm=1&UnitID=…&FloorPlanID=…&myOlePropertyId=…&MoveInDate=…&src=
+                                                        单元上下文进服务端会话
+```
+
+`ApplyNowClick` 的第 5 个参数就是 ③ 的目标页（`termsandotheritems.aspx`），
+和 Xior `ContinueClick` 的第 6 参数同构——**位置不同，写错不会报错**，只会带着
+一组错位的参数去提交。所以两个平台各有一个解析函数，不做「带开关的通用解析」。
+
+③ 之前 vs 之后（实测）：
+
+```
+裸 GET termsandotheritems.aspx      POST 之后
+  UnitId        = '0'                 UnitId        = '211053'
+  FloorplanId   = '0'                 FloorplanId   = '1113962'
+  QuotedRent    = '0'                 QuotedRent    = '1138.00'
+                                      QuotedRentEncr= 'MTEzOC4wMA%3d%3d-RquIlWlxLKs%3d'
+```
+
+**只发那五个参数，不回传 QuotedRent。** 报价由服务端自己算并签名，塞旧价格
+轻则被拒、重则用一个过期价格建申请。
+
+单元参数**每次现查、不持久化**。存下来的 `FloorPlanID` / `MoveInDate` 会过期，
+而且存量参数回答不了「这个单元现在还在不在」——现查那张表等于顺手做了一次
+竞争检测，行没了就是 `race_lost`，上层去试备选房源。这和 Xior 那边 `find_unit`
+做的是同一件事，只是数据源不同。
+
+### 7.3 还差什么
+
+| 项 | 状态 |
 |---|---|
-| 多步表单状态 | 每步 POST 到 `rcformsave.ashx`（不同 `contentclass`），靠 `cafeportalkey` 等加密 token 维持连续性 |
-| 表单字段未知 | 只确认了条款页；之后的页面字段结构全靠猜 |
-| 个人信息需求 | 可能要姓名、出生日期、联系方式、收入/工作信息、紧急联系人——用户需提前在面板录入 |
-| 脆弱性 | RENTCafe 改字段/步骤/JS 验证就断 |
-| 测试困难 | 每次测试都是一次真实预订尝试，没有 sandbox |
+| ①②③ 入口段 | **已实测跑通**（2026-08-04，真实单元，条款表单 18 个字段全部落位） |
+| ④ Start Application | 未跑（要花验证码钱、会在服务端建 prospect） |
+| ⑤ 登录后单元上下文还在不在 | **未验证**——OurDomain 这条路上没有选房页，掉出流程就没有 Xior 那样的重选入口。代码里的处理是：核对是不是 Applicant Info → 不是就重 POST 一次 Book now → 还不是就明确报错中止 |
+| 申请表字段 | 未见过。`rentcafe_applicant.TEXT_FIELDS` 里 `STU_*` 三项是 Xior 自定义的，OurDomain 多半没有——缺了会抛 `FormShapeChangedError`（**这是对的**，宁可中止也不提交缺项申请） |
+| 账号是一套还是一栋楼一套 | **未验证**。两栋楼是两个 securerc 主机，cookie 不跨主机，按 Xior 的经验很可能要分开。当前用面板已有的单对 `ourdomain_email`/`ourdomain_password`，验出问题再照 `xior_accounts` 拆 |
 
-**下一步是侦察不是编码**：用真实 RENTCafe 账号手动走完整流程，记录每步的 URL、
-字段、验证逻辑。不看到完整流程无法估算工作量；如果中途有文件上传（收入证明）
-或人工审核，自动预订直接不可行。
+边界和 Xior 一样停在 **Save（存草稿）**：再往前是 `ApplicationCharges`，要填
+IBAN / SWIFT，代填金融凭据是硬限制。`draft_saved` **不代表抢到房**。

@@ -82,6 +82,23 @@ RENTCAFE_PAGES: dict[str, PageCaptcha] = {
         fallback_flag="failed-captcha-3-rentable",
         form_name="termsandotheritems",
     ),
+    # OurDomain 的第 2 步。同一个步骤（Rental Options），但**页面不同**：
+    # Xior 把它嵌在 oleapplication.aspx 里，OurDomain 是独立的
+    # termsandotheritems.aspx。2026-08-04 在两栋 OurDomain 楼上实测，验证码
+    # 契约与 Xior **逐字相同**——同样的标准 v3、同样的 sitekey、同样的 action、
+    # 同样的回退字段名，连页面 JS 的函数名（callReCaptchaV2Rentable）都一样。
+    #
+    # 单独列一行而不是让 page_captcha() 做别名，是因为这张表的用途就是记录
+    # 「哪一页实测是什么样」。合并会把「两页碰巧一致」写成「本来就是一页」，
+    # 哪天 Yardi 只改其中一边，就看不出来了。
+    "termsandotheritems": PageCaptcha(
+        page="termsandotheritems",
+        kind=KIND_V3,
+        v3_sitekey="6LcjBc4UAAAAABfXlERv_hq_KE3IWDAqbiWkbPzl",
+        action="start_application",
+        fallback_flag="failed-captcha-3-rentable",
+        form_name="termsandotheritems",
+    ),
     "guestlogin": PageCaptcha(
         page="guestlogin",
         kind=KIND_V3_ENTERPRISE,

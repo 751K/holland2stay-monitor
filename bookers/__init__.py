@@ -8,12 +8,24 @@ bookers — 多源自动下单层
 
 支持矩阵（与 ``scrapers/SCRAPER_REGISTRY`` 对照）
 -------------------------------------------------
-| source       | scraper           | booker             |
-|--------------|-------------------|--------------------|
-| holland2stay | HollandStayScraper | HollandStayBooker | ← 当前有完整自动 checkout
-| ourdomain    | OurDomainScraper   | （无）            | ← RENTCafe 多步申请 + 文件上传，
-                                                            自动化不现实；推送 deep link
-                                                            让用户手动申请
+
+===============  ===================  ==================  =========================
+source           scraper              booker              状态
+===============  ===================  ==================  =========================
+holland2stay     HollandStayScraper   HollandStayBooker   完整自动 checkout，**已开**
+xior             XiorScraper          XiorBooker          半自动到「存草稿」，未开
+ourdomain        OurDomainScraper     OurDomainBooker     半自动到「存草稿」，未开
+ourcampus        OurCampusScraper     （无）              没探过预订流程
+===============  ===================  ==================  =========================
+
+「未开」= 注册了 booker，但 ``monitor._AUTO_BOOK_SOURCES`` 里没有它，用户侧
+这条路是关的。两个 RENTCafe 平台共用 ``RentCafeBooker``，边界都停在 Save
+（往后要填 IBAN，代填金融凭据是硬限制）；开之前各自还差一段端到端验证，
+见 ``docs/XIOR.md`` §8.6 / ``docs/OURDOMAIN.md`` §7。
+
+**改这张表时同步改代码**：它上一次和现实脱节是因为 ``OurDomainBooker`` 加进
+``BOOKER_REGISTRY`` 时没人回来改这段，于是文档写着「（无）」而代码里明明有
+一个——查问题的人会先信文档。
 
 不支持下单的 source（没 booker 注册）走 ``dispatch_book`` 的 unsupported 分支，
 返回 ``BookingResult(phase="unsupported", success=False)``——调用方
@@ -61,8 +73,8 @@ def dispatch_book(request: BookingRequest) -> BookingResult:
     按 ``request.listing.source`` 路由到对应 Booker。
 
     未注册的 source 返回 ``phase="unsupported"``——这是**正常**结果，不是错误。
-    例如 OurDomain 用户收到新房源通知后应自己点 deep link 去 RENTCafe 申请；
-    把这条路径走出来比抛异常更友好（上层不需要 try/except）。
+    例如 OurCampus 用户收到新房源通知后应自己点链接去申请；把这条路径走出来
+    比抛异常更友好（上层不需要 try/except）。
     """
     source = (request.listing.source or "").strip().lower()
     booker = get_booker(source)
