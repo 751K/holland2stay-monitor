@@ -1,12 +1,11 @@
 """被移出监控的城市，它的房源也要能收敛。
 
-2026-08-04 线上发现：``mark_stale_listings`` 的范围限定（只收敛"本轮完整扫描
-成功的城市"）有个副作用——一旦某个城市被移出监控，它就再也不会出现在完整
-扫描名单里，于是**永远不会被收敛**，7 天阈值根本没机会生效。
+2026-08-04 发现：``mark_stale_listings`` 的范围限定（只收敛"本轮完整扫描成功
+的城市"）有个副作用——一旦某个城市被移出监控，它就再也不会出现在完整扫描
+名单里，于是**永远不会被收敛**，老化阈值根本没机会生效。
 
-结果是攒了 173 条鬼影：38 条 Xior Vaals，135 条 H2S 的（Rotterdam 64、
-The Hague 11、Utrecht 10……），绝大多数最后一次见到是 2026-05-08，快三个月
-了还在列表和地图上挂着"可订"。改一次监控城市就新增一批。
+结果是每改一次监控城市就攒一批鬼影，最后一次见到已是几个月前，却还在列表和
+地图上挂着"可订"。
 
 这里盯三件事：
 1. 掉出监控范围的确实会收敛（宽限期更长）；
@@ -58,7 +57,7 @@ MONITORED = [("holland2stay", "Eindhoven"), ("xior", "Amsterdam Naritaweg")]
 
 class TestOrphanConvergence:
     def test_listing_in_dropped_city_converges(self, store):
-        """这就是线上那 173 条的处境。"""
+        """这就是那批鬼影的处境。"""
         _add(store, "vaals", source="xior", city="Aachen Vaals Katzensprung", days_ago=90)
 
         n = store.mark_stale_listings(
@@ -181,8 +180,8 @@ class TestAgingPathStillWorks:
     def test_a_long_vanished_platform_reserved_also_converges(self, store):
         """前提变了，记一下为什么。
 
-        原来这里断言的是「H2S 的 Reserved 在监控范围内永不收敛」，于是线上那
-        32 条（最久 86 天没见到）永远卡着。
+        原来这里断言的是「H2S 的 Reserved 在监控范围内永不收敛」，于是一批
+        消失了好几个月的记录永远卡着。
 
         现在它也会收敛：H2S 的 Reserved 是真实状态（有人下单未付款），但那个
         状态**有硬性时限**——官方付款限时 2 小时，超时未付就作废并重新上架。

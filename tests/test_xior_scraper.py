@@ -453,7 +453,7 @@ def test_post_ajax_treats_200_as_success():
     """errorCode 200 是成功，不是故障。
 
     回归：曾用「非 204 即故障」当判据，结果 Naritaweg 返回的 200 被当成错误，
-    整晚 36 轮（每轮 4 个房型 = 144 次）被误标为 incomplete。该字段装的是
+    整晚每一轮、每个房型都被误标为 incomplete。该字段装的是
     HTTP 风格状态码，2xx 都是成功。
     """
     from scrapers.xior import _post_ajax

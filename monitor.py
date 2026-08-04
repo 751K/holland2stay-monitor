@@ -443,9 +443,9 @@ def _monitored_pairs(cfg) -> list[tuple[str, str]]:
 #: 「消失多久算不再可订 / 算彻底没了」。四个平台、所有状态统一一套。
 #:
 #: 曾经按 (source, 状态类) 分开配过，最后收掉了：那些差别描述的是「feed 会不会
-#: 保留下架房源」，而实测下来四个平台的终态都是**从 feed 里消失**——H2S 227 条
-#: 推测 Occupied vs 4 条平台报的，OurDomain 9 vs 1。既然消失是共同的下架信号，
-#: 就不该有四套判据。
+#: 保留下架房源」，而实测下来四个平台的终态都是**从 feed 里消失**——只有 Xior
+#: 的 feed 里真有 Occupied，其余三个平台的终态基本全靠推。既然消失是共同的
+#: 下架信号，就不该有四套判据。
 #:
 #: 数怎么定的：轮次约 1 分钟一次，30 分钟 ≈ 30 轮连续完整扫描里都没有它，
 #: 而同一次响应里通常还有二十几条别的房源作旁证。OurDomain / OurCampus 另有
@@ -1701,7 +1701,7 @@ async def run_once(
         #
         # 2026-08-03 实测：Xior 四栋楼连续 429 让 RateLimitError 逃出整个
         # dispatch，同轮 OurDomain 已抓到的结果被丢弃、H2S 排在后面根本没执行、
-        # 39 个用户收到「监控将暂停 5 分钟」。24 小时内三次。
+        # 每个用户都收到「监控将暂停 5 分钟」。24 小时内三次。
         for src in sorted({t.source for t in other_tasks}):
             await _dispatch_isolated(src, [t for t in other_tasks if t.source == src])
 

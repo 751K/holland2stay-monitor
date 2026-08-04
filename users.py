@@ -554,8 +554,8 @@ def _ensure_rentcafe_creds_unbackfilled(st) -> None:
     为什么光改 :func:`_ab_from_dict` 不够
     ------------------------------------
     回填只在**加载时**发生，但之后任何一次保存都会把回填出来的值**固化到库
-    里**。2026-08-04 线上实测：41 个用户的 ``ourdomain_email`` /
-    ``xior_email`` 全都已经存盘了。所以去掉加载时的回退只能防住以后，存量的
+    里**。2026-08-04 实测：全部用户的 ``ourdomain_email`` / ``xior_email``
+    都已经存盘了。所以去掉加载时的回退只能防住以后，存量的
     那份还躺在 ``auto_book_json`` 里，一旦哪天把这两个 source 加进
     ``_AUTO_BOOK_SOURCES``，它们立刻就会被拿去登录。
 
