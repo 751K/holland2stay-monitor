@@ -153,7 +153,11 @@ class TestShardConfig:
         monkeypatch.delenv("SHARD_SIZES", raising=False)
         monkeypatch.setenv("SOURCES", "holland2stay")
         import config
-        assert config.load_config().shard_sizes == {"xior": 5}
+        from config import _DEFAULT_SHARD_SIZES
+        # 守的是「只有 xior 有默认分片」，不是那个数字——
+        # 数字会随实测调整（2026-08-04：5 → 4）。
+        assert config.load_config().shard_sizes == _DEFAULT_SHARD_SIZES
+        assert set(_DEFAULT_SHARD_SIZES) == {"xior"}
 
     def test_explicit_override(self, monkeypatch):
         monkeypatch.setenv("SHARD_SIZES", "xior:8,ourdomain:2")
@@ -175,4 +179,5 @@ class TestShardConfig:
         import config
         sizes = config.load_config().shard_sizes
         assert sizes["ourdomain"] == 3
-        assert sizes["xior"] == 5     # 非法值不覆盖默认
+        from config import _DEFAULT_SHARD_SIZES
+        assert sizes["xior"] == _DEFAULT_SHARD_SIZES["xior"]   # 非法值不覆盖默认
