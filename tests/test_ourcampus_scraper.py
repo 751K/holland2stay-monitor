@@ -177,8 +177,17 @@ class TestAvailabilityPanelGuard:
         assert result.listings == []
         assert result.complete is False, "响应不像单元面板时必须标记不完整"
 
-    def test_scrape_stays_complete_on_genuine_empty(self, monkeypatch):
-        """真的没房时要判完整，否则 stale 收敛永不执行。"""
+    def test_scrape_becomes_complete_on_genuine_empty(self, monkeypatch):
+        """真的没房时要判完整，否则 stale 收敛永不执行。
+
+        2026-08-04 起需要**连着几轮**才认——这个守卫只能挡住「这压根不是单元
+        面板」，挡不住「是面板，可这一次的内容不对」，两者的状态码和结构完全
+        一样。所以这里断言的从「单轮就完整」改成「连够 N 轮才完整」，前面几轮
+        必须是 incomplete。见 tests/test_empty_result_confirmation.py。
+        """
+        from scrapers.ourdomain import _ZERO_ROUND_STATE, _zero_rounds_to_confirm
+
+        _ZERO_ROUND_STATE.clear()
         scraper = OurCampusScraper()
         monkeypatch.setattr(
             "scrapers.ourdomain._get_text",
@@ -188,9 +197,15 @@ class TestAvailabilityPanelGuard:
             OurCampusScraper, "_fetch_units_html",
             lambda self, session, **kw: _EMPTY_UNITS,
         )
-        result = scraper.scrape(ScrapeTask("ourcampus", "diemen", "OurCampus Amsterdam Diemen"))
-        assert result.listings == []
-        assert result.complete is True
+        task = ScrapeTask("ourcampus", "diemen", "OurCampus Amsterdam Diemen")
+        try:
+            for _ in range(_zero_rounds_to_confirm() - 1):
+                assert scraper.scrape(task).complete is False
+            result = scraper.scrape(task)
+            assert result.listings == []
+            assert result.complete is True
+        finally:
+            _ZERO_ROUND_STATE.clear()
 
 
 # ── Listing 映射（复用基类，验证品牌字段没串到 OurDomain）─────────────

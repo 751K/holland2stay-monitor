@@ -101,6 +101,70 @@ _FINGERPRINT_STATE: dict[str, dict[str, float]] = {}
 # 例：{"chrome131": {"last_good_at": 1234.5, "cooldown_until": 0.0}}
 
 
+# ────────────────────────────────────────────────────────────────────
+# 「这栋楼一个单元都没有」要连着看到几轮才算数
+# ────────────────────────────────────────────────────────────────────
+#
+# 问题
+# ----
+# RentCafe 在真没房时返回的是一张**结构完整**的搜索结果页，只是没有
+# unitrow。``_looks_like_availability_panel`` 能挡住「这压根不是单元面板」，
+# 但挡不住「是面板，可这一次的内容不对」——两种情况的 HTTP 状态、页面结构、
+# 长度都一样，从单次响应里无法区分。
+#
+# 而 ``complete=True`` 的含义是「这轮扫全了，没见到 = 真没了」，
+# ``mark_stale_listings`` 完全信任它。所以一次内容异常的空响应，就足以让整栋
+# 楼的存量 listing 走上收敛路径。
+#
+# 为什么现在才成为问题
+# --------------------
+# 2026-08-04 查线上数据：OurDomain 的房源实际寿命是 0.2–3.1 小时（一批出现，
+# 然后一条条被订走），而老化阈值是 7 天。差着约 800 倍的余量，一次误判根本
+# 来不及产生后果——阈值在替这个漏洞兜底。
+#
+# 一旦阈值调到和真实寿命同一量级（那是迟早的事），这个兜底就没了：一次空响应
+# 直接把整栋楼判死，房源在面板上闪一下消失，用户还会收到「重新可订」的通知。
+# 所以这道闸是**缩短阈值的前置条件**，先把它装上。
+#
+# 做法
+# ----
+# 进程级计数：某栋楼连着 N 轮返回 0 个单元，才承认「真没房」（complete=True）；
+# 不足 N 轮时报 complete=False —— monitor 会跳过这栋楼的 stale 收敛，房源原样
+# 留着。抓到任何单元立刻清零。
+#
+# 重启清空 = 重新数 N 轮，方向是安全的（宁可晚收敛，不可误收敛）。
+_ZERO_ROUND_STATE: dict[str, int] = {}
+_DEFAULT_ZERO_ROUNDS_TO_CONFIRM = 3
+
+
+def _zero_rounds_to_confirm() -> int:
+    """连续多少轮 0 单元才承认。``OURDOMAIN_ZERO_ROUNDS_TO_CONFIRM`` 可覆盖。"""
+    raw = os.environ.get("OURDOMAIN_ZERO_ROUNDS_TO_CONFIRM", "")
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return _DEFAULT_ZERO_ROUNDS_TO_CONFIRM
+    return max(1, min(20, n))
+
+
+def _confirm_empty_result(key: str, unit_count: int) -> bool:
+    """这次的空结果能不能当真。非空结果一律返回 True 并清零计数。"""
+    if unit_count > 0:
+        _ZERO_ROUND_STATE.pop(key, None)
+        return True
+    seen = _ZERO_ROUND_STATE.get(key, 0) + 1
+    _ZERO_ROUND_STATE[key] = seen
+    need = _zero_rounds_to_confirm()
+    if seen >= need:
+        return True
+    logger.info(
+        "[%s] 抓到 0 个单元，第 %d/%d 轮——还不足以断定「真没房」，"
+        "本轮不参与 stale 收敛",
+        key, seen, need,
+    )
+    return False
+
+
 def _mark_fingerprint_good(impersonate: str) -> None:
     state = _FINGERPRINT_STATE.setdefault(impersonate, {})
     state["last_good_at"] = time.monotonic()
@@ -245,6 +309,12 @@ class OurDomainScraper(AbstractScraper):
             for unit in all_units.values()
         ]
         logger.info("[%s] %s 共抓取 %d 个单元", display, self.source, len(listings))
+        # 空结果要连着看到几轮才算数——理由见 _confirm_empty_result 上面那段。
+        # 只在 complete 已经为 True 时才判：本来就不完整的轮次没什么可确认的。
+        if complete:
+            complete = _confirm_empty_result(
+                f"{self.source}:{task.city_key or display}", len(listings),
+            )
         return ScrapeResult(task=task, listings=listings, complete=complete)
 
     def _scrape_once(
