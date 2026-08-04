@@ -426,17 +426,37 @@ def _record_source_round(
         logger.debug("轮次遥测记录失败（已忽略）", exc_info=True)
 
 
+def _monitored_pairs(cfg) -> list[tuple[str, str]]:
+    """当前配置里全部 (source, city) 抓取目标。
+
+    给 ``mark_stale_listings`` 判断"哪些城市已经彻底不监控了"用。读配置失败
+    时返回空列表 → 孤儿收敛整条跳过（fail-open）。绝不能因为一次配置读取
+    异常就把整库判成孤儿。
+    """
+    try:
+        return [(t.source, t.city_display) for t in cfg.scrape_tasks_v2()]
+    except Exception:
+        logger.debug("读取监控目标失败，跳过孤儿收敛", exc_info=True)
+        return []
+
+
 def _mark_stale_listings_for_complete_cities(
         storage: Storage,
         completeness: dict[str, bool],
         *,
         days: int = 7,
         lottery_days: int = 2,
+        monitored_pairs: list[tuple[str, str]] | None = None,
+        orphan_days: int = 30,
 ) -> int:
     """只对本轮完整扫描成功的城市执行 stale listing 收敛。
 
     key 带 ``source:`` 前缀时按 (source, city) 精确限定，避免用一个 source
     的完整性去收敛另一个 source 的同名城市。
+
+    ``monitored_pairs`` 是**配置里**的全部目标，和上面那个"本轮扫全了的"
+    不是一回事——分片和节流会让正常监控的城市这轮不出现。它只用于第二条
+    路径：把已经彻底移出监控的城市里的鬼影 listing 也收敛掉。
     """
     complete_cities: list[str] = []
     complete_source_cities: list[tuple[str, str]] = []
@@ -463,6 +483,8 @@ def _mark_stale_listings_for_complete_cities(
         lottery_days=lottery_days,
         cities=complete_cities if complete_cities else None,
         source_city_pairs=complete_source_cities if complete_source_cities else None,
+        monitored_pairs=monitored_pairs,
+        orphan_days=orphan_days,
     )
 
 
@@ -2380,9 +2402,15 @@ async def main_loop(
                         city_completeness,
                         days=7,
                         lottery_days=2,
+                        monitored_pairs=_monitored_pairs(cfg),
+                        orphan_days=30,
                     )
                     if stale:
-                        logger.info("已将 %d 条未见 listing 推测为 Occupied（book 7 天，lottery 2 天）", stale)
+                        logger.info(
+                            "已将 %d 条未见 listing 推测为 Occupied"
+                            "（在监控城市 book 7 天 / lottery 2 天；已移出监控的城市 30 天）",
+                            stale,
+                        )
                 except Exception:
                     logger.exception("mark_stale_listings 失败（已忽略）")
                 finally:

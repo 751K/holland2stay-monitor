@@ -228,10 +228,29 @@ class ListingOps:
         cities: Optional[list[str]] = None,
         lottery_days: int = 2,
         source_city_pairs: Optional[list[tuple[str, str]]] = None,
+        monitored_pairs: Optional[list[tuple[str, str]]] = None,
+        orphan_days: int = 30,
     ) -> int:
         """
         把 `last_seen` 早于 cutoff 且状态仍是"看起来可用"的 listing
         标为 ``Occupied`` + ``status_is_inferred=1``。
+
+        两条收敛路径
+        ------------
+        1. **仍在监控的城市**：按 ``days`` / ``lottery_days`` 老化。范围由
+           ``cities`` / ``source_city_pairs`` 限定——传的是"本轮完整扫描成功
+           的城市"，只有确认扫全了才敢说"没见到 = 没了"。
+
+        2. **已经掉出监控范围的 (source, city)**：按 ``orphan_days`` 老化。
+           这条是 2026-08-04 补的。第 1 条的范围限定有个副作用：一旦某个城市
+           被移出监控，它就再也不会出现在"完整扫描"名单里，于是**永远不会被
+           收敛**——7 天阈值根本没机会生效。线上因此攒了 173 条鬼影：38 条
+           Xior Vaals，以及 135 条 H2S 的（Rotterdam 64 条、The Hague 11 条
+           等），绝大多数最后一次见到是 2026-05-08，快三个月了还挂着"可订"。
+
+           这条路径收敛 ``status != 'Occupied'`` 的全部状态，不只是
+           book/lottery：一个已经完全不再观察的城市，我们手上任何非 Occupied
+           的状态都同样无从核实，Reserved 也不例外。
 
         Parameters
         ----------
@@ -239,6 +258,14 @@ class ListingOps:
         cities : 限定当前仍在监控的城市；传入空列表时不更新任何 listing
         lottery_days : lottery 老化阈值；默认 2 天
         source_city_pairs : 限定 source + city 组合，用于多源同名城市隔离
+        monitored_pairs : **当前配置里**全部 (source, city) 目标。注意这和
+            ``source_city_pairs`` 不是一回事：后者是"本轮扫全了的"，前者是
+            "配置里有的"。分片和节流会让一个正常监控的城市这轮不出现，拿它
+            当孤儿判据会误杀。传 None / 空表示不知道监控范围 → **跳过孤儿
+            收敛**（fail-open：宁可留着鬼影，也不能因为一次配置读取失败就
+            把整库判死）。
+        orphan_days : 掉出监控范围后的宽限期；默认 30 天。取长是为了防误伤
+            ——临时关一天再打开的城市不该被判死。
 
         Returns
         -------
@@ -261,16 +288,13 @@ class ListingOps:
         cutoff_general = (now - timedelta(days=max(1, int(days)))).isoformat()
         cutoff_lottery = (now - timedelta(days=max(1, int(lottery_days)))).isoformat()
         general_placeholders = ",".join("?" * len(self._STALE_GENERAL_STATUSES))
-        sql = (
-            f"UPDATE listings "
-            f"SET status='Occupied', last_status='Occupied', status_is_inferred=1 "
-            f"WHERE status_is_inferred = 0 "
-            f"AND ("
+
+        # ── 路径 1：仍在监控的城市，按老化阈值 ────────────────────────── #
+        aged_sql = (
             f"(last_seen < ? AND status IN ({general_placeholders})) "
             f"OR (last_seen < ? AND status = ?)"
-            f")"
         )
-        params: list[str] = [
+        aged_params: list[str] = [
             cutoff_general,
             *self._STALE_GENERAL_STATUSES,
             cutoff_lottery,
@@ -287,9 +311,38 @@ class ListingOps:
             scope_clauses.append(f"({pair_clause})")
             for source, city in source_city_filter:
                 scope_params.extend([source, city])
+
+        branch_sql = f"({aged_sql})"
+        params: list[str] = list(aged_params)
         if scope_clauses:
-            sql += " AND (" + " OR ".join(scope_clauses) + ")"
+            branch_sql += " AND (" + " OR ".join(scope_clauses) + ")"
             params.extend(scope_params)
+        branches = [f"({branch_sql})"]
+
+        # ── 路径 2：已掉出监控范围的，按更长的宽限期 ──────────────────── #
+        monitored = [
+            (source, city)
+            for source, city in (monitored_pairs or [])
+            if source and city
+        ]
+        if monitored:
+            cutoff_orphan = (now - timedelta(days=max(1, int(orphan_days)))).isoformat()
+            not_monitored = " AND ".join(
+                "NOT (source = ? AND city = ?)" for _ in monitored
+            )
+            branches.append(
+                f"(last_seen < ? AND status <> 'Occupied' AND {not_monitored})"
+            )
+            params.append(cutoff_orphan)
+            for source, city in monitored:
+                params.extend([source, city])
+
+        sql = (
+            "UPDATE listings "
+            "SET status='Occupied', last_status='Occupied', status_is_inferred=1 "
+            "WHERE status_is_inferred = 0 "
+            "AND (" + " OR ".join(branches) + ")"
+        )
         with self._conn:
             cur = self._conn.execute(sql, params)
         return cur.rowcount or 0
