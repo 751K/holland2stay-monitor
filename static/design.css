@@ -295,6 +295,18 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
    border-color 保持透明，跟 success/warning/info 一致 */
 .badge-secondary{background:var(--surface-hover);color:var(--text2)}
 .badge-reserved{background:var(--info-soft);color:var(--info)}
+/* inferred: 「这个状态是我们猜的」。
+   刻意做成描边而非实底——它不是第五种状态，是贴在状态旁边的一个限定词，
+   实底会和左边那颗状态胶囊抢视觉权重，看起来像两个并列的状态。
+   也刻意不进 .badge-status 的等宽体系：那套是给四个互斥状态对齐用的，
+   这个只在少数行出现，硬塞进去会在没有它的行留下一列空洞。 */
+.badge-inferred{
+  background:transparent;
+  color:var(--text3,var(--text2));
+  box-shadow:inset 0 0 0 1px var(--border);
+  margin-left:4px;
+  cursor:help;
+}
 
 /* ── Status badge：四态严格等宽 ─────────────────────────────────
    listings / 首页用 .badge-status 把 4 种状态胶囊（Book / Lottery /

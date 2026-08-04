@@ -869,7 +869,8 @@
           "features": {"type": "array", "items": {"type": "string"}},
           "feature_map": {"type": "object", "additionalProperties": {"type": "string"}},
           "first_seen": {"type": ["string", "null"]},
-          "last_seen": {"type": ["string", "null"]}
+          "last_seen": {"type": ["string", "null"]},
+          "status_is_inferred": {"type": "boolean", "description": "status 是系统推测的而非平台确认的。平台不会声明「这个单元没了」，只是把它从列表里移除；房源老化后系统据此把它标为 Occupied 并置此位。为 true 时不应把 status 当作平台事实。"}
         },
         "additionalProperties": true
       },

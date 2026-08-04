@@ -207,6 +207,13 @@ def serialize_listing(row: dict) -> dict:
         "feature_map": feature_map,
         "first_seen": row.get("first_seen") or "",
         "last_seen": row.get("last_seen") or "",
+        # status 是系统推测的，还是平台自己说的。
+        #
+        # 平台不会告诉我们「这个单元没了」——它只是把那一行从列表里拿掉。所以
+        # ``mark_stale_listings`` 在房源老化后把它标成 Occupied 并置这个位。
+        # 客户端**必须能区分**：一个「平台报的 Occupied」和一个「我们猜的
+        # Occupied」可信度差得远，混在一起等于把推断当事实端给用户。
+        "status_is_inferred": bool(row.get("status_is_inferred") or 0),
     }
 
 

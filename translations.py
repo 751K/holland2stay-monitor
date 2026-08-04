@@ -269,6 +269,13 @@ TRANSLATIONS = {
     "status_book":          {"zh": "可预订",                   "en": "Available"},
     "status_lottery":       {"zh": "可抽签",                   "en": "Lottery"},
     "status_reserved":      {"zh": "已预留",                   "en": "Reserved"},
+    # 平台不会说「这个单元没了」，只是把它从列表里拿掉；这个状态是系统据此
+    # 推出来的，不是平台确认的。两者可信度差得远，必须让用户看得出来。
+    "status_inferred":      {"zh": "推测",                     "en": "Inferred"},
+    "status_inferred_hint": {
+        "zh": "平台已不再列出该房源，状态由系统推测，未经平台确认",
+        "en": "No longer listed by the platform — status inferred, not confirmed",
+    },
     "filter_city":          {"zh": "城市",                    "en": "City"},
     "filter_source":        {"zh": "平台",                    "en": "Platform"},
     "filter_name":          {"zh": "名称",                    "en": "Name"},

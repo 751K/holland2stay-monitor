@@ -199,6 +199,8 @@
           <td><span class="badge badge-neutral">{{ l.source | source_label }}</span></td>
           <td>
             <span class="badge badge-status badge-{{ cap.css }}">{{ cap.label }}</span>
+            {% if l.status_is_inferred %}<span class="badge badge-inferred"
+              title="{{ _('status_inferred_hint') }}">{{ _('status_inferred') }}</span>{% endif %}
           </td>
           <td class="font-medium">{{ l.price_raw | price_short }}</td>
           <td class="cell-secondary">{{ fm.area or '—' }}</td>
@@ -229,6 +231,8 @@
         <div class="lc-status">
           <span class="badge badge-neutral">{{ l.source | source_label }}</span>
           <span class="badge badge-status badge-{{ cap.css }}">{{ cap.label }}</span>
+          {% if l.status_is_inferred %}<span class="badge badge-inferred"
+            title="{{ _('status_inferred_hint') }}">{{ _('status_inferred') }}</span>{% endif %}
         </div>
       </div>
       {% if fm.building %}<div class="lc-building">{{ fm.building }}</div>{% endif %}
