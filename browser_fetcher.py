@@ -400,9 +400,24 @@ class BrowserFetcher:
     """
     管理 CloakBrowser 生命周期，在浏览器内发**同源**请求。
 
-    浏览器内 fetch() 自带 cookies / TLS 指纹 / CF clearance token，这是绕过
-    Cloudflare 挑战的关键——脱离浏览器把 cookie 搬给 HTTP 客户端通常无效，
-    因为 clearance 同时绑定了 TLS 指纹。
+    浏览器内 fetch() 自带 cookies / TLS 指纹 / CF clearance token。
+
+    **浏览器是过挑战所必需的，但发请求并不必需。** 此处原先写着「脱离浏览器把
+    cookie 搬给 HTTP 客户端通常无效，因为 clearance 同时绑定了 TLS 指纹」——
+    2026-08-05 实测该结论不成立：
+
+        浏览器过一次挑战 → 导出 cf_clearance 与 UA
+        curl_cffi 带上二者 + **同一个出口 IP** + Chrome 指纹
+        → GraphQL 返回 200
+
+        chrome131 / chrome136 / chrome124 三种指纹均可
+
+    clearance 确实绑 IP，但 curl_cffi 的 Chrome 指纹伪装已足够接近，不再是障碍。
+    这意味着「过挑战」与「发请求」可以拆开：前者需要浏览器，后者不需要。
+
+    尚未改造，因为收益取决于一张 clearance 实际能复用多久——标称一年，但真实
+    寿命由 Cloudflare 服务端决定。``tools/clearance_probe.py`` 用于观测该数值。
+    换出口 IP 必须重新过挑战，这一点不会改变。
 
     站点差异全部收在 ``SiteProfile`` 里（见该类）；本类只负责通用流程：
     过挑战 → 等 clearance → 发请求 → 处理 clearance 过期。
