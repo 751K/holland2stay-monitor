@@ -237,6 +237,38 @@ def _acquire_profile_slot(source: str):
     return None, None
 
 
+# Chromium 用这三个文件做单实例互斥，内容是指向 ``<hostname>-<pid>`` 的符号链接。
+_SINGLETON_FILES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
+
+
+def _clear_stale_singleton_locks(path) -> None:
+    """清掉 profile 里残留的 Chromium 单实例锁。
+
+    容器 force-recreate 时旧 Chromium 是被杀掉的，这三个锁留在了 bind mount
+    里。新容器 hostname 变了、锁里记的 pid 也不存在，Chromium 判定该 profile
+    正被别的实例占用，启动即退出，Playwright 报
+    ``Target page, context or browser has been closed``。
+
+    也就是说：**每次部署都会让持久化 profile 失效**，而且是静默降级——日志里
+    只有一行「退回临时 profile」，流量悄悄涨回去。2026-08-05 上线当天就复现了。
+
+    删掉是安全的：同一时刻只有一个实例在用这个目录，这一点已由我们自己的槽位
+    flock 保证，Chromium 这层锁对我们是多余的。
+    """
+    for name in _SINGLETON_FILES:
+        target = path / name
+        try:
+            # 用 lstat 而非 exists()：这些是符号链接，指向的路径通常已经不在了，
+            # exists() 会跟随链接并返回 False，于是一个都删不掉。
+            target.lstat()
+        except OSError:
+            continue
+        try:
+            target.unlink()
+        except OSError as e:
+            logger.warning("清理 %s 失败，持久化 profile 可能启动不了: %s", target, e)
+
+
 def _release_lock(handle) -> None:
     """放掉槽位锁。关闭文件即释放 flock，出错也不能往外抛——它挂在 close()
     路径上，抛出去会把浏览器的资源释放一起带停。"""
@@ -485,6 +517,9 @@ class BrowserFetcher:
                     self._profile.source, _PROFILE_SLOTS,
                 )
             else:
+                # 必须在 launch 之前：Chromium 一见到别人的锁就直接退出，
+                # 事后再清也救不回这一次。
+                _clear_stale_singleton_locks(path)
                 try:
                     ctx = launch_persistent_context(
                         str(path),

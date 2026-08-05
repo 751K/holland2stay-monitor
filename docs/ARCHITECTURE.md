@@ -288,6 +288,17 @@ Holland2Stay 的 scraper 与 booker 共用同一个 source 且运行在不同线
 尚未退出时取得同一目录。槽位全部占用时退回临时 profile——节流不应以取不到浏览器
 为代价。
 
+**启动前须清理 Chromium 的单实例锁。** 容器 `force-recreate` 时旧 Chromium 是被
+杀掉的，`SingletonLock` / `SingletonSocket` / `SingletonCookie` 会留在 bind mount
+中，其内容为指向 `<容器 hostname>-<pid>` 的符号链接。新容器 hostname 已变、pid 亦
+不存在，Chromium 据此判定 profile 正被占用并立即退出，Playwright 报
+`Target page, context or browser has been closed`。由于失败仅静默降级为临时
+profile，其表现是**每次部署之后节流效果悄然消失**。
+
+清理是安全的：同一时刻仅有一个实例使用该目录，已由槽位 flock 保证，Chromium 这层
+锁对本项目属冗余。判断须使用 `lstat()` 而非 `exists()`——这些是悬空符号链接，
+`exists()` 会跟随链接返回 `False`，导致一个也删不掉。
+
 profile 位于 `<DATA_DIR>/browser_profiles/`，每槽位磁盘缓存上限 128 MB
 （`--disk-cache-size`）。删除该目录不影响正确性，仅损失一次冷启动。
 `BROWSER_PERSIST_PROFILE=0` 可整体关闭。

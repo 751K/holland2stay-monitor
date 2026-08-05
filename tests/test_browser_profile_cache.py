@@ -204,6 +204,90 @@ class TestSlotLocking:
         assert spy["persistent"][0].closed
 
 
+class TestStaleSingletonLocks:
+    """容器 force-recreate 之后，profile 里会留下上一个 Chromium 的单实例锁。
+
+    锁的内容是 ``<hostname>-<pid>`` 符号链接。新容器 hostname 变了、pid 也不
+    存在，Chromium 判定 profile 被占用，启动即退出。结果是**每次部署都让持久化
+    profile 失效**，而且静默降级——日志里只有一行「退回临时 profile」，流量悄悄
+    涨回去。2026-08-05 上线当天就复现了。
+    """
+
+    def _seed_locks(self, path):
+        path.mkdir(parents=True, exist_ok=True)
+        # 照实复现：指向一个并不存在的路径的符号链接
+        (path / "SingletonLock").symlink_to("7c9092fabed6-49")
+        (path / "SingletonSocket").symlink_to("/tmp/gone/SingletonSocket")
+        (path / "SingletonCookie").symlink_to("12798656688512932333")
+
+    def test_locks_are_cleared_before_launch(self, spy, monkeypatch, tmp_path):
+        import browser_fetcher as bf
+
+        root = tmp_path / "profiles"
+        monkeypatch.setattr(bf, "_profile_root", lambda: root)
+        self._seed_locks(root / "holland2stay-0")
+
+        BrowserFetcher(profile=H2S_PROFILE).__enter__()
+
+        for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+            assert not (root / "holland2stay-0" / name).is_symlink(), \
+                f"{name} 没清掉，Chromium 会拒绝启动"
+        assert len(spy["persistent"]) == 1
+
+    def test_dangling_symlinks_are_detected(self, tmp_path):
+        """必须用 lstat 判断。
+
+        这些链接指向的路径通常已经不在了，``exists()`` 会跟随链接返回 False，
+        于是一个都删不掉——看起来清理过了，实际什么也没做。
+        """
+        import browser_fetcher as bf
+
+        p = tmp_path / "prof"
+        self._seed_locks(p)
+        assert not (p / "SingletonLock").exists(), "前提：这是个悬空链接"
+
+        bf._clear_stale_singleton_locks(p)
+        assert not (p / "SingletonLock").is_symlink()
+
+    def test_other_files_untouched(self, tmp_path):
+        import browser_fetcher as bf
+
+        p = tmp_path / "prof"
+        self._seed_locks(p)
+        (p / "Local State").write_text("{}")
+        (p / "Default").mkdir()
+
+        bf._clear_stale_singleton_locks(p)
+        assert (p / "Local State").exists(), "把缓存一起删了就等于没有持久化"
+        assert (p / "Default").is_dir()
+
+    def test_missing_locks_is_not_an_error(self, tmp_path):
+        import browser_fetcher as bf
+
+        p = tmp_path / "prof"
+        p.mkdir()
+        bf._clear_stale_singleton_locks(p)  # 不抛即通过
+
+    def test_unremovable_lock_does_not_abort_launch(self, spy, monkeypatch, tmp_path):
+        """删不掉也要继续走，让 launch 自己失败并降级，而不是在这里炸掉。"""
+        import browser_fetcher as bf
+
+        root = tmp_path / "profiles"
+        monkeypatch.setattr(bf, "_profile_root", lambda: root)
+        self._seed_locks(root / "holland2stay-0")
+
+        from pathlib import Path
+        real_unlink = Path.unlink
+        monkeypatch.setattr(
+            Path, "unlink",
+            lambda self, *a, **kw: (_ for _ in ()).throw(OSError("只读"))
+            if self.name.startswith("Singleton") else real_unlink(self, *a, **kw),
+        )
+        f = BrowserFetcher(profile=H2S_PROFILE)
+        f.__enter__()
+        assert f._page is not None
+
+
 class TestDegradesGracefully:
     def test_persistent_launch_failure_falls_back(self, spy, monkeypatch):
         """profile 损坏、磁盘满、锁冲突都不该让抓取停摆。"""
