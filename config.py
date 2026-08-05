@@ -293,6 +293,82 @@ def get_proxy_url(source: str = "", *, rotating: bool = False) -> str:
     return ""
 
 
+# CONNECT 被拒时代理给的状态码，及其真实含义。Chromium 不会把这些码透出来，
+# 它对任何代理层失败都只报 ERR_TUNNEL_CONNECTION_FAILED。
+_PROXY_REJECT_HINTS: dict[int, str] = {
+    402: "流量配额耗尽或账户欠费",
+    403: "该出口被代理商禁用",
+    407: "代理认证失败，用户名或密码不对",
+    429: "代理侧限流",
+    502: "代理无法连到目标站点",
+    503: "代理服务暂时不可用",
+}
+
+
+def probe_proxy(proxy_url: str, host: str, port: int = 443, timeout: float = 8.0) -> str | None:
+    """向代理发一次 CONNECT，确认它到底能不能用。
+
+    代理正常（回 200）时返回 ``None``；否则返回一句可直接写进日志的原因。
+
+    存在的理由是 Chromium 的错误码没有信息量：配额耗尽（402）、认证失败
+    （407）、代理进程宕机，到了 Playwright 那层一律是
+    ``ERR_TUNNEL_CONNECTION_FAILED``。2026-08-05 线上代理欠费停服，日志里
+    六百多行全写着「CF 挑战可能未通过」，实际和 Cloudflare 毫无关系。
+
+    这里直接跟代理说话，把它自己给的状态码取回来。凭据只用于构造
+    ``Proxy-Authorization`` 头，不进返回值也不进日志。
+    """
+    import base64
+    import socket
+
+    if not proxy_url:
+        return None
+    try:
+        parsed = _urlparse(proxy_url)
+        proxy_host = parsed.hostname
+        proxy_port = parsed.port or 80
+    except Exception:
+        return None
+    if not proxy_host:
+        return None
+
+    target = f"{host}:{port}"
+    lines = [f"CONNECT {target} HTTP/1.1", f"Host: {target}"]
+    if parsed.username:
+        cred = f"{_unquote(parsed.username)}:{_unquote(parsed.password or '')}"
+        token = base64.b64encode(cred.encode("utf-8")).decode("ascii")
+        lines.append(f"Proxy-Authorization: Basic {token}")
+    request = ("\r\n".join(lines) + "\r\n\r\n").encode("utf-8")
+
+    sock = None
+    try:
+        sock = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
+        sock.settimeout(timeout)
+        sock.sendall(request)
+        # 状态行就在第一个 CRLF 之前，读一小段足够，不必等完整响应头
+        raw = sock.recv(256).decode("latin-1", "replace")
+    except OSError as e:
+        return f"连不上代理 {proxy_host}:{proxy_port}（{type(e).__name__}: {e}）"
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+    status_line = raw.split("\r\n", 1)[0].strip()
+    m = re.match(r"HTTP/\d(?:\.\d)?\s+(\d{3})(?:\s+(.*))?", status_line)
+    if not m:
+        return f"代理返回无法解析的响应: {status_line[:80]!r}"
+    code = int(m.group(1))
+    if code == 200:
+        return None
+    reason = (m.group(2) or "").strip()
+    hint = _PROXY_REJECT_HINTS.get(code)
+    detail = f"{code} {reason}".strip()
+    return f"代理拒绝 CONNECT: {detail}（{hint}）" if hint else f"代理拒绝 CONNECT: {detail}"
+
+
 def is_proxy_native_fallback_active() -> bool:
     """
     是否因所有已配置代理都在冷却中而进入直连 fallback。

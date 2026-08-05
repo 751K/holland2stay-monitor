@@ -147,7 +147,7 @@ XIOR_PROFILE = SiteProfile(
 | `clearance_pending_markers` | 403 响应中出现这些标记，表示 clearance 尚未生效（可恢复），而非 IP 被封禁 |
 | `maintenance_check` | 可选钩子，仅在挑战通过后调用（挑战页由 Cloudflare 生成，通过之前的正文与站点状态无关） |
 | `source` | 该 profile 所属的 source，决定使用哪条代理 sticky session |
-| `rotating_proxy` | 为 `True` 时每次创建浏览器均更换 session（即更换出口 IP）。适用于**按 IP 累积限流**的站点：单个浏览器会话内 IP 保持稳定，因此 clearance 仍可复用 |
+| `rotating_proxy` | 为 `True` 时每次创建浏览器均更换 session（即更换出口 IP）。适用于**按 IP 累积限流**的站点：单个浏览器会话内 IP 保持稳定，因此 clearance 仍可复用。它同时是 403 与挑战超时的恢复前提——参见本节末尾 |
 
 **关键在于请求必须由浏览器内部发出**（`page.evaluate` 中的 `fetch`），不能将
 cookie 转交 HTTP 客户端——Cloudflare 的 clearance 同时绑定 TLS 指纹，脱离浏览器
@@ -189,9 +189,44 @@ sequenceDiagram
     alt 403 且命中 clearance_pending_markers
         Note over BF: clearance 尚未生效，可恢复：<br/>重新导航，不判定为屏蔽
     else 其它 403
-        Note over BF: 判定为 BlockedError，<br/>批次结束后丢弃会话，见 §5.9
+        BF->>CB: 关闭浏览器并重建
+        Note over BF,CB: 该出口 IP 已被屏蔽，<br/>重建以更换 IP，随后重跑挑战
+        opt 新出口仍返回 403
+            Note over BF: 判定为 BlockedError，<br/>批次结束后丢弃会话，见 §5.9
+        end
     end
 ```
+
+**两类 403 的处置方式相反**：`clearance_pending_markers` 命中者为瞬时状态，
+重新导航即可恢复，更换 IP 反而会丢弃已有会话；其余 403 表示当前出口 IP 已被
+屏蔽，在同一浏览器上重跑挑战无法改变出口，必须重建浏览器。挑战超时与
+clearance 超时同属后者，因此 `ensure_initialized()` 的每次重试均在新出口上
+进行——三次尝试若共用一个 IP，等同于将同一次失败重复三遍。
+
+重建仅对 `rotating_proxy` 为 `True` 的 profile 有意义；固定 session 的 profile
+重建后得到的是同一出口，只会额外付出一次冷启动开销。
+
+### 3.2 代理故障的识别
+
+Chromium 在代理层失败时一律返回 `ERR_TUNNEL_CONNECTION_FAILED` 一类的错误码，
+不透出代理给出的状态码。配额耗尽（402）、认证失败（407）与代理进程宕机在
+Playwright 层完全无法区分，若一概归因于 Cloudflare 挑战，排查方向将被误导。
+
+导航失败命中代理错误码时，`_describe_navigation_failure()` 会调用
+[`config.probe_proxy()`](../config.py) 向**该浏览器实际使用的那条代理线路**发送
+一次 `CONNECT`，取回代理自身的状态码并写入日志：
+
+| 状态码 | 含义 |
+|---|---|
+| 402 | 流量配额耗尽或账户欠费 |
+| 403 | 该出口被代理商禁用 |
+| 407 | 代理认证失败 |
+| 429 | 代理侧限流 |
+| 502 / 503 | 代理无法连接目标站点 / 代理服务不可用 |
+
+探测须使用浏览器实际使用的代理 URL。对 `rotating_proxy` 的 profile 重新调用
+`get_proxy_url()` 会得到另一条 session，探测到的是其它出口，结论无效。凭据仅用于
+构造 `Proxy-Authorization` 请求头，不进入返回值与日志。
 
 ---
 
@@ -452,6 +487,17 @@ Holland2Stay 进入熔断退避。而 403 的恢复路径（`invalidate_session(
 > 一般规律：**任何「为求稳定而固定」的资源，都应事先明确其失效后的替换路径。**
 > 稳定与可替换并不矛盾，只要将替换时机选在本就需要重建的位置。
 
+上述修复补齐了「更换 IP 的能力」，但**没有任何失败路径去触发它**：
+`ensure_initialized()` 的三次重试在同一浏览器上原地重新导航，`fetch()` 的 403
+分支也仅将 `_initialized` 置为 `False`。两者都不会重建浏览器，出口 IP 因此始终
+不变——能力与触发条件分离，逃生口等同于不存在。
+
+现由 `_rebuild_browser()` 统一承担：挑战超时、clearance 超时与非 clearance 类
+403 均先关闭浏览器再重建，随后才重跑挑战。
+
+> 一般规律：**新增一条恢复能力时，须同时确认已有的失败路径会调用它。**
+> 只添加能力而不接入触发点，与未修复没有区别，且更难察觉——代码看上去是完整的。
+
 ### 5.12 「循环是否运行」与「数据是否正确」是两个问题
 
 `/health` 仅回答前者，即 monitor 的心跳新鲜度（§5.1），无法回答后者。而后者才是
@@ -610,6 +656,24 @@ flowchart TD
 配置读取失败、取得空列表时**整条路径跳过**：宁可保留残留记录，也不能因一次配置
 读取失败而将整库判定为终态。
 
+### 5.14 错误信息必须指向真实成因
+
+2026-08-05 代理账户欠费停服，`CONNECT` 一律返回 `402 Payment Required`。
+Chromium 将其压缩为 `ERR_TUNNEL_CONNECTION_FAILED`，日志随之写出六百余行
+「主站加载失败（CF 挑战可能未通过）」——该表述与实际成因毫无关系，排查方向
+被完整地引向 Cloudflare。真实状态码是在容器内手工发送一次 `CONNECT` 才取得的。
+
+同一时段内，走 curl_cffi 的 OurDomain 与 OurCampus 日志中直接写有
+`curl: (56) CONNECT tunnel failed, response 402`。故障是同一个，两条链路的可诊断性
+相差悬殊——差别不在故障本身，而在传输层是否把上游给出的信息透传出来。
+
+处置方式是在归因之前先行确认：导航失败命中代理层错误码时，向当前使用的代理线路
+发送一次 `CONNECT`，取回真实状态码后再决定如何描述（见 §3.2）。
+
+> 一般规律：**当底层将多种成因压缩成同一个错误码时，不应替它猜测，而应主动补测。**
+> 一条自信而错误的错误信息，比一条含糊的错误信息代价更高——后者促使人去查证，
+> 前者使人停止查证。
+
 ---
 
 ## 6. 通知
@@ -724,7 +788,9 @@ IBAN / SWIFT，代填金融凭据是硬性限制。`draft_saved` **不等同于�
 | 某平台状态为 `down` / `warn` | 卡片上的 reasons 已注明触发了哪条规则；判据见 §5.12 |
 | 需查询某时间段的日志 | `/logs` 的 `since` / `until` / `level` 及关键字（服务端过滤，不限于当前屏幕内容） |
 | 日志反复出现 `H2S source 熔断` | 见 §5.5；检查出口 IP 是否已被 Cloudflare 标记，可考虑配置 `HTTPS_PROXY` |
-| 日志反复出现 `CF 挑战 90s 内未解开` | 见 §5.3；多为 IP 信誉问题，需更换出口 IP |
+| 日志反复出现 `CF 挑战 90s 内未解开` | 见 §5.3；多为 IP 信誉问题。系统已在每次重试前更换出口 IP，若三次均失败，说明代理池整体信誉不佳 |
+| 日志出现 `代理拒绝 CONNECT` 或 `连不上代理` | 见 §3.2。原因来自代理自身，与 Cloudflare 无关：402 为配额耗尽或欠费，407 为凭据错误，需登录代理商控制台处置 |
+| 全部 source 同时且持续失败 | 优先怀疑代理而非平台。四个平台同时变更策略的可能性远低于一条共用链路失效；执行下方的代理探测命令即可确认 |
 | 某平台持续返回 0 条 | 见 §5.7 与 §5.12；确认属确无房源还是上游查询失败 |
 | 容器内存接近上限 | 每个浏览器常驻约 200–400MB，多 source 部署需 2G |
 | 已出租的房源仍显示为「可订」 | §5.13。先确认该城市**本轮完整扫描成功**——未扫全则不参与收敛，房源会持续挂起。查 `/monitoring` 轮次表格中的 `(完整/任务)` |
@@ -744,6 +810,11 @@ docker exec h2s python -c "import urllib.request as u; \
 # 部署前预检。注意该命令须在**宿主机的仓库目录**中执行，而非容器内
 # ——Dockerfile 未 COPY tools/，镜像中不存在该模块
 python -m tools.doctor --no-network
+
+# 代理是否可用。正常时无输出，否则打印代理给出的真实状态码（见 §3.2）。
+# 不回显凭据，可直接贴进工单
+docker exec h2s python -c "from config import get_proxy_url, probe_proxy; \
+  print(probe_proxy(get_proxy_url('holland2stay'), 'www.holland2stay.com') or '代理正常')"
 ```
 
 ---

@@ -84,6 +84,17 @@ _CF_CHALLENGE_PENDING_MARKERS: tuple[str, ...] = (
 # 挑战解开的等待上限。实测差异很大：macOS 本地约 3s，1 CPU 的生产 VPS 上
 # headless Chromium 跑完 challenge 要 30s 量级。上限按最慢的环境留足余量，
 # 超时说明这个 IP 当前过不去，交给上层熔断而不是硬发请求。
+# Chromium 在代理层失败时给的错误码。真实原因（配额耗尽、认证失败、代理宕机）
+# 只有代理自己知道，到了 Playwright 这层一律被压成这几个码，所以命中时必须
+# 另行探测——见 ``_describe_navigation_failure``。
+_PROXY_ERROR_MARKERS: tuple[str, ...] = (
+    "ERR_TUNNEL_CONNECTION_FAILED",
+    "ERR_PROXY_CONNECTION_FAILED",
+    "ERR_PROXY_AUTH_UNSUPPORTED",
+    "ERR_NO_SUPPORTED_PROXIES",
+    "ERR_PROXY_CERTIFICATE_INVALID",
+)
+
 _CHALLENGE_CLEAR_TIMEOUT = 90.0
 _CHALLENGE_POLL_INTERVAL = 1.0
 
@@ -270,6 +281,7 @@ class BrowserFetcher:
         self._page = None
         self._initialized = False
         self._effective_headless = headless
+        self._proxy_url = ""
 
     @property
     def profile(self) -> "SiteProfile":
@@ -277,6 +289,10 @@ class BrowserFetcher:
 
     # ── 上下文管理器 ──────────────────────────────────────────────────
     def __enter__(self) -> "BrowserFetcher":
+        self._launch()
+        return self
+
+    def _launch(self) -> None:
         from cloakbrowser import launch
 
         if platform.system() == "Darwin" and self._effective_headless:
@@ -318,6 +334,10 @@ class BrowserFetcher:
                 "%s 浏览器走代理 %s",
                 self._profile.name, _redact_proxy(proxy_url),
             )
+        # 记下来给 _describe_navigation_failure 用：诊断必须探**这个浏览器实际
+        # 在用**的那条代理线路。重新调 get_proxy_url() 在 rotating 的 profile 上
+        # 会拿到另一个 session，探到的是别的出口 IP，结论无效。
+        self._proxy_url = proxy_url or ""
 
         self._browser = launch(
             headless=self._effective_headless,
@@ -326,7 +346,31 @@ class BrowserFetcher:
             proxy=proxy_url,
         )
         self._page = self._browser.new_page()
-        return self
+
+    def _rebuild_browser(self) -> bool:
+        """推倒浏览器重建，换一个出口 IP。换成了返回 True。
+
+        403 和挑战超时都是「当前这个出口 IP 过不去」。同一个浏览器再导航一次
+        用的还是同一个 IP，重试等于把同一次失败重复三遍——2026-08-03 生产事故
+        就是这么熔断的。
+
+        只有 ``rotating_proxy`` 的 profile 重建才会落到新 session；固定 IP 的
+        profile 重建后拿到的是同一个出口，白付一次冷启动，所以不做。
+        """
+        if not self._profile.rotating_proxy:
+            return False
+        if self._browser is None:
+            # 还没 __enter__ 就走到这里，说明调用方绕过了正常生命周期。
+            # 凭空 launch 一个浏览器不是「重建」，交回给调用方处理。
+            return False
+        old = _redact_proxy(self._proxy_url) if self._proxy_url else "直连"
+        self.close()
+        self._launch()
+        new = _redact_proxy(self._proxy_url) if self._proxy_url else "直连"
+        logger.info(
+            "%s 重建浏览器以更换出口 IP：%s → %s", self._profile.name, old, new
+        )
+        return True
 
     def __exit__(self, *args):
         self.close()
@@ -369,6 +413,10 @@ class BrowserFetcher:
                 logger.warning(
                     "初始化第 %d/%d 次未通过：%s", attempt, _INIT_ATTEMPTS, e
                 )
+                # 挑战没解开或 clearance 不生效，说明是这个出口 IP 被盯上了。
+                # 重建浏览器换个 IP 再试，同一个 IP 上重来三次没有意义。
+                if attempt < _INIT_ATTEMPTS:
+                    self._rebuild_browser()
                 continue
 
             # 两段耗时按**成功的那次导航**分开记（不含前面失败尝试的耗时，
@@ -406,9 +454,10 @@ class BrowserFetcher:
                 timeout=30_000,
             )
         except Exception as e:
-            logger.error("%s 主站加载失败: %s", self._profile.name, e)
+            detail = self._describe_navigation_failure(e)
+            logger.error("%s 主站加载失败: %s", self._profile.name, detail)
             raise _exc("ScrapeNetworkError")(
-                f"{self._profile.name} 主站加载失败（CF 挑战可能未通过）: {e}"
+                f"{self._profile.name} 主站加载失败{detail}"
             ) from e
 
         # goto(domcontentloaded) 返回时页面通常还是 CF 挑战页，必须先等挑战
@@ -428,6 +477,39 @@ class BrowserFetcher:
         clearance_start = time.monotonic()
         self._wait_for_clearance()
         return challenge_elapsed, time.monotonic() - clearance_start
+
+    def _describe_navigation_failure(self, error: Exception) -> str:
+        """把 goto() 的异常翻译成一句说得清原因的话。
+
+        Chromium 在代理层失败时只给 ``ERR_TUNNEL_CONNECTION_FAILED`` 这类码，
+        看不出是配额耗尽、认证失败还是代理宕机；而默认文案「CF 挑战可能未通过」
+        会把排查引向 Cloudflare。命中代理错误码时就直接问代理要真实状态码。
+
+        返回值拼在「主站加载失败」后面，自带括号。
+        """
+        text = str(error)
+        if not any(marker in text for marker in _PROXY_ERROR_MARKERS):
+            return f"（CF 挑战可能未通过）: {error}"
+        if not self._proxy_url:
+            return f"（代理层报错，但本次并未走代理）: {error}"
+
+        from config import probe_proxy  # 延迟导入，避免循环依赖
+        from urllib.parse import urlparse
+
+        target = urlparse(self._profile.challenge_url)
+        try:
+            reason = probe_proxy(
+                self._proxy_url,
+                target.hostname or "",
+                target.port or 443,
+            )
+        except Exception as e:  # 诊断本身不能盖掉原始错误
+            logger.debug("代理探测异常: %s", e)
+            return f"（代理层报错，探测代理时又失败了: {e}）: {error}"
+
+        if reason:
+            return f"（{reason}）: {error}"
+        return f"（代理本身可用，问题在目标站点或链路上）: {error}"
 
     def _is_challenge_page(self) -> bool:
         """当前页面是否仍是 CF 挑战页。"""
@@ -754,7 +836,10 @@ class BrowserFetcher:
                 result.get("headers", {}),
                 result.get("text", "")[:300],
             )
+            # 走到这里说明不是 clearance 过期（那条路在上面已经处理并重试过），
+            # 是这个出口 IP 被挡了。原地重跑挑战换不掉 IP，先换浏览器。
             self._initialized = False
+            self._rebuild_browser()
             try:
                 self.ensure_initialized()
             except _exc("UpstreamMaintenanceError"):
