@@ -178,7 +178,13 @@ class TestMonitorRunOnceBlockedAggregation:
                 await run_once(cfg, storage, notifs, dry_run=False)
         asyncio.run(go())
 
-    def test_blocked_does_not_send_per_candidate_booking_failed(self, tmp_path):
+    def test_blocked_notifies_once_not_per_candidate(self, tmp_path):
+        """两个候选只发一条——按候选逐条发就成了刷屏。
+
+        用户该收到这条：他开了自动预订，结果没订上，得知道要手动补。但发的是
+        带房源的 booking_failed，不是给运维看的聚合文案——那份里有技术细节，
+        还带着「影响用户: A, B, C」，会把别人的名字抄送给每一个人。
+        """
         cfg, notifs, storage, notifier = _make_run_once_setup(tmp_path)
         try:
             scrape = lambda *a, **k: [_make_listing(1), _make_listing(2)]
@@ -187,11 +193,11 @@ class TestMonitorRunOnceBlockedAggregation:
         finally:
             storage.close()
 
-        assert notifier.booking_failed == [], (
-            f"blocked 不应触发 per-candidate booking_failed: {notifier.booking_failed}"
+        assert len(notifier.booking_failed) == 1, (
+            f"两个候选应只发 1 条，实际 {len(notifier.booking_failed)}"
         )
-        assert len(notifier.errors) == 1, (
-            f"应聚合发 1 条 error 通知，实际 {len(notifier.errors)}"
+        assert notifier.errors == [], (
+            f"运维用的聚合文案发到用户渠道了: {notifier.errors}"
         )
 
     def test_blocked_invalidates_prewarm_cache(self, tmp_path):

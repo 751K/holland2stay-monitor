@@ -158,7 +158,12 @@ class TestMonitorBlockedHandling:
         assert monitor._h2s_circuit_fail_streak == 1
         assert monitor._h2s_circuit_open_until > 0
 
-    def test_run_once_notifies_user_on_block(self, tmp_path):
+    def test_block_is_not_pushed_to_users(self, tmp_path):
+        """抓取被屏蔽是运维问题，用户既判断不了也处置不了。
+
+        每小时被这类消息打扰几次，足够让人把整个通知渠道静音，连真正的房源
+        通知一起埋掉。改由 _notify_admin_only 只发 admin（web 面板 + admin push）。
+        """
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
@@ -171,44 +176,54 @@ class TestMonitorBlockedHandling:
 
         self._run(tmp_path, scrape, user, notifs_received)
 
-        assert len(notifs_received) == 1, "首次屏蔽必须发 1 条通知"
-        assert "403" in notifs_received[0]
-        assert "H2S" in notifs_received[0]
+        assert notifs_received == [], f"屏蔽通知发到用户渠道了: {notifs_received}"
 
-    def test_notification_throttle_30min(self, tmp_path):
+    def _run_capturing_admin(self, tmp_path, scrape_fn, user, admin_msgs):
+        """屏蔽通知只发 admin，所以捕获点也挪到 _notify_admin_only。"""
+        async def fake_admin(storage, web_notifier, msg, *, kind):
+            # 只收熔断这一类。同一条路上还有「长时间被 block」告警，它本来就是
+            # admin-only、另有节流，混在一起数会把这条用例变成两个机制的和。
+            if kind == "h2s_circuit":
+                admin_msgs.append(msg)
+
+        with patch("monitor._notify_admin_only", side_effect=fake_admin):
+            self._run(tmp_path, scrape_fn, user)
+
+    def test_admin_notification_throttled_30min(self, tmp_path):
+        """节流机制本身没变，只是收件人从所有用户改成了 admin。"""
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
             auto_book=AutoBookConfig(enabled=False),
         )
         scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("test"))
-        notifs_received: list[str] = []
+        admin_msgs: list[str] = []
 
         for _ in range(3):
-            self._run(tmp_path, scrape, user, notifs_received)
+            self._run_capturing_admin(tmp_path, scrape, user, admin_msgs)
             monitor._h2s_circuit_open_until = 0.0
 
-        assert len(notifs_received) == 1, (
-            f"30 分钟内多次屏蔽应该只发 1 通知，实际 {len(notifs_received)}"
+        assert len(admin_msgs) == 1, (
+            f"30 分钟内多次屏蔽应该只发 1 条，实际 {len(admin_msgs)}"
         )
 
-    def test_notification_unthrottled_after_interval(self, tmp_path):
+    def test_admin_notification_unthrottled_after_interval(self, tmp_path):
         user = UserConfig(
             name="A", id="aaaa", enabled=True, notifications_enabled=True,
             notification_channels=[],
             auto_book=AutoBookConfig(enabled=False),
         )
         scrape = lambda *a, **k: (_ for _ in ()).throw(BlockedError("test"))
-        notifs_received: list[str] = []
+        admin_msgs: list[str] = []
 
-        self._run(tmp_path, scrape, user, notifs_received)
-        assert len(notifs_received) == 1
+        self._run_capturing_admin(tmp_path, scrape, user, admin_msgs)
+        assert len(admin_msgs) == 1
 
         monitor._last_block_notify_at -= 31 * 60
         monitor._h2s_circuit_open_until = 0.0
 
-        self._run(tmp_path, scrape, user, notifs_received)
-        assert len(notifs_received) == 2, "超过 30 分钟后应该重新通知"
+        self._run_capturing_admin(tmp_path, scrape, user, admin_msgs)
+        assert len(admin_msgs) == 2, "超过 30 分钟后应该重新通知"
 
     def test_long_h2s_block_notifies_admin_to_check_server(self, tmp_path):
         user = UserConfig(

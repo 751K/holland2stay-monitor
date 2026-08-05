@@ -992,21 +992,6 @@ def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
 # 拆分原则：纯/有界副作用的段落抽出去；raise / return 等控制流留在 run_once。
 
 
-async def _broadcast_error(
-    user_notifiers: "UserNotifiers",
-    web_notifier: "WebNotifier | None",
-    msg: str,
-) -> None:
-    """把一条错误文案广播给所有用户渠道 + web 面板。
-
-    抓取异常分支里 "for notifier: send_error / if web_notifier: send_error"
-    这段重复了三次，抽出来消除重复。"""
-    for _, notifier in user_notifiers:
-        await notifier.send_error(msg)
-    if web_notifier:
-        await web_notifier.send_error(msg)
-
-
 async def _notify_admin_only(
     storage: "Storage",
     web_notifier: "WebNotifier | None",
@@ -1462,7 +1447,7 @@ async def _process_booking_results(
     push_tasks: list = []
     # 本轮被屏蔽的用户（含 notifier），所有候选 await 完后聚合发一条节流通知，
     # 避免每个用户/每个候选都发一次"预订失败"刷屏。
-    blocked_in_round: list[tuple[UserConfig, BaseNotifier, str]] = []
+    blocked_in_round: list[tuple[UserConfig, BaseNotifier, str, "Listing"]] = []
 
     for user, notifier, sorted_cands, future, prewarmed in ab_futures:
         result = await future
@@ -1496,8 +1481,8 @@ async def _process_booking_results(
         if result.dry_run:
             logger.info("[%s] [DRY RUN] 自动预订跳过: %s", user.name, booked_listing.name)
         elif result.phase == "blocked":
-            # 不发 per-candidate booking_failed —— 累积到后面聚合一次性发
-            blocked_in_round.append((user, notifier, result.message))
+            # 累积起来：admin 那条聚合成一份，用户那条按房源各发各的
+            blocked_in_round.append((user, notifier, result.message, booked_listing))
         elif result.success:
             if storage.mark_listing_reserved_after_booking(booked_listing.id):
                 logger.info(
@@ -1535,7 +1520,7 @@ async def _process_booking_results(
 
     # ── 聚合屏蔽通知（共享 scrape 的 30 min 节流，避免双重打扰）────── #
     if blocked_in_round and _should_notify_block():
-        names = sorted({u.name for u, _, _ in blocked_in_round})
+        names = sorted({u.name for u, _, _, _ in blocked_in_round})
         # 取第一条 msg 作为详情（所有候选的 message 通常相同 —— 都是同一 CF 屏蔽）
         detail = blocked_in_round[0][2]
         agg_msg = (
@@ -1544,8 +1529,16 @@ async def _process_booking_results(
             f"影响用户: {', '.join(names)}\n"
             f"30 分钟内不会重复通知。"
         )
-        for u, n, _ in blocked_in_round:
-            await n.send_error(agg_msg)
+        # 用户侧：走房源通知那条路，各发各的。
+        #
+        # 这条对用户是**该发**的——他开了自动预订，结果没订上，得知道要手动补。
+        # 但上面那段聚合文案是给运维看的，直接发给用户有两个问题：技术细节
+        # （403、CF、指纹）他无从处置；而且「影响用户: A, B, C」会把其他人的
+        # 名字抄送给每一个人。
+        for u, n, _, listing in blocked_in_round:
+            await n.send_booking_failed(
+                listing, "平台暂时拒绝了自动预订请求，请尽快手动预订",
+            )
         if web_notifier:
             await web_notifier.send_error(agg_msg)
         # admin 也要收到 403 屏蔽通知
@@ -1556,7 +1549,7 @@ async def _process_booking_results(
         logger.info(
             "🚫 %d 套候选 / %d 个用户被屏蔽，30 min 节流期内不发通知",
             len(blocked_in_round),
-            len({u.id for u, _, _ in blocked_in_round}),
+            len({u.id for u, _, _, _ in blocked_in_round}),
         )
 
     return push_tasks
@@ -1902,7 +1895,9 @@ async def run_once(
                     f"H2S 已进入 source 熔断，约 {cooldown // 60} 分钟后只做一次 canary 探测；"
                     f"其他平台会继续监控。30 分钟内不会重复通知。"
                 )
-                await _broadcast_error(user_notifiers, web_notifier, err_msg)
+                await _notify_admin_only(
+                    storage, web_notifier, err_msg, kind="h2s_circuit",
+                )
             if (
                 not dry_run
                 and _h2s_circuit_fail_streak >= _H2S_LONG_BLOCK_STREAK
@@ -1952,7 +1947,9 @@ async def run_once(
                 f"代理状态: {'已启用' if proxy_on else '未启用'}\n"
                 f"30 分钟内不会重复通知。"
             )
-            await _broadcast_error(user_notifiers, web_notifier, err_msg)
+            await _notify_admin_only(
+                storage, web_notifier, err_msg, kind="scrape_blocked",
+            )
         raise
     except RateLimitError as e:
         # 429 需要更长冷却，上传给 main_loop 单独处理（不走普通 10s 恢复路径）
@@ -1965,7 +1962,9 @@ async def run_once(
         )
         if not dry_run:
             err_msg = f"⚠️ 抓取被限流（429）\n{e}\n监控将暂停 5 分钟后继续。"
-            await _broadcast_error(user_notifiers, web_notifier, err_msg)
+            await _notify_admin_only(
+                storage, web_notifier, err_msg, kind="scrape_rate_limited",
+            )
         raise
     except UpstreamMaintenanceError as e:
         # 平台维护：自己会恢复，**不给普通用户**发告警（用户什么也做不了），
@@ -2505,8 +2504,9 @@ async def main_loop(
             heartbeat_interval_sec = cfg.heartbeat_interval_minutes * 60
             if heartbeat_interval_sec > 0 and time.monotonic() - last_heartbeat_time >= heartbeat_interval_sec:
                 total = storage.count_all()
-                for _, notifier in user_notifiers:
-                    await notifier.send_heartbeat(total_in_db=total, round_count=round_count)
+                # 心跳只发给 admin。它回答的是「监控还在跑吗」——那是运维问题，
+                # 普通用户既无从判断也无从处置，而每小时一条推送足够让人把整个
+                # 通知渠道静音，连真正的房源通知一起埋掉。
                 if web_notifier:
                     await web_notifier.send_heartbeat(total_in_db=total, round_count=round_count)
                 # 清理旧通知，防止 web_notifications 表无限增长
