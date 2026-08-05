@@ -509,15 +509,27 @@ class CityFilter:
     id: int     # GraphQL filter 数值 ID，e.g. 29
 
 
+#: H2S ``available_to_book`` 属性的全部取值（2026-08-05 从 aggregations 接口取得，
+#: 括号内是当时全荷兰的套数）。标签荷英混用是上游本来的样子。
+#:
+#:   179   Direct te boeken         直接可订        (34)
+#:   6204  To be in lottery         即将进入抽签     (7)
+#:   336   Beschikbaar in loterij   抽签中          (46)
+#:   6203  Reserved                 已预留，下单未付款 (229)
+#:   180   Niet beschikbaar         不可用          (12140)
+#:   6253  Coming soon              即将上线        (0)
+#:
+#: 180 是整个存量池——租出去的、没上架的、下架的全归这一档，它不区分原因。
+#: 抓它没有意义：仅监控的两个城市就有 2489 条，是当前抓取量的 80 倍。
+AVAILABILITY_RESERVED_ID = 6203
+
+
 @dataclass
 class AvailabilityFilter:
     """
     GraphQL available_to_book filter 的单个可用性条目。
 
-    已知 ID
-    -------
-    179 → "Available to book"（可直接预订）
-    336 → "Available in lottery"（摇号中）
+    已知 ID 见上方 ``AVAILABILITY_RESERVED_ID`` 处的完整清单。
     """
     label: str  # 可读标签，e.g. "Available to book"
     id: int     # GraphQL filter 数值 ID，e.g. 179
@@ -1392,6 +1404,29 @@ class Config:
     ourdomain_cities: list[OurDomainCityFilter] = field(default_factory=list)
     ourcampus_cities: list[OurCampusCityFilter] = field(default_factory=list)
     xior_cities: list[XiorCityFilter] = field(default_factory=list)
+
+    def sources_with_full_lifecycle(self) -> frozenset[str]:
+        """feed 覆盖了「已预留」状态的 source。
+
+        为什么这决定了状态收敛的判据：**「从 feed 里消失」的含义取决于 feed 覆盖
+        了什么**。
+
+        - feed 只含可订/抽签时，消失是**有歧义**的——可能被人下单了（Reserved），
+          也可能彻底没了。所以先推 Reserved、再推 Occupied，留出付款窗口。
+        - feed 也含 Reserved 时，消失就**没有歧义**了：它已经掉出我们跟踪的全部
+          状态，只能是 H2S 的 ``Niet beschikbaar``。此时再推一次 Reserved 是凭空
+          造一个平台从没说过的状态。
+
+        判据从实际配置推出，不写死平台名——``AVAILABILITY_FILTERS`` 是可改的，
+        写死会在别人改配置时静默失准。
+
+        其余三个平台的 feed 只列可订单元，没有等价的「已预留」状态可抓，
+        因此不在其中（见 ARCHITECTURE §5.13）。
+        """
+        ids = {af.id for af in self.availability_filters}
+        if AVAILABILITY_RESERVED_ID in ids and "holland2stay" in self.sources:
+            return frozenset({"holland2stay"})
+        return frozenset()
 
     def scrape_tasks_v2(self) -> list["ScrapeTask"]:  # type: ignore[name-defined]
         """

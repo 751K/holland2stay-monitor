@@ -272,6 +272,7 @@ class ListingOps:
         orphan_days: int = 30,
         reserved_hours: float = DEFAULT_RESERVED_HOURS,
         occupied_hours: float = DEFAULT_OCCUPIED_HOURS,
+        full_lifecycle_sources: Optional[set[str]] = None,
     ) -> int:
         """按「多久没见到」收敛 listing 状态。
 
@@ -280,6 +281,9 @@ class ListingOps:
         1. **消失 ``reserved_hours``** → ``Reserved`` + ``status_is_inferred=1``。
            范围由 ``cities`` / ``source_city_pairs`` 限定——传的是"本轮完整扫描
            成功的城市"，只有确认扫全了才敢说"没见到 = 没了"。
+
+           ``full_lifecycle_sources`` 里的 source **跳过这一步**，直接走第 2 条：
+           它们的 feed 已经覆盖了「已预留」，消失因此不再有歧义（详见该参数）。
 
         2. **Reserved 消失 ``occupied_hours``** → ``Occupied``（终态）。
            不分「我们推的」和「平台报的」——H2S 官方付款限时就是 2 小时，
@@ -309,6 +313,18 @@ class ListingOps:
             当孤儿判据会误杀。传 None / 空表示不知道监控范围 → **跳过孤儿
             收敛**（fail-open：宁可留着鬼影，也不能因为一次配置读取失败就
             把整库判死）。
+        full_lifecycle_sources : feed 已覆盖「已预留」状态的 source 集合。
+
+            **「从 feed 里消失」的含义取决于 feed 覆盖了什么。** feed 只含
+            可订/抽签时，消失是有歧义的——可能被人下单了，也可能彻底没了，所以
+            先推 Reserved 留出付款窗口。feed 也含 Reserved 时，消失就没有歧义：
+            它已经掉出我们跟踪的全部状态。此时再推一次 Reserved，是凭空造一个
+            平台从没说过的状态，还会把 ``status_is_inferred=1`` 打在一条本可以
+            如实上报的房源上。
+
+            由 ``Config.sources_with_full_lifecycle()`` 从实际配置推出，不写死
+            平台名——``AVAILABILITY_FILTERS`` 是可改的。
+
         orphan_days : 掉出监控范围后的宽限期；默认 30 天。取长是为了防误伤
             ——临时关一天再打开的城市不该被判死。
         reserved_hours / occupied_hours : 见模块顶部 ``DEFAULT_*`` 的说明。
@@ -375,12 +391,32 @@ class ListingOps:
                  *scope_params],
             )
 
-            # ② 消失了但还不够久 → 不再当可订。
+            # ② 消失了 → 不再当可订。走哪条取决于**该 source 的 feed 覆盖了
+            #    什么**，见 full_lifecycle_sources 的说明。
+            full = sorted(s for s in (full_lifecycle_sources or ()) if s)
+            if full:
+                src_ph = ",".join("?" * len(full))
+                # ②a feed 含 Reserved：消失没有歧义，直接判终态。中间再插一个
+                #     推测的 Reserved，是凭空造一个平台从没说过的状态。
+                n += _run(
+                    "Occupied",
+                    f"last_seen < ? AND status IN ({avail_placeholders}) "
+                    f"AND source IN ({src_ph}){scope_sql}",
+                    [_cutoff(occupied_hours), *self._STALE_AVAILABLE_STATUSES,
+                     *full, *scope_params],
+                )
+                not_full = f" AND source NOT IN ({src_ph})"
+                not_full_params = list(full)
+            else:
+                not_full, not_full_params = "", []
+
+            # ②b feed 只含可订/抽签：消失是有歧义的，先推 Reserved 留出付款窗口。
             n += _run(
                 "Reserved",
-                f"last_seen < ? AND status IN ({avail_placeholders}){scope_sql}",
+                f"last_seen < ? AND status IN ({avail_placeholders})"
+                f"{not_full}{scope_sql}",
                 [_cutoff(reserved_hours), *self._STALE_AVAILABLE_STATUSES,
-                 *scope_params],
+                 *not_full_params, *scope_params],
             )
 
             # ③ 孤儿：已经掉出监控范围的，按更长的宽限期直接判终态。

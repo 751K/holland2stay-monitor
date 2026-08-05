@@ -728,9 +728,40 @@ OurCampus 官网自述排队 16–18 个月——仅凭「抓取到 0 条」会�
 | OurCampus | 不存在（推断，尚无真实数据佐证） |
 | Xior | **存在** `Occupied`，为四个平台中唯一显式上报者；但覆盖不完整，其余部分仍需依据消失判定 |
 
-因此「未再出现的时长」是唯一可用的判据。四个平台的终态信号既然一致，判据就不应
-分设四套。此前曾按 (source, 状态类) 分别配置阈值，那些差异实际描述的是「feed 是否
-保留已下架房源」，而四个平台的答案均为否。现统一为一套规则：
+因此「未再出现的时长」是唯一可用的判据。此前曾按 (source, 状态类) 分别配置阈值，
+那些差异实际描述的是「feed 是否保留已下架房源」，而四个平台的答案均为否，故收敛为
+一套规则。
+
+**但「消失」意味着什么，取决于 feed 覆盖了哪些状态。** Holland2Stay 的
+`available_to_book` 共六个取值，抓取范围由 `AVAILABILITY_FILTERS` 决定：
+
+| ID | 标签 | 含义 | 是否抓取 |
+|---|---|---|---|
+| 179 | Direct te boeken | 直接可订 | 是 |
+| 336 | Beschikbaar in loterij | 抽签中 | 是 |
+| 6203 | Reserved | 已下单未付款 | 是 |
+| 6204 | To be in lottery | 即将进入抽签 | 否，尚不可报名 |
+| 180 | Niet beschikbaar | 不可用 | 否，见下 |
+| 6253 | Coming soon | 即将上线 | 否 |
+
+`Niet beschikbaar` 是整个存量池，租出、未上架、已下架全归此档，且不区分原因；仅当前
+监控的两个城市即有 2489 条，为其余状态总量的约 80 倍，抓取无收益。
+
+由此得到两类判据：
+
+- **feed 未覆盖「已预留」**：消失存在歧义——可能已被下单，也可能彻底下架。因此先推
+  `Reserved` 留出付款窗口，再判终态。
+- **feed 已覆盖「已预留」**：消失不再有歧义，该房源已掉出全部被跟踪的状态。此时再推
+  一次 `Reserved`，等于凭空造出一个平台从未声明的状态，并将
+  `status_is_inferred=1` 打在一条本可如实上报的房源上。故直接判终态。
+
+判据由 `Config.sources_with_full_lifecycle()` 从实际配置推出，不硬编平台名——
+`AVAILABILITY_FILTERS` 可变更，硬编会在他人调整配置时静默失准。读取失败时退回前一类
+判据（宁可多一站推测，也不应将仍处于付款窗口内的房源直接判死）。
+
+其余三个平台的 feed 只列可订单元，不存在等价的「已预留」可抓，故始终属于前一类。
+
+统一后的规则：
 
 ```mermaid
 stateDiagram-v2
@@ -741,7 +772,8 @@ stateDiagram-v2
     state "Occupied" as O
 
     [*] --> A: feed 中首次出现
-    A --> R: 消失满 reserved_hours，默认 0.5h
+    A --> R: 消失满 reserved_hours，默认 0.5h<br/>（feed 未覆盖「已预留」的 source）
+    A --> O: 消失满 occupied_hours，默认 2h<br/>（feed 已覆盖「已预留」的 source）
     R --> O: 消失满 occupied_hours，默认 2h
 
     R --> A: feed 中再次出现

@@ -523,7 +523,22 @@ def _mark_stale_listings_for_complete_cities(
         orphan_days=orphan_days,
         reserved_hours=reserved_hours,
         occupied_hours=occupied_hours,
+        full_lifecycle_sources=_full_lifecycle_sources(),
     )
+
+
+def _full_lifecycle_sources() -> set[str]:
+    """feed 已覆盖「已预留」状态的 source。读配置失败时返回空集。
+
+    fail-open 到旧行为：拿不准就按「消失有歧义」处理，先推 Reserved。宁可多一站
+    推测，也不要因为一次配置读取失败就把还在付款窗口里的房源直接判终态。
+    """
+    try:
+        from config import load_config
+        return set(load_config().sources_with_full_lifecycle())
+    except Exception:
+        logger.warning("读取 full_lifecycle_sources 失败，按旧判据收敛", exc_info=True)
+        return set()
 
 
 def _sweep_aging(storage: Storage, completeness: dict[str, bool]) -> int:
