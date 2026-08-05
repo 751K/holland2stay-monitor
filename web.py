@@ -218,7 +218,25 @@ def _inject_translations():
     def _(key: str) -> str:
         return _tr(key, lang)
 
-    return {"_": _, "lang": lang}
+    def dim_scope(dim: str) -> str:
+        """该过滤维度只对部分平台生效时的提示；全平台通用时返回空串。
+
+        平台不支持某维度时该条件对它整体跳过，界面上必须说出来——否则勾了
+        「能耗 ≥ A」的用户会以为收到的都是 A 级，而 Xior 的房源一条都没过
+        这一关。
+        """
+        from config import dim_scope_note
+        return dim_scope_note(dim, lang)
+
+    def dim_scope_badge(dim: str) -> str:
+        """紧凑版标记，配合 dim_scope() 当 tooltip 使用。"""
+        from config import dim_scope_badge as _badge
+        return _badge(dim, lang)
+
+    return {
+        "_": _, "lang": lang,
+        "dim_scope": dim_scope, "dim_scope_badge": dim_scope_badge,
+    }
 
 
 @app.context_processor

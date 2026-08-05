@@ -652,6 +652,85 @@ _SOURCE_FILTER_DIMS: dict[str, frozenset] = {
 }
 
 
+#: 取值互斥、必须整体相等才算命中的维度。
+#:
+#: finishing 的四个取值是四档装修程度：Unfurnished / Semi furnished /
+#: Furnished / Fully furnished。它们在下拉里各占一项，选哪一档就是哪一档——
+#: 「半装修」不算「有家具」，「全装修」也不该被「有家具」顺带收走。想要多档
+#: 就多勾几项，这是白名单本来的用法。
+#:
+#: 其余维度不能这么做：房型在 H2S 写 ``1``、在 OurDomain 写
+#: ``1-Bedroom Apartment``，要求整体相等会让跨平台的同一户型对不上。
+_EXACT_MATCH_DIMS = frozenset({"finishing"})
+
+
+def whitelist_matches(pattern: str, value: str, dim: str = "") -> bool:
+    """白名单条目 ``pattern`` 是否命中房源取值 ``value``。
+
+    ``dim`` 是维度名，用来查 ``_EXACT_MATCH_DIMS`` 决定匹配方式。传维度名而不是
+    传布尔量，是为了让那张表成为唯一真相源——写成布尔量时表可以被清空而行为
+    不变，表就退化成了装饰性注释。
+
+    两边都先过 ``canonical_feature``：上游同一属性有荷兰语和英语两版。
+
+    维度不在 ``_EXACT_MATCH_DIMS`` 里时按**词边界**匹配，而不是裸子串。裸子串会把反义词一起
+    收走——``"Furnished" in "Unfurnished"`` 为真，勾了「有家具」会收到无家具的
+    房源。词边界排掉它（``Unfurnished`` 里 ``furnished`` 前面是字母 n），同时保住
+    真正成立的跨平台包含：H2S 的房型写 ``1``，OurDomain 写
+    ``1-Bedroom Apartment``，指的是同一种户型。
+
+    在表里的维度要求整体相等：这类维度的每个取值都是一档，档与档之间不该互相
+    命中，哪怕字面上一个是另一个的子串。
+    """
+    p = canonical_feature(pattern).strip()
+    v = canonical_feature(value).strip()
+    if not p:
+        return False
+    if dim in _EXACT_MATCH_DIMS:
+        return p.casefold() == v.casefold()
+    return re.search(rf"(?<!\w){re.escape(p)}(?!\w)", v, re.IGNORECASE) is not None
+
+
+
+def sources_supporting_dim(dim: str) -> list[str]:
+    """哪些平台会对这个维度真正生效，按 KNOWN_SOURCES 的顺序返回。
+
+    给界面用。平台不支持某维度时该条件对它整体跳过（fail-open，见上方注释），
+    这个行为本身是对的——否则一套条件会把整批抓不到该属性的房源误杀——但界面
+    上此前一个字都没提：勾了「能耗 ≥ A」的用户会以为收到的都是 A 级，实际
+    Xior 的房源一条都没过能耗这一关。
+    """
+    return [s for s in KNOWN_SOURCES if dim in _SOURCE_FILTER_DIMS.get(s, _UNIVERSAL_FILTER_DIMS)]
+
+
+def dim_scope_note(dim: str, lang: str = "zh") -> str:
+    """维度的适用范围提示；全平台通用时返回空串（无需提示）。"""
+    supported = sources_supporting_dim(dim)
+    if not supported or len(supported) == len(KNOWN_SOURCES):
+        return ""
+    names = "、" if lang == "zh" else ", "
+    listed = names.join(source_display_name(s) for s in supported)
+    if lang == "zh":
+        return f"仅对 {listed} 生效；其余平台不提供该属性，其房源不受此条件影响"
+    return (f"Applies to {listed} only — other platforms do not report this "
+            f"attribute, so their listings are unaffected by this filter")
+
+
+def dim_scope_badge(dim: str, lang: str = "zh") -> str:
+    """紧凑版的适用范围标记，给列表页那种横排筛选栏用。
+
+    完整的一句话在那里会把整行撑散，但完全不提又回到「用户不知道」的老问题，
+    所以留一个短标记，完整说明放 tooltip。
+    """
+    supported = sources_supporting_dim(dim)
+    if not supported or len(supported) == len(KNOWN_SOURCES):
+        return ""
+    if len(supported) == 1:
+        name = source_display_name(supported[0])
+        return f"仅 {name}" if lang == "zh" else f"{name} only"
+    return f"仅 {len(supported)} 个平台" if lang == "zh" else f"{len(supported)} platforms"
+
+
 def _source_supports_dim(source: Optional[str], dim: str) -> bool:
     """该平台是否稳定提供某过滤维度。
 
@@ -853,22 +932,27 @@ class ListingFilter:
                 return False
 
         # ── 平台相关白名单维度 ─────────────────────────────────────────
+        #
+        # 这些维度**两边都要过 canonical_feature**：上游同一个属性有荷兰语和
+        # 英语两版（``Two (only couples)`` / ``Twee (alleen koppels)``），返回哪
+        # 一版取决于录入语言，与房源无关。下拉里只保留归一后的写法，而老用户
+        # 存下来的值可能是荷兰语原文——只归一一侧仍然会漏。
         # 这些维度并非每个平台都有（见 _SOURCE_FILTER_DIMS）。平台**不支持**该
         # 维度 → 跳过该条件（fail-open，避免一套过滤条件误杀整批房源）；平台
         # 支持但本条缺值 → 白名单匹配失败照常拒绝（不削弱该平台过滤严格度）。
         if self.allowed_occupancy and _source_supports_dim(listing.source, "occupancy"):
             occ = fm.get("occupancy", "")
-            if not any(a.lower() in occ.lower() for a in self.allowed_occupancy):
+            if not any(whitelist_matches(a, occ) for a in self.allowed_occupancy):
                 return False
 
         if self.allowed_types and _source_supports_dim(listing.source, "type"):
             rtype = fm.get("type", "")
-            if not any(a.lower() in rtype.lower() for a in self.allowed_types):
+            if not any(whitelist_matches(a, rtype) for a in self.allowed_types):
                 return False
 
         if self.allowed_neighborhoods and _source_supports_dim(listing.source, "neighborhood"):
             nbhd = fm.get("neighborhood", "")
-            if not any(a.lower() in nbhd.lower() for a in self.allowed_neighborhoods):
+            if not any(whitelist_matches(a, nbhd) for a in self.allowed_neighborhoods):
                 return False
 
         if self.allowed_cities:
@@ -889,27 +973,25 @@ class ListingFilter:
         # 只有 H2S 稳定返回；其它平台不支持 → _source_supports_dim 返回 False
         # 而整体跳过。
         if self.allowed_contract and _source_supports_dim(listing.source, "contract"):
-            # 两边都先归一：房源上写的可能是 "Onbepaalde tijd"，而下拉里只剩
-            # 归一后的 "Indefinite"（老用户存下来的值也可能是荷兰语原文）。
-            # 不归一就会出现「勾了 Indefinite 却收不到 38 条同义房源」。
-            contract = canonical_feature(fm.get("contract", ""))
-            if not any(canonical_feature(a).lower() in contract.lower()
-                       for a in self.allowed_contract):
+            contract = fm.get("contract", "")
+            if not any(whitelist_matches(a, contract) for a in self.allowed_contract):
                 return False
 
         if self.allowed_tenant and _source_supports_dim(listing.source, "tenant"):
             tenant = fm.get("tenant", "")
-            if not any(a.lower() in tenant.lower() for a in self.allowed_tenant):
+            if not any(whitelist_matches(a, tenant) for a in self.allowed_tenant):
                 return False
 
         if self.allowed_offer and _source_supports_dim(listing.source, "offer"):
             offer = fm.get("offer", "")
-            if not any(a.lower() in offer.lower() for a in self.allowed_offer):
+            if not any(whitelist_matches(a, offer) for a in self.allowed_offer):
                 return False
 
         if self.allowed_finishing and _source_supports_dim(listing.source, "finishing"):
             furnishing = fm.get("furnishing", "")
-            if not any(a.lower() in furnishing.lower() for a in self.allowed_finishing):
+            # 装修程度是互斥的四档，见 _EXACT_MATCH_DIMS
+            if not any(whitelist_matches(a, furnishing, "finishing")
+                       for a in self.allowed_finishing):
                 return False
 
         if (isinstance(self.allowed_energy, str) and self.allowed_energy.strip()

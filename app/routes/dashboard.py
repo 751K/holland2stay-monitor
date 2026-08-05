@@ -80,7 +80,7 @@ def listings() -> str:
     contract_filter = request.args.get("contract", "")
     tenant_filters = request.args.getlist("tenant")  # 多选
     energy_filter  = request.args.get("energy", "")  # 单选：最低可接受等级
-    finishing_filter = request.args.get("finishing", "")
+    finishing_filters = request.args.getlist("finishing")  # 多选：装修程度
     max_rent = parse_float(max_rent_str) if max_rent_str.strip() else None
     min_area = parse_float(min_area_str) if min_area_str.strip() else None
     rows = query_listing_rows(
@@ -95,7 +95,7 @@ def listings() -> str:
         tenants=tenant_filters,
         occupancies=occupancy_filters,
         energy=energy_filter or None,
-        finishing=finishing_filter or None,
+        finishing=finishing_filters or None,
         limit=500,
     )
     options = get_filter_options()
@@ -112,7 +112,7 @@ def listings() -> str:
         occupancies=options["occupancies"],
         max_rent=max_rent_str, min_area=min_area_str,
         contract_filter=contract_filter, tenant_filters=tenant_filters,
-        energy_filter=energy_filter, finishing_filter=finishing_filter,
+        energy_filter=energy_filter, finishing_filters=finishing_filters,
         contracts=options["contracts"], tenants=options["tenants"],
         energies=options["energies"], finishings=options["finishings"],
     )

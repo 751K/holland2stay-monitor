@@ -424,9 +424,13 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   font-size:13px!important;
   box-shadow:0 1px 0 rgba(255,255,255,.5) inset;
 }
-.listing-filter-card .form-input,
+/* :not(.ms-trigger) 是必需的——多选的触发器同时挂着 form-input 类，会被上面
+   这条 height 钉死在 38px。选中两个长值时内容需要 74px，标签就溢出到框外面
+   去了（实测 Occupancy 勾 Family + Two (only couples)）。下一行的 min-height
+   本来是为它写的，但 height 已经生效，min-height 在这种情况下拦不住。 */
+.listing-filter-card .form-input:not(.ms-trigger),
 .listing-filter-card .form-select{height:var(--filter-control-h)}
-.listing-filter-card .ms-trigger{min-height:var(--filter-control-h)}
+.listing-filter-card .ms-trigger{min-height:var(--filter-control-h);height:auto}
 .listing-filter-card .form-select{
   background-position:right 8px center;
   padding-left:10px;

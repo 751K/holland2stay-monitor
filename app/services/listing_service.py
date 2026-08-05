@@ -58,14 +58,46 @@ def feature_value(row: dict, category: str) -> str | None:
     return None
 
 
+#: 浏览页的 feature 类目 → ListingFilter 的维度名。
+#:
+#: 两边的叫法不一致（页面上是 ``Finishing``，能力表里是 ``finishing``），而匹配
+#: 方式要按维度查表决定，所以必须能对上。
+_FEATURE_CATEGORY_DIMS = {
+    "Finishing": "finishing",
+    "Type": "type",
+    "Occupancy": "occupancy",
+    "Contract": "contract",
+    "Tenant": "tenant",
+    "Offer": "offer",
+    "Neighborhood": "neighborhood",
+}
+
+#: 取值受控、可以安全归一的类目。
+#:
+#: Neighborhood 刻意不在其中：它是自由文本（片区名），而同义表按整个值查，
+#: 扫过自由文本会误伤——某个片区若恰好叫 ``Kaal``，会被改写成 ``Unfurnished``。
+_NORMALIZED_CATEGORIES = frozenset({
+    "Finishing", "Type", "Occupancy", "Contract", "Tenant", "Offer",
+})
+
+
 def feature_contains(row: dict, category: str, value: str) -> bool:
-    """Case-insensitive substring match against a feature category."""
-    needle = value.strip().lower()
+    """房源的某个 feature 类目是否命中筛选值。
+
+    判据与 ``ListingFilter.passes``（通知那条路）**共用** ``whitelist_matches``。
+
+    这里原先是另写的一套裸子串匹配。两套实现意味着同一个筛选条件在「浏览页」
+    和「通知」上给出不同结果——2026-08-05 修好通知侧的荷兰语归一与装修分档
+    之后，浏览页仍然按老规矩走：勾「装修 = Furnished」页面回 251 条，其中含
+    Semi / Fully / Unfurnished，而通知只发 187 条真正的 Furnished。
+    """
+    from config import whitelist_matches
+
+    dim = _FEATURE_CATEGORY_DIMS.get(category, "")
     for item in safe_features(row):
         if not isinstance(item, str) or not item.startswith(f"{category}: "):
             continue
-        haystack = item.split(": ", 1)[1].strip().lower()
-        if needle in haystack:
+        if whitelist_matches(value, item.split(": ", 1)[1], dim):
             return True
     return False
 
@@ -78,7 +110,34 @@ def normalize_listing_row(row: dict) -> dict:
         out["name"] = _ourdomain_display_name(out)
     elif source == "xior":
         out["name"] = _xior_display_name(out)
+    out["features"] = _canonical_features_json(out)
     return out
+
+
+def _canonical_features_json(row: dict) -> str:
+    """把 features 里的取值归一到规范写法，返回重新序列化的 JSON。
+
+    上游同一属性有荷兰语和英语两版。筛选侧已经归一，展示侧不归一就会对不上：
+    下拉里写 ``Two (only couples)``，房源卡片上却是 ``Twee (alleen koppels)``，
+    用户会怀疑筛选是不是把这条漏了。
+
+    **只处理受控取值的类目**（``_NORMALIZED_CATEGORIES``）。同义表是按整个值
+    查的，扫过自由文本会误伤：片区或楼盘若恰好叫 ``Kaal``，会被改写成
+    ``Unfurnished``。类目名不动，原始值仍在数据库里，这里只影响展示。
+    """
+    from models import canonical_feature
+
+    feats = safe_features(row)
+    if not feats:
+        return row.get("features", "[]") or "[]"
+    out = []
+    for item in feats:
+        if isinstance(item, str) and ": " in item:
+            cat, val = item.split(": ", 1)
+            if cat in _NORMALIZED_CATEGORIES:
+                item = f"{cat}: {canonical_feature(val)}"
+        out.append(item)
+    return json.dumps(out, ensure_ascii=False)
 
 
 def normalize_listing_rows(rows: Iterable[dict]) -> list[dict]:
@@ -238,7 +297,7 @@ def query_listing_rows(
     min_area: float | None = None,
     tenants: list[str] | None = None,
     occupancies: list[str] | None = None,
-    finishing: str | None = None,
+    finishing: str | list[str] | None = None,
     limit: int = 2000,
 ) -> list[dict]:
     """
@@ -322,7 +381,13 @@ def query_listing_rows(
         else:
             logger.warning("无效能耗筛选参数 %r，已忽略", energy)
     if finishing:
-        rows = [r for r in rows if feature_contains(r, "Finishing", finishing)]
+        # 装修是四档互斥，多选语义为 OR：命中任意一档即通过。
+        # 兼容传单个字符串——API 与旧链接都可能只带一个值。
+        wanted = [finishing] if isinstance(finishing, str) else list(finishing)
+        rows = [
+            r for r in rows
+            if any(feature_contains(r, "Finishing", f) for f in wanted)
+        ]
 
     return normalize_listing_rows(rows)
 

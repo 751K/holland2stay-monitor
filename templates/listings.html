@@ -85,7 +85,7 @@
         <input type="number" name="min_area" class="form-input" placeholder="m²" value="{{ min_area or '' }}" style="font-size:12px;">
       </div>
       <div class="form-group">
-        <label class="form-label">{{ _('filter_contract') }}</label>
+        <label class="form-label">{{ _('filter_contract') }}{% set _b = dim_scope_badge('contract') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('contract') }}">{{ _b }}</span>{% endif %}</label>
         <select name="contract" class="form-select" style="font-size:12px;">
           <option value="">{{ _('filter_all_contract') }}</option>
           {% for c in contracts %}
@@ -94,7 +94,7 @@
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">{{ _('filter_type') }}</label>
+        <label class="form-label">{{ _('filter_type') }}{% set _b = dim_scope_badge('type') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('type') }}">{{ _b }}</span>{% endif %}</label>
         <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
@@ -108,7 +108,7 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">{{ _('filter_occupancy') }}</label>
+        <label class="form-label">{{ _('filter_occupancy') }}{% set _b = dim_scope_badge('occupancy') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('occupancy') }}">{{ _b }}</span>{% endif %}</label>
         <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
@@ -122,7 +122,7 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">{{ _('filter_tenant') }}</label>
+        <label class="form-label">{{ _('filter_tenant') }}{% set _b = dim_scope_badge('tenant') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('tenant') }}">{{ _b }}</span>{% endif %}</label>
         <div class="multi-select">
           <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
             <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
@@ -136,7 +136,7 @@
         </div>
       </div>
       <div class="form-group">
-        <label class="form-label">{{ _('filter_energy') }}</label>
+        <label class="form-label">{{ _('filter_energy') }}{% set _b = dim_scope_badge('energy') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('energy') }}">{{ _b }}</span>{% endif %}</label>
         <select name="energy" class="form-select" style="font-size:12px;">
           <option value="">{{ _('filter_min_energy') }}</option>
           {% for e in energies %}
@@ -145,19 +145,25 @@
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">{{ _('filter_finishing') }}</label>
-        <select name="finishing" class="form-select" style="font-size:12px;">
-          <option value="">{{ _('filter_all_finishing') }}</option>
-          {% for f in finishings %}
-            <option value="{{ f }}" {% if f == finishing_filter %}selected{% endif %}>{{ f }}</option>
-          {% endfor %}
-        </select>
+        <label class="form-label">{{ _('filter_finishing') }}{% set _b = dim_scope_badge('finishing') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('finishing') }}">{{ _b }}</span>{% endif %}</label>
+        {# 四档互斥，单选就只能一次看一档；想看「有家具或全装修」得选两次。 #}
+        <div class="multi-select">
+          <div class="ms-trigger form-input" style="font-size:12px;padding:6px 10px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;">
+            <span class="ms-text" style="color:var(--text3);">{{ _('multi_select_placeholder') }}</span>
+            <span class="ms-arrow">▾</span>
+          </div>
+          <div class="ms-dropdown">
+            {% for f in finishings %}
+            <label class="ms-option"><input type="checkbox" name="finishing" value="{{ f }}" {% if f in finishing_filters %}checked{% endif %}> {{ f }}</label>
+            {% endfor %}
+          </div>
+        </div>
       </div>
       <div class="form-group filter-actions" style="display:flex; gap:8px;">
         <button type="submit" class="btn btn-primary btn-sm">
           <i class="bi bi-search mr-1"></i>{{ _('filter_btn') }}
         </button>
-        {% if status_filter or search or city_filters or source_filters or type_filters or occupancy_filters or max_rent or min_area or contract_filter or tenant_filters or energy_filter or finishing_filter %}
+        {% if status_filter or search or city_filters or source_filters or type_filters or occupancy_filters or max_rent or min_area or contract_filter or tenant_filters or energy_filter or finishing_filters %}
           <a href="{{ url_for('listings') }}" class="btn btn-ghost btn-sm">
             <i class="bi bi-x mr-1"></i>{{ _('filter_clear') }}
           </a>

@@ -106,8 +106,64 @@ def parse_features_list(features: list[str]) -> dict[str, str]:
 #: ``ListingFilter.passes`` 要按归一后的值比对——三处必须用同一张表，
 #: 否则下拉里只剩 "Indefinite"，匹配时却还在拿原始的 "Onbepaalde tijd" 比，
 #: 用户勾了照样收不到。
+# Holland2Stay 的 feature 取值有荷兰语和英语两版，同一个属性两种写法都会出现
+# （同一批房源里 ``Two (only couples)`` 134 条、``Twee (alleen koppels)`` 47 条）。
+# 上游返回哪一版取决于房源录入时的语言，与房源本身无关。
+#
+# 不归一的后果是筛选按字面匹配：勾了英文那版就收不到荷兰文那版，而下拉里两版
+# 并排列着，看起来像两个不同的选项。
+#
+# 键一律小写（``canonical_feature`` 用 casefold 查表），值取英文写法——面板与
+# 通知的默认语言是英文，且 H2S 自己的英文站点用的就是这些词。
+#: 标 ✓ 的是 2026-08-05 在生产库里实际出现过的写法；其余是同一维度里尚未见到
+#: 荷兰语版本的取值，按荷兰租房的通行说法补上——上游返回哪一版取决于录入语言，
+#: 今天只有英文不代表明天不会冒出荷兰文。未出现的条目是惰性的，不会有副作用。
 FEATURE_SYNONYMS: dict[str, str] = {
-    "onbepaalde tijd": "Indefinite",
+    # ── Contract ──────────────────────────────────────────────────
+    "onbepaalde tijd": "Indefinite",              # ✓
+    "voor onbepaalde tijd": "Indefinite",
+    "maximaal 6 maanden": "6 months max",
+    "6 maanden max": "6 months max",
+    "maximaal 4 maanden": "4 months max",
+    "4 maanden max": "4 months max",
+    # ── Occupancy ─────────────────────────────────────────────────
+    "eén persoon": "One",                          # ✓
+    "een persoon": "One",                          # 上游偶尔丢 accent
+    "één persoon": "One",                          # U+00E9 前置组合形式
+    "twee personen": "Two",                        # ✓
+    "twee (alleen koppels)": "Two (only couples)",  # ✓
+    "twee (alleen stellen)": "Two (only couples)",
+    "gezin (ouders met kinderen)": "Family (parents with children)",  # ✓
+    "drie personen": "Three",
+    "vier personen": "Four",
+    # ── Type ──────────────────────────────────────────────────────
+    # Studio 与数字（1 / 2 / 3 / 4）两种语言写法相同，无需登记。
+    "loft (open slaapkamer)": "Loft (open bedroom area)",  # ✓
+    # ── Finishing ─────────────────────────────────────────────────
+    "gemeubileerd": "Furnished",                   # ✓
+    "gemeubeld": "Furnished",
+    # Gestoffeerd 直译是「铺了地板窗帘」，荷兰租房语境下即 semi furnished：
+    # 有地板、窗帘、灯具，但没有家具。按语境译，不按字面。
+    "gestoffeerd": "Semi furnished",               # ✓
+    "gedeeltelijk gemeubileerd": "Semi furnished",
+    "volledig gemeubileerd": "Fully furnished",
+    "ongemeubileerd": "Unfurnished",
+    "kaal": "Unfurnished",
+    # ── Tenant ────────────────────────────────────────────────────
+    "alleen voor studenten": "student only",       # ✓
+    "alleen studenten": "student only",
+    "alleen voor werkenden": "employed only",
+    "alleen werkenden": "employed only",
+    "studenten en werkenden": "student and employed",
+    "studenten of werkenden": "student and employed",
+    # ── Offer ─────────────────────────────────────────────────────
+    "kort verblijf": "Short-stay",
+    "short stay": "Short-stay",                    # 英文侧的连字符写法差异
+    "parkeerplaats inbegrepen": "Parking included",
+    "parkeren inbegrepen": "Parking included",
+    # 「Receive €150 cash back」这类带金额的优惠没有登记：金额是变量，静态表
+    # 覆盖不全，硬编几个常见值反而给人「已经覆盖」的错觉。目前生产库里只出现
+    # 过英文版。
 }
 
 

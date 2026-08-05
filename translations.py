@@ -486,6 +486,15 @@ TRANSLATIONS = {
     "user_form_auth_token": {"zh": "Auth Token",             "en": "Auth Token"},
     "user_form_section3":   {"zh": "通知过滤条件",            "en": "Notification Filters"},
     "user_form_filter_hint":{"zh": "留空 = 不限制",           "en": "Leave empty = no limit"},
+    # 平台适用范围的统一说明。措辞要说清「其余平台不受影响」——只写「仅对 X
+    # 生效」会被读成「其它平台会被排除」，那是相反的意思。
+    "user_form_dim_scope_intro": {
+        "zh": "带「仅 …」标记的条件只对部分平台生效：其余平台不提供该属性，"
+              "它们的房源不受该条件影响，会照常通知。悬停标记可看具体平台。",
+        "en": "Conditions marked “… only” apply to some platforms: the others do "
+              "not report that attribute, so their listings are unaffected and "
+              "still notify. Hover the marker to see which platforms.",
+    },
     "user_form_max_rent":   {"zh": "最高月租（€）",           "en": "Max rent (€)"},
     "user_form_min_area":   {"zh": "最小面积（m²）",          "en": "Min area (m²)"},
     "user_form_min_floor":      {"zh": "最低楼层",                "en": "Min floor"},

@@ -317,20 +317,25 @@
       <span class="text-xs" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3);margin-left:.5rem;">{{ _('user_form_filter_hint') }}</span>
     </div>
     <div class="card-body">
+      {# 平台适用范围只说一次。逐字段各写一遍的话，同一句话在这一页要出现八遍，
+         其中六遍一字不差。各字段留小徽标 + tooltip，和列表页保持一致。 #}
+      <div class="text-xs text-secondary mb-3" style="line-height:1.6;">
+        <i class="bi bi-info-circle mr-1"></i>{{ _('user_form_dim_scope_intro') }}
+      </div>
       {% set lf = u.listing_filter if is_edit else none %}
       <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
         <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="MAX_RENT" value="{{ lf.max_rent | int if lf and lf.max_rent else '' }}" placeholder="1500"></div>
         <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="MIN_AREA" value="{{ lf.min_area | int if lf and lf.min_area else '' }}" placeholder="20"></div>
         <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="MIN_FLOOR" value="{{ lf.min_floor if lf and lf.min_floor is not none else '' }}" placeholder="0"></div>
         <div class="form-group" style="grid-column:span 2;">
-          <label class="form-label">{{ _('user_form_occupancy') }}</label>
+          <label class="form-label">{{ _('user_form_occupancy') }}{% set _b = dim_scope_badge('occupancy') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('occupancy') }}">{{ _b }}</span>{% endif %}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown">{% set sel_occ = lf.allowed_occupancy if lf else [] %}{% for val, label in occupancy_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_OCCUPANCY" value="{{ val }}"{% if val in sel_occ %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
           </div>
         </div>
         <div class="form-group" style="grid-column:span 2;">
-          <label class="form-label">{{ _('user_form_types') }}</label>
+          <label class="form-label">{{ _('user_form_types') }}{% set _b = dim_scope_badge('type') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('type') }}">{{ _b }}</span>{% endif %}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown">{% set sel_type = lf.allowed_types if lf else [] %}{% for val, label in type_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_TYPES" value="{{ val }}"{% if val in sel_type %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
@@ -353,21 +358,21 @@
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">{{ _('user_form_hoods') }}</label>
+          <label class="form-label">{{ _('user_form_hoods') }}{% set _b = dim_scope_badge('neighborhood') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('neighborhood') }}">{{ _b }}</span>{% endif %}</label>
           <div class="multi-select" id="ms-neighborhood">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown" id="neighborhood-dropdown">{% set sel_nbhd = lf.allowed_neighborhoods if lf else [] %}{% for n in sel_nbhd %}<label class="ms-option"><input type="checkbox" name="ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}</div>
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">{{ _('user_form_offer') }}</label>
+          <label class="form-label">{{ _('user_form_offer') }}{% set _b = dim_scope_badge('contract') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('contract') }}">{{ _b }}</span>{% endif %}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown">{% set sel_contract = lf.allowed_contract if lf else [] %}{% for val, label in contract_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_CONTRACT" value="{{ val }}"{% if val in sel_contract %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">{{ _('user_form_tenant') }}</label>
+          <label class="form-label">{{ _('user_form_tenant') }}{% set _b = dim_scope_badge('tenant') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('tenant') }}">{{ _b }}</span>{% endif %}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown">{% set sel_tenant = lf.allowed_tenant if lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_TENANT" value="{{ val }}"{% if val in sel_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
@@ -376,21 +381,21 @@
       </div>
       <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
         <div class="form-group">
-          <label class="form-label">{{ _('user_form_promo') }}</label>
+          <label class="form-label">{{ _('user_form_promo') }}{% set _b = dim_scope_badge('offer') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('offer') }}">{{ _b }}</span>{% endif %}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown">{% set sel_offer = lf.allowed_offer if lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_OFFER" value="{{ o }}"{% if o in sel_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">{{ _('filter_finishing') }}</label>
+          <label class="form-label">{{ _('filter_finishing') }}{% set _b = dim_scope_badge('finishing') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('finishing') }}">{{ _b }}</span>{% endif %}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown">{% set sel_fin = lf.allowed_finishing if lf else [] %}{% for f in finishing_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_FINISHING" value="{{ f }}"{% if f in sel_fin %} checked{% endif %}> {{ f }}</label>{% endfor %}</div>
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label">{{ _('filter_energy') }}</label>
+          <label class="form-label">{{ _('filter_energy') }}{% set _b = dim_scope_badge('energy') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('energy') }}">{{ _b }}</span>{% endif %}</label>
           {% set cur_en = lf.allowed_energy if lf else '' %}
           <select name="ALLOWED_ENERGY" class="form-select" style="font-size:14px;">
             <option value="">{{ _('filter_min_energy') }}</option>

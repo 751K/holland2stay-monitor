@@ -185,9 +185,16 @@ class TestListingFilterFurnishing:
         lf = ListingFilter(allowed_finishing=["upholstered"])
         assert lf.passes(_listing(features=["Finishing: Upholstered"]))
 
-    def test_substring_match(self):
+    def test_tiers_do_not_leak_into_each_other(self):
+        """装修程度按档整体相等匹配，不做子串。
+
+        原先是子串匹配，于是 ``Upholstered`` 也命中 ``Upholstered (basic)``。
+        放到真实取值上，同一个规则让 ``Furnished`` 命中了 ``Unfurnished``
+        （意思正相反）、``Semi furnished`` 和 ``Fully furnished``。四档在下拉里
+        各占一项，选哪一档就是哪一档；想要多档就多勾几项。
+        """
         lf = ListingFilter(allowed_finishing=["Upholstered"])
-        assert lf.passes(_listing(features=["Finishing: Upholstered (basic)"]))
+        assert not lf.passes(_listing(features=["Finishing: Upholstered (basic)"]))
 
     def test_missing_feature_rejected(self):
         lf = ListingFilter(allowed_finishing=["Upholstered"])
