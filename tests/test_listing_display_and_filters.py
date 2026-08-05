@@ -110,6 +110,70 @@ class TestFinishingIsMultiSelect:
         assert len(query_listing_rows(finishing=[])) == 5
 
 
+class TestBrowsePageAgreesWithNotifications:
+    """平台不提供某维度时，浏览页也要 fail-open。
+
+    此前浏览页没有这一层：一条没有 Finishing 字段的房源在那里必然不匹配，于是勾
+    「装修 = Furnished」把 Xior 与 OurDomain 的 83 条整个排除，而通知侧放行。
+    同一个条件两个答案，且相差恒定 83——正好是没有该字段的房源数。
+
+    放行是对的：这两家的房源实际都带家具，只是 feed 里不上报该属性；按「没这个
+    字段就不匹配」处理，等于因为上游少给一个字段就把整个平台从结果里抹掉。
+    """
+
+    @pytest.fixture
+    def db(self, tmp_path, monkeypatch):
+        import app.db as app_db
+
+        st = Storage(tmp_path / "listings.db")
+        st.diff([
+            Listing(id="H_furn", name="h", status="Available to book",
+                    price_raw="1000", available_from="", url="", city="Eindhoven",
+                    source="holland2stay", features=["Finishing: Furnished"]),
+            Listing(id="H_unfurn", name="h", status="Available to book",
+                    price_raw="1000", available_from="", url="", city="Eindhoven",
+                    source="holland2stay", features=["Finishing: Unfurnished"]),
+            # Xior / OurDomain 的 feed 里没有 Finishing
+            Listing(id="X1", name="x", status="Available to book",
+                    price_raw="1000", available_from="", url="", city="Utrecht",
+                    source="xior", features=["Unit: 1.S127"]),
+            Listing(id="O1", name="o", status="Available to book",
+                    price_raw="1000", available_from="", url="", city="Amsterdam",
+                    source="ourdomain", features=["Type: Studio"]),
+        ])
+        st.close()
+        monkeypatch.setattr(app_db, "DB_PATH", tmp_path / "listings.db")
+        yield
+
+    def test_unsupported_platforms_pass_through(self, db):
+        ids = {r["id"] for r in query_listing_rows(finishing=["Furnished"])}
+        assert ids == {"H_furn", "X1", "O1"}, \
+            "Xior / OurDomain 因为 feed 里没这个字段被整个排除了"
+
+    def test_supported_platform_is_still_filtered(self, db):
+        ids = {r["id"] for r in query_listing_rows(finishing=["Furnished"])}
+        assert "H_unfurn" not in ids, "支持该维度的平台不该放宽"
+
+    def test_matches_the_notification_path(self, db):
+        """两条路必须给出同一个集合，这是本次修复的全部意义。"""
+        from config import ListingFilter
+        from app.services.listing_service import row_to_listing, storage_ctx
+
+        lf = ListingFilter(allowed_finishing=["Furnished"])
+        with storage_ctx() as st:
+            rows = st.get_all_listings(limit=100)
+        notif = {r["id"] for r in rows if lf.passes(row_to_listing(r))}
+        page = {r["id"] for r in query_listing_rows(finishing=["Furnished"])}
+        assert notif == page, f"通知 {sorted(notif)} ≠ 页面 {sorted(page)}"
+
+    def test_type_follows_the_capability_table(self, db):
+        """OurDomain 提供房型、Xior 不提供——不能一刀切。"""
+        ids = {r["id"] for r in query_listing_rows(types=["Studio"])}
+        assert "O1" in ids, "OurDomain 有房型，Studio 应命中"
+        assert "X1" in ids, "Xior 不提供房型，该条件对它应跳过"
+        assert "H_furn" not in ids, "H2S 提供房型但这条没有 Studio"
+
+
 class TestDisplayNormalization:
     def test_controlled_values_are_canonicalized(self):
         out = normalize_listing_row(_row(

@@ -102,6 +102,22 @@ def feature_contains(row: dict, category: str, value: str) -> bool:
     return False
 
 
+def dim_applies(row: dict, dim: str) -> bool:
+    """该房源所属平台是否提供这个维度。不提供时条件对它整体跳过。
+
+    与 ``ListingFilter.passes``（通知那条路）保持同一语义。此前浏览页没有这一层
+    ——一条没有 Finishing 字段的房源在这里必然不匹配，于是勾「装修 = Furnished」
+    会把 Xior 与 OurDomain 的 83 条整个排除，而通知侧放行。同一个条件两个答案。
+
+    放行是对的：这两家的房源实际都是带家具的，只是 feed 里不上报该属性；按
+    「没这个字段就不匹配」处理等于因为上游少给一个字段而把整个平台从结果里
+    抹掉。
+    """
+    from config import source_supports_dim
+
+    return source_supports_dim(row.get("source") or "holland2stay", dim)
+
+
 def normalize_listing_row(row: dict) -> dict:
     """Return a display-normalized copy of one listing row."""
     out = dict(row)
@@ -355,29 +371,41 @@ def query_listing_rows(
             return parse_float(feature_map.get("area", ""))
 
         rows = [r for r in rows if (area := _area(r)) is not None and area >= min_area]
+    # 以下维度并非每个平台都提供。平台不支持 → 该条件对它整体跳过（fail-open，
+    # 见 dim_applies）；平台支持但本条缺值 → 照常不匹配，不削弱严格度。
     if types:
         rows = [
             r for r in rows
-            if any(feature_contains(r, "Type", t) for t in types)
+            if not dim_applies(r, "type")
+            or any(feature_contains(r, "Type", t) for t in types)
         ]
     if contract:
-        rows = [r for r in rows if feature_contains(r, "Contract", contract)]
+        rows = [
+            r for r in rows
+            if not dim_applies(r, "contract")
+            or feature_contains(r, "Contract", contract)
+        ]
     if tenants:
         rows = [
             r for r in rows
-            if any(feature_contains(r, "Tenant", tenant) for tenant in tenants)
+            if not dim_applies(r, "tenant")
+            or any(feature_contains(r, "Tenant", tenant) for tenant in tenants)
         ]
     if occupancies:
         # Occupancy feature 值形如 "Single" / "Two (only couples)" / "Three" 等。
         # 多选语义：OR，命中任意一个值即通过。
         rows = [
             r for r in rows
-            if any(feature_contains(r, "Occupancy", occ) for occ in occupancies)
+            if not dim_applies(r, "occupancy")
+            or any(feature_contains(r, "Occupancy", occ) for occ in occupancies)
         ]
     if energy:
         min_rank = energy_rank(energy)
         if min_rank is not None:
-            rows = [r for r in rows if feature_rank_ok(r, min_rank)]
+            rows = [
+                r for r in rows
+                if not dim_applies(r, "energy") or feature_rank_ok(r, min_rank)
+            ]
         else:
             logger.warning("无效能耗筛选参数 %r，已忽略", energy)
     if finishing:
@@ -386,7 +414,8 @@ def query_listing_rows(
         wanted = [finishing] if isinstance(finishing, str) else list(finishing)
         rows = [
             r for r in rows
-            if any(feature_contains(r, "Finishing", f) for f in wanted)
+            if not dim_applies(r, "finishing")
+            or any(feature_contains(r, "Finishing", f) for f in wanted)
         ]
 
     return normalize_listing_rows(rows)

@@ -731,6 +731,15 @@ def dim_scope_badge(dim: str, lang: str = "zh") -> str:
     return f"仅 {len(supported)} 个平台" if lang == "zh" else f"{len(supported)} platforms"
 
 
+def source_supports_dim(source: Optional[str], dim: str) -> bool:
+    """公开入口，供浏览页复用同一套 fail-open 判定。
+
+    浏览页此前没有这一层，一条没有该属性的房源必然不匹配，等于因为上游少给一个
+    字段就把整个平台从结果里抹掉。
+    """
+    return _source_supports_dim(source, dim)
+
+
 def _source_supports_dim(source: Optional[str], dim: str) -> bool:
     """该平台是否稳定提供某过滤维度。
 
