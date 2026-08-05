@@ -313,12 +313,50 @@ profile 位于 `<DATA_DIR>/browser_profiles/`，每槽位磁盘缓存上限 128 
 | `geocode_cache` | 地址至坐标的缓存，用于避免重复请求 |
 | `round_stats` | 每轮每 source 一行的抓取遥测，保留 30 天（见 §5.12） |
 
-`listings` 中有两列并非抓取所得，而是由系统写入，需单独说明：
+`listings` 中有三列并非抓取所得，而是由系统写入，需单独说明：
 
 | 列 | 写入方 | 语义 |
 |---|---|---|
 | `status_is_inferred` | `mark_stale_listings()` 置 1；`diff()` 收到真实数据时置 0 | 表示该行的 `status` 系**系统推断**而非平台上报。面板、API 与移动端均会暴露该字段（`Listing.status_is_inferred`；面板上表现为状态旁的「推测」徽标），使用户始终可区分状态的来源 |
 | `status_hold_until` | `mark_listing_reserved_after_booking()` | 自动预订下单成功后，本地将状态保持为 `Reserved` 的截止时间，默认 120 分钟（`BOOKING_STATUS_HOLD_MINUTES`，对齐 Holland2Stay 的付款限时）。上游 feed 未必立即反映刚提交的订单，若不保持则会被下一轮的「可订」覆盖，并额外产生一条失实的重新上架通知。保持的条件为三项同时成立：状态为**推断的** `Reserved`、feed 上报「可订」、尚未到期；任一项不成立时一律以 feed 为准 |
+| `city_normalized` | `diff()` 写入；`_backfill_city_normalized()` 于每次启动刷新 | 归一后的城市名，供全部城市筛选使用。原始 `city` 保留并照常展示，见 §4.1 |
+
+### 4.1 `city` 在四个平台上不是同一种东西
+
+| Source | `city` 实际存放的内容 |
+|---|---|
+| Holland2Stay | 城市名 —— `Eindhoven` / `Rotterdam` / `Utrecht` |
+| Xior | **楼盘名** —— `Utrecht Willem Dreeslaan` / `Amsterdam Naritaweg` |
+| OurDomain | **楼盘名** —— `Amsterdam Diemen` / `Amsterdam South-East` |
+| OurCampus | **楼盘名** —— `OurCampus Amsterdam Diemen` |
+
+而 `ListingFilter.allowed_cities` 是精确匹配。两者相加的结果是：勾选「Utrecht」
+的用户既看不到、也收不到 Xior 位于 Utrecht 的房源。2026-08-05 核查生产库，14 个
+用户处于该状态，累计 56 条房源——数据已入库、平台已勾选、抓取一切正常，面板上
+不存在任何异常迹象。**该判据同时决定是否发送通知**，因此其影响不限于浏览页面。
+
+现由 `config.canonical_city()` 归一，`city_normalized` 落库，筛选走归一值，原始
+`city` 仅用于展示。三点需要注意：
+
+**归一表是显式的，不做前缀解析。** `Aachen Vaals Katzensprung` 所属城市为
+`Aachen Vaals` 而非 `Aachen`，按前缀推断必然出错；而推断错误会把房源归入一个并不
+存在的城市，其后果比不归一更严重。Xior 的 `KNOWN_XIOR_CITIES` 原本即含 `city` /
+`bldg` 两个字段，直接取用；OurDomain 与 OurCampus 补充了 `city`。未收录的值原样
+返回。
+
+**两侧都要归一。** 仅归一房源侧，则存量配置中保存着楼盘名的用户会立即失效；仅归
+一用户侧则等同于未修复。回填在每次启动时执行，而非仅在建列当次——楼盘归属写在
+config 中，调整之后存量行必须随之更新。
+
+**查询使用 `COALESCE(NULLIF(city_normalized,''), city)` 而非直接读取归一列。**
+若今后有写入路径遗漏该列，对应房源将从全部城市筛选中消失，且既不报错也不告警；
+退回原始 `city` 至少可按其字面值检索。索引相应建为表达式索引。
+
+Diemen 行政上为独立市镇，此处归入 Amsterdam：平台按 Amsterdam 对外销售，用户亦按
+Amsterdam 检索。调整归属只需修改 config 中的一处。
+
+> 一般规律：**同名字段在不同数据源里未必是同一个概念。** 合并多来源数据时，
+> 真正的风险不是字段缺失——缺失会立刻暴露——而是字段存在、类型相同、语义不同。
 
 常用的 `meta` 键：
 
@@ -858,6 +896,7 @@ IBAN / SWIFT，代填金融凭据是硬性限制。`draft_saved` **不等同于�
 | 日志反复出现 `CF 挑战 90s 内未解开` | 见 §5.3；多为 IP 信誉问题。系统已在每次重试前更换出口 IP，若三次均失败，说明代理池整体信誉不佳 |
 | 日志出现 `代理拒绝 CONNECT` 或 `连不上代理` | 见 §3.2。原因来自代理自身，与 Cloudflare 无关：402 为配额耗尽或欠费，407 为凭据错误，需登录代理商控制台处置 |
 | 全部 source 同时且持续失败 | 优先怀疑代理而非平台。四个平台同时变更策略的可能性远低于一条共用链路失效；执行下方的代理探测命令即可确认 |
+| 勾选了某城市却收不到该市某平台的房源 | §4.1。核对该平台在 `city` 列中存的是城市名还是楼盘名；新楼盘需先补进 `KNOWN_XIOR_CITIES` / `KNOWN_OURDOMAIN_CITIES` 的 `city` 字段，重启后回填即生效 |
 | 某平台持续返回 0 条 | 见 §5.7 与 §5.12；确认属确无房源还是上游查询失败 |
 | 容器内存接近上限 | 每个浏览器常驻约 200–400MB，多 source 部署需 2G |
 | 已出租的房源仍显示为「可订」 | §5.13。先确认该城市**本轮完整扫描成功**——未扫全则不参与收敛，房源会持续挂起。查 `/monitoring` 轮次表格中的 `(完整/任务)` |

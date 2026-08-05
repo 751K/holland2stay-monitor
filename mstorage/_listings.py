@@ -8,6 +8,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+from config import canonical_city
 from models import Listing, canonical_feature
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,15 @@ DEFAULT_OCCUPIED_HOURS = 2.0
 #: 因为索引没跟上才漏出来）。也就是说那不是付款窗口，是「预留 + 作废 + 重新
 #: 上架」的整个周期。这类回归会产生 ``Occupied → 可订``，而那是**真的重新可订
 #: 了**，本来就该通知。
+
+
+#: 城市筛选统一走这个表达式，而不是直接读 city_normalized。
+#:
+#: 归一值由写入路径填、启动时回填。但只要有哪条写入路径漏了它，那条房源就会
+#: 从所有城市筛选里**整个消失**——查不到、也不报错。退回原始 city 至少让它按
+#: 自己的字面值可查；对 H2S（占绝大多数）来说那本来就是正确的城市名。
+_CITY_EXPR = "COALESCE(NULLIF(city_normalized,''), city)"
+_CITY_EXPR_L = "COALESCE(NULLIF(l.city_normalized,''), l.city)"
 
 
 def _now_iso() -> str:
@@ -98,14 +108,14 @@ class ListingOps:
                         """INSERT INTO listings
                            (id, name, status, price_raw, available_from,
                             features, url, city, first_seen, last_seen, notified, last_status,
-                            source)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?)""",
+                            source, city_normalized)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
                         (
                             listing.id, listing.name, listing.status,
                             listing.price_raw, listing.available_from,
                             json.dumps(listing.features, ensure_ascii=False),
                             listing.url, listing.city, now, now, listing.status,
-                            listing.source,
+                            listing.source, canonical_city(listing.city or ""),
                         ),
                     )
                     new_listings.append(listing)
@@ -398,8 +408,15 @@ class ListingOps:
     # ── 基础查询 ────────────────────────────────────────────────────
 
     def get_distinct_cities(self) -> list[str]:
+        """筛选下拉用的城市列表——归一后的值。
+
+        用原始 city 的话，下拉里会同时出现「Amsterdam」和「Amsterdam Diemen」
+        「Amsterdam Naritaweg」，看着像三个城市，实际是一个城市加两个楼盘；
+        用户勾了其中一个就漏掉另外两个。
+        """
         rows = self._conn.execute(
-            "SELECT DISTINCT city FROM listings WHERE city != '' ORDER BY city"
+            f"SELECT DISTINCT {_CITY_EXPR} AS c FROM listings "
+            f"WHERE c != '' ORDER BY c"
         ).fetchall()
         return [r[0] for r in rows]
 
@@ -412,7 +429,8 @@ class ListingOps:
     def count_all(self, city: Optional[str] = None) -> int:
         if city:
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM listings WHERE city = ?", (city,)
+                f"SELECT COUNT(*) FROM listings WHERE {_CITY_EXPR} = ?",
+                (canonical_city(city),),
             ).fetchone()
         else:
             row = self._conn.execute("SELECT COUNT(*) FROM listings").fetchone()
@@ -449,8 +467,10 @@ class ListingOps:
             params.append(f"%{search}%")
             params.append(f"%Building: %{search}%")
         if city:
-            q += " AND city = ?"
-            params.append(city)
+            # 按归一后的城市筛：传进来的可能是城市名，也可能是存量配置里的
+            # 楼盘名，两边都过一遍 canonical_city 才能对上。
+            q += f" AND {_CITY_EXPR} = ?"
+            params.append(canonical_city(city))
         if source:
             q += " AND source = ?"
             params.append(source)
@@ -464,12 +484,12 @@ class ListingOps:
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         if city:
             rows = self._conn.execute(
-                """SELECT sc.*, l.name, l.url, l.price_raw, l.source
+                f"""SELECT sc.*, l.name, l.url, l.price_raw, l.source
                    FROM status_changes sc
                    JOIN listings l ON l.id = sc.listing_id
-                   WHERE sc.changed_at > ? AND l.city = ?
+                   WHERE sc.changed_at > ? AND {_CITY_EXPR_L} = ?
                    ORDER BY sc.changed_at DESC""",
-                (since, city),
+                (since, canonical_city(city)),
             ).fetchall()
         else:
             rows = self._conn.execute(
@@ -488,8 +508,9 @@ class ListingOps:
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         if city:
             row = self._conn.execute(
-                "SELECT COUNT(*) FROM listings WHERE first_seen > ? AND city = ?",
-                (since, city),
+                f"SELECT COUNT(*) FROM listings WHERE first_seen > ? "
+                f"AND {_CITY_EXPR} = ?",
+                (since, canonical_city(city)),
             ).fetchone()
         else:
             row = self._conn.execute(
@@ -503,10 +524,10 @@ class ListingOps:
         since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
         if city:
             row = self._conn.execute(
-                """SELECT COUNT(*) FROM status_changes sc
+                f"""SELECT COUNT(*) FROM status_changes sc
                    JOIN listings l ON l.id = sc.listing_id
-                   WHERE sc.changed_at > ? AND l.city = ?""",
-                (since, city),
+                   WHERE sc.changed_at > ? AND {_CITY_EXPR_L} = ?""",
+                (since, canonical_city(city)),
             ).fetchone()
         else:
             row = self._conn.execute(
@@ -532,9 +553,9 @@ class ListingOps:
         """Return {status_lower: count} for the dashboard filter chips."""
         if city:
             rows = self._conn.execute(
-                "SELECT status, COUNT(*) FROM listings WHERE city = ? "
-                "GROUP BY status",
-                (city,),
+                f"SELECT status, COUNT(*) FROM listings WHERE {_CITY_EXPR} = ? "
+                f"GROUP BY status",
+                (canonical_city(city),),
             ).fetchall()
         else:
             rows = self._conn.execute(

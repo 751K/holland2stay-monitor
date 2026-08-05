@@ -484,14 +484,21 @@ KNOWN_CITIES: list[dict] = [
     {"name": "Zoetermeer",              "id": "6088"},
 ]
 
+# ``city`` 是该地点所属的城市，与 ``name``（平台自己的楼盘叫法）分开。
+# 两者混用过：`city` 列里 H2S 存的是真城市，Xior / OurDomain / OurCampus 存的
+# 是楼盘名，而筛选是精确匹配——勾「Amsterdam」收不到「Amsterdam Diemen」，
+# 2026-08-05 查出线上 14 个用户因此长期漏收通知。见 canonical_city()。
+#
+# Diemen 行政上是独立市镇，这里仍归 Amsterdam：平台按 Amsterdam 卖，用户也
+# 是按 Amsterdam 找房。改归属只需改这一处。
 KNOWN_OURCAMPUS_CITIES: list[dict] = [
-    {"name": "OurCampus Amsterdam Diemen", "key": "diemen"},
+    {"name": "OurCampus Amsterdam Diemen", "key": "diemen", "city": "Amsterdam"},
 ]
 
 
 KNOWN_OURDOMAIN_CITIES: list[dict] = [
-    {"name": "Amsterdam Diemen",    "key": "diemen"},
-    {"name": "Amsterdam South-East","key": "south-east"},
+    {"name": "Amsterdam Diemen",    "key": "diemen",     "city": "Amsterdam"},
+    {"name": "Amsterdam South-East","key": "south-east", "city": "Amsterdam"},
 ]
 
 
@@ -562,6 +569,55 @@ KNOWN_XIOR_CITIES: list[dict] = [
     {"city": "Wageningen",     "bldg": "Costerweg",             "key": "p0196465"},
     {"city": "Wageningen",     "bldg": "Duivendaal",            "key": "p0196466"},
 ]
+
+
+def _build_city_alias_map() -> dict[str, str]:
+    """楼盘名 → 所属城市。key 一律小写。
+
+    只收录**已知**地点，不做任何猜测式解析。用前缀去猜城市看着更省事，但
+    「Aachen Vaals Katzensprung」的城市是「Aachen Vaals」而不是「Aachen」，
+    猜一次错一次；猜错的后果是把房源归到不存在的城市，比不归一还糟。
+    """
+    alias: dict[str, str] = {}
+    for c in KNOWN_XIOR_CITIES:
+        city = (c.get("city") or "").strip()
+        bldg = (c.get("bldg") or "").strip()
+        if not city:
+            continue
+        display = c.get("name") or f"{city} {bldg}".strip()
+        alias[display.lower()] = city
+    for group in (KNOWN_OURDOMAIN_CITIES, KNOWN_OURCAMPUS_CITIES):
+        for c in group:
+            city = (c.get("city") or "").strip()
+            if city and c.get("name"):
+                alias[c["name"].strip().lower()] = city
+    return alias
+
+
+_CITY_ALIAS_MAP = _build_city_alias_map()
+
+
+def canonical_city(value: str) -> str:
+    """把 `city` 字段归一到真正的城市名。
+
+    存在的理由：`city` 这一列在四个平台上存的不是同一种东西——H2S 存真城市
+    （Eindhoven），Xior / OurDomain / OurCampus 存楼盘名（Utrecht Willem
+    Dreeslaan、Amsterdam Diemen）。而 `allowed_cities` 是精确匹配，于是勾了
+    「Utrecht」的用户永远收不到 Xior 在 Utrecht 那 25 套房的通知，面板上也
+    看不出任何异常。
+
+    未收录的值原样返回：宁可维持现状，也不要猜出一个错误的城市。
+    """
+    if not value:
+        return ""
+    return _CITY_ALIAS_MAP.get(value.strip().lower(), value.strip())
+
+
+def known_city_names() -> list[str]:
+    """所有平台归一之后的城市全集，供筛选下拉使用。"""
+    names = {c["name"] for c in KNOWN_CITIES}
+    names.update(_CITY_ALIAS_MAP.values())
+    return sorted(names)
 
 
 @dataclass
@@ -816,8 +872,12 @@ class ListingFilter:
                 return False
 
         if self.allowed_cities:
-            city = listing.city or ""
-            if not any(a.lower() == city.lower() for a in self.allowed_cities):
+            # 两边都先归一。房源侧的 city 可能是楼盘名（Xior / OurDomain /
+            # OurCampus），用户侧的存量配置里也可能存着楼盘名——归一之后
+            # 「Utrecht」与「Utrecht Willem Dreeslaan」才落在同一个值上。
+            # 只归一一侧仍然会漏，这也是本处原先的写法。
+            city = canonical_city(listing.city or "").lower()
+            if not any(canonical_city(a).lower() == city for a in self.allowed_cities):
                 return False
 
         if self.allowed_sources:

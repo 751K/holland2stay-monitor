@@ -270,8 +270,17 @@ def query_listing_rows(
     rows = apply_user_filter(rows, user)
 
     if len(cities) > 1:
-        city_set = {c.lower() for c in cities}
-        rows = [r for r in rows if (r.get("city") or "").lower() in city_set]
+        # 和单选那条路（SQL 里的 city_normalized）保持同一套判据。
+        # 用原始 city 比会让多选和单选给出不同结果——单选「Utrecht」命中 Xior
+        # 的楼盘，多选「Utrecht + Rotterdam」反而漏掉。
+        from config import canonical_city
+
+        city_set = {canonical_city(c).lower() for c in cities}
+        rows = [
+            r for r in rows
+            if (r.get("city_normalized") or canonical_city(r.get("city") or "")).lower()
+            in city_set
+        ]
     if len(sources) > 1:
         source_set = {s.lower() for s in sources}
         rows = [r for r in rows if (r.get("source") or "holland2stay").lower() in source_set]

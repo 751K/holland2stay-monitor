@@ -28,7 +28,7 @@ from flask import (
 
 import sys
 
-from config import KNOWN_SOURCES, source_display_name, APPLICANT_GENDERS, APPLICANT_TITLES, KNOWN_CITIES
+from config import KNOWN_SOURCES, source_display_name, APPLICANT_GENDERS, APPLICANT_TITLES, known_city_names
 from users import get_user, load_users, update_users
 
 from app.auth import (
@@ -250,7 +250,10 @@ def user_new() -> Any:
             _flash_verification_email(user)
         return redirect(url_for("users_list"))
     # GET：空白表单
-    city_names = sorted(c["name"] for c in KNOWN_CITIES)
+    # 全平台归一后的城市并集。只用 KNOWN_CITIES 会漏掉 Xior 独有的
+    # Wageningen / Venlo / Breda / Leeuwarden——用户既选不到，一旦设了
+    # 城市筛选，这些楼盘的房源就被整体挡掉。
+    city_names = known_city_names()
     opts = _get_all_filter_options()
     return render_template(
         "user_form.html", user=None, id_doc=None,
@@ -350,7 +353,10 @@ def user_edit(user_id: str) -> Any:
             flash(f"✅ 用户「{updated.name}」已保存", "success")
         return redirect(url_for("user_edit", user_id=user_id))
 
-    city_names = sorted(c["name"] for c in KNOWN_CITIES)
+    # 全平台归一后的城市并集。只用 KNOWN_CITIES 会漏掉 Xior 独有的
+    # Wageningen / Venlo / Breda / Leeuwarden——用户既选不到，一旦设了
+    # 城市筛选，这些楼盘的房源就被整体挡掉。
+    city_names = known_city_names()
     opts = _get_all_filter_options()
     return render_template(
         "user_form.html", user=user,

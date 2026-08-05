@@ -366,6 +366,54 @@ class StorageBase:
             "TEXT NOT NULL DEFAULT 'en'",
         )
 
+        # listings.city_normalized：归一后的城市名。
+        #
+        # `city` 这一列在四个平台上存的不是同一种东西——H2S 存真城市
+        # （Eindhoven），Xior / OurDomain / OurCampus 存楼盘名（Utrecht Willem
+        # Dreeslaan、Amsterdam Diemen）。而筛选是精确匹配，勾「Utrecht」就收不到
+        # Xior 在 Utrecht 的那些房。原值仍然保留并照常展示，筛选走这一列。
+        self._add_column_if_missing(
+            "listings", "city_normalized", "TEXT NOT NULL DEFAULT ''",
+        )
+        self._backfill_city_normalized()
+        with self._conn:
+            # 表达式索引，与查询里的 _CITY_EXPR 逐字一致——写成
+            # ``ON listings(city_normalized)`` 的话，带 COALESCE 的查询用不上它。
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_listings_city_effective "
+                "ON listings(COALESCE(NULLIF(city_normalized,''), city))"
+            )
+
+    def _backfill_city_normalized(self) -> None:
+        """按当前的归一表刷新 city_normalized。
+
+        每次启动都跑，而不是只在建列时跑一次：楼盘归属写在 config 的表里，
+        新增楼盘或改了归属之后，存量行必须跟着走，否则老房源会一直挂在旧城市
+        下——而这种错在页面上看不出来。
+
+        逐个 distinct city 处理（实际只有几十个值），且只更新与目标值不同的行，
+        因此重复执行不会产生写入。
+        """
+        from config import canonical_city
+
+        try:
+            cities = [
+                r[0] for r in self._conn.execute(
+                    "SELECT DISTINCT city FROM listings"
+                ).fetchall()
+            ]
+        except sqlite3.OperationalError:
+            return  # 表还不存在（首次建库时列已带默认值，无需回填）
+
+        with self._conn:
+            for raw in cities:
+                want = canonical_city(raw or "")
+                self._conn.execute(
+                    "UPDATE listings SET city_normalized=? "
+                    "WHERE city IS ? AND city_normalized IS NOT ?",
+                    (want, raw, want),
+                )
+
     def _add_column_if_missing(
         self, table: str, column: str, decl: str,
     ) -> bool:
