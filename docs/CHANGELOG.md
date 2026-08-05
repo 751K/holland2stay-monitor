@@ -1,5 +1,48 @@
 # Changelog
 
+## v1.13.3 (2026-08-05)
+
+### 代理故障被报成 Cloudflare 故障
+
+代理账户欠费停服，`CONNECT` 一律返回 `402 Payment Required`。Chromium 把它压成
+`ERR_TUNNEL_CONNECTION_FAILED`，日志随之写出六百多行：
+
+```
+Holland2Stay 主站加载失败（CF 挑战可能未通过）: net::ERR_TUNNEL_CONNECTION_FAILED
+```
+
+这句话与实际成因毫无关系。同一时段走 curl_cffi 的 OurDomain 日志里明写着
+`curl: (56) CONNECT tunnel failed, response 402`——故障是同一个，可诊断性相差悬殊，
+差别只在传输层有没有把上游给的信息透传出来。真实状态码最终是手工发了一次
+`CONNECT` 才拿到的。
+
+新增 `config.probe_proxy()`：导航失败命中代理层错误码时，向**该浏览器实际在用的
+那条线路**发一次 `CONNECT`，取回代理自己的状态码再决定怎么描述。402 / 403 / 407 /
+429 / 502 / 503 各自附上含义。凭据只用于构造 `Proxy-Authorization` 头，不进返回值
+也不进日志。
+
+探测必须用浏览器实际在用的那条 URL——`rotating_proxy` 的 profile 重新调
+`get_proxy_url()` 会拿到另一个 session，探到的是别的出口，结论无效。
+
+排障入口新增一条命令，下次不必再手写 socket。
+
+### 被 CF 挡住时不再原地重试同一个 IP
+
+v1.13.0 为两个浏览器 profile 开了 `rotating_proxy`，但**没有任何失败路径去触发
+它**：`ensure_initialized()` 的三次重试在同一个浏览器上原地重新导航，`fetch()` 的
+403 分支也只是把 `_initialized` 置 False。换 IP 的能力有了，触发它的路径没有——
+逃生口等同于不存在。
+
+2026-08-03 那次事故的完整链条正是如此：IP 被标记 → 三次 90s 挑战全超时 → 熔断
+30 分钟。三次尝试跑在同一个出口上，等于把同一次失败重复了三遍，唯一的效果是多烧
+四分半钟。
+
+新增 `_rebuild_browser()`，挑战超时、clearance 超时、非 clearance 类 403 都先关掉
+浏览器重建再重跑挑战。两类 403 处置相反：命中 `clearance_pending_markers` 的是瞬时
+状态，重新导航就好，换 IP 反而丢掉已有会话；其余才是这个出口被挡了。
+
+固定 session 的 profile 不重建——重建后拿到的是同一个出口，白付一次冷启动。
+
 ## v1.13.2 (2026-08-04)
 
 ### 新建用户时填的收件邮箱，永远收不到验证邮件
