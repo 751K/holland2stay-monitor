@@ -645,10 +645,14 @@ _SOURCE_FILTER_DIMS: dict[str, frozenset] = {
         "floor", "occupancy", "type", "neighborhood",
         "contract", "tenant", "offer", "finishing", "energy",
     },
-    "ourdomain": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type"},
-    # OurCampus 复用 OurDomain 的解析器，能提供的维度完全相同
+    # finishing 不是抓来的，是 SOURCE_ASSUMED_FEATURES 声明的整栋楼事实。
+    # 登记进来之后该维度不再走 fail-open：勾 Unfurnished 时这些房源会被正确排除，
+    # 而此前 fail-open 会把它们一并放行——它们恰恰不是无家具的。
+    "ourdomain": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type", "finishing"},
+    # OurCampus 复用 OurDomain 的解析器，抓得到的维度完全相同；但它至今没返回过
+    # 任何单元，装修档位无从核实，所以不登记 finishing。
     "ourcampus": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type"},
-    "xior": _UNIVERSAL_FILTER_DIMS,
+    "xior": _UNIVERSAL_FILTER_DIMS | {"finishing"},
 }
 
 
@@ -729,6 +733,31 @@ def dim_scope_badge(dim: str, lang: str = "zh") -> str:
         name = source_display_name(supported[0])
         return f"仅 {name}" if lang == "zh" else f"{name} only"
     return f"仅 {len(supported)} 个平台" if lang == "zh" else f"{len(supported)} platforms"
+
+
+#: 平台整体成立、但 feed 里不上报的属性。
+#:
+#: Xior 与 OurDomain 的房源全部带家具（床、桌、椅、衣柜），也就是 H2S 口径下的
+#: ``Furnished``；它们的 feed 只是没有这个字段。此前靠 fail-open 兜底——「平台不
+#: 提供该维度就整体放行」——那条规则不区分用户勾的是哪一档，于是勾
+#: ``Unfurnished`` 时这些房源也会出现，而它们恰恰不是无家具的。
+#:
+#: 把事实直接写出来，fail-open 对该维度就不再需要，两个方向都对。
+#:
+#: **这是运营方给的断言，不是抓来的数据。** 平台改了配置这里不会自动跟着变，
+#: 因此只登记「整栋楼统一、不随房源变化」的属性；随房源变化的一律要抓。
+#:
+#: OurCampus 不在其中：它至今没有返回过任何可订单元，装修档位无从核实（见
+#: ARCHITECTURE §9）。宁可让它继续走 fail-open，也不要登记一个没验证过的事实。
+SOURCE_ASSUMED_FEATURES: dict[str, dict[str, str]] = {
+    "xior": {"Finishing": "Furnished"},
+    "ourdomain": {"Finishing": "Furnished"},
+}
+
+
+def assumed_features(source: str) -> list[str]:
+    """该平台恒定成立的 feature 条目，形如 ``["Finishing: Furnished"]``。"""
+    return [f"{k}: {v}" for k, v in SOURCE_ASSUMED_FEATURES.get(source, {}).items()]
 
 
 def source_supports_dim(source: Optional[str], dim: str) -> bool:

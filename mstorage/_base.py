@@ -376,6 +376,7 @@ class StorageBase:
             "listings", "city_normalized", "TEXT NOT NULL DEFAULT ''",
         )
         self._backfill_city_normalized()
+        self._backfill_assumed_features()
         with self._conn:
             # 表达式索引，与查询里的 _CITY_EXPR 逐字一致——写成
             # ``ON listings(city_normalized)`` 的话，带 COALESCE 的查询用不上它。
@@ -413,6 +414,57 @@ class StorageBase:
                     "WHERE city IS ? AND city_normalized IS NOT ?",
                     (want, raw, want),
                 )
+
+    def _backfill_assumed_features(self) -> None:
+        """给存量房源补上 ``SOURCE_ASSUMED_FEATURES`` 声明的属性。
+
+        新抓到的房源由 scraper 带上，但库里已有的不会——而其中绝大多数是
+        ``Occupied`` 状态、不会再被 feed 返回，靠 ``diff()`` 的 UPDATE 永远等不到。
+        它们仍会出现在浏览页里，缺了这个字段就筛不出来。
+
+        每次启动都跑：这张表描述的是平台事实，改了之后存量行必须跟着走。
+        只写回真正缺该类目的行，重复执行不产生写入。
+        """
+        from config import SOURCE_ASSUMED_FEATURES
+
+        if not SOURCE_ASSUMED_FEATURES:
+            return
+        try:
+            rows = self._conn.execute(
+                "SELECT id, source, features FROM listings WHERE source IN ("
+                + ",".join("?" * len(SOURCE_ASSUMED_FEATURES)) + ")",
+                list(SOURCE_ASSUMED_FEATURES),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return
+
+        import json
+
+        updates = []
+        for row in rows:
+            try:
+                feats = json.loads(row["features"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(feats, list):
+                continue
+            changed = False
+            for cat, val in SOURCE_ASSUMED_FEATURES[row["source"]].items():
+                prefix = f"{cat}: "
+                # 已经有该类目就不动——上游哪天真的开始上报了，抓到的值优先。
+                if any(isinstance(f, str) and f.startswith(prefix) for f in feats):
+                    continue
+                feats.append(f"{prefix}{val}")
+                changed = True
+            if changed:
+                updates.append((json.dumps(feats, ensure_ascii=False), row["id"]))
+
+        if updates:
+            with self._conn:
+                self._conn.executemany(
+                    "UPDATE listings SET features=? WHERE id=?", updates
+                )
+            logger.info("已为 %d 条存量房源补上平台声明属性", len(updates))
 
     def _add_column_if_missing(
         self, table: str, column: str, decl: str,

@@ -22,8 +22,18 @@ from models import Listing
 
 class TestSupportMatrix:
     def test_h2s_only_dimensions(self):
-        for dim in ("contract", "tenant", "offer", "finishing", "energy", "neighborhood"):
+        for dim in ("contract", "tenant", "offer", "energy", "neighborhood"):
             assert sources_supporting_dim(dim) == ["holland2stay"], dim
+
+    def test_finishing_is_no_longer_h2s_only(self):
+        """Xior 与 OurDomain 的装修档位由 SOURCE_ASSUMED_FEATURES 声明。
+
+        声明之后能力表必须跟着登记，否则该维度仍走 fail-open——勾 Unfurnished
+        时这些房源照样会出现，而它们恰恰不是无家具的。
+        """
+        assert sources_supporting_dim("finishing") == [
+            "holland2stay", "ourdomain", "xior",
+        ]
 
     def test_xior_lacks_the_rentcafe_dimensions(self):
         for dim in ("floor", "occupancy", "type"):
@@ -85,11 +95,12 @@ class TestFailOpenBehaviourIsWhatTheNoteSays:
     """提示写的和代码做的必须是一回事。"""
 
     def test_unsupported_platform_passes_through(self):
-        f = ListingFilter(allowed_finishing=["Furnished"])
-        assert f.passes(_listing("xior")), "Xior 不提供装修属性，应放行"
+        # 装修不能再拿来举例——Xior 现在有声明值了。合同仍是 H2S 独有。
+        f = ListingFilter(allowed_contract=["Indefinite"])
+        assert f.passes(_listing("xior")), "Xior 不提供合同类型，应放行"
 
     def test_supported_platform_still_filtered(self):
-        f = ListingFilter(allowed_finishing=["Furnished"])
+        f = ListingFilter(allowed_finishing=["Furnished"])  # H2S 自己上报该属性
         assert f.passes(_listing("holland2stay", Finishing="Furnished"))
         # Unfurnished 是反义词。裸子串匹配会把它一起收走
         # （"Furnished" in "Unfurnished" 为真），词边界匹配才排得掉。

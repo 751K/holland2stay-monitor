@@ -38,8 +38,8 @@ def seeded(admin_client):
 class TestListingsPage:
     def test_h2s_only_dimensions_carry_a_badge(self, admin_client):
         html = admin_client.get("/listings").get_data(as_text=True)
-        # 合同 / 租客 / 能耗 / 装修四个 H2S 专有维度
-        assert html.count("仅 Holland2Stay") >= 4, "H2S 专有维度没有徽标"
+        # 合同 / 租客 / 能耗 三个 H2S 专有维度（装修自 v1.14.2 起三平台都有）
+        assert html.count("仅 Holland2Stay") >= 3, "H2S 专有维度没有徽标"
         assert "仅 3 个平台" in html, "部分支持的维度没有徽标"
 
     def test_badge_carries_the_full_note_as_tooltip(self, admin_client):
@@ -86,7 +86,7 @@ class TestUserForm:
 
     def test_fields_carry_badges(self, admin_client):
         html = admin_client.get("/users/new").get_data(as_text=True)
-        assert html.count("仅 Holland2Stay") >= 5
+        assert html.count("仅 Holland2Stay") >= 4
         assert "仅 3 个平台" in html
 
     def test_no_per_field_sentences(self, admin_client):

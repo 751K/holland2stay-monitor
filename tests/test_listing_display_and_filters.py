@@ -21,6 +21,7 @@ from app.services.listing_service import (
     normalize_listing_row,
     query_listing_rows,
 )
+from config import assumed_features
 from models import Listing
 from mstorage import Storage
 
@@ -113,12 +114,13 @@ class TestFinishingIsMultiSelect:
 class TestBrowsePageAgreesWithNotifications:
     """平台不提供某维度时，浏览页也要 fail-open。
 
-    此前浏览页没有这一层：一条没有 Finishing 字段的房源在那里必然不匹配，于是勾
-    「装修 = Furnished」把 Xior 与 OurDomain 的 83 条整个排除，而通知侧放行。
-    同一个条件两个答案，且相差恒定 83——正好是没有该字段的房源数。
+    此前浏览页没有这一层：一条没有该字段的房源在那里必然不匹配，而通知侧放行。
+    同一个条件两个答案，线上实测差值恒定 83——正好是当时没有 Finishing 字段的
+    房源数（Xior 66 + OurDomain 17）。
 
-    放行是对的：这两家的房源实际都带家具，只是 feed 里不上报该属性；按「没这个
-    字段就不匹配」处理，等于因为上游少给一个字段就把整个平台从结果里抹掉。
+    装修那一例后来换了更好的解法：它们的档位由 SOURCE_ASSUMED_FEATURES 直接声明，
+    不再依赖 fail-open（见 test_assumed_features.py）。fail-open 仍然管着它们真正
+    没有的维度——合同 / 租客 / 优惠 / 能耗 / 片区。
     """
 
     @pytest.fixture
@@ -133,26 +135,39 @@ class TestBrowsePageAgreesWithNotifications:
             Listing(id="H_unfurn", name="h", status="Available to book",
                     price_raw="1000", available_from="", url="", city="Eindhoven",
                     source="holland2stay", features=["Finishing: Unfurnished"]),
-            # Xior / OurDomain 的 feed 里没有 Finishing
+            # Xior / OurDomain 的 feed 里没有 Finishing，装修档位由
+            # SOURCE_ASSUMED_FEATURES 声明，scraper 组装 Listing 时带上——
+            # 这里照同一条路构造，否则测的是生产中不存在的形态。
+            # 合同 / 租客 / 能耗仍是它们真正没有的维度。
             Listing(id="X1", name="x", status="Available to book",
                     price_raw="1000", available_from="", url="", city="Utrecht",
-                    source="xior", features=["Unit: 1.S127"]),
+                    source="xior",
+                    features=["Unit: 1.S127", *assumed_features("xior")]),
             Listing(id="O1", name="o", status="Available to book",
                     price_raw="1000", available_from="", url="", city="Amsterdam",
-                    source="ourdomain", features=["Type: Studio"]),
+                    source="ourdomain",
+                    features=["Type: Studio", *assumed_features("ourdomain")]),
         ])
         st.close()
         monkeypatch.setattr(app_db, "DB_PATH", tmp_path / "listings.db")
         yield
 
     def test_unsupported_platforms_pass_through(self, db):
-        ids = {r["id"] for r in query_listing_rows(finishing=["Furnished"])}
-        assert ids == {"H_furn", "X1", "O1"}, \
+        # 合同是 H2S 独有；装修不能再拿来举例——Xior / OurDomain 现在有声明值。
+        ids = {r["id"] for r in query_listing_rows(contract="Indefinite")}
+        assert {"X1", "O1"} <= ids, \
             "Xior / OurDomain 因为 feed 里没这个字段被整个排除了"
 
     def test_supported_platform_is_still_filtered(self, db):
         ids = {r["id"] for r in query_listing_rows(finishing=["Furnished"])}
         assert "H_unfurn" not in ids, "支持该维度的平台不该放宽"
+
+    def test_declared_platforms_land_in_the_right_tier(self, db):
+        """Xior / OurDomain 有声明值，勾 Unfurnished 时不该出现。"""
+        furn = {r["id"] for r in query_listing_rows(finishing=["Furnished"])}
+        unfurn = {r["id"] for r in query_listing_rows(finishing=["Unfurnished"])}
+        assert {"X1", "O1"} <= furn
+        assert not ({"X1", "O1"} & unfurn), "声明是 Furnished，却出现在无家具里"
 
     def test_matches_the_notification_path(self, db):
         """两条路必须给出同一个集合，这是本次修复的全部意义。"""

@@ -24,7 +24,7 @@ from typing import Optional
 
 import curl_cffi.requests as req
 
-from config import get_impersonate, get_proxy_url
+from config import assumed_features, get_impersonate, get_proxy_url
 from models import Listing
 
 from .base import (
@@ -868,6 +868,9 @@ def _to_listing(
     features = [
         f"Unit: {apt}",
         f"Building: {city_display}",
+        # 见 config.SOURCE_ASSUMED_FEATURES。OurCampus 复用本解析器，但它的
+        # 装修档位没核实过，所以按 source 取而不是写死。
+        *assumed_features(source),
     ]
     if street_address:
         # 真实街道地址（建筑级，所有 unit 共享）。供 geocode pipeline 用

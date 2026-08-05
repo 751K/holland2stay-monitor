@@ -47,7 +47,7 @@ from typing import Optional
 import curl_cffi.requests as req
 
 from browser_fetcher import XIOR_PROFILE, BrowserFetcher
-from config import get_impersonate, get_proxy_url
+from config import assumed_features, get_impersonate, get_proxy_url
 from models import Listing
 
 from .base import (
@@ -620,6 +620,9 @@ def _to_listing(
     features = [
         f"Unit: {apt_name}",
         f"Building: {display}",
+        # 整栋楼恒定成立、feed 里不上报的属性（装修档位）。声明在 config，
+        # 不散在各个 scraper 里——见 SOURCE_ASSUMED_FEATURES。
+        *assumed_features("xior"),
     ]
     if fp_name:
         features.append(f"Floorplan: {fp_name}")
