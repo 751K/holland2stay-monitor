@@ -1,5 +1,86 @@
 # Changelog
 
+## v1.13.4 (2026-08-05)
+
+本版只做一件事：把代理流量降下来。代理按流量计费，08-04 全天 985 MB / 天，
+折合 29.6 GB / 月。把这一天的记录逐条拆开之后，钱花在哪一目了然：
+
+| | 流量 | 占比 |
+|---|---:|---:|
+| Cloudflare 挑战载荷 | 558 MB | 56.6% |
+| 业务数据（房源） | 330 MB | 33.5% |
+| 页面静态资源 + 第三方脚本 | 97 MB | 9.8% |
+| 通知出站 | 0.8 MB | 0.1% |
+
+也就是说**一多半的钱花在过挑战上，不是花在房源数据上**。下面两项分别处理后两类
+与第一类。业务数据那 330 MB 是真正要买的东西，不动。
+
+### 浏览器在下载图片、字体和统计脚本，而这些都要按流量付钱
+
+代理按流量计费。08-04 全天代理侧记录 985 MB，其中约 97 MB 是页面自己拉的第三方
+资源——`media.holland2stay.com` 的房源图片 32 MB、`googletagmanager` 24 MB、
+`fonts.gstatic` 15 MB、fontawesome 9 MB，还有 cookieyes、trustpilot、
+google-analytics、ahrefs、chatbase、komoot。抓取需要的只有 DOM 和 cf_clearance。
+
+`browser_fetcher` 之前没有任何 `page.route()`。现按两条规则拦：资源类型命中
+`image`/`media`/`font`，或域名落在第三方清单里。按实测流量回放，**拦下 92 MB/天,
+29.6 → 26.8 GB/月**——这是下限，Xior 与 H2S 主站那 200 MB 里的同域图片也会被拦掉，
+但代理按隧道记账，回放看不出来。
+
+风险全在拦过头，所以三类始终放行：
+
+- `challenges.cloudflare.com` / `cloudflareinsights.com` 及其子域——挑战靠它们跑完；
+- `stylesheet` 与 `script`——CF 的行为检测会读渲染结果，且两类合计不到 5 MB；
+- `cdn.jsdelivr.net`——站点自己的 bundle 也走它，从域名分不出来。
+
+域名匹配按点边界，否则 `nottrustpilot.com` 会被误判。反过来
+`cdn-cookieyes.com` 是**独立注册域**而非 `cookieyes.com` 的子域，点边界匹配吃不到，
+必须单列——这条是写测试时才发现的，而它恰好是那家三个域里最大的一个。
+
+判定出异常一律放行：`route` 处理器抛出去会让请求悬到超时，为省流量把页面拖垮
+不划算。`page.route()` 装不上也只告警。
+
+`BROWSER_BLOCK_RESOURCES=0` 整体关闭——拦截改了加载行为，万一 CF 起疑，得有一条
+不重新发版就能退回原状的路。每次会话结束记一行拦截计数，用来确认规则还在生效。
+
+### 每次重建浏览器都重下一遍 Cloudflare 挑战载荷
+
+代理流量里最大的一项：558 MB / 天，占 56.6%，单个隧道最大 11.5 MB。成因是每次
+重建浏览器都是全新的空缓存，Turnstile 的 JS 和 WASM 一个字节都留不下。Xior 每
+15 分钟重建一次，是主要来源。
+
+**只给 `--disk-cache-dir` 一点用没有**——实测缓存目录里只留下几个索引文件，字节数
+分毫未降。原因是 `launch()` + `new_page()` 走的是 incognito context，HTTP 缓存只在
+内存里，浏览器一关即弃。改用 `launch_persistent_context()` 才行。
+
+本地实测（H2S 首页，两轮同一 profile）：
+
+```
+冷 profile   3.93 MB    3 个请求命中缓存    页面正常
+暖 profile   0.25 MB  143 个请求命中缓存    页面正常
+```
+
+第三轮曾失败，单独复测确认是 90 秒内连打三次被限流，与 profile 无关：暖 profile
+间隔 100 秒再打一次，0.25 MB，页面正常。
+
+cookie 每次启动都清。clearance 绑出口 IP，而 `rotating_proxy` 意味着下次开浏览器
+多半换了 IP，带着旧 `cf_clearance` 去只会被当作可疑重新挑战。要复用的只是磁盘缓存
+里那些静态资源。
+
+一个 profile 目录同一时刻只能被一个 Chromium 打开，而 H2S 的 scraper 和 booker
+共用一个 source、跑在不同线程上。按槽位加 `flock`，抢不到就退回临时 profile。锁必须
+持有到浏览器关掉之后——提前放锁，别人拿到目录时 Chromium 还没退出。
+
+profile 在 `data/browser_profiles/`，每槽位缓存上限 128MB。删掉不影响正确性，只损失
+一次冷启动。`BROWSER_PERSIST_PROFILE=0` 整体关闭。
+
+### 测试真的拉起了浏览器
+
+`tests/test_browser_fetcher.py` 的 `_patch_launch` 只 mock 了 `launch`。改用
+`launch_persistent_context` 之后，那条路径没被拦住，测试跑一遍就在 `data/` 下写出
+了 12MB 的真实 profile。两个入口现在都 mock，并新增 autouse fixture 把 profile 根
+目录指向临时目录。
+
 ## v1.13.3 (2026-08-05)
 
 ### 代理故障被报成 Cloudflare 故障
