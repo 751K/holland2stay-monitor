@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.13.6 (2026-08-05)
+
+### 每次部署都会让持久化 profile 失效
+
+v1.13.4 上线当天就复现了。容器 `force-recreate` 时旧 Chromium 是被杀掉的，
+它的单实例锁留在了 bind mount 里：
+
+```
+SingletonLock   -> 7c9092fabed6-49
+SingletonSocket -> /tmp/org.chromium.Chromium.CXzoae/SingletonSocket
+SingletonCookie -> 12798656688512932333
+```
+
+内容是 `<容器 hostname>-<pid>` 符号链接。新容器 hostname 变了、pid 也不存在，
+Chromium 判定该 profile 正被别的实例占用，启动即退出，Playwright 报
+`Target page, context or browser has been closed`。
+
+**而失败是静默降级的**——日志里只有一行「退回临时 profile」，抓取照常，流量悄悄
+涨回去。也就是说 v1.13.4 省下的那 93% 只在首次部署到下一次部署之间有效。
+
+launch 之前清掉这三个文件即可。删掉是安全的：同一时刻只有一个实例在用这个目录，
+这一点已由槽位 flock 保证，Chromium 这层锁对我们是多余的。
+
+判断必须用 `lstat()` 而不是 `exists()`——这些是悬空符号链接，`exists()` 会跟随
+链接返回 False，于是一个都删不掉，看起来清理过了实际什么也没做。
+
 ## v1.13.5 (2026-08-05)
 
 ### `city` 这一列在四个平台上存的不是同一种东西
