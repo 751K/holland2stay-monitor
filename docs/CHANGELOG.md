@@ -1,5 +1,49 @@
 # Changelog
 
+## v1.13.5 (2026-08-05)
+
+### `city` 这一列在四个平台上存的不是同一种东西
+
+H2S 存真城市（`Eindhoven`），Xior / OurDomain / OurCampus 存楼盘名
+（`Utrecht Willem Dreeslaan`、`Amsterdam Diemen`）。而筛选是精确匹配，于是勾了
+「Utrecht」的用户永远看不到 Xior 在 Utrecht 的那 25 套房。
+
+**这条判据同时管着通知。** 查线上：**14 个用户**因此长期漏收，累计 56 条房源
+——数据在库里、平台也勾了、抓取一切正常，面板上看不出任何异常。
+
+```
+yjn20040203@outlook.com   勾了 Utrecht     漏 Utrecht Willem Dreeslaan (xior)  25 条
+Yixin                     勾了 Amsterdam   漏 Amsterdam Diemen (ourdomain)     16 条
+13714314089@163.com       勾了 Eindhoven   漏 Eindhoven Zernikestraat (xior)    1 条
+```
+
+加一层归一：`listings.city_normalized` 存归一后的城市，原始 `city` 照常保留并
+展示，所有城市筛选走归一列。归一表是**显式的**，不做前缀解析——
+`Aachen Vaals Katzensprung` 的城市是 `Aachen Vaals` 不是 `Aachen`，猜一次错一次，
+而猜错会把房源归到一个不存在的城市，比不归一还糟。Xior 的 `KNOWN_XIOR_CITIES`
+本来就有 `city` / `bldg` 两个字段，直接用；OurDomain / OurCampus 补了 `city`。
+
+Diemen 行政上是独立市镇，这里归 Amsterdam：平台按 Amsterdam 卖，用户也是按
+Amsterdam 找房。改归属只需改 config 里那一处。
+
+**两侧都归一。** 只归一房源侧的话，存量配置里存着楼盘名的用户会立刻失效；只归一
+用户侧则等于没修。回填每次启动都跑，不是只在建列那天跑一次——改了楼盘归属之后，
+存量行必须跟着走。
+
+查询用 `COALESCE(NULLIF(city_normalized,''), city)` 而不是直接读归一列：只要将来
+有哪条写入路径漏了它，那条房源就会从所有城市筛选里查不到，不报错也不告警。退回
+原始 `city` 至少让它按字面值可查。索引相应改成表达式索引。
+
+顺带修好城市下拉：
+
+- 用户筛选那个下拉原先只用 `KNOWN_CITIES`（H2S 的 26 个），Xior 独有的
+  Wageningen / Venlo / Breda / Leeuwarden 根本不在选项里——用户既选不到，一旦设了
+  城市筛选，这些楼盘的房源还会被整体挡掉。现在取全平台并集。
+- 房源列表页的下拉从 26 项收敛到 20 个真城市，`Amsterdam` / `Amsterdam Diemen` /
+  `Amsterdam Naritaweg` 不再像三个城市。
+
+按生产快照回放：14 个用户全部修好，**因改动而丢失的条目为 0**。
+
 ## v1.13.4 (2026-08-05)
 
 本版只做一件事：把代理流量降下来。代理按流量计费，08-04 全天 985 MB / 天，
