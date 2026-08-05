@@ -127,6 +127,127 @@ _XIOR_AJAX_HEADERS = {
 }
 
 
+# ── 资源拦截 ────────────────────────────────────────────────────────
+# 代理按流量计费，而浏览器为了过挑战会把整张页面连同图片、字体、统计脚本
+# 一并下载。2026-08-04 全天代理侧记录：985MB 中约 97MB 属于此类，与房源数据
+# 无关。我们要的只是 DOM 与 cf_clearance cookie。
+#
+# 按类型拦。stylesheet 不在其中——CF 的行为检测会读渲染结果，去掉样式表等于
+# 改变页面的呈现方式，省下的量（合计不足 5MB）不值这个风险。
+_BLOCKED_RESOURCE_TYPES = frozenset({"image", "media", "font"})
+
+# 按域名整体拦：统计、广告、客服挂件、地理编码。都是页面自己加载的第三方，
+# 与「页面是否已渲染完成」无关。
+#
+# 刻意不含 cdn.jsdelivr.net（4.5MB/天）：站点的业务 JS 也走它，无法从域名
+# 区分，拦错会连页面本身一起弄坏。
+_BLOCKED_DOMAINS: tuple[str, ...] = (
+    "googletagmanager.com",
+    "google-analytics.com",
+    "googlesyndication.com",
+    "fonts.gstatic.com",
+    "fonts.googleapis.com",
+    "fontawesome.com",
+    # cookieyes 的 CDN 挂在另一个注册域上（cdn-cookieyes.com，不是
+    # cookieyes.com 的子域），按点边界匹配吃不到，必须单列。它还是这家
+    # 三个域里最大的那个。
+    "cookieyes.com",
+    "cdn-cookieyes.com",
+    "trustpilot.com",
+    "chatbase.co",
+    "ahrefs.com",
+    "komoot.io",
+)
+
+# 无论类型与域名，这些一律放行——挑战本身要靠它们跑完。
+# cloudflareinsights 是 CF 自家的 beacon，量很小（0.4MB/天），拦它省不下什么，
+# 却可能让这个会话在 CF 眼里显得不完整。
+_NEVER_BLOCKED: tuple[str, ...] = (
+    "challenges.cloudflare.com",
+    "cloudflareinsights.com",
+)
+
+
+def _should_block(url: str, resource_type: str) -> bool:
+    """这个子请求该不该拦。纯函数，便于单测覆盖各种 URL 形态。"""
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False  # 解析不了就放行，拦错的代价高于多下一次
+    if not host:
+        return False
+    if any(host == d or host.endswith("." + d) for d in _NEVER_BLOCKED):
+        return False
+    if any(host == d or host.endswith("." + d) for d in _BLOCKED_DOMAINS):
+        return True
+    return resource_type in _BLOCKED_RESOURCE_TYPES
+
+
+# ── 持久化 profile ──────────────────────────────────────────────────
+# 挑战载荷占了代理流量的一多半（2026-08-04：985MB 中 558MB），成因是每次重建
+# 浏览器都是全新的空缓存。而 launch() + new_page() 走的是 incognito context，
+# HTTP 缓存只在内存里，浏览器一关即弃——只给 --disk-cache-dir 无济于事，实测
+# 缓存目录里只会留下几个索引文件，字节数一点不降。
+#
+# 必须换成 launch_persistent_context()。本地实测（2026-08-05，H2S 首页）：
+#   冷 profile  3.93 MB
+#   暖 profile  0.25 MB   143 个请求命中磁盘缓存，页面照常渲染
+#
+# 一个 profile 目录同一时刻只能被一个 Chromium 打开，而 H2S 的 scraper 与
+# booker 用的是同一个 profile、跑在不同线程上。因此按槽位加文件锁，抢不到就
+# 退回临时 profile——省流量不能以抢不到浏览器为代价。
+_PROFILE_SLOTS = 3
+
+# 每个槽位的磁盘缓存上限。生产 VPS 磁盘已用 82%，不能让它无限长。
+# 128MB 足够装下挑战载荷与站点静态资源（实测暖 profile 全目录约 12MB）。
+_DISK_CACHE_SIZE = 128 * 1024 * 1024
+
+
+def _profile_root():
+    from config import DATA_DIR
+
+    return DATA_DIR / "browser_profiles"
+
+
+def _acquire_profile_slot(source: str):
+    """占一个 profile 槽位，返回 ``(目录, 锁文件对象)``；全被占用时返回 ``(None, None)``。
+
+    锁必须持有到浏览器关闭为止，所以把文件对象一并交出去——提前关闭文件会
+    释放 flock，另一个线程就能打开同一个 profile，Chromium 随即报锁冲突。
+    """
+    import fcntl
+
+    root = _profile_root()
+    for slot in range(_PROFILE_SLOTS):
+        path = root / f"{source}-{slot}"
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            handle = open(root / f"{source}-{slot}.lock", "w")
+        except OSError as e:
+            logger.warning("profile 槽位 %s 不可用: %s", path, e)
+            continue
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            handle.close()  # 已被别的线程/进程占着，试下一个
+            continue
+        return path, handle
+    return None, None
+
+
+def _release_lock(handle) -> None:
+    """放掉槽位锁。关闭文件即释放 flock，出错也不能往外抛——它挂在 close()
+    路径上，抛出去会把浏览器的资源释放一起带停。"""
+    if handle is None:
+        return
+    try:
+        handle.close()
+    except OSError:
+        logger.debug("释放 profile 锁失败", exc_info=True)
+
+
 def _redact_proxy(url: str) -> str:
     """代理 URL 里含用户名密码，日志里只留 host:port。"""
     return url.rsplit("@", 1)[-1] if "@" in url else url
@@ -282,6 +403,9 @@ class BrowserFetcher:
         self._initialized = False
         self._effective_headless = headless
         self._proxy_url = ""
+        self._blocked_count = 0
+        self._profile_lock = None
+        self._profile_path = None
 
     @property
     def profile(self) -> "SiteProfile":
@@ -339,13 +463,99 @@ class BrowserFetcher:
         # 会拿到另一个 session，探到的是别的出口 IP，结论无效。
         self._proxy_url = proxy_url or ""
 
-        self._browser = launch(
+        self._browser, self._page = self._open_browser(chromium_args, proxy_url)
+        self._blocked_count = 0
+        self._install_resource_blocking()
+
+    def _open_browser(self, chromium_args: list[str], proxy_url: str | None):
+        """开浏览器，优先复用磁盘上的 profile；拿不到就退回临时 profile。
+
+        返回 ``(browser_or_context, page)``。两种返回物的 ``close()`` 与
+        ``new_page()`` 语义一致，本类其余部分不必区分。
+        """
+        import os
+
+        from cloakbrowser import launch, launch_persistent_context
+
+        if os.environ.get("BROWSER_PERSIST_PROFILE", "1").strip() not in ("0", "false", "no"):
+            path, lock = _acquire_profile_slot(self._profile.source)
+            if path is None:
+                logger.info(
+                    "%s 的 profile 槽位已被占满（共 %d 个），本次用临时 profile",
+                    self._profile.source, _PROFILE_SLOTS,
+                )
+            else:
+                try:
+                    ctx = launch_persistent_context(
+                        str(path),
+                        headless=self._effective_headless,
+                        humanize=True,
+                        args=chromium_args + [f"--disk-cache-size={_DISK_CACHE_SIZE}"],
+                        proxy=proxy_url,
+                    )
+                except Exception as e:
+                    # profile 损坏、锁冲突、磁盘满……都不该让抓取停摆
+                    logger.warning(
+                        "%s 持久化 profile 启动失败，退回临时 profile: %s",
+                        self._profile.name, e,
+                    )
+                    _release_lock(lock)
+                else:
+                    self._profile_lock = lock
+                    self._profile_path = path
+                    # cookie 一律不留。clearance 绑出口 IP，而 rotating_proxy
+                    # 意味着下次开浏览器多半换了 IP——带着上一个 IP 的
+                    # cf_clearance 去请求，CF 只会当作可疑并重新挑战。
+                    # 要复用的只是磁盘缓存里那些静态资源。
+                    try:
+                        ctx.clear_cookies()
+                    except Exception:
+                        logger.debug("清 cookie 失败，继续", exc_info=True)
+                    page = ctx.pages[0] if ctx.pages else ctx.new_page()
+                    logger.info("%s 复用 profile %s", self._profile.name, path.name)
+                    return ctx, page
+
+        browser = launch(
             headless=self._effective_headless,
             humanize=True,
             args=chromium_args,
             proxy=proxy_url,
         )
-        self._page = self._browser.new_page()
+        return browser, browser.new_page()
+
+    def _install_resource_blocking(self) -> None:
+        """拦掉与房源数据无关的子请求，省代理流量。见 ``_should_block``。
+
+        ``BROWSER_BLOCK_RESOURCES=0`` 可整体关闭：拦截会改变页面的加载行为，
+        万一 CF 因此起疑，需要一条不重新发版就能退回原状的路。
+        """
+        import os
+
+        if os.environ.get("BROWSER_BLOCK_RESOURCES", "1").strip() in ("0", "false", "no"):
+            logger.info("%s 资源拦截已关闭（BROWSER_BLOCK_RESOURCES）", self._profile.name)
+            return
+
+        def _handler(route):
+            # 任何一步出错都必须放行并吞掉异常：route 处理器抛出去会让这个
+            # 请求悬着直到超时，为省流量把页面拖垮不划算。
+            try:
+                request = route.request
+                if _should_block(request.url, request.resource_type):
+                    self._blocked_count += 1
+                    route.abort()
+                    return
+            except Exception:
+                logger.debug("资源拦截判定异常，放行", exc_info=True)
+            try:
+                route.continue_()
+            except Exception:
+                logger.debug("route.continue_ 失败", exc_info=True)
+
+        try:
+            self._page.route("**/*", _handler)
+        except Exception as e:
+            # 拦截是省钱的优化，不是抓取的前提，装不上就照常跑
+            logger.warning("%s 资源拦截未能装载，按原样加载页面: %s", self._profile.name, e)
 
     def _rebuild_browser(self) -> bool:
         """推倒浏览器重建，换一个出口 IP。换成了返回 True。
@@ -378,6 +588,13 @@ class BrowserFetcher:
     def close(self):
         """关闭浏览器，释放资源。"""
         if self._browser is not None:
+            if self._blocked_count:
+                # 拦了多少写进日志：改了拦截规则之后，这是唯一能看出它还在
+                # 生效、以及生效到什么程度的地方。
+                logger.info(
+                    "%s 本次会话拦截了 %d 个与数据无关的子请求",
+                    self._profile.name, self._blocked_count,
+                )
             try:
                 self._browser.close()
             except Exception:
@@ -385,6 +602,11 @@ class BrowserFetcher:
             self._browser = None
             self._page = None
             self._initialized = False
+        # 锁必须在浏览器真正关掉之后才放：提前释放会让另一个线程拿到同一个
+        # profile，而 Chromium 还没退出，它会直接报锁冲突。
+        _release_lock(self._profile_lock)
+        self._profile_lock = None
+        self._profile_path = None
 
     # ── CF 挑战初始化 ─────────────────────────────────────────────────
     def ensure_initialized(self) -> None:

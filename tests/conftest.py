@@ -155,6 +155,24 @@ def _reset_login_failures():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_browser_profiles(tmp_path_factory, monkeypatch):
+    """浏览器 profile 槽位改指向临时目录，别在真实 data/ 下留东西。
+
+    ``_acquire_profile_slot`` 会 mkdir，任何碰到浏览器启动路径的用例都会在
+    仓库的 data/ 里建出 browser_profiles/。这是测试污染工作区，而且真跑起
+    浏览器时那里会长到十几兆。
+    """
+    try:
+        import browser_fetcher
+    except ImportError:
+        yield
+        return
+    root = tmp_path_factory.mktemp("browser_profiles")
+    monkeypatch.setattr(browser_fetcher, "_profile_root", lambda: root)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _reset_scraper_instances():
     """清掉跨轮复用的 scraper 实例缓存，避免用例间共享 scraper 状态。"""
     try:

@@ -292,7 +292,15 @@ def test_fetch_gql_renavigates_when_clearance_expires(monkeypatch):
 
 
 def _patch_launch(monkeypatch, platform_name="Darwin"):
-    """替换 cloakbrowser.launch，返回记录 kwargs 的列表。"""
+    """替换两个 launch 入口，返回记录 kwargs 的列表。
+
+    **两个都要替**。生产走的是 ``launch_persistent_context``（磁盘缓存能省掉
+    九成流量），只替 ``launch`` 会让测试真的拉起一个 Chromium、在 data/ 下写出
+    十几兆的 profile——最初就是这么发生的。
+
+    这里让持久化那条路直接抛错，使代码退回临时 profile，从而把断言集中在
+    ``launch`` 的 kwargs 上；持久化路径本身由 test_browser_profile_cache.py 覆盖。
+    """
     calls: list[dict] = []
 
     class _FakeBrowser:
@@ -303,10 +311,14 @@ def _patch_launch(monkeypatch, platform_name="Darwin"):
         calls.append(kwargs)
         return _FakeBrowser()
 
+    def refuse_persistent(*args, **kwargs):
+        raise RuntimeError("测试中不启动持久化浏览器")
+
     import cloakbrowser
 
     monkeypatch.setattr(browser_fetcher.platform, "system", lambda: platform_name)
     monkeypatch.setattr(cloakbrowser, "launch", fake_launch)
+    monkeypatch.setattr(cloakbrowser, "launch_persistent_context", refuse_persistent)
     return calls
 
 

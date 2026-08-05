@@ -228,6 +228,73 @@ Playwright 层完全无法区分，若一概归因于 Cloudflare 挑战，排查
 `get_proxy_url()` 会得到另一条 session，探测到的是其它出口，结论无效。凭据仅用于
 构造 `Proxy-Authorization` 请求头，不进入返回值与日志。
 
+### 3.3 资源拦截
+
+代理按流量计费，而浏览器为通过挑战会加载完整页面，其中包含图片、字体、统计脚本
+与广告——这些与房源数据无关。2026-08-04 全天代理侧记录：985 MB 中约 97 MB 属于
+此类。抓取实际需要的只有 DOM 与 `cf_clearance` cookie。
+
+`_should_block()` 按两条规则判定，命中即 `route.abort()`：
+
+| 规则 | 内容 |
+|---|---|
+| 按资源类型 | `image` / `media` / `font` |
+| 按域名 | 统计、广告、客服挂件、字体 CDN、地理编码等第三方域 |
+
+三类**始终放行**：
+
+- `challenges.cloudflare.com` 与 `cloudflareinsights.com`（含全部子域）——挑战依赖
+  它们，且后者流量极小，拦截收益不足以抵消会话显得不完整的风险；
+- `stylesheet` 与 `script`——Cloudflare 的行为检测会读取渲染结果，移除样式表或脚本
+  等同于改变页面呈现，而这两类合计不足 5 MB；
+- `cdn.jsdelivr.net`——站点自身的业务 bundle 亦经由该 CDN 分发，无法按域名区分。
+
+域名匹配须按点边界进行（`host == d or host.endswith("." + d)`）。子串匹配会将
+`nottrustpilot.com` 一类误判；而按点边界匹配又会漏掉 `cdn-cookieyes.com` 这种
+**独立注册域**——它并非 `cookieyes.com` 的子域，须单独列出。
+
+判定异常时一律放行：拦截是节流优化，而非抓取的前提。`route` 处理器抛出异常会使该
+请求悬挂至超时，代价高于多下载一次。`page.route()` 安装失败同样仅告警，不影响启动。
+
+`BROWSER_BLOCK_RESOURCES=0` 可整体关闭。拦截改变了页面的加载行为，需要保留一条
+无需发布新版本即可退回原状的路径。每个浏览器会话结束时会记录本次拦截的请求数，
+用于确认规则仍然生效。
+
+### 3.4 持久化 profile
+
+代理流量中占比最大的一项是 Cloudflare 的挑战载荷（2026-08-04：985 MB 中 558 MB，
+56.6%），成因是每次重建浏览器均使用全新的空缓存，Turnstile 的 JS 与 WASM 无法
+沿用。Xior 的浏览器每 15 分钟重建一次，是该项的主要来源。
+
+**仅指定 `--disk-cache-dir` 无效。** `launch()` 配合 `new_page()` 使用的是 incognito
+context，其 HTTP 缓存仅存在于内存中，浏览器关闭即丢弃；实测缓存目录中只会留下
+若干索引文件，传输字节数没有变化。必须改用 `launch_persistent_context()`。
+
+本地实测（2026-08-05，Holland2Stay 首页）：
+
+| | 传输字节 | 磁盘缓存命中 | 页面 |
+|---|---:|---:|---|
+| 冷 profile | 3.93 MB | 3 个请求 | 正常渲染 |
+| 暖 profile | 0.25 MB | 143 个请求 | 正常渲染 |
+
+**cookie 每次启动均清空。** clearance 绑定出口 IP，而 `rotating_proxy` 意味着下次
+创建浏览器时出口多半已经改变；携带上一个 IP 的 `cf_clearance` 发起请求，只会被
+Cloudflare 判定为可疑并重新挑战。需要复用的仅是磁盘缓存中的静态资源。
+
+**并发由槽位文件锁保证。** 一个 profile 目录同一时刻只能被一个 Chromium 打开，而
+Holland2Stay 的 scraper 与 booker 共用同一个 source 且运行在不同线程。
+`_acquire_profile_slot()` 依次尝试 `<source>-0` … `<source>-N`，以 `flock` 独占其
+`.lock` 文件；锁必须持有至浏览器关闭之后才释放，提前释放会使另一线程在 Chromium
+尚未退出时取得同一目录。槽位全部占用时退回临时 profile——节流不应以取不到浏览器
+为代价。
+
+profile 位于 `<DATA_DIR>/browser_profiles/`，每槽位磁盘缓存上限 128 MB
+（`--disk-cache-size`）。删除该目录不影响正确性，仅损失一次冷启动。
+`BROWSER_PERSIST_PROFILE=0` 可整体关闭。
+
+> 持久化 profile 与 §5.11 的「403 时重建浏览器换 IP」并不冲突：重建仍复用同一个
+> profile 目录，因此换 IP 的代价从「重下全部资源」降为「重解一次挑战」。
+
 ---
 
 ## 4. 状态
