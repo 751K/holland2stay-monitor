@@ -195,12 +195,21 @@
            显眼是因为当时每个城市都是带边框的卡片；现在没有边框和填色，多出来
            的空白就只是空白。 */
         .xior-list{
-          display:grid; gap:0 24px; align-items:start;
-          grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+          /* 列间距也跟 .form-row 一致（14px）。列数一样但 gap 不同的话，
+             两块的列位置仍然对不上——差 8px，并排看得出来。 */
+          display:grid; gap:0 14px; align-items:start;
+          /* 与同页「H2S 监控城市」同一个下限（180px），两块的列数才对得上；
+             用 210px 时上面 6 列、这里 5 列，并排看是错位的。
+             城市名有 flex:1 + ellipsis，窄一点也不会挤坏。 */
+          grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
         }
         .xior-city-row{
           display:flex; align-items:center; gap:8px;
-          padding:5px 6px; margin:0; border-radius:var(--radius);
+          /* 负外边距抵掉左右内边距：内边距是为了 hover 底色不贴着字，但它同时
+             把复选框往右推了 6px，与上面「H2S 监控城市」那一列对不齐。
+             往外拉 6px 后，复选框回到列的左边界，hover 底色仍有留白。
+             gap 是 14px，两侧各探出 6px 仍落在间距内，不会互相压到。 */
+          padding:5px 6px; margin:0 -6px; border-radius:var(--radius);
           /* 16px 对齐 .checkbox（同页 H2S 城市清单用的就是它），
              否则两块并排看字号明显不一样 */
           font-size:16px; cursor:pointer; list-style:none;
@@ -208,7 +217,9 @@
         .xior-city-row::-webkit-details-marker{ display:none; }
         /* 唯一的视觉反馈是 hover 时的浅底——静态时整块是干净的 */
         .xior-city-row:hover{ background:var(--surface-hover); }
-        .xior-city-row input{ margin:0; }
+        /* accent-color 跟 .checkbox input 一致。漏了它复选框会回落到浏览器
+           默认的蓝色，和同页其它清单一眼看出两种颜色。 */
+        .xior-city-row input{ margin:0; accent-color:var(--accent); }
         .xior-city-name{ flex:1; min-width:0; overflow:hidden;
           text-overflow:ellipsis; white-space:nowrap; }
         /* 折叠状态下靠它知道这座城市选了几栋，不用展开去找 */
@@ -221,7 +232,7 @@
           display:flex; align-items:center; gap:8px; margin:0;
           padding:3px 0; font-size:15px; color:var(--text2); cursor:pointer;
         }
-        .xior-bldg input{ margin:0; }
+        .xior-bldg input{ margin:0; accent-color:var(--accent); }
       </style>
 
       <div class="xior-list">
