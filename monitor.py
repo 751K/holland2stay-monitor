@@ -785,6 +785,128 @@ def _should_notify_internal() -> bool:
     return False
 
 
+# ── 全面故障告警 ────────────────────────────────────────────────────
+#
+# 「某个 source 挂了」「完整率下滑」由 watchdog 负责，但 watchdog 只在**跑完一轮**
+# 之后才评估。当所有 source 同时失败时 run_once 直接上抛，那一轮的 watchdog 根本
+# 不会执行——最需要告警的场景反而最安静。
+#
+# 2026-08-05 04:24–09:29 代理断了 5 小时 5 分钟，59 轮全灭，admin 一条告警都没
+# 收到：当时 main_loop 的 network / blocked / 内部异常分支只 logger.error。而
+# run_once 的 ScrapeNetworkError 分支明确写着「让 main_loop 做连续失败计数和冷却」
+# ——交接的另一头是空的。这里就是补上的那一头。
+#
+# 首次达阈值立即发，之后 15 / 30 / 60 分钟递增，封顶 1 小时：全面宕机要立刻知道，
+# 但连续 5 小时不该收 20 条。
+_OUTAGE_ALERT_BACKOFF = (900, 1800, 3600)
+
+
+class _OutageTracker:
+    """全面故障的告警节流与恢复判定。
+
+    只做判定不做 IO，投递交给调用方——这样测试不必搭 push / web_notifier 环境。
+    时间由调用方传入（``time.monotonic()``），测试可直接推进。
+    """
+
+    def __init__(self) -> None:
+        self._started_at: float | None = None
+        self._alerts = 0
+        self._last_alert_at = 0.0
+        self._rounds = 0
+
+    @property
+    def active(self) -> bool:
+        return self._started_at is not None
+
+    @property
+    def rounds(self) -> int:
+        """本次故障已经失败了多少轮。"""
+        return self._rounds
+
+    def elapsed(self, now: float) -> float:
+        """本次故障已持续多少秒；不在故障中时为 0。"""
+        return 0.0 if self._started_at is None else now - self._started_at
+
+    def record_failure(self, now: float) -> bool:
+        """记一次全面失败，返回本次是否该发告警。
+
+        **首次必发。** 调用方只在确认是全面故障时才调进来（网络分支要连续 3 轮、
+        屏蔽分支一轮就是 15 分钟起步的冷却），门槛已经在外面把住了；这里再压一层
+        「先观察几轮」只会推迟通知。恢复告警靠这条性质成立：进入过故障态就一定
+        通知过，不会出现凭空一条「已恢复」。
+        """
+        if self._started_at is None:
+            self._started_at = now
+            self._alerts = 0
+            self._last_alert_at = 0.0
+            self._rounds = 0
+        self._rounds += 1
+        if self._alerts:
+            idx = min(self._alerts - 1, len(_OUTAGE_ALERT_BACKOFF) - 1)
+            if now - self._last_alert_at < _OUTAGE_ALERT_BACKOFF[idx]:
+                return False
+        self._alerts += 1
+        self._last_alert_at = now
+        return True
+
+    def record_success(self, now: float) -> tuple[float, int] | None:
+        """记一次成功。返回 ``(故障持续秒数, 失败轮数)``；本来就没在故障中则 None。
+
+        不在故障中时**必须**返回 None：否则每一轮正常抓取都会发一条「已恢复」。
+        """
+        if self._started_at is None:
+            return None
+        span, rounds = now - self._started_at, self._rounds
+        self._started_at = None
+        self._alerts = 0
+        self._rounds = 0
+        return span, rounds
+
+
+#: 模块级单例。进程重启后清零——重启后若故障仍在，第一轮会重新告警，符合预期。
+_outage = _OutageTracker()
+
+
+def _format_duration(seconds: float) -> str:
+    """把秒数写成「N 小时 M 分钟」。告警里「5 小时 5 分钟」比「18300 秒」有用。"""
+    total = int(seconds)
+    h, m = divmod(total // 60, 60)
+    if h:
+        return f"{h} 小时 {m} 分钟"
+    return f"{m} 分钟" if m else f"{total} 秒"
+
+
+async def _alert_outage(
+    storage: "Storage",
+    web_notifier: "WebNotifier | None",
+    summary: str,
+    detail: str,
+) -> None:
+    """全面故障告警。只发 admin——用户对代理/网络故障无从处置。"""
+    msg = (
+        f"⛔ 全面抓取故障：{summary}\n\n"
+        f"已持续 {_format_duration(_outage.elapsed(time.monotonic()))}，"
+        f"连续 {_outage.rounds} 轮所有 source 均失败。\n\n"
+        f"{detail}\n\n"
+        "监控进程仍在运行并按退避重试；恢复后会再发一条通知。"
+    )
+    await _notify_admin_only(storage, web_notifier, msg, kind="outage")
+
+
+async def _alert_outage_recovered(
+    storage: "Storage",
+    web_notifier: "WebNotifier | None",
+    span: float,
+    rounds: int,
+) -> None:
+    """恢复告警。kind 与故障告警不同，否则会被 push 的 dedup 压掉。"""
+    msg = (
+        f"✅ 抓取已恢复\n\n"
+        f"本次全面故障持续 {_format_duration(span)}，期间 {rounds} 轮全部失败。"
+    )
+    await _notify_admin_only(storage, web_notifier, msg, kind="outage_recovered")
+
+
 def _h2s_login_suppressed_remaining() -> int:
     """H2S 登录/预订链路是否因 403 被临时抑制；返回剩余秒数。"""
     return max(0, int(_h2s_login_blocked_until - time.monotonic()))
@@ -1029,9 +1151,15 @@ async def _dispatch_watchdog_alerts(
     这里只负责投递。整个函数吞异常——告警通道不该把 monitor 带崩。
 
     调用点在 main_loop 的正常路径上，**run_once 上抛时不会执行**。这是有意的：
-    run_once 只在「所有 source 都失败」时上抛，而那种情况 main_loop 自己的
-    network / blocked 连续失败计数已经在告警了，这里再报一遍只是重复。遥测行
-    在上抛之前就已经写好，所以恢复后的第一轮巡检仍能看到这段历史。
+    run_once 只在「所有 source 都失败」时上抛，那种情况由 main_loop 的
+    ``_OutageTracker`` 直接告警（见 ``_alert_outage``），这里再报一遍只是重复。
+    遥测行在上抛之前就已经写好，所以恢复后的第一轮巡检仍能看到这段历史。
+
+    这段话原先写的是「main_loop 的 network / blocked 连续失败计数已经在告警了」
+    ——**当时那几个分支只 logger.error，一条通知都不发**。于是 2026-08-05 代理断
+    线 5 小时、59 轮全灭，admin 全程静默：部分退化会告警，全面宕机反而不会。
+    ``_OutageTracker`` 就是来补上这个前提的；改动这里之前请确认它仍然成立
+    （tests/test_outage_alert.py 守着这条）。
 
     也没做成 ``finally``：那样关停时（CancelledError）也会跑一次 DB 写 + 推送。
     """
@@ -2423,6 +2551,19 @@ async def main_loop(
                 booking_deadline=booking_deadline,
             )
 
+            # 全面故障结束。紧跟 run_once 之后判定，不放到本段末尾——下面那些
+            # 收尾步骤（剪枝、watchdog）自己也可能抛，那会被 except Exception 记成
+            # 新一轮「全面故障」，而抓取明明成功了。告警过才回报恢复（见
+            # record_success）。
+            recovered = _outage.record_success(time.monotonic())
+            if recovered:
+                span, failed_rounds = recovered
+                logger.info(
+                    "✅ 全面故障已恢复：持续 %s，期间 %d 轮全失败",
+                    _format_duration(span), failed_rounds,
+                )
+                await _alert_outage_recovered(storage, web_notifier, span, failed_rounds)
+
             # 记录本小时存活样本（用于 dashboard 7 天 uptime%）。幂等、持久，
             # 跟 listings 同库 → 同 Docker volume，重启/重建不丢，真实反映宕机。
             try:
@@ -2616,6 +2757,13 @@ async def main_loop(
                 "持续屏蔽请考虑：换 HTTPS_PROXY 出口 / 暂停几小时。",
                 blocked_fail_streak, cooldown,
             )
+            if _outage.record_failure(time.monotonic()):
+                await _alert_outage(
+                    storage, web_notifier,
+                    "所有 source 被 Cloudflare 屏蔽（403）",
+                    "退避已拉长到最多 2 小时。持续屏蔽请换 HTTPS_PROXY 出口，"
+                    "或暂停几小时让 WAF 状态冷下来。",
+                )
             await asyncio.sleep(cooldown)
         except UpstreamMaintenanceError:
             # 平台维护：和 BlockedError 用相同冷却长度，但语义完全不同：
@@ -2664,6 +2812,10 @@ async def main_loop(
                 network_fail_streak += 1
                 cooldown = apply_jitter(_NETWORK_FAIL_COOLDOWN, cfg.jitter_ratio)
                 logger.error("🛰️ 代理失效且无备用，冷却 %d 秒: %s", cooldown, e)
+                if _outage.record_failure(time.monotonic()):
+                    await _alert_outage(
+                        storage, web_notifier, "代理失效且无备用可切", str(e),
+                    )
                 await asyncio.sleep(cooldown)
         except ScrapeNetworkError as e:
             network_fail_streak += 1
@@ -2675,6 +2827,15 @@ async def main_loop(
                     "最近错误: %s",
                     network_fail_streak, _NETWORK_FAIL_THRESHOLD, cooldown, e,
                 )
+                # 达阈值才告警：低于阈值的抖动通常几轮内自愈。异常文本里带着
+                # _describe_navigation_failure() 的代理探测结论（配额耗尽 / 认证
+                # 失败 / 代理宕机），直接透出去，省掉一轮上服务器翻日志。
+                if _outage.record_failure(time.monotonic()):
+                    await _alert_outage(
+                        storage, web_notifier,
+                        "所有 source 网络不可达",
+                        f"请检查代理与网络。最近错误：\n{e}",
+                    )
                 await asyncio.sleep(cooldown)
             else:
                 logger.warning(
@@ -2685,6 +2846,17 @@ async def main_loop(
         except Exception as e:
             # 任何未预期异常：记录并等待 10 秒后继续，而不是静默退出
             logger.exception("主循环出现异常，10 秒后继续: %s", e)
+            # 反复抛的内部异常（DB 锁死、磁盘满）同样让每一轮都跑不完，watchdog
+            # 一样评估不到。告警通道本身出问题时不能再把主循环带崩。
+            if _outage.record_failure(time.monotonic()):
+                try:
+                    await _alert_outage(
+                        storage, web_notifier,
+                        "主循环反复抛出未预期异常",
+                        f"{type(e).__name__}: {e}",
+                    )
+                except Exception:
+                    logger.debug("全面故障告警发送失败（已忽略）", exc_info=True)
             await asyncio.sleep(10)
 
 
