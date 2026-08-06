@@ -148,7 +148,13 @@ Eindhoven），那是手改才会产生、面板不会产生的错误。
 
 ### 仪表盘增加覆盖范围横幅
 
-首页顶部说明当前监控哪些城市，并给出联系支持的入口。
+首页顶部说明当前监控哪些城市，并给出联系支持的入口与邮箱。
+
+做这一条时发现生产的支持邮箱是拼错的：`.env` 里写着 `supprot@flatradar.app`，
+支持页照着显示——而那个页面正是 App Store 登记的 Support URL，写信过去收不到。
+仓库文档里还是第三种拼法 `surrport@`。三处各写各的，必然有一处是错的：横幅因此
+取 `support_text.CONTACT_EMAIL`（即 `SUPPORT_EMAIL`），与支持页同源；文档四处
+错拼一并改正，测试把两种已知错拼钉死。生产 `.env` 已改为 `support@flatradar.app`。
 
 **城市名取自当前生效的配置**（`Config.monitored_city_names()`），不写死——监控范围
 现在存在 `app_settings` 里、随时能从面板改，写死的横幅迟早和实际不符，而且不会有

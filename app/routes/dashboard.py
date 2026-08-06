@@ -56,10 +56,14 @@ def index() -> str:
         logger.warning("读取监控城市失败，本次不显示覆盖范围横幅", exc_info=True)
         cities = []
     monitored_cities_text = ("、" if lang == "zh" else ", ").join(cities)
+    # 支持邮箱同样取配置（SUPPORT_EMAIL）：写死会和支持页显示的不一致，
+    # 而那正是 App Store 登记的 Support URL 上写的地址。
+    from support_text import CONTACT_EMAIL as support_email
 
     return render_template(
         "index.html",
         monitored_cities_text=monitored_cities_text,
+        support_email=support_email,
         stats=stats,
         recent=recent,
         changes=changes,

@@ -162,3 +162,44 @@ class TestTranslations:
         entry = TRANSLATIONS["dash_coverage_notice"]
         assert not entry["zh"].endswith(" ")
         assert entry["en"].endswith(" ")
+
+
+class TestSupportEmail:
+    """横幅上的邮箱必须与支持页同源。
+
+    2026-08-06 发现生产 .env 里写的是 `supprot@flatradar.app`（拼错），支持页照着
+    显示，而那个页面正是 App Store 登记的 Support URL——写信过去是收不到的。
+    仓库文档里还是第三种拼法 `surrport@`。三处各写各的，就一定会有一处是错的。
+
+    所以横幅不自己写死地址，取 `support_text.CONTACT_EMAIL`（即 SUPPORT_EMAIL）。
+    """
+
+    def test_route_takes_it_from_config(self):
+        src = (ROOT / "app" / "routes" / "dashboard.py").read_text(encoding="utf-8")
+        assert "CONTACT_EMAIL" in src, "邮箱写死了，迟早和支持页对不上"
+        assert "support_email=" in src
+
+    def test_template_renders_a_mailto(self):
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        assert "mailto:{{ support_email }}" in html
+
+    def test_template_hides_it_when_unset(self):
+        """没配 SUPPORT_EMAIL 时不该渲染一个空的 mailto: 链接。"""
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        assert "{% if support_email %}" in html
+
+    def test_no_hardcoded_address_anywhere_in_the_banner(self):
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        assert "@flatradar.app" not in html
+
+    @pytest.mark.parametrize("typo", ["supprot@", "surrport@"])
+    def test_known_misspellings_are_gone_from_docs(self, typo):
+        """两种错拼都出现过；留一个在文档里，下一次部署就会再抄一遍。
+
+        只查面向部署者的 README——CHANGELOG 记录的是「当时错成什么样」，那是历史，
+        不是让人照抄的地址。（这条测试第一版连 CHANGELOG 一起查，于是被记录该修复
+        的那段文字判为不合格。）
+        """
+        for name in ("README.md", "README_cn.md"):
+            text = (ROOT / "docs" / name).read_text(encoding="utf-8")
+            assert typo not in text, f"{name} 仍有 {typo}"

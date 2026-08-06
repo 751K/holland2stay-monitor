@@ -20,7 +20,7 @@ FlatRadar 承担这部分工作：同时监控多个租房平台，一旦出现�
 **官网：** [flatradar.app](https://flatradar.app) ·
 **使用指南：** [flatradar.app/guide](https://flatradar.app/guide?lang=zh) ·
 **支持：** [flatradar.app/support](https://flatradar.app/support) ·
-**联系：** [surrport@flatradar.app](mailto:surrport@flatradar.app)
+**联系：** [support@flatradar.app](mailto:support@flatradar.app)
 
 > FlatRadar 是独立的第三方工具，与所监控的任何房源平台均无隶属、背书、赞助或
 > 合作关系。请仅用于个人非商业用途，并遵守各平台的服务条款。做决定前，请务必

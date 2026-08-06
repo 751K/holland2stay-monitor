@@ -25,7 +25,7 @@ services beyond the notification channels you choose to enable.
 **Website:** [flatradar.app](https://flatradar.app) ·
 **User guide:** [flatradar.app/guide](https://flatradar.app/guide) ·
 **Support:** [flatradar.app/support](https://flatradar.app/support) ·
-**Contact:** [surrport@flatradar.app](mailto:surrport@flatradar.app)
+**Contact:** [support@flatradar.app](mailto:support@flatradar.app)
 
 > FlatRadar is an independent, unofficial tool. It is not affiliated with,
 > endorsed by, sponsored by, maintained by, or operated by any housing platform
