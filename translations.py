@@ -427,6 +427,15 @@ TRANSLATIONS = {
     "settings_config_saved":{"zh": "全局配置已保存",           "en": "Global config saved"},
     "settings_request_fail":{"zh": "请求失败",                "en": "Request failed"},
     "settings_no_source":   {"zh": "至少需要启用一个平台，已保留 Holland2Stay。", "en": "At least one platform required. Holland2Stay kept."},
+    # 真实环境变量盖过 app_settings 时的提示。不提示的话，改了没反应会被当成 bug。
+    "settings_invalid_value": {
+        "zh": "配置格式有误，未保存：",
+        "en": "Invalid config format, nothing saved:",
+    },
+    "settings_env_override": {
+        "zh": "以下配置被环境变量覆盖，在这里修改不会生效：",
+        "en": "These settings are overridden by environment variables and cannot be changed here:",
+    },
 
     # ── Users ────────────────────────────────────────────
     "users_title":          {"zh": "用户管理",                "en": "User Management"},

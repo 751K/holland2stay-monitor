@@ -8,6 +8,16 @@
   <span class="meta">{{ _('settings_meta') }}</span>
 </div>
 
+{# 真实环境变量压着数据库时，面板显示的和进程实际用的不是一回事。
+   不说出来就是一次静默失败：改了、保存成功了、什么都没发生。 #}
+{% if env_overridden %}
+<div class="alert alert-warning mb-4">
+  <i class="bi bi-exclamation-triangle mr-2"></i>
+  {{ _('settings_env_override') }}
+  <code>{{ env_overridden | join(' · ') }}</code>
+</div>
+{% endif %}
+
 <form method="post" class="settings-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

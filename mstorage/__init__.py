@@ -21,6 +21,7 @@ from mstorage._map_calendar import MapCalendarOps
 from mstorage._notifications import NotificationOps
 from mstorage._retry import RetryQueueOps
 from mstorage._rounds import RoundStatsOps
+from mstorage._settings import AppSettingOps
 from mstorage._tokens import TokenOps
 from mstorage._user_configs import UserConfigOps
 
@@ -32,6 +33,7 @@ class Storage(
     MapCalendarOps,
     RetryQueueOps,
     RoundStatsOps,
+    AppSettingOps,
     TokenOps,
     UserConfigOps,
     DeviceOps,

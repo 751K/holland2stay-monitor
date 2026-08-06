@@ -446,6 +446,67 @@ def check_supervisor(_: DoctorContext) -> list[CheckResult]:
     return results
 
 
+def check_settings(ctx: DoctorContext) -> list[CheckResult]:
+    """系统级配置（app_settings）是否就位，以及 .env 里有没有残留的覆盖项。
+
+    v1.16.0 起监控范围与轮询节奏存于数据库。部署后最常见的疑问是「我的设置去哪了」，
+    这一节就是回答它的。
+    """
+    results: list[CheckResult] = []
+
+    try:
+        from env_registry import RUNTIME_KEYS, audit_keys
+    except Exception as exc:
+        return [CheckResult(WARN, "Settings registry", "not importable", str(exc))]
+
+    # 键名审计：拼错的键此前完全静默，只会安静地走默认值
+    problems = audit_keys(list(ctx.env))
+    if problems:
+        for msg in problems:
+            results.append(CheckResult(WARN, ".env key names", msg))
+    else:
+        results.append(CheckResult(OK, ".env key names", "all keys recognised"))
+
+    if not DB_PATH.exists():
+        results.append(CheckResult(
+            WARN, "app_settings", "database not created yet; migration runs on first start",
+        ))
+        return results
+
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    except Exception as exc:
+        return results + [CheckResult(WARN, "app_settings", "cannot open database", str(exc))]
+    try:
+        has_table = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_settings'"
+        ).fetchone()
+        if not has_table:
+            results.append(CheckResult(
+                WARN, "app_settings", "table missing; migration runs on first start",
+            ))
+        else:
+            n = con.execute("SELECT COUNT(*) FROM app_settings").fetchone()[0]
+            status = OK if n else WARN
+            note = "" if n else "empty; settings fall back to code defaults"
+            results.append(CheckResult(status, "app_settings", f"{n} setting(s) stored", note))
+    finally:
+        con.close()
+
+    # .env 里残留的 runtime 键会盖过面板，且面板上看不出来
+    leftover = sorted(k for k in ctx.env if k in RUNTIME_KEYS)
+    if leftover:
+        results.append(CheckResult(
+            WARN, "Panel overrides",
+            f"{len(leftover)} key(s) in .env override the dashboard",
+            ", ".join(leftover) + " — remove them from .env to manage from the panel",
+        ))
+    else:
+        results.append(CheckResult(OK, "Panel overrides", "none; dashboard is authoritative"))
+
+    return results
+
+
 def build_context(args: argparse.Namespace) -> DoctorContext:
     values = dotenv_values(ENV_PATH) if ENV_PATH.exists() else {}
     env = {k: str(v or "") for k, v in values.items()}
@@ -481,6 +542,7 @@ def main(argv: list[str] | None = None) -> int:
         ("Paths", check_paths),
         ("Database", check_database),
         ("Users", check_users),
+        ("Settings", check_settings),
         ("Caddy", check_caddy),
         ("APNs", check_apns),
         ("SMTP", check_smtp),

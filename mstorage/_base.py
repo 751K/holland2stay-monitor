@@ -246,6 +246,21 @@ class StorageBase:
                 ON round_stats(round_at);
             CREATE INDEX IF NOT EXISTS idx_round_stats_source_at
                 ON round_stats(source, round_at DESC);
+
+            -- 系统级运维配置（原先住在 .env 的 runtime 类键）。
+            --
+            -- 与 meta 表分开：meta 存的是程序自己的运行状态（心跳、节流时间戳、
+            -- uptime 采样），会被清理逻辑随手改写；这里存的是**人的意图**，
+            -- 混在一起就查不出「谁把 CHECK_INTERVAL 改成 20 的」。
+            --
+            -- 键名的权威清单在 env_registry.py。取值顺序见 settings_store.py：
+            -- 环境变量 > 本表 > 代码默认值。
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key        TEXT PRIMARY KEY,
+                value      TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT '',
+                updated_by TEXT NOT NULL DEFAULT ''
+            );
         """)
         # 增量列：CREATE TABLE IF NOT EXISTS 不会给老库补字段；
         # ALTER TABLE ADD COLUMN 在 SQLite 上幂等需自己捕获 OperationalError。

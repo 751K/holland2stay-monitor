@@ -94,3 +94,6 @@ google-services.json.enc
 # Android Profiler 输出
 *.hprof
 *.trace
+
+# 配置迁移会在 .env 旁边留整份备份（settings_store.migrate_env_to_db）
+.env.bak.*

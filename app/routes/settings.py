@@ -9,21 +9,32 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from dotenv import dotenv_values
 from flask import Flask, flash, redirect, render_template, request, url_for
 
-from config import KNOWN_SOURCES, source_display_name, ENV_PATH, KNOWN_CITIES, KNOWN_OURDOMAIN_CITIES, KNOWN_XIOR_CITIES
+from config import KNOWN_SOURCES, source_display_name, KNOWN_CITIES, KNOWN_OURDOMAIN_CITIES, KNOWN_XIOR_CITIES
 
 from app.auth import admin_required
 from app.csrf import csrf_required
-from app.env_writer import write_env_key
+from app.db import storage
 from app.i18n import get_lang
+from app.process_ctrl import write_reload_request
 from app.safety import sanitize_dotenv
+from env_registry import RUNTIME_KEYS
+from settings_store import source_of
+from target_config import validate as validate_structured
 from translations import tr
 
 logger = logging.getLogger(__name__)
 
-# 全局配置可写入的 .env 键（通知/过滤/预订已移至 SQLite user_configs）
+#: 写入 app_settings 时的来源标记。与 "migration" 区分开，便于事后追查一个值
+#: 到底是迁移带过来的还是有人手点的。
+_UPDATED_BY = "panel"
+
+# 全局配置可写入的键（通知/过滤/预订已移至 SQLite user_configs）。
+#
+# 这些值住在 app_settings 表，不再写 .env——.env 同时被人和程序写，是
+# app/env_writer.py 那把锁与 write_env_key() 不能用 os.replace() 的根源。
+# 取值顺序见 settings_store：真实环境变量 > app_settings > 代码默认值。
 SETTINGS_KEYS: list[str] = [
     "CHECK_INTERVAL", "LOG_LEVEL",
     # 智能轮询
@@ -44,9 +55,11 @@ _FLOAT_KEYS = frozenset({"JITTER_RATIO"})
 @csrf_required
 def settings() -> Any:
     lang = get_lang()
+    st = storage()
     if request.method == "POST":
-        if not ENV_PATH.exists():
-            ENV_PATH.touch()
+        # 整批攒齐再一次事务写入。逐条提交的话中途失败会留下一半新一半旧，
+        # 例如 MIN_INTERVAL 已改而 PEAK_INTERVAL 还是旧的，组合起来可能非法。
+        pending: dict[str, str] = {}
 
         selected_sources = request.form.getlist("source_selected")
         # 用 config.KNOWN_SOURCES（模块级已导入；**别在这里再 import 一次**，
@@ -58,20 +71,20 @@ def settings() -> Any:
             sources = ["holland2stay"]
             flash(tr("settings_no_source", lang), "warning")
         sources_val = ",".join(sources)
-        write_env_key("SOURCES", sanitize_dotenv(sources_val))
+        pending["SOURCES"] = sanitize_dotenv(sources_val)
 
         # 城市：复选框提交 "CityName,ID" 格式，用 | 拼接
         selected_cities = request.form.getlist("city_selected")
         cities_val = "|".join(selected_cities) if selected_cities else "Eindhoven,29"
-        write_env_key("CITIES", sanitize_dotenv(cities_val))
+        pending["CITIES"] = sanitize_dotenv(cities_val)
 
         selected_od_cities = request.form.getlist("ourdomain_city_selected")
         od_cities_val = "|".join(selected_od_cities) if selected_od_cities else "Amsterdam Diemen,diemen"
-        write_env_key("OURDOMAIN_CITIES", sanitize_dotenv(od_cities_val))
+        pending["OURDOMAIN_CITIES"] = sanitize_dotenv(od_cities_val)
 
         selected_xr_cities = request.form.getlist("xior_city_selected")
         xr_cities_val = "|".join(selected_xr_cities) if selected_xr_cities else ""
-        write_env_key("XIOR_CITIES", sanitize_dotenv(xr_cities_val))
+        pending["XIOR_CITIES"] = sanitize_dotenv(xr_cities_val)
 
         new_values: dict[str, str] = {}
         for key in SETTINGS_KEYS:
@@ -88,7 +101,7 @@ def settings() -> Any:
                     new_values[key] = f"(非法值: {sanitized!r})"
                     continue
             new_values[key] = sanitized
-            write_env_key(key, sanitized)
+            pending[key] = sanitized
 
         logger.info(
             "全局配置已保存 — sources=%s 间隔=%s 高峰=%s–%s(%s–%s/%s–%s) 仅工作日=%s 抖动=%s 心跳=%smin 日志=%s H2S城市=%s OD楼盘=%s",
@@ -105,10 +118,53 @@ def settings() -> Any:
             od_cities_val,
         )
 
+        # 写之前先校验结构化的那几项。它们是分隔符拼出来的字符串，坏掉的后果
+        # 不一致：有的静默丢弃（CITIES 解析失败 → 0 个城市，监控照跑但什么都不
+        # 抓），有的直接让 load_config() 抛 ValueError，monitor 起不来。
+        # 挡在写入之前，坏值就进不了库。
+        problems = validate_structured(pending)
+        fatal = [p for p in problems if p.fatal]
+        if fatal:
+            for p in fatal:
+                logger.warning("配置校验失败，已拒绝保存：%s", p)
+            flash(
+                tr("settings_invalid_value", lang) + " " + "；".join(str(p) for p in fatal),
+                "error",
+            )
+            return redirect(url_for("settings"))
+        for p in problems:
+            # 非致命的（ID 不在已知表里）照常保存——官方注册表会更新，写死拒绝
+            # 会让一个新上线的城市变成保存失败。但要说出来。
+            logger.info("配置校验提示：%s", p)
+            flash(str(p), "warning")
+
+        st.set_app_settings(pending, updated_by=_UPDATED_BY)
+        # 让 monitor 立刻重读，而不是等到下次重启。改完配置要等一个不确定的时长
+        # 才生效，人会以为没保存上，于是再点一次。
+        try:
+            write_reload_request()
+        except OSError:
+            logger.warning("写热重载请求失败，配置将在 monitor 下次重启后生效", exc_info=True)
+
+        overridden = sorted(k for k in pending if source_of(k) == "env")
+        if overridden:
+            # 真实环境变量压着数据库，面板显示的和进程实际用的不是一回事。
+            # 不说出来就是一次静默失败。
+            flash(
+                "以下配置存在环境变量覆盖，本次修改不会生效："
+                + "、".join(overridden),
+                "warning",
+            )
+
         flash(tr("settings_config_saved", lang), "success")
         return redirect(url_for("settings"))
 
-    env = dict(dotenv_values(str(ENV_PATH)))
+    # 从数据库读，不从 os.environ 读：gunicorn 多个 worker 各有自己的 os.environ，
+    # 只有写入的那个 worker 注水过，其余的会显示旧值。数据库是唯一都看得到的。
+    # 模板对每个键都自带默认值（env.get(key, '300') 之类），缺键即回落到默认。
+    env = {k: v for k, v in st.all_app_settings().items() if k in RUNTIME_KEYS}
+    env_overridden = sorted(k for k in RUNTIME_KEYS if source_of(k) == "env")
+    setting_meta = st.app_settings_meta()
 
     selected_sources = {
         s.strip().lower()
@@ -150,6 +206,8 @@ def settings() -> Any:
     return render_template(
         "settings.html",
         env=env,
+        env_overridden=env_overridden,
+        setting_meta=setting_meta,
         known_cities=KNOWN_CITIES,
         known_ourdomain_cities=KNOWN_OURDOMAIN_CITIES,
         known_xior_cities=KNOWN_XIOR_CITIES,

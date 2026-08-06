@@ -181,9 +181,10 @@ docker compose logs -f h2s
 The first round is slower than later ones; that is expected. A healthy round ends
 with `本轮完整扫描: N/N 城市 (...)` followed by `本轮结束: ... 新房源`.
 
-Once signed in, add users, notification channels and the cities you want
-monitored. Everything user-facing lives in the panel; you should not need to
-touch `.env` again.
+Once signed in, add users and notification channels, then pick the platforms and
+cities to monitor. Both user-level and system-level settings are managed from the
+panel; `.env` only needs editing when credentials, the domain or the timezone
+change.
 
 ### Running from source
 
@@ -227,12 +228,13 @@ code.
 
 Two things need backing up, and they **must be backed up together**:
 
-- `data/listings.db` — listings, users, credentials, device tokens
+- `data/listings.db` — listings, users, credentials, device tokens, and
+  system settings (`app_settings`)
 - `.env` — the secrets, in particular `DATA_ENCRYPTION_KEY`
 
 Passwords and platform credentials in the database are encrypted with the key in
 `.env`; restoring one without the other leaves you with credentials nobody can
-decrypt.
+decrypt. As of v1.16.0 the monitoring scope and polling cadence also live in the database; restoring only `.env` falls back to code defaults.
 
 **Do not copy the database file directly while the container is running** — you
 will miss recent writes. For a consistent snapshot:
@@ -246,27 +248,81 @@ docker exec h2s python -c "import sqlite3; \
 
 ## Configuration
 
-Day-to-day settings — sources, cities, intervals, filters, channels,
-auto-booking, theme — live in the web dashboard. Deployment-level settings live
-in `.env`; start from [.env.example](../.env.example), which documents every key.
+Configuration lives in three places, with clear boundaries:
+
+| What | Where | Edited via |
+|---|---|---|
+| Per-user: channels, filters, auto-booking | SQLite `user_configs` | Dashboard → Users |
+| System: sources, cities, intervals | SQLite `app_settings` | Dashboard → Settings |
+| Deployment: credentials, paths, timezone, base URL | `.env` | Text editor |
+
+**Monitoring scope and polling cadence are not in `.env`.** As of v1.16.0,
+20 keys — `SOURCES`, `CITIES`, `*_CITIES`, `AVAILABILITY_FILTERS`,
+`CHECK_INTERVAL`, `PEAK_*` and friends — live in the database and are managed
+from the dashboard. First start migrates them out of `.env` automatically,
+backing up the whole file to `.env.bak.<timestamp>` beforehand and logging
+exactly what moved.
+
+What remains in `.env` is roughly 28 keys in three groups:
+
+| Group | Count | Notes |
+|---|---|---|
+| Credentials | 14 | Passwords, API keys, encryption key, proxy URLs. **Never in the database** — databases get backed up, exported, downloaded |
+| Deployment facts | 5 | `DB_PATH`, `TIMEZONE`, `PUBLIC_BASE_URL`, `SESSION_COOKIE_SECURE`, `SUPPORT_EMAIL`. `DB_PATH` must stay here — you need the database before you can read the settings table |
+| Thresholds and switches | 9 | Notification channel toggles and quotas; all have defaults, most deployments set none |
 
 The ones worth knowing up front:
 
 | Key | Default | What it controls |
 |---|---|---|
-| `SOURCES` | `holland2stay` | Which platforms to poll, comma-separated |
-| `CITIES` | `Eindhoven,29` | Holland2Stay cities, as `Name,id` pairs joined by `\|` |
-| `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | Same format for the other sources; building keys are listed in each scraper |
-| `SHADOW_SOURCES` | — | Sources that are scraped and stored but send **no** notifications. For validating a new platform before exposing it to users. Entries missing from `SOURCES` are ignored with a warning — a source listed here but not there is simply off, not shadowed |
-| `CHECK_INTERVAL` | `300` | Seconds between rounds outside peak hours |
-| `PEAK_INTERVAL` | `60` | Seconds between rounds during peak hours |
+| `WEB_PASSWORD` | — | **Required.** The container refuses to start without it |
+| `HTTPS_PROXY` | — | Required in production. Datacenter IPs get 403'd by Cloudflare on Holland2Stay |
+| `PUBLIC_BASE_URL` | — | Required in production, or verification emails link to an internal host |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | How long the monitor may be silent before `/health` reports unhealthy |
 | `HEALTH_*` / `WATCHDOG_*` | see `.env.example` | Thresholds for the data-degradation alerts behind `/monitoring` |
 | `STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` | `0.5` / `2` | How long a listing must be absent from the feed before it is inferred Reserved, then Occupied — see [Listing status](#listing-status) |
-| `HTTPS_PROXY` | — | Route scraping through another exit IP when Cloudflare gets aggressive |
 
-Enabling a source requires **both** `SOURCES` and that source's city list.
-Setting only the city list does nothing.
+The full list is in [.env.example](../.env.example), which documents every key;
+key names and their groups are registered in `env_registry.py`.
+
+### Environment variables win over the database
+
+Resolution order is **environment variable > `app_settings` > code default**.
+The environment layer exists as an override hatch for containerised debugging:
+
+```bash
+docker compose run -e CHECK_INTERVAL=30 h2s python monitor.py
+```
+
+The cost is that it is invisible: the dashboard shows one value, the process
+uses another. So the dashboard flags "overridden by an environment variable,
+changes here will not take effect", and the monitor warns at startup about any
+such key left in `.env`. **Use the dashboard for day-to-day changes** — writing
+these keys back into `.env` silently overrides it.
+
+### Input validation
+
+Misspelled key names are no longer silent. The monitor audits `.env` at startup
+and warns about unregistered keys, with the closest match:
+
+```
+PEAK_STRAT is not a key this project knows; it will have no effect (did you mean PEAK_START?)
+```
+
+Malformed scope values are caught too, with two different outcomes: format
+errors (delimiters, field counts, non-numeric ids) are rejected by the dashboard
+outright; unknown entities (a city id or platform name absent from the known
+tables) only warn and still save — official registries change, and hard-failing
+would turn a newly launched city into a save error.
+
+### Enabling a new platform
+
+In Dashboard → Settings, tick the platform **and** its cities or buildings.
+Both are required; ticking only the cities does nothing. Sources listed in
+`SHADOW_SOURCES` are scraped and stored but send **no** notifications — useful
+for validating a new platform before exposing it to users. Entries missing from
+`SOURCES` are ignored with a warning: a source listed there but not enabled is
+simply off, not shadowed.
 
 Before a production deploy:
 
@@ -277,6 +333,8 @@ python -m tools.doctor --no-network
 Run it on the host, in the repository directory — `tools/` is deliberately not
 copied into the image. It is read-only: it never writes config, sends
 notifications, or touches the monitor process.
+
+Its `Settings` section answers the most common post-deploy question: whether the migration ran (how many rows are in `app_settings`), whether any key left in `.env` is overriding the dashboard, and whether any key name is misspelled.
 
 ---
 

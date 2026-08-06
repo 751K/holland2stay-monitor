@@ -2707,6 +2707,9 @@ async def main_loop(
                 _reload_event.clear()
                 logger.info("热重载中...")
                 load_dotenv(dotenv_path=ENV_PATH, override=True)
+                # override=True 把 .env 重放了一遍，runtime 配置得跟着刷新，
+                # 否则面板刚改的值这一程都不生效。顺序不能反：先 .env 后数据库。
+                _reload_settings()
                 try:
                     cfg = load_config()
                     users = load_users()
@@ -2864,6 +2867,87 @@ async def main_loop(
 # 入口
 # ------------------------------------------------------------------ #
 
+def _validate_structured_config() -> None:
+    """校验监控范围那批「塞在字符串里的表格」，把问题吼出来。
+
+    面板保存时已经挡过一道，但值还能从别处来：手工改库、迁移、环境变量覆盖、
+    从旧版本升上来。这里是最后一道。
+
+    **不阻断启动。** 一个配置笔误让整个监控停摆，代价远大于笔误本身；何况多数
+    问题只影响一个平台，其余照跑更有价值。但要打 ERROR，让它进 errors.log 和
+    /monitoring 面板。
+    """
+    try:
+        from target_config import validate_effective
+
+        problems = validate_effective()
+    except Exception:
+        logger.debug("结构化配置自检失败（已忽略）", exc_info=True)
+        return
+
+    for p in problems:
+        if p.fatal:
+            logger.error("⚙️  配置格式有误：%s", p)
+        else:
+            logger.warning("⚙️  配置提示：%s", p)
+
+
+def _bootstrap_settings() -> None:
+    """把 runtime 类配置从 app_settings 表注入 os.environ；首次运行顺带做迁移。
+
+    必须在 ``load_config()`` 之前调用——后者读的就是 ``os.environ``。
+
+    整段吞异常：配置存储出问题时全部回落到 .env / 代码默认值继续跑。让监控因为
+    读不出配置而起不来，代价远大于用一轮旧配置。
+    """
+    try:
+        from config import DB_PATH, TIMEZONE
+        from settings_store import env_overrides, hydrate, migrate_env_to_db
+        from storage import Storage
+
+        st = Storage(DB_PATH, timezone_str=TIMEZONE)
+        try:
+            migrate_env_to_db(st, ENV_PATH)
+            n = hydrate(st)
+            if n:
+                logger.info("已从 app_settings 载入 %d 项运维配置", n)
+            # 迁移之后 .env 里不该再有 runtime 键。有就是被手工加回来了——它会
+            # 盖过面板，而面板不会有任何提示，改了没反应会让人以为是坏了。
+            leftover = env_overrides(ENV_PATH)
+            if leftover:
+                logger.warning(
+                    "⚙️  .env 里这些键会盖过面板设置（面板改了不生效）：%s。"
+                    "确认要用面板管理的话，从 .env 删掉即可",
+                    ", ".join(leftover),
+                )
+            _validate_structured_config()
+        finally:
+            st.close()
+
+    except Exception:
+        logger.warning("载入 app_settings 失败，本次使用 .env / 默认值", exc_info=True)
+
+
+def _reload_settings() -> None:
+    """热重载时重新注水。
+
+    ``load_dotenv(override=True)`` 会把 .env 重放一遍，而 runtime 配置早已不在
+    .env 里；不重新注水的话，面板刚改的值这一程都不会生效。
+    """
+    try:
+        from config import DB_PATH, TIMEZONE
+        from settings_store import hydrate
+        from storage import Storage
+
+        st = Storage(DB_PATH, timezone_str=TIMEZONE)
+        try:
+            hydrate(st)
+        finally:
+            st.close()
+    except Exception:
+        logger.warning("热重载时读取 app_settings 失败，沿用当前值", exc_info=True)
+
+
 async def _async_main() -> None:
     parser = argparse.ArgumentParser(description="Holland2Stay 房源监控")
     parser.add_argument("--once", action="store_true", help="只运行一次后退出")
@@ -2874,8 +2958,24 @@ async def _async_main() -> None:
     # 强制从 .env 文件重新加载（override=True 覆盖继承的环境变量），
     # 确保子进程启动时使用最新的 .env 配置而非父进程的陈旧值。
     load_dotenv(dotenv_path=ENV_PATH, override=True)
+    # runtime 类配置住在 app_settings 表里，必须在 load_config() **之前**注入
+    # os.environ——load_config() 读的就是 os.environ，晚一步就读到默认值了。
+    #
+    # 迁移只在 monitor 这一处做：web 有多个 gunicorn worker，并发改写 .env 会
+    # 打架。两个进程读同一个库，monitor 搬完 web 下次注水就看得到。
+    _bootstrap_settings()
+
     cfg = load_config()
     _setup_logging(cfg.log_level)
+
+    # 键名审计放在日志配好之后、抓取开始之前。打错的键此前是完全静默的：
+    # PEAK_STRAT=08:30 不报错，只是安静地走默认值，而你以为自己改了。
+    # 只 WARNING 不阻断——一个拼错的键让整个监控起不来，代价远大于它本身。
+    #
+    # 只挂在 monitor 这一处：web 走 gunicorn 时不经过 main()，挂到模块导入上则
+    # 每个 worker 各刷一遍。两个进程读的是同一个 .env，报一次就够。
+    from env_registry import log_env_audit
+    log_env_audit(ENV_PATH)
 
     if not args.test:
         check_for_updates()

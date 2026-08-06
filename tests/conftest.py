@@ -115,10 +115,12 @@ def isolated_data_dir(tmp_path, monkeypatch):
     except ImportError:
         pass
 
-    # settings 路由
+    # settings 路由自 v1.16.0 起写 app_settings 表而非 .env，因此不再需要
+    # 替换它的 ENV_PATH；改成清空 settings_store 的注水记录——那是模块级状态，
+    # 会在测试之间串味（上个用例注过的键，下个用例的 source_of() 仍报 "db"）。
     try:
-        from app.routes import settings as settings_route
-        monkeypatch.setattr(settings_route, "ENV_PATH", fake_env)
+        import settings_store
+        monkeypatch.setattr(settings_store, "_hydrated", set())
     except ImportError:
         pass
 

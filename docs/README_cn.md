@@ -165,8 +165,8 @@ docker compose logs -f h2s
 首轮比之后慢，属正常。一轮正常结束时会看到 `本轮完整扫描: N/N 城市 (...)`，
 随后是 `本轮结束: ... 新房源`。
 
-登录后在面板中添加用户、通知渠道与待监控的城市。用户级配置全部在面板里，此后
-一般不需要再改 `.env`。
+登录后在面板中添加用户、通知渠道，并选择待监控的平台与城市。用户级与系统级配置
+均在面板中管理，`.env` 此后只在更换凭据、域名或时区时才需要改动。
 
 ### 从源码运行
 
@@ -206,11 +206,12 @@ docker compose up -d --force-recreate h2s
 
 需要备份的有两处，且**必须一起备份**：
 
-- `data/listings.db` —— 房源、用户、凭据、设备 token
+- `data/listings.db` —— 房源、用户、凭据、设备 token，以及系统级设置（`app_settings`）
 - `.env` —— 各类密钥，尤其是 `DATA_ENCRYPTION_KEY`
 
 库中的密码与平台凭据是用 `.env` 里的密钥加密的，只恢复其中一个会得到一批无法
-解密的凭据。
+解密的凭据。自 v1.16.0 起，监控范围与轮询节奏亦存于库中，只恢复 `.env` 将回落到
+代码默认值。
 
 容器运行期间**不要直接复制数据库文件**，会遗漏最近的写入。取一致快照用：
 
@@ -223,27 +224,73 @@ docker exec h2s python -c "import sqlite3; \
 
 ## 配置
 
-日常设置（source、城市、轮询间隔、过滤条件、通知渠道、自动预订、主题）均在 Web
-面板中调整。部署级设置位于 `.env`，请以 [.env.example](../.env.example) 为起点，
-其中对每个键均有说明。
+配置分三处存放，各有明确边界：
+
+| 内容 | 位置 | 在哪里改 |
+|---|---|---|
+| 用户级：通知渠道、过滤条件、自动预订 | SQLite `user_configs` | 面板「用户」页 |
+| 系统级：source、城市、轮询间隔 | SQLite `app_settings` | 面板「设置」页 |
+| 部署级：凭据、路径、时区、对外基址 | `.env` | 文本编辑器 |
+
+**监控范围与轮询节奏不在 `.env` 中。** 自 v1.16.0 起，`SOURCES`、`CITIES`、
+`*_CITIES`、`AVAILABILITY_FILTERS`、`CHECK_INTERVAL`、`PEAK_*` 等 20 个键存于
+数据库，由面板管理。首次启动会自动将其从 `.env` 迁入，迁移前把整份文件备份为
+`.env.bak.<时间戳>`，日志中记有搬入与跳过的明细。
+
+`.env` 中只余三类，共约 28 个键：
+
+| 类别 | 数量 | 说明 |
+|---|---|---|
+| 凭据 | 14 | 密码、API key、加密密钥、代理 URL。**不进数据库**——数据库会被备份、导出、下载 |
+| 部署事实 | 5 | `DB_PATH`、`TIMEZONE`、`PUBLIC_BASE_URL`、`SESSION_COOKIE_SECURE`、`SUPPORT_EMAIL`。其中 `DB_PATH` 必须留在此处——须先找到数据库，才能读取设置表 |
+| 阈值开关 | 9 | 通知渠道开关与配额，均有默认值，多数部署无需填写 |
 
 以下几项需优先了解：
 
 | 键 | 默认值 | 作用 |
 |---|---|---|
-| `SOURCES` | `holland2stay` | 启用的平台，以逗号分隔 |
-| `CITIES` | `Eindhoven,29` | Holland2Stay 的城市，格式为 `名称,id`，多项以 `\|` 分隔 |
-| `OURDOMAIN_CITIES` / `OURCAMPUS_CITIES` / `XIOR_CITIES` | — | 其余 source 的同格式配置，楼栋 key 见各自的 scraper |
-| `SHADOW_SOURCES` | — | 列出的 source 照常抓取入库但**不发送任何通知**，用于新平台对用户开放前的静默验证。不在 `SOURCES` 中的条目会被忽略并记录警告——仅写入此处而未写入 `SOURCES` 的平台属于「未启用」，而非「影子」 |
-| `CHECK_INTERVAL` | `300` | 非高峰时段的轮询间隔（秒） |
-| `PEAK_INTERVAL` | `60` | 高峰时段的轮询间隔（秒） |
+| `WEB_PASSWORD` | — | **必填**，留空时容器拒绝启动 |
+| `HTTPS_PROXY` | — | 生产环境必填。机房 IP 抓取 Holland2Stay 会被 Cloudflare 403 |
+| `PUBLIC_BASE_URL` | — | 生产环境必填，否则验证邮件中的链接指向内网 host |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默超过该时长后 `/health` 报告 unhealthy |
 | `HEALTH_*` / `WATCHDOG_*` | 见 `.env.example` | `/monitoring` 所依托的数据退化告警阈值 |
 | `STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` | `0.5` / `2` | 房源自 feed 中消失多久后推定为 Reserved，再经多久判定为 Occupied，见[房源状态](#房源状态) |
-| `HTTPS_PROXY` | — | Cloudflare 拦截较严时，令抓取改走另一个出口 IP |
 
-启用某个 source 需要**同时**配置 `SOURCES` 与该 source 的城市列表，仅配置城市
-列表不会生效。
+完整清单见 [.env.example](../.env.example)，其中对每个键均有说明；键名与类别登记于
+`env_registry.py`。
+
+### 环境变量优先于数据库
+
+取值顺序为 **环境变量 > `app_settings` > 代码默认值**。保留环境变量一层是为容器化
+排障提供强制覆盖口子：
+
+```bash
+docker compose run -e CHECK_INTERVAL=30 h2s python monitor.py
+```
+
+代价是它不可见——面板显示一个值，进程使用另一个。因此面板会标出「被环境变量覆盖，
+在此修改不会生效」，monitor 启动时亦对 `.env` 中残留的此类键发出警告。**日常改配置
+请用面板**；在 `.env` 中重新写入这些键会盖过面板且不易察觉。
+
+### 输入校验
+
+键名拼错不再是静默的。monitor 启动时审计 `.env`，对未登记的键发出警告并给出最接近
+的候选：
+
+```
+⚙️  .env: PEAK_STRAT 不是本项目认识的配置键，它不会有任何效果（是不是想写 PEAK_START？）
+```
+
+监控范围一类的值格式坏了同样会被指出，且区分两种后果：格式错误（分隔符、字段数、
+数值类型）由面板直接拒绝保存；实体不认识（城市 ID 或平台名不在已知表内）仅告警并
+照常保存——官方注册表会更新，写死拒绝会使一个新上线的城市变成保存失败。
+
+### 启用一个新平台
+
+在面板「设置」页勾选平台**并**勾选该平台的城市或楼盘，二者缺一不可：仅勾选城市不会
+生效。`SHADOW_SOURCES` 中列出的 source 照常抓取入库但**不发送任何通知**，用于新平台
+对用户开放前的静默验证；不在 `SOURCES` 中的条目会被忽略并记录警告——仅写入影子名单
+而未启用的平台属于「未启用」，而非「影子」。
 
 上线生产前建议执行一次预检：
 
@@ -253,6 +300,9 @@ python -m tools.doctor --no-network
 
 该命令须在**宿主机的仓库目录**中执行，而非容器内——`tools/` 是有意不打入镜像的。
 它为只读操作：不写入配置、不发送通知、不干预 monitor 进程。
+
+其中 `Settings` 一节回答部署后最常见的疑问：迁移是否已执行（`app_settings` 中
+有多少项）、`.env` 中是否残留会盖过面板的键、以及有无拼错的键名。
 
 ---
 

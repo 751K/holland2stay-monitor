@@ -39,6 +39,99 @@ flowchart LR
 进程定义位于 [`docker/supervisord.conf`](../docker/supervisord.conf)。两者均为
 `autostart=true`，因此重建容器会使此前被手动停止的 monitor 自动恢复。
 
+### 1.1 配置按生命周期分为四类，存放位置随之不同
+
+系统级配置的键分属四种生命周期，登记于 [`env_registry.py`](../env_registry.py)，
+该文件是键名的唯一权威清单：
+
+| 类别 | 数量 | 谁改 | 存放位置 |
+|---|---|---|---|
+| `secret` | 19 | 人，部署时一次 | `.env`。不进数据库——库会被备份、导出、下载 |
+| `deploy` | 9 | 人，换机器或换域名时 | `.env`。部分须在能读数据库**之前**可用，`DB_PATH` 即是 |
+| `runtime` | 20 | **Web 面板，运行时** | SQLite `app_settings` |
+| `tuning` | 30 | 几乎无人改动 | `.env`，均有代码默认值，多数部署一个都不必填 |
+
+`runtime` 一类原先与其余三类同处 `.env`，构成本设计中的矛盾：该文件同时充当
+「人手写的部署产物」与「程序运行时写入的存储」。双重身份在代码中留下两处代价——
+[`app/env_writer.py`](../app/env_writer.py) 为多 worker 并发写入加锁；
+`config.write_env_key()` 无法使用 `dotenv.set_key()`，因其内部的 `os.replace()`
+会破坏 Docker 的 bind mount。
+
+> 一般规律：**一份配置若同时被人和程序写入，就无法同时保持可手改、可 diff、可追溯。**
+> 判断依据不是键的数量，而是写入者的数量。
+
+#### 取值顺序与迁移
+
+```
+真实环境变量  >  app_settings 表  >  代码默认值
+```
+
+实现方式是**注水**（[`settings_store.py`](../settings_store.py)）：启动时把表中的值
+写入 `os.environ`，但仅限环境中尚不存在的键。各模块数十处
+`os.environ.get(key, default)` 因而无需改动，顺序自动成立。环境变量一层予以保留，
+用于容器化排障时的强制覆盖（`docker compose run -e CHECK_INTERVAL=30 ...`）。
+
+保留强制覆盖的代价是它**不可见**：面板显示一个值，进程使用另一个。因此
+`source_of()` 如实报告每个键的来源，面板据此显示「被环境变量覆盖，在此修改不会
+生效」，`monitor` 启动时亦对 `.env` 中残留的 `runtime` 键发出 WARNING。
+
+首次启动执行一次性迁移：将 `.env` 中的 `runtime` 键写入 `app_settings`，随后
+**从 `.env` 移除**（移除前整份备份为 `.env.bak.<时间戳>`）。移除是必需的而非清理
+——`.env` 经 `load_dotenv()` 进入 `os.environ`，只要键还在文件里就永远优先于数据库，
+面板保存将「成功」但无任何效果。
+
+同理，迁移还须将这些键从**内存中的** `os.environ` 撤除：`config` 模块导入时已执行
+过 `load_dotenv()`，仅删文件不足以生效，否则首次升级后的整个进程周期内面板均为失效
+状态。此点由 `tests/test_settings_store.py::test_panel_edit_takes_effect_after_rehydrate`
+固定。
+
+写入路径为单一事务（`set_app_settings`），并附带 `updated_at` / `updated_by`；
+迁移写入的记录标记为 `migration`，面板写入的标记为 `panel`。
+
+#### 结构化配置的解析边界
+
+监控范围（`CITIES` / `*_CITIES` / `AVAILABILITY_FILTERS` / `SHARD_SIZES` /
+`SOURCE_MIN_INTERVALS` / `SOURCES`）本质是表格数据，实际以带分隔符的字符串存放。
+2026-08-06 实测表明，同一层的输入错误此前后果并不一致：
+
+| 输入 | 原行为 |
+|---|---|
+| `CITIES=Eindhoven`（缺 ID） | 静默丢弃 → 0 个城市，监控照常运行且不抓取任何房源 |
+| `CITIES=Eindhoven;29` | 同上 |
+| `CITIES=Eindhoven,abc` | `ValueError`，monitor 无法启动 |
+| `AVAILABILITY_FILTERS=…,999999` | 全部接受，抓取一个不存在的状态 |
+| `SOURCES=holland2stay,xiorr` | 全部接受，一个不存在的平台 |
+
+其中第一种最难察觉：**空列表本身是合法配置**（「不监控任何城市」），因此下游无处
+报错——该故障与「确实不想监控」在语义上不可区分，只有解析层能够分辨。
+
+解析集中于 [`target_config.py`](../target_config.py)，统一返回 `(结果, 问题清单)`，
+不提供「静默丢弃一项」的路径。校验分两层，处置不同：
+
+| 层次 | 判据 | 处置 |
+|---|---|---|
+| 格式 | 分隔符、字段数、数值类型 | 致命；面板拒绝保存 |
+| 实体 | ID / 平台名是否在已知表内 | 警告；照常保存 |
+
+实体层不设为致命系有意为之：官方注册表会更新，写死拒绝将使一个新上线的城市变成
+保存失败乃至启动失败。
+
+校验挂载于两处：面板保存**之前**（坏值不入库，整批一起拒绝），以及 `monitor` 启动
+时的自检（值仍可能来自手工改库、迁移或环境变量覆盖）。自检打 ERROR 但**不阻断启动**
+——单个配置笔误导致整体停摆，代价高于笔误本身，且多数问题只影响一个平台。
+
+#### 键名审计
+
+`monitor.py` 启动时据 registry 审计 `.env`，未登记的键发 WARNING 并给出最接近的
+候选（`PEAK_STRAT` → `PEAK_START`）。此前键名拼错是**完全静默**的——不报错，只是
+安静地走默认值。审计只告警不阻断启动。
+
+三方一致性（代码实际读取 ↔ registry ↔ `.env.example`）由
+`tests/test_env_registry.py` 固定。其源码扫描按当前存在的读取形态匹配
+（`os.environ.get` / `os.environ[...]` / `_env_int` / `_env_float` / `_read`，以及
+`*_ENV` 常量持有键名）；**新增包装函数须同步加入扫描器**，否则该测试会静默漏判
+而非报错。此限制记录于测试的 docstring 中。
+
 ---
 
 ## 2. 一轮抓取

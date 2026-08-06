@@ -88,6 +88,36 @@ from app.routes import (                                          # noqa: E402
 from app.routes import api_v1                                    # noqa: E402
 
 # ------------------------------------------------------------------ #
+# 运维配置注水
+# ------------------------------------------------------------------ #
+#
+# runtime 类配置住在 app_settings 表里，得在读任何配置之前注入 os.environ。
+# 放在模块级而不是 main()：gunicorn 加载的是 web:app，根本不经过 main()。
+# 每个 worker 各注一次，这是必要的——它们是独立进程，各有自己的 os.environ。
+#
+# 只注水不迁移。迁移要改写 .env，多个 worker 并发改同一个文件会打架；那一步交给
+# monitor 独占（见 monitor._bootstrap_settings）。两个进程读同一个库，monitor
+# 搬完这边下次注水就看得到。
+def _hydrate_settings() -> None:
+    try:
+        from config import DB_PATH, TIMEZONE
+        from settings_store import hydrate
+        from storage import Storage
+
+        st = Storage(DB_PATH, timezone_str=TIMEZONE)
+        try:
+            hydrate(st)
+        finally:
+            st.close()
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "载入 app_settings 失败，本 worker 使用 .env / 默认值", exc_info=True,
+        )
+
+
+_hydrate_settings()
+
+# ------------------------------------------------------------------ #
 # Flask app
 # ------------------------------------------------------------------ #
 
