@@ -43,8 +43,23 @@ def index() -> str:
         st.close()
     pid = monitor_pid()
 
+    # 覆盖范围横幅的城市名。取自当前生效的配置而非写死——这些值存在 app_settings
+    # 里，随时能从「设置」页改；写死的横幅迟早和实际不符，且不会有任何地方报错。
+    # 分隔符按语言给：中文用顿号，英文用逗号加空格。
+    lang = get_lang()
+    try:
+        from config import load_config
+
+        cities = load_config().monitored_city_names()
+    except Exception:
+        # 配置读不出来时不显示横幅，而不是让整个首页 500
+        logger.warning("读取监控城市失败，本次不显示覆盖范围横幅", exc_info=True)
+        cities = []
+    monitored_cities_text = ("、" if lang == "zh" else ", ").join(cities)
+
     return render_template(
         "index.html",
+        monitored_cities_text=monitored_cities_text,
         stats=stats,
         recent=recent,
         changes=changes,

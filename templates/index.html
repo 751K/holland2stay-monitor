@@ -50,6 +50,21 @@
   </div>
 </div>
 
+{# 覆盖范围说明。城市名取自**当前生效的配置**（Config.monitored_city_names），
+   不写死——这些值现在存在 app_settings 里，随时能从「设置」页改，写死的横幅迟早
+   和实际不符，而且不会有任何地方报错。 #}
+{% if monitored_cities_text %}
+<div class="alert alert-info mb-4" role="status">
+  <i class="bi bi-geo-alt mr-2"></i>
+  <span>
+    {#- 标签之间不留换行：中文的「请」和「联系支持」之间不该有空格，
+        英文所需的那一个空格写在译文末尾。 -#}
+    {{ _('dash_coverage_notice') | replace('{cities}', monitored_cities_text) -}}
+    <a href="{{ url_for('support_page') }}">{{ _('dash_coverage_contact') }}</a>
+  </span>
+</div>
+{% endif %}
+
 <!-- Modular Dashboard Grid -->
 <div style="display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 32px;">
   

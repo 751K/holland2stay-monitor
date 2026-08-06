@@ -1428,6 +1428,36 @@ class Config:
             return frozenset({"holland2stay"})
         return frozenset()
 
+    def monitored_city_names(self) -> list[str]:
+        """当前实际在监控的城市名，去重排序，供面板向用户说明覆盖范围。
+
+        跨 source 取并集并归一化：OurDomain 的「Amsterdam Diemen」、Xior 的
+        「Eindhoven Kronehoefstraat」都是楼盘名，对用户而言它们就是 Amsterdam 和
+        Eindhoven，分开列只会让人以为监控了七八个城市。
+
+        只算 ``sources`` 里真正启用的平台——某个 source 的城市列表填着但平台没开，
+        它一条都不会抓，列出来就是虚报。
+
+        楼盘归属**按 key 查官方注册表**，不对显示名做前缀猜测：``canonical_city``
+        走的是显式别名表，表里没有的新楼盘会原样漏出去，横幅上就会出现
+        「Maastricht Brusselsepoort」这种半截地名。注册表里本来就带 ``city`` 字段，
+        用它是精确的。查不到才退回 ``canonical_city``。
+        """
+        names: set[str] = set()
+        if "holland2stay" in self.sources:
+            names.update(canonical_city(c.name) for c in self.cities)
+        for source, targets, registry in (
+            ("ourdomain", self.ourdomain_cities, KNOWN_OURDOMAIN_CITIES),
+            ("ourcampus", self.ourcampus_cities, KNOWN_OURCAMPUS_CITIES),
+            ("xior", self.xior_cities, KNOWN_XIOR_CITIES),
+        ):
+            if source not in self.sources:
+                continue
+            by_key = {r["key"]: r.get("city", "") for r in registry}
+            for t in targets:
+                names.add(by_key.get(t.key) or canonical_city(t.name))
+        return sorted(n for n in names if n)
+
     def scrape_tasks_v2(self) -> list["ScrapeTask"]:  # type: ignore[name-defined]
         """
         P0 新接口：展开为 source-aware 的 ``ScrapeTask`` 列表。

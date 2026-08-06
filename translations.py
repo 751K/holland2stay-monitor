@@ -428,6 +428,13 @@ TRANSLATIONS = {
     "settings_request_fail":{"zh": "请求失败",                "en": "Request failed"},
     "settings_no_source":   {"zh": "至少需要启用一个平台，已保留 Holland2Stay。", "en": "At least one platform required. Holland2Stay kept."},
     # 真实环境变量盖过 app_settings 时的提示。不提示的话，改了没反应会被当成 bug。
+    # 仪表盘覆盖范围横幅。{cities} 由 Config.monitored_city_names() 填入——
+    # 分隔符与语序中英不同，所以整句带占位符，不在模板里拼接。
+    "dash_coverage_notice": {
+        "zh": "当前监控的城市：{cities}。需要其他城市，请",
+        "en": "Currently monitoring: {cities}. For other cities, please ",
+    },
+    "dash_coverage_contact": {"zh": "联系支持", "en": "contact support"},
     "settings_invalid_value": {
         "zh": "配置格式有误，未保存：",
         "en": "Invalid config format, nothing saved:",
