@@ -149,9 +149,18 @@ def _setup_logging(level: str) -> None:
     - 更大的 backupCount：错误稀疏，保留更长时间窗口（10MB 历史）
     - 更详细的 formatter：含 funcName:lineno，一眼定位问题源
     - 全局 root logger 接管：所有模块的 logger.warning/error 自动入此文件
+
+    **可重入。** 启动时会调两次：第一次用环境里的 LOG_LEVEL 起个头，好让
+    _bootstrap_settings() 里的迁移日志有地方去；注水之后再按最终配置调一次。
+    每次先摘掉自己上一轮装的 handler，否则每行日志会被写两遍。
     """
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    root = logging.getLogger()
+    for h in [h for h in root.handlers if getattr(h, "_monitor_owned", False)]:
+        root.removeHandler(h)
+        h.close()
     logging.basicConfig(level=getattr(logging, level, "INFO"), format=fmt)
+    root.setLevel(getattr(logging, level, logging.INFO))
     logging.getLogger("asyncio").setLevel(logging.WARNING)
 
     from logging.handlers import RotatingFileHandler
@@ -164,6 +173,7 @@ def _setup_logging(level: str) -> None:
     )
     main_fh.setFormatter(logging.Formatter(fmt))
     main_fh.setLevel(getattr(logging, level, "INFO"))
+    main_fh._monitor_owned = True
     logging.getLogger().addHandler(main_fh)
 
     # 错误日志（WARNING+）：抓取/下单异常的专用归档
@@ -175,6 +185,7 @@ def _setup_logging(level: str) -> None:
         "%(asctime)s [%(levelname)s] %(name)s.%(funcName)s:%(lineno)d %(message)s"
     ))
     error_fh.setLevel(logging.WARNING)
+    error_fh._monitor_owned = True
     logging.getLogger().addHandler(error_fh)
 
 
@@ -2958,6 +2969,14 @@ async def _async_main() -> None:
     # 强制从 .env 文件重新加载（override=True 覆盖继承的环境变量），
     # 确保子进程启动时使用最新的 .env 配置而非父进程的陈旧值。
     load_dotenv(dotenv_path=ENV_PATH, override=True)
+    # 日志必须先配。迁移与键名审计都在 _bootstrap_settings() 里，它们打的
+    # logger.info 若无 handler 会被直接丢弃——2026-08-06 上线时实测：迁移正常
+    # 完成，日志里却一个字都没有，而文档恰恰让人去日志里核对搬了哪些键。
+    #
+    # LOG_LEVEL 本身也是 runtime 键，此刻还没注水，因此先用环境里的值起个头，
+    # 注水之后再按最终配置重配一次。_setup_logging 每次都会重建 handler。
+    _setup_logging(os.environ.get("LOG_LEVEL", "INFO"))
+
     # runtime 类配置住在 app_settings 表里，必须在 load_config() **之前**注入
     # os.environ——load_config() 读的就是 os.environ，晚一步就读到默认值了。
     #

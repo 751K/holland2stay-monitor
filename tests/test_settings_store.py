@@ -70,11 +70,15 @@ class TestMigration:
         assert "DB_PATH=data/x.db" in text
         assert st.get_app_setting("WEB_PASSWORD") is None
 
-    def test_backs_up_before_touching_anything(self, env_and_db):
+    def test_backs_up_before_touching_anything(self, env_and_db, monkeypatch, tmp_path):
+        """备份落在 DATA_DIR，理由见 TestMigrationBackupSurvivesDocker。"""
+        import config
+        data_dir = tmp_path / "data"
+        monkeypatch.setattr(config, "DATA_DIR", data_dir)
         env, st = env_and_db
         ss.migrate_env_to_db(st, env)
 
-        backups = list(env.parent.glob(".env.bak.*"))
+        backups = list(data_dir.glob("env.bak.*"))
         assert len(backups) == 1
         assert "CHECK_INTERVAL=300" in backups[0].read_text(encoding="utf-8")
 
@@ -261,3 +265,90 @@ class TestPanelWritesToTheTable:
         src = (Path(__file__).resolve().parent.parent
                / "app" / "routes" / "settings.py").read_text(encoding="utf-8")
         assert "source_of" in src and "env_overridden" in src
+
+
+class TestMigrationBackupSurvivesDocker:
+    """备份必须落在持久化的目录，否则等于没有备份。
+
+    docker-compose 挂的是 ``./.env:/app/.env``——**文件级** bind mount，只有这一个
+    文件是共享的。写到 ``/app/.env.bak.*`` 的东西留在容器自己的层里，
+    ``--force-recreate`` 一到就没了。
+
+    2026-08-06 上线时实测到了这一点：迁移正常完成，19 个键进了库，宿主机上却找不到
+    任何备份——安全网只存在于代码里，不存在于真实部署中。
+    """
+
+    def test_backup_lands_in_data_dir(self, env_and_db, monkeypatch, tmp_path):
+        import config
+
+        data_dir = tmp_path / "data"
+        monkeypatch.setattr(config, "DATA_DIR", data_dir)
+        env, st = env_and_db
+
+        ss.migrate_env_to_db(st, env)
+
+        backups = list(data_dir.glob("env.bak.*"))
+        assert backups, "备份没落在 DATA_DIR，容器重建后会丢失"
+        assert "CHECK_INTERVAL=300" in backups[0].read_text(encoding="utf-8")
+
+    def test_not_written_next_to_env(self, env_and_db, monkeypatch, tmp_path):
+        import config
+
+        monkeypatch.setattr(config, "DATA_DIR", tmp_path / "data")
+        env, st = env_and_db
+
+        ss.migrate_env_to_db(st, env)
+
+        assert not list(env.parent.glob(".env.bak.*")), \
+            "写在 .env 旁边，Docker 文件级挂载下不持久"
+
+    def test_falls_back_rather_than_skipping_the_backup(self, env_and_db, monkeypatch):
+        """DATA_DIR 不可写时退回 .env 旁边——总比没有备份就动刀强。"""
+        import config
+
+        class Unwritable:
+            def mkdir(self, **kw):
+                raise OSError("read-only file system")
+
+        monkeypatch.setattr(config, "DATA_DIR", Unwritable())
+        env, st = env_and_db
+
+        ss.migrate_env_to_db(st, env)
+
+        assert list(env.parent.glob(".env.bak.*")), "退路也没走，备份彻底没了"
+
+
+class TestMigrationIsActuallyLogged:
+    """迁移日志必须真的写得出来。
+
+    文档让部署的人去日志里核对搬了哪些键。而 _bootstrap_settings() 原先跑在
+    _setup_logging() 之前，logger.info 没有 handler，直接被丢弃——2026-08-06 上线
+    实测：迁移完成，日志里一个字都没有。
+    """
+
+    def test_logging_is_configured_before_bootstrap(self):
+        """按 AST 比较**调用**的行号——注释里同样写着这两个名字。"""
+        import ast
+        import inspect
+        import textwrap
+
+        import monitor
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(monitor._async_main)))
+        first = {}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                first.setdefault(n.func.id, n.lineno)
+        assert first["_setup_logging"] < first["_bootstrap_settings"], \
+            "迁移日志会被丢弃：此时 root logger 还没有 handler"
+
+    def test_setup_logging_is_reentrant(self):
+        """启动时要调两次（LOG_LEVEL 本身也是 runtime 键），不能累积 handler。"""
+        import logging
+
+        import monitor
+
+        monitor._setup_logging("INFO")
+        before = len(logging.getLogger().handlers)
+        monitor._setup_logging("DEBUG")
+        assert len(logging.getLogger().handlers) == before, "每行日志会被写两遍"

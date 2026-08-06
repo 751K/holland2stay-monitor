@@ -139,10 +139,7 @@ def migrate_env_to_db(storage, env_path: str | Path) -> tuple[list[str], list[st
     if moved:
         storage.set_app_settings(moved, updated_by="migration")
 
-    # 整份备份再动刀。备份放在 .env 旁边而不是 /tmp——重启容器 /tmp 就没了，
-    # 而出问题的人第一时间会去看 .env 所在的目录。
-    backup = p.with_name(f"{p.name}.bak.{time.strftime('%Y%m%dT%H%M%S')}")
-    shutil.copy2(p, backup)
+    backup = _backup_env(p)
 
     # 搬走的和跳过的都要从 .env 删掉：跳过的那些数据库里已有值，留在 .env
     # 只会继续盖住数据库，面板依旧改不动。
@@ -165,6 +162,32 @@ def migrate_env_to_db(storage, env_path: str | Path) -> tuple[list[str], list[st
     if skipped:
         logger.info("  跳过（数据库已有值）: %s", ", ".join(sorted(skipped)))
     return sorted(moved), sorted(skipped)
+
+
+def _backup_env(path: Path) -> Path:
+    """动刀之前整份备份，返回备份路径。
+
+    **备份落在 DATA_DIR，不落在 .env 旁边。** docker-compose 挂的是
+    ``./.env:/app/.env``——**文件级** bind mount，只有这一个文件是共享的。写到
+    ``/app/.env.bak.*`` 的东西留在容器自己的层里，``--force-recreate`` 一到就没了。
+    2026-08-06 上线时实测：迁移正常完成，宿主机上却找不到任何备份。
+
+    ``./data:/app/data`` 是目录挂载，才是真正持久的地方。写不进去时退回 .env
+    旁边——总比没有强。
+    """
+    stamp = time.strftime("%Y%m%dT%H%M%S")
+    try:
+        from config import DATA_DIR
+
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        backup = Path(DATA_DIR) / f"env.bak.{stamp}"
+        shutil.copy2(path, backup)
+        return backup
+    except Exception:
+        logger.warning("备份到 DATA_DIR 失败，改写到 .env 旁边", exc_info=True)
+        backup = path.with_name(f"{path.name}.bak.{stamp}")
+        shutil.copy2(path, backup)
+        return backup
 
 
 def _forget_migrated(path: Path, keys: list[str], file_values: dict[str, str]) -> None:
