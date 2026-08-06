@@ -430,8 +430,7 @@ FlatRadar 由个人独立开发与维护，服务器、推送基础设施及 App
 ## 许可证
 
 [PolyForm Noncommercial License 1.0.0](../LICENSE) —— 个人及其它非商业用途免费；
-本许可证不授予商业使用权。如需商业授权，请联系
-[support@flatradar.app](mailto:support@flatradar.app)。
+本许可证不授予商业使用权。
 
 GitHub 侧栏将本仓库的许可证显示为 “Other”，属预期结果：GitHub 仅识别
 choosealicense.com 收录的许可证，而那些全部为开源许可证，「禁止商业使用」这一使用

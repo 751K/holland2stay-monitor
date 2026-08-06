@@ -473,8 +473,7 @@ App Store fees come out of pocket.
 ## License
 
 [PolyForm Noncommercial License 1.0.0](../LICENSE) — free for personal and other
-noncommercial use; commercial use is not granted by this licence. For a
-commercial licence, contact [support@flatradar.app](mailto:support@flatradar.app).
+noncommercial use; commercial use is not granted by this licence.
 
 GitHub's sidebar shows this repository's licence as "Other". That is expected:
 GitHub only detects the licences listed on choosealicense.com, all of which are
