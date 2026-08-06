@@ -151,7 +151,15 @@ def dispatch_scrape_tasks(
     completeness: dict[str, bool] = {}
     success_count = 0
     network_failures: list[str] = []
-    proxy_failure: Optional[ProxyError] = None   # 任一任务遇到代理故障就记下
+    # 任一任务遇到代理层故障就记下**原始异常**（不必是 ProxyError 实例）。
+    # 全失败时据此上抛 ProxyError，monitor 才能走「标记代理故障 → 冷却 → 切备用
+    # 或降级直连原生 IP」那条路。
+    #
+    # 2026-08-05：这里原本只认 ``isinstance(e, ProxyError)``，而生产代码里没有
+    # 任何地方构造过 ProxyError——唯一的构造点就是本函数末尾，条件是本变量非空。
+    # 一个自己喂自己的闭环，于是代理欠费停服 5 小时，冷却/切换/降级一次没触发。
+    # 判定改由 ``is_proxy_error()`` 做，它是为此存在的，此前只有测试在调。
+    proxy_failure: Optional[BaseException] = None
     hard_failures: list[tuple[str, Exception]] = []
 
     for source, source_tasks in by_source.items():
@@ -203,9 +211,9 @@ def dispatch_scrape_tasks(
                         raise
                     except ScrapeNetworkError as e:
                         network_failures.append(ckey)
-                        # ProxyError 是 ScrapeNetworkError 子类——单独记下，便于全失败
-                        # 时上抛 ProxyError 让 monitor 发"代理失效"告警。
-                        if isinstance(e, ProxyError) and proxy_failure is None:
+                        # 代理层故障单独记下：全失败时据此上抛 ProxyError，monitor
+                        # 才会标记代理故障并降级，而不是当成普通网络抖动干等。
+                        if proxy_failure is None and is_proxy_error(e):
                             proxy_failure = e
                         logger.error("%s 抓取网络失败，已隔离该任务: %s", ckey, e)
                         # 单 city 网络失败不进 completeness（与现有 scrape_all 行为一致）
@@ -246,6 +254,11 @@ def dispatch_scrape_tasks(
                     continue
                 completeness[ckey] = False
                 hard_failures.append((ckey, e))
+            # 浏览器 source（H2S / Xior）的代理故障走的是这条路，不是上面的
+            # per-task 分支——浏览器在 batch_session() 里创建，代理连不上时
+            # 连第一个 task 都进不去。2026-08-05 漏判的正是这一半。
+            if proxy_failure is None and is_proxy_error(e):
+                proxy_failure = e
             logger.error(
                 "%s 批次会话失败，已隔离该 source: %s: %s",
                 source, type(e).__name__, e, exc_info=True,
@@ -254,30 +267,48 @@ def dispatch_scrape_tasks(
             # 留着可疑会话的代价远大于下轮多一次冷启动。
             _safe_invalidate(scraper, source)
 
-    # 429 / 403 / 维护：若没有任何任务成功，维持旧行为让 monitor 进入冷却；
-    # 若已有其它平台成功，则返回部分结果，避免 OurDomain 被挡时拖垮 H2S。
-    # 全失败时优先上抛 UpstreamMaintenanceError——它是最有用的信号，monitor
-    # 据此能选择"长冷却 + 不通知"而非"长冷却 + 通知"。
-    if success_count == 0 and hard_failures:
+    # 全失败时上抛什么，按「哪个信号最有用」排序：
+    #
+    #   1. UpstreamMaintenanceError —— monitor 据此走"长冷却 + 不通知"
+    #   2. ProxyError              —— 有明确的自动处置：冷却坏代理、切备用、
+    #                                 或降级直连原生 IP。压成别的异常就等于放弃
+    #                                 这套处置，只能干等人工
+    #   3. 其余 hard_failure（403 / 429 / 未预期异常）
+    #
+    # 代理排在 403/429 之前是因为代理挂了根本拿不到站点的真实响应——同一轮里
+    # 那些 403 多半只是代理失败的次生现象。
+    if success_count == 0 and (hard_failures or proxy_failure is not None):
         maint = next(
             (e for _, e in hard_failures if isinstance(e, UpstreamMaintenanceError)),
             None,
         )
-        raise maint if maint is not None else hard_failures[0][1]
+        if maint is not None:
+            raise maint
+        if proxy_failure is not None:
+            raise _proxy_error_for(tasks, network_failures) from proxy_failure
+        raise hard_failures[0][1]
 
     # 全部任务都网络失败 → 上抛，让 monitor 做连续失败计数。
     # 若失败是代理故障，上抛 ProxyError（ScrapeNetworkError 子类，控制流不变），
-    # monitor 据此额外发"代理失效"告警。
+    # monitor 据此额外发"代理失效"告警并启动降级。
     if success_count == 0 and network_failures and len(network_failures) == len(tasks):
         if proxy_failure is not None:
-            raise ProxyError(
-                f"全部 {len(tasks)} 个任务因代理故障失败: {', '.join(network_failures)}"
-            ) from proxy_failure
+            raise _proxy_error_for(tasks, network_failures) from proxy_failure
         raise ScrapeNetworkError(
             f"全部 {len(tasks)} 个任务网络失败: {', '.join(network_failures)}"
         )
 
     return all_listings, completeness
+
+
+def _proxy_error_for(tasks: list, network_failures: list[str]) -> "ProxyError":
+    """构造上抛给 monitor 的 ProxyError。
+
+    ``network_failures`` 可能为空——浏览器 source 的代理故障发生在 batch_session
+    里，连第一个 task 都没进去，那时只有批次级异常。
+    """
+    where = ", ".join(network_failures) if network_failures else "批次会话建立阶段"
+    return ProxyError(f"全部 {len(tasks)} 个任务因代理故障失败: {where}")
 
 
 def _completeness_key(

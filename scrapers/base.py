@@ -22,6 +22,7 @@ P0 引入：把抓取从 H2S 单源耦合中解放出来，每个第三方租房
 """
 from __future__ import annotations
 
+import re as _re
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -84,18 +85,48 @@ class ProxyError(ScrapeNetworkError):
     """
 
 
+#: Chromium 对任何代理层失败给出的错误码。它不透出代理的真实状态码，但**码本身
+#: 已经说明这是代理层的事**——浏览器根本没连上目标站点。
+#:
+#: 单独列出来是因为下面那几条 libcurl 文案是空格分词的，而 Chromium 用下划线：
+#: ``ERR_TUNNEL_CONNECTION_FAILED`` 里没有 "tunnel connection failed"。
+#: 2026-08-05 代理欠费停服 5 小时期间，浏览器侧的失败因此全部漏判为普通网络错误，
+#: 代理冷却 / 切备用 / 降级直连三条路一条都没走。
+_CHROMIUM_PROXY_ERROR_CODES: tuple[str, ...] = (
+    "err_tunnel_connection_failed",
+    "err_proxy_connection_failed",
+    "err_proxy_auth_unsupported",
+    "err_proxy_certificate_invalid",
+    "err_no_supported_proxies",
+)
+
+
 def is_proxy_error(exc: BaseException) -> bool:
     """
     判断异常是否为抓取代理层故障。
 
-    curl_cffi 代理失败抛 ``curl_cffi.requests.exceptions.ProxyError``（类名
-    含 Proxy）；底层 libcurl 的代理错误 message 含 "CONNECT tunnel failed" /
-    "Proxy CONNECT" / curl 错误码 (56)（隧道失败）/ (97)（代理握手）。
+    三类来源：
+
+    - curl_cffi 代理失败抛 ``curl_cffi.requests.exceptions.ProxyError``（类名含
+      Proxy）；
+    - 底层 libcurl 的代理错误 message 含 "CONNECT tunnel failed" / "Proxy
+      CONNECT" / curl 错误码 (56)（隧道失败）/ (97)（代理握手）；
+    - Playwright/Chromium 给的 ``net::ERR_*`` 代理错误码。
+
+    只回答「是不是代理层的问题」。够不够格让整条代理进冷却是
+    ``is_proxy_service_error`` 的事。
     """
     name = type(exc).__name__.lower()
     if "proxy" in name:
         return True
-    msg = str(exc).lower()
+    msg = _exception_chain_text(exc)
+    if any(code in msg for code in _CHROMIUM_PROXY_ERROR_CODES):
+        return True
+    # config.probe_proxy() 的判词。它是直接跟代理握手得来的结论，比任何字符串
+    # 特征都硬。这里认的是它的文案，改文案会让判定失效——
+    # tests/test_proxy_failover.py 用真实的 probe_proxy 输出钉住这层耦合。
+    if "代理拒绝 connect" in msg or "连不上代理" in msg:
+        return True
     return (
         "connect tunnel failed" in msg
         or "proxy connect" in msg
@@ -105,18 +136,41 @@ def is_proxy_error(exc: BaseException) -> bool:
     )
 
 
+#: 代理明确拒绝 CONNECT 时，哪些状态码足以确认「这条代理现在服务不了我们」。
+#: 判据是**换个出口 IP 也没用**：
+#:
+#: - 402 流量配额耗尽 / 账户欠费、407 认证失败 —— 账户级，整条代理都用不了
+#: - 502 代理连不到目标、503 代理服务不可用 —— 代理服务端自身故障
+#:
+#: 不含 403（该出口被代理商禁用）与 429（代理侧限流）：换个 session 或等一会
+#: 就能恢复，据此让整条代理进冷却等于把还能用的容量白白关掉。
+_PROXY_SERVICE_DOWN_CODES = frozenset({402, 407, 502, 503})
+
+#: 代理拒绝 CONNECT 时状态码出现的两种形态：
+#: libcurl 写 ``CONNECT tunnel failed, response 402``；
+#: ``config.probe_proxy()`` 写 ``代理拒绝 CONNECT: 402 Payment Required（…）``。
+_PROXY_REJECT_CODE_RE = _re.compile(r"(?:response|connect:)\s*(\d{3})")
+
+
 def is_proxy_service_error(exc: BaseException) -> bool:
     """
     判断一次代理错误是否足以确认“代理服务端异常”。
 
     这比 ``is_proxy_error`` 更严格：普通连接抖动、timeout、TLS 中断只算疑似
-    代理故障；只有代理服务明确返回 502/Bad Gateway 或 provider 自己的错误
-    头/原因（如 Webshare 的 X-Webshare-* / circuit breaker）才允许进入
-    cooldown/fallback。
+    代理故障；只有代理服务明确返回 502/Bad Gateway、给出账户级拒绝码，或带上
+    provider 自己的错误头/原因（如 Webshare 的 X-Webshare-* / circuit
+    breaker），才允许进入 cooldown/fallback。
+
+    2026-08-05 的 402（配额耗尽）此前不在此列——代理连着 5 小时明确回
+    ``response 402``，却始终只被当作「疑似」，冷却与降级一次都没触发。
     """
     text = _exception_chain_text(exc)
     if not text:
         return False
+
+    m = _PROXY_REJECT_CODE_RE.search(text)
+    if m and int(m.group(1)) in _PROXY_SERVICE_DOWN_CODES:
+        return True
 
     provider_markers = (
         "x-webshare-error",
