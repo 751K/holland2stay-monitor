@@ -467,6 +467,11 @@ class BrowserFetcher:
         self._blocked_count = 0
         self._profile_lock = None
         self._profile_path = None
+        # 见 _install_byte_accounting
+        self._wire_bytes = 0
+        self._response_count = 0
+        self._cached_count = 0
+        self._cdp = None
 
     @property
     def profile(self) -> "SiteProfile":
@@ -526,7 +531,12 @@ class BrowserFetcher:
 
         self._browser, self._page = self._open_browser(chromium_args, proxy_url)
         self._blocked_count = 0
+        self._wire_bytes = 0
+        self._response_count = 0
+        self._cached_count = 0
+        self._cdp = None
         self._install_resource_blocking()
+        self._install_byte_accounting()
 
     def _open_browser(self, chromium_args: list[str], proxy_url: str | None):
         """开浏览器，优先复用磁盘上的 profile；拿不到就退回临时 profile。
@@ -621,6 +631,63 @@ class BrowserFetcher:
             # 拦截是省钱的优化，不是抓取的前提，装不上就照常跑
             logger.warning("%s 资源拦截未能装载，按原样加载页面: %s", self._profile.name, e)
 
+    def _install_byte_accounting(self) -> None:
+        """统计本次会话真实走了多少字节。``BROWSER_BYTE_ACCOUNTING=0`` 关闭。
+
+        为什么必须是 CDP 而不是别的
+        --------------------------
+        代理按流量计费，而在这之前**没有任何地方知道浏览器到底下了多少字节**：
+
+        - ``route.abort()`` 在下载之前就掐断了，被拦掉的请求根本没有大小；
+        - ``response.body()`` 要把整个 body 拉进内存，为了称重去下载它，
+          省流量的事就白做了；
+        - ``Content-Length`` 在 chunked 响应上直接缺席。
+
+        ``Network.loadingFinished.encodedDataLength`` 是 Chromium 自己记的
+        **线上字节数**，含响应头、按压缩后计算，不额外产生任何请求。
+
+        顺带记 ``fromDiskCache``：持久化 profile 声称复用磁盘缓存来省流量，
+        但每次会话都换出口 IP 又清了 cookie，缓存到底命中没有一直没人验证过。
+        命中的响应 encodedDataLength 记 0，两个数放一起就能看出来。
+
+        全程 try/except：这是计量，不是抓取的前提，任何一步失败都只降级成
+        「这次没数」，不能影响页面加载。
+        """
+        import os
+
+        if os.environ.get("BROWSER_BYTE_ACCOUNTING", "1").strip() in ("0", "false", "no"):
+            return
+
+        try:
+            cdp = self._page.context.new_cdp_session(self._page)
+        except Exception as e:
+            # 非 Chromium 内核、或 CDP 不可用 → 没有计量，照常抓
+            logger.debug("%s 字节计量未能装载: %s", self._profile.name, e)
+            return
+
+        def _finished(params):
+            try:
+                self._wire_bytes += int(params.get("encodedDataLength") or 0)
+            except Exception:
+                pass
+
+        def _response(params):
+            try:
+                self._response_count += 1
+                if (params.get("response") or {}).get("fromDiskCache"):
+                    self._cached_count += 1
+            except Exception:
+                pass
+
+        try:
+            cdp.send("Network.enable")
+            cdp.on("Network.loadingFinished", _finished)
+            cdp.on("Network.responseReceived", _response)
+        except Exception as e:
+            logger.debug("%s 字节计量启用失败: %s", self._profile.name, e)
+            return
+        self._cdp = cdp
+
     def _rebuild_browser(self) -> bool:
         """推倒浏览器重建，换一个出口 IP。换成了返回 True。
 
@@ -652,13 +719,21 @@ class BrowserFetcher:
     def close(self):
         """关闭浏览器，释放资源。"""
         if self._browser is not None:
-            if self._blocked_count:
-                # 拦了多少写进日志：改了拦截规则之后，这是唯一能看出它还在
-                # 生效、以及生效到什么程度的地方。
+            if self._blocked_count or self._wire_bytes:
+                # 拦了多少、下了多少写进日志：改了拦截规则之后，这是唯一能看出
+                # 它还在生效、以及生效到什么程度的地方。两个数必须在同一行——
+                # 拦截数单独看只能说明「拦到了」，说明不了省下多少钱。
                 logger.info(
-                    "%s 本次会话拦截了 %d 个与数据无关的子请求",
+                    "%s 本次会话拦截 %d 个子请求，实际下行 %.2f MB（%d 个响应，%d 个命中磁盘缓存）",
                     self._profile.name, self._blocked_count,
+                    self._wire_bytes / 1e6, self._response_count, self._cached_count,
                 )
+            try:
+                if self._cdp is not None:
+                    self._cdp.detach()
+            except Exception:
+                pass
+            self._cdp = None
             try:
                 self._browser.close()
             except Exception:

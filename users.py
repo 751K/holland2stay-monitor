@@ -655,12 +655,51 @@ def save_users(users: list[UserConfig]) -> None:
         st.close()
 
 
+def _invalidate_monitor_snapshot() -> None:
+    """写热重载请求，让 monitor 丢掉它手里的用户快照。
+
+    monitor 的 ``user_notifiers`` 是 ``list[(UserConfig, Notifier)]``——**整个
+    UserConfig 在进程启动时被快照下来**，只在启动和热重载时重建（见
+    ``monitor._build_user_notifiers``）。任何一次用户配置写入都让那份快照过期。
+
+    绑在 ``update_users`` 里而不是让调用方各自记得，是因为让调用方记得已经
+    失败过了：2026-08-07 查出来时，全仓库 12 处写用户配置的地方只有
+    ``api_v1/me.py`` 一处发了这个请求。后果按严重性排：
+
+    - 改收件邮箱：monitor 继续发旧地址，而面板「发送测试通知」是现场
+      new 一个 notifier、发新地址——**两个邮箱同时在收**。Resend 投递记录里
+      能看到一次心跳同时发给了一个已不存在于任何 user_config 的地址。
+    - 删除用户 / 停用用户：被删被停的人继续收通知。
+    - 邮箱验证通过：``email_verified`` 落库了，但 monitor 快照里还是 0，
+      notifier 直接跳过整个 email 渠道——用户点了验证链接却依然收不到信。
+    - 筛选条件 / 自动预订开关：改了不生效。
+
+    这些以前之所以「过一会儿自己好了」，靠的是别处（设置页、部署重启）偶然
+    触发了一次重载；安静的日子里能拖一整天。
+
+    这是缓存失效，不是层级倒置：``update_users`` 是用户配置**唯一**的写入
+    口，失效动作就该贴在写入点上。``app.process_ctrl`` 只依赖标准库和
+    ``config.DATA_DIR``，没有 Flask 依赖，也不反向依赖本模块。
+
+    失败只记日志：用户数据已经提交了，通知不到 monitor 不该让写入看起来失败。
+    monitor 重启后总会重读。
+    """
+    try:
+        from app.process_ctrl import write_reload_request
+        write_reload_request()
+    except Exception:
+        logger.warning("写热重载请求失败，用户配置改动将在 monitor 下次重启后生效", exc_info=True)
+
+
 def update_users(mutator: Callable[[list[UserConfig]], _T]) -> _T:
     """
     在 SQLite 事务内执行 read-modify-write。
 
     mutator 会收到最新用户列表，可以原地修改，并返回调用方需要的结果。
     只有 mutator 成功返回后才写回；抛异常时事务回滚。
+
+    提交成功后会请求 monitor 热重载——见 ``_invalidate_monitor_snapshot``。
+    不经过本函数的写入（``Storage.reorder_user`` 之类直接改表的）必须自己发。
     """
     st = _open_storage()
     conn = st.conn
@@ -672,12 +711,15 @@ def update_users(mutator: Callable[[list[UserConfig]], _T]) -> _T:
         result = mutator(users)
         st.replace_user_config_rows_unlocked(_users_to_rows(users))
         conn.commit()
-        return result
     except Exception:
         conn.rollback()
         raise
     finally:
         st.close()
+    # 必须在 commit 之后、close 之后：monitor 收到请求会立刻去读库，
+    # 在事务里发等于让它读到未提交的旧值。
+    _invalidate_monitor_snapshot()
+    return result
 
 
 def get_user(users: list[UserConfig], user_id: str) -> Optional[UserConfig]:

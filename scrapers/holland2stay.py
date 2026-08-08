@@ -63,6 +63,18 @@ _STATUS_MAP: dict[int, str] = {
 }
 
 # 新 GraphQL 查询（扁平字段，不再有 custom_attributesV2）
+#
+# 只请求 _to_listing 真正读的字段。这不是洁癖——每轮两个城市、一天 543 轮，
+# 响应体是按天计的代理流量。2026-08-07 实测：
+#
+#   完整查询   2,096 B/条      裁剪后  583 B/条      92 → 26 MB/天
+#
+# 差额的绝大部分是 ``media_gallery``（平均 10.8 张图的 URL，占响应体 70%），
+# 而它在整个代码库里只出现在这段查询里——取回来直接丢掉，listings 表连图片
+# 列都没有。``city`` 同理（城市名是 _scrape_city_pages 的入参）、
+# ``minimum_stay`` 同理。
+#
+# 加字段前先确认 _to_listing 会读它，否则就是在给每一轮加固定开销。
 _GQL_QUERY = """
 query GetCategories(
   $pageSize: Int!,
@@ -82,7 +94,6 @@ query GetCategories(
       name
       sku
       url_key
-      city
       basic_rent
       living_area
       energy_label
@@ -94,7 +105,6 @@ query GetCategories(
       available_to_book
       available_startdate
       next_contract_startdate
-      minimum_stay
       type_of_contract
       offer_text_two
       tenant_profile_restrictions
@@ -105,7 +115,6 @@ query GetCategories(
         }
         __typename
       }
-      media_gallery { url label }
     }
   }
 }

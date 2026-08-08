@@ -7,10 +7,17 @@ APNs 设备 token 持久化
 ``device_tokens`` 表记录 iOS App 注册的 APNs device token。
 
 每个 device row 通过 ``app_token_id`` 外键关联到 ``app_tokens`` 表：
-- 会话被撤销 → 该会话的设备自然不再可推送（``get_active_devices_for_user``
-  会 JOIN ``app_tokens.revoked = 0`` 过滤掉）
+- 会话被撤销或过期 → 该会话的设备不再可推送（``get_active_devices_for_*``
+  会 JOIN ``app_tokens`` 按 ``revoked`` 与 ``expires_at`` 过滤掉）
 - 用户重新登录 → 通常会拿到新 app_token + 重新注册设备 → UNIQUE
   ``(app_token_id, device_token)`` 保证幂等
+
+**一台设备只归属最后一次注册的那个会话。** 表结构按会话分行，但 APNs 的
+device token 是「一个 App 安装 = 一个 token」，所以同一 token 出现在新会话下
+只意味着同一台设备换了个登录。``register_device`` 会把它在其它会话下的旧行
+停掉（``disabled_reason='SupersededBySession'``），否则换账号而客户端没能调成
+``/auth/logout`` 时，一台设备会同时收到新旧两个账号的通知——2026-08-07 生产
+实测有两台中招。见 ``_retire_stale_rows_for``。
 
 字段
 ----
@@ -83,6 +90,9 @@ class DeviceOps:
                        WHERE id = ?""",
                     (env, platform, model, bundle_id, language, now, row["id"]),
                 )
+                # 复活这一行的同时也要停掉别的：用户可能 A→B→A 地切回来，
+                # 此时 B 的行还活着。
+                self._retire_stale_rows_for(device_token, keep_id=int(row["id"]), now=now)
                 return int(row["id"])
             cur = self._conn.execute(
                 """INSERT INTO device_tokens
@@ -92,7 +102,47 @@ class DeviceOps:
                 (app_token_id, device_token, env, platform,
                  model, bundle_id, language, now, now),
             )
-            return int(cur.lastrowid)  # type: ignore[arg-type]
+            new_id = int(cur.lastrowid)  # type: ignore[arg-type]
+            self._retire_stale_rows_for(device_token, keep_id=new_id, now=now)
+            return new_id
+
+    def _retire_stale_rows_for(self, device_token: str, *, keep_id: int, now: str) -> int:
+        """把同一个 device_token 挂在**其它会话**下的行停掉。返回停掉的行数。
+
+        APNs 的 device token 是「一个 App 安装 = 一个 token」。同一个 token 出现
+        在新会话下，只可能是同一台设备上的同一个 App 换了个登录——旧会话是上一
+        次登录的残留，不是另一台设备。
+
+        不这么做的后果（2026-08-07 生产实测，两台设备中招）：
+
+            9e660f7c…  user=c622bf26  登录 06-07  ← 旧账号，仍在推
+                       user=ffdfe243  登录 08-03  ← 新账号
+            500e00ed…  两个 admin 会话都活着      ← 同一条推送发两遍
+
+        ``device_tokens`` 绑的是 ``app_token_id``（会话）而不是设备，而
+        ``get_active_devices_for_user`` 只按 ``revoked`` 过滤。换账号时客户端
+        如果没调 ``/auth/logout``，或者调了但离线失败，旧会话就一直是
+        ``revoked=0``——于是**一台设备同时收两个账号的通知**。
+
+        只停设备行，不撤销旧 app_token：那是登录态策略，不该由一次推送注册
+        顺手决定。
+
+        用 ``disabled_at`` 而不是删行：保留审计痕迹，且用户若切回旧账号，
+        ``register_device`` 会把对应行的 ``disabled_at`` 清空复活。
+        """
+        cur = self._conn.execute(
+            """UPDATE device_tokens
+                  SET disabled_at = ?, disabled_reason = 'SupersededBySession'
+                WHERE device_token = ? AND id != ? AND disabled_at IS NULL""",
+            (now, device_token, keep_id),
+        )
+        n = cur.rowcount or 0
+        if n:
+            logger.info(
+                "设备 %s… 已在新会话下注册，停掉它在其它 %d 个会话下的旧行",
+                device_token[:12], n,
+            )
+        return n
 
     # ── 查询 ────────────────────────────────────────────────────────
 
@@ -123,8 +173,15 @@ class DeviceOps:
         某 user 当前所有可推送的设备。
 
         条件：
-        - app_tokens.user_id = ? AND revoked = 0
+        - app_tokens.user_id = ? AND revoked = 0 AND 未过期
         - device_tokens.disabled_at IS NULL
+
+        过期判据不能省。``revoked`` 是「被显式撤销」，``expires_at`` 是「自己到
+        期」，两者互不蕴含：一个到期的会话在 API 鉴权那边已经用不了了，却仍然
+        满足 ``revoked = 0``——不看过期就等于给已经登出的设备继续推送。
+
+        2026-08-07 查的时候受影响设备是 0 台，但那只是因为 90 天 TTL 一个都还
+        没到期（最早的一个 2026-08-19 到），不是因为逻辑对。
         """
         rows = self._conn.execute(
             """SELECT d.id, d.device_token, d.env, d.platform,
@@ -133,9 +190,10 @@ class DeviceOps:
                JOIN app_tokens t ON d.app_token_id = t.id
                WHERE t.user_id = ?
                  AND t.revoked = 0
+                 AND (t.expires_at IS NULL OR t.expires_at >= ?)
                  AND d.disabled_at IS NULL
                ORDER BY d.id DESC""",
-            (user_id,),
+            (user_id, _utc_now_iso()),
         ).fetchall()
         return [dict(r) for r in rows]
 
@@ -144,8 +202,10 @@ class DeviceOps:
         所有 admin 角色当前可推送的设备。
 
         条件：
-        - app_tokens.role = 'admin' AND user_id IS NULL AND revoked = 0
+        - app_tokens.role = 'admin' AND user_id IS NULL AND revoked = 0 AND 未过期
         - device_tokens.disabled_at IS NULL
+
+        过期判据同 ``get_active_devices_for_user``。
         """
         rows = self._conn.execute(
             """SELECT d.id, d.device_token, d.env, d.platform,
@@ -155,8 +215,10 @@ class DeviceOps:
                WHERE t.role = 'admin'
                  AND t.user_id IS NULL
                  AND t.revoked = 0
+                 AND (t.expires_at IS NULL OR t.expires_at >= ?)
                  AND d.disabled_at IS NULL
-               ORDER BY d.id DESC"""
+               ORDER BY d.id DESC""",
+            (_utc_now_iso(),),
         ).fetchall()
         return [dict(r) for r in rows]
 

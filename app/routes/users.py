@@ -44,6 +44,7 @@ from app.csrf import csrf_required
 from app.db import storage
 from app.forms.user_form import build_user_from_form, build_user_from_form_self
 from app.i18n import DEFAULTS, get_lang, localize_options
+from app.process_ctrl import write_reload_request
 from config import ENERGY_LABELS, energy_rank
 from translations import tr
 
@@ -85,6 +86,26 @@ def _energy_rank_or_99(label: str) -> int:
     """能耗排序辅助，未知标签排最后。"""
     r = energy_rank(label)
     return r if r is not None else 99
+
+
+def _request_monitor_reload(what: str) -> None:
+    """让 monitor 丢掉用户快照。**只给绕过 update_users 的写入路径用。**
+
+    走 ``users.update_users`` 的路径（新建 / 编辑 / 删除 / 停用 / 邮箱验证）
+    已经在那里统一发过了，不要重复调用。这里剩下的是优先级调整——它直接
+    改表（``Storage.reorder_user`` / ``reorder_users_bulk``），不经过
+    ``update_users``，所以得自己发。
+
+    失败只警告不抛：改动已经落库了，重载请求写不下去不该让「保存成功」
+    变成 500。
+    """
+    try:
+        write_reload_request()
+    except OSError:
+        logger.warning(
+            "写热重载请求失败（%s），改动将在 monitor 下次重启后生效",
+            what, exc_info=True,
+        )
 
 
 def _log_user_change(action: str, user: "UserConfig") -> None:  # noqa: F821
@@ -564,6 +585,7 @@ def user_move(user_id: str) -> Any:
 
     if ok:
         direction_label = "上移" if direction == "up" else "下移"
+        _request_monitor_reload("调整优先级")
         flash(f"用户优先级已{direction_label}", "success")
     else:
         flash("已在边界，无法移动", "info")
@@ -606,6 +628,7 @@ def api_users_reorder() -> Any:
         st.close()
 
     logger.info("用户优先级已批量更新（%d 位用户）", len(order))
+    _request_monitor_reload("批量调整优先级")
     return jsonify({"ok": True, "count": len(order)})
 
 
