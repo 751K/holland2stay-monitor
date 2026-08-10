@@ -22,8 +22,31 @@ from models import Listing
 
 class TestSupportMatrix:
     def test_h2s_only_dimensions(self):
-        for dim in ("contract", "tenant", "offer", "energy", "neighborhood"):
+        for dim in ("contract", "offer", "energy", "neighborhood"):
             assert sources_supporting_dim(dim) == ["holland2stay"], dim
+
+    def test_tenant_is_no_longer_h2s_only(self):
+        """租客资格自 v1.16.2 起四个平台都有，且必须全部登记。
+
+        判据不是抓来的——只存在于各平台官网的 Criteria 页：Xior 整站学生盘
+        （SOURCE_ASSUMED_FEATURES），OurCampus 整栋要在校证明，OurDomain 按
+        楼、按面积分档（scrapers/ourdomain.py 的 tenant_policy）。
+
+        声明了却不登记能力表，该维度仍走 fail-open：用户勾「仅学生」照样会收到
+        Young-Professionals-only 的房源，整个维度等于没做。
+        """
+        assert sources_supporting_dim("tenant") == [
+            "holland2stay", "ourdomain", "ourcampus", "xior",
+        ]
+
+    def test_tenant_covers_every_platform_so_no_badge(self):
+        """全平台生效 → 界面不该再挂「仅 Holland2Stay」徽标。
+
+        徽标由 _SOURCE_FILTER_DIMS 动态算出，漏改能力表时它会继续显示一句
+        **错的**范围说明，比没有说明更糟。
+        """
+        assert dim_scope_badge("tenant") == ""
+        assert dim_scope_note("tenant") == ""
 
     def test_finishing_is_no_longer_h2s_only(self):
         """Xior 与 OurDomain 的装修档位由 SOURCE_ASSUMED_FEATURES 声明。
@@ -114,9 +137,50 @@ class TestFailOpenBehaviourIsWhatTheNoteSays:
     @pytest.mark.parametrize("dim,kw", [
         ("energy", dict(allowed_energy="A")),
         ("contract", dict(allowed_contract=["Indefinite"])),
-        ("tenant", dict(allowed_tenant=["student only"])),
         ("offer", dict(allowed_offer=["Short-stay"])),
     ])
     def test_every_h2s_only_dim_is_fail_open_elsewhere(self, dim, kw):
         assert sources_supporting_dim(dim) == ["holland2stay"]
         assert ListingFilter(**kw).passes(_listing("xior"))
+
+
+class TestTenantFiltersEveryPlatform:
+    """租客资格登记进能力表之后，四个平台都要真的被筛。
+
+    这是 v1.16.2 的整个目的：此前 allowed_tenant 只对 H2S 生效，勾「仅学生」
+    会把 Xior / OurDomain 的房源全部放行——包括那些明确写着 Young
+    Professionals only 的。
+    """
+
+    def test_xior_is_student_only(self):
+        """Xior 的取值来自 SOURCE_ASSUMED_FEATURES，房源自身 features 里没有。"""
+        student = ListingFilter(allowed_tenant=["student only"])
+        employed = ListingFilter(allowed_tenant=["employed only"])
+        xior = _listing("xior", Tenant="student only")
+        assert student.passes(xior)
+        assert not employed.passes(xior), "勾「仅上班族」不该收到纯学生盘"
+
+    def test_ourdomain_income_only_unit_is_excluded_for_students(self):
+        od = _listing("ourdomain", Tenant="employed only")
+        assert not ListingFilter(allowed_tenant=["student only"]).passes(od)
+        assert ListingFilter(allowed_tenant=["employed only"]).passes(od)
+
+    def test_ourdomain_student_unit_reaches_both_audiences(self):
+        """Superior Studio 是「学生（须担保人）+ Young Professionals」两者都收。"""
+        od = _listing("ourdomain", Tenant="student and employed")
+        assert ListingFilter(allowed_tenant=["student and employed"]).passes(od)
+
+    def test_ourcampus_is_student_only(self):
+        oc = _listing("ourcampus", Tenant="student only")
+        assert ListingFilter(allowed_tenant=["student only"]).passes(oc)
+        assert not ListingFilter(allowed_tenant=["employed only"]).passes(oc)
+
+    def test_missing_value_is_rejected_not_waved_through(self):
+        """登记之后就是 fail-closed：缺值即拒绝，与 floor / finishing 一致。
+
+        OurDomain Diemen 偶发拿不到面积时不写 Tenant，这类房源在按资格筛选时
+        会被排除。宁可少推不可错推——把「不知道」当成「符合」，会让人白填一轮
+        申请。
+        """
+        od = _listing("ourdomain")
+        assert not ListingFilter(allowed_tenant=["student only"]).passes(od)

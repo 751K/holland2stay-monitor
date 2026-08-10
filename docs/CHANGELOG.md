@@ -45,7 +45,33 @@ OurDomain / OurCampus 房源补上租户资格区分：哪些学生能租，哪�
 `app.i18n.DEFAULT_TENANT` 词汇表内亦会失败——写错一个字母不报错，只会得到一个筛不
 出来的值。
 
-存量房源不会追溯打标，需重新抓到才带该字段。
+OurDomain / OurCampus 的存量房源不会追溯打标，需重新抓到才带该字段；Xior 走
+`SOURCE_ASSUMED_FEATURES`，存量房源由既有 backfill 补齐。
+
+### Xior 全站学生盘
+
+品牌名即 Xior Student Housing，官网通篇「Trusted by 22,000+ students for their
+university journey」，全站无任何收入或雇佣条款。整个 source 一个值，因此声明于
+`SOURCE_ASSUMED_FEATURES`，无需按楼配置——与 OurDomain Diemen 一栋楼内部即分两档
+的情形不同。
+
+### 能力表必须同步登记，否则该维度等于没做
+
+`ListingFilter` 的每个平台专有维度都先过 `_source_supports_dim`：平台未登记时该
+条件**整体跳过**（fail-open）。这一行为本身是对的——否则一套条件会把整批抓不到
+该属性的房源误杀——但它意味着**只声明数据而不登记能力表，筛选不会有任何变化**：
+勾「仅学生」照样收到 Young-Professionals-only 的房源。
+
+`tenant` 因此在 `_SOURCE_FILTER_DIMS` 中为四个平台全部登记。代价是 OurDomain
+Diemen 偶发拿不到面积的单元（此时不写 `Tenant`）会在按资格筛选时被排除，与
+`floor` / `finishing` 一致取 fail-closed。
+
+登记后 `tenant` 覆盖全部 `KNOWN_SOURCES`，`dim_scope_badge` 随之返回空串——筛选栏
+上「仅 Holland2Stay」的徽标自动消失。徽标与提示均由能力表推导，模板未作改动。
+
+顺带修正一条会静默漂移的测试：`test_h2s_only_dimensions_carry_a_badge` 原先断言
+「至少 3 个『仅 Holland2Stay』」，写死的数字既可能因本次变更误报，也可能在别处
+多出徽标时继续通过。改为从能力表推导每种徽标的出现次数，多一个少一个都失败。
 
 ## v1.16.1 (2026-08-07)
 

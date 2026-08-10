@@ -36,11 +36,73 @@ def seeded(admin_client):
 
 
 class TestListingsPage:
-    def test_h2s_only_dimensions_carry_a_badge(self, admin_client):
+    #: /listings 筛选栏渲染徽标的维度，与 templates/listings.html 一一对应。
+    PAGE_DIMS = ("contract", "type", "occupancy", "tenant", "energy", "finishing")
+
+    def test_badges_match_the_capability_table(self, admin_client):
+        """页面上的徽标必须与 _SOURCE_FILTER_DIMS 逐字一致。
+
+        原先这里断言的是「至少 3 个『仅 Holland2Stay』」。写死数字的问题在
+        v1.16.2 暴露了：租客资格扩到四个平台后徽标本该消失，而 `>= 3` 既可能
+        因此变红（实际如此），也可能在别处多出一个徽标时继续变绿——两种都不是
+        在测「说明是对的」。改成从能力表推导，多一个少一个都会失败。
+        """
+        from collections import Counter
+
+        from config import dim_scope_badge
+
         html = admin_client.get("/listings").get_data(as_text=True)
-        # 合同 / 租客 / 能耗 三个 H2S 专有维度（装修自 v1.14.2 起三平台都有）
-        assert html.count("仅 Holland2Stay") >= 3, "H2S 专有维度没有徽标"
-        assert "仅 3 个平台" in html, "部分支持的维度没有徽标"
+        expected = Counter(
+            b for d in self.PAGE_DIMS if (b := dim_scope_badge(d))
+        )
+        assert expected, "没有任何维度需要徽标，这条测试已经失去意义"
+        for badge, n in expected.items():
+            assert html.count(badge) == n, (
+                f"徽标 {badge!r} 应出现 {n} 次，实际 {html.count(badge)} 次"
+            )
+
+    @pytest.fixture
+    def tenant_seeded(self, admin_client):
+        """租客筛选的选项来自库里已有取值，空库连 checkbox 都渲染不出来。"""
+        from app.db import storage
+        from models import Listing
+
+        st = storage()
+        st.diff([
+            Listing(id="T1", name="T1", status="Available to book",
+                    price_raw="1000", available_from="", url="",
+                    city="Eindhoven", source="holland2stay",
+                    features=["Tenant: student only"]),
+            Listing(id="T2", name="T2", status="Available to book",
+                    price_raw="1000", available_from="", url="",
+                    city="Amsterdam", source="ourdomain",
+                    features=["Tenant: employed only"]),
+        ])
+        st.close()
+        return admin_client
+
+    def test_tenant_no_longer_claims_to_be_h2s_only(self, tenant_seeded):
+        admin_client = tenant_seeded
+        """租客资格自 v1.16.2 起四平台都有，界面不该再声称它只对 H2S 生效。
+
+        徽标错了比没有徽标更糟——用户会据此以为筛不到 Xior / OurDomain 的房源，
+        从而根本不去勾它。
+        """
+        from config import dim_scope_badge, dim_scope_note
+
+        html = admin_client.get("/listings").get_data(as_text=True)
+        assert dim_scope_badge("tenant") == ""
+        assert 'name="tenant"' in html, "租客筛选没渲染出来，这条测试测了个空"
+        # 租客那一行的 label 里不该有任何徽标。取 name="tenant" 之前最后一个
+        # form-label——中间隔着若干 <label class="ms-option">，正则一把梭会被
+        # 它们挡住。
+        head = html[: html.index('name="tenant"')]
+        labels = re.findall(
+            r'<label class="form-label">(.*?)</label>', head, re.S,
+        )
+        assert labels, "找不到租客筛选的 label"
+        assert "badge" not in labels[-1], f"租客维度仍挂着徽标: {labels[-1]}"
+        assert dim_scope_note("tenant") == ""
 
     def test_badge_carries_the_full_note_as_tooltip(self, admin_client):
         html = admin_client.get("/listings").get_data(as_text=True)

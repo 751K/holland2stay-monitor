@@ -249,7 +249,8 @@ Listing(
     status      = <见 §4>,
     price_raw   = f"€{minimumRent}–€{maximumRent}",   # 相等时只写一个
     available_from = _normalise_date(unit["availableDate"]),  # DD/MM/YYYY → YYYY-MM-DD
-    features    = ["Unit: …", "Building: …", "Floorplan: …", "Area: … m²", "Deposit: €…"],
+    features    = ["Unit: …", "Building: …", "Floorplan: …", "Area: … m²", "Deposit: €…",
+                   "Finishing: Furnished", "Tenant: student only"],   # 见 §5.1
     url         = unit["applyOnlineURL"] or building_url,
     city        = building_display,
     source      = "xior",
@@ -260,6 +261,22 @@ Listing(
 
 通知中的链接直接采用 `applyOnlineURL`，即 RENTCafe 的预订页，其中已包含全部预填
 参数。
+
+### 5.1 Tenant：全站学生盘
+
+`Finishing` 与 `Tenant` 均非抓取所得，而是 `config.SOURCE_ASSUMED_FEATURES` 声明的
+平台级事实。
+
+Xior 为纯学生住宿：品牌名即 Xior Student Housing，官网通篇「Trusted by 22,000+
+students for their university journey」，全站不存在收入或雇佣条款。因此整个 source
+取单一值 `student only`，无需按楼栋或面积区分——这与 OurDomain 不同，后者仅 Diemen
+一栋楼内部即分为「学生可租」与「须有收入」两档（见 [OURDOMAIN.md](OURDOMAIN.md) §5.1）。
+
+取值沿用 Holland2Stay `tenant_profile_restrictions` 的词汇表，Web 端 Tenant 多选过滤
+器因此可跨 source 合并。`tenant` 已在 `_SOURCE_FILTER_DIMS` 中为本平台登记——只声明
+数据而不登记能力表时该维度仍走 fail-open，用户勾选「仅学生」不会有任何变化。
+
+存量房源由 `SOURCE_ASSUMED_FEATURES` 既有的 backfill 补齐，无需重新抓取。
 
 ---
 

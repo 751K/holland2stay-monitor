@@ -29,8 +29,20 @@ from mstorage import Storage
 
 class TestDeclaration:
     def test_xior_and_ourdomain_are_furnished(self):
-        assert assumed_features("xior") == ["Finishing: Furnished"]
+        assert "Finishing: Furnished" in assumed_features("xior")
         assert assumed_features("ourdomain") == ["Finishing: Furnished"]
+
+    def test_xior_is_student_only(self):
+        """Xior 是纯学生盘，整个 source 一个值。
+
+        品牌名就是 Xior Student Housing，官网通篇「Trusted by 22,000+ students
+        for their university journey」，全站没有任何收入或雇佣条款。
+
+        放在这里而不是像 OurDomain 那样按楼配 tenant_policy：那边 Diemen 一栋
+        楼内部就分两档（Superior Studio 收学生，其余 Young Professionals
+        only），非按面积切不可；Xior 没有这个问题。
+        """
+        assert "Tenant: student only" in assumed_features("xior")
 
     def test_ourcampus_is_not_declared(self):
         """OurCampus 至今没返回过任何单元，装修档位无从核实。
@@ -200,7 +212,11 @@ class TestBackfill:
         st2 = self._reopen(path)
         feats = self._feats(st2, "x1")
         st2.close()
-        assert feats == ["Finishing: Semi furnished"]
+        # 只断言 Finishing：本测试问的是「抓到的值会不会被声明值覆盖」，
+        # 同一次 backfill 顺带补上的其它声明属性（Tenant）与此无关。
+        assert [f for f in feats if f.startswith("Finishing")] == [
+            "Finishing: Semi furnished"
+        ]
 
     def test_undeclared_sources_untouched(self, tmp_path):
         path = tmp_path / "listings.db"

@@ -660,11 +660,22 @@ _SOURCE_FILTER_DIMS: dict[str, frozenset] = {
     # finishing 不是抓来的，是 SOURCE_ASSUMED_FEATURES 声明的整栋楼事实。
     # 登记进来之后该维度不再走 fail-open：勾 Unfurnished 时这些房源会被正确排除，
     # 而此前 fail-open 会把它们一并放行——它们恰恰不是无家具的。
-    "ourdomain": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type", "finishing"},
+    # tenant 同理，不是抓来的：判据只存在于平台官网的 Criteria 页，由
+    # scrapers/ourdomain.py 的 tenant_policy 声明（见 docs/OURDOMAIN.md §5.1）。
+    # **必须登记**，否则 allowed_tenant 对本平台整体跳过——用户勾了「仅学生」
+    # 依然会收到 Young-Professionals-only 的房源，这个维度等于没做。
+    # 代价是 Diemen 偶发拿不到面积的单元（此时不写 Tenant）会在筛选时被排除；
+    # 与 floor 一样取 fail-closed，宁可少推不可错推。
+    "ourdomain": _UNIVERSAL_FILTER_DIMS | {
+        "floor", "occupancy", "type", "finishing", "tenant",
+    },
     # OurCampus 复用 OurDomain 的解析器，抓得到的维度完全相同；但它至今没返回过
     # 任何单元，装修档位无从核实，所以不登记 finishing。
-    "ourcampus": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type"},
-    "xior": _UNIVERSAL_FILTER_DIMS | {"finishing"},
+    # tenant 不同：它不依赖单元数据，整栋恒为 student only（官网 criteria 要求
+    # 在校证明，PhD 与博后明确不符合），所以可以登记。
+    "ourcampus": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type", "tenant"},
+    # xior 的 tenant 来自 SOURCE_ASSUMED_FEATURES，每条房源都带，可安全登记。
+    "xior": _UNIVERSAL_FILTER_DIMS | {"finishing", "tenant"},
 }
 
 
@@ -762,7 +773,12 @@ def dim_scope_badge(dim: str, lang: str = "zh") -> str:
 #: OurCampus 不在其中：它至今没有返回过任何可订单元，装修档位无从核实（见
 #: ARCHITECTURE §9）。宁可让它继续走 fail-open，也不要登记一个没验证过的事实。
 SOURCE_ASSUMED_FEATURES: dict[str, dict[str, str]] = {
-    "xior": {"Finishing": "Furnished"},
+    # Xior 是纯学生盘：品牌名就是 Xior Student Housing，官网通篇「Trusted by
+    # 22,000+ students for their university journey」，全站没有任何收入或雇佣
+    # 条款。整个 source 一个值，不需要按楼或按面积切——所以放这里，而不是像
+    # OurDomain 那样在 BUILDINGS 里配 tenant_policy（那边 Diemen 一栋楼内部
+    # 就分两档，非切不可）。
+    "xior": {"Finishing": "Furnished", "Tenant": "student only"},
     "ourdomain": {"Finishing": "Furnished"},
 }
 
