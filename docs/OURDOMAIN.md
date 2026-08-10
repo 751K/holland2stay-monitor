@@ -211,6 +211,7 @@ Listing(
         "Type: Studio",
         "Area: 22 m²",
         "Occupancy: One",                                  # 由 sqft 反推
+        "Tenant: student and employed",                    # 见 §5.1
         "Floor: 0",
         "Deposit: € 2.622",
         "Detail: Ground Floor, Courtyard View",
@@ -231,6 +232,42 @@ Listing(
 自然合并。楼层由 `parse_ourdomain_floor()` 自 Detail 字段提取（`Ground Floor` 记为
 0，`Floor 1-4` 记为 1）。
 
+### 5.1 Tenant：谁能租（2026-08-08 侦察）
+
+平台将房源区分为「学生可租」与「须有收入」两类，而 **RentCafe 租赁门户不承载该
+信息**——unit 行仅有面积、租金、押金、楼层。判据只存在于平台官网的 Criteria 页：
+
+| 楼栋 | Criteria 页原文要点 | `Tenant` 取值 |
+|---|---|---|
+| OurDomain Diemen | Superior Studio：1-person max.，Students (with Guarantors) & Young Professionals；Executive / Superior Plus：2-person max.，Young Professionals only | 按面积切，见下 |
+| OurDomain South East | 全篇无学生条款；须 fixed-hour 雇佣合同（满 3 个月）或 KvK 注册满一年的 ZZP，个人月毛收入 ≥ 3× base rent（双人合计 4×） | `employed only` |
+| OurCampus Diemen | 须 MBO / HBO / 大学在校证明（限荷兰境内院校），PhD 与博后明确不符合；无收入要求。页脚标注「Young professionals book at: OurDomain」 | `student only` |
+
+Diemen 需要在单元级区分户型，而 §3.3 已说明 FP → unit 映射不可用；生产数据亦印证
+其噪声：#7343（34.43 m²）挂有 Superior Studio 的 FP ID，#6387（33.78 m²）反而没有。
+可用判据是面积——该楼各户型的尺寸区间互不重叠：
+
+```
+Superior Studio       22 – 30 m²   Regulated     学生可租（须担保人）
+Executive Studio      33 – 39 m²   Free Market   Young Professionals only
+Superior Plus Studio  33 – 49 m²   Free Market   Young Professionals only
+1-Bedroom Apt / Loft  45 – 50 m²   Free Market   Young Professionals only
+```
+
+2026-08-08 生产库存实测 24 个单元，面积落在 22.56 / 27.86 / 28.39 / 29.27 / 30.20
+与 33.78 / 34.43 两簇，中间为空。阈值取 **32 m²**，两侧各留约 1.8 m² 余量。
+
+该阈值仅对 Diemen 成立。South East 的户型尺寸严重重叠（20.8–21.4 / 20.8–26.2 /
+26.5–33.5 / 26.5–32.7），但整栋不设学生档，无需切分。
+
+面积缺失时不写该字段。将「未知」记为「须有收入」会使符合条件的学生看不到房源，
+记为「学生可租」则会让人白填一轮申请——两种误判均劣于字段缺失。
+
+取值沿用 Holland2Stay `tenant_profile_restrictions` 的词汇表（`student only` /
+`employed only` / `student and employed`，见 `app.i18n.DEFAULT_TENANT`），Web 端的
+Tenant 多选过滤器因此可跨 source 合并，无需新增维度。规则以 `tenant_policy` 记于
+每条 `BUILDINGS` 记录，新增楼栋时必须一并声明（由测试守卫）。
+
 ---
 
 ## 6. 风险
@@ -242,6 +279,7 @@ Listing(
 | `data-selenium-id` 变更 | 该属性是 Yardi 的测试锚点，移除成本较高；且已有 `data-label` 作为备选匹配 |
 | 出现新主题或新字段名 | 核心字段全部为空时会记录 WARNING，据此补充 label 匹配 |
 | 楼盘规模较小 | 属固有限制，单栋的可订单元长期维持在个位数。新增楼栋时补充一条 `BUILDINGS` 记录即可 |
+| Tenant 判据依赖官网 Criteria 页 | 该页由平台手工维护，改版不会有任何报错。§5.1 的面积阈值同理：新增落在 30–33 m² 之间的户型会使其失效。测试断言的是阈值相对实测尺寸的位置，尺寸变动即失败 |
 
 ---
 

@@ -1,5 +1,52 @@
 # Changelog
 
+## v1.16.2 (2026-08-08)
+
+OurDomain / OurCampus 房源补上租户资格区分：哪些学生能租，哪些必须有收入。
+
+### 判据不在抓取的那一层
+
+平台把房源分成「学生可租」与「须有收入」两类，但 **RentCafe 租赁门户不承载这个
+信息**——unit 行只有面积、租金、押金、楼层。分类只存在于平台官网的 Criteria 页，
+三栋楼规则各不相同：
+
+| 楼栋 | Criteria 页要点 | `Tenant` |
+|---|---|---|
+| OurDomain Diemen | Superior Studio：1 人上限，Students (with Guarantors) & Young Professionals；Executive / Superior Plus：2 人上限，Young Professionals only | 按面积切 |
+| OurDomain South East | 全篇无学生条款；须 fixed-hour 雇佣合同（满 3 个月）或 KvK 注册满一年的 ZZP，个人月毛收入 ≥ 3× base rent（双人合计 4×） | `employed only` |
+| OurCampus Diemen | 须 MBO / HBO / 大学在校证明（限荷兰院校），PhD 与博后明确不符合，无收入要求；页脚标注「Young professionals book at: OurDomain」 | `student only` |
+
+### Diemen 按面积切，因为 FP 映射不可用
+
+`docs/OURDOMAIN.md` §3.3 已说明 FP → unit 映射不可信，生产数据亦印证其噪声：
+\#7343（34.43 m²）挂有 Superior Studio 的 FP ID，#6387（33.78 m²）反而没有。
+
+可用判据是面积——该楼各户型尺寸互不重叠。2026-08-08 实测 24 个单元落在两簇：
+
+```
+22.56  27.86  28.39  29.27  30.20   │   33.78  34.43
+      Superior Studio（学生可租）    │   Executive 起（须有收入）
+```
+
+阈值取 32 m²，两侧各留约 1.8 m² 余量。面积缺失时不写该字段：把「未知」记为「须有
+收入」会让符合条件的学生看不到房源，记为「学生可租」则会让人白填一轮申请。
+
+阈值仅对 Diemen 成立。South East 户型尺寸严重重叠（20.8–21.4 / 20.8–26.2 /
+26.5–33.5 / 26.5–32.7），但整栋不设学生档，无需切分。
+
+### 复用既有维度，无 UI 改动
+
+取值沿用 Holland2Stay `tenant_profile_restrictions` 的词汇表（`student only` /
+`employed only` / `student and employed`），因此 Web 端的 Tenant 多选过滤器立即可
+筛 OurDomain 房源并与 Holland2Stay 合并，中文标签、`ListingFilter.allowed_tenant`
+均无需改动。
+
+规则以 `tenant_policy` 记于每条 `BUILDINGS` 记录，新增楼栋漏配由测试拦截；取值不在
+`app.i18n.DEFAULT_TENANT` 词汇表内亦会失败——写错一个字母不报错，只会得到一个筛不
+出来的值。
+
+存量房源不会追溯打标，需重新抓到才带该字段。
+
 ## v1.16.1 (2026-08-07)
 
 修复三处通知投递错发：用户配置改动对监控进程不可见、设备换账号后新旧账号同时收、

@@ -182,6 +182,11 @@ def _is_in_cooldown(impersonate: str) -> bool:
     return until > time.monotonic()
 
 
+# Diemen「学生可租」的面积上限。定义在这里而不是紧挨 _infer_tenant，是因为
+# BUILDINGS 是类属性，类体求值时它必须已经存在。判据与取值来源见 _infer_tenant。
+_TENANT_STUDENT_MAX_SQM = 32.0
+
+
 class OurDomainScraper(AbstractScraper):
     """Unit-level scraper for OurDomain properties backed by RENTCafe."""
 
@@ -221,6 +226,13 @@ class OurDomainScraper(AbstractScraper):
             "property_id": "184283",
             "type": "Studio",
             "street_address": "Dalsteindreef, 1112 XJ Diemen",
+            # 只有 Superior Studio（22–30 m²）收学生，且须担保人；
+            # 其余户型 Young Professionals only。见 _infer_tenant 上方注释。
+            "tenant_policy": {
+                "default": "employed only",
+                "student_max_sqm": _TENANT_STUDENT_MAX_SQM,
+                "student": "student and employed",
+            },
         },
         "south-east": {
             "base": "https://southeast-thisisourdomain.securerc.co.uk/onlineleasing",
@@ -230,6 +242,8 @@ class OurDomainScraper(AbstractScraper):
             "property_id": "182801",
             "type": "Studio",
             "street_address": "Markelerbergpad 5, 1105 AW Amsterdam",
+            # criteria 页全篇没有学生条款：要雇佣合同或 ZZP，收入 3–4× base rent。
+            "tenant_policy": {"default": "employed only"},
         },
     }
 
@@ -304,6 +318,7 @@ class OurDomainScraper(AbstractScraper):
                 default_type=building.get("type"),
                 fp_names_by_id=fp_names_by_id,
                 street_address=building.get("street_address"),
+                tenant_policy=building.get("tenant_policy"),
                 id_prefix=self.ID_PREFIX,
             )
             for unit in all_units.values()
@@ -684,6 +699,83 @@ def _extract_floorplan_names(html: str) -> dict[str, str]:
 #
 # 优先级：显式 "1-person max" > "Plus Studio" > "Studio" > "1-Bedroom" > "2/3-Bedroom"
 
+# ────────────────────────────────────────────────────────────────────
+# 租户资格：谁能租这套房
+# ────────────────────────────────────────────────────────────────────
+#
+# 平台把房源分成「学生可租」和「必须有收入」两类，但 **RentCafe 租赁门户
+# 完全不带这个信息**——unit 行只有面积、租金、押金、楼层。判据只存在于平台
+# 自己的官网 Criteria 页。以下规则逐条抄自 2026-08-08 抓取的原文：
+#
+# OurDomain Amsterdam Diemen — thisisourdomain.nl/amsterdam-diemen/criteria
+#     Superior Studio:      1-person max., Students (with Guarantors) & Young Professionals
+#     Executive Studio:     2-person max., Young Professionals only
+#     Superior Plus Studio: 2-person max., Young Professionals only
+#     「Students are only eligible to rent a Superior Studio for 1 person
+#      maximum, if they are also able to provide a guarantor.」
+#
+# OurDomain Amsterdam South East — /amsterdam-south-east/criteria
+#     全篇没有学生条款。要求 fixed-hour 雇佣合同（满 3 个月）或 KvK 注册满
+#     一年的 ZZP，个人月毛收入 ≥ 3× base rent（双人合计 4×）。
+#
+# OurCampus Amsterdam Diemen — ourcampus.nl/en/criteria（见 ourcampus.py）
+#     「Enrolled at an MBO, HBO, or university-level institution」+ 在校证明，
+#     PhD / 博后明确不符合。无收入要求。页脚写着「Young professionals book
+#     at: [OurDomain]」——它就是纯学生盘。
+#
+# 落到单元级：Diemen 需要区分 Superior Studio 和其余户型，而
+# --------------------------------------------------------
+# **FP → unit 映射不能用**（见 docs/OURDOMAIN.md §3.3：同一单元出现在该楼
+# 几乎所有 FP 的查询结果里）。生产数据也印证了噪声：#7343（34.43 m²）挂着
+# Superior Studio 的 FP id，#6387（33.78 m²）却没挂。
+#
+# 可用的判据是面积——Diemen 各户型的尺寸区间不重叠：
+#
+#     Superior Studio      22 – 30 m²   Regulated     学生可（须担保人）
+#     Executive Studio     33 – 39 m²   Free Market   Young Pro only
+#     Superior Plus Studio 33 – 49 m²   Free Market   Young Pro only
+#     1-Bedroom Apt/Loft   45 – 50 m²   Free Market   Young Pro only
+#
+# 生产库存实测（24 个单元）落在 22.56 / 27.86 / 28.39 / 29.27 / 30.20 与
+# 33.78 / 34.43 两簇，中间 30.20 → 33.78 是干净缺口。阈值取 32，两侧各留
+# 1.8 m² 余量。
+#
+# 阈值只对 Diemen 有意义：South East 的户型尺寸严重重叠（20.8–21.4 /
+# 20.8–26.2 / 26.5–33.5 / 26.5–32.7 …），但它整栋都没有学生档，不需要切。
+#
+# 拿不到面积时返回 None 而不是猜——把「不知道」写成「要收入」，会让本来
+# 够资格的学生看不到房；写成「学生可」则更糟。
+
+
+def _infer_tenant(policy: Optional[dict], sqft: str = "") -> Optional[str]:
+    """按楼栋的资格规则推断 ``Tenant`` 取值。
+
+    取值用 ``models.FEATURE_SYNONYMS`` 的 Tenant 词汇（``student only`` /
+    ``employed only`` / ``student and employed``），与 H2S 的
+    ``tenant_profile_restrictions`` 同一套——Web 的 Tenant 多选筛选跨 source
+    才能自然合并，而不是给 OD 单独造一个维度。
+
+    policy 形状::
+
+        {"default": "employed only"}                      # 整栋一个值
+        {"default": "employed only",                      # 按面积切
+         "student_max_sqm": 32.0,
+         "student": "student and employed"}
+    """
+    if not policy:
+        return None
+    threshold = policy.get("student_max_sqm")
+    if threshold is None:
+        return policy.get("default")
+
+    from models import parse_float
+    sqm = parse_float(sqft) if sqft else None
+    if sqm is None:
+        # 面积缺失 → 不知道是哪个户型 → 不写。见上面那段。
+        return None
+    return policy.get("student") if sqm <= threshold else policy.get("default")
+
+
 def _infer_occupancy(
     sqft: Optional[str] = None,
     fp_names: Optional[list[str]] = None,
@@ -846,6 +938,7 @@ def _to_listing(
     default_type: Optional[str] = None,
     fp_names_by_id: Optional[dict[str, str]] = None,
     street_address: Optional[str] = None,
+    tenant_policy: Optional[dict] = None,
     id_prefix: str = "od_",
 ) -> Listing:
     apt = unit.get("apt") or f"#{unit['unit_id']}"
@@ -884,6 +977,12 @@ def _to_listing(
         # 用 H2S 同样的 "Occupancy: ..." 前缀写进 features，Web filter
         # `get_feature_values("Occupancy")` 会自动 distinct 出来
         features.append(f"Occupancy: {occupancy}")
+    tenant = _infer_tenant(tenant_policy, sqft)
+    if tenant:
+        # 同理走 H2S 的 "Tenant: ..." 前缀，共用一个多选筛选。
+        # 学生 / 要收入的区分只存在于平台官网 Criteria 页，RentCafe 门户
+        # 不带——判据与来源见 _infer_tenant。
+        features.append(f"Tenant: {tenant}")
     if unit.get("floor") is not None:
         features.append(f"Floor: {unit['floor']}")
     if unit.get("deposit"):

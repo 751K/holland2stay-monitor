@@ -147,6 +147,12 @@ class OurCampusScraper(OurDomainScraper):
             # 建筑级真实街道地址，供 geocode 用（unit 名不可 geocode）。
             # 与 OurDomain South-East（Dalsteindreef 20-40）同街，是隔壁楼。
             "street_address": "Dalsteindreef 6002, 1112 XC Diemen",
+            # 纯学生盘，整栋一个值，不按面积切。ourcampus.nl/en/criteria：
+            # 「Enrolled at an MBO, HBO, or university-level institution
+            # (only universities located in the Netherlands)」+ 在校证明，
+            # PhD / 博后明确不符合，且无收入要求。页脚写着「Young
+            # professionals book at: [OurDomain]」——它把有收入的人劝去隔壁。
+            "tenant_policy": {"default": "student only"},
         },
     }
 
