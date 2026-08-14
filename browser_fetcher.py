@@ -59,7 +59,24 @@ def _exc(name: str) -> type:
 
 
 _H2S_MAIN_PAGE = "https://www.holland2stay.com/residences"
-_H2S_GQL_PATH = "/api/graphql"
+# GraphQL 端点。H2S 迁过两次：
+#   api.holland2stay.com/graphql  →  www.holland2stay.com/api/graphql
+#                                 →  www.holland2stay.com/api/service/residences
+#
+# 2026-08-11 19:34 第二次迁移，旧路径直接 404（Next.js 错误页，不是 JSON）。
+# 404 不在 clearance_pending_markers 里，于是被当成硬网络错误——整个 source
+# 每轮隔离，连带把「所有城市第 1 页都连不上」判成全网失败。生产静默了三天。
+#
+# 同一次改版还上了一层加密信道：客户端 AES-GCM 加密请求体、RSA-OAEP 包裹会话
+# 密钥，POST 成 {v,k,iv,d,ct} 信封。但它只作用于 axios 拦截器命中的
+# `/api/rest/*`（源码里的判据就是 `url.startsWith("/api/rest/")`）；
+# `/api/service/residences` 不在其中，仍是明文 GraphQL——所以这里不需要复刻
+# 那套加密。它哪天挪进 /api/rest/ 才需要，那时得从页面 webpack runtime 里取
+# 出加密函数来用，而不是自己实现。详见 docs/CHANGELOG.md v1.16.3。
+#
+# **改这个常量前先确认新路径返回的是 GraphQL 错误而不是 HTML**：打一个空 body，
+# 端点对了会回 `{"errors":[{"message":"Syntax Error: Unexpected <EOF>"...}]}`。
+_H2S_GQL_PATH = "/api/service/residences"
 _XIOR_MAIN_PAGE = "https://www.xiorstudenthousing.eu/netherlands/"
 _XIOR_AJAX_PATH = "/wp-admin/admin-ajax.php"
 
@@ -1233,6 +1250,23 @@ class BrowserFetcher:
         if status == 429:
             raise _exc("RateLimitError")(
                 f"{self._profile.name} 返回 429 Too Many Requests"
+            )
+
+        if status == 404:
+            # 404 = 这个路径在上游不存在了，几乎只有一个成因：端点被迁走。
+            #
+            # 单独拎出来是因为它此前落进下面那条通用分支，报成
+            # 「抓取网络失败 … 请检查代理/网络」——2026-08-11 H2S 把
+            # /api/graphql 迁到 /api/service/residences 时，日志连刷三天
+            # 「请检查代理/网络」，而代理一直是好的。诊断被引向了完全错误的
+            # 方向，是那次静默三天的直接原因之一。
+            #
+            # 仍然抛 ScrapeNetworkError：调用方的隔离与重试语义不该变，改的
+            # 只是这句话指向哪儿。
+            raise _exc("ScrapeNetworkError")(
+                f"{self._profile.name} HTTP 404 —— 端点 {path} 不存在，"
+                f"上游很可能改了 API 路径（不是代理或网络问题，别往那个方向查）。"
+                f"响应: {result['text'][:200]}"
             )
 
         if not result["ok"] and status >= 400:

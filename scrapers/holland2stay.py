@@ -2,8 +2,9 @@
 scrapers/holland2stay.py — Holland2Stay 抓取器（CloakBrowser + 新 GraphQL API）
 ============================================================================
 
-H2S 已将 API 从 ``api.holland2stay.com/graphql`` 迁移至
-``www.holland2stay.com/api/graphql``（与主站同域，Cloudflare WAF 保护）。
+H2S 的 GraphQL 端点已迁移两次，当前为
+``www.holland2stay.com/api/service/residences``（与主站同域，Cloudflare WAF
+保护）。路径常量在 ``browser_fetcher._H2S_GQL_PATH``，迁移史与判据见那里。
 
 旧 curl_cffi 直连路径已被 CF 封锁。新路径使用 CloakBrowser（patched Chromium）
 绕过 CF Turnstile，再通过浏览器内 ``page.evaluate(fetch)`` 调用 GraphQL API。

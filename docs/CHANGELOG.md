@@ -1,5 +1,58 @@
 # Changelog
 
+## v1.16.3 (2026-08-14)
+
+Holland2Stay 迁移 GraphQL 端点，抓取中断三天。修复端点，并纠正把该故障指向错误
+方向的报错文案。
+
+### 时间线
+
+```
+08-11 19:34   /api/graphql 开始返回 404（Next.js 错误页）
+08-11 19:58   连续 40 次网络失败，告警推送至 admin 设备
+08-11 19:59   monitor 被 supervisorctl stop（SIGTERM）
+08-14 21:02   发现。四个平台已静默三天，Web 面板始终在跑
+```
+
+H2S 将端点自 `www.holland2stay.com/api/graphql` 迁至
+`www.holland2stay.com/api/service/residences`。这是该 API 的第二次迁移，此前一次
+是 `api.holland2stay.com/graphql` → 同域 `/api/graphql`。
+
+新端点仍为明文 GraphQL，查询语句与返回字段**逐字未变**——实测生产查询在新路径上
+返回 43 条（Eindhoven，三种可用状态），字段集与响应体大小（571 B/条）均与迁移前
+一致。修复即一个路径常量。
+
+### 端点确实换了，clearance 机制没换
+
+同一次改版新增了三个前置接口：
+
+```
+GET  /api/remote      → {"verified":true,"realClientIp":"…","country":"NL"}
+POST /api/clearance   → {"token":"<Turnstile>","provider":"turnstile"} → 下发 h2s_clr cookie
+POST /api/__enc__     → {"v":1,"k":"<RSA-OAEP 包裹的 AES 密钥>","iv":"…","d":"<密文>"}
+```
+
+其中加密信道值得记一笔：客户端以 AES-GCM 加密请求体、RSA-OAEP 包裹会话密钥，成
+`{v,k,iv,d,ct}` 信封投递；GET 请求把 path+query 加密后塞进 `x-enc-q` 头，POST 则
+把信封作为 body 并置 `x-enc: 1`。
+
+但它只作用于 axios 拦截器命中的路径，判据是源码里的
+`url.startsWith("/api/rest/")`。`/api/service/residences` 不在其中，因此**无需复刻
+这套加密**。若其日后迁入 `/api/rest/`，正确做法是从页面 webpack runtime 中取出该
+加密函数调用，而非自行实现 RSA+AES。
+
+`clearance_required` 的握手机制本就已实现（`SiteProfile.clearance_probe` 与
+`clearance_pending_markers`），迁移后照常工作，未作改动。
+
+### 404 此前被报成「请检查代理/网络」
+
+`fetch()` 中 404 落入通用的 `status >= 400` 分支，输出
+「抓取网络失败 … 请检查代理/网络」。而代理自始至终正常——日志连刷三天，把排查引向
+了完全错误的方向，是本次静默三天的直接原因之一。
+
+404 现单独成支，明确指出「端点不存在，上游很可能改了 API 路径，不是代理或网络
+问题」。异常类型仍为 `ScrapeNetworkError`，调用方的隔离与重试语义不变。
+
 ## v1.16.2 (2026-08-08)
 
 OurDomain / OurCampus 房源补上租户资格区分：哪些学生能租，哪些必须有收入。
