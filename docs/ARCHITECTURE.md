@@ -4,8 +4,8 @@
 单轮抓取经过哪些环节、状态存放于何处、发生故障时系统如何响应。
 
 面向用户的使用说明见 [flatradar.app/guide](https://flatradar.app/guide)，接口契约
-见 [API.md](API.md)，各平台的抓取侦察见 [XIOR.md](XIOR.md) /
-[OURDOMAIN.md](OURDOMAIN.md) / [SCRAPING_RECON.md](SCRAPING_RECON.md)。
+见 [API.md](API.md)，各平台的抓取侦察见 [H2S.md](H2S.md) /
+[XIOR.md](XIOR.md) / [OURDOMAIN.md](OURDOMAIN.md) / [SCRAPING_RECON.md](SCRAPING_RECON.md)。
 
 ---
 

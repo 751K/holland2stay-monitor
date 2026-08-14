@@ -60,7 +60,8 @@ OurCampus 视为尚未验证的代码。
 不构成冗余。
 
 第三方站点随时可能变更，覆盖范围亦随之变化。各平台的抓取实现见
-[XIOR.md](XIOR.md)、[OURDOMAIN.md](OURDOMAIN.md)、[SCRAPING_RECON.md](SCRAPING_RECON.md)。
+[H2S.md](H2S.md)、[XIOR.md](XIOR.md)、[OURDOMAIN.md](OURDOMAIN.md)、
+[SCRAPING_RECON.md](SCRAPING_RECON.md)。
 
 ### 客户端
 
@@ -411,7 +412,7 @@ Xior、OurDomain、OurCampus 运行的是同一套 RENTCafe 后端，共用一�
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 系统运行方式，以及排障前应先了解的全部失败模式 |
 | [API.md](API.md) | 面向移动端与外部集成的后端契约 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
-| [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | 各平台抓取侦察 |
+| [H2S.md](H2S.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | 各平台抓取侦察 |
 | [ANDROID_PLAN.md](ANDROID_PLAN.md) · [iOS_README.md](iOS_README.md) | 移动端开发 |
 | [dataflow_ch.mmd](dataflow_ch.mmd) · [dataflow_en.mmd](dataflow_en.mmd) | 完整抓取与通知流程的 Mermaid 图 |
 

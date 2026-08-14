@@ -53,6 +53,7 @@ v2.0 只做两件事。
 
 ### 已完成：H2S 传输层迁移至 CloakBrowser
 - H2S 将 API 迁至 `www.holland2stay.com/api/graphql` + Cloudflare Turnstile，旧 curl_cffi 路径封锁
+  （该端点此后于 2026-08-11 再次迁移，当前值与迁移史见 [H2S.md](H2S.md) §2）
 - **scraper**：`scrapers/holland2stay.py` 重写，`browser_fetcher.py` 共享模块，CloakBrowser 绕过 Turnstile + 浏览器内调用 GraphQL
 - **booker**：同步迁移，所有 GraphQL mutation 走 BrowserFetcher
 - **新 API**：扁平字段替代 `custom_attributesV2`；attribute ID→label 通过 aggregations 接口映射

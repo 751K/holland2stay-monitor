@@ -72,7 +72,7 @@ _H2S_MAIN_PAGE = "https://www.holland2stay.com/residences"
 # `/api/rest/*`（源码里的判据就是 `url.startsWith("/api/rest/")`）；
 # `/api/service/residences` 不在其中，仍是明文 GraphQL——所以这里不需要复刻
 # 那套加密。它哪天挪进 /api/rest/ 才需要，那时得从页面 webpack runtime 里取
-# 出加密函数来用，而不是自己实现。详见 docs/CHANGELOG.md v1.16.3。
+# 出加密函数来用，而不是自己实现。详见 docs/H2S.md。
 #
 # **改这个常量前先确认新路径返回的是 GraphQL 错误而不是 HTML**：打一个空 body，
 # 端点对了会回 `{"errors":[{"message":"Syntax Error: Unexpected <EOF>"...}]}`。

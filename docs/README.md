@@ -71,7 +71,7 @@ of them will never add up to a comparable pool. The sources are separate pools,
 not redundancy for each other.
 
 Coverage shifts as third-party sites change. The scrapers are documented in
-[XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
+[H2S.md](H2S.md), [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
 [SCRAPING_RECON.md](SCRAPING_RECON.md).
 
 ### Clients
