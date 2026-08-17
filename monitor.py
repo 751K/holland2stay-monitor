@@ -1868,15 +1868,35 @@ async def run_once(
                         total_targets=source_totals.get(_H2S_SOURCE, len(selected_h2s)),
                     )
             except Exception as e:
-                # H2S 的非 Blocked 异常按旧契约照常上抛（熔断只管 403），
-                # 但先留痕——否则遥测里 H2S 会在这类失败时凭空消失。
+                # 与其它 source 同样只隔离，不上抛。
+                #
+                # 这里原本是 `raise`（注释写的是「按旧契约」——那个契约来自 H2S
+                # 还是唯一 source 的年代）。上面那段 2026-08-03 的跨源隔离**把
+                # H2S 漏在了外面**，于是它成了唯一能一票否决整轮的源：异常穿透
+                # 到 run_once 的 except，同轮已经抓好的 OurDomain / OurCampus /
+                # Xior 结果全部丢弃——不入库、不通知、不做状态变更。
+                #
+                # 2026-08-17 实测代价：H2S 端点迁移后返回 404，13.7 小时里
+                # **118 轮无一轮走完**，而那三个平台每轮都抓成功了（Xior 464 次、
+                # OurDomain 119 次、OurCampus 118 次），全部白抓。
+                #
+                # 该上抛的判定在下面：`source_failures and not succeeded_sources`
+                # ——**所有** source 都失败才算整轮失败。H2S 喂进去即可，不必自己
+                # 决定整轮的生死。403 熔断仍走上面的 BlockedError 分支，不受影响。
+                source_failures.append((_H2S_SOURCE, e))
+                for t in selected_h2s:
+                    completeness_all.setdefault(_ckey(_H2S_SOURCE, t.city_display), False)
+                logger.error(
+                    "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
+                    _H2S_SOURCE, len(selected_h2s), type(e).__name__, e,
+                    exc_info=True,
+                )
                 if not dry_run:
                     _record_source_round(
                         storage, round_at=round_at, source=_H2S_SOURCE,
                         targets=len(selected_h2s), started_at=started_at, error=e,
                         total_targets=source_totals.get(_H2S_SOURCE, len(selected_h2s)),
                     )
-                raise
             else:
                 succeeded_sources.append(_H2S_SOURCE)
                 fresh_all.extend(fresh_part)
@@ -2835,10 +2855,15 @@ async def main_loop(
             network_fail_streak += 1
             if network_fail_streak >= _NETWORK_FAIL_THRESHOLD:
                 cooldown = apply_jitter(_NETWORK_FAIL_COOLDOWN, cfg.jitter_ratio)
+                # 不要在这里替用户断言「是代理/网络的问题」。走到这条分支只说明
+                # **所有 source 都失败了**，成因可能是代理、网络，也可能是某个
+                # 平台改了 API——2026-08-11 与 08-17 两次 H2S 端点迁移，这句
+                # 「请检查代理/网络」各刷了三天与半天，而代理自始至终正常，
+                # 排查方向被它带偏了两次。异常文本里已经带着真正的成因，让它说话。
                 logger.error(
                     "🌐 连续 %d 次网络失败（阈值 %d），冷却 %d 秒。"
-                    "每轮所有城市第 1 页均无法连接 — 请检查代理/网络。"
-                    "最近错误: %s",
+                    "本轮全部 source 均未取到数据 — 成因见下方异常文本，"
+                    "代理故障会另有「代理失效」告警。最近错误: %s",
                     network_fail_streak, _NETWORK_FAIL_THRESHOLD, cooldown, e,
                 )
                 # 达阈值才告警：低于阈值的抖动通常几轮内自愈。异常文本里带着

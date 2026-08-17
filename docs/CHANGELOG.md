@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.16.4 (2026-08-17)
+
+Holland2Stay 是唯一未被跨 source 隔离的平台，其失败会作废整轮。本次将它纳入与其余
+平台相同的隔离路径。
+
+### 一个平台失败，四个平台一起停
+
+`monitor` 逐 source 调用 `dispatch_scrape_tasks()`。其余平台走 `_dispatch_isolated`，
+失败仅记入 `source_failures`；**只有所有平台都失败时才上抛**（`source_failures and
+not succeeded_sources`）。
+
+Holland2Stay 走的是独立分支，非 `BlockedError` 异常直接 `raise`，注释写着「按旧契约」
+——该契约来自它还是唯一 source 的年代。2026-08-03 补跨 source 隔离时，它被漏在了外面，
+于是成为唯一能一票否决整轮的平台：异常穿透至 `run_once`，同轮已抓取的结果全部丢弃。
+
+2026-08-17 H2S 端点再次迁移（返回 404）暴露了这一点：
+
+```
+08:11 之后    轮次 118      本轮结束 0
+              Xior 抓取 464 次 · OurDomain 119 次 · OurCampus 118 次 —— 全部丢弃
+```
+
+13.7 小时内四个平台一并停摆：不入库、不通知、不做状态变更，而其中三个平台每轮都
+抓取成功。
+
+修复即让 H2S 与其余平台一致：失败记入 `source_failures`，完整性标记为 `False`，由既有
+的「全部失败才上抛」判定统一决定整轮生死。403 熔断仍走 `BlockedError` 分支，语义不变。
+
+### 测试缺口
+
+`tests/test_monitor_source_isolation.py` 覆盖了 Xior 与 OurDomain 的隔离，唯独没有
+H2S 失败的用例——`test_partial_success_suppresses_raise` 恰好相反（H2S 成功、其余失败）。
+本次补 8 个用例，含四类非 Blocked 异常的参数化，以及 403 仍走熔断路径的断言。
+
+### 「请检查代理/网络」
+
+该文案在「所有 source 均未取到数据」时输出，但成因未必是代理。2026-08-11 与 08-17 两次
+端点迁移，它分别刷了三天与半天，而代理自始至终正常，排查方向两度被带偏。现改为指向
+异常文本本身，并说明代理故障另有专门告警。
+
 ## v1.16.3 (2026-08-14)
 
 Holland2Stay 迁移 GraphQL 端点，抓取中断三天。修复端点，并纠正把该故障指向错误

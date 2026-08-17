@@ -332,3 +332,123 @@ class TestCompletenessKeyPrefix:
 
         assert exc is None
         assert completeness["xior:Amsterdam Naritaweg"] is False
+
+
+# ── H2S 也必须被隔离 ────────────────────────────────────────────────
+
+class TestH2SIsolation:
+    """H2S 曾是唯一能一票否决整轮的 source。
+
+    2026-08-03 加跨源隔离时，H2S 被漏在了外面：它走的是独立的
+    ``if selected_h2s:`` 分支，非 Blocked 异常直接 ``raise``，注释写着
+    「按旧契约」——那个契约来自它还是唯一 source 的年代。
+
+    2026-08-17 实测代价：H2S 端点迁移后返回 404，**13.7 小时内 118 轮无一轮
+    走完**。而同期 Xior 抓了 464 次、OurDomain 119 次、OurCampus 118 次，
+    全部成功、全部被丢弃——不入库、不通知、不做状态变更。
+
+    上面 TestSourceIsolation 覆盖了 Xior 与 OurDomain，唯独没有 H2S 失败的
+    用例；``test_partial_success_suppresses_raise`` 恰好是反过来的（H2S 成功、
+    其余失败）。这个缺口正是它活下来的原因。
+    """
+
+    def test_h2s_404_does_not_kill_other_sources(self, tmp_path):
+        """复现 2026-08-17：H2S 端点 404，其余 source 结果必须保住。"""
+        def side_effect(source, tasks, multi_source):
+            if source == "holland2stay":
+                raise ScrapeNetworkError(
+                    "Holland2Stay HTTP 404 —— 端点 /api/service/residences 不存在"
+                )
+            return _ok(source, tasks, multi_source)
+
+        completeness, _, exc = _run(tmp_path, side_effect)
+
+        assert exc is None, f"H2S 的 404 不该逃逸整轮，实际抛出 {exc!r}"
+        assert completeness == {
+            "holland2stay:Eindhoven": False,
+            "ourdomain:Amsterdam Diemen": True,
+            "xior:Amsterdam Naritaweg": True,
+        }
+
+    def test_other_sources_still_reach_storage(self, tmp_path):
+        """真正的代价是这个：H2S 一抛，别人抓到的东西根本没走到入库。"""
+        def side_effect(source, tasks, multi_source):
+            if source == "holland2stay":
+                raise ScrapeNetworkError("Holland2Stay HTTP 404")
+            return _ok(source, tasks, multi_source)
+
+        storage = Storage(Path(tmp_path) / "test.db", timezone_str="UTC")
+
+        def fake_dispatch(tasks, *, multi_source=False):
+            return side_effect(tasks[0].source, tasks, multi_source)
+
+        async def go():
+            with patch("monitor.dispatch_scrape_tasks", side_effect=fake_dispatch), \
+                 patch("mcore.prewarm.create_prewarmed_session", return_value=None):
+                await run_once(_cfg(tmp_path), storage, [], dry_run=False)
+
+        try:
+            asyncio.run(go())
+            assert sorted(storage.get_distinct_sources()) == ["ourdomain", "xior"]
+        finally:
+            storage.close()
+
+    @pytest.mark.parametrize("exc", [
+        ScrapeNetworkError("endpoint moved"),
+        RateLimitError("429"),
+        UpstreamMaintenanceError("maintenance"),
+        RuntimeError("playwright crashed"),
+    ])
+    def test_every_non_blocked_failure_is_isolated(self, tmp_path, exc):
+        """不是只有 404。任何非 Blocked 异常都不该带走整轮。
+
+        原代码是裸 ``except Exception: ... raise``，所以这一整类都会一票否决。
+        """
+        def side_effect(source, tasks, multi_source):
+            if source == "holland2stay":
+                raise exc
+            return _ok(source, tasks, multi_source)
+
+        completeness, _, raised = _run(tmp_path, side_effect)
+
+        assert raised is None, f"{type(exc).__name__} 不该逃逸整轮"
+        assert completeness["ourdomain:Amsterdam Diemen"] is True
+
+    def test_h2s_marked_incomplete_not_missing(self, tmp_path):
+        """标 ✗ 而不是从 completeness 里消失——留空会让 stale 收敛误判。"""
+        def side_effect(source, tasks, multi_source):
+            if source == "holland2stay":
+                raise ScrapeNetworkError("boom")
+            return _ok(source, tasks, multi_source)
+
+        completeness, _, _ = _run(tmp_path, side_effect)
+
+        assert "holland2stay:Eindhoven" in completeness
+        assert completeness["holland2stay:Eindhoven"] is False
+
+    def test_all_down_including_h2s_still_raises(self, tmp_path):
+        """隔离不能把「全塌了」也一起吞掉，否则 main_loop 不冷却会空转刷站。"""
+        def side_effect(source, tasks, multi_source):
+            raise ScrapeNetworkError(f"{source} down")
+
+        _, _, exc = _run(tmp_path, side_effect)
+
+        assert isinstance(exc, ScrapeNetworkError)
+
+    def test_h2s_403_still_takes_the_circuit_breaker_path(self, tmp_path):
+        """BlockedError 仍走熔断分支，不该被这次改动顺手改掉语义。
+
+        403 的处置（``_mark_h2s_scrape_blocked`` + canary 恢复）与本次隔离是
+        两件事；把它一起塞进 source_failures 会让熔断失效。
+        """
+        def side_effect(source, tasks, multi_source):
+            if source == "holland2stay":
+                raise BlockedError("Holland2Stay 持续返回 403")
+            return _ok(source, tasks, multi_source)
+
+        with patch("monitor._mark_h2s_scrape_blocked") as marked:
+            completeness, _, exc = _run(tmp_path, side_effect)
+
+        assert exc is None
+        assert marked.called, "403 没有走到熔断标记"
+        assert completeness["ourdomain:Amsterdam Diemen"] is True
