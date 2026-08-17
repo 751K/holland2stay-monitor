@@ -20,11 +20,25 @@ class _FakePage:
     def __init__(self, *responses: dict, title: str = "", content: str = ""):
         self.responses = list(responses)
         self.scripts: list[str] = []
+        self.args: list = []          # 每次请求 evaluate 的参数，供断言用
+        self.key_fetches = 0
         self._title = title
         self._content = content
 
-    def evaluate(self, script: str):
+    #: 公钥抓取（``_ensure_enc_pubkey``）返回的假 SPKI 常量。
+    #: 它走的也是 page.evaluate，但返回的是字符串而不是响应 dict——
+    #: 按参数个数区分：抓公钥那次带一个正则参数。
+    ENC_PUBKEY = "MII" + "A" * 100
+
+    def evaluate(self, script: str, arg=None):
+        # _ensure_enc_pubkey：唯一一个带正则参数、且不发请求的 evaluate。
+        # 单独计数——``scripts`` 是「发了几次请求」的判据，把抓公钥混进去会让
+        # 那些计数断言变成在数实现细节。
+        if arg is not None and isinstance(arg, str) and "MII" in arg:
+            self.key_fetches += 1
+            return self.ENC_PUBKEY
         self.scripts.append(script)
+        self.args.append(arg)
         if self.responses:
             return self.responses.pop(0)
         return {
@@ -81,12 +95,21 @@ def test_fetch_gql_uses_browser_like_same_origin_request():
     data = fetcher.fetch_gql("query Test { products { items { sku } } }")
 
     assert data["data"]["products"]["items"] == []
+    # H2S 自 2026-08-17 起走加密信封（_encrypted_fetch），请求头改为**参数**
+    # 传入而不是拼进 JS 源码。所以断言分两处：形状看源码，内容看实参——后者
+    # 比匹配源码子串结实，改写法不会误报。
     script = page.scripts[0]
-    assert "credentials: 'include'" in script
-    assert "mode: 'same-origin'" in script
+    assert 'credentials: "include"' in script
+    assert 'mode: "same-origin"' in script
     assert "referrer: window.location.href" in script
-    assert '"Store": "default"' in script
-    assert '"Content-Currency": "EUR"' in script
+
+    pub, path, payload, hdrs, _timeout, enc_header = page.args[0]
+    assert pub == page.ENC_PUBKEY, "没有把抓到的公钥传下去"
+    assert path == "/api/__enc__"
+    assert hdrs["Store"] == "default"
+    assert hdrs["Content-Currency"] == "EUR"
+    assert hdrs[enc_header] == "1", "信封请求必须带 x-enc: 1"
+    assert "query Test" in payload, "加密的应当是原始 GraphQL 明文"
 
 
 def test_fetch_gql_refreshes_status_after_403_retry_success():
@@ -426,3 +449,98 @@ def test_sticky_session_id_is_constant_so_rotation_is_the_only_escape():
 
     rot = {_derive_session_id("holland2stay", True) for _ in range(5)}
     assert len(rot) == 5, "rotating 每次都要给出新 session，才能真正换掉被烧的 IP"
+
+
+# ── 加密信封传输 ────────────────────────────────────────────────────
+#
+# 2026-08-17 H2S 把 GraphQL 整体搬进加密信道：明文请求直接吃 Cloudflare 挑战。
+# 这是同一 API 的第三次迁移，前两次都只是换路径。
+#
+# 传输层之上不该有任何感知——_GQL_QUERY 与 _to_listing 一行没改，因为截获站点
+# 加密前的明文可见它发的仍是同一条 GetCategories 查询。以下用例锁住这个边界。
+
+class TestEncryptedEnvelope:
+    def test_only_h2s_encrypts(self):
+        """Xior 不走信封。开关放在 profile 上，别让它变成全局行为。"""
+        from browser_fetcher import H2S_PROFILE, XIOR_PROFILE
+        assert H2S_PROFILE.encrypted_envelope is True
+        assert XIOR_PROFILE.encrypted_envelope is False
+
+    def test_plaintext_query_is_what_gets_encrypted(self):
+        """加密的必须是原始 GraphQL，不是别的形状。
+
+        站点自己发的明文（截获自 crypto.subtle.encrypt）就是
+        {"query": ..., "variables": ...}，schema 完全没变。
+        """
+        page = _FakePage({
+            "status": 200, "ok": True,
+            "text": json.dumps({"data": {"products": {"items": []}}}),
+            "headers": {"x-enc": "1"},
+        })
+        fetcher = _make_fetcher(page)
+        fetcher.fetch_gql("query Q { products { items { sku } } }",
+                          {"pageSize": 100})
+
+        _pub, _path, payload, _h, _t, _e = page.args[0]
+        sent = json.loads(payload)
+        assert sent["query"] == "query Q { products { items { sku } } }"
+        assert sent["variables"] == {"pageSize": 100}
+
+    def test_pubkey_fetched_once_per_session(self):
+        """公钥每个浏览器会话抓一次就够，不该每请求都扫一遍 bundle。"""
+        page = _FakePage(
+            {"status": 200, "ok": True, "text": json.dumps({"data": {}}),
+             "headers": {"x-enc": "1"}},
+            {"status": 200, "ok": True, "text": json.dumps({"data": {}}),
+             "headers": {"x-enc": "1"}},
+        )
+        fetcher = _make_fetcher(page)
+        fetcher.fetch_gql("query A { a }")
+        fetcher.fetch_gql("query B { b }")
+        assert page.key_fetches == 1, f"抓了 {page.key_fetches} 次公钥"
+        assert len(page.scripts) == 2
+
+    def test_missing_pubkey_says_where_to_look(self):
+        """抓不到公钥要指出去哪儿找——bundle 结构变了时这是唯一的线索。"""
+        from scrapers.base import ScrapeNetworkError
+
+        class _NoKeyPage(_FakePage):
+            def evaluate(self, script, arg=None):
+                if arg is not None and isinstance(arg, str) and "MII" in arg:
+                    return None
+                return super().evaluate(script, arg)
+
+        fetcher = _make_fetcher(_NoKeyPage())
+        with pytest.raises(ScrapeNetworkError) as ei:
+            fetcher.fetch_gql("query Q { q }")
+        msg = str(ei.value)
+        assert "公钥" in msg
+        assert "__enc__" in msg, "没说去哪个 chunk 找"
+
+    def test_pubkey_dropped_on_browser_rebuild(self):
+        """公钥绑浏览器生命周期：轮换时最多废掉一个会话，而不是整个进程。"""
+        page = _FakePage({"status": 200, "ok": True,
+                          "text": json.dumps({"data": {}}),
+                          "headers": {"x-enc": "1"}})
+        fetcher = _make_fetcher(page)
+        fetcher.fetch_gql("query A { a }")
+        assert fetcher._enc_pubkey
+
+        # _launch 会重置它；这里直接验字段契约，不去真起浏览器
+        import inspect
+        src = inspect.getsource(type(fetcher)._launch)
+        assert "_enc_pubkey" in src, "_launch 没有清空公钥缓存"
+
+    def test_clearance_probe_path_is_the_envelope_endpoint(self):
+        """探测请求也得走信封，否则初始化永远探不通。"""
+        from browser_fetcher import H2S_PROFILE, _H2S_GQL_PATH
+        assert _H2S_GQL_PATH == "/api/__enc__"
+        assert H2S_PROFILE.clearance_probe.path == _H2S_GQL_PATH
+
+    def test_get_requests_skip_the_envelope(self):
+        """GET 没有 body，包不了信封，也不该被这条分支拦下。"""
+        page = _FakePage({"status": 200, "ok": True, "text": "{}", "headers": {}})
+        fetcher = _make_fetcher(page)
+        fetcher._raw_fetch("/whatever", method="GET")
+        assert page.key_fetches == 0, "GET 不该去抓公钥"
+        assert "async () =>" in page.scripts[0], "GET 应当走明文 _raw_fetch"

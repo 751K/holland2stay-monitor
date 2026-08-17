@@ -1,5 +1,49 @@
 # Changelog
 
+## v1.16.5 (2026-08-17)
+
+Holland2Stay 将 GraphQL 整体迁入加密信道。接入该信道，恢复抓取。
+
+### 六天内第三次迁移
+
+```
+08-17 08:11   /api/service/residences → 404（Next.js 错误页）
+              新端点 /api/__enc__，且请求体须加密——明文直接触发 Cloudflare 挑战
+```
+
+上一次迁移在 08-11。**GraphQL schema 与查询语句仍逐字未变**：在
+`crypto.subtle.encrypt` 上打钩子截获站点加密**之前**的明文，可见它发的仍是
+`GetCategories` / `products` / `category_uid:"Nw=="` 与同一套 `available_to_book` ID。
+因此 `_GQL_QUERY` 与 `_to_listing` 未作改动，变的只有传输层。
+
+### 加密信封
+
+算法照抄站点自身的 JS：AES-GCM 256 会话密钥逐请求生成，RSA-OAEP(SHA-256) 包裹，
+12 字节 IV，投递 `{v:1, k, iv, d, ct}`，`POST /api/__enc__` 带 `x-enc: 1`；响应带
+`x-enc: 1` 时以同一密钥解开。
+
+实现为 `BrowserFetcher._encrypted_fetch`，开关是 `SiteProfile.encrypted_envelope`
+（仅 H2S 打开）。**只改传输层**：调用方照旧传明文 body、拿到明文 text，返回形状与
+`_raw_fetch` 一致，`fetch_gql` 以上（scraper / booker）一行未改。响应无 `x-enc` 头时
+原样返回明文——403 的 `clearance_required` 正是这么回的，clearance 探测依赖它。
+
+加密在页面内以 WebCrypto 完成，而非在 Python 侧：密钥材料不出浏览器，且沿用同源
+`fetch` 的全部凭据（cookies、clearance、TLS 指纹）。
+
+公钥不写死。它是 bundle 里的 SPKI 常量（392 字符），运行时从含 `__enc__` 的 chunk 抓取，
+每个浏览器会话一次，随浏览器重建（2 小时）失效——写死会在轮换当天变成一次无从下手的
+解密失败。抓不到时的异常会指明去哪个 chunk 找什么常量。
+
+### 定位过程中的弯路，已记入文档
+
+`/api/rest/*` 是 axios 拦截器 **GET 分支**改写后的形状；POST 分支不改写 URL，实际目标
+是 `/api/__enc__`。先盯着前者试了几轮，均为 403 或 400。
+
+判断信封本身是否正确的信号：**响应带 `x-enc: 1` 且能解密**——即使内容是报错，也说明
+服务端已成功解开信封，问题在 payload 而非密码学。这条判据写入了 `docs/H2S.md` §4.3。
+
+实测恢复：Amsterdam 7 条、Eindhoven 44 条，均 `complete=True`，字段与迁移前一致。
+
 ## v1.16.4 (2026-08-17)
 
 Holland2Stay 是唯一未被跨 source 隔离的平台，其失败会作废整轮。本次将它纳入与其余

@@ -76,7 +76,19 @@ _H2S_MAIN_PAGE = "https://www.holland2stay.com/residences"
 #
 # **改这个常量前先确认新路径返回的是 GraphQL 错误而不是 HTML**：打一个空 body，
 # 端点对了会回 `{"errors":[{"message":"Syntax Error: Unexpected <EOF>"...}]}`。
-_H2S_GQL_PATH = "/api/service/residences"
+#
+# 2026-08-17 第三次迁移：/api/service/residences 也 404 了，GraphQL 整体搬进
+# 加密信道 /api/__enc__。**schema 一字未改**——截获站点加密前的明文可见，它发的
+# 仍是 GetCategories / products / category_uid:"Nw==" / 同一套 available_to_book
+# ID。变的只有传输层，所以 _GQL_QUERY 与 _to_listing 都不用动。见 docs/H2S.md §4。
+_H2S_GQL_PATH = "/api/__enc__"
+
+# 信封请求头。值恒为 "1"：请求上表示 body 是信封，响应上表示 body 需要解密。
+_ENC_HEADER = "x-enc"
+
+# 公钥在 bundle 里是个 SPKI base64 常量（实测 392 字符）。运行时抓而不是写死：
+# 它可能轮换，写死会在轮换当天变成一次无从下手的解密失败。
+_ENC_PUBKEY_RE = r'"(MII[A-Za-z0-9+/=]{80,})"'
 _XIOR_MAIN_PAGE = "https://www.xiorstudenthousing.eu/netherlands/"
 _XIOR_AJAX_PATH = "/wp-admin/admin-ajax.php"
 
@@ -371,6 +383,9 @@ class SiteProfile:
     clearance_pending_markers: tuple[str, ...] = _CF_CHALLENGE_PENDING_MARKERS
     maintenance_check: Optional[Callable[[str, str], None]] = None
     rotating_proxy: bool = False
+    #: 请求体是否要包成加密信封。见 ``BrowserFetcher._encrypted_fetch``。
+    #: 只影响传输层：调用方照旧传明文 body、拿到明文 text。
+    encrypted_envelope: bool = False
 
 
 H2S_PROFILE = SiteProfile(
@@ -388,6 +403,8 @@ H2S_PROFILE = SiteProfile(
     clearance_pending_markers=(_CLEARANCE_REQUIRED_MARKER,)
     + _CF_CHALLENGE_PENDING_MARKERS,
     maintenance_check=_h2s_maintenance_check,
+    # GraphQL 自 2026-08-17 起只走加密信道，明文直接吃 Cloudflare 挑战。
+    encrypted_envelope=True,
     # 2026-08-03 生产事故：出口 IP 被 CF 盯上后，H2S 连续 3 次 90s 挑战全失败，
     # 熔断退避 30 分钟。而 sticky session id 是 sha1(source) 的常量——重建浏览器
     # 拿到的还是同一个 IP，403 恢复路径根本走不出去。
@@ -484,6 +501,8 @@ class BrowserFetcher:
         self._blocked_count = 0
         self._profile_lock = None
         self._profile_path = None
+        # 加密公钥，每个浏览器会话抓一次。见 _ensure_enc_pubkey。
+        self._enc_pubkey: str = ""
         # 见 _install_byte_accounting
         self._wire_bytes = 0
         self._response_count = 0
@@ -547,6 +566,9 @@ class BrowserFetcher:
         self._proxy_url = proxy_url or ""
 
         self._browser, self._page = self._open_browser(chromium_args, proxy_url)
+        # 公钥跟着浏览器一起丢：它是站点常量，但会轮换。绑在浏览器生命周期上
+        # （2 小时）意味着轮换最多让一个会话失败，而不是让整个进程一直用旧值。
+        self._enc_pubkey = ""
         self._blocked_count = 0
         self._wire_bytes = 0
         self._response_count = 0
@@ -958,7 +980,16 @@ class BrowserFetcher:
 
         不做任何状态码处理，也**不会**触发 ``ensure_initialized``——
         clearance 探测要在初始化过程中调用它，走公开方法会无限递归。
+
+        profile 开了 ``encrypted_envelope`` 时，带 body 的请求改走
+        ``_encrypted_fetch``：body 被包成信封、响应被解密，返回形状不变。
+        GET/HEAD 没有 body，不需要也无法走信封。
         """
+        if self._profile.encrypted_envelope and method.upper() not in ("GET", "HEAD"):
+            return self._encrypted_fetch(
+                path, body=body, headers=headers or {}, timeout_ms=timeout_ms,
+            )
+
         merged = dict(self._profile.default_headers)
         if headers:
             merged.update(headers)
@@ -1007,6 +1038,146 @@ class BrowserFetcher:
             }}
         """
         return self._page.evaluate(js_code)
+
+    # ── 加密信封传输 ────────────────────────────────────────────────
+    #
+    # 2026-08-17 起 H2S 的 GraphQL 只走这条路：明文请求会直接吃 Cloudflare
+    # 挑战。算法照抄站点自己的 JS（chunk 里搜 ``__enc__``）：
+    #
+    #     aesKey  = AES-GCM 256，每次请求新生成
+    #     k       = RSA-OAEP(SHA-256) 包裹 aesKey 的裸字节
+    #     iv      = 12 字节随机数
+    #     d       = AES-GCM(aesKey, iv, 明文)
+    #     信封     = {v:1, k, iv, d, ct}   全部 base64
+    #     POST 到 /api/__enc__，带 x-enc: 1
+    #     响应带 x-enc: 1 时，body 是 {iv, d, ct}，用同一个 aesKey 解
+    #
+    # **为什么在页面里做而不是在 Python 里做**：WebCrypto 就在手边，且密钥
+    # 材料不出浏览器；更重要的是这样能沿用同源 fetch 的全部凭据（cookies /
+    # clearance / TLS 指纹），与既有的 _raw_fetch 完全同构。
+    #
+    # 公钥不写死，见 ``_ensure_enc_pubkey``。
+
+    def _ensure_enc_pubkey(self) -> str:
+        """取加密用的 RSA 公钥（SPKI base64），每个浏览器会话抓一次并缓存。
+
+        写死会在轮换当天变成一次无从下手的解密失败，而它就摆在 bundle 里，
+        抓一次的代价只有一个浏览器会话一次。
+        """
+        if self._enc_pubkey:
+            return self._enc_pubkey
+        key = self._page.evaluate(
+            """async (re) => {
+                const rx = new RegExp(re);
+                for (const u of [...document.querySelectorAll('script[src]')]
+                                 .map(s => s.src)) {
+                    let t;
+                    try { t = await (await fetch(u)).text(); } catch (e) { continue; }
+                    if (!t.includes('__enc__')) continue;
+                    const m = t.match(rx);
+                    if (m) return m[1];
+                }
+                return null;
+            }""",
+            _ENC_PUBKEY_RE,
+        )
+        if not key:
+            raise _exc("ScrapeNetworkError")(
+                f"{self._profile.name} 找不到加密公钥——bundle 结构可能已变。"
+                f"到含 __enc__ 的 chunk 里搜 SPKI 常量（形如 MIIBIjANBgkq…），"
+                f"并核对 _ENC_PUBKEY_RE。"
+            )
+        self._enc_pubkey = key
+        logger.info("%s 已取得加密公钥（%d 字符）", self._profile.name, len(key))
+        return key
+
+    def _encrypted_fetch(
+        self,
+        path: str,
+        *,
+        body: str,
+        headers: Mapping[str, str],
+        timeout_ms: int,
+    ) -> dict:
+        """把 body 包成信封发出去，返回**解密后**的 ``{status, ok, text, headers}``。
+
+        返回形状与 ``_raw_fetch`` 完全一致，所以 ``fetch`` / ``fetch_gql`` 以上
+        一行都不用改。
+
+        响应没有 x-enc 头时原样返回明文——403 的
+        ``{"code":"clearance_required"}`` 就是这么回的，clearance 探测要靠它。
+        """
+        pub = self._ensure_enc_pubkey()
+        merged = dict(self._profile.default_headers)
+        merged.update(headers or {})
+        merged[_ENC_HEADER] = "1"
+        merged["Content-Type"] = "application/json"
+
+        js_code = """
+            async ([pub, path, payload, hdrs, timeoutMs, encHeader]) => {
+                const b2a = (b) => { let s = "";
+                    for (const x of b) s += String.fromCharCode(x); return btoa(s); };
+                const a2b = (s) => { const t = atob(s);
+                    const u = new Uint8Array(t.length);
+                    for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i);
+                    return u; };
+                const sub = crypto.subtle;
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), timeoutMs);
+                try {
+                    const rsa = await sub.importKey("spki", a2b(pub),
+                        {name: "RSA-OAEP", hash: "SHA-256"}, false, ["encrypt"]);
+                    const aes = await sub.generateKey({name: "AES-GCM", length: 256},
+                        true, ["encrypt", "decrypt"]);
+                    const raw = new Uint8Array(await sub.exportKey("raw", aes));
+                    const k = new Uint8Array(
+                        await sub.encrypt({name: "RSA-OAEP"}, rsa, raw));
+                    const iv = crypto.getRandomValues(new Uint8Array(12));
+                    const d = new Uint8Array(await sub.encrypt({name: "AES-GCM", iv},
+                        aes, new TextEncoder().encode(payload)));
+                    const envelope = {v: 1, k: b2a(k), iv: b2a(iv), d: b2a(d),
+                                      ct: "application/json"};
+
+                    const resp = await fetch(path, {
+                        method: "POST",
+                        credentials: "include",
+                        mode: "same-origin",
+                        cache: "no-store",
+                        redirect: "follow",
+                        referrer: window.location.href,
+                        referrerPolicy: "strict-origin-when-cross-origin",
+                        headers: hdrs,
+                        body: JSON.stringify(envelope),
+                        signal: controller.signal,
+                    });
+                    clearTimeout(timer);
+
+                    const raw_text = await resp.text();
+                    const out = {};
+                    for (const [key, value] of resp.headers.entries()) {
+                        const lower = key.toLowerCase();
+                        if (['cf-ray', 'content-type', 'server', 'vary',
+                             encHeader].includes(lower)) out[lower] = value;
+                    }
+                    // 没有 x-enc 头 = 明文（403 clearance_required 走这条）
+                    if (out[encHeader] !== "1") {
+                        return {status: resp.status, ok: resp.ok,
+                                text: raw_text, headers: out};
+                    }
+                    const back = JSON.parse(raw_text);
+                    const plain = new Uint8Array(await sub.decrypt(
+                        {name: "AES-GCM", iv: a2b(back.iv)}, aes, a2b(back.d)));
+                    return {status: resp.status, ok: resp.ok,
+                            text: new TextDecoder().decode(plain), headers: out};
+                } catch (err) {
+                    clearTimeout(timer);
+                    return {error: err.message || String(err)};
+                }
+            }
+        """
+        return self._page.evaluate(
+            js_code, [pub, path, body, merged, timeout_ms, _ENC_HEADER]
+        )
 
     def _raw_fetch_gql(
         self,

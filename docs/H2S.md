@@ -1,7 +1,7 @@
 # Holland2Stay — 平台状态
 
 本文记录 Holland2Stay（下称 H2S）的抓取现状：端点契约、Cloudflare 与站点自有的两层
-校验、以及 2026-08-11 那次改版引入的加密信道。
+校验、以及自 2026-08-17 起必须走的加密信道。
 
 代码位于 [`scrapers/holland2stay.py`](../scrapers/holland2stay.py) 与
 [`browser_fetcher.py`](../browser_fetcher.py)；后者为三个走浏览器的平台共用。
@@ -14,7 +14,7 @@
 |---|---|
 | 官网 | `https://www.holland2stay.com`（Next.js） |
 | 数据形态 | GraphQL JSON（Magento 后端） |
-| 端点 | `https://www.holland2stay.com/api/service/residences` |
+| 端点 | `https://www.holland2stay.com/api/__enc__`（加密信封，见 §4） |
 | 传输方式 | CloakBrowser（patched Chromium）内 `page.evaluate(fetch)` |
 | 覆盖城市 | 由 `CITIES` 配置，当前生产为 Amsterdam / Eindhoven |
 | 在本项目中的地位 | 房源量最大的一个源，且是唯一开启自动预订的平台 |
@@ -23,24 +23,34 @@
 
 ## 2. 端点迁移史
 
-该端点已迁移两次，**每次都是静默的**：旧路径不重定向、不返回结构化错误，直接消失。
+该端点已迁移三次，**每次都是静默的**：旧路径不重定向、不返回结构化错误，直接消失。
+后两次相隔仅六天。
 
 | 时间 | 端点 | 旧路径的表现 |
 |---|---|---|
 | — | `api.holland2stay.com/graphql` | 被 Cloudflare 封锁，curl_cffi 直连不再可行 |
 | 2026-06 | `www.holland2stay.com/api/graphql` | 同域，进入 Cloudflare 托管挑战之后 |
 | 2026-08-11 19:34 | `www.holland2stay.com/api/service/residences` | 旧路径返回 **404 + Next.js 错误页**（HTML，非 JSON） |
+| 2026-08-17 08:11 | `www.holland2stay.com/api/__enc__` | 同上 404；且**改为加密信封**，明文请求直接触发 Cloudflare 挑战 |
 
-两次迁移中，**GraphQL schema 与查询语句均逐字未变**——变的只有路径。2026-08-14
-实测：生产查询在新路径上返回 43 条（Eindhoven，三种可用状态），字段集与响应体大小
-（571 B/条）与迁移前完全一致。
+三次迁移中，**GraphQL schema 与查询语句均逐字未变**——变的只有传输层。这不是推测：
+在 `crypto.subtle.encrypt` 上打钩子截获站点加密**之前**的明文，可见它发的仍是
+`GetCategories` / `products` / `category_uid:"Nw=="` 与同一套 `available_to_book` ID。
+因此 `_GQL_QUERY` 与 `_to_listing` 历次迁移一行未改。
 
-路径常量为 `browser_fetcher._H2S_GQL_PATH`。**判断新路径是否正确的方法**：以空 body
-打一次，端点正确时返回 GraphQL 的语法错误而非 HTML：
+路径常量为 `browser_fetcher._H2S_GQL_PATH`。
 
-```json
-{"errors":[{"message":"Syntax Error: Unexpected <EOF>","locations":[{"line":1,"column":1}]}]}
-```
+**下次迁移时怎么找新端点**，按顺序：
+
+1. 以空 body 打候选路径。端点正确时返回 GraphQL 语法错误而非 HTML：
+   `{"errors":[{"message":"Syntax Error: Unexpected <EOF>"...}]}`。
+   注意区分两种 404——JSON 的 `{"error":"Not found"}` 说明该命名空间存在，
+   Next.js 的 HTML 错误页说明整条路径都不在。
+2. 若候选路径全军覆没，**钩住 `crypto.subtle.encrypt` 截明文**（站点自己会加密，
+   钩子能拿到它加密前的完整 payload），再配合 hook `window.fetch` 看它 POST 去哪儿。
+   2026-08-17 就是这么一步定位到 `/api/__enc__` 的。
+3. 不要只盯着 axios 拦截器改写后的 `/api/rest/*`——那是 GET 分支的形状，实际
+   POST 目标是 `/api/__enc__`。当时在这里绕了几轮。
 
 > 2026-08-11 的这次迁移导致抓取中断三天。404 当时落在通用的 `status >= 400` 分支，
 > 报为「抓取网络失败 … 请检查代理/网络」，而代理自始至终正常，排查方向被完全带偏。
@@ -82,50 +92,66 @@ POST /api/clearance   → {"token":"<Turnstile token>","provider":"turnstile"}
 到则重新导航——token 由导航签发，继续轮询换不出来，只会朝一个拿不到 clearance 的会话
 打一串必然 403 的请求。
 
-该机制在 2026-08-11 改版前后**未作任何改动**即继续工作。
+该机制历经 2026-08-11 与 08-17 两次改版**未作任何改动**即继续工作。
 
 ---
 
-## 4. 加密信道：存在，但当前用不上
+## 4. 加密信道（自 2026-08-17 起必经）
 
-同一次改版引入了一层应用级加密。客户端以 AES-GCM 加密请求体、RSA-OAEP 包裹会话
-密钥，投递如下信封：
+GraphQL 请求体须包成加密信封投递，明文请求会直接触发 Cloudflare 挑战。算法照抄站点
+自己的 JS（`_next/static/chunks/common-*.js`，搜 `__enc__`）：
 
-```json
-{"v":1,
- "k":"<RSA-OAEP 包裹的 AES-256 密钥, base64>",
- "iv":"<12 字节 nonce, base64>",
- "d":"<AES-GCM 密文, base64>",
- "ct":"application/json"}
+```
+aesKey  = AES-GCM 256，每次请求新生成
+k       = RSA-OAEP(SHA-256) 包裹 aesKey 的裸字节
+iv      = 12 字节随机数
+d       = AES-GCM(aesKey, iv, 明文)
+信封     = {v:1, k, iv, d, ct}        全部 base64
 ```
 
-- **GET**：把 `path + query` 加密后置于 `x-enc-q` 头，URL 改写为 `/api/rest/__enc__`
-- **POST**：信封作为 body，置 `x-enc: 1`
-- **响应**：带 `x-enc: 1` 时以同一会话密钥解密
+`POST /api/__enc__`，带 `x-enc: 1`。响应带 `x-enc: 1` 时 body 为 `{iv, d, ct}`，用同一个
+`aesKey` 解开即得明文 GraphQL 响应。
 
-**但它只作用于部分路径。** axios 拦截器中的判据是：
+实现见 `BrowserFetcher._encrypted_fetch`，由 `SiteProfile.encrypted_envelope` 开关控制
+（仅 H2S 打开）。它**只改传输层**：调用方照旧传明文 body、拿到明文 text，返回形状与
+`_raw_fetch` 完全一致，因此 `fetch_gql` 以上（scraper / booker）一行未改。
 
-```js
-if (!(t.url && t.url.startsWith("/api/rest/"))) return t;   // 不加密，原样放行
-```
+响应没有 `x-enc` 头时原样返回明文——403 的 `{"code":"clearance_required"}` 正是这么回
+的，§3.2 的 clearance 探测依赖这一点。
 
-`/api/service/residences` 不以 `/api/rest/` 开头，因此**仍是明文 GraphQL**，本项目无需
-实现这套加密。
+### 4.1 为什么在页面里加密
 
-若其日后迁入 `/api/rest/`：**不要自行实现 RSA+AES**。公钥内嵌于 JS 且可能轮换，自建
-实现会成为第三个需要跟随上游改版的地方。正确做法是从页面的 webpack runtime 中取出
-该加密函数直接调用——反正已经跑着真实浏览器，页面自己就能加密。相关代码位于
-`_next/static/chunks/common-*.js`，搜 `__enc__` 即可定位。
+WebCrypto 就在手边，密钥材料不出浏览器；更重要的是这样能沿用同源 `fetch` 的全部凭据
+（cookies、clearance、TLS 指纹），与既有传输层完全同构。
+
+### 4.2 公钥不写死
+
+公钥是 bundle 里的 SPKI base64 常量（实测 392 字符），由 `_ensure_enc_pubkey` 在**运行
+时**从含 `__enc__` 的 chunk 中抓取，每个浏览器会话一次，随浏览器重建（2 小时）而失效。
+
+写死会在轮换当天变成一次无从下手的解密失败；绑在浏览器生命周期上，则轮换最多废掉一
+个会话。抓不到时抛出的异常会指明去哪个 chunk 找什么常量。
+
+### 4.3 曾经走过的弯路
+
+`/api/rest/*` 是 axios 拦截器 **GET 分支**改写后的形状（把 path+query 加密进 `x-enc-q`
+头，URL 改写为 `/api/rest/__enc__`）。POST 分支**不改写 URL**，实际目标是
+`/api/__enc__`。2026-08-17 定位时先盯着 `/api/rest/*` 试了几轮，均为 403 Cloudflare
+挑战或 400 `Specified request cannot be processed`。
+
+判断信封本身是否正确的信号：响应带 `x-enc: 1` 且能解密——哪怕内容是报错，也说明服务端
+已成功解开信封，问题在 payload 而非密码学。
 
 ---
 
 ## 5. 端点契约
 
 ```
-POST https://www.holland2stay.com/api/service/residences
+POST https://www.holland2stay.com/api/__enc__
 Content-Type: application/json
+x-enc: 1
 
-{"query": "<GraphQL>", "variables": {...}}
+<信封，见 §4>  ←  明文为 {"query": "<GraphQL>", "variables": {...}}
 ```
 
 查询语句见 `scrapers.holland2stay._GQL_QUERY`。变量形如：
@@ -177,8 +203,9 @@ query{products(filter:{category_uid:{eq:"Nw=="}}){
 
 | 风险 | 现状 |
 |---|---|
-| 端点再次迁移 | 已发生两次，且均为静默 404。判据见 §2；404 已单独成支并指向「上游改了路径」 |
-| `/api/service/residences` 迁入 `/api/rest/` | 届时需接入加密信道。做法见 §4——取用页面自身的加密函数，不要自行实现 |
+| 端点再次迁移 | **已发生三次**，后两次相隔六天，均为静默 404。定位步骤见 §2；404 已单独成支并指向「上游改了路径」 |
+| 加密公钥轮换 | 运行时抓取，绑浏览器生命周期，轮换最多废掉一个会话。见 §4.2 |
+| 信封格式变更（`v` 从 1 起跳） | 目前无版本协商。届时解密会失败，需重读 chunk 里的 `__enc__` 实现 |
 | Turnstile 加码 | 当前由站点前端自动完成，本项目只等待。若改为需要交互，则须接入打码服务 |
 | 出口 IP 被 Cloudflare 盯上 | 挑战连续失败即熔断退避；重建浏览器会更换出口 IP |
 | GraphQL schema 变更 | `total_pages` 缺失时标记不完整；字段增减由 `tests/test_h2s_query_fields.py` 守卫 |
