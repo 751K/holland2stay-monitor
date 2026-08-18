@@ -174,7 +174,6 @@ def test_holland2stay_reuses_one_browser_for_all_cities(monkeypatch):
             return {"data": {"products": {"items": [], "page_info": {"current_page": 1, "total_pages": 1}}}}
 
     monkeypatch.setattr(h2s, "BrowserFetcher", _FakeBrowserFetcher)
-    monkeypatch.setattr(h2s, "_fetch_attr_labels", lambda fetcher: {})
 
     with patch(_PATCH_SCRAPE, return_value=([], True)):
         tasks = [
@@ -210,7 +209,6 @@ def test_holland2stay_standalone_scrape_still_self_manages_browser(monkeypatch):
             return {"data": {"products": {"items": [], "page_info": {"current_page": 1, "total_pages": 1}}}}
 
     monkeypatch.setattr(h2s, "BrowserFetcher", _FakeBrowserFetcher)
-    monkeypatch.setattr(h2s, "_fetch_attr_labels", lambda fetcher: {})
 
     with patch(_PATCH_SCRAPE, return_value=([], True)):
         scraper_instance = h2s.HollandStayScraper()

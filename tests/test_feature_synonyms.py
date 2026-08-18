@@ -191,8 +191,14 @@ class TestWordBoundaryMatching:
         assert not whitelist_matches(pattern, value, "type")
 
     def test_no_partial_word_match(self):
+        # source 必须选一个**仍登记 tenant 维度**的平台。holland2stay 自
+        # 2026-08-18 起不再登记（白名单查询里没有 tenant_profile_restrictions，
+        # 见 config._SOURCE_FILTER_DIMS），该维度对它 fail-open 整体跳过，
+        # 这条断言会变成永远通过——测的就不再是词边界了。
         f = ListingFilter(allowed_tenant=["student only"])
-        assert not f.passes(_listing(Tenant="students onlyish"))
+        listing = _listing(Tenant="students onlyish")
+        listing.source = "xior"
+        assert not f.passes(listing)
 
     def test_exact_dims_come_from_the_table(self):
         """匹配方式由 _EXACT_MATCH_DIMS 决定，不能在调用点各写各的。

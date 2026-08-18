@@ -81,17 +81,22 @@ class TestListingsPage:
         st.close()
         return admin_client
 
-    def test_tenant_no_longer_claims_to_be_h2s_only(self, tenant_seeded):
-        admin_client = tenant_seeded
-        """租客资格自 v1.16.2 起四平台都有，界面不该再声称它只对 H2S 生效。
+    def test_tenant_badge_reflects_the_capability_table(self, tenant_seeded):
+        """徽标要如实反映该维度覆盖哪几个平台。
 
-        徽标错了比没有徽标更糟——用户会据此以为筛不到 Xior / OurDomain 的房源，
-        从而根本不去勾它。
+        覆盖范围变过两次：v1.16.2 从「仅 H2S」扩到四家，2026-08-18 又因 H2S 的
+        GraphQL operation 白名单缩回三家。徽标错了比没有徽标更糟——用户会据此
+        误判哪些平台的房源在按资格过滤。
         """
+        admin_client = tenant_seeded
         from config import dim_scope_badge, dim_scope_note
 
         html = admin_client.get("/listings").get_data(as_text=True)
-        assert dim_scope_badge("tenant") == ""
+        # 2026-08-18 起 H2S 不再登记该维度（白名单查询里没有那个字段），
+        # 徽标如实变回「仅 3 个平台」。这里断言的是「徽标与能力表一致」，
+        # 而不是某个具体字样——写死字样会在下次覆盖变化时误报。
+        badge = dim_scope_badge("tenant")
+        assert badge == "仅 3 个平台"
         assert 'name="tenant"' in html, "租客筛选没渲染出来，这条测试测了个空"
         # 租客那一行的 label 里不该有任何徽标。取 name="tenant" 之前最后一个
         # form-label——中间隔着若干 <label class="ms-option">，正则一把梭会被
@@ -101,8 +106,10 @@ class TestListingsPage:
             r'<label class="form-label">(.*?)</label>', head, re.S,
         )
         assert labels, "找不到租客筛选的 label"
-        assert "badge" not in labels[-1], f"租客维度仍挂着徽标: {labels[-1]}"
-        assert dim_scope_note("tenant") == ""
+        assert badge in labels[-1], f"租客那一行没渲染出徽标: {labels[-1]}"
+        assert "Holland2Stay" not in dim_scope_note("tenant"), (
+            "H2S 已不在该维度覆盖内，提示里不该再提它"
+        )
 
     def test_badge_carries_the_full_note_as_tooltip(self, admin_client):
         html = admin_client.get("/listings").get_data(as_text=True)

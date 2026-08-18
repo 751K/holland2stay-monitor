@@ -1,20 +1,22 @@
-"""
-H2S GraphQL 查询里的字段必须真的被用到。
+"""H2S 的 GraphQL 查询必须与站点原文逐字段一致。
 
-响应体是按天计的代理流量：每轮两个城市、一天 543 轮。往 ``items`` 里多加
-一个字段，成本是 543 × 条数 × 字段大小，每天都要付。
+**这个文件的前提在 2026-08-18 被反转过一次。**
 
-2026-08-07 实测这笔账：
+原先守的是「只请求 _to_listing 真正读取的字段」——为省流量而裁剪查询，多请求
+一个字段就失败。当时实测 media_gallery 一项就占响应体 70%，裁剪后 92 → 26 MB/天。
 
-    完整查询   2,096 B/条      92 MB/天
-    裁剪后       583 B/条      26 MB/天
+那天 H2S 上线了 GraphQL operation 白名单：不在名单里的查询一律
+``403 {"code":"operation_not_allowed"}``。而我们那份裁剪版恰恰不在名单里，于是
+H2S 抓取全量中断。实测判据：
 
-差额 70% 是 ``media_gallery``——平均 10.8 张图的 URL，取回来直接丢掉，
-listings 表连图片列都没有。同时躺着的还有 ``city``（城市名是入参）和
-``minimum_stay``。三个字段谁都没读过，白付了不知道多久。
+    站点原文                            200
+    删掉 image_manager 块                403
+    加 tenant_profile_restrictions       403
+    加 available_startdate               403
+    只改空格                             200   ← 空白不敏感，字段集敏感
 
-守卫做的事：把查询 ``items`` 块里的顶层字段，和 ``_to_listing`` 里出现过的
-字符串字面量比对。加了字段却不读，这里就失败。
+所以现在守的是**反过来的约束**：查询是照抄品，一个字段都不能增删。省流量改走
+「查什么」（scrapers.holland2stay 的分层抓取，那些走 variables，白名单不管）。
 """
 from __future__ import annotations
 
@@ -22,16 +24,18 @@ import ast
 import re
 from pathlib import Path
 
-_SRC = Path(__file__).resolve().parent.parent / "scrapers" / "holland2stay.py"
+import pytest
+
+_ROOT = Path(__file__).resolve().parent.parent
+_GQL = _ROOT / "h2s_gql.py"
+_SCRAPER = _ROOT / "scrapers" / "holland2stay.py"
 
 
 def _items_fields() -> set[str]:
-    """抽出 _GQL_QUERY 中 ``items { ... }`` 的顶层字段名。
+    """抽出查询里 ``items { ... }`` 的顶层字段名。"""
+    import h2s_gql
 
-    嵌套块（``price_range { ... }``）只记块名本身，不下钻——子字段是 H2S
-    schema 要求的结构，不由 _to_listing 逐个点名。
-    """
-    src = _SRC.read_text(encoding="utf-8")
+    src = h2s_gql.GQL_QUERY
     start = src.index("items {") + len("items {")
     depth, i = 1, start
     while depth:
@@ -56,45 +60,91 @@ def _items_fields() -> set[str]:
     return fields
 
 
-def _to_listing_strings() -> set[str]:
-    """``_to_listing`` 函数体内出现的所有字符串字面量。"""
-    tree = ast.parse(_SRC.read_text(encoding="utf-8"))
-    fn = next(
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.FunctionDef) and n.name == "_to_listing"
-    )
-    return {
-        n.value for n in ast.walk(fn)
-        if isinstance(n, ast.Constant) and isinstance(n.value, str)
+class TestQueryIsVerbatim:
+    """查询是照抄品，不是设计品。"""
+
+    #: 2026-08-18 从线上明文抄下来时，items 选择集里的字段。
+    #: 这份清单**不是需求**，是上游的既成事实。它变了只能重新照抄，不能自行增删。
+    EXPECTED = {
+        "name", "sku", "city", "url_key", "available_to_book",
+        "next_contract_startdate", "current_lottery_subscribers", "finishing",
+        "living_area", "no_of_rooms", "offer_text_two", "offer_text",
+        "maximum_number_of_persons", "type_of_contract", "price_analysis_text",
+        "allowance_price", "floor", "basic_rent", "price_range", "energy_label",
+        "minimum_stay", "media_gallery", "image_manager", "__typename",
     }
 
-
-class TestQueryFieldsAreUsed:
-    def test_every_queried_field_is_read(self):
-        unused = sorted(_items_fields() - _to_listing_strings())
-        assert not unused, (
-            "这些字段请求了但 _to_listing 从不读，每轮都在白付流量: "
-            f"{unused}。确认要加就先在 _to_listing 里用上它。"
+    def test_field_set_matches_the_allowlisted_document(self):
+        got = _items_fields()
+        added = sorted(got - self.EXPECTED)
+        removed = sorted(self.EXPECTED - got)
+        assert not added, (
+            f"给白名单查询加了字段: {added}。加一个就会全量 403 "
+            f"operation_not_allowed，H2S 直接停摆。"
+        )
+        assert not removed, (
+            f"从白名单查询删了字段: {removed}。删一个同样 403——这正是 "
+            f"2026-08-18 中断的直接原因。要省流量请改分层抓取，别动字段。"
         )
 
-    def test_dropped_fields_stay_dropped(self):
-        """2026-08-07 裁掉的三个字段，别又被加回来。"""
-        fields = _items_fields()
-        for f in ("media_gallery", "city", "minimum_stay"):
-            assert f not in fields, (
-                f"{f} 已于 2026-08-07 因无人读取被裁掉（media_gallery 一项占"
-                "响应体 70%）。真要加回来，先让 _to_listing 用上它。"
+    def test_operation_name_is_declared(self):
+        """缺 operationName 同样 403，实测过。"""
+        import h2s_gql
+        assert h2s_gql.OPERATION_NAME == "GetCategories"
+
+    def test_scraper_does_not_define_its_own_query(self):
+        """查询只有一处定义。散成两份必然有一份忘了跟着照抄。"""
+        src = _SCRAPER.read_text(encoding="utf-8")
+        assert "query GetCategories(" not in src, (
+            "scrapers/holland2stay.py 里又出现了查询定义，"
+            "它应当只从 h2s_gql 导入"
+        )
+
+    def test_scraper_sends_the_operation_name(self):
+        """调用点必须带 operation_name，否则一律 403。"""
+        tree = ast.parse(_SCRAPER.read_text(encoding="utf-8"))
+        calls = [
+            n for n in ast.walk(tree)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "fetch_gql"
+        ]
+        assert calls, "找不到 fetch_gql 调用，这条守卫已失效"
+        for c in calls:
+            kw = {k.arg for k in c.keywords}
+            assert "operation_name" in kw, (
+                "有一处 fetch_gql 没传 operation_name，该请求会 403"
             )
 
-    def test_parser_actually_finds_fields(self):
-        """守卫别退化成空集合——空集合与任何东西求差都是空。"""
-        fields = _items_fields()
-        assert len(fields) >= 15, f"字段解析失效，只抽到 {fields}"
-        assert "sku" in fields and "price_range" in fields
 
-    def test_required_fields_present(self):
-        """反向：_to_listing 依赖的字段不能被误删。"""
-        fields = _items_fields()
-        for f in ("sku", "url_key", "available_to_book", "basic_rent",
-                  "available_startdate", "price_range"):
-            assert f in fields, f"_to_listing 依赖 {f}，查询里却没有"
+class TestFieldsWeLost:
+    """照抄的代价：三个我们原本在用的字段不在名单里。"""
+
+    @pytest.mark.parametrize("field", [
+        "building_name", "available_startdate", "tenant_profile_restrictions",
+    ])
+    def test_absent_field_stays_absent(self, field):
+        """别再把它们加回查询——加了就是全量 403。
+
+        它们的替代来源见 docs/H2S.md §5.2：building_name 与
+        tenant_profile_restrictions 可经 aggregations / 筛选条件取回，
+        available_startdate 只能从 SSR 页面解析。
+        """
+        assert field not in _items_fields()
+
+    def test_to_listing_tolerates_their_absence(self):
+        """字段缺失时必须优雅降级，不能抛。"""
+        from scrapers.holland2stay import _to_listing
+
+        item = {
+            "url_key": "x-1", "sku": "r-x-1", "available_to_book": 6203,
+            "basic_rent": 1200, "living_area": "40", "energy_label": "A",
+            "no_of_rooms": "6137", "floor": "6061", "finishing": 6261,
+            "maximum_number_of_persons": 23, "type_of_contract": 21,
+            "next_contract_startdate": "2026-09-01 00:00:00",
+        }
+        listing = _to_listing(item, "Eindhoven", {})
+        assert listing is not None, "缺三个字段就返回 None，会把整城房源丢光"
+        assert listing.id == "x-1"
+        assert listing.available_from is None
+        assert not [f for f in listing.features if f.startswith("Tenant:")]

@@ -89,6 +89,29 @@ _ENC_HEADER = "x-enc"
 # 公钥在 bundle 里是个 SPKI base64 常量（实测 392 字符）。运行时抓而不是写死：
 # 它可能轮换，写死会在轮换当天变成一次无从下手的解密失败。
 _ENC_PUBKEY_RE = r'"(MII[A-Za-z0-9+/=]{80,})"'
+
+# 只在这些 chunk 里找公钥。**别再扫全部 script。**
+#
+# 2026-08-18 生产事故：初版实现遍历页面上全部 <script src>（实测 81 个）逐个
+# fetch，直到命中含 __enc__ 的那个。代价是每建一次浏览器多打 ~97 个请求：
+#
+#     Holland2Stay   217 → 314 个响应 / 会话，1.78 → 2.66 MB
+#     Xior（对照组）   93 →  97 个响应 / 会话，0.60 → 0.61 MB
+#
+# 部署当晚 H2S 就开始连续 403（此前三天一次都没有），熔断退避到 110 分钟。
+# 「从页面里把每个 JS chunk 都拉一遍」本身就是极像爬虫的行为特征。
+#
+# 实测 __enc__ 只出现在 common-* 与 vendors-* 两类 chunk 里，按名字先筛一遍
+# 就够，命中即停——正常情况下只需 1–2 个请求。
+_ENC_CHUNK_HINTS = ("common-", "vendors-")
+
+# 公钥是站点级常量，**进程内共享**，不随浏览器重建作废。
+#
+# 初版绑在浏览器生命周期上（2 小时一换），本意是让公钥轮换最多废掉一个会话；
+# 但那意味着每次重建浏览器都要重新扫一遍 bundle，而 403 恰恰会触发重建——
+# 于是被封之后反而扫得更凶，正反馈。改为进程级缓存 + 失败时作废：轮换照样
+# 能自愈（解密失败会清缓存重取），代价却降到每进程一次。
+_ENC_PUBKEY_CACHE: dict[str, str] = {}
 _XIOR_MAIN_PAGE = "https://www.xiorstudenthousing.eu/netherlands/"
 _XIOR_AJAX_PATH = "/wp-admin/admin-ajax.php"
 
@@ -130,9 +153,19 @@ _CHALLENGE_POLL_INTERVAL = 1.0
 # clearance 未生效时 H2S 返回的标记（403 + 这段 JSON）
 _CLEARANCE_REQUIRED_MARKER = "clearance_required"
 # 探测用的最小查询：只取 total_count，不翻页不取字段
-_CLEARANCE_PROBE_QUERY = (
-    '{products(filter:{category_uid:{eq:"Nw=="}},pageSize:1){total_count}}'
-)
+# 探测必须用白名单登记的那条 operation。**不能自己写个最小查询**——
+# H2S 自 2026-08-18 起按 operation 白名单放行，匿名/自定义查询一律
+# 403 operation_not_allowed，而那不是 clearance_pending_markers 里的标记，
+# 于是初始化会把「查询没登记」误判成「这个 IP 被封」，一路熔断。
+# 代价只是探测请求变大，一次初始化一次，可接受。
+from h2s_gql import GQL_QUERY as _H2S_GQL_DOCUMENT, OPERATION_NAME as _H2S_OPERATION
+
+_CLEARANCE_PROBE_VARIABLES = {
+    "pageSize": 1,
+    "currentPage": 1,
+    "filters": {"category_uid": {"eq": "Nw=="}},
+    "sort": {"next_contract_startdate": "ASC"},
+}
 # 单次导航后等 cookie 落地的上限。实测正常 2–3s（本地）到 10–22s（生产 VPS）。
 # 不宜再长：token 只能靠重新导航签发，超过这个窗口还没落地，继续轮询是白打
 # 必然 403 的请求，换一次导航才有意义。
@@ -338,6 +371,19 @@ class ProbeRequest:
     headers: Mapping[str, str] = field(default_factory=dict)
 
 
+def _gql_body(query: str, variables: dict | None, operation_name: str = "") -> str:
+    """拼 GraphQL 请求体。
+
+    ``operationName`` 只在非空时才写进去——H2S 自 2026-08-18 起按 operation
+    白名单放行（见 docs/H2S.md §5），而 Xior 那边根本不发 GraphQL。多塞一个
+    ``"operationName": ""`` 会改变请求体，没必要冒这个险。
+    """
+    body: dict = {"query": query, "variables": variables or {}}
+    if operation_name:
+        body["operationName"] = operation_name
+    return _json_dumps(body)
+
+
 @dataclass(frozen=True)
 class SiteProfile:
     """一个受 Cloudflare 保护的站点，需要浏览器传输层才能访问。
@@ -395,7 +441,9 @@ H2S_PROFILE = SiteProfile(
     default_headers=_H2S_GQL_HEADERS,
     clearance_probe=ProbeRequest(
         path=_H2S_GQL_PATH,
-        body=_json_dumps({"query": _CLEARANCE_PROBE_QUERY, "variables": {}}),
+        body=_gql_body(
+            _H2S_GQL_DOCUMENT, _CLEARANCE_PROBE_VARIABLES, _H2S_OPERATION,
+        ),
         headers=_H2S_GQL_HEADERS,
     ),
     # H2S 不回 CF 挑战页，而是自己的 JSON：
@@ -501,8 +549,6 @@ class BrowserFetcher:
         self._blocked_count = 0
         self._profile_lock = None
         self._profile_path = None
-        # 加密公钥，每个浏览器会话抓一次。见 _ensure_enc_pubkey。
-        self._enc_pubkey: str = ""
         # 见 _install_byte_accounting
         self._wire_bytes = 0
         self._response_count = 0
@@ -566,9 +612,6 @@ class BrowserFetcher:
         self._proxy_url = proxy_url or ""
 
         self._browser, self._page = self._open_browser(chromium_args, proxy_url)
-        # 公钥跟着浏览器一起丢：它是站点常量，但会轮换。绑在浏览器生命周期上
-        # （2 小时）意味着轮换最多让一个会话失败，而不是让整个进程一直用旧值。
-        self._enc_pubkey = ""
         self._blocked_count = 0
         self._wire_bytes = 0
         self._response_count = 0
@@ -1059,37 +1102,62 @@ class BrowserFetcher:
     # 公钥不写死，见 ``_ensure_enc_pubkey``。
 
     def _ensure_enc_pubkey(self) -> str:
-        """取加密用的 RSA 公钥（SPKI base64），每个浏览器会话抓一次并缓存。
+        """取加密用的 RSA 公钥（SPKI base64）。进程内缓存，见 ``_ENC_PUBKEY_CACHE``。
 
-        写死会在轮换当天变成一次无从下手的解密失败，而它就摆在 bundle 里，
-        抓一次的代价只有一个浏览器会话一次。
+        **按 chunk 名字先筛**（``_ENC_CHUNK_HINTS``），不要遍历全部 script——
+        那条路 2026-08-18 把出口 IP 送进了 Cloudflare 黑名单，原因见常量注释。
         """
-        if self._enc_pubkey:
-            return self._enc_pubkey
+        cached = _ENC_PUBKEY_CACHE.get(self._profile.name)
+        if cached:
+            return cached
+
         key = self._page.evaluate(
-            """async (re) => {
+            """async ([re, hints]) => {
                 const rx = new RegExp(re);
-                for (const u of [...document.querySelectorAll('script[src]')]
-                                 .map(s => s.src)) {
-                    let t;
-                    try { t = await (await fetch(u)).text(); } catch (e) { continue; }
-                    if (!t.includes('__enc__')) continue;
-                    const m = t.match(rx);
-                    if (m) return m[1];
+                const all = [...document.querySelectorAll('script[src]')]
+                    .map(s => s.src);
+                // 先按名字筛；筛不到再退回全量，但正常情况下走不到那一步。
+                const named = all.filter(u => hints.some(h => u.includes(h)));
+                for (const list of [named, all]) {
+                    for (const u of list) {
+                        let t;
+                        try { t = await (await fetch(u)).text(); }
+                        catch (e) { continue; }
+                        if (!t.includes('__enc__')) continue;
+                        const m = t.match(rx);
+                        if (m) return {key: m[1], scanned: list.length,
+                                       fallback: list === all};
+                    }
                 }
                 return null;
             }""",
-            _ENC_PUBKEY_RE,
+            [_ENC_PUBKEY_RE, list(_ENC_CHUNK_HINTS)],
         )
-        if not key:
+        if not key or not key.get("key"):
             raise _exc("ScrapeNetworkError")(
                 f"{self._profile.name} 找不到加密公钥——bundle 结构可能已变。"
                 f"到含 __enc__ 的 chunk 里搜 SPKI 常量（形如 MIIBIjANBgkq…），"
-                f"并核对 _ENC_PUBKEY_RE。"
+                f"并核对 _ENC_PUBKEY_RE / _ENC_CHUNK_HINTS。"
             )
-        self._enc_pubkey = key
-        logger.info("%s 已取得加密公钥（%d 字符）", self._profile.name, len(key))
-        return key
+        if key.get("fallback"):
+            # 退回全量说明 _ENC_CHUNK_HINTS 过期了。它能救这一次，但代价正是
+            # 当初惹祸的那个行为特征，所以要吵一声，别让它悄悄变成常态。
+            logger.warning(
+                "%s 按 chunk 名字没找到公钥，退回扫描全部 %d 个 script。"
+                "请更新 _ENC_CHUNK_HINTS——长期这么扫会被 Cloudflare 盯上。",
+                self._profile.name, key.get("scanned", 0),
+            )
+        _ENC_PUBKEY_CACHE[self._profile.name] = key["key"]
+        logger.info(
+            "%s 已取得加密公钥（%d 字符，扫了 %d 个 chunk）",
+            self._profile.name, len(key["key"]), key.get("scanned", 0),
+        )
+        return key["key"]
+
+    def _drop_enc_pubkey(self) -> None:
+        """作废缓存的公钥。上游轮换时靠它自愈——下次请求会重新抓。"""
+        if _ENC_PUBKEY_CACHE.pop(self._profile.name, None):
+            logger.warning("%s 加密公钥已作废，下次请求将重新抓取", self._profile.name)
 
     def _encrypted_fetch(
         self,
@@ -1175,15 +1243,22 @@ class BrowserFetcher:
                 }
             }
         """
-        return self._page.evaluate(
+        result = self._page.evaluate(
             js_code, [pub, path, body, merged, timeout_ms, _ENC_HEADER]
         )
+        # JS 侧的 try/catch 把 importKey / encrypt / decrypt 的失败都收成
+        # {"error": ...}。公钥轮换正是从这里冒出来的：旧公钥加密的信封服务端
+        # 解不开，或响应用新密钥回来我们解不开。作废缓存，下次请求重抓即自愈。
+        if isinstance(result, dict) and result.get("error"):
+            self._drop_enc_pubkey()
+        return result
 
     def _raw_fetch_gql(
         self,
         query: str,
         variables: dict | None = None,
         *,
+        operation_name: str = "",
         timeout_ms: int = 30_000,
         extra_headers: dict[str, str] | None = None,
     ) -> dict:
@@ -1191,7 +1266,7 @@ class BrowserFetcher:
         return self._raw_fetch(
             _H2S_GQL_PATH,
             method="POST",
-            body=_json_dumps({"query": query, "variables": variables or {}}),
+            body=_gql_body(query, variables, operation_name),
             headers=extra_headers,
             timeout_ms=timeout_ms,
         )
@@ -1255,6 +1330,7 @@ class BrowserFetcher:
         query: str,
         variables: dict | None = None,
         *,
+        operation_name: str = "",
         timeout_ms: int = 30_000,
         extra_headers: dict[str, str] | None = None,
     ) -> dict:
@@ -1265,6 +1341,8 @@ class BrowserFetcher:
         ----------
         query         : GraphQL query 或 mutation 字符串
         variables     : GraphQL variables dict（可选）
+        operation_name: GraphQL operationName。H2S 自 2026-08-18 起按 operation
+                        白名单放行，缺了它一律 403 ``operation_not_allowed``
         timeout_ms    : fetch 超时毫秒数
         extra_headers : 额外 HTTP 头（e.g. Authorization: Bearer xxx）
 
@@ -1281,7 +1359,7 @@ class BrowserFetcher:
         result = self.fetch(
             _H2S_GQL_PATH,
             method="POST",
-            body=_json_dumps({"query": query, "variables": variables or {}}),
+            body=_gql_body(query, variables, operation_name),
             headers=extra_headers,
             timeout_ms=timeout_ms,
         )

@@ -16,12 +16,26 @@ _CLEARANCE_403 = json.dumps(
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_enc_pubkey_cache():
+    """公钥缓存是进程级的（见 browser_fetcher._ENC_PUBKEY_CACHE）。
+
+    不清就会跨测试泄漏：第一个用例抓完之后，后面的 key_fetches 全是 0，
+    「每会话只抓一次」这类断言会变成永远通过。
+    """
+    from browser_fetcher import _ENC_PUBKEY_CACHE
+    _ENC_PUBKEY_CACHE.clear()
+    yield
+    _ENC_PUBKEY_CACHE.clear()
+
+
 class _FakePage:
     def __init__(self, *responses: dict, title: str = "", content: str = ""):
         self.responses = list(responses)
         self.scripts: list[str] = []
         self.args: list = []          # 每次请求 evaluate 的参数，供断言用
         self.key_fetches = 0
+        self.key_hints: list = []
         self._title = title
         self._content = content
 
@@ -31,12 +45,14 @@ class _FakePage:
     ENC_PUBKEY = "MII" + "A" * 100
 
     def evaluate(self, script: str, arg=None):
-        # _ensure_enc_pubkey：唯一一个带正则参数、且不发请求的 evaluate。
-        # 单独计数——``scripts`` 是「发了几次请求」的判据，把抓公钥混进去会让
-        # 那些计数断言变成在数实现细节。
-        if arg is not None and isinstance(arg, str) and "MII" in arg:
+        # _ensure_enc_pubkey：唯一一个传 [正则, chunk 名单] 且不发请求的
+        # evaluate。单独计数——``scripts`` 是「发了几次请求」的判据，把抓公钥
+        # 混进去会让那些计数断言变成在数实现细节。
+        if (isinstance(arg, list) and len(arg) == 2
+                and isinstance(arg[0], str) and "MII" in arg[0]):
             self.key_fetches += 1
-            return self.ENC_PUBKEY
+            self.key_hints = arg[1]
+            return {"key": self.ENC_PUBKEY, "scanned": 1, "fallback": False}
         self.scripts.append(script)
         self.args.append(arg)
         if self.responses:
@@ -506,7 +522,8 @@ class TestEncryptedEnvelope:
 
         class _NoKeyPage(_FakePage):
             def evaluate(self, script, arg=None):
-                if arg is not None and isinstance(arg, str) and "MII" in arg:
+                if (isinstance(arg, list) and len(arg) == 2
+                        and isinstance(arg[0], str) and "MII" in arg[0]):
                     return None
                 return super().evaluate(script, arg)
 
@@ -517,19 +534,48 @@ class TestEncryptedEnvelope:
         assert "公钥" in msg
         assert "__enc__" in msg, "没说去哪个 chunk 找"
 
-    def test_pubkey_dropped_on_browser_rebuild(self):
-        """公钥绑浏览器生命周期：轮换时最多废掉一个会话，而不是整个进程。"""
+    def test_only_scans_named_chunks(self):
+        """按 chunk 名字筛，别遍历全部 script。
+
+        2026-08-18 初版就是遍历全部（实测 81 个），每建一次浏览器多打 ~97 个
+        请求，当晚 H2S 就被 Cloudflare 连续 403。这条守住那次教训。
+        """
+        from browser_fetcher import _ENC_CHUNK_HINTS
+
         page = _FakePage({"status": 200, "ok": True,
                           "text": json.dumps({"data": {}}),
                           "headers": {"x-enc": "1"}})
-        fetcher = _make_fetcher(page)
-        fetcher.fetch_gql("query A { a }")
-        assert fetcher._enc_pubkey
+        _make_fetcher(page).fetch_gql("query A { a }")
 
-        # _launch 会重置它；这里直接验字段契约，不去真起浏览器
+        assert page.key_hints == list(_ENC_CHUNK_HINTS)
+        assert page.key_hints, "没有传 chunk 名单 = 又在扫全部 script"
+
+    def test_pubkey_survives_browser_rebuild(self):
+        """公钥是站点常量，进程内共享，**不该**随浏览器重建作废。
+
+        初版绑在浏览器生命周期上，而 403 恰恰会触发重建——被封之后反而扫得
+        更凶，正反馈。
+        """
         import inspect
-        src = inspect.getsource(type(fetcher)._launch)
-        assert "_enc_pubkey" in src, "_launch 没有清空公钥缓存"
+        from browser_fetcher import BrowserFetcher
+        src = inspect.getsource(BrowserFetcher._launch)
+        assert "_enc_pubkey" not in src, "_launch 又在丢公钥缓存了"
+
+    def test_crypto_failure_drops_the_key(self):
+        """轮换的自愈路径：加解密失败 → 作废缓存 → 下次重抓。"""
+        from browser_fetcher import _ENC_PUBKEY_CACHE
+
+        page = _FakePage(
+            {"error": "The operation failed for an operation-specific reason"},
+            {"status": 200, "ok": True, "text": json.dumps({"data": {}}),
+             "headers": {"x-enc": "1"}},
+        )
+        fetcher = _make_fetcher(page)
+        try:
+            fetcher.fetch_gql("query A { a }")
+        except Exception:
+            pass
+        assert not _ENC_PUBKEY_CACHE, "解密失败后没有作废公钥，轮换将无法自愈"
 
     def test_clearance_probe_path_is_the_envelope_endpoint(self):
         """探测请求也得走信封，否则初始化永远探不通。"""

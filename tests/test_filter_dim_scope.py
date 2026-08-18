@@ -25,28 +25,28 @@ class TestSupportMatrix:
         for dim in ("contract", "offer", "energy", "neighborhood"):
             assert sources_supporting_dim(dim) == ["holland2stay"], dim
 
-    def test_tenant_is_no_longer_h2s_only(self):
-        """租客资格自 v1.16.2 起四个平台都有，且必须全部登记。
+    def test_tenant_covers_the_three_criteria_platforms(self):
+        """租客资格覆盖 OurDomain / OurCampus / Xior，**不含 H2S**。
 
-        判据不是抓来的——只存在于各平台官网的 Criteria 页：Xior 整站学生盘
-        （SOURCE_ASSUMED_FEATURES），OurCampus 整栋要在校证明，OurDomain 按
-        楼、按面积分档（scrapers/ourdomain.py 的 tenant_policy）。
+        v1.16.2 加这个维度时四家都在。2026-08-18 H2S 上线 GraphQL operation
+        白名单，我们只能照抄它那条查询，而 tenant_profile_restrictions 不在
+        字段集里（加进去会全量 403，见 h2s_gql.py）——房源不再带 Tenant 标签。
 
-        声明了却不登记能力表，该维度仍走 fail-open：用户勾「仅学生」照样会收到
-        Young-Professionals-only 的房源，整个维度等于没做。
+        **必须同时摘掉登记**：该维度 fail-closed，缺值即拒绝，留着会让勾
+        「仅学生」的用户一条 H2S 房源都收不到，比没有这个筛选更糟。
         """
         assert sources_supporting_dim("tenant") == [
-            "holland2stay", "ourdomain", "ourcampus", "xior",
+            "ourdomain", "ourcampus", "xior",
         ]
 
-    def test_tenant_covers_every_platform_so_no_badge(self):
-        """全平台生效 → 界面不该再挂「仅 Holland2Stay」徽标。
+    def test_tenant_badge_says_three_platforms(self):
+        """H2S 摘掉之后徽标要如实变回「仅 3 个平台」。
 
-        徽标由 _SOURCE_FILTER_DIMS 动态算出，漏改能力表时它会继续显示一句
-        **错的**范围说明，比没有说明更糟。
+        徽标由 _SOURCE_FILTER_DIMS 动态算出。漏改能力表时它会显示一句**错的**
+        范围说明，比没有说明更糟——用户会据此以为 H2S 的房源也在按资格过滤。
         """
-        assert dim_scope_badge("tenant") == ""
-        assert dim_scope_note("tenant") == ""
+        assert dim_scope_badge("tenant") == "仅 3 个平台"
+        assert "Holland2Stay" not in dim_scope_note("tenant")
 
     def test_finishing_is_no_longer_h2s_only(self):
         """Xior 与 OurDomain 的装修档位由 SOURCE_ASSUMED_FEATURES 声明。

@@ -33,6 +33,9 @@
 | 2026-08-11 19:34 | `www.holland2stay.com/api/service/residences` | 旧路径返回 **404 + Next.js 错误页**（HTML，非 JSON） |
 | 2026-08-17 08:11 | `www.holland2stay.com/api/__enc__` | 同上 404；且**改为加密信封**，明文请求直接触发 Cloudflare 挑战 |
 
+2026-08-18 08:11 又加了一道 **GraphQL operation 白名单**（端点未变）：不在名单里
+的查询一律 `403 {"code":"operation_not_allowed"}`。见 §5。
+
 三次迁移中，**GraphQL schema 与查询语句均逐字未变**——变的只有传输层。这不是推测：
 在 `crypto.subtle.encrypt` 上打钩子截获站点加密**之前**的明文，可见它发的仍是
 `GetCategories` / `products` / `category_uid:"Nw=="` 与同一套 `available_to_book` ID。
@@ -179,25 +182,82 @@ x-enc: 1
 
 由 `tests/test_h2s_query_fields.py` 守卫：新增字段而不在 `_to_listing` 中读取即失败。
 
-### 5.1 attribute label 映射
+### 5.1 operation 白名单（2026-08-18 起）
 
-枚举字段返回的是 attribute option ID，须经 aggregations 接口映射为可读 label：
+查询文本必须与站点自己发的**逐字段一致**。实测判据：
 
 ```
-query{products(filter:{category_uid:{eq:"Nw=="}}){
-  aggregations{attribute_code label options{label value}}}}
+站点原文                            200
+删掉 image_manager 块                403
+加 tenant_profile_restrictions       403
+加 available_startdate               403
+只改空格                             200   ← 空白不敏感，字段集敏感
 ```
 
-返回 15 个 aggregation（`city` / `finishing` / `type_of_contract` /
-`tenant_profile_restrictions` 等）。`available_to_book` **不在其中**，其 ID→label 由
-`_STATUS_MAP` 硬编码。
+即白名单比对的是归一化后的**字段集合**，且 `operationName` 缺失同样 403。
+`variables` 不受限制——城市、可用状态、分页、排序都可自由传。
 
-上游返回的 label 荷兰语与英语混杂，且同一字段在不同房源上可能不一致（生产库中
-`Finishing: Furnished` 与 `Finishing: Gemeubileerd` 并存）。归一由
-`models.FEATURE_SYNONYMS` 与 `canonical_feature()` 在过滤层完成，**不在抓取层做**——
-上游文案随时可能新增写法，抓取层归一会把未收录的值直接丢掉。
+因此查询存于 [`h2s_gql.py`](../h2s_gql.py)，是**照抄品**：
 
----
+- 不要「优化」它。我们此前为省流量裁掉了 `media_gallery` 等字段，正是那份裁剪版
+  在 2026-08-18 被全量拒绝，抓取中断。
+- 上游改版后重新照抄：钩住 `crypto.subtle.encrypt` 截获站点加密前的明文即可。
+- 由 `tests/test_h2s_query_fields.py` 守卫，字段增删即失败。
+
+### 5.2 照抄的代价：三个字段拿不到
+
+白名单那条查询不含以下字段，我们原先在用：
+
+| 字段 | 用途 | 现状 |
+|---|---|---|
+| `tenant_profile_restrictions` | 学生 / 上班族标签 | 仍可作**筛选条件**（实测 Eindhoven 不限状态 78 条），且主查询自带的 aggregations 会报出有无受限房源。2026-08-18 当天可订的 48 套里一套都没有，故暂未接入；`tenant` 维度已从 H2S 的能力表摘除，见下 |
+| `building_name` | 展示用 | 同样可经 aggregations 取回，需要时再补 |
+| `available_startdate` | `Listing.available_from` | **拿不到**。不能用 `next_contract_startdate` 顶替——可订房源里大量是 `2050-01-01` 哨兵值。真实来源是 SSR 页面：房源卡片上写着 `Available per Aug 20, 2026`，实测 10/10 可解析，但一页仅 10 条 |
+
+`tenant` 已从 `config._SOURCE_FILTER_DIMS["holland2stay"]` 中摘除。**必须摘**：该维度
+fail-closed，缺值即拒绝，留着会让勾「仅学生」的用户一条 H2S 房源都收不到——比没有
+这个筛选更糟。OurDomain / OurCampus / Xior 不受影响。
+
+### 5.3 分层抓取：白名单之后唯一的省流量手段
+
+字段集被锁死，响应体没得裁，能动的只有「查什么」。2026-08-18 实测两城合计、线上
+真实字节（加密响应不可压缩，无 gzip 收益）：
+
+```
+只查 可订 + 抽签 + 即将上线      2.2 KB/轮
+再加上 Reserved               292.2 KB/轮
+```
+
+贵的不是「有没有新房」，是那批已被预订的房源——每轮完整拉一遍，而 Reserved 状态
+几乎不动。故拆成两层（`scrapers/holland2stay.py` 的 `_FRESH_STATUSES` /
+`_ARCHIVE_STATUSES`）：
+
+- **每轮**只查可订类。新房源必然先出现在这里，通知不延迟。
+- **每 `_FULL_SCAN_INTERVAL`（默认 1800 秒）**做一次含 Reserved 的全量。
+
+两条必须守住的性质，均有测试（`tests/test_h2s_tiered_scan.py`）：
+
+1. **高频轮一律 `complete=False`。** 它看不见 Reserved，若标成完整扫描，stale
+   收敛会把那批房源判成「已下架」清掉。
+2. **层级按批次决定，不按城市。** 实现时踩过：在 `_plan_scan` 里直接推进计时器，
+   导致一轮里第一个城市消耗掉「该全量」的标记，其余城市统统被降级。
+
+### 5.4 attribute label 映射
+
+枚举字段返回的是 attribute option ID，须映射为可读 label。以前单独发一条
+`GetAggregations` 查询，2026-08-18 起被白名单挡掉——好在白名单这条 `GetCategories`
+的 ProductsFragment 本就带 `aggregations`，同一响应里即可取（`_labels_from_aggregations`），
+反而省掉一次请求。
+
+`available_to_book` 不在其中，其 ID→label 由 `_STATUS_MAP` 硬编码。
+
+映射需**跨轮累积**：aggregations 是按当前 filters 统计的，高频轮里 Reserved 房源的
+label 根本不出现，覆盖式赋值会让上一轮攒到的映射丢失，features 里就会冒出裸 ID。
+
+上游返回的 label 荷兰语与英语混杂（生产库中 `Finishing: Furnished` 与
+`Finishing: Gemeubileerd` 并存）。归一由 `models.FEATURE_SYNONYMS` 与
+`canonical_feature()` 在过滤层完成，**不在抓取层做**——上游文案随时可能新增写法，
+抓取层归一会把未收录的值直接丢掉。
 
 ## 6. 风险
 
@@ -208,7 +268,9 @@ query{products(filter:{category_uid:{eq:"Nw=="}}){
 | 信封格式变更（`v` 从 1 起跳） | 目前无版本协商。届时解密会失败，需重读 chunk 里的 `__enc__` 实现 |
 | Turnstile 加码 | 当前由站点前端自动完成，本项目只等待。若改为需要交互，则须接入打码服务 |
 | 出口 IP 被 Cloudflare 盯上 | 挑战连续失败即熔断退避；重建浏览器会更换出口 IP |
-| GraphQL schema 变更 | `total_pages` 缺失时标记不完整；字段增减由 `tests/test_h2s_query_fields.py` 守卫 |
+| operation 白名单收紧 | 已发生一次。查询是照抄品，字段增删即 403。定位与重抄步骤见 §2 / §5.1 |
+| 白名单查询里的字段被上游删掉 | 我们跟着丢字段，且无从补救（只能另找 SSR 等来源）。§5.2 已有三个先例 |
+| GraphQL schema 变更 | `total_pages` 缺失时标记不完整；字段集由 `tests/test_h2s_query_fields.py` 守卫 |
 | label 出现新的语言写法 | 过滤层归一，未收录的值原样保留而非丢弃；补 `FEATURE_SYNONYMS` 即可 |
 
 ---

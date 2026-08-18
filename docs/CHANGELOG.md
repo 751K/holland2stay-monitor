@@ -1,5 +1,76 @@
 # Changelog
 
+## v1.16.6 (2026-08-18)
+
+Holland2Stay 上线 GraphQL operation 白名单，我们裁剪过的查询被全量拒绝，抓取中断
+约 5 小时。改为照抄站点原文，并以分层抓取抵消随之而来的流量增长。
+
+### 白名单比对的是字段集合
+
+2026-08-18 08:11 起，不在名单里的查询一律 `403 {"code":"operation_not_allowed"}`。
+实测判据：
+
+```
+站点原文                            200
+删掉 image_manager 块                403
+加 tenant_profile_restrictions       403
+加 available_startdate               403
+只改空格                             200   ← 空白不敏感，字段集敏感
+```
+
+`operationName` 缺失同样 403；`variables` 不受限制。
+
+我们此前为省流量裁掉了 `media_gallery` 等未使用字段（92 → 26 MB/天），正是那份裁剪版
+被拒。查询因此移入 `h2s_gql.py` 并标注为**照抄品**，由
+`tests/test_h2s_query_fields.py` 守卫——该测试的前提就此反转：原先禁止请求用不到的
+字段，现在禁止增删任何字段。
+
+### 照抄的代价与补救
+
+`tenant_profile_restrictions` / `building_name` / `available_startdate` 三个字段不在
+名单内。前两者仍可经 aggregations 或筛选条件取回；`available_startdate` 只能从 SSR
+页面解析（房源卡片写着 `Available per Aug 20, 2026`，实测 10/10 可解析），本次未接入，
+`available_from` 暂为空。
+
+`tenant` 维度已从 H2S 的能力表摘除。该维度 fail-closed，缺值即拒绝——留着会让勾
+「仅学生」的用户一条 H2S 房源都收不到，比没有这个筛选更糟。摘除后 H2S 房源照常推送，
+只是不按租客资格过滤；OurDomain / OurCampus / Xior 不受影响。2026-08-18 当天可订的
+48 套里一套都没有租客限制，故实际影响为零。
+
+### 分层抓取
+
+字段集锁死后，能动的只剩「查什么」。实测两城合计、线上真实字节（加密响应不可压缩）：
+
+```
+只查 可订 + 抽签 + 即将上线      2.2 KB/轮
+再加上 Reserved               292.2 KB/轮
+```
+
+贵的是那批已被预订的房源。故拆成两层：每轮只查可订类（新房源必然先出现在这里，通知
+不延迟），每 30 分钟做一次含 Reserved 的全量。按实际节奏折算，97 → 约 15 MB/天。
+
+两条性质由 `tests/test_h2s_tiered_scan.py` 守住：
+
+1. 高频轮一律 `complete=False`——它看不见 Reserved，标成完整扫描会让 stale 收敛把
+   那批房源清空。
+2. 层级按批次决定而非按城市。实现时踩过：在 `_plan_scan` 里推进计时器，导致一轮里
+   第一个城市消耗掉「该全量」，其余城市被降级。
+
+### attribute label 改由主响应携带
+
+`GetAggregations` 那条自定义查询同样被白名单挡掉。白名单的 `GetCategories` 本就带
+`aggregations`，改从同一响应取，反而省掉一次请求。映射需跨轮累积——aggregations 按
+当前 filters 统计，高频轮里 Reserved 的 label 不出现，覆盖式赋值会丢掉已攒到的映射。
+
+### 公钥扫描收敛
+
+`_ensure_enc_pubkey` 初版遍历页面全部 script（实测 81 个）找公钥，每建一次浏览器多打
+约 97 个请求（H2S 每会话 217 → 314 个响应，而未改动的 Xior 稳定在 93 → 97）。改为按
+chunk 名筛选并进程内缓存，失败时作废重取。
+
+> 排查期间一度将当日 403 归因于此。实际成因是 operation 白名单——报错为应用层的
+> `operation_not_allowed`，非 Cloudflare 挑战页。该扫描确属浪费，但与本次中断无关。
+
 ## v1.16.5 (2026-08-17)
 
 Holland2Stay 将 GraphQL 整体迁入加密信道。接入该信道，恢复抓取。

@@ -63,63 +63,41 @@ _STATUS_MAP: dict[int, str] = {
     6204: "To be in lottery",
 }
 
-# 新 GraphQL 查询（扁平字段，不再有 custom_attributesV2）
+# ── 分层抓取：省流量的唯一旋钮 ────────────────────────────────────────
 #
-# 只请求 _to_listing 真正读的字段。这不是洁癖——每轮两个城市、一天 543 轮，
-# 响应体是按天计的代理流量。2026-08-07 实测：
+# 白名单锁死了字段集（见 h2s_gql.py），响应体没得裁。能动的只有「查什么」。
 #
-#   完整查询   2,096 B/条      裁剪后  583 B/条      92 → 26 MB/天
+# 2026-08-18 实测（两城合计，线上真实字节，加密响应不可压缩）：
 #
-# 差额的绝大部分是 ``media_gallery``（平均 10.8 张图的 URL，占响应体 70%），
-# 而它在整个代码库里只出现在这段查询里——取回来直接丢掉，listings 表连图片
-# 列都没有。``city`` 同理（城市名是 _scrape_city_pages 的入参）、
-# ``minimum_stay`` 同理。
+#     只查 可订 + 抽签 + 即将上线      2.2 KB/轮     ← 当前 0 条房源
+#     再加上 Reserved               292.2 KB/轮    ← 那 48 条全在这儿
 #
-# 加字段前先确认 _to_listing 会读它，否则就是在给每一轮加固定开销。
-_GQL_QUERY = """
-query GetCategories(
-  $pageSize: Int!,
-  $currentPage: Int!,
-  $filters: ProductAttributeFilterInput!,
-  $sort: ProductAttributeSortInput
-) {
-  products(
-    pageSize: $pageSize,
-    currentPage: $currentPage,
-    filter: $filters,
-    sort: $sort
-  ) {
-    total_count
-    page_info { current_page total_pages }
-    items {
-      name
-      sku
-      url_key
-      basic_rent
-      living_area
-      energy_label
-      building_name
-      no_of_rooms
-      floor
-      finishing
-      maximum_number_of_persons
-      available_to_book
-      available_startdate
-      next_contract_startdate
-      type_of_contract
-      offer_text_two
-      tenant_profile_restrictions
-      price_range {
-        minimum_price {
-          regular_price { value __typename }
-          __typename
-        }
-        __typename
-      }
-    }
-  }
-}
-"""
+# 贵的不是「有没有新房」，是那批已被预订的房源——它们每轮被完整拉一遍，而
+# Reserved 状态几乎不动。所以拆成两层：
+#
+#   每轮      只查 _FRESH_STATUSES。新房源必然先出现在这里，通知不延迟。
+#   低频      加上 _ARCHIVE_STATUSES 做全量，用于状态流转与库存统计。
+#
+# 关键：**高频轮不能参与 stale 收敛**。它看不见 Reserved 房源，若标成完整
+# 扫描，那批房源会被判定为「已下架」而被清掉。所以高频轮一律 complete=False，
+# 只有全量轮才可能为 True。
+_FRESH_STATUSES = ("179", "336", "6253")     # 可订 / 抽签 / 即将上线
+_ARCHIVE_STATUSES = ("6203", "6204")         # Reserved / 待抽签
+
+#: 全量扫描间隔（秒）。Reserved 的状态分辨率粗到这个粒度，够用；
+#: Reserved→可订 的转变仍会在下一个高频轮里立刻出现，不受影响。
+_FULL_SCAN_INTERVAL = 1800.0
+
+
+# GraphQL 查询与 operation 名从 h2s_gql 导入——**那份是照抄品，不能改**。
+#
+# H2S 自 2026-08-18 起按 operation 白名单放行，字段增删一个即
+# 403 operation_not_allowed。我们此前为省流量裁剪过查询（删掉 media_gallery
+# 等），正是那份裁剪版当天被全量拒绝，抓取中断。理由与实测判据见 h2s_gql.py。
+#
+# 因此本文件里**不要**再定义查询。省流量改走「查什么」而不是「要哪些字段」：
+# 见 _AVAILABILITY_TIERS 的分层抓取。
+from h2s_gql import GQL_QUERY as _GQL_QUERY, OPERATION_NAME as _GQL_OPERATION
 
 
 # ── Attribute 标签查询（一次获取，批次内复用）──────────────────────────
@@ -136,31 +114,22 @@ _ATTRS_TO_LABEL = {
 }
 
 
-def _fetch_attr_labels(fetcher: "BrowserFetcher") -> dict[str, dict[str, str]]:
-    """
-    通过 aggregations 接口获取所有 attribute option ID → label 映射。
+def _labels_from_aggregations(products: dict) -> dict[str, dict[str, str]]:
+    """从 GetCategories 响应自带的 ``aggregations`` 里取 ID → label 映射。
 
-    一次查询覆盖所有需要的属性，结果在批次内缓存复用。
-    """
-    query = """
-    query GetAggregations($filters: ProductAttributeFilterInput!) {
-      products(filter: $filters) {
-        aggregations {
-          attribute_code
-          options { label value }
-        }
-      }
-    }
-    """
-    data = fetcher.fetch_gql(query, {"filters": {"category_uid": {"eq": "Nw=="}}})
+    以前这里单独发一条 ``GetAggregations`` 查询。2026-08-18 起 H2S 按 operation
+    白名单放行，那条自定义查询直接 403——好在白名单这条 ``GetCategories`` 的
+    ProductsFragment 本来就带 ``aggregations``，同一个响应里就能取，反而省掉
+    一次请求。
 
+    注意 aggregations 是**按当前 filters 统计**的：只查「可订」时，取值为
+    Reserved 的房源不在统计里，其 label 也就不会出现。所以映射要跨轮累积，
+    见 ``HollandStayScraper._attr_labels`` 的合并逻辑。
+    """
     labels: dict[str, dict[str, str]] = {}
-    try:
-        aggs = data["data"]["products"]["aggregations"]
-    except (KeyError, TypeError):
-        logger.warning("aggregations 响应格式异常，标签映射将降级为原始 ID")
+    aggs = (products or {}).get("aggregations")
+    if not aggs:
         return labels
-
     for agg in aggs:
         code = agg.get("attribute_code", "")
         if code not in _ATTRS_TO_LABEL:
@@ -173,7 +142,6 @@ def _fetch_attr_labels(fetcher: "BrowserFetcher") -> dict[str, dict[str, str]]:
                 code_map[val] = lbl
         if code_map:
             labels[code] = code_map
-
     return labels
 
 
@@ -360,7 +328,9 @@ def _scrape_city_pages(
 
         logger.info("[%s] 抓取第 %d 页", city_name, current_page)
         try:
-            data = fetcher.fetch_gql(_GQL_QUERY, variables)
+            data = fetcher.fetch_gql(
+                _GQL_QUERY, variables, operation_name=_GQL_OPERATION,
+            )
         except (RateLimitError, BlockedError, ScrapeNetworkError):
             raise
         except Exception as e:
@@ -398,6 +368,15 @@ def _scrape_city_pages(
         items = products.get("items") or []
         page_info = products.get("page_info") or {}
         total_pages = page_info.get("total_pages")
+
+        # 标签映射就在这个响应里，顺手并进去（以前是单独一条 GetAggregations
+        # 查询，2026-08-18 起被 operation 白名单挡掉）。
+        #
+        # **合并而不是覆盖**：aggregations 是按当前 filters 统计的，只查
+        # 「可订」那一轮里 Reserved 房源的 label 根本不出现。覆盖会让上一轮
+        # 攒到的映射丢失，features 里就会冒出裸 ID。
+        for _code, _map in _labels_from_aggregations(products).items():
+            attr_labels.setdefault(_code, {}).update(_map)
 
         # total_pages 缺失以前默认成 1，于是 current_page(1) >= 1 直接判
         # complete=True——**「没拿到数据」被当成了「确认没有数据」**，正是那次
@@ -482,6 +461,12 @@ class HollandStayScraper(AbstractScraper):
         self._fetcher: Optional[BrowserFetcher] = None
         self._attr_labels: dict[str, dict[str, str]] = {}
         self._browser_created_at: float = 0.0
+        # 上次全量扫描的时刻。**不跟着浏览器重建清零**——浏览器 2 小时一换，
+        # 清零会让每次换浏览器都强制一次全量，分层就白做了。
+        self._last_full_scan_at: float = 0.0
+        #: 本批次是否做全量扫描。由 _begin_batch 每轮算一次，见 _plan_scan。
+        #: 独立调用（非 dispatcher）路径没有批次，默认全量，行为与旧版一致。
+        self._full_this_batch: bool = True
 
     def _ensure_browser(self) -> BrowserFetcher:
         """懒创建或复用浏览器实例。
@@ -506,7 +491,10 @@ class HollandStayScraper(AbstractScraper):
         try:
             self._fetcher.__enter__()
             self._fetcher.ensure_initialized()
-            self._attr_labels = _fetch_attr_labels(self._fetcher)
+            # 标签映射不再单独查（GetAggregations 已被 operation 白名单挡掉），
+            # 改由每次 GetCategories 响应自带的 aggregations 累积，见
+            # _labels_from_aggregations。这里只备好空表。
+            self._attr_labels = {}
             self._browser_created_at = time.monotonic()
             logger.info("浏览器已创建并完成 CF 挑战 (第 %d 次)", getattr(self, '_browser_create_count', 0) + 1)
             setattr(self, '_browser_create_count', getattr(self, '_browser_create_count', 0) + 1)
@@ -543,10 +531,49 @@ class HollandStayScraper(AbstractScraper):
         ``invalidate_session()``。
         """
         self._ensure_browser()
+        self._begin_batch()
         yield
 
+    def _plan_scan(self, configured: list[str]) -> tuple[list[str], bool]:
+        """本轮查哪些可用状态，以及这轮算不算全量。见 _FRESH_STATUSES 上方注释。
+
+        ``configured`` 是用户配置的可用状态白名单——分层不能越过它去查用户
+        没要的状态，否则库里会冒出用户根本不想看的房源。
+
+        **决策按批次做，不按城市。** 一轮里每个城市各调一次 scrape()，若在这里
+        直接推进计时器，第一个城市会把「该做全量」消耗掉，后面的城市统统被降级
+        ——那一轮就只有第一个城市是全量，其余全是高频层。批次标记由
+        ``batch_session()`` 在进入时算一次。
+        """
+        want = set(configured)
+        fresh = [s for s in _FRESH_STATUSES if s in want]
+        archive = [s for s in _ARCHIVE_STATUSES if s in want]
+        if not archive:
+            # 用户本来就没要 Reserved 这类，没有可省的，每轮都是全量
+            return configured, True
+        if not fresh:
+            # 用户只要 Reserved 这类：没有高频层可走，退回全量，否则永远查不到
+            return configured, True
+        if self._full_this_batch:
+            return configured, True
+        return fresh, False
+
+    def _begin_batch(self) -> None:
+        """每批次开头决定这一轮是不是全量扫描。"""
+        now = time.monotonic()
+        self._full_this_batch = (now - self._last_full_scan_at) >= _FULL_SCAN_INTERVAL
+        if self._full_this_batch:
+            self._last_full_scan_at = now
+
     def scrape(self, task: ScrapeTask) -> ScrapeResult:
-        availability_ids = task.extra.get("availability_ids") or ["179", "336"]
+        configured = task.extra.get("availability_ids") or ["179", "336"]
+        availability_ids, is_full = self._plan_scan(list(configured))
+        if not is_full:
+            logger.info(
+                "[%s] 高频轮：只查 %s（省去 Reserved 全量），%.0f 秒后做全量",
+                task.city_display, ",".join(availability_ids),
+                max(0.0, _FULL_SCAN_INTERVAL - (time.monotonic() - self._last_full_scan_at)),
+            )
 
         if self._fetcher is not None:
             # 批次内：复用共享浏览器
@@ -563,7 +590,7 @@ class HollandStayScraper(AbstractScraper):
 
             with BrowserFetcher(headless=CLOAKBROWSER_HEADLESS) as fetcher:
                 fetcher.ensure_initialized()
-                labels = _fetch_attr_labels(fetcher)
+                labels: dict[str, dict[str, str]] = {}
                 listings, complete = _scrape_city_pages(
                     fetcher,
                     task.city_display,
@@ -571,6 +598,11 @@ class HollandStayScraper(AbstractScraper):
                     availability_ids=availability_ids,
                     attr_labels=labels,
                 )
+
+        if not is_full:
+            # 高频轮看不见 Reserved，标成完整扫描会让那批房源被 stale 收敛
+            # 判成「已下架」清掉。见 _FRESH_STATUSES 上方注释。
+            complete = False
 
         for l in listings:
             l.source = self.source
