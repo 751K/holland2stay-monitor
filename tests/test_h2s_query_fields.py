@@ -146,5 +146,54 @@ class TestFieldsWeLost:
         listing = _to_listing(item, "Eindhoven", {})
         assert listing is not None, "缺三个字段就返回 None，会把整城房源丢光"
         assert listing.id == "x-1"
-        assert listing.available_from is None
+        # available_from 有替代来源（next_contract_startdate，见 TestAvailableFrom），
+        # 所以缺 available_startdate 不等于没日期。
+        assert listing.available_from == "2026-09-01"
         assert not [f for f in listing.features if f.startswith("Tenant:")]
+
+
+class TestAvailableFrom:
+    """`available_from` 的来源在 2026-08-18 换过一次。
+
+    原来用 `available_startdate`，白名单查询里没有这个字段（加进去会全量 403）。
+    替代来源不是别处——**站点自己就是拿 `next_contract_startdate` 渲染
+    「Available per …」的**：详情页 HTML 里那个日期就是这个字段。一度打算另开
+    一条 SSR 解析的路（实测每页 0.9 MB / 3.5s），实际我们本来就有这个值。
+
+    `2050-01-01` 是「没有下一个合同起始日」的哨兵。实测 Reserved 里约一半是它，
+    抽签房源里一个都没有。当真日期透出去，用户会看到「2050 年可入住」。
+    """
+
+    @staticmethod
+    def _listing(**item):
+        from scrapers.holland2stay import _to_listing
+        base = {"url_key": "x-1", "sku": "r-x-1",
+                "available_to_book": 179, "basic_rent": 1200}
+        return _to_listing({**base, **item}, "Eindhoven", {})
+
+    def test_uses_next_contract_startdate(self):
+        got = self._listing(next_contract_startdate="2026-08-20 00:00:00")
+        assert got.available_from == "2026-08-20"
+
+    @pytest.mark.parametrize("raw", [
+        "2050-01-01 00:00:00", "2050-12-31 00:00:00", "2099-01-01 00:00:00",
+    ])
+    def test_far_future_sentinel_becomes_none(self, raw):
+        """按年份判，不是精确匹配 2050-01-01——哨兵换个写法不该原样透出去。"""
+        assert self._listing(next_contract_startdate=raw).available_from is None
+
+    def test_missing_date_is_none(self):
+        assert self._listing().available_from is None
+
+    def test_prefers_available_startdate_if_it_ever_returns(self):
+        """上游把字段放回来时自动切回去，不必再改代码。"""
+        got = self._listing(
+            available_startdate="2026-07-01 00:00:00",
+            next_contract_startdate="2050-01-01 00:00:00",
+        )
+        assert got.available_from == "2026-07-01"
+
+    def test_realistic_date_still_passes_through(self):
+        """别把判据写成「凡是未来日期都当哨兵」——2049 年是合法的。"""
+        got = self._listing(next_contract_startdate="2049-06-01 00:00:00")
+        assert got.available_from == "2049-06-01"

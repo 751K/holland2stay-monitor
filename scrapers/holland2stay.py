@@ -185,8 +185,22 @@ def _to_listing(
                 price_raw = None
 
         # ── available_from ──
-        avail_date = item.get("available_startdate") or ""
+        #
+        # 首选 available_startdate；它自 2026-08-18 起不在白名单查询的字段集里
+        # （加进去会全量 403，见 h2s_gql.py），所以实际走的是下面那条。留着它是
+        # 因为上游哪天把字段放回来，这里不必再改。
+        #
+        # 退而用 next_contract_startdate：**站点自己就是拿它渲染「Available per
+        # …」的**。详情页 HTML 里那个日期就是这个字段——一度以为要另开一条 SSR
+        # 解析的路，实际我们本来就有。
+        #
+        # 2050-01-01 是「没有下一个合同起始日」的哨兵，不是真日期。实测
+        # Reserved 里约一半是它，抽签里一个都没有。按年份判而不是精确匹配那一天：
+        # 哨兵值换个写法（2099、2050-12-31）时不至于原样透出去。
+        avail_date = item.get("available_startdate") or item.get("next_contract_startdate") or ""
         available_from = avail_date.split(" ")[0] if avail_date else None
+        if available_from and available_from[:4].isdigit() and int(available_from[:4]) >= 2050:
+            available_from = None
 
         # ── contract fields ──
         contract_id: Optional[int] = None

@@ -212,11 +212,33 @@ x-enc: 1
 |---|---|---|
 | `tenant_profile_restrictions` | 学生 / 上班族标签 | 仍可作**筛选条件**（实测 Eindhoven 不限状态 78 条），且主查询自带的 aggregations 会报出有无受限房源。2026-08-18 当天可订的 48 套里一套都没有，故暂未接入；`tenant` 维度已从 H2S 的能力表摘除，见下 |
 | `building_name` | 展示用 | 同样可经 aggregations 取回，需要时再补 |
-| `available_startdate` | `Listing.available_from` | **拿不到**。不能用 `next_contract_startdate` 顶替——可订房源里大量是 `2050-01-01` 哨兵值。真实来源是 SSR 页面：房源卡片上写着 `Available per Aug 20, 2026`，实测 10/10 可解析，但一页仅 10 条 |
+| `available_startdate` | `Listing.available_from` | 已解决，见 §5.5。改用 `next_contract_startdate`——**站点自己就是拿它渲染「Available per …」的** |
 
 `tenant` 已从 `config._SOURCE_FILTER_DIMS["holland2stay"]` 中摘除。**必须摘**：该维度
 fail-closed，缺值即拒绝，留着会让勾「仅学生」的用户一条 H2S 房源都收不到——比没有
 这个筛选更糟。OurDomain / OurCampus / Xior 不受影响。
+
+### 5.5 `available_from` 的替代来源
+
+`available_startdate` 不在白名单字段集里。替代来源不在别处：**站点自己就是拿
+`next_contract_startdate` 渲染「Available per …」的**——详情页 HTML 里那个日期就是
+这个字段，而它本就在白名单查询里。
+
+一度打算另开一条路：抓详情页解析卡片文案。实测过两种取法（导航 0.90 MB / 3.5s，
+同源 fetch 原始 HTML 0.03 MB / 0.5s），都不必要。
+
+`2050-01-01` 是「没有下一个合同起始日」的哨兵，须过滤，否则用户会看到「2050 年可
+入住」。按**年份** ≥ 2050 判断，而非精确匹配那一天——哨兵换个写法时不至于原样透出。
+
+2026-08-18 实测分布（Eindhoven，46 条）：
+
+```
+抽签      全部有真日期
+Reserved  约半数是哨兵——它们确实没有确定的可入住日
+整体      15% 有日期
+```
+
+占比低是正确的：绝大多数是 Reserved。**用户真正关心的可订 / 抽签房源全都有日期。**
 
 ### 5.3 分层抓取：白名单之后唯一的省流量手段
 
