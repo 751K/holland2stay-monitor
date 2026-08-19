@@ -13,10 +13,11 @@ booker.py — 自动预订模块（CloakBrowser 版）
        ——2026-08-19 起 H2S 登录已从 GraphQL mutation 迁到 NextAuth，见
        docs/H2S_BOOKING_OPS.md §6
 3. _do_book()（内部子流程，失败时可重试）：
-   3a. create_empty_cart()
-           createEmptyCart mutation → 全新空购物车 cart_id
-   3b. add_to_cart()
-           addNewBooking mutation → 将押金项加入购物车并创建预订
+   3a+3b. create_booking()
+           POST /api/booking（加密信封 + Bearer）→ {cartId, booking}
+           一步完成「建车 + 占房」。**替代了旧的 createEmptyCart + addNewBooking**
+           ——后者的 addNewBooking 已被 H2S 摘出公开 API（2026-08-19 实测 403），
+           站点自己也改走这条。见 docs/H2S_BOOKING_OPS.md §6.10
    3c. set_payment_method()
            setPaymentMethodOnCart mutation → code="idealcheckout_ideal"
    3d. _fetch_checkout_agreements()
@@ -36,10 +37,17 @@ docs/H2S_BOOKING_OPS.md 与 scrapers.base.OperationNotAllowedError。
 （``/api/__enc__``）；登录用的 NextAuth 端点是明文 REST，走 ``fetch_plain``
 （不套加密信封）。Bearer accessToken 通过 extra_headers 传递。
 
-⚠️ 未经真实下单验证的部分：登录（NextAuth）与 ``GetProductDetail`` 已实测走通，
-但 createEmptyCart → … → placeOrder 只静态照抄了站点原文、核对了端点与鉴权，
-没有真的下过单（下单产生真实订单）。首次真实预订前应先用真实账号跑一次
-「加购但不 placeOrder」收尾验证。见 docs/H2S_BOOKING_OPS.md §6.5。
+验证状态（2026-08-19 逐条实测，用无效参数探白名单，零副作用）
+------------------------------------------------------------
+    login（NextAuth）        ✅ 真实账号走通
+    setPaymentMethodOnCart   ✅ 200（回 CART_NOT_FOUND = 过白名单）
+    GetCheckoutAgreements    ✅ 200
+    placeOrder               ✅ 200（同上）
+    idealCheckOut            ✅ 200（同上）
+    createEmptyCart          ✅ 200（但流程已不用它）
+    addNewBooking            ❌ 403「not available through the public API」——已弃用
+    POST /api/booking        ✅ 端点存在（未登录回 401，非 404）；**带真实登录态的
+                                 完整占房未验证**，会在首次真实预订时见分晓
 """
 from __future__ import annotations
 
@@ -118,6 +126,19 @@ _AUTH_CSRF_PATH = "/api/auth/csrf"
 _AUTH_CALLBACK_PATH = "/api/auth/callback/credentials"
 _AUTH_SESSION_PATH = "/api/auth/session"
 _AUTH_CALLBACK_URL = "https://www.holland2stay.com/"
+
+# ── 占房入口（2026-08-19 实测确定）──────────────────────────────────
+# GraphQL ``addNewBooking`` **已被摘出公开 API**：同一 clearance 窗口内实测
+#     createEmptyCart          → 200（真建了车）
+#     addNewBooking            → 403 {"error":"This operation is not available
+#                                      through the public API"}
+#     setPaymentMethodOnCart   → 200（回 CART_NOT_FOUND = 过了白名单）
+#     placeOrder / idealCheckOut → 200（同上）
+# 即 6 步里只有占房这一步被摘掉。站点自己也不再直接发它，改走服务端代理
+# ``POST /api/booking``（加密信封 + Bearer），一次完成建车 + 占房，返回
+# {cartId, booking}。实测该端点存在（未登录时回 401 Unauthorized，而非 404 /
+# operation_not_allowed）。详见 docs/H2S_BOOKING_OPS.md §6.10。
+_BOOKING_API_PATH = "/api/booking"
 
 
 class AuthError(Exception):
@@ -442,6 +463,74 @@ def cancel_pending_orders(fetcher: BrowserFetcher, token: str) -> int:
 # 加入购物车（预占位）
 # ------------------------------------------------------------------ #
 
+def create_booking(
+    fetcher: BrowserFetcher,
+    token: str,
+    sku: str,
+    contract_start_date: Optional[str],
+) -> str:
+    """走站点自己的占房入口 ``POST /api/booking``，返回 cart_id。
+
+    ★ 有副作用：这一步就占住房了。
+
+    **它替代了旧的 ``create_empty_cart`` + ``add_to_cart`` 两步**——后者用的
+    GraphQL ``addNewBooking`` 已被 H2S 摘出公开 API（实测 403，见
+    ``_BOOKING_API_PATH`` 上方注释）。站点自己现在也走这条。
+
+    请求体照抄站点（``zg`` 加密后 POST）：
+        {sku, contract_startDate, challengeToken, challengeProvider}
+
+    ``challengeToken`` 是站点自有 clearance 的 Turnstile token
+    （``action:"clearance"`` / ``appearance:"interaction-only"``）。我们的
+    BrowserFetcher 已经在浏览器里完成了那套 clearance，cookie 就位；这里传空串，
+    由服务端按 cookie 判定。若线上回「需要验证」，说明服务端要显式 token，
+    届时需从页面 ``window.turnstile`` 取。
+
+    Raises
+    ------
+    AuthError    401（token 失效 / 未登录）
+    RuntimeError 其余非 2xx，或响应里没有 cartId
+    """
+    payload = {
+        "sku": sku,
+        "contract_startDate": _to_h2s_date(contract_start_date) if contract_start_date else None,
+        "challengeToken": "",
+        "challengeProvider": "turnstile",
+    }
+    resp = fetcher.fetch_encrypted_json(
+        _BOOKING_API_PATH,
+        body=_json.dumps(payload),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+    )
+    status = resp.get("status", 0)
+    text = resp.get("text", "") or ""
+
+    if status == 401:
+        raise AuthError(f"占房被拒 401（登录态失效）: {text[:200]}")
+    if not (200 <= status < 300):
+        raise RuntimeError(f"占房失败 HTTP {status}: {text[:300]}")
+
+    try:
+        data = _json.loads(text)
+    except _json.JSONDecodeError as e:
+        raise RuntimeError(f"占房响应非 JSON: {e}; 原文 {text[:200]}") from e
+
+    cart_id = data.get("cartId")
+    if not cart_id:
+        raise RuntimeError(
+            f"占房未返回 cartId（可能未真正占到）: {str(data)[:300]}"
+        )
+    if not data.get("booking"):
+        # 站点前端也检查这个字段——没有它说明车建了但没占上房
+        raise RuntimeError(f"占房未生效（无 booking 字段）: {str(data)[:300]}")
+
+    logger.info("占房成功，cart_id=%s", cart_id)
+    return cart_id
+
+
 def add_to_cart(
     fetcher: BrowserFetcher,
     token: str,
@@ -756,8 +845,10 @@ def try_book(
         def _do_book() -> tuple[str, float, float]:
             ta = time.monotonic()
 
-            new_cart_id = create_empty_cart(fetcher, token)
-            add_to_cart(fetcher, token, new_cart_id, sku, start_date)
+            # 建车 + 占房合成一步：走站点自己的 /api/booking。
+            # 旧的 create_empty_cart + add_to_cart 已废——addNewBooking 被摘出
+            # 公开 API（实测 403），见 _BOOKING_API_PATH 注释。
+            new_cart_id = create_booking(fetcher, token, sku, start_date)
             set_payment_method(fetcher, token, new_cart_id, code=payment_method)
             _fetch_checkout_agreements(fetcher, token)
             t_add_val = time.monotonic() - ta

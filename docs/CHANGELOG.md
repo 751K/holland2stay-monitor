@@ -1,5 +1,44 @@
 # Changelog
 
+## v1.17.0 (2026-08-19)
+
+**找到了自动预订一直不成的真正原因，并修好。**
+
+### 逐条实测白名单（用无效参数，零副作用）
+
+用故意无效的参数发每条下单 operation，靠错误形状区分「网关拒绝」与「业务拒绝」。
+同一 clearance 窗口内可复现：
+
+```
+createEmptyCart          200  真返回 cart id            ✅
+GetCheckoutAgreements    200                            ✅
+addNewBooking            403  not available through
+                              the public API            ❌  ← 就是它
+setPaymentMethodOnCart   200  CART_NOT_FOUND            ✅
+placeOrder               200  CART_NOT_FOUND            ✅
+idealCheckOut            200                            ✅
+```
+
+**6 步里 5 步放行，只有占房那一步被 H2S 摘出了公开 API。** 不是 Turnstile
+（那个结论上一条 commit 已撤回），不是照抄得不够像。
+
+### 改动
+
+占房改走站点自己的服务端代理 `POST /api/booking`（加密信封 + Bearer），一次完成
+建车 + 占房，返回 `{cartId, booking}`：
+
+- 新增 `booker.create_booking()`，`_do_book` 里取代 `create_empty_cart + add_to_cart`
+- 新增 `BrowserFetcher.fetch_encrypted_json()`（往任意同源路径 POST 加密信封）
+- 端点实测存在（未登录回 401，非 404 / operation_not_allowed）
+
+### 仍未验证
+
+带真实登录态的完整占房没跑过（跑通=真占一套房）。`challengeToken` 传空串、赌服务端
+按 clearance cookie 判定；若线上要显式 token，需从页面 `window.turnstile` 取。
+会在首次真实预订时见分晓，失败有明确 phase/日志。详见 docs/H2S_BOOKING_OPS.md §6.10。
+
+新增 `TestCreateBooking`(7)，5 个变异全部捕获。全套 2517 通过。
+
 ## v1.16.9 (2026-08-19)
 
 修复自动预订：登录整套换成 NextAuth，下单 operation 全部照抄站点原文。

@@ -116,3 +116,94 @@ class TestCancelUsesRestEnvelope:
         methods = dict((p.split("?")[0], m) for p, m in f.rest_calls)
         assert methods["/api/rest/V1/newdashboard/contract/me"] == "GET"
         assert methods["/api/rest/V1/customer/bookingcancel/r-x-1"] == "POST"
+
+
+class TestCreateBooking:
+    """占房走 ``POST /api/booking``，不是 GraphQL addNewBooking。
+
+    2026-08-19 实测：同一 clearance 窗口内 createEmptyCart 200、
+    addNewBooking **403 not available through the public API**、其余 5 步 200。
+    即 H2S 把占房摘出了公开 API，只能走站点自己的服务端代理。
+    """
+
+    class _F:
+        def __init__(self, status=200, text='{"cartId":"CART-1","booking":{"id":9}}'):
+            self.status, self.text = status, text
+            self.calls = []
+
+        def fetch_encrypted_json(self, path, *, body, headers=None, timeout_ms=30_000):
+            self.calls.append({"path": path, "body": body, "headers": headers or {}})
+            return {"status": self.status, "ok": True, "text": self.text, "headers": {}}
+
+        def fetch_gql(self, *a, **k):
+            raise AssertionError("占房不该再走 GraphQL —— addNewBooking 已被 403")
+
+    def test_posts_to_api_booking_and_returns_cart_id(self):
+        import booker
+        f = self._F()
+        assert booker.create_booking(f, "tok", "r-x-1", "2026-09-03") == "CART-1"
+        assert f.calls[0]["path"] == "/api/booking"
+
+    def test_payload_matches_the_site(self):
+        import json
+        import booker
+        f = self._F()
+        booker.create_booking(f, "tok", "r-x-1", "2026-09-03")
+        body = json.loads(f.calls[0]["body"])
+        assert body["sku"] == "r-x-1"
+        # 日期必须是 DD-MM-YYYY（站点原文 getDate-getMonth+1-getFullYear）
+        assert body["contract_startDate"] == "03-09-2026", (
+            "日期格式不是 DD-MM-YYYY —— 站点就是这么拼的"
+        )
+        assert "challengeToken" in body and "challengeProvider" in body
+
+    def test_sends_bearer(self):
+        import booker
+        f = self._F()
+        booker.create_booking(f, "the-jwt", "r-x-1", None)
+        assert f.calls[0]["headers"].get("Authorization") == "Bearer the-jwt"
+
+    def test_401_is_auth_error(self):
+        import pytest as _p
+        import booker
+        f = self._F(status=401, text='{"error":"Unauthorized"}')
+        with _p.raises(booker.AuthError):
+            booker.create_booking(f, "stale", "r-x-1", None)
+
+    def test_missing_cart_id_raises(self):
+        """没 cartId = 没占到房。绝不能当成功往下走 placeOrder。"""
+        import pytest as _p
+        import booker
+        f = self._F(text='{"ok":true}')
+        with _p.raises(RuntimeError, match="cartId"):
+            booker.create_booking(f, "tok", "r-x-1", None)
+
+    def test_missing_booking_field_raises(self):
+        """站点前端也检查 booking 字段——车建了但没占上房，同样是失败。"""
+        import pytest as _p
+        import booker
+        f = self._F(text='{"cartId":"CART-1"}')
+        with _p.raises(RuntimeError):
+            booker.create_booking(f, "tok", "r-x-1", None)
+
+    def test_do_book_uses_create_booking_not_add_to_cart(self):
+        """回归：_do_book 里不能再出现 create_empty_cart / add_to_cart 的调用。"""
+        import ast
+        import pathlib
+        src = pathlib.Path("booker.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_do_book":
+                called = {
+                    n.func.id for n in ast.walk(node)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                }
+                assert "create_booking" in called, "_do_book 没走新的占房入口"
+                assert "add_to_cart" not in called, (
+                    "_do_book 还在调 add_to_cart —— addNewBooking 已被 403"
+                )
+                assert "create_empty_cart" not in called, (
+                    "/api/booking 已经代建车，不该再单独建一次"
+                )
+                return
+        raise AssertionError("找不到 _do_book，这条守卫已失效")

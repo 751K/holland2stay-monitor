@@ -258,9 +258,12 @@ class TestBookerPhase:
             mock.__enter__.return_value = mock
             mock.__exit__.return_value = False
             mock.fetch_plain.side_effect = _plain
-            # 登录通过后，下单第一步（createEmptyCart）的 operation 被上游拒
+            # 登录通过后，下单侧的 operation 被上游拒
             mock.fetch_gql.side_effect = OperationNotAllowedError(
-                "operation CreateEmptyCart 被拒"
+                "operation SetPaymentMethodOnCart 被拒"
+            )
+            mock.fetch_encrypted_json.side_effect = OperationNotAllowedError(
+                "operation 被拒"
             )
             result = try_book(listing, email="x@x.com", password="pw", dry_run=False)
 

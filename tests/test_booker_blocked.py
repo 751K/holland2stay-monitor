@@ -62,6 +62,8 @@ class TestTryBookBlocked:
     def test_try_book_with_prewarmed_still_detects_block(self):
         listing = _make_listing(1)
         mock_fetcher = MagicMock()
+        # 占房现在走 /api/booking（fetch_encrypted_json），不再是 fetch_gql
+        mock_fetcher.fetch_encrypted_json.side_effect = BlockedError("CF blocked")
         mock_fetcher.fetch_gql.side_effect = BlockedError("CF blocked")
         mock_fetcher.close = MagicMock()
         prewarmed = PrewarmedSession(

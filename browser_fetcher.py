@@ -1407,6 +1407,33 @@ class BrowserFetcher:
             self._drop_enc_pubkey()
         return result
 
+    def fetch_encrypted_json(
+        self,
+        path: str,
+        *,
+        body: str,
+        headers: Mapping[str, str] | None = None,
+        timeout_ms: int = 30_000,
+    ) -> dict:
+        """POST 一个加密信封到任意同源路径，返回解密后的 ``{status, ok, text, headers}``。
+
+        给 GraphQL 以外、但同样走信封的站点端点用——目前是 ``/api/booking``
+        （站点自己的占房入口，见 docs/H2S_BOOKING_OPS.md §6.10）。编码与站点的
+        ``zg`` 一致：``JSON → 信封 → body``，头带 ``x-enc: 1``。
+
+        不做 403 重建：401/403 在这些业务端点上是语义响应（未登录、参数无效），
+        换 IP 解决不了。状态码原样交回调用方。
+        """
+        self.ensure_initialized()
+        result = self._encrypted_fetch(
+            path, body=body, headers=headers or {}, timeout_ms=timeout_ms,
+        )
+        if "error" in result:
+            raise _exc("ScrapeNetworkError")(
+                f"{self._profile.name} 加密请求失败 {path}: {result['error']}"
+            )
+        return result
+
     def fetch_rest(
         self,
         path: str,

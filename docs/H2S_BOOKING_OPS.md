@@ -504,3 +504,59 @@ GET 那条的 `ct` 必须是 `text/plain`（body 那条是 `application/json`）
 
 由 `tests/test_browser_fetcher.py::TestRestEnvelope` 与
 `tests/test_booker_operations.py::TestCancelUsesRestEnvelope` 守卫。
+
+---
+
+## 6.10 逐条实测：白名单到底放行哪几步（2026-08-19，决定性）
+
+前面几节反复在「照抄了原文，应该没问题吧」上打转。这次做了**直接的实证**：用
+**故意无效的参数**发每条 operation，靠错误的**形状**区分两件事——
+
+- 回 `403 {"error":"...not available through the public API"}` → **网关拒绝**，
+  这条 operation 不在公开 API 里；
+- 回 `200` + 业务错误（`CART_NOT_FOUND` 等） → **过了白名单**，只是参数无效。
+
+参数是假的，不占房、不产生订单。同一 clearance 窗口内连发，结果可复现：
+
+| operation | 结果 | 判定 |
+|---|---|---|
+| `createEmptyCart` | 200，真返回 cart id | ✅ 放行 |
+| `GetCheckoutAgreements` | 200，返回条款正文 | ✅ 放行 |
+| **`addNewBooking`** | **403 not available through the public API** | ❌ **被摘出公开 API** |
+| `setPaymentMethodOnCart` | 200 + `Could not find a cart with ID "INVALID-CART"` | ✅ 放行 |
+| `placeOrder` | 200 + `CART_NOT_FOUND` | ✅ 放行 |
+| `idealCheckOut` | 200 + internal error | ✅ 放行 |
+
+**6 步里 5 步放行，只有占房那一步被摘掉。** 这就是自动预订一直不成的真正原因——
+不是 Turnstile（§6.8 已撤回），不是照抄得不够像，是 H2S 明确把 `addNewBooking`
+从公开 API 移除、改成服务端专用。
+
+### 替代路径：`POST /api/booking`
+
+站点自己也不再直接发 `addNewBooking`，改走服务端代理（§6.8 里读到的那段）：
+
+```js
+const a = await zg({sku, contract_startDate, challengeToken, challengeProvider});
+const r = await fetch("/api/booking", {method:"POST", headers:{...a.headers}, body:a.body});
+const t = await r.json();     // → { cartId, booking }
+```
+
+即：**加密信封 + Bearer，一次完成建车 + 占房**，返回 `cartId` 供后续
+setPaymentMethod / placeOrder / idealCheckOut 使用（那三步都已验证放行）。
+
+实测该端点存在：未登录时回 `401 {"error":"Unauthorized"}`——不是 404、也不是
+operation_not_allowed，说明路由在、只是要登录态。
+
+### 已实现
+
+`booker.create_booking()` 走这条，`_do_book` 里 `create_empty_cart + add_to_cart`
+两步已被它取代（旧函数保留但不再进主流程）。守卫见
+`tests/test_booker_operations.py::TestCreateBooking`（含一条 AST 测试，钉住
+`_do_book` 不许再调 `add_to_cart` / `create_empty_cart`）。
+
+### 仍未验证的最后一环
+
+**带真实登录态的 `/api/booking` 完整占房没跑过**——跑通就等于真占一套房。
+`challengeToken` 这里传空串，赌服务端按 clearance cookie 判定（我们的浏览器已经
+过了那套 clearance）。若线上回「需要验证」，则需从页面 `window.turnstile` 取真实
+token 再传。这一环会在首次真实预订时见分晓，且失败会以明确的 phase / 日志报出来。
