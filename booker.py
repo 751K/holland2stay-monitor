@@ -9,7 +9,9 @@ booker.py — 自动预订模块（CloakBrowser 版）
 1. _fetch_sku_and_contract() [fallback，pre-extracted 时跳过]
        通过 url_key 查询 Magento SKU + type_of_contract ID + 下一个入住日期
 2. login()
-       generateCustomerToken mutation → Bearer token
+       NextAuth 三步握手（csrf → callback/credentials → session）→ accessToken(JWT)
+       ——2026-08-19 起 H2S 登录已从 GraphQL mutation 迁到 NextAuth，见
+       docs/H2S_BOOKING_OPS.md §6
 3. _do_book()（内部子流程，失败时可重试）：
    3a. create_empty_cart()
            createEmptyCart mutation → 全新空购物车 cart_id
@@ -24,11 +26,20 @@ booker.py — 自动预订模块（CloakBrowser 版）
    3e. _ideal_checkout()
            idealCheckOut mutation → redirect（直链付款 URL）
 
+下单 operation 全部照抄站点原文（``h2s_booking_gql``）。白名单只认 operationName +
+完整字段集，自写的查询一律 403 ``operation_not_allowed``——历史与判据见
+docs/H2S_BOOKING_OPS.md 与 scrapers.base.OperationNotAllowedError。
+
 传输层
 ------
-已从 curl_cffi → CloakBrowser（BrowserFetcher）。所有 GraphQL 请求通过
-浏览器内 fetch() 发送，自动携带 CF clearance token / cookies / TLS。
-Bearer token 通过 extra_headers 传递。
+已从 curl_cffi → CloakBrowser（BrowserFetcher）。下单 GraphQL 走加密信道
+（``/api/__enc__``）；登录用的 NextAuth 端点是明文 REST，走 ``fetch_plain``
+（不套加密信封）。Bearer accessToken 通过 extra_headers 传递。
+
+⚠️ 未经真实下单验证的部分：登录（NextAuth）与 ``GetProductDetail`` 已实测走通，
+但 createEmptyCart → … → placeOrder 只静态照抄了站点原文、核对了端点与鉴权，
+没有真的下过单（下单产生真实订单）。首次真实预订前应先用真实账号跑一次
+「加购但不 placeOrder」收尾验证。见 docs/H2S_BOOKING_OPS.md §6.5。
 """
 from __future__ import annotations
 
@@ -38,7 +49,26 @@ from dataclasses import dataclass
 from datetime import datetime as _dt
 from typing import Literal, Optional
 
+import json as _json
+from urllib.parse import urlencode as _urlencode
+
 from browser_fetcher import BrowserFetcher
+from h2s_booking_gql import (
+    ADDNEWBOOKING as _GQL_ADD_BOOKING,
+    CREATEEMPTYCART as _GQL_CREATE_CART,
+    GETCHECKOUTAGREEMENTS as _GQL_AGREEMENTS,
+    GETPRODUCTDETAIL as _GQL_PRODUCT_DETAIL,
+    IDEALCHECKOUT as _GQL_IDEAL,
+    PLACEORDER as _GQL_PLACE_ORDER,
+    SETPAYMENTMETHODONCART as _GQL_SET_PAYMENT,
+    OP_ADDNEWBOOKING as _OP_ADD_BOOKING,
+    OP_CREATEEMPTYCART as _OP_CREATE_CART,
+    OP_GETCHECKOUTAGREEMENTS as _OP_AGREEMENTS,
+    OP_GETPRODUCTDETAIL as _OP_PRODUCT_DETAIL,
+    OP_IDEALCHECKOUT as _OP_IDEAL,
+    OP_PLACEORDER as _OP_PLACE_ORDER,
+    OP_SETPAYMENTMETHODONCART as _OP_SET_PAYMENT,
+)
 from models import STATUS_AVAILABLE, Listing
 from scrapers.base import BlockedError, OperationNotAllowedError
 
@@ -52,7 +82,7 @@ class PrewarmedSession:
     Attributes
     ----------
     fetcher    : 已过 CF 挑战的 BrowserFetcher 实例
-    token      : generateCustomerToken 返回的 Bearer token
+    token      : NextAuth session 的 accessToken(JWT)，用作下单的 Bearer
     created_at : time.monotonic() 创建时刻
     email      : 对应的 H2S 账号邮箱
     """
@@ -75,6 +105,31 @@ _PAYMENT_METHOD = "idealcheckout_ideal"
 
 # Magento token 有效期约 1 小时，设 55 分钟上限保留缓冲
 _TOKEN_MAX_AGE = 3300
+
+# ── 登录（NextAuth）────────────────────────────────────────────────
+# 2026-08-19 起 H2S 登录不再是 GraphQL ``generateCustomerToken``，换成了
+# 标准 NextAuth credentials 流（docs/H2S_BOOKING_OPS.md §6）。三步握手，全部
+# 在 www 同源、明文（不走加密信封）：
+#   GET  /api/auth/csrf                 → { csrfToken }
+#   POST /api/auth/callback/credentials → 表单 { email, password, csrfToken, … }
+#   GET  /api/auth/session              → { accessToken(JWT), requires2fa, … }
+# 拿到的 accessToken 就是后续所有下单 GraphQL 的 Bearer。
+_AUTH_CSRF_PATH = "/api/auth/csrf"
+_AUTH_CALLBACK_PATH = "/api/auth/callback/credentials"
+_AUTH_SESSION_PATH = "/api/auth/session"
+_AUTH_CALLBACK_URL = "https://www.holland2stay.com/"
+
+
+class AuthError(Exception):
+    """登录被平台拒绝（凭据错误）。换 IP / 重试都无意义——要用户改账号密码。"""
+
+
+class TwoFactorRequiredError(Exception):
+    """登录成功但账号开了两步验证，需要人工输入验证码，无法全自动下单。
+
+    与 AuthError 分开：凭据是对的，只是这个账号过不了全自动。给用户的提示也不同
+    （去关掉 2FA 或改用半自动），见 docs/H2S_BOOKING_OPS.md §6.5。
+    """
 
 
 def _mask_email(email: str) -> str:
@@ -143,6 +198,8 @@ def _gql(
     query: str,
     token: Optional[str] = None,
     variables: Optional[dict] = None,
+    *,
+    operation_name: str = "",
 ) -> dict:
     """
     执行 GraphQL 查询/变更并返回 data 字段。
@@ -173,7 +230,12 @@ def _gql(
     if token:
         extra_headers["Authorization"] = f"Bearer {token}"
 
-    data = fetcher.fetch_gql(query, variables=variables, extra_headers=extra_headers)
+    # operation_name 必须带上：H2S 白名单缺 operationName 同样 403（见
+    # h2s_booking_gql 模块文档）。旧代码一处都没传——这是历史 403 的成因之一。
+    data = fetcher.fetch_gql(
+        query, variables=variables, operation_name=operation_name,
+        extra_headers=extra_headers,
+    )
 
     if "errors" in data:
         msgs = "; ".join(e.get("message", "") for e in data["errors"])
@@ -186,20 +248,87 @@ def _gql(
 # ------------------------------------------------------------------ #
 
 def login(fetcher: BrowserFetcher, email: str, password: str) -> str:
-    """调用 generateCustomerToken mutation 登录，返回 Bearer token。"""
-    query = '''
-    mutation GenerateCustomerToken($email: String!, $password: String!) {
-      generateCustomerToken(email: $email, password: $password) {
-        token
-      }
-    }
-    '''
-    data = _gql(fetcher, query, variables={"email": email, "password": password})
-    token = data.get("generateCustomerToken", {}).get("token")
-    if not token:
-        raise RuntimeError("登录失败：未获取到 token")
-    logger.debug("登录成功")
-    return token
+    """走 NextAuth credentials 流登录，返回后续下单要用的 Bearer accessToken。
+
+    三步握手，全部同源、明文（``fetch_plain``，不走加密信封）：
+        1. GET  /api/auth/csrf                 → csrfToken
+        2. POST /api/auth/callback/credentials → 提交凭据（表单）
+        3. GET  /api/auth/session              → accessToken(JWT)
+
+    Raises
+    ------
+    AuthError               凭据被拒（callback 401 / session 无 token）
+    TwoFactorRequiredError  账号开了 2FA，无法全自动
+    ScrapeNetworkError      网络/传输失败
+    RuntimeError            响应结构异常
+
+    历史：2026-08-19 前这里是 GraphQL ``generateCustomerToken`` mutation；H2S 把
+    登录整体迁到 NextAuth 后，那条 mutation 已不存在（打过去 operation_not_allowed）。
+    见 docs/H2S_BOOKING_OPS.md §6。
+    """
+    # 1. CSRF token
+    r = fetcher.fetch_plain(_AUTH_CSRF_PATH, method="GET")
+    try:
+        csrf = _json.loads(r["text"]).get("csrfToken")
+    except _json.JSONDecodeError as e:
+        raise RuntimeError(f"登录第 1 步 CSRF 响应非 JSON: {e}") from e
+    if not csrf:
+        raise RuntimeError("登录第 1 步未取得 csrfToken")
+
+    # 2. 提交凭据。NextAuth callback 是 x-www-form-urlencoded；redirect=false +
+    #    json=true 让它回 JSON 而不是 302，便于判成败。
+    form = _urlencode({
+        "email": email,
+        "password": password,
+        "csrfToken": csrf,
+        "callbackUrl": _AUTH_CALLBACK_URL,
+        "redirect": "false",
+        "json": "true",
+    })
+    r2 = fetcher.fetch_plain(
+        _AUTH_CALLBACK_PATH,
+        method="POST",
+        body=form,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    # NextAuth 凭据错误：callback 回 401，或回 200 但 body 带 error。
+    if r2["status"] == 401:
+        raise AuthError("登录被拒：邮箱或密码错误（callback 401）")
+    if r2["status"] not in (200, 302):
+        raise RuntimeError(
+            f"登录第 2 步异常 HTTP {r2['status']}: {r2.get('text','')[:200]}"
+        )
+    try:
+        cb = _json.loads(r2["text"]) if r2.get("text") else {}
+    except _json.JSONDecodeError:
+        cb = {}
+    if isinstance(cb, dict) and cb.get("error"):
+        raise AuthError(f"登录被拒: {cb['error']}")
+
+    # 3. 取 session 里的 accessToken
+    r3 = fetcher.fetch_plain(_AUTH_SESSION_PATH, method="GET")
+    try:
+        sess = _json.loads(r3["text"])
+    except _json.JSONDecodeError as e:
+        raise RuntimeError(f"登录第 3 步 session 响应非 JSON: {e}") from e
+
+    # 空 session = 凭据没通过（NextAuth 对未认证返回 {} 或无 user）
+    if not sess or not sess.get("accessToken"):
+        if sess.get("requires2fa") or sess.get("twoFaPending"):
+            raise TwoFactorRequiredError(
+                "账号开启了两步验证，无法全自动下单（需要人工输入验证码）"
+            )
+        raise AuthError("登录未生效：session 无 accessToken（凭据可能有误）")
+
+    if sess.get("requires2fa") or sess.get("twoFaPending"):
+        # 极少数情况下 accessToken 已发但仍标记待验证——按 2FA 处理更安全，
+        # 否则拿一个未完成校验的 token 去下单会在后续步骤莫名失败。
+        raise TwoFactorRequiredError(
+            "登录返回 token 但仍待两步验证，无法全自动下单"
+        )
+
+    logger.debug("登录成功（NextAuth，accessToken 已取得）")
+    return sess["accessToken"]
 
 
 # ------------------------------------------------------------------ #
@@ -208,8 +337,8 @@ def login(fetcher: BrowserFetcher, email: str, password: str) -> str:
 
 def create_empty_cart(fetcher: BrowserFetcher, token: str) -> str:
     """调用 createEmptyCart mutation 创建全新空购物车，返回 cart_id。"""
-    query = "mutation CreateEmptyCart { createEmptyCart }"
-    data = _gql(fetcher, query, token=token)
+    data = _gql(fetcher, _GQL_CREATE_CART, token=token,
+                operation_name=_OP_CREATE_CART)
     cart_id = data.get("createEmptyCart")
     if not cart_id:
         raise RuntimeError("createEmptyCart 未返回购物车 ID")
@@ -227,19 +356,9 @@ def set_payment_method(
     cart_id: str,
     code: str = _PAYMENT_METHOD,
 ) -> None:
-    query = '''
-    mutation SetPaymentMethodOnCart($cartId: String!, $paymentMethod: PaymentMethodInput!) {
-      setPaymentMethodOnCart(
-        input: {cart_id: $cartId, payment_method: $paymentMethod}
-      ) {
-        cart {
-          selected_payment_method { code title }
-        }
-      }
-    }
-    '''
-    data = _gql(fetcher, query, token=token,
-                variables={"cartId": cart_id, "paymentMethod": {"code": code}})
+    data = _gql(fetcher, _GQL_SET_PAYMENT, token=token,
+                variables={"cartId": cart_id, "paymentMethod": {"code": code}},
+                operation_name=_OP_SET_PAYMENT)
     selected = (
         (data.get("setPaymentMethodOnCart") or {})
         .get("cart", {})
@@ -253,67 +372,67 @@ def set_payment_method(
 # 取消 pending 订单
 # ------------------------------------------------------------------ #
 
+# 取消预留：REST，不是 GraphQL。机制 2026-08-19 从租户门户 JS 逐字读出
+# （docs/H2S_BOOKING_OPS.md §6.6），站点原文：
+#     列出预留  GET  /api/rest/V1/newdashboard/contract/me?fields=items[id,sku,status,...]
+#     取消一笔  POST /api/rest/V1/customer/bookingcancel/{sku}   body {}   Bearer
+# 按 **SKU** 取消，不是订单号。旧代码那套 GraphQL customer{orders}+cancelOrder
+# 是自写的，站点根本不这么做，必然失败——已删除。
+_REST_LIST_RESERVATIONS = (
+    "/api/rest/V1/newdashboard/contract/me"
+    "?fields=items[id,sku,product_name,building_name,status,start_date]"
+)
+_REST_BOOKING_CANCEL = "/api/rest/V1/customer/bookingcancel/{sku}"
+_CANCEL_STATUSES = {"pending", "pending_payment", "reserved", "processing", "reservation"}
+
+
 def cancel_pending_orders(fetcher: BrowserFetcher, token: str) -> int:
-    query = '''
-    {
-      customer {
-        orders(pageSize: 10, currentPage: 1) {
-          items {
-            id
-            number
-            status
-          }
-        }
-      }
-    }
-    '''
+    """取消账号下所有待处理的预留，返回取消成功的笔数。
+
+    ⚠️ 机制已照抄、**未经真实取消验证**：一是这条路只在 reserved_conflict +
+    cancel_enabled 时触发（边缘场景），二是租户门户把 REST 路径也塞进加密信封，
+    而 www 上这些端点走明文还是走信封静态读不出来——这里先按明文（``fetch_plain``）
+    实现，若线上回 400/403 再改走信封。整体 try/except 兜底：取消失败只是救不回
+    旧预留，不连累主流程。用真实账号验证时，比照 §6.6 核对传输层。
+    """
+    import json as _j
+
+    hdr = {"Authorization": f"Bearer {token}"}
     try:
-        data = _gql(fetcher, query, token=token)
+        r = fetcher.fetch_plain(_REST_LIST_RESERVATIONS, method="GET", headers=hdr)
+        items = (_j.loads(r["text"]) or {}).get("items") or []
     except Exception as e:
-        logger.warning("查询订单列表失败（忽略）: %s", e)
+        logger.warning("查询预留列表失败（忽略，机制见 §6.6）: %s", e)
         return 0
 
-    items = (data.get("customer") or {}).get("orders", {}).get("items") or []
-    CANCEL_STATUSES = {"pending", "pending_payment", "reserved", "processing"}
     to_cancel = [
-        (o["id"], o["number"])
-        for o in items
-        if o.get("status", "").lower() in CANCEL_STATUSES
+        (it.get("sku"), it.get("product_name") or it.get("sku"))
+        for it in items
+        if it.get("sku") and str(it.get("status", "")).lower() in _CANCEL_STATUSES
     ]
-
     if not to_cancel:
-        logger.debug("无 pending 订单，无需取消")
+        logger.debug("无待处理预留，无需取消")
         return 0
 
-    logger.info("发现 %d 笔 pending 订单，准备取消: %s", len(to_cancel), [n for _, n in to_cancel])
+    logger.info("发现 %d 笔待处理预留，准备取消: %s",
+                len(to_cancel), [n for _, n in to_cancel])
 
     cancelled = 0
-    cancel_disabled = False
-    for order_uid, order_number in to_cancel:
+    for sku, name in to_cancel:
         try:
-            q = '''
-            mutation CancelOrder($orderId: String!) {
-              cancelOrder(input: { order_id: $orderId }) {
-                order { id status }
-              }
-            }
-            '''
-            _gql(fetcher, q, token=token, variables={"orderId": order_uid})
-            logger.info("已取消订单 #%s", order_number)
-            cancelled += 1
-        except Exception as e:
-            err_str = str(e)
-            if "not enabled" in err_str.lower():
-                cancel_disabled = True
-                logger.warning("cancelOrder 未启用，无法取消订单 #%s: %s", order_number, err_str)
+            resp = fetcher.fetch_plain(
+                _REST_BOOKING_CANCEL.format(sku=sku),
+                method="POST", body="{}",
+                headers={**hdr, "Content-Type": "application/json"},
+            )
+            if 200 <= resp.get("status", 0) < 300:
+                logger.info("已取消预留 %s (%s)", name, sku)
+                cancelled += 1
             else:
-                logger.warning("取消订单 #%s 失败: %s", order_number, e)
-
-    if cancel_disabled and cancelled == 0:
-        raise RuntimeError(
-            "当前账号有旧预留单且平台未启用订单取消功能，无法自动取消。\n"
-            "请登录 Holland2Stay 手动取消旧订单后再试。"
-        )
+                logger.warning("取消预留 %s 返回 HTTP %s: %s",
+                               sku, resp.get("status"), resp.get("text", "")[:200])
+        except Exception as e:
+            logger.warning("取消预留 %s 失败: %s", sku, e)
 
     return cancelled
 
@@ -330,59 +449,46 @@ def add_to_cart(
     contract_start_date: Optional[str],
 ) -> bool:
     """
-    调用 H2S 专用 addNewBooking mutation，将押金项加入购物车并创建预订。
+    发站点原文的 ``AddNewBooking`` mutation，把押金项加入购物车并创建预订。
 
-    与浏览器行为对齐：仅传 cart_id + sku + contract_startDate。
-    NON_NULL 传播绕过：不请求 cart{} 字段，只查 user_errors。
+    ★ 有副作用：这一步就占住房了。
+
+    用的是照抄品（``h2s_booking_gql.ADDNEWBOOKING``），选择集是站点的
+    ``cart { items {...} }``——不是我们以前自写的 ``user_errors``。白名单按
+    operationName + 归一化字段集放行，选择集写错就是 403。声明了但没传的变量
+    （contract_id / option_selected）按 GraphQL 规则默认 null，合法。
     """
-    query = '''
-    mutation AddNewBooking(
-      $cart_id: String!,
-      $sku: String!,
-      $contract_startDate: String
-    ) {
-      addNewBooking(
-        cart_id: $cart_id
-        sku: $sku
-        contract_startDate: $contract_startDate
-      ) {
-        user_errors { code message }
-      }
-    }
-    '''
-
     variables: dict = {"cart_id": cart_id, "sku": sku}
     if contract_start_date:
         variables["contract_startDate"] = _to_h2s_date(contract_start_date)
 
     raw = fetcher.fetch_gql(
-        query, variables=variables,
+        _GQL_ADD_BOOKING, variables=variables,
+        operation_name=_OP_ADD_BOOKING,
         extra_headers={"Authorization": f"Bearer {token}"},
     )
 
     logger.debug("addNewBooking raw response: %s", raw)
 
+    # GraphQL 层错误：有 errors 且没有可用 data 才算致命（NON_NULL 传播会同时
+    # 带 errors + 部分 data）。
     if "errors" in raw:
         msgs = "; ".join(e.get("message", "") for e in raw["errors"])
-        if not raw.get("data"):
+        cart = ((raw.get("data") or {}).get("addNewBooking") or {}).get("cart")
+        if not cart:
             logger.error(
-                "addNewBooking GraphQL 层致命错误 sku=%s start=%s: %s",
+                "addNewBooking GraphQL 层错误 sku=%s start=%s: %s",
                 sku, contract_start_date, msgs,
             )
-            raise RuntimeError(f"addNewBooking GraphQL 错误: {msgs}")
-        logger.warning("addNewBooking 非致命 GraphQL 错误（NON_NULL 传播，已忽略）: %s", msgs)
+            raise RuntimeError(f"addNewBooking 失败: {msgs}")
+        logger.warning("addNewBooking 带非致命 GraphQL 错误（已入车，忽略）: %s", msgs)
 
-    result = (raw.get("data") or {}).get("addNewBooking") or {}
-    user_errors = result.get("user_errors") or []
-    if user_errors:
-        msgs = "; ".join(
-            f"[{e.get('code','?')}] {e.get('message','')}" for e in user_errors
+    cart = ((raw.get("data") or {}).get("addNewBooking") or {}).get("cart")
+    if not cart or not (cart.get("items") or []):
+        raise RuntimeError(
+            f"addNewBooking 未把房源加入购物车（sku={sku}）；"
+            f"响应: {str(raw)[:300]}"
         )
-        logger.error(
-            "addNewBooking 业务错误 sku=%s start=%s: %s",
-            sku, contract_start_date, msgs,
-        )
-        raise RuntimeError(f"addNewBooking 失败: {msgs}")
 
     logger.info("addNewBooking 成功（押金项已入购物车）")
     return True
@@ -400,19 +506,9 @@ def _fetch_checkout_agreements(fetcher: BrowserFetcher, token: str) -> None:
     某些 Magento 实例要求必须先接受协议才能 placeOrder。
     本函数仅做查询 + 日志记录，fail-open：失败不阻塞下单。
     """
-    query = '''
-    query GetCheckoutAgreements {
-      checkoutAgreements {
-        name
-        content
-        checkbox_text
-        mode
-        __typename
-      }
-    }
-    '''
     try:
-        data = _gql(fetcher, query, token=token)
+        data = _gql(fetcher, _GQL_AGREEMENTS, token=token,
+                    operation_name=_OP_AGREEMENTS)
         ags = data.get("checkoutAgreements") or []
         logger.debug("checkout 协议: %d 条", len(ags))
     except Exception as e:
@@ -425,22 +521,13 @@ def place_order(
     cart_id: str,
     store_id: int = _H2S_STORE_ID,
 ) -> str:
-    """调用 placeOrder mutation 将购物车转为正式订单，返回订单号。"""
-    query = '''
-    mutation PlaceOrder($cartId: String!, $storeId: Int) {
-      placeOrder(input: {cart_id: $cartId, store_id: $storeId}) {
-        orderV2 {
-          order_number
-        }
-        errors {
-          message
-          code
-        }
-      }
-    }
-    '''
-    data = _gql(fetcher, query, token=token,
-                variables={"cartId": cart_id, "storeId": store_id})
+    """调用站点原文的 placeOrder mutation 将购物车转为正式订单，返回订单号。
+
+    ★ 有副作用：这一步产生真实订单。
+    """
+    data = _gql(fetcher, _GQL_PLACE_ORDER, token=token,
+                variables={"cartId": cart_id, "storeId": store_id},
+                operation_name=_OP_PLACE_ORDER)
     result = data.get("placeOrder") or {}
 
     errors = result.get("errors") or []
@@ -467,18 +554,12 @@ def place_order(
 # ------------------------------------------------------------------ #
 
 def _ideal_checkout(fetcher: BrowserFetcher, token: str, order_number: str) -> str:
-    """调用 idealCheckOut mutation 生成 iDEAL 直链付款 URL。"""
-    query = '''
-    mutation IdealCheckOut($order_id: String!, $plateform: String) {
-      idealCheckOut(order_id: $order_id, plateform: $plateform) {
-        redirect
-      }
-    }
-    '''
+    """调用站点原文的 idealCheckOut mutation 生成 iDEAL 直链付款 URL。"""
     tp0 = time.monotonic()
     try:
-        data = _gql(fetcher, query, token=token,
-                    variables={"order_id": order_number, "plateform": "h"})
+        data = _gql(fetcher, _GQL_IDEAL, token=token,
+                    variables={"order_id": order_number, "plateform": "h"},
+                    operation_name=_OP_IDEAL)
     except Exception as e:
         logger.error("idealCheckOut 失败 (%.2fs): %s", time.monotonic() - tp0, e)
         raise
@@ -514,6 +595,9 @@ BookingPhase = Literal[
     # 凭据被平台拒了。和 not_configured 分开：那个是"没填"，这个是"填了但不对"，
     # 用户看到的提示不一样；也和 blocked 分开——重试和换 IP 都救不回来。
     "auth_failed",
+    # 凭据对，但账号开了两步验证，无法全自动（需人工输验证码）。和 auth_failed
+    # 分开：不是账号密码的问题，提示用户去关 2FA 或改半自动。
+    "auth_2fa",
     # 走到了最后一步但服务端拒绝保存。**绝不能报成 draft_saved**——那条消息
     # 让用户以为表单已填好、安心去传证件，而实际上什么都没存下。
     "save_rejected",
@@ -744,6 +828,24 @@ def try_book(
         return BookingResult(listing, True, msg, pay_url=pay_url,
                              contract_start_date=start_date or "", phase="success")
 
+    except TwoFactorRequiredError as tfa_err:
+        # 凭据对，但账号开了 2FA，全自动到此为止。和 auth_failed 分开：给用户的
+        # 提示不同（去关 2FA 或改半自动），也不该像 blocked 那样熔断登录链路。
+        total = time.monotonic() - t0
+        logger.warning(
+            "[%s]%s 🔐 需要两步验证 phase=auth_2fa | listing_id=%s email=%s | %s",
+            listing.name, " [DRY RUN]" if dry_run else "",
+            listing.id, _mask_email(email), tfa_err,
+        )
+        return BookingResult(listing, False, str(tfa_err), phase="auth_2fa")
+    except AuthError as auth_err:
+        total = time.monotonic() - t0
+        logger.error(
+            "[%s]%s 🔑 登录被拒 phase=auth_failed | listing_id=%s email=%s | %s",
+            listing.name, " [DRY RUN]" if dry_run else "",
+            listing.id, _mask_email(email), auth_err,
+        )
+        return BookingResult(listing, False, str(auth_err), phase="auth_failed")
     except OperationNotAllowedError as op_err:
         # 必须排在 BlockedError 前面（虽然两者没有继承关系，顺序仍是给读者看的：
         # 这两条分支处理的是同一个 HTTP 403 的两种成因）。
@@ -798,27 +900,22 @@ def try_book(
 
 def _fetch_sku_and_contract(fetcher: BrowserFetcher, url_key: str) -> tuple[str, Optional[int], Optional[str]]:
     """
-    通过 url_key 查询 addNewBooking 所需的三个关键参数。
+    通过 url_key 查询 addNewBooking 所需的三个关键参数（sku / contract_id / 起租日）。
 
-    新 API 使用扁平字段（不再有 custom_attributesV2）。
+    用站点原文 ``GetProductDetail``（照抄品）：白名单只认这个 operation 名与它
+    完整的字段集，旧的自写 ``GetProduct`` 已 403（docs/H2S_BOOKING_OPS.md §2）。
+    我们只用到其中三个字段，但**一个都不能删**——删了就是全量 403。
+    过滤走 variables（``$filters``），白名单不管。
+
+    这是兜底路径：抓取侧通常已给出 sku/contract_id/起租日，只有 listing.sku 为空
+    时才走到这里。它是纯公开查询，不需要登录，无副作用。
     """
-    query = '''
-    query GetProduct($urlKey: String!) {
-      products(filter: {
-        category_uid: { eq: "Nw==" }
-        url_key: { eq: $urlKey }
-      }) {
-        items {
-          sku
-          type_of_contract
-          next_contract_startdate
-          available_startdate
-        }
-      }
-    }
-    '''
-    data = _gql(fetcher, query, variables={"urlKey": url_key})
-    items = data.get("products", {}).get("items") or []
+    data = _gql(
+        fetcher, _GQL_PRODUCT_DETAIL,
+        variables={"filters": {"url_key": {"eq": url_key}}},
+        operation_name=_OP_PRODUCT_DETAIL,
+    )
+    items = (data.get("products") or {}).get("items") or []
     if not items:
         raise RuntimeError(f"未找到房源: {url_key}")
 

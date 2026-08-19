@@ -1052,17 +1052,25 @@ class BrowserFetcher:
         body: str = "",
         headers: Mapping[str, str] | None = None,
         timeout_ms: int = 30_000,
+        encrypted: bool | None = None,
     ) -> dict:
         """在页面里发一次同源请求，原样返回 ``{status, ok, text, headers}``。
 
         不做任何状态码处理，也**不会**触发 ``ensure_initialized``——
         clearance 探测要在初始化过程中调用它，走公开方法会无限递归。
 
-        profile 开了 ``encrypted_envelope`` 时，带 body 的请求改走
-        ``_encrypted_fetch``：body 被包成信封、响应被解密，返回形状不变。
-        GET/HEAD 没有 body，不需要也无法走信封。
+        ``encrypted`` 决定带 body 的请求走不走加密信封：
+        - ``None``（默认）→ 跟随 profile 的 ``encrypted_envelope``；
+        - ``True`` → 强制信封；``False`` → 强制明文。
+
+        H2S 的 GraphQL 走信封，但同站的 NextAuth 端点（``/api/auth/*``）是明文
+        表单 REST，硬套信封只会 400——那条路要显式传 ``encrypted=False``。
+        GET/HEAD 没有 body，无所谓信封。
         """
-        if self._profile.encrypted_envelope and method.upper() not in ("GET", "HEAD"):
+        use_envelope = (
+            self._profile.encrypted_envelope if encrypted is None else encrypted
+        )
+        if use_envelope and method.upper() not in ("GET", "HEAD"):
             return self._encrypted_fetch(
                 path, body=body, headers=headers or {}, timeout_ms=timeout_ms,
             )
@@ -1446,6 +1454,43 @@ class BrowserFetcher:
             raise _exc("ScrapeNetworkError")(
                 f"{self._profile.name} 响应非 JSON: {e}"
             ) from e
+
+    def fetch_plain(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        body: str = "",
+        headers: Mapping[str, str] | None = None,
+        timeout_ms: int = 30_000,
+    ) -> dict:
+        """发一次**不走加密信封**的同源请求，原样返回 ``{status, ok, text, headers}``。
+
+        给同站的明文 REST 端点用——目前是 H2S 的 NextAuth 登录流
+        （``/api/auth/csrf`` · ``/api/auth/callback/credentials`` ·
+        ``/api/auth/session``）。这些不是 GraphQL、不吃加密信道，被 ``fetch()``
+        默认套上信封只会 400。
+
+        与 ``fetch()`` 的两点区别，都是刻意的：
+
+        - **强制明文**（``encrypted=False``）——绕开 profile 的
+          ``encrypted_envelope``；
+        - **不做 403/CF 重建**——登录失败回 401、需要重新校验回 403，都是业务
+          语义的响应，换 IP / 重建浏览器解决不了。状态码原样交回调用方判断。
+
+        仍然会 ``ensure_initialized``：NextAuth 端点同样在 Cloudflare 后面，
+        clearance cookie 得先就位。
+        """
+        self.ensure_initialized()
+        result = self._raw_fetch(
+            path, method=method, body=body, headers=headers,
+            timeout_ms=timeout_ms, encrypted=False,
+        )
+        if "error" in result:
+            raise _exc("ScrapeNetworkError")(
+                f"{self._profile.name} 明文请求失败 {path}: {result['error']}"
+            )
+        return result
 
     def fetch(
         self,

@@ -48,7 +48,9 @@ class TestTryBookBlocked:
             mock_fetcher = MockFetcher.return_value
             mock_fetcher.__enter__.return_value = mock_fetcher
             mock_fetcher.__exit__.return_value = False
-            # ensure_initialized 正常，但 fetch_gql 抛 BlockedError
+            # 登录改走 fetch_plain（NextAuth）——CF 屏蔽经 ensure_initialized
+            # 冒到这里。fetch_gql 也一并设上，覆盖有 prewarmed 时的下单路径。
+            mock_fetcher.fetch_plain.side_effect = BlockedError("Cloudflare WAF 屏蔽（HTTP 403）")
             mock_fetcher.fetch_gql.side_effect = BlockedError("Cloudflare WAF 屏蔽（HTTP 403）")
 
             result = try_book(listing, email="x@x.com", password="pw", dry_run=False)

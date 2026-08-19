@@ -241,12 +241,26 @@ class TestBookerPhase:
             sku="SKU-1", contract_id=42, contract_start_date="2030-01-01",
         )
 
+        import json as _j
+
+        def _plain(path, **kw):
+            # 让 NextAuth 登录三步走通，把 OperationNotAllowedError 留给下单侧
+            body = {
+                "/api/auth/csrf": {"csrfToken": "c"},
+                "/api/auth/callback/credentials": {"url": "/"},
+                "/api/auth/session": {"user": {}, "accessToken": "jwt",
+                                      "requires2fa": False},
+            }[path]
+            return {"status": 200, "ok": True, "text": _j.dumps(body), "headers": {}}
+
         with patch("booker.BrowserFetcher") as MockFetcher:
             mock = MockFetcher.return_value
             mock.__enter__.return_value = mock
             mock.__exit__.return_value = False
+            mock.fetch_plain.side_effect = _plain
+            # 登录通过后，下单第一步（createEmptyCart）的 operation 被上游拒
             mock.fetch_gql.side_effect = OperationNotAllowedError(
-                "operation generateCustomerToken 被拒"
+                "operation CreateEmptyCart 被拒"
             )
             result = try_book(listing, email="x@x.com", password="pw", dry_run=False)
 

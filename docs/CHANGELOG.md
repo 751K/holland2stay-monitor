@@ -1,5 +1,53 @@
 # Changelog
 
+## v1.16.9 (2026-08-19)
+
+修复自动预订：登录整套换成 NextAuth，下单 operation 全部照抄站点原文。
+
+### 背景
+
+v1.16.8 把「operation 未放行」和 CF 屏蔽分了开，但没修预订本身。这次连着用户
+在浏览器里实登一次账号（我全程挂钩抓包、密码打码、占房/下单那步没点）把链路摸清，
+确认 booker 三个月来其实一直是坏的，只是几乎没触发过。完整侦察见
+`docs/H2S_BOOKING_OPS.md`。
+
+### 三处根因
+
+1. **登录已迁到 NextAuth**（不再是 GraphQL `generateCustomerToken`）。那条 mutation
+   打过去就是 operation_not_allowed。新流程：`GET /api/auth/csrf` →
+   `POST /api/auth/callback/credentials`（表单）→ `GET /api/auth/session` 取
+   `accessToken`（JWT，1h）。**这几个端点是明文 REST，不能走加密信封**——否则 400。
+2. **`GetProduct` 不存在**，站点叫 `GetProductDetail`，字段集也不同。
+3. **所有 booker GraphQL 一处都没传 operationName**。白名单按 operationName + 字段集
+   放行，缺名同样 403。这是历史 403 的成因之一。
+
+### 改动
+
+- `browser_fetcher.py`：`_raw_fetch` 加 `encrypted` 覆盖；新增 `fetch_plain()`——
+  强制明文、不做 CF-403 重建，给 NextAuth 端点用。
+- `booker.py`：`login()` 重写成 NextAuth 三步握手；`_gql` 与所有下单步骤补上
+  `operation_name`；`GetProduct` → 照抄的 `GetProductDetail`；新增 `AuthError` /
+  `TwoFactorRequiredError` 与对应 phase（`auth_failed` / `auth_2fa`）。
+- `h2s_booking_gql.py`（新）：7 条下单 operation 的逐字原文，照抄品，从站点 JS chunk
+  静态取得（无需登录、无副作用），与 `h2s_gql.py` 同一模式。
+- `cancel_pending_orders` 重写：取消预留是 **REST 按 SKU**
+  （`POST /api/rest/V1/customer/bookingcancel/{sku}`），不是 GraphQL。旧的自写
+  `cancelOrder` mutation 站点根本不用、必然失败，已删。机制从租户门户 JS 静态读出
+  （docs/H2S_BOOKING_OPS.md §6.6），传输层（明文 vs 信封）未验证，边缘场景 + 兜底。
+
+### 验证边界
+
+- **已实测走通**：NextAuth 登录（真实账号登录一次抓包确认）、`GetProductDetail`
+  端点与鉴权（`Bearer accessToken`）、operation 白名单判据。
+- **未经真实下单验证**：`createEmptyCart → … → placeOrder` 只静态照抄了原文、核对了
+  端点与鉴权，没真的下过单（下单产生真实订单）。首次真实预订前应先用真实账号跑一次
+  「加购但不 placeOrder」收尾。见 `docs/H2S_BOOKING_OPS.md` §6.5。
+- **2FA 是条件触发**：这次登录没触发。若生产账号触发 2FA，全自动到此为止
+  （`phase=auth_2fa`），需人工或半自动。
+
+新增 `tests/test_booker_login.py`（13）、`tests/test_h2s_booking_gql.py`（6）、
+`tests/test_booker_operations.py`（7）、`browser_fetcher` 明文通道 2 条。
+
 ## v1.16.8 (2026-08-19)
 
 把「operation 未被上游放行」从「Cloudflare 屏蔽」里分出来。两者都是 HTTP 403，

@@ -475,6 +475,47 @@ def test_sticky_session_id_is_constant_so_rotation_is_the_only_escape():
 # 传输层之上不该有任何感知——_GQL_QUERY 与 _to_listing 一行没改，因为截获站点
 # 加密前的明文可见它发的仍是同一条 GetCategories 查询。以下用例锁住这个边界。
 
+class TestFetchPlain:
+    """NextAuth 端点必须走明文，即便 H2S profile 默认开着加密信封。
+
+    套上信封发到 /api/auth/* 只会 400——登录整条就断在第一步。
+    """
+
+    def test_post_bypasses_the_envelope(self):
+        # H2S profile：encrypted_envelope=True。fetch_plain(POST) 仍应走明文
+        # _raw_fetch（page.evaluate 单参数、arg 为 None），而不是加密路径
+        # （6 元素 list 参数）。
+        page = _FakePage({
+            "status": 200, "ok": True,
+            "text": json.dumps({"url": "https://www.holland2stay.com/"}),
+            "headers": {},
+        })
+        fetcher = _make_fetcher(page)
+        assert fetcher._profile.encrypted_envelope is True
+
+        fetcher.fetch_plain("/api/auth/callback/credentials", method="POST",
+                            body="email=a%40b.com&password=x",
+                            headers={"Content-Type": "application/x-www-form-urlencoded"})
+
+        # 加密路径会往 args 里塞一个 6 元素 list [pub, path, body, hdrs, t, encHdr]。
+        # 明文路径的 evaluate 是单参数，arg 记为 None。
+        assert not any(isinstance(a, list) and len(a) == 6 for a in page.args), (
+            "fetch_plain 走了加密信封——NextAuth 端点会被 400"
+        )
+        assert page.key_fetches == 0, "明文请求不该去抓加密公钥"
+
+    def test_get_returns_raw_body(self):
+        page = _FakePage({
+            "status": 200, "ok": True,
+            "text": json.dumps({"csrfToken": "abc"}),
+            "headers": {},
+        })
+        fetcher = _make_fetcher(page)
+        r = fetcher.fetch_plain("/api/auth/csrf", method="GET")
+        assert r["status"] == 200
+        assert json.loads(r["text"])["csrfToken"] == "abc"
+
+
 class TestEncryptedEnvelope:
     def test_only_h2s_encrypts(self):
         """Xior 不走信封。开关放在 profile 上，别让它变成全局行为。"""
