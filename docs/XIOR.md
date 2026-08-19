@@ -287,7 +287,7 @@ students for their university journey」，全站不存在收入或雇佣条款�
 | 数据格式 | GraphQL JSON | HTML table | AJAX JSON |
 | 传输方式 | 浏览器 | curl_cffi 加指纹轮换 | 浏览器 |
 | Cloudflare 强度 | 托管挑战 | WAF 403（更换指纹即可通过） | 托管挑战加 IP 限流 |
-| 出口 IP 策略 | 固定 sticky，以复用 clearance | **每次尝试均更换**，更换 IP 是其唯一恢复手段 | 在一段时间内固定，随浏览器重建而轮换 |
+| 出口 IP 策略 | 在一段时间内固定，随浏览器重建而轮换（同 Xior） | **每次尝试均更换**，更换 IP 是其唯一恢复手段 | 在一段时间内固定，随浏览器重建而轮换 |
 | 反机器人机制 | Turnstile | reCAPTCHA v3 与 v2 | Turnstile（不做校验） |
 | 每轮请求数 | 城市数乘以页数 | 1 加 N 个 FP | N 个房型，每栋约 2–5 个 |
 | 预订链接 | 无 | 无 | `applyOnlineURL` |

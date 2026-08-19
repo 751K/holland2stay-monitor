@@ -71,8 +71,20 @@
 Chromium。`BrowserFetcher.ensure_initialized()` 导航至主站
 （`_H2S_MAIN_PAGE = /residences`）完成挑战，取得 `cf_clearance`。
 
-`cf_clearance` 与出口 IP 绑定，故 H2S 的 profile 使用**固定 sticky 代理**——与
-OurDomain 相反，后者以更换 IP 作为唯一的恢复手段。
+`cf_clearance` 与出口 IP 绑定，但**换 IP 的时机是「建浏览器」而不是「每请求」**：
+clearance 本来就只在单个浏览器的生命周期内有效（`_BROWSER_MAX_AGE` 2 小时），而新建
+浏览器无论如何都要重解一次挑战——那一刻用旧 IP 还是新 IP，成本完全一样。因此固定 IP
+在这里省不下任何东西，H2S 的 profile 开 **`rotating_proxy=True`**（与 Xior、OurDomain
+一致）：每次重建浏览器换一个代理 session，浏览器存活期间 IP 与 clearance 仍然稳定。
+
+反过来，固定 sticky 有一个真实代价：session id 是 `sha1(source)` 的常量，出口 IP 一旦
+被 CF 盯上就再也换不掉，`_rebuild_browser()` 重建出来的还是同一个 IP，恢复路径形同虚设。
+2026-08-03 生产事故即由此而来——连续 3 次 90s 挑战全部失败，熔断退避 30 分钟。
+
+> ⚠️ 轮换并非无条件生效。`config._with_source_session` 只在代理用户名**已经**以
+> `-<数字>` 结尾时才改写 session（webshare sticky 端点的 `{user}-{country}-{session_id}`
+> 形状）；其它形态原样返回，**不报错也不打日志**。用其它代理商时，按 source 隔离与
+> 轮换会双双静默失效，表现就退化成上面那个「IP 换不掉」的死局。
 
 ### 3.2 站点自有的 clearance
 
@@ -338,6 +350,8 @@ label 根本不出现，覆盖式赋值会让上一轮攒到的映射丢失，fe
 | 出口 IP 被 Cloudflare 盯上 | 挑战连续失败即熔断退避；重建浏览器会更换出口 IP |
 | operation 白名单收紧 | 已发生两次（抓取 2026-08-18、预订 2026-08-19）。查询是照抄品，字段增删即 403。定位与重抄步骤见 §2 / §5.1 |
 | 把 operation 403 误判成 CF 屏蔽 | 已发生一次，代价 75 秒 + 3 MB + 1 小时登录抑制。判据已分开，见 §5.1.1 |
+| 上游把某条 operation 整个摘出公开 API | 已发生一次：`addNewBooking`（占房）。**照抄原文救不了**——只能改走站点自己的新入口。判定方法：用无效参数发一次，看是 403「not available」还是 200 + 业务错误，见 §7.1 |
+| 登录 / 占房路径整体迁移 | 已发生：登录 → NextAuth，占房 → `POST /api/booking`。侦察靠静态读站点 JS chunk（零副作用），见 `H2S_BOOKING_OPS.md` |
 | 白名单查询里的字段被上游删掉 | 我们跟着丢字段，且无从补救（只能另找 SSR 等来源）。§5.2 已有三个先例 |
 | GraphQL schema 变更 | `total_pages` 缺失时标记不完整；字段集由 `tests/test_h2s_query_fields.py` 守卫 |
 | label 出现新的语言写法 | 过滤层归一，未收录的值原样保留而非丢弃；补 `FEATURE_SYNONYMS` 即可 |
@@ -350,31 +364,55 @@ H2S 是当前唯一开启自动预订的平台（`monitor._AUTO_BOOK_SOURCES`）
 mutation 同样经由 `BrowserFetcher`，与抓取共用会话与 clearance。流程止于支付页，不代
 填任何金融凭据。
 
-### 7.1 当前状态：被 operation 白名单挡住（2026-08-19 起）
+### 7.1 当前状态（2026-08-19 实测重写）
 
-`booker.py` 里 9 条 operation 全是自己写的，都没在上游登记：
+**这一节此前的内容是错的**：曾写「9 条 operation 都没在上游登记、登录那条被拒导致
+第一步就断」。逐条实测后推翻——真相要窄得多，也具体得多。
+
+#### 实测：白名单放行哪几步
+
+用**故意无效的参数**发每条 operation，靠错误形状区分「网关拒绝」与「业务拒绝」
+（参数是假的，不占房、不产生订单）。同一 clearance 窗口内可复现：
+
+| operation | 结果 | 判定 |
+|---|---|---|
+| `createEmptyCart` | 200，真返回 cart id | ✅ 放行 |
+| `GetCheckoutAgreements` | 200，返回条款正文 | ✅ 放行 |
+| **`addNewBooking`** | **403 not available through the public API** | ❌ **被摘出公开 API** |
+| `setPaymentMethodOnCart` | 200 + `Could not find a cart with ID …` | ✅ 放行 |
+| `placeOrder` | 200 + `CART_NOT_FOUND` | ✅ 放行 |
+| `idealCheckOut` | 200 + internal error | ✅ 放行 |
+
+**6 步里 5 步一直是对的，只有占房那一步被摘掉。**
+
+#### 登录也变了（但没被挡）
+
+登录不再是 GraphQL `generateCustomerToken`，换成了 **NextAuth 三步握手**
+（`/api/auth/csrf` → `/api/auth/callback/credentials` → `/api/auth/session` 取
+`accessToken`），端点走**明文**（加密拦截器只对 `/api/rest/` 生效）。真实账号实测走通，
+未触发验证码、未触发 2FA（`requires2fa:false`）。
+
+#### 占房的替代路径
+
+站点自己也不再直接发 `addNewBooking`，改走服务端代理：
 
 ```
-GenerateCustomerToken   CreateEmptyCart        SetPaymentMethodOnCart
-CancelOrder             AddNewBooking          GetCheckoutAgreements
-PlaceOrder              IdealCheckOut          GetProduct
+POST /api/booking          加密信封 + Bearer
+body {sku, contract_startDate, challengeToken, challengeProvider}
+→ { cartId, booking }      一次完成建车 + 占房
 ```
 
-实测（只读探测，无副作用）：
+已实现为 `booker.create_booking()`。端点实测存在（未登录回 401 Unauthorized，
+而非 404 / operation_not_allowed）。
 
-```
-抓取用的 GetCategories（照抄品）   200
-GetCheckoutAgreements             200   ← 恰好与站点原文一致
-GetProduct                        403   operation 未放行
-```
+#### 曾经的误判（留作教训）
 
-白名单是**逐 operation** 判的，不是整个端点开关。`GetCheckoutAgreements` 能过纯属
-巧合。登录那条被拒 = 预订在第一步就断，后面 8 条走不到。
+一度断言「占房被 Turnstile 挡死、全自动无解」，理由是下单代码里有个 `challengeToken`
+字段。**错的**：那个字段只是被 `JSON.stringify` 进加密信封的普通字段，
+`zg`（信封打包函数）根本不认识它；它来自 `turnstile.render({action:"clearance",
+appearance:"interaction-only"})`——就是 §3.2 那套站点自有 clearance，
+`BrowserFetcher` 早已处理。而且推翻它的证据当时就在：用户当天在自动化浏览器里
+完整走完过一次真实下单。**读到可疑字段时，先问有没有已发生的事实与之矛盾。**
 
-**修法**：和抓取侧一样照抄——在浏览器里走一遍真实的登录 / 加购 / 下单，钩住
-`crypto.subtle.encrypt` 截获加密前的明文，把站点自己发的那几条 operation 原样搬进
-`booker.py`（§4.2 / §5.1 是同一套手法）。这一步需要真实账号且会产生真实订单，
-不能靠只读探测完成。
+完整侦察记录见 [`H2S_BOOKING_OPS.md`](H2S_BOOKING_OPS.md)。
 
-在此之前每次新房上线都会以同样方式失败一次。分流已经做了（§5.1.1），失败不再拖累
-抓取和登录链路，但预订本身仍是坏的。
