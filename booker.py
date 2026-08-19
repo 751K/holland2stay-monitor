@@ -389,20 +389,21 @@ _CANCEL_STATUSES = {"pending", "pending_payment", "reserved", "processing", "res
 def cancel_pending_orders(fetcher: BrowserFetcher, token: str) -> int:
     """取消账号下所有待处理的预留，返回取消成功的笔数。
 
-    ⚠️ 机制已照抄、**未经真实取消验证**：一是这条路只在 reserved_conflict +
-    cancel_enabled 时触发（边缘场景），二是租户门户把 REST 路径也塞进加密信封，
-    而 www 上这些端点走明文还是走信封静态读不出来——这里先按明文（``fetch_plain``）
-    实现，若线上回 400/403 再改走信封。整体 try/except 兜底：取消失败只是救不回
-    旧预留，不连累主流程。用真实账号验证时，比照 §6.6 核对传输层。
+    传输层已确定（2026-08-19 逐字读自站点 module 82361，见 §6.9）：
+    ``/api/rest/*`` **走加密信封**——GET 把路径塞进 ``x-enc-q``，POST 加密 body。
+    所以这里用 ``fetch_rest``，不是 ``fetch_plain``（后者只对 ``/api/auth/*`` 正确）。
+
+    ⚠️ 仍未经真实取消验证：这条路只在 reserved_conflict + cancel_enabled 时触发
+    （边缘场景），且整体 try/except 兜底——取消失败只是救不回旧预留，不连累主流程。
     """
     import json as _j
 
     hdr = {"Authorization": f"Bearer {token}"}
     try:
-        r = fetcher.fetch_plain(_REST_LIST_RESERVATIONS, method="GET", headers=hdr)
+        r = fetcher.fetch_rest(_REST_LIST_RESERVATIONS, method="GET", headers=hdr)
         items = (_j.loads(r["text"]) or {}).get("items") or []
     except Exception as e:
-        logger.warning("查询预留列表失败（忽略，机制见 §6.6）: %s", e)
+        logger.warning("查询预留列表失败（忽略，机制见 §6.6/§6.9）: %s", e)
         return 0
 
     to_cancel = [
@@ -420,7 +421,7 @@ def cancel_pending_orders(fetcher: BrowserFetcher, token: str) -> int:
     cancelled = 0
     for sku, name in to_cancel:
         try:
-            resp = fetcher.fetch_plain(
+            resp = fetcher.fetch_rest(
                 _REST_BOOKING_CANCEL.format(sku=sku),
                 method="POST", body="{}",
                 headers={**hdr, "Content-Type": "application/json"},
@@ -453,11 +454,12 @@ def add_to_cart(
 
     ★ 有副作用：这一步就占住房了。
 
-    ⚠️ 未决风险（docs/H2S_BOOKING_OPS.md §6.8）：2026-08-19 发现官网前端已把占房
-    改走服务端代理 ``POST /api/booking``（带 Turnstile challengeToken），bundle 里
-    ``AddNewBooking`` 只剩定义、无客户端调用点。后端是否仍接受**直接** GraphQL
-    addNewBooking（本函数的做法）未验证——只有真占一次房才知道。若被拒（尤其带
-    challenge/verification 字样），说明占房已迁到 Turnstile 门后，全自动无解，需转半自动。
+    ⚠️ 未决点（docs/H2S_BOOKING_OPS.md §6.8）：官网前端已把占房改走服务端代理
+    ``POST /api/booking``，bundle 里 ``AddNewBooking`` 只剩定义、无客户端调用点。
+    这只说明**前端换了入口**，不等于后端拒绝直接 GraphQL——后者未验证，留待首次
+    真实预订时观察。（曾据此断言「被 Turnstile 挡死」，那是错的：那个
+    ``challengeToken`` 就是站点自有 clearance 的 Turnstile，BrowserFetcher 早已处理，
+    且用户在自动化浏览器里的真实下单当天就走通了。详见 §6.8。）
 
     用的是照抄品（``h2s_booking_gql.ADDNEWBOOKING``），选择集是站点的
     ``cart { items {...} }``——不是我们以前自写的 ``user_errors``。白名单按

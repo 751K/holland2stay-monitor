@@ -424,58 +424,83 @@ try/except 兜底，未验证不影响主流程。
 
 ---
 
-## 6.8 ⚠️ 重大发现：占房步骤已迁到 Turnstile 门后（2026-08-19，静态读 www JS）
+## 6.8 ~~占房迁到 Turnstile 门后~~ —— **该结论是错的，已撤回**
 
-为验证下单链路,静态读了 www 房源页的下单提交代码。结论比预期严重。
+我看到下单代码里有个 `challengeToken` 字段，就断言「占房被 Turnstile 挡住、全自动
+可能无解」。**错了。** 更要命的是，推翻它的证据当时就摆在眼前：用户当天就在
+自动化 CloakBrowser 里完整走完了一次真实下单，一路到 iDEAL 支付页——占房那步分明
+成功了。我拿一个字段名压过了已经发生的事实。
 
-### 确认对的（两处，静态坐实）
+### 真相（逐字读自 module 82361）
 
-- **日期格式** `contract_startDate` = **`DD-MM-YYYY`**。站点原文:
-  ``String(getDate).padStart(2,"0")-String(getMonth+1).padStart(2,"0")-getFullYear``。
-  booker 的 `_to_h2s_date` 正是这个 ✓
-- **store_id = 54**。站点按 sku 前缀（`d-`/`m-`/`sc`/`j-`/`w-`…）判 `r=54`。
-  booker 的 `_H2S_STORE_ID = 54` ✓
-
-### 但架构变了：`createEmptyCart` + `addNewBooking` 客户端已不再直接调
-
-站点现在的下单提交是:
+`zg` / `Eg` **只是加密信封的打包函数**，不是什么 Turnstile 逻辑：
 
 ```js
-const a = await D.zg({ sku, contract_startDate, challengeToken, challengeProvider });
-const r = await fetch("/api/booking", { method:"POST", headers:{...a.headers}, body:a.body });
-const t = await r.json();          // → { cartId, booking }
-localStorage.setItem("cartId", t.cartId);
-// 之后 ej()：用 cartId + accessToken + store_id(54) 走 placeOrder/支付
+async function x(e){                              // = zg
+  let t = JSON.stringify(e);
+  if(!o()) return {body:t, headers:{}};           // 无加密能力就发明文
+  let {envelope:r} = await h(f(t), "application/json");
+  return {body: JSON.stringify(r), headers:{"x-enc":"1"}};
+}
 ```
 
-要点:
+`challengeToken` 只是被 `JSON.stringify` 进去的一个**普通字段**，`zg` 根本不认识它。
+而且**登录用的 `Eg` 是同一套、同样带 `challengeToken`**，登录实测直接过、无验证码。
 
-- **占房走服务端代理 `POST /api/booking`,不是直接 GraphQL。** 它内部替你做
-  createEmptyCart + addNewBooking，返回 `{cartId}`。
-- **带 `challengeToken`（Turnstile）**。占房这一步现在被人机验证挡着。
-- bundle 里 `AddNewBooking` / `CreateEmptyCart` 两个 GraphQL operation **只剩定义、
-  没有客户端调用点**——已被 `/api/booking` 取代。
-- 下游（placeOrder / idealCheckOut）看着仍是直接 GraphQL（只有占房那步被代理）。
+那个 token 来自：
 
-### 对 booker 的意义（未决风险）
+```js
+turnstile.render(el, { sitekey: "0x4AAAAAADhJiBbYg2OyYwDz",
+                       appearance: "interaction-only",
+                       action: "clearance" })
+```
 
-booker 现在的做法是**直接发 GraphQL `createEmptyCart` + `addNewBooking`**——这是旧流程。
-两种可能，静态读分不出，只有真发一次 addNewBooking（会占房）才知道:
+`action:"clearance"` —— **就是站点自有 clearance 的那套 Turnstile**（docs/H2S.md §3.2），
+`BrowserFetcher` 早就在处理。`interaction-only` = 平时隐形自动发 token。不是新增闸门。
 
-- **乐观**:后端仍接受直接 GraphQL `addNewBooking`（operation 还在白名单里），
-  `/api/booking` 只是官网前端多加的一层。那 booker 照旧能用。
-- **悲观**:后端现在要求占房必须走 `/api/booking` 的 Turnstile 校验，直接 GraphQL
-  `addNewBooking` 会被拒。那 booker 的占房这一步是坏的，**且无法全自动修复**——
-  Turnstile 挡着，和登录 2FA、取消预留是同一堵墙。
+### 仍然确认为真的部分
 
-**没有真占一次房，无法判定是哪种。** 我不做这个真实副作用测试。
+- **日期格式 `DD-MM-YYYY`** ✓（站点 `getDate-getMonth+1-getFullYear`）
+- **store_id = 54** ✓（站点按 sku 前缀判 `r=54`）
+- 官网前端占房确实改走了服务端代理 `POST /api/booking`，bundle 里
+  `createEmptyCart`/`addNewBooking` 只剩定义无调用点。但这只说明**前端换了入口**，
+  不等于后端拒绝直接 GraphQL——后者仍未验证，留待首次真实预订时观察。
 
-### 建议
+### 教训
 
-1. **先按现状**：v1.16.9 的其余修复（NextAuth 登录、operationName、GetProductDetail、
-   REST 取消）都是实打实的进步，且日期/store_id 已确认。占房那步维持直接 GraphQL。
-2. **真实验证只能等一次真预订**：下次有用户真要订，看 `addNewBooking` 是成功还是被拒。
-   成功=乐观情形，booker 可用；被拒（尤其带 challenge/verification 字样）=占房已迁到
-   Turnstile 门后，需要重新设计（半自动：秒级通知 + 一键跳到官网下单页让用户过 Turnstile）。
-3. **长期方向**：占房被 Turnstile 保护后，「后台全自动下单」这个形态在 H2S 上正在关闭。
-   半自动（我们抢速度、用户过验证）可能是唯一可持续的路。
+读到一个可疑字段时，先问「有没有已发生的事实与之矛盾」。这次有，而且很硬。
+
+## 6.9 `/api/rest/*` 的信封约定（本轮真正的收获）
+
+挖 `challengeToken` 时把传输层规则完整读了出来（module 82361 的 `H` / `J`），
+**修掉了一个真 bug**：`cancel_pending_orders` 之前对 `/api/rest/*` 发明文。
+
+三条路，三种编码，别混：
+
+| 路径 | 编码 |
+|---|---|
+| `/api/auth/*`（NextAuth） | **明文**。拦截器只对 `/api/rest/` 生效 → `fetch_plain` |
+| `GET /api/rest/*` | 加密**路径**（去掉 `/api` 前缀、含 query），base64(JSON(信封)) 塞 `x-enc-q` 头，实际请求 `GET /api/rest/__enc__` |
+| `POST /api/rest/*` | 加密 **body**，POST **原 URL**，`x-enc: 1` |
+| GraphQL `/api/__enc__` | 加密 body（既有实现） |
+
+站点原文：
+
+```js
+// H：GET /api/rest/*
+let r = e.slice("/api".length);
+let {envelope:n, aesKey:a} = await h(f(r), "text/plain");   // 注意 ct 是 text/plain
+i.set("x-enc-q", base64(JSON(n)));
+let s = await fetch("/api/rest/__enc__", {...t, method:"GET", headers:i});
+
+// J：POST（加密 body，打原 URL）
+let {envelope:r, aesKey:n} = await h(f(t.body), "application/json");
+a.set("x-enc","1");
+let i = await fetch(e, {...t, headers:a, body:JSON.stringify(r)});
+```
+
+已实现为 `BrowserFetcher.fetch_rest()`，`cancel_pending_orders` 改用它。
+GET 那条的 `ct` 必须是 `text/plain`（body 那条是 `application/json`），写混了服务端解不开。
+
+由 `tests/test_browser_fetcher.py::TestRestEnvelope` 与
+`tests/test_booker_operations.py::TestCancelUsesRestEnvelope` 守卫。

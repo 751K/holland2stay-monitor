@@ -119,6 +119,19 @@ _H2S_GQL_PATH = "/api/__enc__"
 
 # 信封请求头。值恒为 "1"：请求上表示 body 是信封，响应上表示 body 需要解密。
 _ENC_HEADER = "x-enc"
+# ── /api/rest/* 的信封约定（2026-08-19 逐字读自站点 module 82361）──────
+# 站点对 REST 的加密**和 GraphQL 不同**，分 GET / 非 GET 两套：
+#
+#   非 GET（函数 J）：加密 **body** → POST 原 URL，头 x-enc: 1
+#                    ——形状与 GraphQL 一致，可直接复用 _encrypted_fetch
+#   GET（函数 H）：  加密 **路径本身**（去掉 /api 前缀，含 query string），
+#                    base64(JSON(信封)) 塞进 x-enc-q 头，
+#                    实际请求 GET /api/rest/__enc__
+#
+# 之前 cancel_pending_orders 直接发明文 /api/rest/...，两条都不对。
+_ENC_QUERY_HEADER = "x-enc-q"
+_REST_ENC_PATH = "/api/rest/__enc__"
+_REST_API_PREFIX = "/api"
 
 # 公钥在 bundle 里是个 SPKI base64 常量（实测 392 字符）。运行时抓而不是写死：
 # 它可能轮换，写死会在轮换当天变成一次无从下手的解密失败。
@@ -1293,6 +1306,138 @@ class BrowserFetcher:
         # 解不开，或响应用新密钥回来我们解不开。作废缓存，下次请求重抓即自愈。
         if isinstance(result, dict) and result.get("error"):
             self._drop_enc_pubkey()
+        return result
+
+    def _encrypted_rest_get(
+        self,
+        path: str,
+        *,
+        headers: Mapping[str, str],
+        timeout_ms: int,
+    ) -> dict:
+        """GET ``/api/rest/*``：加密**路径**走 ``x-enc-q`` 头。
+
+        照抄站点 module 82361 的函数 ``H``：
+
+            r = url.slice("/api".length)            # "/rest/V1/..."（含 query）
+            envelope = encrypt(r, "text/plain")
+            headers["x-enc-q"] = base64(JSON(envelope))
+            GET /api/rest/__enc__
+            响应带 x-enc:1 → 用同一个 aesKey 解密
+
+        注意加密的是**路径字符串**、ct 为 ``text/plain``——与 body 加密那条
+        （``application/json``）不是一回事，写混了服务端解不开。
+        """
+        pub = self._ensure_enc_pubkey()
+        merged = dict(self._profile.default_headers)
+        merged.update(headers or {})
+
+        inner = path[len(_REST_API_PREFIX):] if path.startswith(_REST_API_PREFIX) else path
+
+        js_code = """
+            async ([pub, inner, encPath, hdrs, timeoutMs, encHeader, qHeader]) => {
+                const b2a = (b) => { let s = "";
+                    for (const x of b) s += String.fromCharCode(x); return btoa(s); };
+                const a2b = (s) => { const t = atob(s);
+                    const u = new Uint8Array(t.length);
+                    for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i);
+                    return u; };
+                const sub = crypto.subtle;
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), timeoutMs);
+                try {
+                    const rsa = await sub.importKey("spki", a2b(pub),
+                        {name: "RSA-OAEP", hash: "SHA-256"}, false, ["encrypt"]);
+                    const aes = await sub.generateKey({name: "AES-GCM", length: 256},
+                        true, ["encrypt", "decrypt"]);
+                    const raw = new Uint8Array(await sub.exportKey("raw", aes));
+                    const k = new Uint8Array(
+                        await sub.encrypt({name: "RSA-OAEP"}, rsa, raw));
+                    const iv = crypto.getRandomValues(new Uint8Array(12));
+                    const d = new Uint8Array(await sub.encrypt({name: "AES-GCM", iv},
+                        aes, new TextEncoder().encode(inner)));
+                    const envelope = {v: 1, k: b2a(k), iv: b2a(iv), d: b2a(d),
+                                      ct: "text/plain"};
+                    // 站点：x-enc-q = base64(utf8(JSON(envelope)))
+                    const q = b2a(new TextEncoder().encode(JSON.stringify(envelope)));
+                    const h = Object.assign({}, hdrs);
+                    h[qHeader] = q;
+
+                    const resp = await fetch(encPath, {
+                        method: "GET",
+                        credentials: "include",
+                        mode: "same-origin",
+                        cache: "no-store",
+                        redirect: "follow",
+                        referrer: window.location.href,
+                        referrerPolicy: "strict-origin-when-cross-origin",
+                        headers: h,
+                        signal: controller.signal,
+                    });
+                    clearTimeout(timer);
+
+                    const raw_text = await resp.text();
+                    const out = {};
+                    for (const [key, value] of resp.headers.entries()) {
+                        const lower = key.toLowerCase();
+                        if (['cf-ray', 'content-type', 'server', 'vary',
+                             encHeader].includes(lower)) out[lower] = value;
+                    }
+                    if (out[encHeader] !== "1") {
+                        return {status: resp.status, ok: resp.ok,
+                                text: raw_text, headers: out};
+                    }
+                    const back = JSON.parse(raw_text);
+                    const plain = new Uint8Array(await sub.decrypt(
+                        {name: "AES-GCM", iv: a2b(back.iv)}, aes, a2b(back.d)));
+                    return {status: resp.status, ok: resp.ok,
+                            text: new TextDecoder().decode(plain), headers: out};
+                } catch (err) {
+                    clearTimeout(timer);
+                    return {error: err.message || String(err)};
+                }
+            }
+        """
+        result = self._page.evaluate(
+            js_code,
+            [pub, inner, _REST_ENC_PATH, merged, timeout_ms,
+             _ENC_HEADER, _ENC_QUERY_HEADER],
+        )
+        if isinstance(result, dict) and result.get("error"):
+            self._drop_enc_pubkey()
+        return result
+
+    def fetch_rest(
+        self,
+        path: str,
+        *,
+        method: str = "GET",
+        body: str = "",
+        headers: Mapping[str, str] | None = None,
+        timeout_ms: int = 30_000,
+    ) -> dict:
+        """发一次 ``/api/rest/*`` 请求，按站点的信封约定编码，返回解密后的响应。
+
+        GET 走 ``x-enc-q``（加密路径），其余走加密 body（形状同 GraphQL）。
+        两条规则逐字照抄自站点 module 82361 的 ``H`` / ``J``，见
+        docs/H2S_BOOKING_OPS.md §6.9。
+
+        **不是 ``fetch_plain``**：那条是给 ``/api/auth/*``（NextAuth）用的，
+        站点对它确实不加密（拦截器只对 ``/api/rest/`` 生效）。两者别混。
+        """
+        self.ensure_initialized()
+        if method.upper() == "GET":
+            result = self._encrypted_rest_get(
+                path, headers=headers or {}, timeout_ms=timeout_ms,
+            )
+        else:
+            result = self._encrypted_fetch(
+                path, body=body, headers=headers or {}, timeout_ms=timeout_ms,
+            )
+        if "error" in result:
+            raise _exc("ScrapeNetworkError")(
+                f"{self._profile.name} REST 请求失败 {path}: {result['error']}"
+            )
         return result
 
     def _raw_fetch_gql(

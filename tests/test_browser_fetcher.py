@@ -631,3 +631,65 @@ class TestEncryptedEnvelope:
         fetcher._raw_fetch("/whatever", method="GET")
         assert page.key_fetches == 0, "GET 不该去抓公钥"
         assert "async () =>" in page.scripts[0], "GET 应当走明文 _raw_fetch"
+
+
+class TestRestEnvelope:
+    """``/api/rest/*`` 的信封约定与 GraphQL / NextAuth 都不同，三者别混。
+
+    2026-08-19 逐字读自站点 module 82361（函数 H / J）：
+        GET  /api/rest/X  → 加密**路径**（去掉 /api 前缀），base64 塞 x-enc-q，
+                            实际请求 GET /api/rest/__enc__
+        POST /api/rest/X  → 加密 **body**，POST 原 URL，x-enc: 1
+        /api/auth/*       → 完全不加密（拦截器只对 /api/rest/ 生效）
+
+    cancel_pending_orders 曾经对 /api/rest/* 直接发明文，两条都不对。
+    """
+
+    def test_get_encrypts_the_path_into_x_enc_q(self):
+        page = _FakePage({
+            "status": 200, "ok": True,
+            "text": json.dumps({"items": []}),
+            "headers": {"x-enc": "1"},
+        })
+        fetcher = _make_fetcher(page)
+        fetcher.fetch_rest("/api/rest/V1/newdashboard/contract/me?fields=x",
+                           method="GET")
+
+        # 参数形状：[pub, inner, encPath, hdrs, timeout, encHeader, qHeader]
+        args = page.args[0]
+        assert isinstance(args, list) and len(args) == 7
+        inner, enc_path, q_header = args[1], args[2], args[6]
+        assert inner == "/rest/V1/newdashboard/contract/me?fields=x", (
+            "加密的必须是去掉 /api 前缀的路径（含 query），站点原文如此"
+        )
+        assert enc_path == "/api/rest/__enc__", "GET 必须打到 __enc__ 端点"
+        assert q_header == "x-enc-q"
+
+    def test_post_encrypts_the_body_at_the_original_url(self):
+        page = _FakePage({
+            "status": 200, "ok": True, "text": json.dumps({"ok": True}),
+            "headers": {"x-enc": "1"},
+        })
+        fetcher = _make_fetcher(page)
+        fetcher.fetch_rest("/api/rest/V1/customer/bookingcancel/r-x-1",
+                           method="POST", body="{}")
+
+        # 走 _encrypted_fetch：[pub, path, payload, hdrs, timeout, encHeader]
+        args = page.args[0]
+        assert isinstance(args, list) and len(args) == 6
+        assert args[1] == "/api/rest/V1/customer/bookingcancel/r-x-1", (
+            "POST 必须打原 URL，不是 __enc__"
+        )
+        assert args[2] == "{}", "加密的是 body"
+
+    def test_auth_endpoints_stay_plain(self):
+        """反向守卫：/api/auth/* 不该被加密。写反了登录第一步就 400。"""
+        page = _FakePage({
+            "status": 200, "ok": True,
+            "text": json.dumps({"csrfToken": "abc"}), "headers": {},
+        })
+        fetcher = _make_fetcher(page)
+        fetcher.fetch_plain("/api/auth/csrf", method="GET")
+        assert not any(isinstance(a, list) and len(a) in (6, 7) for a in page.args), (
+            "NextAuth 端点被套上了信封"
+        )
