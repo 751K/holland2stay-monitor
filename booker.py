@@ -40,7 +40,7 @@ from typing import Literal, Optional
 
 from browser_fetcher import BrowserFetcher
 from models import STATUS_AVAILABLE, Listing
-from scrapers.base import BlockedError
+from scrapers.base import BlockedError, OperationNotAllowedError
 
 logger = logging.getLogger(__name__)
 
@@ -102,15 +102,20 @@ def _to_h2s_date(iso_date: str) -> str:
 # ------------------------------------------------------------------ #
 # Cloudflare WAF 屏蔽检测
 # ------------------------------------------------------------------ #
-
-class BookingBlockedError(Exception):
-    """
-    booker 在登录 / 下单流程中遇 H2S API 返回 403。
-
-    BrowserFetcher 内部检测 403 时抛 BlockedError，booker 捕获后
-    转为 BookingBlockedError 让上层区分「预订层屏蔽」与其他 BlockedError。
-    """
-
+#
+# 这里曾经有一个 ``BookingBlockedError``，声称「booker 捕获 BlockedError 后转成
+# 它，让上层区分预订层屏蔽与其它 BlockedError」。**没有任何地方 raise 过它。**
+#
+# 后果不是「多了个没用的类」，而是三处 ``except BookingBlockedError`` 从来没有
+# 触发过：prewarm 上抛的一直是裸 BlockedError，于是每次都落进后面的
+# ``except Exception: ps = None``，静默降级成「回退正常登录」，
+# ``_mark_h2s_login_blocked()`` 一次都没被调用过。CF 真把我们挡了的时候，
+# 登录抑制窗口形同虚设——照常每轮再去撞一次。
+#
+# 现在上层直接 ``except BlockedError``。那层「区分」本来也不存在意义：
+# prewarm 这条路上唯一的异常来源就是预订层自己。
+# 需要和 CF 屏蔽分开的是 operation 未放行，那是 OperationNotAllowedError，
+# 它**不继承** BlockedError，所以不会被这些 handler 接住——正是要的效果。
 
 # ------------------------------------------------------------------ #
 # 错误分类（placeOrder 业务错误识别）
@@ -494,6 +499,11 @@ BookingPhase = Literal[
     "", "dry_run", "success", "race_lost",
     "reserved_conflict", "cancel+retry", "unknown_error",
     "blocked",
+    # 403，但正文是上游应用说「这条 GraphQL operation 没登记」，不是 CF 屏蔽。
+    # 和 blocked 分开的理由是上层动作完全相反：blocked 要换 IP、失效 session、
+    # 暂停登录链路；这个换多少 IP 都一样，只能改代码把站点原文照抄回来。
+    # 混在一起的代价见 OperationNotAllowedError 的 docstring。
+    "operation_rejected",
     "unsupported",
     # 半自动预订：申请已起草并存在用户账号下，但**没有占住房**——
     # 还差用户自己上传证件和付款。与 "success" 必须分开：把它当成功报给
@@ -734,6 +744,22 @@ def try_book(
         return BookingResult(listing, True, msg, pay_url=pay_url,
                              contract_start_date=start_date or "", phase="success")
 
+    except OperationNotAllowedError as op_err:
+        # 必须排在 BlockedError 前面（虽然两者没有继承关系，顺序仍是给读者看的：
+        # 这两条分支处理的是同一个 HTTP 403 的两种成因）。
+        #
+        # 与 blocked 的差别全在上层：blocked 会让 monitor 暂停整条登录链路一小时
+        # 并失效 prewarm 缓存（假设 session 被标记了）；operation_rejected 不该
+        # 触发任何一项——session 是好的，IP 是好的，坏的是我们发的那条查询。
+        total = time.monotonic() - t0
+        logger.error(
+            "[%s]%s ⛔ booking 的 operation 未被上游放行 phase=operation_rejected | "
+            "listing_id=%s email=%s prewarmed=%s timings={total:%.2fs} | %s",
+            listing.name, " [DRY RUN]" if dry_run else "",
+            listing.id, _mask_email(email),
+            "yes" if prewarmed else "no", total, op_err,
+        )
+        return BookingResult(listing, False, str(op_err), phase="operation_rejected")
     except BlockedError as block_err:
         total = time.monotonic() - t0
         logger.error(

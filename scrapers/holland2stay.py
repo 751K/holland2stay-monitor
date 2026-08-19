@@ -42,6 +42,7 @@ from .base import (
     RATE_LIMIT_BACKOFF,
     AbstractScraper,
     BlockedError,
+    OperationNotAllowedError,
     RateLimitError,
     ScrapeNetworkError,
     ScrapeResult,
@@ -345,7 +346,16 @@ def _scrape_city_pages(
             data = fetcher.fetch_gql(
                 _GQL_QUERY, variables, operation_name=_GQL_OPERATION,
             )
-        except (RateLimitError, BlockedError, ScrapeNetworkError):
+        except (
+            RateLimitError,
+            BlockedError,
+            OperationNotAllowedError,
+            ScrapeNetworkError,
+        ):
+            # OperationNotAllowedError 必须原样上抛。落进下面那条 except Exception
+            # 会被改判成「第 1 页网络错误」——和 2026-08-11 端点迁移时那句
+            # 「请检查代理/网络」是同一类误诊：把「查询没登记」说成网络问题，
+            # 排查会往代理方向走，而代理是好的。
             raise
         except Exception as e:
             logger.error(

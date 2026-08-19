@@ -9,7 +9,7 @@ www.holland2stay.com/api/graphql）。
 维持旧 import 路径兼容（monitor.py / tests 等）。
 
 所有异常类（BlockedError / RateLimitError / ProxyError / ScrapeNetworkError /
-UpstreamMaintenanceError）定义在 ``scrapers/base.py``，经 ``scrapers.__init__``
+UpstreamMaintenanceError / OperationNotAllowedError）定义在 ``scrapers/base.py``，经 ``scrapers.__init__``
 导出。本文件的 re-export 仅用于尚未迁移的历史代码。
 """
 from __future__ import annotations
@@ -17,12 +17,14 @@ from __future__ import annotations
 from scrapers.base import (  # noqa: F401  (re-export for backwards compat)
     RATE_LIMIT_BACKOFF,
     BlockedError,
+    OperationNotAllowedError,
     ProxyError,
     RateLimitError,
     ScrapeNetworkError,
     UpstreamMaintenanceError,
     is_cloudflare_body,
     is_maintenance_body,
+    is_operation_rejected_body,
     is_proxy_error,
     is_proxy_service_error,
 )

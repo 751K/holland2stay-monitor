@@ -29,6 +29,7 @@ from .base import (
     RATE_LIMIT_BACKOFF,
     AbstractScraper,
     BlockedError,
+    OperationNotAllowedError,
     ProxyError,
     RateLimitError,
     ScrapeNetworkError,
@@ -37,6 +38,7 @@ from .base import (
     UpstreamMaintenanceError,
     is_cloudflare_body,
     is_maintenance_body,
+    is_operation_rejected_body,
     is_proxy_error,
     is_proxy_service_error,
 )
@@ -207,6 +209,19 @@ def dispatch_scrape_tasks(
                         if isinstance(e, BlockedError) and source_blocked is None:
                             source_blocked = e
                         logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
+                    except OperationNotAllowedError as e:
+                        # 403，但正文是上游应用说「这条 operation 没登记」。
+                        # 隔离照旧，但**刻意不 _safe_invalidate**：会话、指纹、
+                        # 出口 IP 全都是好的，丢掉只换来下轮一次完整 CF 挑战，
+                        # 然后在同一条查询上以同样方式失败。
+                        # 也不进 source_blocked——那个开关的语义是「被 CF 标记了」。
+                        hard_failures.append((ckey, e))
+                        completeness[ckey] = False
+                        logger.error(
+                            "%s 的 GraphQL operation 未被上游放行，已隔离该任务"
+                            "（换 IP / 重建会话均无效，需照抄站点原文）: %s",
+                            ckey, e,
+                        )
                     except (KeyboardInterrupt, SystemExit):
                         raise
                     except ScrapeNetworkError as e:
@@ -336,6 +351,7 @@ __all__ = [
     "BlockedError",
     "HollandStayScraper",
     "OurCampusScraper",
+    "OperationNotAllowedError",
     "OurDomainScraper",
     "XiorScraper",
     "ProxyError",
@@ -349,6 +365,7 @@ __all__ = [
     "get_scraper",
     "is_cloudflare_body",
     "is_maintenance_body",
+    "is_operation_rejected_body",
     "is_proxy_error",
     "is_proxy_service_error",
 ]

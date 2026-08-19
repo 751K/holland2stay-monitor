@@ -1,5 +1,110 @@
 # Changelog
 
+## v1.16.8 (2026-08-19)
+
+把「operation 未被上游放行」从「Cloudflare 屏蔽」里分出来。两者都是 HTTP 403，
+处置相反，此前混成一种。
+
+### 这次的代价
+
+11:08 一次自动预订失败。H2S 对登录 mutation 返回
+`403 {"error":"This operation is not available through the public API"}`，
+`content-type: application/json` —— 应用层拒绝，不是挑战页。代码判成 CF 屏蔽：
+
+```
+11:08:26  开始预订 Victoriahof 36
+11:09:03  403 → 重建浏览器（换出口 IP + 一整轮 CF 挑战）
+11:09:07  403 → 再重建一次
+11:09:41  403 → 抛 BlockedError；75 秒、约 3 MB 白烧
+11:09:41  monitor 据此暂停**整条登录链路** 1 小时
+```
+
+三次重建换了三个出口 IP，拿回的是同一句话。误判把「预订坏了」扩散成「预订和登录
+都停了」。抓取当天仍有 508 次成功，没被连累纯属熔断阈值没到。
+
+### 判据
+
+正文，不是状态码也不是 `content-type`。两种写法都实测过，都得认：
+
+```
+抓取侧 2026-08-18  {"code":"operation_not_allowed"}
+预订侧 2026-08-19  {"error":"This operation is not available through the public API"}
+```
+
+新增 `scrapers.base.is_operation_rejected_body()` 与 `OperationNotAllowedError`。
+该异常**刻意不继承 `BlockedError`**——一旦继承，上层每一处 `except BlockedError`
+都会把它接住，换 IP / 熔断 / 登录抑制原样重演。
+
+### 分流后的行为
+
+| 位置 | 之前 | 现在 |
+|---|---|---|
+| `browser_fetcher.fetch()` | 重建浏览器换 IP，重试仍 403 则抛 `BlockedError` | 命中即抛 `OperationNotAllowedError`，一次都不重建 |
+| 同上，重建之后才露出该文案 | 抛 `BlockedError` | 改判（挑战没过时看到的是 CF 的 HTML，业务后端那句话要等挑战过了才可见） |
+| `scrapers` dispatcher | 落进通用 `except`，`_safe_invalidate` 丢掉浏览器 | 隔离该任务，**不丢会话** |
+| `scrapers/holland2stay.py` | 第 1 页失败被改判成「网络错误」 | 原样上抛。改判是 2026-08-11「请检查代理/网络」那类误诊 |
+| `booker.py` | `phase="blocked"` | `phase="operation_rejected"` |
+| `monitor` | `_mark_h2s_login_blocked()` 抑制 1 小时 + 失效 prewarm | 两者都不做。session、指纹、IP 全是好的 |
+| admin 告警 | 「被 403 屏蔽」，30 分钟一条 | 「operation 未被上游放行，换 IP 无效」，6 小时一条 |
+
+`fetch_gql` 会从文档正文里读出 operation 名写进错误消息（booker 里有 9 条，不写清楚
+是哪条等于没说）。**只用于日志**：往请求体里补 `operationName` 会改变发给上游的内容，
+而上游正是按 operation 判放行的。
+
+用户侧文案不变——「没订上，得手动补」，至于是 IP 被挡还是查询没登记，不是他能处置
+的信息。
+
+### 没修的：预订本身仍然坏着
+
+`booker.py` 里 9 条 operation 全是自己写的。逐条探测（只读，无副作用）：
+
+```
+抓取用的 GetCategories（照抄品）   200
+GetCheckoutAgreements             200   ← 恰好与站点原文一致
+GetProduct                        403   operation 未放行
+```
+
+白名单是**逐 operation** 判的，不是端点开关。登录那条被拒 = 预订第一步就断。
+修法与抓取侧相同（钩 `crypto.subtle.encrypt` 截获站点明文后照抄），但需要真实账号
+走完一遍下单流程并产生真实订单，无法靠只读探测完成。见 `docs/H2S.md` §7.1。
+
+本次改的是**误判的代价**，不是预订。8 个开启自动预订的用户在照抄完成前每次新房上线
+仍会失败一次，只是不再拖累抓取和登录链路。
+
+新增 `tests/test_operation_not_allowed.py`（27 条）。
+
+### 顺带修掉一个静默失效了很久的 handler
+
+`BookingBlockedError` 是死代码 —— **全仓库没有任何地方 raise 它**。
+`mcore/prewarm.py` 上抛的一直是裸 `BlockedError`，而 monitor 三处写的是
+`except BookingBlockedError`：
+
+```python
+try:
+    ps = fut.result()
+except BookingBlockedError as e:   # ← 永远不命中
+    _mark_h2s_login_blocked(e)
+    ps = None
+except Exception:                  # ← 每次都走这条
+    ps = None
+```
+
+后果不是少一行日志：**登录抑制窗口从来没有被 prewarm 打开过**。被 CF 挡住时下一轮
+照样再去撞一次登录接口，而每次撞都是一轮完整的 CF 挑战。08-19 那条「预登录未成功，
+下单时回退到正常登录路径」走的就是这条静默降级。
+
+改法是删掉这个类，三处直接 `except BlockedError`。它承诺的那层「区分预订层屏蔽与
+其它 BlockedError」本来也不存在意义 —— prewarm 这条路上唯一的异常来源就是预订层
+自己。真正需要和 CF 屏蔽分开的是 `OperationNotAllowedError`，而它不继承
+`BlockedError`，正好不会被这些 handler 接住。
+
+`PrewarmCache.create()` 里那条日志也一并拆开：BlockedError 分支说的是「上抛以暂停
+登录链路」，不再谎称「回退正常登录」—— 抑制生效后这一轮压根不下单。
+
+守卫在 `tests/test_booker_blocked.py`：一条行为测试（prewarm 抛 `BlockedError`
+→ 抑制窗口打开；抛 `OperationNotAllowedError` 或普通异常 → 不打开），一条 AST
+测试钉住「调用 `_mark_h2s_login_blocked` 的 except 只捕获 `BlockedError`」。
+
 ## v1.16.7 (2026-08-18)
 
 补回 Holland2Stay 房源的可入住日期。

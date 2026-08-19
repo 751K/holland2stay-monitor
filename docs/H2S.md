@@ -204,6 +204,52 @@ x-enc: 1
 - 上游改版后重新照抄：钩住 `crypto.subtle.encrypt` 截获站点加密前的明文即可。
 - 由 `tests/test_h2s_query_fields.py` 守卫，字段增删即失败。
 
+#### 5.1.1 被拒的 403 与被屏蔽的 403 不是一回事
+
+两者都是 HTTP 403，但处置**相反**，混为一谈的代价是实打实的：
+
+| | Cloudflare 屏蔽 | operation 未放行 |
+|---|---|---|
+| 正文 | 挑战页 / 屏蔽页 HTML | JSON，`content-type: application/json` |
+| 判据 | `is_cloudflare_body()` | `is_operation_rejected_body()` |
+| 异常 | `BlockedError` | `OperationNotAllowedError`（**不继承前者**） |
+| 换出口 IP | 有意义 | 无意义 —— 同会话换一条已登记的 operation 立刻 200 |
+| 等冷却 | 有意义 | 无意义 —— 不改代码永远不会好 |
+| 修法 | 换 IP / 换指纹 / 等 | 照抄站点自己发的那条 operation |
+
+正文有两种写法，都实测过，判定必须同时认：
+
+```
+抓取侧 2026-08-18  {"code":"operation_not_allowed"}
+预订侧 2026-08-19  {"error":"This operation is not available through the public API"}
+```
+
+**2026-08-19 的代价。** 预订链路的登录 mutation 被拒，而代码把它当成 CF 屏蔽：
+
+```
+11:08:26  开始预订 Victoriahof 36
+11:09:03  403 → 重建浏览器（换出口 IP + 一整轮 CF 挑战）
+11:09:07  403 → 再重建一次
+11:09:41  403 → 抛 BlockedError；75 秒、约 3 MB 白烧
+11:09:41  monitor 据此暂停**整条登录链路** 1 小时
+```
+
+三次重建换了三个出口 IP，拿回的是同一句话——拒绝它的不是 Cloudflare，是上游业务
+后端。误判还把「预订坏了」扩散成了「预订和登录都停了」。
+
+现在的分流（`browser_fetcher.fetch()`）：
+
+- 403 + 正文命中 operation 文案 → 直接抛 `OperationNotAllowedError`，**不重建、
+  不换 IP、不进任何冷却**；
+- 重建之后才露出该文案的，同样改判（挑战没过时看到的是 CF 的 HTML，业务后端那句话
+  要等挑战过了才看得见）；
+- 抓取侧 dispatcher 隔离该任务但**不丢会话**；`scrapers/holland2stay.py` 原样上抛，
+  不再改判成「第 1 页网络错误」；
+- 预订侧是独立的 `phase="operation_rejected"`，不触发登录抑制、不失效 prewarm 缓存，
+  admin 告警 6 小时一条并直接写明「换 IP 无效，去照抄 operation」。
+
+由 `tests/test_operation_not_allowed.py` 守卫。
+
 ### 5.2 照抄的代价：三个字段拿不到
 
 白名单那条查询不含以下字段，我们原先在用：
@@ -290,7 +336,8 @@ label 根本不出现，覆盖式赋值会让上一轮攒到的映射丢失，fe
 | 信封格式变更（`v` 从 1 起跳） | 目前无版本协商。届时解密会失败，需重读 chunk 里的 `__enc__` 实现 |
 | Turnstile 加码 | 当前由站点前端自动完成，本项目只等待。若改为需要交互，则须接入打码服务 |
 | 出口 IP 被 Cloudflare 盯上 | 挑战连续失败即熔断退避；重建浏览器会更换出口 IP |
-| operation 白名单收紧 | 已发生一次。查询是照抄品，字段增删即 403。定位与重抄步骤见 §2 / §5.1 |
+| operation 白名单收紧 | 已发生两次（抓取 2026-08-18、预订 2026-08-19）。查询是照抄品，字段增删即 403。定位与重抄步骤见 §2 / §5.1 |
+| 把 operation 403 误判成 CF 屏蔽 | 已发生一次，代价 75 秒 + 3 MB + 1 小时登录抑制。判据已分开，见 §5.1.1 |
 | 白名单查询里的字段被上游删掉 | 我们跟着丢字段，且无从补救（只能另找 SSR 等来源）。§5.2 已有三个先例 |
 | GraphQL schema 变更 | `total_pages` 缺失时标记不完整；字段集由 `tests/test_h2s_query_fields.py` 守卫 |
 | label 出现新的语言写法 | 过滤层归一，未收录的值原样保留而非丢弃；补 `FEATURE_SYNONYMS` 即可 |
@@ -302,3 +349,32 @@ label 根本不出现，覆盖式赋值会让上一轮攒到的映射丢失，fe
 H2S 是当前唯一开启自动预订的平台（`monitor._AUTO_BOOK_SOURCES`）。所有 GraphQL
 mutation 同样经由 `BrowserFetcher`，与抓取共用会话与 clearance。流程止于支付页，不代
 填任何金融凭据。
+
+### 7.1 当前状态：被 operation 白名单挡住（2026-08-19 起）
+
+`booker.py` 里 9 条 operation 全是自己写的，都没在上游登记：
+
+```
+GenerateCustomerToken   CreateEmptyCart        SetPaymentMethodOnCart
+CancelOrder             AddNewBooking          GetCheckoutAgreements
+PlaceOrder              IdealCheckOut          GetProduct
+```
+
+实测（只读探测，无副作用）：
+
+```
+抓取用的 GetCategories（照抄品）   200
+GetCheckoutAgreements             200   ← 恰好与站点原文一致
+GetProduct                        403   operation 未放行
+```
+
+白名单是**逐 operation** 判的，不是整个端点开关。`GetCheckoutAgreements` 能过纯属
+巧合。登录那条被拒 = 预订在第一步就断，后面 8 条走不到。
+
+**修法**：和抓取侧一样照抄——在浏览器里走一遍真实的登录 / 加购 / 下单，钩住
+`crypto.subtle.encrypt` 截获加密前的明文，把站点自己发的那几条 operation 原样搬进
+`booker.py`（§4.2 / §5.1 是同一套手法）。这一步需要真实账号且会产生真实订单，
+不能靠只读探测完成。
+
+在此之前每次新房上线都会以同样方式失败一次。分流已经做了（§5.1.1），失败不再拖累
+抓取和登录链路，但预订本身仍是坏的。

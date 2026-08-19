@@ -15,7 +15,7 @@ import pytest
 
 import monitor
 from monitor import run_once
-from booker import BookingBlockedError, BookingResult, PrewarmedSession, try_book
+from booker import BookingResult, PrewarmedSession, try_book
 from mcore.booking import book_with_fallback
 from notifier import BaseNotifier
 from users import UserConfig
@@ -237,3 +237,133 @@ class TestMonitorRunOnceBlockedAggregation:
 
         assert len(notifier.booking_failed) == 1
         assert "raced" in notifier.booking_failed[0][1]
+
+
+# ─── prewarm 上抛的 403 必须推进登录抑制窗口 ──────────────────
+
+class TestPrewarmBlockSuppressesLogin:
+    """回归：这条路曾经**从未执行过**。
+
+    `mcore.prewarm.PrewarmCache.create()` 上抛的一直是裸 `BlockedError`，
+    而 monitor 那三处写的是 `except BookingBlockedError` —— 一个全仓库没有任何
+    地方 raise 的类。于是异常每次都落进后面的 `except Exception: ps = None`，
+    CF 屏蔽被静默降级成「这次没建成，回退正常登录」，
+    `_mark_h2s_login_blocked()` 一次都没被调用过。
+
+    后果不是少一行日志：抑制窗口从来没打开过，被 CF 挡住时下一轮照样再去撞一次
+    登录接口——而每次撞都是一轮完整的 CF 挑战。
+    """
+
+    def setup_method(self):
+        monitor.prewarm_cache.clear()
+        monitor._h2s_login_blocked_until = 0.0
+
+    def teardown_method(self):
+        monitor.prewarm_cache.clear()
+        monitor._h2s_login_blocked_until = 0.0
+
+    def _run_with_prewarm_error(self, cfg, storage, notifs, exc):
+        async def go():
+            def _boom(email, password):
+                raise exc
+
+            with patch("monitor.dispatch_scrape_tasks",
+                       side_effect=lambda *a, **k: [_make_listing(1)]), \
+                 patch("bookers.holland2stay.try_book",
+                       side_effect=lambda l, *a, **k: BookingResult(
+                           l, False, "n/a", phase="unknown_error")), \
+                 patch("mcore.prewarm.create_prewarmed_session", side_effect=_boom):
+                await run_once(cfg, storage, notifs, dry_run=False)
+        asyncio.run(go())
+
+    def test_cloudflare_block_opens_the_suppression_window(self, tmp_path):
+        cfg, notifs, storage, _ = _make_run_once_setup(tmp_path)
+        try:
+            self._run_with_prewarm_error(
+                cfg, storage, notifs, BlockedError("Cloudflare WAF 屏蔽（HTTP 403）"),
+            )
+        finally:
+            storage.close()
+
+        assert monitor._h2s_login_suppressed_remaining() > 0, (
+            "prewarm 遇 CF 403 却没打开登录抑制窗口——"
+            "这正是 BookingBlockedError 那个死类造成的静默降级"
+        )
+
+    def test_operation_rejection_does_not_open_the_window(self, tmp_path):
+        """反向守卫：operation 未放行不是 CF 屏蔽，抑制多久都不会好。
+
+        没有这条，把上面的 handler 写成 `except Exception` 也能全绿——
+        然后每次预订失败都白关一小时登录链路。
+        """
+        from scrapers.base import OperationNotAllowedError
+
+        cfg, notifs, storage, _ = _make_run_once_setup(tmp_path)
+        try:
+            self._run_with_prewarm_error(
+                cfg, storage, notifs,
+                OperationNotAllowedError("operation generateCustomerToken 被拒"),
+            )
+        finally:
+            storage.close()
+
+        assert monitor._h2s_login_suppressed_remaining() == 0, (
+            "operation 未放行不该暂停登录链路：登录链路本身是好的"
+        )
+
+    def test_ordinary_failure_does_not_open_the_window(self, tmp_path):
+        """普通失败（超时、解析炸了）照旧只是「这次没建成」。"""
+        cfg, notifs, storage, _ = _make_run_once_setup(tmp_path)
+        try:
+            self._run_with_prewarm_error(
+                cfg, storage, notifs, RuntimeError("socket 超时"),
+            )
+        finally:
+            storage.close()
+
+        assert monitor._h2s_login_suppressed_remaining() == 0
+
+
+class TestNoDeadExceptionClass:
+    """`BookingBlockedError` 已删除。别再引进一个没人 raise 的异常类。
+
+    它的危害不是「多了个没用的名字」，而是让 `except` 分支看起来有覆盖、
+    实际永远不执行——静默失效，测试和日志都看不出来。
+    """
+
+    def test_booker_no_longer_exports_it(self):
+        import booker
+        assert not hasattr(booker, "BookingBlockedError")
+
+    def test_monitor_handlers_reference_a_live_exception(self):
+        """monitor 里 `_mark_h2s_login_blocked` 所在的 except 必须捕获
+        一个真的会被抛出来的类型。"""
+        import ast
+        import pathlib
+
+        src = pathlib.Path("monitor.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+
+        caught: set[str] = set()
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            calls = [
+                n for n in ast.walk(node)
+                if isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name)
+                and n.func.id == "_mark_h2s_login_blocked"
+            ]
+            if not calls or node.type is None:
+                continue
+            names = (
+                [node.type] if isinstance(node.type, ast.Name)
+                else list(getattr(node.type, "elts", []))
+            )
+            caught.update(n.id for n in names if isinstance(n, ast.Name))
+
+        assert caught, "找不到调用 _mark_h2s_login_blocked 的 except 分支"
+        assert caught == {"BlockedError"}, (
+            f"这些 except 捕获了 {sorted(caught)}。prewarm 上抛的是裸 "
+            f"BlockedError；捕获别的类型 = 分支永远不执行"
+        )

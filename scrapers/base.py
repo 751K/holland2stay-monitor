@@ -220,6 +220,54 @@ class UpstreamMaintenanceError(Exception):
     """
 
 
+class OperationNotAllowedError(Exception):
+    """
+    上游按 GraphQL **operation 白名单**放行，而我们发的这一条不在名单里。
+
+    与 BlockedError 的区别 —— 这是整个类存在的理由
+    ------------------------------------------------
+    两者都是 HTTP 403，但成因、修法、代价完全相反：
+
+    - BlockedError → Cloudflare 说「不服务**这个 IP**」。正文是挑战页 HTML，
+      换出口 IP / 换指纹 / 等冷却都有意义。
+    - OperationNotAllowedError → 应用层说「不认识**这条 operation**」。正文是
+      JSON（``content-type: application/json``），Cloudflare 只是转发。
+      **和 IP 毫无关系**：同一个会话里换一条已登记的 operation 立刻 200。
+
+    把后者当成前者的代价是实打实的。2026-08-19 一次自动预订失败：
+    连续两次「重建 CF 会话」各跑一轮完整挑战，75 秒、约 3 MB 代理流量，
+    结束时仍是同一个 403；随后误判触发 1 小时登录链路抑制，把本来只坏了
+    预订的故障扩散到整条登录路径。换多少个 IP 都不会好。
+
+    唯一的修法是把站点自己发的那条 operation 原样照抄回来
+    （见 ``docs/H2S.md`` §5.1）。因此它**不该进任何自动冷却**——等待不会
+    改变结果，重试只是重复烧钱。
+    """
+
+
+#: 403 正文里出现这些 = 上游按 operation 白名单拒绝，与出口 IP 无关。
+#:
+#: 同一道闸门，两种文案，都实测过：
+#:   抓取侧 2026-08-18  ``{"code":"operation_not_allowed"}``
+#:   预订侧 2026-08-19  ``{"error":"This operation is not available through the public API"}``
+#: 只认其中一条会漏判另一条——漏判的后果就是上面那段 75 秒白烧。
+_OPERATION_REJECTED_MARKERS: tuple[str, ...] = (
+    "operation_not_allowed",
+    "not available through the public api",
+)
+
+
+def is_operation_rejected_body(body: str) -> bool:
+    """判断 403 响应体是否为「这条 operation 没登记」而非 CF 屏蔽。
+
+    只看正文，不看 ``content-type``：JSON 头是强信号但不是判据——CF 自己的
+    某些拒绝也带 JSON 头，而这两句文案是上游应用独有的。
+    """
+    lower = body.lower()
+    return any(marker in lower for marker in _OPERATION_REJECTED_MARKERS)
+
+
+
 # ────────────────────────────────────────────────────────────────────
 # 共享常量与工具
 # ────────────────────────────────────────────────────────────────────

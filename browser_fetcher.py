@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import platform
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Mapping, Optional
@@ -45,17 +46,50 @@ def _exc(name: str) -> type:
     if name not in _exc_cache:
         from scrapers.base import (  # noqa: E402
             BlockedError,
+            OperationNotAllowedError,
             RateLimitError,
             ScrapeNetworkError,
             UpstreamMaintenanceError,
         )
         _exc_cache.update({
             "BlockedError": BlockedError,
+            "OperationNotAllowedError": OperationNotAllowedError,
             "RateLimitError": RateLimitError,
             "ScrapeNetworkError": ScrapeNetworkError,
             "UpstreamMaintenanceError": UpstreamMaintenanceError,
         })
     return _exc_cache[name]
+
+
+#: 从 GraphQL 文档正文里读出 operation 名，例如 ``query GetProduct($k: String!)``
+#: → ``GetProduct``。
+_OPERATION_LABEL_RE = re.compile(
+    r"\b(?:query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)"
+)
+
+
+def _operation_label(query: str) -> str:
+    """给错误消息用的 operation 名，**不参与请求**。
+
+    调用方没传 ``operation_name`` 时（booker 的 9 条 mutation 都没传）从文档
+    正文里读一个出来。纯展示用途：往请求体里补 operationName 会改变发给上游
+    的内容，而上游正是按 operation 判放行的——为了让日志好看去动线上行为，
+    因果就反了。
+    """
+    m = _OPERATION_LABEL_RE.search(query or "")
+    return m.group(1) if m else "(匿名)"
+
+
+def _is_operation_rejected(body: str) -> bool:
+    """403 正文是否表示「这条 operation 没在上游白名单里」。
+
+    判据本身住在 ``scrapers.base``（和 ``is_cloudflare_body`` 这些放一起，
+    抓取侧与预订侧共用一份文案清单）；这里只是同样的延迟导入包装，理由见
+    上面 ``_exc`` 的注释——模块顶层 import 会循环。
+    """
+    from scrapers.base import is_operation_rejected_body  # noqa: E402
+
+    return is_operation_rejected_body(body)
 
 
 _H2S_MAIN_PAGE = "https://www.holland2stay.com/residences"
@@ -1352,17 +1386,26 @@ class BrowserFetcher:
 
         Raises
         ------
-        BlockedError          HTTP 403 (CF 再次拦截)
-        RateLimitError        HTTP 429 (限流)
-        ScrapeNetworkError    网络/超时错误 / 非 JSON 响应
+        BlockedError              HTTP 403 且是 Cloudflare 屏蔽（换 IP 有意义）
+        OperationNotAllowedError  HTTP 403 但是 operation 没登记（换 IP 无意义）
+        RateLimitError            HTTP 429 (限流)
+        ScrapeNetworkError        网络/超时错误 / 非 JSON 响应
         """
-        result = self.fetch(
-            _H2S_GQL_PATH,
-            method="POST",
-            body=_gql_body(query, variables, operation_name),
-            headers=extra_headers,
-            timeout_ms=timeout_ms,
-        )
+        try:
+            result = self.fetch(
+                _H2S_GQL_PATH,
+                method="POST",
+                body=_gql_body(query, variables, operation_name),
+                headers=extra_headers,
+                timeout_ms=timeout_ms,
+            )
+        except _exc("OperationNotAllowedError") as e:
+            # fetch() 是站点通用入口，看不到 operationName。把它补进消息里——
+            # 这条异常唯一的修法就是「照抄哪条 operation」，不写清楚是哪条，
+            # 日志等于只说了「有一条不行」，而 booker 里有 9 条。
+            raise _exc("OperationNotAllowedError")(
+                f"operation {operation_name or _operation_label(query)} 被拒: {e}"
+            ) from e
 
         import json
 
@@ -1420,9 +1463,11 @@ class BrowserFetcher:
 
         Raises
         ------
-        BlockedError          403 且重建会话后仍被挡
-        RateLimitError        429
-        ScrapeNetworkError    网络/超时错误
+        BlockedError              403 且重建会话后仍被挡
+        OperationNotAllowedError  403 且正文表明这条 operation 没在白名单里。
+                                  **不重建、不换 IP** —— 见该异常的 docstring
+        RateLimitError            429
+        ScrapeNetworkError        网络/超时错误
         UpstreamMaintenanceError  重建过程中发现站点在维护
         """
         self.ensure_initialized()
@@ -1455,6 +1500,24 @@ class BrowserFetcher:
                     f"clearance 恢复后重试失败: {result['error']}"
                 )
             status = result["status"]
+
+        if status == 403 and _is_operation_rejected(result.get("text", "")):
+            # 403 但不是 Cloudflare —— 是上游应用说「这条 operation 没登记」。
+            #
+            # 必须在下面那段重建之前拦住。重建做的三件事（换出口 IP、换指纹、
+            # 重跑 CF 挑战）对这种 403 一件都不管用：正文由业务后端生成，
+            # Cloudflare 只是把它转出来。2026-08-19 一次自动预订就是这样烧掉
+            # 75 秒和两轮完整挑战，最后拿到的还是同一个 403，并且把误判上抛成
+            # BlockedError，触发了 1 小时登录链路抑制。
+            #
+            # 抛一个**不继承 BlockedError**的异常：上层任何 `except BlockedError`
+            # 都不该接住它，否则换 IP / 熔断 / 抑制会原样重演。
+            raise _exc("OperationNotAllowedError")(
+                f"{self._profile.name} 拒绝了这条 GraphQL operation："
+                f"不在上游白名单里（HTTP 403，正文由业务后端返回，非 Cloudflare 挑战页）。"
+                f"换 IP、重建浏览器、等冷却都无效，只能照抄站点自己发的那条 operation。"
+                f"路径 {path}，响应: {result.get('text', '')[:200]}"
+            )
 
         if status == 403:
             logger.warning(
@@ -1490,6 +1553,15 @@ class BrowserFetcher:
                     retry.get("headers", {}),
                     retry.get("text", "")[:300],
                 )
+                # 重建后才露出 operation 文案的情形也要认下来。上面那道闸门只看
+                # 第一次响应，而挑战未过时拿到的是挑战页 HTML，真正的业务 403
+                # 要到挑战过了之后才看得见。
+                if _is_operation_rejected(retry.get("text", "")):
+                    raise _exc("OperationNotAllowedError")(
+                        f"{self._profile.name} 拒绝了这条 GraphQL operation："
+                        f"不在上游白名单里。重建会话后仍是同一个 403 —— 与出口 IP 无关。"
+                        f"路径 {path}，响应: {retry.get('text', '')[:200]}"
+                    )
                 raise _exc("BlockedError")(
                     f"{self._profile.name} 持续返回 403。可能需要更换 IP 或等待冷却。"
                 )

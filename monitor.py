@@ -59,7 +59,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from booker import BookingBlockedError, PrewarmedSession
+from booker import PrewarmedSession
 from config import DATA_DIR, ENV_PATH, get_proxy_url, is_proxy_native_fallback_active, load_config
 from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
@@ -717,6 +717,11 @@ _H2S_LONG_BLOCK_NOTIFY_INTERVAL = 21600  # 长时间 block admin 告警 6 小时
 # 状态是模块级，进程重启后清零（重启后第一轮屏蔽会再发通知，符合预期）。
 _last_block_notify_at: float = 0.0
 _BLOCK_NOTIFY_INTERVAL = 1800  # 30 分钟
+_last_operation_rejected_notify_at: float = 0.0
+# operation 被拒是个**只能靠改代码修好**的状态：不会自愈，也不随时间变化。
+# 用 blocked 那 30 分钟的节奏去提醒，等于在人上班之前先发 16 条一模一样的告警。
+# 6 小时一条足够——真正的紧迫感来自第一条。
+_OPERATION_REJECTED_NOTIFY_INTERVAL = 21600  # 6 小时
 _last_h2s_long_block_notify_at: float = 0.0
 
 # 维护通知节流：admin 已经在 dashboard banner 上看到维护态了，再叠加 web 通知
@@ -732,6 +737,20 @@ def _should_notify_block() -> bool:
     now = time.monotonic()
     if _last_block_notify_at <= 0 or now - _last_block_notify_at >= _BLOCK_NOTIFY_INTERVAL:
         _last_block_notify_at = now
+        return True
+    return False
+
+
+def _should_notify_operation_rejected() -> bool:
+    """operation 被上游拒时是否该告警。6 小时最多一次，理由见常量注释。"""
+    global _last_operation_rejected_notify_at
+    now = time.monotonic()
+    if (
+        _last_operation_rejected_notify_at <= 0
+        or now - _last_operation_rejected_notify_at
+        >= _OPERATION_REJECTED_NOTIFY_INTERVAL
+    ):
+        _last_operation_rejected_notify_at = now
         return True
     return False
 
@@ -1394,7 +1413,15 @@ def _submit_bookings(
             if pre_fut is not None and pre_fut.done():
                 try:
                     prewarmed = pre_fut.result()
-                except BookingBlockedError as e:
+                except BlockedError as e:
+                    # 曾经写的是 BookingBlockedError —— 一个没人 raise 的类，
+                    # 于是这条分支从未执行过：prewarm 上抛的一直是裸
+                    # BlockedError，每次都落进下面的 except Exception，
+                    # CF 屏蔽被静默降级成「回退正常登录」，抑制窗口形同虚设。
+                    #
+                    # OperationNotAllowedError 刻意不在此列（它不继承
+                    # BlockedError）：那种 403 抑制多久都不会好，
+                    # 落到下面返回 None、由 try_book 报 operation_rejected 才对。
                     _mark_h2s_login_blocked(e)
                     prewarmed = None
                 except Exception:
@@ -1587,6 +1614,10 @@ async def _process_booking_results(
     # 本轮被屏蔽的用户（含 notifier），所有候选 await 完后聚合发一条节流通知，
     # 避免每个用户/每个候选都发一次"预订失败"刷屏。
     blocked_in_round: list[tuple[UserConfig, BaseNotifier, str, "Listing"]] = []
+    # operation 被上游拒（403 但不是 CF）。单独一个列表而不是并进 blocked_in_round：
+    # 给 admin 的那条文案必须不一样——一条是"去看看 IP/指纹"，另一条是"去照抄
+    # operation"。混成一条会把人引向换代理，而换代理对后者毫无用处。
+    rejected_in_round: list[tuple[UserConfig, BaseNotifier, str, "Listing"]] = []
 
     for user, notifier, sorted_cands, future, prewarmed in ab_futures:
         result = await future
@@ -1594,6 +1625,9 @@ async def _process_booking_results(
             continue
         # phase="blocked" 或 unknown_error 都意味着 session 可能已被 H2S 标记，
         # 失效 prewarm 缓存让下轮换新 session+token+TLS 指纹。
+        # operation_rejected 刻意不在此列：session / token / 指纹都没问题，
+        # 坏的是我们发的那条查询。丢掉缓存只会让下一轮多跑一次完整登录，
+        # 然后在同一个地方以同样的方式失败。
         if prewarmed and result.phase in ("unknown_error", "blocked"):
             prewarm_cache.invalidate(user.id)
             logger.info("[%s] 因 %s 失效 prewarm 缓存", user.name, result.phase)
@@ -1613,6 +1647,13 @@ async def _process_booking_results(
                 # 等下轮换指纹后再决定是否重试。
                 _mark_h2s_login_blocked(result.message)
                 pass
+            elif result.phase == "operation_rejected":
+                # 同样不是房源级问题，retry_queue 也保持不动。但**不调用
+                # _mark_h2s_login_blocked**：那个函数假设「CF 盯上我们了，先躲
+                # 一小时」，而这里 CF 什么都没做。躲一小时既救不了预订，还会把
+                # 登录链路白白关掉——2026-08-19 就是这么从「预订坏了」变成
+                # 「预订和登录都停了」的。
+                pass
             else:
                 for c in sorted_cands:
                     retry_queue.discard(user.id, c.id)
@@ -1622,6 +1663,8 @@ async def _process_booking_results(
         elif result.phase == "blocked":
             # 累积起来：admin 那条聚合成一份，用户那条按房源各发各的
             blocked_in_round.append((user, notifier, result.message, booked_listing))
+        elif result.phase == "operation_rejected":
+            rejected_in_round.append((user, notifier, result.message, booked_listing))
         elif result.success:
             if storage.mark_listing_reserved_after_booking(booked_listing.id):
                 logger.info(
@@ -1690,6 +1733,41 @@ async def _process_booking_results(
             len(blocked_in_round),
             len({u.id for u, _, _, _ in blocked_in_round}),
         )
+
+    # ── operation 被上游拒（403 但不是 CF）────────────────────────── #
+    # 用户侧文案与 blocked 完全一样：对用户来说结果就是「没订上，得手动补」，
+    # 至于是 IP 被挡还是查询没登记，不是他能处置的信息。
+    # admin 侧则必须写清楚——这条不修代码就永远不会好。
+    if rejected_in_round:
+        for u, n, _, listing in rejected_in_round:
+            await n.send_booking_failed(
+                listing, "平台暂时拒绝了自动预订请求，请尽快手动预订",
+            )
+        if _should_notify_operation_rejected():
+            names = sorted({u.name for u, _, _, _ in rejected_in_round})
+            detail = rejected_in_round[0][2]
+            agg_msg = (
+                f"⛔ 自动预订的 GraphQL operation 未被上游放行"
+                f"（{len(rejected_in_round)} 套候选 / {len(names)} 个用户）\n\n"
+                f"{detail}\n\n"
+                f"影响用户: {', '.join(names)}\n\n"
+                "这不是 Cloudflare 屏蔽：换 IP / 换指纹 / 等冷却都无效，必须把站点"
+                "自己发的那条 operation 原样照抄进 booker（见 docs/H2S.md §5.1）。"
+                "在那之前每次新房上线都会以同样方式失败。\n"
+                "6 小时内不会重复通知。"
+            )
+            if web_notifier:
+                await web_notifier.send_error(agg_msg)
+            push_tasks.append(asyncio.create_task(
+                push.dispatch_admin(storage, agg_msg, kind="operation_rejected"),
+            ))
+        else:
+            logger.info(
+                "⛔ %d 套候选 / %d 个用户因 operation 未放行失败，"
+                "6h 节流期内不发 admin 告警",
+                len(rejected_in_round),
+                len({u.id for u, _, _, _ in rejected_in_round}),
+            )
 
     return push_tasks
 
@@ -1969,7 +2047,9 @@ async def run_once(
         def _on_prewarm_done(user_id: str, fut) -> None:
             try:
                 ps = fut.result()
-            except BookingBlockedError as e:
+            except BlockedError as e:
+                # 见上面 pre_fut.result() 处的注释：这里原本也是永远不会命中的
+                # BookingBlockedError。OperationNotAllowedError 不该被接住。
                 _mark_h2s_login_blocked(e)
                 ps = None
             except Exception:
@@ -2028,7 +2108,9 @@ async def run_once(
                 continue
             try:
                 ps = fut.result()
-            except BookingBlockedError as e:
+            except BlockedError as e:
+                # 见上面 pre_fut.result() 处的注释：这里原本也是永远不会命中的
+                # BookingBlockedError。OperationNotAllowedError 不该被接住。
                 _mark_h2s_login_blocked(e)
                 ps = None
             except Exception:

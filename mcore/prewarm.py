@@ -64,18 +64,30 @@ class PrewarmCache:
         self._cache[user_id] = session
 
     def create(self, user: "UserConfig") -> "PrewarmedSession | None":
-        """在 executor 线程中为单个用户建立预登录 session。失败返回 None。"""
+        """在 executor 线程中为单个用户建立预登录 session。
+
+        返回 None = 这次没建成，下单时走正常登录路径。
+        **BlockedError 例外，原样上抛**：调用方据此推进登录抑制窗口。
+        压成 None 等于把「CF 挡了我们」降级成「这次没建成」，下一轮照样再撞一次。
+        """
         try:
             return create_prewarmed_session(
                 user.auto_book.email, user.auto_book.password
             )
+        except BlockedError:
+            # CF 屏蔽要上抛，让调用方推进登录抑制窗口——**不能**说成「回退正常
+            # 登录」：回退过去也是同一个 403，而且抑制生效后这一轮压根不下单。
+            # 这条日志说错了很久，因为上抛的那半边此前根本没人接住
+            # （见 monitor 里 except BlockedError 处的注释）。
+            logger.warning(
+                "[%s] 预登录遭 Cloudflare 屏蔽，上抛以暂停登录链路", user.name,
+            )
+            raise
         except Exception as e:
             logger.warning(
                 "[%s] 预登录失败 (%s)，下单时将回退到正常登录路径",
                 user.name, e,
             )
-            if isinstance(e, BlockedError):
-                raise
             return None
 
     # -- 清理 ----------------------------------------------------------
