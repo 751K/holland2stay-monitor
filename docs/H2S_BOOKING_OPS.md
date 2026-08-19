@@ -421,3 +421,61 @@ try/except 兜底，未验证不影响主流程。
 
 结论：不为「再确认已知结构」去创建一笔真订单。真正的收尾验证放在首次真实预订那次
 一起做（§6.5）。
+
+---
+
+## 6.8 ⚠️ 重大发现：占房步骤已迁到 Turnstile 门后（2026-08-19，静态读 www JS）
+
+为验证下单链路,静态读了 www 房源页的下单提交代码。结论比预期严重。
+
+### 确认对的（两处，静态坐实）
+
+- **日期格式** `contract_startDate` = **`DD-MM-YYYY`**。站点原文:
+  ``String(getDate).padStart(2,"0")-String(getMonth+1).padStart(2,"0")-getFullYear``。
+  booker 的 `_to_h2s_date` 正是这个 ✓
+- **store_id = 54**。站点按 sku 前缀（`d-`/`m-`/`sc`/`j-`/`w-`…）判 `r=54`。
+  booker 的 `_H2S_STORE_ID = 54` ✓
+
+### 但架构变了：`createEmptyCart` + `addNewBooking` 客户端已不再直接调
+
+站点现在的下单提交是:
+
+```js
+const a = await D.zg({ sku, contract_startDate, challengeToken, challengeProvider });
+const r = await fetch("/api/booking", { method:"POST", headers:{...a.headers}, body:a.body });
+const t = await r.json();          // → { cartId, booking }
+localStorage.setItem("cartId", t.cartId);
+// 之后 ej()：用 cartId + accessToken + store_id(54) 走 placeOrder/支付
+```
+
+要点:
+
+- **占房走服务端代理 `POST /api/booking`,不是直接 GraphQL。** 它内部替你做
+  createEmptyCart + addNewBooking，返回 `{cartId}`。
+- **带 `challengeToken`（Turnstile）**。占房这一步现在被人机验证挡着。
+- bundle 里 `AddNewBooking` / `CreateEmptyCart` 两个 GraphQL operation **只剩定义、
+  没有客户端调用点**——已被 `/api/booking` 取代。
+- 下游（placeOrder / idealCheckOut）看着仍是直接 GraphQL（只有占房那步被代理）。
+
+### 对 booker 的意义（未决风险）
+
+booker 现在的做法是**直接发 GraphQL `createEmptyCart` + `addNewBooking`**——这是旧流程。
+两种可能，静态读分不出，只有真发一次 addNewBooking（会占房）才知道:
+
+- **乐观**:后端仍接受直接 GraphQL `addNewBooking`（operation 还在白名单里），
+  `/api/booking` 只是官网前端多加的一层。那 booker 照旧能用。
+- **悲观**:后端现在要求占房必须走 `/api/booking` 的 Turnstile 校验，直接 GraphQL
+  `addNewBooking` 会被拒。那 booker 的占房这一步是坏的，**且无法全自动修复**——
+  Turnstile 挡着，和登录 2FA、取消预留是同一堵墙。
+
+**没有真占一次房，无法判定是哪种。** 我不做这个真实副作用测试。
+
+### 建议
+
+1. **先按现状**：v1.16.9 的其余修复（NextAuth 登录、operationName、GetProductDetail、
+   REST 取消）都是实打实的进步，且日期/store_id 已确认。占房那步维持直接 GraphQL。
+2. **真实验证只能等一次真预订**：下次有用户真要订，看 `addNewBooking` 是成功还是被拒。
+   成功=乐观情形，booker 可用；被拒（尤其带 challenge/verification 字样）=占房已迁到
+   Turnstile 门后，需要重新设计（半自动：秒级通知 + 一键跳到官网下单页让用户过 Turnstile）。
+3. **长期方向**：占房被 Turnstile 保护后，「后台全自动下单」这个形态在 H2S 上正在关闭。
+   半自动（我们抢速度、用户过验证）可能是唯一可持续的路。

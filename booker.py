@@ -453,6 +453,12 @@ def add_to_cart(
 
     ★ 有副作用：这一步就占住房了。
 
+    ⚠️ 未决风险（docs/H2S_BOOKING_OPS.md §6.8）：2026-08-19 发现官网前端已把占房
+    改走服务端代理 ``POST /api/booking``（带 Turnstile challengeToken），bundle 里
+    ``AddNewBooking`` 只剩定义、无客户端调用点。后端是否仍接受**直接** GraphQL
+    addNewBooking（本函数的做法）未验证——只有真占一次房才知道。若被拒（尤其带
+    challenge/verification 字样），说明占房已迁到 Turnstile 门后，全自动无解，需转半自动。
+
     用的是照抄品（``h2s_booking_gql.ADDNEWBOOKING``），选择集是站点的
     ``cart { items {...} }``——不是我们以前自写的 ``user_errors``。白名单按
     operationName + 归一化字段集放行，选择集写错就是 403。声明了但没传的变量
