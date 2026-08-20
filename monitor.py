@@ -63,6 +63,7 @@ from booker import PrewarmedSession
 from config import DATA_DIR, ENV_PATH, get_proxy_url, is_proxy_native_fallback_active, load_config
 from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
+from mcore.backoff import PersistedBackoff
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
@@ -784,106 +785,100 @@ _H2S_LONG_BLOCK_STREAK = 3  # 第 3 次连续 H2S 403 起视为长时间被 bloc
 _H2S_LONG_BLOCK_NOTIFY_INTERVAL = 21600  # 长时间 block admin 告警 6 小时最多一次
 
 # 屏蔽通知节流：避免每轮抓取都给用户推一次相同的告警。
-# 状态是模块级，进程重启后清零（重启后第一轮屏蔽会再发通知，符合预期）。
-_last_block_notify_at: float = 0.0
 _BLOCK_NOTIFY_INTERVAL = 1800  # 30 分钟
-_last_operation_rejected_notify_at: float = 0.0
+
 # operation 被拒是个**只能靠改代码修好**的状态：不会自愈，也不随时间变化。
 # 用 blocked 那 30 分钟的节奏去提醒，等于在人上班之前先发 16 条一模一样的告警。
 # 6 小时一条足够——真正的紧迫感来自第一条。
 _OPERATION_REJECTED_NOTIFY_INTERVAL = 21600  # 6 小时
-_last_h2s_long_block_notify_at: float = 0.0
 
 # 维护通知节流：admin 已经在 dashboard banner 上看到维护态了，再叠加 web 通知
 # 主要是让 admin 在收 push（如果接了）/ 刷通知面板时也能看到一条记录。
 # 间隔比屏蔽长一截——维护态用户什么都做不了，没必要 30 min 一刷。
-_last_maintenance_notify_at: float = 0.0
 _MAINTENANCE_NOTIFY_INTERVAL = 3600  # 1 小时
+
+# 这几个节流窗口全部**落库**：以前是模块级 float，注释写着「重启后清零，重启后
+# 第一轮会再发通知，符合预期」——那在部署一天 12 次的节奏下就不符合预期了，
+# 等于每次部署都给 admin 重发一遍同样的告警。见 mcore/backoff.py。
+_throttle_notify_block = PersistedBackoff(
+    "throttle_notify_block", max_seconds=_BLOCK_NOTIFY_INTERVAL)
+_throttle_notify_operation_rejected = PersistedBackoff(
+    "throttle_notify_operation_rejected", max_seconds=_OPERATION_REJECTED_NOTIFY_INTERVAL)
+_throttle_h2s_long_block = PersistedBackoff(
+    "throttle_h2s_long_block", max_seconds=_H2S_LONG_BLOCK_NOTIFY_INTERVAL)
+_throttle_notify_maintenance = PersistedBackoff(
+    "throttle_notify_maintenance", max_seconds=_MAINTENANCE_NOTIFY_INTERVAL)
+
+
+#: 供 _should_notify_* 落库用的 Storage 句柄。由 main() 在启动时设一次。
+#:
+#: 为什么是模块级而不是参数：这几个 _should_notify_* 散布在十几个调用点，全都
+#: 没有 storage 在手，逐个穿参数会把签名污染一大片。和 retry_queue / prewarm_cache
+#: 一样按模块级单例处理。为 None 时节流退化成进程内——测试与 CLI 场景正是如此。
+_throttle_storage_ref = None
+
+
+def _throttle_storage():
+    return _throttle_storage_ref
+
+
+def _bind_persistent_state(storage) -> None:
+    """把落库句柄接上，并从库里恢复所有退避 / 熔断 / 节流状态。
+
+    在 main() 里、进入主循环之前调一次。没有这一步的话这些状态仍然只活在进程内
+    ——正是本次要修的那个问题。
+    """
+    global _throttle_storage_ref
+    _throttle_storage_ref = storage
+    for b in (
+        _h2s_circuit, _h2s_login_block,
+        _throttle_notify_block, _throttle_notify_operation_rejected,
+        _throttle_h2s_long_block, _throttle_notify_maintenance,
+        _throttle_notify_proxy, _throttle_notify_internal,
+    ):
+        try:
+            b.load(storage)
+        except Exception:
+            logger.warning("恢复退避状态失败（按未退避处理）", exc_info=True)
 
 
 def _should_notify_block() -> bool:
     """是否该发屏蔽通知。30 分钟最多一次，避免持续屏蔽时刷屏。"""
-    global _last_block_notify_at
-    now = time.monotonic()
-    if _last_block_notify_at <= 0 or now - _last_block_notify_at >= _BLOCK_NOTIFY_INTERVAL:
-        _last_block_notify_at = now
-        return True
-    return False
+    return _throttle_notify_block.claim(_BLOCK_NOTIFY_INTERVAL, storage=_throttle_storage())
 
 
 def _should_notify_operation_rejected() -> bool:
     """operation 被上游拒时是否该告警。6 小时最多一次，理由见常量注释。"""
-    global _last_operation_rejected_notify_at
-    now = time.monotonic()
-    if (
-        _last_operation_rejected_notify_at <= 0
-        or now - _last_operation_rejected_notify_at
-        >= _OPERATION_REJECTED_NOTIFY_INTERVAL
-    ):
-        _last_operation_rejected_notify_at = now
-        return True
-    return False
+    return _throttle_notify_operation_rejected.claim(_OPERATION_REJECTED_NOTIFY_INTERVAL, storage=_throttle_storage())
 
 
 def _should_notify_h2s_long_block() -> bool:
     """H2S 长时间 403 后是否该通知 admin。6 小时最多一次。"""
-    global _last_h2s_long_block_notify_at
-    now = time.monotonic()
-    if (
-        _last_h2s_long_block_notify_at <= 0
-        or now - _last_h2s_long_block_notify_at >= _H2S_LONG_BLOCK_NOTIFY_INTERVAL
-    ):
-        _last_h2s_long_block_notify_at = now
-        return True
-    return False
+    return _throttle_h2s_long_block.claim(_H2S_LONG_BLOCK_NOTIFY_INTERVAL, storage=_throttle_storage())
 
 
 def _should_notify_maintenance() -> bool:
     """是否该给 admin 发维护通知。1 小时最多一次。"""
-    global _last_maintenance_notify_at
-    now = time.monotonic()
-    if (
-        _last_maintenance_notify_at <= 0
-        or now - _last_maintenance_notify_at >= _MAINTENANCE_NOTIFY_INTERVAL
-    ):
-        _last_maintenance_notify_at = now
-        return True
-    return False
-
+    return _throttle_notify_maintenance.claim(_MAINTENANCE_NOTIFY_INTERVAL, storage=_throttle_storage())
 
 # 代理失效通知节流：代理挂了 admin 也只需要知道一次，30 min 一条够。
-_last_proxy_notify_at: float = 0.0
 _PROXY_NOTIFY_INTERVAL = 1800  # 30 分钟
+_throttle_notify_proxy = PersistedBackoff("throttle_notify_proxy", max_seconds=_PROXY_NOTIFY_INTERVAL)
 
 
 def _should_notify_proxy() -> bool:
     """是否该给 admin 发代理失效通知。30 分钟最多一次。"""
-    global _last_proxy_notify_at
-    now = time.monotonic()
-    if _last_proxy_notify_at <= 0 or now - _last_proxy_notify_at >= _PROXY_NOTIFY_INTERVAL:
-        _last_proxy_notify_at = now
-        return True
-    return False
-
+    return _throttle_notify_proxy.claim(_PROXY_NOTIFY_INTERVAL, storage=_throttle_storage())
 
 # 未分类/管线错误通知节流：某个反复抛错的内部异常（如 DB 锁死、磁盘满）若每轮
 # 都通知会刷屏 admin。和代理/屏蔽一样 30 min 一条。
-_last_internal_notify_at: float = 0.0
 _INTERNAL_NOTIFY_INTERVAL = 1800  # 30 分钟
+_throttle_notify_internal = PersistedBackoff("throttle_notify_internal", max_seconds=_INTERNAL_NOTIFY_INTERVAL)
 
 
 def _should_notify_internal() -> bool:
     """是否该给 admin 发未分类/管线内部错误通知。30 分钟最多一次。"""
-    global _last_internal_notify_at
-    now = time.monotonic()
-    if (
-        _last_internal_notify_at <= 0
-        or now - _last_internal_notify_at >= _INTERNAL_NOTIFY_INTERVAL
-    ):
-        _last_internal_notify_at = now
-        return True
-    return False
-
+    return _throttle_notify_internal.claim(_INTERNAL_NOTIFY_INTERVAL, storage=_throttle_storage())
 
 # ── 全面故障告警 ────────────────────────────────────────────────────
 #
@@ -1009,15 +1004,17 @@ async def _alert_outage_recovered(
 
 def _h2s_login_suppressed_remaining() -> int:
     """H2S 登录/预订链路是否因 403 被临时抑制；返回剩余秒数。"""
-    return max(0, int(_h2s_login_blocked_until - time.monotonic()))
+    return _h2s_login_block.remaining()
 
 
-def _mark_h2s_login_blocked(reason: BaseException | str) -> None:
-    """H2S 登录/预订遇到 Cloudflare 403 后，短期内停止触碰登录链路。"""
-    global _h2s_login_blocked_until
-    _h2s_login_blocked_until = max(
-        _h2s_login_blocked_until,
-        time.monotonic() + _H2S_LOGIN_BLOCKED_SUPPRESS_SEC,
+def _mark_h2s_login_blocked(reason: BaseException | str, storage=None) -> None:
+    """H2S 登录/预订遇到 Cloudflare 403 后，短期内停止触碰登录链路。
+
+    ``storage`` 给了才落库。少数调用点（预订结果回调）拿不到 storage，那里退化
+    成进程内抑制——比原来强，但不跨重启。
+    """
+    _h2s_login_block.open(
+        _H2S_LOGIN_BLOCKED_SUPPRESS_SEC, reason=str(reason), storage=storage,
     )
     prewarm_cache.clear()
     logger.warning(
@@ -1029,40 +1026,34 @@ def _mark_h2s_login_blocked(reason: BaseException | str) -> None:
 
 def _h2s_circuit_remaining() -> int:
     """H2S 抓取 circuit breaker 剩余暂停秒数。"""
-    return max(0, int(_h2s_circuit_open_until - time.monotonic()))
+    return _h2s_circuit.remaining()
 
 
-def _mark_h2s_scrape_blocked(reason: BaseException | str) -> int:
+def _mark_h2s_scrape_blocked(reason: BaseException | str, storage=None) -> int:
     """H2S 抓取被 Cloudflare 403 后，打开 source-level circuit breaker。"""
-    global _h2s_circuit_fail_streak, _h2s_circuit_open_until, _h2s_circuit_reason
-    _h2s_circuit_fail_streak += 1
+    streak = _h2s_circuit.bump()
     cooldown = min(
         _H2S_CIRCUIT_MAX_COOLDOWN,
-        _H2S_CIRCUIT_BASE_COOLDOWN * (2 ** max(0, _h2s_circuit_fail_streak - 1)),
+        _H2S_CIRCUIT_BASE_COOLDOWN * (2 ** max(0, streak - 1)),
     )
-    _h2s_circuit_open_until = time.monotonic() + cooldown
-    _h2s_circuit_reason = str(reason)
-    _mark_h2s_login_blocked(reason)
+    _h2s_circuit.open(cooldown, reason=str(reason), storage=storage)
+    _mark_h2s_login_blocked(reason, storage=storage)
     logger.error(
         "🚫 H2S source 熔断：连续抓取 403=%d，暂停 H2S %d 秒；其他 source 继续运行。原因: %s",
-        _h2s_circuit_fail_streak,
-        cooldown,
-        reason,
+        streak, cooldown, reason,
     )
     return cooldown
 
 
-def _mark_h2s_scrape_recovered() -> None:
+def _mark_h2s_scrape_recovered(storage=None) -> None:
     """H2S canary 成功后关闭 circuit breaker，下一轮恢复完整 H2S 抓取。"""
-    global _h2s_circuit_fail_streak, _h2s_circuit_open_until, _h2s_circuit_reason
-    if _h2s_circuit_fail_streak or _h2s_circuit_open_until:
+    if _h2s_circuit.fail_streak or _h2s_circuit.remaining():
         logger.info(
             "✅ H2S canary 抓取成功，关闭 source 熔断（之前连续 403=%d）",
-            _h2s_circuit_fail_streak,
+            _h2s_circuit.fail_streak,
         )
-    _h2s_circuit_fail_streak = 0
-    _h2s_circuit_open_until = 0.0
-    _h2s_circuit_reason = ""
+    _h2s_circuit.reset(storage)
+    _h2s_login_block.reset(storage)
 
 
 # 需要浏览器传输层的 source。它们的 Playwright 对象绑定创建线程，因此**必须**
@@ -1132,10 +1123,10 @@ def _select_h2s_tasks_for_circuit(h2s_tasks: list) -> tuple[list, str]:
             "🚫 H2S source 熔断中，跳过 %d 个 H2S 任务，%d 秒后 canary。最近原因: %s",
             len(h2s_tasks),
             remaining,
-            _h2s_circuit_reason or "unknown",
+            _h2s_circuit.reason or "unknown",
         )
         return [], "open"
-    if _h2s_circuit_fail_streak > 0 or _h2s_circuit_open_until > 0:
+    if _h2s_circuit.fail_streak > 0 or _h2s_circuit.remaining() > 0:
         logger.warning(
             "🚫 H2S source 熔断到期，本轮只用 1 个城市做 canary: %s",
             h2s_tasks[0].city_display,
@@ -1156,10 +1147,15 @@ UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
 # mcore 服务实例（进程生命周期内单例）
 retry_queue = RetryQueue()
 prewarm_cache = PrewarmCache()
-_h2s_login_blocked_until: float = 0.0
-_h2s_circuit_open_until: float = 0.0
-_h2s_circuit_fail_streak: int = 0
-_h2s_circuit_reason: str = ""
+#: H2S 熔断 / 登录抑制的退避状态。**落库，跨进程重启存活**——见 mcore/backoff.py。
+#:
+#: 这些以前是裸的模块级 float（基于 time.monotonic），重启即清零。也就是说正在被
+#: CF 封、退避已拉到 6 小时的时候部署一次，立刻满速重打。2026-08-20 一天部署 12 次
+#: = 12 次退避清零。
+_h2s_circuit = PersistedBackoff("h2s_circuit", max_seconds=_H2S_CIRCUIT_MAX_COOLDOWN)
+_h2s_login_block = PersistedBackoff(
+    "h2s_login_block", max_seconds=_H2S_LOGIN_BLOCKED_SUPPRESS_SEC,
+)
 
 
 # ------------------------------------------------------------------ #
@@ -1500,7 +1496,7 @@ def _submit_bookings(
                     # OperationNotAllowedError 刻意不在此列（它不继承
                     # BlockedError）：那种 403 抑制多久都不会好，
                     # 落到下面返回 None、由 try_book 报 operation_rejected 才对。
-                    _mark_h2s_login_blocked(e)
+                    _mark_h2s_login_blocked(e, storage)
                     prewarmed = None
                 except Exception:
                     prewarmed = None
@@ -2026,7 +2022,7 @@ async def run_once(
                 )
             except BlockedError as e:
                 h2s_blocked = e
-                _mark_h2s_scrape_blocked(e)
+                _mark_h2s_scrape_blocked(e, storage)
                 if not dry_run:
                     _record_source_round(
                         storage, round_at=round_at, source=_H2S_SOURCE,
@@ -2070,7 +2066,7 @@ async def run_once(
                 fresh_all.extend(fresh_part)
                 completeness_all.update(completeness_part)
                 if h2s_mode == "canary":
-                    _mark_h2s_scrape_recovered()
+                    _mark_h2s_scrape_recovered(storage)
                 if not dry_run:
                     complete_n, total_n = _completeness_stats(completeness_part)
                     _record_source_round(
@@ -2089,7 +2085,7 @@ async def run_once(
                 targets=len(h2s_tasks),
                 total_targets=source_totals.get(_H2S_SOURCE, len(h2s_tasks)),
                 error_type="CircuitOpen",
-                error_msg=_h2s_circuit_reason or "circuit open",
+                error_msg=_h2s_circuit.reason or "circuit open",
             )
 
         # 一个都没成功 = 本轮没有任何可用数据，维持旧契约上抛，让 main_loop 走
@@ -2140,7 +2136,7 @@ async def run_once(
             except BlockedError as e:
                 # 见上面 pre_fut.result() 处的注释：这里原本也是永远不会命中的
                 # BookingBlockedError。OperationNotAllowedError 不该被接住。
-                _mark_h2s_login_blocked(e)
+                _mark_h2s_login_blocked(e, storage)
                 ps = None
             except Exception:
                 ps = None
@@ -2201,7 +2197,7 @@ async def run_once(
             except BlockedError as e:
                 # 见上面 pre_fut.result() 处的注释：这里原本也是永远不会命中的
                 # BookingBlockedError。OperationNotAllowedError 不该被接住。
-                _mark_h2s_login_blocked(e)
+                _mark_h2s_login_blocked(e, storage)
                 ps = None
             except Exception:
                 ps = None
@@ -2231,7 +2227,7 @@ async def run_once(
                 )
             if (
                 not dry_run
-                and _h2s_circuit_fail_streak >= _H2S_LONG_BLOCK_STREAK
+                and _h2s_circuit.fail_streak >= _H2S_LONG_BLOCK_STREAK
                 and _should_notify_h2s_long_block()
             ):
                 cooldown = _h2s_circuit_remaining()
@@ -2240,7 +2236,7 @@ async def run_once(
                     web_notifier,
                     (
                         "H2S 长时间被 block，需要检查服务器\n\n"
-                        f"连续 H2S 403: {_h2s_circuit_fail_streak} 次\n"
+                        f"连续 H2S 403: {_h2s_circuit.fail_streak} 次\n"
                         f"当前 H2S 熔断剩余: 约 {max(1, cooldown // 60)} 分钟\n"
                         f"最近错误: {h2s_blocked}\n\n"
                         "请检查服务器网络、代理出口、Webshare 状态和 H2S GraphQL 访问情况。"
@@ -3299,6 +3295,7 @@ async def _async_main() -> None:
 
     # 恢复持久化的竞败重试队列（进程重启后不丢失）
     retry_queue.load(storage)
+    _bind_persistent_state(storage)
 
     # 加载用户配置；旧 users.json 迁移损坏时硬停止，避免忽略或覆盖现有数据
     try:

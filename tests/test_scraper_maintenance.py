@@ -91,12 +91,12 @@ class TestDispatcherMaintenancePriority:
 class TestMonitorMaintenanceAdminNotify:
     def setup_method(self):
         import monitor
-        monitor._last_maintenance_notify_at = 0.0
+        monitor._throttle_notify_maintenance.reset()
         monitor.prewarm_cache.clear()
 
     def teardown_method(self):
         import monitor
-        monitor._last_maintenance_notify_at = 0.0
+        monitor._throttle_notify_maintenance.reset()
         monitor.prewarm_cache.clear()
 
     def _run(self, tmp_path, *, user_notify_capture, admin_notify_capture):
@@ -186,7 +186,7 @@ class TestMonitorMaintenanceAdminNotify:
             self._run(tmp_path, user_notify_capture=user_msgs, admin_notify_capture=admin_msgs)
         assert len(admin_msgs) == 1
 
-        monitor._last_maintenance_notify_at -= 61 * 60
+        monitor._throttle_notify_maintenance.expire()
 
         with pytest.raises(UpstreamMaintenanceError):
             self._run(tmp_path, user_notify_capture=user_msgs, admin_notify_capture=admin_msgs)

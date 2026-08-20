@@ -113,11 +113,11 @@ class TestScrapeNetworkErrorPropagation:
 
 class TestMonitorBlockedHandling:
     def setup_method(self):
-        monitor._last_block_notify_at = 0.0
+        monitor._throttle_notify_block.reset()
         monitor.prewarm_cache.clear()
 
     def teardown_method(self):
-        monitor._last_block_notify_at = 0.0
+        monitor._throttle_notify_block.reset()
         monitor.prewarm_cache.clear()
 
     def _run(self, tmp_path, scrape_fn, user, notifications_capture=None):
@@ -158,8 +158,8 @@ class TestMonitorBlockedHandling:
 
         self._run(tmp_path, scrape, user)
 
-        assert monitor._h2s_circuit_fail_streak == 1
-        assert monitor._h2s_circuit_open_until > 0
+        assert monitor._h2s_circuit.fail_streak == 1
+        assert monitor._h2s_circuit.remaining() > 0
 
     def test_block_is_not_pushed_to_users(self, tmp_path):
         """抓取被屏蔽是运维问题，用户既判断不了也处置不了。
@@ -204,7 +204,7 @@ class TestMonitorBlockedHandling:
 
         for _ in range(3):
             self._run_capturing_admin(tmp_path, scrape, user, admin_msgs)
-            monitor._h2s_circuit_open_until = 0.0
+            monitor._h2s_circuit.expire()
 
         assert len(admin_msgs) == 1, (
             f"30 分钟内多次屏蔽应该只发 1 条，实际 {len(admin_msgs)}"
@@ -222,8 +222,9 @@ class TestMonitorBlockedHandling:
         self._run_capturing_admin(tmp_path, scrape, user, admin_msgs)
         assert len(admin_msgs) == 1
 
-        monitor._last_block_notify_at -= 31 * 60
-        monitor._h2s_circuit_open_until = 0.0
+        # 把节流窗口拨到过去（原来是减 monotonic 时间戳，现在是拨 deadline）
+        monitor._throttle_notify_block.expire()
+        monitor._h2s_circuit.expire()
 
         self._run_capturing_admin(tmp_path, scrape, user, admin_msgs)
         assert len(admin_msgs) == 2, "超过 30 分钟后应该重新通知"
@@ -268,7 +269,7 @@ class TestMonitorBlockedHandling:
                         [(user, CapturingNotifier())],
                         web_notifier=admin, dry_run=False,
                     )
-                    monitor._h2s_circuit_open_until = 0.0
+                    monitor._h2s_circuit.expire()
 
         try:
             asyncio.run(go())

@@ -190,28 +190,35 @@ def _reset_scraper_instances():
         pass
 
 
+def _clear_h2s_guards() -> None:
+    """把 H2S 熔断/登录抑制/长封告警节流复位。
+
+    ⚠️ 这里只能用 ``reset()``，**不要直接给 monitor 赋属性**。之前写的是
+    ``monitor._h2s_circuit_open_until = 0.0`` 这种——在那几个全局被
+    ``PersistedBackoff`` 取代之后，赋值不再复位任何东西，只是**凭空造出一个
+    同名属性**，于是「旧全局不许回来」的守卫在整套跑时永远失败，单独跑却通过。
+    """
+    try:
+        import monitor
+    except ImportError:
+        return
+    for b in ("_h2s_circuit", "_h2s_login_block"):
+        obj = getattr(monitor, b, None)
+        if obj is not None:
+            obj.reset()
+    for t in ("_h2s_long_block", "_notify_block", "_notify_internal",
+              "_notify_maintenance", "_notify_proxy", "_notify_operation_rejected"):
+        obj = getattr(monitor, f"_throttle{t}", None)
+        if obj is not None:
+            obj.reset()
+
+
 @pytest.fixture(autouse=True)
 def _reset_monitor_h2s_guards():
-    """隔离 monitor 的 H2S 熔断/登录抑制内存状态。"""
-    try:
-        import monitor
-        monitor._h2s_login_blocked_until = 0.0
-        monitor._h2s_circuit_open_until = 0.0
-        monitor._h2s_circuit_fail_streak = 0
-        monitor._h2s_circuit_reason = ""
-        monitor._last_h2s_long_block_notify_at = 0.0
-    except ImportError:
-        pass
+    """隔离 monitor 的 H2S 熔断/登录抑制状态。"""
+    _clear_h2s_guards()
     yield
-    try:
-        import monitor
-        monitor._h2s_login_blocked_until = 0.0
-        monitor._h2s_circuit_open_until = 0.0
-        monitor._h2s_circuit_fail_streak = 0
-        monitor._h2s_circuit_reason = ""
-        monitor._last_h2s_long_block_notify_at = 0.0
-    except ImportError:
-        pass
+    _clear_h2s_guards()
 
 
 @pytest.fixture

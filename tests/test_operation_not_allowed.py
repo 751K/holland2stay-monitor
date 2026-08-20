@@ -289,9 +289,9 @@ class TestMonitorDoesNotSuppressLogin:
     @pytest.fixture(autouse=True)
     def _reset_suppression(self):
         import monitor
-        monitor._h2s_login_blocked_until = 0.0
+        monitor._h2s_login_block.reset()
         yield
-        monitor._h2s_login_blocked_until = 0.0
+        monitor._h2s_login_block.reset()
 
     def test_source_code_never_marks_login_blocked_for_this_phase(self):
         """用 AST 钉住控制流：``operation_rejected`` 那条分支里不能出现

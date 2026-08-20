@@ -15,22 +15,27 @@ import pytest
 # ── _should_notify_block ──────────────────────────────────
 
 class TestShouldNotifyBlock:
-    def test_first_call_true(self, monkeypatch):
-        from monitor import _should_notify_block
-        monkeypatch.setattr("monitor._last_block_notify_at", 0.0)
-        assert _should_notify_block() is True
+    """节流窗口现在挂在 ``PersistedBackoff`` 上（落库、跨重启存活），
+    不再是模块级 float —— 见 mcore/backoff.py。"""
 
-    def test_second_call_within_interval_false(self, monkeypatch):
-        from monitor import _should_notify_block
-        now = _time.monotonic()
-        monkeypatch.setattr("monitor._last_block_notify_at", now)
-        assert _should_notify_block() is False
+    def test_first_call_true(self):
+        import monitor
+        monitor._throttle_notify_block.reset()
+        assert monitor._should_notify_block() is True
 
-    def test_after_interval_true(self, monkeypatch):
-        from monitor import _should_notify_block
-        monkeypatch.setattr("monitor._last_block_notify_at", 0.0)
-        monkeypatch.setattr(_time, "monotonic", lambda: 99999.0)
-        assert _should_notify_block() is True
+    def test_second_call_within_interval_false(self):
+        import monitor
+        monitor._throttle_notify_block.reset()
+        assert monitor._should_notify_block() is True
+        assert monitor._should_notify_block() is False
+
+    def test_after_interval_true(self):
+        import monitor
+        monitor._throttle_notify_block.reset()
+        assert monitor._should_notify_block() is True
+        # 窗口过期：把 deadline 拨到过去
+        monitor._throttle_notify_block.expire()
+        assert monitor._should_notify_block() is True
 
 
 # ── ScrapeNetworkError cooldown ────────────────────────────
