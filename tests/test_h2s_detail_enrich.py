@@ -275,3 +275,84 @@ class TestRateLimiting:
         with caplog.at_level(logging.WARNING, logger=h2s.logger.name):
             h2s._enrich(_Limited(), [_listing("k-0")])
         assert "429" in caplog.text
+
+
+class TestBatchWideBudget:
+    """预算与限速是**批次级**的，不是每城一份。
+
+    2026-08-20 那次 429 只修了单城内部：``spent`` / 请求间隔 / 撞 429 收手
+    全是 ``_enrich`` 的局部变量，而 ``_enrich`` **每个城市调一次**。线上
+    H2S 有 19 个城市且没配 SHARD_SIZES，于是每轮有 19 份独立预算、19 次
+    独立撞墙：Eindhoven 撞到 429 收手，Rotterdam 紧接着从零开始再撞一次。
+
+    上游的限流按**出口 IP 的请求速率**算，它不关心我们内部怎么分城。所以
+    预算、间隔、收手开关都必须挂在一个跨城共享的对象上。
+    """
+
+    def test_budget_is_shared_across_cities(self):
+        """两个城市合起来才花掉一份预算，不是各花一份。"""
+        f = _Fetcher({f"k-{i}": {"building_name": 614} for i in range(10)})
+        budget = h2s._DetailBudget(4)
+        h2s._enrich(f, [_listing(f"k-{i}") for i in range(5)], budget)
+        h2s._enrich(f, [_listing(f"k-{i}") for i in range(5, 10)], budget)
+        assert len(f.calls) == 4, (
+            f"预算没有跨城共享，实际打了 {len(f.calls)} 次"
+        )
+
+    def test_rate_limit_stops_the_whole_batch_not_just_one_city(self):
+        """A 城撞 429 之后，B 城不该从零开始再撞一次。"""
+        from scrapers.base import RateLimitError
+
+        class _Limited(_Fetcher):
+            def fetch_gql(self, *a, **k):
+                self.calls.append(1)
+                raise RateLimitError("Holland2Stay 返回 429 Too Many Requests")
+
+        f = _Limited()
+        budget = h2s._DetailBudget()
+        h2s._enrich(f, [_listing(f"a-{i}") for i in range(5)], budget)
+        h2s._enrich(f, [_listing(f"b-{i}") for i in range(5)], budget)
+        assert len(f.calls) == 1, (
+            f"429 之后其它城市还在继续打：共 {len(f.calls)} 次"
+        )
+
+    def test_spacing_carries_across_cities(self, monkeypatch):
+        """第二个城市的第一个请求也要等间隔——限速不能在城市边界断掉。"""
+        slept: list[float] = []
+        monkeypatch.setattr(h2s.time, "sleep", lambda s: slept.append(s))
+
+        f = _Fetcher({f"k-{i}": {"building_name": 614} for i in range(4)})
+        budget = h2s._DetailBudget()
+        h2s._enrich(f, [_listing("k-0"), _listing("k-1")], budget)
+        h2s._enrich(f, [_listing("k-2"), _listing("k-3")], budget)
+        assert slept == [h2s._DETAIL_REQUEST_SPACING] * 3, (
+            f"跨城的那次没等间隔: {slept}"
+        )
+
+    def test_standalone_call_still_gets_its_own_budget(self):
+        """不传 budget 时退化成一次性预算，老调用方行为不变。"""
+        f = _Fetcher({f"k-{i}": {"building_name": 614} for i in range(2)})
+        h2s._enrich(f, [_listing("k-0")])
+        h2s._enrich(f, [_listing("k-1")])
+        assert len(f.calls) == 2
+
+
+class TestScraperBatchBudget:
+    """预算对象由 ``_begin_batch()`` 每批次建一次，同批次内所有城市共享。"""
+
+    def test_begin_batch_creates_a_fresh_budget(self):
+        s = h2s.HollandStayScraper()
+        s._begin_batch()
+        first = s._detail_budget
+        assert isinstance(first, h2s._DetailBudget)
+        s._begin_batch()
+        assert s._detail_budget is not first, "新批次没有重置预算"
+
+    def test_budget_survives_within_a_batch(self):
+        """同一批次里连着抓多个城市，用的必须是同一个预算对象。"""
+        s = h2s.HollandStayScraper()
+        s._begin_batch()
+        budget = s._detail_budget
+        budget.remaining = 3
+        budget.stopped = True
+        assert s._detail_budget is budget

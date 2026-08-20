@@ -168,7 +168,8 @@ from h2s_booking_gql import (  # noqa: E402
 #: 按下面的预算分摊到多轮，不会在单轮里炸开）。
 _DETAIL_CACHE: dict[str, dict[str, str]] = {}
 
-#: 单次 scrape 最多补齐几条。缓存命中后稳态是 0，这个数只影响**冷启动**。
+#: **一个批次**（= 一轮里同一 source 的所有城市合计）最多补齐几条。
+#: 缓存命中后稳态是 0，这个数只影响**冷启动**。
 #:
 #: ⚠️ 不能设得太小，原因不是性能而是**正确性**：每轮抓取都会重建 Listing，而
 #: 列表查询里没有 building_name / tenant_profile，所以未补齐的房源写库时会把
@@ -190,6 +191,41 @@ _DETAIL_REQUEST_SPACING = 0.6
 #: 撞到 429 就本轮收手。继续打只会加重限流，而且这些房源下轮还有机会——
 #: 补齐本来就是跨轮渐进的。没有这个开关时，46 条里有 24 条在反复撞墙。
 _DETAIL_STOP_ON_RATE_LIMIT = True
+
+
+class _DetailBudget:
+    """一个**批次**共享的补齐预算与限速状态。
+
+    为什么必须跨城共享 —— 这是本类存在的唯一理由
+    ---------------------------------------------
+    上游的限流按**出口 IP 的请求速率**算。而 ``_enrich()`` 是每个城市调一次
+    （``scrape()`` 里一次），所以把预算、间隔、撞 429 收手这三件事放成函数
+    局部变量，等于给每个城市各发一份配额：
+
+        线上 H2S 19 个城市，且生产 .env 没配 SHARD_SIZES
+        → 每轮 19 份独立预算（上限 19 × 60 = 1140 条）
+        → 19 次独立撞墙：Eindhoven 撞 429 收手，Rotterdam 从零开始再撞一次
+
+    2026-08-20 修 429 时加的间距与收手开关只覆盖了单城内部，跨城那一半漏了。
+    本类把三个状态提到批次级，由 ``HollandStayScraper._begin_batch()`` 每批次
+    建一个新的。
+
+    代价：冷启动变慢。383 条房源按每批 60 条、全量轮 30 分钟一次，铺满约 7 轮
+    ≈ 3.5 小时。这在 v1.17.3 之后是安全的——storage 的粘性字段合并
+    （``mstorage/_listings.py:_STICKY_FEATURE_KEYS``）保证没轮到补齐的房源
+    不会被抹掉旧值，渐进补齐不再有「补一批、抹一批」的拉锯。
+    """
+
+    __slots__ = ("remaining", "stopped", "started")
+
+    def __init__(self, budget: int = _DETAIL_BUDGET_PER_ROUND) -> None:
+        #: 本批次还能发几条详情请求
+        self.remaining = budget
+        #: 本批次撞过 429，剩下的城市一律不再发（继续打只会加重限流）
+        self.stopped = False
+        #: 本批次已经发过至少一条——决定下一条要不要先等间隔。
+        #: 跨城也算数：城市边界不该让限速断掉。
+        self.started = False
 
 #: tenant_profile 的 option ID → 语义。2026-08-19 从站点**详情页正文**逐条实测确定
 #: （不是猜的，也不是从下单向导的选项推断的——那次推断错了）：
@@ -264,12 +300,23 @@ def _fetch_detail(fetcher: "BrowserFetcher", url_key: str) -> dict[str, str]:
     return _detail_features(items[0], products.get("aggregations"))
 
 
-def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
+def _enrich(
+    fetcher: "BrowserFetcher",
+    listings: list[Listing],
+    budget: "_DetailBudget | None" = None,
+) -> int:
     """给还没补齐过的房源补上 Building / Tenant / Neighborhood / MinIncome。
 
     返回本次真正发出去的请求数。**fail-open**：任何一条失败都只记日志跳过，
     不让「补齐」这种锦上添花的事拖垮主抓取。
+
+    ``budget`` 是**批次级**的（见 ``_DetailBudget``）——预算、请求间隔、撞 429
+    收手三件事都记在它身上，所以同一轮里后面的城市接着前面的用，而不是各自
+    重新开一份。不传时退化成一次性预算，给独立调用（单测 / 工具脚本）用。
     """
+    if budget is None:
+        budget = _DetailBudget()
+
     spent = 0
     failed = 0
     rate_limited = False
@@ -277,30 +324,41 @@ def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
     for l in listings:
         extra = _DETAIL_CACHE.get(l.id)
         if extra is None:
-            if spent >= _DETAIL_BUDGET_PER_ROUND:
+            # 本批次已经撞过 429 / 预算已用尽 —— 都不再发请求，但**继续遍历**：
+            # 缓存里已有的房源仍要把 feature 贴上去。
+            if budget.stopped or budget.remaining <= 0:
                 continue
-            if spent:
+            if budget.started:
                 time.sleep(_DETAIL_REQUEST_SPACING)
             try:
                 extra = _fetch_detail(fetcher, l.id)
-                spent += 1
             except RateLimitError as e:
                 # 速率触顶。继续打只会加重限流；这些房源下轮还有机会。
+                # 收手是**整个批次**的事，不只是这个城市——限流按 IP 算，
+                # 下一个城市接着打就是接着撞同一堵墙。
+                budget.started = True
+                budget.remaining -= 1
                 rate_limited = True
                 failed += 1
                 if not first_err:
                     first_err = f"RateLimitError: {e}"
                 if _DETAIL_STOP_ON_RATE_LIMIT:
+                    budget.stopped = True
                     break
                 continue
             except Exception as e:
                 # 只跳过这一条，不缓存失败——下轮还有机会。
                 # **但要吵一声**：fail-open + debug 日志 = 静默半残，
                 # 补齐悄悄只成功一半时从日志上完全看不出来（实测踩过）。
+                budget.started = True
+                budget.remaining -= 1
                 failed += 1
                 if not first_err:
                     first_err = f"{type(e).__name__}: {e}"
                 continue
+            budget.started = True
+            budget.remaining -= 1
+            spent += 1
             _DETAIL_CACHE[l.id] = extra
         if not extra:
             continue
@@ -315,7 +373,7 @@ def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
             "失败的房源这轮没有 Building/Tenant，会被 fail-closed 的租客筛选拒掉。"
             "首个错误: %s",
             failed, spent, len(listings),
-            "，已因 429 本轮收手（下轮继续）" if rate_limited else "",
+            "，已因 429 本批次收手（下轮继续）" if rate_limited else "",
             first_err,
         )
     return spent
@@ -666,6 +724,9 @@ class HollandStayScraper(AbstractScraper):
         #: 本批次是否做全量扫描。由 _begin_batch 每轮算一次，见 _plan_scan。
         #: 独立调用（非 dispatcher）路径没有批次，默认全量，行为与旧版一致。
         self._full_this_batch: bool = True
+        #: 本批次共享的详情补齐预算 / 限速状态。由 _begin_batch 每轮建一个。
+        #: 见 _DetailBudget —— 每城一份是 2026-08-20 那次 429 没修干净的另一半。
+        self._detail_budget: Optional[_DetailBudget] = None
 
     def _ensure_browser(self) -> BrowserFetcher:
         """懒创建或复用浏览器实例。
@@ -758,11 +819,16 @@ class HollandStayScraper(AbstractScraper):
         return fresh, False
 
     def _begin_batch(self) -> None:
-        """每批次开头决定这一轮是不是全量扫描。"""
+        """每批次开头决定这一轮是不是全量扫描，并重置详情补齐预算。
+
+        预算必须在这里建、且**整批共享**：``_enrich()`` 是每城调一次，把预算
+        留在它的局部变量里等于给 19 个城市各发一份配额。见 ``_DetailBudget``。
+        """
         now = time.monotonic()
         self._full_this_batch = (now - self._last_full_scan_at) >= _FULL_SCAN_INTERVAL
         if self._full_this_batch:
             self._last_full_scan_at = now
+        self._detail_budget = _DetailBudget()
 
     def scrape(self, task: ScrapeTask) -> ScrapeResult:
         configured = task.extra.get("availability_ids") or ["179", "336"]
@@ -784,7 +850,7 @@ class HollandStayScraper(AbstractScraper):
                 availability_ids=availability_ids,
                 attr_labels=self._attr_labels,
             )
-            enriched = _enrich(self._fetcher, listings)
+            enriched = _enrich(self._fetcher, listings, self._detail_budget)
         else:
             # 独立调用（单测 / 调试 / 非 dispatcher 路径）
             from config import CLOAKBROWSER_HEADLESS
