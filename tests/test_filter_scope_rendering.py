@@ -84,31 +84,28 @@ class TestListingsPage:
     def test_tenant_badge_reflects_the_capability_table(self, tenant_seeded):
         """徽标要如实反映该维度覆盖哪几个平台。
 
-        覆盖范围变过两次：v1.16.2 从「仅 H2S」扩到四家，2026-08-18 又因 H2S 的
-        GraphQL operation 白名单缩回三家。徽标错了比没有徽标更糟——用户会据此
+        覆盖范围变过三次：v1.16.2 从「仅 H2S」扩到四家，2026-08-18 因白名单缩回
+        三家，2026-08-19 靠详情补齐恢复四家。徽标错了比没有徽标更糟——用户会据此
         误判哪些平台的房源在按资格过滤。
         """
         admin_client = tenant_seeded
         from config import dim_scope_badge, dim_scope_note
 
         html = admin_client.get("/listings").get_data(as_text=True)
-        # 2026-08-18 起 H2S 不再登记该维度（白名单查询里没有那个字段），
-        # 徽标如实变回「仅 3 个平台」。这里断言的是「徽标与能力表一致」，
-        # 而不是某个具体字样——写死字样会在下次覆盖变化时误报。
+        # 覆盖范围变过三次：v1.16.2 四家 → 2026-08-18 因白名单缩回三家 →
+        # 2026-08-19 靠 GetProductDetail 详情补齐恢复四家。断言的是「徽标与能力表
+        # 一致」，不是某个具体字样——写死字样会在下次覆盖变化时误报。
         badge = dim_scope_badge("tenant")
-        assert badge == "仅 3 个平台"
+        assert badge == "", "四家全覆盖时不该有徽标"
         assert 'name="tenant"' in html, "租客筛选没渲染出来，这条测试测了个空"
-        # 租客那一行的 label 里不该有任何徽标。取 name="tenant" 之前最后一个
-        # form-label——中间隔着若干 <label class="ms-option">，正则一把梭会被
-        # 它们挡住。
+        # 通用维度那一行的 label 里不该出现任何「仅 …」范围提示
         head = html[: html.index('name="tenant"')]
         labels = re.findall(
             r'<label class="form-label">(.*?)</label>', head, re.S,
         )
         assert labels, "找不到租客筛选的 label"
-        assert badge in labels[-1], f"租客那一行没渲染出徽标: {labels[-1]}"
-        assert "Holland2Stay" not in dim_scope_note("tenant"), (
-            "H2S 已不在该维度覆盖内，提示里不该再提它"
+        assert "仅 " not in labels[-1], (
+            f"租客已是通用维度，那一行不该再有范围徽标: {labels[-1]}"
         )
 
     def test_badge_carries_the_full_note_as_tooltip(self, admin_client):

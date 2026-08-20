@@ -25,28 +25,32 @@ class TestSupportMatrix:
         for dim in ("contract", "offer", "energy", "neighborhood"):
             assert sources_supporting_dim(dim) == ["holland2stay"], dim
 
-    def test_tenant_covers_the_three_criteria_platforms(self):
-        """租客资格覆盖 OurDomain / OurCampus / Xior，**不含 H2S**。
+    def test_tenant_covers_all_four_platforms(self):
+        """租客资格四家全覆盖。**这个断言被来回改过两次，两次都是有原因的。**
 
-        v1.16.2 加这个维度时四家都在。2026-08-18 H2S 上线 GraphQL operation
-        白名单，我们只能照抄它那条查询，而 tenant_profile_restrictions 不在
-        字段集里（加进去会全量 403，见 h2s_gql.py）——房源不再带 Tenant 标签。
+        v1.16.2 加这个维度时四家都在。2026-08-18 H2S 上线 operation 白名单，
+        我们只能照抄它那条 GetCategories，租客属性不在字段集里——房源不带
+        Tenant 标签，而该维度 fail-closed（缺值即拒绝），留着登记会让勾
+        「仅学生」的用户一条 H2S 房源都收不到。于是摘掉。
 
-        **必须同时摘掉登记**：该维度 fail-closed，缺值即拒绝，留着会让勾
-        「仅学生」的用户一条 H2S 房源都收不到，比没有这个筛选更糟。
+        2026-08-19 恢复：站点另有一条同样在白名单里的 GetProductDetail，字段集里
+        有 tenant_profile，按需单取即可补齐（scrapers/holland2stay.py 的详情补齐）。
+
+        改这条断言之前先确认**房源真的带上了 Tenant 标签**——只改能力表不改抓取，
+        就又回到「勾了就收不到」的那个坑里。
         """
         assert sources_supporting_dim("tenant") == [
-            "ourdomain", "ourcampus", "xior",
+            "holland2stay", "ourdomain", "ourcampus", "xior",
         ]
 
-    def test_tenant_badge_says_three_platforms(self):
-        """H2S 摘掉之后徽标要如实变回「仅 3 个平台」。
+    def test_tenant_badge_is_empty_when_universal(self):
+        """四家全覆盖 = 通用维度 = 不该有徽标。
 
-        徽标由 _SOURCE_FILTER_DIMS 动态算出。漏改能力表时它会显示一句**错的**
-        范围说明，比没有说明更糟——用户会据此以为 H2S 的房源也在按资格过滤。
+        徽标由 _SOURCE_FILTER_DIMS 动态算出。多一句「仅 N 个平台」比没有更糟——
+        用户会据此以为某些平台没在按资格过滤。
         """
-        assert dim_scope_badge("tenant") == "仅 3 个平台"
-        assert "Holland2Stay" not in dim_scope_note("tenant")
+        assert dim_scope_badge("tenant") == ""
+        assert dim_scope_note("tenant") == ""
 
     def test_finishing_is_no_longer_h2s_only(self):
         """Xior 与 OurDomain 的装修档位由 SOURCE_ASSUMED_FEATURES 声明。

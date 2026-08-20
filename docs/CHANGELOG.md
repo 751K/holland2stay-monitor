@@ -1,5 +1,57 @@
 # Changelog
 
+## v1.17.1 (2026-08-19)
+
+把白名单字段集外的房源信息按需取回来，并**恢复 H2S 的租客资格筛选**。
+
+### 背景
+
+仪表盘上 H2S 房源的「楼盘」列一直是空的——白名单那条 `GetCategories` 的字段集里
+没有 `building_name`，加进去就是全量 403（v1.16.6 的教训）。同样丢掉的还有租客资格，
+`tenant` 维度因此在 2026-08-18 被摘出能力表，6 个用户的筛选失效。
+
+### 发现
+
+站点还有**另一条同样在白名单里**的 operation —— `GetProductDetail`（原本是 booker
+取 sku 用的），字段集大得多：`building_name` · `tenant_profile` · `neighborhood` ·
+`min_income` · `income_requirements` · `deposit` · `pets_allowed` … 实测 200 放行。
+
+代价：单条 ≈ 11.4 KB，且**没有分页变量**（page_size 固定 20 → 一次 160 KB）。
+所以只能按需单取，绝不能替代列表抓取。
+
+### 实现
+
+`scrapers/holland2stay.py` 新增详情补齐：
+
+- 进程内缓存，同一房源只取一次
+- 每轮预算上限 20 条（≈ 230 KB/轮封顶），冷启动分摊到约 19 轮铺满
+- fail-open：失败只记 debug 日志跳过，不拖垮主抓取；失败不缓存，下轮再试
+- `building_name` 的 ID→label 走同一响应的 aggregations（filter 收窄后正好只剩一条）
+
+### tenant_profile 映射（从站点详情页正文逐条实测）
+
+```
+6213  "Important: Students only"                            → student only
+6214  "You can book this residence as a working professional" → employed only
+6215  "…as a student or a working professional"              → student or employed
+```
+
+曾从下单向导「渲染了两个选项」推断 6214 = 两者皆可——**错的**，其中一个是禁用态。
+后来直接读详情页正文才定死。未知 ID 一律跳过，不回落默认值。
+
+### 恢复
+
+`tenant` 重新登记进 `_SOURCE_FILTER_DIMS["holland2stay"]`，四家平台全覆盖，范围徽标
+随之消失。仪表盘「楼盘」列有值了。
+
+**取舍**：补齐按预算分摊，期间未补到的房源没有 Tenant 标签、会被 fail-closed 拒掉。
+宁可少推几条，不可把「不确定能不能租」的房源推给勾了资格限制的用户。
+
+注：截图里 Reserved / Occupied 房源的「入住」为空是**正确的**——上游对这类房源的
+`next_contract_startdate` 就是 2050 哨兵，没有下一个合同起始日，不是我们丢的。
+
+新增 `tests/test_h2s_detail_enrich.py`（18），7 个变异全部捕获。全套 2535 通过。
+
 ## v1.17.0 (2026-08-19)
 
 **找到了自动预订一直不成的真正原因，并修好。**

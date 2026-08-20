@@ -146,6 +146,135 @@ def _labels_from_aggregations(products: dict) -> dict[str, dict[str, str]]:
     return labels
 
 
+# ── 详情补齐（GetProductDetail）─────────────────────────────────────
+#
+# 白名单那条 GetCategories 的字段集里没有 building_name / tenant_profile /
+# neighborhood / min_income（docs/H2S.md §5.2），加进去就是全量 403。
+# 但站点另有一条**同样在白名单里**的 GetProductDetail，字段集大得多，全都有。
+# 2026-08-19 实测：200 放行；裁剪它的字段集同样 403（按字段集判，与 GetCategories
+# 一条规律）。
+#
+# 代价：单条约 11.4 KB（aggregations 4 KB + item 7 KB），且**没有分页变量**
+# （page_size 固定 20）。所以只能按需单取，绝不能拿它替代列表抓取——
+# 20 条就是 160 KB，全量替换会把 v1.16.6 省下的流量原样吐回去。
+#
+# 策略：进程内缓存 + 每轮预算上限。同一房源只取一次；冷启动分摊到若干轮补齐。
+from h2s_booking_gql import (  # noqa: E402
+    GETPRODUCTDETAIL as _GQL_DETAIL,
+    OP_GETPRODUCTDETAIL as _OP_DETAIL,
+)
+
+#: url_key → 补齐出来的 feature 片段。进程级，重启后重建（每次重建 ≈ 房源数 × 11 KB，
+#: 按下面的预算分摊到多轮，不会在单轮里炸开）。
+_DETAIL_CACHE: dict[str, dict[str, str]] = {}
+
+#: 每轮最多补齐几条。20 × 11.4 KB ≈ 230 KB/轮 上限；缓存命中后通常是 0。
+#: 调大只会让冷启动更快、峰值更高——当前 H2S 库存约 380 条，20/轮 约 19 轮补完。
+_DETAIL_BUDGET_PER_ROUND = 20
+
+#: tenant_profile 的 option ID → 语义。2026-08-19 从站点**详情页正文**逐条实测确定
+#: （不是猜的，也不是从下单向导的选项推断的——那次推断错了）：
+#:     6213  "Important: Students only"
+#:     6214  "You can book this residence as a working professional"
+#:     6215  "You can book this residence as a student or a working professional"
+#: 取值语义与 OurDomain / Xior 的 Tenant 维度对齐（见 config.SOURCE_ASSUMED_FEATURES）。
+#: tenant_profile 不在 aggregations 里（实测），也不是可筛选属性（filter 报错），
+#: 所以只能靠这张写死的表。上游若新增取值，未知 ID 原样跳过而不是瞎猜。
+_TENANT_PROFILE_LABELS: dict[str, str] = {
+    "6213": "student only",
+    "6214": "employed only",
+    "6215": "student or employed",
+}
+
+
+def _detail_features(item: dict, aggregations: list | None) -> dict[str, str]:
+    """从 GetProductDetail 的单条响应里抽出我们要的几个 feature。
+
+    ``building_name`` 回的是 attribute option ID；同一响应的 aggregations 里带着
+    该 ID 的 label，而且因为 filter 收窄到了单个 url_key，那个 aggregation 通常
+    只剩这一条选项——正好精确对应，不需要跨轮累积。
+    """
+    out: dict[str, str] = {}
+
+    # building_name：ID → label（走本次响应自带的 aggregations）
+    bid = item.get("building_name")
+    if bid is not None:
+        for agg in (aggregations or []):
+            if agg.get("attribute_code") != "building_name":
+                continue
+            for opt in agg.get("options", []):
+                if str(opt.get("value", "")) == str(bid) and opt.get("label"):
+                    out["Building"] = opt["label"]
+                    break
+            break
+
+    # tenant_profile：ID → 语义（写死表，未知 ID 跳过）
+    tp = item.get("tenant_profile")
+    if tp is not None:
+        label = _TENANT_PROFILE_LABELS.get(str(tp))
+        if label:
+            out["Tenant"] = label
+
+    # neighborhood 直接就是字符串
+    hood = (item.get("neighborhood") or "").strip()
+    if hood:
+        out["Neighborhood"] = hood
+
+    # min_income 是「月租的几倍」，站点就这么表述
+    inc = str(item.get("min_income") or "").strip()
+    if inc:
+        out["MinIncome"] = f"{inc}x rent"
+
+    return out
+
+
+def _fetch_detail(fetcher: "BrowserFetcher", url_key: str) -> dict[str, str]:
+    """取单条房源详情并抽出补齐字段。失败返回空 dict（fail-open，不影响抓取）。"""
+    data = fetcher.fetch_gql(
+        _GQL_DETAIL,
+        variables={"filters": {"url_key": {"eq": url_key}}},
+        operation_name=_OP_DETAIL,
+    )
+    if "errors" in data and not data.get("data"):
+        msgs = "; ".join(e.get("message", "") for e in data["errors"])
+        raise RuntimeError(f"GetProductDetail 错误: {msgs}")
+    products = (data.get("data") or {}).get("products") or {}
+    items = products.get("items") or []
+    if not items:
+        return {}
+    return _detail_features(items[0], products.get("aggregations"))
+
+
+def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
+    """给还没补齐过的房源补上 Building / Tenant / Neighborhood / MinIncome。
+
+    返回本次真正发出去的请求数。**fail-open**：任何一条失败都只记日志跳过，
+    不让「补齐」这种锦上添花的事拖垮主抓取。
+    """
+    spent = 0
+    for l in listings:
+        extra = _DETAIL_CACHE.get(l.id)
+        if extra is None:
+            if spent >= _DETAIL_BUDGET_PER_ROUND:
+                continue
+            try:
+                extra = _fetch_detail(fetcher, l.id)
+                spent += 1
+            except Exception as e:
+                # 只跳过这一条，不缓存失败——下轮还有机会
+                logger.debug("[%s] 详情补齐失败（忽略）: %s", l.id, e)
+                continue
+            _DETAIL_CACHE[l.id] = extra
+        if not extra:
+            continue
+        # 已有同名 feature 的不覆盖：列表查询给的值优先（它是每轮新鲜的）
+        have = {f.split(":", 1)[0] for f in l.features if ":" in f}
+        for k, v in extra.items():
+            if k not in have:
+                l.features.append(f"{k}: {v}")
+    return spent
+
+
 # ── BrowserFetcher（从共享模块导入）─────────────────────────────────
 from browser_fetcher import BrowserFetcher  # noqa: E402
 
@@ -599,6 +728,7 @@ class HollandStayScraper(AbstractScraper):
                 max(0.0, _FULL_SCAN_INTERVAL - (time.monotonic() - self._last_full_scan_at)),
             )
 
+        enriched = 0
         if self._fetcher is not None:
             # 批次内：复用共享浏览器
             listings, complete = _scrape_city_pages(
@@ -608,6 +738,7 @@ class HollandStayScraper(AbstractScraper):
                 availability_ids=availability_ids,
                 attr_labels=self._attr_labels,
             )
+            enriched = _enrich(self._fetcher, listings)
         else:
             # 独立调用（单测 / 调试 / 非 dispatcher 路径）
             from config import CLOAKBROWSER_HEADLESS
@@ -622,6 +753,7 @@ class HollandStayScraper(AbstractScraper):
                     availability_ids=availability_ids,
                     attr_labels=labels,
                 )
+                enriched = _enrich(fetcher, listings)
 
         if not is_full:
             # 高频轮看不见 Reserved，标成完整扫描会让那批房源被 stale 收敛
@@ -632,10 +764,11 @@ class HollandStayScraper(AbstractScraper):
             l.source = self.source
 
         logger.info(
-            "[%s] Holland2Stay 共抓取 %d 条房源%s",
+            "[%s] Holland2Stay 共抓取 %d 条房源%s%s",
             task.city_display,
             len(listings),
             " (完整)" if complete else "",
+            f"，详情补齐 {enriched} 条（缓存 {len(_DETAIL_CACHE)}）" if enriched else "",
         )
         return ScrapeResult(
             task=task,

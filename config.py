@@ -653,21 +653,21 @@ class XiorCityFilter:
 # 新增 scraper 时在此登记它能稳定产出的可过滤维度即可。
 _UNIVERSAL_FILTER_DIMS = frozenset({"max_rent", "min_area", "city", "source"})
 _SOURCE_FILTER_DIMS: dict[str, frozenset] = {
-    # tenant 自 2026-08-18 起不在此列：H2S 上线 GraphQL operation 白名单后，
-    # 我们只能照抄它那条查询，而 tenant_profile_restrictions **不在该查询的字段
-    # 集里**（加进去会 403，见 h2s_gql.py）。房源因此不再带 Tenant 标签。
+    # tenant 曾在 2026-08-18 被摘出此表：H2S 上线 operation 白名单后我们只能照抄
+    # 它那条 GetCategories，而租客属性不在该查询的字段集里，房源因此不带 Tenant
+    # 标签；而这个维度是 fail-closed 的，缺值即拒绝——留着注册会让勾「仅学生」
+    # 的用户一条 H2S 房源都收不到。
     #
-    # 留着注册更糟：这个维度是 fail-closed 的，缺值即拒绝——勾「仅学生」的用户
-    # 会一条 H2S 房源都收不到。摘掉后退回 fail-open，H2S 房源照常推送，只是不
-    # 按租客资格过滤；OurDomain / OurCampus / Xior 三家不受影响。
+    # 2026-08-19 恢复：站点另有一条同样在白名单里的 GetProductDetail，字段集里有
+    # tenant_profile，按需单取即可补齐（scrapers/holland2stay.py 的详情补齐）。
+    # 取值语义从站点详情页正文逐条实测确定，见 _TENANT_PROFILE_LABELS。
     #
-    # 可以恢复：该属性仍能作为**筛选条件**用（实测 Eindhoven 不限状态 78 条），
-    # 且主查询自带的 aggregations 会报出有没有受限房源——没有就不必多查。
-    # 2026-08-18 当天可订的 48 套里一套都没有，所以先摘掉，按需补齐见
-    # docs/H2S.md §5.2。
+    # ⚠️ 补齐是**按预算分摊**的（每轮上限 20 条），冷启动后要若干轮才铺满。
+    # 期间未补到的房源没有 Tenant 标签，会被 fail-closed 拒掉——这是有意的取舍：
+    # 宁可少推几条，不可把「不确定能不能租」的房源推给勾了资格限制的用户。
     "holland2stay": _UNIVERSAL_FILTER_DIMS | {
         "floor", "occupancy", "type", "neighborhood",
-        "contract", "offer", "finishing", "energy",
+        "contract", "offer", "finishing", "energy", "tenant",
     },
     # finishing 不是抓来的，是 SOURCE_ASSUMED_FEATURES 声明的整栋楼事实。
     # 登记进来之后该维度不再走 fail-open：勾 Unfurnished 时这些房源会被正确排除，

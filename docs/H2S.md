@@ -268,13 +268,13 @@ x-enc: 1
 
 | 字段 | 用途 | 现状 |
 |---|---|---|
-| `tenant_profile_restrictions` | 学生 / 上班族标签 | 仍可作**筛选条件**（实测 Eindhoven 不限状态 78 条），且主查询自带的 aggregations 会报出有无受限房源。2026-08-18 当天可订的 48 套里一套都没有，故暂未接入；`tenant` 维度已从 H2S 的能力表摘除，见下 |
-| `building_name` | 展示用 | 同样可经 aggregations 取回，需要时再补 |
+| `tenant_profile_restrictions` | 学生 / 上班族标签 | **2026-08-19 已解决**，见 §5.6。改用 `GetProductDetail` 的 `tenant_profile`，`tenant` 维度已恢复登记 |
+| `building_name` | 展示用 | **2026-08-19 已解决**，见 §5.6 |
 | `available_startdate` | `Listing.available_from` | 已解决，见 §5.5。改用 `next_contract_startdate`——**站点自己就是拿它渲染「Available per …」的** |
 
-`tenant` 已从 `config._SOURCE_FILTER_DIMS["holland2stay"]` 中摘除。**必须摘**：该维度
-fail-closed，缺值即拒绝，留着会让勾「仅学生」的用户一条 H2S 房源都收不到——比没有
-这个筛选更糟。OurDomain / OurCampus / Xior 不受影响。
+`tenant` 曾从 `config._SOURCE_FILTER_DIMS["holland2stay"]` 中摘除（该维度 fail-closed，
+缺值即拒绝，留着会让勾「仅学生」的用户一条 H2S 房源都收不到）。**2026-08-19 已恢复**
+——补齐机制见 §5.6。
 
 ### 5.5 `available_from` 的替代来源
 
@@ -297,6 +297,68 @@ Reserved  约半数是哨兵——它们确实没有确定的可入住日
 ```
 
 占比低是正确的：绝大多数是 Reserved。**用户真正关心的可订 / 抽签房源全都有日期。**
+
+### 5.6 详情补齐：把字段集外的东西按需取回来
+
+白名单那条 `GetCategories` 的字段集是照抄的既成事实，加字段即全量 403。但站点还有
+**另一条同样在白名单里**的 operation —— `GetProductDetail`（原本是 booker 取 sku 用的，
+见 `h2s_booking_gql.py`），它的字段集大得多：
+
+```
+building_name  tenant_profile  neighborhood  min_income  income_requirements
+deposit  pets_allowed  parking_status  storage_available  energy_common_areas …
+```
+
+2026-08-19 实测 200 放行；裁剪它的字段集同样 403（与 `GetCategories` 一条规律）。
+
+#### 代价决定了用法
+
+```
+单条           ≈ 11.4 KB   （aggregations 4 KB + item 7 KB）
+分页           无变量，page_size 固定 20 → 一次 160 KB
+```
+
+**绝不能拿它替代列表抓取** —— 那会把 §5.3 省下的流量原样吐回去。只能**按需单取**：
+
+- 进程内缓存（`_DETAIL_CACHE`），同一房源只取一次；
+- 每轮预算上限（`_DETAIL_BUDGET_PER_ROUND = 20`，约 230 KB/轮封顶），冷启动分摊到
+  若干轮铺满（H2S 库存约 380 条 ≈ 19 轮）；
+- **fail-open**：任何一条失败只记 debug 日志跳过，不拖垮主抓取；失败不缓存，下轮再试。
+
+#### building_name：ID → label 走同一响应
+
+`building_name` 回的是 attribute option ID。因为 filter 收窄到了单个 `url_key`，
+同一响应的 `aggregations` 里那个属性通常只剩这一条选项，正好精确对应 —— 不需要像
+`_labels_from_aggregations` 那样跨轮累积。
+
+#### tenant_profile：三个值，从详情页正文逐条实测确定
+
+`tenant_profile` **不在 aggregations 里**，也**不是可筛选属性**（`filter` 直接报
+invalid value），所以只能写死映射表。取值语义取自站点详情页的明文说明：
+
+| ID | 站点正文 | 我们的取值 |
+|---|---|---|
+| 6213 | `Important: Students only` | `student only` |
+| 6214 | `You can book this residence as a working professional` | `employed only` |
+| 6215 | `You can book this residence as a student or a working professional` | `student or employed` |
+
+> ⚠️ 这里曾判断错一次：从下单向导「同时渲染了 Student 和 Working professional 两个
+> 选项」推断 6214 = 两者皆可。**错的** —— 选项渲染出来了但其中一个是禁用态。后来
+> 直接读详情页正文（`This residence cannot be booked by students.`）才定死。
+> 判枚举语义时以**页面明文**为准，别从控件的存在与否反推。
+
+未知 ID 一律跳过而不是回落到某个默认值 —— 猜错会把房源推给不符合资格的用户。
+
+#### 恢复了什么
+
+`tenant` 维度重新登记进 `config._SOURCE_FILTER_DIMS["holland2stay"]`，四家平台全覆盖，
+范围徽标随之消失（`dim_scope_badge("tenant") == ""`）。仪表盘的「楼盘」列也有值了。
+
+**取舍**：补齐按预算分摊，冷启动后要若干轮才铺满；期间未补到的房源没有 `Tenant`
+标签，会被 fail-closed 拒掉。这是有意的 —— 宁可少推几条，不可把「不确定能不能租」
+的房源推给勾了资格限制的用户。
+
+由 `tests/test_h2s_detail_enrich.py` 守卫。
 
 ### 5.3 分层抓取：白名单之后唯一的省流量手段
 
