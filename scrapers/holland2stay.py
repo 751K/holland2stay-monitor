@@ -175,9 +175,21 @@ _DETAIL_CACHE: dict[str, dict[str, str]] = {}
 #: 上一轮已经存进去的值**抹掉**（storage 每轮整体覆盖 features）。预算若盖不满
 #: 一轮的房源数，就会出现「补上一批、抹掉另一批」的来回拉锯。
 #:
-#: 实测每城每轮约 6–45 条，60 能一次盖满，冷启动一轮到位（≈680 KB 上限），
-#: 之后稳态 0。留着上限只为兜住「上游忽然返回几百条」的异常情况。
+#: 实测每城每轮约 6–45 条，60 能一次盖满，之后稳态 0。留着上限兜住
+#: 「上游忽然返回几百条」的异常情况。
+#:
+#: ⚠️ 光有条数上限不够：2026-08-20 生产实测，一口气连发 46 条详情请求会被 H2S
+#: 打 429（46 条里 24 条失败）。**限制速率比限制条数更重要**——见下面两个常量。
 _DETAIL_BUDGET_PER_ROUND = 60
+
+#: 两次详情请求之间的间隔。429 是按速率触发的，不是按总量。
+#: 0.6s × 46 条 ≈ 28s，摊在本来就要几十秒的 H2S 抓取里可以接受；冷启动铺满后
+#: 全是缓存命中，这个开销就归零。
+_DETAIL_REQUEST_SPACING = 0.6
+
+#: 撞到 429 就本轮收手。继续打只会加重限流，而且这些房源下轮还有机会——
+#: 补齐本来就是跨轮渐进的。没有这个开关时，46 条里有 24 条在反复撞墙。
+_DETAIL_STOP_ON_RATE_LIMIT = True
 
 #: tenant_profile 的 option ID → 语义。2026-08-19 从站点**详情页正文**逐条实测确定
 #: （不是猜的，也不是从下单向导的选项推断的——那次推断错了）：
@@ -260,15 +272,27 @@ def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
     """
     spent = 0
     failed = 0
+    rate_limited = False
     first_err: str = ""
     for l in listings:
         extra = _DETAIL_CACHE.get(l.id)
         if extra is None:
             if spent >= _DETAIL_BUDGET_PER_ROUND:
                 continue
+            if spent:
+                time.sleep(_DETAIL_REQUEST_SPACING)
             try:
                 extra = _fetch_detail(fetcher, l.id)
                 spent += 1
+            except RateLimitError as e:
+                # 速率触顶。继续打只会加重限流；这些房源下轮还有机会。
+                rate_limited = True
+                failed += 1
+                if not first_err:
+                    first_err = f"RateLimitError: {e}"
+                if _DETAIL_STOP_ON_RATE_LIMIT:
+                    break
+                continue
             except Exception as e:
                 # 只跳过这一条，不缓存失败——下轮还有机会。
                 # **但要吵一声**：fail-open + debug 日志 = 静默半残，
@@ -287,10 +311,12 @@ def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
                 l.features.append(f"{k}: {v}")
     if failed:
         logger.warning(
-            "详情补齐 %d 条失败（成功 %d，本轮共 %d 条房源）。"
+            "详情补齐 %d 条失败（成功 %d，本轮共 %d 条房源）%s。"
             "失败的房源这轮没有 Building/Tenant，会被 fail-closed 的租客筛选拒掉。"
             "首个错误: %s",
-            failed, spent, len(listings), first_err,
+            failed, spent, len(listings),
+            "，已因 429 本轮收手（下轮继续）" if rate_limited else "",
+            first_err,
         )
     return spent
 

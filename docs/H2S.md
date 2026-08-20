@@ -320,10 +320,16 @@ deposit  pets_allowed  parking_status  storage_available  energy_common_areas �
 
 **绝不能拿它替代列表抓取** —— 那会把 §5.3 省下的流量原样吐回去。只能**按需单取**：
 
-- 进程内缓存（`_DETAIL_CACHE`），同一房源只取一次；
-- 每轮预算上限（`_DETAIL_BUDGET_PER_ROUND = 20`，约 230 KB/轮封顶），冷启动分摊到
-  若干轮铺满（H2S 库存约 380 条 ≈ 19 轮）；
-- **fail-open**：任何一条失败只记 debug 日志跳过，不拖垮主抓取；失败不缓存，下轮再试。
+- 进程内缓存（`_DETAIL_CACHE`），同一房源只取一次，稳态开销为 0；
+- **限速**（`_DETAIL_REQUEST_SPACING = 0.6s`）—— 这条比条数上限更要紧：
+  2026-08-20 实测一口气连发 46 条会被打 **429**（46 条里 24 条失败）。
+  429 是按**速率**触发的，光有条数上限挡不住；
+- 撞到 429 **本轮收手**（`_DETAIL_STOP_ON_RATE_LIMIT`）——继续打只会加重限流，
+  而补齐本来就是跨轮渐进的；
+- 条数上限（`_DETAIL_BUDGET_PER_ROUND = 60`）只兜「上游忽然返回几百条」的异常；
+- **fail-open**：任何一条失败只跳过，不拖垮主抓取；失败不缓存，下轮再试。
+  但**失败要在 WARNING 级别聚合报出来**——最初写成 `debug`，结果 46 条只补上 25 条
+  而日志上完全看不出来。fail-open 加看不见的日志就是静默半残，我们栽过。
 
 #### building_name：ID → label 走同一响应
 

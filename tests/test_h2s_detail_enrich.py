@@ -16,6 +16,12 @@ from models import Listing
 
 
 @pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    """补齐会在请求之间 sleep（防 429）。测试里不能真等——70 条就是 41 秒。"""
+    monkeypatch.setattr(h2s.time, "sleep", lambda _s: None)
+
+
+@pytest.fixture(autouse=True)
 def _clear_cache():
     """补齐缓存是进程级的，不清会跨用例泄漏，把「只取一次」的断言变成永远通过。"""
     h2s._DETAIL_CACHE.clear()
@@ -208,3 +214,64 @@ class TestQueryIsTheVerbatimOne:
         from config import _SOURCE_FILTER_DIMS
         assert "tenant" in _SOURCE_FILTER_DIMS["holland2stay"]
         assert "Tenant" in h2s._detail_features({"tenant_profile": 6213}, [])
+
+
+class TestRateLimiting:
+    """一口气连发详情请求会被 H2S 打 429 —— 2026-08-20 生产实测，46 条里 24 条失败。
+
+    **限速比限量更重要**：光有条数上限挡不住 429，因为 429 是按速率触发的。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _record_sleep(self, monkeypatch):
+        slept = []
+        monkeypatch.setattr(h2s.time, "sleep", lambda s: slept.append(s))
+        self.slept = slept
+        yield
+
+    def test_spaces_out_requests(self):
+        """请求之间要有间隔，否则必然 429。"""
+        f = _Fetcher({f"k-{i}": {"building_name": 614} for i in range(4)})
+        h2s._enrich(f, [_listing(f"k-{i}") for i in range(4)])
+        # 首个请求不等，之后每个都等
+        assert self.slept == [h2s._DETAIL_REQUEST_SPACING] * 3
+
+    def test_spacing_is_meaningful(self):
+        """间隔太小等于没限速；太大会把抓取拖垮。"""
+        assert 0.2 <= h2s._DETAIL_REQUEST_SPACING <= 2.0
+
+    def test_cached_listings_do_not_sleep(self):
+        """稳态全是缓存命中，不该白等——否则每轮凭空多几十秒。"""
+        f = _Fetcher({"k-0": {"building_name": 614}})
+        h2s._enrich(f, [_listing("k-0")])
+        self.slept.clear()
+        h2s._enrich(f, [_listing("k-0")])
+        assert self.slept == []
+
+    def test_stops_on_rate_limit(self):
+        """撞到 429 本轮收手，别继续撞墙。
+
+        没有这个开关时，46 条里 24 条在反复撞同一堵墙——既补不上，又加重限流。
+        """
+        from scrapers.base import RateLimitError
+
+        class _Limited(_Fetcher):
+            def fetch_gql(self, *a, **k):
+                self.calls.append(1)
+                raise RateLimitError("Holland2Stay 返回 429 Too Many Requests")
+
+        f = _Limited()
+        h2s._enrich(f, [_listing(f"k-{i}") for i in range(10)])
+        assert len(f.calls) == 1, f"429 后还在继续打：{len(f.calls)} 次"
+
+    def test_rate_limit_is_reported(self, caplog):
+        import logging
+        from scrapers.base import RateLimitError
+
+        class _Limited(_Fetcher):
+            def fetch_gql(self, *a, **k):
+                raise RateLimitError("429")
+
+        with caplog.at_level(logging.WARNING, logger=h2s.logger.name):
+            h2s._enrich(_Limited(), [_listing("k-0")])
+        assert "429" in caplog.text
