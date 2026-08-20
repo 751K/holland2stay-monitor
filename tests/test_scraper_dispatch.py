@@ -430,3 +430,75 @@ def test_no_method_is_silently_shadowed_by_a_duplicate_definition():
                      if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
             dupes = {n for n in names if names.count(n) > 1}
             assert not dupes, f"{path}:{node.name} 里重复定义了 {dupes}"
+
+
+class TestCompletenessKeyHasOneImplementation:
+    """completeness 字典的 key 构造只准有一份实现。
+
+    monitor 曾在 ``_dispatch_with_h2s_circuit`` 里自己写了一个 ``_ckey``，
+    注释是「与 ``scrapers._completeness_key`` 保持一致的 key 构造」——**靠注释
+    维持的一致性不是一致性**。两边必须同时改，而没有任何东西保证这点。
+
+    key 形态错开的后果不是报错，是**静默的错误收敛**：monitor 写进
+    ``completeness_all`` 的 key 与 dispatcher 返回的对不上，
+    ``mark_stale_listings`` 就会拿一个 source 的完整性去收敛另一个 source 的
+    listing，或者干脆漏掉某个城市的收敛。
+    """
+
+    def test_monitor_does_not_reimplement_it(self):
+        import inspect
+
+        import monitor
+
+        src = inspect.getsource(monitor.run_once)
+        assert "def _ckey(" not in src, (
+            "monitor 又自己写了一份 key 构造——两边必须同时改，靠注释维持不住"
+        )
+
+    def test_monitor_imports_the_shared_one(self):
+        import monitor
+        import scrapers
+
+        assert monitor.completeness_key is scrapers.completeness_key
+
+    @pytest.mark.parametrize("multi,expected", [
+        (True, "holland2stay:Eindhoven"),
+        (False, "Eindhoven"),
+    ])
+    def test_key_shape(self, multi, expected):
+        import scrapers
+
+        assert scrapers.completeness_key(
+            "holland2stay", "Eindhoven", multi_source=multi,
+        ) == expected
+
+    def test_dispatcher_output_matches_the_shared_helper(self):
+        """行为级守卫：dispatcher 真正产出的 key 必须等于共享函数算出来的。"""
+        import scrapers
+        from scrapers.base import ScrapeResult
+
+        class _Fake(scrapers.base.AbstractScraper):
+            source = "holland2stay"
+
+            def scrape(self, task):
+                return ScrapeResult(task=task, listings=[], complete=True)
+
+        monkey = scrapers.SCRAPER_REGISTRY.copy()
+        scrapers.SCRAPER_REGISTRY["holland2stay"] = _Fake
+        scrapers.reset_scraper_instances()
+        try:
+            tasks = [ScrapeTask(source="holland2stay", city_key="29",
+                                city_display="Eindhoven")]
+            for multi in (True, False):
+                _, completeness = scrapers.dispatch_scrape_tasks(
+                    tasks, multi_source=multi,
+                )
+                assert set(completeness) == {
+                    scrapers.completeness_key(
+                        "holland2stay", "Eindhoven", multi_source=multi,
+                    )
+                }
+        finally:
+            scrapers.SCRAPER_REGISTRY.clear()
+            scrapers.SCRAPER_REGISTRY.update(monkey)
+            scrapers.reset_scraper_instances()

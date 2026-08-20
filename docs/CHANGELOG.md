@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.17.12 (2026-08-20)
+
+completeness key 的构造收敛成一份实现。
+
+### 问题
+
+monitor 在 `_dispatch_with_h2s_circuit` 里自己写了一个 `_ckey`，注释是
+「与 `scrapers._completeness_key` 保持一致的 key 构造」——**靠注释维持的一致性
+不是一致性**。两处必须同时改，而没有任何东西保证这点。
+
+key 形态一旦错开，症状不是报错，是**静默的错误收敛**：monitor 写进
+`completeness_all` 的 key 与 dispatcher 返回的对不上，`mark_stale_listings`
+会拿一个 source 的完整性去收敛另一个 source 的 listing，或者干脆漏掉某个城市。
+
+### 修法
+
+`scrapers._completeness_key` 提升为公开的 `scrapers.completeness_key`，签名从
+`(source, city_display, by_source, multi_source)` 简化成
+`(source, city_display, *, multi_source)`——`by_source` 那个参数只是为了在
+dispatcher 内部兜底数 source 数，现在在 `dispatch_scrape_tasks` 开头算一次
+`multi` 就够了。monitor 直接调它，本地的 `_ckey` 删除。
+
+### 测试
+
+新增 `TestCompletenessKeyHasOneImplementation`（5 条）：monitor 不得再定义
+`_ckey`、两边必须是同一个函数对象、key 形态、以及一条**行为级**守卫——
+dispatcher 真正产出的 key 必须等于共享函数算出来的。2 个变异全部捕获。
+
+全套 2592 通过。
+
 ## v1.17.11 (2026-08-20)
 
 浏览器生命周期抽成共享基类。

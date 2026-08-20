@@ -72,6 +72,7 @@ from scrapers import (
     RateLimitError,
     ScrapeNetworkError,
     UpstreamMaintenanceError,
+    completeness_key,
     dispatch_scrape_tasks,
     is_proxy_service_error,
 )
@@ -1860,9 +1861,10 @@ async def run_once(
         # 时刻而不是各 source 各自的完成时刻——否则同一轮的行会散成好几组。
         round_at = datetime.now(timezone.utc).isoformat()
 
-        def _ckey(source: str, city_display: str) -> str:
-            """与 ``scrapers._completeness_key`` 保持一致的 key 构造。"""
-            return f"{source}:{city_display}" if multi_source else city_display
+        # completeness 的 key 直接用 dispatcher 那份共享实现
+        # （``scrapers.completeness_key``）。这里以前有个本地 ``_ckey``，注释写着
+        # 「与 scrapers._completeness_key 保持一致」——靠注释维持的一致性不是
+        # 一致性，而形态一旦错开症状不是报错，是静默的错误收敛。
 
         async def _dispatch(selected, *, isolated: bool = False, browser_source: str = ""):
             result = await _dispatch_scrape_tasks_async(
@@ -1894,7 +1896,9 @@ async def run_once(
                 # 标 ✗ 而不是留空：完整扫描那行日志要看得出「这个 source 塌了」，
                 # 且 False 会正确挡住该城市的 stale 收敛。
                 for t in group:
-                    completeness_all.setdefault(_ckey(src, t.city_display), False)
+                    completeness_all.setdefault(
+                        completeness_key(src, t.city_display,
+                                         multi_source=multi_source), False)
                 logger.error(
                     "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
                     src, len(group), type(e).__name__, e,
@@ -1963,7 +1967,9 @@ async def run_once(
                 # 决定整轮的生死。403 熔断仍走上面的 BlockedError 分支，不受影响。
                 source_failures.append((_H2S_SOURCE, e))
                 for t in selected_h2s:
-                    completeness_all.setdefault(_ckey(_H2S_SOURCE, t.city_display), False)
+                    completeness_all.setdefault(
+                        completeness_key(_H2S_SOURCE, t.city_display,
+                                         multi_source=multi_source), False)
                 logger.error(
                     "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
                     _H2S_SOURCE, len(selected_h2s), type(e).__name__, e,

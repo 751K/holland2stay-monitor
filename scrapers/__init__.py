@@ -149,6 +149,10 @@ def dispatch_scrape_tasks(
     for t in tasks:
         by_source[t.source].append(t)
 
+    # 整轮是否跨多个 source。调用方知道全貌时以它为准；不知道时（单元测试直接
+    # 喂一批混合任务）退回本次调用里数得到的 source 数。
+    multi = multi_source or len(by_source) > 1
+
     all_listings: list = []
     completeness: dict[str, bool] = {}
     success_count = 0
@@ -169,7 +173,7 @@ def dispatch_scrape_tasks(
         if not scraper:
             # 未注册的 source 不抛异常，跳过——避免某条配置笔误把整个监控卡住
             for t in source_tasks:
-                completeness[_completeness_key(source, t.city_display, by_source, multi_source)] = False
+                completeness[completeness_key(source, t.city_display, multi_source=multi)] = False
             continue
 
         # batch_session() 让 scraper 把 Session/TLS 指纹提升到批次级——H2S
@@ -188,7 +192,7 @@ def dispatch_scrape_tasks(
         try:
             with scraper.batch_session():
                 for t in source_tasks:
-                    ckey = _completeness_key(source, t.city_display, by_source, multi_source)
+                    ckey = completeness_key(source, t.city_display, multi_source=multi)
                     try:
                         result = scraper.scrape(t)
                         success_count += 1
@@ -264,7 +268,7 @@ def dispatch_scrape_tasks(
             # 只补还没有结论的 task——异常若来自 ``__exit__``，前面已经跑完的
             # task 有自己的 completeness，不该被这里覆盖。
             for t in source_tasks:
-                ckey = _completeness_key(source, t.city_display, by_source, multi_source)
+                ckey = completeness_key(source, t.city_display, multi_source=multi)
                 if ckey in completeness:
                     continue
                 completeness[ckey] = False
@@ -326,23 +330,29 @@ def _proxy_error_for(tasks: list, network_failures: list[str]) -> "ProxyError":
     return ProxyError(f"全部 {len(tasks)} 个任务因代理故障失败: {where}")
 
 
-def _completeness_key(
-    source: str,
-    city_display: str,
-    by_source: dict[str, list[ScrapeTask]],
-    multi_source: bool = False,
-) -> str:
-    """
-    多源时 completeness 字典 key 加 source 前缀防同名城市覆盖。
-    单源时退化为纯 city_display（保持与旧 scrape_all 输出兼容）。
+def completeness_key(source: str, city_display: str, *, multi_source: bool) -> str:
+    """completeness 字典的 key。**这是唯一的实现，别再写第二份。**
 
-    ``by_source`` 只看得到**本次调用**的 source，而 monitor 是按 source 分开
-    调用 dispatcher 的——光看它永远是 1。所以还要 ``multi_source``：由知道
-    整轮全貌的调用方给出。
+    多源时加 source 前缀防同名城市互相覆盖（H2S 的 Amsterdam 与 OurDomain 的
+    Amsterdam）；单源时退化为纯 ``city_display``，保持与旧 ``scrape_all``
+    输出兼容。
+
+    为什么必须共享
+    --------------
+    monitor 侧也要构造同样的 key：它按 source 分开调 dispatcher，某个 source
+    整体失败时得自己把那些 task 标成不完整。以前那里另写了一个 ``_ckey``，
+    注释是「与 ``scrapers._completeness_key`` 保持一致」——**靠注释维持的一致性
+    不是一致性**。
+
+    key 形态一旦错开，症状不是报错而是**静默的错误收敛**：monitor 写进
+    ``completeness_all`` 的 key 与 dispatcher 返回的对不上，
+    ``mark_stale_listings`` 会拿一个 source 的完整性去收敛另一个 source 的
+    listing，或者干脆漏掉某个城市。
+
+    ``multi_source`` 只能由**知道整轮全貌**的调用方给：dispatcher 每次只收到
+    一个 source 的任务，自己看永远是单源。
     """
-    if multi_source or len(by_source) > 1:
-        return f"{source}:{city_display}"
-    return city_display
+    return f"{source}:{city_display}" if multi_source else city_display
 
 
 __all__ = [
@@ -357,6 +367,7 @@ __all__ = [
     "ProxyError",
     "RateLimitError",
     "SCRAPER_REGISTRY",
+    "completeness_key",
     "ScrapeNetworkError",
     "ScrapeResult",
     "ScrapeTask",
