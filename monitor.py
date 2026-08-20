@@ -131,7 +131,7 @@ async def _dispatch_scrape_tasks_async(
     非浏览器 source 继续用默认 executor。
 
     ``multi_source`` 要透传给 dispatcher：本函数每次只喂一个 source 的任务，
-    dispatcher 自己看不出整轮是不是多源（见 ``_completeness_key``）。
+    dispatcher 自己看不出整轮是不是多源（见 ``scrapers.completeness_key``）。
     """
     executor = (
         _get_browser_executor(browser_source or _H2S_SOURCE) if isolated else None

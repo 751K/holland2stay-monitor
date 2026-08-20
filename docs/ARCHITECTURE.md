@@ -199,6 +199,8 @@ flowchart TD
 scrapers/
 ├── base.py           AbstractScraper / ScrapeTask / ScrapeResult / 异常定义
 ├── __init__.py       SCRAPER_REGISTRY + get_scraper() + dispatch_scrape_tasks()
+├── _browser_backed.py BrowserBackedScraper：浏览器型 source 的共同基类，
+│                     承载创建 / 存活性检查 / 年龄重建 / 批次会话的生命周期
 ├── holland2stay.py   GraphQL over 浏览器传输层
 ├── ourdomain.py      RENTCafe HTML/AJAX over curl_cffi
 ├── ourcampus.py      继承 OurDomain，只换取单元表的请求形状
@@ -634,15 +636,71 @@ v1.9.0 声称实现了跨轮复用，但上述两条均未满足，实际从未�
 
 ### 5.5 source 级熔断
 
-Holland2Stay 抓取抛出 `BlockedError`（**仅限 403 这一种情形**，而非任何失败）时
-会触发熔断，**仅暂停 Holland2Stay**，其余 source 继续运行。冷却时间自 30 分钟
-起，连续失败则翻倍，上限 6 小时；冷却到期后先以 1 个城市作 canary 试探，成功后
-方恢复完整扫描。
+每个 source 各持有一个独立的熔断器，实现于
+[`mcore/circuit.py`](../mcore/circuit.py) 的 `SourceCircuits`。当某 source 的
+任务整体失败、且异常类型落在该 source 的 `trips_on` 白名单内时触发熔断，
+**仅暂停该 source**，其余 source 继续运行；冷却到期后先以 1 个 target 作 canary
+试探，成功后方恢复完整扫描。连续失败则冷却翻倍，直至该 source 的上限。
 
-若仅启用单个 source，该设计将失去意义——Holland2Stay 一旦熔断，整轮即为空操作。
+冷却参数按 source 分别配置——各平台的失败语义并不相同，退避参数亦不应相同：
 
-Xior 与 OurDomain **没有**对等的熔断机制，仅有 §5.8 的逐 source 隔离。其失败不会
-累积为暂停，每轮照常重试。
+| Source | 触发熔断的异常 | 起始冷却 | 上限 |
+|---|---|---|---|
+| Holland2Stay | `BlockedError` | 30 分钟 | 6 小时 |
+| Xior | `BlockedError` / `RateLimitError` | 10 分钟 | 1 小时 |
+| 其余（默认） | `BlockedError` | 15 分钟 | 2 小时 |
+
+Xior 将 429 纳入熔断，是因其限流按 IP 跨轮累积（见
+[XIOR.md §2.2](XIOR.md)）：整源 429 之后若不退避，下一轮恰好在限流最严的时刻
+再次施压。Holland2Stay 则不纳入——该平台的 429 由抓取层内部的
+`RATE_LIMIT_BACKOFF` 消化即可，此为实测结论。
+
+`ScrapeNetworkError` 一律不触发熔断。网络失败已有 main_loop 的连续失败计数与
+冷却，叠加第二层退避会使恢复时机难以预测。
+
+`trips_on` 采用白名单而非黑名单：新增一种异常时默认**不**熔断，较之默认熔断
+更为安全。
+
+若仅启用单个 source，熔断将失去隔离意义——该 source 一旦熔断，整轮即为空操作。
+
+**该机制曾长期为 Holland2Stay 独有。** 抽象层是对称的（`AbstractScraper` 与
+`SCRAPER_REGISTRY`），编排层却将 Holland2Stay 硬编码为特例——它曾是唯一的
+source，这一历史遗留固化成了架构。其后果是保护恰好装在了最不需要它的那个
+source 上。推广前对保留日志中「整体抓取失败」的全量统计如下：
+
+| Source | 异常 | 次数 | 当时是否有熔断 |
+|---|---|---|---|
+| Xior | `RateLimitError` | 147 | 否 |
+| OurDomain | `ScrapeNetworkError` | 67 | 否 |
+| OurCampus | `ScrapeNetworkError` | 60 | 否 |
+| Xior | `ScrapeNetworkError` | 57 | 否 |
+| Holland2Stay | 全部合计 | 6 | 是 |
+
+#### 5.5.1 退避状态必须落库
+
+熔断截止时刻与连败计数、登录抑制、各类告警节流，原本均为 `monitor` 的模块级
+全局变量，进程重启即清零。其代价是：正处于 6 小时退避中的 source，一次部署即
+令其恢复满速施压；2026-08-20 当日部署 12 次，等同于 12 次退避清零，admin 亦于
+每次部署后重收同一批告警。
+
+该判断项目自身早已写下——`_apply_source_intervals` 的注释即为「时间戳存 meta，
+重启后仍然生效，否则频繁重启会绕过节流，而重启往往正因出现故障」。同一判断、
+同一文件，当时仅落实于「source 抓取间隔」一项。
+
+现由 [`mcore/backoff.py`](../mcore/backoff.py) 的 `PersistedBackoff` 统一承载，
+状态写入 `meta` 表。两个设计要点：
+
+- **采用墙钟而非单调钟。** `monotonic()` 的零点是进程启动，持久化其取值并无
+  意义。代价是须处理 NTP 跳变，处理方式为将剩余时间钳制至配置上限——等待时长
+  永不超过该 source 配置的最长退避。若不钳制，一次时钟回跳足以令该 source 长期
+  停摆，且无任何日志可供追溯成因。
+- **`expire()` 与 `reset()` 语义分离。** `reset()` 表示问题已解决（canary
+  成功），连败计数清零；`expire()` 表示本轮等待到期，计数保留。二者混同会使
+  持续被封时每次退避均自起始值重新计算，永远无法逼近上限，而该上限正是用于
+  保护出口 IP 的。
+
+读取失败不视为致命：退避状态是优化而非抓取的前提，读不到最多退化为「本轮不
+退避」，不应将 monitor 拦在启动阶段。
 
 ### 5.6 「屏蔽」「维护」「限流」要分开
 
@@ -650,13 +708,45 @@ Xior 与 OurDomain **没有**对等的熔断机制，仅有 §5.8 的逐 source 
 
 | 异常 | 触发条件 | 处置 |
 |---|---|---|
-| `BlockedError` | Cloudflare 屏蔽、clearance 无法恢复 | source 熔断并向 admin 告警 |
+| `BlockedError` | Cloudflare 屏蔽、clearance 无法恢复 | source 熔断并向 admin 告警；批次结束后丢弃浏览器会话（§5.9） |
 | `UpstreamMaintenanceError` | 平台维护页 | 静默冷却，**不打扰普通用户**（该情形下用户无可操作） |
-| `RateLimitError` | 429 | 退避重试 |
+| `OperationNotAllowedError` | 403，但正文为上游应用所述「该 operation 未登记」 | 隔离该 task，且**不**丢弃会话、**不**更换出口 IP——二者均属无效动作，须照抄站点原文 |
+| `RateLimitError` | 429 | 先由抓取层退避重试；退避耗尽则短路同 source 的剩余 task（§5.6.1），并按该 source 的策略决定是否熔断（§5.5） |
+| `ProxyError` | 代理层故障（`ScrapeNetworkError` 的子类） | 冷却该代理、切换备用，或降级为直连原生 IP（§5.15） |
 | `ScrapeNetworkError` | 网络故障 / 超时 / 非预期响应 | 该 task 不计入 completeness（缺席不等于完整），连续失败达到阈值后方冷却 |
 
 维护异常曾被 403 处理分支归并为 `BlockedError`，导致平台维护走上了熔断加告警的
 路径。
+
+#### 5.6.1 429 是 source 级状态，不是 task 级状态
+
+`dispatch_scrape_tasks()` 原本将 `RateLimitError` 与 `BlockedError` 置于同一
+`except` 分支，但仅为 403 设有 source 级处理（批次结束后丢弃会话），429 记入
+`hard_failures` 后即继续下一个 task。
+
+429 是服务端针对本客户端**出口 IP** 作出的配额判定，而非针对某一栋楼或某一个
+城市。首个 task 在退避耗尽后仍被拒绝，即说明配额尚未恢复，其余 task 必然同样
+被拒——区别仅在于每一个都要先睡满一整轮退避，去重新证明一件已知的事。
+
+2026-08-20 生产日志（Xior，4 个城市）：
+
+```
+16:21:06  xior:Amsterdam Karspeldreef      429
+16:22:37  xior:Amsterdam Naritaweg         429   +91s
+16:24:08  xior:Eindhoven Kronehoefstraat   429   +91s
+16:25:39  xior:Eindhoven Zernikestraat     429   +91s
+```
+
+整齐的 91 秒即 `RATE_LIMIT_BACKOFF` 的 30s 加 60s，单次爆发约 6 分钟。**该 6
+分钟阻塞整轮**，同轮内其余 source 的房源随之延迟交付。此类爆发自 2026-08-10
+起每日约 10 次，累计接近 1 小时的空转。
+
+现改为：批次内一旦出现 429，同 source 的剩余 task 直接判定为失败，不再发出任何
+请求。同一日改动后的首次爆发，四条记录落在同一毫秒内，熔断于 3 毫秒后跳闸。
+
+三项**刻意未作改动**者：403 仍跑完整批、批次结束后方丢弃会话（§5.9）；429 仍
+不丢弃会话（等待即可恢复，重建只是徒然多过一次 Cloudflare 挑战）；
+`ScrapeNetworkError` 不短路——它是单次请求的抖动，而非配额判定。
 
 ### 5.7 completeness 决定能否做状态收敛
 
@@ -689,8 +779,8 @@ incomplete，会导致 stale 收敛永不执行。v1.9.6 以「非 204 即故障
 
 现 monitor 逐 source 隔离：失败的 source 在完整扫描日志中标记 `✗`，其余照常入库
 并发送通知；仅当**全部** source 均失败时才向上抛出，并由 `_pick_round_failure()`
-按 `ProxyError → Maintenance → Blocked → RateLimit → Network` 的优先级挑选一个
-最适合 main_loop 据以决策的异常。
+按 `ProxyError → Maintenance → OperationNotAllowed → Blocked → RateLimit →
+Network` 的优先级挑选一个最适合 main_loop 据以决策的异常。
 
 另有一处同类缺陷：`batch_session()` 的进入与退出发生在 per-task `try` **之外**，
 浏览器创建失败、Cloudflare 挑战未通过、Playwright 崩溃均会由此穿透整个 dispatcher。
@@ -1078,14 +1168,39 @@ Chromium 将其压缩为 `ERR_TUNNEL_CONNECTION_FAILED`，日志随之写出六�
 
 `SHADOW_SOURCES` 中列出的 source 会在 `diff()` 之后、分发之前被整体滤除：房源照常
 入库、状态变更照常记录、stale 收敛照常参与，但不发送任何通知。该机制用于新平台
-上线前的静默验证。
+上线前的静默验证。被滤除的事件在丢弃时即标记为「已走完通知阶段」——「决定不发」
+同样是通知阶段的一种结论，若不标记，§6.1 的重放会将静默拦下的房源原样推送给
+用户，影子保证当场失效。
+
+### 6.1 交付语义为 at-least-once
+
+`run_once` 的顺序是 `diff()` → 通知 → 标记。而 `diff()` 检测变更的副作用正是
+覆盖掉用于检测的那份旧状态，因此「diff 已提交、通知尚未发出」这一窗口内进程
+若终止，事件即永久丢失——下一轮 `diff()` 所见的新旧状态已然相同，不再产出任何
+结果。触发条件相当日常：2026-08-20 当日部署 12 次，每次 `--force-recreate` 都
+在打断正在进行的轮次。
+
+`notified` 字段形似一本 at-least-once 的账，实则只写不读：全仓库并无任何
+`SELECT` 读取它，仅有两条 `UPDATE` 将其置 1。
+
+现改为有界重放，三件事须同时成立，缺其一即构成一次面向全体用户的通知轰炸：
+
+| 措施 | 内容 | 缺失的后果 |
+|---|---|---|
+| 语义修正 | `notified=1` 自「至少投递给一个用户」改为「已走完通知阶段」 | 无人匹配的房源永远停留在 0，重放信号被噪音淹没 |
+| 一次性迁移 | 存量 `notified=0` 全部置 1，靠 meta 打标只执行一次 | 历史数据被当作待发事件重放 |
+| 有界重放 | 仅重放 90 分钟窗口内的事件，单轮上限 50 条，超窗者归档 | 0 池只增不减，每轮空扫 |
+
+取舍是非对称的：重复通知仅构成打扰，漏发通知则会令用户错过房源。上线前以真实
+生产库快照预演迁移，403 条 listings 与 204 条 status_changes 的积压全部归档，
+首次部署重放 0 条事件，与生产实测一致。
 
 永久性失败须与临时故障区分处理。例如：用户屏蔽 Telegram bot 后，每次请求均返回
 `403 bot was blocked by the user`，该状态不会自行恢复。系统现会停止重试并自动关闭
 该用户的 Telegram 渠道（凭据保留，解除屏蔽后重新勾选即可），同时写入一条面板通知
 说明原因。
 
-### 6.1 普通用户只接收房源相关推送
+### 6.2 普通用户只接收房源相关推送
 
 允许发往用户渠道的仅有四类，其余一律经 `_notify_admin_only()` 发往 admin
 （面板通知 + admin 推送）：

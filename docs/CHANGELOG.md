@@ -1,5 +1,178 @@
 # Changelog
 
+## v1.19.0 (2026-08-20)
+
+后端**架构审查**，四项修复。主题与 v1.18.0 不同：那一轮修的是异常分类，这一轮
+修的是**编排层的假设**——三处把「当时只有一个 source」「进程不会中途重启」这类
+早已不成立的前提固化进了结构。
+
+### 1. 通知交付自 at-most-once 改为 at-least-once
+
+`run_once` 的顺序是 `diff()` → 通知 → 标记，而 `diff()` 检测变更的副作用正是
+覆盖掉用于检测的那份旧状态。于是「diff 已提交、通知尚未发出」这一窗口内进程若
+终止，事件即永久丢失：下一轮 `diff()` 所见新旧状态已然相同，不再产出任何结果。
+
+触发条件相当日常——2026-08-20 当日部署 12 次，每次 `--force-recreate` 都在打断
+正在进行的轮次。
+
+`notified` 字段形似一本 at-least-once 的账，实则只写不读：全仓库并无任何
+`SELECT` 读取它，仅有两条 `UPDATE` 将其置 1。
+
+改动包含三件必须同时成立的事，缺其一即构成一次面向 51 位真实用户的通知轰炸：
+
+| 措施 | 内容 |
+|---|---|
+| 语义修正 | `notified=1` 自「至少投递给一个用户」改为「已走完通知阶段」。旧语义使无人匹配的房源永远停留在 0——生产实测 559 条 listings 中 403 条属此，319 条 status_changes 中 204 条属此 |
+| 一次性迁移 | 存量 `notified=0` 全部置 1，靠 meta 打标只执行一次。它们是历史数据，重放是错的 |
+| 有界重放 | 仅重放 90 分钟窗口内的事件，单轮上限 50 条，超窗者归档，否则 0 池只增不减 |
+
+顺带修复一处会被重放直接击穿的交互：影子 source 的事件原本被丢弃后不作任何标记，
+注释亦写明「副作用是 `notified` 一直为 0」。在只写不读的年代这无害，加入重放之后
+则会将静默拦下的房源原样推送给用户，影子保证当场失效。现改为丢弃时即标记——
+「决定不发」同样是通知阶段的一种结论，原注释所承诺的「解除影子不补发历史」因此
+依然成立。
+
+取舍写在测试里：重复通知仅构成打扰，漏发通知会令用户错过房源，代价并不对称。
+
+上线前以真实生产库快照预演迁移：403 与 204 条积压全部归档，首次部署重放 0 条
+事件，与生产实测一致。
+
+新增 `tests/test_notification_replay.py`（20 条）。5 个变异中有 2 个首轮未被捕获
+（语义修正仅在 storage 层有测试、状态变更一侧缺对称用例），补测试后全部捕获。
+
+### 2. 退避 / 熔断 / 告警节流的状态改为落库
+
+上述状态原本全为 `monitor` 的模块级全局变量，进程重启即清零：
+
+```
+_h2s_circuit_open_until / _fail_streak    H2S 熔断（最长 6 小时退避）
+_h2s_login_blocked_until                  登录抑制（1 小时）
+_last_*_notify_at ×6                      全部告警节流
+```
+
+即正被 Cloudflare 封禁、退避已拉至 6 小时之际部署一次，立刻恢复满速施压。当日
+12 次部署等同于 12 次退避清零；告警节流同样被清，admin 每次部署后重收同一批
+告警。
+
+而这一判断项目自身早已写下——`_apply_source_intervals` 的注释即为「时间戳存
+meta，重启后仍然生效，否则频繁重启会绕过节流，而重启往往正因出现故障」。同一
+判断、同一文件，当时仅落实于「source 抓取间隔」一项。
+
+新增 `mcore/backoff.py:PersistedBackoff`，将「截止时刻 + 连败计数」写入 meta；
+上列 8 处状态全部迁入（其中 H2S 熔断随第 3 项进一步并入 `SourceCircuits`），
+`_async_main` 启动时经 `_bind_persistent_state()` 接管句柄并恢复。两个设计要点见
+[ARCHITECTURE.md §5.5.1](ARCHITECTURE.md)：采用墙钟而非单调钟（须将剩余时间钳制
+至配置上限以承受 NTP 跳变），以及 `expire()` 与 `reset()` 的语义分离（混同会使
+退避永远无法逼近上限）。
+
+`conftest` 的 `_reset_monitor_h2s_guards` 一并修正：它原本直接向 monitor 赋属性，
+在全局被取代之后不再复位任何东西，只是凭空造出同名属性，致使「旧全局不许回来」
+的守卫单独运行时通过、整套运行时必然失败。
+
+新增 `tests/test_backoff_persistence.py`（14 条）。3 个变异中「启动时不 bind」
+一项首轮未被捕获——所有单元测试自行传入 storage，删除接线照样全绿；补 AST 守卫
+后捕获。
+
+### 3. 抓取熔断自 Holland2Stay 专属推广至每个 source
+
+monitor 中 Holland2Stay 专属逻辑有 56 处引用。抽象层是对称的（`AbstractScraper`
+与 `SCRAPER_REGISTRY`），编排层却将其硬编码为特例——历史遗留（它曾是唯一
+source）固化成的架构。
+
+结果是保护恰好装在了最不需要它的那个 source 上。保留日志中「整体抓取失败」的
+全量统计：
+
+```
+xior          RateLimitError      147 次   ← 无熔断
+ourdomain     ScrapeNetworkError   67 次   ← 无熔断
+ourcampus     ScrapeNetworkError   60 次   ← 无熔断
+xior          ScrapeNetworkError   57 次   ← 无熔断
+holland2stay  全部合计              6 次   ← 有熔断
+```
+
+Xior 的限流按 IP 累积（约 15–20 req/window），整源 429 之后并无任何退避，下一轮
+照常施压——恰是「限流最严之时接着再撞」。
+
+新增 `mcore/circuit.py:SourceCircuits`，每个 source 一个熔断器，状态落库。策略
+按 source 配置，不作一刀切——各家失败语义不同，退避参数就不应相同：
+
+| Source | 触发熔断的异常 | 起始冷却 | 上限 |
+|---|---|---|---|
+| Holland2Stay | `BlockedError` | 30 分钟 | 6 小时 |
+| Xior | `BlockedError` / `RateLimitError` | 10 分钟 | 1 小时 |
+| 默认（新平台自动获得） | `BlockedError` | 15 分钟 | 2 小时 |
+
+Holland2Stay 的两个数字系原样搬迁，未作调整——本次是推广机制，而非重新调参。
+429 是否纳入熔断亦按 source 配置：Holland2Stay 一侧「429 等待即可、由抓取层的
+`RATE_LIMIT_BACKOFF` 处理」是实测结论，不应顺手改掉。网络错误一律不熔断——已有
+连续失败计数与冷却，叠加两层退避会使恢复时机难以预测。
+
+`trips_on` 采用白名单而非黑名单：新增一种异常时默认不熔断，较之默认熔断安全。
+
+Holland2Stay 的分支现亦走同一套机制，仅保留其独有的那一半：登录 / 预订链路抑制
+（唯有该平台具备自动预订，403 之后继续触碰登录接口只会令 WAF 状态更热）。
+
+顺带修复一处真实的健壮性缺口：`PersistedBackoff.load()` 的 docstring 写明「绝不
+抛出」，实际仅有 meta 内容损坏一种情形被 `_as_float` 兜住，连接本身出问题会一路
+抛出，将 monitor 拦在启动阶段。退避状态是优化而非抓取的前提，读不到最多退化为
+「本轮不退避」。迁移时确曾触发：测试关闭 Storage 之后 teardown 再触碰熔断，10
+个用例集体 `ProgrammingError`。
+
+新增 `tests/test_source_circuit.py`（24 条），5 个变异全部捕获。
+
+**首次实战验证**：2026-08-20 16:25 Xior 因 429 熔断，跳闸 → 冷却 600 秒 → 单
+target canary → 成功关闭 → `watchdog[recovered]`，全流程一步不差，同轮其余
+source 照常完成扫描。
+
+### 4. 429 改为 source 级短路
+
+`dispatch_scrape_tasks()` 将 `RateLimitError` 与 `BlockedError` 置于同一
+`except` 分支，但仅为 403 设有 source 级处理（批次结束后丢弃会话），429 记入
+`hard_failures` 后即继续下一个城市。
+
+而 429 是服务端针对本客户端出口 IP 作出的配额判定，并非针对某一栋楼。首个 task
+退避耗尽后仍被拒绝，其余必然同样被拒——区别仅在于每一个都要先睡满一整轮退避，
+去重新证明一件已知的事。
+
+生产日志（2026-08-20，Xior 4 个城市）：
+
+```
+16:21:06  xior:Amsterdam Karspeldreef      429
+16:22:37  xior:Amsterdam Naritaweg         429   +91s
+16:24:08  xior:Eindhoven Kronehoefstraat   429   +91s
+16:25:39  xior:Eindhoven Zernikestraat     429   +91s
+```
+
+整齐的 91 秒即 30s + 60s 退避，单次爆发约 6 分钟。该 6 分钟阻塞整轮，同轮内
+Holland2Stay 与 OurDomain 的房源随之延迟交付。此类爆发自 08-10 起每日约 10 次
+（08-18 计 72 次 / 08-19 计 80 次 / 08-20 计 39 次，按 task 计），累计接近 1
+小时的空转。
+
+现改为：批次内出现过 429，即直接判定剩余 task 失败，不再发出任何请求。同日改动
+后的首次爆发，四条记录落于同一毫秒内，熔断于 3 毫秒后跳闸。
+
+三项刻意未改：403 仍跑完整批、批次结束后方丢弃会话（中途丢弃会令后续 task 各自
+触发一次浏览器重建，注释中早有记录）；429 仍不丢弃会话——等待即可恢复，重建只是
+徒然多过一次 Cloudflare 挑战；`ScrapeNetworkError` 不短路，它是单次请求的抖动而
+非配额判定。
+
+新增 `tests/test_scraper_rate_limit_shortcircuit.py`（10 条）。变异测试运行 7 个
+变异，其中 `hard_failures.append` 一项属真正的存活者：该表仅被 any/first 语义
+消费，从不计数，因此为跳过的 task 补记录在当下是行为中性的。保留它是为维持
+「每个失败的 task 都在案」这一不变量，注释与测试均已改为如实陈述，不再声称它是
+熔断跳闸的前提。
+
+### 文档
+
+同步修正三处与代码不符的表述：ARCHITECTURE.md §5.5 曾称熔断为 Holland2Stay 专属
+且「Xior 与 OurDomain 没有对等机制」；§5.6 的异常处置表缺 `OperationNotAllowedError`
+与 `ProxyError` 两行，`RateLimitError` 一行仅写「退避重试」；§5.8 的失败优先级链
+遗漏 `OperationNotAllowedError`。另补 §5.5.1（退避状态落库）、§5.6.1（429 的
+source 级短路）、§6.1（交付语义），§3 的文件树补入 `scrapers/_browser_backed.py`，
+XIOR.md §2.2 的 429 处置改为三层描述。
+
+测试 2627 → 2695。
+
 ## v1.18.0 (2026-08-20)
 
 抓取链路的**错误处理审查**，七项修复。主题是同一件事：异常抛得很规范，问题全在
