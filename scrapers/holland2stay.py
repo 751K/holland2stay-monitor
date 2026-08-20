@@ -259,6 +259,8 @@ def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
     不让「补齐」这种锦上添花的事拖垮主抓取。
     """
     spent = 0
+    failed = 0
+    first_err: str = ""
     for l in listings:
         extra = _DETAIL_CACHE.get(l.id)
         if extra is None:
@@ -268,8 +270,12 @@ def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
                 extra = _fetch_detail(fetcher, l.id)
                 spent += 1
             except Exception as e:
-                # 只跳过这一条，不缓存失败——下轮还有机会
-                logger.debug("[%s] 详情补齐失败（忽略）: %s", l.id, e)
+                # 只跳过这一条，不缓存失败——下轮还有机会。
+                # **但要吵一声**：fail-open + debug 日志 = 静默半残，
+                # 补齐悄悄只成功一半时从日志上完全看不出来（实测踩过）。
+                failed += 1
+                if not first_err:
+                    first_err = f"{type(e).__name__}: {e}"
                 continue
             _DETAIL_CACHE[l.id] = extra
         if not extra:
@@ -279,6 +285,13 @@ def _enrich(fetcher: "BrowserFetcher", listings: list[Listing]) -> int:
         for k, v in extra.items():
             if k not in have:
                 l.features.append(f"{k}: {v}")
+    if failed:
+        logger.warning(
+            "详情补齐 %d 条失败（成功 %d，本轮共 %d 条房源）。"
+            "失败的房源这轮没有 Building/Tenant，会被 fail-closed 的租客筛选拒掉。"
+            "首个错误: %s",
+            failed, spent, len(listings), first_err,
+        )
     return spent
 
 

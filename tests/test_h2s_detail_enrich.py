@@ -162,6 +162,21 @@ class TestEnrich:
         assert l.features == []
         assert "x-1" not in h2s._DETAIL_CACHE
 
+    def test_failures_are_logged_loudly_not_silently(self, caplog):
+        """fail-open + debug 日志 = 静默半残。
+
+        实测踩过：46 条只补上 25 条，日志上完全看不出来，因为失败写的是 debug。
+        补齐失败不是无害的——那些房源这轮没有 Tenant 标签，会被 fail-closed 的
+        租客筛选**拒掉**，用户少收房源却无从察觉。必须在 WARNING 级别可见。
+        """
+        import logging
+        f = _Fetcher(boom=True)
+        with caplog.at_level(logging.WARNING, logger=h2s.logger.name):
+            h2s._enrich(f, [_listing("x-1"), _listing("x-2")])
+        text = caplog.text
+        assert "详情补齐" in text and "失败" in text, f"失败没有在 WARNING 级别报出来: {text!r}"
+        assert "2" in text, "没报出失败条数"
+
     def test_does_not_overwrite_existing_features(self):
         """列表查询给的值更新鲜，补齐不该盖掉它。"""
         f = _Fetcher({"x-1": {"building_name": 614}})
