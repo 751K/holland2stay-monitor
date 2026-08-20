@@ -1111,6 +1111,46 @@ class BrowserFetcher:
     def is_initialized(self) -> bool:
         return self._initialized
 
+    @property
+    def is_alive(self) -> bool:
+        """浏览器进程和页面是否还在。
+
+        为什么需要它 —— 「对象还在」不等于「浏览器还在」
+        ------------------------------------------------
+        Chromium 崩掉 / 被 OOM killer 干掉之后，``self._browser`` 仍然是个对象，
+        ``close()`` 也从没被调用过。而调用方判断「要不要复用」看的是「非 None
+        且没超龄」，于是死掉的实例会被一直复用到 ``_BROWSER_MAX_AGE``
+        （H2S 2 小时）才自愈。
+
+        中间那些轮次不会自己恢复：崩溃在 ``page.evaluate`` 处抛出，被
+        ``_scrape_city_pages`` 改判成 ``ScrapeNetworkError``，而 dispatcher 的
+        网络分支**刻意不丢会话**（丢的话每次代理抖动都要重过一整轮 CF 挑战）。
+
+        实现上只读**本地标志位**，不发任何 IPC：``is_closed()`` / ``is_connected()``
+        由连接层维护，进程没了会被置位。所以这个检查几乎零成本，可以每次复用前跑。
+        """
+        if self._browser is None or self._page is None:
+            return False
+        try:
+            if self._page.is_closed():
+                return False
+        except Exception:
+            # 连状态都问不出来，按死了算——保守方向是重建，代价只是一次冷启动
+            return False
+
+        # launch() 给的是 Browser（有 is_connected）；
+        # launch_persistent_context() 给的是 BrowserContext（没有，要从 .browser 问）。
+        # 本类其余部分都不区分这两种返回物，这里也不该例外。
+        for obj in (self._browser, getattr(self._browser, "browser", None)):
+            probe = getattr(obj, "is_connected", None)
+            if probe is None:
+                continue
+            try:
+                return bool(probe())
+            except Exception:
+                return False
+        return True
+
     # ── 通用同源请求 ────────────────────────────────────────────────────
     def _raw_fetch(
         self,

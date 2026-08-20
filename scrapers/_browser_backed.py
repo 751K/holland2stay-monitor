@@ -90,7 +90,18 @@ class BrowserBackedScraper(AbstractScraper):
 
         now = time.monotonic()
         if self._fetcher is not None:
-            if now - self._browser_created_at > self._BROWSER_MAX_AGE:
+            # 存活性排在年龄前面：进程没了的话，「还没到重建时间」毫无意义。
+            # getattr 兜底是给测试替身留的；真实类必须有这个属性，由
+            # tests/test_scraper_dispatch.py 的守卫钉住。
+            if not getattr(self._fetcher, "is_alive", True):
+                logger.warning(
+                    "%s 浏览器已失联（进程退出或页面关闭），丢弃重建。"
+                    "没有这道检查的话，死掉的实例会被一直复用到 %.0f 分钟的"
+                    "年龄上限才自愈，中间每一轮都以同样方式失败。",
+                    self.source, self._BROWSER_MAX_AGE / 60,
+                )
+                self._close_browser()
+            elif now - self._browser_created_at > self._BROWSER_MAX_AGE:
                 logger.info(
                     "%s 浏览器已存活 %.0f 分钟，主动重建",
                     self.source, (now - self._browser_created_at) / 60,

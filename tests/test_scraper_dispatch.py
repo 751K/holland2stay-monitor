@@ -502,3 +502,137 @@ class TestCompletenessKeyHasOneImplementation:
             scrapers.SCRAPER_REGISTRY.clear()
             scrapers.SCRAPER_REGISTRY.update(monkey)
             scrapers.reset_scraper_instances()
+
+
+class TestDeadBrowserIsNotReused:
+    """浏览器进程没了就得丢弃重建，不能因为「对象还在、年龄没到」就接着用。
+
+    怎么走到这一步的
+    ----------------
+    Playwright 抛 ``Target page, context or browser has been closed`` 时::
+
+        fetch() 里 evaluate 抛
+          → _scrape_city_pages 第 1 页 → 改判成 ScrapeNetworkError
+          → dispatcher 的 ScrapeNetworkError 分支：只记 network_failures，
+            **不 _safe_invalidate**
+          → 下一轮 _ensure_browser() 看到 _fetcher 非 None 且没超龄 → 原样复用
+
+    dispatcher 那条 ``except Exception → _safe_invalidate`` 的注释写着「这类异常
+    通常意味着底层会话已不可用」——正是为这种情况准备的，但浏览器崩溃在到达它
+    之前就被改判成网络错误了。
+
+    而 ``_ensure_browser`` 只检查「非 None」和「年龄」，**没有存活性检查**。
+    阻塞窗口 = ``_BROWSER_MAX_AGE``：H2S 2 小时，Xior 15 分钟。
+
+    ⚠️ 这条是**路径风险，不是已观测事故**：线上日志里那 2 次
+    ``Target closed`` 都发生在持久化 profile 启动回退里，已经被处理掉了。
+    修它是因为窗口太长、代价太低，不是因为它烧过。
+
+    为什么不改成「ScrapeNetworkError 也丢会话」
+    ------------------------------------------
+    那样每次代理抖动都会丢掉一个好会话，下一轮要重过一整轮 CF 挑战。存活性
+    检查是本地标志位，不发 IPC，几乎零成本，而且判的是真正的那件事。
+    """
+
+    @staticmethod
+    def _scraper(monkeypatch, alive_after_first=True):
+        import scrapers.holland2stay as h2s
+
+        built = []
+
+        class _Fake:
+            def __init__(self, headless=True, profile=None):
+                built.append(self)
+                self.is_alive = True
+
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+            def ensure_initialized(self): pass
+
+        monkeypatch.setattr(h2s, "BrowserFetcher", _Fake)
+        s = h2s.HollandStayScraper()
+        return s, built
+
+    def test_dead_browser_is_discarded_and_rebuilt(self, monkeypatch):
+        s, built = self._scraper(monkeypatch)
+        first = s._ensure_browser()
+        assert len(built) == 1
+
+        # 活着 → 复用
+        assert s._ensure_browser() is first
+        assert len(built) == 1
+
+        # 进程没了 → 必须重建
+        first.is_alive = False
+        second = s._ensure_browser()
+        assert second is not first, (
+            "死掉的浏览器被原样复用了——之后每一轮都会以同样方式失败，"
+            "直到 _BROWSER_MAX_AGE（H2S 是 2 小时）才自愈"
+        )
+        assert len(built) == 2
+
+    def test_real_fetcher_exposes_liveness(self):
+        """``_ensure_browser`` 用 getattr 兜底（测试替身没有这个属性），
+
+        所以真实类必须真的有它，否则存活检查会静默退化成「永远活着」。
+        """
+        from browser_fetcher import BrowserFetcher
+
+        assert isinstance(
+            getattr(BrowserFetcher, "is_alive", None), property
+        ), "BrowserFetcher.is_alive 不见了，存活检查会静默失效"
+
+    def test_liveness_is_false_before_launch(self):
+        from browser_fetcher import BrowserFetcher
+
+        f = BrowserFetcher.__new__(BrowserFetcher)
+        f._browser = None
+        f._page = None
+        assert f.is_alive is False
+
+    def test_liveness_is_false_when_page_closed(self):
+        from browser_fetcher import BrowserFetcher
+
+        class _Page:
+            def is_closed(self): return True
+
+        class _Browser:
+            def is_connected(self): return True
+
+        f = BrowserFetcher.__new__(BrowserFetcher)
+        f._browser = _Browser()
+        f._page = _Page()
+        assert f.is_alive is False
+
+    def test_liveness_is_false_when_browser_disconnected(self):
+        from browser_fetcher import BrowserFetcher
+
+        class _Page:
+            def is_closed(self): return False
+
+        class _Browser:
+            def is_connected(self): return False
+
+        f = BrowserFetcher.__new__(BrowserFetcher)
+        f._browser = _Browser()
+        f._page = _Page()
+        assert f.is_alive is False
+
+    def test_persistent_context_liveness_goes_through_its_browser(self):
+        """``launch_persistent_context()`` 返回的是 BrowserContext，它没有
+        ``is_connected``——得从 ``.browser`` 上问。两种返回物本类其余部分都不
+        区分，存活检查也不该例外。"""
+        from browser_fetcher import BrowserFetcher
+
+        class _Page:
+            def is_closed(self): return False
+
+        class _Ctx:
+            class browser:
+                @staticmethod
+                def is_connected(): return False
+
+        f = BrowserFetcher.__new__(BrowserFetcher)
+        f._browser = _Ctx()
+        f._page = _Page()
+        assert f.is_alive is False
