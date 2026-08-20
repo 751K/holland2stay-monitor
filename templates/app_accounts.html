@@ -79,17 +79,17 @@
             {% endif %}
           </td>
           <td style="padding:12px 16px;" class="text-xs text-secondary">
-            {{ t.created_at | replace('T', ' ') | replace('Z', '') }}
+            {{ t.created_at | local_time }}
           </td>
           <td style="padding:12px 16px;" class="text-xs text-secondary">
             {% if t.last_used_at %}
-              {{ t.last_used_at | replace('T', ' ') | replace('Z', '') }}
+              {{ t.last_used_at | local_time }}
             {% else %}
               {{ _('app_accounts_never') }}
             {% endif %}
           </td>
           <td style="padding:12px 16px;" class="text-xs text-secondary">
-            {{ (t.expires_at | replace('T', ' ') | replace('Z', '')) if t.expires_at else _('app_accounts_no_expiry') }}
+            {{ (t.expires_at | local_time) if t.expires_at else _('app_accounts_no_expiry') }}
           </td>
           <td style="padding:12px 16px;">
             {% if t.revoked %}
@@ -196,10 +196,10 @@
             {% endif %}
           </td>
           <td style="padding:12px 16px;" class="text-xs text-secondary">
-            {{ (d.created_at or '') | replace('T', ' ') | replace('Z', '') }}
+            {{ (d.created_at or '') | local_time }}
           </td>
           <td style="padding:12px 16px;" class="text-xs text-secondary">
-            {{ (d.last_seen or '') | replace('T', ' ') | replace('Z', '') }}
+            {{ (d.last_seen or '') | local_time }}
           </td>
           <td style="padding:12px 16px;">
             {% if is_disabled %}
