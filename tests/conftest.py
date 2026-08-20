@@ -206,6 +206,14 @@ def _clear_h2s_guards() -> None:
     if circuits is not None:
         for src in circuits.known_sources():
             circuits.recover(src)
+    # 自适应抓取节奏也是 monitor 的模块级全局，同样会跨用例泄漏：
+    # 某个用例把 xior 罚到 ×2，后面测 _apply_source_intervals 的用例就会看到
+    # 「基准 600 ×2 = 1200 秒」而不是 600，单独跑通过、整套跑失败。
+    pacing = getattr(monitor, "_source_pacing", None)
+    if pacing is not None and circuits is not None:
+        for src in circuits.known_sources():
+            pacing.reset(src)
+
     obj = getattr(monitor, "_h2s_login_block", None)
     if obj is not None:
         obj.reset()

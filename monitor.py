@@ -66,6 +66,7 @@ from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.backoff import PersistedBackoff
 from mcore.circuit import SourceCircuits
 from mcore.health import CIRCUIT_OPEN_ERROR
+from mcore.pacing import AdaptivePacing
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
@@ -291,7 +292,11 @@ def _apply_source_intervals(
         by_source.setdefault(t.source, []).append(t)
 
     for src, group in by_source.items():
-        gap = int(intervals.get(src, 0) or 0)
+        # 配置值是**基准**，实际遵守的是乘上自适应倍率之后的值。见
+        # mcore/pacing.py：手工调出来的 180 秒实测并不干净，而那套调法默认
+        # 「不干净会有人退回上一档」——没有人退。
+        base_gap = int(intervals.get(src, 0) or 0)
+        gap = _source_pacing.gap_for(src, base_gap)
         if gap <= 0:
             out.extend(group)
             continue
@@ -310,10 +315,12 @@ def _apply_source_intervals(
         # waited < 0 = 时间戳在未来（改过系统时间/时钟回拨），也放行，
         # 不能让 source 卡到时间追上为止。
         if last > 0 and 0 <= waited < gap:
+            mult = _source_pacing.multiplier(src)
             logger.info(
-                "source %s 距上次抓取仅 %.0f 秒（< %d 秒），本轮跳过"
+                "source %s 距上次抓取仅 %.0f 秒（< %d 秒%s），本轮跳过"
                 "——抓太频繁会撞限流，反而更慢",
                 src, waited, gap,
+                "" if mult <= 1.0 else f"，基准 {base_gap} ×{mult:.3g}",
             )
             continue
 
@@ -833,6 +840,7 @@ def _bind_persistent_state(storage) -> None:
     global _throttle_storage_ref
     _throttle_storage_ref = storage
     _source_circuits.load(storage)
+    _source_pacing.load(storage)
     for b in (
         _h2s_login_block,
         _throttle_notify_block, _throttle_notify_operation_rejected,
@@ -1150,6 +1158,11 @@ prewarm_cache = PrewarmCache()
 #: ——而实测整源失败次数是 xior 147 / ourdomain 67 / ourcampus 60 / H2S 6，
 #: 保护恰好装在最不需要它的那个上。
 _source_circuits = SourceCircuits()
+
+#: 按 429 历史自动伸缩各 source 的最小抓取间隔。和熔断分工不同：熔断管「出事
+#: 之后停多久」，这个管「平时多久打一次」。只有熔断的话，冷却一结束节奏就回到
+#: 原值，过三五十分钟再撞一次——生产实测每天约 10 次，从没停过。
+_source_pacing = AdaptivePacing()
 _h2s_login_block = PersistedBackoff(
     "h2s_login_block", max_seconds=_H2S_LOGIN_BLOCKED_SUPPRESS_SEC,
 )
@@ -1978,6 +1991,10 @@ async def run_once(
                 # xior 整源 429 失败 147 次、ourdomain / ourcampus 各 60+ 次，
                 # H2S 总共才 6 次。保护装在了最不需要它的那个 source 上。
                 _source_circuits.trip(src, e, storage=None if dry_run else storage)
+                # 只有 429 才拉长节奏。403 / 网络错误 / 平台维护都不是「打得太
+                # 勤」造成的，拉长间隔既治不了它们，又白白拖慢恢复。
+                if isinstance(e, RateLimitError):
+                    _source_pacing.penalize(src, storage=None if dry_run else storage)
                 # 标 ✗ 而不是留空：完整扫描那行日志要看得出「这个 source 塌了」，
                 # 且 False 会正确挡住该城市的 stale 收敛。
                 for t in group:
@@ -1999,6 +2016,13 @@ async def run_once(
             succeeded_sources.append(src)
             if source_modes.get(src) == "canary":
                 _source_circuits.recover(src, storage=None if dry_run else storage)
+            # 干净地抓完一轮。攒够连续若干轮才会降一档——降太快会在限流阈值
+            # 附近来回振荡，每振荡一次就要再付一次熔断冷却。
+            #
+            # canary 轮也算数：它只抓 1 个 target，是这个 source 当下能给出的
+            # 最干净的证据。不算的话，熔断频繁的 source 永远攒不满计数，倍率
+            # 只升不降——那正是它最需要降下来的时候。
+            _source_pacing.relax(src, storage=None if dry_run else storage)
             fresh_all.extend(fresh_part)
             completeness_all.update(completeness_part)
             if not dry_run:
