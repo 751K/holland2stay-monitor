@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.17.10 (2026-08-20)
+
+加密信封合并成一份实现。
+
+### 问题
+
+`_encrypted_fetch`（93 行）与 `_encrypted_rest_get`（98 行）是两份**行级 76%
+重复**的拷贝。站点对两种投递方式用的是同一套密码学（module 82361 的 `J` / `H`），
+只在三处不同：
+
+| | 加密什么 | `ct` | 信封放哪 |
+|---|---|---|---|
+| `J`（非 GET） | body | `application/json` | 请求体，头带 `x-enc: 1` |
+| `H`（GET） | 路径（去掉 `/api` 前缀） | `text/plain` | `x-enc-q` 头 |
+
+剩下的全是共享的：RSA-OAEP 包裹 AES 会话密钥、12 字节 IV、同源 fetch 的凭据
+设置、响应头白名单、`x-enc` 判定与解密。**公钥轮换自愈、错误收敛、响应头白名单
+各写了两遍**——改一处忘另一处只是时间问题。
+
+### 修法
+
+三处差异参数化，密码学收进 `_ENVELOPE_JS` + `_envelope_fetch()`。
+`_encrypted_fetch` / `_encrypted_rest_get` 保留为薄封装：它们承载的是**站点
+规则的文档**（哪条对应 `J`、哪条对应 `H`），调用方与测试都不用改。
+
+JS 的入参从位置列表改成对象，测试断言随之按 key 写——比数 `args[6]` 结实得多。
+
+### 测试
+
+新增 `TestEnvelopeHasOneImplementation`（3 条）：AES 密钥生成在源码里只准出现
+一次、两种投递都必须走共享实现、`_drop_enc_pubkey` 只准有一个调用点。加上原有
+的 `TestRestEnvelope`，3 个变异全部捕获（ct 写混 / 丢掉 x-enc-q / 再抄一份）。
+
+`browser_fetcher.py` 净减 16 行，重复段落归零。全套 2582 通过。
+
 ## v1.17.9 (2026-08-20)
 
 理清「补齐字段不能丢」的四层机制，删掉其中一层已失效的存在理由。

@@ -1227,6 +1227,128 @@ class BrowserFetcher:
         if _ENC_PUBKEY_CACHE.pop(self._profile.name, None):
             logger.warning("%s 加密公钥已作废，下次请求将重新抓取", self._profile.name)
 
+    #: 信封的 JS 实现。**只有这一份。**
+    #:
+    #: 站点对两种投递方式用的是同一套密码学，只在三处不同（module 82361 的
+    #: J / H 两个函数）：加密什么、ct 写什么、信封放 body 还是放头。这三处
+    #: 参数化掉之后剩下的全是共享的——RSA-OAEP 包裹 AES 会话密钥、12 字节 IV、
+    #: 同源 fetch 的凭据设置、响应头白名单、x-enc 判定与解密。
+    #:
+    #: 之前是两份各 90+ 行、行级 76% 重复的拷贝。公钥轮换自愈、错误收敛、
+    #: 响应头白名单各写了两遍——改一处忘另一处只是时间问题。
+    _ENVELOPE_JS = """
+        async (a) => {
+            const b2a = (b) => { let s = "";
+                for (const x of b) s += String.fromCharCode(x); return btoa(s); };
+            const a2b = (s) => { const t = atob(s);
+                const u = new Uint8Array(t.length);
+                for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i);
+                return u; };
+            const sub = crypto.subtle;
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), a.timeoutMs);
+            try {
+                const rsa = await sub.importKey("spki", a2b(a.pub),
+                    {name: "RSA-OAEP", hash: "SHA-256"}, false, ["encrypt"]);
+                const aes = await sub.generateKey({name: "AES-GCM", length: 256},
+                    true, ["encrypt", "decrypt"]);
+                const raw = new Uint8Array(await sub.exportKey("raw", aes));
+                const k = new Uint8Array(
+                    await sub.encrypt({name: "RSA-OAEP"}, rsa, raw));
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+                const d = new Uint8Array(await sub.encrypt({name: "AES-GCM", iv},
+                    aes, new TextEncoder().encode(a.plaintext)));
+                const envelope = {v: 1, k: b2a(k), iv: b2a(iv), d: b2a(d),
+                                  ct: a.contentType};
+
+                const h = Object.assign({}, a.headers);
+                const init = {
+                    method: a.method,
+                    credentials: "include",
+                    mode: "same-origin",
+                    cache: "no-store",
+                    redirect: "follow",
+                    referrer: window.location.href,
+                    referrerPolicy: "strict-origin-when-cross-origin",
+                    signal: controller.signal,
+                };
+                if (a.queryHeader) {
+                    // 站点：x-enc-q = base64(utf8(JSON(信封)))，请求不带 body
+                    h[a.queryHeader] = b2a(
+                        new TextEncoder().encode(JSON.stringify(envelope)));
+                } else {
+                    init.body = JSON.stringify(envelope);
+                }
+                init.headers = h;
+
+                const resp = await fetch(a.url, init);
+                clearTimeout(timer);
+
+                const raw_text = await resp.text();
+                const out = {};
+                for (const [key, value] of resp.headers.entries()) {
+                    const lower = key.toLowerCase();
+                    if (['cf-ray', 'content-type', 'server', 'vary',
+                         a.encHeader].includes(lower)) out[lower] = value;
+                }
+                // 没有 x-enc 头 = 明文（403 clearance_required 走这条）
+                if (out[a.encHeader] !== "1") {
+                    return {status: resp.status, ok: resp.ok,
+                            text: raw_text, headers: out};
+                }
+                const back = JSON.parse(raw_text);
+                const plain = new Uint8Array(await sub.decrypt(
+                    {name: "AES-GCM", iv: a2b(back.iv)}, aes, a2b(back.d)));
+                return {status: resp.status, ok: resp.ok,
+                        text: new TextDecoder().decode(plain), headers: out};
+            } catch (err) {
+                clearTimeout(timer);
+                return {error: err.message || String(err)};
+            }
+        }
+    """
+
+    def _envelope_fetch(
+        self,
+        *,
+        url: str,
+        method: str,
+        plaintext: str,
+        content_type: str,
+        headers: Mapping[str, str],
+        timeout_ms: int,
+        query_header: str = "",
+    ) -> dict:
+        """发一次信封请求，返回**解密后**的 ``{status, ok, text, headers}``。
+
+        返回形状与 ``_raw_fetch`` 完全一致，所以 ``fetch`` / ``fetch_gql`` 以上
+        一行都不用改。响应没有 x-enc 头时原样返回明文——403 的
+        ``{"code":"clearance_required"}`` 就是这么回的，clearance 探测要靠它。
+
+        ``query_header`` 非空时信封走那个请求头（GET 的形态），否则走 body。
+        """
+        pub = self._ensure_enc_pubkey()
+        merged = dict(self._profile.default_headers)
+        merged.update(headers or {})
+
+        result = self._page.evaluate(self._ENVELOPE_JS, {
+            "pub": pub,
+            "url": url,
+            "method": method,
+            "plaintext": plaintext,
+            "contentType": content_type,
+            "headers": merged,
+            "timeoutMs": timeout_ms,
+            "encHeader": _ENC_HEADER,
+            "queryHeader": query_header,
+        })
+        # JS 侧的 try/catch 把 importKey / encrypt / decrypt 的失败都收成
+        # {"error": ...}。公钥轮换正是从这里冒出来的：旧公钥加密的信封服务端
+        # 解不开，或响应用新密钥回来我们解不开。作废缓存，下次请求重抓即自愈。
+        if isinstance(result, dict) and result.get("error"):
+            self._drop_enc_pubkey()
+        return result
+
     def _encrypted_fetch(
         self,
         path: str,
@@ -1235,91 +1357,22 @@ class BrowserFetcher:
         headers: Mapping[str, str],
         timeout_ms: int,
     ) -> dict:
-        """把 body 包成信封发出去，返回**解密后**的 ``{status, ok, text, headers}``。
+        """非 GET：加密 **body** → POST 原 URL，头 ``x-enc: 1``。
 
-        返回形状与 ``_raw_fetch`` 完全一致，所以 ``fetch`` / ``fetch_gql`` 以上
-        一行都不用改。
-
-        响应没有 x-enc 头时原样返回明文——403 的
-        ``{"code":"clearance_required"}`` 就是这么回的，clearance 探测要靠它。
+        站点 module 82361 的函数 ``J``。GraphQL（``/api/__enc__``）、
+        ``/api/booking``、``POST /api/rest/*`` 都是这个形状。
         """
-        pub = self._ensure_enc_pubkey()
-        merged = dict(self._profile.default_headers)
-        merged.update(headers or {})
+        merged = dict(headers or {})
         merged[_ENC_HEADER] = "1"
         merged["Content-Type"] = "application/json"
-
-        js_code = """
-            async ([pub, path, payload, hdrs, timeoutMs, encHeader]) => {
-                const b2a = (b) => { let s = "";
-                    for (const x of b) s += String.fromCharCode(x); return btoa(s); };
-                const a2b = (s) => { const t = atob(s);
-                    const u = new Uint8Array(t.length);
-                    for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i);
-                    return u; };
-                const sub = crypto.subtle;
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), timeoutMs);
-                try {
-                    const rsa = await sub.importKey("spki", a2b(pub),
-                        {name: "RSA-OAEP", hash: "SHA-256"}, false, ["encrypt"]);
-                    const aes = await sub.generateKey({name: "AES-GCM", length: 256},
-                        true, ["encrypt", "decrypt"]);
-                    const raw = new Uint8Array(await sub.exportKey("raw", aes));
-                    const k = new Uint8Array(
-                        await sub.encrypt({name: "RSA-OAEP"}, rsa, raw));
-                    const iv = crypto.getRandomValues(new Uint8Array(12));
-                    const d = new Uint8Array(await sub.encrypt({name: "AES-GCM", iv},
-                        aes, new TextEncoder().encode(payload)));
-                    const envelope = {v: 1, k: b2a(k), iv: b2a(iv), d: b2a(d),
-                                      ct: "application/json"};
-
-                    const resp = await fetch(path, {
-                        method: "POST",
-                        credentials: "include",
-                        mode: "same-origin",
-                        cache: "no-store",
-                        redirect: "follow",
-                        referrer: window.location.href,
-                        referrerPolicy: "strict-origin-when-cross-origin",
-                        headers: hdrs,
-                        body: JSON.stringify(envelope),
-                        signal: controller.signal,
-                    });
-                    clearTimeout(timer);
-
-                    const raw_text = await resp.text();
-                    const out = {};
-                    for (const [key, value] of resp.headers.entries()) {
-                        const lower = key.toLowerCase();
-                        if (['cf-ray', 'content-type', 'server', 'vary',
-                             encHeader].includes(lower)) out[lower] = value;
-                    }
-                    // 没有 x-enc 头 = 明文（403 clearance_required 走这条）
-                    if (out[encHeader] !== "1") {
-                        return {status: resp.status, ok: resp.ok,
-                                text: raw_text, headers: out};
-                    }
-                    const back = JSON.parse(raw_text);
-                    const plain = new Uint8Array(await sub.decrypt(
-                        {name: "AES-GCM", iv: a2b(back.iv)}, aes, a2b(back.d)));
-                    return {status: resp.status, ok: resp.ok,
-                            text: new TextDecoder().decode(plain), headers: out};
-                } catch (err) {
-                    clearTimeout(timer);
-                    return {error: err.message || String(err)};
-                }
-            }
-        """
-        result = self._page.evaluate(
-            js_code, [pub, path, body, merged, timeout_ms, _ENC_HEADER]
+        return self._envelope_fetch(
+            url=path,
+            method="POST",
+            plaintext=body,
+            content_type="application/json",
+            headers=merged,
+            timeout_ms=timeout_ms,
         )
-        # JS 侧的 try/catch 把 importKey / encrypt / decrypt 的失败都收成
-        # {"error": ...}。公钥轮换正是从这里冒出来的：旧公钥加密的信封服务端
-        # 解不开，或响应用新密钥回来我们解不开。作废缓存，下次请求重抓即自愈。
-        if isinstance(result, dict) and result.get("error"):
-            self._drop_enc_pubkey()
-        return result
 
     def _encrypted_rest_get(
         self,
@@ -1330,95 +1383,26 @@ class BrowserFetcher:
     ) -> dict:
         """GET ``/api/rest/*``：加密**路径**走 ``x-enc-q`` 头。
 
-        照抄站点 module 82361 的函数 ``H``：
+        站点 module 82361 的函数 ``H``::
 
             r = url.slice("/api".length)            # "/rest/V1/..."（含 query）
             envelope = encrypt(r, "text/plain")
             headers["x-enc-q"] = base64(JSON(envelope))
             GET /api/rest/__enc__
-            响应带 x-enc:1 → 用同一个 aesKey 解密
 
         注意加密的是**路径字符串**、ct 为 ``text/plain``——与 body 加密那条
         （``application/json``）不是一回事，写混了服务端解不开。
         """
-        pub = self._ensure_enc_pubkey()
-        merged = dict(self._profile.default_headers)
-        merged.update(headers or {})
-
         inner = path[len(_REST_API_PREFIX):] if path.startswith(_REST_API_PREFIX) else path
-
-        js_code = """
-            async ([pub, inner, encPath, hdrs, timeoutMs, encHeader, qHeader]) => {
-                const b2a = (b) => { let s = "";
-                    for (const x of b) s += String.fromCharCode(x); return btoa(s); };
-                const a2b = (s) => { const t = atob(s);
-                    const u = new Uint8Array(t.length);
-                    for (let i = 0; i < t.length; i++) u[i] = t.charCodeAt(i);
-                    return u; };
-                const sub = crypto.subtle;
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), timeoutMs);
-                try {
-                    const rsa = await sub.importKey("spki", a2b(pub),
-                        {name: "RSA-OAEP", hash: "SHA-256"}, false, ["encrypt"]);
-                    const aes = await sub.generateKey({name: "AES-GCM", length: 256},
-                        true, ["encrypt", "decrypt"]);
-                    const raw = new Uint8Array(await sub.exportKey("raw", aes));
-                    const k = new Uint8Array(
-                        await sub.encrypt({name: "RSA-OAEP"}, rsa, raw));
-                    const iv = crypto.getRandomValues(new Uint8Array(12));
-                    const d = new Uint8Array(await sub.encrypt({name: "AES-GCM", iv},
-                        aes, new TextEncoder().encode(inner)));
-                    const envelope = {v: 1, k: b2a(k), iv: b2a(iv), d: b2a(d),
-                                      ct: "text/plain"};
-                    // 站点：x-enc-q = base64(utf8(JSON(envelope)))
-                    const q = b2a(new TextEncoder().encode(JSON.stringify(envelope)));
-                    const h = Object.assign({}, hdrs);
-                    h[qHeader] = q;
-
-                    const resp = await fetch(encPath, {
-                        method: "GET",
-                        credentials: "include",
-                        mode: "same-origin",
-                        cache: "no-store",
-                        redirect: "follow",
-                        referrer: window.location.href,
-                        referrerPolicy: "strict-origin-when-cross-origin",
-                        headers: h,
-                        signal: controller.signal,
-                    });
-                    clearTimeout(timer);
-
-                    const raw_text = await resp.text();
-                    const out = {};
-                    for (const [key, value] of resp.headers.entries()) {
-                        const lower = key.toLowerCase();
-                        if (['cf-ray', 'content-type', 'server', 'vary',
-                             encHeader].includes(lower)) out[lower] = value;
-                    }
-                    if (out[encHeader] !== "1") {
-                        return {status: resp.status, ok: resp.ok,
-                                text: raw_text, headers: out};
-                    }
-                    const back = JSON.parse(raw_text);
-                    const plain = new Uint8Array(await sub.decrypt(
-                        {name: "AES-GCM", iv: a2b(back.iv)}, aes, a2b(back.d)));
-                    return {status: resp.status, ok: resp.ok,
-                            text: new TextDecoder().decode(plain), headers: out};
-                } catch (err) {
-                    clearTimeout(timer);
-                    return {error: err.message || String(err)};
-                }
-            }
-        """
-        result = self._page.evaluate(
-            js_code,
-            [pub, inner, _REST_ENC_PATH, merged, timeout_ms,
-             _ENC_HEADER, _ENC_QUERY_HEADER],
+        return self._envelope_fetch(
+            url=_REST_ENC_PATH,
+            method="GET",
+            plaintext=inner,
+            content_type="text/plain",
+            headers=headers or {},
+            timeout_ms=timeout_ms,
+            query_header=_ENC_QUERY_HEADER,
         )
-        if isinstance(result, dict) and result.get("error"):
-            self._drop_enc_pubkey()
-        return result
 
     def fetch_encrypted_json(
         self,

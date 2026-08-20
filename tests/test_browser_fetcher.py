@@ -119,13 +119,15 @@ def test_fetch_gql_uses_browser_like_same_origin_request():
     assert 'mode: "same-origin"' in script
     assert "referrer: window.location.href" in script
 
-    pub, path, payload, hdrs, _timeout, enc_header = page.args[0]
-    assert pub == page.ENC_PUBKEY, "没有把抓到的公钥传下去"
-    assert path == "/api/__enc__"
-    assert hdrs["Store"] == "default"
-    assert hdrs["Content-Currency"] == "EUR"
-    assert hdrs[enc_header] == "1", "信封请求必须带 x-enc: 1"
-    assert "query Test" in payload, "加密的应当是原始 GraphQL 明文"
+    a = page.args[0]
+    assert a["pub"] == page.ENC_PUBKEY, "没有把抓到的公钥传下去"
+    assert a["url"] == "/api/__enc__"
+    assert a["method"] == "POST"
+    assert a["headers"]["Store"] == "default"
+    assert a["headers"]["Content-Currency"] == "EUR"
+    assert a["headers"][a["encHeader"]] == "1", "信封请求必须带 x-enc: 1"
+    assert "query Test" in a["plaintext"], "加密的应当是原始 GraphQL 明文"
+    assert not a["queryHeader"], "GraphQL 的信封走 body，不走 x-enc-q"
 
 
 def test_fetch_gql_refreshes_status_after_403_retry_success():
@@ -538,8 +540,7 @@ class TestEncryptedEnvelope:
         fetcher.fetch_gql("query Q { products { items { sku } } }",
                           {"pageSize": 100})
 
-        _pub, _path, payload, _h, _t, _e = page.args[0]
-        sent = json.loads(payload)
+        sent = json.loads(page.args[0]["plaintext"])
         assert sent["query"] == "query Q { products { items { sku } } }"
         assert sent["variables"] == {"pageSize": 100}
 
@@ -655,15 +656,16 @@ class TestRestEnvelope:
         fetcher.fetch_rest("/api/rest/V1/newdashboard/contract/me?fields=x",
                            method="GET")
 
-        # 参数形状：[pub, inner, encPath, hdrs, timeout, encHeader, qHeader]
-        args = page.args[0]
-        assert isinstance(args, list) and len(args) == 7
-        inner, enc_path, q_header = args[1], args[2], args[6]
-        assert inner == "/rest/V1/newdashboard/contract/me?fields=x", (
+        a = page.args[0]
+        assert a["plaintext"] == "/rest/V1/newdashboard/contract/me?fields=x", (
             "加密的必须是去掉 /api 前缀的路径（含 query），站点原文如此"
         )
-        assert enc_path == "/api/rest/__enc__", "GET 必须打到 __enc__ 端点"
-        assert q_header == "x-enc-q"
+        assert a["contentType"] == "text/plain", (
+            "GET 那条的 ct 是 text/plain，写成 application/json 服务端解不开"
+        )
+        assert a["url"] == "/api/rest/__enc__", "GET 必须打到 __enc__ 端点"
+        assert a["method"] == "GET"
+        assert a["queryHeader"] == "x-enc-q", "信封必须走头，不是 body"
 
     def test_post_encrypts_the_body_at_the_original_url(self):
         page = _FakePage({
@@ -674,13 +676,14 @@ class TestRestEnvelope:
         fetcher.fetch_rest("/api/rest/V1/customer/bookingcancel/r-x-1",
                            method="POST", body="{}")
 
-        # 走 _encrypted_fetch：[pub, path, payload, hdrs, timeout, encHeader]
-        args = page.args[0]
-        assert isinstance(args, list) and len(args) == 6
-        assert args[1] == "/api/rest/V1/customer/bookingcancel/r-x-1", (
+        a = page.args[0]
+        assert a["url"] == "/api/rest/V1/customer/bookingcancel/r-x-1", (
             "POST 必须打原 URL，不是 __enc__"
         )
-        assert args[2] == "{}", "加密的是 body"
+        assert a["method"] == "POST"
+        assert a["plaintext"] == "{}", "加密的是 body"
+        assert a["contentType"] == "application/json"
+        assert not a["queryHeader"], "POST 那条走 body，不走 x-enc-q"
 
     def test_auth_endpoints_stay_plain(self):
         """反向守卫：/api/auth/* 不该被加密。写反了登录第一步就 400。"""
@@ -690,6 +693,63 @@ class TestRestEnvelope:
         })
         fetcher = _make_fetcher(page)
         fetcher.fetch_plain("/api/auth/csrf", method="GET")
-        assert not any(isinstance(a, list) and len(a) in (6, 7) for a in page.args), (
+        assert not any(isinstance(a, dict) and "plaintext" in a for a in page.args), (
             "NextAuth 端点被套上了信封"
+        )
+
+
+class TestEnvelopeHasOneImplementation:
+    """信封的密码学只准有一份实现。
+
+    之前是两份各 90+ 行、行级 76% 重复的拷贝（``_encrypted_fetch`` 与
+    ``_encrypted_rest_get``）。站点对两种投递方式用的是同一套密码学，只在三处
+    不同——加密什么、``ct`` 写什么、信封放 body 还是放头。剩下的全是共享的：
+    RSA-OAEP 包裹 AES 会话密钥、12 字节 IV、同源 fetch 的凭据设置、响应头白
+    名单、``x-enc`` 判定与解密。
+
+    两份拷贝意味着公钥轮换自愈、错误收敛、响应头白名单各写了两遍——改一处忘
+    另一处只是时间问题。
+    """
+
+    def test_only_one_place_calls_crypto_subtle(self):
+        import re
+        from pathlib import Path
+
+        src = Path("browser_fetcher.py").read_text(encoding="utf-8")
+        # 建 AES 会话密钥是信封的标志动作，出现两次就是又抄了一份
+        n = len(re.findall(r'generateKey\(\{name:\s*"AES-GCM"', src))
+        assert n == 1, f"信封的 AES 密钥生成出现了 {n} 次——又抄了一份实现"
+
+    def test_both_delivery_modes_go_through_the_shared_helper(self):
+        from browser_fetcher import BrowserFetcher
+
+        calls = []
+
+        class _Spy(BrowserFetcher):
+            def _envelope_fetch(self, **kw):
+                calls.append(kw)
+                return {"status": 200, "ok": True, "text": "{}", "headers": {}}
+
+        f = _Spy.__new__(_Spy)
+        f._encrypted_fetch("/api/__enc__", body="{}", headers={}, timeout_ms=1)
+        f._encrypted_rest_get("/api/rest/V1/x", headers={}, timeout_ms=1)
+        assert len(calls) == 2, "有一条没走共享实现"
+        body_mode, head_mode = calls
+        # body 投递：不传 query_header（走默认空串）
+        assert not body_mode.get("query_header")
+        assert body_mode["content_type"] == "application/json"
+        assert body_mode["method"] == "POST"
+        # 头投递：x-enc-q + text/plain，这两处写混了服务端解不开
+        assert head_mode["query_header"] == "x-enc-q"
+        assert head_mode["content_type"] == "text/plain"
+        assert head_mode["method"] == "GET"
+
+    def test_pubkey_self_heal_is_not_duplicated(self):
+        """公钥作废（轮换自愈）只该有一个触发点。"""
+        from pathlib import Path
+
+        src = Path("browser_fetcher.py").read_text(encoding="utf-8")
+        n = src.count("self._drop_enc_pubkey()")
+        assert n == 1, (
+            f"_drop_enc_pubkey 有 {n} 个调用点——两份拷贝各写一遍正是要消掉的问题"
         )
