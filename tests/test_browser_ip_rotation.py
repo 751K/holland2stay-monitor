@@ -199,3 +199,51 @@ class TestFetch403RotatesExit:
 
         f.fetch("/api/graphql")
         assert rebuilds["n"] == 0, "clearance 过期被当成了 IP 被封"
+
+
+class TestRebuildRefusalIsVisible:
+    """``_rebuild_browser()`` 拒绝重建时必须吵一声，不能静默返回 False。
+
+    它对非 rotating 的 profile 直接返回 False 什么也不做（重建后拿到的是同一个
+    出口 IP，白付一次冷启动）。这个判断本身是对的，问题是**调用方全都忽略返回
+    值**：``ensure_initialized`` 和 ``fetch`` 都是 ``self._rebuild_browser()`` 一行
+    带过。于是「重试 3 次，每次换一个出口 IP」会静默退化成「在同一个 IP 上原样
+    重试 3 次」——日志上完全看不出区别，而这正是 2026-08-03 那次熔断的成因描述。
+
+    两个 profile 现在都是 ``rotating_proxy=True``，所以这是**陷阱不是 bug**。
+    修法也只是让它可见：真到了那天，日志得说得出「我没换 IP，因为这个 profile
+    不轮换」，而不是让人对着三条一模一样的失败猜。
+    """
+
+    def test_non_rotating_profile_logs_why_it_refused(self, caplog):
+        import logging
+
+        from browser_fetcher import XIOR_PROFILE, BrowserFetcher
+
+        f = BrowserFetcher.__new__(BrowserFetcher)
+        f._profile = XIOR_PROFILE.__class__(
+            **{**XIOR_PROFILE.__dict__, "rotating_proxy": False}
+        )
+        f._browser = object()
+        f._proxy_url = ""
+
+        with caplog.at_level(logging.WARNING, logger="browser_fetcher"):
+            assert f._rebuild_browser() is False
+        assert "不轮换" in caplog.text or "rotating" in caplog.text, (
+            f"静默拒绝了重建，调用方还以为换过 IP 了: {caplog.text!r}"
+        )
+
+    def test_no_browser_yet_also_says_why(self, caplog):
+        """还没 __enter__ 就调重建 = 调用方绕过了正常生命周期，同样要可见。"""
+        import logging
+
+        from browser_fetcher import H2S_PROFILE, BrowserFetcher
+
+        f = BrowserFetcher.__new__(BrowserFetcher)
+        f._profile = H2S_PROFILE
+        f._browser = None
+        f._proxy_url = ""
+
+        with caplog.at_level(logging.WARNING, logger="browser_fetcher"):
+            assert f._rebuild_browser() is False
+        assert caplog.text.strip(), "静默返回 False，没有任何痕迹"

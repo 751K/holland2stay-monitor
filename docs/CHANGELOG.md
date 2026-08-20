@@ -1,5 +1,90 @@
 # Changelog
 
+## v1.18.0 (2026-08-20)
+
+抓取链路的**错误处理审查**，七项修复。主题是同一件事：异常抛得很规范，问题全在
+「接」和「分类」上——taxonomy 里每个类都写清了自己代表什么根因、上层该据此做什么
+决策，但好几处把一个类压成了另一个类，上层那套决策就全废了。
+
+审查本身先确认了两件好事：**在 `except` 块里抛新异常的地方，没有一处漏掉
+`from`**（AST 全量扫描，因果链 100% 完整）；booker 的 handler 链是全仓库最好的
+参照物，四个分支各自注明了上层行为差在哪。
+
+### 线上已发生的误判（有日志证据）
+
+**1. 平台维护被改判成「第 1 页网络错误」——实测 20 次**
+
+`_scrape_city_pages` 的重抛白名单漏了 `UpstreamMaintenanceError`。日志里一句话
+同时写着两个互相矛盾的判断：
+
+```
+[ERROR] holland2stay:Eindhoven 抓取网络失败，已隔离该任务:
+        [Eindhoven] 第 1 页网络错误: H2S 平台维护中（页面标题: H2S-Maintenance）
+```
+
+2026-08-04 与 08-15 共 20 次。同期 per-task 维护分支只正确命中过 2 次，还是
+curl_cffi 时代的。代价：维护期走网络失败路径（5 分钟冷却 + 连续失败计数 +
+ERROR），而不是设计好的维护路径（15 分钟安静冷却 + INFO + 不发用户告警 +
+dashboard banner）。
+
+讽刺的是 `browser_fetcher.fetch()` 专门为这件事把异常小心地原样抛出来，下一层
+就给压掉了。`XiorScraper._post_ajax` 的同一个位置一直是对的。
+
+**2. 导航失败绕过了整套重试 + 换 IP 逻辑——实测 558 次**
+
+`ensure_initialized` 的「3 次尝试，每次换出口 IP」只接 `BlockedError`，而
+`goto()` 失败抛的是 `ScrapeNetworkError`，直接穿透。
+
+```
+初始化重试（BlockedError 路径，有重试+换IP）        164 次
+主站加载失败（ScrapeNetworkError 路径，零重试）      558 次   ← 3.4 倍
+  其中消息写着「（CF 挑战可能未通过）」的            439 次
+```
+
+**为挑战失败准备的恢复逻辑，被挑战失败绕过了 439 次。** 现在两类都重试，唯一
+不重试的是代理服务端级故障（402/407/502/503，换 session 也是同一个坏账户，
+判据用现成的 `is_proxy_service_error`）。
+
+刻意不改判成 `BlockedError`：goto 超时到底是被挡还是网络慢我们并不知道，
+「挑战可能未通过」是排除法猜的。修的是重试缺失，不是发明一个证明不了的分类。
+
+顺带修了 `_navigate_and_verify` 的 docstring——它一直写着「任一环节没过就抛
+`BlockedError`」，读代码的人按它假设了行为，这大概就是 bug 藏这么久的原因。
+
+### 路径风险与一致性
+
+**3. 浏览器失联后被复用到年龄上限。** `_ensure_browser` 只看「非 None」和
+「年龄」。Chromium 崩了之后对象还在、`close()` 从没调过，于是死实例被复用到
+`_BROWSER_MAX_AGE`（H2S 2 小时）。中间不会自愈：崩溃被改判成
+`ScrapeNetworkError`，而 dispatcher 的网络分支刻意不丢会话。新增
+`BrowserFetcher.is_alive`（只读本地标志位，不发 IPC）。属路径风险，未观测到。
+
+**4. `OperationNotAllowedError` 在抓取侧没有 handler。** monitor 根本没导入过
+这个类，于是它落到「未分类的内部异常，请查看服务器日志排查」——**全系统最可
+诉诸行动的一条故障，却把排查引向了服务器日志。** 现在有专属分支，告警直接给出
+唯一修法；优先级排在 `BlockedError` 前面（两者都是 403，但换 IP/熔断/登录抑制
+对它一件都不管用）；`main_loop` 的冷却是限流不是等待。
+
+**5. 404 的教训只落地在 H2S 一家。** RentCafe 两个 source 的 404 现在也会说
+「这不是代理或网络问题，别往那个方向查」，并指到 `BUILDINGS` 表去核对 slug /
+property_id——URL 里嵌着这两个上游可改的标识。
+
+**6. GraphQL `errors` 与相邻的 `data=null` 分支不一致。** 同一个函数里两种
+「没拿到数据」，一个 raise 一个 break，后者把「上游拒绝了我们的查询」上报成
+「成功抓到 0 条」。同时修另一个方向：NON_NULL 传播会同时给出 errors 和部分
+data，见到 errors 就整页丢掉等于把能用的数据也扔了（booker 早就按这个规律
+处理，抓取侧一直没有）。
+
+**7. `_rebuild_browser()` 静默拒绝。** 调用方全都忽略返回值，非 rotating 的
+profile 上「重试 3 次换 IP」会悄悄退化成「同一个 IP 原样重试 3 次」。两个
+profile 现在都轮换，所以是陷阱不是 bug——修法只是让它可见。
+
+### 测试
+
+新增 35 条，覆盖每一条修复及其反向守卫（维护仍不重试 / 代理账户级故障不重试 /
+500 不该被说成端点搬走 / ProxyError 与 Maintenance 仍排在 operation 之前 /
+taxonomy 之外的异常仍归网络类）。13 个变异全部捕获。全套 **2627** 通过。
+
 ## v1.17.12 (2026-08-20)
 
 completeness key 的构造收敛成一份实现。

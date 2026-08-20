@@ -840,11 +840,25 @@ class BrowserFetcher:
         只有 ``rotating_proxy`` 的 profile 重建才会落到新 session；固定 IP 的
         profile 重建后拿到的是同一个出口，白付一次冷启动，所以不做。
         """
+        # 两处拒绝都要**吵一声**。调用方（``ensure_initialized`` / ``fetch``）都是
+        # ``self._rebuild_browser()`` 一行带过、忽略返回值，所以静默返回 False 会让
+        # 「重试 3 次，每次换一个出口 IP」悄悄退化成「在同一个 IP 上原样重试 3 次」
+        # ——日志上完全看不出区别，而那正是 2026-08-03 那次熔断的成因描述。
         if not self._profile.rotating_proxy:
+            logger.warning(
+                "%s 请求重建浏览器换 IP，但该 profile 不轮换出口（rotating_proxy=False），"
+                "本次不重建。调用方的重试将落在同一个出口 IP 上。",
+                self._profile.name,
+            )
             return False
         if self._browser is None:
             # 还没 __enter__ 就走到这里，说明调用方绕过了正常生命周期。
             # 凭空 launch 一个浏览器不是「重建」，交回给调用方处理。
+            logger.warning(
+                "%s 请求重建浏览器，但当前还没有浏览器实例（调用方绕过了 __enter__），"
+                "本次不重建。",
+                self._profile.name,
+            )
             return False
         old = _redact_proxy(self._proxy_url) if self._proxy_url else "直连"
         self.close()
