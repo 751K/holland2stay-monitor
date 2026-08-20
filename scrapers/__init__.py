@@ -121,6 +121,9 @@ def dispatch_scrape_tasks(
       只有所有启用任务都失败时才上抛给 monitor 做冷却
     - ``RateLimitError`` / ``BlockedError`` 在单 source 或全 source 失败时
       继续上抛，保留与 monitor.main_loop 的冷却契约兼容
+    - ``RateLimitError`` 额外做**批次级短路**：一旦某 task 退避跑满仍 429，
+      同 source 的剩余 task 直接判失败、不再发请求（429 是针对出口 IP 的
+      配额，重试只是重新证明已知的事，代价是整轮阻塞数分钟）
     - ``ScrapeNetworkError`` 累积，若全部 source 都网络失败则上抛
     - ``completeness`` 字典 key 是 ``city_display``——多 source 同名城市
       （例如 H2S 的 Amsterdam + OurDomain 的 Amsterdam）会前缀化 source
@@ -188,11 +191,40 @@ def dispatch_scrape_tasks(
         # 本批次里是否出现过 403。出现过就在批次结束后丢掉该 source 的长生命
         # 周期资源（浏览器），下轮重建——被 CF 标记的会话留着只会一直 403。
         source_blocked: Optional[BlockedError] = None
+        # 本批次里是否出现过 429（退避已跑满仍然被限流）。出现过就不再给同
+        # source 的剩余 task 发请求——理由见下面循环里的注释。
+        source_rate_limited: Optional[RateLimitError] = None
 
         try:
             with scraper.batch_session():
                 for t in source_tasks:
                     ckey = completeness_key(source, t.city_display, multi_source=multi)
+
+                    # 429 是**服务端对本客户端出口 IP 的配额判定**，不是对某一
+                    # 栋楼、某一个城市的。上一个 task 把退避跑满仍然 429，说明
+                    # 配额还没恢复，剩下的 task 必然也 429——区别只在于每个都
+                    # 要先睡满一整轮退避（Xior 是 30s+60s）去把这件已知的事重
+                    # 新证明一遍。
+                    #
+                    # 2026-08-20 生产实测：4 个城市 × 91 秒 ≈ 6 分钟，而且这 6
+                    # 分钟**整轮阻塞**——同轮里 H2S / OurDomain 的房源一起延迟
+                    # 交付。这样的爆发每天约 10 次，累计近 1 小时空转。
+                    #
+                    # 直接判失败、一个请求都不发。
+                    #
+                    # 仍然记进 hard_failures 是为了让这张表保持「每个失败的
+                    # task 都在案」的不变量——**不是**熔断器跳闸的前提：跳闸
+                    # 只需要 success_count == 0 加任意一条 hard_failure，而
+                    # 触发短路的那个 task 自己已经记过一条了。
+                    if source_rate_limited is not None:
+                        hard_failures.append((ckey, source_rate_limited))
+                        completeness[ckey] = False
+                        logger.warning(
+                            "%s 跳过：本批次 %s 已被限流（429），"
+                            "同 source 剩余任务不再发请求", ckey, source,
+                        )
+                        continue
+
                     try:
                         result = scraper.scrape(t)
                         success_count += 1
@@ -212,6 +244,8 @@ def dispatch_scrape_tasks(
                         # 重建只是白白多过一次 CF 挑战。
                         if isinstance(e, BlockedError) and source_blocked is None:
                             source_blocked = e
+                        elif isinstance(e, RateLimitError) and source_rate_limited is None:
+                            source_rate_limited = e
                         logger.error("%s 抓取被限流/屏蔽，已隔离该任务: %s", ckey, e)
                     except OperationNotAllowedError as e:
                         # 403，但正文是上游应用说「这条 operation 没登记」。
