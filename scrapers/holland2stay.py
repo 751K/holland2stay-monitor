@@ -38,9 +38,9 @@ from typing import Optional
 
 from models import Listing
 
+from ._browser_backed import BrowserBackedScraper
 from .base import (
     RATE_LIMIT_BACKOFF,
-    AbstractScraper,
     BlockedError,
     OperationNotAllowedError,
     RateLimitError,
@@ -404,7 +404,7 @@ def _enrich(
 
 
 # ── BrowserFetcher（从共享模块导入）─────────────────────────────────
-from browser_fetcher import BrowserFetcher  # noqa: E402
+from browser_fetcher import H2S_PROFILE, BrowserFetcher  # noqa: E402
 
 
 # ── Listing 转换 ────────────────────────────────────────────────────────
@@ -716,32 +716,26 @@ def _scrape_city_pages(
 
 # ── Scraper ─────────────────────────────────────────────────────────────
 
-class HollandStayScraper(AbstractScraper):
+class HollandStayScraper(BrowserBackedScraper):
     """
     Holland2Stay 抓取器（CloakBrowser + 新 GraphQL API）。
 
-    浏览器生命周期
-    --------------
-    浏览器**跨轮复用**——首轮创建，后续轮复用同一个实例，避免每轮重新执行
-    CF Turnstile 挑战（~4s 冷启动 + CF challenge 频率过高会被标记）。
-
-    关闭重建发生在三种情况：
-    - 超过 ``_BROWSER_MAX_AGE``（2 小时）→ ``_ensure_browser`` 主动重建
-    - 本批次出现过 403 或未预期异常 → dispatcher 调 ``invalidate_session()``
-    - 进程退出
-
-    batch_session() 不创建/关闭浏览器，只负责让 dispatcher 拿到共享实例。
+    浏览器生命周期归 ``BrowserBackedScraper``（懒创建 / 超龄重建 / 失效丢弃 /
+    批次作用域，与 Xior 共用同一份实现）。本类只提供三样站点相关的东西：
+    profile、存活时长、以及挂在浏览器生命周期上的 attr 标签表。
     """
 
     source = "holland2stay"
+    _BROWSER_PROFILE = H2S_PROFILE
 
-    # 浏览器最大存活时间（秒）：超过后主动重建，避免会话过期被 CF 拦
+    #: 浏览器最大存活时间（秒）：超过后主动重建，避免会话过期被 CF 拦。
+    #: 比 Xior 的 15 分钟长得多——H2S 靠的是**稳定**出口 IP 复用 clearance，
+    #: 而 Xior 靠**频繁换** IP 摊开按 IP 累积的限流，两者的取舍方向相反。
     _BROWSER_MAX_AGE = 7200  # 2 小时
 
     def __init__(self) -> None:
-        self._fetcher: Optional[BrowserFetcher] = None
+        super().__init__()
         self._attr_labels: dict[str, dict[str, str]] = {}
-        self._browser_created_at: float = 0.0
         # 上次全量扫描的时刻。**不跟着浏览器重建清零**——浏览器 2 小时一换，
         # 清零会让每次换浏览器都强制一次全量，分层就白做了。
         self._last_full_scan_at: float = 0.0
@@ -751,75 +745,46 @@ class HollandStayScraper(AbstractScraper):
         #: 本批次共享的详情补齐预算 / 限速状态。由 _begin_batch 每轮建一个。
         #: 见 _DetailBudget —— 每城一份是 2026-08-20 那次 429 没修干净的另一半。
         self._detail_budget: Optional[_DetailBudget] = None
+        #: _end_batch 用来判断「计划了全量却一条没成」。
+        self._batch_planned_full: bool = False
+        self._batch_scan_mark: float = 0.0
 
-    def _ensure_browser(self) -> BrowserFetcher:
-        """懒创建或复用浏览器实例。
+    # ── 浏览器生命周期的站点侧钩子 ──────────────────────────────────
 
-        只在两种情况下真正重建：实例还没有，或已超过 ``_BROWSER_MAX_AGE``。
-        抓取期的 403 由 dispatcher 在批次结束后调 ``invalidate_session()``
-        丢弃会话，下一轮再走到这里时自然重建。
+    def _new_fetcher(self, *, headless: bool) -> BrowserFetcher:
+        """引用**本模块**的 BrowserFetcher —— 见基类同名方法的说明（测试接缝）。"""
+        return BrowserFetcher(headless=headless, profile=H2S_PROFILE)
+
+    def _on_browser_ready(self) -> None:
+        """标签映射跟着浏览器走：换了浏览器就从空表重新累积。
+
+        标签不再单独查（``GetAggregations`` 已被 operation 白名单挡掉），
+        改由每次 ``GetCategories`` 响应自带的 aggregations 累积，见
+        ``_labels_from_aggregations``。
         """
-        from config import CLOAKBROWSER_HEADLESS
+        self._attr_labels = {}
 
+    def _on_browser_closed(self) -> None:
+        self._attr_labels = {}
+
+    def _begin_batch(self) -> None:
+        """每批次开头决定这一轮是不是全量扫描，并重置详情补齐预算。
+
+        预算必须在这里建、且**整批共享**：``_enrich()`` 是每城调一次，把预算
+        留在它的局部变量里等于给各个城市各发一份配额。见 ``_DetailBudget``。
+
+        **这里不推进 ``_last_full_scan_at``。** 计时器由 ``_note_full_scan_done()``
+        在全量真的跑完之后推进，理由见那个方法。
+        """
         now = time.monotonic()
-        if self._fetcher is not None:
-            # 超龄 → 主动重建
-            if now - self._browser_created_at > self._BROWSER_MAX_AGE:
-                logger.info("浏览器已存活 %.0f 分钟，主动重建", (now - self._browser_created_at) / 60)
-                self._close_browser()
-            else:
-                return self._fetcher
+        self._full_this_batch = (now - self._last_full_scan_at) >= _FULL_SCAN_INTERVAL
+        self._detail_budget = _DetailBudget()
+        # 给 _end_batch 判断「计划了全量却一条没成」用
+        self._batch_planned_full = self._full_this_batch
+        self._batch_scan_mark = self._last_full_scan_at
 
-        # 新建浏览器
-        self._fetcher = BrowserFetcher(headless=CLOAKBROWSER_HEADLESS)
-        try:
-            self._fetcher.__enter__()
-            self._fetcher.ensure_initialized()
-            # 标签映射不再单独查（GetAggregations 已被 operation 白名单挡掉），
-            # 改由每次 GetCategories 响应自带的 aggregations 累积，见
-            # _labels_from_aggregations。这里只备好空表。
-            self._attr_labels = {}
-            self._browser_created_at = time.monotonic()
-            logger.info("浏览器已创建并完成 CF 挑战 (第 %d 次)", getattr(self, '_browser_create_count', 0) + 1)
-            setattr(self, '_browser_create_count', getattr(self, '_browser_create_count', 0) + 1)
-            return self._fetcher
-        except Exception:
-            self._close_browser()
-            raise
-
-    def _close_browser(self) -> None:
-        """关闭浏览器，释放资源。由 ``invalidate_session()`` 和超龄重建调用。"""
-        if self._fetcher is not None:
-            try:
-                self._fetcher.__exit__(None, None, None)
-            except Exception:
-                pass
-            self._fetcher = None
-            self._attr_labels = {}
-
-    def invalidate_session(self) -> None:
-        """未预期异常后丢弃浏览器——坏掉的会话留着会让后续每轮重复失败。"""
-        self._close_browser()
-
-    @contextmanager
-    def batch_session(self):
-        """
-        批次上下文：确保浏览器存活，dispatcher 通过此入口拿到共享实例。
-
-        浏览器跨轮复用——不再每批次创建/关闭。
-
-        这里**不**捕获抓取期的异常。dispatcher 是按 task 隔离的，``scrape()``
-        抛的东西根本到不了 ``yield``——曾经写在这里的 ``except BlockedError:
-        self._close_browser()`` 因此是死代码，「403 后关闭浏览器下轮重建」
-        实际从未发生过。现在由 dispatcher 在批次结束后统一调
-        ``invalidate_session()``。
-        """
-        self._ensure_browser()
-        self._begin_batch()
-        planned_full = self._full_this_batch
-        mark = self._last_full_scan_at
-        yield
-        if planned_full and self._last_full_scan_at == mark:
+    def _end_batch(self) -> None:
+        if self._batch_planned_full and self._last_full_scan_at == self._batch_scan_mark:
             # 计时器没被推进 = 没有任何城市完成全量。下一轮会立刻重试（这正是
             # 不提前记账的意义），但这件事本身必须可见：否则「Reserved 长期
             # 没被看到、状态收敛停摆」在日志上完全没有痕迹。
@@ -827,6 +792,22 @@ class HollandStayScraper(AbstractScraper):
                 "本批次计划做全量扫描，但没有任何城市完成——计时器不推进，"
                 "下一轮立即重试。这期间 Reserved 房源没被看到，其状态收敛推迟。"
             )
+
+    def _note_full_scan_done(self) -> None:
+        """记下「全量扫描真的完成了一次」，推进计时器。
+
+        为什么不在 ``_begin_batch()`` 里当场推进 —— 那是**先记账后干活**
+        ------------------------------------------------------------------
+        原实现在决定要做全量的那一刻就写 ``_last_full_scan_at = now``。批次随后
+        403 / 熔断 / 代理挂掉时，那次全量一条数据都没拿到，计时器却已经走了：
+        下一次全量要再等 30 分钟。H2S 熔断退避最长 6 小时
+        （``monitor._H2S_CIRCUIT_MAX_COOLDOWN``），期间 Reserved 那批房源的状态
+        收敛可以停摆很久，而日志上看不出「本该全量的那轮没成」。
+
+        判据是「至少有一个城市跑完了全量」，不是「全部城市都跑完」：后者会让一个
+        长期坏掉的城市把整批钉死在每轮全量上，而全量正是我们要省的那部分流量。
+        """
+        self._last_full_scan_at = time.monotonic()
 
     def _plan_scan(self, configured: list[str]) -> tuple[list[str], bool]:
         """本轮查哪些可用状态，以及这轮算不算全量。见 _FRESH_STATUSES 上方注释。
@@ -851,35 +832,6 @@ class HollandStayScraper(AbstractScraper):
         if self._full_this_batch:
             return configured, True
         return fresh, False
-
-    def _begin_batch(self) -> None:
-        """每批次开头决定这一轮是不是全量扫描，并重置详情补齐预算。
-
-        预算必须在这里建、且**整批共享**：``_enrich()`` 是每城调一次，把预算
-        留在它的局部变量里等于给各个城市各发一份配额。见 ``_DetailBudget``。
-
-        **这里不推进 ``_last_full_scan_at``。** 计时器由 ``_note_full_scan_done()``
-        在全量真的跑完之后推进，理由见那个方法。
-        """
-        now = time.monotonic()
-        self._full_this_batch = (now - self._last_full_scan_at) >= _FULL_SCAN_INTERVAL
-        self._detail_budget = _DetailBudget()
-
-    def _note_full_scan_done(self) -> None:
-        """记下「全量扫描真的完成了一次」，推进计时器。
-
-        为什么不在 ``_begin_batch()`` 里当场推进 —— 那是**先记账后干活**
-        ------------------------------------------------------------------
-        原实现在决定要做全量的那一刻就写 ``_last_full_scan_at = now``。批次随后
-        403 / 熔断 / 代理挂掉时，那次全量一条数据都没拿到，计时器却已经走了：
-        下一次全量要再等 30 分钟。H2S 熔断退避最长 6 小时
-        （``monitor._H2S_CIRCUIT_MAX_COOLDOWN``），期间 Reserved 那批房源的状态
-        收敛可以停摆很久，而日志上看不出「本该全量的那轮没成」。
-
-        判据是「至少有一个城市跑完了全量」，不是「全部城市都跑完」：后者会让一个
-        长期坏掉的城市把整批钉死在每轮全量上，而全量正是我们要省的那部分流量。
-        """
-        self._last_full_scan_at = time.monotonic()
 
     def scrape(self, task: ScrapeTask) -> ScrapeResult:
         configured = task.extra.get("availability_ids") or ["179", "336"]

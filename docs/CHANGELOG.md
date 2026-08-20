@@ -1,5 +1,50 @@
 # Changelog
 
+## v1.17.11 (2026-08-20)
+
+浏览器生命周期抽成共享基类。
+
+### 问题
+
+H2S 与 Xior 的 `_ensure_browser` / `_close_browser` / `invalidate_session` /
+`batch_session` 是两份**行级 75% 重复**的拷贝（65 行 vs 64 行），连注释都是
+同一段（包括那句「曾经写在这里的 `except BlockedError` 是死代码」）。差别只有
+三处：用哪个 `SiteProfile`、活多久、建好之后要不要额外重置点什么。
+
+### 修法
+
+新增 `scrapers/_browser_backed.py:BrowserBackedScraper`，两家都继承它。子类只
+留下站点相关的部分：
+
+| | H2S | Xior |
+|---|---|---|
+| `_BROWSER_PROFILE` | `H2S_PROFILE` | `XIOR_PROFILE` |
+| `_BROWSER_MAX_AGE` | 7200s（稳定 IP 复用 clearance） | 900s（频繁换 IP 摊开限流） |
+| 钩子 | `_on_browser_ready/closed`（attr 标签表）、`_begin_batch`/`_end_batch` | 无 |
+
+**放在独立模块而不是 `scrapers/base.py`**：`base` 是 source-agnostic 的抽象层，
+OurDomain / OurCampus 走纯 HTTP，不该因为另外两家用浏览器就被拖进对
+`browser_fetcher` 的依赖。
+
+净减 102 行。
+
+### 迁移中踩到的两个坑（都留了守卫）
+
+**1. 把建 fetcher 收进基类会让所有测试打桩失效——而且是危险的失效。**
+用例一直是 `monkeypatch.setattr(scrapers.holland2stay, "BrowserFetcher", Fake)`
+这么打桩的。基类若直接用自己导入的名字，这些桩全部落空，用例会**真的去启动一个
+Chromium**（cloakbrowser 的升级提示打进测试输出才发现）。所以保留一个三行的
+`_new_fetcher()` 由子类覆盖——它看着多余，但它是接缝。
+
+**2. 重排方法位置留下了两份 `_begin_batch`。** Python 对同名方法重复定义不报
+任何错，后一份（旧的）静默覆盖前一份，新加的字段永远不被赋值。症状是一条测试
+莫名其妙失败而代码看起来完全正确。新增 AST 守卫扫 `scrapers/*.py` 的所有类。
+
+### 测试
+
+新增 `TestBrowserLifecycleIsShared`（4 条）+ 重复定义守卫（1 条）。3 个变异全部
+捕获。全套 2587 通过。
+
 ## v1.17.10 (2026-08-20)
 
 加密信封合并成一份实现。

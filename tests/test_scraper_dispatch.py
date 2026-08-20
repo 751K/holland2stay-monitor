@@ -156,7 +156,7 @@ def test_holland2stay_reuses_one_browser_for_all_cities(monkeypatch):
     browser_instances = []
 
     class _FakeBrowserFetcher:
-        def __init__(self, headless=True):
+        def __init__(self, headless=True, profile=None):
             browser_instances.append(self)
             self._initialized = False
 
@@ -200,7 +200,7 @@ def test_holland2stay_standalone_scrape_still_self_manages_browser(monkeypatch):
     browser_instances = []
 
     class _FakeBrowserFetcher:
-        def __init__(self, headless=True):
+        def __init__(self, headless=True, profile=None):
             browser_instances.append(self)
             self._initialized = False
 
@@ -343,3 +343,90 @@ class TestNoUnwiredScraperHooks:
             "scraper.py 又回来了——它只是 scrapers.base 的 re-export 垫片"
         )
         assert importlib.util.find_spec("scrapers.base") is not None
+
+
+class TestBrowserLifecycleIsShared:
+    """浏览器生命周期只准有一份实现。
+
+    H2S 与 Xior 的 ``_ensure_browser`` / ``_close_browser`` /
+    ``invalidate_session`` / ``batch_session`` 曾是两份行级 75% 重复的拷贝
+    （65 行 vs 64 行），连注释都是同一段。差别只有三处：用哪个 SiteProfile、
+    活多久、建好之后要不要额外重置点什么。
+
+    现在都继承 ``scrapers._browser_backed.BrowserBackedScraper``。
+    """
+
+    def test_browser_sources_inherit_the_shared_base(self):
+        import scrapers
+        from scrapers._browser_backed import BrowserBackedScraper
+
+        for source in ("holland2stay", "xior"):
+            cls = scrapers.SCRAPER_REGISTRY[source]
+            assert issubclass(cls, BrowserBackedScraper), (
+                f"{source} 没走共享的浏览器生命周期"
+            )
+
+    def test_subclasses_do_not_reimplement_the_lifecycle(self):
+        """子类只准提供 profile / 存活时长 / 钩子，不准自己重写生命周期。"""
+        import scrapers
+        from scrapers._browser_backed import BrowserBackedScraper
+
+        shared = ("_ensure_browser", "_close_browser",
+                  "invalidate_session", "batch_session")
+        for source in ("holland2stay", "xior"):
+            cls = scrapers.SCRAPER_REGISTRY[source]
+            for name in shared:
+                assert name not in vars(cls), (
+                    f"{source} 又自己实现了 {name}——共享实现就白抽了"
+                )
+                assert getattr(cls, name) is getattr(BrowserBackedScraper, name)
+
+    def test_each_source_keeps_its_own_profile_and_lifetime(self):
+        """共享的是流程，不是参数。两家的取舍方向相反，不能一起调。"""
+        from browser_fetcher import H2S_PROFILE, XIOR_PROFILE
+        import scrapers
+
+        h2s_cls = scrapers.SCRAPER_REGISTRY["holland2stay"]
+        xior_cls = scrapers.SCRAPER_REGISTRY["xior"]
+        assert h2s_cls._BROWSER_PROFILE is H2S_PROFILE
+        assert xior_cls._BROWSER_PROFILE is XIOR_PROFILE
+        # H2S 靠稳定出口 IP 复用 clearance；Xior 靠频繁换 IP 摊开限流
+        assert h2s_cls._BROWSER_MAX_AGE > xior_cls._BROWSER_MAX_AGE * 4
+
+    def test_the_fetcher_factory_stays_patchable_per_module(self):
+        """``_new_fetcher`` 必须由子类覆盖，引用**自己模块**的 BrowserFetcher。
+
+        这看着像多余的一行，但它是测试的接缝。迁移过程中把它收进基类之后，
+        所有 ``monkeypatch.setattr(scrapers.holland2stay, "BrowserFetcher", …)``
+        的桩**全部失效**——而失效的后果不是测试报错，是测试真的去启动一个
+        Chromium（cloakbrowser 的升级提示直接打进了测试输出才发现）。
+        """
+        import scrapers
+
+        for source in ("holland2stay", "xior"):
+            cls = scrapers.SCRAPER_REGISTRY[source]
+            assert "_new_fetcher" in vars(cls), (
+                f"{source} 没覆盖 _new_fetcher——测试的打桩接缝会失效，"
+                "用例会去启动真实浏览器"
+            )
+
+
+def test_no_method_is_silently_shadowed_by_a_duplicate_definition():
+    """同名方法在一个类里定义两次时，后一个静默覆盖前一个。
+
+    迁移时踩到过：重排方法位置留下了两份 ``_begin_batch``，Python 不报任何错，
+    只是后面那份（旧的）赢了，新加的字段永远不被赋值——症状是一条测试莫名其妙
+    失败，而代码看起来完全正确。
+    """
+    import ast
+    import pathlib
+
+    for path in pathlib.Path("scrapers").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            names = [n.name for n in node.body
+                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+            dupes = {n for n in names if names.count(n) > 1}
+            assert not dupes, f"{path}:{node.name} 里重复定义了 {dupes}"

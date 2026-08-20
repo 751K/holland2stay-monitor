@@ -56,9 +56,9 @@ from browser_fetcher import XIOR_PROFILE, BrowserFetcher
 from config import assumed_features, get_impersonate
 from models import Listing
 
+from ._browser_backed import BrowserBackedScraper
 from .base import (
     RATE_LIMIT_BACKOFF,
-    AbstractScraper,
     BlockedError,
     RateLimitError,
     ScrapeNetworkError,
@@ -110,10 +110,14 @@ def _is_upstream_ok(code) -> bool:
         return True
 
 
-class XiorScraper(AbstractScraper):
-    """Unit-level scraper for Xior properties backed by RENTCafe."""
+class XiorScraper(BrowserBackedScraper):
+    """Unit-level scraper for Xior properties backed by RENTCafe.
+
+    浏览器生命周期归 ``BrowserBackedScraper``（与 H2S 共用同一份实现）。
+    """
 
     source = "xior"
+    _BROWSER_PROFILE = XIOR_PROFILE
 
     # ── building registry (auto-discovered 2026-05-22) ─────────────────
 
@@ -159,67 +163,9 @@ class XiorScraper(AbstractScraper):
     # 代价是每小时多 4 次 CF 挑战（Xior 的挑战约 7–9s，比 H2S 便宜）。
     _BROWSER_MAX_AGE = 900  # 15 分钟
 
-    def __init__(self) -> None:
-        self._fetcher: Optional[BrowserFetcher] = None
-        self._browser_created_at: float = 0.0
-
-    def _ensure_browser(self) -> BrowserFetcher:
-        """懒创建或复用浏览器实例。
-
-        只在两种情况下真正重建：实例还没有，或已超过 ``_BROWSER_MAX_AGE``。
-        抓取期的 403 由 dispatcher 在批次结束后调 ``invalidate_session()``
-        丢弃会话，下一轮再走到这里时自然重建。
-        """
-        from config import CLOAKBROWSER_HEADLESS
-
-        now = time.monotonic()
-        if self._fetcher is not None:
-            if now - self._browser_created_at > self._BROWSER_MAX_AGE:
-                logger.info(
-                    "Xior 浏览器已存活 %.0f 分钟，主动重建",
-                    (now - self._browser_created_at) / 60,
-                )
-                self._close_browser()
-            else:
-                return self._fetcher
-
-        self._fetcher = BrowserFetcher(
-            headless=CLOAKBROWSER_HEADLESS, profile=XIOR_PROFILE
-        )
-        try:
-            self._fetcher.__enter__()
-            self._fetcher.ensure_initialized()
-            self._browser_created_at = time.monotonic()
-            logger.info("Xior 浏览器已创建并完成 CF 挑战")
-            return self._fetcher
-        except Exception:
-            self._close_browser()
-            raise
-
-    def _close_browser(self) -> None:
-        if self._fetcher is not None:
-            try:
-                self._fetcher.__exit__(None, None, None)
-            except Exception:
-                pass
-            self._fetcher = None
-
-    def invalidate_session(self) -> None:
-        """未预期异常后丢弃浏览器——坏掉的会话留着会让后续每轮重复失败。"""
-        self._close_browser()
-
-    @contextmanager
-    def batch_session(self):
-        """批次上下文：确保浏览器存活，跨轮复用。
-
-        这里**不**捕获抓取期的异常。dispatcher 是按 task 隔离的，``scrape()``
-        抛的东西根本到不了 ``yield``——曾经写在这里的 ``except BlockedError:
-        self._close_browser()`` 因此是死代码，「403 后关闭浏览器下轮重建」
-        实际从未发生过。现在由 dispatcher 在批次结束后统一调
-        ``invalidate_session()``。
-        """
-        self._ensure_browser()
-        yield
+    def _new_fetcher(self, *, headless: bool) -> BrowserFetcher:
+        """引用**本模块**的 BrowserFetcher —— 见基类同名方法的说明（测试接缝）。"""
+        return BrowserFetcher(headless=headless, profile=XIOR_PROFILE)
 
     # ── public API ─────────────────────────────────────────────────────
 

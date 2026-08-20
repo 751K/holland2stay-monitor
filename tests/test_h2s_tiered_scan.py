@@ -157,6 +157,7 @@ class TestFreshRoundIsNeverComplete:
                             lambda *a, **k: ([], True))
 
         class _FakeFetcher:
+            def __init__(self, headless=True, profile=None): pass
             def __enter__(self): return self
             def __exit__(self, *a): return False
             def ensure_initialized(self): pass
@@ -207,6 +208,7 @@ class TestTimerAdvancesOnlyAfterTheWorkIsDone:
         monkeypatch.setattr(h2s, "_enrich", lambda *a, **k: 0)
 
         class _FakeFetcher:
+            def __init__(self, headless=True, profile=None): pass
             def __enter__(self): return self
             def __exit__(self, *a): return False
             def ensure_initialized(self): pass
