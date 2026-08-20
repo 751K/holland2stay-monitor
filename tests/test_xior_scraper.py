@@ -600,3 +600,118 @@ def test_xior_building_lookup():
     )
     assert bldg["property_page_id"] == 1114
     assert bldg["display"] == "Maastricht Annadal"
+
+
+# ── 权威校验必须和浏览器走同一条出口 ────────────────────────────────────
+
+class TestFloorplanCheckSharesTheBrowserExit:
+    """floorplans.aspx 的权威校验要走**浏览器实际在用的那条代理**。
+
+    原实现在 ``scrape()`` 里另调一次 ``get_proxy_url(self.source)``——注意
+    **没有 rotating=True**，于是它拿到的是一条永不轮换的 sticky session，
+    和浏览器（``XIOR_PROFILE.rotating_proxy=True``）根本是两个出口 IP。
+
+    两个后果：
+
+    1. **不一致。** WP feed 和「这户型到底还能不能订」这两份数据来自不同 IP，
+       而这条校验恰恰只在有候选可订单元时才发——也就是决定一条房源真假的
+       那一刻。
+    2. **多烧一份限流额度，而且是烧在一个永不轮换的 IP 上。** Xior 整套抗
+       限流策略就是「换浏览器换 IP 把累积量摊开」（见模块头 Rate limiting），
+       唯独这条最关键的请求被钉死在固定 IP 上。它打的还是 RentCafe
+       （``*.securerc.co.uk``），和 OurDomain 同一个平台，而 OurDomain 那边
+       用的是 ``rotating=True``。
+
+    ``BrowserFetcher`` 早就把实际生效的代理记在 ``_proxy_url`` 上了，就是为了
+    「诊断必须探这个浏览器实际在用的那条线路」——同一个理由适用于这里。
+    """
+
+    def test_browser_fetcher_exposes_its_proxy(self):
+        from browser_fetcher import BrowserFetcher
+
+        f = BrowserFetcher.__new__(BrowserFetcher)
+        f._proxy_url = "http://u:p@gw.example:8080"
+        assert f.proxy_url == "http://u:p@gw.example:8080"
+
+    def test_verify_uses_the_fetchers_proxy_not_a_second_session(self, monkeypatch):
+        import scrapers.xior as x
+
+        seen: dict = {}
+
+        class _Sess:
+            def __init__(self, **kw):
+                seen.update(kw)
+
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        monkeypatch.setattr(x.req, "Session", _Sess)
+        monkeypatch.setattr(x, "_fetch_bookable_floorplan_ids", lambda s, u: {1})
+        # 诱饵：本次修复把这个符号从模块里删掉了。若哪天有人把它加回来并在
+        # 校验路径上用，桩会让断言立刻看见走错了出口。raising=False 是因为
+        # 现在它本就不该存在。
+        monkeypatch.setattr(
+            x, "get_proxy_url", lambda *a, **k: "http://WRONG:1", raising=False,
+        )
+
+        class _Fetcher:
+            proxy_url = "http://RIGHT:2"
+
+        s = x.XiorScraper()
+        unit = {
+            "unitStatus": "Notice Unrented",
+            "availableDate": "01/07/2026",
+            "applyOnlineURL": (
+                "https://x.securerc.co.uk/onlineleasing/a/oleapplication.aspx"
+                "?myOlePropertyId=185589&myLeaseCafeType=2"
+            ),
+        }
+        monkeypatch.setattr(x, "_is_candidate_available", lambda u, t: True)
+
+        from datetime import date
+        s._verify_bookable_floorplans([unit], date(2026, 1, 1), _Fetcher(), "B")
+
+        assert seen.get("proxies") == {
+            "https": "http://RIGHT:2", "http": "http://RIGHT:2",
+        }, f"权威校验没走浏览器那条代理: {seen.get('proxies')!r}"
+
+    def test_no_proxy_means_no_proxies_dict(self, monkeypatch):
+        """浏览器降级成直连（代理全在冷却）时，校验也该直连。"""
+        import scrapers.xior as x
+        from datetime import date
+
+        seen: dict = {}
+
+        class _Sess:
+            def __init__(self, **kw):
+                seen.update(kw)
+
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        monkeypatch.setattr(x.req, "Session", _Sess)
+        monkeypatch.setattr(x, "_fetch_bookable_floorplan_ids", lambda s, u: set())
+        monkeypatch.setattr(x, "_is_candidate_available", lambda u, t: True)
+
+        class _Fetcher:
+            proxy_url = ""
+
+        s = x.XiorScraper()
+        s._verify_bookable_floorplans(
+            [{"applyOnlineURL":
+              "https://x.securerc.co.uk/onlineleasing/a/oleapplication.aspx"
+              "?myOlePropertyId=1&myLeaseCafeType=2"}],
+            date(2026, 1, 1), _Fetcher(), "B",
+        )
+        assert seen.get("proxies") == {}
+
+    def test_scrape_no_longer_opens_its_own_sticky_session(self):
+        """回归守卫：``scrape()`` 里不该再出现非 rotating 的 get_proxy_url。"""
+        import inspect
+
+        import scrapers.xior as x
+
+        src = inspect.getsource(x.XiorScraper.scrape)
+        assert "get_proxy_url" not in src, (
+            "scrape() 又自己开了一条 sticky 代理会话——它和浏览器不是同一个出口 IP"
+        )

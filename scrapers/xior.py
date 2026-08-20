@@ -33,6 +33,12 @@ accumulates across rounds. Two mechanisms together:
 - ``XIOR_PROFILE.rotating_proxy=True`` + a short ``_BROWSER_MAX_AGE`` means
   rebuilding the browser also rotates the exit IP, which spreads the
   accumulated count. 429s additionally retry with ``RATE_LIMIT_BACKOFF``.
+
+**All of this source's traffic goes out one exit IP** — the browser's, read
+back off ``BrowserFetcher.proxy_url``. That includes the RentCafe
+``floorplans.aspx`` cross-check in step 4, which used to open its own
+non-rotating sticky session and therefore sat on a fixed IP that the rotation
+strategy above could never move.
 """
 from __future__ import annotations
 
@@ -47,7 +53,7 @@ from typing import Optional
 import curl_cffi.requests as req
 
 from browser_fetcher import XIOR_PROFILE, BrowserFetcher
-from config import assumed_features, get_impersonate, get_proxy_url
+from config import assumed_features, get_impersonate
 from models import Listing
 
 from .base import (
@@ -228,8 +234,6 @@ class XiorScraper(AbstractScraper):
         prop_id = bldg["property_page_id"]
         semester = bldg["semester_id"]
         room_ids = bldg["room_type_ids"]
-        proxy = get_proxy_url(self.source)
-        proxies = {"https": proxy, "http": proxy} if proxy else {}
 
         fetcher = self._fetcher or self._ensure_browser()
 
@@ -266,7 +270,7 @@ class XiorScraper(AbstractScraper):
         # 该楼的 floorplans.aspx（绝大多数轮次没有候选 → 零额外请求）。fail-open：
         # 拿不到（None）就不 gate，信 WP feed，绝不漏报真房源。
         bookable_fp_ids = self._verify_bookable_floorplans(
-            list(all_units.values()), today, proxies, display,
+            list(all_units.values()), today, fetcher, display,
         )
 
         listings = [
@@ -284,13 +288,24 @@ class XiorScraper(AbstractScraper):
         self,
         units: list[dict],
         today: date,
-        proxies: dict,
+        fetcher: "BrowserFetcher",
         display: str,
     ) -> Optional[set[int]]:
         """对窗口内的候选可订单元，抓 floorplans.aspx 求权威可订 floorplan 集合。
 
         - 无候选 → 返回 None（不 gate，省一次请求）
         - 有候选但无法推导/抓取 floorplans.aspx → 返回 None（fail-open）
+
+        **走 ``fetcher.proxy_url``，也就是浏览器这一刻实际在用的那条代理。**
+        这里原本另调 ``get_proxy_url(self.source)``——没带 ``rotating=True``，
+        拿到的是一条**永不轮换**的 sticky session，和浏览器不是同一个出口 IP：
+
+        - WP feed 和「这户型到底还能不能订」来自两个 IP，而这条校验恰恰只在
+          有候选可订单元时才发，也就是决定一条房源真假的那一刻；
+        - 多烧一份限流额度，还烧在永不轮换的 IP 上——而 Xior 整套抗限流策略
+          就是「换浏览器换 IP 把累积量摊开」（见模块头 Rate limiting）。它打的
+          还是 RentCafe（``*.securerc.co.uk``），和 OurDomain 同一个平台，
+          OurDomain 那边用的是 ``rotating=True``。
         """
         candidates = [u for u in units if _is_candidate_available(u, today)]
         if not candidates:
@@ -306,6 +321,8 @@ class XiorScraper(AbstractScraper):
                 "fail-open 按 WP feed 结果", display,
             )
             return None
+        proxy = fetcher.proxy_url
+        proxies = {"https": proxy, "http": proxy} if proxy else {}
         with req.Session(impersonate=get_impersonate(), proxies=proxies) as vs:
             ids = _fetch_bookable_floorplan_ids(vs, fp_url)
         if ids is None:

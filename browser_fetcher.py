@@ -606,6 +606,19 @@ class BrowserFetcher:
     def profile(self) -> "SiteProfile":
         return self._profile
 
+    @property
+    def proxy_url(self) -> str:
+        """本实例**实际在用**的代理 URL（未配置代理时为空串）。
+
+        存在的理由和 ``_describe_navigation_failure`` 里探代理是同一个：任何
+        「跟这个浏览器走同一条线路」的需求都必须读这个值，而**不能**重新调
+        ``get_proxy_url()``——rotating 的 profile 上那样会拿到另一个 session，
+        也就是另一个出口 IP。
+
+        含用户名密码，写日志前过 ``_redact_proxy()``。
+        """
+        return self._proxy_url
+
     # ── 上下文管理器 ──────────────────────────────────────────────────
     def __enter__(self) -> "BrowserFetcher":
         self._launch()

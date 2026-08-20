@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.17.7 (2026-08-20)
+
+Xior 的权威校验改走浏览器那条出口 IP。
+
+### 问题
+
+`XiorScraper.scrape()` 里另调了一次 `get_proxy_url(self.source)`——**没带
+`rotating=True`**，拿到的是一条永不轮换的 sticky session，和浏览器
+（`XIOR_PROFILE.rotating_proxy=True`）根本是两个出口 IP。
+
+这条代理唯一的用途是 `_verify_bookable_floorplans()` 去抓 RentCafe 的
+`floorplans.aspx`，而它只在**有候选可订单元时**才发——也就是决定一条房源
+到底是不是真房源的那一刻。两个后果：
+
+1. **数据不一致**：WP feed 和「这户型还能不能订」来自两个不同 IP。
+2. **多烧一份限流额度，还烧在永不轮换的 IP 上。** Xior 整套抗限流策略就是
+   「换浏览器换 IP 把累积量摊开」，唯独这条最关键的请求被钉死在固定 IP 上。
+   它打的还是 RentCafe（`*.securerc.co.uk`），和 OurDomain 同一个平台，而
+   OurDomain 那边用的是 `rotating=True`。
+
+### 修法
+
+`BrowserFetcher` 新增 `proxy_url` 只读属性，暴露本实例**实际在用**的代理
+（`_launch()` 早就记着它了，理由和 `_describe_navigation_failure` 探代理时
+一样：必须探这个浏览器实际在用的那条线路）。`_verify_bookable_floorplans()`
+改收 `fetcher` 并从它取代理；`scrape()` 里那次 `get_proxy_url` 连同 import
+一起删掉。
+
+现在这个 source 的全部流量走同一个出口 IP，随浏览器重建一起轮换。
+
+### 测试
+
+`tests/test_xior_scraper.py` 新增 4 条，含一条源码级回归守卫（`scrape()` 里
+不得再出现 `get_proxy_url`）和一个诱饵桩。1 个变异捕获。全套 2570 通过。
+
 ## v1.17.6 (2026-08-20)
 
 全量扫描的计时器改为**干完活之后**才推进。
