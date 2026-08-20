@@ -49,6 +49,61 @@ _CITY_EXPR = "COALESCE(NULLIF(city_normalized,''), city)"
 _CITY_EXPR_L = "COALESCE(NULLIF(l.city_normalized,''), l.city)"
 
 
+
+# ── 粘性 feature ────────────────────────────────────────────────────
+#
+# 有些 feature 不是列表抓取产出的，而是**另发一次详情请求**补齐的
+# （scrapers/holland2stay.py 的详情补齐：Building / Tenant / Neighborhood /
+# MinIncome，来自 GetProductDetail —— 白名单主查询的字段集里没有它们）。
+#
+# 补齐是按预算 + 限速跨轮渐进的，还会因 429 中断，进程重启后缓存也清零。
+# 于是同一条房源在「补到了」和「还没补到」之间来回：而 diff() 每轮整体覆盖
+# features，没补到的那轮就会把上一轮存好的值**抹掉**。
+# 实测表现：部署后仪表盘的「楼盘」列大面积变回 '—'，90 分钟后才慢慢长回来。
+#
+# 判据：对这些 key 而言，**抓取侧没给 ≠ 上游没有了**，只是这轮没去问。
+# 所以新值缺失时保留旧值；新值存在时正常覆盖（上游真改了要能跟上）。
+#
+# 只对这几个 key 生效。普通字段（Type / Area / Status 派生的那些）仍然整体覆盖
+# ——那些是每轮都拿得到的，缺失就是真的没有了。
+_STICKY_FEATURE_KEYS = frozenset({
+    "Building", "Tenant", "Neighborhood", "MinIncome",
+})
+
+
+def _merge_sticky_features(
+    fresh_features: list[str],
+    old_features_json: "str | None",
+) -> list[str]:
+    """新 features 缺了粘性 key 时，从旧值里补回来。"""
+    if not old_features_json:
+        return list(fresh_features)
+
+    fresh_keys = {
+        f.split(":", 1)[0].strip() for f in fresh_features if ":" in f
+    }
+    missing = set(_STICKY_FEATURE_KEYS) - fresh_keys
+    if not missing:
+        return list(fresh_features)
+
+    try:
+        old = json.loads(old_features_json)
+    except (json.JSONDecodeError, TypeError):
+        return list(fresh_features)
+    if not isinstance(old, list):
+        return list(fresh_features)
+
+    merged = list(fresh_features)
+    for item in old:
+        if not isinstance(item, str) or ":" not in item:
+            continue
+        key = item.split(":", 1)[0].strip()
+        if key in missing:
+            merged.append(item)
+            missing.discard(key)
+    return merged
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -90,7 +145,8 @@ class ListingOps:
             if ids:
                 placeholders = ",".join("?" * len(ids))
                 rows = cur.execute(
-                    f"""SELECT id, status, status_is_inferred, status_hold_until
+                    f"""SELECT id, status, status_is_inferred, status_hold_until,
+                               features
                         FROM listings WHERE id IN ({placeholders})""",
                     ids,
                 ).fetchall()
@@ -99,6 +155,14 @@ class ListingOps:
             for listing in fresh:
                 old_row = existing.get(listing.id)
                 old_status = old_row["status"] if old_row is not None else None
+                # 抓取产不出的「粘性」字段要保留，见 _merge_sticky_features
+                features_json = json.dumps(
+                    _merge_sticky_features(
+                        listing.features,
+                        old_row.get("features") if old_row else None,
+                    ),
+                    ensure_ascii=False,
+                )
 
                 if old_status is None:
                     # P0: 写入 source 字段。老的 INSERT 不传 source 时
@@ -113,7 +177,7 @@ class ListingOps:
                         (
                             listing.id, listing.name, listing.status,
                             listing.price_raw, listing.available_from,
-                            json.dumps(listing.features, ensure_ascii=False),
+                            features_json,
                             listing.url, listing.city, now, now, listing.status,
                             listing.source, canonical_city(listing.city or ""),
                         ),
@@ -128,7 +192,7 @@ class ListingOps:
                                WHERE id=?""",
                             (
                                 listing.name, listing.price_raw, listing.available_from,
-                                json.dumps(listing.features, ensure_ascii=False),
+                                features_json,
                                 now, listing.source, listing.id,
                             ),
                         )
@@ -147,7 +211,7 @@ class ListingOps:
                         (
                             listing.name, listing.status, listing.price_raw,
                             listing.available_from,
-                            json.dumps(listing.features, ensure_ascii=False),
+                            features_json,
                             now, listing.status, listing.source, listing.id,
                         ),
                     )
