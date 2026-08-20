@@ -36,20 +36,32 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _env_float(name: str, default: float) -> float:
-    try:
-        v = float(os.environ.get(name, "") or default)
-    except (TypeError, ValueError):
-        return default
-    return v if 0.0 < v <= 1.0 else default
-
-
 # 连续失败几轮算 down
 FAIL_STREAK_DOWN = _env_int("HEALTH_FAIL_STREAK_DOWN", 3)
 # 连续抓到 0 条几轮算 warn（还要满足窗口内曾经非零，见 _judge）
 ZERO_STREAK_WARN = _env_int("HEALTH_ZERO_STREAK_WARN", 3)
-# 完整扫描率低于多少算 warn
-COMPLETENESS_WARN = _env_float("HEALTH_COMPLETENESS_WARN", 0.8)
+# 距上次完整扫描超过多少秒算 warn
+#
+# 这条规则取代了原先的「完整扫描率低于 80%」。**分层抓取让那个阈值永久为真**：
+# H2S 每轮只查 _FRESH_STATUSES，一律 complete=False，只有每 30 分钟一次的全量
+# 轮才可能为 True，于是完整率结构性地停在 10% 上下。它每天都在告警，唯一的效果
+# 是训练人忽略告警。
+#
+# 换成「距上次完整扫描多久」之后，一条规则同时适用于两类 source，因为它量的
+# 是**后果**而不是比率——stale 收敛只在完整轮里发生，多久没有完整轮，下架判定
+# 就滞后多久：
+#
+#   H2S（每 30 分钟一次全量）   连着漏掉 3 次全量才报
+#   其余（每轮都是全量）        连续 90 分钟没有任何完整轮才报
+#
+# 默认 5400 秒 = H2S 全量间隔的 3 倍。实测其间隔中位 31.2 分、最大 36.9 分，
+# 留足余量。
+STALE_FULL_SCAN_SECONDS = _env_int("HEALTH_STALE_FULL_SCAN_SECONDS", 5400)
+
+#: 熔断跳过的那一轮在遥测里的 error_type 标记。它**不是抓取失败**——是按设计
+#: 退避，见 _judge 里 fail_streak 的处理。
+CIRCUIT_OPEN_ERROR = "CircuitOpen"
+
 # 判定窗口：每个 source 回看多少轮
 DEFAULT_WINDOW = _env_int("HEALTH_WINDOW_ROUNDS", 24)
 
@@ -97,6 +109,14 @@ class SourceHealth:
     fail_streak: int = 0            # 从最新往回数，连续失败几轮
     zero_streak: int = 0            # 从最新往回数，连续 0 条几轮（失败轮打断计数）
     completeness_rate: float = -1.0  # sum(complete)/sum(targets)；无数据为 -1
+    # 最近一次「至少有一个 target 抓全了」的轮次。**跨窗口**取自库里，不能只看
+    # 窗口内——H2S 的窗口（24 轮 ≈ 36 分钟）比它的全量间隔（30 分钟）还短，
+    # 窗口里常常一次全量都不含，据此判定必然误报。
+    last_complete_at: str = ""
+    # 距上次完整扫描多少秒；算不出（无数据）为 -1
+    stale_full_scan_seconds: float = -1.0
+    # 窗口内有几轮是熔断跳过的。它们既不算失败也不算成功，只用于文案。
+    circuit_open_rounds: int = 0
     avg_listings: float = 0.0
     max_listings: int = 0
     last_listings: int = 0
@@ -117,6 +137,9 @@ class SourceHealth:
             "fail_streak": self.fail_streak,
             "zero_streak": self.zero_streak,
             "completeness_rate": self.completeness_rate,
+            "last_complete_at": self.last_complete_at,
+            "stale_full_scan_seconds": self.stale_full_scan_seconds,
+            "circuit_open_rounds": self.circuit_open_rounds,
             "avg_listings": round(self.avg_listings, 1),
             "max_listings": self.max_listings,
             "last_listings": self.last_listings,
@@ -159,9 +182,17 @@ def _judge(h: SourceHealth) -> None:
             f"连续 {h.zero_streak} 轮零房源，但窗口内曾抓到 {h.max_listings} 条"
         )
 
-    if 0 <= h.completeness_rate < COMPLETENESS_WARN:
+    # 完整扫描率**不再**作为告警判据，只作为面板指标保留。分层抓取让它对 H2S
+    # 结构性地停在 10% 上下，阈值永久为真。判据换成「多久没有完整轮」——量的是
+    # stale 收敛滞后了多久，对分层与非分层 source 同样成立。见
+    # STALE_FULL_SCAN_SECONDS 的注释。
+    if h.stale_full_scan_seconds > STALE_FULL_SCAN_SECONDS:
+        mins = h.stale_full_scan_seconds / 60
         reasons.append(
-            f"完整扫描率 {h.completeness_rate:.0%} 低于 {COMPLETENESS_WARN:.0%}"
+            f"已 {mins:.0f} 分钟没有完整扫描"
+            f"（上限 {STALE_FULL_SCAN_SECONDS / 60:.0f} 分钟）"
+            + (f"，最近一次 {fmt_ts(h.last_complete_at)}" if h.last_complete_at
+               else "，库里没有任何完整轮的记录")
         )
 
     h.reasons = reasons
@@ -173,10 +204,20 @@ def _judge(h: SourceHealth) -> None:
         h.status = STATUS_OK
 
 
-def source_health_from_rows(source: str, rows: list[dict[str, Any]]) -> SourceHealth:
+def source_health_from_rows(
+    source: str,
+    rows: list[dict[str, Any]],
+    *,
+    last_complete_at: str = "",
+    now: datetime | None = None,
+) -> SourceHealth:
     """从遥测行算健康快照。``rows`` 必须**最新在前**。
 
     拆成纯函数是为了能脱离 DB 测试判级规则——规则本身才是容易写错的部分。
+
+    ``last_complete_at`` 由调用方从库里查，**不能从 rows 里推**：窗口是按轮数
+    截的（默认 24 轮），而 H2S 的全量间隔是 30 分钟、每轮约 90 秒，窗口时间跨度
+    比全量间隔还短，里面常常一次全量都不含。据窗口判定必然误报。
     """
     h = SourceHealth(source=source, rounds=len(rows))
     if not rows:
@@ -185,7 +226,13 @@ def source_health_from_rows(source: str, rows: list[dict[str, Any]]) -> SourceHe
 
     h.last_round_at = rows[0]["round_at"]
     h.last_listings = int(rows[0]["listings"])
-    h.last_error = rows[0]["error_type"] or ""
+    # 取最近一条**非熔断**错误：熔断轮不是失败，让它当 last_error 会使 down
+    # 告警的正文指向「CircuitOpen」，而真正的成因（403 / 429）被盖住。
+    h.last_error = next(
+        (r["error_type"] for r in rows
+         if r["error_type"] and r["error_type"] != CIRCUIT_OPEN_ERROR),
+        "",
+    )
     # total_targets 为 0 = 老行或未记录，按不分片处理（保守：规则照常生效）
     h.sharded = any(
         int(r.get("total_targets") or 0) > int(r.get("targets") or 0) for r in rows
@@ -197,8 +244,23 @@ def source_health_from_rows(source: str, rows: list[dict[str, Any]]) -> SourceHe
         if int(r["listings"]) > 0 and not h.last_nonzero_at:
             h.last_nonzero_at = r["round_at"]
 
+    # 熔断跳过的那一轮**既不计失败也不打断计数**——它是按设计退避，不是抓取
+    # 出错。原先把它当失败计入，后果是熔断器每正常工作一次就发一对
+    # down + recovered 告警：Xior 的策略首次失败即跳闸，于是「1 次真失败 +
+    # 2 轮熔断」凑够 3 轮，报出「⛔ 连续抓取失败｜错误 CircuitOpen」。
+    # 保护装置一生效就拉警报，等于没有警报。
+    #
+    # 跳过而不是打断，是为了让**真实**失败仍能跨熔断期累积：
+    # 失败 → 熔断 → canary 失败 → 熔断 → canary 失败，那是真的 down。
+    h.circuit_open_rounds = sum(
+        1 for r in rows if (r["error_type"] or "") == CIRCUIT_OPEN_ERROR
+    )
+
     for r in rows:
-        if r["error_type"]:
+        err = r["error_type"] or ""
+        if err == CIRCUIT_OPEN_ERROR:
+            continue
+        if err:
             h.fail_streak += 1
         else:
             break
@@ -206,7 +268,10 @@ def source_health_from_rows(source: str, rows: list[dict[str, Any]]) -> SourceHe
     # 失败轮**打断**零计数而不是并入：失败轮的 listings 恒为 0，若一并算进
     # zero_streak，任何一次失败都会顺带触发「零房源」告警，两条规则就重了。
     for r in rows:
-        if r["error_type"]:
+        err = r["error_type"] or ""
+        if err == CIRCUIT_OPEN_ERROR:
+            continue
+        if err:
             break
         if int(r["listings"]) == 0:
             h.zero_streak += 1
@@ -221,8 +286,40 @@ def source_health_from_rows(source: str, rows: list[dict[str, Any]]) -> SourceHe
         if targets:
             h.completeness_rate = sum(int(r["complete"]) for r in ok_rows) / targets
 
+    h.last_complete_at = last_complete_at or ""
+    # 从未有过完整轮时，下界取窗口里**最早**那轮——能断言的只有「至少这么久
+    # 没完整过」。取最新那轮会让下界恒为 0，规则等于不存在。
+    h.stale_full_scan_seconds = _seconds_since(
+        h.last_complete_at, rows[-1]["round_at"], now,
+    )
+
     _judge(h)
     return h
+
+
+def _seconds_since(
+    last_complete_at: str, oldest_round_at: str, now: datetime | None,
+) -> float:
+    """距上次完整扫描过了多少秒；算不出返回 -1。
+
+    基准取 ``now`` 而非 ``last_round_at``：进程若已经卡死不再写遥测，用最后一行
+    当基准会让这个差值**永远停住**，恰好在最该报警时报不出来。
+
+    从未有过完整轮（``last_complete_at`` 为空）时，用窗口内最早那轮当下界——
+    答「至少这么久了」，而不是无从判断。库刚建起来、连一轮都没跑过的情况下
+    两者都为空，返回 -1，由 rounds == 0 那条分支去判 UNKNOWN。
+    """
+    base = now or datetime.now(timezone.utc)
+    ref = last_complete_at or oldest_round_at
+    if not ref:
+        return -1.0
+    try:
+        t = datetime.fromisoformat(ref)
+    except ValueError:
+        return -1.0
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    return max(0.0, (base - t).total_seconds())
 
 
 def source_health(storage, *, window: int = DEFAULT_WINDOW) -> list[SourceHealth]:
@@ -230,7 +327,15 @@ def source_health(storage, *, window: int = DEFAULT_WINDOW) -> list[SourceHealth
     out: list[SourceHealth] = []
     for src in storage.round_stats_sources():
         rows = storage.recent_round_stats(source=src, limit=window)
-        out.append(source_health_from_rows(src, rows))
+        try:
+            last_complete = storage.last_complete_round_at(src)
+        except Exception:
+            # 老 Storage 或查询失败：退化成「算不出」，而不是把整个健康检查
+            # 拖挂。stale 规则会因此静默，其余规则照常。
+            last_complete = ""
+        out.append(source_health_from_rows(
+            src, rows, last_complete_at=last_complete,
+        ))
     return out
 
 
@@ -271,6 +376,6 @@ def health_report(storage, *, window: int = DEFAULT_WINDOW) -> dict[str, Any]:
         "thresholds": {
             "fail_streak_down": FAIL_STREAK_DOWN,
             "zero_streak_warn": ZERO_STREAK_WARN,
-            "completeness_warn": COMPLETENESS_WARN,
+            "stale_full_scan_seconds": STALE_FULL_SCAN_SECONDS,
         },
     }

@@ -10,6 +10,7 @@ Xior 四栋楼常态零可订，OurCampus 官网自述排队 16–18 个月。�
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -19,17 +20,44 @@ from models import Listing
 from storage import Storage
 
 
+#: _rows 生成的最新一轮的时刻。判级现在带时间维度（「多久没有完整扫描」），
+#: 纯函数测试必须把 now 钉死，否则用例会随真实时间漂移。
+_NOW = datetime(2026, 8, 3, 20, 0, 0, tzinfo=timezone.utc)
+
+
 def _rows(specs):
-    """specs 最新在前，每项 (listings, targets, complete, error_type)。"""
+    """specs 最新在前，每项 (listings, targets, complete, error_type)。
+
+    最新一轮落在 ``_NOW``，往回每轮相隔 1 分钟——真实轮次就是分钟级的，
+    用小时级会让 24 轮的窗口横跨一整天，与生产完全不像。
+    """
     return [
         {
-            "round_at": f"2026-08-03T{20 - i:02d}:00:00+00:00",
+            "round_at": (_NOW - timedelta(minutes=i)).isoformat(),
             "source": "s",
             "listings": l, "targets": t, "complete": c,
             "duration_ms": 0, "error_type": e, "error_msg": "",
         }
         for i, (l, t, c, e) in enumerate(specs)
     ]
+
+
+def _h(rows, *, last_complete_at=None, now=_NOW):
+    """判级快捷方式：默认从 rows 里取最近一条 complete > 0 当作上次完整扫描。
+
+    生产里这个值是**跨窗口**从库里查的（见 source_health_from_rows 的
+    docstring）。测试默认从 rows 推，是因为绝大多数用例的窗口本就覆盖了它；
+    要验证「窗口内没有完整轮」的场景，显式传 last_complete_at。
+    """
+    if last_complete_at is None:
+        last_complete_at = next(
+            (r["round_at"] for r in rows
+             if int(r["complete"]) > 0 and not r["error_type"]),
+            "",
+        )
+    return health.source_health_from_rows(
+        "s", rows, last_complete_at=last_complete_at, now=now,
+    )
 
 
 def _ok(n, listings=10):
@@ -49,73 +77,81 @@ def _fail(n, err="RateLimitError"):
 
 class TestJudgeStatus:
     def test_healthy_source_is_ok(self):
-        h = health.source_health_from_rows("s", _rows(_ok(10)))
+        h = _h(_rows(_ok(10)))
         assert h.status == health.STATUS_OK
         assert h.reasons == []
 
     def test_no_rows_is_unknown(self):
-        h = health.source_health_from_rows("s", [])
+        h = _h([])
         assert h.status == health.STATUS_UNKNOWN
         assert h.rounds == 0
 
     def test_consecutive_failures_is_down(self):
-        h = health.source_health_from_rows("s", _rows(_fail(3) + _ok(5)))
+        h = _h(_rows(_fail(3) + _ok(5)))
         assert h.status == health.STATUS_DOWN
         assert h.fail_streak == 3
         assert h.last_error == "RateLimitError"
 
     def test_below_fail_threshold_is_not_down(self):
-        h = health.source_health_from_rows("s", _rows(_fail(2) + _ok(5)))
+        h = _h(_rows(_fail(2) + _ok(5)))
         assert h.status != health.STATUS_DOWN
 
     def test_zero_after_nonzero_is_warn(self):
         """本来有房、突然全没了——上游改版打坏解析器就是这个特征。"""
-        h = health.source_health_from_rows("s", _rows(_zero(3) + _ok(5, listings=284)))
+        h = _h(_rows(_zero(3) + _ok(5, listings=284)))
         assert h.status == health.STATUS_WARN
         assert h.zero_streak == 3
         assert h.max_listings == 284
 
     def test_always_zero_source_stays_ok(self):
         """Xior / OurCampus 常态零可订，不该被永久钉在告警上。"""
-        h = health.source_health_from_rows("s", _rows(_zero(20)))
+        h = _h(_rows(_zero(20)))
         assert h.status == health.STATUS_OK
         assert h.zero_streak == 20
         assert h.max_listings == 0
 
-    def test_low_completeness_is_warn(self):
-        rows = _rows([(10, 6, 2, "")] * 5)   # 2/6 完整
-        h = health.source_health_from_rows("s", rows)
-        assert h.status == health.STATUS_WARN
+    def test_low_completeness_alone_is_not_warn(self):
+        """低完整率**不再**告警——分层抓取让它对 H2S 永久为真。
+
+        H2S 每轮只查 _FRESH_STATUSES（一律 complete=False），只有每 30 分钟
+        一次的全量轮才可能完整，完整率结构性地停在 10% 上下。按 80% 阈值报，
+        它每天都在响，唯一的效果是训练人忽略告警。
+
+        指标本身保留在面板上，只是不再作为判据。
+        """
+        rows = _rows([(10, 6, 2, "")] * 5)   # 2/6 完整，且每轮都有完整 target
+        h = _h(rows)
         assert h.completeness_rate == pytest.approx(2 / 6)
-        assert any("完整扫描率" in r for r in h.reasons)
+        assert h.status == health.STATUS_OK
+        assert h.reasons == []
 
     def test_full_completeness_is_ok(self):
-        h = health.source_health_from_rows("s", _rows(_ok(5)))
+        h = _h(_rows(_ok(5)))
         assert h.completeness_rate == pytest.approx(1.0)
         assert h.status == health.STATUS_OK
 
 
 class TestStreaks:
     def test_fail_streak_breaks_on_success(self):
-        h = health.source_health_from_rows("s", _rows(_fail(2) + _ok(1) + _fail(5)))
+        h = _h(_rows(_fail(2) + _ok(1) + _fail(5)))
         assert h.fail_streak == 2
 
     def test_failed_round_breaks_zero_streak(self):
         """失败轮的 listings 恒为 0；若并入 zero_streak，任何一次失败都会顺带
         触发「零房源」告警，两条规则就重了。"""
-        h = health.source_health_from_rows("s", _rows(_fail(1) + _zero(5) + _ok(3)))
+        h = _h(_rows(_fail(1) + _zero(5) + _ok(3)))
         assert h.zero_streak == 0
         assert h.fail_streak == 1
 
     def test_last_success_and_nonzero_timestamps(self):
         rows = _rows(_fail(2) + _zero(1) + _ok(1, listings=7))
-        h = health.source_health_from_rows("s", rows)
+        h = _h(rows)
         assert h.last_success_at == rows[2]["round_at"]   # 第一条非 error
         assert h.last_nonzero_at == rows[3]["round_at"]   # 第一条 listings>0
 
     def test_averages_exclude_failed_rounds(self):
         """失败轮的 0 不该把平均值拉下来——那是「没抓」，不是「抓到 0 条」。"""
-        h = health.source_health_from_rows("s", _rows(_fail(5) + _ok(2, listings=10)))
+        h = _h(_rows(_fail(5) + _ok(2, listings=10)))
         assert h.avg_listings == pytest.approx(10.0)
 
 
@@ -195,11 +231,23 @@ def st(tmp_path):
     s.close()
 
 
+#: 走 DB 的用例共用的时间锚。**必须在模块加载时算一次**，不能每次调用现取:
+#: silent_round_streak 按 round_at 把各 source 归成同一轮，两次 _seed 若各自
+#: 取 now()，毫秒差会把一轮劈成两轮。
+_DB_NOW = datetime.now(timezone.utc)
+
+
 def _seed(st, source, specs):
-    """specs 最旧在前，每项 (listings, targets, complete, error_type)。"""
+    """specs 最旧在前，每项 (listings, targets, complete, error_type)。
+
+    时刻取「相对现在往回数分钟」而非固定日期：stale 规则量的是与当下的真实
+    时间差，钉死日期会让每一轮都显得陈旧数年，所有走 DB 的用例集体误报。
+    """
+    n = len(specs)
     for i, (l, t, c, e) in enumerate(specs):
         st.record_round_stat(
-            round_at=f"2026-08-03T{i:02d}:00:00+00:00", source=source,
+            round_at=(_DB_NOW - timedelta(minutes=n - 1 - i)).isoformat(),
+            source=source,
             listings=l, targets=t, complete=c, error_type=e,
         )
 
@@ -267,10 +315,12 @@ class TestWatchdog:
     def test_recovery_is_reported_once(self, st):
         _seed(st, "s", [(12, 2, 2, "")] * 3 + [(0, 2, 0, "RateLimitError")] * 3)
         assert [a.key for a in watchdog.poll(st, now=1000.0)] == ["source_down:s"]
-        # 恢复：追加三轮成功
-        for i in range(6, 9):
-            st.record_round_stat(round_at=f"2026-08-03T{i:02d}:00:00+00:00",
-                                 source="s", listings=12, targets=2, complete=2)
+        # 恢复：追加三轮成功。时刻必须**晚于** _seed 那批，否则按 round_at
+        # 倒序取窗口时它们排在后面，恢复根本不会被看到。
+        for i in range(1, 4):
+            st.record_round_stat(
+                round_at=(_DB_NOW + timedelta(minutes=i)).isoformat(),
+                source="s", listings=12, targets=2, complete=2)
         recovered = watchdog.poll(st, now=1100.0)
         assert [a.level for a in recovered] == [watchdog.LEVEL_RECOVERED]
         assert watchdog.poll(st, now=1200.0) == []
@@ -335,7 +385,7 @@ class TestWatchdog:
 
 def _row(listings, targets, total, err=""):
     return {
-        "round_at": "2026-08-03T10:00:00+00:00", "source": "s",
+        "round_at": _NOW.isoformat(), "source": "s",
         "listings": listings, "targets": targets, "complete": targets,
         "duration_ms": 0, "error_type": err, "error_msg": "",
         "total_targets": total,
@@ -351,28 +401,32 @@ class TestShardedSourcesSkipZeroRule:
 
     def test_sharded_zero_streak_does_not_warn(self):
         rows = [_row(0, 3, 30)] * 3 + [_row(38, 3, 30)]
-        h = health.source_health_from_rows("xior", rows)
+        h = health.source_health_from_rows(
+            "xior", rows, last_complete_at=_NOW.isoformat(), now=_NOW)
         assert h.sharded is True
         assert h.zero_streak == 3          # 仍然如实统计
         assert h.status == health.STATUS_OK  # 但不据此告警
 
     def test_unsharded_zero_streak_still_warns(self):
         rows = [_row(0, 6, 6)] * 3 + [_row(284, 6, 6)]
-        h = health.source_health_from_rows("holland2stay", rows)
+        h = health.source_health_from_rows(
+            "holland2stay", rows, last_complete_at=_NOW.isoformat(), now=_NOW)
         assert h.sharded is False
         assert h.status == health.STATUS_WARN
 
     def test_missing_total_targets_treated_as_unsharded(self):
         """老行没有这一列，保守按不分片处理，规则照常生效。"""
         rows = [_row(0, 6, 0)] * 3 + [_row(284, 6, 0)]
-        h = health.source_health_from_rows("holland2stay", rows)
+        h = health.source_health_from_rows(
+            "holland2stay", rows, last_complete_at=_NOW.isoformat(), now=_NOW)
         assert h.sharded is False
         assert h.status == health.STATUS_WARN
 
     def test_sharded_still_reports_fail_streak(self):
         """分片只跳过零房源规则，连续失败照常判 down。"""
         rows = [_row(0, 3, 30, "RateLimitError")] * 3 + [_row(38, 3, 30)]
-        h = health.source_health_from_rows("xior", rows)
+        h = health.source_health_from_rows(
+            "xior", rows, last_complete_at=_NOW.isoformat(), now=_NOW)
         assert h.status == health.STATUS_DOWN
 
     def test_sharded_flag_is_exposed(self):
@@ -389,3 +443,239 @@ class TestAlertTextIsTerse:
         for banned in ("就是这个样子", "请求仍是 200", "会一直挂着", "只是不产出数据"):
             assert banned not in body, f"告警文案不该含解读性文字: {body}"
         assert "\n" not in body, "单行，便于推送展示"
+
+
+# ── 分层抓取 / 熔断：两条不该触发告警的「正常」 ──────────────────
+
+
+class TestTieredScrapingDoesNotAlert:
+    """分层抓取让完整率结构性偏低，那不是故障。
+
+    H2S 每轮只查 _FRESH_STATUSES，一律 complete=False；只有每 30 分钟一次的
+    全量轮才可能为 True。生产实测完整率长期在 9–11%，而阈值是 80%——这条告警
+    每天都在响。告警一旦被无视，等于没有告警。
+    """
+
+    def _tiered(self, *, full_scan_ago_minutes, rounds=24):
+        """模拟 H2S：绝大多数轮 complete=0，全量轮在 N 分钟前。"""
+        rows = _rows([(46, 2, 0, "")] * rounds)
+        return health.source_health_from_rows(
+            "holland2stay", rows,
+            last_complete_at=(_NOW - timedelta(minutes=full_scan_ago_minutes)).isoformat(),
+            now=_NOW,
+        )
+
+    def test_tiered_source_on_schedule_is_ok(self):
+        """全量按 30 分钟节奏跑着，完整率 0% 也不该告警。"""
+        h = self._tiered(full_scan_ago_minutes=31)
+        assert h.completeness_rate == 0.0
+        assert h.status == health.STATUS_OK
+        assert h.reasons == []
+
+    def test_tiered_source_alerts_only_when_full_scan_stops(self):
+        """真正的故障是全量停了——那时 stale 收敛不再执行，下架判定滞后。"""
+        h = self._tiered(full_scan_ago_minutes=95)
+        assert h.status == health.STATUS_WARN
+        assert any("没有完整扫描" in r for r in h.reasons)
+
+    def test_threshold_boundary(self):
+        """阈值是 90 分钟（5400 秒），刚好卡住不报，多一分钟才报。"""
+        assert health.STALE_FULL_SCAN_SECONDS == 5400
+        assert self._tiered(full_scan_ago_minutes=90).status == health.STATUS_OK
+        assert self._tiered(full_scan_ago_minutes=91).status == health.STATUS_WARN
+
+    def test_never_complete_uses_window_as_lower_bound(self):
+        """从未有过完整轮时答「至少这么久」，而不是当作 0。"""
+        rows = _rows([(46, 2, 0, "")] * 24)
+        h = health.source_health_from_rows(
+            "holland2stay", rows, last_complete_at="", now=_NOW + timedelta(hours=3))
+        assert h.status == health.STATUS_WARN
+        assert any("没有完整扫描" in r for r in h.reasons)
+
+    def test_stale_is_measured_against_now_not_last_round(self):
+        """进程卡死不再写遥测时，最该报警——不能用最后一行当基准把差值冻住。"""
+        rows = _rows(_ok(5))          # 全部完整，但都是 3 小时前的
+        h = health.source_health_from_rows(
+            "s", rows,
+            last_complete_at=_NOW.isoformat(),
+            now=_NOW + timedelta(hours=3),
+        )
+        assert h.stale_full_scan_seconds == pytest.approx(3 * 3600)
+        assert h.status == health.STATUS_WARN
+
+
+class TestCircuitOpenIsNotAFailure:
+    """熔断跳过的轮次是**按设计退避**，不是抓取失败。
+
+    原先把它当失败计入 fail_streak，后果是熔断器每正常工作一次就发一对
+    down + recovered 告警：Xior 首次失败即跳闸，「1 次真失败 + 2 轮熔断」凑够
+    3 轮，报出「⛔ 连续抓取失败｜错误 CircuitOpen」。保护装置一生效就拉警报。
+    """
+
+    def _circuit(self, n):
+        return [(0, 4, 0, health.CIRCUIT_OPEN_ERROR)] * n
+
+    def test_circuit_open_rounds_do_not_make_a_source_down(self):
+        """生产实况：1 次真 429 之后连续熔断，不该报 down。"""
+        h = _h(_rows(self._circuit(8) + _fail(1) + _ok(10)))
+        assert h.fail_streak == 1
+        assert h.circuit_open_rounds == 8
+        assert h.status == health.STATUS_OK
+
+    def test_pure_circuit_open_window_is_not_down(self):
+        h = _h(_rows(self._circuit(24)), last_complete_at=_NOW.isoformat())
+        assert h.fail_streak == 0
+        assert h.status == health.STATUS_OK
+
+    def test_real_failures_still_accumulate_across_circuit_gaps(self):
+        """跳过而不是打断：canary 反复失败仍然是真的 down。"""
+        rows = _rows(
+            _fail(1) + self._circuit(3) + _fail(1) + self._circuit(3) + _fail(1) + _ok(5)
+        )
+        h = _h(rows)
+        assert h.fail_streak == 3
+        assert h.status == health.STATUS_DOWN
+
+    def test_real_failure_after_circuit_still_breaks_on_success(self):
+        """熔断轮中立不等于「无视成功」：成功仍然清零。"""
+        h = _h(_rows(self._circuit(2) + _ok(1) + _fail(5)))
+        assert h.fail_streak == 0
+
+    def test_last_error_points_at_the_real_cause(self):
+        """down 告警的正文要说 403/429，而不是 CircuitOpen。"""
+        h = _h(_rows(self._circuit(3) + _fail(3, "BlockedError") + _ok(5)))
+        assert h.fail_streak == 3
+        assert h.last_error == "BlockedError"
+        assert h.status == health.STATUS_DOWN
+
+    def test_circuit_open_does_not_break_zero_streak(self):
+        """熔断轮 listings 恒为 0，但它既不算失败也不该打断零计数。"""
+        h = _h(_rows(self._circuit(2) + _zero(3) + _ok(3, listings=284)))
+        assert h.zero_streak == 3
+
+
+class TestWatchdogAlertShape:
+    def test_stale_full_scan_alert_replaces_completeness_low(self, st):
+        """告警键换了名字，正文要说清后果（stale 收敛不执行）。"""
+        # 一轮都没完整过，且窗口跨度已经超过 90 分钟
+        _seed(st, "s", [(46, 2, 0, "")] * 120)
+        for a in watchdog.evaluate(st, window=120):
+            if a.key.startswith("stale_full_scan:"):
+                assert "没有完整轮" in a.body
+                assert "stale 收敛" in a.body
+                break
+        else:
+            pytest.fail("从未有过完整轮，应当报 stale_full_scan")
+
+    def test_never_complete_is_conservative_inside_a_short_window(self, st):
+        """从未完整过时，下界只能取窗口最早那轮——**刻意宁可漏报不误报**。
+
+        默认窗口 24 轮，按生产的分钟级节奏只覆盖半小时左右，够不到 90 分钟的
+        阈值。这不是漏洞：真实的「全量停了」场景里 last_complete_at 来自库里、
+        不受窗口限制，照样算得出（见 last_complete_round_at 的 docstring）。
+        真正的空值只出现在「保留期内一次都没完整过」，那种 source 由
+        fail_streak 与全局静默规则兜底。
+        """
+        _seed(st, "s", [(46, 2, 0, "")] * 24)
+        assert not any(
+            a.key.startswith("stale_full_scan:") for a in watchdog.evaluate(st)
+        )
+
+    def test_no_completeness_low_key_remains(self, st):
+        """旧告警键必须彻底消失，否则节流状态会指向一条不再产生的告警。"""
+        _seed(st, "s", [(10, 6, 2, "")] * 6)
+        assert not any(
+            a.key.startswith("completeness_low:") for a in watchdog.evaluate(st)
+        )
+
+    def test_circuit_open_source_produces_no_down_alert(self, st):
+        _seed(st, "xior",
+              [(0, 4, 4, "")] * 3
+              + [(0, 4, 0, "RateLimitError")]
+              + [(0, 4, 0, health.CIRCUIT_OPEN_ERROR)] * 4)
+        assert not any(
+            a.key.startswith("source_down:") for a in watchdog.evaluate(st)
+        )
+
+
+class TestLastCompleteRoundAt:
+    """跨窗口查「上次完整扫描」——H2S 的窗口比它的全量间隔还短。"""
+
+    def test_finds_the_most_recent_complete_round(self, st):
+        _seed(st, "s", [(46, 2, 2, "")] + [(46, 2, 0, "")] * 5)
+        rows = st.recent_round_stats(source="s", limit=6)
+        got = st.last_complete_round_at("s")
+        assert got == rows[-1]["round_at"]          # 最早那轮才是唯一完整的
+
+    def test_takes_the_newest_when_several_are_complete(self, st):
+        """必须取**最新**的完整轮，不是最早的。
+
+        取最早的话，一个跑了几天的 source 会永远报「上次完整扫描在几天前」
+        ——正是这次要消灭的那种永久误报。单条完整轮的用例区分不出这两种实现。
+        """
+        _seed(st, "s", [
+            (46, 2, 2, ""),      # 最早：完整
+            (46, 2, 0, ""),
+            (46, 2, 2, ""),      # 中间：完整
+            (46, 2, 0, ""),
+            (46, 2, 2, ""),      # 最新的完整轮 ← 应当取它
+            (46, 2, 0, ""),
+        ])
+        rows = st.recent_round_stats(source="s", limit=6)   # 最新在前
+        assert st.last_complete_round_at("s") == rows[1]["round_at"]
+        assert st.last_complete_round_at("s") != rows[-1]["round_at"]
+
+    def test_returns_empty_when_never_complete(self, st):
+        _seed(st, "s", [(46, 2, 0, "")] * 5)
+        assert st.last_complete_round_at("s") == ""
+
+    def test_is_scoped_to_the_source(self, st):
+        _seed(st, "a", [(46, 2, 2, "")] * 3)
+        _seed(st, "b", [(46, 2, 0, "")] * 3)
+        assert st.last_complete_round_at("a") != ""
+        assert st.last_complete_round_at("b") == ""
+
+    def test_reaches_past_the_health_window(self, st):
+        """本方法存在的全部理由：默认窗口 24 轮盖不住 30 分钟的全量间隔。"""
+        _seed(st, "s", [(46, 2, 2, "")] + [(46, 2, 0, "")] * 40)
+        assert len(st.recent_round_stats(source="s", limit=health.DEFAULT_WINDOW)) == 24
+        assert st.last_complete_round_at("s") != ""   # 窗口外也能找到
+
+
+class TestCircuitMarkerIsOneString:
+    """写入方与识别方必须用同一个常量。
+
+    monitor 写遥测行、health 判读遥测行，两边靠一个字符串对上。项目里已经栽过
+    一次同类的跟头（run_once 与 _dispatch_watchdog_alerts 各自注释假设对方在
+    负责，中间是空的，代价是 5 小时零告警）。**注释描述的是意图，不是事实**，
+    跨函数的交接必须由测试固定。
+
+    这里钉的是「不许再出现字面量」：改动前把 error_type 写成 "circuit_open"
+    之类，所有行为测试照样全绿，而生产里熔断轮会重新被算成抓取失败。
+    """
+
+    def test_monitor_writes_the_constant_health_reads(self):
+        import monitor
+        assert monitor.CIRCUIT_OPEN_ERROR is health.CIRCUIT_OPEN_ERROR
+
+    def test_no_literal_circuit_marker_in_monitor(self):
+        import ast
+        import inspect
+        import monitor
+
+        src = inspect.getsource(monitor)
+        tree = ast.parse(src)
+        bad = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.keyword)
+            and node.arg == "error_type"
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+            and "circuit" in node.value.value.lower()
+        ]
+        assert not bad, (
+            f"monitor.py:{bad} 用字面量写熔断标记。必须用 "
+            f"mcore.health.CIRCUIT_OPEN_ERROR——两边一旦写岔，熔断轮会重新被"
+            f"算成抓取失败，熔断器每正常工作一次就发一对 down + recovered 告警"
+        )

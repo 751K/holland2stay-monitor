@@ -65,6 +65,7 @@ from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.backoff import PersistedBackoff
 from mcore.circuit import SourceCircuits
+from mcore.health import CIRCUIT_OPEN_ERROR
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
@@ -2041,7 +2042,7 @@ async def run_once(
                         storage, round_at=round_at, source=src,
                         targets=len(group),
                         total_targets=source_totals.get(src, len(group)),
-                        error_type="CircuitOpen",
+                        error_type=CIRCUIT_OPEN_ERROR,
                         error_msg=_source_circuits.reason(src) or "circuit open",
                     )
                 continue
@@ -2123,7 +2124,7 @@ async def run_once(
                 storage, round_at=round_at, source=_H2S_SOURCE,
                 targets=len(h2s_tasks),
                 total_targets=source_totals.get(_H2S_SOURCE, len(h2s_tasks)),
-                error_type="CircuitOpen",
+                error_type=CIRCUIT_OPEN_ERROR,
                 error_msg=_source_circuits.reason(_H2S_SOURCE) or "circuit open",
             )
 

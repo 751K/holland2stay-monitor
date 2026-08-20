@@ -8,14 +8,22 @@ from __future__ import annotations
 
 import pytest
 
+from datetime import datetime, timedelta, timezone
+
 from storage import Storage
+
+
+#: 时间锚。判级带了时间维度（「多久没有完整扫描」），钉死日期会让每一轮都显得
+#: 陈旧数年，所有 source 集体报 stale。模块级算一次，好让多个 source 归到同一轮。
+_NOW = datetime.now(timezone.utc)
 
 
 def _seed(st, source, specs):
     """specs 最旧在前，每项 (listings, targets, complete, error_type)。"""
+    n = len(specs)
     for i, (l, t, c, e) in enumerate(specs):
         st.record_round_stat(
-            round_at=f"2026-08-03T{i:02d}:00:00+00:00", source=source,
+            round_at=(_NOW - timedelta(minutes=n - 1 - i)).isoformat(), source=source,
             listings=l, targets=t, complete=c, error_type=e,
         )
 

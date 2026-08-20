@@ -102,14 +102,18 @@ def evaluate(storage, *, window: int | None = None) -> list[Alert]:
                     f"｜最近非零 {fmt_ts(h.last_nonzero_at, fallback='无')}"
                 ),
             ))
-        if 0 <= h.completeness_rate < 1.0 and any(
-            "完整扫描率" in r for r in h.reasons
-        ):
+        # 判据是「多久没有完整扫描」而不是完整率——分层抓取让后者对 H2S
+        # 永久为真，见 mcore/health.py 的 STALE_FULL_SCAN_SECONDS。
+        if any("没有完整扫描" in r for r in h.reasons):
             alerts.append(Alert(
-                key=f"completeness_low:{h.source}",
+                key=f"stale_full_scan:{h.source}",
                 level=LEVEL_WARN,
-                title=f"⚠️ {h.source} 完整扫描率偏低",
-                body=f"窗口内完整扫描率 {h.completeness_rate:.0%}",
+                title=f"⚠️ {h.source} 迟迟没有完整扫描",
+                body=(
+                    f"已 {h.stale_full_scan_seconds / 60:.0f} 分钟没有完整轮"
+                    f"｜最近一次 {fmt_ts(h.last_complete_at, fallback='无记录')}"
+                    "｜期间 stale 收敛不会执行，下架判定会滞后"
+                ),
             ))
 
     streak = silent_round_streak(storage, **({"limit": window} if window else {}))

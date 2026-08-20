@@ -134,6 +134,27 @@ class RoundStatsOps:
             return []
         return [dict(r) for r in rows]
 
+    def last_complete_round_at(self, source: str) -> str:
+        """该 source 最近一次「至少有一个 target 抓全了」的轮次时刻（ISO）。
+
+        健康判定要跨窗口看这件事：窗口是按轮数截的，而 H2S 的全量间隔比窗口的
+        时间跨度还长，窗口里常常一次全量都不含（见 mcore/health.py）。
+
+        走 ``idx_round_stats_source_at``，从最新往回扫到第一条 complete > 0
+        即止，通常只需几行。查不到返回空串——「从未完整过」由调用方去解释。
+        """
+        try:
+            row = self._conn.execute(
+                "SELECT round_at FROM round_stats "
+                "WHERE source = ? AND complete > 0 "
+                "ORDER BY round_at DESC, id DESC LIMIT 1",
+                (source,),
+            ).fetchone()
+        except Exception:
+            logger.debug("last_complete_round_at 查询失败（已忽略）", exc_info=True)
+            return ""
+        return row[0] if row else ""
+
     def round_stats_sources(self) -> list[str]:
         """遥测里出现过的 source，字母序。
 
