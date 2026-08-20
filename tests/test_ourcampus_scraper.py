@@ -323,3 +323,20 @@ class TestCapture:
             floorplans_url="https://x.test/onlineleasing/s/floorplans.aspx",
         )
         assert "fp=1112904" in self._read(cap)
+
+
+def test_ourcampus_shares_the_rentcafe_404_diagnosis():
+    """OurCampus 覆盖了 ``_fetch_units_html``（POST + floorPlans[]），但取文本
+    仍然走基类的 ``_get_text``——404 的诊断因此是共享的。
+
+    这条守卫存在的意义：如果哪天 OurCampus 自己发请求了，那句「别往代理方向查」
+    就会静默地只剩 OurDomain 有，而 RentCafe 的 404 恰恰最容易发生在标识改动上。
+    """
+    import inspect
+
+    import scrapers.ourcampus as oc
+
+    src = inspect.getsource(oc.OurCampusScraper._fetch_units_html)
+    assert "_get_text(" in src, (
+        "OurCampus 不再走共享的 _get_text，404 的诊断会只剩 OurDomain 有"
+    )

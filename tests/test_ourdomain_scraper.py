@@ -341,3 +341,65 @@ class TestCellExtractionFallback:
         assert unit["deposit"] == "€ 3.000"
         assert "High Floor" in unit["detail"]
         assert unit["status"] == "Available to book"
+
+
+class TestEndpointGoneIsNotReportedAsNetworkTrouble:
+    """404 = 端点被搬走了，不是代理/网络问题——诊断必须说清这一点。
+
+    这条教训在 H2S 那边是花了三天买的：2026-08-11 H2S 把 ``/api/graphql`` 迁到
+    ``/api/service/residences``，旧路径直接 404，而 404 落进了通用分支，日志连刷
+    三天「请检查代理/网络」，而代理一直是好的。``browser_fetcher.fetch()`` 因此
+    加了专门的 404 分支，注释里写着「不是代理或网络问题，**别往那个方向查**」。
+
+    **但那个教训只落地在了 H2S 一家。** RentCafe 这两个 source（OurDomain /
+    OurCampus）走 ``resp.raise_for_status()``，slug 或 property_id 改了、端点搬了，
+    报出来的还是一句泛泛的失败，排查照样会往代理方向走。
+
+    RentCafe 的 404 尤其容易发生：URL 里嵌着 ``slug`` 和 ``myolePropertyID``，
+    两者都是上游可改的标识，而它们就写死在 ``BUILDINGS`` 表里。
+    """
+
+    @staticmethod
+    def _get(status, body="not found"):
+        import scrapers.ourdomain as od
+
+        class _Sess:
+            def get(self, url, timeout=30, **kw):
+                return FakeResponse(status, body)
+
+        return od._get_text(_Sess(), "https://x.securerc.co.uk/onlineleasing/y/z.aspx")
+
+    def test_404_says_the_endpoint_moved(self):
+        from scrapers.base import ScrapeNetworkError
+
+        with pytest.raises(ScrapeNetworkError) as ei:
+            self._get(404)
+        msg = str(ei.value)
+        assert "404" in msg
+        assert "代理" in msg and "别往" in msg, (
+            f"404 没说清「别往代理方向查」，会重演 H2S 那三天: {msg}"
+        )
+
+    def test_404_mentions_what_actually_changed(self):
+        """要指向真正可能变的东西：slug / property_id / 端点路径。"""
+        from scrapers.base import ScrapeNetworkError
+
+        with pytest.raises(ScrapeNetworkError) as ei:
+            self._get(404)
+        msg = str(ei.value)
+        assert any(k in msg for k in ("slug", "property_id", "BUILDINGS")), (
+            f"没指出该去核对哪个配置: {msg}"
+        )
+
+    def test_other_5xx_still_goes_through_the_generic_path(self):
+        """反向守卫：500 是上游自己坏了，不该被说成「端点搬走了」。"""
+        with pytest.raises(Exception) as ei:
+            self._get(500, "boom")
+        assert "别往" not in str(ei.value)
+
+    def test_404_is_a_scrape_network_error_so_isolation_is_unchanged(self):
+        """只改这句话指向哪儿，不改上层的隔离/重试语义——和 H2S 那边同一个取舍。"""
+        from scrapers.base import ScrapeNetworkError
+
+        with pytest.raises(ScrapeNetworkError):
+            self._get(404)

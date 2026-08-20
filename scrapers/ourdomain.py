@@ -549,6 +549,29 @@ def _get_text(
             # 落到下方常规分支处理
         if resp.status_code == 429:
             continue
+
+        if resp.status_code == 404:
+            # 404 = 这个路径在上游不存在了，几乎只有一个成因：端点或标识被改了。
+            #
+            # 单独拎出来是因为 H2S 那边为这件事花过三天：2026-08-11 端点迁移后
+            # 旧路径 404，落进通用分支报成「请检查代理/网络」，日志连刷三天，
+            # 而代理一直是好的。``browser_fetcher.fetch()`` 因此有了专门的 404
+            # 分支——但那条教训一直只落地在 H2S 一家。
+            #
+            # RentCafe 尤其容易撞上：URL 里嵌着 slug 与 myolePropertyID，两者
+            # 都是上游可改的标识，而它们就写死在本文件的 BUILDINGS 表里。
+            #
+            # 仍然抛 ScrapeNetworkError：上层的隔离与重试语义不该变，改的只是
+            # 这句话把人指向哪儿。
+            logger.error("RentCafe HTTP 404 url=%s body=%r", url, resp.text[:200])
+            raise ScrapeNetworkError(
+                f"RentCafe HTTP 404 —— 端点 {url} 不存在。"
+                f"上游很可能改了路径或标识（对照 BUILDINGS 表里的 slug / "
+                f"property_id 到站点上核对一遍）。"
+                f"**这不是代理或网络问题，别往那个方向查。** "
+                f"响应: {resp.text[:200]}"
+            )
+
         if not resp.ok:
             logger.error("RentCafe HTTP %d url=%s body=%r", resp.status_code, url, resp.text[:300])
         resp.raise_for_status()
