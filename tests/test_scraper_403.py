@@ -281,3 +281,106 @@ class TestMonitorBlockedHandling:
         ]
         assert len(long_block_msgs) == 1
         assert "需要检查服务器" in long_block_msgs[0]
+
+
+class TestOperationNotAllowedHasItsOwnHandling:
+    """``OperationNotAllowedError`` 在抓取侧必须有自己的分支。
+
+    问题
+    ----
+    monitor **根本没导入过这个类**。``_ROUND_FAILURE_PRIORITY`` 里没有，
+    ``run_once`` 和 ``main_loop`` 的 except 链里也没有。于是全源失败时它一路
+    落到 ``run_once`` 的兜底::
+
+        except Exception → "抓取阶段未分类错误…这是一条未被归类的内部异常，
+                            请查看服务器日志排查"
+
+    **它是全系统最可诉诸行动的一条故障**（去照抄站点那条 operation），却被报成
+    「未分类的内部异常」，把排查引向服务器日志而不是 docs/H2S.md §5.1。
+
+    同一个类在 booker 里有专属 phase ``operation_rejected``，还配了三行注释解释
+    为什么不能当 blocked 处理——两边待遇差得离谱。
+
+    优先级为什么排在 BlockedError 前面
+    ----------------------------------
+    两者都是 HTTP 403，但把后者当前者的代价是实打实的：2026-08-19 一次自动预订
+    连续两次「重建 CF 会话」各跑一轮完整挑战，75 秒、约 3 MB 代理流量，结束时
+    仍是同一个 403，随后误判触发 1 小时登录链路抑制。同一轮里两种 403 都出现时，
+    「这条 operation 没登记」是更具体、也更可诉诸行动的那个诊断。
+    """
+
+    def test_monitor_knows_the_class(self):
+        import monitor
+        from scrapers.base import OperationNotAllowedError
+
+        assert monitor.OperationNotAllowedError is OperationNotAllowedError
+
+    def test_it_is_in_the_round_failure_priority(self):
+        import monitor
+        from scrapers.base import OperationNotAllowedError
+
+        assert OperationNotAllowedError in monitor._ROUND_FAILURE_PRIORITY, (
+            "不在优先级表里 → _pick_round_failure 按列表顺序碰运气，"
+            "然后落进 run_once 的「未分类内部异常」兜底"
+        )
+
+    def test_it_outranks_blocked(self):
+        import monitor
+        from scrapers.base import BlockedError, OperationNotAllowedError
+
+        pri = monitor._ROUND_FAILURE_PRIORITY
+        assert pri.index(OperationNotAllowedError) < pri.index(BlockedError), (
+            "被 BlockedError 抢先 → 走换 IP / 熔断 / 登录抑制，"
+            "而这三件事对「operation 没登记」一件都不管用"
+        )
+
+    def test_pick_round_failure_prefers_it_over_blocked(self):
+        import monitor
+        from scrapers.base import BlockedError, OperationNotAllowedError
+
+        op = OperationNotAllowedError("GetCategories 被拒")
+        picked = monitor._pick_round_failure([
+            ("ourdomain:X", BlockedError("403")),
+            ("holland2stay:Eindhoven", op),
+        ])
+        assert picked is op
+
+    def test_maintenance_and_proxy_still_outrank_it(self):
+        """反向守卫：这两个仍排在前面。
+
+        代理挂了根本拿不到站点的真实响应，同轮里的 403 多半只是次生现象；
+        平台维护则是站点级状态，与我们发什么 operation 无关。
+        """
+        import monitor
+        from scrapers.base import (
+            OperationNotAllowedError, ProxyError, UpstreamMaintenanceError,
+        )
+
+        pri = monitor._ROUND_FAILURE_PRIORITY
+        assert pri.index(ProxyError) < pri.index(OperationNotAllowedError)
+        assert pri.index(UpstreamMaintenanceError) < pri.index(OperationNotAllowedError)
+
+    def test_main_loop_does_not_rotate_ip_or_suppress_login(self):
+        """守卫：它不继承 BlockedError，所以任何 `except BlockedError` 都接不住。
+
+        这是整个类存在的理由——换 IP / 熔断 / 1 小时登录抑制对它一件都不管用。
+        """
+        from scrapers.base import BlockedError, OperationNotAllowedError
+
+        assert not issubclass(OperationNotAllowedError, BlockedError)
+        assert not issubclass(OperationNotAllowedError, ScrapeNetworkError)
+
+    def test_admin_message_is_actionable_not_unclassified(self):
+        """告警文案必须指向真正的修法，而不是「查服务器日志」。"""
+        import inspect
+
+        import monitor
+
+        src = inspect.getsource(monitor.run_once)
+        assert "except OperationNotAllowedError" in src, (
+            "run_once 没有专属分支，只能落进「未分类内部异常」兜底"
+        )
+        # 分支正文里要出现「照抄」这个动作词——它是唯一的修法
+        i = src.index("except OperationNotAllowedError")
+        body = src[i:i + 1500]
+        assert "照抄" in body, f"告警没说清要做什么: {body[:300]}"

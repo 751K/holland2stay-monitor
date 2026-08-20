@@ -68,6 +68,7 @@ from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
 from scrapers import (
     BlockedError,
+    OperationNotAllowedError,
     ProxyError,
     RateLimitError,
     ScrapeNetworkError,
@@ -700,6 +701,20 @@ _BLOCKED_COOLDOWN_MAX = 7200  # 连续 Cloudflare 403 时最长冷却 2 小时
 # 不发用户告警，不计入 network_fail_streak，安静等。
 _MAINTENANCE_COOLDOWN = 900  # 15 分钟
 
+#: 上游按 operation 白名单拒绝后的冷却（秒）。
+#:
+#: 这条**不会自己好**——修法只有一个：把站点自己发的那条 operation 原样照抄
+#: 回来（docs/H2S.md §5.1）。所以冷却在这里不是「等它恢复」，是**限流**：
+#: 不冷却的话每轮（高峰期约 60 秒）都会重跑一次完整抓取 + 浏览器会话，在一个
+#: 必然失败的查询上反复烧代理流量。
+#:
+#: 也不宜太长：修好之后是要发版的，而发版会重启进程、冷却随之清零，所以 15 分钟
+#: 只影响「人还没来得及修」的那段窗口。
+#:
+#: 刻意**不**走 BlockedError 那套指数退避 + 换 IP + 熔断：换多少个 IP 都不会好，
+#: 见 scrapers.base.OperationNotAllowedError 的 docstring。
+_OPERATION_REJECTED_COOLDOWN = 900  # 15 分钟
+
 # 连续网络失败阈值：连续 N 次全部城市第 1 页网络失败时触发冷却，
 # 避免坏代理/断网时监控空转刷屏 error log
 _NETWORK_FAIL_THRESHOLD = 3
@@ -1007,6 +1022,13 @@ _BROWSER_SOURCES = frozenset({"holland2stay", "xior"})
 #   ProxyError    有明确修复动作（切备用代理 / 降级直连），而且全员失败时它
 #                 大概率就是其它 source 失败的共同根因 —— 排最前
 #   Maintenance   平台自己会恢复，安静长冷却、不告警用户
+#   OperationNotAllowed
+#                 唯一需要**人去改代码**的一条（照抄站点那条 operation）。
+#                 排在 Blocked 前面：两者都是 403，但把后者当前者的代价实测过
+#                 ——2026-08-19 一次自动预订连续两次「重建 CF 会话」各跑一轮
+#                 完整挑战，75 秒、约 3 MB 代理流量，结束时还是同一个 403，
+#                 随后误判触发 1 小时登录链路抑制。同一轮里两种 403 都出现时，
+#                 「这条 operation 没登记」是更具体也更可诉诸行动的诊断。
 #   Blocked       长冷却 + 指数退避
 #   RateLimit     短冷却 + 自适应间隔翻倍
 #   Network       连续失败计数
@@ -1014,6 +1036,7 @@ _BROWSER_SOURCES = frozenset({"holland2stay", "xior"})
 _ROUND_FAILURE_PRIORITY: tuple[type[BaseException], ...] = (
     ProxyError,
     UpstreamMaintenanceError,
+    OperationNotAllowedError,
     BlockedError,
     RateLimitError,
     ScrapeNetworkError,
@@ -2178,6 +2201,38 @@ async def run_once(
                 "H2S 熔断中，且其它 source 本轮未抓到任何房源，无数据可入库。"
             )
             return completeness
+    except OperationNotAllowedError as e:
+        # 403，但正文是上游应用说「这条 operation 没登记」，与出口 IP 无关。
+        #
+        # 以前这里没有分支，它会一路落到最底下的 except Exception，被报成
+        # 「未分类的内部异常，请查看服务器日志排查」——**全系统最可诉诸行动的
+        # 一条故障，却把排查引向了服务器日志。** 同一个类在 booker 里早就有专属
+        # phase（operation_rejected），抓取侧一直没补上。
+        #
+        # 不换 IP、不熔断、不抑制登录：那三件事对这种 403 一件都不管用
+        # （见 scrapers.base.OperationNotAllowedError）。上抛让 main_loop 做限流
+        # 冷却，避免在一个必然失败的查询上每轮烧一次代理流量。
+        await _stash_pending_prewarms()
+        logger.error(
+            "⛔ 上游拒绝了我们发的 GraphQL operation（HTTP 403，非 Cloudflare）"
+            " cities=%d users=%d：%s",
+            len(scrape_tasks), len(user_notifiers), e,
+        )
+        if not dry_run and _should_notify_internal():
+            await _notify_admin_only(
+                storage, web_notifier,
+                f"⛔ 上游按 operation 白名单拒绝\n\n{e}\n\n"
+                f"这不是 Cloudflare 屏蔽，也不是网络问题——换 IP、重建会话、"
+                f"等冷却都无效。\n"
+                f"唯一的修法是把站点自己发的那条 operation **原样照抄**回来"
+                f"（步骤见 docs/H2S.md §5.1：钩住 crypto.subtle.encrypt 截获"
+                f"加密前的明文）。\n"
+                f"注意白名单按 operationName + 归一化字段集比对，删一个字段"
+                f"就是 403。\n"
+                f"30 分钟内不重复通知。",
+                kind="error",
+            )
+        raise
     except BlockedError as e:
         # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。
         # 给 main_loop 一个长 cooldown（15 min），并节流通知避免刷屏。
@@ -2886,6 +2941,20 @@ async def main_loop(
                     "退避已拉长到最多 2 小时。持续屏蔽请换 HTTPS_PROXY 出口，"
                     "或暂停几小时让 WAF 状态冷下来。",
                 )
+            await asyncio.sleep(cooldown)
+        except OperationNotAllowedError:
+            # 上游按 operation 白名单拒绝。**不会自己好**，冷却在这里是限流不是
+            # 等待：不冷却的话每轮都在一个必然失败的查询上重跑完整抓取 + 浏览器
+            # 会话。修好要发版，发版会重启进程、冷却清零，所以这 15 分钟只影响
+            # 「人还没来得及修」的那段窗口。
+            #
+            # 刻意不做指数退避、不换 IP、不进熔断——换多少个 IP 都不会好。
+            cooldown = apply_jitter(_OPERATION_REJECTED_COOLDOWN, cfg.jitter_ratio)
+            logger.error(
+                "⛔ 上游按 operation 白名单拒绝，冷却 %d 秒。"
+                "这条不会自己恢复，需要照抄站点那条 operation（docs/H2S.md §5.1）。",
+                cooldown,
+            )
             await asyncio.sleep(cooldown)
         except UpstreamMaintenanceError:
             # 平台维护：和 BlockedError 用相同冷却长度，但语义完全不同：
