@@ -204,3 +204,91 @@ class TestMonitorMaintenanceAdminNotify:
             assert st.get_meta("upstream_maintenance_last_at", default="") != ""
         finally:
             st.close()
+
+
+class TestMaintenanceSurvivesTheScrapeLoop:
+    """维护异常必须原样穿过 ``_scrape_city_pages``，不能被改判成网络错误。
+
+    2026-08-04 / 08-15 生产实测共 20 次误判，日志长这样——一句话里同时写着
+    「网络错误」和「平台维护中」::
+
+        [ERROR] holland2stay:Eindhoven 抓取网络失败，已隔离该任务:
+                [Eindhoven] 第 1 页网络错误: H2S 平台维护中（页面标题: H2S-Maintenance）
+
+    成因是重抛白名单漏了 ``UpstreamMaintenanceError``，于是它落进下面那条
+    ``except Exception`` 被包成 ``ScrapeNetworkError``。
+
+    讽刺的是 ``browser_fetcher.fetch()`` 里专门为这件事写过一段注释——
+    「这是维护，不是屏蔽。压成 BlockedError 会让 monitor 走熔断 + admin 告警，
+    而不是安静的维护冷却」——它小心翼翼把异常原样抛出来，下一层就给压掉了。
+
+    代价：维护期走的是网络失败路径（5 分钟冷却 + 连续失败计数 + ERROR 日志），
+    而不是设计好的维护路径（15 分钟安静冷却 + INFO + 不发用户告警 + dashboard
+    banner）。
+
+    ``XiorScraper._post_ajax`` 的同一个位置一直是对的
+    （``except (BlockedError, UpstreamMaintenanceError): raise``）。
+    """
+
+    @staticmethod
+    def _run(exc):
+        import scrapers.holland2stay as h2s
+
+        class _Fetcher:
+            def fetch_gql(self, *a, **k):
+                raise exc
+
+        return h2s._scrape_city_pages(
+            _Fetcher(), "Eindhoven", city_ids=["29"],
+            availability_ids=["179"], attr_labels={},
+        )
+
+    def test_maintenance_is_not_reclassified_as_network_error(self):
+        from scrapers.base import ScrapeNetworkError
+
+        with pytest.raises(UpstreamMaintenanceError):
+            self._run(UpstreamMaintenanceError("H2S 平台维护中（页面标题: H2S-Maintenance）"))
+
+        # 反向确认：它没有变成 ScrapeNetworkError
+        try:
+            self._run(UpstreamMaintenanceError("维护"))
+        except ScrapeNetworkError as e:                     # pragma: no cover
+            pytest.fail(f"维护被改判成网络错误了: {e}")
+        except UpstreamMaintenanceError:
+            pass
+
+    def test_the_message_does_not_say_network(self):
+        """回归到文案层：日志里不该再出现「网络错误: …平台维护中」这种自相矛盾。"""
+        try:
+            self._run(UpstreamMaintenanceError("H2S 平台维护中"))
+        except Exception as e:
+            assert "网络错误" not in str(e), (
+                f"维护异常的消息里还写着「网络错误」: {e}"
+            )
+
+    @pytest.mark.parametrize("exc_name", [
+        "RateLimitError", "BlockedError", "OperationNotAllowedError",
+        "ScrapeNetworkError", "UpstreamMaintenanceError",
+    ])
+    def test_every_taxonomy_error_passes_through_unchanged(self, exc_name):
+        """整个 taxonomy 都必须原样穿过——漏掉任何一个都是同一类 bug。
+
+        判据很简单：这些类各自代表一种**上层要据以做不同决策**的根因
+        （换 IP / 等冷却 / 照抄 operation / 安静等维护 / 查代理）。在这里把
+        任何一个压成别的类，上层那套决策就全废了。
+        """
+        import scrapers.base as base
+
+        cls = getattr(base, exc_name)
+        with pytest.raises(cls):
+            self._run(cls("boom"))
+
+    def test_unexpected_errors_still_become_network_errors(self):
+        """反向守卫：taxonomy 之外的异常（我们自己的 bug）仍然归网络类。
+
+        不是说这个归类有多准，而是上层的隔离与重试语义依赖它，别顺手改掉。
+        """
+        from scrapers.base import ScrapeNetworkError
+
+        with pytest.raises(ScrapeNetworkError):
+            self._run(TypeError("解析炸了"))

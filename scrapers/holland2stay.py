@@ -47,6 +47,7 @@ from .base import (
     ScrapeNetworkError,
     ScrapeResult,
     ScrapeTask,
+    UpstreamMaintenanceError,
 )
 
 logger = logging.getLogger(__name__)
@@ -608,11 +609,28 @@ def _scrape_city_pages(
             BlockedError,
             OperationNotAllowedError,
             ScrapeNetworkError,
+            UpstreamMaintenanceError,
         ):
-            # OperationNotAllowedError 必须原样上抛。落进下面那条 except Exception
-            # 会被改判成「第 1 页网络错误」——和 2026-08-11 端点迁移时那句
-            # 「请检查代理/网络」是同一类误诊：把「查询没登记」说成网络问题，
-            # 排查会往代理方向走，而代理是好的。
+            # **整个 taxonomy 都要原样上抛。** 这几个类各自代表一种上层要据以
+            # 做不同决策的根因（换 IP / 等冷却 / 照抄 operation / 安静等维护 /
+            # 查代理）。在这里压成别的类，上层那套决策就全废了。
+            #
+            # 漏一个的代价是实打实的，两次都栽过：
+            #
+            # OperationNotAllowedError —— 落进下面那条 except Exception 会被改判成
+            #   「第 1 页网络错误」，和 2026-08-11 端点迁移时那句「请检查代理/网络」
+            #   是同一类误诊：把「查询没登记」说成网络问题，排查往代理方向走，
+            #   而代理是好的。
+            #
+            # UpstreamMaintenanceError —— 2026-08-04 / 08-15 生产实测共 20 次误判，
+            #   日志一句话里同时写着「网络错误」和「平台维护中」：
+            #     「[Eindhoven] 第 1 页网络错误: H2S 平台维护中（页面标题:
+            #       H2S-Maintenance）」
+            #   于是维护期走的是网络失败路径（5 分钟冷却 + 连续失败计数 + ERROR
+            #   日志），而不是设计好的维护路径（15 分钟安静冷却 + INFO + 不发用户
+            #   告警 + dashboard banner）。
+            #   browser_fetcher.fetch() 里专门为这件事把异常小心地原样抛出来
+            #   （见那里「这是维护，不是屏蔽」的注释），下一层就是这里给压掉的。
             raise
         except Exception as e:
             logger.error(
