@@ -40,9 +40,26 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+def _project_root() -> Path:
+    """定位仓库根目录。
 
-DB = Path(__file__).resolve().parent.parent / "data" / "listings.db"
+    允许以 ``python3 - < tools/backfill_h2s_details.py`` 的形式跑（容器里没重建
+    镜像时很方便）。那种情况下 CPython 会把 ``__file__`` 设成字符串 ``<stdin>``
+    ——**不是未定义**，所以不能只判断 in globals()，得判断它是不是真的存在，
+    否则算出来的路径是 ``/data/listings.db`` 这种，报「unable to open database」。
+    """
+    f = globals().get("__file__")
+    if f:
+        p = Path(f)
+        if p.exists():
+            return p.resolve().parent.parent
+    return Path.cwd()
+
+
+_ROOT = _project_root()
+sys.path.insert(0, str(_ROOT))
+
+DB = _ROOT / "data" / "listings.db"
 
 #: 连续失败多少次就中止。撞墙还硬打只会让限流更严。
 _MAX_CONSECUTIVE_FAILURES = 5
@@ -84,11 +101,12 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help="最多补 N 条（0 = 不限）")
     ap.add_argument("--spacing", type=float, default=0.0,
                     help="请求间隔秒数（默认跟随抓取侧配置）")
+    ap.add_argument("--db", default=str(DB), help="数据库路径")
     args = ap.parse_args()
 
     import sqlite3
 
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(args.db)
     try:
         rows = _rows_needing_backfill(conn)
     finally:
