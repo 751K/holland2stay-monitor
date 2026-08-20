@@ -34,11 +34,6 @@ class TestOperationNamesThreaded:
         assert f.calls[0]["operation_name"] == gql.OP_GETPRODUCTDETAIL
         assert f.calls[0]["query"] is gql.GETPRODUCTDETAIL
 
-    def test_create_empty_cart_uses_create_empty_cart_op(self):
-        f = _CapturingFetcher({"data": {"createEmptyCart": "cart-123"}})
-        booker.create_empty_cart(f, "tok")
-        assert f.calls[0]["operation_name"] == gql.OP_CREATEEMPTYCART
-
     def test_set_payment_uses_set_payment_op(self):
         f = _CapturingFetcher({"data": {"setPaymentMethodOnCart": {
             "cart": {"selected_payment_method": {"code": "idealcheckout_ideal"}}}}})
@@ -56,20 +51,45 @@ class TestOperationNamesThreaded:
         booker._ideal_checkout(f, "tok", "H2S-1")
         assert f.calls[0]["operation_name"] == gql.OP_IDEALCHECKOUT
 
-    def test_add_to_cart_uses_add_booking_op(self):
-        f = _CapturingFetcher({"data": {"addNewBooking": {
-            "cart": {"items": [{"id": "1"}]}}}})
-        booker.add_to_cart(f, "tok", "cart-1", "r-x-1", "2099-09-01")
-        assert f.calls[0]["operation_name"] == gql.OP_ADDNEWBOOKING
-
-    @pytest.mark.parametrize("call", [
-        lambda f: booker.create_empty_cart(f, "tok"),
+    @pytest.mark.parametrize("call,resp", [
+        (lambda f: booker.set_payment_method(f, "tok", "c1"),
+         {"data": {"setPaymentMethodOnCart": {"cart": {
+             "selected_payment_method": {"code": "idealcheckout_ideal"}}}}}),
+        (lambda f: booker.place_order(f, "tok", "c1"),
+         {"data": {"placeOrder": {"orderV2": {"order_number": "H2S-1"}}}}),
+        (lambda f: booker._ideal_checkout(f, "tok", "H2S-1"),
+         {"data": {"idealCheckOut": {"redirect": "https://pay"}}}),
     ])
-    def test_empty_operation_name_is_a_bug(self, call):
+    def test_empty_operation_name_is_a_bug(self, call, resp):
         """没有哪一步该发空 operationName——发了就是 403。"""
-        f = _CapturingFetcher({"data": {"createEmptyCart": "c1"}})
+        f = _CapturingFetcher(resp)
         call(f)
         assert f.calls[0]["operation_name"], "operation_name 为空 = 必然 403"
+
+
+class TestNoUnwiredBookingFallback:
+    """占房只有一条路径，不留「保留着以防万一」的死函数。
+
+    ``create_empty_cart`` / ``add_to_cart`` 曾以「addNewBooking 是否真被后端
+    拒绝还没验证，先留着」的名义保留。但没有任何代码路径会调它们——留着但
+    没接线的 fallback 只是错觉，而这个错觉正是 ``BookingBlockedError`` 那个
+    bug 藏了三个月的机制（测试钉着死代码，让它看起来是活的）。
+
+    2026-08-20 删除。要找原文去 git 历史，或看 ``h2s_booking_gql``——那份是
+    **站点报文的照抄记录**，不是我们的调用清单，两个 operation 仍留在里面。
+    """
+
+    def test_dead_cart_helpers_are_gone(self):
+        for name in ("create_empty_cart", "add_to_cart"):
+            assert not hasattr(booker, name), (
+                f"booker.{name} 又回来了——它没有任何调用者，"
+                "留着只会让「有 fallback」的错觉重演"
+            )
+
+    def test_transcript_module_still_keeps_the_operations(self):
+        """照抄记录不删：它记的是站点发过什么，与我们调不调无关。"""
+        assert gql.ADDNEWBOOKING and gql.OP_ADDNEWBOOKING == "AddNewBooking"
+        assert gql.CREATEEMPTYCART and gql.OP_CREATEEMPTYCART == "CreateEmptyCart"
 
 
 class TestCancelUsesRestEnvelope:

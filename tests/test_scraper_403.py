@@ -3,6 +3,9 @@
 
 旧 curl_cffi _post_gql 已删除；现在浏览器内 fetch 检测 403 并通过
 BlockedError 向上传播。monitor 级别的 circuit breaker + 通知节流不受影响。
+
+异常从 ``scrapers.base`` 导入——顶层 ``scraper.py`` 那层 re-export 兼容垫片
+已删除（生产代码零 import，只有本文件还在用它）。
 """
 from __future__ import annotations
 
@@ -14,7 +17,7 @@ import pytest
 
 import monitor
 from monitor import run_once
-from scraper import BlockedError, RateLimitError, ScrapeNetworkError
+from scrapers.base import BlockedError, RateLimitError, ScrapeNetworkError
 from booker import BookingResult
 from notifier import BaseNotifier
 from users import UserConfig

@@ -187,7 +187,16 @@ def test_holland2stay_reuses_one_browser_for_all_cities(monkeypatch):
 
 
 def test_holland2stay_standalone_scrape_still_self_manages_browser(monkeypatch):
-    """不经 dispatcher 直接 scrape() 时，应自建 BrowserFetcher（单测路径）。"""
+    """不经 dispatcher 直接 scrape() 时，应自建 BrowserFetcher 并**挂在实例上复用**。
+
+    这里原本是 scrape() 里一条独立的 else 分支：另起一个一次性浏览器、用局部
+    labels dict、用完即关。它和主路径行为并不一致——每次调用都付一整轮 CF 挑战，
+    而且 attr 标签的跨轮累积在它上面是坏的（每次空表，features 里会冒出裸 ID）。
+    dispatcher 路径永远走不到它，这份发散因此一直没人发现。
+
+    现在两条路径合一，形状与 XiorScraper 相同：``self._fetcher or
+    self._ensure_browser()``。所以第二次 scrape() 不该再建第二个浏览器。
+    """
     browser_instances = []
 
     class _FakeBrowserFetcher:
@@ -212,12 +221,33 @@ def test_holland2stay_standalone_scrape_still_self_manages_browser(monkeypatch):
 
     with patch(_PATCH_SCRAPE, return_value=([], True)):
         scraper_instance = h2s.HollandStayScraper()
-        scraper_instance.scrape(ScrapeTask(
+        task = ScrapeTask(
             source="holland2stay", city_key="1", city_display="Eindhoven",
-        ))
+        )
+        scraper_instance.scrape(task)
+        scraper_instance.scrape(task)
 
-    # 独立调用：建了 1 个 BrowserFetcher
-    assert len(browser_instances) == 1
+    # 独立调用：只建 1 个 BrowserFetcher，第二次复用
+    assert len(browser_instances) == 1, (
+        f"独立调用每次都新建浏览器（{len(browser_instances)} 个）"
+        "——每个都是一整轮 CF 挑战"
+    )
+    # 标签映射挂在实例上，不是每次调用一份局部空表
+    assert scraper_instance._attr_labels is not None
+
+
+def test_scrape_has_no_separate_standalone_branch():
+    """回归守卫：scrape() 里不该再出现「自己 with 一个 BrowserFetcher」的分支。
+
+    那条分支是主路径的一份发散拷贝，且 dispatcher 永远走不到——正是这种
+    「不可达 + 行为不同」的组合让 bug 能长期藏着。
+    """
+    import inspect
+
+    src = inspect.getsource(h2s.HollandStayScraper.scrape)
+    assert "with BrowserFetcher(" not in src, (
+        "scrape() 又自己开了一次性浏览器，行为会和 dispatcher 路径分叉"
+    )
 
 
 def test_browser_backed_sources_all_run_on_the_isolated_thread(monkeypatch):
@@ -274,3 +304,42 @@ def test_each_browser_source_gets_its_own_thread(monkeypatch):
     assert all(len(v) == 1 for v in seen.values()), seen
     # 但两个 source 不能是同一条
     assert seen["holland2stay"] != seen["xior"], seen
+
+
+class TestNoUnwiredScraperHooks:
+    """``AbstractScraper`` 上不留没人调的扩展点。
+
+    基类曾挂着 ``prewarm_session()`` 与 ``try_book(listing)`` 两个 no-op 钩子，
+    设想是「支持自动预订的平台各自实现」。实际从未接线：预登录走
+    ``mcore/prewarm.py → booker.create_prewarmed_session``，下单走 ``monitor``
+    直接调 ``booker`` / ``bookers/*``，全仓库没有一处调过它们。
+
+    而 H2S 那个 override 里还留着「暂未适配新 API」——在 booker 换成 NextAuth
+    （v1.16.9）之后就是错的，等于在基类文档上给后来人指一条不存在的路。
+    """
+
+    def test_hooks_are_gone_from_the_base_class(self):
+        from scrapers.base import AbstractScraper
+
+        for name in ("prewarm_session", "try_book"):
+            assert not hasattr(AbstractScraper, name), (
+                f"AbstractScraper.{name} 又回来了——没有任何调用者，"
+                "留着只会让人以为抓取层管预订"
+            )
+
+    def test_no_scraper_implements_them_either(self):
+        import scrapers
+
+        for source, cls in scrapers.SCRAPER_REGISTRY.items():
+            for name in ("prewarm_session", "try_book"):
+                assert not hasattr(cls, name), f"{source} 还实现着 {name}"
+
+    def test_compat_shim_module_is_gone(self):
+        """顶层 ``scraper.py`` 只剩 re-export，生产代码零 import，已删除。"""
+        import importlib.util
+        import pathlib
+
+        assert not pathlib.Path("scraper.py").exists(), (
+            "scraper.py 又回来了——它只是 scrapers.base 的 re-export 垫片"
+        )
+        assert importlib.util.find_spec("scrapers.base") is not None

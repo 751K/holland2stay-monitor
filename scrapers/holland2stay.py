@@ -9,8 +9,8 @@ H2S 的 GraphQL 端点已迁移两次，当前为
 旧 curl_cffi 直连路径已被 CF 封锁。新路径使用 CloakBrowser（patched Chromium）
 绕过 CF Turnstile，再通过浏览器内 ``page.evaluate(fetch)`` 调用 GraphQL API。
 
-本次同时完成了当初 P0 多源重构遗留的 TODO：将 H2S 爬取主体从 ``scraper.py``
-正式搬入本文件，不再通过 ``from scraper import _scrape_city_pages`` 桥接。
+本次同时完成了当初 P0 多源重构遗留的 TODO：将 H2S 爬取主体从顶层
+``scraper.py`` 正式搬入本文件（那个桥接模块已于 2026-08-20 删除）。
 
 新 API 字段变化
 --------------
@@ -867,32 +867,23 @@ class HollandStayScraper(AbstractScraper):
                 max(0.0, _FULL_SCAN_INTERVAL - (time.monotonic() - self._last_full_scan_at)),
             )
 
-        enriched = 0
-        if self._fetcher is not None:
-            # 批次内：复用共享浏览器
-            listings, complete = _scrape_city_pages(
-                self._fetcher,
-                task.city_display,
-                city_ids=[task.city_key],
-                availability_ids=availability_ids,
-                attr_labels=self._attr_labels,
-            )
-            enriched = _enrich(self._fetcher, listings, self._detail_budget)
-        else:
-            # 独立调用（单测 / 调试 / 非 dispatcher 路径）
-            from config import CLOAKBROWSER_HEADLESS
-
-            with BrowserFetcher(headless=CLOAKBROWSER_HEADLESS) as fetcher:
-                fetcher.ensure_initialized()
-                labels: dict[str, dict[str, str]] = {}
-                listings, complete = _scrape_city_pages(
-                    fetcher,
-                    task.city_display,
-                    city_ids=[task.city_key],
-                    availability_ids=availability_ids,
-                    attr_labels=labels,
-                )
-                enriched = _enrich(fetcher, listings)
+        # dispatcher 路径下 batch_session() 已经把浏览器备好了；独立调用
+        # （工具脚本 / 调试）走 _ensure_browser() 自建一个，之后挂在实例上复用。
+        #
+        # 这里原本是个 if/else：没有 fetcher 时**另起一个一次性浏览器**，用
+        # 局部的 labels dict。两条路径行为并不一致——一次性那条每次都付一整轮
+        # CF 挑战，且 attr 标签的跨轮累积在它上面是坏的（每次都是空表，features
+        # 里会冒出裸 ID）。dispatcher 路径永远走不到它，于是这份发散一直没人
+        # 发现。改成和 XiorScraper 同一个形状。
+        fetcher = self._fetcher or self._ensure_browser()
+        listings, complete = _scrape_city_pages(
+            fetcher,
+            task.city_display,
+            city_ids=[task.city_key],
+            availability_ids=availability_ids,
+            attr_labels=self._attr_labels,
+        )
+        enriched = _enrich(fetcher, listings, self._detail_budget)
 
         if not is_full:
             # 高频轮看不见 Reserved，标成完整扫描会让那批房源被 stale 收敛
@@ -917,12 +908,3 @@ class HollandStayScraper(AbstractScraper):
             listings=listings,
             complete=complete,
         )
-
-    def prewarm_session(self) -> None:
-        """
-        H2S 自动预订登录预热 — 暂未适配新 API。
-
-        booker.py 下单路径也需迁移到 CloakBrowser（独立 follow-up）。
-        当前 no-op，不影响抓取。
-        """
-        return None

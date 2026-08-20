@@ -549,10 +549,17 @@ operation_not_allowed，说明路由在、只是要登录态。
 
 ### 已实现
 
-`booker.create_booking()` 走这条，`_do_book` 里 `create_empty_cart + add_to_cart`
-两步已被它取代（旧函数保留但不再进主流程）。守卫见
-`tests/test_booker_operations.py::TestCreateBooking`（含一条 AST 测试，钉住
-`_do_book` 不许再调 `add_to_cart` / `create_empty_cart`）。
+`booker.create_booking()` 走这条，取代了旧的 `create_empty_cart + add_to_cart`
+两步。**那两个函数 2026-08-20 已删除**——它们一度以「万一要退回去」为名保留，
+但没有任何代码路径会调它们，而「留着但没接线的 fallback」只是错觉（同样的错觉
+让 `BookingBlockedError` 那个 bug 藏了三个月）。要找原文去 git 历史，或看
+`h2s_booking_gql`——那份是**站点报文的照抄记录**，不是我们的调用清单，两个
+operation 仍留在里面。
+
+也就是说：**占房只有这一条路径，没有 fallback。** 守卫见
+`tests/test_booker_operations.py`（`TestCreateBooking` + 一条 AST 测试钉住
+`_do_book` 只调 `create_booking`，`TestNoUnwiredBookingFallback` 钉住那两个
+函数不许回来）。
 
 ### 仍未验证的最后一环
 

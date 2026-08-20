@@ -15,9 +15,18 @@ booker.py — 自动预订模块（CloakBrowser 版）
 3. _do_book()（内部子流程，失败时可重试）：
    3a+3b. create_booking()
            POST /api/booking（加密信封 + Bearer）→ {cartId, booking}
-           一步完成「建车 + 占房」。**替代了旧的 createEmptyCart + addNewBooking**
-           ——后者的 addNewBooking 已被 H2S 摘出公开 API（2026-08-19 实测 403），
-           站点自己也改走这条。见 docs/H2S_BOOKING_OPS.md §6.10
+           一步完成「建车 + 占房」。**这是唯一的占房入口。**
+
+           曾经是 createEmptyCart + addNewBooking 两步。后者 2026-08-19 实测
+           被 H2S 摘出公开 API（403 "not available through the public API"），
+           站点自己的前端也改走了 /api/booking。那两个函数一度保留着「万一
+           要退回去」，但没有任何代码路径会走到它们——「保留作 fallback」在
+           没接线的情况下只是错觉（我们在 BookingBlockedError 上栽过同样的坑）。
+           2026-08-20 删除，要找原文去 git 历史或 h2s_booking_gql（那份是站点
+           报文的照抄记录，不是我们的调用清单）。
+
+           ⚠️ 这条路径**尚未经过一次真实预订验证**——验证它就等于真占一套房。
+           首次真实自动预订时需要盯着结果。见 docs/H2S_BOOKING_OPS.md §6.10
    3c. set_payment_method()
            setPaymentMethodOnCart mutation → code="idealcheckout_ideal"
    3d. _fetch_checkout_agreements()
@@ -62,15 +71,11 @@ from urllib.parse import urlencode as _urlencode
 
 from browser_fetcher import BrowserFetcher
 from h2s_booking_gql import (
-    ADDNEWBOOKING as _GQL_ADD_BOOKING,
-    CREATEEMPTYCART as _GQL_CREATE_CART,
     GETCHECKOUTAGREEMENTS as _GQL_AGREEMENTS,
     GETPRODUCTDETAIL as _GQL_PRODUCT_DETAIL,
     IDEALCHECKOUT as _GQL_IDEAL,
     PLACEORDER as _GQL_PLACE_ORDER,
     SETPAYMENTMETHODONCART as _GQL_SET_PAYMENT,
-    OP_ADDNEWBOOKING as _OP_ADD_BOOKING,
-    OP_CREATEEMPTYCART as _OP_CREATE_CART,
     OP_GETCHECKOUTAGREEMENTS as _OP_AGREEMENTS,
     OP_GETPRODUCTDETAIL as _OP_PRODUCT_DETAIL,
     OP_IDEALCHECKOUT as _OP_IDEAL,
@@ -244,8 +249,9 @@ def _gql(
 
     注意
     ----
-    此函数不处理 partial error。add_to_cart() 因 NON_NULL 传播问题
-    不使用此函数而是直接调用 fetcher.fetch_gql()。
+    此函数不处理 partial error（GraphQL 的 NON_NULL 传播会同时给出 errors 和
+    部分 data）。需要区分「致命」与「已生效但带告警」的调用方要直接用
+    ``fetcher.fetch_gql()``。
     """
     extra_headers = {}
     if token:
@@ -350,21 +356,6 @@ def login(fetcher: BrowserFetcher, email: str, password: str) -> str:
 
     logger.debug("登录成功（NextAuth，accessToken 已取得）")
     return sess["accessToken"]
-
-
-# ------------------------------------------------------------------ #
-# 购物车
-# ------------------------------------------------------------------ #
-
-def create_empty_cart(fetcher: BrowserFetcher, token: str) -> str:
-    """调用 createEmptyCart mutation 创建全新空购物车，返回 cart_id。"""
-    data = _gql(fetcher, _GQL_CREATE_CART, token=token,
-                operation_name=_OP_CREATE_CART)
-    cart_id = data.get("createEmptyCart")
-    if not cart_id:
-        raise RuntimeError("createEmptyCart 未返回购物车 ID")
-    logger.debug("新购物车 ID: %s", cart_id)
-    return cart_id
 
 
 # ------------------------------------------------------------------ #
@@ -473,9 +464,10 @@ def create_booking(
 
     ★ 有副作用：这一步就占住房了。
 
-    **它替代了旧的 ``create_empty_cart`` + ``add_to_cart`` 两步**——后者用的
-    GraphQL ``addNewBooking`` 已被 H2S 摘出公开 API（实测 403，见
-    ``_BOOKING_API_PATH`` 上方注释）。站点自己现在也走这条。
+    **这是唯一的占房入口。** 曾经是 ``createEmptyCart`` + ``addNewBooking``
+    两步，后者已被 H2S 摘出公开 API（实测 403，见 ``_BOOKING_API_PATH`` 上方
+    注释），站点自己现在也走这条。那两个函数 2026-08-20 删除——留着但没接线
+    的「fallback」只是错觉。
 
     请求体照抄站点（``zg`` 加密后 POST）：
         {sku, contract_startDate, challengeToken, challengeProvider}
@@ -529,66 +521,6 @@ def create_booking(
 
     logger.info("占房成功，cart_id=%s", cart_id)
     return cart_id
-
-
-def add_to_cart(
-    fetcher: BrowserFetcher,
-    token: str,
-    cart_id: str,
-    sku: str,
-    contract_start_date: Optional[str],
-) -> bool:
-    """
-    发站点原文的 ``AddNewBooking`` mutation，把押金项加入购物车并创建预订。
-
-    ★ 有副作用：这一步就占住房了。
-
-    ⚠️ 未决点（docs/H2S_BOOKING_OPS.md §6.8）：官网前端已把占房改走服务端代理
-    ``POST /api/booking``，bundle 里 ``AddNewBooking`` 只剩定义、无客户端调用点。
-    这只说明**前端换了入口**，不等于后端拒绝直接 GraphQL——后者未验证，留待首次
-    真实预订时观察。（曾据此断言「被 Turnstile 挡死」，那是错的：那个
-    ``challengeToken`` 就是站点自有 clearance 的 Turnstile，BrowserFetcher 早已处理，
-    且用户在自动化浏览器里的真实下单当天就走通了。详见 §6.8。）
-
-    用的是照抄品（``h2s_booking_gql.ADDNEWBOOKING``），选择集是站点的
-    ``cart { items {...} }``——不是我们以前自写的 ``user_errors``。白名单按
-    operationName + 归一化字段集放行，选择集写错就是 403。声明了但没传的变量
-    （contract_id / option_selected）按 GraphQL 规则默认 null，合法。
-    """
-    variables: dict = {"cart_id": cart_id, "sku": sku}
-    if contract_start_date:
-        variables["contract_startDate"] = _to_h2s_date(contract_start_date)
-
-    raw = fetcher.fetch_gql(
-        _GQL_ADD_BOOKING, variables=variables,
-        operation_name=_OP_ADD_BOOKING,
-        extra_headers={"Authorization": f"Bearer {token}"},
-    )
-
-    logger.debug("addNewBooking raw response: %s", raw)
-
-    # GraphQL 层错误：有 errors 且没有可用 data 才算致命（NON_NULL 传播会同时
-    # 带 errors + 部分 data）。
-    if "errors" in raw:
-        msgs = "; ".join(e.get("message", "") for e in raw["errors"])
-        cart = ((raw.get("data") or {}).get("addNewBooking") or {}).get("cart")
-        if not cart:
-            logger.error(
-                "addNewBooking GraphQL 层错误 sku=%s start=%s: %s",
-                sku, contract_start_date, msgs,
-            )
-            raise RuntimeError(f"addNewBooking 失败: {msgs}")
-        logger.warning("addNewBooking 带非致命 GraphQL 错误（已入车，忽略）: %s", msgs)
-
-    cart = ((raw.get("data") or {}).get("addNewBooking") or {}).get("cart")
-    if not cart or not (cart.get("items") or []):
-        raise RuntimeError(
-            f"addNewBooking 未把房源加入购物车（sku={sku}）；"
-            f"响应: {str(raw)[:300]}"
-        )
-
-    logger.info("addNewBooking 成功（押金项已入购物车）")
-    return True
 
 
 # ------------------------------------------------------------------ #
@@ -846,8 +778,8 @@ def try_book(
             ta = time.monotonic()
 
             # 建车 + 占房合成一步：走站点自己的 /api/booking。
-            # 旧的 create_empty_cart + add_to_cart 已废——addNewBooking 被摘出
-            # 公开 API（实测 403），见 _BOOKING_API_PATH 注释。
+            # 这是唯一的占房入口，没有 fallback——addNewBooking 已被摘出公开
+            # API（实测 403），见 _BOOKING_API_PATH 注释。
             new_cart_id = create_booking(fetcher, token, sku, start_date)
             set_payment_method(fetcher, token, new_cart_id, code=payment_method)
             _fetch_checkout_agreements(fetcher, token)

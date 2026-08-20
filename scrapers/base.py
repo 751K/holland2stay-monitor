@@ -9,12 +9,11 @@ P0 引入：把抓取从 H2S 单源耦合中解放出来，每个第三方租房
 --------
 - **同步 API**：保留现有 sync 范式，monitor 那边继续用 ``run_in_executor``
   把抓取放进线程池。改 async 是另一坨工作量，不在 P0 范围内。
-- **零回归承诺**：仅 Holland2Stay 一家时行为完全不变——`HollandStayScraper`
-  内部直接调 `scraper.py:_scrape_city_pages`，多城市编排归 dispatcher，
-  I/O 形状一致。
+- **零回归承诺**：仅 Holland2Stay 一家时行为完全不变——多城市编排归
+  dispatcher，I/O 形状一致。
 - **异常分类**：``RateLimitError`` / ``BlockedError`` / ``ScrapeNetworkError``
-  都来自这里。P0 之前它们住在 `scraper.py`；现在挪到中性位置，旧
-  `scraper.py` 仅做 re-export 保持 import 路径兼容。
+  都来自这里。P0 之前它们住在顶层 `scraper.py`；那个模块迁移后只剩 re-export，
+  生产代码零 import，2026-08-20 删除。
 - **数据模型保守演进**：Listing 在 P0 里只新增 `source` 字段（默认
   ``"holland2stay"``），id / native_id 的前缀化迁移留到 P1（接 OurDomain
   时一起做，避免提前改 status_changes / web_notifications / iOS deep
@@ -371,8 +370,15 @@ class AbstractScraper(ABC):
     --------
     - 必须设 ``source: str`` 类属性（与 SCRAPER_REGISTRY key 一致）
     - 必须实现 ``scrape(task) -> ScrapeResult`` 同步方法
-    - 可选实现 ``prewarm_session()`` / ``try_book(listing)`` 钩子；
-      多数平台不支持 booking → 留空即可（基类 no-op 默认实现）
+    - 可选覆盖 ``batch_session()`` / ``invalidate_session()``（见下）
+
+    **抓取层不管预订。** 这里曾经还挂着 ``prewarm_session()`` 与
+    ``try_book(listing)`` 两个 no-op 钩子，设想是「支持自动预订的平台各自实现」。
+    实际从未接线：预登录走 ``mcore/prewarm.py → booker.create_prewarmed_session``，
+    下单走 ``monitor`` 直接调 ``booker`` / ``bookers/*``，全仓库没有一处调过这
+    两个钩子。而 H2S 那个 override 里还留着一句「暂未适配新 API」——它在 booker
+    换成 NextAuth（v1.16.9）之后就是错的，等于在基类文档上给后来人指一条不存在
+    的路。2026-08-20 删除。
 
     线程模型
     --------
@@ -452,11 +458,3 @@ class AbstractScraper(ABC):
         所以批次作用域内的共享 Session 无并发风险。
         """
         yield
-
-    def prewarm_session(self) -> None:
-        """登录 / 预热会话。仅 H2S 等支持 auto-book 的平台需要。"""
-        return None
-
-    def try_book(self, listing: Listing) -> bool:
-        """自动预订单条 listing。仅 H2S 等支持的平台实现。"""
-        return False

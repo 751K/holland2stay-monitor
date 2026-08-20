@@ -1,5 +1,50 @@
 # Changelog
 
+## v1.17.8 (2026-08-20)
+
+拆掉四处死代码。它们的共同点是**看起来是活的**——有测试钉着、有 docstring 讲
+用途，但生产没有任何调用者。这正是 `BookingBlockedError` 那个 bug 藏三个月的
+机制，这次一次清干净。
+
+### 1. `booker.create_empty_cart()` / `add_to_cart()`
+
+v1.17.0 之后 `_do_book` 只调 `create_booking()`（`POST /api/booking`）。这两个
+函数生产零调用者，但 `add_to_cart` 的 docstring 写着「留待首次真实预订时观察」，
+读起来像保留了一条 fallback——实际没有任何代码路径会走过去。
+
+删除。`h2s_booking_gql` 里的 `ADDNEWBOOKING` / `CREATEEMPTYCART` **保留**：那份
+是站点报文的照抄记录，不是我们的调用清单。
+
+⚠️ 随之明确一件事：**占房只有 `create_booking()` 一条路径，而它尚未经过一次
+真实预订验证**（验证它就等于真占一套房）。首次真实自动预订时需要盯着结果。
+
+### 2. `AbstractScraper.prewarm_session()` / `try_book()`
+
+全仓库无调用者。预登录走 `mcore/prewarm.py → booker.create_prewarmed_session`，
+下单走 `monitor` 直接调 `booker` / `bookers/*`。而 H2S 那个 override 还写着
+「暂未适配新 API」——在 booker 换成 NextAuth（v1.16.9）之后就是错的，等于在基类
+文档上给后来人指一条不存在的路。
+
+### 3. 顶层 `scraper.py`
+
+只剩 re-export 垫片，生产代码零 import，只有 `tests/test_scraper_403.py` 还在用。
+删除，测试改从 `scrapers.base` 导入。
+
+### 4. `HollandStayScraper.scrape()` 的独立分支
+
+`self._fetcher is None` 时另起一个**一次性浏览器**、用局部 labels dict、用完即关。
+它和主路径行为并不一致：每次调用付一整轮 CF 挑战，且 attr 标签的跨轮累积在它上面
+是坏的（每次空表，features 里会冒出裸 ID）。dispatcher 路径永远走不到它，这份
+发散因此一直没人发现。
+
+改成和 `XiorScraper` 同一个形状：`self._fetcher or self._ensure_browser()`。独立
+调用仍然能用，而且第二次调用会复用浏览器而不是再建一个。
+
+### 测试
+
+新增 3 个守卫类共 7 条（死函数不许回来 / 钩子不许回来 / 垫片不许回来 / `scrape()`
+不许再出现一次性浏览器分支），4 个变异全部捕获。全套 2577 通过。
+
 ## v1.17.7 (2026-08-20)
 
 Xior 的权威校验改走浏览器那条出口 IP。
