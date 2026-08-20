@@ -137,9 +137,22 @@ class TestEnrich:
         assert spent == n
         assert len(f.calls) == n
 
-    def test_budget_is_not_absurdly_large(self):
-        """20 × 11.4 KB ≈ 230 KB/轮。调到三位数就等于放弃了 v1.16.6 的省流量。"""
-        assert 1 <= h2s._DETAIL_BUDGET_PER_ROUND <= 50
+    def test_budget_covers_a_normal_round(self):
+        """预算太小不只是慢，是**会丢数据**。
+
+        每轮抓取都重建 Listing，而列表查询里没有 building_name / tenant_profile；
+        storage 每轮整体覆盖 features。所以没轮到补齐的房源，写库时会把上一轮
+        已经存进去的值抹掉——预算盖不满一轮就会「补一批、抹一批」来回拉锯。
+
+        实测每城每轮约 6–45 条，所以下限按 50 卡。
+        """
+        assert h2s._DETAIL_BUDGET_PER_ROUND >= 50, (
+            "预算盖不满一轮的房源数，会出现补齐/抹除的拉锯"
+        )
+
+    def test_budget_still_has_a_ceiling(self):
+        """上限兜住「上游忽然返回几百条」——一次 300 条就是 3.4 MB。"""
+        assert h2s._DETAIL_BUDGET_PER_ROUND <= 200
 
     def test_failure_is_fail_open_and_not_cached(self):
         """补齐是锦上添花，失败绝不能拖垮主抓取；也不缓存失败，下轮还有机会。"""

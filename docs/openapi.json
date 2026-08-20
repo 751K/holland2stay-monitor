@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FlatRadar Backend API",
-    "version": "1.17.1",
+    "version": "1.17.2",
     "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",

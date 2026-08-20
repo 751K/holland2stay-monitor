@@ -149,7 +149,7 @@
     </div>
     <div style="overflow-x:auto;">
       <table class="table-minimal">
-        <thead><tr><th>{{ _('col_listing') }}</th><th>{{ _('col_building') }}</th><th>{{ _('col_source') }}</th><th>{{ _('col_status') }}</th><th>{{ _('col_rent') }}</th><th>{{ _('col_occupancy') }}</th><th>{{ _('col_found') }}</th></tr></thead>
+        <thead><tr><th>{{ _('col_listing') }}</th><th>{{ _('col_building') }}</th><th>{{ _('col_source') }}</th><th>{{ _('col_status') }}</th><th>{{ _('col_rent') }}</th><th>{{ _('col_available') }}</th><th>{{ _('col_found') }}</th></tr></thead>
         <tbody>
         {% for l in recent %}
           {% set fm = l.features | parse_features %}
