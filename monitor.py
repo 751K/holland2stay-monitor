@@ -64,6 +64,7 @@ from config import DATA_DIR, ENV_PATH, get_proxy_url, is_proxy_native_fallback_a
 from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.backoff import PersistedBackoff
+from mcore.circuit import SourceCircuits
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm import PrewarmCache
@@ -830,8 +831,9 @@ def _bind_persistent_state(storage) -> None:
     """
     global _throttle_storage_ref
     _throttle_storage_ref = storage
+    _source_circuits.load(storage)
     for b in (
-        _h2s_circuit, _h2s_login_block,
+        _h2s_login_block,
         _throttle_notify_block, _throttle_notify_operation_rejected,
         _throttle_h2s_long_block, _throttle_notify_maintenance,
         _throttle_notify_proxy, _throttle_notify_internal,
@@ -1026,33 +1028,25 @@ def _mark_h2s_login_blocked(reason: BaseException | str, storage=None) -> None:
 
 def _h2s_circuit_remaining() -> int:
     """H2S 抓取 circuit breaker 剩余暂停秒数。"""
-    return _h2s_circuit.remaining()
+    return _source_circuits.remaining(_H2S_SOURCE)
 
 
 def _mark_h2s_scrape_blocked(reason: BaseException | str, storage=None) -> int:
-    """H2S 抓取被 Cloudflare 403 后，打开 source-level circuit breaker。"""
-    streak = _h2s_circuit.bump()
-    cooldown = min(
-        _H2S_CIRCUIT_MAX_COOLDOWN,
-        _H2S_CIRCUIT_BASE_COOLDOWN * (2 ** max(0, streak - 1)),
-    )
-    _h2s_circuit.open(cooldown, reason=str(reason), storage=storage)
+    """H2S 抓取被 Cloudflare 403 后，打开熔断 + 抑制登录链路。
+
+    熔断本身已经推广成 per-source（``mcore/circuit.py``），这里只剩 H2S 独有的
+    那一半：**登录/预订链路抑制**。那是因为只有 H2S 有自动预订，而 403 之后继续
+    去碰登录接口只会让 WAF 状态更热。
+    """
+    exc = reason if isinstance(reason, BaseException) else BlockedError(str(reason))
+    cooldown = _source_circuits.trip(_H2S_SOURCE, exc, storage=storage)
     _mark_h2s_login_blocked(reason, storage=storage)
-    logger.error(
-        "🚫 H2S source 熔断：连续抓取 403=%d，暂停 H2S %d 秒；其他 source 继续运行。原因: %s",
-        streak, cooldown, reason,
-    )
     return cooldown
 
 
 def _mark_h2s_scrape_recovered(storage=None) -> None:
-    """H2S canary 成功后关闭 circuit breaker，下一轮恢复完整 H2S 抓取。"""
-    if _h2s_circuit.fail_streak or _h2s_circuit.remaining():
-        logger.info(
-            "✅ H2S canary 抓取成功，关闭 source 熔断（之前连续 403=%d）",
-            _h2s_circuit.fail_streak,
-        )
-    _h2s_circuit.reset(storage)
+    """H2S canary 成功后关闭熔断 + 解除登录抑制，下一轮恢复完整 H2S 抓取。"""
+    _source_circuits.recover(_H2S_SOURCE, storage=storage)
     _h2s_login_block.reset(storage)
 
 
@@ -1115,24 +1109,23 @@ def _select_h2s_tasks_for_circuit(h2s_tasks: list) -> tuple[list, str]:
       open    : circuit 冷却中，不抓 H2S
       canary  : 冷却到期，只抓 1 个 H2S 城市探测恢复
     """
-    if not h2s_tasks:
+    mode, n = _source_circuits.plan(_H2S_SOURCE, n_tasks=len(h2s_tasks))
+    if mode == "none":
         return [], "none"
-    remaining = _h2s_circuit_remaining()
-    if remaining > 0:
+    if mode == "open":
         logger.warning(
             "🚫 H2S source 熔断中，跳过 %d 个 H2S 任务，%d 秒后 canary。最近原因: %s",
             len(h2s_tasks),
-            remaining,
-            _h2s_circuit.reason or "unknown",
+            _source_circuits.remaining(_H2S_SOURCE),
+            _source_circuits.reason(_H2S_SOURCE) or "unknown",
         )
         return [], "open"
-    if _h2s_circuit.fail_streak > 0 or _h2s_circuit.remaining() > 0:
+    if mode == "canary":
         logger.warning(
             "🚫 H2S source 熔断到期，本轮只用 1 个城市做 canary: %s",
             h2s_tasks[0].city_display,
         )
-        return h2s_tasks[:1], "canary"
-    return h2s_tasks, "normal"
+    return h2s_tasks[:n], mode
 
 
 _PID_FILE = DATA_DIR / "monitor.pid"
@@ -1152,7 +1145,10 @@ prewarm_cache = PrewarmCache()
 #: 这些以前是裸的模块级 float（基于 time.monotonic），重启即清零。也就是说正在被
 #: CF 封、退避已拉到 6 小时的时候部署一次，立刻满速重打。2026-08-20 一天部署 12 次
 #: = 12 次退避清零。
-_h2s_circuit = PersistedBackoff("h2s_circuit", max_seconds=_H2S_CIRCUIT_MAX_COOLDOWN)
+#: 每个 source 一个熔断器，策略按 source 配（mcore/circuit.py）。以前只有 H2S 有
+#: ——而实测整源失败次数是 xior 147 / ourdomain 67 / ourcampus 60 / H2S 6，
+#: 保护恰好装在最不需要它的那个上。
+_source_circuits = SourceCircuits()
 _h2s_login_block = PersistedBackoff(
     "h2s_login_block", max_seconds=_H2S_LOGIN_BLOCKED_SUPPRESS_SEC,
 )
@@ -1927,6 +1923,9 @@ async def run_once(
 
         fresh_all: list[Listing] = []
         completeness_all: dict[str, bool] = {}
+        #: source → 本轮的熔断模式（normal / canary / open），canary 成功时据此
+        #: 关闭熔断。
+        source_modes: dict[str, str] = {}
         h2s_blocked: BlockedError | None = None
         source_failures: list[tuple[str, Exception]] = []
         succeeded_sources: list[str] = []
@@ -1973,6 +1972,11 @@ async def run_once(
                 )
             except Exception as e:
                 source_failures.append((src, e))
+                # 打开这个 source 的熔断（按 source 各自的策略；不该熔断的异常
+                # 会被 trip() 原样忽略）。以前只有 H2S 有这层保护——而实测里
+                # xior 整源 429 失败 147 次、ourdomain / ourcampus 各 60+ 次，
+                # H2S 总共才 6 次。保护装在了最不需要它的那个 source 上。
+                _source_circuits.trip(src, e, storage=None if dry_run else storage)
                 # 标 ✗ 而不是留空：完整扫描那行日志要看得出「这个 source 塌了」，
                 # 且 False 会正确挡住该城市的 stale 收敛。
                 for t in group:
@@ -1992,6 +1996,8 @@ async def run_once(
                     )
                 return
             succeeded_sources.append(src)
+            if source_modes.get(src) == "canary":
+                _source_circuits.recover(src, storage=None if dry_run else storage)
             fresh_all.extend(fresh_part)
             completeness_all.update(completeness_part)
             if not dry_run:
@@ -2012,7 +2018,40 @@ async def run_once(
         # dispatch，同轮 OurDomain 已抓到的结果被丢弃、H2S 排在后面根本没执行、
         # 每个用户都收到「监控将暂停 5 分钟」。24 小时内三次。
         for src in sorted({t.source for t in other_tasks}):
-            await _dispatch_isolated(src, [t for t in other_tasks if t.source == src])
+            group = [t for t in other_tasks if t.source == src]
+            mode, n = _source_circuits.plan(src, n_tasks=len(group))
+            source_modes[src] = mode
+            if mode == "open":
+                remaining = _source_circuits.remaining(src)
+                logger.warning(
+                    "🚫 source %s 熔断中，跳过 %d 个任务，%d 秒后做 canary。最近原因: %s",
+                    src, len(group), remaining,
+                    _source_circuits.reason(src) or "unknown",
+                )
+                # 熔断期完全跳过，但**要记一行遥测**：不记的话这个 source 在面板
+                # 上直接消失，只能看到 last_round_at 不断变老——与「进程挂了」
+                # 无从区分。记成一次带 CircuitOpen 标记的失败，让「按设计退避」
+                # 本身可见。这条和 H2S 分支的处理是对齐的。
+                for t in group:
+                    completeness_all.setdefault(
+                        completeness_key(src, t.city_display,
+                                         multi_source=multi_source), False)
+                if not dry_run:
+                    _record_source_round(
+                        storage, round_at=round_at, source=src,
+                        targets=len(group),
+                        total_targets=source_totals.get(src, len(group)),
+                        error_type="CircuitOpen",
+                        error_msg=_source_circuits.reason(src) or "circuit open",
+                    )
+                continue
+            if mode == "canary":
+                logger.warning(
+                    "🚫 source %s 熔断到期，本轮只用 1 个 target 做 canary: %s",
+                    src, group[0].city_display,
+                )
+                group = group[:n]
+            await _dispatch_isolated(src, group)
 
         if selected_h2s:
             started_at = time.monotonic()
@@ -2085,7 +2124,7 @@ async def run_once(
                 targets=len(h2s_tasks),
                 total_targets=source_totals.get(_H2S_SOURCE, len(h2s_tasks)),
                 error_type="CircuitOpen",
-                error_msg=_h2s_circuit.reason or "circuit open",
+                error_msg=_source_circuits.reason(_H2S_SOURCE) or "circuit open",
             )
 
         # 一个都没成功 = 本轮没有任何可用数据，维持旧契约上抛，让 main_loop 走
@@ -2227,7 +2266,7 @@ async def run_once(
                 )
             if (
                 not dry_run
-                and _h2s_circuit.fail_streak >= _H2S_LONG_BLOCK_STREAK
+                and _source_circuits.fail_streak(_H2S_SOURCE) >= _H2S_LONG_BLOCK_STREAK
                 and _should_notify_h2s_long_block()
             ):
                 cooldown = _h2s_circuit_remaining()
@@ -2236,7 +2275,7 @@ async def run_once(
                     web_notifier,
                     (
                         "H2S 长时间被 block，需要检查服务器\n\n"
-                        f"连续 H2S 403: {_h2s_circuit.fail_streak} 次\n"
+                        f"连续 H2S 403: {_source_circuits.fail_streak(_H2S_SOURCE)} 次\n"
                         f"当前 H2S 熔断剩余: 约 {max(1, cooldown // 60)} 分钟\n"
                         f"最近错误: {h2s_blocked}\n\n"
                         "请检查服务器网络、代理出口、Webshare 状态和 H2S GraphQL 访问情况。"

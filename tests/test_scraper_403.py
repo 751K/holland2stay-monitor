@@ -158,8 +158,8 @@ class TestMonitorBlockedHandling:
 
         self._run(tmp_path, scrape, user)
 
-        assert monitor._h2s_circuit.fail_streak == 1
-        assert monitor._h2s_circuit.remaining() > 0
+        assert monitor._source_circuits.fail_streak("holland2stay") == 1
+        assert monitor._source_circuits.remaining("holland2stay") > 0
 
     def test_block_is_not_pushed_to_users(self, tmp_path):
         """抓取被屏蔽是运维问题，用户既判断不了也处置不了。
@@ -204,7 +204,7 @@ class TestMonitorBlockedHandling:
 
         for _ in range(3):
             self._run_capturing_admin(tmp_path, scrape, user, admin_msgs)
-            monitor._h2s_circuit.expire()
+            monitor._source_circuits.expire("holland2stay")
 
         assert len(admin_msgs) == 1, (
             f"30 分钟内多次屏蔽应该只发 1 条，实际 {len(admin_msgs)}"
@@ -224,7 +224,7 @@ class TestMonitorBlockedHandling:
 
         # 把节流窗口拨到过去（原来是减 monotonic 时间戳，现在是拨 deadline）
         monitor._throttle_notify_block.expire()
-        monitor._h2s_circuit.expire()
+        monitor._source_circuits.expire("holland2stay")
 
         self._run_capturing_admin(tmp_path, scrape, user, admin_msgs)
         assert len(admin_msgs) == 2, "超过 30 分钟后应该重新通知"
@@ -269,7 +269,7 @@ class TestMonitorBlockedHandling:
                         [(user, CapturingNotifier())],
                         web_notifier=admin, dry_run=False,
                     )
-                    monitor._h2s_circuit.expire()
+                    monitor._source_circuits.expire("holland2stay")
 
         try:
             asyncio.run(go())

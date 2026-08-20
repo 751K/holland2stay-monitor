@@ -79,10 +79,23 @@ class PersistedBackoff:
         return f"backoff:{self._name}:reason"
 
     def load(self, storage) -> None:
-        """进程启动时读一次。meta 损坏时当作「没有退避」，绝不抛。"""
-        self._until = _as_float(storage.get_meta(self._key_until, default=""))
-        self._streak = int(_as_float(storage.get_meta(self._key_streak, default="")))
-        self.reason = storage.get_meta(self._key_reason, default="") or ""
+        """进程启动时读一次。**绝不抛**——读不出来就当作「没有退避」。
+
+        「绝不抛」以前只写在 docstring 里没兑现：meta 损坏由 ``_as_float`` 兜住，
+        但连接本身出问题（库被关掉、锁死、schema 损坏）会一路抛出去，把 monitor
+        拦在启动阶段。退避状态是**优化**，不是抓取的前提——读不到最多退化成
+        「这一轮不退避」，绝不该让它决定进程能不能起来。
+        """
+        try:
+            self._until = _as_float(storage.get_meta(self._key_until, default=""))
+            self._streak = int(_as_float(storage.get_meta(self._key_streak, default="")))
+            self.reason = storage.get_meta(self._key_reason, default="") or ""
+        except Exception:
+            logger.warning(
+                "读取退避状态 %s 失败，按「无退避」处理", self._name, exc_info=True,
+            )
+            self._until, self._streak, self.reason = 0.0, 0, ""
+            return
         if self.remaining() > 0:
             logger.info(
                 "恢复退避状态 %s：剩余 %d 秒，连败 %d 次%s",

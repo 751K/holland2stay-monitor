@@ -30,6 +30,7 @@ from __future__ import annotations
 import pytest
 
 from mcore.backoff import PersistedBackoff
+from mcore.circuit import SourceCircuits
 from storage import Storage
 
 
@@ -135,7 +136,7 @@ class TestMonitorUsesIt:
     def test_h2s_circuit_state_is_persisted(self):
         import monitor
 
-        assert isinstance(monitor._h2s_circuit, PersistedBackoff)
+        assert isinstance(monitor._source_circuits, SourceCircuits)
         assert isinstance(monitor._h2s_login_block, PersistedBackoff)
 
     def test_no_monotonic_backed_circuit_globals_remain(self):
@@ -217,13 +218,13 @@ class TestStartupActuallyWiresIt:
         """所有实例都要被 load，漏一个那一项就永远从零开始。"""
         import monitor
 
-        st.set_meta("backoff:h2s_circuit:until", str(9e18))
+        st.set_meta("backoff:circuit_holland2stay:until", str(9e18))
         st.set_meta("backoff:throttle_notify_block:until", str(9e18))
         try:
             monitor._bind_persistent_state(st)
-            assert monitor._h2s_circuit.remaining() > 0
+            assert monitor._source_circuits.remaining("holland2stay") > 0
             assert monitor._throttle_notify_block.remaining() > 0
         finally:
-            monitor._h2s_circuit.reset()
+            monitor._source_circuits.recover("holland2stay")
             monitor._throttle_notify_block.reset()
             monitor._throttle_storage_ref = None

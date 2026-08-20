@@ -202,10 +202,13 @@ def _clear_h2s_guards() -> None:
         import monitor
     except ImportError:
         return
-    for b in ("_h2s_circuit", "_h2s_login_block"):
-        obj = getattr(monitor, b, None)
-        if obj is not None:
-            obj.reset()
+    circuits = getattr(monitor, "_source_circuits", None)
+    if circuits is not None:
+        for src in circuits.known_sources():
+            circuits.recover(src)
+    obj = getattr(monitor, "_h2s_login_block", None)
+    if obj is not None:
+        obj.reset()
     for t in ("_h2s_long_block", "_notify_block", "_notify_internal",
               "_notify_maintenance", "_notify_proxy", "_notify_operation_rejected"):
         obj = getattr(monitor, f"_throttle{t}", None)
