@@ -753,3 +753,124 @@ class TestEnvelopeHasOneImplementation:
         assert n == 1, (
             f"_drop_enc_pubkey 有 {n} 个调用点——两份拷贝各写一遍正是要消掉的问题"
         )
+
+
+class TestNavigationFailuresAlsoGetRetriedAndRotated:
+    """``goto()`` 失败也要走重试 + 换出口 IP，不能直接穿透。
+
+    ``ensure_initialized`` 有一套「3 次尝试，每次换一个出口 IP」的恢复逻辑，
+    但它**只接 BlockedError**。而 ``_navigate_and_verify`` 里 ``goto()`` 失败抛的
+    是 ``ScrapeNetworkError`` —— 不在接的范围内，直接穿透，零重试零换 IP。
+
+    线上计数（保留日志全量）::
+
+        初始化重试（BlockedError 路径，有重试+换IP）        164 次
+        主站加载失败（ScrapeNetworkError 路径，零重试）      558 次   ← 3.4 倍
+          其中消息写着「（CF 挑战可能未通过）」的            439 次
+
+    **为挑战失败准备的恢复逻辑，被挑战失败绕过了 439 次。** ``goto`` 超时和
+    ``_wait_for_challenge_clear`` 超时是同一个根因（这个出口 IP 过不去），只是
+    检测点差一步，却走了完全相反的两条路。
+
+    而 ``_navigate_and_verify`` 的 docstring 一直写着「任一环节没过就抛
+    ``BlockedError``」——文档说的和代码做的不是一回事，大概就是它一直没被发现
+    的原因。
+
+    唯一**不该**重试的是代理服务端级故障（402 配额耗尽 / 407 认证失败 /
+    502 / 503）：换 session 也是同一个坏账户，重试只是白等。判据用现成的
+    ``is_proxy_service_error``——它就是为「够不够格确认代理挂了」而存在的。
+    """
+
+    @staticmethod
+    def _fetcher(monkeypatch, raiser):
+        rebuilds: list[int] = []
+        attempts: list[int] = []
+
+        def _nav(self, attempt):
+            attempts.append(attempt)
+            raiser(attempt)
+            return 1.0, 0.5
+
+        monkeypatch.setattr(BrowserFetcher, "_navigate_and_verify", _nav)
+        monkeypatch.setattr(BrowserFetcher, "_rebuild_browser",
+                            lambda self: rebuilds.append(1) or True)
+        f = BrowserFetcher()
+        f._page = _FakePage()
+        return f, attempts, rebuilds
+
+    def test_navigation_failure_is_retried_with_a_new_ip(self, monkeypatch):
+        from scrapers.base import ScrapeNetworkError
+
+        def _boom(attempt):
+            if attempt < 3:
+                raise ScrapeNetworkError(
+                    "Holland2Stay 主站加载失败（CF 挑战可能未通过）: Timeout 30000ms"
+                )
+
+        f, attempts, rebuilds = self._fetcher(monkeypatch, _boom)
+        f.ensure_initialized()
+
+        assert attempts == [1, 2, 3], f"导航失败没有重试: {attempts}"
+        assert len(rebuilds) == 2, f"重试时没有换出口 IP: {rebuilds}"
+        assert f.is_initialized is True
+
+    def test_it_gives_up_after_max_attempts_with_the_original_class(self, monkeypatch):
+        """三次都不行就上抛，且**保持原来的类**。
+
+        不改判成 BlockedError：``goto`` 超时到底是被挡还是网络慢，我们并不知道。
+        「挑战可能未通过」是 ``_describe_navigation_failure`` 排除法猜的，不是判据。
+        修的是重试缺失，不是顺手发明一个证明不了的分类。
+        """
+        from scrapers.base import ScrapeNetworkError
+
+        def _always(attempt):
+            raise ScrapeNetworkError("主站加载失败（CF 挑战可能未通过）")
+
+        f, attempts, rebuilds = self._fetcher(monkeypatch, _always)
+        with pytest.raises(ScrapeNetworkError):
+            f.ensure_initialized()
+        assert attempts == [1, 2, 3]
+        assert f.is_initialized is False
+
+    def test_proxy_service_failure_is_not_retried(self, monkeypatch):
+        """代理账户级故障（402/407/502/503）立刻上抛——换 session 也是同一个坏账户。
+
+        2026-08-05 代理欠费停服 5 小时，明确回 ``response 402``。对这种情况重试
+        三次只是白等，而且延后了 monitor 那边的「标记故障 → 切备用 → 降级直连」。
+        """
+        from scrapers.base import ProxyError
+
+        def _quota(attempt):
+            raise ProxyError(
+                "全部任务因代理故障失败: CONNECT tunnel failed, response 402"
+            )
+
+        f, attempts, rebuilds = self._fetcher(monkeypatch, _quota)
+        with pytest.raises(ProxyError):
+            f.ensure_initialized()
+        assert attempts == [1], f"代理账户级故障还在重试: {attempts}"
+        assert rebuilds == [], "代理账户级故障不该换 session"
+
+    def test_maintenance_still_bypasses_the_retry_loop(self, monkeypatch):
+        """反向守卫：平台维护仍然立刻上抛，重试多少次都一样。"""
+        def _maint(attempt):
+            raise UpstreamMaintenanceError("H2S 平台维护中")
+
+        f, attempts, rebuilds = self._fetcher(monkeypatch, _maint)
+        with pytest.raises(UpstreamMaintenanceError):
+            f.ensure_initialized()
+        assert attempts == [1]
+
+    def test_docstring_lists_every_class_it_can_raise(self):
+        """文档与行为必须对上——这个不一致正是 bug 藏住的原因。
+
+        原 docstring 写的是「任一环节没过就抛 ``BlockedError``」，读代码的人
+        按它假设了行为，没去核对 ``except`` 接的是哪几个类，于是 goto 失败
+        绕过整套重试逻辑这件事一直没被发现。
+
+        断言「三个类都提到了」而不是「别提某句话」——后者会被解释性的行文
+        （比如引用旧说法来说明它错在哪）误伤。
+        """
+        doc = BrowserFetcher._navigate_and_verify.__doc__ or ""
+        for cls in ("BlockedError", "ScrapeNetworkError", "UpstreamMaintenanceError"):
+            assert cls in doc, f"docstring 没提到它会抛 {cls}"

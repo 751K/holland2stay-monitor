@@ -911,13 +911,43 @@ class BrowserFetcher:
                 challenge_elapsed, clearance_elapsed = self._navigate_and_verify(
                     attempt
                 )
-            except _exc("BlockedError") as e:
+            except (_exc("BlockedError"), _exc("ScrapeNetworkError")) as e:
+                # **两类都要重试，判据是「换个出口 IP 有没有可能解决」。**
+                #
+                # BlockedError      挑战没解开 / clearance 不生效 —— 这个出口 IP
+                #                   被盯上了，换一个再试
+                # ScrapeNetworkError goto() 本身失败 —— 单个出口 IP 不通、或者
+                #                   挑战页压根没加载完
+                #
+                # 这里以前**只接 BlockedError**，于是 goto 失败直接穿透，零重试
+                # 零换 IP。线上计数（保留日志全量）：
+                #
+                #     初始化重试（BlockedError 路径）        164 次
+                #     主站加载失败（穿透，零重试）            558 次   ← 3.4 倍
+                #       其中消息写着「（CF 挑战可能未通过）」   439 次
+                #
+                # 也就是说，为挑战失败准备的这套恢复逻辑被挑战失败绕过了 439 次。
+                # goto 超时和 _wait_for_challenge_clear 超时是同一个根因，只是
+                # 检测点差一步，却走了完全相反的两条路。
+                #
+                # 唯一不重试的是代理服务端级故障：换 session 也是同一个坏账户。
+                from scrapers.base import is_proxy_service_error  # 延迟导入避免循环
+
+                if is_proxy_service_error(e):
+                    # 402 配额耗尽 / 407 认证失败 / 502 / 503 —— 账户级或代理
+                    # 服务自身故障。2026-08-05 欠费停服 5 小时期间明确回
+                    # response 402，重试三次只是白等，还延后了 monitor 那边的
+                    # 「标记故障 → 切备用 → 降级直连」。
+                    logger.error(
+                        "%s 初始化遇到代理服务端故障，不重试，直接上抛：%s",
+                        self._profile.name, e,
+                    )
+                    raise
                 last_error = e
                 logger.warning(
-                    "初始化第 %d/%d 次未通过：%s", attempt, _INIT_ATTEMPTS, e
+                    "初始化第 %d/%d 次未通过（%s）：%s",
+                    attempt, _INIT_ATTEMPTS, type(e).__name__, e,
                 )
-                # 挑战没解开或 clearance 不生效，说明是这个出口 IP 被盯上了。
-                # 重建浏览器换个 IP 再试，同一个 IP 上重来三次没有意义。
                 if attempt < _INIT_ATTEMPTS:
                     self._rebuild_browser()
                 continue
@@ -941,9 +971,21 @@ class BrowserFetcher:
 
         返回 ``(挑战耗时, clearance 耗时)``，单位秒，只计本次导航。
 
-        任一环节没过就抛 ``BlockedError``，由 ``ensure_initialized`` 决定是否
-        换一次导航重试。``UpstreamMaintenanceError`` 不在重试之列——平台维护
-        重试多少次都一样。
+        抛什么，取决于在哪一步没过 —— **不是清一色 BlockedError**
+        ----------------------------------------------------------
+        ``goto()`` 失败          → ``ScrapeNetworkError``（消息由
+                                  ``_describe_navigation_failure`` 拼，可能是
+                                  代理层原因，也可能只是「CF 挑战可能未通过」
+                                  这个排除法猜测）
+        挑战没解开 / clearance   → ``BlockedError``
+        主站在维护               → ``UpstreamMaintenanceError``
+
+        前两类都由 ``ensure_initialized`` 重试并换出口 IP；维护不在重试之列
+        （重试多少次都一样）。
+
+        这段 docstring 以前写的是「任一环节没过就抛 ``BlockedError``」——**那是
+        错的**，而且正是它让「goto 失败绕过整套重试逻辑」这个 bug 藏了很久：
+        读代码的人按文档假设了行为，没去核对 ``except`` 接的是哪几个类。
         """
         logger.info(
             "CloakBrowser 加载 %s 主站完成 CF 挑战...（第 %d 次）",
