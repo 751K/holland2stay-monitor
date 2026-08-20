@@ -9,6 +9,8 @@ neighborhood / min_income，加进去就是全量 403（docs/H2S.md §5.2）。�
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import scrapers.holland2stay as h2s
@@ -142,19 +144,6 @@ class TestEnrich:
         spent = h2s._enrich(f, listings)
         assert spent == n
         assert len(f.calls) == n
-
-    def test_budget_covers_a_normal_round(self):
-        """预算太小不只是慢，是**会丢数据**。
-
-        每轮抓取都重建 Listing，而列表查询里没有 building_name / tenant_profile；
-        storage 每轮整体覆盖 features。所以没轮到补齐的房源，写库时会把上一轮
-        已经存进去的值抹掉——预算盖不满一轮就会「补一批、抹一批」来回拉锯。
-
-        实测每城每轮约 6–45 条，所以下限按 50 卡。
-        """
-        assert h2s._DETAIL_BUDGET_PER_ROUND >= 50, (
-            "预算盖不满一轮的房源数，会出现补齐/抹除的拉锯"
-        )
 
     def test_budget_still_has_a_ceiling(self):
         """上限兜住「上游忽然返回几百条」——一次 300 条就是 3.4 MB。"""
@@ -356,3 +345,99 @@ class TestScraperBatchBudget:
         budget.remaining = 3
         budget.stopped = True
         assert s._detail_budget is budget
+
+
+class TestBudgetIsNotLoadBearingForCorrectness:
+    """预算是**流量旋钮**，不是正确性机制——把它调到 1 也不该丢数据。
+
+    这条曾经不成立。当时 `storage.diff()` 每轮整体覆盖 features，而列表查询里
+    没有 Building / Tenant，所以没轮到补齐的房源写库时会把上一轮存好的值抹掉。
+    于是 `_DETAIL_BUDGET_PER_ROUND` 的注释里写着「不能设太小，原因不是性能而是
+    正确性」，还配了一条 `>= 50` 的下限断言。
+
+    v1.17.3 的粘性字段合并（``mstorage/_listings.py:_STICKY_FEATURE_KEYS``）
+    把这件事接管了：抓取侧没给这几个 key ≠ 上游没有了，只是这轮没去问，写库时
+    从旧值补回来。**那条正确性论证从此失效**，但注释和断言一直留着——于是同一
+    个问题挂着四层机制，其中一层的存在理由已经是假的。
+
+    这里改成钉住真正的性质：预算多小都不丢数据。数字大小只影响冷启动多快铺满。
+    """
+
+    def test_a_spent_budget_after_a_lost_cache_loses_nothing(self, tmp_path):
+        """预算 0 + 缓存已丢 = 房源裸着写库。库里必须还留着上次补到的 Building。
+
+        「缓存已丢」不是假设，是每次部署的常态：``_DETAIL_CACHE`` 是进程级的，
+        容器一重建就清零。紧接着的那几轮，预算被别的城市花光 / 撞 429 收手，
+        这条房源就会以「没有 Building」的形态写库。
+
+        ⚠️ 构造这个场景必须显式清缓存。第一版测试只是「预算 1、跑两轮」，
+        看着像覆盖了，实际第二轮全是缓存命中——两条房源都带着 Building 落库，
+        粘性合并一次都没被调用。把粘性合并整个短路掉，那个测试照样通过。
+        """
+        from storage import Storage
+
+        f = _Fetcher({"k-0": {"building_name": 614}})
+        st = Storage(tmp_path / "t.db", timezone_str="UTC")
+        try:
+            # 1) 正常补齐一轮，Building 落库
+            ls = [_listing("k-0")]
+            h2s._enrich(f, ls, h2s._DetailBudget())
+            st.diff(ls)
+
+            # 2) 部署 / 重启：进程级缓存清零
+            h2s._DETAIL_CACHE.clear()
+
+            # 3) 重启后这一轮预算已被别的城市花光，这条补不到，裸着写库
+            bare = [_listing("k-0")]
+            h2s._enrich(f, bare, h2s._DetailBudget(0))
+            assert not bare[0].features, "前提没成立：这轮本该是裸的"
+            st.diff(bare)
+
+            feats = json.loads(st.get_all_listings()[0]["features"])
+            assert "Building: Philips Bedrijfsschool" in feats, (
+                "楼盘被抹了——正确性又回到「预算得够大」上了"
+            )
+        finally:
+            st.close()
+
+    def test_a_rate_limited_round_loses_nothing_either(self, tmp_path):
+        """撞 429 收手是同一个场景的另一半：这轮就是补不到。"""
+        from scrapers.base import RateLimitError
+        from storage import Storage
+
+        class _Limited(_Fetcher):
+            def fetch_gql(self, *a, **k):
+                raise RateLimitError("429")
+
+        f = _Fetcher({"k-0": {"building_name": 614}})
+        st = Storage(tmp_path / "t.db", timezone_str="UTC")
+        try:
+            ls = [_listing("k-0")]
+            h2s._enrich(f, ls, h2s._DetailBudget())
+            st.diff(ls)
+
+            h2s._DETAIL_CACHE.clear()
+            bare = [_listing("k-0")]
+            h2s._enrich(_Limited(), bare, h2s._DetailBudget())
+            assert not bare[0].features
+            st.diff(bare)
+
+            feats = json.loads(st.get_all_listings()[0]["features"])
+            assert "Building: Philips Bedrijfsschool" in feats
+        finally:
+            st.close()
+
+    def test_correctness_is_owned_by_the_sticky_merge(self):
+        """正确性归属必须明确：粘性表要覆盖补齐能产出的全部 key。
+
+        真正的断言在 ``tests/test_sticky_features.py::test_all_enrichment_keys_are_covered``；
+        这里只是从补齐这一侧再钉一次归属，免得有人回头又把它塞进预算里。
+        """
+        from mstorage._listings import _STICKY_FEATURE_KEYS
+
+        produced = set(h2s._detail_features(
+            {"building_name": 614, "tenant_profile": 6213,
+             "neighborhood": "Strijp", "min_income": "3.5"},
+            _AGGS,
+        ))
+        assert produced <= set(_STICKY_FEATURE_KEYS)
