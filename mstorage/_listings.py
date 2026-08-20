@@ -266,6 +266,109 @@ class ListingOps:
 
     # ── 通知回执 ────────────────────────────────────────────────────
 
+    # ── 未投递事件的重放 ────────────────────────────────────────────
+    #
+    # ``notified`` 曾经是**只写**的：全仓库没有任何 SELECT 读它，只有两条
+    # UPDATE 把它置 1。于是它看起来像一本 at-least-once 的账，实际没人对账。
+    #
+    # 而 ``diff()`` 检测变更的**副作用就是覆盖掉用来检测的那个旧状态**。两者
+    # 叠加的后果：diff 提交之后、通知发出去之前进程死掉（崩溃 / 部署 / OOM），
+    # 那批事件永久丢失——下一轮 diff 看到 old_status == new_status，什么也不产出。
+    # 触发条件很日常：2026-08-20 一天之内部署了 12 次。
+    #
+    # 下面这组方法让 notified=0 真的有人读。三个必须同时成立的前提见
+    # tests/test_notification_replay.py::TestNoNotificationStorm。
+
+    #: 重放的时间窗（分钟）。超窗的不再发——房子多半已经没了，推过去只是打扰。
+    PENDING_WINDOW_MINUTES = 90
+
+    #: 单轮重放条数上限。异常情况下（比如迁移出岔子）不至于一次性炸开。
+    PENDING_BATCH_LIMIT = 50
+
+    def _row_to_listing(self, r) -> Listing:
+        """把 listings 行还原成能直接喂给 notifier 的 Listing。
+
+        必须是完整对象而不是半成品 row：通知模板要读 name / status / price /
+        url / features，缺一条就会在**重放路径**上炸——而那条路径平时不跑，
+        炸了也不会有人立刻发现。
+        """
+        try:
+            feats = json.loads(r["features"]) if r["features"] else []
+        except (json.JSONDecodeError, TypeError):
+            feats = []
+        keys = r.keys()
+        return Listing(
+            id=r["id"],
+            name=r["name"] or r["id"],
+            status=r["status"] or "",
+            price_raw=r["price_raw"],
+            available_from=r["available_from"],
+            features=feats if isinstance(feats, list) else [],
+            url=r["url"] or "",
+            city=r["city"] or "",
+            source=(r["source"] if "source" in keys else "") or "",
+            sku=(r["sku"] if "sku" in keys else "") or "",
+        )
+
+    def pending_new_listings(
+        self,
+        within_minutes: int | None = None,
+        limit: int | None = None,
+    ) -> list[Listing]:
+        """还没走完通知阶段的新房源（时间窗内、按条数封顶）。"""
+        win = self.PENDING_WINDOW_MINUTES if within_minutes is None else within_minutes
+        lim = self.PENDING_BATCH_LIMIT if limit is None else limit
+        rows = self._conn.execute(
+            f"""SELECT * FROM listings
+                WHERE notified = 0
+                  AND first_seen > datetime('now', '-{int(win)} minutes')
+                ORDER BY first_seen ASC LIMIT ?""",
+            (int(lim),),
+        ).fetchall()
+        return [self._row_to_listing(r) for r in rows]
+
+    def pending_status_changes(
+        self,
+        within_minutes: int | None = None,
+        limit: int | None = None,
+    ) -> list[tuple[Listing, str, str]]:
+        """还没走完通知阶段的状态变更，形状与 ``diff()`` 的第二个返回值一致。"""
+        win = self.PENDING_WINDOW_MINUTES if within_minutes is None else within_minutes
+        lim = self.PENDING_BATCH_LIMIT if limit is None else limit
+        rows = self._conn.execute(
+            f"""SELECT sc.listing_id, sc.old_status, sc.new_status, l.*
+                FROM status_changes sc
+                JOIN listings l ON l.id = sc.listing_id
+                WHERE sc.notified = 0
+                  AND sc.changed_at > datetime('now', '-{int(win)} minutes')
+                ORDER BY sc.changed_at ASC LIMIT ?""",
+            (int(lim),),
+        ).fetchall()
+        return [
+            (self._row_to_listing(r), r["old_status"] or "", r["new_status"] or "")
+            for r in rows
+        ]
+
+    def retire_stale_pending(self, within_minutes: int | None = None) -> int:
+        """把超出时间窗的积压直接标记成已处理，返回条数。
+
+        没有这一步的话 0 池只增不减：超窗的行永远选不中、也永远不被清掉，
+        每轮都要白扫一遍。
+        """
+        win = self.PENDING_WINDOW_MINUTES if within_minutes is None else within_minutes
+        with self._conn:
+            c1 = self._conn.execute(
+                f"""UPDATE listings SET notified = 1
+                    WHERE notified = 0
+                      AND first_seen <= datetime('now', '-{int(win)} minutes')"""
+            ).rowcount
+            c2 = self._conn.execute(
+                f"""UPDATE status_changes SET notified = 1
+                    WHERE notified = 0
+                      AND changed_at <= datetime('now', '-{int(win)} minutes')"""
+            ).rowcount
+        return (c1 or 0) + (c2 or 0)
+
     def mark_notified(self, listing_id: str) -> None:
         with self._conn:
             self._conn.execute(

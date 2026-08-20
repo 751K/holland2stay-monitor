@@ -594,10 +594,41 @@ def _stale_sweep_decision(
     return "run"
 
 
+def _merge_pending_events(
+    storage: "Storage",
+    new_listings: list["Listing"],
+    status_changes: list[tuple["Listing", str, str]],
+) -> int:
+    """把上一轮没走完通知阶段的事件并进本轮，返回补进来的条数。
+
+    **就地修改**传入的两个列表——调用方后面还要把它们喂给通知与预订两条路，
+    返回新列表会让调用点多出两个容易忘记同步的变量。
+
+    去重按 listing id：本轮 diff 已经产出的不再补一遍（同一条房源刚上架又立刻
+    变状态时会撞上）。
+    """
+    have_new = {l.id for l in new_listings}
+    have_sc = {t[0].id for t in status_changes}
+    n = 0
+    for l in storage.pending_new_listings():
+        if l.id not in have_new:
+            new_listings.append(l)
+            have_new.add(l.id)
+            n += 1
+    for tup in storage.pending_status_changes():
+        if tup[0].id not in have_sc:
+            status_changes.append(tup)
+            have_sc.add(tup[0].id)
+            n += 1
+    return n
+
+
 def _drop_shadow_sources(
     cfg,
     new_listings: list["Listing"],
     status_changes: list[tuple["Listing", str, str]],
+    *,
+    storage: "Storage | None" = None,
 ) -> tuple[list["Listing"], list[tuple["Listing", str, str]]]:
     """滤掉影子 source 的通知事件（房源本身已经入库，这里只拦「告诉谁」）。
 
@@ -605,6 +636,16 @@ def _drop_shadow_sources(
     和面板统计，但不发用户渠道通知、不写面板 notification feed、不推 APNs/FCM。
 
     ``cfg.shadow_sources`` 为空时零开销直接返回原对象。
+
+    被丢弃的事件会**当场标记成已处理**
+    ----------------------------------
+    这里原本什么都不标，注释写着「副作用是这些 listing 的 notified 一直是 0，
+    取消影子后不会补发历史」。那在 ``notified`` 只写不读的年代是无害的，但**加上
+    未投递事件重放之后会直接翻车**：被静默拦下的房源停在 0，下一轮重放原样捞
+    出来推给用户，影子 source 的整个保证当场失效。
+
+    「丢弃」也是通知阶段的一种结论——决定了「不发」，就该记成已处理。顺带，
+    原注释承诺的「解除影子不补发历史」也因此依然成立。
     """
     shadow = {s.lower() for s in getattr(cfg, "shadow_sources", None) or ()}
     if not shadow:
@@ -615,6 +656,19 @@ def _drop_shadow_sources(
 
     kept_new = [l for l in new_listings if not _shadowed(l)]
     kept_sc = [t for t in status_changes if not _shadowed(t[0])]
+
+    if storage is not None:
+        dropped_ids = (
+            [l.id for l in new_listings if _shadowed(l)]
+            + [t[0].id for t in status_changes if _shadowed(t[0])]
+        )
+        if dropped_ids:
+            try:
+                storage.mark_notified_batch(dropped_ids)
+                storage.mark_status_change_notified_batch(dropped_ids)
+            except Exception:
+                # 标记失败最多让这几条被重放一次，不该拖垮本轮通知
+                logger.warning("影子 source 事件标记失败（可能被重放一次）", exc_info=True)
 
     dropped_new = len(new_listings) - len(kept_new)
     dropped_sc = len(status_changes) - len(kept_sc)
@@ -1517,7 +1571,12 @@ async def _notify_new_listings(
 ) -> tuple[int, list]:
     """发送新房源通知（预订已在后台线程并行运行）。
 
-    标记策略：任意用户通知成功即标记该 listing 为"已通知"。
+    标记策略：**走完本阶段的 listing 全部标记**，与「有没有人匹配」「投递成功
+    与否」都无关。``notified=1`` 的语义是「已处理」，不是「已送达」。
+
+    这个区别以前无所谓（没人读这个字段），现在它是未投递事件重放的判据——
+    旧写法（只在至少投递成功时标记）会让无人匹配的房源永远停在 0，生产实测
+    559 条里有 403 条是这么来的，重放信号会被这批噪音淹没。
 
     Returns
     -------
@@ -1530,16 +1589,13 @@ async def _notify_new_listings(
     push_tasks: list = []
 
     for listing in new_listings:
-        notified_this = False
         for user, notifier in user_notifiers:
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
                 logger.info("[%s] 跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
 
             logger.info("[%s] 新房源: %s (%s)", user.name, listing.name, listing.status)
-            ok = await notifier.send_new_listing(listing)
-            if ok:
-                notified_this = True
+            if await notifier.send_new_listing(listing):
                 total_notified += 1
 
             # APNs 推送钩子：现有渠道发送之后追加，独立 task，与其他渠道互不阻塞。
@@ -1549,8 +1605,16 @@ async def _notify_new_listings(
         if web_notifier:
             await web_notifier.send_new_listing(listing)
 
-        if notified_this:
-            new_notified_ids.append(listing.id)
+        # **走完通知阶段就标记，不管有没有人匹配。**
+        #
+        # 旧写法是 `if notified_this`（至少投递给一个用户）。于是没有任何用户
+        # 筛选条件匹配到的房源永远停在 notified=0——2026-08-20 生产实测，559 条
+        # listings 里有 403 条是这么来的。
+        #
+        # 这个语义差别以前无所谓（没人读这个字段），现在它是重放的判据：不修的话
+        # 0 池会立刻重新堆积，重放信号退化成噪音。见
+        # mstorage/_listings.py 的 pending_new_listings。
+        new_notified_ids.append(listing.id)
 
     # APNs + FCM 发送：本轮每个用户的匹配若 < 阈值，按条推；否则聚合成一条
     if push.get_client() is not None or push.get_fcm_client() is not None:
@@ -1593,16 +1657,13 @@ async def _notify_status_changes(
     sc_notified_ids: list[str] = []
 
     for listing, old_status, new_status in status_changes:
-        notified_this = False
         for user, notifier in user_notifiers:
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
                 logger.info("[%s] 状态变更跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
 
             logger.info("[%s] 状态变更: %s  %s → %s", user.name, listing.name, old_status, new_status)
-            ok = await notifier.send_status_change(listing, old_status, new_status)
-            if ok:
-                notified_this = True
+            await notifier.send_status_change(listing, old_status, new_status)
             # APNs + FCM status_change：直接逐条推（变更通常不像新房源那么密集）
             if push.get_client() is not None or push.get_fcm_client() is not None:
                 push_tasks.append(asyncio.create_task(
@@ -1615,8 +1676,8 @@ async def _notify_status_changes(
         if web_notifier:
             await web_notifier.send_status_change(listing, old_status, new_status)
 
-        if notified_this:
-            sc_notified_ids.append(listing.id)
+        # 同上：走完通知阶段就标记，判据是「处理过」不是「投递成功」。
+        sc_notified_ids.append(listing.id)
 
     storage.mark_status_change_notified_batch(sc_notified_ids)
     return push_tasks
@@ -2415,8 +2476,33 @@ async def run_once(
         # ——diff() 只对真正的新 id 产出 new_listings，老的不会再冒出来。
         # 这是想要的：解除影子不该给用户灌一堆积压通知。
         new_listings, status_changes = _drop_shadow_sources(
-            cfg, new_listings, status_changes,
+            cfg, new_listings, status_changes, storage=storage,
         )
+
+        # ── 重放上一轮没发出去的事件 ─────────────────────────────────── #
+        # diff() 检测变更的副作用就是覆盖掉用来检测的旧状态，所以「diff 已提交、
+        # 通知还没发」这个窗口里进程一死，事件就永久丢了——下一轮 diff 看到
+        # old_status == new_status，什么都不产出。触发条件很日常：2026-08-20
+        # 一天之内部署了 12 次，每次 --force-recreate 都在打断正在跑的轮次。
+        #
+        # 这里把 notified=0 的事件捞回来（有时间窗、有条数上限，见
+        # mstorage/_listings.py），交付语义从 at-most-once 变成 at-least-once。
+        #
+        # **重复通知只是打扰，漏掉通知会让人错过房子** —— 代价不对称，所以选前者。
+        if not dry_run:
+            try:
+                replayed = _merge_pending_events(
+                    storage, new_listings, status_changes,
+                )
+                if replayed:
+                    logger.warning(
+                        "重放 %d 条上一轮未发出的通知事件"
+                        "（上次多半是部署或崩溃打断了通知阶段）", replayed,
+                    )
+                storage.retire_stale_pending()
+            except Exception:
+                # 重放是补偿机制，它自己坏掉不该拖垮正常通知
+                logger.warning("未投递事件重放失败（本轮跳过）", exc_info=True)
 
         # diff() 成功后再写时间戳，确保面板显示的 last_scrape_at 对应一次完整的
         # "抓取 + 入库" 操作；若 diff() 抛异常，时间戳不会被更新。

@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+from datetime import datetime as _dt, timezone as _tz
 from pathlib import Path
+from pathlib import Path as _Path
 
 logger = logging.getLogger(__name__)
 
@@ -391,6 +393,7 @@ class StorageBase:
             "listings", "city_normalized", "TEXT NOT NULL DEFAULT ''",
         )
         self._backfill_city_normalized()
+        self._retire_legacy_notification_backlog()
         self._backfill_assumed_features()
         with self._conn:
             # 表达式索引，与查询里的 _CITY_EXPR 逐字一致——写成
@@ -399,6 +402,57 @@ class StorageBase:
                 "CREATE INDEX IF NOT EXISTS idx_listings_city_effective "
                 "ON listings(COALESCE(NULLIF(city_normalized,''), city))"
             )
+
+    #: 一次性迁移的标记 key。见 ``_retire_legacy_notification_backlog``。
+    _BACKLOG_MIGRATION_KEY = "notified_backlog_retired_at"
+
+    def _retire_legacy_notification_backlog(self) -> None:
+        """把存量 ``notified=0`` 一次性置 1。**只跑一次**，靠 meta 打标。
+
+        为什么必须有这一步 —— 不做就是一次面向真实用户的通知轰炸
+        ------------------------------------------------------------
+        ``notified`` 以前的语义是「至少投递给了一个用户」，所以**没有任何用户的
+        筛选条件匹配到**的房源会永远停在 0。2026-08-20 生产实测：
+
+            listings        559 条，其中 notified=0 有 403 条
+            status_changes  319 条，其中 notified=0 有 204 条
+
+        新的重放逻辑会读 ``notified=0``。如果不先把这批存量归档，上线的那一瞬间
+        就会给 51 个真实用户推 400 多条历史房源。
+
+        新语义是「已走完通知阶段」（不管有没有人匹配），所以这批存量的确都算
+        处理过了，置 1 是正确的，不是掩盖。
+        """
+        if self.get_meta(self._BACKLOG_MIGRATION_KEY, default=""):
+            return
+        with self._conn:
+            n1 = self._conn.execute(
+                "UPDATE listings SET notified = 1 WHERE notified = 0"
+            ).rowcount or 0
+            n2 = self._conn.execute(
+                "UPDATE status_changes SET notified = 1 WHERE notified = 0"
+            ).rowcount or 0
+        self.set_meta(self._BACKLOG_MIGRATION_KEY, _dt.now(_tz.utc).isoformat())
+        if n1 or n2:
+            logger.info(
+                "已归档历史未通知积压：listings %d 条、status_changes %d 条。"
+                "它们诞生于「notified 只在投递成功时才置 1」的旧语义，"
+                "不是丢失的事件——重放它们等于给用户轰炸历史房源。",
+                n1, n2,
+            )
+
+    @classmethod
+    def _reset_backlog_migration_for_tests(cls, db_path) -> None:
+        """给测试用：清掉迁移标记与进程内的「已迁移」记忆，模拟首次升级。"""
+        import sqlite3 as _s
+
+        conn = _s.connect(str(db_path))
+        try:
+            conn.execute("DELETE FROM meta WHERE key = ?", (cls._BACKLOG_MIGRATION_KEY,))
+            conn.commit()
+        finally:
+            conn.close()
+        cls._migrated_paths.discard(str(_Path(db_path).resolve()))
 
     def _backfill_city_normalized(self) -> None:
         """按当前的归一表刷新 city_normalized。
