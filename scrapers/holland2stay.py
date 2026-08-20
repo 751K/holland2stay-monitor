@@ -792,7 +792,17 @@ class HollandStayScraper(AbstractScraper):
         """
         self._ensure_browser()
         self._begin_batch()
+        planned_full = self._full_this_batch
+        mark = self._last_full_scan_at
         yield
+        if planned_full and self._last_full_scan_at == mark:
+            # 计时器没被推进 = 没有任何城市完成全量。下一轮会立刻重试（这正是
+            # 不提前记账的意义），但这件事本身必须可见：否则「Reserved 长期
+            # 没被看到、状态收敛停摆」在日志上完全没有痕迹。
+            logger.warning(
+                "本批次计划做全量扫描，但没有任何城市完成——计时器不推进，"
+                "下一轮立即重试。这期间 Reserved 房源没被看到，其状态收敛推迟。"
+            )
 
     def _plan_scan(self, configured: list[str]) -> tuple[list[str], bool]:
         """本轮查哪些可用状态，以及这轮算不算全量。见 _FRESH_STATUSES 上方注释。
@@ -822,13 +832,30 @@ class HollandStayScraper(AbstractScraper):
         """每批次开头决定这一轮是不是全量扫描，并重置详情补齐预算。
 
         预算必须在这里建、且**整批共享**：``_enrich()`` 是每城调一次，把预算
-        留在它的局部变量里等于给 19 个城市各发一份配额。见 ``_DetailBudget``。
+        留在它的局部变量里等于给各个城市各发一份配额。见 ``_DetailBudget``。
+
+        **这里不推进 ``_last_full_scan_at``。** 计时器由 ``_note_full_scan_done()``
+        在全量真的跑完之后推进，理由见那个方法。
         """
         now = time.monotonic()
         self._full_this_batch = (now - self._last_full_scan_at) >= _FULL_SCAN_INTERVAL
-        if self._full_this_batch:
-            self._last_full_scan_at = now
         self._detail_budget = _DetailBudget()
+
+    def _note_full_scan_done(self) -> None:
+        """记下「全量扫描真的完成了一次」，推进计时器。
+
+        为什么不在 ``_begin_batch()`` 里当场推进 —— 那是**先记账后干活**
+        ------------------------------------------------------------------
+        原实现在决定要做全量的那一刻就写 ``_last_full_scan_at = now``。批次随后
+        403 / 熔断 / 代理挂掉时，那次全量一条数据都没拿到，计时器却已经走了：
+        下一次全量要再等 30 分钟。H2S 熔断退避最长 6 小时
+        （``monitor._H2S_CIRCUIT_MAX_COOLDOWN``），期间 Reserved 那批房源的状态
+        收敛可以停摆很久，而日志上看不出「本该全量的那轮没成」。
+
+        判据是「至少有一个城市跑完了全量」，不是「全部城市都跑完」：后者会让一个
+        长期坏掉的城市把整批钉死在每轮全量上，而全量正是我们要省的那部分流量。
+        """
+        self._last_full_scan_at = time.monotonic()
 
     def scrape(self, task: ScrapeTask) -> ScrapeResult:
         configured = task.extra.get("availability_ids") or ["179", "336"]
@@ -871,6 +898,9 @@ class HollandStayScraper(AbstractScraper):
             # 高频轮看不见 Reserved，标成完整扫描会让那批房源被 stale 收敛
             # 判成「已下架」清掉。见 _FRESH_STATUSES 上方注释。
             complete = False
+        elif complete:
+            # 全量真的跑完了，这才轮到推进计时器。见 _note_full_scan_done。
+            self._note_full_scan_done()
 
         for l in listings:
             l.source = self.source
