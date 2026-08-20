@@ -645,11 +645,40 @@ def _scrape_city_pages(
             break
 
         if "errors" in data:
-            logger.error(
-                "[%s] GraphQL 错误 page=%d errors=%s",
-                city_name, current_page, data["errors"],
+            # **有 errors 且没有可用 data 才算致命。** GraphQL 的 NON_NULL 传播
+            # 会同时给出 errors 和部分 data，站点自己的前端就靠这个继续渲染；
+            # 整页丢掉等于把能用的数据也一起扔了。booker.py 早就按这个规律处理，
+            # 抓取侧一直没有。
+            msgs = "; ".join(
+                str(e.get("message", e)) if isinstance(e, dict) else str(e)
+                for e in data["errors"]
             )
-            break
+            if data.get("data"):
+                logger.warning(
+                    "[%s] GraphQL 带非致命错误 page=%d（有可用 data，继续解析）: %s",
+                    city_name, current_page, msgs,
+                )
+            else:
+                logger.error(
+                    "[%s] GraphQL 错误 page=%d errors=%s",
+                    city_name, current_page, data["errors"],
+                )
+                if current_page == 1:
+                    # 和下面那条 data=null 保持一致：第 1 页没拿到任何数据就上抛。
+                    #
+                    # 这里以前是 break，于是返回 ([], False)、dispatcher 记一次
+                    # **成功**。也就是把「上游拒绝了我们的查询」上报成「这个城市
+                    # 成功抓到 0 条」——正是 total_pages 那段注释点名的
+                    # 「没拿到数据被当成确认没有数据」那一类。而紧挨着的
+                    # data=null 分支同样是「没拿到数据」，第 1 页却是 raise。
+                    #
+                    # 上抛不会误伤整轮：dispatcher 按 task 隔离，只有所有 source
+                    # 的所有任务都失败才会上抛给 monitor 冷却。
+                    raise ScrapeNetworkError(
+                        f"[{city_name}] 第 1 页 GraphQL 返回错误且无可用数据"
+                        f"（上游应用层错误，不是网络问题）: {msgs}"
+                    )
+                break
 
         gql_data = data.get("data")
         if gql_data is None:

@@ -76,14 +76,59 @@ class TestScrapeCityCompleteness:
         assert [l.id for l in listings] == ["a", "b"]
         assert complete is True
 
-    def test_graphql_errors_return_incomplete_without_raise(self):
-        fetcher = _make_fetcher({"errors": [{"message": "bad"}]})
-        listings, complete = _scrape_city_pages(
-            fetcher, "Eindhoven", ["29"], ["179"], _EMPTY_LABELS,
-        )
+    def test_graphql_errors_on_page_1_raise_like_a_null_data(self):
+        """第 1 页拿到 GraphQL 错误且没有可用数据 = 这一城这轮没拿到任何东西。
 
-        assert listings == []
+        以前这里是 ``break``，于是返回 ``([], False)``、dispatcher 记一次
+        **成功**、``success_count += 1``。也就是把「上游拒绝了我们的查询」上报成
+        「这个城市成功抓到 0 条」——正是 ``total_pages`` 那段注释点名的
+        「**没拿到数据**被当成**确认没有数据**」那一类。
+
+        而紧挨着的 ``data is None`` 分支，同样是「没拿到数据」，第 1 页是 raise。
+        同一个函数里两种处理方式，没有任何理由支持这个差别。
+
+        raise 不会误伤整轮：dispatcher 按 task 隔离，只有**所有** source 的所有
+        任务都失败才会上抛给 monitor 冷却。
+        """
+        from scrapers.base import ScrapeNetworkError
+
+        fetcher = _make_fetcher({"errors": [{"message": "bad"}]})
+        with pytest.raises(ScrapeNetworkError) as ei:
+            _scrape_city_pages(
+                fetcher, "Eindhoven", ["29"], ["179"], _EMPTY_LABELS,
+            )
+        assert "bad" in str(ei.value), "错误原文没带出来，日志里看不到上游说了什么"
+
+    def test_graphql_errors_on_a_later_page_keep_partial_results(self):
+        """后续页出错则保留已抓到的部分，只标不完整——和网络错误同一个取舍。"""
+        with patch("scrapers.holland2stay._to_listing", side_effect=_listing):
+            fetcher = _make_fetcher(
+                _page(1, 2, [{"id": "a"}]),
+                {"errors": [{"message": "bad"}]},
+            )
+            listings, complete = _scrape_city_pages(
+                fetcher, "Eindhoven", ["29"], ["179"], _EMPTY_LABELS,
+            )
+        assert [l.id for l in listings] == ["a"]
         assert complete is False
+
+    def test_partial_errors_with_usable_data_are_not_thrown_away(self):
+        """GraphQL 的 NON_NULL 传播会**同时**给出 errors 和部分 data。
+
+        整页丢掉等于把能用的数据也扔了。booker.py 的 add_to_cart 早就按这个
+        规律处理（「有 errors 且没有可用 data 才算致命」），抓取侧一直没有。
+        """
+        page = _page(1, 1, [{"id": "a"}])
+        page["errors"] = [{"message": "field X is null"}]
+        with patch("scrapers.holland2stay._to_listing", side_effect=_listing):
+            fetcher = _make_fetcher(page)
+            listings, complete = _scrape_city_pages(
+                fetcher, "Eindhoven", ["29"], ["179"], _EMPTY_LABELS,
+            )
+        assert [l.id for l in listings] == ["a"], (
+            "带 errors 的部分响应被整页丢掉了——可用数据也一起扔了"
+        )
+        assert complete is True
 
     def test_later_page_network_error_keeps_partial_results_but_incomplete(self):
         with patch("scrapers.holland2stay._to_listing", side_effect=_listing):
