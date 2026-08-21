@@ -427,6 +427,12 @@ TRANSLATIONS = {
     "settings_config_saved":{"zh": "全局配置已保存",           "en": "Global config saved"},
     "settings_request_fail":{"zh": "请求失败",                "en": "Request failed"},
     "settings_no_source":   {"zh": "至少需要启用一个平台，已保留 Holland2Stay。", "en": "At least one platform required. Holland2Stay kept."},
+    # 平台开着但一个楼盘都没勾。已按你的选择保存，只是提醒——真要停掉整个
+    # 平台，取消勾选平台本身更直接。
+    "settings_source_no_target": {
+        "zh": "{sources} 已启用但未勾选任何楼盘，这些平台不会抓取。若要停用平台，请取消勾选平台本身。",
+        "en": "{sources} enabled but no property selected; these platforms will not be scraped. To disable a platform, uncheck the platform itself.",
+    },
     # 真实环境变量盖过 app_settings 时的提示。不提示的话，改了没反应会被当成 bug。
     # 仪表盘覆盖范围横幅。{cities} 由 Config.monitored_city_names() 填入——
     # 分隔符与语序中英不同，所以整句带占位符，不在模板里拼接。

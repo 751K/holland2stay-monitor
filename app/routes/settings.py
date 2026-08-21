@@ -73,18 +73,53 @@ def settings() -> Any:
         sources_val = ",".join(sources)
         pending["SOURCES"] = sanitize_dotenv(sources_val)
 
-        # 城市：复选框提交 "CityName,ID" 格式，用 | 拼接
-        selected_cities = request.form.getlist("city_selected")
-        cities_val = "|".join(selected_cities) if selected_cities else "Eindhoven,29"
-        pending["CITIES"] = sanitize_dotenv(cities_val)
+        # 城市：复选框提交 "CityName,ID" 格式，用 | 拼接。
+        #
+        # **全部取消勾选就是空**，不回落到硬编码的默认城市。原先 CITIES 和
+        # OURDOMAIN_CITIES 在空选时会写回 "Eindhoven,29" / "Amsterdam Diemen,
+        # diemen"，于是用户取消勾选、保存，刷新一看又勾上了——界面把没保存的
+        # 东西显示成保存了，这比拒绝保存还糟。XIOR_CITIES 一直是允许空的，
+        # 三者现在一致。
+        #
+        # 空列表是合法配置：monitor 那边「未配置任何抓取任务」有专门的分支，
+        # 只跳过本轮并 WARNING，不会出错。真要整个停掉某平台，取消勾选平台
+        # 本身更直接——所以下面只提示，不代劳。
+        city_lists = {
+            "CITIES": request.form.getlist("city_selected"),
+            "OURDOMAIN_CITIES": request.form.getlist("ourdomain_city_selected"),
+            "XIOR_CITIES": request.form.getlist("xior_city_selected"),
+        }
+        for key, picked in city_lists.items():
+            pending[key] = sanitize_dotenv("|".join(picked))
 
-        selected_od_cities = request.form.getlist("ourdomain_city_selected")
-        od_cities_val = "|".join(selected_od_cities) if selected_od_cities else "Amsterdam Diemen,diemen"
-        pending["OURDOMAIN_CITIES"] = sanitize_dotenv(od_cities_val)
-
-        selected_xr_cities = request.form.getlist("xior_city_selected")
-        xr_cities_val = "|".join(selected_xr_cities) if selected_xr_cities else ""
-        pending["XIOR_CITIES"] = sanitize_dotenv(xr_cities_val)
+        # 平台开着却一个楼盘都没勾——配置合法，但十有八九不是本意，说一声。
+        # 这里**只警告不修改**：和 SOURCES 那条「至少留一个平台」不同，那个
+        # 若为空整个监控就是空转，这个只是某一个平台没目标。
+        #
+        # ⚠️ 三个列表的「空」含义**并不相同**，别把它们一视同仁：
+        #
+        #     CITIES            空 → 0 个城市，该平台不抓
+        #     OURDOMAIN_CITIES  空 → 0 个楼盘，该平台不抓
+        #     XIOR_CITIES       空 → **全部 30 栋**（config.py:1844 的既有约定）
+        #
+        # 所以 xior 不在下面这张表里：它空着不是「没目标」，恰恰是「全都要」，
+        # 对它报「不会抓取」是错的。
+        _no_target_when_empty = {
+            "CITIES": "holland2stay",
+            "OURDOMAIN_CITIES": "ourdomain",
+        }
+        empty_enabled = sorted(
+            source_display_name(src)
+            for key, src in _no_target_when_empty.items()
+            if not city_lists[key] and src in sources
+        )
+        if empty_enabled:
+            flash(
+                tr("settings_source_no_target", lang).format(
+                    sources="、".join(empty_enabled) if lang == "zh"
+                    else ", ".join(empty_enabled)),
+                "warning",
+            )
 
         new_values: dict[str, str] = {}
         for key in SETTINGS_KEYS:
@@ -114,8 +149,8 @@ def settings() -> Any:
             new_values.get("JITTER_RATIO", "?"),
             new_values.get("HEARTBEAT_INTERVAL_MINUTES", "?"),
             new_values.get("LOG_LEVEL", "?"),
-            cities_val,
-            od_cities_val,
+            pending["CITIES"],
+            pending["OURDOMAIN_CITIES"],
         )
 
         # 写之前先校验结构化的那几项。它们是分隔符拼出来的字符串，坏掉的后果
