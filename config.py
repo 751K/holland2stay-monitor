@@ -1429,6 +1429,9 @@ class Config:
     #: ``{source: 最小间隔秒数}``。控制「多久抓一次」，和分片的
     #: 「每轮抓几个」是两回事——见 _DEFAULT_SOURCE_MIN_INTERVALS。
     source_min_intervals: dict[str, int] = field(default_factory=dict)
+    #: 高峰期专用的最小间隔；缺项的 source 回落到 ``source_min_intervals``。
+    #: 见 _DEFAULT_SOURCE_PEAK_MIN_INTERVALS——这道闸门只在高峰期真正起作用。
+    source_peak_min_intervals: dict[str, int] = field(default_factory=dict)
     ourdomain_cities: list[OurDomainCityFilter] = field(default_factory=list)
     ourcampus_cities: list[OurCampusCityFilter] = field(default_factory=list)
     xior_cities: list[XiorCityFilter] = field(default_factory=list)
@@ -1607,14 +1610,42 @@ _DEFAULT_SHARD_SIZES: dict[str, int] = {"xior": 4}
 #: （关掉就是关掉，见 AdaptivePacing.gap_for）。
 _DEFAULT_SOURCE_MIN_INTERVALS: dict[str, int] = {"xior": 180}
 
+#: 高峰期专用的最小间隔。留空的 source 沿用上面那份。
+#:
+#: 为什么需要分时段：这道闸门**只在高峰期起作用**。峰外轮次本身就是
+#: ``check_interval``（300 秒起，加抖动实测中位 381 秒），比 180 秒的闸门还慢，
+#: 闸门形同不存在；峰内轮次是 ``peak_interval`` 60 秒、自适应还会衰减到
+#: ``min_interval`` 20 秒，闸门成了唯一给 Xior 减速的东西。
+#:
+#: 2026-08-14–21 七天实测（真实窗口 07:30–11:00 / 13:30–17:00，仅工作日）：
+#:
+#:     ===========  ==========  ============  ==============
+#:     时段         轮间隔中位  每轮 429 概率  429 次数
+#:     ===========  ==========  ============  ==============
+#:     峰内 180 闸  202 秒      12.44%         51
+#:     峰外 无闸    381 秒       0.09%          1
+#:     ===========  ==========  ============  ==============
+#:
+#: 节奏只差不到 2 倍，429 概率差 **138 倍**——180 秒就压在阈值的悬崖边上，
+#: 而 380 秒在安全侧。98% 的 429 出在那 7 小时里。
+#:
+#: 所以峰内取 360 秒：贴着实测安全的 381 秒，又不必把峰外一起拖慢。注意方向
+#: 和 ``peak_interval`` 相反——那个是高峰**加快**轮次，这个是高峰**放慢**单个
+#: source，正因为轮次加快了才需要它。
+_DEFAULT_SOURCE_PEAK_MIN_INTERVALS: dict[str, int] = {"xior": 360}
 
-def _parse_source_min_intervals(raw: str) -> dict[str, int]:
+
+def _parse_source_min_intervals(
+    raw: str, defaults: dict[str, int] | None = None,
+) -> dict[str, int]:
     """解析 ``SOURCE_MIN_INTERVALS``，形如 ``xior:600,ourdomain:120``（秒）。
 
     留空用 :data:`_DEFAULT_SOURCE_MIN_INTERVALS`；显式写 ``xior:0`` 关掉该
     source 的节流。非法条目忽略而不是报错——配置写错不该让监控起不来。
+
+    ``SOURCE_PEAK_MIN_INTERVALS`` 走同一个解析器，只是换一份默认值。
     """
-    out = dict(_DEFAULT_SOURCE_MIN_INTERVALS)
+    out = dict(_DEFAULT_SOURCE_MIN_INTERVALS if defaults is None else defaults)
     if not (raw or "").strip():
         return out
     for part in raw.split(","):
@@ -1796,6 +1827,9 @@ def load_config() -> Config:
     shard_sizes = _parse_shard_sizes(os.environ.get("SHARD_SIZES", ""))
     source_min_intervals = _parse_source_min_intervals(
         os.environ.get("SOURCE_MIN_INTERVALS", ""))
+    source_peak_min_intervals = _parse_source_min_intervals(
+        os.environ.get("SOURCE_PEAK_MIN_INTERVALS", ""),
+        _DEFAULT_SOURCE_PEAK_MIN_INTERVALS)
 
     ourcampus_cities: list[OurCampusCityFilter] = []
     if "ourcampus" in sources:
@@ -1850,6 +1884,7 @@ def load_config() -> Config:
         shadow_sources=shadow_sources,
         shard_sizes=shard_sizes,
         source_min_intervals=source_min_intervals,
+        source_peak_min_intervals=source_peak_min_intervals,
         ourdomain_cities=ourdomain_cities,
         ourcampus_cities=ourcampus_cities,
         xior_cities=xior_cities,

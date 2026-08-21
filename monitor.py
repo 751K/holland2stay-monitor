@@ -282,8 +282,23 @@ def _apply_source_intervals(
     整个 source 静默停掉。
     """
     intervals = getattr(cfg, "source_min_intervals", None) or {}
-    if not intervals:
+    peak_intervals = getattr(cfg, "source_peak_min_intervals", None) or {}
+    if not intervals and not peak_intervals:
         return tasks
+
+    # 这道闸门**只在高峰期真正起作用**：峰外轮次本身就是 check_interval
+    # （300 秒起，实测中位 381 秒），比闸门还慢；峰内轮次是 peak_interval
+    # 60 秒、自适应还会衰减到 min_interval 20 秒，闸门成了唯一给 Xior 减速的
+    # 东西。七天实测里 98% 的 429 出在高峰那 7 小时。所以峰内单独配一档。
+    #
+    # 方向和 peak_interval 相反：那个是高峰加快轮次，这个是高峰放慢单个
+    # source——正因为轮次加快了才需要它。
+    try:
+        _, is_peak = get_interval(cfg)
+    except Exception:
+        # 判不出时段就按峰外处理：宁可少拦一轮，也不能因为读配置出错把
+        # source 停掉。
+        is_peak = False
 
     now = time.time() if now is None else now
     out: list = []
@@ -295,7 +310,13 @@ def _apply_source_intervals(
         # 配置值是**基准**，实际遵守的是乘上自适应倍率之后的值。见
         # mcore/pacing.py：手工调出来的 180 秒实测并不干净，而那套调法默认
         # 「不干净会有人退回上一档」——没有人退。
-        base_gap = int(intervals.get(src, 0) or 0)
+        #
+        # 峰内优先用 source_peak_min_intervals，缺项回落到常规那份。回落而不是
+        # 补 0：没为某个 source 配峰内值，意思是「和平时一样」，不是「不限流」。
+        if is_peak and src in peak_intervals:
+            base_gap = int(peak_intervals.get(src, 0) or 0)
+        else:
+            base_gap = int(intervals.get(src, 0) or 0)
         gap = _source_pacing.gap_for(src, base_gap)
         if gap <= 0:
             out.extend(group)
@@ -317,9 +338,10 @@ def _apply_source_intervals(
         if last > 0 and 0 <= waited < gap:
             mult = _source_pacing.multiplier(src)
             logger.info(
-                "source %s 距上次抓取仅 %.0f 秒（< %d 秒%s），本轮跳过"
+                "source %s 距上次抓取仅 %.0f 秒（< %d 秒%s%s），本轮跳过"
                 "——抓太频繁会撞限流，反而更慢",
                 src, waited, gap,
+                "，高峰档" if is_peak and src in peak_intervals else "",
                 "" if mult <= 1.0 else f"，基准 {base_gap} ×{mult:.3g}",
             )
             continue
