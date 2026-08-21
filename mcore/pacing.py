@@ -25,25 +25,44 @@
 
 参数取值
 --------
-``factor=2`` / ``max_multiplier=4``  →  180 → 360 → 720 秒。360 与 720 恰好
-夹住上面注释里实测「干净」的 300 与 600，两次碰撞即可收敛到安全区。
+``factor=2`` / ``max_multiplier=2``。乘的是**当前时段那一档**基准
+（见 config 的 SOURCE_PEAK_MIN_INTERVALS），于是：
 
-不设更大的上限，是因为**抓得慢的代价是真实的**：房源出现到被发现最多晚一个
-间隔。但对照现状——每天 10 次 429，每次触发 600 秒熔断，Xior 事实上每天已经有
-约 100 分钟完全抓不到——720 秒的稳态远好过 180 秒加上反复黑洞。
+    峰内   360 → 720 秒     720 在实测干净的 381 秒之上，留足余量
+    峰外   180 → 360 秒     360 仍低于峰外自然节奏 381 秒，闸门保持不生效
 
-``calm_rounds=8``：连续 8 轮干净才降一档。在 720 秒档上约 96 分钟，在 360 秒
-档上约 48 分钟。降得太快会在阈值附近来回振荡，每次振荡都要付一次熔断。
+上限取 2 而不是 4，正是为了后一行：峰外每轮 429 概率只有 0.09%，本来就不需要
+退避；若允许 ×4，一次**峰内**的 429 会把峰外一起压到 720 秒，在没有风险的时段
+白白减半抓取频率。720 秒之上没有任何数据支持，真不够用时该拿着证据再放开。
+
+``calm_seconds=14400``（4 小时）：距上次被限流满 4 小时才降一档。
+
+**按时间而不是按轮数**——原先是「连续 8 轮干净」，实测直接翻车：
+
+    08-21 08:52   ×2 → ×1   攒够 8 轮
+    08-21 09:14   ×1 → ×2   22 分钟后就撞回去
+
+根子在于同一个轮数在不同时段意味着完全不同的耐心：峰内 20 秒一轮，8 轮只有
+2 分钟；峰外 300 秒一轮，8 轮是 40 分钟。而限流恢复只跟真实时间有关，跟我们
+跑了几轮无关。这和 mcore/health.py 里把「完整扫描率」换成「距上次完整扫描
+多久」是同一类修正。
 """
 
 from __future__ import annotations
 
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
 _MULT_KEY = "pacing_mult_{}"
-_CALM_KEY = "pacing_calm_{}"
+#: 当前这段「干净期」的起点（墙钟 epoch 秒）。
+#:
+#: 键名和旧的 ``pacing_calm_{}`` **刻意不同**：那个存的是轮数计数，语义已经变了。
+#: 沿用同一个键的话，升级后第一次读会把一个小整数（比如 7）当成 1970 年的时间戳，
+#: 算出「已经干净了 56 年」，于是立刻降一档——正是这次要消灭的行为。
+#: 旧键留在库里不管，它不再被任何代码读取。
+_CALM_SINCE_KEY = "pacing_calm_since_{}"
 
 
 class AdaptivePacing:
@@ -58,14 +77,15 @@ class AdaptivePacing:
         self,
         *,
         factor: float = 2.0,
-        max_multiplier: float = 4.0,
-        calm_rounds: int = 8,
+        max_multiplier: float = 2.0,
+        calm_seconds: float = 14400.0,
     ) -> None:
         self._factor = max(1.0, float(factor))
         self._max = max(1.0, float(max_multiplier))
-        self._calm_rounds = max(1, int(calm_rounds))
+        self._calm_seconds = max(1.0, float(calm_seconds))
         self._mult: dict[str, float] = {}
-        self._calm: dict[str, int] = {}
+        #: source → 当前干净期的起点（墙钟）。倍率为 1 时无意义。
+        self._calm_since: dict[str, float] = {}
         self._storage = None
 
     # ── 状态 ────────────────────────────────────────────────────
@@ -79,7 +99,9 @@ class AdaptivePacing:
         try:
             for src in self._known(storage):
                 self._mult[src] = self._read_float(storage, _MULT_KEY.format(src), 1.0)
-                self._calm[src] = int(self._read_float(storage, _CALM_KEY.format(src), 0.0))
+                since = self._read_float(storage, _CALM_SINCE_KEY.format(src), 0.0)
+                if since > 0:
+                    self._calm_since[src] = since
         except Exception:
             logger.warning("恢复抓取节奏失败（按 1 倍处理）", exc_info=True)
 
@@ -115,7 +137,8 @@ class AdaptivePacing:
             return
         try:
             storage.set_meta(_MULT_KEY.format(source), str(self._mult.get(source, 1.0)))
-            storage.set_meta(_CALM_KEY.format(source), str(self._calm.get(source, 0)))
+            storage.set_meta(_CALM_SINCE_KEY.format(source),
+                             str(self._calm_since.get(source, 0.0)))
         except Exception:
             # 写不进去就只在进程内生效，比整个停掉强
             logger.debug("写 %s 抓取节奏失败（已忽略）", source, exc_info=True)
@@ -137,20 +160,23 @@ class AdaptivePacing:
 
     # ── 反馈 ────────────────────────────────────────────────────
 
-    def penalize(self, source: str, *, storage=None) -> bool:
-        """被限流了：间隔翻倍。返回倍率是否真的变了（已到上限则不变）。
+    def penalize(self, source: str, *, storage=None, now: float | None = None) -> bool:
+        """被限流了：间隔翻倍，干净期从此刻重新开始计时。
+
+        返回倍率是否真的变了（已到上限则不变）。**即使没变也要重置计时**——
+        封顶不等于风险消失，反而说明还在挨打，不该让它继续朝降档爬。
 
         只该由**确实是 429** 的失败调用。403、网络错误、平台维护都不是「打得
         太勤」造成的，拉长间隔既治不了它们，又会白白拖慢恢复。
         """
+        t = time.time() if now is None else now
         old = self._mult.get(source, 1.0)
         new = min(self._max, old * self._factor)
-        self._calm[source] = 0
-        if new == old:
-            self._save(source, storage)
-            return False
+        self._calm_since[source] = t
         self._mult[source] = new
         self._save(source, storage)
+        if new == old:
+            return False
         logger.warning(
             "source %s 被限流，最小抓取间隔 ×%.3g → ×%.3g（上限 ×%.3g）"
             "——抓得越勤实际拿到数据反而越晚",
@@ -158,36 +184,58 @@ class AdaptivePacing:
         )
         return True
 
-    def relax(self, source: str, *, storage=None) -> bool:
-        """干净地抓完一轮。攒够 ``calm_rounds`` 轮才降一档。
+    def relax(self, source: str, *, storage=None, now: float | None = None) -> bool:
+        """干净地抓完一轮。距上次被限流满 ``calm_seconds`` 才降一档。
 
         返回本次是否真的降了档。
+
+        用墙钟而不是单调钟，理由和 mcore/backoff.py 一样：状态要跨进程重启
+        存活，而 ``monotonic()`` 的零点是进程启动，持久化它毫无意义。
         """
+        t = time.time() if now is None else now
         if self._mult.get(source, 1.0) <= 1.0:
-            # 已经在基准节奏上，不必攒计数，也不必反复写库
-            if self._calm.get(source):
-                self._calm[source] = 0
+            # 已经在基准节奏上：清掉计时起点，不必反复写库
+            if self._calm_since.pop(source, None) is not None:
                 self._save(source, storage)
             return False
 
-        self._calm[source] = self._calm.get(source, 0) + 1
-        if self._calm[source] < self._calm_rounds:
+        since = self._calm_since.get(source)
+        if since is None:
+            # 倍率是从库里恢复的、但计时起点丢了（旧版本升上来，或 meta 写坏）。
+            # 从现在开始计时，而不是当作「已经干净很久」立刻降档。
+            self._calm_since[source] = t
             self._save(source, storage)
+            return False
+
+        elapsed = t - since
+        if elapsed < 0:
+            # 时钟回拨。重新起算而不是当场降档——保守一侧是**保持退避**。
+            logger.warning(
+                "source %s 的节奏计时起点在未来（时钟回拨？），重新起算", source,
+            )
+            self._calm_since[source] = t
+            self._save(source, storage)
+            return False
+
+        if elapsed < self._calm_seconds:
             return False
 
         old = self._mult.get(source, 1.0)
         new = max(1.0, old / self._factor)
         self._mult[source] = new
-        self._calm[source] = 0
+        if new <= 1.0:
+            self._calm_since.pop(source, None)
+        else:
+            self._calm_since[source] = t
         self._save(source, storage)
         logger.info(
-            "source %s 连续 %d 轮没被限流，最小抓取间隔 ×%.3g → ×%.3g",
-            source, self._calm_rounds, old, new,
+            "source %s 已 %.1f 小时没被限流，最小抓取间隔 ×%.3g → ×%.3g",
+            source, elapsed / 3600.0, old, new,
         )
         return True
 
     def reset(self, source: str, *, storage=None) -> None:
         """回到基准节奏。给运维和测试用，正常流程不调。"""
         self._mult[source] = 1.0
-        self._calm[source] = 0
+        self._calm_since.pop(source, None)
         self._save(source, storage)
