@@ -146,14 +146,16 @@ class TestUserForm:
     def test_scope_rule_is_stated_once(self, admin_client):
         html = admin_client.get("/users/new").get_data(as_text=True)
         text = _text(html)
-        assert "带「仅 …」标记的条件只对部分平台生效" in text
+        assert "带平台标记的条件只对部分平台生效" in text
         # 整句只出现一次；各字段靠徽标
         assert text.count("其余平台不提供该属性，它们的房源不受该条件影响") == 1
 
     def test_fields_carry_badges(self, admin_client):
         html = admin_client.get("/users/new").get_data(as_text=True)
         assert html.count("仅 Holland2Stay") >= 4
-        assert "仅 3 个平台" in html
+        # 徽标要点名平台，不能是「仅 3 个平台」那种只报数的写法
+        assert "Xior 除外" in html
+        assert "个平台" not in html
 
     def test_no_per_field_sentences(self, admin_client):
         """逐字段整句提示已经收掉——同一句话一页出现八遍太吵。"""

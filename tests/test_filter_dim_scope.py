@@ -14,6 +14,7 @@ from config import (
     KNOWN_SOURCES,
     ListingFilter,
     dim_scope_badge,
+    source_display_name,
     dim_scope_note,
     sources_supporting_dim,
 )
@@ -104,6 +105,48 @@ class TestScopeNote:
         assert dim_scope_badge("energy") == "仅 Holland2Stay"
         assert dim_scope_badge("energy", "en") == "Holland2Stay only"
         assert len(dim_scope_badge("occupancy")) < 12
+
+    def test_badge_names_platforms_never_just_a_count(self):
+        """「仅 3 个平台」既不说是哪 3 个也不说缺谁。
+
+        2026-08-21 实际被误读成「和 Holland2Stay 有关」——而那几个维度恰恰是
+        Holland2Stay 全都支持的，缺的是 Xior。徽标必须点名。
+        """
+        from config import KNOWN_SOURCES
+        names = {source_display_name(s) for s in KNOWN_SOURCES}
+        for dim in ("type", "occupancy", "finishing", "energy",
+                    "contract", "neighborhood", "offer", "floor"):
+            for lang in ("zh", "en"):
+                badge = dim_scope_badge(dim, lang)
+                assert badge, f"{dim} 应当有徽标"
+                assert "个平台" not in badge and "platforms" not in badge, (
+                    f"{dim}/{lang} 的徽标只报了个数：{badge!r}"
+                )
+                assert any(n in badge for n in names), (
+                    f"{dim}/{lang} 的徽标没点名任何平台：{badge!r}"
+                )
+
+    def test_badge_names_the_shorter_side(self):
+        """哪边名字少就报哪边——信息量一样，字数更省。"""
+        # 缺 1 个（Xior）→ 报缺的
+        assert dim_scope_badge("type") == "Xior 除外"
+        assert dim_scope_badge("type", "en") == "Except Xior"
+        # 缺 1 个（OurCampus）
+        assert dim_scope_badge("finishing") == "OurCampus 除外"
+        # 只支持 1 个 → 报支持的
+        assert dim_scope_badge("contract") == "仅 Holland2Stay"
+
+    def test_badge_and_note_agree_on_which_platforms(self):
+        """徽标是 tooltip 的缩写，两者不能各说各的。"""
+        for dim in ("type", "finishing", "energy"):
+            badge, note = dim_scope_badge(dim), dim_scope_note(dim)
+            supported = {source_display_name(s) for s in sources_supporting_dim(dim)}
+            for name in supported:
+                assert name in note
+            if "除外" in badge:
+                # 徽标点的是**缺**的那个，它一定不在 note 的支持列表里
+                excluded = badge.replace(" 除外", "").split("、")
+                assert not (set(excluded) & supported)
 
     def test_unknown_dimension_gets_no_note(self):
         assert dim_scope_note("色号") == ""

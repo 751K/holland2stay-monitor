@@ -510,12 +510,16 @@ TRANSLATIONS = {
     "user_form_filter_hint":{"zh": "留空 = 不限制",           "en": "Leave empty = no limit"},
     # 平台适用范围的统一说明。措辞要说清「其余平台不受影响」——只写「仅对 X
     # 生效」会被读成「其它平台会被排除」，那是相反的意思。
+    #
+    # 不要在这里复述徽标的具体措辞（原先写的是「带『仅 …』标记的」）：徽标现在
+    # 两种形态并存——「Xior 除外」与「仅 Holland2Stay」，哪种取决于点名哪一边
+    # 更短，见 config.dim_scope_badge。写死一种会和另一种对不上。
     "user_form_dim_scope_intro": {
-        "zh": "带「仅 …」标记的条件只对部分平台生效：其余平台不提供该属性，"
+        "zh": "带平台标记的条件只对部分平台生效：其余平台不提供该属性，"
               "它们的房源不受该条件影响，会照常通知。悬停标记可看具体平台。",
-        "en": "Conditions marked “… only” apply to some platforms: the others do "
-              "not report that attribute, so their listings are unaffected and "
-              "still notify. Hover the marker to see which platforms.",
+        "en": "Conditions with a platform marker apply to some platforms only: "
+              "the others do not report that attribute, so their listings are "
+              "unaffected and still notify. Hover the marker to see which.",
     },
     "user_form_max_rent":   {"zh": "最高月租（€）",           "en": "Max rent (€)"},
     "user_form_min_area":   {"zh": "最小面积（m²）",          "en": "Min area (m²)"},

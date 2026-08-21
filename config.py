@@ -760,14 +760,27 @@ def dim_scope_badge(dim: str, lang: str = "zh") -> str:
 
     完整的一句话在那里会把整行撑散，但完全不提又回到「用户不知道」的老问题，
     所以留一个短标记，完整说明放 tooltip。
+
+    **一定要点名平台，不要只报个数。** 原先「仅 3 个平台」既不说是哪 3 个，也
+    不说缺谁，读的人只能去开 tooltip；2026-08-21 实际被误读成「和 Holland2Stay
+    有关」，而那三个维度恰恰是 Holland2Stay 全都支持的。
+
+    规则是**说短的那一边**——哪边名字少就报哪边，信息量一样而字数更省：
+
+        缺的少   → 「Xior 除外」
+        支持的少 → 「仅 Holland2Stay」
+        一样多   → 报支持方（正面陈述「对谁生效」比「对谁不生效」好读）
     """
     supported = sources_supporting_dim(dim)
     if not supported or len(supported) == len(KNOWN_SOURCES):
         return ""
-    if len(supported) == 1:
-        name = source_display_name(supported[0])
-        return f"仅 {name}" if lang == "zh" else f"{name} only"
-    return f"仅 {len(supported)} 个平台" if lang == "zh" else f"{len(supported)} platforms"
+    missing = [s for s in KNOWN_SOURCES if s not in supported]
+    sep = "、" if lang == "zh" else ", "
+    if len(missing) < len(supported):
+        listed = sep.join(source_display_name(s) for s in missing)
+        return f"{listed} 除外" if lang == "zh" else f"Except {listed}"
+    listed = sep.join(source_display_name(s) for s in supported)
+    return f"仅 {listed}" if lang == "zh" else f"{listed} only"
 
 
 #: 平台整体成立、但 feed 里不上报的属性。
