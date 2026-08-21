@@ -671,7 +671,12 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 }
 .notif-trigger:hover{color:var(--text);background:var(--accent-soft)}
 .notif-badge{
-  position:absolute;top:4px;right:8px;
+  /* 垂直居中用 50% + translateY，不要写死像素偏移。
+     按钮高度不是固定值：桌面端是 8px padding 加行高（实测 39.25px），
+     移动端还叠了 min-height:44px（见文件末尾的 @media）。原先写死 4px，
+     浏览器实测角标中心比按钮中心高 6.63px（桌面）/ 9px（移动）——正是
+     2026-08-21 反馈的「没对齐」。改法见 tests/test_notif_badge_alignment.py。 */
+  position:absolute;top:50%;right:8px;transform:translateY(-50%);
   min-width:18px;height:18px;border-radius:9px;
   background:var(--danger);color:#fff;
   font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;
