@@ -790,9 +790,89 @@ SOURCE_ASSUMED_FEATURES: dict[str, dict[str, str]] = {
     # 条款。整个 source 一个值，不需要按楼或按面积切——所以放这里，而不是像
     # OurDomain 那样在 BUILDINGS 里配 tenant_policy（那边 Diemen 一栋楼内部
     # 就分两档，非切不可）。
-    "xior": {"Finishing": "Furnished", "Tenant": "student only"},
+    #
+    # ⚠️ Finishing 曾经也在这里写着 "Furnished"，2026-08-21 实测发现是错的：
+    # 装修档位**按 room type 变**，同一栋楼内部就分两档。
+    #
+    #     Amsterdam Naritaweg   Deluxe / Unfurnished   站点无任何 furnished 项
+    #     Amsterdam Naritaweg   Deluxe / Furnished     Fully furnished
+    #     Aachen Vaals          Comfy                  Partially furnished
+    #                                                  （床架有、床垫没有）
+    #     Amsterdam Karspeldreef / Eindhoven ×2 /
+    #     Groningen / Utrecht                          Fully furnished
+    #
+    # 生产库 69 条里 41 条被标错（3 条实为无家具、38 条实为半装）。方向是**错推**：
+    # 勾 Furnished 的用户收到它们，勾 Unfurnished / Semi furnished 的反而收不到。
+    #
+    # 现改由 scrapers/xior.py 的 BUILDING_FURNISHING 按楼登记 + 按 floorplan
+    # 名判定，验证过一栋登记一栋；没登记的不写该字段。
+    "xior": {"Tenant": "student only"},
     "ourdomain": {"Finishing": "Furnished"},
 }
+
+
+# ── 装修档位：按楼登记，验证过一栋登记一栋 ──────────────────────────
+#
+# 这个属性 feed 里不上报，只能从站点房型页读。**不能整个 source 一刀切**——
+# 2026-08-21 实测三种档位并存，同一栋楼内部就分两档：
+#
+#     Amsterdam Naritaweg    Deluxe / Unfurnished    站点无任何 furnished 项
+#     Amsterdam Naritaweg    Deluxe / Furnished      Fully furnished
+#     Aachen Vaals           Comfy                   Partially furnished
+#     Amsterdam Karspeldreef Comfy                   Fully furnished
+#
+# 注意最后两行：**同名的 "Comfy" 在两栋楼里不是一个档位**，所以房型名单独用
+# 不可靠，必须按楼。
+#
+# 判定优先级：
+#   1. floorplan 名里明写 Furnished / Unfurnished  → 以它为准（上游自己的声明）
+#   2. 本表登记的楼栋                              → 用登记值
+#   3. 都没有                                      → **不写该字段**
+#
+# 第 3 条是有意的：`finishing` 在 config._SOURCE_FILTER_DIMS 里给 xior 登记着，
+# 没有值即 fail-closed，勾了装修条件的用户收不到这些房源。宁可少推，不可像
+# 改动前那样把半装/无家具的房源当全装推出去。
+#
+# 取值用 models.py 的规范英文档位（Fully furnished / Semi furnished /
+# Unfurnished），别新造词——过滤下拉是按库里出现过的值去重出来的。
+_FIN_FULLY = "Fully furnished"
+_FIN_SEMI = "Semi furnished"
+_FIN_UNFURNISHED = "Unfurnished"
+
+#: ``{building_key: 档位}``。每一条都对着站点房型页核过，注释写明依据。
+#: 新增楼栋**不要凭印象填**——核不了就别登记，留空比填错好。
+XIOR_BUILDING_FURNISHING: dict[str, str] = {
+    # 2026-08-21 逐栋核对（站点房型卡片的 FEATURES 清单）
+    "p0196062": _FIN_FULLY,   # Amsterdam Karspeldreef —— 3 个房型全是 Fully furnished
+    "p0196467": _FIN_FULLY,   # Eindhoven Kronehoefstraat —— 3 个房型全是 Fully furnished
+    "p0195855": _FIN_FULLY,   # Eindhoven Zernikestraat —— Comfy / Deluxe 均 Fully furnished
+    "p0196098": _FIN_FULLY,   # Groningen Eendrachtskade —— Comfy / Deluxe 均 Fully furnished
+    "p0196503": _FIN_FULLY,   # Utrecht Willem Dreeslaan —— 仅 Essential，Fully furnished
+    # Aachen Vaals Katzensprung —— 站点写的是 "Partially furnished"：床架有、
+    # **床垫没有**（"Bed frame - no mattress"），无 Wardrobe。按 models.py 的
+    # 术语表这是 Semi furnished（荷兰语 gestoffeerd），不是 Furnished。
+    "p0196061": _FIN_SEMI,
+    # Amsterdam Naritaweg 不登记：它四个房型分 Furnished / Unfurnished 两档，
+    # 由下面的房型名规则逐条判定，登记一个整栋值反而会盖掉正确答案。
+}
+
+#: floorplan 名里的档位后缀。Xior 只在同一栋楼同时卖两种时才加后缀。
+_FIN_FP_UNFURNISHED = re.compile(r"\bunfurnished\b", re.IGNORECASE)
+_FIN_FP_FURNISHED = re.compile(r"\bfurnished\b", re.IGNORECASE)
+
+
+def xior_furnishing_for(building_key: str, floorplan_name: str) -> Optional[str]:
+    """该单元的装修档位；判不出返回 None（调用方不写该字段）。
+
+    房型名优先于楼栋登记：后缀是上游针对**这一个房型**的声明，比整栋的概括更准。
+    """
+    name = floorplan_name or ""
+    if _FIN_FP_UNFURNISHED.search(name):
+        return _FIN_UNFURNISHED
+    if _FIN_FP_FURNISHED.search(name):
+        # 站点上带 "/ Furnished" 后缀的房型，FEATURES 里写的都是 Fully furnished
+        return _FIN_FULLY
+    return XIOR_BUILDING_FURNISHING.get(building_key)
 
 
 def assumed_features(source: str) -> list[str]:

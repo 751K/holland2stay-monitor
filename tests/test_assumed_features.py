@@ -28,9 +28,19 @@ from mstorage import Storage
 
 
 class TestDeclaration:
-    def test_xior_and_ourdomain_are_furnished(self):
-        assert "Finishing: Furnished" in assumed_features("xior")
+    def test_ourdomain_is_furnished(self):
         assert assumed_features("ourdomain") == ["Finishing: Furnished"]
+
+    def test_xior_no_longer_declares_a_source_wide_finishing(self):
+        """Xior 的装修档位**按 room type 变**，整源一个值是错的。
+
+        2026-08-21 对着站点房型页逐栋核对：Naritaweg 一栋楼内部就分
+        Furnished / Unfurnished 两档，Vaals 是 Partially furnished（床架有、
+        床垫没有）。详见 tests/test_xior_furnishing.py。
+        """
+        assert "Finishing" not in dict(
+            f.split(": ", 1) for f in assumed_features("xior")
+        )
 
     def test_xior_is_student_only(self):
         """Xior 是纯学生盘，整个 source 一个值。
@@ -77,15 +87,24 @@ def _listing(lid: str, source: str, features=()) -> Listing:
 
 
 class TestFilterBehaviour:
-    def test_furnished_matches(self):
+    def test_furnished_matches_ourdomain(self):
         f = ListingFilter(allowed_finishing=["Furnished"])
-        assert f.passes(_listing("x", "xior"))
         assert f.passes(_listing("o", "ourdomain"))
+
+    def test_xior_without_a_finishing_value_is_filtered_out(self):
+        """xior 的 finishing 现在按楼判定，判不出就不写——fail-closed。
+
+        这里的 _listing 只带整源声明（Tenant），没有 Finishing，所以任何装修
+        条件都拦得住它。宁可少推，不可像改动前那样把半装的房源当全装推出去。
+        """
+        assert not ListingFilter(allowed_finishing=["Furnished"]).passes(
+            _listing("x", "xior"))
+        assert not ListingFilter(allowed_finishing=["Unfurnished"]).passes(
+            _listing("x", "xior"))
 
     def test_unfurnished_no_longer_matches(self):
         """这是本次修复的重点：它们不是无家具的。"""
         f = ListingFilter(allowed_finishing=["Unfurnished"])
-        assert not f.passes(_listing("x", "xior"))
         assert not f.passes(_listing("o", "ourdomain"))
 
     def test_other_tiers_do_not_match(self):
@@ -116,9 +135,12 @@ class TestScrapersEmitIt:
              "minimumRent": 800, "availableDate": "2026-09-01"},
             display="Utrecht Willem Dreeslaan",
             building_url="https://x.test/",
+            building_key="p0196503",
             today=date(2026, 8, 5),
         )
-        assert "Finishing: Furnished" in l.features
+        # 该楼实测 Fully furnished；档位来自按楼登记，不再是整源假设
+        assert "Finishing: Fully furnished" in l.features
+        assert "Tenant: student only" in l.features
 
     def test_ourdomain(self):
         from scrapers.ourdomain import _to_listing
@@ -185,7 +207,7 @@ class TestBackfill:
                    features, url, city, first_seen, last_seen, notified,
                    last_status, source)
                VALUES ('x1','x','Occupied','1000','', '["Unit: 1.S127"]','',
-                       'Utrecht','2026-01-01','2026-01-01',0,'Occupied','xior')"""
+                       'Diemen','2026-01-01','2026-01-01',0,'Occupied','ourdomain')"""
         )
         st.conn.commit()
         st.close()
@@ -203,8 +225,8 @@ class TestBackfill:
                    features, url, city, first_seen, last_seen, notified,
                    last_status, source)
                VALUES ('x1','x','Occupied','1000','',
-                       '["Finishing: Semi furnished"]','','Utrecht',
-                       '2026-01-01','2026-01-01',0,'Occupied','xior')"""
+                       '["Finishing: Semi furnished"]','','Diemen',
+                       '2026-01-01','2026-01-01',0,'Occupied','ourdomain')"""
         )
         st.conn.commit()
         st.close()
@@ -235,7 +257,7 @@ class TestBackfill:
         st = Storage(path)
         st.diff([Listing(id="x1", name="x", status="Available to book",
                          price_raw="1000", available_from="", url="",
-                         city="Utrecht", source="xior", features=["Unit: A"])])
+                         city="Diemen", source="ourdomain", features=["Unit: A"])])
         st.close()
 
         for _ in range(3):

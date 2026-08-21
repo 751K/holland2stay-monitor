@@ -395,6 +395,7 @@ class StorageBase:
         self._backfill_city_normalized()
         self._retire_legacy_notification_backlog()
         self._backfill_assumed_features()
+        self._resync_xior_furnishing()
         with self._conn:
             # 表达式索引，与查询里的 _CITY_EXPR 逐字一致——写成
             # ``ON listings(city_normalized)`` 的话，带 COALESCE 的查询用不上它。
@@ -534,6 +535,73 @@ class StorageBase:
                     "UPDATE listings SET features=? WHERE id=?", updates
                 )
             logger.info("已为 %d 条存量房源补上平台声明属性", len(updates))
+
+    def _resync_xior_furnishing(self) -> None:
+        """把存量 Xior 房源的装修档位重算一遍。
+
+        为什么不能只靠 ``_backfill_assumed_features``
+        --------------------------------------------
+        那个函数**只补不改**：已经有该类目就跳过。而 2026-08-21 之前所有 Xior
+        房源都被写成 ``Finishing: Furnished``（当时是整个 source 一刀切的假设），
+        实测下来 69 条里 41 条是错的——3 条实为无家具、38 条实为半装。只补不改
+        的话这批错值会永远留着，而它们绝大多数是 Occupied、不会再被 feed 返回，
+        靠 diff() 的 UPDATE 也等不到。
+
+        **每次启动都跑，不打一次性标记。** 判定是纯函数（楼栋登记 + 房型名），
+        所以重复执行幂等；而且以后每登记一栋新楼，存量行会自动跟着修正。
+
+        Xior 的 feed 根本不上报装修档位，所以这里覆盖写不会盖掉任何真实抓到的
+        值——这个前提对别的 source 不成立，因此本函数**只处理 xior**。
+        """
+        import json
+
+        from config import (
+            KNOWN_XIOR_CITIES,
+            xior_furnishing_for,
+        )
+
+        # Building feature 里存的是 display 名，反查成注册表 key
+        by_display = {
+            (c.get("name") or f"{c.get('city','')} {c.get('bldg','')}".strip()): c["key"]
+            for c in KNOWN_XIOR_CITIES
+        }
+        try:
+            rows = self._conn.execute(
+                "SELECT id, features FROM listings WHERE source='xior'"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return
+
+        updates = []
+        for row in rows:
+            try:
+                feats = json.loads(row["features"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(feats, list):
+                continue
+
+            def _val(prefix: str) -> str:
+                for f in feats:
+                    if isinstance(f, str) and f.startswith(prefix):
+                        return f[len(prefix):].strip()
+                return ""
+
+            key = by_display.get(_val("Building: "), "")
+            want = xior_furnishing_for(key, _val("Floorplan: "))
+            kept = [f for f in feats
+                    if not (isinstance(f, str) and f.startswith("Finishing: "))]
+            if want:
+                kept.append(f"Finishing: {want}")
+            if kept != feats:
+                updates.append((json.dumps(kept, ensure_ascii=False), row["id"]))
+
+        if updates:
+            with self._conn:
+                self._conn.executemany(
+                    "UPDATE listings SET features=? WHERE id=?", updates
+                )
+            logger.info("已重算 %d 条 Xior 房源的装修档位", len(updates))
 
     def _add_column_if_missing(
         self, table: str, column: str, decl: str,

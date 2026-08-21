@@ -97,6 +97,14 @@ _AJAX_PATH = "/wp-admin/admin-ajax.php"
 # 应考虑分轮抓取，而不是把这个值调小。
 _MIN_REQUEST_INTERVAL = 5.0
 
+# 装修档位的登记表与判定住在 config（它是「平台事实」，和
+# SOURCE_ASSUMED_FEATURES 同一类），这里只做转发——mstorage 的存量订正也要用，
+# 而 mstorage 不能 import scrapers。
+from config import (  # noqa: E402
+    XIOR_BUILDING_FURNISHING as BUILDING_FURNISHING,
+    xior_furnishing_for as furnishing_for,
+)
+
 
 def _is_upstream_ok(code) -> bool:
     """上游 errorCode 是否表示成功（2xx）。无法解析时保守当作成功。
@@ -222,6 +230,7 @@ class XiorScraper(BrowserBackedScraper):
         listings = [
             _to_listing(
                 u, display=display, building_url=bldg.get("url", ""),
+                building_key=(task.city_key or "").strip().lower(),
                 today=today, bookable_floorplan_ids=bookable_fp_ids,
             )
             for u in all_units.values()
@@ -533,6 +542,7 @@ def _to_listing(
     *,
     display: str,
     building_url: str,
+    building_key: str = "",
     today: Optional[date] = None,
     bookable_floorplan_ids: Optional[set[int]] = None,
 ) -> Listing:
@@ -583,10 +593,21 @@ def _to_listing(
     features = [
         f"Unit: {apt_name}",
         f"Building: {display}",
-        # 整栋楼恒定成立、feed 里不上报的属性（装修档位）。声明在 config，
-        # 不散在各个 scraper 里——见 SOURCE_ASSUMED_FEATURES。
+        # 整个 source 恒定成立、feed 里不上报的属性（目前只有 Tenant）。
+        # 装修档位**不在这里**——它按 room type 变，见 furnishing_for。
         *assumed_features("xior"),
     ]
+    # 装修档位：房型名优先，其次按楼登记，都没有就不写（fail-closed，理由见
+    # BUILDING_FURNISHING 的注释）。
+    furnishing = furnishing_for(building_key, fp_name)
+    if furnishing:
+        features.append(f"Finishing: {furnishing}")
+    else:
+        logger.debug(
+            "Xior 单元 %s 的装修档位未知（楼栋 %s 未登记、房型名 %r 也没说），"
+            "不写 Finishing——该房源会被装修筛选 fail-closed 排除",
+            apt_id, building_key or "?", fp_name,
+        )
     if fp_name:
         features.append(f"Floorplan: {fp_name}")
     if sqm:

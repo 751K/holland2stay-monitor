@@ -21,7 +21,7 @@ from app.services.listing_service import (
     normalize_listing_row,
     query_listing_rows,
 )
-from config import assumed_features
+from config import assumed_features, xior_furnishing_for
 from models import Listing
 from mstorage import Storage
 
@@ -135,14 +135,20 @@ class TestBrowsePageAgreesWithNotifications:
             Listing(id="H_unfurn", name="h", status="Available to book",
                     price_raw="1000", available_from="", url="", city="Eindhoven",
                     source="holland2stay", features=["Finishing: Unfurnished"]),
-            # Xior / OurDomain 的 feed 里没有 Finishing，装修档位由
-            # SOURCE_ASSUMED_FEATURES 声明，scraper 组装 Listing 时带上——
-            # 这里照同一条路构造，否则测的是生产中不存在的形态。
-            # 合同 / 租客 / 能耗仍是它们真正没有的维度。
+            # OurDomain 的装修档位由 SOURCE_ASSUMED_FEATURES 声明；Xior 的按楼
+            # 登记（见 tests/test_xior_furnishing.py），这里照生产的路子构造，
+            # 否则测的是生产中不存在的形态。合同 / 租客 / 能耗仍是它们真正没有
+            # 的维度。
             Listing(id="X1", name="x", status="Available to book",
                     price_raw="1000", available_from="", url="", city="Utrecht",
                     source="xior",
-                    features=["Unit: 1.S127", *assumed_features("xior")]),
+                    features=["Unit: 1.S127", *assumed_features("xior"),
+                              f"Finishing: {xior_furnishing_for('p0196503', 'Essential')}"]),
+            # 未登记楼栋：没有 Finishing，装修条件对它 fail-closed
+            Listing(id="X2", name="x2", status="Available to book",
+                    price_raw="1000", available_from="", url="", city="Utrecht",
+                    source="xior",
+                    features=["Unit: 9", *assumed_features("xior")]),
             Listing(id="O1", name="o", status="Available to book",
                     price_raw="1000", available_from="", url="", city="Amsterdam",
                     source="ourdomain",
@@ -163,11 +169,23 @@ class TestBrowsePageAgreesWithNotifications:
         assert "H_unfurn" not in ids, "支持该维度的平台不该放宽"
 
     def test_declared_platforms_land_in_the_right_tier(self, db):
-        """Xior / OurDomain 有声明值，勾 Unfurnished 时不该出现。"""
+        """有档位的平台各归各档；装修是精确匹配，档与档之间不互相命中。"""
         furn = {r["id"] for r in query_listing_rows(finishing=["Furnished"])}
+        fully = {r["id"] for r in query_listing_rows(finishing=["Fully furnished"])}
         unfurn = {r["id"] for r in query_listing_rows(finishing=["Unfurnished"])}
-        assert {"X1", "O1"} <= furn
-        assert not ({"X1", "O1"} & unfurn), "声明是 Furnished，却出现在无家具里"
+
+        assert "O1" in furn                      # OurDomain 声明 Furnished
+        assert "X1" in fully                     # Xior 该楼实测 Fully furnished
+        assert "X1" not in furn, (
+            "finishing 在 _EXACT_MATCH_DIMS 里，Fully furnished 不该被 Furnished 收走"
+        )
+        assert not ({"X1", "O1"} & unfurn), "有家具的档位出现在无家具里"
+
+    def test_xior_without_a_registered_building_is_filtered_out(self, db):
+        """判不出档位的 Xior 房源对任何装修条件都不匹配——fail-closed。"""
+        for pick in ("Furnished", "Fully furnished", "Semi furnished", "Unfurnished"):
+            ids = {r["id"] for r in query_listing_rows(finishing=[pick])}
+            assert "X2" not in ids, f"没有档位却匹配上了 {pick}"
 
     def test_matches_the_notification_path(self, db):
         """两条路必须给出同一个集合，这是本次修复的全部意义。"""
