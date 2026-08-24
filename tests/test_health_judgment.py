@@ -679,3 +679,161 @@ class TestCircuitMarkerIsOneString:
             f"mcore.health.CIRCUIT_OPEN_ERROR——两边一旦写岔，熔断轮会重新被"
             f"算成抓取失败，熔断器每正常工作一次就发一对 down + recovered 告警"
         )
+
+
+# ── 分层抓取：高频轮的 0 不参与零房源判定 ──────────────────────────
+
+
+class TestTieredZeroRoundsDoNotFeedZeroStreak:
+    """高频轮的 0 和全量轮的非零不可比，不能放进同一个 streak。
+
+    H2S 每轮只查「可订 / 抽签 / 即将上线」（一律 complete=0），每 30 分钟才做
+    一次带 Reserved 的全量轮。2026-08-24 生产实测：平台上确实一套可订的都没有
+    （43 套全是 Reserved），于是高频轮连续返回 0、全量轮返回 43，凑够 3 轮报
+    「抓取成功但零房源」，下一次全量轮一到又「已恢复」——24 小时 7 报 7 恢复。
+
+    这和 TestShardedSourcesSkipZeroRule 是同一个坑，只是切的维度是「状态」而非
+    「楼栋」，而 sharded 的判据（total_targets > targets）在分层时恒为假。
+    """
+
+    def test_partial_zero_rounds_do_not_count(self):
+        """5 个高频零轮 + 1 个全量非零轮 = 生产上最常见的形态。"""
+        rows = _rows([(0, 2, 0, "")] * 5 + [(43, 2, 2, "")] * 3)
+        h = _h(rows)
+        assert h.zero_streak == 0
+        assert h.status == health.STATUS_OK
+        assert h.reasons == []
+
+    def test_full_zero_rounds_still_warn(self):
+        """规则没被废掉：全量轮连着抓到 0，才是真的「本来有房、突然全没了」。"""
+        h = _h(_rows([(0, 2, 2, "")] * 3 + [(43, 2, 2, "")] * 3))
+        assert h.zero_streak == 3
+        assert h.status == health.STATUS_WARN
+
+    def test_partial_rounds_are_skipped_not_terminal(self):
+        """高频轮夹在中间时跳过而不是打断——否则真故障永远凑不够 3 轮。"""
+        rows = _rows(
+            [(0, 2, 2, "")]        # 全量零
+            + [(0, 2, 0, "")] * 4  # 高频零，跳过
+            + [(0, 2, 2, "")]      # 全量零
+            + [(0, 2, 0, "")] * 4  # 高频零，跳过
+            + [(0, 2, 2, "")]      # 全量零
+            + [(43, 2, 2, "")]
+        )
+        h = _h(rows)
+        assert h.zero_streak == 3
+        assert h.status == health.STATUS_WARN
+
+    def test_nonzero_partial_round_resets_the_streak(self):
+        """高频轮抓到了东西 = 这个 source 明摆着在工作，不论那轮完不完整。"""
+        rows = _rows(
+            [(0, 2, 2, "")] * 2    # 全量零
+            + [(3, 2, 0, "")]      # 高频轮抓到 3 条 → 重新计数
+            + [(0, 2, 2, "")] * 5
+            + [(43, 2, 2, "")]
+        )
+        h = _h(rows)
+        assert h.zero_streak == 2
+        assert h.status == health.STATUS_OK
+
+    def test_failed_round_still_breaks_before_partial_logic(self):
+        """失败轮照旧打断，和分层与否无关。"""
+        h = _h(_rows(_fail(1) + [(0, 2, 2, "")] * 5 + [(43, 2, 2, "")]))
+        assert h.zero_streak == 0
+
+
+# ── 停用的 source 不再巡检 ─────────────────────────────────────────
+
+
+class TestDisabledSourceIsNotJudged:
+    """停用之后遥测行还会在库里躺满 30 天保留期。
+
+    2026-08-24 实测：OurDomain 在 08-21 从面板停用，之后三天报了 5 次
+    「迟迟没有完整扫描」——每一次都属实，也每一次都无意义。
+    """
+
+    def test_disabled_source_is_unknown(self):
+        rows = _rows(_ok(5))
+        h = health.source_health_from_rows(
+            "ourdomain", rows,
+            last_complete_at=(_NOW - timedelta(hours=10)).isoformat(),
+            now=_NOW, enabled=False,
+        )
+        assert h.status == health.STATUS_UNKNOWN
+        assert h.reasons == ["该 source 当前未启用，窗口内的遥测是停用前留下的"]
+
+    def test_same_rows_warn_when_enabled(self):
+        """对照组：同样的行，启用状态下是要报的。"""
+        rows = _rows(_ok(5))
+        h = health.source_health_from_rows(
+            "ourdomain", rows,
+            last_complete_at=(_NOW - timedelta(hours=10)).isoformat(),
+            now=_NOW,
+        )
+        assert h.status == health.STATUS_WARN
+
+    def test_disabled_beats_down_too(self):
+        """连续失败也不报——它没在跑，「失败」是停用前的历史。"""
+        h = health.source_health_from_rows(
+            "ourdomain", _rows(_fail(5)), last_complete_at="",
+            now=_NOW, enabled=False,
+        )
+        assert h.status == health.STATUS_UNKNOWN
+
+    def test_enabled_flag_is_exposed(self):
+        h = health.source_health_from_rows("s", _rows(_ok(1)), enabled=False)
+        assert h.as_dict()["enabled"] is False
+
+
+class TestEnabledSourcesFromEnv:
+    """``SOURCES`` 由 settings_store 每轮注水进环境，切分规则要和 config 对齐。"""
+
+    @pytest.mark.parametrize("raw,want", [
+        ("holland2stay,xior", {"holland2stay", "xior"}),
+        ("holland2stay|xior", {"holland2stay", "xior"}),
+        (" Holland2Stay , XIOR ", {"holland2stay", "xior"}),
+        ("holland2stay,,xior", {"holland2stay", "xior"}),
+    ])
+    def test_parsing(self, monkeypatch, raw, want):
+        monkeypatch.setenv("SOURCES", raw)
+        assert health.enabled_sources() == want
+
+    @pytest.mark.parametrize("raw", ["", "   ", ",", "|"])
+    def test_unreadable_means_do_not_filter(self, monkeypatch, raw):
+        """判断不了就别过滤——宁可多报，不可把真故障静音。"""
+        monkeypatch.setenv("SOURCES", raw)
+        assert health.enabled_sources() is None
+
+    def test_missing_env_means_do_not_filter(self, monkeypatch):
+        monkeypatch.delenv("SOURCES", raising=False)
+        assert health.enabled_sources() is None
+
+
+class TestWatchdogSkipsDisabledSources:
+    def test_disabled_source_produces_no_alert(self, st, monkeypatch):
+        monkeypatch.setenv("SOURCES", "holland2stay,xior")
+        # ourdomain 早已停摆：全是完整轮，但最近一轮是 10 小时前
+        st.record_round_stat(
+            round_at=(_DB_NOW - timedelta(hours=10)).isoformat(),
+            source="ourdomain", listings=12, targets=2, complete=2,
+        )
+        assert watchdog.poll(st) == []
+
+    def test_enabled_source_in_the_same_db_still_alerts(self, st, monkeypatch):
+        monkeypatch.setenv("SOURCES", "holland2stay,xior")
+        st.record_round_stat(
+            round_at=(_DB_NOW - timedelta(hours=10)).isoformat(),
+            source="ourdomain", listings=12, targets=2, complete=2,
+        )
+        _seed(st, "holland2stay",
+              [(284, 6, 6, "")] * 5 + [(0, 6, 6, "")] * 3)
+        assert [a.key for a in watchdog.poll(st)] == ["source_zero:holland2stay"]
+
+    def test_report_marks_disabled_sources(self, st, monkeypatch):
+        monkeypatch.setenv("SOURCES", "xior")
+        _seed(st, "xior", [(0, 4, 4, "")] * 3)
+        _seed(st, "ourdomain", [(0, 2, 2, "")] * 3)
+        by_src = {s["source"]: s for s in health.health_report(st)["sources"]}
+        assert by_src["xior"]["enabled"] is True
+        assert by_src["ourdomain"]["enabled"] is False
+        assert by_src["ourdomain"]["status"] == health.STATUS_UNKNOWN

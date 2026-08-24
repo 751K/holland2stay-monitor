@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -124,6 +125,8 @@ class SourceHealth:
     # 本轮抓的 target 数 < 该 source 配置的总数 → 说明启用了分轮抓取。
     # 分片下每轮覆盖不同子集，"这一轮 0 条" 和上一轮的非零没有可比性。
     sharded: bool = False
+    # 该 source 当前是否还在配置里。停用之后遥测行仍留在库里，见 _judge。
+    enabled: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -145,12 +148,24 @@ class SourceHealth:
             "last_listings": self.last_listings,
             "last_error": self.last_error,
             "sharded": self.sharded,
+            "enabled": self.enabled,
         }
 
 
 def _judge(h: SourceHealth) -> None:
     """按指标定级，就地写回 status / reasons。"""
     reasons: list[str] = []
+
+    # 停用的 source 不定级。它的遥测行会在库里留满保留期（30 天），照旧判定
+    # 就是对着一个根本没在跑的东西报警——2026-08-24 实测：OurDomain 在 08-21
+    # 从面板停用，之后三天报了 5 次「迟迟没有完整扫描」，每一次都属实，也每一
+    # 次都无意义。
+    #
+    # 归到 unknown 而不是 ok：我们对它没有判断，不是判断它没事。
+    if not h.enabled:
+        h.status = STATUS_UNKNOWN
+        h.reasons = ["该 source 当前未启用，窗口内的遥测是停用前留下的"]
+        return
 
     if h.rounds == 0:
         h.status = STATUS_UNKNOWN
@@ -210,6 +225,7 @@ def source_health_from_rows(
     *,
     last_complete_at: str = "",
     now: datetime | None = None,
+    enabled: bool = True,
 ) -> SourceHealth:
     """从遥测行算健康快照。``rows`` 必须**最新在前**。
 
@@ -219,7 +235,7 @@ def source_health_from_rows(
     截的（默认 24 轮），而 H2S 的全量间隔是 30 分钟、每轮约 90 秒，窗口时间跨度
     比全量间隔还短，里面常常一次全量都不含。据窗口判定必然误报。
     """
-    h = SourceHealth(source=source, rounds=len(rows))
+    h = SourceHealth(source=source, rounds=len(rows), enabled=enabled)
     if not rows:
         _judge(h)
         return h
@@ -267,16 +283,29 @@ def source_health_from_rows(
 
     # 失败轮**打断**零计数而不是并入：失败轮的 listings 恒为 0，若一并算进
     # zero_streak，任何一次失败都会顺带触发「零房源」告警，两条规则就重了。
+    #
+    # ⚠️ 只在 complete > 0 的轮次之间累积。complete == 0 意味着这一轮没有任何
+    # target 被抓全，H2S 的分层抓取每轮都是如此（只查 _FRESH_STATUSES，代码里
+    # 强制 complete=False），拿它的 0 去和全量轮的 43 相比，比的是两批不同的
+    # 东西——和上面 sharded 那条是同一个坑，只是切的维度是「状态」而非「楼栋」，
+    # 而 sharded 的判据（total_targets > targets）在分层时恒为假，漏掉了它。
+    #
+    # 2026-08-24 实测后果：H2S 每 30 分钟一次全量轮，中间约 5 个高频轮全是 0
+    # （当时平台上确实一套可订的都没有，43 套全是 Reserved），凑够 3 轮报
+    # 「抓取成功但零房源」，下一次全量轮一到又「已恢复」——24 小时 7 报 7 恢复。
+    #
+    # 漏报的兜底是 stale_full_scan：真到了连全量轮都不再产出的地步，那条会响。
     for r in rows:
         err = r["error_type"] or ""
         if err == CIRCUIT_OPEN_ERROR:
             continue
         if err:
             break
-        if int(r["listings"]) == 0:
-            h.zero_streak += 1
-        else:
-            break
+        if int(r["listings"]) > 0:
+            break                      # 看见过非零就重来，不论那轮完不完整
+        if int(r.get("complete") or 0) <= 0:
+            continue                   # 这一轮没抓全任何 target，它的 0 不算数
+        h.zero_streak += 1
 
     ok_rows = [r for r in rows if not r["error_type"]]
     if ok_rows:
@@ -322,8 +351,25 @@ def _seconds_since(
     return max(0.0, (base - t).total_seconds())
 
 
+def enabled_sources() -> set[str] | None:
+    """当前启用的 source 集合；判断不了时返回 ``None``（= 不过滤，规则照常生效）。
+
+    「这个 source 还在不在跑」只有配置知道，从遥测行里推不出来——停用和卡死
+    留下的痕迹一模一样，都是「不再有新行」。而 round_stats 的保留期是 30 天，
+    停用之后那些行还会在窗口里躺很久。
+
+    直接读环境变量而不是 import config，理由同 :func:`fmt_ts`：``mcore`` 不依赖
+    ``config``。``SOURCES`` 由 settings_store 每轮从 app_settings 注水进来，
+    monitor 与面板两个进程里都在。切分规则与 ``config._parse_sources_raw`` 对齐。
+    """
+    raw = os.environ.get("SOURCES", "")
+    values = {p.strip().lower() for p in re.split(r"[,|]", raw) if p.strip()}
+    return values or None
+
+
 def source_health(storage, *, window: int = DEFAULT_WINDOW) -> list[SourceHealth]:
     """所有出现过的 source 的健康快照，按 source 名排序。"""
+    enabled = enabled_sources()
     out: list[SourceHealth] = []
     for src in storage.round_stats_sources():
         rows = storage.recent_round_stats(source=src, limit=window)
@@ -335,6 +381,7 @@ def source_health(storage, *, window: int = DEFAULT_WINDOW) -> list[SourceHealth
             last_complete = ""
         out.append(source_health_from_rows(
             src, rows, last_complete_at=last_complete,
+            enabled=enabled is None or str(src).strip().lower() in enabled,
         ))
     return out
 
