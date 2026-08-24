@@ -45,9 +45,22 @@ def _get_cipher() -> Fernet:
 
 
 def encrypt(plaintext: str) -> str:
-    """加密字符串。空字符串原样返回。"""
+    """加密字符串。空字符串原样返回。
+
+    **幂等**：已经带 "$F$" 前缀的值原样返回，不会套第二层。
+
+    没有这道判断的话，重复加密会产出 ``$F$ + encrypt("$F$…")``，而 ``decrypt``
+    只解一层，返回的是内层密文本身——看起来像是"解密成功"，实际拿到一串乱码，
+    静默损坏且很难倒查。迁移脚本和保存路径都可能对同一个值调两次，所以这道
+    判断必须在这里，而不是靠每个调用方自己记得先检查。
+
+    代价是无法加密一个真的以 "$F$" 开头的明文；但 ``decrypt`` 早就把该前缀当作
+    标记了，这种明文本来就无法往返，不算新增限制。
+    """
     if not plaintext:
         return ""
+    if plaintext.startswith("$F$"):
+        return plaintext
     cipher = _get_cipher()
     return "$F$" + cipher.encrypt(plaintext.encode()).decode()
 

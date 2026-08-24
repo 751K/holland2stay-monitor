@@ -191,7 +191,7 @@ def _profile_from_dict(raw) -> "ApplicantProfile":
     未知 key 直接丢弃（而不是塞进构造器炸掉）——上游加字段、用户手改 JSON、
     版本回退都可能带来多余 key，一个坏 key 不该让整个用户配置加载失败。
     """
-    from config import _ENCRYPTED_PROFILE_FIELDS, ApplicantProfile
+    from config import ApplicantProfile, profile_field_is_encrypted
 
     if not isinstance(raw, dict):
         return ApplicantProfile()
@@ -200,7 +200,7 @@ def _profile_from_dict(raw) -> "ApplicantProfile":
     for k, v in raw.items():
         if k not in known:
             continue
-        kw[k] = decrypt(v) if (k in _ENCRYPTED_PROFILE_FIELDS and isinstance(v, str)) else v
+        kw[k] = decrypt(v) if (profile_field_is_encrypted(k) and isinstance(v, str)) else v
     try:
         return ApplicantProfile(**kw)
     except Exception:
@@ -364,12 +364,13 @@ def _user_to_row(u: UserConfig) -> dict:
     for _pw_key in ("password", "xior_password", "ourdomain_password"):
         if ab.get(_pw_key):
             ab[_pw_key] = encrypt(ab[_pw_key])
-    # 申请人档案：只加密真正抬高身份盗用风险的那两项（见 _ENCRYPTED_PROFILE_FIELDS）
+    # 申请人档案：**默认全部加密**，例外清单见 config._PLAINTEXT_PROFILE_FIELDS。
+    # 这里面有国籍、出生地、身份证号，以及 GDPR 第 10 条的犯罪记录。
     prof = ab.get("applicant_profile")
     if isinstance(prof, dict):
-        from config import _ENCRYPTED_PROFILE_FIELDS
+        from config import profile_field_is_encrypted
         ab["applicant_profile"] = {
-            k: (encrypt(v) if (k in _ENCRYPTED_PROFILE_FIELDS and v) else v)
+            k: (encrypt(v) if (profile_field_is_encrypted(k) and isinstance(v, str) and v) else v)
             for k, v in prof.items()
         }
 

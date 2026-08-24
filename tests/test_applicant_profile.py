@@ -17,7 +17,7 @@ import pytest
 from config import (
     APPLICANT_GENDERS,
     APPLICANT_TITLES,
-    _ENCRYPTED_PROFILE_FIELDS,
+    profile_field_is_encrypted,
     ApplicantProfile,
     AutoBookConfig,
 )
@@ -57,7 +57,7 @@ class TestDataBoundary:
         from dataclasses import fields
         names = {f.name for f in fields(ApplicantProfile)}
         assert "id_number" in names, "申请表必填，缺了存不了草稿"
-        assert "id_number" in _ENCRYPTED_PROFILE_FIELDS, "证件号必须加密存储"
+        assert profile_field_is_encrypted("id_number"), "证件号必须加密存储"
 
 
 class TestCompleteness:
@@ -120,14 +120,24 @@ class TestPersistence:
         assert "2003-09-14" not in blob, "生日不能明文落库"
         assert "Dorpsstraat" not in blob, "地址不能明文落库"
 
-    def test_non_sensitive_fields_stay_plain(self):
-        """与库里既有的 email / telegram_chat_id 同级。全都加密会让这张表
-        和其它表的处理方式不一致，反而容易在某处漏掉。"""
+    def test_names_and_school_are_encrypted_too(self):
+        """2026-08-24 政策反转：姓名和学校也加密了。
+
+        原先的理由是「与库里既有的 email / telegram_chat_id 同级，保持明文」。
+        但这张档案不是零散字段——它是一整包身份信息（姓名 + 生日 + 地址 +
+        国籍 + 证件号 + 学校），凑在一起的敏感度远高于任何单项。
+        """
         u = UserConfig(id="u1", name="T",
                        auto_book=AutoBookConfig(applicant_profile=_full()))
         blob = _user_to_row(u)["auto_book_json"]
-        assert "Kong" in blob
-        assert "TU Eindhoven" in blob
+        assert "Kong" not in blob, "姓氏明文落库了"
+        assert "TU Eindhoven" not in blob, "学校明文落库了"
+
+    def test_preference_fields_stay_plain(self):
+        """例外清单里的三项确实不是个人数据，加密只会让排查变难。"""
+        from config import _PLAINTEXT_PROFILE_FIELDS
+        for f in _PLAINTEXT_PROFILE_FIELDS:
+            assert not profile_field_is_encrypted(f)
 
     def test_round_trip(self):
         u = UserConfig(id="u1", name="T",
@@ -138,9 +148,19 @@ class TestPersistence:
         assert back.phone == "+31600"
         assert back.is_complete() is True
 
-    def test_encrypted_field_list_matches_reality(self):
-        assert set(_ENCRYPTED_PROFILE_FIELDS) == {
-            "date_of_birth", "address", "id_number"}
+    def test_encryption_is_the_default_not_a_whitelist(self):
+        """2026-08-24 从「只加密三项」改成「默认加密 + 例外清单」。
+
+        原先的正向白名单漏掉了国籍、出生地、性别、电话，以及
+        ever_evicted / ever_convicted / criminal_charges —— 犯罪记录在 GDPR 下
+        属第 10 条数据，比证件号更该保护，却一直是明文。详见
+        tests/test_applicant_profile_encryption.py。
+        """
+        from config import _PLAINTEXT_PROFILE_FIELDS
+        assert profile_field_is_encrypted("criminal_charges")
+        assert profile_field_is_encrypted("nationality")
+        assert _PLAINTEXT_PROFILE_FIELDS == {
+            "no_middle_name", "min_lease_term", "housing_type"}
 
     def test_id_number_is_encrypted(self):
         """护照号/身份证号和姓名生日地址国籍凑在一起就是完整身份信息包。"""

@@ -396,6 +396,7 @@ class StorageBase:
         self._retire_legacy_notification_backlog()
         self._backfill_assumed_features()
         self._resync_xior_furnishing()
+        self._encrypt_applicant_profiles()
         with self._conn:
             # 表达式索引，与查询里的 _CITY_EXPR 逐字一致——写成
             # ``ON listings(city_normalized)`` 的话，带 COALESCE 的查询用不上它。
@@ -602,6 +603,71 @@ class StorageBase:
                     "UPDATE listings SET features=? WHERE id=?", updates
                 )
             logger.info("已重算 %d 条 Xior 房源的装修档位", len(updates))
+
+    def _encrypt_applicant_profiles(self) -> None:
+        """把存量申请人档案里该加密而没加密的字段补上。
+
+        2026-08-24 之前只有 date_of_birth / address / id_number 三项加密，其余
+        ——国籍、出生地、性别、电话、学号，以及 ever_evicted / ever_convicted /
+        criminal_charges（**GDPR 第 10 条数据**）——都是明文。改成"默认加密"之后，
+        已经落库的那些值不会自己变，得走一趟。
+
+        每次启动都跑：判定是纯函数，``encrypt()`` 幂等（见 crypto.py），重复执行
+        不产生写入；而且以后再从明文清单里挪走某个字段，存量行会自动跟上。
+
+        任何异常都只记日志：档案加密是数据保护措施，不该让 monitor 起不来。
+        """
+        import json
+
+        try:
+            from config import profile_field_is_encrypted
+            from crypto import encrypt
+        except Exception:
+            logger.warning("加载加密依赖失败，跳过申请人档案迁移", exc_info=True)
+            return
+
+        try:
+            rows = self._conn.execute(
+                "SELECT id, auto_book_json FROM user_configs "
+                "WHERE auto_book_json IS NOT NULL AND auto_book_json != ''"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return
+
+        updates = []
+        for row in rows:
+            try:
+                ab = json.loads(row["auto_book_json"] or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            prof = ab.get("applicant_profile")
+            if not isinstance(prof, dict):
+                continue
+            changed = False
+            for k, v in list(prof.items()):
+                if not (isinstance(v, str) and v):
+                    continue
+                if not profile_field_is_encrypted(k):
+                    continue
+                if v.startswith("$F$"):
+                    continue
+                prof[k] = encrypt(v)
+                changed = True
+            if changed:
+                ab["applicant_profile"] = prof
+                updates.append((json.dumps(ab, ensure_ascii=False), row["id"]))
+
+        if not updates:
+            return
+        try:
+            with self._conn:
+                self._conn.executemany(
+                    "UPDATE user_configs SET auto_book_json=? WHERE id=?", updates
+                )
+        except Exception:
+            logger.warning("申请人档案加密迁移写入失败", exc_info=True)
+            return
+        logger.info("已加密 %d 位用户的申请人档案字段", len(updates))
 
     def _add_column_if_missing(
         self, table: str, column: str, decl: str,

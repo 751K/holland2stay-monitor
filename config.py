@@ -1182,12 +1182,32 @@ class ListingFilter:
         return True
 
 
-#: 申请人档案里**加密存储**的字段。
+#: 申请人档案里**不**加密的字段。**默认是加密**，这张表是例外清单。
 #:
-#: 只加密真正抬高身份盗用风险的两项。其余（姓名、电话、大学）与库里既有的
-#: email / telegram_chat_id 同级，保持明文——全都加密会让这张表和其它表的
-#: 处理方式不一致，反而容易在某处漏掉。
-_ENCRYPTED_PROFILE_FIELDS = ("date_of_birth", "address", "id_number")
+#: 为什么反过来写
+#: --------------
+#: 原先是正向白名单，只登记了 date_of_birth / address / id_number 三项，理由是
+#: 「只加密真正抬高身份盗用风险的」。但这张档案是给 RENTCafe 租房申请表填的，
+#: 剩下的字段包括国籍、出生地、性别、电话、学号，以及
+#: ``ever_evicted`` / ``ever_convicted`` / ``criminal_charges``
+#: ——**犯罪记录在 GDPR 下属第 10 条数据**，比身份证号更该保护，却一直是明文。
+#:
+#: 正向白名单的问题不只是漏了几项：它让「新加字段」的默认行为是**明文**。
+#: 这张表以后还会跟着 RENTCafe 表单变，每加一个字段就要有人记得回来登记一次。
+#: 反过来之后，忘记维护这张表的后果是「多加密了一个不敏感字段」，而不是
+#: 「明文存了一项敏感数据」——两种疏忽的代价不对称。
+#:
+#: 下面三项确实不是个人数据，加密只会让排查变难：
+_PLAINTEXT_PROFILE_FIELDS = frozenset({
+    "no_middle_name",   # 布尔标记：本人没有中间名
+    "min_lease_term",   # 租期偏好，例如 "12 months"
+    "housing_type",     # 房型偏好，不指向具体的人
+})
+
+
+def profile_field_is_encrypted(name: str) -> bool:
+    """该档案字段是否加密存储。默认加密，见 _PLAINTEXT_PROFILE_FIELDS。"""
+    return name not in _PLAINTEXT_PROFILE_FIELDS
 
 #: RENTCafe 申请表的下拉选项，抄自实测页面（Vaals / Katzensprung）。
 #: 值必须与页面 option 文本完全一致，否则提交时匹配不上。
