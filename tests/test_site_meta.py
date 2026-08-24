@@ -107,3 +107,60 @@ class TestRootIcons:
         """图标要在登录页上就能显示。"""
         for p in ("/favicon.ico", "/apple-touch-icon.png"):
             assert client.get(p).status_code == 301
+
+
+class TestSitemap:
+    """sitemap 只列**匿名访客真能拿到 200** 的页面。
+
+    2026-08-24 实测：/ /listings /stats /map /calendar 全部 302 到登录页；
+    guest mode 不改变这一点——它是 POST /guest 的交互式开关，靠 session 生效，
+    爬虫既不会 POST 也不带 session。
+    """
+
+    def test_served_without_login(self, client):
+        r = client.get("/sitemap.xml")
+        assert r.status_code == 200
+        assert r.mimetype in ("application/xml", "text/xml")
+
+    def test_lists_only_publicly_reachable_pages(self, client):
+        import re
+        body = client.get("/sitemap.xml").get_data(as_text=True)
+        locs = re.findall(r"<loc>[^<]*?(/[^<]*)</loc>", body)
+        assert locs, "sitemap 是空的"
+        for path in locs:
+            r = client.get(path)
+            assert r.status_code == 200, (
+                f"sitemap 列了 {path}，但匿名访问返回 {r.status_code}"
+                "——列一个进不去的页面只会浪费抓取配额"
+            )
+
+    def test_does_not_list_redirects(self, client):
+        """``/`` 对匿名访客 302 到 /login，列它属于坏习惯：列真正 200 的那个。"""
+        body = client.get("/sitemap.xml").get_data(as_text=True)
+        assert "<loc>http://localhost/</loc>" not in body
+
+    def test_does_not_contradict_robots(self, client):
+        """sitemap 里的页面不能同时被自己的 robots.txt 拦着。"""
+        import re
+        from app.routes.site_meta import _DISALLOW
+        body = client.get("/sitemap.xml").get_data(as_text=True)
+        for path in re.findall(r"<loc>[^<]*?(/[^<]*)</loc>", body):
+            for rule in _DISALLOW:
+                assert not path.startswith(rule), (
+                    f"{path} 既在 sitemap 里又被 Disallow: {rule} 拦着"
+                )
+
+    def test_host_is_not_hardcoded(self, client):
+        """自部署的人换域名不该改代码。"""
+        body = client.get("/sitemap.xml", base_url="https://example.test").get_data(as_text=True)
+        assert "https://example.test/login" in body
+        assert "flatradar" not in body.lower()
+
+    def test_robots_points_at_it(self, client):
+        body = client.get("/robots.txt", base_url="https://example.test").get_data(as_text=True)
+        assert "Sitemap: https://example.test/sitemap.xml" in body
+
+    def test_no_fabricated_lastmod(self, client):
+        """没有真实修改时间可依据，编一个就是撒谎。"""
+        body = client.get("/sitemap.xml").get_data(as_text=True)
+        assert "<lastmod>" not in body

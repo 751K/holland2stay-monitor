@@ -28,7 +28,7 @@ robots.txt 与 Cloudflare 的关系
 """
 from __future__ import annotations
 
-from flask import Flask, Response, redirect
+from flask import Flask, Response, redirect, request, url_for
 
 
 #: 拦住的路径分两类，理由不同——混成一条判据的话，哪天某个路径变公开了也看不出来。
@@ -57,12 +57,55 @@ _DISALLOW_SENSITIVE = (
 #: 落地页 ``/`` 已经链过去了，被索引也没有坏处。
 _DISALLOW = _DISALLOW_NEEDS_AUTH + _DISALLOW_SENSITIVE
 
-_ROBOTS = "User-agent: *\n" + "".join(f"Disallow: {p}\n" for p in _DISALLOW)
+#: sitemap 里要列的公开页。**判据是「匿名访客真的能拿到 200」**——
+#: 2026-08-24 实测，除这几个之外全部 302 到登录页：
+#:
+#:     /login 26.9KB   /guide 17KB   /privacy 13.2KB
+#:     /terms 11.4KB   /support 8.6KB   /donate 7.4KB
+#:
+#: 注意 ``/`` **不在其中**：它对匿名访客 302 到 ``/login``，而 sitemap 里列
+#: 重定向 URL 是坏习惯，列真正返回 200 的那个。
+#:
+#: 也注意 **guest mode 不改变这份名单**：它是 ``POST /guest`` 的交互式开关，
+#: 靠 session 生效，爬虫既不会 POST 也不带 session，看到的和匿名访客一样。
+_PUBLIC_ENDPOINTS = (
+    "login",
+    "guide_page",
+    "donate_page",
+    "support_page",
+    "privacy_page",
+    "terms_page",
+)
+
+_ROBOTS = ("User-agent: *\n"
+           + "".join(f"Disallow: {p}\n" for p in _DISALLOW))
 
 
 def robots_txt():
-    """源站自己的 robots.txt。Cloudflare 会在其后拼上托管块。"""
-    return Response(_ROBOTS, mimetype="text/plain")
+    """源站自己的 robots.txt。Cloudflare 会在其后拼上托管块。
+
+    ``Sitemap:`` 用当前请求的 host 拼，不写死域名——自部署的人换域名不用改代码。
+    """
+    body = _ROBOTS + f"\nSitemap: {request.url_root.rstrip('/')}/sitemap.xml\n"
+    return Response(body, mimetype="text/plain")
+
+
+def sitemap_xml():
+    """列出匿名访客真正能打开的页面。
+
+    刻意不写 ``<lastmod>`` / ``<changefreq>`` / ``<priority>``：前者没有真实的
+    修改时间可依据，编一个就是撒谎；后两者主流搜索引擎早已忽略。宁可给一份短
+    而准确的。
+    """
+    root = request.url_root.rstrip("/")
+    urls = "".join(
+        f"  <url><loc>{root}{url_for(ep)}</loc></url>\n"
+        for ep in _PUBLIC_ENDPOINTS
+    )
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+           f"{urls}</urlset>\n")
+    return Response(xml, mimetype="application/xml")
 
 
 def favicon_ico():
@@ -82,6 +125,8 @@ def apple_touch_icon():
 def register(app: Flask) -> None:
     app.add_url_rule("/robots.txt", endpoint="robots_txt",
                      view_func=robots_txt, methods=["GET"])
+    app.add_url_rule("/sitemap.xml", endpoint="sitemap_xml",
+                     view_func=sitemap_xml, methods=["GET"])
     app.add_url_rule("/favicon.ico", endpoint="favicon_ico",
                      view_func=favicon_ico, methods=["GET"])
     for rule in ("/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):
