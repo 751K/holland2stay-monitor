@@ -197,6 +197,8 @@ async def send_verification_email(user_id: str, user_name: str, email: str) -> b
         return False
 
     import curl_cffi.requests as req
+
+    from net import direct_curl_session
     from config import get_impersonate
 
     payload = {
@@ -213,7 +215,7 @@ async def send_verification_email(user_id: str, user_name: str, email: str) -> b
 
     def _post() -> bool:
         try:
-            with req.Session(impersonate=get_impersonate()) as s:
+            with direct_curl_session(impersonate=get_impersonate()) as s:
                 r = s.post(ResendNotifier.ENDPOINT, json=payload,
                            headers=headers, timeout=15)
         except Exception as e:

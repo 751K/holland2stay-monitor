@@ -45,6 +45,8 @@ from typing import TYPE_CHECKING, Callable
 
 import curl_cffi.requests as req
 
+from net import direct_curl_session
+
 from config import get_impersonate
 from models import Listing
 
@@ -398,7 +400,7 @@ class TelegramNotifier(BaseNotifier):
     ) -> None:
         self._token = token
         self._chat_id = chat_id
-        self._session = req.Session(impersonate=get_impersonate())
+        self._session = direct_curl_session(impersonate=get_impersonate())
         # 回调只触发一次；触发后本实例直接短路，不再打 API。
         # 光靠回调里的「关闭渠道」不够——那要等下次热重载才会重建 notifier，
         # 这中间每轮仍会照打照错。
@@ -597,7 +599,7 @@ class ResendNotifier(BaseNotifier):
 
     def _ensure_session(self) -> req.Session:
         if self._session is None:
-            self._session = req.Session(impersonate=get_impersonate())
+            self._session = direct_curl_session(impersonate=get_impersonate())
         return self._session
 
     async def _send(self, text: str) -> bool:
@@ -823,7 +825,7 @@ class WhatsAppNotifier(BaseNotifier):
         self._token = auth_token
         self._from = from_number
         self._to = to_number
-        self._session = req.Session(impersonate=get_impersonate())
+        self._session = direct_curl_session(impersonate=get_impersonate())
 
     async def _send(self, text: str) -> bool:
         url = f"https://api.twilio.com/2010-04-01/Accounts/{self._sid}/Messages.json"

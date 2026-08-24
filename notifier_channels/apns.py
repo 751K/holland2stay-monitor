@@ -184,6 +184,8 @@ class ApnsClient:
         transport=None,   # 测试注入 httpx.MockTransport
     ) -> None:
         import httpx
+
+        from net import direct_httpx_kwargs
         self.cfg = cfg
         self._jwt = _JwtSigner(cfg.key_path, cfg.key_id, cfg.team_id)
         client_kwargs: dict = {
@@ -192,7 +194,7 @@ class ApnsClient:
         }
         if transport is not None:
             client_kwargs["transport"] = transport
-        self._client = httpx.AsyncClient(**client_kwargs)
+        self._client = httpx.AsyncClient(**direct_httpx_kwargs(**client_kwargs))
 
     async def close(self) -> None:
         await self._client.aclose()

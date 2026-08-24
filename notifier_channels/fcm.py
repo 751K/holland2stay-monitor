@@ -272,6 +272,8 @@ class FcmClient:
         transport=None,  # 测试注入 httpx.MockTransport
     ) -> None:
         import httpx
+
+        from net import direct_httpx_kwargs
         self.cfg = cfg
         self._auth = _AccessTokenCache(
             cfg.client_email, cfg.private_key, cfg.token_uri,
@@ -281,7 +283,7 @@ class FcmClient:
         }
         if transport is not None:
             client_kwargs["transport"] = transport
-        self._client = httpx.AsyncClient(**client_kwargs)
+        self._client = httpx.AsyncClient(**direct_httpx_kwargs(**client_kwargs))
 
     async def close(self) -> None:
         await self._client.aclose()

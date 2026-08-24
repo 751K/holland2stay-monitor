@@ -3,7 +3,9 @@ import json
 import sys
 import time
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.request import Request
+
+from net import direct_urlopen
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -19,7 +21,7 @@ def geocode_address(address: str) -> tuple[float, float] | None:
     url = f"https://photon.komoot.io/api/?q={quote(address)}&limit=1"
     req = Request(url, headers={"User-Agent": "FlatRadar/1.0"})
     try:
-        resp = urlopen(req, timeout=8)
+        resp = direct_urlopen(req, timeout=8)
         data = json.loads(resp.read().decode())
         feats = data.get("features", [])
         if feats:

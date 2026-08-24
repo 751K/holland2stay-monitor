@@ -34,13 +34,15 @@ _geocode_status: dict = {"running": False, "total": 0, "done": 0, "failed": 0, "
 
 def _geocode_one(addr: str) -> tuple[float, float] | None:
     """对单个地址做 Photon 地理编码；含 Room 房号则失败时回退到建筑地址重试。"""
-    from urllib.request import Request, urlopen
+    from urllib.request import Request
+
+    from net import direct_urlopen
     from urllib.parse import quote
 
     def _query(q: str) -> tuple[float, float] | None:
         url = f"https://photon.komoot.io/api/?q={quote(q)}&limit=1"
         req = Request(url, headers={"User-Agent": "FlatRadar/1.0"})
-        resp = urlopen(req, timeout=5)
+        resp = direct_urlopen(req, timeout=5)
         data = json.loads(resp.read().decode())
         feats = data.get("features", [])
         if feats:
@@ -66,9 +68,7 @@ def _geocode_one(addr: str) -> tuple[float, float] | None:
 
 def _run_geocode_worker(addresses: list[str]) -> None:
     """后台线程：逐个地理编码地址列表，结果写入缓存，进度更新到全局状态。"""
-    from urllib.request import Request, urlopen
-    from urllib.parse import quote
-
+    # 实际的 HTTP 请求在 _geocode_one 里发，这里不直接联网
     st = storage()
     done, failed = 0, 0
     errors: list[dict] = []

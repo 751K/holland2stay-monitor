@@ -43,6 +43,8 @@ import time
 from typing import Any, Optional
 
 import curl_cffi.requests as req
+
+from net import direct_curl_session
 from flask import Flask, Response, jsonify, request
 
 from app.db import storage
@@ -128,7 +130,7 @@ def _fetch_full_email(email_id: str, api_key: str) -> Optional[dict]:
     if not email_id or not api_key:
         return None
     try:
-        with req.Session(impersonate=get_impersonate()) as session:
+        with direct_curl_session(impersonate=get_impersonate()) as session:
             resp = session.get(
                 f"https://api.resend.com/emails/receiving/{email_id}",
                 headers={
@@ -228,7 +230,7 @@ def _forward_inbound(
     }
 
     try:
-        with req.Session(impersonate=get_impersonate()) as session:
+        with direct_curl_session(impersonate=get_impersonate()) as session:
             r = session.post(
                 "https://api.resend.com/emails",
                 json=payload,
