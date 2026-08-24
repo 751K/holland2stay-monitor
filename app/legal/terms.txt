@@ -1,4 +1,4 @@
-Last updated: June 3, 2026
+Last updated: August 24, 2026
 
 These Terms of Use govern your access to and use of FlatRadar.
 
@@ -74,7 +74,11 @@ FlatRadar supports Face ID and Touch ID for sign-in convenience. When you enable
 
 If FlatRadar allows you to use credentials for authentication with a third-party service, such credentials are used only for the functionality requested by you.
 
-Where possible, credentials are stored locally on your device using secure storage such as Apple Keychain.
+Some features cannot work from your device alone, because FlatRadar has to act while your device is offline. Sending alerts through your own Telegram bot, Twilio account, or SMTP mail server, and submitting an auto-booking application on your behalf, all require FlatRadar servers to hold the relevant credentials. Those credentials are stored on FlatRadar servers in encrypted form, and are used only for the feature you enabled.
+
+Credentials that only ever need to be used on your device, such as the FlatRadar login you save for Face ID or Touch ID, are stored locally in the Apple Keychain and are not uploaded.
+
+You can remove any stored third-party credential at any time by clearing it in your account settings or by turning the corresponding feature off.
 
 You are responsible for ensuring that your use of any third-party account through FlatRadar complies with the applicable third-party terms.
 

@@ -1,4 +1,4 @@
-Last updated: June 3, 2026
+Last updated: August 24, 2026
 
 This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
 
@@ -55,6 +55,27 @@ Saved Preferences and Alert Data
 - Notification preferences.
 - Alert history, including matched listings, alert timestamps, and delivery status where needed to operate notifications.
 
+Auto-Booking Applicant Data (only if you enable auto-booking)
+
+FlatRadar offers an optional auto-booking feature. It is disabled by default. If you enable it and fill in the application form, FlatRadar stores the details that the housing platform's own rental application requires, so that it can submit the application on your behalf. Depending on the platform's form, this may include:
+
+- Name, title, gender, date of birth, place of birth, and nationality.
+- Contact details such as phone number and postal address.
+- Identity document number, and the country that issued it.
+- University and student number.
+- Answers to the screening questions that the housing platform's application form asks, which may include whether you have previously been evicted, convicted, or charged with an offence.
+
+We collect these details only because the housing platform's application form requires them, and we use them only to submit the application you asked us to submit. We do not use them for any other purpose.
+
+These fields are encrypted at rest on FlatRadar servers, except for non-identifying preferences such as your desired lease term and housing type.
+
+You can leave any field blank, clear the form at any time, or turn auto-booking off. If you never enable auto-booking, FlatRadar does not collect any of this data.
+
+Crash and Diagnostic Reports
+
+- If the mobile app crashes, it may send a crash report containing the error, a stack trace, app version, operating system version, and device model.
+- Crash reports are used only to find and fix defects.
+
 Usage, Network, and Technical Data
 - Basic app usage events, server logs, request timestamps, error logs, IP address, device information, app version, and diagnostic information.
 - Security-related logs used to prevent abuse, spam, unauthorized access, scraping abuse, or service disruption.
@@ -66,6 +87,8 @@ Feedback Data
 3. Data We Do Not Intentionally Collect
 
 FlatRadar does not intentionally collect sensitive personal data such as race, religion, political opinions, health information, biometric data, or precise real-time location. Device location used by the map feature is processed locally on your device and is not stored by FlatRadar.
+
+One exception is described above: if you choose to enable auto-booking, the housing platform's own application form may ask about evictions, convictions, or criminal charges, and FlatRadar stores your answers so that it can complete that form for you. This data is encrypted at rest, is never collected unless you enable auto-booking and enter it yourself, and is used only to submit the application you requested.
 
 FlatRadar does not sell your personal data.
 
@@ -99,7 +122,11 @@ FlatRadar may fetch listing information from publicly accessible services, APIs,
 
 10. Third-Party Services
 
-FlatRadar may interact with: housing platforms (listing data), Apple Push Notification service (iOS notifications), Firebase Cloud Messaging (Android notifications), Cloudflare (DNS and security), Apple Maps (iOS map), Google Maps (Android and web map), hosting and backend providers, and email or support providers.
+FlatRadar may interact with: housing platforms (listing data), Apple Push Notification service (iOS notifications), Firebase Cloud Messaging (Android notifications), Cloudflare (DNS and security), Apple Maps (iOS map), Google Maps (Android and web map), Resend (transactional email such as address verification and email alerts), Photon by Komoot (converting listing addresses into map coordinates), and Hetzner (server hosting, Germany).
+
+If you configure your own Telegram bot, Twilio account, or SMTP mail server to receive alerts, FlatRadar sends your alerts through those services on your behalf. Those services are chosen and controlled by you.
+
+Donations are handled entirely by the payment provider you choose (for example GitHub Sponsors, Alipay, or WeChat Pay). FlatRadar does not receive, process, or store your payment details.
 
 11. Data Sharing
 
@@ -107,7 +134,7 @@ We do not sell your personal data. We do not use your personal data for third-pa
 
 12. Data Retention
 
-We keep your data only as long as necessary. Account data is retained while your account remains active. Server logs and diagnostic data are retained for a limited period. When you delete your account, we will delete or anonymize associated personal data unless retention is required for legal, security, or legitimate operational reasons.
+We keep your data only as long as necessary. Account data is retained while your account remains active. Server access logs are rotated and retained for roughly 30 days. Auto-booking applicant details are kept until you clear them or delete your account. When you delete your account, we will delete or anonymize associated personal data unless retention is required for legal, security, or legitimate operational reasons.
 
 13. Account Deletion
 
@@ -120,6 +147,8 @@ Depending on your location, you may have the right to access, correct, delete, r
 15. Security
 
 We use reasonable technical and organizational measures to protect your data, including HTTPS, server-side access controls, bcrypt password hashing, secure session handling, Cloudflare security protections, Apple Keychain where applicable, and monitoring to detect abuse. FlatRadar account passwords are not stored in plain text.
+
+Data that you supply for optional features is encrypted at rest on FlatRadar servers. This covers the credentials for any notification channel you configure yourself (such as a Telegram bot token, Twilio auth token, or SMTP password), any housing platform credentials you provide for auto-booking, and the auto-booking applicant details described in Section 2.
 
 16. International Data Transfers
 
