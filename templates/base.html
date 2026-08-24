@@ -31,6 +31,17 @@
         }
       }
       document.documentElement.setAttribute('data-theme', t);
+
+      // sidebar 的品牌 logo 是首屏 LCP 候选，要 preload。深浅色是两个文件，
+      // 而主题到这一行才定下来，所以只能在这里动态插链接——写死在 HTML 里
+      // 必然有一半用户预载错的那张。
+      var pre = document.createElement('link');
+      pre.rel = 'preload';
+      pre.as = 'image';
+      pre.type = 'image/png';
+      pre.href = t === 'dark' ? '/static/logo-small-dark.png'
+                              : '/static/logo-small.png';
+      document.head.appendChild(pre);
     })();
   </script>
   {#
@@ -53,10 +64,10 @@
       FOUT（系统字体先 paint 后切到 Inter，字距/字重轻微跳变），用户
       明确不接受。代价是 LCP 等字体到位，preconnect 已经能省点。
     - logo-small.png：preload —— sidebar 品牌 logo 在首屏视口内，是 LCP 候选。
+      深浅两版的 preload 链接由上面那段主题脚本按当前主题动态插入。
   #}
   <link rel="preload" href="{{ asset('design.css') }}" as="style" fetchpriority="high">
   <link rel="stylesheet" href="{{ asset('design.css') }}">
-  <link rel="preload" href="/static/logo-small.png" as="image" type="image/png">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -87,7 +98,7 @@
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-brand">
-      <img class="brand-mark" src="/static/logo-small.png" alt="" width="28" height="28">
+      <span class="brand-mark" aria-hidden="true"></span>
       <span>FlatRadar</span>
     </div>
 

@@ -141,7 +141,17 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   font-weight:700;font-size:18px;letter-spacing:-.02em;
   color:var(--text);flex-shrink:0;
 }
-.sidebar-brand .brand-mark{width:28px;height:28px;border-radius:7px;box-shadow:0 8px 20px rgba(56,189,248,.18);flex-shrink:0}
+/* 品牌 mark 用 background-image 而不是 <img>：深浅两版是两个文件，主题靠
+   data-theme 切换（不是 prefers-color-scheme），<picture media> 那套用不上，
+   而两个 <img> 互相 display:none 会白下载一张。 */
+.sidebar-brand .brand-mark{
+  width:28px;height:28px;border-radius:7px;
+  box-shadow:0 8px 20px rgba(56,189,248,.18);flex-shrink:0;
+  background:url("/static/logo-small.png") center/100% 100% no-repeat;
+}
+[data-theme="dark"] .sidebar-brand .brand-mark{
+  background-image:url("/static/logo-small-dark.png");
+}
 .sidebar-nav{flex:1;padding:4px 8px;display:flex;flex-direction:column;gap:1px}
 .sidebar-nav a{
   display:flex;align-items:center;gap:10px;
@@ -1008,7 +1018,12 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   width:52px;height:52px;border-radius:var(--radius-lg);background:var(--accent);color:#fff;
   display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 16px;
 }
-.login-logo{display:block;object-fit:cover;background:transparent;box-shadow:0 10px 28px rgba(56,189,248,.16)}
+/* 同 .brand-mark：深浅两版走 background-image，由 data-theme 切换。 */
+.login-logo{
+  display:block;box-shadow:0 10px 28px rgba(56,189,248,.16);
+  background:url("/static/logo-md.png") center/100% 100% no-repeat;
+}
+[data-theme="dark"] .login-logo{background-image:url("/static/logo-md-dark.png")}
 .login-field{margin-bottom:16px}
 .login-field label{display:block;font-size:14px;font-weight:550;color:var(--text2);margin-bottom:6px}
 .login-field input{
