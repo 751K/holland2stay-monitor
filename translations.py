@@ -632,7 +632,30 @@ TRANSLATIONS = {
     "guest_mode":           {"zh": "访客模式",            "en": "Guest mode"},
 
     # ── Login ────────────────────────────────────────────
-    "login_title":          {"zh": "登录 · FlatRadar",        "en": "Login · FlatRadar"},
+    # 落地页的 <title> 与 meta description。
+    #
+    # ⚠️ 这两条**只给搜索引擎和分享卡片看**，不是界面文案，改动前先想清楚：
+    # `/` 对匿名访客 302 到 `/login`，所以这就是搜索结果里显示的那一行。
+    # 原先写的是「登录 · FlatRadar」——一个 26.9KB 的落地页，标题却只说「登录」，
+    # 搜「荷兰租房监控」的人看到它不会点。
+    #
+    # 刻意不在标题里写 Holland2Stay / Xior：那样 SEO 更强，但一来提高了对被监控
+    # 平台的曝光，二来在自己的标题里用别家商标另有一层风险。见 docs/ARCHITECTURE。
+    #
+    # 长度按搜索结果的显示上限控制：标题 ≤ 30 中文字，描述 ≤ 80 中文字。
+    "login_title": {
+        "zh": "FlatRadar · 荷兰租房房源监控与提醒",
+        "en": "FlatRadar · Dutch Rental Listing Alerts",
+    },
+    "login_meta_description": {
+        "zh": "自动监控荷兰多个租房平台的新房源，可按城市、租金、面积、租客资格"
+              "筛选，命中立刻推送到手机。支持 iOS 与 Android，免费使用。",
+        # 英文按 ~155 字符控制：超过会被搜索结果截断，句尾的信息就白写了。
+        # 中文按 ~80 字算，两边上限不同是因为搜索结果按像素宽度截。
+        "en": "Tracks new rental listings across Dutch housing platforms. Filter "
+              "by city, rent, size and tenant eligibility, and get an instant "
+              "push when one matches.",
+    },
     "login_header":         {"zh": "FlatRadar",               "en": "FlatRadar"},
     "login_subtitle":       {"zh": "请登录以继续访问",          "en": "Sign in to continue"},
     "login_username":       {"zh": "用户名",                  "en": "Username"},
