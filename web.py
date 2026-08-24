@@ -81,6 +81,7 @@ from app.routes import (                                          # noqa: E402
     notifications,
     sessions,
     settings as settings_routes,
+    site_meta,
     stats,
     system,
     users,
@@ -309,6 +310,7 @@ notifications.register(app)    # /api/notifications* /api/events
 inbound.register(app)          # /api/inbound/email （Resend webhook，Svix 签名校验，无需登录）
 app_accounts.register(app)     # /settings/app-accounts (admin: Bearer token 管理)
 legal.register(app)            # /privacy /terms （公开页面，无需登录）
+site_meta.register(app)        # /robots.txt /favicon.ico /apple-touch-icon*（公开）
 api_v1.register(app)           # /api/v1/auth/* /api/v1/stats/public/* (Bearer token)
 
 
