@@ -28,6 +28,8 @@ robots.txt 与 Cloudflare 的关系
 """
 from __future__ import annotations
 
+import os
+
 from flask import Flask, Response, redirect, request, url_for
 
 
@@ -81,12 +83,29 @@ _ROBOTS = ("User-agent: *\n"
            + "".join(f"Disallow: {p}\n" for p in _DISALLOW))
 
 
-def robots_txt():
-    """源站自己的 robots.txt。Cloudflare 会在其后拼上托管块。
+def _site_root() -> str:
+    """对外可见的站点根 URL，无尾斜杠。
 
-    ``Sitemap:`` 用当前请求的 host 拼，不写死域名——自部署的人换域名不用改代码。
+    优先 ``PUBLIC_BASE_URL``——项目已有的这个变量就是为此存在的，而且是**唯一
+    知道真实 scheme 的来源**：源站在 Caddy + Cloudflare 后面，TLS 在边缘就终止
+    了，到 Flask 这一跳是明文 HTTP，``request.url_root`` 因此返回 ``http://``。
+    2026-08-24 上线后实测 sitemap 里全是 http:// —— 而搜索引擎把 http 与 https
+    视作两个站点，等于整份 sitemap 都指向"站外"。
+
+    没配时回落到 ``request.url_root``，自部署与本地开发才跑得起来。
+
+    注意这里的回落标准**故意比 app/email_verify.py 松**：那边拒绝回落，因为
+    邮件里的验证链接是安全边界，Host header 可伪造，伪造出的链接会发给真实
+    用户。sitemap 不同——伪造的 Host 只会让攻击者自己拿到一份指向自己域名的
+    XML，害不到别人。
     """
-    body = _ROBOTS + f"\nSitemap: {request.url_root.rstrip('/')}/sitemap.xml\n"
+    base = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    return base or request.url_root.rstrip("/")
+
+
+def robots_txt():
+    """源站自己的 robots.txt。Cloudflare 会在其后拼上托管块。"""
+    body = _ROBOTS + f"\nSitemap: {_site_root()}/sitemap.xml\n"
     return Response(body, mimetype="text/plain")
 
 
@@ -97,7 +116,7 @@ def sitemap_xml():
     修改时间可依据，编一个就是撒谎；后两者主流搜索引擎早已忽略。宁可给一份短
     而准确的。
     """
-    root = request.url_root.rstrip("/")
+    root = _site_root()
     urls = "".join(
         f"  <url><loc>{root}{url_for(ep)}</loc></url>\n"
         for ep in _PUBLIC_ENDPOINTS

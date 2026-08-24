@@ -150,15 +150,37 @@ class TestSitemap:
                     f"{path} 既在 sitemap 里又被 Disallow: {rule} 拦着"
                 )
 
-    def test_host_is_not_hardcoded(self, client):
+    def test_host_is_not_hardcoded(self, client, monkeypatch):
         """自部署的人换域名不该改代码。"""
+        monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
         body = client.get("/sitemap.xml", base_url="https://example.test").get_data(as_text=True)
         assert "https://example.test/login" in body
         assert "flatradar" not in body.lower()
 
-    def test_robots_points_at_it(self, client):
+    def test_robots_points_at_it(self, client, monkeypatch):
+        monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
         body = client.get("/robots.txt", base_url="https://example.test").get_data(as_text=True)
         assert "Sitemap: https://example.test/sitemap.xml" in body
+
+    def test_public_base_url_wins_and_keeps_https(self, client, monkeypatch):
+        """源站在 Caddy + Cloudflare 后面，到 Flask 这一跳是明文 HTTP。
+
+        只信 request.url_root 的话 sitemap 里全是 http://，而搜索引擎把
+        http 与 https 视作两个站点——整份 sitemap 等于指向站外。2026-08-24
+        上线后实测踩到过一次。
+        """
+        monkeypatch.setenv("PUBLIC_BASE_URL", "https://real.example")
+        for path in ("/sitemap.xml", "/robots.txt"):
+            body = client.get(path, base_url="http://origin.internal").get_data(as_text=True)
+            assert "https://real.example" in body, f"{path} 没用 PUBLIC_BASE_URL"
+            assert "http://origin.internal" not in body, (
+                f"{path} 泄漏了源站的明文 URL"
+            )
+
+    def test_no_http_urls_when_configured(self, client, monkeypatch):
+        monkeypatch.setenv("PUBLIC_BASE_URL", "https://real.example")
+        body = client.get("/sitemap.xml", base_url="http://origin.internal").get_data(as_text=True)
+        assert "<loc>http://" not in body
 
     def test_no_fabricated_lastmod(self, client):
         """没有真实修改时间可依据，编一个就是撒谎。"""
