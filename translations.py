@@ -426,6 +426,9 @@ TRANSLATIONS = {
     "settings_sending":     {"zh": "发送中...",               "en": "Sending..."},
     "settings_config_saved":{"zh": "全局配置已保存",           "en": "Global config saved"},
     "settings_request_fail":{"zh": "请求失败",                "en": "Request failed"},
+    # 侧栏赞助入口。措辞刻意克制——「赞助」不是「捐款」，也不加感叹号：
+    # 它挨着隐私条款和使用条款，语气得和它们一致。
+    "donate":               {"zh": "赞助开发者",              "en": "Support the developer"},
     "settings_no_source":   {"zh": "至少需要启用一个平台，已保留 Holland2Stay。", "en": "At least one platform required. Holland2Stay kept."},
     # 平台开着但一个楼盘都没勾。已按你的选择保存，只是提醒——真要停掉整个
     # 平台，取消勾选平台本身更直接。

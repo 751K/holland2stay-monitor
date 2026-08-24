@@ -157,14 +157,23 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .sidebar-footer{
   padding:10px;display:flex;flex-direction:column;gap:2px;flex-shrink:0;
 }
-.sidebar-footer button,.sidebar-footer form button{
+/* 按钮与链接共用一套外观。原先三个 <a>（语言 / 隐私 / 条款）各自内联写了
+   一份等价的 style + onmouseover/onmouseout，改一处就得改三处，而且第四个
+   链接一加就是第四份复制。收进这条规则，行为不变。 */
+.sidebar-footer button,.sidebar-footer form button,.sidebar-footer a{
   display:flex;align-items:center;gap:8px;width:100%;
   padding:8px 12px;border-radius:var(--radius);
   border:none;background:transparent;
   font-size:15px;color:var(--text2);cursor:pointer;
   transition:color .12s,background .12s;
+  text-decoration:none;
 }
-.sidebar-footer button:hover{color:var(--text);background:var(--accent-soft)}
+.sidebar-footer button:hover,.sidebar-footer a:hover{
+  color:var(--text);background:var(--accent-soft);
+}
+/* 赞助入口：图标给一点暖色，和其它中性项区分开，但不做成整行高亮——
+   它是次要入口，不该比「通知」「设置」更抢眼。 */
+.sidebar-footer a.donate-link i{color:var(--warning, #e8a33d)}
 
 /* Monitor badge in sidebar */
 .mon-badge{

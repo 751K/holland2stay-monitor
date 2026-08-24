@@ -158,29 +158,21 @@
         {{ _('toggle_theme') }}
       </button>
 
-      <a href="{{ url_for('set_lang', lang='en' if lang=='zh' else 'zh', next=request.path) }}"
-         style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border-radius:6px;border:none;background:transparent;font-size:15px;color:var(--text2);cursor:pointer;transition:color .12s,background .12s;"
-         onmouseover="this.style.color='var(--text)';this.style.background='var(--accent-soft)'"
-         onmouseout="this.style.color='var(--text2)';this.style.background='transparent'">
+      <a href="{{ url_for('set_lang', lang='en' if lang=='zh' else 'zh', next=request.path) }}">
         <i class="bi bi-translate" style="font-size:15px;width:18px;text-align:center;"></i>
         {{ 'English' if lang=='zh' else '中文' }}
       </a>
 
-      <a href="{{ url_for('privacy_page') }}"
-         target="_blank"
-         rel="noopener noreferrer"
-         style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border-radius:6px;border:none;background:transparent;font-size:15px;color:var(--text2);cursor:pointer;transition:color .12s,background .12s;text-decoration:none;"
-         onmouseover="this.style.color='var(--text)';this.style.background='var(--accent-soft)'"
-         onmouseout="this.style.color='var(--text2)';this.style.background='transparent'">
+      <a href="{{ url_for('donate_page') }}" class="donate-link" target="_blank" rel="noopener noreferrer">
+        <i class="bi bi-cup-hot" style="font-size:15px;width:18px;text-align:center;"></i>
+        {{ _('donate') }}
+      </a>
+
+      <a href="{{ url_for('privacy_page') }}" target="_blank" rel="noopener noreferrer">
         <i class="bi bi-shield-check" style="font-size:15px;width:18px;text-align:center;"></i>
         {{ 'Privacy Policy' if lang == 'en' else '隐私条款' }}
       </a>
-      <a href="{{ url_for('terms_page') }}"
-         target="_blank"
-         rel="noopener noreferrer"
-         style="display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;border-radius:6px;border:none;background:transparent;font-size:15px;color:var(--text2);cursor:pointer;transition:color .12s,background .12s;text-decoration:none;"
-         onmouseover="this.style.color='var(--text)';this.style.background='var(--accent-soft)'"
-         onmouseout="this.style.color='var(--text2)';this.style.background='transparent'">
+      <a href="{{ url_for('terms_page') }}" target="_blank" rel="noopener noreferrer">
         <i class="bi bi-file-text" style="font-size:15px;width:18px;text-align:center;"></i>
         {{ 'Terms of Use' if lang == 'en' else '使用条款' }}
         </a>
