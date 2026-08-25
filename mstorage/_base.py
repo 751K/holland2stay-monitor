@@ -376,6 +376,22 @@ class StorageBase:
                 "ON status_changes(listing_id)"
             )
 
+        # 上面两个索引在 v1.3.0（2026-05-13，storage 模块化重构）里是**改名**
+        # 来的：旧名 idx_sc_changed_at / idx_sc_listing_id 从代码里删掉了，新名
+        # 用 CREATE INDEX IF NOT EXISTS 建上，但没有人 DROP 旧的——而
+        # IF NOT EXISTS 只管建，不会清理同定义的另一个名字。
+        #
+        # 于是存量库里同一列上并排挂着两个完全相同的索引，一直到 2026-08-25
+        # 才量出来。空间无所谓（各 16–20 KB），代价在写：每 INSERT 一条
+        # status_changes 要维护 4 个索引而不是 2 个。
+        #
+        # 用 IF EXISTS 且不打一次性标记：DROP 幂等，新库上是无操作，
+        # 而只在「本次刚建表」的分支里做会漏掉所有存量库——恰恰是唯一有旧
+        # 索引的那批。
+        with self._conn:
+            for _stale in ("idx_sc_changed_at", "idx_sc_listing_id"):
+                self._conn.execute(f"DROP INDEX IF EXISTS {_stale}")
+
         # device_tokens.language：APNs 推送语言（'en' | 'zh'）。
         # 客户端注册设备时上报；老设备默认 'en'。
         self._add_column_if_missing(
