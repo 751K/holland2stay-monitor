@@ -833,3 +833,88 @@ class TestFloorplanCheckUsesTheRentCafePlaybook:
 
         budget_warnings = [w for w in warned if "预算" in w]
         assert len(budget_warnings) == 1, f"刷了 {len(budget_warnings)} 条: {warned}"
+
+
+# ── 可订与否只看按钮文字 ────────────────────────────────────────────
+
+#: 2026-08-25 从生产页面原样抄下来的两块 tile。**属性完全相同，只有文字不同**：
+#: Zernikestraat 的 Comfy 已经租完，按钮却仍是 applyButton + data-selenium-id
+#: ="ApplyNow"；同一时刻 Karspeldreef 真能订的那个户型，按钮文字是 "Available"。
+#: 而 tile 顶上那句 (Available) 两边都写着，租完了也不更新。
+_RENTED_OUT_TILE = """
+<div data-selenium-id ="FloorPlanAvailability" class="availability-count"> (Available) </div>
+<table class="table"><tr><td>Deposit</td>
+<button id="Comfy" data-selenium-id = "ApplyNow" class="applyButton btn btn-primary "
+ onclick="location.href = 'termsandotheritems.aspx?myOlePropertyId=185589&floorPlans=1109741'">Rented Out</button>
+</td></tr></table>
+"""
+_AVAILABLE_TILE = """
+<div data-selenium-id ="FloorPlanAvailability" class="availability-count"> (Available) </div>
+<table class="table"><tr><td>Deposit</td>
+<button data-selenium-id = "ApplyNow" class="applyButton btn btn-primary "
+ onclick="location.href = 'termsandotheritems.aspx?myOlePropertyId=185795&floorPlans=1111515'">Available</button>
+</td></tr></table>
+"""
+
+
+class TestButtonLabelDecidesBookability:
+    """类名和 data-selenium-id 分辨不了可订与否，只有按钮文字能。
+
+    实测后果：xr_373301（Zernikestraat 1-222，19 m²、€781）在 WP feed 里挂着，
+    闸门看类名放行，面板上一直显示 Book，实际早已租出——用户是自己发现的。
+    """
+
+    def test_rented_out_is_not_bookable(self):
+        from scrapers.xior import parse_bookable_floorplan_ids
+        assert parse_bookable_floorplan_ids(_RENTED_OUT_TILE) == set()
+
+    def test_available_is_bookable(self):
+        from scrapers.xior import parse_bookable_floorplan_ids
+        assert parse_bookable_floorplan_ids(_AVAILABLE_TILE) == {1111515}
+
+    def test_both_on_one_page(self):
+        from scrapers.xior import parse_bookable_floorplan_ids
+        assert parse_bookable_floorplan_ids(
+            _RENTED_OUT_TILE + _AVAILABLE_TILE) == {1111515}
+
+    def test_tile_header_available_is_not_evidence(self):
+        """两块 tile 顶上都写着 (Available)——它是陈旧的，不能当判据。"""
+        assert "(Available)" in _RENTED_OUT_TILE
+        from scrapers.xior import parse_bookable_floorplan_ids
+        assert parse_bookable_floorplan_ids(_RENTED_OUT_TILE) == set()
+
+    @pytest.mark.parametrize("label", [
+        "RENTED OUT", "  Rented   Out  ", "<span>Rented&nbsp;Out</span>",
+        "Sold Out", "Contact Us", "Join the waiting list",
+    ])
+    def test_negative_labels_in_any_shape(self, label):
+        from scrapers.xior import parse_bookable_floorplan_ids
+        html = _RENTED_OUT_TILE.replace(">Rented Out<", f">{label}<")
+        assert parse_bookable_floorplan_ids(html) == set(), f"{label!r} 被当成可订了"
+
+    @pytest.mark.parametrize("label", ["Available", "Apply Now", "Book now"])
+    def test_positive_labels(self, label):
+        from scrapers.xior import parse_bookable_floorplan_ids
+        html = _AVAILABLE_TILE.replace(">Available<", f">{label}<")
+        assert parse_bookable_floorplan_ids(html) == {1111515}
+
+    def test_unknown_label_is_let_through_but_logged(self, monkeypatch):
+        """漏报真房源比误报贵，所以未知文字放行——但必须在日志里留痕。"""
+        import scrapers.xior as x
+
+        warned = []
+        monkeypatch.setattr(x.logger, "warning", lambda m, *a, **k: warned.append((m, a)))
+        html = _AVAILABLE_TILE.replace(">Available<", ">Reserveren<")
+
+        assert x.parse_bookable_floorplan_ids(html) == {1111515}
+        assert warned, "出现没见过的按钮文字却一声不吭"
+        assert any("Reserveren" in str(a) for _, a in warned)
+
+    def test_known_labels_do_not_log(self, monkeypatch):
+        """已知文字不该刷告警——否则日志里全是它，真的新文字就淹了。"""
+        import scrapers.xior as x
+
+        warned = []
+        monkeypatch.setattr(x.logger, "warning", lambda m, *a, **k: warned.append(m))
+        x.parse_bookable_floorplan_ids(_AVAILABLE_TILE + _RENTED_OUT_TILE)
+        assert warned == []

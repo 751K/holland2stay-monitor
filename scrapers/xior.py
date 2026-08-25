@@ -466,8 +466,44 @@ def _days_until(iso_date: Optional[str], today: date) -> Optional[int]:
 # 我们抓这一页，取出「真正可订」的 floorplan id 集合，用来 gate WP feed 的单元
 # （join key：WP 单元的 floorplanId == floorplans.aspx 的 floorPlans=<id>）。
 _FP_TILE_SPLIT = re.compile(r'data-selenium-id\s*=\s*"FloorPlanAvailability"')
-_FP_APPLY_BTN = re.compile(r'<button[^>]*data-selenium-id\s*=\s*"ApplyNow"[^>]*>')
+#: 连按钮文字一起吃进来——**类名和 data-selenium-id 分辨不了可订与否**，见下。
+_FP_APPLY_BTN = re.compile(
+    r'<button[^>]*data-selenium-id\s*=\s*"ApplyNow"[^>]*>(?P<label>.*?)</button>',
+    re.S,
+)
 _FP_FLOORPLAN_ID = re.compile(r'floorPlans=(\d+)')
+
+# ── 按钮文字才是判据 ────────────────────────────────────────────────
+#
+# 2026-08-25 实测，同一时刻的两栋楼：
+#
+#   Zernikestraat / Comfy（1109741）
+#     <button id="Comfy" data-selenium-id="ApplyNow"
+#             class="applyButton btn btn-primary">Rented Out</button>
+#   Karspeldreef（1111515）
+#     <button ... data-selenium-id="ApplyNow"
+#             class="applyButton btn btn-primary">Available</button>
+#
+# 属性一模一样，只有**文字**不同。而 tile 顶上那句 ``(Available)``
+# （``availability-count``）两边都写着，租完了也不更新——所以它不能用。
+#
+# 后果实测：xr_373301（Zernikestraat 1-222，19 m²，€781）在 WP feed 里挂着，
+# 闸门看类名放行，面板上一直显示 Book，实际早已租出。
+#
+# 未知文字**放行并告警**：漏报真房源比误报一条贵得多（见模块头 step 4 的
+# fail-open 取舍），但要在日志里留下痕迹，别再靠用户来发现。
+_FP_UNBOOKABLE_LABELS = (
+    "rented out", "sold out", "unavailable", "not available",
+    "waiting list", "contact us",
+)
+_FP_BOOKABLE_LABELS = ("available", "apply", "book")
+_FP_TAGS = re.compile(r"<[^>]+>")
+
+
+def _button_label(raw: str) -> str:
+    """按钮内文字，去标签、去实体、压空白。"""
+    from html import unescape
+    return re.sub(r"\s+", " ", unescape(_FP_TAGS.sub(" ", raw or ""))).strip()
 
 
 def _floorplans_url(apply_url: str) -> Optional[str]:
@@ -505,8 +541,19 @@ def parse_bookable_floorplan_ids(html_body: str) -> set[int]:
         if not btn or "applyButton" not in btn.group(0):
             continue  # contactButton / 无按钮 = 订不了
         m = _FP_FLOORPLAN_ID.search(seg)
-        if m:
-            ids.add(int(m.group(1)))
+        if not m:
+            continue
+        label = _button_label(btn.group("label"))
+        low = label.lower()
+        if any(k in low for k in _FP_UNBOOKABLE_LABELS):
+            continue  # 类名是 applyButton，文字却写着 Rented Out —— 订不了
+        if not any(k in low for k in _FP_BOOKABLE_LABELS):
+            logger.warning(
+                "Xior floorplans.aspx 出现没见过的按钮文字 %r（floorplan %s），"
+                "按可订放行——若它其实代表订不了，会误报一条房源",
+                label[:40], m.group(1),
+            )
+        ids.add(int(m.group(1)))
     return ids
 
 

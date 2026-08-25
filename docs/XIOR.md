@@ -236,8 +236,27 @@ WordPress feed 中标记为「可订」并不等同于当前确实可以提交�
 列于其中，用户点击 `applyOnlineURL` 进入后才发现房源已无。`floorplans.aspx` 是
 权威来源，每个户型 tile 二者取其一：
 
-- `(Available)` 与 `<button class="applyButton" … floorPlans=<id>>`：确实可订
-- `(Contact for Availability)` 与 `<button class="contactButton" data-function='contactUsLink'>`：不可订
+- `<button class="applyButton" … floorPlans=<id>>`，**且按钮文字为 `Available`**：确实可订
+- `<button class="contactButton" data-function='contactUsLink'>Contact Us`：不可订
+- `<button class="applyButton" … floorPlans=<id>>`，**但按钮文字为 `Rented Out`**：不可订
+
+**判据是按钮文字，不是类名（2026-08-25 更正）**。此处原先只看
+`class="applyButton"` 与 `data-selenium-id="ApplyNow"`，而 RENTCafe 在户型租完后
+**不改这两个属性，只改按钮文字**。同一时刻实测：
+
+| 楼栋 | 属性 | 按钮文字 | 实际 |
+|---|---|---|---|
+| Zernikestraat / Comfy (1109741) | `applyButton` + `ApplyNow` | `Rented Out` | 订不了 |
+| Karspeldreef (1111515) | `applyButton` + `ApplyNow` | `Available` | 能订 |
+
+而 tile 顶上那句 `(Available)`（`availability-count`）**两边都写着**，租完了也不更新，
+因此它不能作为判据。
+
+后果：`xr_373301`（Zernikestraat 1-222，19 m²、€781）在 WP feed 里挂着、闸门看类名
+放行，面板上一直显示可订，实际早已租出——是用户自己发现的。
+
+未见过的按钮文字**放行并告警**：漏报真房源比误报贵（同 fail-open 的取舍），但要在
+日志里留痕，不能再靠用户发现。
 
 关联键为：feed 单元的 `floorplanId` 等于 `floorplans.aspx` 中的 `floorPlans=<id>`。
 
