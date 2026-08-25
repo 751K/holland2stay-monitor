@@ -610,6 +610,50 @@ class ListingOps:
 
     # ── 基础查询 ────────────────────────────────────────────────────
 
+    def detail_feature_snapshot(self, source: str) -> dict[str, dict[str, str]]:
+        """库里已有的补齐值：``{listing_id: {key: value}}``，只含粘性那几个 key。
+
+        抓取侧在**进程启动时**拿它回填详情缓存。没有这一步的话，重启后
+        ``_DETAIL_CACHE`` 归零，几十条早就补齐过的房源会被重新问一遍详情——
+        而上游的限流是按速率算的，那一串请求撞出 429 之后，本轮真正需要补齐的
+        **新房源**就轮不上了。2026-08-25 实测：部署两分钟后进来的
+        ``beukenlaan-143-093`` 就这么少了 Building/Tenant，而它带着残缺的
+        feature 直接发出了通知，勾了租客条件的用户被 fail-closed 拒掉，且补齐
+        之后不会补发。
+
+        只回填**有值**的 key。详情里本来就没有的（空结果）不进快照，重启后照旧
+        去问一次——那类房源很少，代价小于「永远不再核实」。
+        """
+        out: dict[str, dict[str, str]] = {}
+        try:
+            rows = self._conn.execute(
+                "SELECT id, features FROM listings "
+                "WHERE source = ? AND features IS NOT NULL AND features <> ''",
+                (source,),
+            ).fetchall()
+        except Exception:
+            logger.debug("读取 detail_feature_snapshot 失败（已忽略）", exc_info=True)
+            return out
+
+        for r in rows:
+            try:
+                feats = json.loads(r["features"])
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(feats, list):
+                continue
+            got: dict[str, str] = {}
+            for item in feats:
+                if not isinstance(item, str) or ":" not in item:
+                    continue
+                key, value = item.split(":", 1)
+                key, value = key.strip(), value.strip()
+                if key in _STICKY_FEATURE_KEYS and value:
+                    got[key] = value
+            if got:
+                out[r["id"]] = got
+        return out
+
     def get_distinct_cities(self) -> list[str]:
         """筛选下拉用的城市列表——归一后的值。
 

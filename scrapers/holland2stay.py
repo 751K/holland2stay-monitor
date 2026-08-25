@@ -166,7 +166,10 @@ def _labels_from_aggregations(products: dict) -> dict[str, dict[str, str]]:
 # 「补齐字段不能丢」这件事历史上被四个地方分别处理过，各自的注释都声称自己是
 # 关键的那一层。理清一次，免得下次又长出一层：
 #
-#   1. _DETAIL_CACHE          省流量。同一房源一个进程内只取一次。
+#   1. _DETAIL_CACHE          省流量。同一房源一个进程内只取一次。进程启动时
+#                             由 prime_detail_cache() 用库里已有的值回填，
+#                             否则每次重启头几轮都在重问已知答案（2026-08-25
+#                             那次 429 挤掉新房源就是这么来的）。
 #   2. _DETAIL_BUDGET_PER_ROUND / _DETAIL_REQUEST_SPACING / _DETAIL_STOP_ON_RATE_LIMIT
 #                             省流量 + 防 429。见 _DetailBudget。
 #   3. _STICKY_FEATURE_KEYS   ← **正确性归它管。** 在 mstorage/_listings.py：
@@ -323,6 +326,44 @@ def _fetch_detail(fetcher: "BrowserFetcher", url_key: str) -> dict[str, str]:
     if not items:
         return {}
     return _detail_features(items[0], products.get("aggregations"))
+
+
+def prime_detail_cache(snapshot: "dict[str, dict[str, str]]") -> int:
+    """进程启动时用库里已有的补齐值回填 ``_DETAIL_CACHE``，返回回填条数。
+
+    为什么需要它
+    ------------
+    缓存是进程级的，重启即清零。于是每次部署后的头几轮，几十条**早就补齐过**
+    的房源会被重新问一遍详情——而限流是按速率算的，那一串请求把 429 撞出来之后
+    就本批次收手，本轮真正需要补齐的**新房源**排在后面，轮不上。
+
+    2026-08-25 实测：部署两分钟后进来的 ``beukenlaan-143-093`` 正是如此
+    （日志：``详情补齐 1 条失败（成功 24，本轮共 37 条房源），已因 429 本批次收手``）。
+    它是新房源，库里没有旧值，``_STICKY_FEATURE_KEYS`` 的粘性合并救不了它——
+    粘性只能保住**已经有过**的值。结果它带着残缺的 feature 直接发了通知，勾了
+    租客条件的用户被 fail-closed 拒掉，而补齐之后不会补发。
+
+    回填之后，稳态下「不在缓存里」就等价于「这条是新的」，预算与限流自然全花在
+    新房源上。
+
+    这不是第五层机制
+    ----------------
+    见上面「四层机制各管什么」：本函数不改变任何一层的职责，只是让第 1 层
+    （纯流量旋钮）在重启后不必从零开始。正确性仍然归第 3 层（storage 的粘性
+    合并）管。
+
+    代价：上游若改了某条房源的楼盘名，本进程不会再去核实（缓存本来就"永不过期"，
+    这里只是把这个性质延长到跨重启）。楼盘名基本不变，可以接受。
+    """
+    added = 0
+    for listing_id, feats in (snapshot or {}).items():
+        if not listing_id or listing_id in _DETAIL_CACHE:
+            continue
+        clean = {k: v for k, v in (feats or {}).items() if k and v}
+        if clean:
+            _DETAIL_CACHE[listing_id] = clean
+            added += 1
+    return added
 
 
 def _enrich(

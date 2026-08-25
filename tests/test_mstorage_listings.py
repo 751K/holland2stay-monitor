@@ -1,5 +1,7 @@
 """mstorage 房源查询单元测试 — get_all_listings / get_recent_changes / counts / filter helpers。"""
 
+import json
+
 import pytest
 from datetime import datetime, timezone, timedelta
 from models import Listing
@@ -206,3 +208,48 @@ class TestCountByStatus:
         result = store.count_by_status(city="Amsterdam")
         assert result.get("available to book") == 1
         assert len(result) == 1  # only Amsterdam listings
+
+
+class TestDetailFeatureSnapshot:
+    """给抓取侧在进程启动时回填详情缓存用。
+
+    不回填的后果见 scrapers/holland2stay.py 的 prime_detail_cache：重启后几十条
+    早就补齐过的房源被重新问一遍详情，撞出 429 收手，本轮真正的新房源轮不上。
+    """
+
+    def test_only_sticky_keys_come_back(self, store):
+        _add(store, "a", features=json.dumps([
+            "Building: The Wall", "Tenant: student only",
+            "Neighborhood: Strijp", "MinIncome: 3x",
+            "Area: 25 m²", "Energy: A",           # 每轮都拿得到，不该进快照
+        ]))
+        snap = store.detail_feature_snapshot("holland2stay")
+        assert snap["a"] == {
+            "Building": "The Wall", "Tenant": "student only",
+            "Neighborhood": "Strijp", "MinIncome": "3x",
+        }
+
+    def test_listings_without_sticky_keys_are_absent(self, store):
+        """一条都没有的不进快照——进了就等于宣布「查过了，没有」，永不再问。"""
+        _add(store, "a", features=json.dumps(["Area: 25 m²"]))
+        assert store.detail_feature_snapshot("holland2stay") == {}
+
+    def test_partial_values_survive(self, store):
+        _add(store, "a", features=json.dumps(["Building: The Wall", "Area: 25 m²"]))
+        assert store.detail_feature_snapshot("holland2stay") == {
+            "a": {"Building": "The Wall"}}
+
+    def test_other_sources_are_not_mixed_in(self, store):
+        _add(store, "a", features=json.dumps(["Building: The Wall"]))
+        _add(store, "b", source="xior", features=json.dumps(["Building: 别人的"]))
+        assert list(store.detail_feature_snapshot("holland2stay")) == ["a"]
+
+    def test_empty_value_is_dropped(self, store):
+        _add(store, "a", features=json.dumps(["Building: ", "Tenant: student only"]))
+        assert store.detail_feature_snapshot("holland2stay") == {
+            "a": {"Tenant": "student only"}}
+
+    @pytest.mark.parametrize("bad", ["not json", "{}", '"a string"', "", "[123, null]"])
+    def test_junk_features_do_not_blow_up(self, store, bad):
+        _add(store, "a", features=bad)
+        assert store.detail_feature_snapshot("holland2stay") == {}

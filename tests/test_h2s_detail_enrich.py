@@ -441,3 +441,99 @@ class TestBudgetIsNotLoadBearingForCorrectness:
             _AGGS,
         ))
         assert produced <= set(_STICKY_FEATURE_KEYS)
+
+
+# ── 重启后回填缓存 ──────────────────────────────────────────────────
+
+
+class TestPrimeDetailCache:
+    """缓存是进程级的，重启即清零——而库里明明已经有那些值了。
+
+    不回填的后果（2026-08-25 生产实测）：部署两分钟后的那一轮，37 条房源里
+    24 条被重新问了一遍详情，第 25 条撞 429 收手，而排在后面的
+    ``beukenlaan-143-093`` 是**当轮唯一的新房源**，就此少了 Building/Tenant。
+    它带着残缺的 feature 直接发了通知，勾了租客条件的用户被 fail-closed 拒掉，
+    补齐之后也不会补发——粘性合并救不了它，粘性只能保住已经有过的值。
+    """
+
+    def test_primed_listings_cost_no_request(self):
+        h2s.prime_detail_cache({"x-1": {"Building": "The Wall"}})
+        f = _Fetcher({"x-1": {"building_name": 614}})
+        l = _listing("x-1")
+        h2s._enrich(f, [l])
+
+        assert f.calls == [], "库里已经有值了，不该再问一次详情"
+        assert "Building: The Wall" in l.features
+
+    def test_new_listing_still_gets_the_budget(self):
+        """回填之后「不在缓存里」就等价于「这条是新的」——预算全花在它身上。"""
+        h2s.prime_detail_cache({f"old-{i}": {"Building": "B"} for i in range(30)})
+        f = _Fetcher({"new-1": {"building_name": 614, "tenant_profile": 6213}})
+        listings = [_listing(f"old-{i}") for i in range(30)] + [_listing("new-1")]
+
+        budget = h2s._DetailBudget()
+        budget.remaining = 1          # 极端情况：预算只够一条
+        h2s._enrich(f, listings, budget)
+
+        assert [c["key"] for c in f.calls] == ["new-1"]
+        assert "Tenant: student only" in listings[-1].features
+
+    def test_returns_how_many_were_added(self):
+        assert h2s.prime_detail_cache({"a": {"Building": "X"}, "b": {"Tenant": "Y"}}) == 2
+        # 已经在缓存里的不重复计数，也不覆盖
+        assert h2s.prime_detail_cache({"a": {"Building": "改了"}}) == 0
+        assert h2s._DETAIL_CACHE["a"] == {"Building": "X"}
+
+    def test_empty_and_junk_are_ignored(self):
+        """空值不能进缓存——进了就等于宣布「这条详情查过了，没有」，永不再问。"""
+        assert h2s.prime_detail_cache({}) == 0
+        assert h2s.prime_detail_cache(None) == 0
+        assert h2s.prime_detail_cache({"a": {}}) == 0
+        assert h2s.prime_detail_cache({"a": {"Building": ""}}) == 0
+        assert h2s.prime_detail_cache({"": {"Building": "X"}}) == 0
+        assert h2s._DETAIL_CACHE == {}
+
+    def test_snapshot_keys_match_what_the_detail_query_produces(self):
+        """两侧对同一组 key 的认知必须一致，否则回填要么漏要么塞进无效项。
+
+        storage 侧的 _STICKY_FEATURE_KEYS 决定快照里放什么，抓取侧的
+        _detail_features 决定能补出什么。靠注释维持一致不算一致。
+        """
+        from mstorage._listings import _STICKY_FEATURE_KEYS
+
+        produced = h2s._detail_features(
+            {"building_name": 614, "tenant_profile": 6213,
+             "neighborhood": "Strijp", "min_income": "3x"},
+            _AGGS,
+        )
+        assert set(produced) == set(_STICKY_FEATURE_KEYS)
+
+
+class TestPrimingIsActuallyWiredUp:
+    """回填得在**进程启动时**真的被调用——单测自己调一遍，接线断了照样全绿。"""
+
+    def test_bind_persistent_state_primes_the_cache(self):
+        import inspect
+
+        import monitor
+
+        src = inspect.getsource(monitor._bind_persistent_state)
+        assert "prime_detail_cache" in src, (
+            "_bind_persistent_state 必须回填详情缓存，否则每次部署后头几轮"
+            "都会把已补齐的房源重问一遍，撞 429 挤掉当轮的新房源")
+        assert "detail_feature_snapshot" in src
+
+    def test_priming_failure_does_not_stop_startup(self, tmp_path, monkeypatch):
+        """回填是省事的，不是必需的——库读不出来也得照常启动。"""
+        import monitor
+        from mstorage import Storage
+
+        st = Storage(tmp_path / "t.db")
+        monkeypatch.setattr(
+            st, "detail_feature_snapshot",
+            lambda source: (_ for _ in ()).throw(RuntimeError("库炸了")),
+        )
+        try:
+            monitor._bind_persistent_state(st)   # 不抛就算过
+        finally:
+            st.close()

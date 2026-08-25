@@ -874,6 +874,18 @@ def _bind_persistent_state(storage) -> None:
         except Exception:
             logger.warning("恢复退避状态失败（按未退避处理）", exc_info=True)
 
+    # H2S 详情补齐缓存同样是进程级的。不回填的话，重启后头几轮会把几十条早就
+    # 补齐过的房源重新问一遍详情，撞出 429 收手，本轮真正的新房源反而轮不上
+    # （见 scrapers/holland2stay.py 的 prime_detail_cache）。
+    try:
+        from scrapers.holland2stay import prime_detail_cache
+
+        primed = prime_detail_cache(storage.detail_feature_snapshot("holland2stay"))
+        if primed:
+            logger.info("详情补齐缓存回填 %d 条，重启后不再重复取详情", primed)
+    except Exception:
+        logger.warning("回填详情补齐缓存失败（按空缓存处理）", exc_info=True)
+
 
 def _should_notify_block() -> bool:
     """是否该发屏蔽通知。30 分钟最多一次，避免持续屏蔽时刷屏。"""
