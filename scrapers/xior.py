@@ -34,11 +34,13 @@ accumulates across rounds. Two mechanisms together:
   rebuilding the browser also rotates the exit IP, which spreads the
   accumulated count. 429s additionally retry with ``RATE_LIMIT_BACKOFF``.
 
-**All of this source's traffic goes out one exit IP** — the browser's, read
-back off ``BrowserFetcher.proxy_url``. That includes the RentCafe
-``floorplans.aspx`` cross-check in step 4, which used to open its own
-non-rotating sticky session and therefore sat on a fixed IP that the rotation
-strategy above could never move.
+**The WordPress endpoint's traffic all goes out one exit IP** — the browser's.
+The ``floorplans.aspx`` cross-check in step 4 is the deliberate exception: it
+targets a different origin (``*.securerc.co.uk``), where the browser's
+clearance is worthless, so it rotates its own exit IP and TLS fingerprint the
+way OurDomain does against that same platform. Pinning it to the browser's
+sticky IP is what kept it at 0/10 for its entire life — see
+``_fetch_bookable_floorplan_ids``.
 """
 from __future__ import annotations
 
@@ -53,10 +55,20 @@ from typing import Optional
 import curl_cffi.requests as req
 
 from browser_fetcher import XIOR_PROFILE, BrowserFetcher
-from config import assumed_features, get_impersonate
+from config import assumed_features, get_proxy_url
 from models import Listing
 
 from ._browser_backed import BrowserBackedScraper
+# floorplans.aspx 在 *.securerc.co.uk 上，和 OurDomain / OurCampus 同一套
+# RentCafe + Cloudflare。取数打法（浏览器 header、同 session 403 重试、TLS 指纹
+# 冷却状态机）都在那边，直接复用——ourcampus 也是这么接的。
+from .ourdomain import (
+    _get_text,
+    _headers_for,
+    _impersonate_attempts,
+    _mark_fingerprint_blocked,
+    _mark_fingerprint_good,
+)
 from .base import (
     RATE_LIMIT_BACKOFF,
     BlockedError,
@@ -65,7 +77,6 @@ from .base import (
     ScrapeResult,
     ScrapeTask,
     UpstreamMaintenanceError,
-    is_cloudflare_body,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +107,11 @@ _AJAX_PATH = "/wp-admin/admin-ajax.php"
 # 注意：楼栋数增加时单轮耗时线性增长（每栋楼的房型数 × 5s）。楼栋很多时
 # 应考虑分轮抓取，而不是把这个值调小。
 _MIN_REQUEST_INTERVAL = 5.0
+
+# floorplans.aspx 权威校验的时间预算（秒）。见 _fetch_bookable_floorplan_ids。
+# 45 秒 ≈ 一轮 Xior 的耗时（中位 55s），也就是说这道闸最多把轮次拖慢一倍，
+# 到点就 fail-open。
+_VERIFY_TIME_BUDGET = 45.0
 
 # 装修档位的登记表与判定住在 config（它是「平台事实」，和
 # SOURCE_ASSUMED_FEATURES 同一类），这里只做转发——mstorage 的存量订正也要用，
@@ -224,7 +240,7 @@ class XiorScraper(BrowserBackedScraper):
         # 该楼的 floorplans.aspx（绝大多数轮次没有候选 → 零额外请求）。fail-open：
         # 拿不到（None）就不 gate，信 WP feed，绝不漏报真房源。
         bookable_fp_ids = self._verify_bookable_floorplans(
-            list(all_units.values()), today, fetcher, display,
+            list(all_units.values()), today, display,
         )
 
         listings = [
@@ -243,7 +259,6 @@ class XiorScraper(BrowserBackedScraper):
         self,
         units: list[dict],
         today: date,
-        fetcher: "BrowserFetcher",
         display: str,
     ) -> Optional[set[int]]:
         """对窗口内的候选可订单元，抓 floorplans.aspx 求权威可订 floorplan 集合。
@@ -251,16 +266,11 @@ class XiorScraper(BrowserBackedScraper):
         - 无候选 → 返回 None（不 gate，省一次请求）
         - 有候选但无法推导/抓取 floorplans.aspx → 返回 None（fail-open）
 
-        **走 ``fetcher.proxy_url``，也就是浏览器这一刻实际在用的那条代理。**
-        这里原本另调 ``get_proxy_url(self.source)``——没带 ``rotating=True``，
-        拿到的是一条**永不轮换**的 sticky session，和浏览器不是同一个出口 IP：
-
-        - WP feed 和「这户型到底还能不能订」来自两个 IP，而这条校验恰恰只在
-          有候选可订单元时才发，也就是决定一条房源真假的那一刻；
-        - 多烧一份限流额度，还烧在永不轮换的 IP 上——而 Xior 整套抗限流策略
-          就是「换浏览器换 IP 把累积量摊开」（见模块头 Rate limiting）。它打的
-          还是 RentCafe（``*.securerc.co.uk``），和 OurDomain 同一个平台，
-          OurDomain 那边用的是 ``rotating=True``。
+        取数怎么打见 ``_fetch_bookable_floorplan_ids``。这里曾经把请求绑在
+        ``fetcher.proxy_url``（浏览器那条 sticky 线路）上，理由是「WP feed 和
+        这条校验应当来自同一个出口 IP」——**那个理由不成立**：浏览器的
+        clearance 属于 Xior 主站的 origin，到了 ``securerc.co.uk`` 上不顶用，
+        而绑死一个 IP 恰恰是 CF 在那边最吃的一招。
         """
         candidates = [u for u in units if _is_candidate_available(u, today)]
         if not candidates:
@@ -276,10 +286,7 @@ class XiorScraper(BrowserBackedScraper):
                 "fail-open 按 WP feed 结果", display,
             )
             return None
-        proxy = fetcher.proxy_url
-        proxies = {"https": proxy, "http": proxy} if proxy else {}
-        with req.Session(impersonate=get_impersonate(), proxies=proxies) as vs:
-            ids = _fetch_bookable_floorplan_ids(vs, fp_url)
+        ids = _fetch_bookable_floorplan_ids(fp_url)
         if ids is None:
             logger.warning(
                 "[%s] Xior floorplans.aspx 验证不可用，fail-open 按 WP feed 结果"
@@ -503,26 +510,79 @@ def parse_bookable_floorplan_ids(html_body: str) -> set[int]:
     return ids
 
 
-def _fetch_bookable_floorplan_ids(
-    session: req.Session, url: str
-) -> Optional[set[int]]:
-    """GET floorplans.aspx 并解析可订 floorplan id 集合。
+def _fetch_bookable_floorplan_ids(url: str) -> Optional[set[int]]:
+    """取 floorplans.aspx 并解析可订 floorplan id 集合。
 
-    返回 None 表示「无法判定」（网络异常 / 非 200 / Cloudflare challenge）——
-    调用方据此 **fail-open**（信 WP feed，不漏报真房源）。
+    返回 None 表示「无法判定」——调用方据此 **fail-open**（信 WP feed，不漏报
+    真房源）。
+
+    为什么走 OurDomain 那套而不是单发一次
+    -----------------------------------
+    这个页面在 ``*.securerc.co.uk`` 上，和 OurDomain / OurCampus 打的是同一套
+    RentCafe + Cloudflare。原实现是「浏览器的 sticky 出口 IP + 默认指纹 + 单发、
+    不带 header」，2026-08-25 复盘：**生产日志里 10 次尝试 10 次失败**（5 次
+    403、5 次 challenge 页），0 次成功——这道「权威闸门」自上线起就一直敞着，
+    所有 Xior 通知走的都是未经校验的 WP feed。Naritaweg 60S 就是这么发出去的。
+
+    当天在生产上做的对照（同一个 URL，前后几分钟内）：
+
+        ===========================================  ======
+        打法                                          结果
+        ===========================================  ======
+        现状：sticky IP + 默认指纹 + 单发 + 无 header   0/2
+        OurDomain 打法（下面这套）                     10/10
+        ===========================================  ======
+
+    差别在三件事，缺一不可：**浏览器风格 header**、**同 session 内 403 重试**
+    （CF 首次 403 会顺手下发 cf_clearance，第二次同 URL 往往就软通过）、
+    **每次尝试换出口 IP + 换 TLS 指纹**。这正是 ``ourdomain._get_text`` 和
+    它的指纹状态机，直接复用而不是抄一遍——``ourcampus`` 也是这么做的。
+
+    指纹的冷却状态是模块级、跨 source 共享的：三个 source 打的是同一个
+    SecureRC 集群，某个指纹被烧对谁都一样，所以这里也如实记账。
+
+    出口 IP 用 ``rotating=True``，和浏览器那条 sticky 线路无关：原注释主张
+    「跟浏览器同一个 IP」是为了复用 clearance，但**浏览器的 clearance 属于
+    Xior 主站那个 origin，在 securerc.co.uk 上一文不值**——这里没有 clearance
+    可复用，换 IP 才是恢复手段（与 OurDomain 同理）。
     """
-    try:
-        resp = session.get(url, timeout=30)
-    except Exception as exc:
-        logger.warning("Xior floorplans.aspx 请求异常 url=%s: %s", url, exc)
-        return None
-    if resp.status_code != 200:
-        logger.warning("Xior floorplans.aspx HTTP %d url=%s", resp.status_code, url)
-        return None
-    if is_cloudflare_body(resp.text):
-        logger.warning("Xior floorplans.aspx 命中 Cloudflare challenge url=%s", url)
-        return None
-    return parse_bookable_floorplan_ids(resp.text)
+    tried: list[str] = []
+    started = time.monotonic()
+    for impersonate in _impersonate_attempts():
+        # 时间预算：这是一道**尽力而为**的闸，拿不到就 fail-open。而
+        # ``_get_text`` 遇 429 会退避 30s + 60s，四个指纹轮完最坏能吃掉六分钟
+        # ——而整轮 Xior 本身才 55 秒。宁可这一轮不校验，也不能让它把轮次拖垮：
+        # 拖垮的代价是**所有**楼的房源都晚到，比放过一条未校验的房源更贵。
+        #
+        # ``started`` 在函数入口取，所以第一次尝试一定跑得到——预算管的是
+        # 「还要不要继续轮换」，不是「要不要开始」。
+        if time.monotonic() - started > _VERIFY_TIME_BUDGET:
+            logger.warning(
+                "Xior floorplans.aspx 校验超出 %.0fs 预算，剩余指纹不再试 url=%s",
+                _VERIFY_TIME_BUDGET, url,
+            )
+            break
+        tried.append(impersonate)
+        proxy = get_proxy_url("xior", rotating=True)
+        proxies = {"https": proxy, "http": proxy} if proxy else {}
+        try:
+            with req.Session(impersonate=impersonate, proxies=proxies) as session:
+                html = _get_text(session, url, headers=_headers_for(url))
+        except BlockedError:
+            _mark_fingerprint_blocked(impersonate)
+            continue
+        except Exception as exc:
+            # 网络类异常换指纹也没用，直接交回 fail-open
+            logger.warning("Xior floorplans.aspx 请求异常 url=%s: %s", url, exc)
+            return None
+        _mark_fingerprint_good(impersonate)
+        return parse_bookable_floorplan_ids(html)
+
+    logger.warning(
+        "Xior floorplans.aspx 全部 TLS 指纹都被挡 url=%s，已试: %s",
+        url, ", ".join(tried),
+    )
+    return None
 
 
 def _is_candidate_available(unit: dict, today: date) -> bool:

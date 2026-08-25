@@ -602,116 +602,234 @@ def test_xior_building_lookup():
     assert bldg["display"] == "Maastricht Annadal"
 
 
-# ── 权威校验必须和浏览器走同一条出口 ────────────────────────────────────
+# ── 权威校验的取数打法 ──────────────────────────────────────────────
 
-class TestFloorplanCheckSharesTheBrowserExit:
-    """floorplans.aspx 的权威校验要走**浏览器实际在用的那条代理**。
+class TestFloorplanCheckUsesTheRentCafePlaybook:
+    """``floorplans.aspx`` 要按 OurDomain 那套打，而不是单发一次。
 
-    原实现在 ``scrape()`` 里另调一次 ``get_proxy_url(self.source)``——注意
-    **没有 rotating=True**，于是它拿到的是一条永不轮换的 sticky session，
-    和浏览器（``XIOR_PROFILE.rotating_proxy=True``）根本是两个出口 IP。
+    这个页面在 ``*.securerc.co.uk`` 上，和 OurDomain / OurCampus 是同一套
+    RentCafe + Cloudflare。原实现绑在浏览器的 sticky 出口 IP 上、用默认指纹、
+    单发一次、不带 header——2026-08-25 复盘生产日志：**10 次尝试 10 次失败**
+    （5 次 403、5 次 challenge 页），0 次成功。这道闸门一直是敞的，所有 Xior
+    通知走的都是未经校验的 WP feed（Naritaweg 60S 就是这么发出去的）。
 
-    两个后果：
+    同日在生产上对照，同一个 URL、前后几分钟：
 
-    1. **不一致。** WP feed 和「这户型到底还能不能订」这两份数据来自不同 IP，
-       而这条校验恰恰只在有候选可订单元时才发——也就是决定一条房源真假的
-       那一刻。
-    2. **多烧一份限流额度，而且是烧在一个永不轮换的 IP 上。** Xior 整套抗
-       限流策略就是「换浏览器换 IP 把累积量摊开」（见模块头 Rate limiting），
-       唯独这条最关键的请求被钉死在固定 IP 上。它打的还是 RentCafe
-       （``*.securerc.co.uk``），和 OurDomain 同一个平台，而 OurDomain 那边
-       用的是 ``rotating=True``。
+        现状打法                          0/2
+        OurDomain 打法（本类守的这套）     10/10
 
-    ``BrowserFetcher`` 早就把实际生效的代理记在 ``_proxy_url`` 上了，就是为了
-    「诊断必须探这个浏览器实际在用的那条线路」——同一个理由适用于这里。
+    **本类推翻的是它自己的上一版。** 原来那组测试（
+    ``TestFloorplanCheckSharesTheBrowserExit``）守的是「必须走浏览器那条
+    sticky 代理」，理由是「WP feed 与校验应当同源同 IP」。那个理由不成立：
+    浏览器的 clearance 属于 Xior 主站的 origin，到 ``securerc.co.uk`` 上一文
+    不值；而绑死一个 IP 恰恰是 CF 在那边最吃的一招。
     """
 
-    def test_browser_fetcher_exposes_its_proxy(self):
-        from browser_fetcher import BrowserFetcher
-
-        f = BrowserFetcher.__new__(BrowserFetcher)
-        f._proxy_url = "http://u:p@gw.example:8080"
-        assert f.proxy_url == "http://u:p@gw.example:8080"
-
-    def test_verify_uses_the_fetchers_proxy_not_a_second_session(self, monkeypatch):
+    def _patch(self, monkeypatch, *, get_text, fingerprints=("fp1", "fp2")):
         import scrapers.xior as x
 
-        seen: dict = {}
+        calls: dict = {"proxy": [], "sessions": [], "get_text": [],
+                       "good": [], "blocked": []}
 
         class _Sess:
             def __init__(self, **kw):
-                seen.update(kw)
+                calls["sessions"].append(kw)
 
             def __enter__(self): return self
             def __exit__(self, *a): return False
 
         monkeypatch.setattr(x.req, "Session", _Sess)
-        monkeypatch.setattr(x, "_fetch_bookable_floorplan_ids", lambda s, u: {1})
-        # 诱饵：本次修复把这个符号从模块里删掉了。若哪天有人把它加回来并在
-        # 校验路径上用，桩会让断言立刻看见走错了出口。raising=False 是因为
-        # 现在它本就不该存在。
-        monkeypatch.setattr(
-            x, "get_proxy_url", lambda *a, **k: "http://WRONG:1", raising=False,
-        )
+        monkeypatch.setattr(x, "_impersonate_attempts", lambda: list(fingerprints))
 
-        class _Fetcher:
-            proxy_url = "http://RIGHT:2"
+        def _proxy(source, **kw):
+            calls["proxy"].append((source, kw))
+            return f"http://exit{len(calls['proxy'])}:1"
 
-        s = x.XiorScraper()
-        unit = {
-            "unitStatus": "Notice Unrented",
-            "availableDate": "01/07/2026",
-            "applyOnlineURL": (
-                "https://x.securerc.co.uk/onlineleasing/a/oleapplication.aspx"
-                "?myOlePropertyId=185589&myLeaseCafeType=2"
-            ),
-        }
-        monkeypatch.setattr(x, "_is_candidate_available", lambda u, t: True)
+        monkeypatch.setattr(x, "get_proxy_url", _proxy)
 
-        from datetime import date
-        s._verify_bookable_floorplans([unit], date(2026, 1, 1), _Fetcher(), "B")
+        def _get_text(session, url, *, headers=None, **kw):
+            calls["get_text"].append({"url": url, "headers": headers})
+            return get_text(len(calls["get_text"]))
 
-        assert seen.get("proxies") == {
-            "https": "http://RIGHT:2", "http": "http://RIGHT:2",
-        }, f"权威校验没走浏览器那条代理: {seen.get('proxies')!r}"
+        monkeypatch.setattr(x, "_get_text", _get_text)
+        monkeypatch.setattr(x, "_mark_fingerprint_good",
+                            lambda imp: calls["good"].append(imp))
+        monkeypatch.setattr(x, "_mark_fingerprint_blocked",
+                            lambda imp: calls["blocked"].append(imp))
+        return x, calls
 
-    def test_no_proxy_means_no_proxies_dict(self, monkeypatch):
-        """浏览器降级成直连（代理全在冷却）时，校验也该直连。"""
+    def test_每次尝试都换出口_ip(self, monkeypatch):
+        """rotating=True。绑死一个 IP 正是 CF 在这个平台上最吃的一招。"""
+        from scrapers.base import BlockedError
+
+        def _text(n):
+            if n < 3:
+                raise BlockedError("403")
+            return "<html></html>"
+
+        x, calls = self._patch(monkeypatch, get_text=_text,
+                               fingerprints=("fp1", "fp2", "fp3"))
+        x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        assert [c[0] for c in calls["proxy"]] == ["xior"] * 3
+        assert all(c[1].get("rotating") is True for c in calls["proxy"]), (
+            f"取到了 sticky 出口: {calls['proxy']}")
+        # 三次尝试 = 三条不同的出口线路，而不是复用同一条
+        assert len({s["proxies"]["https"] for s in calls["sessions"]}) == 3
+
+    def test_走_get_text_而不是裸请求(self, monkeypatch):
+        """同 session 内 403 重试住在 _get_text 里，是这套打法的关键一环。"""
+        x, calls = self._patch(monkeypatch, get_text=lambda n: "<html></html>")
+        x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        assert len(calls["get_text"]) == 1
+        headers = calls["get_text"][0]["headers"]
+        assert headers and "Accept-Language" in headers, (
+            f"没带浏览器风格 header: {headers!r}")
+
+    def test_单发裸请求已经从取数路径里消失(self):
+        """回归守卫：别哪天又改回 session.get(url) 单发。"""
+        import inspect
+
         import scrapers.xior as x
-        from datetime import date
 
-        seen: dict = {}
+        src = inspect.getsource(x._fetch_bookable_floorplan_ids)
+        assert "session.get(" not in src and ".get(url" not in src, (
+            "又变回单发裸请求了——生产实测这么打是 0/10")
+        assert "_get_text" in src
 
-        class _Sess:
-            def __init__(self, **kw):
-                seen.update(kw)
+    def test_被挡就换指纹并记冷却(self, monkeypatch):
+        from scrapers.base import BlockedError
 
-            def __enter__(self): return self
-            def __exit__(self, *a): return False
+        def _text(n):
+            if n == 1:
+                raise BlockedError("403")
+            return '<div data-selenium-id="FloorPlanAvailability"></div>'
 
-        monkeypatch.setattr(x.req, "Session", _Sess)
-        monkeypatch.setattr(x, "_fetch_bookable_floorplan_ids", lambda s, u: set())
-        monkeypatch.setattr(x, "_is_candidate_available", lambda u, t: True)
+        x, calls = self._patch(monkeypatch, get_text=_text)
+        x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
 
-        class _Fetcher:
-            proxy_url = ""
+        assert calls["blocked"] == ["fp1"]
+        assert calls["good"] == ["fp2"]
 
-        s = x.XiorScraper()
-        s._verify_bookable_floorplans(
-            [{"applyOnlineURL":
-              "https://x.securerc.co.uk/onlineleasing/a/oleapplication.aspx"
-              "?myOlePropertyId=1&myLeaseCafeType=2"}],
-            date(2026, 1, 1), _Fetcher(), "B",
+    def test_全部指纹被挡返回_none_走_fail_open(self, monkeypatch):
+        """判定不了就 fail-open——宁可误报，也不漏掉真房源。"""
+        from scrapers.base import BlockedError
+
+        def _text(n):
+            raise BlockedError("403")
+
+        x, calls = self._patch(monkeypatch, get_text=_text)
+        got = x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        assert got is None
+        assert calls["blocked"] == ["fp1", "fp2"]
+        assert calls["good"] == []
+
+    def test_网络异常直接放弃不轮换指纹(self, monkeypatch):
+        """换指纹治不了连不上，白打两轮只是多烧两个 IP。"""
+        def _text(n):
+            raise OSError("connection reset")
+
+        x, calls = self._patch(monkeypatch, get_text=_text)
+        got = x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        assert got is None
+        assert len(calls["get_text"]) == 1
+        assert calls["blocked"] == []
+
+    def test_成功时解析出可订户型(self, monkeypatch):
+        html = (
+            '<div data-selenium-id="FloorPlanAvailability">'
+            '<button data-selenium-id="ApplyNow" class="applyButton" '
+            'onclick="go(\'?floorPlans=1109741\')"></button></div>'
         )
-        assert seen.get("proxies") == {}
+        x, calls = self._patch(monkeypatch, get_text=lambda n: html)
+        got = x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
 
-    def test_scrape_no_longer_opens_its_own_sticky_session(self):
-        """回归守卫：``scrape()`` 里不该再出现非 rotating 的 get_proxy_url。"""
+        assert got == {1109741}
+        assert calls["good"] == ["fp1"]
+
+    def test_scrape_不再自己开_sticky_会话(self):
+        """``scrape()`` 里不该出现 get_proxy_url——它只该走浏览器那条线。"""
         import inspect
 
         import scrapers.xior as x
 
         src = inspect.getsource(x.XiorScraper.scrape)
         assert "get_proxy_url" not in src, (
-            "scrape() 又自己开了一条 sticky 代理会话——它和浏览器不是同一个出口 IP"
+            "scrape() 又自己开了一条代理会话——WP feed 必须走浏览器的出口")
+
+    def test_校验拿不到结果时不_gate(self, monkeypatch):
+        """fail-open 的语义没变：None 一路传到 _to_listing，不过滤任何单元。"""
+        from datetime import date
+
+        import scrapers.xior as x
+
+        monkeypatch.setattr(x, "_is_candidate_available", lambda u, t: True)
+        monkeypatch.setattr(x, "_fetch_bookable_floorplan_ids", lambda url: None)
+        s = x.XiorScraper()
+        got = s._verify_bookable_floorplans(
+            [{"applyOnlineURL":
+              "https://x.securerc.co.uk/onlineleasing/a/oleapplication.aspx"
+              "?myOlePropertyId=1&myLeaseCafeType=2"}],
+            date(2026, 1, 1), "B",
         )
+        assert got is None
+
+    def test_超出时间预算就停手_fail_open(self, monkeypatch):
+        """_get_text 遇 429 会退避 30s+60s，四个指纹轮完最坏六分钟——而整轮
+        Xior 才 55 秒。到点必须停手，宁可不校验也不能拖垮轮次。"""
+        import scrapers.xior as x
+        from scrapers.base import BlockedError
+
+        clock = {"t": 0.0}
+        monkeypatch.setattr(x.time, "monotonic", lambda: clock["t"])
+
+        def _text(n):
+            clock["t"] += 100.0          # 每次尝试烧掉 100 秒
+            raise BlockedError("403")
+
+        x, calls = self._patch(monkeypatch, get_text=_text,
+                               fingerprints=("fp1", "fp2", "fp3", "fp4"))
+        got = x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        assert got is None                      # fail-open
+        assert len(calls["get_text"]) == 1, (
+            f"预算 {x._VERIFY_TIME_BUDGET}s，却试了 {len(calls['get_text'])} 个指纹")
+
+    def test_预算的起点是函数入口而不是零点(self, monkeypatch):
+        """monotonic() 的绝对值毫无意义（开机以来的秒数，生产上是六位数）。
+
+        起点若不是入口取的，第一次尝试就会被自己的预算挡掉——那等于把整道闸
+        关成常闭，比现在的常开还糟：所有候选单元会被判成「不可订」。
+        """
+        import scrapers.xior as x
+
+        monkeypatch.setattr(x.time, "monotonic", lambda: 987_654.0)
+        x, calls = self._patch(monkeypatch, get_text=lambda n: "<html></html>")
+        x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        assert len(calls["get_text"]) == 1
+
+    def test_超预算只警告一次(self, monkeypatch):
+        """停手要 break 不要 continue——否则剩下几个指纹各刷一条同样的告警。"""
+        import scrapers.xior as x
+        from scrapers.base import BlockedError
+
+        clock = {"t": 0.0}
+        monkeypatch.setattr(x.time, "monotonic", lambda: clock["t"])
+        warned: list = []
+        monkeypatch.setattr(x.logger, "warning",
+                            lambda msg, *a, **k: warned.append(msg))
+
+        def _text(n):
+            clock["t"] += 100.0
+            raise BlockedError("403")
+
+        x, calls = self._patch(monkeypatch, get_text=_text,
+                               fingerprints=("fp1", "fp2", "fp3", "fp4"))
+        x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        budget_warnings = [w for w in warned if "预算" in w]
+        assert len(budget_warnings) == 1, f"刷了 {len(budget_warnings)} 条: {warned}"

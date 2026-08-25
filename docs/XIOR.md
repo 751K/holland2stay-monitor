@@ -241,11 +241,33 @@ WordPress feed 中标记为「可订」并不等同于当前确实可以提交�
 
 关联键为：feed 单元的 `floorplanId` 等于 `floorplans.aspx` 中的 `floorPlans=<id>`。
 
-该页面使用 curl_cffi 直接获取（它**不在**托管挑战之后，返回 HTTP 200），且仅在
-「本栋楼存在窗口内的候选可订单元」时才额外发起一次请求——绝大多数轮次候选数为 0，
-因而不产生额外请求。相关函数：
+该页面仅在「本栋楼存在窗口内的候选可订单元」时才额外发起请求——绝大多数轮次
+候选数为 0，因而不产生额外请求。相关函数：
 `_floorplans_url()` / `parse_bookable_floorplan_ids()` / `_fetch_bookable_floorplan_ids()` /
 `XiorScraper._verify_bookable_floorplans()`。
+
+**取数打法（2026-08-25 更正）**：此处原先写的是「该页面不在托管挑战之后，
+curl_cffi 直接获取即返回 HTTP 200」——**该结论不成立**。生产日志复盘：这道闸自
+上线起共尝试 10 次，10 次全部失败（5 次 HTTP 403、5 次 challenge 页），成功 0 次，
+也就是说它一直处于 fail-open 状态，所有 Xior 通知走的都是未经校验的 feed 数据
+（`xr_403214` Amsterdam Naritaweg 60S 即为一例：只在校验失败的那一轮出现过，
+之后 170 次抓取再未出现）。
+
+同日在生产上做的对照（同一 URL、前后数分钟内）：
+
+| 打法 | 结果 |
+|---|---|
+| 浏览器 sticky 出口 IP + 默认指纹 + 单发、不带 header（原实现） | 0/2 |
+| OurDomain 的 SecureRC 打法 | 10/10 |
+
+差别在三处，缺一不可：浏览器风格 header、**同 session 内 403 重试**（Cloudflare
+首次 403 会顺手下发 `cf_clearance`，第二次同 URL 往往软通过）、**每次尝试换出口
+IP + 换 TLS 指纹**。该页面与 OurDomain / OurCampus 同属 `*.securerc.co.uk`，因此
+直接复用 `scrapers/ourdomain.py` 的 `_get_text()` 与指纹冷却状态机，不另抄一份。
+
+注意出口 IP 用 `rotating=True`，与浏览器那条 sticky 线路无关：浏览器的 clearance
+属于 Xior 主站的 origin，在 `securerc.co.uk` 上不适用，此处没有 clearance 可复用，
+换 IP 才是恢复手段（与 OurDomain 同理）。
 
 ---
 
