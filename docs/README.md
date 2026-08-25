@@ -4,28 +4,25 @@
 
 > 中文版：[README_cn.md](README_cn.md)
 
-In the Dutch rental market the difficulty is rarely finding a listing. It is
-**seeing it before someone else books it**: a good unit can go from published to
-taken within the hour, and refreshing a search page all day is not practical.
+FlatRadar is a self-hosted monitor for the Dutch rental market. It tracks
+Holland2Stay, OurDomain, OurCampus and Xior, and as soon as a listing matches
+your criteria it sends a notification through the channels you enabled, with a
+direct link included. For Holland2Stay it goes one step further: it first
+carries the booking through to the payment page, then sends the payment link
+along with the alert, so only the payment itself remains.
 
-FlatRadar takes over that part. It monitors several rental platforms at once and,
-as soon as a listing matches your criteria, sends a notification through the
-channels you enabled, with a direct link included. For Holland2Stay it goes one
-step further: it first carries the booking through to the payment page, then
-sends the payment link along with the alert, so only the payment itself remains.
-
-Its limits should be stated alongside that: **the system never pays on your
-behalf, and it cannot guarantee a booking succeeds.** What it shortens is the
-interval between a listing going live and you learning of it. Everything beyond
-that still depends on the competition on the platform.
+**FlatRadar never pays on your behalf, and it cannot guarantee a booking
+succeeds.** Whether you get the unit still depends on the competition on the
+platform.
 
 The project is self-hostable: one container, one SQLite file, no external
 services beyond the notification channels you choose to enable.
 
-**Website:** [flatradar.app](https://flatradar.app) ·
-**User guide:** [flatradar.app/guide](https://flatradar.app/guide) ·
-**Support:** [flatradar.app/support](https://flatradar.app/support) ·
-**Contact:** [support@flatradar.app](mailto:support@flatradar.app)
+**Website — [flatradar.app](https://flatradar.app)**
+
+[User guide](https://flatradar.app/guide) ·
+[Support](https://flatradar.app/support) ·
+[support@flatradar.app](mailto:support@flatradar.app)
 
 > FlatRadar is an independent, unofficial tool. It is not affiliated with,
 > endorsed by, sponsored by, maintained by, or operated by any housing platform
@@ -474,9 +471,3 @@ App Store fees come out of pocket.
 
 [PolyForm Noncommercial License 1.0.0](../LICENSE) — free for personal and other
 noncommercial use; commercial use is not granted by this licence.
-
-GitHub's sidebar shows this repository's licence as "Other". That is expected:
-GitHub only detects the licences listed on choosealicense.com, all of which are
-open source, and a no-commercial-use restriction disqualifies a licence from that
-definition. The licence is nonetheless registered with SPDX as
-`PolyForm-Noncommercial-1.0.0`.

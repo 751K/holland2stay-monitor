@@ -4,23 +4,21 @@
 
 > English version: [README.md](README.md)
 
-在荷兰租房，困难之处通常不在于找到房源，而在于**在其被他人预订之前发现它**。
-条件较好的房源自上线至订满往往只有数十分钟，而持续刷新页面并不现实。
+FlatRadar 是一套可自部署的荷兰租房监控工具。它同时追踪 Holland2Stay、OurDomain、
+OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即通过所选渠道发出通知，
+通知中附有直达链接。对 Holland2Stay 更进一步——先将预订推进至支付页面，再连同
+付款链接一并发出，因此收到通知时仅余付款一步。
 
-FlatRadar 承担这部分工作：同时监控多个租房平台，一旦出现符合所设条件的房源，
-即通过所选渠道发出通知，通知中附有直达链接。对 Holland2Stay 更进一步——先将预订
-推进至支付页面，再连同付款链接一并发出，因此收到通知时仅余付款一步。
-
-其边界需一并说明：**系统不代为付款，亦不保证预订成功。** 它所缩短的是「房源上线」
-至「用户获知」之间的时间差，此外的结果仍取决于平台上的实际竞争。
+**FlatRadar 不代为付款，亦不保证预订成功。** 能否订到仍取决于平台上的实际竞争。
 
 本项目支持自部署：一个容器、一个 SQLite 文件，除所选用的通知渠道外不依赖任何
 外部服务。
 
-**官网：** [flatradar.app](https://flatradar.app) ·
-**使用指南：** [flatradar.app/guide](https://flatradar.app/guide?lang=zh) ·
-**支持：** [flatradar.app/support](https://flatradar.app/support) ·
-**联系：** [support@flatradar.app](mailto:support@flatradar.app)
+**官网 — [flatradar.app](https://flatradar.app)**
+
+[使用指南](https://flatradar.app/guide?lang=zh) ·
+[支持](https://flatradar.app/support) ·
+[support@flatradar.app](mailto:support@flatradar.app)
 
 > FlatRadar 是独立的第三方工具，与所监控的任何房源平台均无隶属、背书、赞助或
 > 合作关系。请仅用于个人非商业用途，并遵守各平台的服务条款。做决定前，请务必
@@ -432,8 +430,3 @@ FlatRadar 由个人独立开发与维护，服务器、推送基础设施及 App
 
 [PolyForm Noncommercial License 1.0.0](../LICENSE) —— 个人及其它非商业用途免费；
 本许可证不授予商业使用权。
-
-GitHub 侧栏将本仓库的许可证显示为 “Other”，属预期结果：GitHub 仅识别
-choosealicense.com 收录的许可证，而那些全部为开源许可证，「禁止商业使用」这一使用
-领域限制按定义即不属于开源。该许可证在 SPDX 中登记为
-`PolyForm-Noncommercial-1.0.0`。
