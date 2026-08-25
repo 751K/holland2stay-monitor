@@ -186,6 +186,39 @@ def source_short(source: str) -> str:
     return mapping.get((source or "").lower(), source_label(source))
 
 
+#: 过滤条件摘要里最多列几项，超过就只报个数。
+#:
+#: 2026-08-25 反馈：有人勾了 28 个片区，模板把它们用 "/" 连成一个**没有空格的
+#: 长串**，浏览器只能在连字符处断行，于是文字直接溢出卡片右缘（截图里
+#: "Schalkwijk/Sphin" 断在卡片外面）。列全了也没人会在列表页逐个读，要看有编辑页。
+#:
+#: 取 4 而不是 3：H2S 的户型常态就是「1 / 2 / Loft (open bedroom area) / Studio」
+#: 四项，阈值再低一档就会把这个日常情况也折叠成一个数字，白丢信息。
+_SUMMARY_LIMIT = 4
+
+
+def summarize_list(values, limit: int = _SUMMARY_LIMIT) -> str:
+    """短列表原样列出，长列表只报个数。
+
+    ``["a","b"]``           → ``"a / b"``
+    ``28 个片区``            → ``"28 个"`` / ``"28 selected"``
+
+    分隔符两侧留空格：这一行的溢出根源就是 ``"/".join(...)`` 造出的无空格长串，
+    没有断行机会。留了空格之后即便阈值被调大，也只是多占几行而不会溢出。
+
+    只报个数而不是「前 3 项 +25」，是 2026-08-25 定的：后者要心算才知道总数，
+    用户看到第一反应就是「+25 是啥意思」。完整清单挂在模板的 ``title`` 上。
+
+    ``limit <= 0`` 表示不折叠（列表页之外的地方复用时用得上）。
+    """
+    items = [str(v).strip() for v in (values or []) if str(v).strip()]
+    if not items:
+        return ""
+    if limit and len(items) > limit:
+        return f"{len(items)} 个" if get_lang() == "zh" else f"{len(items)} selected"
+    return " / ".join(items)
+
+
 def register(app: "Flask") -> None:
     """把上述过滤器/全局函数挂到 Flask app 的 Jinja 环境。"""
     app.add_template_filter(time_ago,       "time_ago")
@@ -196,4 +229,5 @@ def register(app: "Flask") -> None:
     app.add_template_filter(source_short,    "source_short")
     app.add_template_filter(status_short,    "status_short")
     app.add_template_filter(status_capsule,  "status_capsule")
+    app.add_template_filter(summarize_list,  "summarize_list")
     app.add_template_global(status_badge,   "status_badge")

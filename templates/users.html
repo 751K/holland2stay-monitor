@@ -101,8 +101,12 @@
       {% if lf.max_rent %}€{{ lf.max_rent | int }}{{ _('per_month') }}{{ _('users_filter_prefix') }} {% endif %}
       {% if lf.min_area %}≥{{ lf.min_area | int }}m² {% endif %}
       {% if lf.min_floor %}≥{{ lf.min_floor }}{% if lang=='zh' %}层{% endif %} {% endif %}
-      {% if lf.allowed_types %}{% if lang=='zh' %}户型{% else %}Type{% endif %}: {{ lf.allowed_types | join('/') }} {% endif %}
-      {% if lf.allowed_neighborhoods %}{% if lang=='zh' %}片区{% else %}Area{% endif %}: {{ lf.allowed_neighborhoods | join('/') }}{% endif %}
+      {#
+        列表只摘前几项，完整清单挂在 title 上。勾了 28 个片区的用户存在，
+        全列出来会把卡片撑成一堵墙，而且没人会在列表页读它——要看有编辑页。
+      #}
+      {% if lf.allowed_types %}<span title="{{ lf.allowed_types | join(' / ') }}">{% if lang=='zh' %}户型{% else %}Type{% endif %}: {{ lf.allowed_types | summarize_list }}</span> {% endif %}
+      {% if lf.allowed_neighborhoods %}<span title="{{ lf.allowed_neighborhoods | join(' / ') }}">{% if lang=='zh' %}片区{% else %}Area{% endif %}: {{ lf.allowed_neighborhoods | summarize_list }}</span>{% endif %}
     {% endif %}
   </div>
 

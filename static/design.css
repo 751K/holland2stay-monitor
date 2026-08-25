@@ -834,7 +834,9 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .channel-pill.telegram{background:var(--pill-telegram-bg);color:var(--pill-telegram)}
 .channel-pill.email{background:var(--pill-email-bg);color:var(--pill-email)}
 .channel-pill.whatsapp{background:var(--success-soft);color:var(--success)}
-.filter-tags{font-size:12px;color:var(--text2);margin:8px 0;line-height:1.6}
+/* 兜底：过滤条件摘要里可能出现没有空格的长串（片区名用 / 连接、长邮箱），
+   没有断行机会就会溢出卡片。摘要已经截断到前几项，这里再保一道。 */
+.filter-tags{font-size:12px;color:var(--text2);margin:8px 0;line-height:1.6;overflow-wrap:anywhere}
 /* 四个按钮（编辑 / 测试通知 / 停用 / 删除）在窄列里放不下。卡片列是
    minmax(360px,1fr)，带拖拽手柄时内容区只剩 360-44-20=296px，而中文标签
    一行就要 350px——不换行的话「删除」被卡片裁掉一半。 */
