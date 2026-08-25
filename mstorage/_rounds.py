@@ -169,6 +169,33 @@ class RoundStatsOps:
             return []
         return [r[0] for r in rows]
 
+    def silence_span(self) -> tuple[str, str]:
+        """``(最近一轮抓到过东西的时刻, 库里最早的一轮)``，取不到的位置为 ""。
+
+        给「全站静默了多久」用。为什么不复用 ``recent_rounds_grouped``：那个按
+        **轮数**截，而这条判据要的是**时间**——高峰期一轮 60 秒、峰外 390 秒，
+        同样 24 轮可以是 24 分钟也可以是 2.6 小时，按轮数根本量不出「多久」。
+
+        第二个值是下界：整个保留期里都没有非零轮时，能断言的只有「至少从那时
+        起就没抓到过」。
+        """
+        out = ["", ""]
+        try:
+            row = self._conn.execute(
+                "SELECT round_at FROM round_stats GROUP BY round_at "
+                "HAVING SUM(listings) > 0 ORDER BY round_at DESC LIMIT 1"
+            ).fetchone()
+            if row:
+                out[0] = row[0]
+            row = self._conn.execute(
+                "SELECT MIN(round_at) FROM round_stats"
+            ).fetchone()
+            if row and row[0]:
+                out[1] = row[0]
+        except Exception:
+            logger.debug("silence_span 查询失败（已忽略）", exc_info=True)
+        return out[0], out[1]
+
     def recent_rounds_grouped(self, *, limit: int = 30) -> list[dict[str, Any]]:
         """最近 N 轮，按 round_at 分组，每轮带上各 source 的明细。
 

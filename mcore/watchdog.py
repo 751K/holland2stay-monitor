@@ -27,9 +27,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from mcore.health import (
+    SILENT_SECONDS,
     STATUS_DOWN,
     STATUS_WARN,
     fmt_ts,
+    silence_seconds,
     silent_round_streak,
     source_health,
 )
@@ -43,9 +45,11 @@ _FIRED_META_PREFIX = "watchdog_fired:"
 # 报得太勤只会让人开始忽略它。
 _REPEAT_INTERVAL = float(os.environ.get("WATCHDOG_REPEAT_INTERVAL", "21600"))
 
-# 连续多少轮全局零房源才报。比单 source 的阈值高：整轮零可能是所有 source
-# 恰好同时空窗，得给它更长的确认期。
-_SILENT_ROUNDS = int(os.environ.get("WATCHDOG_SILENT_ROUNDS", "6"))
+# 全局静默的判据在 mcore/health.py 的 SILENT_SECONDS —— **按时间不按轮数**。
+# 这里原先是 `_SILENT_ROUNDS = 6`（连续 6 轮全站 0 条），2026-08-25 换掉：
+# 高峰期一轮 60 秒，6 轮就是 6 分钟，而「全站 0 条」现在本来就是常态
+# （H2S 高频轮只查可订、OurCampus 三个月 1 条、Xior 常态零可订）。当天报了
+# 两次，两次都是正常状态。理由与阈值见那个常量的注释。
 
 LEVEL_WARN = "warn"
 LEVEL_DOWN = "down"
@@ -116,13 +120,18 @@ def evaluate(storage, *, window: int | None = None) -> list[Alert]:
                 ),
             ))
 
-    streak = silent_round_streak(storage, **({"limit": window} if window else {}))
-    if streak >= _SILENT_ROUNDS and _db_has_listings(storage):
+    silent = silence_seconds(storage)
+    if silent > SILENT_SECONDS and _db_has_listings(storage):
+        streak = silent_round_streak(storage, **({"limit": window} if window else {}))
         alerts.append(Alert(
             key="silent_rounds",
             level=LEVEL_DOWN,
-            title="⛔ 全局连续零房源",
-            body=f"连续 {streak} 轮全部 source 合计 0 条｜库内仍有房源记录",
+            title="⛔ 全站长时间没抓到任何房源",
+            body=(
+                f"已 {silent / 3600:.1f} 小时没有任何 source 抓到过东西"
+                f"（上限 {SILENT_SECONDS / 3600:.0f} 小时）"
+                f"｜最近 {streak} 轮全站 0 条｜库内仍有房源记录"
+            ),
         ))
 
     return alerts

@@ -158,33 +158,33 @@
 
       {% if is_admin %}
       <button onclick="toggleNotifications()" class="notif-trigger">
-        <i class="bi bi-bell" style="font-size:15px;width:18px;text-align:center;"></i>
+        <i class="bi bi-bell"></i>
         {{ _('notifications') }}
         <span id="notif-badge" class="notif-badge">0</span>
       </button>
       {% endif %}
 
       <button onclick="toggleTheme()">
-        <i id="theme-icon" class="bi bi-sun" style="font-size:15px;width:18px;text-align:center;"></i>
+        <i id="theme-icon" class="bi bi-sun"></i>
         {{ _('toggle_theme') }}
       </button>
 
       <a href="{{ url_for('set_lang', lang='en' if lang=='zh' else 'zh', next=request.path) }}">
-        <i class="bi bi-translate" style="font-size:15px;width:18px;text-align:center;"></i>
+        <i class="bi bi-translate"></i>
         {{ 'English' if lang=='zh' else '中文' }}
       </a>
 
       <a href="{{ url_for('donate_page') }}" class="donate-link" target="_blank" rel="noopener noreferrer">
-        <i class="bi bi-cup-hot" style="font-size:15px;width:18px;text-align:center;"></i>
+        <i class="bi bi-cup-hot"></i>
         {{ _('donate') }}
       </a>
 
       <a href="{{ url_for('privacy_page') }}" target="_blank" rel="noopener noreferrer">
-        <i class="bi bi-shield-check" style="font-size:15px;width:18px;text-align:center;"></i>
+        <i class="bi bi-shield-check"></i>
         {{ 'Privacy Policy' if lang == 'en' else '隐私条款' }}
       </a>
       <a href="{{ url_for('terms_page') }}" target="_blank" rel="noopener noreferrer">
-        <i class="bi bi-file-text" style="font-size:15px;width:18px;text-align:center;"></i>
+        <i class="bi bi-file-text"></i>
         {{ 'Terms of Use' if lang == 'en' else '使用条款' }}
         </a>
 
@@ -192,7 +192,7 @@
       <form method="POST" action="{{ url_for('logout') }}" style="margin:0;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit">
-          <i class="bi bi-box-arrow-right" style="font-size:15px;width:18px;text-align:center;"></i>
+          <i class="bi bi-box-arrow-right"></i>
           {{ _('logout') }}
         </button>
       </form>

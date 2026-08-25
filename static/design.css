@@ -184,15 +184,31 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 /* 赞助入口：图标给一点暖色，和其它中性项区分开，但不做成整行高亮——
    它是次要入口，不该比「通知」「设置」更抢眼。 */
 .sidebar-footer a.donate-link i{color:var(--warning, #e8a33d)}
+/* 图标列宽只在这里定义一次。原先 7 个 <i> 各自内联写了一份等价的
+   font-size/width/text-align——和上面那段注释说的三个 <a> 是同一个毛病，
+   而且圆点对不齐正是因为这个数字散在模板里、CSS 这边无从对齐。 */
+.sidebar-footer i{font-size:15px;width:18px;text-align:center;flex-shrink:0}
 
 /* Monitor badge in sidebar */
 .mon-badge{
   display:flex;align-items:center;gap:8px;
   padding:8px 12px;font-size:15px;color:var(--text2);
 }
-.mon-dot{width:6px;height:6px;border-radius:50%;background:var(--text2);flex-shrink:0}
-.mon-badge.running .mon-dot{background:var(--success);animation:breathe 1.6s ease-in-out infinite}
-.mon-badge.stopped .mon-dot{background:var(--danger)}
+/* 圆点要和下面几行的图标**同一条中线**。
+   图标列宽 18px（见上面 .sidebar-footer i），而圆点本身只有 6px：不给它同宽的
+   盒子，中心就比图标左偏 (18-6)/2 = 6px——2026-08-25 反馈的正是这个。
+   做法是外面套一个 18px 的盒子、圆点画在 ::before 上，这样 18 这个数只写在
+   .sidebar-footer i 一处，改图标列宽时不会两边脱节。 */
+.mon-dot{
+  width:18px;height:18px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+}
+.mon-dot::before{
+  content:"";width:6px;height:6px;border-radius:50%;
+  background:var(--text2);
+}
+.mon-badge.running .mon-dot::before{background:var(--success);animation:breathe 1.6s ease-in-out infinite}
+.mon-badge.stopped .mon-dot::before{background:var(--danger)}
 @keyframes breathe{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(2.2);opacity:.35}}
 
 /* Main content */

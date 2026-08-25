@@ -10,6 +10,7 @@ Xior 四栋楼常态零可订，OurCampus 官网自述排队 16–18 个月。�
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -237,16 +238,19 @@ def st(tmp_path):
 _DB_NOW = datetime.now(timezone.utc)
 
 
-def _seed(st, source, specs):
+def _seed(st, source, specs, *, minutes_apart: int = 1):
     """specs 最旧在前，每项 (listings, targets, complete, error_type)。
 
     时刻取「相对现在往回数分钟」而非固定日期：stale 规则量的是与当下的真实
     时间差，钉死日期会让每一轮都显得陈旧数年，所有走 DB 的用例集体误报。
+
+    ``minutes_apart`` 给按时间判定的规则用（全站静默）：默认 1 分钟一轮，
+    整串只跨几分钟；要造「静默了几小时」就把它调大。
     """
     n = len(specs)
     for i, (l, t, c, e) in enumerate(specs):
         st.record_round_stat(
-            round_at=(_DB_NOW - timedelta(minutes=n - 1 - i)).isoformat(),
+            round_at=(_DB_NOW - timedelta(minutes=(n - 1 - i) * minutes_apart)).isoformat(),
             source=source,
             listings=l, targets=t, complete=c, error_type=e,
         )
@@ -345,19 +349,39 @@ class TestWatchdog:
         assert watchdog.poll(st) == []
         assert watchdog.snapshot(st) == []
 
-    def test_silent_rounds_fires_when_db_has_listings(self, st):
-        """2026-06-13 那次 7 周静默停摆的直接判据：库里有房源，但一轮都抓不到。"""
+    def _with_a_listing(self, st):
         st.diff([Listing(
             id="x1", name="X", status="Available to book", price_raw="€700",
             available_from="2030-01-01", features=[], url="https://e.test/1",
             city="C", source="a",
         )])
-        _seed(st, "a", [(0, 1, 1, "")] * 8)
+
+    def test_silent_rounds_fires_when_db_has_listings(self, st):
+        """2026-06-13 那次 7 周静默停摆的直接判据：库里有房源，但一轮都抓不到。"""
+        self._with_a_listing(st)
+        _seed(st, "a", [(0, 1, 1, "")] * 8, minutes_apart=30)   # 跨 3.5 小时
         assert "silent_rounds" in [a.key for a in watchdog.poll(st)]
+
+    def test_a_few_zero_rounds_do_not_fire(self, st):
+        """判据是**多久**没抓到，不是**几轮**。
+
+        高峰期一轮 60 秒，而「全站 0 条」现在本来就是常态：H2S 高频轮只查可订、
+        OurCampus 三个月 1 条、Xior 常态零可订。按轮数算的话六分钟就报一次
+        ——2026-08-25 当天报了两次，两次都是正常状态。
+        """
+        self._with_a_listing(st)
+        _seed(st, "a", [(0, 1, 1, "")] * 20)     # 20 轮，但只跨 20 分钟
+        assert "silent_rounds" not in [a.key for a in watchdog.poll(st)]
+
+    def test_a_nonzero_round_resets_the_clock(self, st):
+        self._with_a_listing(st)
+        _seed(st, "a", [(0, 1, 1, "")] * 4 + [(7, 1, 1, "")] + [(0, 1, 1, "")] * 3,
+              minutes_apart=30)
+        assert "silent_rounds" not in [a.key for a in watchdog.poll(st)]
 
     def test_silent_rounds_silent_on_empty_db(self, st):
         """空库分不清「坏了」和「本来就没房」，不报。"""
-        _seed(st, "a", [(0, 1, 1, "")] * 8)
+        _seed(st, "a", [(0, 1, 1, "")] * 8, minutes_apart=30)
         assert "silent_rounds" not in [a.key for a in watchdog.poll(st)]
 
     def test_silent_rounds_survives_a_long_outage(self, st):
@@ -369,7 +393,7 @@ class TestWatchdog:
             city="C", source="a",
         )])
         # 窗口内**全部**是零轮，没有任何非零轮可作基线
-        _seed(st, "a", [(0, 1, 1, "")] * 24)
+        _seed(st, "a", [(0, 1, 1, "")] * 24, minutes_apart=30)
         assert "silent_rounds" in [a.key for a in watchdog.poll(st)]
 
     def test_snapshot_does_not_advance_state(self, st):
@@ -837,3 +861,65 @@ class TestWatchdogSkipsDisabledSources:
         assert by_src["xior"]["enabled"] is True
         assert by_src["ourdomain"]["enabled"] is False
         assert by_src["ourdomain"]["status"] == health.STATUS_UNKNOWN
+
+
+# ── 全站静默：按时间，不按轮数 ──────────────────────────────────────
+
+
+class TestSilenceIsMeasuredInTime:
+    """轮数量不出「多久」：高峰期一轮 60 秒、峰外 390 秒，同样 6 轮可以是
+    6 分钟也可以是 39 分钟。而现在「全站 0 条」是常态，不是故障——
+
+        H2S 高频轮只查可订/抽签，平台上没有可订房源时正确地返回 0
+        （2026-08-25 实测：库里 345 Occupied + 42 Reserved，可订 0）
+        OurCampus 官网自述排队 16–18 个月，三个月抓到 1 条
+        Xior 常态零可订
+
+    判据换成时间之后，它才回到本来的含义：**库里有房源，却已经很久没有任何
+    source 抓到过任何东西**——2026-06-13 那次七周静默停摆正是这个形状。
+    """
+
+    def test_span_reports_last_nonzero_and_oldest(self, st):
+        _seed(st, "a", [(0, 1, 1, ""), (5, 1, 1, ""), (0, 1, 1, "")], minutes_apart=10)
+        last_nonzero, oldest = st.silence_span()
+        assert last_nonzero and oldest and last_nonzero > oldest
+
+    def test_span_empty_on_empty_db(self, st):
+        assert st.silence_span() == ("", "")
+
+    def test_seconds_grows_with_real_time(self, st):
+        _seed(st, "a", [(5, 1, 1, "")] + [(0, 1, 1, "")] * 3, minutes_apart=60)
+        secs = health.silence_seconds(st)
+        assert 3 * 3600 - 120 < secs < 3 * 3600 + 120, secs
+
+    def test_seconds_uses_oldest_row_as_lower_bound(self, st):
+        """一条非零轮都没有时，答「至少从最早那轮起就没抓到过」。"""
+        _seed(st, "a", [(0, 1, 1, "")] * 3, minutes_apart=60)
+        assert health.silence_seconds(st) > 2 * 3600 - 120
+
+    def test_seconds_is_minus_one_without_any_telemetry(self, st):
+        assert health.silence_seconds(st) == -1.0
+
+    def test_threshold_default_is_three_hours(self):
+        assert health.SILENT_SECONDS == 10800
+
+    def test_report_exposes_both_the_metric_and_the_threshold(self, st):
+        _seed(st, "a", [(3, 1, 1, "")] * 2)
+        rep = health.health_report(st)
+        assert "silence_seconds" in rep
+        assert rep["thresholds"]["silent_seconds"] == health.SILENT_SECONDS
+        # 轮数版保留成面板指标，但不再是判据
+        assert "silent_round_streak" in rep
+
+    def test_alert_body_says_hours_not_rounds(self, st):
+        st.diff([Listing(
+            id="x1", name="X", status="Available to book", price_raw="€700",
+            available_from="2030-01-01", features=[], url="https://e.test/1",
+            city="C", source="a",
+        )])
+        _seed(st, "a", [(0, 1, 1, "")] * 8, minutes_apart=30)
+        alert = next(a for a in watchdog.poll(st) if a.key == "silent_rounds")
+        # 正文的**主语**必须是时长。只断言「有『小时』二字」不够：文案里还有
+        # 「（上限 3 小时）」，把主句换回轮数照样能过——第一版就是这么漏的。
+        assert re.search(r"已 [\d.]+ 小时没有任何 source 抓到过东西", alert.body), alert.body
+        assert "库内仍有房源记录" in alert.body

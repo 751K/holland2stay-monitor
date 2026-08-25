@@ -59,6 +59,27 @@ ZERO_STREAK_WARN = _env_int("HEALTH_ZERO_STREAK_WARN", 3)
 # 留足余量。
 STALE_FULL_SCAN_SECONDS = _env_int("HEALTH_STALE_FULL_SCAN_SECONDS", 5400)
 
+# 全站静默多少秒算故障（库里仍有房源的前提下）。
+#
+# 这条判据原先是「连续 N 轮全站 0 条」，N 默认 6。**轮数量不出「多久」**：
+# 高峰期一轮 60 秒、峰外 390 秒，同样 6 轮可以是 6 分钟也可以是 39 分钟。
+# 而现在「全站 0 条」本来就是常态——
+#
+#   H2S 高频轮只查可订/抽签，平台上没有可订房源时正确地返回 0
+#     （2026-08-25 实测：库里 345 Occupied + 42 Reserved，可订 0）
+#   OurCampus 官网自述排队 16–18 个月，三个月抓到 1 条
+#   Xior 常态零可订
+#
+# 于是高峰期六分钟就报一次「全局连续零房源」。2026-08-25 当天报了两次，
+# 两次都是正常状态。
+#
+# 换成时间之后判据回到它本来的含义：**库里有房源，却已经很久没有任何 source
+# 抓到过任何东西**——2026-06-13 那次七周静默停摆正是这个形状。
+#
+# 默认 3 小时：正常运行下 H2S 每 30 分钟一次全量轮必然非零，3 小时等于连着
+# 漏掉 6 次全量，留足余量而又远早于「七周」。
+SILENT_SECONDS = _env_int("HEALTH_SILENT_SECONDS", 10800)
+
 #: 熔断跳过的那一轮在遥测里的 error_type 标记。它**不是抓取失败**——是按设计
 #: 退避，见 _judge 里 fail_streak 的处理。
 CIRCUIT_OPEN_ERROR = "CircuitOpen"
@@ -412,6 +433,20 @@ def silent_round_streak(storage, *, limit: int = 24) -> int:
     return streak
 
 
+def silence_seconds(storage, *, now: datetime | None = None) -> float:
+    """全站多久没抓到过任何东西（秒）；算不出返回 -1。
+
+    「抓到过东西」= 某一轮所有 source 的 listings 加起来 > 0。基准取 ``now``
+    而不是最后一轮的时刻，理由同 :func:`_seconds_since`：进程卡死不再写遥测时，
+    用最后一行当基准会让差值永远停住，恰好在最该报警时报不出来。
+    """
+    try:
+        last_nonzero, oldest = storage.silence_span()
+    except Exception:
+        return -1.0
+    return _seconds_since(last_nonzero, oldest, now)
+
+
 def health_report(storage, *, window: int = DEFAULT_WINDOW) -> dict[str, Any]:
     """面板 / API 用的完整快照。"""
     healths = source_health(storage, window=window)
@@ -419,10 +454,13 @@ def health_report(storage, *, window: int = DEFAULT_WINDOW) -> dict[str, Any]:
         "status": overall_status(healths),
         "window": window,
         "sources": [h.as_dict() for h in healths],
+        # 轮数版只作为面板指标保留；告警判据是下面那个按时间算的。
         "silent_round_streak": silent_round_streak(storage, limit=window),
+        "silence_seconds": silence_seconds(storage),
         "thresholds": {
             "fail_streak_down": FAIL_STREAK_DOWN,
             "zero_streak_warn": ZERO_STREAK_WARN,
             "stale_full_scan_seconds": STALE_FULL_SCAN_SECONDS,
+            "silent_seconds": SILENT_SECONDS,
         },
     }
