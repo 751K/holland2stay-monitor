@@ -17,11 +17,16 @@ import pytest
 
 MONITOR = Path(__file__).resolve().parent.parent / "monitor.py"
 
-#: 允许发给普通用户的推送。四种都是他要么能行动、要么明确关心的：
+#: 允许发给普通用户的推送。都是他要么能行动、要么明确关心的：
 #: 新房源和状态变更是他订阅的内容；预订成功带着付款链接，不发等于白订；
 #: 预订失败要让他知道得手动补上。
+#:
+#: ``send_new_listings_batch`` 是 ``send_new_listing`` 的聚合版本，内容同属房源，
+#: 只是把 H2S 整批放出的抽签房源收进一条消息（2026-08-25 加）。它进这张清单
+#: 不削弱这条边界——判据始终是「内容是不是房源」，不是「一条还是多条」。
 ALLOWED_USER_SENDS = {
     "send_new_listing",
+    "send_new_listings_batch",
     "send_status_change",
     "send_booking_success",
     "send_booking_failed",

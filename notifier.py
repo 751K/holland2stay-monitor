@@ -105,6 +105,20 @@ class BaseNotifier(ABC):
         """发送新房源上架通知。"""
         return await self._send(_format_new(listing, lang=self.language))
 
+    async def send_new_listings_batch(self, listings: list[Listing]) -> bool:
+        """把一批新房源聚成**一条**消息发出。
+
+        目前只有 H2S 的抽签房源走这条：它们是整批放出的（2026-08-25 实测一轮
+        9 套同时进库），逐条发等于一次占掉一个用户当天邮件配额的一半——当天
+        ``fl1p`` 就是这么在 22 秒内被拒发 12 次的。
+
+        抽签本身也不急：进抽签池不是先到先得，晚看半小时不影响结果。可直接
+        预订的房源相反，仍然逐条发。
+        """
+        if not listings:
+            return False
+        return await self._send(_format_new_batch(listings, lang=self.language))
+
     async def send_status_change(
         self, listing: Listing, old_status: str, new_status: str
     ) -> bool:
@@ -1282,6 +1296,10 @@ _NOTIF_LABELS = {
     "Reason":              {"zh": "原因"},
     "Manual booking":      {"zh": "手动预订"},
     "Pay now (time-sensitive)": {"zh": "立即付款（有时限）"},
+    "Lottery listings":    {"zh": "抽签房源"},
+    "in this round":       {"zh": "本轮放出"},
+    "and":                 {"zh": "另有"},
+    "more":                {"zh": "套"},
 }
 
 
@@ -1313,6 +1331,38 @@ def _format_new(l: Listing, *, lang: str = "en") -> str:
             f"",
         ]
     lines.append(f"{l.url}")
+    return "\n".join(lines)
+
+
+#: 一封聚合通知里最多逐条列出多少套。超出的只报个数。
+#:
+#: 20 不是随手取的：邮件正文再长用户也不会逐条读，而 Telegram 单条消息上限
+#: 4096 字符——每条约 90 字符，20 条约 1.8 KB，加上抬头仍有余量。真放出 60 套
+#: 时列全会被 Telegram 截断，截断的位置不可控，反而看不出总数。
+_BATCH_LIST_LIMIT = 20
+
+
+def _format_new_batch(listings: list[Listing], *, lang: str = "en") -> str:
+    """把一批同类新房源聚成一条消息。
+
+    每套只留「名字 · 租金 · 面积」三样——聚合的意义是「这一轮放了哪些」，
+    要看细节点链接。逐条那份 ``_format_new`` 会带上类型/楼层/能耗，那是单套
+    通知才划算的信息密度。
+    """
+    source = _source_short(getattr(listings[0], "source", "")) if listings else ""
+    head = f"[{source}] {_tl('Lottery listings', lang)} × {len(listings)}"
+    lines = [head, f"{_tl('in this round', lang)}", ""]
+    for l in listings[:_BATCH_LIST_LIMIT]:
+        fm = l.feature_map()
+        area = fm.get("area", "")
+        bits = [l.name, f"{l.price_display}{_tl('/mo', lang)}"]
+        if area:
+            bits.append(area)
+        lines.append(" · ".join(bits))
+        lines.append(f"  {l.url}")
+    extra = len(listings) - _BATCH_LIST_LIMIT
+    if extra > 0:
+        lines += ["", f"{_tl('and', lang)} {extra} {_tl('more', lang)}"]
     return "\n".join(lines)
 
 

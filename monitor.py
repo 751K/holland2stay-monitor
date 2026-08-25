@@ -1602,6 +1602,44 @@ def _submit_bookings(
     return ab_futures
 
 
+#: 只有这个平台的抽签房源走聚合。写死而不是「所有 source」是因为判据是**平台
+#: 行为**：只有 H2S 会把一批抽签房源在同一轮里一次性放出（2026-08-25 实测一轮
+#: 9 套）。别的平台根本没有抽签状态，写宽了等于给一个不存在的情况留后门。
+_BATCH_SOURCE = "holland2stay"
+
+#: 攒够几套才聚合。1 套时聚合与逐条完全等价，却换来一条信息更少的消息
+#: （聚合版不带类型/楼层/能耗），所以从 2 起。
+_BATCH_MIN = 2
+
+
+def _split_batchable(matched: list["Listing"]) -> tuple[list["Listing"], list["Listing"]]:
+    """把某用户本轮的匹配拆成「聚合发」和「逐条发」两堆。
+
+    只有 **H2S 的抽签房源**进第一堆，而且要够 ``_BATCH_MIN`` 套。
+
+    为什么只聚合抽签
+    ----------------
+    进抽签池不是先到先得——晚看半小时不影响抽中概率。而「可直接预订」相反，
+    2026-08-25 实测中位窗口 154 分钟、最短 4 分钟，那种房源少发一条就是少一次
+    机会，绝不能为了省配额把它埋进摘要里。
+
+    顺序保持原样返回，不排序：调用方的日志和消息都按这个顺序输出，而
+    ``new_listings`` 的顺序来自抓取，重排只会让人对不上号。
+    """
+    from models import is_lottery_status
+
+    batched, singles = [], []
+    for l in matched:
+        if (l.source or "") == _BATCH_SOURCE and is_lottery_status(l.status):
+            batched.append(l)
+        else:
+            singles.append(l)
+    if len(batched) < _BATCH_MIN:
+        # 不够数：原样退回逐条，且要**保持原顺序**，不能把它们甩到队尾。
+        return [], matched
+    return batched, singles
+
+
 async def _notify_new_listings(
     new_listings: list["Listing"],
     user_notifiers: "UserNotifiers",
@@ -1634,10 +1672,6 @@ async def _notify_new_listings(
                 logger.info("[%s] 跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
 
-            logger.info("[%s] 新房源: %s (%s)", user.name, listing.name, listing.status)
-            if await notifier.send_new_listing(listing):
-                total_notified += 1
-
             # APNs 推送钩子：现有渠道发送之后追加，独立 task，与其他渠道互不阻塞。
             user_round_matches.setdefault(user.id, []).append(listing)
 
@@ -1655,6 +1689,30 @@ async def _notify_new_listings(
         # 0 池会立刻重新堆积，重放信号退化成噪音。见
         # mstorage/_listings.py 的 pending_new_listings。
         new_notified_ids.append(listing.id)
+
+    # 逐条 / 聚合发送。
+    #
+    # 这一段从上面的 `for listing: for user:` 里拆了出来——聚合必须先把某个用户
+    # 本轮的匹配收齐才能判断，边遍历边发做不到。代价是日志里「新房源」那几行
+    # 现在按用户分组，不再按房源分组。
+    for user, notifier in user_notifiers:
+        matched = user_round_matches.get(user.id) or []
+        batched, singles = _split_batchable(matched)
+        if batched:
+            logger.info(
+                "[%s] %d 套 %s 抽签房源聚合成 1 条（逐条发会占掉当天邮件配额的一大半）",
+                user.name, len(batched), _BATCH_SOURCE,
+            )
+            for l in batched:
+                logger.info("[%s]   ↳ %s (%s)", user.name, l.name, l.status)
+            if await notifier.send_new_listings_batch(batched):
+                # 计的是「这些房源都通知到了这个用户」，语义和拆分前一致；
+                # 实际发出的消息数是 1，那件事由上面那行日志表达。
+                total_notified += len(batched)
+        for listing in singles:
+            logger.info("[%s] 新房源: %s (%s)", user.name, listing.name, listing.status)
+            if await notifier.send_new_listing(listing):
+                total_notified += 1
 
     # APNs + FCM 发送：本轮每个用户的匹配若 < 阈值，按条推；否则聚合成一条
     if push.get_client() is not None or push.get_fcm_client() is not None:

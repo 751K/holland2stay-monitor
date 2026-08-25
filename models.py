@@ -16,6 +16,18 @@ STATUS_AVAILABLE = "available to book"
 STATUS_LOTTERY   = "available in lottery"
 
 
+def is_lottery_status(status: str | None) -> bool:
+    """该状态是不是「抽签」类。
+
+    按子串判而不是拿 ``STATUS_LOTTERY`` 等值比，因为 H2S 的抽签**有两个取值**：
+    ``Available in lottery``（6203，已在抽签池）和 ``To be in lottery``
+    （6204，即将进入）。两者都不是「点了就能订」，对通知而言是同一类事件。
+    只对 ``STATUS_LOTTERY`` 等值判会漏掉后者——``app/jinja_filters.py`` 的状态
+    胶囊早就是按子串判的，这里保持一致。
+    """
+    return "lottery" in (status or "").strip().lower()
+
+
 # LISTING_KEY_MAP：将 GraphQL 属性名映射为 feature_map() 返回的标准 key。
 # scraper.py 在构建 features 列表时用 "Type: Studio" 这样的格式，
 # feature_map() 再把 "Type" 还原成 "type" 等内部 key。
