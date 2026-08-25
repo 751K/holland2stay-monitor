@@ -114,6 +114,10 @@ TRANSLATIONS = {
     },
     # ── 申请人档案（RENTCafe Applicant Info 自动填）────────
     "user_form_profile": {"zh": "申请人档案", "en": "Applicant profile"},
+    # 这一块归 Xior 和 OurDomain 共用：两者都是 RENTCafe，申请表由
+    # bookers/rentcafe.py 一份代码填（XiorBooker / OurDomainBooker 都继承它）。
+    "user_form_profile_scope": {"zh": "Xior 与 OurDomain 共用",
+                                "en": "Shared by Xior and OurDomain"},
     "user_form_profile_note": {
         # 这里是纯文本，模板不做 Markdown 渲染——写 **粗体** 只会把星号
         # 原样显示出来
@@ -548,7 +552,6 @@ TRANSLATIONS = {
     "user_form_ab_xior":      {"zh": "Xior 账号",             "en": "Xior account"},
     "user_form_ab_ourdomain": {"zh": "OurDomain 账号",        "en": "OurDomain account"},
     "user_form_ab_pass":    {"zh": "密码",                   "en": "Password"},
-    "user_form_profile":    {"zh": "个人资料",                "en": "Profile"},
     "user_form_first_name": {"zh": "名",                     "en": "First Name"},
     "user_form_last_name":  {"zh": "姓",                     "en": "Last Name"},
     "user_form_phone":      {"zh": "电话",                   "en": "Phone"},

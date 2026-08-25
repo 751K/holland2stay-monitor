@@ -788,8 +788,24 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   width:36px;height:36px;border-radius:var(--radius);display:flex;align-items:center;justify-content:center;
   font-size:16px;font-weight:700;color:#fff;flex-shrink:0;
 }
-.user-name{font-weight:600;font-size:16px}
-.user-id{font-size:12px;color:var(--text3)}
+/* 用户名可能是一整个邮箱地址——没有空格，断不开。flex 项默认 min-width:auto
+   会撑着不缩，于是右边的 ▲▼ 和状态胶囊被顶到卡片外面（2026-08-25 实测：
+   qijunhuang1221@gmail.com 把「启用」顶出卡片右缘 83px）。
+
+   浏览器实测各条的作用（卡片 364px，逐条关掉看后果）：
+
+     三条都在                     好
+     只关 overflow-wrap           好（min-width 兜住）
+     关 wrap + identity 的 minw   胶囊被顶出卡片 89px
+     关 wrap + 名字列的 minw      名字压到胶囊上 37px
+
+   所以两级 min-width 各管一件事：外层管「别把右边顶出去」，名字那一列管
+   「别压到右边身上」。曾经还给右侧加过 flex-shrink:0，实测**毫无影响**
+   （胶囊和 ▲▼ 本来就缩不动），已删——留着只会让人以为它在起作用。 */
+.user-card-identity{min-width:0}
+.user-card-identity > div{min-width:0}
+.user-name{font-weight:600;font-size:16px;overflow-wrap:anywhere}
+.user-id{font-size:12px;color:var(--text3);overflow-wrap:anywhere}
 /* rank badge + move buttons (user list) */
 .rank-badge{
   display:inline-flex;align-items:center;justify-content:center;
@@ -843,6 +859,26 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .user-card-actions{
   display:flex;flex-wrap:wrap;gap:6px;padding-top:14px;margin-top:14px;
 }
+
+/* ── 自动预订：每个平台一块 ────────────────────────────────────
+   三个平台（H2S / Xior / OurDomain）原先各只有一行灰色小标题，中间还夹着
+   一大块申请人档案，看上去就是一整条没有边界的表单——2026-08-25 反馈
+   「三个平台之间区分不明显」。改成每个平台一块内嵌面板，视觉语言跟这个
+   表单里已有的 .channel-card 一致（surface 里嵌一层 bg）。
+   申请人档案挪到两个 RENTCafe 平台之后：它归 Xior 和 OurDomain 共用
+   （bookers/rentcafe.py 一份代码填），夹在中间会让人以为它只属于 Xior。 */
+.ab-platform{
+  /* 面板用 surface + 描边，**不能**用 var(--bg) 填充：.form-input 的底色正是
+     var(--bg) 且既无边框也无阴影，同色一填输入框就整个隐形了（实测过）。 */
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:14px;
+}
+.ab-platform-head{
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;
+}
+.ab-platform-name{font-size:14px;font-weight:600;color:var(--text)}
+/* 共用块：不是第四个平台，用虚线边框和无填充把它和三块平台区分开 */
+.ab-platform-shared{background:transparent;border-style:dashed}
 
 /* ── Channel Card (user form) — border only on select ──────────── */
 .channel-card{

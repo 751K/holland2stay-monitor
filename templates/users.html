@@ -35,7 +35,7 @@
 
   <!-- Header -->
   <div class="user-card-header">
-    <div class="flex items-center gap-2">
+    <div class="flex items-center gap-2 user-card-identity">
       {% if is_admin %}
       <span class="rank-badge" title="{{ _('users_rank_hint') }}">#{{ loop.index }}</span>
       {% endif %}
