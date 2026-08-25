@@ -835,8 +835,11 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .channel-pill.email{background:var(--pill-email-bg);color:var(--pill-email)}
 .channel-pill.whatsapp{background:var(--success-soft);color:var(--success)}
 .filter-tags{font-size:12px;color:var(--text2);margin:8px 0;line-height:1.6}
+/* 四个按钮（编辑 / 测试通知 / 停用 / 删除）在窄列里放不下。卡片列是
+   minmax(360px,1fr)，带拖拽手柄时内容区只剩 360-44-20=296px，而中文标签
+   一行就要 350px——不换行的话「删除」被卡片裁掉一半。 */
 .user-card-actions{
-  display:flex;gap:6px;padding-top:14px;margin-top:14px;
+  display:flex;flex-wrap:wrap;gap:6px;padding-top:14px;margin-top:14px;
 }
 
 /* ── Channel Card (user form) — border only on select ──────────── */
