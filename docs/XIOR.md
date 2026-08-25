@@ -226,7 +226,7 @@ WordPress feed 中标记为「可订」并不等同于当前确实可以提交�
 | 闸 | 信号源 | 规则 | 失败策略 |
 |---|---|---|---|
 | ① 可用日期窗口 | feed 的 `availableDate` | 距今超过 60 天（`_AVAILABLE_HORIZON_DAYS`）即降级 | 日期缺失或无法解析时**不降级**（保守处理） |
-| ② floorplans.aspx 权威校验 | RentCafe OLE `floorplans.aspx` | 单元的 `floorplanId` 不在「确实可订」的户型集合内即降级 | 无法获取（网络故障、Cloudflare 拦截、非 200）时 **fail-open**，以 feed 为准 |
+| ② floorplans.aspx 权威校验 | RentCafe OLE `floorplans.aspx` | 单元的 `floorplanId` 不在「确实可订」的户型集合内即降级 | 无法获取（网络故障、Cloudflare 拦截、非 200）时 **fail-open**，以 feed 为准，但**不得推翻库内已有的判定**（见下） |
 
 **第一道校验的存在原因**：`Notice Unrented` 的 `availableDate` 可能远在一年以后
 （现住户尚未搬离）。实测出现过入住日期为 `2027-07-01` 的单元被报为「当前可订」，
@@ -287,6 +287,46 @@ IP + 换 TLS 指纹**。该页面与 OurDomain / OurCampus 同属 `*.securerc.co
 注意出口 IP 用 `rotating=True`，与浏览器那条 sticky 线路无关：浏览器的 clearance
 属于 Xior 主站的 origin，在 `securerc.co.uk` 上不适用，此处没有 clearance 可复用，
 换 IP 才是恢复手段（与 OurDomain 同理）。
+
+**传输类异常也要换线路重试（2026-08-25 更正）**：`_fetch_bookable_floorplan_ids()`
+原先只对 `BlockedError` 轮换指纹，其余异常直接 `return None`，理由写的是「网络类
+异常换指纹也没用」。该理由只对一半——换**指纹**确实没用，但每次尝试还会
+`get_proxy_url(rotating=True)` **换出口 IP**，而实际遇到的
+`curl: (56) CONNECT tunnel failed, response 502` 正是出口那一端的故障。现改为
+`continue`（仍受 45 s 预算约束），且**不记指纹冷却**——线路故障不是指纹的问题，
+不应把可用指纹烧进冷却池。收尾日志按「全部被挡」/「全部连不通」/「两者皆有」
+分开输出：前者需查指纹池与 Cloudflare，后者需查代理供应商。
+
+### 4.3 fail-open 只填空白，不推翻证据
+
+校验拿不到时报出的「可订」带 `Listing.status_unverified = True`，存储层据此决定
+是否放行（`mstorage/_listings.py::_should_hold_unverified`）：
+
+| 库内现状 | 本轮（未校验）报可订 | 处置 |
+|---|---|---|
+| 已是 `Available to book` | 可订 | 放行，维持可订——这正是 fail-open 的本意 |
+| `Occupied` / `Reserved` | 可订 | **压住**：不写 `status_changes`、不发通知，仅更新价格等非状态字段 |
+| 库内无此条（新房源） | 可订 | 放行并收录——无旧状态即无相反证据 |
+
+界线在于**填补空白**与**推翻证据**是两回事：库内的 `Occupied` 是上一轮权威校验
+的结果，拿一份已知滞后的 feed 去推翻它，等于让房源状态取决于「校验请求通没通」，
+而非取决于房源本身。降级方向不受影响——feed 报 `Occupied` 无需权威背书。
+
+**该规则的来源（2026-08-25）**：`xr_373301`（Zernikestraat 1-222）当日在库内翻转
+5 次，向 38 名用户发出 190 条通知：
+
+| 时刻（本地） | 校验结果 | 库内状态 | 真伪 |
+|---|---|---|---|
+| 11:15–14:05 | `[1109741]`，连续 20 轮 | `Available` | 真 |
+| 14:12 | `[]` | → `Occupied` | 真 |
+| 14:49 | ⚠️ 打不通 | → `Available` | **伪** |
+| 14:55 | `[]` | → `Occupied` | 真 |
+| 15:08 | ⚠️ 代理 502 | → `Available` | **伪** |
+
+当日 51 次校验中 15 次未打通（HTTP 403 八次、challenge 五次、代理 502 两次），
+约 29%。房源本身全程未变，变的只是校验请求是否成功。
+
+代价：确有新单元上架而校验恰好不可用时，播报延后一至两轮（约 6–12 分钟）。
 
 ---
 

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from config import canonical_city
-from models import Listing, canonical_feature
+from models import STATUS_AVAILABLE, Listing, canonical_feature
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,17 @@ class ListingOps:
                     )
                     new_listings.append(listing)
                 else:
-                    if self._should_keep_booking_hold(old_row, listing.status, now_dt):
+                    hold_unverified = self._should_hold_unverified(old_row, listing)
+                    if hold_unverified:
+                        # 压住一次状态翻转是**看不见**的操作——日志里不留痕，
+                        # 下次再问「为什么这条没报可订」就只能靠猜。
+                        logger.info(
+                            "[%s] %s 报可订但本轮没通过权威校验，维持 %s"
+                            "（不翻转、不通知）",
+                            listing.source, listing.id, old_status,
+                        )
+                    if (hold_unverified
+                            or self._should_keep_booking_hold(old_row, listing.status, now_dt)):
                         cur.execute(
                             """UPDATE listings
                                SET name=?, price_raw=?, available_from=?,
@@ -225,6 +235,38 @@ class ListingOps:
                         status_changes.append((listing, old_status, listing.status))
 
         return new_listings, status_changes
+
+    @staticmethod
+    def _should_hold_unverified(old_row: dict | None, listing: Listing) -> bool:
+        """校验不可用的这一轮，不许把「已知不可订」翻成「可订」。
+
+        为什么只拦这一个方向
+        --------------------
+        ``status_unverified`` 说的是「这次报可订，但只有上游 feed 背书」。怎么
+        处置取决于**我们手上有没有相反的证据**：
+
+        - 库里已经是可订 → 保持可订。这正是 fail-open 的本意（别漏报真房源），
+          拦下来反而会造出一次假的「没了」。
+        - 库里是 Occupied / Reserved → **压住**。这个状态是上一轮权威校验的结果，
+          是实打实的证据；拿一份已知会滞后的 feed 去推翻它，等于让房源状态取决于
+          「校验请求通没通」，而不是取决于房子。
+        - 库里没这条（新房源）→ 不拦。没有旧状态就没有相反证据，fail-open
+          填补空白是对的；这跟推翻证据是两回事。
+
+        代价是真有新一轮上架、而校验恰好挂了时，播报会晚一到两轮（约 6–12
+        分钟）。对照组是 2026-08-25：xr_373301 一天翻转 5 次、发出 190 条通知，
+        其中两次「又可订」纯粹是校验打不通造出来的，点进去是空的。
+
+        不写 status_changes、不发通知——被压住的这一轮**什么都没变**，
+        走的是和 ``_should_keep_booking_hold`` 同一条「只更新非状态字段」的路。
+        """
+        if not getattr(listing, "status_unverified", False):
+            return False
+        if not old_row:
+            return False
+        if (listing.status or "").strip().lower() != STATUS_AVAILABLE:
+            return False
+        return (old_row.get("status") or "").strip().lower() != STATUS_AVAILABLE
 
     @staticmethod
     def _should_keep_booking_hold(

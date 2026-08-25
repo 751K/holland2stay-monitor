@@ -239,6 +239,12 @@ class XiorScraper(BrowserBackedScraper):
         # floorplans.aspx 权威校验：仅当存在「窗口内的候选可订单元」时才多查一次
         # 该楼的 floorplans.aspx（绝大多数轮次没有候选 → 零额外请求）。fail-open：
         # 拿不到（None）就不 gate，信 WP feed，绝不漏报真房源。
+        #
+        # 但 fail-open **只填空白、不推翻证据**：拿不到校验时报出来的可订会带上
+        # ``Listing.status_unverified``，存储层据此拒绝把一条已知不可订的房源翻
+        # 成可订（mstorage._listings._should_hold_unverified）。2026-08-25 之前
+        # 没有这道拦截，一条 Zernikestraat 的单元一天翻转 5 次、发了 190 条通知，
+        # 其中两次「又可订」只是因为校验请求没打通。
         bookable_fp_ids = self._verify_bookable_floorplans(
             list(all_units.values()), today, display,
         )
@@ -594,6 +600,8 @@ def _fetch_bookable_floorplan_ids(url: str) -> Optional[set[int]]:
     可复用，换 IP 才是恢复手段（与 OurDomain 同理）。
     """
     tried: list[str] = []
+    blocked: list[str] = []
+    transport_errors: list[str] = []
     started = time.monotonic()
     for impersonate in _impersonate_attempts():
         # 时间预算：这是一道**尽力而为**的闸，拿不到就 fail-open。而
@@ -617,18 +625,44 @@ def _fetch_bookable_floorplan_ids(url: str) -> Optional[set[int]]:
                 html = _get_text(session, url, headers=_headers_for(url))
         except BlockedError:
             _mark_fingerprint_blocked(impersonate)
+            blocked.append(impersonate)
             continue
         except Exception as exc:
-            # 网络类异常换指纹也没用，直接交回 fail-open
-            logger.warning("Xior floorplans.aspx 请求异常 url=%s: %s", url, exc)
-            return None
+            # 传输类异常（代理 502 / CONNECT tunnel failed / 连接重置）。
+            #
+            # 这里原先是 ``return None``，注释的理由是「网络类异常换指纹也没
+            # 用」——这话对了一半：换**指纹**确实没用，但每次尝试还会
+            # ``get_proxy_url(rotating=True)`` **换出口 IP**，而代理 502 恰恰
+            # 是出口那一端的事，换一条线路就好了。旧写法把这次重试机会一起
+            # 扔掉，直接落到 fail-open。2026-08-25 生产日志里两次「又可订」
+            # 假告警就是这么来的。
+            #
+            # 指纹不记账：这不是它的错，别把一个好指纹烧进冷却池。
+            transport_errors.append(f"{impersonate}: {exc}")
+            logger.debug("Xior floorplans.aspx 传输异常，换线路重试 url=%s: %s", url, exc)
+            continue
         _mark_fingerprint_good(impersonate)
         return parse_bookable_floorplan_ids(html)
 
-    logger.warning(
-        "Xior floorplans.aspx 全部 TLS 指纹都被挡 url=%s，已试: %s",
-        url, ", ".join(tried),
-    )
+    # 走到这里 = 一次都没成功。把「被挡」和「线路坏了」分开报：前者要看指纹池
+    # 和 CF，后者要看代理商，混成一句话会把人指向错误的方向。
+    if blocked and not transport_errors:
+        logger.warning(
+            "Xior floorplans.aspx 全部 TLS 指纹都被挡 url=%s，已试: %s",
+            url, ", ".join(tried),
+        )
+    elif transport_errors and not blocked:
+        logger.warning(
+            "Xior floorplans.aspx 全部线路都连不通 url=%s，已试 %d 条: %s",
+            url, len(transport_errors), " ｜ ".join(transport_errors),
+        )
+    else:
+        logger.warning(
+            "Xior floorplans.aspx 校验全部失败 url=%s｜被挡 %d 次（%s）"
+            "｜线路不通 %d 次（%s）",
+            url, len(blocked), ", ".join(blocked) or "-",
+            len(transport_errors), " ｜ ".join(transport_errors) or "-",
+        )
     return None
 
 
@@ -679,7 +713,8 @@ def _to_listing(
             status = "Occupied"
         elif bookable_floorplan_ids is not None:
             # floorplans.aspx 权威校验：户型不在可订集合 = WP feed 滞后/已订走。
-            # bookable_floorplan_ids 为 None 时不进此分支（fail-open，信 feed）。
+            # bookable_floorplan_ids 为 None 时不进此分支（fail-open，信 feed），
+            # 改由下面的 status_unverified 交给存储层拦住状态翻转。
             # floorplanId 解析不出来也不 gate（保守，避免误杀真房源）。
             try:
                 fp_id = int(unit.get("floorplanId"))
@@ -724,10 +759,18 @@ def _to_listing(
     elif deposit == 0:
         features.append("Deposit: €0")
 
+    # 这一轮报的「可订」有没有权威依据？没有的话让存储层拦住状态翻转
+    # （见 Listing.status_unverified / mstorage.diff）。只有真报可订才有意义：
+    # Occupied 不需要校验背书，feed 说没有就是没有。
+    status_unverified = (
+        bookable_floorplan_ids is None and status in _AVAILABLE_STATUSES
+    )
+
     return Listing(
         id=f"xr_{apt_id}",
         name=f"{display} {apt_name}",
         status=status,
+        status_unverified=status_unverified,
         price_raw=price_raw,
         available_from=avail_date,
         features=features,

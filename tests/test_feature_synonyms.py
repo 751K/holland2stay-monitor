@@ -223,3 +223,52 @@ class TestWordBoundaryMatching:
         from config import whitelist_matches
         assert not whitelist_matches("", "Furnished")
         assert not whitelist_matches("   ", "Furnished")
+
+
+class TestTenantAndOrIsTheSameThing:
+    """``student or employed`` 与 ``student and employed`` 是同一个取值。
+
+    2026-08-25 在生产库里发现两种拼法并存（61 条 and / 16 条 or）。来源是
+    ``scrapers/holland2stay.py`` 的 ``_TENANT_PROFILE_LABELS``：option 6215 的
+    站点原文是「You can book this residence as a student or a working
+    professional」，照抄成了 ``student or employed``。同义表里只登记了荷兰语那版
+    （``studenten of werkenden``），英文这版漏了。
+
+    漏登记的后果是双份的，两条都在下面钉住：勾了「学生/上班族」的用户静默收不到
+    那 16 条；筛选下拉从库里取 distinct 值，归一不掉就会并排出现两个同义选项，
+    其中一个还没有翻译。
+    """
+
+    def test_归一到同一个值(self):
+        assert canonical_feature("student or employed") == "student and employed"
+
+    def test_勾了下拉里那个选项就能收到(self):
+        f = ListingFilter(allowed_tenant=["student and employed"])
+        assert f.passes(_listing(Tenant="student or employed")), \
+            "库里 16 条 student or employed 收不到"
+
+    def test_和荷兰语那版归一到一起(self):
+        assert (canonical_feature("student or employed")
+                == canonical_feature("Studenten of werkenden"))
+
+    def test_不会误伤_student_only(self):
+        """两个白名单值都带 student，别归一过头把它们合并了。"""
+        f = ListingFilter(allowed_tenant=["student only"])
+        assert not f.passes(_listing(Tenant="student or employed"))
+        assert canonical_feature("student only") == "student only"
+
+    def test_下拉里不再并排出现两个同义项(self, tmp_path):
+        """筛选选项走 get_feature_values，它内部会 canonical_feature 去重。"""
+        from models import Listing
+        from mstorage import Storage
+
+        st = Storage(tmp_path / "t.db")
+        st.diff([
+            Listing(id="a", name="a", status="Occupied", price_raw="€1",
+                    available_from="", url="", city="Eindhoven",
+                    features=["Tenant: student and employed"]),
+            Listing(id="b", name="b", status="Occupied", price_raw="€1",
+                    available_from="", url="", city="Eindhoven",
+                    features=["Tenant: student or employed"]),
+        ])
+        assert st.get_feature_values("Tenant") == ["student and employed"]

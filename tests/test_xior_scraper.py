@@ -726,8 +726,33 @@ class TestFloorplanCheckUsesTheRentCafePlaybook:
         assert calls["blocked"] == ["fp1", "fp2"]
         assert calls["good"] == []
 
-    def test_网络异常直接放弃不轮换指纹(self, monkeypatch):
-        """换指纹治不了连不上，白打两轮只是多烧两个 IP。"""
+    def test_传输异常要换线路重试(self, monkeypatch):
+        """**本例推翻它的上一版**（``test_网络异常直接放弃不轮换指纹``）。
+
+        上一版守的是「换指纹治不了连不上，白打两轮只是多烧两个 IP」。前半句对，
+        后半句错了：每次尝试除了换指纹，还会 ``get_proxy_url(rotating=True)``
+        **换出口 IP**，而 2026-08-25 生产上那两次失败是
+        ``curl: (56) CONNECT tunnel failed, response 502``——代理那一端的事，
+        换条线路就好了。上一版把这次重试机会一起扔掉，直接落到 fail-open，
+        造出两次「又可订」的假告警。
+        """
+        def _text(n):
+            if n == 1:
+                raise OSError("CONNECT tunnel failed, response 502")
+            return ('<div data-selenium-id="FloorPlanAvailability">'
+                    '<button data-selenium-id="ApplyNow" class="applyButton" '
+                    'onclick="go(\'?floorPlans=42\')">Available</button></div>')
+
+        x, calls = self._patch(monkeypatch, get_text=_text)
+        got = x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        assert got == {42}, "第一条线路 502 之后就没再试了"
+        assert len(calls["get_text"]) == 2
+        # 两次尝试落在两条不同的出口线路上——重试的意义全在这里
+        assert len({s["proxies"]["https"] for s in calls["sessions"]}) == 2
+
+    def test_传输异常不烧指纹(self, monkeypatch):
+        """线路坏了不是指纹的错，别把一个好指纹记进冷却池。"""
         def _text(n):
             raise OSError("connection reset")
 
@@ -735,8 +760,25 @@ class TestFloorplanCheckUsesTheRentCafePlaybook:
         got = x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
 
         assert got is None
-        assert len(calls["get_text"]) == 1
         assert calls["blocked"] == []
+        assert calls["good"] == []
+
+    def test_传输异常也受时间预算约束(self, monkeypatch):
+        """改成 continue 之后，别让一堆超时把整轮 Xior 拖垮。"""
+        import itertools
+
+        def _text(n):
+            raise OSError("timeout")
+
+        x, calls = self._patch(monkeypatch, get_text=_text,
+                               fingerprints=tuple(f"fp{i}" for i in range(20)))
+        clock = itertools.count(0, 30.0)   # 每次尝试推进 30 秒
+        monkeypatch.setattr(x.time, "monotonic", lambda: next(clock))
+        got = x._fetch_bookable_floorplan_ids("https://x.securerc.co.uk/f.aspx")
+
+        assert got is None
+        assert len(calls["get_text"]) < 20, (
+            f"20 个指纹全试了一遍，预算没起作用: {len(calls['get_text'])} 次")
 
     def test_成功时解析出可订户型(self, monkeypatch):
         html = (

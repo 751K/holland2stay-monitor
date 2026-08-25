@@ -156,6 +156,14 @@ FEATURE_SYNONYMS: dict[str, str] = {
     "alleen werkenden": "employed only",
     "studenten en werkenden": "student and employed",
     "studenten of werkenden": "student and employed",
+    # 英文侧的同一个取值。H2S 的 tenant_profile option 6215 原文是「as a student
+    # or a working professional」，scrapers/holland2stay.py 照抄成
+    # ``student or employed``——语义与上一行的荷兰语版完全相同，只是 and/or
+    # 之差。漏登记的后果不是少一个选项，而是**两个都在**：筛选下拉从库里取
+    # distinct 值（mstorage._listings.get_feature_values），归一不掉就会并排
+    # 出现「学生/上班族」和一个没翻译的 student or employed，勾了前者的用户
+    # 静默收不到后者那批房源。2026-08-25 生产库里正好有 16 条。
+    "student or employed": "student and employed",
     # ── Offer ─────────────────────────────────────────────────────
     "kort verblijf": "Short-stay",
     "short stay": "Short-stay",                    # 英文侧的连字符写法差异
@@ -218,6 +226,21 @@ class Listing:
     contract_id: Optional[int] = None
     contract_start_date: Optional[str] = None
     source: str = "holland2stay"
+
+    #: 这一轮的 ``status`` 没能通过平台的权威校验（**不是**「状态未知」，而是
+    #: 「只有上游 feed 说了算，而那个 feed 已知会滞后」）。
+    #:
+    #: 谁会设：目前只有 Xior——它的 WP feed 会把已经订走的单元继续挂着，所以
+    #: 每轮要另外抓一次 ``floorplans.aspx`` 求权威可订集合；那个页面在
+    #: Cloudflare 后面，2026-08-25 实测约 29% 的轮次拿不到。
+    #:
+    #: 谁会读：``mstorage._listings.diff()``。拿不到校验时**不许把一条已知不可
+    #: 订的房源翻成可订**——见 ``_should_hold_unverified``。这一位只描述「这次
+    #: 报的可订有没有依据」，怎么处置由存储层决定，scraper 不需要知道旧状态。
+    #:
+    #: 不参与 ``__eq__``：它是这一轮的取数元信息，不是房源快照的一部分。两条
+    #: 描述同一套房子的 Listing 不该因为「这轮校验通没通」而判为不等。
+    status_unverified: bool = field(default=False, compare=False)
 
     # feature_map() 解析结果缓存，排除在 __repr__ / __eq__ / __init__ 之外
     _feature_map_cache: Optional[dict[str, str]] = field(

@@ -263,6 +263,11 @@ class _DetailBudget:
 #: 取值语义与 OurDomain / Xior 的 Tenant 维度对齐（见 config.SOURCE_ASSUMED_FEATURES）。
 #: tenant_profile 不在 aggregations 里（实测），也不是可筛选属性（filter 报错），
 #: 所以只能靠这张写死的表。上游若新增取值，未知 ID 原样跳过而不是瞎猜。
+#: 这里刻意保留站点原文的措辞（6215 是 "student **or** …"），归一交给
+#: ``models.FEATURE_SYNONYMS``——它把 ``student or employed`` 和荷兰语的
+#: ``studenten of werkenden`` 一起收敛到 ``student and employed``。2026-08-25
+#: 之前同义表里只有荷兰语那条，英文这条漏了：库里两种拼法并存（61 / 16 条），
+#: 筛选下拉并排列出两个同义项，勾了「学生/上班族」的用户静默漏掉那 16 条。
 _TENANT_PROFILE_LABELS: dict[str, str] = {
     "6213": "student only",
     "6214": "employed only",
