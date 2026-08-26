@@ -69,6 +69,7 @@ from .ourdomain import (
     _mark_fingerprint_blocked,
     _mark_fingerprint_good,
 )
+from net import NO_PROXY_CURL  # 见 _fetch_bookable_floorplan_ids 里 proxies 处的注释
 from .base import (
     RATE_LIMIT_BACKOFF,
     BlockedError,
@@ -619,7 +620,10 @@ def _fetch_bookable_floorplan_ids(url: str) -> Optional[set[int]]:
             break
         tried.append(impersonate)
         proxy = get_proxy_url("xior", rotating=True)
-        proxies = {"https": proxy, "http": proxy} if proxy else {}
+        # 空串 = 代理全在冷却、降级直连。**不能传 {}**：curl_cffi 见到空字典会
+        # 静默回落到 HTTP_PROXY / HTTPS_PROXY，也就是回落到刚被判失效的那个
+        # 代理。同一个坑见 scrapers/ourdomain.py 里的长注释与 net.py 的模块注释。
+        proxies = {"https": proxy, "http": proxy} if proxy else NO_PROXY_CURL
         try:
             with req.Session(impersonate=impersonate, proxies=proxies) as session:
                 html = _get_text(session, url, headers=_headers_for(url))

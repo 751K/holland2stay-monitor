@@ -625,6 +625,8 @@ class BrowserFetcher:
         return self
 
     def _launch(self) -> None:
+        import os
+
         from cloakbrowser import launch
 
         if platform.system() == "Darwin" and self._effective_headless:
@@ -670,6 +672,30 @@ class BrowserFetcher:
         # 在用**的那条代理线路。重新调 get_proxy_url() 在 rotating 的 profile 上
         # 会拿到另一个 session，探到的是别的出口 IP，结论无效。
         self._proxy_url = proxy_url or ""
+
+        # 降级直连时必须**显式关掉** Chromium 的代理解析。
+        #
+        # 上面那段注释讲的是「显式传 proxy 才能保证出口一致」，但反向不成立：
+        # 传 proxy=None **关不掉**它——Chromium 会自己去读 HTTP_PROXY /
+        # HTTPS_PROXY，继续拨那个刚被判定为失效的代理。
+        #
+        # 2026-08-26 生产实测（webshare 两个账号同时 402）：五次「降级直连
+        # 原生 IP」全部在 3 秒内报 ERR_TUNNEL_CONNECTION_FAILED，而代码自己
+        # 打出的诊断是「代理层报错，但本次并未走代理」——那句矛盾正是这个
+        # bug 的指纹。加上 --no-proxy-server 之后，浏览器才真的连到 CF
+        # （失败时间从 3 秒变成 275 秒，因为它终于开始真的解挑战了）。
+        # 只在**环境里确实有代理会漏进来**时才加：没配过代理的自部署用户
+        # 本来就没有 env 可漏，给他们平白加个 flag 只会让排查时多一个变量。
+        if not proxy_url and any(
+            os.environ.get(k) for k in
+            ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+             "http_proxy", "https_proxy", "all_proxy")
+        ):
+            logger.info(
+                "%s 降级直连：环境里还有代理变量，显式加 --no-proxy-server 挡住 "
+                "Chromium 自己的代理解析", self._profile.name,
+            )
+            chromium_args = chromium_args + ["--no-proxy-server"]
 
         self._browser, self._page = self._open_browser(chromium_args, proxy_url)
         self._blocked_count = 0

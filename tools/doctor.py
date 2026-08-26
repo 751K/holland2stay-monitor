@@ -24,6 +24,7 @@ from urllib import request as urllib_request
 
 from dotenv import dotenv_values
 
+from net import NO_PROXY_CURL  # 见 check_h2s_network 里 proxies 处的注释
 from config import BASE_DIR, DATA_DIR, DB_PATH, ENV_PATH, get_impersonate, get_proxy_url
 
 
@@ -386,7 +387,11 @@ def check_h2s_network(ctx: DoctorContext) -> list[CheckResult]:
     if ctx.no_network:
         return [CheckResult(SKIP, "H2S GraphQL", "--no-network")]
     proxy = get_proxy_url()
-    proxies = {"http": proxy, "https": proxy} if proxy else {}
+    # 空串 = 代理全在冷却、已降级直连。**不能传 {}**：curl_cffi 见到空字典会
+    # 静默回落到 HTTP_PROXY / HTTPS_PROXY，也就是回落到那个刚被判失效的代理。
+    # doctor 恰恰是代理故障时会被跑起来的工具——它这里说谎，人就会照着错误的
+    # 结论去查别的地方。同一个坑见 net.py 模块注释与 scrapers/ourdomain.py。
+    proxies = {"http": proxy, "https": proxy} if proxy else NO_PROXY_CURL
     try:
         import curl_cffi.requests as req
 

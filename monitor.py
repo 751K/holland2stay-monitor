@@ -256,6 +256,72 @@ def _shard_source_tasks(
 _SOURCE_LAST_SCRAPE_PREFIX = "source_last_scrape:"
 
 
+#: 代理全挂、降级直连原生 IP 时，哪些 source 还能抓。
+#:
+#: 2026-08-26 在生产服务器上逐个实测（webshare 两个账号同时 402，正好是干净的
+#: 直连环境）：
+#:
+#:     OurDomain    HTTP 200,  8.9 KB      ✅
+#:     OurCampus    HTTP 200, 62.8 KB      ✅
+#:     H2S          真浏览器解 CF 挑战，90 秒未解开 ×3   ❌
+#:     Xior         同上，停在挑战页                    ❌
+#:
+#: 判据是**实测**不是猜的：两家 RENTCafe 站点在机房 IP 上根本没有 Cloudflare
+#: 挑战，而 H2S / Xior 是硬挡——不是慢，是挑战解不开。
+#:
+#: 名单写死而不是自动探测：自动探测意味着每轮都要先打一次试探请求，代价是
+#: 额外流量和额外的被封面。上游哪天变了，这里会表现为「降级期间某个 source
+#: 一直失败」，日志里看得见。
+_PROXYLESS_CAPABLE_SOURCES: frozenset[str] = frozenset({"ourdomain", "ourcampus"})
+
+
+def _apply_proxyless_gate(tasks: list) -> list:
+    """代理全挂时，把直连打不通的 source 整体摘出本轮。
+
+    为什么要摘
+    ----------
+    2026-08-26 生产实况：webshare 两个账号同时 402，五次「降级直连原生 IP」，
+    **一轮都没抓成**——H2S / Xior 在直连下必然失败，而
+    ``dispatch_scrape_tasks`` 的判据是「全员失败就上抛 ProxyError」，于是那两家
+    的必然失败把同一轮里本来能成的 OurDomain / OurCampus 一起掀掉了。
+
+    摘掉之后这一轮就只剩打得通的那些，成功数不再是 0，整轮也就不会被上抛的
+    ProxyError 中止。代价是 H2S / Xior 在代理恢复前完全不抓——但它们本来也
+    抓不到，区别只是「安静地等」还是「每轮制造一批注定失败的请求」。
+
+    这也让遥测说了实话：被摘掉的 source 本轮不写 round_stats，健康判定看到的
+    是「没有这一轮」，而不是「这一轮失败了」。把等代理算成抓取失败，会让
+    fail_streak 报出一个和成因无关的结论——判据和被判的东西不是一回事。
+    """
+    from config import is_proxy_native_fallback_active
+
+    try:
+        if not is_proxy_native_fallback_active():
+            return tasks
+    except Exception:
+        # 判不出代理状态就当作正常：宁可让它去试一轮，也不能因为读状态出错
+        # 把 source 静默停掉。
+        logger.debug("代理降级状态判定失败，本轮不启用直连闸门", exc_info=True)
+        return tasks
+
+    kept, dropped = [], []
+    for t in tasks:
+        (kept if (t.source or "") in _PROXYLESS_CAPABLE_SOURCES else dropped).append(t)
+
+    if dropped:
+        by_source: dict[str, int] = {}
+        for t in dropped:
+            by_source[t.source] = by_source.get(t.source, 0) + 1
+        logger.warning(
+            "🛰️ 代理全部失效，本轮跳过直连打不通的 source：%s"
+            "（它们在机房 IP 上会被 Cloudflare 挡住，不是抓取故障）｜"
+            "仍在抓：%s",
+            "、".join(f"{k}×{v}" for k, v in sorted(by_source.items())),
+            "、".join(sorted({t.source for t in kept})) or "无",
+        )
+    return kept
+
+
 def _apply_source_intervals(
         tasks: list,
         cfg,
@@ -2011,6 +2077,10 @@ async def run_once(
     source_totals: dict[str, int] = {}
     for _t in scrape_tasks:
         source_totals[_t.source] = source_totals.get(_t.source, 0) + 1
+
+    # 代理全挂时只留下**直连打得通**的 source。放在节流和分片之前：被代理
+    # 挡住的 source 本轮根本不该占分片游标。
+    scrape_tasks = _apply_proxyless_gate(scrape_tasks)
 
     # 先按 source 节流（多久抓一次），再分片（每轮抓几个）——两者管的不是
     # 同一件事，顺序不能反：先分片会让被跳过的 source 白白推进分片游标。

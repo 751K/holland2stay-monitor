@@ -27,6 +27,7 @@ import curl_cffi.requests as req
 from config import assumed_features, get_impersonate, get_proxy_url
 from models import Listing
 
+from net import NO_PROXY_CURL  # 见下面 proxies 处的注释
 from .base import (
     RATE_LIMIT_BACKOFF,
     AbstractScraper,
@@ -270,7 +271,18 @@ class OurDomainScraper(AbstractScraper):
             # 与 H2S / Xior 相反：它们需要出口 IP 稳定才能复用 clearance，
             # OurDomain 没有 clearance 可复用，换 IP 才是它的恢复手段。
             proxy = get_proxy_url(self.source, rotating=True)
-            proxies = {"https": proxy, "http": proxy} if proxy else {}
+            # 代理全在冷却时 get_proxy_url 返回空串 = 降级直连原生 IP。
+            # 这里**不能传 {}**：curl_cffi 见到空字典会静默回落到
+            # HTTP_PROXY / HTTPS_PROXY 环境变量，也就是回落到那个刚被判定为
+            # 失效的代理，于是「降级直连」从来没有真的直连过。
+            #
+            # 2026-08-26 生产实测（webshare 两个账号同时 402）：并排对比同一
+            # 个 URL，proxies={"http":"","https":""} → 200，proxies={} → 402。
+            # 那五次「降级直连原生 IP」全部落在后者上，一轮都没抓成。
+            #
+            # 同一个坑 net.py 的模块注释里已经写过一次（2026-08-24，用户数据
+            # 出站那次），当时只修了非抓取路径，scraper 这边漏了。
+            proxies = {"https": proxy, "http": proxy} if proxy else NO_PROXY_CURL
             try:
                 all_units, complete, fp_names_by_id = self._scrape_once(
                     display=display,
