@@ -134,7 +134,99 @@ def evaluate(storage, *, window: int | None = None) -> list[Alert]:
             ),
         ))
 
+    alerts.extend(_email_quota_alerts(storage))
+
     return alerts
+
+
+def _email_quota_alerts(storage) -> list[Alert]:
+    """今天有通知被邮件配额挡下 → 告警。
+
+    判据是**实际拒发次数**，不是「计数触顶」。一个用户正好用到 20/20、之后再没
+    有房源要推给他，那什么都没丢；被挡下的那一条才是他本该收到却没收到的。拿
+    触顶当判据会在没损失时也响——本项目反复修过的正是这类错。
+
+    2026-08-25 的形态：当天拒发 26 次（``fl1p`` 18 次、``qijunhuang1221`` 8 次），
+    全部是 per-user 触顶，全局那条一次都没到。而这件事**只存在于日志里**，
+    面板、告警、用户那边都看不出来，后果是「用户以为没房源，其实是没发出来」。
+
+    分两级：全局额度用尽是所有人的邮件都停了，per-user 只影响那几个人。
+
+    一条告警而不是每人一条：它回答的是同一个问题「今天有没有邮件被丢掉」，
+    拆开会让 admin 每天收到一串同义告警，而恢复通知同样要来一串。
+    """
+    from notifier import RESEND_GLOBAL_DAILY_LIMIT, RESEND_PER_USER_DAILY_LIMIT
+
+    day = _utc_day()
+    try:
+        total, per_user = storage.email_reject_counts(day)
+    except Exception:
+        logger.debug("配额拒发计数读取失败（已忽略）", exc_info=True)
+        return []
+    if total <= 0:
+        return []
+
+    try:
+        used_global, _ = storage.get_email_send_counts(day)
+    except Exception:
+        used_global = 0
+    global_exhausted = used_global >= RESEND_GLOBAL_DAILY_LIMIT
+
+    names = _resolve_user_names(storage, per_user)
+    who = "｜".join(f"{n} {c} 条" for n, c in names) if names else "无归属用户"
+
+    if global_exhausted:
+        return [Alert(
+            key="email_quota_global",
+            level=LEVEL_DOWN,
+            title="⛔ 全局邮件额度已用尽，通知正在被丢弃",
+            body=(
+                f"今天已有 {total} 条通知发不出去"
+                f"｜全局 {used_global}/{RESEND_GLOBAL_DAILY_LIMIT}"
+                f"｜{who}"
+                "｜UTC 零点重置。要么调 RESEND_GLOBAL_DAILY_LIMIT（先确认 Resend "
+                "那边的真实额度），要么让用量大的用户收窄过滤条件"
+            ),
+        )]
+
+    return [Alert(
+        key="email_quota_user",
+        level=LEVEL_WARN,
+        title="⚠️ 有用户的邮件额度用尽，通知正在被丢弃",
+        body=(
+            f"今天已有 {total} 条通知发不出去"
+            f"｜每用户上限 {RESEND_PER_USER_DAILY_LIMIT}/天"
+            f"｜{who}"
+            f"｜全局 {used_global}/{RESEND_GLOBAL_DAILY_LIMIT}，尚有余量"
+            "｜这些用户多半是过滤条件太松，收窄比调上限管用"
+        ),
+    )]
+
+
+def _utc_day() -> str:
+    """配额按 UTC 日切窗，和 notifier._today_key() 必须一致。"""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _resolve_user_names(storage, per_user: dict[str, int]) -> list[tuple[str, int]]:
+    """把 user_id 换成名字，按拒发数降序。
+
+    报 id 等于让人再去查一次库——告警要能直接读懂，否则和翻日志没区别。
+    查不到名字的（用户已删除）保留 id，不静默丢掉：那也是丢了通知。
+    """
+    if not per_user:
+        return []
+    names: dict[str, str] = {}
+    try:
+        for row in storage.list_user_config_rows():
+            names[str(row["id"])] = str(row["name"] or row["id"])
+    except Exception:
+        logger.debug("用户名解析失败，退回用 id", exc_info=True)
+    return sorted(
+        ((names.get(uid, uid), cnt) for uid, cnt in per_user.items()),
+        key=lambda x: (-x[1], x[0]),
+    )
 
 
 def _db_has_listings(storage) -> bool:

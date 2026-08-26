@@ -628,13 +628,18 @@ class ResendNotifier(BaseNotifier):
             logger.error("Resend 发送失败: 收件人为空")
             return False
 
-        # 配额检查（fail-closed）：触顶不发，写 WARN 日志。
+        # 配额检查（fail-closed）：触顶不发，写 WARN 日志 + 记一笔拒发。
+        #
+        # 记账不是为了好看：在此之前这件事**只存在于日志里**，2026-08-25 当天
+        # 拒发 26 次，没有任何告警、面板上也看不出来，而后果正是「用户以为没
+        # 房源，其实是没发出来」。
         ok, reason = check_resend_quota(self._user_id)
         if not ok:
             logger.warning(
                 "Resend 配额拒发 user=%s reason=%s",
                 self._user_id or "<anon>", reason,
             )
+            record_resend_rejected(self._user_id)
             return False
 
         subject = _format_email_subject(text)
@@ -755,6 +760,27 @@ def check_resend_quota(user_id: str) -> tuple[bool, str]:
     if user_id and u >= RESEND_PER_USER_DAILY_LIMIT:
         return False, f"该用户今日额度已用尽 ({u}/{RESEND_PER_USER_DAILY_LIMIT})"
     return True, ""
+
+
+def record_resend_rejected(user_id: str) -> None:
+    """一条通知因配额被挡下。与 record_resend_send 对称，同样不因 DB 故障抛错。
+
+    告警读的是这个数而不是「今天发了多少」：正好用到 20/20 但之后没有房源要推，
+    什么都没丢；被挡下的那一条才是用户本该收到却没收到的。
+    """
+    day = _today_key()
+    try:
+        st = _open_storage_for_quota()
+    except Exception:
+        logger.warning("配额拒发记账: storage 不可用，跳过")
+        return
+    try:
+        st.record_email_reject(day, user_id)
+    except Exception:
+        logger.exception("配额拒发记账失败 user=%s", user_id or "<anon>")
+    finally:
+        try: st.close()
+        except Exception: pass
 
 
 def record_resend_send(user_id: str) -> None:

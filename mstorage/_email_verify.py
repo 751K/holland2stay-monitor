@@ -133,6 +133,57 @@ class EmailVerifyOps:
                     (user_id, day),
                 )
 
+    # ── 被配额挡掉的发送 ────────────────────────────────────────────
+    #
+    # 单独记**拒发次数**，而不是拿「计数触顶」当判据。两者不是一回事：
+    # 一个用户当天正好用到 20/20、之后再没有房源要推给他，那什么都没丢；
+    # 而真被挡下来的那一条，是用户本该收到却没收到的通知。
+    #
+    # 告警要报的是后者。拿触顶当判据会在没损失时也响——这正是本项目反复
+    # 修过的那类错：判据和被判的东西不是一回事。
+    #
+    # 复用同一张表，只换 scope（reject_global / reject_user），因此不需要改
+    # schema，prune_old_email_send_counters 也会一并清掉这些行。
+
+    def record_email_reject(self, day: str, user_id: str = "") -> None:
+        """一条通知因配额被挡下时调用。与 record_email_send 对称。"""
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO email_send_counters (scope, key, day, count) "
+                "VALUES ('reject_global', '', ?, 1) "
+                "ON CONFLICT(scope, key, day) DO UPDATE SET count = count + 1",
+                (day,),
+            )
+            if user_id:
+                self._conn.execute(
+                    "INSERT INTO email_send_counters (scope, key, day, count) "
+                    "VALUES ('reject_user', ?, ?, 1) "
+                    "ON CONFLICT(scope, key, day) DO UPDATE SET count = count + 1",
+                    (user_id, day),
+                )
+
+    def email_reject_counts(self, day: str) -> tuple[int, dict[str, int]]:
+        """当天 (总拒发数, {user_id: 拒发数})。
+
+        总数单独存而不是把 per-user 加起来：``user_id`` 为空的发送（验证邮件
+        那类）不归属任何用户，只进 global。加总会把它们漏掉。
+        """
+        row = self._conn.execute(
+            "SELECT count FROM email_send_counters "
+            "WHERE scope='reject_global' AND key='' AND day=?",
+            (day,),
+        ).fetchone()
+        total = int(row[0]) if row else 0
+        per_user = {
+            r[0]: int(r[1])
+            for r in self._conn.execute(
+                "SELECT key, count FROM email_send_counters "
+                "WHERE scope='reject_user' AND day=? AND count > 0",
+                (day,),
+            )
+        }
+        return total, per_user
+
     def prune_old_email_send_counters(self, keep_days: int = 30) -> int:
         """清理超期计数行，控制表大小。建议每天调一次。"""
         cutoff = (
