@@ -383,8 +383,20 @@ class TestDegradedPollingRate:
         assert effective == 600, f"is_peak={is_peak} 时没压到 10 分钟"
 
     def test_jitter_cannot_pull_it_below_the_floor(self):
-        """抖动是负的时候不能把 600 抖到 600 以下。"""
+        """抖动是负的时候不能把 600 抖到 600 以下。
+
+        原来切 260 个字符的窗口。2026-08-26 在 apply_jitter 和这行之间插入了
+        「自家线路主动降速」的同类夹取，窗口被撑开就切不到了——测的本来就是
+        「夹取在抖动之后」这个**顺序**，改成直接比下标，不受中间插了什么影响。
+        """
         src = inspect.getsource(monitor.main_loop)
-        i = src.index("actual = apply_jitter(effective_interval")
-        after = src[i:i + 260]
-        assert "max(actual, _NATIVE_PROXY_FALLBACK_INTERVAL)" in after
+        jitter = src.index("actual = apply_jitter(effective_interval")
+        clamp = src.index("max(actual, _NATIVE_PROXY_FALLBACK_INTERVAL)")
+        assert jitter < clamp, "下限夹取跑到抖动前面去了，负抖动会漏过去"
+
+    def test_personal_proxy_floor_is_also_applied_after_jitter(self):
+        """自家线路那道下限同样得在抖动之后夹——0.4 的抖动能把 120 秒打到 72 秒。"""
+        src = inspect.getsource(monitor.main_loop)
+        jitter = src.index("actual = apply_jitter(effective_interval")
+        clamp = src.index("max(actual, _PERSONAL_PROXY_MIN_INTERVAL)")
+        assert jitter < clamp

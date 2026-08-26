@@ -252,6 +252,52 @@ def _with_source_session(url: str, source: str, rotating: bool = False) -> str:
     return _urlunparse(parsed._replace(netloc=netloc))
 
 
+def _personal_proxies() -> list[str]:
+    """``SCRAPE_PROXIES_PERSONAL``：池子里哪些代理是「自己的线路」。
+
+    典型是家里那条反向 SSH 隧道——它不是买来的商业住宅池，而是用户自家的宽带
+    和自家的 IP。把它排在最后（见 SCRAPE_PROXIES_FALLBACK 的顺序）只解决「什么
+    时候用」，不解决「用多狠」：一旦用上，抓取节奏和平时一样是高峰 20–60 秒
+    一轮，全部打在同一个住宅 IP 上。
+
+    2026-08-02 的教训正好说明这有多危险：所有 source 挤在同一个 sticky 出口时，
+    Xior 一轮 12 个请求就触发 429，四栋楼全挂。那还只是商业池里的一个出口，
+    烧了换一个就是；自家 IP 烧了没得换，而且影响的是家里所有上网。
+
+    所以这是**主动降速**，不是故障降级——两者的判据和目的都不同，代码里也分开。
+    """
+    raw = os.environ.get("SCRAPE_PROXIES_PERSONAL", "")
+    return [p.strip() for p in re.split(r"[,\n]", raw) if p.strip()]
+
+
+def is_personal_proxy_active() -> bool:
+    """当前生效的代理是不是「自己的线路」。
+
+    比的是**当前会用哪个**（``get_proxy_url()`` 的返回），不是「池子里有没有」——
+    商业代理还活着的时候不该限速。
+
+    比较前先剥掉 sticky session 改写：``_with_source_session`` 会把用户名换成
+    per-source 的 id，直接字符串相等会漏。个人代理通常没有凭据（``socks5://ip:port``）
+    因而不受改写影响，但不能依赖这一点。
+    """
+    personal = _personal_proxies()
+    if not personal:
+        return False
+    current = get_proxy_url()
+    if not current:
+        return False
+    return any(_same_proxy_endpoint(current, p) for p in personal)
+
+
+def _same_proxy_endpoint(a: str, b: str) -> bool:
+    """两个代理 URL 是否指向同一个端点（忽略用户名里的 session 段与密码）。"""
+    try:
+        pa, pb = _urlparse(a), _urlparse(b)
+    except Exception:
+        return a == b
+    return (pa.scheme, pa.hostname, pa.port) == (pb.scheme, pb.hostname, pb.port)
+
+
 def get_proxy_url(source: str = "", *, rotating: bool = False) -> str:
     """
     统一的代理 URL 读取，**带故障切换**。

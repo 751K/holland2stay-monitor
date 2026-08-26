@@ -60,6 +60,8 @@ SECRET_KEYS: frozenset[str] = frozenset({
     "GOOGLE_MAPS_API_KEY", "CAPTCHA_API_KEY",
     # 代理 URL 形如 http://user:pass@host:port——凭据就在字符串里
     "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "SCRAPE_PROXIES_FALLBACK",
+    # 个人线路同样是完整代理 URL，可能带凭据
+    "SCRAPE_PROXIES_PERSONAL",
 })
 
 #: 部署事实。换机器/换域名才改；且部分在能读数据库之前就要可用。
@@ -107,6 +109,8 @@ TUNING_KEYS: frozenset[str] = frozenset({
     "HEALTH_ZERO_STREAK_WARN", "HEALTH_STALE_FULL_SCAN_SECONDS",
     "HEALTH_SILENT_SECONDS",
     "WATCHDOG_REPEAT_INTERVAL",
+    # 走自家线路时的主动降速下限（见 config.is_personal_proxy_active）
+    "PERSONAL_PROXY_MIN_INTERVAL",
     # 状态收敛与预订
     "STALE_RESERVED_HOURS", "STALE_OCCUPIED_HOURS",
     "BOOKING_STATUS_HOLD_MINUTES",

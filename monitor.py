@@ -60,7 +60,8 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 
 from booker import PrewarmedSession
-from config import DATA_DIR, ENV_PATH, get_proxy_url, is_proxy_native_fallback_active, load_config
+from config import (DATA_DIR, ENV_PATH, get_proxy_url, is_personal_proxy_active,
+                    is_proxy_native_fallback_active, load_config)
 from models import STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.backoff import PersistedBackoff
@@ -873,6 +874,32 @@ _NETWORK_FAIL_THRESHOLD = 3
 _NETWORK_FAIL_COOLDOWN = 300  # 5 分钟
 _PROXY_CONFIRM_RETRY_DELAY = 60  # 单次代理故障先短冷却复核，不立刻切换/直连
 _NATIVE_PROXY_FALLBACK_INTERVAL = 600  # 10 分钟；代理全挂时直连原生 IP 的最高频率
+
+#: 走「自己的线路」（家里那条隧道）时的最小轮次间隔，默认 120 秒。
+#:
+#: 这是**主动降速**，不是故障降级。商业住宅池的出口烧了换一个就是；自家 IP
+#: 烧了没得换，而且影响的是家里所有上网。所以宁可慢，也不能把它打进黑名单。
+#:
+#: 120 秒是怎么来的：高峰实测轮次中位 26 秒（P90 75 秒），也就是降到约 1/5 的
+#: 强度。同时它仍远小于房源的可订窗口——2026-08-25 实测中位 154 分钟、最短
+#: 4 分钟，两分钟一轮对最短那种也还有一次机会。再慢就开始真的漏房源了。
+#:
+#: 可用 PERSONAL_PROXY_MIN_INTERVAL 覆盖：这个值该由线路主人自己定，别人的
+#: 家宽和忍耐度都不一样。
+def _env_int_positive(name: str, default: int) -> int:
+    """读一个正整数环境变量；空/非法/非正一律回落默认值。
+
+    回落而不是抛错：一个手滑写错的降速阈值不该让整个监控起不来，而默认值本身
+    是安全的那一侧（慢）。
+    """
+    try:
+        val = int(os.environ.get(name, "") or default)
+    except (TypeError, ValueError):
+        return default
+    return val if val > 0 else default
+
+
+_PERSONAL_PROXY_MIN_INTERVAL = _env_int_positive("PERSONAL_PROXY_MIN_INTERVAL", 120)
 _H2S_SOURCE = "holland2stay"
 _PREWARM_CANDIDATE_WAIT_SEC = 2.0  # 有真实候选时最多等 2s 让预登录赶上快速通道
 _H2S_LOGIN_BLOCKED_SUPPRESS_SEC = 3600  # H2S 登录/预订 403 后 1 小时内不碰登录链路
@@ -2995,6 +3022,20 @@ async def main_loop(
                 adaptive_peak = float(cfg.peak_interval)
                 peak_tag = ""
 
+            # 主动降速：走自家线路时把轮次间隔抬到 _PERSONAL_PROXY_MIN_INTERVAL。
+            # 放在 native fallback **之前**判定，两者互斥（个人代理还活着就不算
+            # 全冷却），但真同时成立时下面的 max 会取更慢的那个，方向正确。
+            personal_proxy_active = is_personal_proxy_active()
+            if personal_proxy_active:
+                prev_personal = effective_interval
+                effective_interval = max(effective_interval, _PERSONAL_PROXY_MIN_INTERVAL)
+                if effective_interval != prev_personal:
+                    logger.info(
+                        "🏠 正在使用自己的线路，主动降速：本轮间隔 %d 秒（原 %d 秒）"
+                        "——自家 IP 烧了没得换",
+                        effective_interval, prev_personal,
+                    )
+
             native_fallback_active = is_proxy_native_fallback_active()
             if native_fallback_active:
                 prev_interval = effective_interval
@@ -3153,6 +3194,10 @@ async def main_loop(
                 last_heartbeat_time = time.monotonic()
 
             actual = apply_jitter(effective_interval, cfg.jitter_ratio)
+            # 抖动是 ±jitter_ratio，会把间隔往下拉——下限必须在抖动之后再夹一次，
+            # 否则 0.4 的抖动能把 120 秒打到 72 秒，降速就漏了。
+            if personal_proxy_active:
+                actual = max(actual, _PERSONAL_PROXY_MIN_INTERVAL)
             if native_fallback_active:
                 actual = max(actual, _NATIVE_PROXY_FALLBACK_INTERVAL)
             dev_pct = (actual - effective_interval) / effective_interval * 100
