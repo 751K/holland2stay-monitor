@@ -143,12 +143,41 @@ def is_proxy_error(exc: BaseException) -> bool:
 #:
 #: 不含 403（该出口被代理商禁用）与 429（代理侧限流）：换个 session 或等一会
 #: 就能恢复，据此让整条代理进冷却等于把还能用的容量白白关掉。
-_PROXY_SERVICE_DOWN_CODES = frozenset({402, 407, 502, 503})
+#: **账户级**拒绝：欠费、流量耗尽、凭据错误。这类不会自己好——等多久都一样，
+#: 除非人去后台充值/改密码。
+#:
+#: 2026-08-26 生产：webshare 两个账号同时 402，而冷却统一是 10 分钟，于是每 10
+#: 分钟就有一段窗口，各 source 重新去敲那个明知欠费的代理。H2S 因为浏览器一建
+#: 用 2 小时躲过了，Xior（15 分钟重建）和 OurCampus（每轮现取）则反复中招。
+_PROXY_ACCOUNT_ERROR_CODES = frozenset({402, 407})
+
+#: **瞬时**服务端异常：网关抽风、后端过载。这类可能几分钟后自己好，值得早点回去试。
+_PROXY_TRANSIENT_ERROR_CODES = frozenset({502, 503})
+
+_PROXY_SERVICE_DOWN_CODES = _PROXY_ACCOUNT_ERROR_CODES | _PROXY_TRANSIENT_ERROR_CODES
 
 #: 代理拒绝 CONNECT 时状态码出现的两种形态：
 #: libcurl 写 ``CONNECT tunnel failed, response 402``；
 #: ``config.probe_proxy()`` 写 ``代理拒绝 CONNECT: 402 Payment Required（…）``。
 _PROXY_REJECT_CODE_RE = _re.compile(r"(?:response|connect:)\s*(\d{3})")
+
+
+def is_proxy_account_error(exc: BaseException) -> bool:
+    """这次代理故障是不是**账户级**的（欠费 / 流量耗尽 / 认证失败）。
+
+    与 ``is_proxy_service_error`` 的关系是「更窄的一档」：后者回答「够不够格进
+    冷却」，这个回答「该冷却多久」。判据刻意只认明确的 402 / 407 状态码——
+    判错的代价不对称：把瞬时故障误判成账户级，会让一个其实已经恢复的代理白白
+    多等一小时；反过来只是回到现状。所以宁可漏判。
+
+    provider 自己的错误头（X-Webshare-* 之类）**不**并进来：它们既可能是账户
+    问题也可能是网关问题，从字符串里分不出来。
+    """
+    text = _exception_chain_text(exc)
+    if not text:
+        return False
+    m = _PROXY_REJECT_CODE_RE.search(text)
+    return bool(m and int(m.group(1)) in _PROXY_ACCOUNT_ERROR_CODES)
 
 
 def is_proxy_service_error(exc: BaseException) -> bool:

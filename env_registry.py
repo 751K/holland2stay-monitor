@@ -111,6 +111,8 @@ TUNING_KEYS: frozenset[str] = frozenset({
     "WATCHDOG_REPEAT_INTERVAL",
     # 走自家线路时的主动降速下限（见 config.is_personal_proxy_active）
     "PERSONAL_PROXY_MIN_INTERVAL",
+    # 账户级代理故障（402 欠费 / 407 认证失败）的冷却时长
+    "PROXY_ACCOUNT_COOLDOWN_SEC",
     # 状态收敛与预订
     "STALE_RESERVED_HOURS", "STALE_OCCUPIED_HOURS",
     "BOOKING_STATUS_HOLD_MINUTES",

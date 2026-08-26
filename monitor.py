@@ -80,6 +80,7 @@ from scrapers import (
     UpstreamMaintenanceError,
     completeness_key,
     dispatch_scrape_tasks,
+    is_proxy_account_error,
     is_proxy_service_error,
 )
 from update_checker import check_for_updates
@@ -2620,7 +2621,12 @@ async def run_once(
         await _stash_pending_prewarms()
         old_proxy = get_proxy_url()
         service_error = is_proxy_service_error(e)
-        new_proxy = report_proxy_failure(service_error_confirmed=service_error)
+        # 账户级（402 欠费 / 407 认证失败）走长冷却：那种故障不会自己好，
+        # 按 10 分钟回去重试只是每小时自伤六次。
+        account_level = is_proxy_account_error(e)
+        new_proxy = report_proxy_failure(
+            service_error_confirmed=service_error, account_level=account_level,
+        )
         confirmed_down = is_proxy_in_cooldown(old_proxy)
         native_fallback = is_proxy_native_fallback_active()
         switched_proxy = bool(new_proxy and new_proxy != old_proxy)

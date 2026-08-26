@@ -184,6 +184,34 @@ from urllib.parse import (  # noqa: E402
 )
 
 _PROXY_COOLDOWN_SEC = 600  # 10 分钟
+
+#: 账户级故障（402 欠费 / 407 认证失败）的冷却时长，默认 1 小时。
+#:
+#: 为什么要和 10 分钟分开：账户级故障**不会自己好**，10 分钟一到就把死代理放回
+#: 候选，等于每小时自伤六次。2026-08-26 生产实况——webshare 两个账号同时 402，
+#: 每 10 分钟 Xior 和 OurCampus 就各丢一轮，而 H2S 因为浏览器一建用 2 小时反而
+#: 躲过了（``_BROWSER_MAX_AGE``），同一次故障在三个 source 上表现完全不同。
+#:
+#: 为什么是 1 小时而不是更长：判错的代价是「一个其实已经充上值的代理白等」。
+#: 10 分钟 → 1 小时已经把自伤从每小时 6 次压到 1 次，再往上（比如 4 小时）边际
+#: 收益只有 0.75 次/小时，而恢复延迟涨 4 倍。不划算。
+#:
+#: 等不及的话重启进程即可——冷却状态是进程级的，重启就清零（见本节开头注释）。
+#: 充完值重启容器是最快的恢复路径。
+def _env_int_positive(name: str, default: int) -> int:
+    """读一个正整数环境变量；空/非法/非正一律回落默认值。
+
+    回落而不是抛错：手滑写错的冷却时长不该让整个进程起不来，而默认值本身是
+    安全的那一侧（冷却更久 = 少骚扰已知故障的代理）。
+    """
+    try:
+        val = int(os.environ.get(name, "") or default)
+    except (TypeError, ValueError):
+        return default
+    return val if val > 0 else default
+
+
+_PROXY_ACCOUNT_COOLDOWN_SEC = _env_int_positive("PROXY_ACCOUNT_COOLDOWN_SEC", 3600)
 _PROXY_FAILURE_CONFIRM_THRESHOLD = 2
 _PROXY_FAILURE_CONFIRM_WINDOW_SEC = 600
 _proxy_cooldown_until: dict[str, float] = {}  # proxy_url -> monotonic 截止
@@ -428,7 +456,12 @@ def is_proxy_native_fallback_active() -> bool:
     return all(_proxy_cooldown_until.get(p, 0.0) > now for p in pool)
 
 
-def report_proxy_failure(url: str = "", *, service_error_confirmed: bool = True) -> str:
+def report_proxy_failure(
+    url: str = "",
+    *,
+    service_error_confirmed: bool = True,
+    account_level: bool = False,
+) -> str:
     """
     记录一次代理故障。``url`` 留空时记录**当前选中**的那个（即刚刚用过、
     刚失败的那个）。
@@ -436,6 +469,10 @@ def report_proxy_failure(url: str = "", *, service_error_confirmed: bool = True)
     只有同一代理在确认窗口内连续失败达到阈值，且本次错误已确认是代理
     服务端异常时，才把它放入 cooldown。返回下一轮 get_proxy_url 会用的
     代理；若所有代理都进入冷却则返回空串，表示下一轮将直连服务器原生 IP。
+
+    ``account_level=True``（402 欠费 / 407 认证失败，见
+    ``scrapers.base.is_proxy_account_error``）改用 ``_PROXY_ACCOUNT_COOLDOWN_SEC``
+    这档长冷却——那种故障不会自己好，按 10 分钟回去重试只是反复自伤。
     """
     pool = _proxy_pool()
     target = url.strip() or (pool[0] if pool else "")
@@ -443,7 +480,11 @@ def report_proxy_failure(url: str = "", *, service_error_confirmed: bool = True)
     if not url:
         target = get_proxy_url()
     if target and _record_proxy_failure_mark(target) and service_error_confirmed:
-        _proxy_cooldown_until[target] = _time.monotonic() + _PROXY_COOLDOWN_SEC
+        # 账户级故障用长冷却：它不会自己好，10 分钟就回去敲等于每小时自伤六次。
+        cooldown = (
+            _PROXY_ACCOUNT_COOLDOWN_SEC if account_level else _PROXY_COOLDOWN_SEC
+        )
+        _proxy_cooldown_until[target] = _time.monotonic() + cooldown
         _proxy_failure_marks.pop(target, None)
     return get_proxy_url()
 

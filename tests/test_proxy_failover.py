@@ -325,15 +325,50 @@ class TestRunOnceTurnsProxyErrorIntoCooldown:
     链条上任何一环断了，前面几层全白做——所以这里既钉接线，也把整条链重放一遍。
     """
 
+    def _report_call(self):
+        """从 run_once 里揪出那次 report_proxy_failure 调用（AST，不比字符串）。
+
+        原来断的是一整行精确文本。2026-08-26 给这次调用加了 account_level 参数、
+        顺带换行，断言就挂了——而它要守的「有没有把故障报给代理池」根本没变。
+        改成认调用本身和它的关键字参数，格式怎么排都无所谓。
+        """
+        import ast
+        import textwrap
+
+        tree = ast.parse(textwrap.dedent(inspect.getsource(monitor.run_once)))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and getattr(node.func, "id", "") == "report_proxy_failure"):
+                return node
+        raise AssertionError("run_once 里根本没有调用 report_proxy_failure")
+
     def test_handler_feeds_the_verdict_into_the_pool(self):
+        import ast
+
         src = inspect.getsource(monitor.run_once)
         i = src.index("except ProxyError as e:")
         block = src[i:i + 1400]
         assert "is_proxy_service_error(e)" in block, (
             "没有判定「确认代理服务端异常」，report_proxy_failure 拿不到 confirmed"
         )
-        assert "report_proxy_failure(service_error_confirmed=service_error)" in block, (
-            "没有把故障报给代理池——冷却/切换/降级都不会发生"
+        kwargs = {k.arg: ast.unparse(k.value) for k in self._report_call().keywords}
+        assert kwargs.get("service_error_confirmed") == "service_error", (
+            f"没有把故障报给代理池——冷却/切换/降级都不会发生（实参 {kwargs}）"
+        )
+
+    def test_account_level_verdict_is_also_fed_in(self):
+        """402 欠费 / 407 认证失败要走长冷却，判定结果得真的传进去。
+
+        不传的话默认 account_level=False，长冷却永远不生效，而所有行为测试
+        照样绿——账户级故障会继续每 10 分钟被重试一次。
+        """
+        import ast
+
+        src = inspect.getsource(monitor.run_once)
+        assert "is_proxy_account_error(e)" in src, "没有判定账户级故障"
+        kwargs = {k.arg: ast.unparse(k.value) for k in self._report_call().keywords}
+        assert kwargs.get("account_level") == "account_level", (
+            f"账户级判定没传给代理池（实参 {kwargs}）"
         )
 
     def test_replaying_last_nights_error_ends_in_native_fallback(self, monkeypatch):

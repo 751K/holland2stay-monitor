@@ -40,6 +40,7 @@ from .base import (
     is_maintenance_body,
     is_operation_rejected_body,
     is_proxy_error,
+    is_proxy_account_error,
     is_proxy_service_error,
 )
 from .holland2stay import HollandStayScraper
@@ -412,5 +413,6 @@ __all__ = [
     "is_maintenance_body",
     "is_operation_rejected_body",
     "is_proxy_error",
+    "is_proxy_account_error",
     "is_proxy_service_error",
 ]
