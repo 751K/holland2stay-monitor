@@ -949,7 +949,8 @@ def _extract_unit(row_html: str, unit_id: str) -> Optional[dict]:
         "deposit": deposit,
         "detail": detail,
         "floor": floor,
-        "status": _extract_status(avail_html),
+        # 传整行：可下单按钮在行里，不在 availability 那一格
+        "status": _extract_status(avail_html, row_html),
         "avail_date": avail_date,
         "fp_ids": [],
     }
@@ -1126,20 +1127,87 @@ def _label_texts(html: str) -> list[str]:
     return labels
 
 
-def _extract_status(avail_html: str) -> str:
+#: 可下单控件。RENTCafe 的单元行里，能不能订**由这个按钮决定**，不由状态格的
+#: 样式类决定。三个特征任一命中即可——站点换主题时类名和文案都可能变，但
+#: ApplyNowClick 这个回调是下单流程的入口，最不容易动。
+_BOOKABLE_CONTROL_RE = re.compile(
+    r"UnitSelect|ApplyNowClick|value\s*=\s*[\"']\s*Book Now\s*[\"']",
+    re.IGNORECASE,
+)
+#: 被禁用的按钮不算数（目前实测没出现过，但不能指望它永远不出现）。
+_DISABLED_CONTROL_RE = re.compile(r"<input\b[^>]*\bdisabled\b", re.IGNORECASE)
+
+#: 见过并且已经想清楚含义的状态格样式。没见过的形态要告警，不能默默归类。
+_KNOWN_AVAIL_CLASSES = ("success", "warning", "muted", "danger")
+
+
+def _has_bookable_control(row_html: str) -> bool:
+    if not row_html:
+        return False
+    if _DISABLED_CONTROL_RE.search(row_html):
+        return False
+    return bool(_BOOKABLE_CONTROL_RE.search(row_html))
+
+
+def _extract_status(avail_html: str, row_html: str = "") -> str:
+    """判定单元状态。**判据是有没有可下单的按钮**，不是状态格的样式类。
+
+    为什么改（2026-08-27）
+    ---------------------
+    原实现只看状态格里第一个 span 的 class：``success`` → 可订，``warning`` →
+    抽签，**其余一律 Occupied**。而 OurCampus 当天列出的单元是这样的：
+
+        <span class='muted'>31-8-2026</span>
+        <input class='UnitSelect btn btn-primary' value='Book Now'
+               onclick='ApplyNowClick("457252",…,"10-9-2026",…)'>
+
+    ``muted`` 不在判据里，于是掉进兜底判成 Occupied——而那个 Book Now 按钮
+    和当天判为 Available 的单元**一模一样**。快照实测：34 个 UnitSelect 按钮
+    形态完全一致、0 个 disabled，状态格 21 个 success + 13 个 muted，正好
+    一一对应。也就是说 ``muted`` 的含义是「**某日起**可订」，不是「已出租」。
+
+    后果：那三套房源挂了约一小时（11:22–12:19）带着能点的按钮，我们报成
+    Occupied，一条通知都没发；再看时已经没了。
+
+    这和 2026-08-25 Xior 那次是同一个错误的两个方向：那次「类名说能订、文字
+    写着 Rented Out」判宽了，这次「按钮明明能订、类名不认识」判严了。共同点
+    是**判据看的是外观标记，而不是那个决定「能不能订」的东西**。
+
+    ``row_html`` 缺省时退回旧的类名判据——老调用方和单元测试还按单格传参，
+    不能因为拿不到整行就把所有单元判成不可订。
+    """
     m = re.search(
         r"<span\b[^>]*class=[\"']([^\"']*)[\"'][^>]*>(.*?)</span>",
         avail_html,
         re.IGNORECASE | re.DOTALL,
     )
-    if not m:
-        return "Occupied"
-    classes = m.group(1).lower()
-    text = _strip_html(m.group(2)).lower()
-    if "success" in classes or text == "available":
-        return "Available to book"
+    classes = m.group(1).lower() if m else ""
+    text = _strip_html(m.group(2)).lower() if m else ""
+
+    # 抽签是独立的一档：它也有按钮，但点下去是进池子不是直接订到房。
     if "warning" in classes or "wait" in text:
         return "Available in lottery"
+
+    # 两个独立的可订证据，取其一即可：
+    #   ① 状态格明确写着可订（老主题就靠这个，且有些行不带按钮）
+    #   ② 行里有可下单按钮（muted + 日期那种就靠这个）
+    # 要求两者同时成立会把 ① 那类主题全判成不可订——合成 fixture
+    # test_southeast_style_row_extracts_all_fields 当场抓到过这个回归。
+    explicit = "success" in classes or text == "available"
+    bookable = _has_bookable_control(row_html)
+
+    if explicit or bookable:
+        if bookable and not explicit and classes and not any(
+            k in classes for k in _KNOWN_AVAIL_CLASSES
+        ):
+            # 放行并告警，与 scrapers/xior.py 对未知按钮文字的处理一致：
+            # 漏报真房源比误报贵，但不能再让「没见过」悄悄变成 Occupied。
+            logger.warning(
+                "OurDomain/OurCampus 状态格出现没见过的样式 %r（文本 %r），"
+                "但行内有可下单按钮——按可订放行。若它其实代表订不到，"
+                "会误报一条房源", classes[:60], text[:40],
+            )
+        return "Available to book"
     return "Occupied"
 
 
