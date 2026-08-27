@@ -63,11 +63,26 @@ LABELS: dict[str, dict[str, tuple[str, str]]] = {
 
 
 def get_lang() -> str:
-    """从 cookie 或 query 参数读取语言；如果未设置，尝试从 Accept-Language 获取，默认 zh。"""
+    """从 cookie 或 query 参数读取语言；都没有时按 Accept-Language 协商。
+
+    **不带 Accept-Language 的客户端回落到 en，不是 zh。**
+
+    这条只影响一种访客：完全不发 ``Accept-Language`` 头的。真人浏览器一定会
+    发（中文用户发 ``zh-CN``，仍然协商到 zh），所以这里改的实际上只有爬虫——
+    Googlebot 就是不带这个头爬的。
+
+    2026-08-27 实测，改之前：
+
+        curl（无 Accept-Language）        -> <html lang="zh">  荷兰租房房源监控与提醒
+        curl -A Googlebot（无该头）      -> <html lang="zh">  同上
+        curl -H "Accept-Language: en-US" -> <html lang="en">  Dutch Rental Listing Alerts
+
+    整个站正在被当成中文站收录，而目标人群（住在荷兰的国际学生）搜的是英文词。
+    """
     lang = request.args.get("lang", "") or request.cookies.get("h2s-lang", "")
     if lang not in ("zh", "en"):
         best = request.accept_languages.best_match(["zh", "en"])
-        lang = best if best else "zh"
+        lang = best if best else "en"
     return lang
 
 

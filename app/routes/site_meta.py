@@ -83,7 +83,7 @@ _ROBOTS = ("User-agent: *\n"
            + "".join(f"Disallow: {p}\n" for p in _DISALLOW))
 
 
-def _site_root() -> str:
+def site_root() -> str:
     """对外可见的站点根 URL，无尾斜杠。
 
     优先 ``PUBLIC_BASE_URL``——项目已有的这个变量就是为此存在的，而且是**唯一
@@ -105,7 +105,7 @@ def _site_root() -> str:
 
 def robots_txt():
     """源站自己的 robots.txt。Cloudflare 会在其后拼上托管块。"""
-    body = _ROBOTS + f"\nSitemap: {_site_root()}/sitemap.xml\n"
+    body = _ROBOTS + f"\nSitemap: {site_root()}/sitemap.xml\n"
     return Response(body, mimetype="text/plain")
 
 
@@ -116,7 +116,7 @@ def sitemap_xml():
     修改时间可依据，编一个就是撒谎；后两者主流搜索引擎早已忽略。宁可给一份短
     而准确的。
     """
-    root = _site_root()
+    root = site_root()
     urls = "".join(
         f"  <url><loc>{root}{url_for(ep)}</loc></url>\n"
         for ep in _PUBLIC_ENDPOINTS
@@ -125,6 +125,87 @@ def sitemap_xml():
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
            f"{urls}</urlset>\n")
     return Response(xml, mimetype="application/xml")
+
+
+#: ``/llms.txt`` 的正文。格式见 https://llmstxt.org/ ——一个 H1、一段 blockquote
+#: 摘要、若干「标题 + 链接列表」小节。
+#:
+#: 为什么值得单独出一份：2026-08-27 的 Caddy 日志里，AI 检索类爬虫已经是抓得
+#: 最勤的一批（Claude-SearchBot 204 次、ClaudeBot 49、PerplexityBot 12、
+#: GPTBot 14、OAI-SearchBot 7、xAI 10、DeepSeekBot 5），而 GitHub 那边已经能
+#: 看到真人从 chatgpt.com 过来。它们抓到的却是一张登录表单——``/`` 对匿名访客
+#: 302 到 ``/login``，正文里没有一句话说明这站是干什么的。
+#:
+#: 注意这里**只写公开页**，判据与 ``_PUBLIC_ENDPOINTS`` 相同：写一个要登录的
+#: 链接进去，只会让抓取方拿到 302。
+def _llms_txt() -> str:
+    root = site_root()
+    return f"""# FlatRadar
+
+> Monitors Dutch rental platforms (Holland2Stay, Xior, OurDomain, OurCampus)
+> and alerts you the moment a listing you can actually book appears. Filter by
+> city, rent, floor area and tenant eligibility; notifications go to email,
+> Telegram, iOS and Android push. Free to use, and self-hostable.
+
+FlatRadar is an unofficial, independent tool. It is not affiliated with any of
+the platforms it monitors, and it does not list or let properties itself.
+
+## Pages
+
+- [Sign in / overview]({root}/login): what the service does, and where you sign up.
+- [User guide]({root}/guide): how filters, notifications and auto-booking work.
+- [Support]({root}/support): contact and troubleshooting.
+- [Donate]({root}/donate): how to support development.
+
+## Legal
+
+- [Privacy policy]({root}/privacy)
+- [Terms of service]({root}/terms)
+
+## Source
+
+- [Source code](https://github.com/751K/holland2stay-monitor): Python, Flask, SQLite; self-hosting instructions in the README.
+"""
+
+
+def llms_txt():
+    """``/llms.txt`` —— 给 AI 检索爬虫的站点说明。"""
+    return Response(_llms_txt(), mimetype="text/plain")
+
+
+#: 语言代码 -> og:locale。og 协议要的是 ``language_TERRITORY``，不是裸的 ISO 639。
+_OG_LOCALE = {"zh": "zh_CN", "en": "en_US"}
+
+
+def social_meta() -> dict:
+    """给模板算好一份分享卡片 / 规范化链接要用的绝对 URL。
+
+    **canonical 只用 ``request.path``，丢掉全部查询参数**（``lang`` 除外）。
+    落地页尤其需要这一条：``/`` 对匿名访客 302 到 ``/login?next=/``，爬虫顺着
+    过来看到的就是带 ``next=`` 的那个 URL；不收敛的话每一个 ``next`` 取值都是
+    一份重复内容。
+
+    hreflang 指向 ``?lang=xx``：``get_lang()`` 读的就是这个查询参数，所以这两个
+    URL 是真能拿到对应语言的——指一个不生效的 URL 比不写还糟。``x-default``
+    给不带参数的那个，交回给 Accept-Language 协商。
+    """
+    from app.i18n import get_lang
+
+    root = site_root()
+    base = f"{root}{request.path}"
+    explicit = request.args.get("lang", "")
+    lang = get_lang()
+    canonical = f"{base}?lang={explicit}" if explicit in _OG_LOCALE else base
+    return {
+        "canonical":   canonical,
+        "alternates":  (("en", f"{base}?lang=en"),
+                        ("zh", f"{base}?lang=zh"),
+                        ("x-default", base)),
+        "image":       f"{root}/static/og-card.png",
+        "locale":      _OG_LOCALE.get(lang, "en_US"),
+        "locale_alt":  [v for k, v in _OG_LOCALE.items() if k != lang],
+        "verification": os.environ.get("GOOGLE_SITE_VERIFICATION", "").strip(),
+    }
 
 
 def favicon_ico():
@@ -142,6 +223,9 @@ def apple_touch_icon():
 
 
 def register(app: Flask) -> None:
+    app.context_processor(lambda: {"social": social_meta()})
+    app.add_url_rule("/llms.txt", endpoint="llms_txt",
+                     view_func=llms_txt, methods=["GET"])
     app.add_url_rule("/robots.txt", endpoint="robots_txt",
                      view_func=robots_txt, methods=["GET"])
     app.add_url_rule("/sitemap.xml", endpoint="sitemap_xml",

@@ -190,6 +190,12 @@ class TestUncheckingAllCitiesSticks:
     点错了。CITIES 有同样的写法，XIOR_CITIES 一直是允许空的。
     """
 
+    #: 这一组里有两条断言中文文案，**POST 和 GET 都要钉住语言**。
+    #: 提示是 POST 时 flash 进 session 的，文案在那一刻就按 get_lang() 定死了；
+    #: 只给 GET 加 Accept-Language 的话，会得到「英文的提示渲染在中文页面上」。
+    #: 2026-08-27 把不带 Accept-Language 的回落改成 en 之后，这一点才暴露出来。
+    _ZH = {"Accept-Language": "zh-CN"}
+
     def _post(self, client, **extra):
         data = {
             "CHECK_INTERVAL": "300", "LOG_LEVEL": "INFO",
@@ -199,7 +205,7 @@ class TestUncheckingAllCitiesSticks:
         }
         data.update(extra)
         return client.post("/settings", data=data,
-                           headers={"X-CSRF-Token": "test_csrf"})
+                           headers={**self._ZH, "X-CSRF-Token": "test_csrf"})
 
     def test_unchecking_ourdomain_cities_saves_empty(self, admin_client, isolated_data_dir):
         self._post(admin_client)
@@ -231,15 +237,15 @@ class TestUncheckingAllCitiesSticks:
 
     def test_warns_when_an_enabled_source_has_no_target(self, admin_client, isolated_data_dir):
         """合法但十有八九不是本意——只提示，不代劳改配置。"""
-        r = self._post(admin_client, ourdomain_city_selected=[])
-        html = admin_client.get("/settings").get_data(as_text=True)
+        self._post(admin_client, ourdomain_city_selected=[])
+        html = admin_client.get("/settings", headers=self._ZH).get_data(as_text=True)
         assert "OurDomain" in html and "不会抓取" in html
 
     def test_no_warning_when_the_source_is_disabled(self, admin_client, isolated_data_dir):
         """平台本来就没启用，没勾楼盘是理所当然的，不该报。"""
         self._post(admin_client, source_selected="holland2stay",
                    ourdomain_city_selected=[])
-        html = admin_client.get("/settings").get_data(as_text=True)
+        html = admin_client.get("/settings", headers=self._ZH).get_data(as_text=True)
         assert "不会抓取" not in html
 
 

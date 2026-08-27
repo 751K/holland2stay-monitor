@@ -70,7 +70,10 @@ class TestContent:
 
 class TestRendered:
     def test_login_page_carries_both(self, client):
-        html = client.get("/login").get_data(as_text=True)
+        # 显式要中文：2026-08-27 起，**不带 Accept-Language 的客户端回落到 en**
+        # （Googlebot 就是这么爬的），默认渲染的已经不是中文了。
+        html = client.get(
+            "/login", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
         assert f"<title>{TRANSLATIONS['login_title']['zh']}</title>" in html
         assert 'name="description"' in html
 
@@ -80,9 +83,13 @@ class TestRendered:
         assert TRANSLATIONS["login_meta_description"]["en"] in html
 
     def test_title_key_is_only_used_for_the_title(self):
-        """login_title 只该出现在 <title> 里。
+        """login_title 只该出现在 <title> 和 og:title 里。
 
-        它如果哪天被当成界面文案复用，改 SEO 标题就会顺带改坏页面上的字。
+        它如果哪天被当成**界面文案**复用，改 SEO 标题就会顺带改坏页面上的字。
+        守的是这个，不是「只能出现一次」——og:title 复用它恰恰是对的：分享卡片
+        的标题和搜索结果的标题写成两份，只会各自漂移。它们相等这件事由
+        tests/test_social_meta.py::TestShareCard::test_title_matches_the_page_title
+        钉住。
         """
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
@@ -91,6 +98,9 @@ class TestRendered:
             txt = f.read_text(encoding="utf-8")
             if "login_title" in txt:
                 for line in txt.splitlines():
-                    if "login_title" in line and "<title>" not in line:
-                        hits.append(f"{f.name}: {line.strip()[:60]}")
-        assert not hits, "login_title 被用在了 <title> 之外：\n" + "\n".join(hits)
+                    if "login_title" not in line:
+                        continue
+                    if "<title>" in line or "set social_title" in line:
+                        continue
+                    hits.append(f"{f.name}: {line.strip()[:60]}")
+        assert not hits, "login_title 被用在了 <title> / og:title 之外：\n" + "\n".join(hits)

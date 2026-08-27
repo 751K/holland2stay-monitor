@@ -39,26 +39,39 @@ class TestListingsPage:
     #: /listings 筛选栏渲染徽标的维度，与 templates/listings.html 一一对应。
     PAGE_DIMS = ("contract", "type", "occupancy", "tenant", "energy", "finishing")
 
-    def test_badges_match_the_capability_table(self, admin_client):
+    @pytest.mark.parametrize("lang,header", [("zh", "zh-CN"), ("en", "en-US")])
+    def test_badges_match_the_capability_table(self, admin_client, lang, header):
         """页面上的徽标必须与 _SOURCE_FILTER_DIMS 逐字一致。
 
         原先这里断言的是「至少 3 个『仅 Holland2Stay』」。写死数字的问题在
         v1.16.2 暴露了：租客资格扩到四个平台后徽标本该消失，而 `>= 3` 既可能
         因此变红（实际如此），也可能在别处多出一个徽标时继续变绿——两种都不是
         在测「说明是对的」。改成从能力表推导，多一个少一个都会失败。
+
+        **两边的语言必须钉死。** 这条原先不传 Accept-Language，靠的是页面默认
+        渲染中文、而 dim_scope_badge 的默认参数也是 zh —— 两个默认值恰好撞上。
+        2026-08-27 把不带 Accept-Language 的回落改成 en（Googlebot 就是这么爬的）
+        之后它立刻变红：页面是英文的，断言拿的还是中文徽标。两种语言都测一遍，
+        顺便守住 badge 的英文分支。
         """
         from collections import Counter
 
         from config import dim_scope_badge
 
-        html = admin_client.get("/listings").get_data(as_text=True)
+        html = admin_client.get(
+            "/listings", headers={"Accept-Language": header}).get_data(as_text=True)
+        assert f'<html lang="{lang}"' in html
         expected = Counter(
-            b for d in self.PAGE_DIMS if (b := dim_scope_badge(d))
+            b for d in self.PAGE_DIMS if (b := dim_scope_badge(d, lang))
         )
         assert expected, "没有任何维度需要徽标，这条测试已经失去意义"
         for badge, n in expected.items():
-            assert html.count(badge) == n, (
-                f"徽标 {badge!r} 应出现 {n} 次，实际 {html.count(badge)} 次"
+            # 数 `>徽标</span>` 而不是裸的徽标文本：英文版的 tooltip 正文里
+            # 同样含有「Holland2Stay only」这一串，裸数会把 title 属性也数进来
+            # （实测 2 个徽标被数成 4）。中文版碰巧不重叠，纯属侥幸。
+            anchor = f">{badge}</span>"
+            assert html.count(anchor) == n, (
+                f"徽标 {badge!r} 应出现 {n} 次，实际 {html.count(anchor)} 次"
             )
 
     @pytest.fixture
@@ -109,7 +122,8 @@ class TestListingsPage:
         )
 
     def test_badge_carries_the_full_note_as_tooltip(self, admin_client):
-        html = admin_client.get("/listings").get_data(as_text=True)
+        html = admin_client.get(
+            "/listings", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
         assert "其余平台不提供该属性" in html, "徽标没有带完整说明"
 
     def test_universal_dimensions_have_no_badge(self, admin_client):
@@ -144,14 +158,16 @@ class TestListingsPage:
 
 class TestUserForm:
     def test_scope_rule_is_stated_once(self, admin_client):
-        html = admin_client.get("/users/new").get_data(as_text=True)
+        html = admin_client.get(
+            "/users/new", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
         text = _text(html)
         assert "带平台标记的条件只对部分平台生效" in text
         # 整句只出现一次；各字段靠徽标
         assert text.count("其余平台不提供该属性，它们的房源不受该条件影响") == 1
 
     def test_fields_carry_badges(self, admin_client):
-        html = admin_client.get("/users/new").get_data(as_text=True)
+        html = admin_client.get(
+            "/users/new", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
         assert html.count("仅 Holland2Stay") >= 4
         # 徽标要点名平台，不能是「仅 3 个平台」那种只报数的写法
         assert "Xior 除外" in html

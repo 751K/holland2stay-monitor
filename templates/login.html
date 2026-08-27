@@ -26,7 +26,9 @@
   <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
   <meta name="lang" content="{{ lang }}">
   <title>{{ _('login_title') }}</title>
-  <meta name="description" content="{{ _('login_meta_description') }}">
+  {% set social_title = _('login_title') %}
+  {% set social_desc  = _('login_meta_description') %}
+  {% include '_social_meta.html' %}
   <link rel="icon" href="/static/favicon.png" type="image/png">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 

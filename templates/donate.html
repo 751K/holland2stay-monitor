@@ -6,8 +6,12 @@
   <title>{{ page_title }} · FlatRadar</title>
   <link rel="icon" href="/static/favicon.png" type="image/png">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-  <meta name="description"
-        content="{{ page_title }} — 支付宝 / 微信 / GitHub Sponsors 多渠道支持 FlatRadar 开发">
+  {% set social_title = page_title ~ ' · FlatRadar' %}
+  {# 描述跟着 lang 走：写死中文的话，英文页会得到「Support the developer — 支付宝…」 #}
+  {% set social_desc = page_title ~ (' — 支付宝 / 微信 / GitHub Sponsors 多渠道支持 FlatRadar 开发'
+                                    if lang == 'zh' else
+                                    ' — support FlatRadar via Alipay, WeChat Pay or GitHub Sponsors.') %}
+  {% include '_social_meta.html' %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">

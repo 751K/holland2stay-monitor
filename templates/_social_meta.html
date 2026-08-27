@@ -1,0 +1,49 @@
+{#
+  分享卡片 + 规范化链接 + 站点验证。四个公开页共用。
+
+  为什么不放进 base.html
+  ---------------------
+  base.html 服务的是**登录后**的页面，爬虫和 IM 的预览机器人一个都看不到。
+  公开页（login / donate / support / legal）刻意各自写 <head>，不引 design.css
+  也不带 CSRF 上下文，所以共享的那部分只能做成 include。
+  /guide 是 docs/ 下的静态文件，由 app/routes/legal.py:guide_page 把同一份渲染
+  结果注到 </head> 前——改这里，那边一起变。
+
+  调用方必须在 include 之前设好两个变量：
+
+      {% set social_title = "…" %}
+      {% set social_desc  = "…" %}
+
+  tests/test_social_meta.py 会逐个公开页断言它们非空，并断言 description 只出现
+  一次——单一来源就在这个文件里，别在调用方再写一遍 <meta name="description">。
+#}
+  <meta name="description" content="{{ social_desc }}">
+
+  <link rel="canonical" href="{{ social.canonical }}">
+  {%- for code, href in social.alternates %}
+  <link rel="alternate" hreflang="{{ code }}" href="{{ href }}">
+  {%- endfor %}
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="FlatRadar">
+  <meta property="og:title" content="{{ social_title }}">
+  <meta property="og:description" content="{{ social_desc }}">
+  <meta property="og:url" content="{{ social.canonical }}">
+  <meta property="og:image" content="{{ social.image }}">
+  {# 明写尺寸：抓取方拿到 width/height 就不必先下载图片才能决定用大卡还是小卡，
+     首次分享时能少一次往返，也避免尺寸未知时降级成 summary 小图。 #}
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="FlatRadar — instant alerts for Dutch rental listings">
+  <meta property="og:locale" content="{{ social.locale }}">
+  {%- for alt in social.locale_alt %}
+  <meta property="og:locale:alternate" content="{{ alt }}">
+  {%- endfor %}
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ social_title }}">
+  <meta name="twitter:description" content="{{ social_desc }}">
+  <meta name="twitter:image" content="{{ social.image }}">
+  {%- if social.verification %}
+  <meta name="google-site-verification" content="{{ social.verification }}">
+  {%- endif %}

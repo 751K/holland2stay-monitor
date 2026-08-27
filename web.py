@@ -176,6 +176,25 @@ def _add_security_headers(resp):
         "form-action 'self'",
     )
 
+    # ── 语言协商要对缓存可见 ──────────────────────────────────────
+    # 同一个 URL 会按 Accept-Language 返回中文或英文（app.i18n.get_lang）。
+    # 不声明 Vary 的话，任何中间缓存（Cloudflare、公司代理、浏览器）都会把
+    # 第一个访客拿到的那份语言发给后面所有人。
+    #
+    # 只给 HTML 加：/static/ 下的资源与语言无关，给它们加 Vary 只会白白降低
+    # 边缘缓存命中率。
+    #
+    # 用「读出来再合并」而不是直接赋值，是为了不覆盖**视图自己或更早跑的
+    # after_request 已经写好的** Vary（本文件是目前唯一的 after_request，但
+    # Flask 按注册的逆序执行，后加的会跑在前面）。
+    # 注意 session 的 `Vary: Cookie` **不在此列**：它由 Flask 的 process_response
+    # 在所有 after_request 之后追加，这里根本看不到它——最终响应上两个都在，
+    # 靠的是 Flask 那一步，不是这里的合并。
+    if resp.mimetype == "text/html":
+        parts = [p.strip() for p in resp.headers.get("Vary", "").split(",") if p.strip()]
+        if not any(p.lower() == "accept-language" for p in parts):
+            resp.headers["Vary"] = ", ".join(parts + ["Accept-Language"])
+
     # ── 静态资源缓存 ──────────────────────────────────────────────
     # /static/ 下的文件都通过 `?v=NN` 查询字符串做 cache bust（design.css?v=15、
     # app.js?v=5 等）。URL 不变就能命中缓存。

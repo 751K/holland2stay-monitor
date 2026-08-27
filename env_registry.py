@@ -68,6 +68,7 @@ SECRET_KEYS: frozenset[str] = frozenset({
 DEPLOY_KEYS: frozenset[str] = frozenset({
     "DB_PATH", "DATA_DIR",
     "TIMEZONE", "PUBLIC_BASE_URL", "SUPPORT_EMAIL",
+    "GOOGLE_SITE_VERIFICATION",
     "SESSION_COOKIE_SECURE",
     "FLASK_DEBUG", "SUPERVISOR_CONF",
     "CLOAKBROWSER_HEADLESS",
