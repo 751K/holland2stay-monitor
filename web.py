@@ -59,6 +59,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 # app/ 子包
 from app import csrf as _csrf                                    # noqa: E402
+from app import early_hints                                      # noqa: E402
 from app import jinja_filters                                    # noqa: E402
 from app.auth import (                                            # noqa: E402
     auth_enabled,
@@ -220,6 +221,7 @@ def _add_security_headers(resp):
 # ------------------------------------------------------------------ #
 jinja_filters.register(app)
 _csrf.register(app)
+early_hints.register(app)
 
 
 _ASSET_VERSIONS: dict[str, str] = {}
