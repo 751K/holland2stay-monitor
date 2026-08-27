@@ -1,5 +1,72 @@
 # Changelog
 
+## v1.27.0 (2026-08-27)
+
+面向站外的元信息：分享卡片、爬虫看到的语言、Early Hints。这些一直是空的，而且
+都不报错——页面 200，日志干净，只有翻访问日志才看得出来。
+
+### 新增
+
+* **公开页带上分享卡片**（[792f003](https://github.com/751K/holland2stay-monitor/commit/792f003)）
+
+    此前链接贴进 WhatsApp / Teams / Telegram 只显示一行光秃秃的网址，`og:` 与
+    `twitter:` 一个都没有。六个公开页现在共用 `templates/_social_meta.html`，
+    `<meta name="description">` 也搬了进去，全站只留这一个来源。
+    卡片图上是真实抓到过的一条房源，不是编的——og 图会被各家平台长期缓存，
+    编一个不存在的地址等于把假数据钉在此后每一次分享上。
+
+* **`/llms.txt`**（[792f003](https://github.com/751K/holland2stay-monitor/commit/792f003)）
+
+    AI 检索爬虫是抓得最勤的一批（五天内 Claude-SearchBot 204 次，另有 GPTBot、
+    PerplexityBot、xAI 等七种），而它们抓到的是一张登录表单。正文里明写
+    unofficial / not affiliated 并有用例钉住：被转述成官方渠道是真实风险。
+
+### 变更
+
+* **不带 `Accept-Language` 的客户端回落到 `en`，不再是 `zh`**（[792f003](https://github.com/751K/holland2stay-monitor/commit/792f003)）
+
+    Googlebot 就是不带这个头爬的，整个站因此在被当成中文站收录。真人浏览器一定
+    会发这个头，中文用户仍然协商到 zh——这条实际只影响爬虫。
+
+* **公开页补上 `canonical` / `hreflang`，HTML 响应补 `Vary: Accept-Language`**（[792f003](https://github.com/751K/holland2stay-monitor/commit/792f003)）
+
+    `/` 对匿名访客 302 到 `/login?next=/`，此前每一个 `next` 取值都是一份重复
+    内容。canonical 只取路径，唯独保留 `?lang=`——那是内容真的不同的参数。
+
+* **HTML 响应带上 `Link:` 头，Cloudflare 据此发 103 Early Hints**（[7dd5ce3](https://github.com/751K/holland2stay-monitor/commit/7dd5ce3)）
+
+    zone 上 `early_hints` 一直开着，但源站一个 `Link:` 都没有，边缘无从播起。
+    发什么由响应正文决定——各页引用的样式表并不一致，donate / legal 不引
+    `design.css`，连 Inter 的字重参数都不同，发统一清单会让它们预载用不上的东西。
+
+    刻意不预载首屏 logo：深浅色是两个文件，主题由内联脚本运行时才定，`Link:` 头
+    比 HTML 更早，写死任何一张都有一半用户预载错。
+
+    上线实测：第二次请求收到 `HTTP/2 103` + 五条 hints，即 Cloudflare 对
+    `Cache-Control: no-cache` 的动态响应同样会播。
+
+### 修复
+
+* **5 条断言中文文案的用例一直在假绿**（[792f003](https://github.com/751K/holland2stay-monitor/commit/792f003)）
+
+    它们靠「页面默认渲染中文」这个默认值，而不是自己钉住语言。
+    `test_no_warning_when_the_source_is_disabled` 最糟：它断言中文文案**不出现**，
+    页面一变英文就永远为真。另有一条数的是裸徽标文本，而英文版 tooltip 里含同一
+    串，2 个徽标被数成 4。
+
+* **`Vary` 合并的注释与用例都是错的**（[792f003](https://github.com/751K/holland2stay-monitor/commit/792f003)）
+
+    注释说「不要覆盖 session 的 `Vary: Cookie`」，而那一份由 Flask 在所有
+    `after_request` 跑完之后才追加，钩子根本看不到它。用例因此是空的——把合并改成
+    直接赋值也照样绿。
+
+### 已知现象（非缺陷）
+
+* Cloudflare 分析里约 25% 的 504、`originResponseStatus` 全为 0，是 Early Hints
+  子系统的内部记录（`requestSource: earlyHintsCache`，UA 为 `nginx-ssl` /
+  `bastion`），不经过源站。按 `requestSource: "eyeball"` 统计，真实访客的 504 是
+  **0**，真实错误率 0.04%。不必再查。
+
 ## v1.26.0 (2026-08-27)
 
 **判据和被判的东西不是一回事**——本轮三项修复全是这个形态的不同实例，而它在本
