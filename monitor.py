@@ -81,6 +81,7 @@ from scrapers import (
     completeness_key,
     dispatch_scrape_tasks,
     is_proxy_account_error,
+    is_proxy_error,
     is_proxy_service_error,
 )
 from update_checker import check_for_updates
@@ -1734,6 +1735,53 @@ def _split_batchable(matched: list["Listing"]) -> tuple[list["Listing"], list["L
     return batched, singles
 
 
+def _report_source_proxy_failure(source: str, exc: BaseException) -> None:
+    """把单个 source 的代理故障报给代理池（冷却 / 切换 / 降级）。
+
+    和 ``run_once`` 外层那个 ``except ProxyError`` 处理的是同一件事，区别只在
+    触发条件：那里要求整轮全灭，这里只要求「这次失败是代理造成的」。代理坏了
+    就是坏了，与同轮别的 source 走没走运无关。
+
+    刻意**不**在这里发 admin 告警：外层那条已经有 30 分钟节流，而这条每轮每
+    source 都可能触发，加告警只会把真信号淹掉。这里只负责让冷却状态跟上事实。
+
+    任何异常都吞掉：报告失败不该把「隔离这个 source、继续跑别的」这件事一起
+    带崩——那正是这层隔离存在的理由。
+    """
+    from config import (
+        is_proxy_in_cooldown,
+        report_proxy_failure,
+    )
+
+    try:
+        before = get_proxy_url()
+        service_error = is_proxy_service_error(exc)
+        account_level = is_proxy_account_error(exc)
+        after = report_proxy_failure(
+            service_error_confirmed=service_error, account_level=account_level,
+        )
+        if before and is_proxy_in_cooldown(before):
+            logger.warning(
+                "🛰️ [%s] 代理已确认故障并进入冷却%s：%s",
+                source,
+                "（账户级，长冷却）" if account_level else "",
+                _redact_proxy_for_log(before),
+            )
+            if after != before:
+                logger.info(
+                    "🛰️ [%s] 下一轮改用 %s", source,
+                    _redact_proxy_for_log(after) if after else "服务器原生 IP 直连",
+                )
+    except Exception:
+        logger.debug("[%s] 上报代理故障失败（已忽略）", source, exc_info=True)
+
+
+def _redact_proxy_for_log(url: str) -> str:
+    """代理 URL 里带凭据，日志里只留 scheme + host:port。"""
+    import re as _re
+    return _re.sub(r"//[^@]*@", "//", url or "") or "(无)"
+
+
 async def _notify_new_listings(
     new_listings: list["Listing"],
     user_notifiers: "UserNotifiers",
@@ -2196,6 +2244,30 @@ async def run_once(
                     src, len(group), type(e).__name__, e,
                     exc_info=True,
                 )
+                # 代理坏了要**当场报给代理池**，不能等整轮全灭。
+                #
+                # 这层跨源隔离接住异常之后就 return 了，而标记冷却/切换/降级的
+                # 代码住在 run_once 外层的 `except ProxyError`——那里只有整轮
+                # 所有 source 都失败时才够得着。于是形成一个死锁式的循环：
+                #
+                #   H2S 成功（浏览器建在好线路上，缓存 2 小时）
+                #     → 整轮不算全灭 → 外层处理器不触发
+                #     → 代理池永远不知道那个代理挂了
+                #     → OurCampus / Xior 每轮现取代理，拿到没被冷却的死代理
+                #     → 402，循环
+                #
+                # 2026-08-27 实测：08 时（本地）source 级隔离 176 次，真正报给
+                # 代理池只有 4 次；同一小时 H2S 163/167 成功，而 OurCampus 和
+                # Xior 是 0/167。**H2S 的健康恰恰是把另外两家钉死的原因**——
+                # 它越顺，代理池越听不到坏消息。
+                #
+                # 判据也因此换掉了：冷却要回答的是「这个代理还能不能用」，而
+                # 原先拿「整轮有没有全灭」来判，两者不是一回事。
+                #
+                # 误伤由既有的「连续两次确认」阈值挡住（_PROXY_FAILURE_CONFIRM_
+                # THRESHOLD）：单次抖动只留一个 mark，不会真的冷却谁。
+                if not dry_run and is_proxy_error(e):
+                    _report_source_proxy_failure(src, e)
                 if not dry_run:
                     _record_source_round(
                         storage, round_at=round_at, source=src,
