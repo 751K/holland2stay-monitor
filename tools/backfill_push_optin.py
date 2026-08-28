@@ -37,7 +37,15 @@ iMessage），推送从旁边绕了过去——``push.dispatch`` 只查节流和
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# 生产上代码是打进镜像的（docker-compose 只 bind mount data/logs/.env），
+# 所以这个脚本通常是喂 stdin 跑的：
+#     docker compose exec -T h2s python3 - < tools/backfill_push_optin.py
+# 那种情况下 __file__ 不存在，而容器的 WORKDIR 已经是 /app，sys.path 本来
+# 就对。只有在仓库里直接执行时才需要补路径。
+try:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+except NameError:
+    pass
 
 import argparse
 
