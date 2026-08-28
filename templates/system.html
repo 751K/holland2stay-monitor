@@ -42,13 +42,13 @@
             </button>
             <button type="button"
                     id="monitor-stop-btn"
-                    class="btn btn-ghost btn-sm{% if not info.monitor_running %} hidden{% endif %}"
+                    class="btn btn-outline btn-sm{% if not info.monitor_running %} hidden{% endif %}"
                     onclick="controlMonitor(this, 'stop')">
               <i class="bi bi-pause-fill mr-1"></i>{{ _('monitor_stop') }}
             </button>
             <button type="button"
                     id="monitor-restart-btn"
-                    class="btn btn-ghost btn-sm"
+                    class="btn btn-outline btn-sm"
                     onclick="controlMonitor(this, 'restart')">
               <i class="bi bi-arrow-repeat mr-1"></i>{{ _('settings_restart') }}
             </button>
@@ -79,7 +79,7 @@
       <textarea id="ann-body" class="ann-input" rows="3"
                 placeholder="{{ _('announce_body_ph') }}" maxlength="1000"></textarea>
       <div style="display:flex;gap:8px;align-items:center;">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="sendAnnouncement(true)">
+        <button type="button" class="btn btn-outline btn-sm" onclick="sendAnnouncement(true)">
           {{ _('announce_preview') }}
         </button>
         <button type="button" class="btn btn-primary btn-sm" onclick="sendAnnouncement(false)">

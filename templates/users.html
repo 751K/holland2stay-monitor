@@ -125,10 +125,10 @@
 
   <!-- Actions -->
   <div class="user-card-actions">
-    <a href="{{ url_for('user_edit', user_id=user.id) }}" class="btn btn-ghost btn-sm">
+    <a href="{{ url_for('user_edit', user_id=user.id) }}" class="btn btn-outline btn-sm">
       <i class="bi bi-pencil mr-1"></i>{{ _('users_edit') }}
     </a>
-    <button class="btn btn-ghost btn-sm js-test-notify"
+    <button class="btn btn-outline btn-sm js-test-notify"
             data-user-id="{{ user.id }}"
             data-user-name="{{ user.name }}"
             {% if not user.notification_channels %}disabled{% endif %}>
@@ -137,12 +137,12 @@
     {% if is_admin %}
     <form action="{{ url_for('user_toggle', user_id=user.id) }}" method="post" style="display:inline;">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-ghost btn-sm">
+      <button type="submit" class="btn btn-outline btn-sm">
         <i class="bi bi-{% if user.enabled %}pause{% else %}play{% endif %}-fill mr-1"></i>
         {{ _('users_toggle_off') if user.enabled else _('users_toggle_on') }}
       </button>
     </form>
-    <button class="btn btn-ghost btn-sm danger ml-auto js-delete-user"
+    <button class="btn btn-outline btn-sm danger ml-auto js-delete-user"
             data-user-id="{{ user.id }}"
             data-user-name="{{ user.name }}">
       <i class="bi bi-trash mr-1"></i>{{ _('users_delete') }}
@@ -160,7 +160,7 @@
     <h3 style="color:var(--danger);"><i class="bi bi-exclamation-triangle mr-2"></i>{{ _('users_delete_confirm') }}</h3>
     <p>{{ _('users_delete_msg') }}<strong id="deleteUserName"></strong>？{{ _('users_delete_warn') }}</p>
     <div class="modal-actions">
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('deleteModal').classList.add('hidden')">{{ _('settings_cancel') }}</button>
+      <button class="btn btn-outline btn-sm" onclick="document.getElementById('deleteModal').classList.add('hidden')">{{ _('settings_cancel') }}</button>
       <form id="deleteForm" method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-danger btn-sm">{{ _('users_delete') }}</button>

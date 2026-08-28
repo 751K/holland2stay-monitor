@@ -308,10 +308,15 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .table-minimal .cell-mono{font-family:var(--font-mono);font-size:14px}
 
 /* ── Badges — soft, no border ─────────────────────────────────── */
+/* 徽章不再是胶囊形。
+   站里有两套形状语言：圆角矩形是「操作」，徽章是「状态」。徽章原本走 100px
+   胶囊，在房源表那种夹在文字里的场合没问题，但一旦和尺寸相近的按钮上下相邻
+   （进程状态卡就是），胶囊对矩形的对比会盖过它们本来要传达的区别。
+   改成 --radius-lg：仍比按钮的 --radius 圆一档，看得出是两类东西，但不再硬碰。 */
 .badge{
   display:inline-flex;align-items:center;
   font-size:12px;font-weight:550;
-  padding:3px 10px;border-radius:100px;
+  padding:3px 10px;border-radius:var(--radius-lg);
   white-space:nowrap;
 }
 .badge-success{background:var(--success-soft);color:var(--success)}
@@ -392,6 +397,29 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .btn-danger:hover{opacity:.9}
 .btn-danger-ghost{background:var(--danger-soft);color:var(--danger)}
 .btn-danger-ghost:hover{opacity:.8}
+
+/* 描边式：透明底 + 一条发丝边。
+   给「一排并列的次要操作」用。.btn-ghost 是实心灰底（--surface-hover），单独
+   放在控制栏里没问题，但成排落进以文字为主的卡片时，几块实心色块比它们要表达
+   的重要性重得多——进程状态卡和用户卡都是这个情形。
+   .danger 变体给删除这类不可逆操作：它此前和「编辑」长得一模一样，因为
+   .btn-ghost.danger 从来没有过对应规则。 */
+.btn-outline{
+  background:transparent;
+  border:1px solid var(--border);
+  color:var(--text2);
+}
+.btn-outline:hover{
+  background:var(--surface-hover);
+  border-color:color-mix(in srgb, var(--text3) 40%, var(--border));
+  color:var(--text);
+}
+.btn-outline.danger{color:var(--danger)}
+.btn-outline.danger:hover{
+  background:var(--danger-soft);
+  border-color:color-mix(in srgb, var(--danger) 40%, var(--border));
+  color:var(--danger);
+}
 .btn-icon{
   width:34px;height:34px;padding:0;border-radius:var(--radius);
   border:none;background:transparent;color:var(--text2);
@@ -482,6 +510,21 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 /* .ms-arrow 现在是背景图（见 --caret），改 color 已经不起作用；
    箭头颜色由 SVG 里的 stroke 决定，和 <select> 保持一致。 */
 .listing-filter-card .filter-actions{align-self:end}
+
+/* 筛选卡内所有控件共用一个高度。此前按钮走 .btn-sm（26px），而输入框由内边距
+   撑到 38px——同一行里两种高度，肉眼看得出，但没有任何地方会报错。写成一个
+   变量而不是两处各写一个数值：两处迟早分叉，而分叉的表现就是现在这样。 */
+.listing-filter-card{--filter-control-h:38px}
+.listing-filter-card .form-input,
+.listing-filter-card .form-select,
+.listing-filter-card .ms-trigger,
+.listing-filter-card .filter-actions .btn{
+  min-height:var(--filter-control-h);
+}
+.listing-filter-card .filter-actions .btn{
+  padding-top:0;padding-bottom:0;
+  font-size:13px;
+}
 
 /* Settings forms need stronger input contrast on large glass panels. */
 .settings-form .form-input,
@@ -611,9 +654,18 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 }
 .monitor-paused-inline span{color:var(--text2)}
 .monitor-control-panel{
-  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
 }
-.monitor-control-row td{padding-top:6px}
+.monitor-control-row td{padding-top:10px}
+
+/* 尺寸由面板统一给，颜色走 .btn-outline。
+   .btn-primary（监控停着时的「启动」）保持实心，那一刻它确实是主操作。 */
+.monitor-control-panel .btn{
+  padding:7px 13px;
+  font-size:13px;
+  border-radius:var(--radius);
+}
+.monitor-control-panel .btn i{font-size:13px}
 
 /* ── Page Header ───────────────────────────────────────────────── */
 .page-header{
@@ -858,9 +910,11 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 }
 .user-card.drag-over-top::before{top:-2px}
 .user-card.drag-over-bottom::after{bottom:-2px}
+/* 渠道标签和 .badge 同属状态语言，跟着走同一档——否则用户卡上会同时出现
+   胶囊（Telegram）和圆角矩形（启用）两种形状。 */
 .channel-pill{
   display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;
-  padding:3px 10px;border-radius:100px;
+  padding:3px 10px;border-radius:var(--radius-lg);
 }
 .channel-pill.imessage{background:var(--accent-soft);color:var(--accent)}
 .channel-pill.telegram{background:var(--pill-telegram-bg);color:var(--pill-telegram)}
@@ -875,6 +929,12 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .user-card-actions{
   display:flex;flex-wrap:wrap;gap:6px;padding-top:14px;margin-top:14px;
 }
+.user-card-actions .btn{
+  padding:7px 13px;
+  font-size:13px;
+  border-radius:var(--radius);
+}
+.user-card-actions .btn i{font-size:13px}
 
 /* ── 自动预订：每个平台一块 ────────────────────────────────────
    三个平台（H2S / Xior / OurDomain）原先各只有一行灰色小标题，中间还夹着
