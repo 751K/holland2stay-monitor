@@ -41,12 +41,14 @@ SETTINGS_KEYS: list[str] = [
     "PEAK_INTERVAL", "MIN_INTERVAL", "PEAK_START", "PEAK_END", "PEAK_START_2", "PEAK_END_2", "PEAK_WEEKDAYS_ONLY", "JITTER_RATIO",
     # 心跳
     "HEARTBEAT_INTERVAL_MINUTES",
+    # 地图显示范围
+    "MAP_MAX_AGE_DAYS",
 ]
 
 # 数值型 key：空值或非法值跳过写入，避免 load_config() 中 int("") / int("abc") 抛错
 _NUMERIC_KEYS = frozenset({
     "CHECK_INTERVAL", "PEAK_INTERVAL", "MIN_INTERVAL", "JITTER_RATIO",
-    "HEARTBEAT_INTERVAL_MINUTES",
+    "HEARTBEAT_INTERVAL_MINUTES", "MAP_MAX_AGE_DAYS",
 })
 _FLOAT_KEYS = frozenset({"JITTER_RATIO"})
 

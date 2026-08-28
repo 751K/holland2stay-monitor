@@ -87,6 +87,8 @@ RUNTIME_KEYS: frozenset[str] = frozenset({
     "CITIES", "OURDOMAIN_CITIES", "OURCAMPUS_CITIES", "XIOR_CITIES",
     "AVAILABILITY_FILTERS",
     "SHARD_SIZES", "SOURCE_MIN_INTERVALS", "SOURCE_PEAK_MIN_INTERVALS",
+    # 地图显示范围：只保留这么多天内还被抓到过的房源；0 = 不过滤
+    "MAP_MAX_AGE_DAYS",
 })
 
 #: 行为阈值与开关。都有代码默认值，绝大多数部署一个都不必填。
@@ -117,8 +119,6 @@ TUNING_KEYS: frozenset[str] = frozenset({
     # 状态收敛与预订
     "STALE_RESERVED_HOURS", "STALE_OCCUPIED_HOURS",
     "BOOKING_STATUS_HOLD_MINUTES",
-    # 地图只显示这么多天内还被抓到过的房源；0 = 不过滤
-    "MAP_MAX_AGE_DAYS",
 })
 
 TIERS: dict[str, frozenset[str]] = {

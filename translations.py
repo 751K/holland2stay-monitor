@@ -650,6 +650,19 @@ TRANSLATIONS = {
         "zh": "FlatRadar · 荷兰租房房源监控与提醒",
         "en": "FlatRadar · Dutch Rental Listing Alerts",
     },
+    #: 「设置」页的地图显示范围。runtime 类配置，住在 app_settings 表。
+    "settings_map_max_age": {
+        "zh": "地图显示范围（天）",
+        "en": "Map age limit (days)",
+    },
+    "settings_map_max_age_default": {
+        "zh": "默认 14",
+        "en": "default 14",
+    },
+    "settings_map_max_age_hint": {
+        "zh": "只在地图上显示这么多天内还被抓到过的房源。已成交的房源会长期留在库里，不过滤会让几个月前就下架的单元一直钉在图上。填 0 显示全部。",
+        "en": "Only show listings still seen within this many days. Taken listings stay in the database indefinitely; without this, units delisted months ago remain pinned on the map. Set 0 to show everything.",
+    },
     # ── 新用户引导（app/services/onboarding_service.py）─────────────
     #: 清单标题。只在「还收不到通知」时出现，配好即消失。
     "onb_title": {
