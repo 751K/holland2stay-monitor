@@ -567,10 +567,49 @@ def user_test_notify(user_id: str) -> Any:
             results.append({"channel": label, "ok": False,
                             "error": "发送失败，请检查日志"})
 
+    # 设备推送也要测。它不在 notification_channels 里——那个字段只列外部渠道，
+    # APNs / FCM 走的是 device_tokens。只测外部渠道的话，一个只用 App、没配
+    # 邮件的用户点「确认能收到」会得到「未配置任何通知渠道」，而他的投递明明
+    # 是好的。按钮承诺的是「确认能收到」，就得测真正在生效的那条路。
+    # 总开关关着时真实投递也不会推（mcore/push.py:_user_wants_push），测试
+    # 跟着不推——测试结果比真实投递乐观，比不测还糟。
+    if getattr(user, "notifications_enabled", True):
+        results.extend(_test_push_to_devices(user_id))
+
     if not results:
         return jsonify({"ok": False, "results": [], "error": "该用户未配置任何通知渠道"})
 
     return jsonify({"ok": any(r["ok"] for r in results), "results": results})
+
+
+def _test_push_to_devices(user_id: str) -> list[dict]:
+    """给该用户的活跃设备发一条测试推送。没有设备时返回空列表（不是失败）。"""
+    from app.db import storage
+
+    st = storage()
+    try:
+        devices = st.get_active_devices_for_user(user_id)
+        if not devices:
+            return []
+        from mcore import push as _push
+
+        sent = _run_async(_push.dispatch_announcement_to_user(
+            st, user_id, "🧪 FlatRadar", "通知配置正确 ✅",
+        ))
+    except Exception as e:
+        logger.exception("测试推送失败 user_id=%s", user_id)
+        return [{"channel": "设备推送", "ok": False, "error": "发送失败，请检查日志"}]
+    finally:
+        st.close()
+
+    n = len(devices)
+    return [{
+        "channel": f"设备推送（{n}）" if n > 1 else "设备推送",
+        "ok": sent > 0,
+        # 登记了设备但一条都没发出去，最常见的原因是 token 已经失效（换机、
+        # 重装、长期未打开）。说出设备数才能让用户看懂 "0/2" 是什么意思。
+        "error": None if sent > 0 else f"{n} 台设备均未送达",
+    }]
 
 
 @admin_required

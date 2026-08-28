@@ -608,3 +608,59 @@ window.sourceShort = function (source) {
   var key = String(source || '').toLowerCase();
   return window.SOURCE_SHORT[key] || window.sourceLabel(source);
 };
+
+/* ── 引导清单的「发送测试通知」按钮 ─────────────────────────────
+ *
+ * 走的是 /users/<id>/test，和「我的配置」页上那个按钮同一个端点。结果按渠道
+ * 逐条展示，不合并成一句「成功/失败」——用户配了两个渠道、只有一个通的时候，
+ * 一句「失败」会让他去查错的那一头。
+ */
+document.addEventListener('click', function (e) {
+  var btn = e.target.closest('[data-onb-test]');
+  if (!btn) return;
+
+  var lang = getLang();
+  var box = btn.parentElement.querySelector('.onb-test-result');
+  var csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+  var orig = btn.innerHTML;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner mr-1"></span>' +
+                  (lang === 'zh' ? '发送中' : 'Sending');
+  if (box) { box.hidden = true; box.innerHTML = ''; }
+
+  fetch(btn.getAttribute('data-onb-test'), {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrf },
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (!box) return;
+      var rows = (d && d.results) || [];
+      if (!rows.length) {
+        box.className = 'onb-test-result onb-test-fail';
+        box.textContent = (d && d.error) ||
+          (lang === 'zh' ? '没有可用的接收方式' : 'No delivery route available');
+      } else {
+        box.className = 'onb-test-result';
+        box.innerHTML = rows.map(function (x) {
+          var cls = x.ok ? 'onb-test-ok' : 'onb-test-fail';
+          var mark = x.ok ? '✓' : '✗';
+          var tail = x.ok ? '' : ' — ' + escapeHtml(x.error || '');
+          return '<div class="' + cls + '">' + mark + ' ' +
+                 escapeHtml(x.channel || '') + tail + '</div>';
+        }).join('');
+      }
+      box.hidden = false;
+    })
+    .catch(function () {
+      if (!box) return;
+      box.className = 'onb-test-result onb-test-fail';
+      box.textContent = lang === 'zh' ? '请求失败' : 'Request failed';
+      box.hidden = false;
+    })
+    .finally(function () {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    });
+});

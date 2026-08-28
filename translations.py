@@ -650,6 +650,81 @@ TRANSLATIONS = {
         "zh": "FlatRadar · 荷兰租房房源监控与提醒",
         "en": "FlatRadar · Dutch Rental Listing Alerts",
     },
+    # ── 新用户引导（app/services/onboarding_service.py）─────────────
+    #: 清单标题。只在「还收不到通知」时出现，配好即消失。
+    "onb_title": {
+        "zh": "还差一步就能收到房源提醒",
+        "en": "One step left before you get alerts",
+    },
+    "onb_title_done": {
+        "zh": "提醒已开启",
+        "en": "Alerts are on",
+    },
+    #: 第一步：筛选条件。空不是错，所以措辞是描述而不是催促。
+    "onb_step_filter": {
+        "zh": "筛选条件",
+        "en": "Filters",
+    },
+    "onb_filter_empty": {
+        "zh": "未设置——当前会把全部城市、全部价位的房源都推给你",
+        "en": "Not set — you'll be alerted about every listing, any city, any price",
+    },
+    "onb_filter_set": {
+        "zh": "已设置 %(n)s 项",
+        "en": "%(n)s set",
+    },
+    #: 第二步：接收方式。这一步是真正的闸。
+    "onb_step_route": {
+        "zh": "接收方式",
+        "en": "How you get alerted",
+    },
+    "onb_route_none": {
+        "zh": "没有任何接收方式——你现在收不到通知",
+        "en": "No delivery route — you are not receiving anything",
+    },
+    "onb_route_toggle_off": {
+        "zh": "通知总开关是关着的——你现在收不到通知",
+        "en": "Notifications are switched off — you are not receiving anything",
+    },
+    "onb_route_account_off": {
+        "zh": "账号已停用——所有通知都已停止",
+        "en": "Account is disabled — all alerts are stopped",
+    },
+    "onb_route_ok": {
+        "zh": "已启用：",
+        "en": "Active: ",
+    },
+    #: 第三步：验证。配好之后才有意义，所以只在前两步过了才出现。
+    "onb_step_verify": {
+        "zh": "确认能收到",
+        "en": "Confirm it works",
+    },
+    "onb_verify_hint": {
+        "zh": "发一条测试通知，确认它真的到你手上",
+        "en": "Send a test notification and check it actually arrives",
+    },
+    "onb_verify_btn": {
+        "zh": "发送测试通知",
+        "en": "Send test",
+    },
+    "onb_go_settings": {
+        "zh": "去配置接收方式",
+        "en": "Set up delivery",
+    },
+    #: 两个按钮都写「去设置」会让人不知道点哪个通向什么。
+    "onb_go_filter": {
+        "zh": "去设置筛选条件",
+        "en": "Set filters",
+    },
+    #: 面板铃铛是全局流水，不按用户筛选——不说清楚会让人以为筛选生效了。
+    "onb_bell_note": {
+        "zh": "下面的通知列表是全站流水，不按你的筛选条件过滤。只有上面配好的接收方式才会按条件推给你。",
+        "en": "The notification feed below is site-wide and unfiltered. Only the delivery routes above respect your filters.",
+    },
+    "onb_guide_link": {
+        "zh": "完整使用说明",
+        "en": "Full guide",
+    },
     #: 价格右上角那个星号的 tooltip。只有 OurDomain / OurCampus 会出现。
     "rent_basis_hint": {
         "zh": "此价格为基础租金，服务费另计：",

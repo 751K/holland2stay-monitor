@@ -17,12 +17,42 @@ from app.auth import api_login_required, login_required
 from app.db import storage
 from app.process_ctrl import monitor_pid
 from app.services.dashboard_service import dashboard_metrics
+from app.services.onboarding_service import delivery_state
 from app.i18n import get_lang
 from app.services.listing_service import (
     get_filter_options,
     normalize_listing_rows,
     query_listing_rows,
 )
+
+
+def _onboarding_state():
+    """当前登录用户的投递状态；不适用时返回 None（模板据此整块跳过）。
+
+    只对 user 角色算：admin 和 guest 没有 UserConfig 行，guest 更是连账号
+    都没有。算不出来时返回 None 而不是抛——引导缺一块不该让首页 500。
+    """
+    from app.auth import current_user_id, is_user
+
+    if not is_user():
+        return None
+    uid = current_user_id()
+    if not uid:
+        return None
+    try:
+        from users import load_users
+
+        user = next((u for u in load_users() if u.id == uid), None)
+        if user is None:
+            return None
+        st = storage()
+        try:
+            return delivery_state(st, user, get_lang())
+        finally:
+            st.close()
+    except Exception:
+        logger.warning("计算引导状态失败 user_id=%s", uid, exc_info=True)
+        return None
 
 
 @login_required
@@ -64,6 +94,7 @@ def index() -> str:
         "index.html",
         monitored_cities_text=monitored_cities_text,
         support_email=support_email,
+        onb=_onboarding_state(),
         stats=stats,
         recent=recent,
         changes=changes,

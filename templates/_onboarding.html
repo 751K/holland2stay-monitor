@@ -1,0 +1,109 @@
+{#
+  新用户引导清单。
+
+  只对 user 角色渲染（admin / guest 没有 UserConfig 行，onb 会是 None）。
+
+  什么时候出现
+  ------------
+  「收不到通知」**或**「筛选为空」。两者都配好就整块消失——引导不是常驻装饰。
+
+  两档措辞，不混成一个进度条
+  --------------------------
+  - 收不到通知：红。这是个故障状态，用户做了事却没有结果。
+  - 筛选为空：灰。这是**合法状态**，意思是「什么都推给我」。把它算成未完成
+    会对着一半只想随便看看的人天天报警，所以措辞是「会发生什么」而不是
+    「你还没做什么」。
+
+  第三步「确认能收到」只在前两步的闸过了才出现——没有接收方式的时候让人去点
+  「发送测试通知」，只会得到一次失败，那不叫引导。
+#}
+{% if onb and (not onb.reachable or onb.filter_empty) %}
+{# 外壳两种状态一模一样，和面板上其它卡片同一套玻璃质感。轻重差别全部由
+   内容承担：标题、图标、以及那一步自己的颜色。给整张卡描边或加色条会让它
+   压过下面真正的故障横幅。 #}
+<section class="onb-card" aria-labelledby="onb-title">
+  <div class="onb-head">
+    <i class="bi {% if onb.reachable %}bi-info-circle{% else %}bi-bell-slash{% endif %}"
+       aria-hidden="true"></i>
+    <h2 id="onb-title">
+      {{ _('onb_title_done') if onb.reachable else _('onb_title') }}
+    </h2>
+  </div>
+
+  <ol class="onb-steps">
+    {# ── 接收方式排第一：它是唯一真正挡住通知的东西 ── #}
+    <li class="onb-step {% if onb.reachable %}onb-step-done{% else %}onb-step-blocked{% endif %}">
+      <span class="onb-mark" aria-hidden="true">
+        <i class="bi {% if onb.reachable %}bi-check-lg{% else %}bi-x-lg{% endif %}"></i>
+      </span>
+      <div class="onb-body">
+        <div class="onb-step-name">{{ _('onb_step_route') }}</div>
+        <div class="onb-step-note">
+          {% if onb.reachable %}
+            {{ _('onb_route_ok') }}{{ onb.route_labels | join('、' if lang == 'zh' else ', ') }}
+          {% elif onb.blocked_by == 'account' %}
+            {{ _('onb_route_account_off') }}
+          {% elif onb.blocked_by == 'toggle' %}
+            {{ _('onb_route_toggle_off') }}
+          {% else %}
+            {{ _('onb_route_none') }}
+          {% endif %}
+        </div>
+        {% if not onb.reachable and current_user_id %}
+        <a class="btn btn-primary onb-btn"
+           href="{{ url_for('user_edit', user_id=current_user_id) }}">
+          {{ _('onb_go_settings') }}
+        </a>
+        {% endif %}
+      </div>
+    </li>
+
+    {# ── 筛选条件：空是合法的，所以是灰的「–」不是红的「✗」 ── #}
+    <li class="onb-step {% if onb.filter_empty %}onb-step-note-only{% else %}onb-step-done{% endif %}">
+      <span class="onb-mark" aria-hidden="true">
+        <i class="bi {% if onb.filter_empty %}bi-dash{% else %}bi-check-lg{% endif %}"></i>
+      </span>
+      <div class="onb-body">
+        <div class="onb-step-name">{{ _('onb_step_filter') }}</div>
+        <div class="onb-step-note">
+          {% if onb.filter_empty %}
+            {{ _('onb_filter_empty') }}
+          {% else %}
+            {{ _('onb_filter_set') % {'n': onb.filter_count} }}
+          {% endif %}
+        </div>
+        {% if onb.filter_empty and current_user_id %}
+        <a class="btn btn-ghost onb-btn"
+           href="{{ url_for('user_edit', user_id=current_user_id) }}#filter">
+          {{ _('onb_go_filter') }}
+        </a>
+        {% endif %}
+      </div>
+    </li>
+
+    {# ── 确认能收到：只有接收方式通了才有意义 ── #}
+    {% if onb.reachable and current_user_id %}
+    <li class="onb-step onb-step-note-only">
+      <span class="onb-mark" aria-hidden="true"><i class="bi bi-dash"></i></span>
+      <div class="onb-body">
+        <div class="onb-step-name">{{ _('onb_step_verify') }}</div>
+        <div class="onb-step-note">{{ _('onb_verify_hint') }}</div>
+        <button type="button"
+                class="btn btn-ghost onb-btn"
+                data-onb-test="{{ url_for('user_test_notify', user_id=current_user_id) }}">
+          {{ _('onb_verify_btn') }}
+        </button>
+        <div class="onb-test-result" role="status" aria-live="polite" hidden></div>
+      </div>
+    </li>
+    {% endif %}
+  </ol>
+
+  <p class="onb-foot">
+    {{ _('onb_bell_note') }}
+    <a href="{{ url_for('guide_page') }}" target="_blank" rel="noopener">
+      {{ _('onb_guide_link') }}
+    </a>
+  </p>
+</section>
+{% endif %}

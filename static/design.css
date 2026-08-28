@@ -1299,3 +1299,52 @@ html.theme-transitioning *::after{
   margin-left:1px;
   cursor:help;
 }
+
+/* ── 新用户引导清单（templates/_onboarding.html）─────────────────
+   只在「此刻收不到通知」或「筛选为空」时出现，配好即整块消失。
+
+   外壳用和面板上其它卡片完全一样的玻璃质感，不做任何结构性的强调——
+   第一版给它加了一条红色竖边，站里别处没有这种东西，结果它比它下面真正的
+   故障横幅还抢眼。轻重由内容承担：挡路的那一步自己是红的，其余是灰的。 */
+.onb-card{
+  padding:18px 22px;margin-bottom:20px;
+  background:var(--glass-bg);
+  backdrop-filter:var(--glass-blur);
+  -webkit-backdrop-filter:var(--glass-blur);
+  border:1px solid var(--glass-border);
+  border-radius:var(--radius-xl);
+  box-shadow:var(--glass-shadow);
+}
+.onb-head{display:flex;align-items:center;gap:9px;margin-bottom:16px}
+.onb-head i{font-size:16px;color:var(--text3);flex-shrink:0}
+.onb-head h2{margin:0;font-size:15px;font-weight:650}
+
+.onb-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
+.onb-step{display:flex;align-items:flex-start;gap:10px}
+.onb-mark{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;border-radius:50%;flex-shrink:0;margin-top:1px;
+  font-size:11px;
+}
+.onb-step-blocked .onb-mark{background:var(--danger-soft);color:var(--danger)}
+.onb-step-done .onb-mark{background:var(--success-soft);color:var(--success)}
+.onb-step-note-only .onb-mark{background:var(--surface-hover);color:var(--text3)}
+
+.onb-body{min-width:0}
+.onb-step-name{font-size:14px;font-weight:600;line-height:1.3}
+.onb-step-note{font-size:13px;color:var(--text2);line-height:1.45;margin-top:2px}
+.onb-step-blocked .onb-step-note{color:var(--danger)}
+.onb-btn{margin-top:8px}
+
+.onb-foot{
+  margin:16px 0 0;padding-top:13px;
+  border-top:1px solid var(--border);
+  font-size:12px;color:var(--text3);line-height:1.5;
+}
+.onb-foot a{color:var(--text2);text-decoration:underline}
+.onb-foot a:hover{color:var(--text)}
+
+.onb-test-result{margin-top:8px;font-size:13px;line-height:1.45}
+.onb-test-result[hidden]{display:none}
+.onb-test-ok{color:var(--success)}
+.onb-test-fail{color:var(--danger)}
