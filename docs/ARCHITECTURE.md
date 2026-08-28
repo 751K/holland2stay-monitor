@@ -1,7 +1,7 @@
 # FlatRadar 架构说明
 
 本文档面向自部署、排障与二次开发者。阅读之后应能回答以下问题：进程如何运行、
-单轮抓取经过哪些环节、状态存放于何处、发生故障时系统如何响应。
+单轮抓取经过哪些环节、状态保存在哪里、发生故障时系统如何响应。
 
 面向用户的使用说明见 [flatradar.app/guide](https://flatradar.app/guide)，接口契约
 见 [API.md](API.md)，各平台的抓取侦察见 [H2S.md](H2S.md) /
@@ -955,6 +955,11 @@ OurCampus 官网自述排队 16–18 个月——仅凭「抓取到 0 条」会�
 `_dispatch_watchdog_alerts` 在 run_once 上抛时仍然跳过，此时其注释所述前提才真正
 成立；`tests/test_outage_alert.py` 同时守住判定逻辑与四个分支的接线。
 
+**为什么没有引入 Prometheus、Grafana 或 OTel。** 本系统是单机单容器、单个 SQLite
+文件，引入指标后端的运维成本高于其所解决的问题。在这一规模下，SQLite 表就是正确
+答案。同理，日志侧也没有做全文索引——数十 MB 规模的日志，分块反向读取加子串过滤
+已经足够快。
+
 ### 5.13 「从 feed 里消失」是唯一的下架信号
 
 四个平台均不提供「房源已下架」的显式信号，只是停止在 feed 中返回该房源。
@@ -1359,10 +1364,11 @@ docker exec h2s python -c "from config import get_proxy_url, probe_proxy; \
 - 各 source 是**互不相同的房源池**，彼此不构成冗余；Holland2Stay 故障期间无法
   从其它 source 获取其房源。且体量极不均衡：Holland2Stay 按城市覆盖，是房源的
   主要来源，其余三个平台均为单栋楼粒度，合计占比很小。
-- **OurCampus 从未返回过任何可订单元。** 它照常被轮询，户型面板亦返回正常，但
-  解析器所期待的单元表始终未出现（`data/ourcampus_capture.txt` 逐次请求记录一行，
-  可自行查阅）。其解析器完全继承自 OurDomain，从未与真实 markup 核对——阈值、
-  状态映射以及「feed 仅列出可订单元」这一前提，均未经验证。
+- **OurCampus 出房频率极低。** 接入之后的最初数月，解析器所期待的单元表一次都
+  没有出现；该样本此后已经出现，并被用于校准解析器（见 v1.26.0）。校准过程中
+  证伪了两条原有前提：feed 并非只列出可订单元，置灰的日期单元格表示「自该日起
+  可订」而非「已出租」。`data/ourcampus_capture.txt` 逐次请求记录一行，并在解析
+  出单元或疑似解析失配时附上 HTML，可自行查阅。尚未验证的是该平台的预订流程。
 - 单机 SQLite，无水平扩展设计；`--workers=1` 用于规避写锁冲突。
 - Cloudflare 策略随时可能变更，抓取层的稳定性本质上依赖出口 IP 的信誉。
 - 自动预订仅覆盖 Holland2Stay。RENTCafe 线的代码已完整、reCAPTCHA 已对接、流程

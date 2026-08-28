@@ -44,14 +44,35 @@ OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即�
 | Holland2Stay | 任意配置的荷兰城市 | 稳定，为房源的主要来源 | 支持自动预订 |
 | OurDomain | Amsterdam Diemen / South-East | 稳定 | 仅通知（预订链路已实现，未开放）|
 | Xior | 14 个城市共 30 栋楼，可按需选择 | 稳定 | 仅通知（预订链路已实现，未开放）|
-| OurCampus | Amsterdam Diemen（1 栋） | **未经验证**，见下文 | 仅通知 |
+| OurCampus | Amsterdam Diemen（1 栋） | 已用真实 markup 校准；出房极少，见下文 | 仅通知 |
 
-**OurCampus 至今未出现过任何可订房源。** 它照常被轮询，户型面板亦返回正常，但
-解析器所期待的单元表始终未曾出现。该解析器完全继承自 OurDomain，从未与真实
-markup 核对——其状态映射、阈值，以及「feed 仅列出可订单元」这一前提，均未经
-验证。每次请求都会向 `data/ourcampus_capture.txt` 写入一行摘要，首次成功解析出
-单元时会一并存入完整 HTML；本地实例的进展可查阅该文件。在该样本出现之前，应将
-OurCampus 视为尚未验证的代码。
+**OurCampus 会出现可订房源，但频率很低。** 接入之后的最初数月，它的户型面板始终
+返回正常，而解析器所期待的单元表一次都没有出现，因此这个完全继承自 OurDomain 的
+解析器从未与真实 markup 核对过。该样本此后已经出现。系统仍然会为每次请求向
+`data/ourcampus_capture.txt` 写入一行摘要，并在解析出单元、或响应看似单元面板而
+解析器未能读出内容时，一并存入对应的 HTML。本地实例的进展可查阅该文件。
+
+原有的两条前提已被这些样本证伪。其一，feed 并非只列出可订单元；其二，置灰的日期
+单元格表示「自该日起可订」，而不是「已出租」，按后者理解曾导致整批单元被判定为
+Occupied 且未发出任何通知。状态判定现已改为依据该行是否带有可用的下单按钮，
+并对未识别的样式类放行且记录告警，而不再无声归类。
+
+**期望值应当按实际会出现的那一档来定，而不是按官网营销页。** 预订系统里共有三个
+户型，而 `ourcampus.nl` 只宣传了其中两个：
+
+| 户型 | 面积 | 月租 | 官网是否宣传 |
+|---|---|---|---|
+| Standard+ Studio Apartment — 1 人 | 21–28,5 m² | €1.063–1.153 | 否 |
+| Furnished Student Apartment — 1 人 | 26–39 m² | €621–906 | 是 |
+| Furnished Student Apartment — 2 人 | 41–55 m² | €919–1.042 | 是 |
+
+至今在此出现过的每一套单元都属于第一行，即官网未宣传、且每平米价格约为另外两档
+两倍的那一档；两档便宜的学生房一次都没有出现过。这与 Greystar 官网 FAQ 的说明
+相符：该地点此前采用等候名单分配房源，该名单已不再接受新申请，但只要名单上仍有
+排名中的申请人，房源就优先分配给他们。因此进入公开可订池、能被本项目抓到的，是
+队列未取走的部分。
+
+预订流程本身至今没有侦察过，是这次接入中唯一仍未验证的环节。
 
 各平台体量本身即不均衡：Holland2Stay 按城市覆盖，是房源的主要来源；其余三个均为
 单栋楼粒度，数栋楼合计也难以形成可比的规模。各 source 是互不相同的房源池，彼此
@@ -123,15 +144,24 @@ cp .env.example .env
 mkdir -p data logs logs/caddy
 ```
 
-**第 2 步**，编辑 `.env`，至少填写这五项：
+**第 2 步**，编辑 `.env`：
 
 ```env
 WEB_PASSWORD=一串足够长的随机字符
-SESSION_COOKIE_SECURE=true
+HTTPS_PROXY=http://user:pass@proxy-host:port
 PUBLIC_BASE_URL=https://your.domain.com
-SUPPORT_EMAIL=support@example.com
-TIMEZONE=Europe/Amsterdam
+SESSION_COOKIE_SECURE=true
 ```
+
+- `WEB_PASSWORD`——留空时容器拒绝启动。
+- `HTTPS_PROXY`——机房 IP 必须配，而 VPS 给的正是机房 IP。不配则 Holland2Stay 被
+  Cloudflare 403，该 source 会一直停在熔断循环里。仅当服务器为住宅出口时可以不填。
+- `PUBLIC_BASE_URL`——验证邮件的链接由它拼出；未设置时程序拒绝发送。
+- `SESSION_COOKIE_SECURE`——`.env.example` 里的默认值是 `false`，HTTPS 部署需改为
+  `true`。
+
+`SUPPORT_EMAIL` 与 `TIMEZONE` 已预填好（`support@example.com`、
+`Europe/Amsterdam`），其余键也都有可用默认值——只在默认值不适用时才需要改。
 
 **第 3 步**，编辑 `Caddyfile`，把其中的 `your.domain.com` 换成实际域名。
 
@@ -141,11 +171,12 @@ TIMEZONE=Europe/Amsterdam
 docker compose up -d
 ```
 
-证书由 Caddy 自动申请与续期。启动完成后访问域名，用户名 `admin`、密码为第 2 步
-所设的 `WEB_PASSWORD` 登录。
+证书由 Caddy 自动申请与续期。启动完成后访问域名，用第 2 步所设的 `WEB_PASSWORD`
+登录；用户名在未自行设置 `WEB_USERNAME` 时为 `admin`。
 
-> 若容器没能起来、日志里是一行 `FATAL`，说明第 2 步或第 3 步没做完——提示中已
-> 写明缺什么。
+> entrypoint 启动前只校验两项：`WEB_PASSWORD` 非空、`Caddyfile` 中不再含
+> `your.domain.com`。任一不满足都会打印 `FATAL` 并终止容器。其余键一概不校验——
+> 漏填 `HTTPS_PROXY` 或 `PUBLIC_BASE_URL` 容器照常启动，要到日志里才看得出来。
 
 ### 确认运行状态
 

@@ -50,17 +50,45 @@ services beyond the notification channels you choose to enable.
 | Holland2Stay | Any Dutch city you configure | Proven — the bulk of what lands | Auto-booking supported |
 | OurDomain | Amsterdam Diemen / South-East | Proven | Notify only (booking flow built, not enabled) |
 | Xior | Any of 30 buildings across 14 cities | Proven | Notify only (booking flow built, not enabled) |
-| OurCampus | Amsterdam Diemen (1 building) | **Unproven** — see below | Notify only |
+| OurCampus | Amsterdam Diemen (1 building) | Checked against real markup; very low volume — see below | Notify only |
 
-**OurCampus has never returned a single available unit.** It is polled normally
-and its floorplan panels come back valid, but the unit table its parser expects
-has not shown up once. The parser is inherited from OurDomain and has never been
-checked against real markup, so its status mapping, its thresholds and the
-premise that the feed lists only bookable units are all unverified. Every request
-writes a summary line to `data/ourcampus_capture.txt`, and the first response
-that actually parses a unit gets its full HTML archived there — check that file
-to see where your own instance stands. Until such a sample exists, treat
-OurCampus as untested code that happens to run.
+**OurCampus does return units, but rarely.** For the first months after it was
+added, its floorplan panels came back valid while the unit table its parser
+expects never appeared, so the parser — inherited wholesale from OurDomain —
+had never been checked against real markup. Those samples have since arrived.
+Every request still writes a summary line to `data/ourcampus_capture.txt`, and
+any response that parses a unit, or that looks like a unit panel the parser
+failed to read, gets its HTML archived alongside it. Check that file to see
+where your own instance stands.
+
+Two of the original assumptions turned out to be wrong, and the archived samples
+are what corrected them. The feed does not list only bookable units, and a
+greyed-out date cell means "bookable from that date" rather than "occupied";
+reading it as the latter caused a whole batch of units to be reported as
+occupied with no notification sent. The status mapping now keys off whether the
+row carries a working order button, and an unrecognised style class is let
+through with a warning rather than silently classified.
+
+**Set your expectations by the tier that actually surfaces, not by the marketing
+page.** The booking system carries three floor plans, while `ourcampus.nl` only
+advertises two of them:
+
+| Floor plan | Size | Rent | Advertised on the site |
+|---|---|---|---|
+| Standard+ Studio Apartment — 1 person | 21–28.5 m² | €1,063–1,153 | No |
+| Furnished Student Apartment — 1 person | 26–39 m² | €621–906 | Yes |
+| Furnished Student Apartment — 2 person | 41–55 m² | €919–1,042 | Yes |
+
+Every unit that has ever surfaced here belongs to the first row — the one the
+site does not advertise, and the one that costs roughly twice as much per square
+metre as the other two. The cheap student tiers have never appeared once. That
+is consistent with what Greystar's own FAQ describes: this location historically
+allocated homes from a waiting list, that list is closed to new applicants, and
+while ranked applicants remain, homes go to them first. So what reaches the
+public availability feed is what the queue did not take.
+
+The booking flow itself has never been scouted, and remains the one part of this
+integration that is still unproven.
 
 Expect lopsided volume in general. Holland2Stay covers whole cities and is where
 most listings come from; the other three are individual buildings, so a handful
@@ -137,15 +165,27 @@ cp .env.example .env
 mkdir -p data logs logs/caddy
 ```
 
-**Step 2** — edit `.env` and fill in at least these five keys:
+**Step 2** — edit `.env`:
 
 ```env
 WEB_PASSWORD=a-long-random-string
-SESSION_COOKIE_SECURE=true
+HTTPS_PROXY=http://user:pass@proxy-host:port
 PUBLIC_BASE_URL=https://your.domain.com
-SUPPORT_EMAIL=support@example.com
-TIMEZONE=Europe/Amsterdam
+SESSION_COOKIE_SECURE=true
 ```
+
+- `WEB_PASSWORD` — the container refuses to start while it is empty.
+- `HTTPS_PROXY` — needed on any datacenter IP, which is what a VPS gives you.
+  Without it Cloudflare 403s Holland2Stay and that source stays in its breaker
+  loop. Skip it only if the server has a residential exit.
+- `PUBLIC_BASE_URL` — verification emails are built from it; unset, the app
+  refuses to send them.
+- `SESSION_COOKIE_SECURE` — `.env.example` ships `false`; set it to `true` for
+  the HTTPS deployment.
+
+`SUPPORT_EMAIL` and `TIMEZONE` arrive pre-filled (`support@example.com`,
+`Europe/Amsterdam`) and every other key has a working default — change them only
+if the default is wrong for you.
 
 **Step 3** — edit `Caddyfile` and replace `your.domain.com` with your domain.
 
@@ -156,10 +196,14 @@ docker compose up -d
 ```
 
 Caddy obtains and renews the certificate on its own. Once it is up, open your
-domain and sign in as `admin` with the password you set in step 2.
+domain and sign in with the password you set in step 2. The username is
+`admin` unless you set `WEB_USERNAME` yourself.
 
-> If the container does not come up and the log shows a `FATAL` line, step 2 or
-> step 3 is incomplete — the message says which.
+> The entrypoint validates exactly two things before starting: that
+> `WEB_PASSWORD` is non-empty, and that `Caddyfile` no longer contains
+> `your.domain.com`. Either one failing prints a `FATAL` line and stops the
+> container. Nothing else is checked — a missing `HTTPS_PROXY` or
+> `PUBLIC_BASE_URL` starts up normally and only surfaces later in the logs.
 
 ### Confirming it works
 
