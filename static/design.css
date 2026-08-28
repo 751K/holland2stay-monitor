@@ -980,7 +980,9 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .city-btn.active{background:var(--accent);color:#fff;box-shadow:none}
 .city-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 
-.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+/* gap 不能省：末尾的视图切换带 margin-left:auto，会把 space-between 的余量
+   全部吃掉，于是「‹ 2026 年 八月 ›」三个元素紧贴在一起。 */
+.cal-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
 .cal-nav-btn{
   width:36px;height:36px;border-radius:var(--radius);
   background:var(--glass-bg);color:var(--text2);cursor:pointer;transition:all .12s;

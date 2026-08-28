@@ -100,10 +100,16 @@ class TestStorageQueries:
         assert isinstance(cities, list)
 
     def test_bad_features_json_no_crash(self, temp_db):
-        """损坏的 JSON 在 get_map_listings 不崩。"""
+        """损坏的 JSON 在 get_map_listings 不崩。
+
+        last_seen 用「现在」：地图按它过滤陈旧房源，写死日期会让这条用例因为
+        「房源太旧被滤掉」而空转，看上去仍然是绿的，却根本没走到解析那一步。
+        """
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat()
         temp_db.conn.execute(
             "INSERT INTO listings (id, name, status, price_raw, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            ("bad-id", "Bad", "Available", "€500", "BROKEN JSON {{{", "https://x.com", "E", "2026-01-01", "2026-01-01", "Available"),
+            ("bad-id", "Bad", "Available", "€500", "BROKEN JSON {{{", "https://x.com", "E", now, now, "Available"),
         )
         temp_db.conn.commit()
         rows = temp_db.get_map_listings()

@@ -4,10 +4,41 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from models import parse_features_list
 
 logger = logging.getLogger(__name__)
+
+#: 地图只显示这么多天内还被抓到过的房源。
+#:
+#: 为什么需要这道过滤：``Occupied`` 是老化收敛的**终态**，那些行永远留在库里。
+#: 地图此前不带任何时间条件，于是几个月前就从 feed 里消失的单元仍然钉在图上。
+#: 2026-08-28 线上实测 628 条里有 270 条超过 30 天没被抓到过，全部是 Occupied，
+#: 而 Reserved 与可订的房源没有一条陈旧——真正的噪音全在终态那一侧。
+#:
+#: 十四天：在 feed 里的房源每轮都会被看到（轮次是分钟级），因此「两周没见到」
+#: 已经足够肯定它不在了；同时留下两周的近期成交做参考，不至于把地图清空。
+#: 用 MAP_MAX_AGE_DAYS 可调，设 0 表示不过滤。
+#:
+#: 比较必须走 julianday 而不是字符串。``last_seen`` 存的是带时区的 ISO
+#: （``2026-08-14T09:00:00+00:00``），而 ``datetime('now','-14 days')`` 返回的是
+#: 空格分隔、无时区的形式；两者直接比字符串时，第 10 位是 ``T``(0x54) 对空格
+#: (0x20)，于是边界那一天的房源无论几点都判为「新」。差一天看不出来，但它是
+#: 那种永远不会报错的错。
+_MAP_MAX_AGE_DAYS_DEFAULT = 14
+
+
+def _map_max_age_days() -> int:
+    raw = os.environ.get("MAP_MAX_AGE_DAYS", "")
+    if not raw.strip():
+        return _MAP_MAX_AGE_DAYS_DEFAULT
+    try:
+        return max(0, int(raw))
+    except (TypeError, ValueError):
+        logger.warning("MAP_MAX_AGE_DAYS=%r 不是整数，按默认 %d 天处理",
+                       raw, _MAP_MAX_AGE_DAYS_DEFAULT)
+        return _MAP_MAX_AGE_DAYS_DEFAULT
 
 # 荷兰城市口语别称 → 正式名
 _CITY_FORMAL: dict[str, str] = {
@@ -66,11 +97,25 @@ class MapCalendarOps:
                 (address, lat, lng),
             )
 
-    def get_map_listings(self) -> list[dict]:
-        rows = self._conn.execute(
-            """SELECT id, name, status, price_raw, available_from, url, city, source, features
-               FROM listings ORDER BY city, name LIMIT 2000"""
-        ).fetchall()
+    def get_map_listings(self, *, max_age_days: int | None = None) -> list[dict]:
+        """地图数据。默认只返回近期还被抓到过的房源，见 _MAP_MAX_AGE_DAYS_DEFAULT。
+
+        ``max_age_days=0`` 关闭过滤（返回全部）；不传则读环境变量。
+        """
+        days = _map_max_age_days() if max_age_days is None else max(0, int(max_age_days))
+        if days:
+            rows = self._conn.execute(
+                """SELECT id, name, status, price_raw, available_from, url, city, source, features
+                   FROM listings
+                   WHERE julianday(last_seen) >= julianday('now') - ?
+                   ORDER BY city, name LIMIT 2000""",
+                (days,),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                """SELECT id, name, status, price_raw, available_from, url, city, source, features
+                   FROM listings ORDER BY city, name LIMIT 2000"""
+            ).fetchall()
         results: list[dict] = []
         for r in rows:
             try:

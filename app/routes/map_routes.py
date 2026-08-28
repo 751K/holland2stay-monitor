@@ -13,11 +13,9 @@
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
-import time as _time
 
 from flask import Flask, jsonify, render_template, request
 
@@ -25,6 +23,7 @@ from app.auth import admin_api_required, api_login_required, login_required
 from app.csrf import csrf_required
 from app.db import storage
 from app.services.listing_service import get_map_payload
+from mcore.geocode import geocode_addresses
 
 logger = logging.getLogger(__name__)
 
@@ -35,71 +34,25 @@ _geocode_lock = threading.Lock()
 _geocode_status: dict = {"running": False, "total": 0, "done": 0, "failed": 0, "errors": []}
 
 
-def _geocode_one(addr: str) -> tuple[float, float] | None:
-    """对单个地址做 Photon 地理编码；含 Room 房号则失败时回退到建筑地址重试。"""
-    from urllib.request import Request
-
-    from net import direct_urlopen
-    from urllib.parse import quote
-
-    def _query(q: str) -> tuple[float, float] | None:
-        url = f"https://photon.komoot.io/api/?q={quote(q)}&limit=1"
-        req = Request(url, headers={"User-Agent": "FlatRadar/1.0"})
-        resp = direct_urlopen(req, timeout=5)
-        data = json.loads(resp.read().decode())
-        feats = data.get("features", [])
-        if feats:
-            coords = feats[0]["geometry"]["coordinates"]
-            return float(coords[1]), float(coords[0])  # (lat, lng)
-        return None
-
-    result = _query(addr)
-    if result is not None:
-        return result
-
-    # 含 Room 编号的地址（如 "Westblaak 924 Room 2"）Photon 往往无结果；
-    # 回退到建筑级地址（去掉 Room X）重试
-    import re
-    stripped = re.sub(r"\bRoom\s+\S+", "", addr, flags=re.IGNORECASE).strip().rstrip(",")
-    if stripped != addr:
-        try:
-            return _query(stripped)
-        except Exception:
-            pass
-    return None
-
-
 def _run_geocode_worker(addresses: list[str]) -> None:
-    """后台线程：逐个地理编码地址列表，结果写入缓存，进度更新到全局状态。"""
-    # 实际的 HTTP 请求在 _geocode_one 里发，这里不直接联网
+    """后台线程：逐个解析地址，进度更新到模块级状态。
+
+    解析本身在 mcore.geocode——监控进程的周期任务用的是同一份实现。这里只负责
+    把进度暴露给 /api/map/geocode/status。
+    """
     st = storage()
-    done, failed = 0, 0
-    errors: list[dict] = []
     try:
-        for addr in addresses:
-            try:
-                coord = _geocode_one(addr)
-                if coord:
-                    st.cache_coords(addr, coord[0], coord[1])
-                    done += 1
-                else:
-                    failed += 1
-                    errors.append({"address": addr, "reason": "Photon returned no results"})
-            except Exception as e:
-                failed += 1
-                # /api/map/geocode/status 是 @api_login_required——普通用户也读得到。
-                # 异常来自对 Photon 的 HTTP 调用，文本里会带上服务地址，所以只归类。
-                logger.exception("geocode failed for %r: %s", addr, e)
-                errors.append({"address": addr, "reason": "geocoding request failed"})
+        def _progress(done: int, failed: int, errors: list[dict]) -> None:
             with _geocode_lock:
                 _geocode_status["done"] = done
                 _geocode_status["failed"] = failed
-            _time.sleep(0.15)
+
+        _, _, errors = geocode_addresses(st, addresses, on_progress=_progress)
     finally:
         st.close()
         with _geocode_lock:
             _geocode_status["running"] = False
-            _geocode_status["errors"] = errors[:20]  # 最多保留 20 条
+            _geocode_status["errors"] = errors[:20]   # 最多保留 20 条
 
 
 @login_required

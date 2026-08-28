@@ -19,6 +19,11 @@ API v1 只读数据端点测试（Phase 2）
 
 from __future__ import annotations
 
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
 import json
 
 import pytest
@@ -64,9 +69,12 @@ def seeded(api_app):
                 "INSERT INTO listings (id,name,status,price_raw,available_from,"
                 "features,url,city,first_seen,last_seen,last_status,source) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                # last_seen 用「现在」而不是写死的日期：地图按 last_seen 过滤
+                # 陈旧房源，写死的日期会随时间推移把这些用例都变红，而红的原因
+                # 和它们要测的东西无关。
                 (lid, name, status, price, avail, json.dumps(feats),
                  f"https://h.com/{lid}", city,
-                 "2026-05-13T08:00:00", "2026-05-13T08:00:00", status, source),
+                 _now_iso(), _now_iso(), status, source),
             )
         # 地图坐标缓存：给 id-1 / id-2 加坐标（id-3 没地址匹配，故意不缓存）
         from mstorage._map_calendar import _CITY_FORMAL

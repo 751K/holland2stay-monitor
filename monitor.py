@@ -70,6 +70,7 @@ from mcore.health import CIRCUIT_OPEN_ERROR
 from mcore.pacing import AdaptivePacing
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
+from mcore import geocode as _geocode
 from mcore.prewarm import PrewarmCache
 from scrapers import (
     BlockedError,
@@ -568,6 +569,10 @@ def _monitored_pairs(cfg) -> list[tuple[str, str]]:
 #: 收得太早的代价不是「少通知」而是「多通知」：房源被误判之后又出现在 feed 里，
 #: 会产生一次状态变更，用户收到一条假的重新上架。中间那站 Reserved 就是为此
 #: 存在的——2 小时内回来只是 ``Reserved → 可订``，是最常见的正常迁移。
+#: 地图坐标补齐的间隔（秒）。半小时一次乘以每批 30 个地址，足以跟上新房源的
+#: 出现速度；backlog 大的时候也能在一两天内追平，而不必等管理员想起来点一下。
+_GEOCODE_INTERVAL_SEC = 1800
+
 _STALE_RESERVED_HOURS = 0.5
 #: 2 小时对齐 **H2S 官方的付款限时**：消失超过它，预留必然已经落定。
 _STALE_OCCUPIED_HOURS = 2.0
@@ -3031,6 +3036,10 @@ async def main_loop(
     round_count = 0
     last_heartbeat_time = time.monotonic()  # 启动时记为刚发过，避免第一轮立即心跳
     last_stale_sweep_time = 0.0  # 启动后第一轮成功抓取即执行一次状态收敛
+    # 地图坐标补齐用自己的计时器，不搭心跳的车：心跳是**通知**，把
+    # HEARTBEAT_INTERVAL_MINUTES 设成 0 是「别给我发心跳」，不该顺带让地图
+    # 停止补坐标。0.0 表示启动后第一轮就补一次。
+    last_geocode_time = 0.0
     stale_sweep_interval_sec = 24 * 60 * 60
 
     # 自适应高峰间隔：从 peak_interval 出发，成功则缩短，限流则翻倍退避。
@@ -3270,6 +3279,22 @@ async def main_loop(
                 except Exception:
                     logger.exception("prune_old_email_send_counters 失败（已忽略）")
                 last_heartbeat_time = time.monotonic()
+
+            # 给新房源补地图坐标。此前只有管理员在地图页手动点才会解析，于是新
+            # 抓到的房源在有人想起来点一下之前都不在图上。
+            #
+            # 每批有上限（见 mcore.geocode.DEFAULT_BATCH）：稳态下每次只有零星
+            # 几个新地址，但第一次跑或换了监控城市之后会有几百个，不设上限就会
+            # 把一个抓取轮次拖成几分钟。剩下的交给下一次。
+            if time.monotonic() - last_geocode_time >= _GEOCODE_INTERVAL_SEC:
+                try:
+                    ok, bad = _geocode.geocode_missing(storage)
+                    if ok or bad:
+                        logger.info("地图坐标补齐：成功 %d，失败 %d", ok, bad)
+                except Exception:
+                    logger.exception("geocode_missing 失败（已忽略）")
+                finally:
+                    last_geocode_time = time.monotonic()
 
             actual = apply_jitter(effective_interval, cfg.jitter_ratio)
             # 抖动是 ±jitter_ratio，会把间隔往下拉——下限必须在抖动之后再夹一次，

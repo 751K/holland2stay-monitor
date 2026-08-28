@@ -117,6 +117,8 @@ TUNING_KEYS: frozenset[str] = frozenset({
     # 状态收敛与预订
     "STALE_RESERVED_HOURS", "STALE_OCCUPIED_HOURS",
     "BOOKING_STATUS_HOLD_MINUTES",
+    # 地图只显示这么多天内还被抓到过的房源；0 = 不过滤
+    "MAP_MAX_AGE_DAYS",
 })
 
 TIERS: dict[str, frozenset[str]] = {

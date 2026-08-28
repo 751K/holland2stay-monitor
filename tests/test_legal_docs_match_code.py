@@ -124,9 +124,20 @@ class TestThirdPartiesAreNamed:
         assert "api.resend.com" in (root / "notifier.py").read_text(encoding="utf-8")
 
     def test_photon_is_actually_used(self):
+        """在代码树里找，而不是钉死一个文件。
+
+        这条原本指着 app/routes/map_routes.py。地理编码后来被提到 mcore/geocode.py
+        （监控进程也要用），这条就红了——但它要核对的是「隐私条款点名的服务确实
+        在用」，和实现住在哪个文件无关。钉死路径等于把一次正常的重构变成一次
+        假警报。
+        """
         root = Path(__file__).resolve().parent.parent
-        src = (root / "app" / "routes" / "map_routes.py").read_text(encoding="utf-8")
-        assert "photon.komoot.io" in src
+        hits = [
+            p for p in root.rglob("*.py")
+            if "test" not in p.parts and ".venv" not in p.parts
+            and "photon.komoot.io" in p.read_text(encoding="utf-8", errors="ignore")
+        ]
+        assert hits, "隐私条款点名了 Photon，代码里却找不到对它的调用"
 
 
 class TestTermsCredentialClause:

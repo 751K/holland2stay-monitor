@@ -1,7 +1,13 @@
 """mstorage 地图+日历模块单元测试。"""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from mstorage import Storage
+
+
+def _iso(days_ago: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
 
 
 @pytest.fixture
@@ -12,6 +18,13 @@ def store(tmp_path):
 
 
 def _add(st, **kw):
+    """插一条房源。``last_seen`` 默认为「刚刚」。
+
+    这里原本写死 2026-05-13。在没有任何东西依赖新鲜度的时候那没关系，但地图
+    加了时间过滤之后，这个固定日期会随着时间推移把每一条用例都变红——而红的
+    原因和用例要测的东西（地址拼装、城市正式名）毫无关系。要测陈旧就显式传
+    ``days_ago``。
+    """
     st.conn.execute(
         """INSERT OR REPLACE INTO listings
            (id, name, status, price_raw, available_from, features, url, city,
@@ -24,7 +37,7 @@ def _add(st, **kw):
             kw.get("available_from", kw.get("available_from", "")),
             kw.get("features", "[]"), kw.get("url", "https://t/x"),
             kw.get("city", "Eindhoven"),
-            "2026-05-01T00:00:00", "2026-05-13T00:00:00", 0,
+            _iso(kw.get("days_ago", 0) + 1), _iso(kw.get("days_ago", 0)), 0,
             kw.get("status", "Available to book"),
             kw.get("source", "holland2stay"),
         ),

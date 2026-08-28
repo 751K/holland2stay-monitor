@@ -179,13 +179,15 @@ class TestUserReachableRoutes:
     def test_geocode_status_no_leak(self, caplog_exc):
         """/api/map/geocode/status 是 @api_login_required——普通用户读得到。
 
-        直接跑 worker：状态是模块级全局，不需要过 HTTP 也能验。
+        直接跑 worker：状态是模块级全局，不需要过 HTTP 也能验。解析本身已经
+        提到 mcore.geocode（监控进程的周期任务用同一份），补丁因此打在那里。
         """
         from app.routes import map_routes
+        from mcore import geocode
 
-        with patch.object(map_routes, "_geocode_one", _boom), \
-             patch.object(map_routes, "storage"), \
-             patch.object(map_routes._time, "sleep", lambda *_: None):
+        with patch.object(geocode, "geocode_one", _boom), \
+             patch.object(geocode.time, "sleep", lambda *_: None), \
+             patch.object(map_routes, "storage"):
             map_routes._run_geocode_worker(["Damrak 1, Amsterdam"])
 
         errors = map_routes._geocode_status["errors"]
