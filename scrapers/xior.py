@@ -119,6 +119,7 @@ _VERIFY_TIME_BUDGET = 45.0
 # 而 mstorage 不能 import scrapers。
 from config import (  # noqa: E402
     XIOR_BUILDING_FURNISHING as BUILDING_FURNISHING,
+    _FIN_UNFURNISHED,
     xior_furnishing_for as furnishing_for,
 )
 
@@ -177,6 +178,69 @@ class XiorScraper(BrowserBackedScraper):
         "p0196465": {"url":"https://www.xiorstudenthousing.eu/netherlands/wageningen/costerweg-student-accommodation/","display":"Wageningen Costerweg","property_page_id":1101,"semester_id":3281,"room_type_ids":[29887]},
         "p0196466": {"url":"https://www.xiorstudenthousing.eu/netherlands/wageningen/duivendaal-student-accommodation/","display":"Wageningen Duivendaal","property_page_id":1100,"semester_id":3281,"room_type_ids":[32290,32291,32292,32293]},
         "p0196061": {"url":"https://www.xiorstudenthousing.eu/netherlands/aachen-vaals/katzensprung-student-accommodation/","display":"Aachen Vaals Katzensprung","property_page_id":1134,"semester_id":3281,"room_type_ids":[29889]},
+    }
+
+    #: 每栋楼的**月度预付费**（服务费、能源、网络、洗衣、家具），单位欧元。
+    #:
+    #: 为什么必须有这张表
+    #: ------------------
+    #: feed 的 ``minimumRent`` 是**基础租金**——楼盘页的房间表列名字面就写着
+    #: "Basic rent"，页面另起一段列出 "Monthly Advance Charges"。两者相加才是
+    #: 租客实际每月付的钱，而这笔预付费在各楼之间从 €180 到 €345 不等，比很多
+    #: 房源之间的价差还大。只报基础租金的后果不止是显示偏低：租金筛选跨 source
+    #: 共用同一个数，Xior 会因此在同一个上限下把如实报价的平台挤出结果。
+    #:
+    #: 取值取页面自己的 ``TOTAL Per month``，不是我们把明细加起来
+    #: -------------------------------------------------------------
+    #: 2026-08-28 逐栋核对：30 栋里 **27 栋的明细合计与页面 TOTAL 完全相等**，
+    #: 另外 2 栋（Amsterdam Karspeldreef 差 €100、Groningen Zernike Tower 差
+    #: €30）是**页面自己算错**，明细与 TOTAL 对不上。
+    #:
+    #: 这两栋取 TOTAL，理由有三：它是 Xior 印在页面上的数字，用户拿我们的价格
+    #: 去对官网对得上；它是更保守（更高）的那个，而这个功能的全部意义就是别让
+    #: 人以为便宜；出了分歧那是上游的账，不是我们的算术。
+    #:
+    #: ``furnishings`` 是明细里的家具项，只用于一件事：该单元是 Unfurnished 时
+    #: 从 total 里减掉它。TOTAL 是含家具的。
+    #:
+    #: **Delft Phoenixstraat 不在表中**——它的页面完全没有费用区块。缺表的楼
+    #: 不做合成，保持基础租金，见 ``_all_in_price``。
+    #:
+    #: 重新发现：``python tools/discover_xior_charges.py``（需要能过 Cloudflare
+    #: 的出口）。这张表和 ``BUILDINGS`` 一样会随上游调价而过期，
+    #: ``tests/test_xior_all_in_price.py`` 只能守住"每栋楼都有登记"，守不住
+    #: "登记值still正确"——涨价了不会有人告诉我们。
+    XIOR_CHARGES_DISCOVERED = "2026-08-28"
+    MONTHLY_CHARGES: dict[str, dict] = {
+        "p0196062": {"total": 310, "furnishings": 50},      # Amsterdam Karspeldreef
+        "p0196102": {"total": 235.5, "furnishings": 28.5},  # Amsterdam Naritaweg
+        "p0196099": {"total": 245, "furnishings": 25},      # Breda Kraanstraat
+        "p0196103": {"total": 187.75, "furnishings": 50},   # Breda Rat Verleghstraat
+        "p0196106": {"total": 232.5, "furnishings": 25},    # Breda Tramsingel 21
+        "p0196107": {"total": 196, "furnishings": 28.5},    # Breda Tramsingel 27
+        "p0196059": {"total": 257, "furnishings": 50},      # Delft Antonia Veerstraat
+        "p0196060": {"total": 280, "furnishings": 50},      # Delft Barbarasteeg
+        "p0196467": {"total": 218, "furnishings": 45},      # Eindhoven Kronehoefstraat
+        "p0195855": {"total": 240, "furnishings": 50},      # Eindhoven Zernikestraat
+        "p0196098": {"total": 330, "furnishings": 50},      # Groningen Eendrachtskade
+        "p0196468": {"total": 252.5, "furnishings": 50},    # Groningen Oosterhamrikkade
+        "p0195447": {"total": 255, "furnishings": 50},      # Groningen Zernike Tower
+        "p0196104": {"total": 202.5, "furnishings": 50},    # Leeuwarden Ritsumastraat
+        "p0196105": {"total": 277.5, "furnishings": 25},    # Leeuwarden Tesselschadestraat
+        "p0196501": {"total": 330, "furnishings": 55},      # Leiden Verbeekstraat
+        "p0196111": {"total": 270, "furnishings": 50},      # Maastricht Annadal
+        "p0195680": {"total": 265, "furnishings": 50},      # Maastricht Bonnefanten
+        "p0196471": {"total": 215, "furnishings": 25},      # Maastricht Vijverdalseweg
+        "p0196502": {"total": 200, "furnishings": 50},      # Rotterdam Burgemeester Oudlaan
+        "p0196500": {"total": 305, "furnishings": 50},      # The Hague Eisenhowerlaan
+        "p0196100": {"total": 345, "furnishings": 70},      # The Hague Lutherse Burgwal
+        "p0195853": {"total": 215, "furnishings": 25},      # Utrecht Rotsoord
+        "p0196503": {"total": 250},                         # Utrecht Willem Dreeslaan
+        "p0196469": {"total": 188, "furnishings": 25},      # Venlo Peperstraat
+        "p0196470": {"total": 233, "furnishings": 50},      # Venlo Spoorstraat
+        "p0196465": {"total": 196, "furnishings": 20},      # Wageningen Costerweg
+        "p0196466": {"total": 290, "furnishings": 50},      # Wageningen Duivendaal
+        "p0196061": {"total": 180, "furnishings": 50},      # Aachen Vaals Katzensprung
     }
 
     # ── 浏览器生命周期 ─────────────────────────────────────────────────
@@ -682,6 +746,53 @@ def _is_candidate_available(unit: dict, today: date) -> bool:
     return not (days is not None and days > _AVAILABLE_HORIZON_DAYS)
 
 
+#: 「无家具」那一档的字面值。与 config._FIN_UNFURNISHED 同源——
+#: ``xior_furnishing_for()`` 返回的就是它，比在这里另写一个字符串安全。
+_UNFURNISHED = _FIN_UNFURNISHED
+
+
+def _all_in_price(
+    min_rent: float,
+    max_rent: float,
+    *,
+    building_key: str,
+    furnishing: Optional[str],
+) -> Optional[str]:
+    """基础租金 + 该楼的月度预付费 = 租客实际每月付的钱。
+
+    feed 只给基础租金（楼盘页的房间表列名字面写着 "Basic rent"），预付费在
+    ``XiorScraper.MONTHLY_CHARGES`` 里按楼登记，取值与取舍见那里的注释。
+
+    两条边界都是刻意的：
+
+    - **该楼没有登记就不合成**，原样返回基础租金。缺表只有 Delft Phoenixstraat
+      一家（它的页面完全没有费用区块），但上游新增楼栋时也会走到这里。这时
+      报一个偏低的价格，好过报一个我们编出来的数。
+    - **Unfurnished 的单元减去家具项**。TOTAL 是含家具的，而无家具单元不付
+      这笔。只在该楼登记了 ``furnishings`` 时才减——减不出来就宁可多报。
+
+    区间价（``minimumRent`` != ``maximumRent``）两端各自加同一笔预付费：
+    这笔钱按楼固定，不随房间大小变。
+    """
+    charges = XiorScraper.MONTHLY_CHARGES.get(building_key or "")
+    if not charges:
+        logger.debug(
+            "Xior 楼栋 %s 没有登记月度预付费，价格保持基础租金", building_key or "?",
+        )
+        add = 0.0
+    else:
+        add = float(charges["total"])
+        if furnishing == _UNFURNISHED:
+            add -= float(charges.get("furnishings") or 0)
+
+    if not min_rent:
+        return None
+    lo = float(min_rent) + add
+    if max_rent and max_rent != min_rent:
+        return f"€{lo:.0f}–€{float(max_rent) + add:.0f}"
+    return f"€{lo:.0f}"
+
+
 def _to_listing(
     unit: dict,
     *,
@@ -732,9 +843,10 @@ def _to_listing(
                 )
                 status = "Occupied"
 
-    price_raw = f"€{min_rent}"
-    if max_rent and max_rent != min_rent:
-        price_raw = f"€{min_rent}–€{max_rent}"
+    furnishing = furnishing_for(building_key, fp_name)
+    price_raw = _all_in_price(
+        min_rent, max_rent, building_key=building_key, furnishing=furnishing,
+    )
 
     features = [
         f"Unit: {apt_name}",
@@ -743,9 +855,8 @@ def _to_listing(
         # 装修档位**不在这里**——它按 room type 变，见 furnishing_for。
         *assumed_features("xior"),
     ]
-    # 装修档位：房型名优先，其次按楼登记，都没有就不写（fail-closed，理由见
-    # BUILDING_FURNISHING 的注释）。
-    furnishing = furnishing_for(building_key, fp_name)
+    # 装修档位在上面算价时已经取过（Unfurnished 要从预付费里减家具项）。
+    # fail-closed 的理由见 BUILDING_FURNISHING 的注释。
     if furnishing:
         features.append(f"Finishing: {furnishing}")
     else:

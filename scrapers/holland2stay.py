@@ -479,15 +479,37 @@ def _to_listing(
         status = _STATUS_MAP.get(atb_id, f"Unknown({atb_id})") if atb_id is not None else "Unknown"
 
         # ── price ──
-        rent = item.get("basic_rent")
-        if rent is not None:
-            price_raw = f"€{float(rent):.0f}"
-        else:
-            try:
-                val = item["price_range"]["minimum_price"]["regular_price"]["value"]
+        # 取 price_range（到手价）而不是 basic_rent（**基础租金**，不含服务费与
+        # 水电预付）。2026-08-28 在 Eindhoven 实测七条，price_range 比 basic_rent
+        # 高 15%–38%（例：707 → 966、780 → 1076），差额量级正是荷兰的服务费加
+        # 水电月付。
+        #
+        # 为什么这件事比"显示不准"严重：租金筛选跨 source 共用 price_value 这
+        # 一个数。H2S 报基础租金而 RENTCafe 那几家报的是 RentCafe 的 Rent 列，
+        # 同一个「≤ €800」在两边筛的不是同一件事，H2S 因此被系统性地美化，把
+        # 别家如实报价的房源挤了出去。
+        #
+        # basic_rent 留作兜底而不是首选：price_range 是 Magento 的嵌套结构，
+        # 任何一层缺失就取不到，而没有价格的房源会被所有带租金上限的筛选直接
+        # 漏掉——宁可报一个偏低的价格，也好过整条不可见。
+        #
+        # allowance_price **不能**用：它是算房补资格的口径，不是租金。实测里
+        # 它既可能低于 basic_rent（707 → 431），也可能是 0（1495 那条超过房补
+        # 上限）。
+        price_raw = None
+        try:
+            val = item["price_range"]["minimum_price"]["regular_price"]["value"]
+            if val:
                 price_raw = f"€{float(val):.0f}"
-            except (KeyError, TypeError):
-                price_raw = None
+        except (KeyError, TypeError, ValueError):
+            pass
+        if price_raw is None:
+            rent = item.get("basic_rent")
+            if rent:
+                try:
+                    price_raw = f"€{float(rent):.0f}"
+                except (TypeError, ValueError):
+                    price_raw = None
 
         # ── available_from ──
         #

@@ -70,7 +70,8 @@ class TestToListingNormal:
         assert listing.name == "Test Listing 1, Eindhoven"
         assert listing.status == "Available to book"
         assert listing.city == "Eindhoven"
-        assert listing.price_raw == "€707"
+        # price_range（到手价）优先于 basic_rent（基础租金），见 TestPrice
+        assert listing.price_raw == "€850"
         assert listing.available_from == "2026-06-01"
         assert listing.url == "https://www.holland2stay.com/residences/test-listing-1.html"
         assert listing.contract_id == 21
@@ -100,10 +101,78 @@ class TestToListingNormal:
         listing = _to_listing(item, "Eindhoven", _LABELS)
         assert listing.contract_start_date == "2026-07-15"
 
-    def test_price_uses_price_range_fallback(self):
-        """当 basic_rent 缺失时降级到 price_range。"""
+    def test_price_prefers_the_all_in_figure(self):
+        """``price_range`` 是到手价，``basic_rent`` 是基础租金，取前者。
+
+        2026-08-28 在生产实测七条 Eindhoven 房源，两者相差 15%–38%
+        （707 → 966、780 → 1076），差额量级正是服务费加水电月付。取错的后果
+        不只是显示偏低：租金筛选跨 source 共用同一个数，H2S 报基础租金会把
+        如实报价的其它平台挤出结果。
+        """
         item = _item()
-        del item["basic_rent"]
+        assert item["basic_rent"] != 850, "fixture 两个价格必须不同，否则测不出取的是哪个"
+        listing = _to_listing(item, "Eindhoven", _LABELS)
+        assert listing.price_raw == "€850"
+
+    def test_price_falls_back_to_basic_rent(self):
+        """``price_range`` 是 Magento 的嵌套结构，任一层缺失就取不到。
+
+        这时宁可报一个偏低的价格，也好过没有价格——没有价格的房源会被所有带
+        租金上限的筛选直接漏掉，整条不可见。
+        """
+        item = _item()
+        del item["price_range"]
+        listing = _to_listing(item, "Eindhoven", _LABELS)
+        assert listing.price_raw == "€707"
+
+    def test_price_falls_back_when_the_nested_shape_is_broken(self):
+        """缺的不一定是最外层，也不一定是"缺"。
+
+        三种坏法抛的异常各不相同，只捕获其中一种，另外两种会让整条房源解析
+        崩掉——而 GraphQL 的 schema 变过不止一次（见 h2s_gql.py 的字段白名单）。
+        所以三种都要覆盖：
+
+            少一层键        -> KeyError
+            某层不是 dict   -> TypeError
+            value 不是数字  -> ValueError
+        """
+        broken_shapes = [
+            ({}, "KeyError"),
+            ({"minimum_price": {}}, "KeyError"),
+            ({"minimum_price": {"regular_price": {}}}, "KeyError"),
+            (None, "TypeError"),
+            ({"minimum_price": None}, "TypeError"),
+            ({"minimum_price": []}, "TypeError"),
+            ({"minimum_price": {"regular_price": {"value": "n/a"}}}, "ValueError"),
+        ]
+        for broken, why in broken_shapes:
+            item = _item()
+            item["price_range"] = broken
+            listing = _to_listing(item, "Eindhoven", _LABELS)
+            assert listing.price_raw == "€707", f"{why}（{broken!r}）没有回落到 basic_rent"
+
+    def test_broken_basic_rent_does_not_crash(self):
+        """兜底本身也可能是坏的，两条路都断时给 None，不要抛。"""
+        item = _item(basic_rent="n/a")
+        del item["price_range"]
+        listing = _to_listing(item, "Eindhoven", _LABELS)
+        assert listing.price_raw is None
+
+    def test_zero_all_in_price_falls_back_too(self):
+        """0 不是一个价格。直接格式化会渲染出「€0」，比没有价格更误导。"""
+        item = _item()
+        item["price_range"] = {"minimum_price": {"regular_price": {"value": 0}}}
+        listing = _to_listing(item, "Eindhoven", _LABELS)
+        assert listing.price_raw == "€707"
+
+    def test_allowance_price_is_never_used(self):
+        """``allowance_price`` 是算房补资格的口径，不是租金。
+
+        实测里它既可能远低于基础租金（707 → 431），也可能是 0（租金超过房补
+        上限时）。拿它当价格显示会给出一个谁都付不到的数。
+        """
+        item = _item()
+        item["allowance_price"] = 431
         listing = _to_listing(item, "Eindhoven", _LABELS)
         assert listing.price_raw == "€850"
 
@@ -159,7 +228,7 @@ class TestToListingMissingFields:
         assert "type" not in fm
         assert "area" not in fm
         assert listing.status == "Available to book"
-        assert listing.price_raw == "€707"
+        assert listing.price_raw == "€850"
 
 
 # ── 边缘情况 ────────────────────────────────────────────────
@@ -182,9 +251,17 @@ class TestToListingEdgeCases:
         result = _to_listing(None, "Nowhere", _LABELS)  # type: ignore[arg-type]
         assert result is None
 
+    def test_price_is_rounded_to_whole_euros(self):
+        """Magento 的 value 是浮点，租金不显示小数。"""
+        item = _item()
+        item["price_range"] = {"minimum_price": {"regular_price": {"value": 850.6}}}
+        listing = _to_listing(item, "Eindhoven", _LABELS)
+        assert listing.price_raw == "€851"
+
     def test_basic_rent_precision(self):
-        """basic_rent 整数直接格式化。"""
+        """回落路径同样取整。"""
         item = _item(basic_rent=851)
+        del item["price_range"]
         listing = _to_listing(item, "Eindhoven", _LABELS)
         assert listing.price_raw == "€851"
 

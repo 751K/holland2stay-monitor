@@ -37,6 +37,8 @@ def test_to_listing_maps_status_notice_unrented():
     assert listing.id == "xr_402419"
     assert listing.name == "Maastricht Annadal M1.30.53"
     assert listing.source == "xior"
+    # 没传 building_key，查不到月度预付费 → 保持基础租金。这条测的是状态映射，
+    # 价格口径另见 tests/test_xior_all_in_price.py。
     assert listing.price_raw == "€417–€580"
     assert listing.available_from == "2026-07-01"
 
@@ -290,6 +292,22 @@ def test_to_listing_single_rent_when_min_equals_max():
     unit = dict(SAMPLE_UNIT, minimumRent=500, maximumRent=500)
     listing = _to_listing(unit, display="Maastricht Annadal", building_url="https://example.com")
     assert listing.price_raw == "€500"
+
+
+def test_to_listing_adds_monthly_charges_for_a_registered_building():
+    """这一条与上面两条的区别只有一个 building_key。
+
+    上面两条不传它，于是查不到费用表、加 0——新逻辑在那里根本没被走到。
+    Maastricht Annadal 登记的预付费是 €270。
+    """
+    from scrapers.xior import _to_listing
+
+    unit = dict(SAMPLE_UNIT, minimumRent=500, maximumRent=500)
+    listing = _to_listing(
+        unit, display="Maastricht Annadal", building_url="https://example.com",
+        building_key="p0196111",
+    )
+    assert listing.price_raw == "€770"
 
 
 def test_to_listing_features_include_unit_sqm_floorplan():
