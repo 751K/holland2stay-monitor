@@ -104,6 +104,36 @@ def _merge_sticky_features(
     return merged
 
 
+def _sticky_available_from(fresh: "str | None", old: "str | None") -> "str | None":
+    """入住日期是粘性的：抓不到的时候保留上一次抓到的真值。
+
+    为什么需要
+    ----------
+    H2S 的房源在「可订」阶段有真实的 available_from，一旦转成 Reserved，上游
+    的 next_contract_startdate 就变成 2050-01-01 哨兵——scrapers/holland2stay.py
+    认出哨兵后返回 None，而这里原来是无条件写回库，于是那个真日期被 None 冲掉，
+    界面上只剩一个「—」。
+
+    2026-08-28 线上实测：H2S 445 条里 76 条没有日期，其中 Reserved 47 条中占了
+    45 条；而 Available to book 的 19 条一条都不缺。23 条能从 status_changes 里
+    证明它们曾经是「可订」——也就是说那个日期确实存在过，是被我们自己删掉的。
+
+    判据
+    ----
+    只在**新值为空**时保留旧值。上游给了新日期就用新的——修正、重新放盘都应该
+    覆盖得了。空值的含义是「这一轮没拿到」，不是「这个房子没有入住日」，两者不
+    是一回事。
+
+    对四个平台都生效。今天只有 H2S 会产生空值（其余三个线上 0 条），但「未知不
+    该覆盖已知」和平台无关，写成 H2S 专属反而是在赌上游行为不变。
+    """
+    fresh = (fresh or "").strip()
+    if fresh:
+        return fresh
+    old = (old or "").strip()
+    return old or None
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -146,7 +176,7 @@ class ListingOps:
                 placeholders = ",".join("?" * len(ids))
                 rows = cur.execute(
                     f"""SELECT id, status, status_is_inferred, status_hold_until,
-                               features
+                               features, available_from
                         FROM listings WHERE id IN ({placeholders})""",
                     ids,
                 ).fetchall()
@@ -162,6 +192,16 @@ class ListingOps:
                         old_row.get("features") if old_row else None,
                     ),
                     ensure_ascii=False,
+                )
+                # 同理：抓不到日期时保留上一次的真值，见 _sticky_available_from。
+                #
+                # 就地改 listing 而不是另起一个局部变量：diff() 返回的就是这批
+                # 对象，monitor 拿它们去发通知（notifier.py 读
+                # listing.available_from）。同一个值留两个名字，迟早只同步一处，
+                # 届时表现是「网页上有日期、推送里是 ?」——同一件事两个说法。
+                listing.available_from = _sticky_available_from(
+                    listing.available_from,
+                    old_row.get("available_from") if old_row else None,
                 )
 
                 if old_status is None:
