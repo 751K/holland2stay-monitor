@@ -9,10 +9,9 @@ OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即�
 通知中附有直达链接。对 Holland2Stay 更进一步——先将预订推进至支付页面，再连同
 付款链接一并发出，因此收到通知时仅余付款一步。
 
-**FlatRadar 不代为付款，亦不保证预订成功。** 能否订到仍取决于平台上的实际竞争。
+**FlatRadar 的服务范围不包括自动付款，亦不保证预订成功。** 能否订到仍取决于平台上的实际竞争。
 
-本项目支持自部署：一个容器、一个 SQLite 文件，除所选用的通知渠道外不依赖任何
-外部服务。
+项目支持本地/运毒部署。
 
 **官网 — [flatradar.app](https://flatradar.app)**
 
@@ -72,16 +71,11 @@ OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即�
 | 系统 | 推荐 Linux | macOS 的限制见下方[从源码运行](#从源码运行) |
 | 域名 | 可选 | 仅 HTTPS 部署需要，下文的本地路径无需域名 |
 
-除此之外无其它依赖：不需要外部数据库、消息队列或指标后端，全部状态存放于单个
-SQLite 文件。
-
 ---
 
 ## 快速开始
 
-两条路径：仅需确认能否运行，走第一条；要长期使用，走第二条。
-
-### 一、本地试运行
+### 一、本地部署
 
 不需要域名和证书。依次执行：
 
@@ -93,17 +87,13 @@ mkdir -p data logs
 docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
 ```
 
-首次构建需数分钟。完成后访问 `http://127.0.0.1:8088`，无需登录。
+首次构建需数分钟。完成后访问 `http://127.0.0.1:8088`，无需登录。默认只监控 Holland2Stay 的 Eindhoven，其余平台在面板中按需启用。
 
 > ⚠️ 该模式下面板是明文 HTTP、且没有密码，只监听本机地址。**请勿用于公网服务器**，
-> 正式部署走下面第二条。
 
-默认只监控 Holland2Stay 的 Eindhoven，其余平台在面板中按需启用。
+### 二、云端部署
 
-### 二、部署到服务器
-
-**开始之前**需备齐三项：一台已装 Docker 的服务器、一个 A/AAAA 记录指向它的域名、
-放行的 80/443 端口。
+开始部署前需要自行配置相关网络环境。
 
 **第 1 步**，创建配置与数据目录：
 
@@ -189,8 +179,6 @@ python monitor.py                # 抓取循环，需另开终端
 
 ## 升级与备份
 
-升级必须重新构建镜像——只执行 `git pull` 不会生效。`.env` 与 `data/` 会保留。
-
 ```bash
 cd /path/to/holland2stay-monitor
 cp data/listings.db "data/listings.db.bak.$(date +%Y%m%dT%H%M%S)"
@@ -198,9 +186,6 @@ git pull
 docker compose build h2s
 docker compose up -d --force-recreate h2s
 ```
-
-后两条命令缺一不可：漏掉 `build` 等于没升级，漏掉 `--force-recreate` 则旧容器
-仍在跑旧代码。
 
 需要备份的有两处，且**必须一起备份**：
 
@@ -220,9 +205,9 @@ docker exec h2s python -c "import sqlite3; \
 
 ---
 
-## 配置
+## 配置存储
 
-配置分三处存放，各有明确边界：
+配置分三处存放：
 
 | 内容 | 位置 | 在哪里改 |
 |---|---|---|
@@ -350,19 +335,13 @@ stateDiagram-v2
 
 Xior、OurDomain、OurCampus 运行的是同一套 RENTCafe 后端，共用一份实现
 （[`bookers/rentcafe.py`](../bookers/rentcafe.py)）。代码已完整，reCAPTCHA 已
-对接，流程亦已对真实站点走通。该线目前仍处于**关闭**状态——
-`monitor._AUTO_BOOK_SOURCES` 中仅含 holland2stay，面板上无法启用。欠缺的是验证，
-而非代码：
+对接，流程亦已对真实站点走通。功能仍处于**关闭**状态。
 
 | 平台 | 已完成的部分 | 尚待验证的部分 |
 |---|---|---|
 | Xior | 已推进至申请表、保存草稿并代为上传证件（2026-08-03，真实账号） | 代传证件后表单能否正常保存尚未确认。此外 Xior 的草稿**并不锁定房源**——它比 Holland2Stay 提前一步终止，下一页即需填写 IBAN/SWIFT |
 | OurDomain | 入口段已对真实站点走通（2026-08-04）：floorplans → 可用单元 → 条款页 POST，18 个字段全部落位 | 登录之后的环节全部未验证。该流程**不含选房页**，一旦脱离流程便没有重选入口——代码的处理方式为明确报错中止，绝不携带错位的上下文继续执行。验证需要一个真实的 OurDomain 账号 |
 | OurCampus | 无 | 预订流程尚未侦察 |
-
-两条线最终止于同一处限制，与 Holland2Stay 相同：再往前是 `ApplicationCharges`，
-需填写 IBAN / SWIFT，代填金融凭据是硬性限制。详见 [XIOR.md](XIOR.md) §8 与
-[OURDOMAIN.md](OURDOMAIN.md) §7。
 
 > 线上演示环境对普通用户关闭了自动预订。如有需要请邮件联系，或[自行部署](#快速开始)。
 
