@@ -52,49 +52,6 @@ services beyond the notification channels you choose to enable.
 | Xior | Any of 30 buildings across 14 cities | Proven | Notify only (booking flow built, not enabled) |
 | OurCampus | Amsterdam Diemen (1 building) | Checked against real markup; very low volume — see below | Notify only |
 
-**OurCampus does return units, but rarely.** For the first months after it was
-added, its floorplan panels came back valid while the unit table its parser
-expects never appeared, so the parser — inherited wholesale from OurDomain —
-had never been checked against real markup. Those samples have since arrived.
-Every request still writes a summary line to `data/ourcampus_capture.txt`, and
-any response that parses a unit, or that looks like a unit panel the parser
-failed to read, gets its HTML archived alongside it. Check that file to see
-where your own instance stands.
-
-Two of the original assumptions turned out to be wrong, and the archived samples
-are what corrected them. The feed does not list only bookable units, and a
-greyed-out date cell means "bookable from that date" rather than "occupied";
-reading it as the latter caused a whole batch of units to be reported as
-occupied with no notification sent. The status mapping now keys off whether the
-row carries a working order button, and an unrecognised style class is let
-through with a warning rather than silently classified.
-
-**Set your expectations by the tier that actually surfaces, not by the marketing
-page.** The booking system carries three floor plans, while `ourcampus.nl` only
-advertises two of them:
-
-| Floor plan | Size | Rent | Advertised on the site |
-|---|---|---|---|
-| Standard+ Studio Apartment — 1 person | 21–28.5 m² | €1,063–1,153 | No |
-| Furnished Student Apartment — 1 person | 26–39 m² | €621–906 | Yes |
-| Furnished Student Apartment — 2 person | 41–55 m² | €919–1,042 | Yes |
-
-Every unit that has ever surfaced here belongs to the first row — the one the
-site does not advertise, and the one that costs roughly twice as much per square
-metre as the other two. The cheap student tiers have never appeared once. That
-is consistent with what Greystar's own FAQ describes: this location historically
-allocated homes from a waiting list, that list is closed to new applicants, and
-while ranked applicants remain, homes go to them first. So what reaches the
-public availability feed is what the queue did not take.
-
-The booking flow itself has never been scouted, and remains the one part of this
-integration that is still unproven.
-
-Expect lopsided volume in general. Holland2Stay covers whole cities and is where
-most listings come from; the other three are individual buildings, so a handful
-of them will never add up to a comparable pool. The sources are separate pools,
-not redundancy for each other.
-
 Coverage shifts as third-party sites change. The scrapers are documented in
 [H2S.md](H2S.md), [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
 [SCRAPING_RECON.md](SCRAPING_RECON.md).
