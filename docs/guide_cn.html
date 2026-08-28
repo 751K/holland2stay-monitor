@@ -108,16 +108,12 @@ python monitor.py  # 抓取循环，需另开终端</pre>
   <tr><th>平台</th><th>覆盖范围</th><th>数据粒度</th><th>自动预订</th></tr>
   <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>26 个荷兰城市</td><td>单元级（具体房号、租金、面积）</td><td>✅ 完整 GraphQL 流程</td></tr>
   <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam（Diemen 与 South-East）</td><td>单元级（#6045、面积、楼层、朝向）</td><td>❌ 仅通知</td></tr>
-  <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen（1 栋）</td><td>同 OurDomain（尚未验证）</td><td>❌ 仅通知</td></tr>
+  <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen（1 栋）</td><td>单元级（同 OurDomain）</td><td>❌ 仅通知</td></tr>
   <tr><td><strong>Xior</strong> (XR)</td><td>荷兰 30 栋楼，分布于 14 个城市</td><td>单元级（M1.30.53、面积、租金、押金）</td><td>❌ 仅通知</td></tr>
 </table>
 
 <div class="tip">
 <strong>提示：</strong>在<strong>设置 → 平台</strong>中启用或禁用平台，在<strong>设置 → 城市</strong>中选择需监控的城市或楼盘。
-</div>
-
-<div class="tip warn">
-<strong>关于 OurCampus：</strong>该平台自接入以来从未返回过可订房源，其解析逻辑继承自 OurDomain，尚未与真实数据核对。在出现首条房源之前，其结果应视为未经验证。
 </div>
 
 <!-- ─────────── -->
@@ -139,7 +135,12 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 
 <div class="card">
 <h3>地图</h3>
-<p>将全部房源标注于交互式地图上。绿色表示可预订，橙色表示抽签中，灰色表示已入住；标记同时显示平台来源。该页面需配置 <code>GOOGLE_MAPS_API_KEY</code> 方可使用。</p>
+<p>把房源标注于交互式地图上。绿色表示可预订，橙色表示抽签中，灰色表示已入住；标记同时显示平台来源。该页面需配置 <code>GOOGLE_MAPS_API_KEY</code> 方可使用。</p>
+<p>地图<strong>只显示近期还被抓到过的房源</strong>，默认十四天，可在「设置」页的
+「地图显示范围」里改，填 0 显示全部。已入住是状态收敛的终态，那些记录会长期留在
+数据库里；不加这道限制，几个月前就从平台上撤下的单元仍然会钉在图上。</p>
+<p>坐标由监控进程<strong>自动解析并缓存</strong>，无需手动操作；新抓到的房源通常在半小时内出现在图上。
+管理员也可以在地图页手动触发一次，用于排查。</p>
 </div>
 
 <div class="card">
@@ -169,13 +170,18 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 
 <div class="card">
 <h3>Email <span class="badge badge-blue">跨平台</span></h3>
-<p>填入 SMTP 服务器信息。常见服务商的配置如下：</p>
+<p>有两种方式，<strong>默认是第一种</strong>。</p>
+<p><strong>一、由服务代发（默认）。</strong>只填收件邮箱即可，不需要 SMTP 服务器。
+填好后会收到一封确认邮件，<strong>点击其中的链接完成验证</strong>之后才会开始投递——
+这道确认用于防止把别人的邮箱填进来。验证状态在用户配置页可以看到，也可以重发确认邮件。</p>
+<p><strong>二、自建 SMTP。</strong>把邮件模式改为自定义，再填服务器信息。常见服务商如下：</p>
 <table>
   <tr><th>服务商</th><th>SMTP 地址</th><th>端口</th><th>加密</th></tr>
   <tr><td>Gmail</td><td>smtp.gmail.com</td><td>587</td><td>STARTTLS</td></tr>
   <tr><td>Outlook</td><td>smtp.office365.com</td><td>587</td><td>STARTTLS</td></tr>
 </table>
-<p>账号已开启两步验证时，须使用<strong>应用专用密码</strong>。</p>
+<p>账号已开启两步验证时，须使用<strong>应用专用密码</strong>。自建 SMTP 不需要邮箱验证，
+投递结果由你自己的服务器负责。</p>
 </div>
 
 <div class="card">
@@ -190,16 +196,25 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 
 <div class="card">
 <h3>iOS 推送通知</h3>
-<p>使用 <a href="https://apps.apple.com/us/app/flarradar/id6769857080">FlatRadar iOS App</a> 时，APNs 推送将自动发送，并按设备语言在中英文之间自动选择。</p>
+<p>使用 <a href="https://apps.apple.com/us/app/flarradar/id6769857080">FlatRadar iOS App</a> 时，APNs 推送自动发送，并按设备语言在中英文之间自动选择。</p>
 </div>
 
 <div class="card">
 <h3>Android 推送通知</h3>
-<p>使用 <a href="https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk">FlatRadar Android App</a> 时，FCM 推送将自动发送，同样支持中英双语。</p>
+<p>使用 <a href="https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk">FlatRadar Android App</a> 时，FCM 推送自动发送，同样支持中英双语。</p>
+</div>
+
+<div class="card">
+<h3>设备推送与「通知开关」的关系</h3>
+<p>用户配置里那个<strong>通知开关</strong>管住全部渠道，<strong>设备推送也在内</strong>。关掉它，
+手机就不再收到推送。</p>
+<p>在 App 里授权推送权限并登录，会<strong>自动打开这个开关</strong>——在手机上同意接收，就是同意接收，
+不必再去面板点一次。此后你在面板上关掉它，才是真的关掉。</p>
 </div>
 
 <div class="tip">
-<strong>提示：</strong>点击<strong>发送测试通知</strong>可对各渠道逐一验证。
+<strong>提示：</strong>点击<strong>发送测试通知</strong>可对各渠道逐一验证，设备推送也在测试范围内。
+面板首页会在「你当前收不到任何通知」时给出一张清单，指明缺的是哪一步。
 </div>
 
 <!-- ─────────── -->
@@ -244,18 +259,45 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 
 <div class="card">
 <table>
-  <tr><th>条件</th><th>示例</th><th>说明</th></tr>
-  <tr><td>最高租金</td><td>€1200</td><td>仅推送不高于 €1200/月的房源</td></tr>
-  <tr><td>最小面积</td><td>25 m²</td><td>仅推送不小于 25 m² 的房源</td></tr>
-  <tr><td>最低楼层</td><td>1</td><td>排除底层（0 层）</td></tr>
-  <tr><td>入住人数</td><td>Single</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>户型</td><td>Studio, 1</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>城市</td><td>Eindhoven, Amsterdam</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>平台</td><td>H2S, OD</td><td>可多选，仅推送所选平台的房源</td></tr>
-  <tr><td>合同类型</td><td>Indefinite</td><td>仅推送长租房源，排除短租</td></tr>
-  <tr><td>租客要求</td><td>student only</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><th>条件</th><th>示例</th><th>适用平台</th><th>说明</th></tr>
+  <tr><td>最高租金</td><td>€1200</td><td>全部</td><td>仅推送不高于 €1200/月的房源。<strong>各平台价格口径不同，见下方</strong></td></tr>
+  <tr><td>最小面积</td><td>25 m²</td><td>全部</td><td>仅推送不小于 25 m² 的房源</td></tr>
+  <tr><td>最低楼层</td><td>1</td><td>全部</td><td>排除底层（0 层）</td></tr>
+  <tr><td>城市</td><td>Eindhoven, Amsterdam</td><td>全部</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>平台</td><td>H2S, OD</td><td>全部</td><td>可多选，仅推送所选平台的房源</td></tr>
+  <tr><td>租客要求</td><td>student only</td><td>全部</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>户型</td><td>Studio, 1</td><td>Xior 除外</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>入住人数</td><td>Single</td><td>Xior 除外</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>装修类型</td><td>Furnished</td><td>OurCampus 除外</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>合同类型</td><td>Indefinite</td><td>仅 Holland2Stay</td><td>仅推送长租房源，排除短租</td></tr>
+  <tr><td>最低能耗</td><td>B</td><td>仅 Holland2Stay</td><td>仅推送不低于该等级的房源</td></tr>
+  <tr><td>街区</td><td>Strijp, Centrum</td><td>仅 Holland2Stay</td><td>可多选，选项随所选城市变化</td></tr>
+  <tr><td>供应形式</td><td>Rent</td><td>仅 Holland2Stay</td><td>可多选，用于区分出租与其他挂牌形式</td></tr>
 </table>
 <p>各项条件须<strong>同时满足</strong>才会推送；留空表示该项不作限制。</p>
+<p>「适用平台」一列很重要：某个平台不提供该字段时，这个条件<strong>对它整体跳过</strong>，
+而不是把它的房源全部排除。也就是说，勾了「最低能耗 B」并不意味着推来的都是 B 级——
+Xior、OurDomain、OurCampus 的房源根本没参与这一关。面板的筛选项旁也标着同样的范围。</p>
+</div>
+
+<div class="card">
+<h3>租金的口径</h3>
+<p>四个平台报的不是同一个数，设置「最高租金」之前请先看清楚：</p>
+<table>
+  <tr><th>平台</th><th>面板与通知里显示的价格</th></tr>
+  <tr><td>Holland2Stay</td><td><strong>到手价</strong>：含服务费与水电预付</td></tr>
+  <tr><td>Xior</td><td><strong>到手价</strong>：基础租金加上该楼盘登记的月度预付费用</td></tr>
+  <tr><td>OurDomain</td><td><strong>基础租金</strong>，服务费另计</td></tr>
+  <tr><td>OurCampus</td><td><strong>基础租金</strong>，服务费另计</td></tr>
+</table>
+<p>后两个平台的服务费按户型变化，而上游不提供单元与户型的对应关系，因此无法合成到手价。
+面板上这类房源的价格右上角带一个星号，悬停可看到该楼盘服务费的区间；通知里的租金行
+也会附上同样的说明。</p>
+<div class="tip warn">
+<strong>这对筛选意味着什么：</strong>同一个租金上限，在 Holland2Stay 与 Xior 上过滤的是
+你实际要付的钱，在 OurDomain 与 OurCampus 上过滤的是不含服务费的部分。给后两者留出余量，
+或用平台条件把它们分开处理。
+</div>
 </div>
 
 <!-- ─────────── -->
@@ -272,6 +314,8 @@ python monitor.py  # 抓取循环，需另开终端</pre>
   <tr><td>高峰下限</td><td>15s</td><td>自适应收紧后的最小间隔</td></tr>
   <tr><td>高峰时段</td><td>08:30–10:00、13:30–15:00</td><td>荷兰时间，仅工作日生效</td></tr>
   <tr><td>抖动比例</td><td>0.20</td><td>每轮间隔在 ±20% 范围内随机浮动</td></tr>
+  <tr><td>心跳间隔</td><td>60 分钟</td><td>向管理员发送存活通知的间隔；设 0 关闭</td></tr>
+  <tr><td>地图显示范围</td><td>14 天</td><td>地图只显示这么多天内还被抓到过的房源；设 0 显示全部</td></tr>
 </table>
 </div>
 
@@ -300,11 +344,20 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 
 <div class="card">
 <h3>收不到通知</h3>
+<p>先看面板首页。<strong>「你现在收不到通知」的时候那里会出现一张清单</strong>，直接指明缺的是哪一步；
+清单消失就说明这条链路是通的。手动排查按下面的顺序：</p>
 <ul>
-  <li>确认该用户<strong>已启用</strong>且<strong>通知已开启</strong></li>
-  <li>确认至少有一个通知渠道配置了有效凭据</li>
-  <li>点击<strong>发送测试通知</strong>逐一排查</li>
+  <li>该用户<strong>已启用</strong>，且<strong>通知开关是开着的</strong>——这个开关同时管住邮件、
+      Telegram 等外部渠道和手机推送，关着的时候一条都不会发</li>
+  <li>至少有<strong>一条接收方式</strong>：配了有效凭据的外部渠道，<strong>或者</strong>登录着 App 的手机。
+      只用 App 的话，「通知渠道」一栏是空的属于正常</li>
+  <li>用邮件且是默认的代发模式时，确认收件邮箱<strong>已完成验证</strong>——未验证不投递</li>
+  <li>点击<strong>发送测试通知</strong>逐一排查，结果按渠道分别列出，设备推送也在内</li>
 </ul>
+<div class="tip">
+<strong>面板上的通知列表不能用来判断这件事。</strong>那是全站流水，不分用户、不按你的过滤条件
+筛选；里面有内容不代表你配好了。只有上面这条链路通了，才会按你的条件推给你。
+</div>
 </div>
 
 <div class="card">

@@ -59,7 +59,7 @@ td{color:var(--text2)}
 </nav>
 
 <h1>FlatRadar — User Guide</h1>
-<p class="subtitle">Monitor listings across Holland2Stay, OurDomain, and Xior. Get instant notifications and auto-book on Holland2Stay.</p>
+<p class="subtitle">Monitor listings across Holland2Stay, OurDomain, OurCampus and Xior. Get instant notifications and auto-book on Holland2Stay.</p>
 
 <!-- ─────────────────────────────────────────────── -->
 <h2 id="start">Quick Start</h2>
@@ -106,16 +106,12 @@ python web.py</pre>
   <tr><th>Platform</th><th>Coverage</th><th>Data Level</th><th>Auto-Booking</th></tr>
   <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>26 Dutch cities</td><td>Unit (room number, rent, area)</td><td>✅ Full GraphQL flow</td></tr>
   <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam (Diemen + South-East)</td><td>Unit (#6045, sqm, floor, view)</td><td>❌ Notify only</td></tr>
-  <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen (1 building)</td><td>Same as OurDomain (unverified)</td><td>❌ Notify only</td></tr>
+  <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen (1 building)</td><td>Unit (same as OurDomain)</td><td>❌ Notify only</td></tr>
   <tr><td><strong>Xior</strong> (XR)</td><td>30 buildings across 14 Dutch cities</td><td>Unit (M1.30.53, sqm, rent, deposit)</td><td>❌ Notify only</td></tr>
 </table>
 
 <div class="tip">
 <strong>Tip:</strong> Go to <strong>Settings → Platforms</strong> to enable or disable platforms, and <strong>Settings → Cities</strong> to pick which buildings to monitor.
-</div>
-
-<div class="tip warn">
-<strong>On OurCampus:</strong> it has never returned a bookable listing since it was added. Its parser is inherited from OurDomain and has never been checked against real data, so treat its results as unverified until a first listing appears.
 </div>
 
 <!-- ─────────────────────────────────────────────── -->
@@ -125,7 +121,7 @@ python web.py</pre>
 
 <div class="card">
 <h3>Dashboard</h3>
-<p>At-a-glance view: total listings in database, new listings today, status changes today, last scrape time. Shows the newest listings and recent status changes (48h). Each listing row includes a source badge (H2S / OD / XR).</p>
+<p>At-a-glance view: total listings in database, new listings today, status changes today, last scrape time. Shows the newest listings and recent status changes (48h). Each listing row includes a source badge (H2S / OD / OC / XR).</p>
 <p>Click <strong>Start monitor</strong> to begin scraping. The dot turns green when the monitor is running.</p>
 </div>
 
@@ -137,7 +133,13 @@ python web.py</pre>
 
 <div class="card">
 <h3>Map</h3>
-<p>All listings plotted on an interactive map. Green = available to book, orange = lottery, grey = not available. Markers show platform badges.</p>
+<p>Listings plotted on an interactive map. Green = available to book, orange = lottery, grey = not available. Markers show platform badges. Requires <code>GOOGLE_MAPS_API_KEY</code>.</p>
+<p>The map <strong>only shows listings still seen recently</strong> — fourteen days by default,
+adjustable under <em>Map age limit</em> in Settings, or 0 to show everything. "Not available" is a
+terminal state, so those records stay in the database indefinitely; without this limit, units delisted
+months ago would remain pinned on the map.</p>
+<p>Coordinates are resolved and cached <strong>automatically</strong> by the monitor — new listings
+usually appear on the map within half an hour. Admins can also trigger a pass by hand for debugging.</p>
 </div>
 
 <div class="card">
@@ -167,13 +169,19 @@ python web.py</pre>
 
 <div class="card">
 <h3>Email <span class="badge badge-blue">Cross-platform</span></h3>
-<p>Fill in SMTP server details. Common configurations:</p>
+<p>Two ways; <strong>the first is the default</strong>.</p>
+<p><strong>1. Sent for you (default).</strong> Enter a recipient address — no SMTP server needed.
+You will receive a confirmation email and must <strong>click the link in it</strong> before delivery
+begins; that step exists so nobody can sign someone else's address up. The verification state is shown
+on the user's settings page, where the confirmation can also be re-sent.</p>
+<p><strong>2. Your own SMTP.</strong> Switch the email mode to custom, then fill in server details:</p>
 <table>
   <tr><th>Provider</th><th>SMTP Host</th><th>Port</th><th>Security</th></tr>
   <tr><td>Gmail</td><td>smtp.gmail.com</td><td>587</td><td>STARTTLS</td></tr>
   <tr><td>Outlook</td><td>smtp.office365.com</td><td>587</td><td>STARTTLS</td></tr>
 </table>
-<p>Use an <strong>App Password</strong> (not your regular password) if 2FA is enabled.</p>
+<p>Use an <strong>App Password</strong> (not your regular password) if 2FA is enabled. Custom SMTP
+skips the address verification — delivery is your own server's business.</p>
 </div>
 
 <div class="card">
@@ -196,8 +204,19 @@ python web.py</pre>
 <p>If you use the <a href="https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk">FlatRadar Android app</a>, FCM push notifications are sent automatically. Same bilingual support as iOS.</p>
 </div>
 
+<div class="card">
+<h3>Push and the notifications switch</h3>
+<p>The <strong>notifications switch</strong> in a user's settings governs every channel,
+<strong>device push included</strong>. Turn it off and the phone stops receiving push.</p>
+<p>Granting push permission and signing in from the app <strong>turns that switch on for you</strong> —
+agreeing on the phone is agreeing, you do not have to go and click it again in the panel. Turning it off
+in the panel afterwards is what genuinely turns it off.</p>
+</div>
+
 <div class="tip">
-<strong>Tip:</strong> Click <strong>Send Test Notification</strong> to verify each channel works before going live.
+<strong>Tip:</strong> Click <strong>Send Test Notification</strong> to verify each channel, device push
+included. The dashboard also shows a checklist whenever an account cannot receive anything, naming the
+step that is missing.
 </div>
 
 <!-- ─────────────────────────────────────────────── -->
@@ -242,19 +261,48 @@ python web.py</pre>
 
 <div class="card">
 <table>
-  <tr><th>Filter</th><th>Example</th><th>How it works</th></tr>
-  <tr><td>Max rent</td><td>€1200</td><td>Only listings ≤ €1200/month</td></tr>
-  <tr><td>Min area</td><td>25 m²</td><td>Only listings ≥ 25 m²</td></tr>
-  <tr><td>Min floor</td><td>1</td><td>Skip ground floor (0)</td></tr>
-  <tr><td>Occupancy</td><td>Single</td><td>Multi-select — any match</td></tr>
-  <tr><td>Type</td><td>Studio, 1</td><td>Multi-select — any match</td></tr>
-  <tr><td>Cities</td><td>Eindhoven, Amsterdam</td><td>Multi-select — any match</td></tr>
-  <tr><td>Sources</td><td>H2S, OD</td><td>Multi-select — only notify for these platforms</td></tr>
-  <tr><td>Neighborhood</td><td>Centrum</td><td>Depends on selected cities</td></tr>
-  <tr><td>Contract</td><td>Indefinite</td><td>Long-term only (skip short-stay)</td></tr>
-  <tr><td>Tenant</td><td>student only</td><td>Multi-select — any match</td></tr>
+  <tr><th>Filter</th><th>Example</th><th>Applies to</th><th>How it works</th></tr>
+  <tr><td>Max rent</td><td>€1200</td><td>All</td><td>Only listings ≤ €1200/month. <strong>Platforms quote different figures — see below</strong></td></tr>
+  <tr><td>Min area</td><td>25 m²</td><td>All</td><td>Only listings ≥ 25 m²</td></tr>
+  <tr><td>Min floor</td><td>1</td><td>All</td><td>Skip ground floor (0)</td></tr>
+  <tr><td>Cities</td><td>Eindhoven, Amsterdam</td><td>All</td><td>Multi-select — any match</td></tr>
+  <tr><td>Sources</td><td>H2S, OD</td><td>All</td><td>Multi-select — only notify for these platforms</td></tr>
+  <tr><td>Tenant</td><td>student only</td><td>All</td><td>Multi-select — any match</td></tr>
+  <tr><td>Type</td><td>Studio, 1</td><td>Except Xior</td><td>Multi-select — any match</td></tr>
+  <tr><td>Occupancy</td><td>Single</td><td>Except Xior</td><td>Multi-select — any match</td></tr>
+  <tr><td>Furnishing</td><td>Furnished</td><td>Except OurCampus</td><td>Multi-select — any match</td></tr>
+  <tr><td>Contract</td><td>Indefinite</td><td>Holland2Stay only</td><td>Long-term only (skip short-stay)</td></tr>
+  <tr><td>Min energy label</td><td>B</td><td>Holland2Stay only</td><td>Only listings rated at or above this label</td></tr>
+  <tr><td>Neighborhood</td><td>Centrum</td><td>Holland2Stay only</td><td>Multi-select; options follow the cities you picked</td></tr>
+  <tr><td>Offer type</td><td>Rent</td><td>Holland2Stay only</td><td>Multi-select — distinguishes rentals from other listing types</td></tr>
 </table>
 <p>All filters are <strong>AND</strong> together. Leave empty = no restriction.</p>
+<p>The <em>Applies to</em> column matters: when a platform does not report a field, the filter is
+<strong>skipped for that platform entirely</strong> rather than excluding all of its listings. Setting
+"Min energy label: B" therefore does <em>not</em> mean everything you receive is rated B — Xior,
+OurDomain and OurCampus listings never went through that check. The panel labels each filter with the
+same scope.</p>
+</div>
+
+<div class="card">
+<h3>What "rent" means per platform</h3>
+<p>The four platforms do not quote the same number. Read this before setting <em>Max rent</em>:</p>
+<table>
+  <tr><th>Platform</th><th>Price shown in the panel and notifications</th></tr>
+  <tr><td>Holland2Stay</td><td><strong>All-in</strong> — includes service costs and utility prepayment</td></tr>
+  <tr><td>Xior</td><td><strong>All-in</strong> — base rent plus that building's registered monthly advance charges</td></tr>
+  <tr><td>OurDomain</td><td><strong>Base rent</strong>; service costs charged separately</td></tr>
+  <tr><td>OurCampus</td><td><strong>Base rent</strong>; service costs charged separately</td></tr>
+</table>
+<p>For the latter two, service costs vary by floor plan and the upstream feed does not say which unit
+belongs to which plan, so an all-in figure cannot be derived. Those listings carry an asterisk beside the
+price; hovering shows that building's service-cost range, and the rent line in notifications carries the
+same note.</p>
+<div class="tip warn">
+<strong>What this means for filtering:</strong> the same rent ceiling filters what you actually pay on
+Holland2Stay and Xior, but only the part excluding service costs on OurDomain and OurCampus. Leave
+headroom for those two, or separate them out with the platform filter.
+</div>
 </div>
 
 <!-- ─────────────────────────────────────────────── -->
@@ -271,6 +319,8 @@ python web.py</pre>
   <tr><td>Peak min interval</td><td>15s</td><td>Floor — adaptive polling never goes below this</td></tr>
   <tr><td>Peak hours</td><td>08:30–10:00, 13:30–15:00</td><td>When to accelerate (NL time, weekdays only)</td></tr>
   <tr><td>Jitter ratio</td><td>0.20</td><td>±20% random variation to avoid detection</td></tr>
+  <tr><td>Heartbeat interval</td><td>60 min</td><td>How often the admin gets a liveness notification; 0 disables it</td></tr>
+  <tr><td>Map age limit</td><td>14 days</td><td>Map shows only listings still seen within this many days; 0 shows everything</td></tr>
 </table>
 </div>
 
@@ -299,11 +349,22 @@ python web.py</pre>
 
 <div class="card">
 <h3>Notifications not arriving</h3>
+<p>Start at the dashboard. <strong>A checklist appears there whenever the account cannot receive
+anything</strong> and names the missing step; if it is gone, the chain is intact. To check by hand:</p>
 <ul>
-  <li>Check the user is <strong>enabled</strong> and <strong>notifications are on</strong></li>
-  <li>Verify at least one channel is configured with valid credentials</li>
-  <li>Click <strong>Send Test Notification</strong> to debug each channel</li>
+  <li>The user is <strong>enabled</strong> and the <strong>notifications switch is on</strong> — that
+      switch governs both external channels and device push; with it off nothing is sent at all</li>
+  <li>There is <strong>at least one delivery route</strong>: an external channel with valid credentials,
+      <strong>or</strong> a phone signed into the app. If you only use the app, an empty channel list is
+      normal</li>
+  <li>On the default (sent-for-you) email mode, the recipient address is <strong>verified</strong> —
+      unverified addresses are not delivered to</li>
+  <li>Click <strong>Send Test Notification</strong>; results are listed per channel, device push included</li>
 </ul>
+<div class="tip">
+<strong>The notification feed in the panel cannot tell you any of this.</strong> It is a site-wide stream,
+neither per-user nor filtered by your criteria; content in it does not mean your setup works.
+</div>
 </div>
 
 <div class="card">
