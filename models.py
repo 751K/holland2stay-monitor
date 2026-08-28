@@ -46,6 +46,10 @@ LISTING_KEY_MAP: dict[str, str] = {
     "Contract":     "contract",     # 合同类型，e.g. "Indefinite" / "6 months max"
     "Tenant":       "tenant",       # 租客要求，e.g. "student only" / "employed only"
     "Address":      "address",      # 街道地址，供 geocode pipeline 用，e.g. "Wenckebachweg 51, 1096 AN Amsterdam"
+    # 价格口径标注。只有 OurDomain / OurCampus 有——它们的 price_raw 是基础租金，
+    # 服务费另计且按户型变，我们拿不到单元的户型所以无法并进价格。
+    # 见 scrapers/ourdomain.py 的 SERVICE_COST_RANGES。
+    "Service costs": "service_costs",
 }
 
 
@@ -274,6 +278,22 @@ class Listing:
         例：price_raw="€707" → 707.0
         """
         return parse_float(self.price_raw)
+
+    @property
+    def rent_basis_note(self) -> str:
+        """价格口径的补充说明；不需要标注时返回空串。
+
+        H2S 与 Xior 的 ``price_raw`` 已经是到手价，不带这条。OurDomain 与
+        OurCampus 报的是基础租金——服务费按户型变，而 RentCafe 的 feed 给不出
+        单元的户型（每个单元都关联到该楼全部户型 ID），所以并不进价格，只在
+        展示时说明量级，把加法留给用户。
+
+        返回值形如 ``"base rent, service costs €192–380 excl."``。
+        """
+        note = self.feature_map().get("service_costs")
+        if not note:
+            return ""
+        return f"base rent, service costs {note}"
 
     @property
     def price_display(self) -> str:

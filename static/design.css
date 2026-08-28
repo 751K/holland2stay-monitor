@@ -1288,3 +1288,14 @@ html.theme-transitioning *::after{
   .sidebar-footer button,.sidebar-footer form button,.sidebar-footer a{min-height:44px}
   .notif-trigger{min-height:44px}
 }
+
+/* 租金口径星号。OurDomain / OurCampus 报的是基础租金，服务费另计——
+   星号本身要不显眼（价格才是主体），但必须可点/可悬停拿到说明。 */
+.rent-basis{
+  color:var(--text3);
+  font-size:11px;
+  vertical-align:super;
+  line-height:0;
+  margin-left:1px;
+  cursor:help;
+}

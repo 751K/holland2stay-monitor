@@ -964,6 +964,67 @@ def _merge_unit(all_units: dict[str, dict], unit: dict, fp_id: str) -> None:
         all_units[unit_id]["fp_ids"].append(fp_id)
 
 
+#: 各楼公布的**月度服务费区间**（欧元）。键是 ``city_display``，与 listing 的
+#: ``Building`` feature 同源。
+#:
+#: 为什么只标注、不像 Xior 那样并进价格
+#: -----------------------------------
+#: RentCafe 的 ``Rent`` 列是**基础租金**：OurDomain 官网逐个户型分开列
+#: "Base rent" 与 "Service costs"，OurCampus 则写明 "excluding service costs
+#: and utility advances"。两家都该像 Xior 一样报到手价，但它们做不到——
+#:
+#: 服务费**按户型变**，而我们拿不到单元的户型。``rcLoadContent.ashx`` 的
+#: ``floorPlans=N`` 过滤器不可靠（见 _infer_occupancy 的注释），每个单元都被
+#: 关联到该楼**全部**户型 ID，单元行本身也没有户型列。而同一栋楼里 Superior
+#: Studio 的服务费是 €192、Executive Studio 是 €320–380，基础租金却只差几十块
+#: ——面积、租金、装修档位没有一个能把它们分开。猜错一档就是近 €190/月的误差，
+#: 比要修的问题还大。
+#:
+#: 所以这里只登记区间并写进 features，由展示层告诉用户"这是基础租金、另有多少
+#: 服务费"，把加法留给用户自己做。宁可诚实地偏低，也不要自信地报错价。
+#:
+#: 数据来源：各楼**专门的 service-charges 页**（2026-08-28 采）。
+#:
+#:   thisisourdomain.nl/amsterdam-diemen/service-charges
+#:   thisisourdomain.nl/amsterdam-south-east/service-charges
+#:   ourcampus.nl/en/service-charges
+#:
+#: 不要用楼盘首页那些户型卡片上的 "Service costs" ——它和专门页对不上。Diemen
+#: 的卡片给出 €192–380，而专门页逐项列明后是 €248–361；专门页带免责声明、写明
+#: 以租赁合同为准，是更权威的一份。
+#:
+#: ``heating`` 单独一项，只有 Diemen 有：它的 Recoverable Service Costs **不含**
+#: 公寓自身供暖，住户须自行与 Eteck 签约，页面估计月均约 €85。不把它并进区间
+#: 是为了让我们报的数与页面上那行 Total 逐字对得上，但标注时会加出来——少说
+#: €85 就是这次要修的那种毛病。
+SERVICE_COST_RANGES: dict[str, dict] = {
+    # OurDomain：Standard Studio €290–361、1 Bedroom €248–361，取并集
+    "Amsterdam Diemen":           {"range": (248, 361), "heating": 85},
+    # OurDomain：家具型 €173.62–184.61、非家具 €183.81–204.31，取并集
+    "Amsterdam South-East":       {"range": (174, 204)},
+    # OurCampus：Fitness €18.37 + Recoverable €264.48–383.04
+    "OurCampus Amsterdam Diemen": {"range": (282, 401)},
+}
+SERVICE_COSTS_DISCOVERED = "2026-08-28"
+
+
+def _service_cost_note(city_display: str) -> Optional[str]:
+    """该楼的服务费区间，形如 ``"€248–361 + ~€85 heating excl."``。
+
+    没登记就返回 None，**不写**一句含糊的"另有服务费"：后者无法校对，也给不出
+    量级，用户拿它做不了任何判断，只会以为我们知道而没说。
+    """
+    rec = SERVICE_COST_RANGES.get(city_display or "")
+    if not rec:
+        return None
+    lo, hi = rec["range"]
+    note = f"€{lo}–{hi}"
+    heating = rec.get("heating")
+    if heating:
+        note += f" + ~€{heating} heating"
+    return f"{note} excl."
+
+
 def _to_listing(
     unit: dict,
     *,
@@ -1023,6 +1084,11 @@ def _to_listing(
         features.append(f"Floor: {unit['floor']}")
     if unit.get("deposit"):
         features.append(f"Deposit: {unit['deposit']}")
+    # 价格口径：RentCafe 的 Rent 列是基础租金，服务费另计。见
+    # SERVICE_COST_RANGES 的注释——为什么只标注不并进价格。
+    note = _service_cost_note(city_display)
+    if note:
+        features.append(f"Service costs: {note}")
     if detail:
         features.append(f"Detail: {detail}")
     if unit.get("fp_ids"):

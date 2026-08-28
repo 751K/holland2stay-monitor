@@ -208,7 +208,10 @@
             {% if l.status_is_inferred %}<span class="badge badge-inferred"
               title="{{ _('status_inferred_hint') }}">{{ _('status_inferred') }}</span>{% endif %}
           </td>
-          <td class="font-medium">{{ l.price_raw | price_short }}</td>
+          {# OurDomain / OurCampus 报的是基础租金，服务费按户型变、拿不到户型，
+             所以并不进价格，只在这里标一下量级。见 models.Listing.rent_basis_note。#}
+          <td class="font-medium">{{ l.price_raw | price_short }}{% if fm.service_costs %}<span
+            class="rent-basis" title="{{ _('rent_basis_hint') }} {{ fm.service_costs }}">*</span>{% endif %}</td>
           <td class="cell-secondary">{{ fm.area or '—' }}</td>
           <td class="cell-secondary">{{ fm.floor or '—' }}</td>
           <td class="cell-secondary">{{ fm.type or '—' }}</td>
@@ -243,7 +246,8 @@
       </div>
       {% if fm.building %}<div class="lc-building">{{ fm.building }}</div>{% endif %}
       <div class="lc-details">
-        <span class="lc-rent">{{ l.price_raw | price_short }}</span>
+        <span class="lc-rent">{{ l.price_raw | price_short }}{% if fm.service_costs %}<span
+          class="rent-basis" title="{{ _('rent_basis_hint') }} {{ fm.service_costs }}">*</span>{% endif %}</span>
         {% if fm.area %}<span>{{ fm.area }}</span>{% endif %}
         {% if fm.floor %}<span>{{ fm.floor }}</span>{% endif %}
         {% if fm.type %}<span>{{ fm.type }}</span>{% endif %}

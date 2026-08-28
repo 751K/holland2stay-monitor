@@ -1335,6 +1335,21 @@ def _tl(text: str, lang: str) -> str:
     return text
 
 
+def _rent_note(l: Listing, lang: str) -> str:
+    """租金后面的口径说明，形如 ``"（基础租金，服务费 €192–380 另计）"``。
+
+    只有 OurDomain / OurCampus 会返回非空——它们报的是基础租金。不加这句的话，
+    用户看到 €1.563 会以为那就是到手价，而实际还要再加两三百。
+    """
+    note = l.rent_basis_note
+    if not note:
+        return ""
+    rng = note.split("service costs", 1)[-1].replace("excl.", "").strip()
+    if lang == "zh":
+        return f"（基础租金，服务费 {rng} 另计）"
+    return f" (base rent; service costs {rng} extra)"
+
+
 def _format_new(l: Listing, *, lang: str = "en") -> str:
     fm = l.feature_map()
     source = _source_short(getattr(l, "source", ""))
@@ -1343,7 +1358,7 @@ def _format_new(l: Listing, *, lang: str = "en") -> str:
         f"",
         f"{l.name}",
         f"{_tl('Status', lang)}: {l.status}",
-        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
         f"{_tl('Available', lang)}: {l.available_from or '?'}",
         f"",
     ]
@@ -1381,7 +1396,7 @@ def _format_new_batch(listings: list[Listing], *, lang: str = "en") -> str:
     for l in listings[:_BATCH_LIST_LIMIT]:
         fm = l.feature_map()
         area = fm.get("area", "")
-        bits = [l.name, f"{l.price_display}{_tl('/mo', lang)}"]
+        bits = [l.name, f"{l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}"]
         if area:
             bits.append(area)
         lines.append(" · ".join(bits))
@@ -1399,7 +1414,7 @@ def _format_status_change(l: Listing, old: str, new: str, *, lang: str = "en") -
         f"",
         f"{l.name}",
         f"{old} → {new}",
-        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
         f"{_tl('Available', lang)}: {l.available_from or '?'}",
         f"",
         f"{l.url}",
@@ -1424,7 +1439,7 @@ def _format_booking_success(
         f"[{source}] {_tl('Booking Successful!', lang)}",
         f"",
         f"{l.name}",
-        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
         f"{_tl('Move-in', lang)}: {start}",
         f"",
         f"{_tl('Pay now (time-sensitive)', lang)}:",
@@ -1440,7 +1455,7 @@ def _format_booking_failed(l: Listing, reason: str, *, lang: str = "en") -> str:
         f"[{source}] {_tl('Booking Failed', lang)}",
         f"",
         f"{l.name}",
-        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
         f"",
         f"{_tl('Reason', lang)}: {reason}",
         f"{_tl('Manual booking', lang)}: {l.url}",

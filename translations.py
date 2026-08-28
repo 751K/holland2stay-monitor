@@ -650,6 +650,11 @@ TRANSLATIONS = {
         "zh": "FlatRadar · 荷兰租房房源监控与提醒",
         "en": "FlatRadar · Dutch Rental Listing Alerts",
     },
+    #: 价格右上角那个星号的 tooltip。只有 OurDomain / OurCampus 会出现。
+    "rent_basis_hint": {
+        "zh": "此价格为基础租金，服务费另计：",
+        "en": "Base rent; service costs are charged separately:",
+    },
     "login_meta_description": {
         "zh": "自动监控荷兰多个租房平台的新房源，可按城市、租金、面积、租客资格"
               "筛选，命中立刻推送到手机。支持 iOS 与 Android，免费使用。",
