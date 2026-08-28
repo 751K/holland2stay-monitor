@@ -9,7 +9,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from config import canonical_city
-from models import STATUS_AVAILABLE, Listing, canonical_feature
+from models import (
+    STATUS_AVAILABLE,
+    Listing,
+    canonical_feature,
+    is_sentinel_available_from,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,14 +129,21 @@ def _sticky_available_from(fresh: "str | None", old: "str | None") -> "str | Non
     覆盖得了。空值的含义是「这一轮没拿到」，不是「这个房子没有入住日」，两者不
     是一回事。
 
+    哨兵在两侧都按「空」处理。scrapers 层已经认过一次，这里是落库前的最后一道：
+    没有它的话，抓取层的过滤哪天回退，哨兵进了库就会被粘性逻辑当成「已知」永远
+    锁住——那正是这个函数本来要防的事情的反面。线上 2026-08-28 就有 72 条
+    ``2050-01-01`` 留在库里，是加过滤之前写进去的，之后再没被抓到过。
+
     对四个平台都生效。今天只有 H2S 会产生空值（其余三个线上 0 条），但「未知不
     该覆盖已知」和平台无关，写成 H2S 专属反而是在赌上游行为不变。
     """
     fresh = (fresh or "").strip()
-    if fresh:
+    if fresh and not is_sentinel_available_from(fresh):
         return fresh
     old = (old or "").strip()
-    return old or None
+    if not old or is_sentinel_available_from(old):
+        return None
+    return old
 
 
 def _now_iso() -> str:

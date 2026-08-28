@@ -13,6 +13,21 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 STATUS_AVAILABLE = "available to book"
+
+#: available_from 的哨兵年份。H2S 的 next_contract_startdate 在「没有下一个合同
+#: 起始日」时返回 2050-01-01——那不是日期，是「不知道」。
+#:
+#: 按年份判而不是精确匹配那一天：哨兵换个写法（2099、2050-12-31）时不至于原样
+#: 透出去。放在这里而不是各自写一份，是因为它有两个使用点——scrapers 层认它，
+#: 存储层落库前再兜一次——两处各写一个 2050 迟早分叉，而分叉的表现是一个假日期
+#: 悄悄进了库，没有任何地方会报错。
+SENTINEL_AVAILABLE_FROM_YEAR = 2050
+
+
+def is_sentinel_available_from(value: "str | None") -> bool:
+    """这个 available_from 是不是哨兵（而不是真日期）。"""
+    v = (value or "").strip()
+    return bool(v) and v[:4].isdigit() and int(v[:4]) >= SENTINEL_AVAILABLE_FROM_YEAR
 STATUS_LOTTERY   = "available in lottery"
 
 

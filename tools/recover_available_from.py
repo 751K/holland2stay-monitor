@@ -19,8 +19,18 @@ backup-*.db，能从里面把当时的值捞出来。
 早于 2026-08-18 的备份里存的是**原始的 2050-01-01**——哨兵过滤是那之后才加进
 scraper 的。直接把「备份里的非空值」写回去，等于把我们费劲滤掉的东西又写回库。
 
-所以这里用和 scrapers/holland2stay.py 一样的判据：年份 >= 2050 视为哨兵，跳过。
+判据用 models.is_sentinel_available_from，和 scraper、存储层是同一个函数。
 「备份里有非空值」和「备份里有真实日期」不是一回事。
+
+顺带清理库里残留的哨兵
+----------------------
+同一批遗留还有另一半：2026-08-28 线上有 72 行 available_from 就是
+``2050-01-01``，全是 H2S 的 Occupied，last_seen 全部停在 2026-08-18——加过滤
+那天之后就再没被抓到过。它们**正显示在房源列表页上**，一个看起来像数据的假
+日期，比「—」更糟；而且因为再也不会被抓到，粘性逻辑也永远碰不到它们。
+
+这批没得救：备份最早只到 2026-08-19，那时候库里存的也已经是哨兵。所以置空，
+让它显示「—」——不知道就说不知道。
 
 取哪一份
 --------
@@ -41,15 +51,7 @@ import os
 import sqlite3
 
 from config import DATA_DIR
-
-#: 与 scrapers/holland2stay.py 同一条判据：这一年及以后的都是「没有下一个合同
-#: 起始日」的哨兵，不是真日期。按年份判而不是精确匹配 2050-01-01，哨兵换写法
-#: （2099、2050-12-31）时不至于漏过去。
-SENTINEL_YEAR = 2050
-
-
-def _is_sentinel(value: str) -> bool:
-    return bool(value) and value[:4].isdigit() and int(value[:4]) >= SENTINEL_YEAR
+from models import is_sentinel_available_from as _is_sentinel
 
 
 def main() -> int:
@@ -68,13 +70,21 @@ def main() -> int:
         )
     }
     print(f"当前没有入住日期的房源  {len(missing)} 条")
-    if not missing:
-        return 0
+
+    # 库里残留的哨兵。和「补回空值」是两件独立的事——早退会让其中一件永远
+    # 不执行，而它们只是碰巧共用同一个判据。
+    stale_ids = [
+        r["id"] for r in con.execute(
+            "SELECT id, available_from FROM listings "
+            "WHERE available_from IS NOT NULL AND available_from != ''"
+        ) if _is_sentinel(r["available_from"])
+    ]
+    print(f"库里存着哨兵本身        {len(stale_ids)} 条   （正显示在列表页上）")
 
     files = sorted(
         f for f in glob.glob(str(DATA_DIR / "*.db"))
         if os.path.abspath(f) != os.path.abspath(str(live))
-    )
+    ) if missing else []
     print(f"扫描备份                {len(files)} 份")
 
     found: dict[str, tuple[str, str]] = {}
@@ -105,16 +115,17 @@ def main() -> int:
     print(f"备份里查无此条          "
           f"{len(missing) - len(found) - len(sentinel_only)} 条\n")
 
-    if not found:
-        print("没有可恢复的。")
-        return 0
-
     for lid, (af, src) in sorted(found.items(), key=lambda kv: kv[1][0]):
         print(f"  {missing[lid]['name'][:32]:<34}{missing[lid]['status'][:10]:<12}"
               f"{af}   ({src})")
 
+    if not found and not stale_ids:
+        print("没有需要处理的。")
+        return 0
+
     if not args.apply:
-        print(f"\n这是预演。加 --apply 才会写入这 {len(found)} 条。")
+        print(f"\n这是预演。加 --apply 会补 {len(found)} 条、"
+              f"清 {len(stale_ids)} 条。")
         return 0
 
     with con:
@@ -126,7 +137,15 @@ def main() -> int:
                 (af, lid),
             )
             n += cur.rowcount
-    print(f"\n已写入 {n} 条。")
+        cleared = 0
+        if stale_ids:
+            ph = ",".join("?" * len(stale_ids))
+            cur = con.execute(
+                f"UPDATE listings SET available_from = NULL WHERE id IN ({ph})",
+                stale_ids,
+            )
+            cleared = cur.rowcount
+    print(f"\n已补回 {n} 条，清掉 {cleared} 条哨兵。")
     return 0
 
 

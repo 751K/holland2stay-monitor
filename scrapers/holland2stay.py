@@ -36,7 +36,7 @@ import time
 from contextlib import contextmanager
 from typing import Optional
 
-from models import Listing
+from models import Listing, is_sentinel_available_from
 
 from ._browser_backed import BrowserBackedScraper
 from .base import (
@@ -526,7 +526,7 @@ def _to_listing(
         # 哨兵值换个写法（2099、2050-12-31）时不至于原样透出去。
         avail_date = item.get("available_startdate") or item.get("next_contract_startdate") or ""
         available_from = avail_date.split(" ")[0] if avail_date else None
-        if available_from and available_from[:4].isdigit() and int(available_from[:4]) >= 2050:
+        if is_sentinel_available_from(available_from):
             available_from = None
 
         # ── contract fields ──

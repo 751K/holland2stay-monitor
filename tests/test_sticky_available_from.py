@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from models import Listing
+from models import Listing, is_sentinel_available_from
 from mstorage._listings import _sticky_available_from
 
 
@@ -43,9 +43,42 @@ class TestMergeRule:
         # 两边都空 → None，别把空串写进库
         (None,         None,         None),
         ("",           "",           None),
+        # 哨兵两侧都按「空」处理
+        ("2050-01-01", "2026-06-01", "2026-06-01"),   # 新值是哨兵 → 保住旧的真值
+        ("2099-12-31", "2026-06-01", "2026-06-01"),   # 换个写法照样认
+        ("2026-10-15", "2050-01-01", "2026-10-15"),   # 旧值是哨兵 → 新的真值赢
+        (None,         "2050-01-01", None),           # 旧值是哨兵 → 不保留
+        ("2050-01-01", "2050-01-01", None),
     ])
     def test_rule(self, fresh, old, want):
         assert _sticky_available_from(fresh, old) == want
+
+    def test_sentinel_is_never_locked_in(self, temp_db):
+        """哨兵不能靠粘性住进库里。
+
+        scrapers 层已经认过一次哨兵，这里是落库前的最后一道。少了它，抓取层的
+        过滤哪天回退，哨兵就会被粘性当成「已知」永远锁住——正好是这个函数本来
+        要防的事情的反面。
+        """
+        st = temp_db
+        st.diff([_l(avail="2026-09-01")])
+        # 抓取层漏了一个哨兵进来
+        st.diff([_l(status="Reserved", avail="2050-01-01")])
+        assert st.get_all_listings()[0]["available_from"] == "2026-09-01"
+
+    def test_scraper_and_storage_share_one_criterion(self):
+        """两处各写一个 2050 会分叉，而分叉的表现是一个假日期悄悄进了库。"""
+        import inspect
+
+        import scrapers.holland2stay as h2s
+        import mstorage._listings as li
+
+        for mod in (h2s, li):
+            src = inspect.getsource(mod)
+            assert "is_sentinel_available_from" in src, mod.__name__
+            assert ">= 2050" not in src, f"{mod.__name__} 里还留着手写的 2050"
+        assert is_sentinel_available_from("2050-01-01")
+        assert not is_sentinel_available_from("2026-09-01")
 
 
 # ── 真实场景：可订 → Reserved ────────────────────────────────────
