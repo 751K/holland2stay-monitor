@@ -16,6 +16,10 @@ mcore.push — APNs + FCM 推送调度
 4. **运行时单例客户端**：第一次调用时构造（含 .p8 / service account 加载），
    后续复用；同进程内多协程并发安全。
 5. **平台分离**：按 device_tokens.platform 字段分流到 APNs（iOS）或 FCM（Android）。
+6. **尊重用户的通知开关**：``UserConfig.notifications_enabled=False`` 时不推。
+   这条以前不成立——外部渠道被 ``MultiNotifier(enabled=…)`` 挡着，推送却从
+   旁边绕了过去，于是面板上那个写着「通知」的开关关掉后手机照响。公告路径
+   （announcement_service）一直是查的，房源路径漏了。管理员告警不受此限。
 """
 
 from __future__ import annotations
@@ -702,6 +706,22 @@ async def _send_fcm_to_user(
 # ── 对外 API ────────────────────────────────────────────────────────
 
 
+def _user_wants_push(user, *, what: str) -> bool:
+    """用户是否愿意收推送。
+
+    ``notifications_enabled`` 是用户在面板上那个总开关。它在注册时是 False
+    （fail-closed），所以「在手机上登记设备」必须把它打开，否则 App 用户一条
+    都收不到——见 device_service.register_device_for_token。
+
+    缺字段时按 True 处理：老配置里没有这个键，宁可多推也不要静默失联。
+    """
+    if getattr(user, "notifications_enabled", True):
+        return True
+    logger.debug("推送跳过：user=%s 通知开关已关闭（%s）",
+                 getattr(user, "id", "?"), what)
+    return False
+
+
 async def dispatch(storage, user, listing, *, kind: str = "new") -> int:
     """
     单条房源 APNs 推送入口（同一 listing × 同一 user 短期内只发一次）。
@@ -716,6 +736,8 @@ async def dispatch(storage, user, listing, *, kind: str = "new") -> int:
     返回成功发送的设备数（0 = 没设备 / 被节流 / APNs 未启用 / 全失败）。
     """
     try:
+        if not _user_wants_push(user, what=kind):
+            return 0
         if not _allow_send(user.id, listing.id, kind):
             return 0
         if kind == "new":
@@ -737,6 +759,8 @@ async def dispatch(storage, user, listing, *, kind: str = "new") -> int:
 async def dispatch_status_change(storage, user, listing, old_status: str,
                                  new_status: str) -> int:
     try:
+        if not _user_wants_push(user, what="status_change"):
+            return 0
         if not _allow_send(user.id, listing.id, "status_change"):
             return 0
         payload_fn = lambda lang: _payload_status_change(listing, old_status, new_status, lang=lang)
@@ -755,6 +779,8 @@ async def dispatch_aggregate(
     """≥3 套时上层调；同一 round_id collapse-id，覆盖之前的聚合。"""
     try:
         if not listings:
+            return 0
+        if not _user_wants_push(user, what="round"):
             return 0
         if not _allow_send(user.id, round_id, "round"):
             return 0
@@ -776,6 +802,8 @@ async def dispatch_error(
     """403 屏蔽这类异常事件——上层 monitor.run_once 已有 30 分钟节流，
     这里再加 dedup 防多用户/多 round 重复。"""
     try:
+        if not _user_wants_push(user, what=kind):
+            return 0
         if not _allow_send(user.id, kind, kind):
             return 0
         payload_fn = lambda lang: _payload_error(message, kind=kind, lang=lang)

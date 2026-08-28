@@ -62,6 +62,47 @@ def _run_async(coro):
     return result_container[0]
 
 
+def _enable_notifications_for(user_id: str) -> bool:
+    """登记设备即视为用户同意接收推送——把总开关打开。返回是否真的改了。
+
+    为什么必须有这一步：注册接口把 ``notifications_enabled`` 硬编码成 False
+    （fail-closed，见 api_v1/auth.py:_register），而 App 没有任何端点能改它。
+    推送一旦开始遵守这个开关（mcore/push.py:_user_wants_push），不补这一步
+    就等于把 App 的推送整个关掉。
+
+    在手机上授权推送权限并上报 device_token，就是用户表达的同意，只是发生在
+    App 里而不是面板上。之后他在面板上关掉开关，才是真的关掉——那时推送也停。
+
+    **先读后写**：App 每次启动都重新上报设备，而 update_users 会无条件重写
+    全部用户行、并请求 monitor 热重载。不加这道判断就是每次启动踢一次 monitor。
+    """
+    from users import load_users, update_users
+
+    try:
+        current = next((u for u in load_users() if u.id == user_id), None)
+    except Exception:
+        logger.exception("读取用户配置失败 user_id=%s", user_id)
+        return False
+    if current is None or current.notifications_enabled:
+        return False
+
+    def _flip(users):
+        for u in users:
+            if u.id == user_id:
+                u.notifications_enabled = True
+                break
+        return None
+
+    try:
+        update_users(_flip)
+    except Exception:
+        # 设备已经登记成功了，开关没翻不该让整个请求失败——用户还能自己去面板打开。
+        logger.exception("登记设备后打开通知开关失败 user_id=%s", user_id)
+        return False
+    logger.info("登记设备 → 自动打开通知开关 user_id=%s", user_id)
+    return True
+
+
 def register_device_for_token(
     *,
     token_id: int,
@@ -71,8 +112,13 @@ def register_device_for_token(
     model: str = "",
     bundle_id: str = "",
     language: str = "en",
+    user_id: str | None = None,
 ) -> dict:
-    """Validate and register/refresh a device for one app auth token."""
+    """Validate and register/refresh a device for one app auth token.
+
+    ``user_id`` 传入时（user 角色），登记成功会顺带打开该用户的通知总开关。
+    admin 调试用的设备登记不传，因为 admin 没有 UserConfig 行。
+    """
     device_token = (device_token or "").strip()
     env = (env or "production").strip().lower()
     platform = (platform or "ios").strip().lower()
@@ -101,7 +147,9 @@ def register_device_for_token(
         except ValueError as exc:
             raise DeviceValidationError(str(exc)) from exc
 
-    return {"device_id": device_id, "env": env, "platform": platform}
+    enabled_now = _enable_notifications_for(user_id) if user_id else False
+    return {"device_id": device_id, "env": env, "platform": platform,
+            "notifications_enabled": enabled_now or None}
 
 
 def list_devices_for_token_safe(*, token_id: int) -> dict:

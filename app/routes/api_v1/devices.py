@@ -55,6 +55,10 @@ def _register():
             model=model,
             bundle_id=bundle_id,
             language=language,
+            # user 角色才传：登记设备顺带打开通知总开关（见 device_service）。
+            # admin 调试登记的设备没有 UserConfig 行，传了也没东西可翻。
+            user_id=(api_auth.current_user_id()
+                     if api_auth.current_role() == "user" else None),
         )
     except DeviceValidationError as exc:
         return _err.err_validation(str(exc))
