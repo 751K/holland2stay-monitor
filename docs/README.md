@@ -11,12 +11,11 @@ direct link included. For Holland2Stay it goes one step further: it first
 carries the booking through to the payment page, then sends the payment link
 along with the alert, so only the payment itself remains.
 
-**FlatRadar never pays on your behalf, and it cannot guarantee a booking
-succeeds.** Whether you get the unit still depends on the competition on the
-platform.
+**Paying on your behalf is outside what FlatRadar does, and it cannot guarantee
+a booking succeeds.** Whether you get the unit still depends on the competition
+on the platform.
 
-The project is self-hostable: one container, one SQLite file, no external
-services beyond the notification channels you choose to enable.
+The project runs both locally and on a server.
 
 **Website — [flatradar.app](https://flatradar.app)**
 
@@ -50,7 +49,7 @@ services beyond the notification channels you choose to enable.
 | Holland2Stay | Any Dutch city you configure | Proven — the bulk of what lands | Auto-booking supported |
 | OurDomain | Amsterdam Diemen / South-East | Proven | Notify only (booking flow built, not enabled) |
 | Xior | Any of 30 buildings across 14 cities | Proven | Notify only (booking flow built, not enabled) |
-| OurCampus | Amsterdam Diemen (1 building) | Checked against real markup; very low volume — see below | Notify only |
+| OurCampus | Amsterdam Diemen (1 building) | Checked against real markup; very low volume | Notify only |
 
 Coverage shifts as third-party sites change. The scrapers are documented in
 [H2S.md](H2S.md), [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
@@ -78,17 +77,11 @@ Coverage shifts as third-party sites change. The scrapers are documented in
 | OS | Linux recommended | See the [macOS note](#running-from-source) below |
 | Domain | Optional | Needed only for the HTTPS deployment. The local path below runs without one |
 
-Nothing else is required — no external database, no message broker, no
-telemetry backend. State is one SQLite file.
-
 ---
 
 ## Quick start
 
-Two paths: the first to confirm it runs, the second for anything you intend to
-depend on.
-
-### 1. Try it locally
+### 1. Local deployment
 
 No domain and no certificate required. Run:
 
@@ -101,19 +94,15 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
 ```
 
 The first build takes a few minutes. When it finishes, open
-`http://127.0.0.1:8088` — no login required.
+`http://127.0.0.1:8088` — no login required. Out of the box it monitors
+Holland2Stay in Eindhoven only; enable the rest from the panel.
 
 > ⚠️ In this mode the panel is plain HTTP with no password and listens on the
-> loopback address only. **Do not use it on a public server**; for that, use the
-> second path below.
+> loopback address only. **Do not use it on a public server.**
 
-Out of the box it monitors Holland2Stay in Eindhoven only. Enable the rest from
-the panel.
+### 2. Cloud deployment
 
-### 2. Deploy to a server
-
-**Before you start** you need three things: a server with Docker installed, a
-domain whose A/AAAA record points at it, and ports 80/443 open.
+Set up the networking side yourself before you begin.
 
 **Step 1** — create the config and data directories:
 
@@ -209,9 +198,6 @@ gives you a panel that never gets new data.
 
 ## Upgrading and backups
 
-Upgrading requires rebuilding the image — `git pull` alone has no effect.
-`.env` and `data/` are preserved.
-
 ```bash
 cd /path/to/holland2stay-monitor
 cp data/listings.db "data/listings.db.bak.$(date +%Y%m%dT%H%M%S)"
@@ -219,10 +205,6 @@ git pull
 docker compose build h2s
 docker compose up -d --force-recreate h2s
 ```
-
-Neither of the last two commands is optional: without `build` nothing is
-upgraded, and without `--force-recreate` the old container keeps running the old
-code.
 
 Two things need backing up, and they **must be backed up together**:
 
@@ -244,9 +226,9 @@ docker exec h2s python -c "import sqlite3; \
 
 ---
 
-## Configuration
+## Where configuration lives
 
-Configuration lives in three places, with clear boundaries:
+Configuration lives in three places:
 
 | What | Where | Edited via |
 |---|---|---|
@@ -389,20 +371,13 @@ it never completes a payment.
 Xior, OurDomain and OurCampus run the same RENTCafe backend and share one
 implementation ([`bookers/rentcafe.py`](../bookers/rentcafe.py)). The code is
 complete, reCAPTCHA solving is wired up, and the flow has been walked end-to-end
-against a live site. It is still **switched off** —
-`monitor._AUTO_BOOK_SOURCES` lists Holland2Stay only, and no user can turn it
-on from the panel. What is missing is verification, not code:
+against a live site. The feature is still **switched off**.
 
 | Platform | Reached | Missing |
 |---|---|---|
 | Xior | Applicant form, draft saved, ID document uploaded (2026-08-03, real account) | Whether the form saves cleanly once the system supplies the document. And a Xior draft **does not hold the unit** — it stops a step earlier than Holland2Stay, because the next page asks for IBAN/SWIFT |
 | OurDomain | Entry leg verified against the live site (2026-08-04): floorplans → available units → terms POST, all 18 form fields landing | Everything after login. This flow has no unit-picker page, so falling out of it has no recovery path — the code aborts loudly rather than continuing with a mismatched context. Needs a real OurDomain account |
 | OurCampus | Nothing | Booking flow has never been scouted |
-
-Both stop at the same wall Holland2Stay does: the next step is
-`ApplicationCharges`, which wants IBAN/SWIFT. Entering financial credentials is
-a hard limit. Details in [XIOR.md](XIOR.md) §8 and
-[OURDOMAIN.md](OURDOMAIN.md) §7.
 
 > The hosted demo has auto-booking disabled for user accounts. Email us or
 > [self-host](#quick-start) to use it.

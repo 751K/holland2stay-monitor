@@ -11,7 +11,7 @@ OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即�
 
 **FlatRadar 的服务范围不包括自动付款，亦不保证预订成功。** 能否订到仍取决于平台上的实际竞争。
 
-项目支持本地/运毒部署。
+项目支持本地部署与云端部署。
 
 **官网 — [flatradar.app](https://flatradar.app)**
 
@@ -43,7 +43,7 @@ OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即�
 | Holland2Stay | 任意配置的荷兰城市 | 稳定，为房源的主要来源 | 支持自动预订 |
 | OurDomain | Amsterdam Diemen / South-East | 稳定 | 仅通知（预订链路已实现，未开放）|
 | Xior | 14 个城市共 30 栋楼，可按需选择 | 稳定 | 仅通知（预订链路已实现，未开放）|
-| OurCampus | Amsterdam Diemen（1 栋） | 已用真实 markup 校准；出房极少，见下文 | 仅通知 |
+| OurCampus | Amsterdam Diemen（1 栋） | 已用真实 markup 校准；出房极少 | 仅通知 |
 
 第三方站点随时可能变更，覆盖范围亦随之变化。各平台的抓取实现见
 [H2S.md](H2S.md)、[XIOR.md](XIOR.md)、[OURDOMAIN.md](OURDOMAIN.md)、
@@ -89,7 +89,7 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
 
 首次构建需数分钟。完成后访问 `http://127.0.0.1:8088`，无需登录。默认只监控 Holland2Stay 的 Eindhoven，其余平台在面板中按需启用。
 
-> ⚠️ 该模式下面板是明文 HTTP、且没有密码，只监听本机地址。**请勿用于公网服务器**，
+> ⚠️ 该模式下面板是明文 HTTP、且没有密码，只监听本机地址。**请勿用于公网服务器**。
 
 ### 二、云端部署
 
