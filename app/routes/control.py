@@ -15,6 +15,7 @@ import threading
 
 from flask import Flask, jsonify
 
+from app.api_errors import legacy_server_error
 from app.auth import admin_api_required
 from app.csrf import csrf_required
 from app.services.monitor_service import (
@@ -42,7 +43,7 @@ def api_reload():
         msg = "监控程序未运行，请先启动监控" if e.status == 400 else str(e)
         return jsonify({"ok": False, "error": msg}), e.status
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_reload")
     if result.get("fallback"):
         message = "信号发送失败，已回退为文件触发重载"
     elif result.get("method") == "file":
@@ -61,7 +62,7 @@ def api_monitor_start():
     except MonitorServiceError as e:
         return jsonify({"ok": False, "error": str(e)}), e.status
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_monitor_start")
     payload = {"ok": True, "message": "已启动"}
     if "method" in result:
         payload["method"] = result["method"]
@@ -77,7 +78,7 @@ def api_monitor_stop():
     except MonitorServiceError as e:
         return jsonify({"ok": False, "error": str(e)}), e.status
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_monitor_stop")
     if result.get("method") == "supervisor":
         return jsonify({"ok": True, "message": "已停止", "method": "supervisor"})
     return jsonify({"ok": True, "message": "已发送停止信号"})
@@ -93,7 +94,7 @@ def api_monitor_restart():
     except MonitorServiceError as e:
         return jsonify({"ok": False, "error": str(e)}), e.status
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_monitor_restart")
     msg = "进程已重启（旧进程已退出，新进程已启动）" if result.get("was_running") else "进程已启动"
     return jsonify({"ok": True, "message": msg, **{k: v for k, v in result.items() if k != "restarted"}})
 

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 import time as _time
@@ -24,6 +25,8 @@ from app.auth import admin_api_required, api_login_required, login_required
 from app.csrf import csrf_required
 from app.db import storage
 from app.services.listing_service import get_map_payload
+
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------ #
 # 后台地理编码任务的共享状态
@@ -84,7 +87,10 @@ def _run_geocode_worker(addresses: list[str]) -> None:
                     errors.append({"address": addr, "reason": "Photon returned no results"})
             except Exception as e:
                 failed += 1
-                errors.append({"address": addr, "reason": str(e)[:120]})
+                # /api/map/geocode/status 是 @api_login_required——普通用户也读得到。
+                # 异常来自对 Photon 的 HTTP 调用，文本里会带上服务地址，所以只归类。
+                logger.exception("geocode failed for %r: %s", addr, e)
+                errors.append({"address": addr, "reason": "geocoding request failed"})
             with _geocode_lock:
                 _geocode_status["done"] = done
                 _geocode_status["failed"] = failed

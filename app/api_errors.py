@@ -19,6 +19,10 @@ iOS / 第三方客户端拿到的所有 ``/api/v1/*`` 响应都遵循同一壳�
   400↔validation、429↔rate_limited、500↔server_error。
 - 永远不要把后端异常 ``str(e)`` 直接塞 message——可能泄漏路径/SQL/堆栈。
   err_server_error() 写日志但返回固定文案。
+
+旧路由（``/api/*``，非 v1）用的是另一套壳 ``{"ok": …, "error": "<字符串>"}``，
+前端 JS 直接读顶层 ``error``，改不动。但上面那条规则对两套壳同样成立，所以
+legacy_server_error() 放在这里——本模块管的是「错误怎么回」，不只是 v1 的壳形。
 """
 
 from __future__ import annotations
@@ -76,3 +80,18 @@ def err_server_error(exc: Exception | None = None,
     if exc is not None:
         logger.exception("API server_error: %s", exc)
     return err("server_error", message, 500)
+
+
+# ── 旧路由（/api/*，非 v1）─────────────────────────────────────────
+
+def legacy_server_error(exc: Exception, context: str,
+                        message: str = "服务器内部错误"):
+    """旧路由的 500：``{"ok": false, "error": "<固定文案>"}``。
+
+    与 err_server_error() 的差别只有壳形——旧前端读的是顶层 ``error`` 字符串，
+    不是 error 对象。规则是同一条：traceback 进日志，客户端只拿到固定文案。
+
+    ``context`` 是日志里的定位串（一般填 endpoint 名），不会出现在响应里。
+    """
+    logger.exception("%s failed: %s", context, exc)
+    return jsonify({"ok": False, "error": message}), 500

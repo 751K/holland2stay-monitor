@@ -559,7 +559,13 @@ def user_test_notify(user_id: str) -> Any:
             results.append({"channel": label, "ok": ok,
                             "error": None if ok else "发送失败，请检查日志"})
         except Exception as e:
-            results.append({"channel": label, "ok": False, "error": str(e)})
+            # 这条路由是 @self_or_admin_required——普通用户点一下「测试通知」
+            # 就能触发。异常文本来自 Telegram / Twilio SDK，内容不受我们控制，
+            # 可能带上 token 片段或内部 URL，所以只回固定文案。
+            logger.exception("user_test_notify(%s) channel=%s failed: %s",
+                             user_id, ch, e)
+            results.append({"channel": label, "ok": False,
+                            "error": "发送失败，请检查日志"})
 
     if not results:
         return jsonify({"ok": False, "results": [], "error": "该用户未配置任何通知渠道"})

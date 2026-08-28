@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import subprocess as _sp
@@ -28,10 +29,13 @@ from flask import Flask, jsonify, render_template, request
 from config import BASE_DIR, DATA_DIR, ENV_PATH
 from users import load_users
 
+from app.api_errors import legacy_server_error
 from app.auth import admin_api_required, admin_required, api_login_required
 from app.csrf import csrf_required
 from app.db import storage
 from app.process_ctrl import monitor_pid
+
+logger = logging.getLogger(__name__)
 
 # monitor 心跳容许的最大停滞秒数。默认 15 分钟 ≈ 3–4 个抓取轮次，既能容忍
 # 管理员为部署 / 调试短暂停掉监控，也不会让一次被遗忘的暂停无限期潜伏。
@@ -214,7 +218,7 @@ def api_crash_detail(crash_id: str):
         data = _json.loads(path.read_text(encoding="utf-8"))
         return jsonify({"ok": True, "data": data})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_crash_detail")
 
 
 @admin_api_required
@@ -228,7 +232,7 @@ def api_crash_delete(crash_id: str):
         path.unlink()
         return jsonify({"ok": True})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_crash_delete")
 
 
 @admin_api_required
@@ -437,7 +441,9 @@ def api_logs():
             "truncated": truncated,
         })
     except Exception as e:
-        return jsonify({"lines": [], "size": 0, "error": str(e)}), 500
+        # 壳形与其它路由不同：前端无条件读 lines/size，缺字段会直接抛。
+        logger.exception("api_logs failed: %s", e)
+        return jsonify({"lines": [], "size": 0, "error": "读取日志失败"}), 500
 
 
 @admin_api_required
@@ -453,7 +459,7 @@ def api_logs_clear():
             log_path.write_text("", encoding="utf-8")
         return jsonify({"ok": True, "file": file_key})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_logs_clear")
 
 
 @admin_api_required
@@ -474,7 +480,7 @@ def api_reset_db():
         st.reset_all()
         return jsonify({"ok": True, "message": "数据库已清空（listings / status_changes / meta / 通知）"})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_reset_db")
     finally:
         st.close()
 
@@ -619,7 +625,7 @@ def api_announcement():
     except ValueError as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return legacy_server_error(e, "api_announcement")
     return jsonify({"ok": True, "dry_run": dry_run, **res.as_dict()})
 
 
