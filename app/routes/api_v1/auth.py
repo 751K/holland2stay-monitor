@@ -49,9 +49,14 @@ logger = logging.getLogger(__name__)
 
 ADMIN_USERNAME = "__admin__"
 
-# 登录端点 TTL 边界：永远不允许客户端拿到非过期 token
-DEFAULT_TTL_DAYS = 90
-MAX_TTL_DAYS = 90
+# 登录端点 TTL 边界：永远不允许客户端拿到非过期 token。
+#
+# 默认值取自 mstorage._tokens——那边的 touch_app_tokens 会按同一个天数做滑动
+# 续期。两处各写一个 90 迟早分叉，而分叉的表现是「登录发的和续期发的不一样长」，
+# 不会有任何地方报错。
+from mstorage._tokens import SLIDING_TTL_DAYS as DEFAULT_TTL_DAYS
+
+MAX_TTL_DAYS = DEFAULT_TTL_DAYS
 MIN_TTL_DAYS = 1
 
 # 给"用户不存在"路径用的占位 bcrypt 哈希，用来抵消时序差

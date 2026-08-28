@@ -29,6 +29,21 @@ Bearer Token 持久化（iOS / 第三方客户端用）
    累计后定期 flush。
 3. 撤销不删除行（``revoked=1``），保留历史便于审计；
    ``cleanup_expired_tokens()`` 提供物理清理（按需调用）。
+4. ``expires_at`` **随使用滑动**（见 touch_app_tokens）。语义是「停用
+   SLIDING_TTL_DAYS 天后过期」，不是「登录后 SLIDING_TTL_DAYS 天过期」。
+
+为什么改成滑动
+--------------
+原来是登录时写死 now+90d，之后只读。到期那一刻 get_active_devices_for_user
+的 JOIN 把设备滤掉、推送立即停——而推送正是把用户叫回 App 的唯一通道。用户
+拿不到推送就不会打开 App，也就看不到 401、不会重新登录。
+
+2026-08-28 实测：48 个登录过 App 的用户里 9 个已经这么掉出去了（token 建于
+93–100 天前，第一批用户集中在 App 上线时登录），**重新登录回来的 0 人**。
+其中 Zhou / Xu 在过期前 3 天还在用 App——滑动续期的话他们今天还活着。
+
+代价是被盗 token 只要在用就一直有效。撤销通道是有的（/app_accounts 页面、
+改密码即撤销全部），这是移动端会话的标准取舍。
 """
 
 from __future__ import annotations
@@ -37,6 +52,10 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+#: token 的滑动有效期（天）。每次被使用就从「现在」重新起算。
+#: api_v1/auth.py 的 DEFAULT_TTL_DAYS 从这里取，避免两处慢慢分叉。
+SLIDING_TTL_DAYS = 90
 
 
 def _utc_now_iso() -> str:
@@ -195,19 +214,48 @@ class TokenOps:
 
     def touch_app_tokens(self, token_ids: list[int]) -> None:
         """
-        批量刷新 last_used_at（异步队列调用，每请求不直接走这里）。
+        批量刷新 last_used_at，并把 expires_at 顺势推到 now + SLIDING_TTL_DAYS。
 
-        空列表是 no-op，便于调用方无脑调用。
+        （异步队列调用，每请求不直接走这里。空列表是 no-op。）
+
+        续期搭在这条 UPDATE 上是有意的：这些行本来每隔一个 flush 周期就要写
+        一次，多改一个字段是零额外代价。单开一条语句反而会让每个活跃 token
+        每周期多一次写。
+
+        三个不动的情况，都写在 WHERE 里而不是 Python 里——判断和更新必须是
+        同一条语句，否则并发撤销会被这里覆盖回去：
+
+        - ``revoked = 1``          已撤销的不能靠「被用了一下」复活
+        - ``expires_at IS NULL``   永不过期的 token（admin 用）不该被安上一个到期日。
+          这条严格说是冗余的——下面那个 ``>= now`` 已经排除了 NULL 行（SQLite
+          三值逻辑）。留着是不想让一个安全判据依赖三值逻辑的细节。
+        - ``expires_at < now``     已经死了的不能复活。能走到这里说明请求通过了
+          鉴权，但 flush 是异步的、token 行还有 5 分钟缓存，跨过期点的窗口存在。
+
+        另加 ``expires_at < 新值`` 防止缩短：真到了这一步说明有人手工设过更长
+        的到期日，续期不该把它砍回 90 天。
         """
         if not token_ids:
             return
         now = _utc_now_iso()
+        new_expiry = (
+            datetime.now(timezone.utc) + timedelta(days=SLIDING_TTL_DAYS)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
         placeholders = ",".join("?" * len(token_ids))
         with self._conn:
             self._conn.execute(
                 f"UPDATE app_tokens SET last_used_at = ? "
                 f"WHERE id IN ({placeholders})",
                 [now, *token_ids],
+            )
+            self._conn.execute(
+                f"UPDATE app_tokens SET expires_at = ? "
+                f"WHERE id IN ({placeholders}) "
+                f"  AND revoked = 0 "
+                f"  AND expires_at IS NOT NULL "
+                f"  AND expires_at >= ? "
+                f"  AND expires_at < ?",
+                [new_expiry, *token_ids, now, new_expiry],
             )
 
     # ── 维护 ────────────────────────────────────────────────────────
