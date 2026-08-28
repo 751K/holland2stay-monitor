@@ -650,6 +650,29 @@ TRANSLATIONS = {
         "zh": "FlatRadar · 荷兰租房房源监控与提醒",
         "en": "FlatRadar · Dutch Rental Listing Alerts",
     },
+    # ── 用户配置页的「App 推送」卡片 ─────────────────────────────
+    #: 注意它**不是** notification_channels 里的一个值——推送走 device_tokens，
+    #: 由 App 登录时登记。这张卡只说明，不勾选。
+    "channel_app_push": {
+        "zh": "App 推送",
+        "en": "App push",
+    },
+    "channel_app_push_badge": {
+        "zh": "免配置",
+        "en": "no setup",
+    },
+    "channel_app_push_hint": {
+        "zh": "安装 App 并用本账号登录即可",
+        "en": "Install the app and sign in with this account",
+    },
+    "channel_app_push_active": {
+        "zh": "已连接 %(n)s 台设备",
+        "en": "%(n)s device(s) connected",
+    },
+    "channel_app_push_help": {
+        "zh": "下载 App 后使用账号登录即可收到通知。",
+        "en": "Download the app and sign in with this account to start receiving notifications.",
+    },
     #: 「设置」页的地图显示范围。runtime 类配置，住在 app_settings 表。
     "settings_map_max_age": {
         "zh": "地图显示范围（天）",

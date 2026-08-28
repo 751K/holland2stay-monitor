@@ -309,38 +309,7 @@
       box-shadow: 0 12px 24px color-mix(in srgb, var(--text) 15%, transparent) !important;
       transform: translateY(-2px);
     }
-    .btn-download {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      padding: 10px 18px;
-      border-radius: 999px;
-      font-size: 14px;
-      font-weight: 650;
-      text-decoration: none;
-      transition: all 0.2s;
-      cursor: pointer;
-      flex: 1;
-    }
-    .btn-dl-ios {
-      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-      background: color-mix(in srgb, var(--accent) 10%, transparent);
-      color: var(--accent);
-    }
-    .btn-dl-ios:hover {
-      background: color-mix(in srgb, var(--accent) 18%, transparent);
-      transform: scale(1.03);
-    }
-    .btn-dl-android {
-      border: 1px solid color-mix(in srgb, #10b981 28%, var(--border));
-      background: color-mix(in srgb, #10b981 10%, transparent);
-      color: #10b981;
-    }
-    .btn-dl-android:hover {
-      background: color-mix(in srgb, #10b981 18%, transparent);
-      transform: scale(1.03);
-    }
+    .login-dl-row .btn-download { flex: 1; }
     .floating-tools {
       position: absolute;
       top: 24px;
@@ -577,7 +546,7 @@
     <h1>{{ 'Welcome to FlatRadar' if lang == 'en' else '欢迎来到 FlatRadar' }}</h1>
     <div class="sub">{{ 'Find your dream house in the Netherlands, faster and smarter.' if lang == 'en' else '更快、更智能地发现荷兰心仪好房' }}</div>
     
-    <div style="display:flex;gap:12px;margin:16px 0 28px;">
+    <div style="display:flex;gap:12px;margin:16px 0 28px;" class="login-dl-row">
       <a href="https://apps.apple.com/us/app/flarradar/id6769857080" target="_blank" rel="noopener noreferrer" class="btn-download btn-dl-ios">
         <i class="bi bi-apple"></i>
         iOS App

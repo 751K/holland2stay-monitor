@@ -79,15 +79,15 @@
             <input type="hidden" id="app_login_h" name="app_login_enabled"
                    value="{{ 'true' if is_edit and u.app_login_enabled else 'false' }}">
             {% else %}
-            {# user 自助模式：登录开关只能由 admin 切换，这里只显示状态 #}
+            {# user 自助模式：登录开关只能由 admin 切换，这里只显示状态。
+               用徽章而不是「图标 + 一行文字」——「已启用 / 已停用」在用户卡上
+               本来就是徽章，同一个状态两种画法只会让人以为它们不是一回事。 #}
             <label class="form-label">{{ _('user_form_app_login_enable') }}</label>
-            <div style="font-size:14px;color:var(--text2);padding-top:4px;">
+            <div style="padding-top:2px;">
               {% if u.app_login_enabled %}
-                <i class="bi bi-check-circle" style="color:var(--success);"></i>
-                {{ _('users_enabled') }}
+                <span class="badge badge-success">{{ _('users_enabled') }}</span>
               {% else %}
-                <i class="bi bi-x-circle" style="color:var(--text3);"></i>
-                {{ _('users_disabled') }}
+                <span class="badge badge-neutral">{{ _('users_disabled') }}</span>
               {% endif %}
             </div>
             {% endif %}
@@ -130,8 +130,54 @@
 
       <input type="hidden" id="channels_hidden" name="NOTIFICATION_CHANNELS" value="{{ u.notification_channels | join(',') if is_edit else '' }}">
 
+      <!-- App 推送 —— 放在 .form-row **之外**。
+           它没有输入框，展开后是两个按钮加一段说明，挤在一个网格列里说明文字
+           只有几十像素宽。但也不能用 grid-column:1/-1 让它横跨：.form-row 是
+           repeat(auto-fit, minmax(160px,1fr))，而 1/-1 要求解析出完整的轨道
+           列表，auto-fit 于是不再折叠空轨道——四个渠道会被压回 160px 的格子，
+           挤在左边。移出网格是唯一不动其余四张卡的做法。
+
+           另注意：这不是 notification_channels 里的一个值。推送走 device_tokens，
+           由 App 登录时登记；给它加一个真的 checkbox 会往那个字段写进一个
+           create_user_notifier 不认识的值（日志里是「未知通知渠道」），而且永远
+           不会投递。所以它只展开、不勾选，用 toggleInfoCard。 -->
+      <div class="form-group">
+        <label class="channel-card{% if device_count %} selected{% endif %}" style="display:block;cursor:pointer;"
+               onclick="toggleInfoCard('apppush')">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-2">
+              <i class="bi bi-phone" style="font-size:15px;"></i>
+              <span class="font-medium text-sm">{{ _('channel_app_push') }}</span>
+            </div>
+            <span class="badge badge-success text-xs">{{ _('channel_app_push_badge') }}</span>
+          </div>
+          <div class="text-xs text-secondary">
+            {% if device_count %}
+              {{ _('channel_app_push_active') % {'n': device_count} }}
+            {% else %}
+              {{ _('channel_app_push_hint') }}
+            {% endif %}
+          </div>
+        </label>
+        <div id="sec_apppush" class="mt-2" style="display:none;">
+          <div class="flex items-center gap-2" style="flex-wrap:wrap;">
+            <a class="btn-download btn-dl-ios" target="_blank" rel="noopener noreferrer"
+               href="https://apps.apple.com/us/app/flarradar/id6769857080">
+              <i class="bi bi-apple"></i>iOS App
+            </a>
+            <a class="btn-download btn-dl-android" target="_blank" rel="noopener noreferrer"
+               href="https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk">
+              <i class="bi bi-android2"></i>Android App
+            </a>
+          </div>
+          <div class="form-help mt-2" style="line-height:1.6;">
+            {{ _('channel_app_push_help') }}
+          </div>
+        </div>
+      </div>
+
       <div class="form-row">
-        <!-- iMessage -->
+        <!-- iMessage -->        <!-- iMessage -->
         <div class="form-group">
           <label class="channel-card {% if is_edit and 'imessage' in u.notification_channels %}selected{% endif %}"
                  style="display:block;{% if not is_macos %}opacity:0.45;pointer-events:none;cursor:not-allowed;{% endif %}"
@@ -994,6 +1040,15 @@ function syncEmailRequirement() {
   var required = !!(emailChk && emailChk.checked);
   emailTo.required = required;
   emailTo.setAttribute('aria-required', required ? 'true' : 'false');
+}
+
+/* 只展开说明区，不碰 channels_hidden。
+   给「App 推送」这类**不是通知渠道**的卡片用：它反映的是设备有没有登记，
+   不是一个可以在这里勾选的设置。 */
+function toggleInfoCard(name) {
+  var sec = document.getElementById('sec_' + name);
+  if (!sec) return;
+  sec.style.display = (sec.style.display === 'none' || !sec.style.display) ? 'block' : 'none';
 }
 
 function toggleChannel(ch) {

@@ -398,6 +398,30 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .btn-danger-ghost{background:var(--danger-soft);color:var(--danger)}
 .btn-danger-ghost:hover{opacity:.8}
 
+/* App 下载入口。
+   登录页与用户配置页都要用，此前只在 login.html 的内联 <style> 里有一份，
+   于是面板那边只能拿 .btn-outline 凑合——同一个动作两种画法。
+   保留按平台着色（iOS 走 accent，Android 走绿），那是有用的区分；圆角跟着
+   按钮走 --radius，不再是胶囊：它是操作，不是状态。 */
+.btn-download{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:9px 16px;border-radius:var(--radius);
+  font-size:14px;font-weight:600;text-decoration:none;
+  transition:all .14s;cursor:pointer;white-space:nowrap;
+}
+.btn-dl-ios{
+  border:1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background:color-mix(in srgb, var(--accent) 10%, transparent);
+  color:var(--accent);
+}
+.btn-dl-ios:hover{background:color-mix(in srgb, var(--accent) 18%, transparent)}
+.btn-dl-android{
+  border:1px solid color-mix(in srgb, var(--success) 28%, var(--border));
+  background:color-mix(in srgb, var(--success) 10%, transparent);
+  color:var(--success);
+}
+.btn-dl-android:hover{background:color-mix(in srgb, var(--success) 18%, transparent)}
+
 /* 描边式：透明底 + 一条发丝边。
    给「一排并列的次要操作」用。.btn-ghost 是实心灰底（--surface-hover），单独
    放在控制栏里没问题，但成排落进以文字为主的卡片时，几块实心色块比它们要表达

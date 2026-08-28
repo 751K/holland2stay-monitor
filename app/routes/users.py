@@ -277,7 +277,7 @@ def user_new() -> Any:
     city_names = known_city_names()
     opts = _get_all_filter_options()
     return render_template(
-        "user_form.html", user=None, id_doc=None,
+        "user_form.html", user=None, id_doc=None, device_count=0,
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
         applicant_genders=APPLICANT_GENDERS,
@@ -379,8 +379,20 @@ def user_edit(user_id: str) -> Any:
     # 城市筛选，这些楼盘的房源就被整体挡掉。
     city_names = known_city_names()
     opts = _get_all_filter_options()
+    # 「App 推送」卡片显示已连接设备数。查不出来时按 0——那张卡会退回
+    # 「安装 App 并登录即可」，比谎报一个数字好。
+    try:
+        st_dev = storage()
+        try:
+            device_count = len(st_dev.get_active_devices_for_user(user_id))
+        finally:
+            st_dev.close()
+    except Exception:
+        logger.warning("读取设备数失败 user_id=%s", user_id, exc_info=True)
+        device_count = 0
+
     return render_template(
-        "user_form.html", user=user,
+        "user_form.html", user=user, device_count=device_count,
         id_doc=__import__("applicant_docs").info(user_id),
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
