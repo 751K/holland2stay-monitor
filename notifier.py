@@ -1197,6 +1197,17 @@ def _split_email_recipients(value: str) -> list[str]:
     return [part.strip() for part in re.split(r"[,;\n]+", value or "") if part.strip()]
 
 
+#: 首行开头的装饰性前缀：连续的非文字字符。邮件标题与 Telegram 标题共用一份。
+#:
+#: ``[`` 必须排除。所有通知的首行都是 ``[H2S] 新房源上架`` 这种来源标记，
+#: 把它当装饰吃掉会留下一个孤零零的右括号——而这个函数原本只是想去掉
+#: ``⚠️`` / ``✅`` 这类 emoji。Telegram 那份从一开始就排除了它，邮件这份没有，
+#: 于是每一封通知邮件的标题都少一个左括号。同一个意图两份实现，分叉了一年。
+#:
+#: ``<@#/`` 是 Telegram 的实体前缀，同样不算装饰。
+_LEADING_DECORATION_RE = re.compile(r"^[^\w<@#/\[]+\s*", re.UNICODE)
+
+
 def _format_email_subject(text: str) -> str:
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "FlatRadar 通知")
     first_line = re.sub(r"\s+", " ", first_line)
@@ -1208,7 +1219,7 @@ def _format_email_subject(text: str) -> str:
 
 def _strip_leading_symbol(value: str) -> str:
     """邮件标题区域不重复展示 emoji / bullets，保留正文原文。"""
-    return re.sub(r"^[^\w\u4e00-\u9fff]+", "", value or "").strip() or value
+    return _LEADING_DECORATION_RE.sub("", (value or "").strip()).strip() or value
 
 
 def _format_email_html(text: str) -> str:
@@ -1462,12 +1473,9 @@ def _format_booking_failed(l: Listing, reason: str, *, lang: str = "en") -> str:
     ])
 
 
-_TELEGRAM_ICON_PREFIX_RE = re.compile(r"^[^\w<@#/\[]+\s*", re.UNICODE)
-
-
 def _strip_telegram_icon(line: str) -> str:
     """移除纯文本通知里的装饰性 emoji 前缀，保留正式文本。"""
-    return _TELEGRAM_ICON_PREFIX_RE.sub("", line.strip()).strip()
+    return _LEADING_DECORATION_RE.sub("", line.strip()).strip()
 
 
 def _telegram_link_line(line: str) -> str | None:
