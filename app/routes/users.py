@@ -147,6 +147,29 @@ def _get_all_filter_options() -> dict[str, list[str]]:
         st.close()
 
 
+#: 语言 cookie 的存活期，与侧栏那个语言开关（sessions.set_lang）保持一致。
+_LANG_COOKIE_MAX_AGE = 60 * 60 * 24 * 365
+
+
+def _own_language_cookie(resp, user_id: str, language: str):
+    """保存**自己**的账号时，界面语言跟着表单里选的走。
+
+    ``language`` 原本只管发出去的文案（验证邮件、房源通知），而界面语言是
+    ``h2s-lang`` 这个 cookie，两者各走各的——用户在自己的页面上把语言改成英文、
+    保存，界面却仍是中文，看起来像没生效。
+
+    只对本人生效。``current_user_id()`` 对 admin / guest 返回空串，所以 admin
+    编辑别人时不会把自己的界面语言换掉——那是另一个人的偏好，不是他的。
+
+    cookie 而不是 session：界面语言本来就存在 cookie 里，写 session 会让同一个
+    浏览器的匿名页面（登录页、指南）跟不上。
+    """
+    if language in ("zh", "en") and user_id and current_user_id() == user_id:
+        resp.set_cookie("h2s-lang", language,
+                        max_age=_LANG_COOKIE_MAX_AGE, samesite="Lax")
+    return resp
+
+
 def users_list() -> Any:
     """
     用户列表页：
@@ -237,7 +260,10 @@ def _flash_verification_email(user) -> None:
     """
     from app.email_verify import EmailVerifyConfigError, send_verification_email_sync
     try:
-        sent = send_verification_email_sync(user.id, user.name, user.email_to)
+        sent = send_verification_email_sync(
+            user.id, user.name, user.email_to,
+            getattr(user, "language", "en") or "en",
+        )
         if sent:
             flash("📧 验证邮件已发送，请查收并点击链接确认", "success")
         else:
@@ -380,12 +406,18 @@ def user_edit(user_id: str) -> Any:
                 allowed, reason = check_test_notify_rate(user_id)
                 if not allowed:
                     flash(reason, "warning")
-                    return redirect(url_for("user_edit", user_id=user_id))
+                    return _own_language_cookie(
+                        redirect(url_for("user_edit", user_id=user_id)),
+                        user_id, updated.language,
+                    )
                 record_test_notify(user_id)
             _flash_verification_email(updated)
         else:
             flash(f"✅ 用户「{updated.name}」已保存", "success")
-        return redirect(url_for("user_edit", user_id=user_id))
+        return _own_language_cookie(
+            redirect(url_for("user_edit", user_id=user_id)),
+            user_id, updated.language,
+        )
 
     # 全平台归一后的城市并集。只用 KNOWN_CITIES 会漏掉 Xior 独有的
     # Wageningen / Venlo / Breda / Leeuwarden——用户既选不到，一旦设了

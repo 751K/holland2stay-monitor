@@ -48,6 +48,20 @@ USER_CONFIG_COLUMNS = (
 )
 
 
+#: ``ON CONFLICT DO UPDATE`` 的 SET 子句，由列表推出而不是手写。
+#:
+#: 原先这串是逐列手打的，加列时漏掉 ``language``——于是它只在 INSERT 时写得进去，
+#: 之后无论怎么保存都改不动，而且不会报错：新建用户选中文是对的，编辑时改成英文
+#: 点了保存、提示「已保存」，值纹丝不动。2026-08-29 加「通知语言」入口时撞上。
+#:
+#: ``id`` 是冲突键，``created_at`` 必须保留首次写入的值，其余一律跟随 excluded。
+_UPDATE_SET = ", ".join(
+    f"{c}=excluded.{c}"
+    for c in USER_CONFIG_COLUMNS
+    if c not in ("id", "created_at")
+)
+
+
 class UserConfigOps:
     """依赖 self._conn（由 StorageBase 提供）。"""
 
@@ -93,35 +107,9 @@ class UserConfigOps:
             self._conn.execute("DELETE FROM user_configs")
         placeholders = ", ".join("?" for _ in USER_CONFIG_COLUMNS)
         sql = (
-            f"INSERT INTO user_configs ({', '.join(USER_CONFIG_COLUMNS)}) VALUES ({placeholders}) "
-            "ON CONFLICT(id) DO UPDATE SET "
-            "name=excluded.name, "
-            "enabled=excluded.enabled, "
-            "notifications_enabled=excluded.notifications_enabled, "
-            "notification_channels_json=excluded.notification_channels_json, "
-            "imessage_recipient=excluded.imessage_recipient, "
-            "telegram_token=excluded.telegram_token, "
-            "telegram_chat_id=excluded.telegram_chat_id, "
-            "email_mode=excluded.email_mode, "
-            "email_verified=excluded.email_verified, "
-            "email_smtp_host=excluded.email_smtp_host, "
-            "email_smtp_port=excluded.email_smtp_port, "
-            "email_smtp_security=excluded.email_smtp_security, "
-            "email_username=excluded.email_username, "
-            "email_password=excluded.email_password, "
-            "email_from=excluded.email_from, "
-            "email_to=excluded.email_to, "
-            "twilio_sid=excluded.twilio_sid, "
-            "twilio_token=excluded.twilio_token, "
-            "twilio_from=excluded.twilio_from, "
-            "twilio_to=excluded.twilio_to, "
-            "listing_filter_json=excluded.listing_filter_json, "
-            "auto_book_json=excluded.auto_book_json, "
-            "app_password_hash=excluded.app_password_hash, "
-            "app_login_enabled=excluded.app_login_enabled, "
-            "allow_h2s_login=excluded.allow_h2s_login, "
-            "sort_order=excluded.sort_order, "
-            "updated_at=excluded.updated_at"
+            f"INSERT INTO user_configs ({', '.join(USER_CONFIG_COLUMNS)}) "
+            f"VALUES ({placeholders}) "
+            "ON CONFLICT(id) DO UPDATE SET " + _UPDATE_SET
         )
         for idx, row in enumerate(materialized):
             item = dict(row)

@@ -185,6 +185,23 @@ def parse_screening_consent(
     return old or datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+#: 通知语言的合法取值。认不出的一律按 en——UserConfig 的默认值就是它。
+_LANGUAGES = ("en", "zh")
+
+
+def _language(form, existing) -> str:
+    """表单里的通知语言。
+
+    表单里没有这个字段时**沿用旧值**，而不是回落到 ``en``。API 或旧版页面提交
+    的表单不带 LANGUAGE，回落的话会把用户已经选好的中文悄悄改回英文，而且没有
+    任何地方会报错。
+    """
+    raw = (form.get("LANGUAGE") or "").strip().lower()[:2]
+    if raw in _LANGUAGES:
+        return raw
+    return getattr(existing, "language", "en") or "en"
+
+
 def build_user_from_form(
     form: "ImmutableMultiDict[str, str]",
     user_id: Optional[str] = None,
@@ -378,6 +395,7 @@ def build_user_from_form(
         name=raw_name or "未命名用户",
         enabled=form.get("enabled") == "true",
         notifications_enabled=form.get("NOTIFICATIONS_ENABLED", "true") != "false",
+        language=_language(form, existing),
         notification_channels=channels,
         imessage_recipient=form.get("IMESSAGE_RECIPIENT", ""),
         telegram_token=form.get("TELEGRAM_BOT_TOKEN", ""),
@@ -416,6 +434,7 @@ def build_user_from_form_self(
     - ``notifications_enabled`` + ``notification_channels``
     - 四个渠道的凭证字段（imessage / telegram / email / whatsapp）
     - ``listing_filter``（通知过滤）
+    - ``language``（通知语言，本人的偏好）
     - ``app_password``（仅本人可改自己密码；空表单 = 不动）
 
     **以下字段完全忽略 form 输入，强制沿用 existing**：
@@ -532,6 +551,7 @@ def build_user_from_form_self(
         enabled=form.get("enabled") == "true",
         # 可改：通知段
         notifications_enabled=form.get("NOTIFICATIONS_ENABLED", "true") != "false",
+        language=_language(form, existing),
         notification_channels=channels,
         imessage_recipient=form.get("IMESSAGE_RECIPIENT", ""),
         telegram_token=form.get("TELEGRAM_BOT_TOKEN", ""),

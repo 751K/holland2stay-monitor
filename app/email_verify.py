@@ -71,7 +71,65 @@ def _safe_user_name(raw: str) -> str:
     return " ".join(cleaned.split())[:64]
 
 
-def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str]:
+#: 验证邮件的中英两份文案。
+#:
+#: 此前整封信写死中文，而 ``UserConfig.language`` 默认就是 ``en``——2026-08-29
+#: 线上 62 个用户全部是 en，配了邮箱的 13 个也全部是 en。也就是说至今发出去的
+#: 每一封验证邮件都是中文发给英文用户的。房源通知一直是按 ``user.language``
+#: 分支的，只有这一封没跟上。
+#:
+#: 落款那句沿用 notifier.py 里的写法，两种语言相同：品牌行不翻译，而且项目早已
+#: 不只监控 Holland2Stay，原文「Holland2Stay 房源监控」是四个平台里的一个。
+_VERIFY_TEXT = {
+    "zh": {
+        "html_lang":  "zh",
+        "subject":    "FlatRadar — 确认你的通知邮箱",
+        "title":      "确认你的通知邮箱",
+        "intro":      "你好 {name}，有人（很可能是你本人）把这个邮箱地址设为 "
+                      "FlatRadar 的通知收件人。为防止他人滥用，请点击下方按钮确认这是你的邮箱。",
+        "button":     "确认邮箱",
+        "fallback":   "如按钮无法点击，复制以下链接到浏览器打开：",
+        "expiry":     "链接 24 小时内有效。如果你不知道这封邮件是什么，请直接忽略——"
+                      "未确认的邮箱不会收到任何后续通知，也不会再收到本类邮件。",
+        "text_body":  "你好 {name},\n\n"
+                      "有人（很可能是你本人）把这个邮箱地址设为 FlatRadar 的通知收件人。\n"
+                      "为防止他人滥用，请点击以下链接确认这是你的邮箱：\n\n"
+                      "{url}\n\n"
+                      "链接 24 小时内有效。如果你不知道这封邮件是什么，请直接忽略——\n"
+                      "未确认的邮箱不会收到任何后续通知。\n\n"
+                      "— FlatRadar",
+    },
+    "en": {
+        "html_lang":  "en",
+        "subject":    "FlatRadar — Confirm your notification email",
+        "title":      "Confirm your notification email",
+        "intro":      "Hi {name}, someone (most likely you) set this address as the "
+                      "notification recipient for FlatRadar. To stop anyone else from "
+                      "using it, please confirm the address with the button below.",
+        "button":     "Confirm email",
+        "fallback":   "If the button does not work, copy this link into your browser:",
+        "expiry":     "The link is valid for 24 hours. If you were not expecting this "
+                      "email, just ignore it — an unconfirmed address receives no "
+                      "notifications, and no further messages of this kind.",
+        "text_body":  "Hi {name},\n\n"
+                      "Someone (most likely you) set this address as the notification "
+                      "recipient for FlatRadar.\n"
+                      "To stop anyone else from using it, confirm the address here:\n\n"
+                      "{url}\n\n"
+                      "The link is valid for 24 hours. If you were not expecting this "
+                      "email, just ignore it —\n"
+                      "an unconfirmed address receives no notifications.\n\n"
+                      "— FlatRadar",
+    },
+}
+
+#: 页脚。与 notifier.py 的通知邮件同一句，不随语言变化。
+_VERIFY_FOOTER = "© FlatRadar · independent rental listing companion"
+
+
+def _format_verify_email(
+    verify_url: str, user_name: str, lang: str = "en",
+) -> tuple[str, str, str]:
     """
     返回 (subject, text_body, html_body)。
 
@@ -80,27 +138,26 @@ def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str
       Gmail 会剥掉 <style>，所以一切样式必须 inline；外层 table 防止 Outlook
       把内容塞进窄列。
     - user_name 同时做 (1) 控制字符脱敏 → text，(2) HTML 实体转义 → html
+    - lang 取自 ``UserConfig.language``，与房源通知同一个字段；认不出的值按 en。
+
+    ``_VERIFY_TEXT`` 里的文案是本文件自己写的常量，不含任何 HTML 元字符，直接
+    插进模板即可；唯一需要转义的是 ``user_name``，而它在 ``safe_name`` 那一步
+    已经转义过一次。外面再包一层 ``_html_escape`` 会把 ``&`` 变成 ``&amp;amp;``
+    ——名字里有 ``&`` 的人会在邮件里看到实体码。有一条用例钉住文案不含元字符。
     """
     user_name = _safe_user_name(user_name)
-    subject = "FlatRadar — 确认你的通知邮箱"
-    text_body = (
-        f"你好 {user_name},\n\n"
-        f"有人（很可能是你本人）把这个邮箱地址设为 FlatRadar 房源监控的通知收件人。\n"
-        f"为防止他人滥用，请点击以下链接确认这是你的邮箱：\n\n"
-        f"{verify_url}\n\n"
-        f"链接 24 小时内有效。如果你不知道这封邮件是什么，请直接忽略——\n"
-        f"未确认的邮箱不会收到任何后续通知。\n\n"
-        f"— FlatRadar"
-    )
+    t = _VERIFY_TEXT.get((lang or "en").lower()[:2], _VERIFY_TEXT["en"])
+    subject = t["subject"]
+    text_body = t["text_body"].format(name=user_name, url=verify_url)
 
     safe_name = _html_escape(user_name or "")
     safe_url = _html_escape(verify_url)
     html_body = f"""<!doctype html>
-<html lang="zh">
+<html lang="{t["html_lang"]}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>确认你的通知邮箱</title>
+<title>{t["title"]}</title>
 </head>
 <body style="margin:0;padding:0;background:#f5f7fa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#1f2530;">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f5f7fa;padding:32px 16px;">
@@ -115,11 +172,10 @@ def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str
               FLATRADAR
             </div>
             <h1 style="margin:14px 0 8px;font-size:22px;font-weight:600;line-height:1.3;color:#1f2530;">
-              确认你的通知邮箱
+              {t["title"]}
             </h1>
             <p style="margin:0;color:#6b7280;font-size:14px;line-height:1.6;">
-              你好 {safe_name}，有人（很可能是你本人）把这个邮箱地址设为
-              FlatRadar 房源监控的通知收件人。为防止他人滥用，请点击下方按钮确认这是你的邮箱。
+              {t["intro"].format(name=safe_name)}
             </p>
           </td>
         </tr>
@@ -129,14 +185,14 @@ def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str
                style="display:inline-block;padding:12px 28px;background:#0f6b7a;color:#ffffff;
                       text-decoration:none;border-radius:8px;font-size:15px;font-weight:500;
                       box-shadow:0 1px 2px rgba(15,107,122,.3);">
-              确认邮箱
+              {t["button"]}
             </a>
           </td>
         </tr>
         <tr>
           <td style="padding:8px 36px 4px;">
             <p style="margin:0;color:#9aa3ad;font-size:12px;line-height:1.6;text-align:center;">
-              如按钮无法点击，复制以下链接到浏览器打开：
+              {t["fallback"]}
             </p>
             <p style="margin:8px 0 0;word-break:break-all;text-align:center;">
               <a href="{safe_url}" style="color:#0f6b7a;font-size:12px;text-decoration:none;">{safe_url}</a>
@@ -146,14 +202,13 @@ def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str
         <tr>
           <td style="padding:24px 36px 32px;border-top:1px solid #eef0f3;margin-top:24px;">
             <p style="margin:18px 0 0;color:#9aa3ad;font-size:12px;line-height:1.6;">
-              链接 24 小时内有效。如果你不知道这封邮件是什么，请直接忽略——
-              未确认的邮箱不会收到任何后续通知，也不会再收到本类邮件。
+              {t["expiry"]}
             </p>
           </td>
         </tr>
       </table>
       <p style="margin:14px 0 0;color:#b8c0cc;font-size:11px;">
-        © FlatRadar · Holland2Stay 房源监控
+        {_VERIFY_FOOTER}
       </p>
     </td>
   </tr>
@@ -163,7 +218,9 @@ def _format_verify_email(verify_url: str, user_name: str) -> tuple[str, str, str
     return subject, text_body, html_body
 
 
-async def send_verification_email(user_id: str, user_name: str, email: str) -> bool:
+async def send_verification_email(
+    user_id: str, user_name: str, email: str, lang: str = "en",
+) -> bool:
     """
     给指定邮箱发一封带 token 链接的验证邮件。
 
@@ -185,7 +242,7 @@ async def send_verification_email(user_id: str, user_name: str, email: str) -> b
         st.close()
 
     verify_url = _build_verify_url(token)
-    subject, text_body, html_body = _format_verify_email(verify_url, user_name)
+    subject, text_body, html_body = _format_verify_email(verify_url, user_name, lang)
 
     # 验证邮件需要自定义 subject 和确认按钮链接，因此直接调底层 HTTP
     # （与 ResendNotifier._post 同形）。配额由该函数自己调用 check/record
@@ -236,7 +293,9 @@ async def send_verification_email(user_id: str, user_name: str, email: str) -> b
     return sent
 
 
-def send_verification_email_sync(user_id: str, user_name: str, email: str) -> bool:
+def send_verification_email_sync(
+    user_id: str, user_name: str, email: str, lang: str = "en",
+) -> bool:
     """同步包装，给 Flask 路由层调用（避免每个路由都管 event loop）。"""
     try:
         asyncio.get_running_loop()
@@ -246,10 +305,10 @@ def send_verification_email_sync(user_id: str, user_name: str, email: str) -> bo
         has_running_loop = True
 
     if not has_running_loop:
-        return asyncio.run(send_verification_email(user_id, user_name, email))
+        return asyncio.run(send_verification_email(user_id, user_name, email, lang))
 
     import concurrent.futures
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
         return pool.submit(
-            asyncio.run, send_verification_email(user_id, user_name, email)
+            asyncio.run, send_verification_email(user_id, user_name, email, lang)
         ).result()

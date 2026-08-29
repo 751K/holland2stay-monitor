@@ -36,6 +36,14 @@ _BLANKED = [
 #: 这种写法本来就要两种语言各写一遍，中文出现在里面是正常的。
 _BILINGUAL = re.compile(r"\blang\s*==|\bzh\s*\?|\?\s*['\"][^'\"]*[一-鿿]")
 
+#: 语言选单里的语言名。
+#:
+#: 语言名按惯例一律用它自己的语言写（endonym）：无论界面是中文还是英文，那两项
+#: 都该是 "English" 和「中文」。翻译它才是错的——英文界面上写 "Chinese" 的话，
+#: 只看得懂中文的人反而找不到自己那一项。侧栏那个语言开关里的 "English" 是同
+#: 一回事，只是它是 ASCII，本来就落不到这条规则上。
+_LANGUAGE_ENDONYM = re.compile(r'<option value="zh"[^>]*>\s*中文')
+
 _JINJA_COMMENT_LINE = re.compile(r"^\s*(#|//|/\*|\*)")
 
 
@@ -84,6 +92,8 @@ def _offending_lines(path: pathlib.Path) -> list[str]:
             continue
         if _JINJA_COMMENT_LINE.match(line) or _BILINGUAL.search(line):
             continue
+        if _LANGUAGE_ENDONYM.search(line):
+            continue
         hits.append(f"{path.name}:{lineno}: {line.strip()[:90]}")
     return hits
 
@@ -110,3 +120,23 @@ def test_detector_actually_catches_something():
         p.write_text("<th>设备</th>\n{# 中文注释不算 #}\n", encoding="utf-8")
         hits = _offending_lines(p)
         assert len(hits) == 1 and "设备" in hits[0]
+
+
+def test_endonym_exemption_is_narrow():
+    """语言名的豁免不能宽到把别处的中文一起放过。
+
+    豁免的判据是「<option value="zh"> 里的中文」，不是「出现了中文两个字」。
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        p = pathlib.Path(d) / "x.html"
+        p.write_text(
+            '<option value="zh">中文</option>\n'      # 放过
+            '<span>切换到中文</span>\n'                # 不放过
+            '<option value="en">通知语言</option>\n',  # 不放过
+            encoding="utf-8")
+        hits = _offending_lines(p)
+        assert len(hits) == 2, hits
+        assert "切换到中文" in hits[0]
+        assert "通知语言" in hits[1]

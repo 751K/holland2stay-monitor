@@ -199,7 +199,10 @@ def resend_verify(user_id: str) -> Any:
         record_test_notify(user_id)
 
     try:
-        sent = send_verification_email_sync(user.id, user.name, user.email_to)
+        sent = send_verification_email_sync(
+            user.id, user.name, user.email_to,
+            getattr(user, "language", "en") or "en",
+        )
     except EmailVerifyConfigError as e:
         logger.error("resend_verify: 邮箱验证未就绪: %s", e)
         return jsonify({"ok": False, "error": "系统未配置 PUBLIC_BASE_URL，暂时无法发送验证邮件"}), 503

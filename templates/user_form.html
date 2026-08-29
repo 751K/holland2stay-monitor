@@ -58,6 +58,22 @@
           </label>
           <input type="hidden" id="enabled_h" name="enabled" value="{{ 'true' if not is_edit or u.enabled else 'false' }}">
         </div>
+        {#
+          语言。此前 UserConfig.language 没有任何入口，所有人恒为 en——而验证
+          邮件、房源通知都按它出文案。自助模式下也可改：这是本人的偏好。
+
+          保存自己的账号时界面语言跟着走（见 app/routes/users.py 的
+          _own_language_cookie）。选项写各自的母语名，中英界面下都是
+          "English" 和「中文」——翻成 "Chinese" 反而让只看得懂中文的人找不到
+          自己那一项。
+        #}
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_language') }}</label>
+          <select class="form-select" name="LANGUAGE">
+            <option value="en" {% if not is_edit or (u.language or 'en') != 'zh' %}selected{% endif %}>English</option>
+            <option value="zh" {% if is_edit and (u.language or 'en') == 'zh' %}selected{% endif %}>中文</option>
+          </select>
+        </div>
       </div>
 
       <!-- 登录（iOS App / Web 共用） -->

@@ -499,6 +499,7 @@ TRANSLATIONS = {
     "user_form_name":       {"zh": "用户名称",                "en": "User Name"},
     "user_form_status":     {"zh": "账户状态",                "en": "Account Status"},
     "user_form_enable":     {"zh": "启用此用户",              "en": "Enable this user"},
+    "user_form_language":   {"zh": "语言",                    "en": "Language"},
     "user_form_section2":   {"zh": "通知渠道",                "en": "Notification Channels"},
     "user_form_notif_on":   {"zh": "开启通知",                "en": "Enable notifications"},
     "user_form_recipient":  {"zh": "收件人（手机号或 Apple ID）", "en": "Recipient (phone or Apple ID)"},

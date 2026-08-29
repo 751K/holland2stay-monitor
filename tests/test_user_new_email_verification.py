@@ -53,7 +53,7 @@ class TestSendsOnCreate:
 
         u = _user("NewShared")
         # 传的必须是刚建出来那个用户的 id，不能是别人的
-        user_id, user_name, email = send.call_args.args
+        user_id, user_name, email = send.call_args.args[:3]
         assert user_id == u.id
         assert user_name == "NewShared"
         assert email == "a@example.com"
