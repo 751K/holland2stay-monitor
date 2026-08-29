@@ -793,7 +793,10 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
      移动端还叠了 min-height:44px（见文件末尾的 @media）。原先写死 4px，
      浏览器实测角标中心比按钮中心高 6.63px（桌面）/ 9px（移动）——正是
      2026-08-21 反馈的「没对齐」。改法见 tests/test_notif_badge_alignment.py。 */
-  position:absolute;top:50%;right:8px;transform:translateY(-50%);
+  /* right 与这一行的 padding-left 同为 12px。原先是 8：角标离右边缘比图标离
+     左边缘近 4px，整行看着往右歪——纵向是正的（下面那段），但眼睛把这份不对称
+     读成了「没居中」。 */
+  position:absolute;top:50%;right:12px;transform:translateY(-50%);
   min-width:18px;height:18px;border-radius:9px;
   background:var(--danger);color:#fff;
   font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;
@@ -882,9 +885,21 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .user-card:hover{box-shadow:var(--shadow-md)}
 .user-card.disabled{opacity:.5}
 .user-card-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px}
+/* 头像。此前是饱和渐变加白字，在一张以文字和软色标签为主的卡片上，它是最重的
+   一块——比它要表达的东西（一个首字母）重得多。
+
+   也不再按人分色。全站的颜色只有一个 accent、四个语义色和四个渠道品牌色；
+   「每人一个色相」是一套别处都不用的调色板，本身就是不协调的来源，而识别靠的
+   是紧挨着的用户名，颜色从来没承担过这件事。改用 accent 的软底加 accent 的字，
+   和侧栏选中态、主按钮同一个色系。
+
+   两个值都是主题变量，深色下自动跟随，不需要 [data-theme] 覆盖。
+   圆角走 --radius-lg：6px 是操作，10px 是状态，头像属于后者。 */
 .user-avatar{
-  width:36px;height:36px;border-radius:var(--radius);display:flex;align-items:center;justify-content:center;
-  font-size:16px;font-weight:700;color:#fff;flex-shrink:0;
+  width:36px;height:36px;border-radius:var(--radius-lg);
+  display:flex;align-items:center;justify-content:center;
+  font-size:15px;font-weight:650;flex-shrink:0;letter-spacing:.01em;
+  background:var(--accent-soft);color:var(--accent);
 }
 /* 用户名可能是一整个邮箱地址——没有空格，断不开。flex 项默认 min-width:auto
    会撑着不缩，于是右边的 ▲▼ 和状态胶囊被顶到卡片外面（2026-08-25 实测：
@@ -905,10 +920,17 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .user-name{font-weight:600;font-size:16px;overflow-wrap:anywhere}
 .user-id{font-size:12px;color:var(--text3);overflow-wrap:anywhere}
 /* rank badge + move buttons (user list) */
+/* 抢房优先级序号。两处改动，都是为了让它别和紧挨着的头像打架：
+   - 圆角由 50% 收成 --radius-lg。它是这一簇里最后一个正圆，而旁边的头像是
+     10px 方圆——两个同色小块、一圆一方并排，是「形状不成套」最直接的样子。
+     按站里那条语言：6px 是操作，10px 是状态，序号是状态。
+   - 文字由 accent 降为 text3。序号是给管理员看的排序元数据，不该和头像抢
+     同一个强调色；底色仍用 accent-soft，两者还是一家人，只是头像是被强调的
+     那个。 */
 .rank-badge{
   display:inline-flex;align-items:center;justify-content:center;
-  width:24px;height:24px;border-radius:50%;
-  background:var(--accent-soft);color:var(--accent);
+  min-width:24px;height:24px;padding:0 5px;border-radius:var(--radius-lg);
+  background:var(--accent-soft);color:var(--text3);
   font-size:11px;font-weight:700;flex-shrink:0;
 }
 .rank-form{display:inline-flex;line-height:0}
