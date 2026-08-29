@@ -170,7 +170,20 @@ def users_list() -> Any:
             return redirect(url_for("index"))
 
     users = load_users()
-    return render_template("users.html", users=users)
+
+    # 每张卡片上要显示「这个人在哪些客户端登录着」。一次取全部再按 id 分发，
+    # 卡片里逐个查会变成几十次 SQLite 往返。
+    st = storage()
+    try:
+        clients = st.get_active_clients_by_user()
+    except Exception:
+        # 客户端信息是卡片上的附加信息，取不到不该让整个用户列表打不开。
+        logger.exception("读取活跃客户端失败")
+        clients = {}
+    finally:
+        st.close()
+
+    return render_template("users.html", users=users, clients=clients)
 
 
 def _handle_id_document(user_id: str) -> None:

@@ -171,6 +171,50 @@ class TokenOps:
         rows = self._conn.execute(q, params).fetchall()
         return [dict(r) for r in rows]
 
+    def get_active_clients_by_user(self) -> dict[str, list[dict]]:
+        """每个用户当前登录着的客户端 → ``{user_id: [{name, sessions, last_used_at}]}``。
+
+        给用户管理页一次取全部，而不是每张卡片查一次——列表页有几十张卡片。
+
+        「活跃」的判据和 :meth:`get_active_devices_for_user` 完全一致：
+        ``revoked = 0`` 且未过期。两处必须同一套条件，否则卡片上写着「iPhone
+        在线」而推送那边早就把它滤掉了——一个界面上看不出问题的谎。
+
+        按 ``device_name`` 归并。同一台设备重装 App、重新登录都会各签一枚新
+        token：线上有个用户在同一台 vivo 上攒了 7 枚，逐条列出来就是七个一模一
+        样的标签。归并后用 ``sessions`` 表示会话数。
+
+        查的是 token 不是设备。App 登录本身就是一条通知渠道，和 Email 平级；
+        有没有登记 APNs 设备是另一回事，不在这个方法的判断里。
+
+        ``role = 'user'`` 和 ``user_id IS NOT NULL`` 互为冗余——create_app_token
+        强制两者同真同假，删掉任何一条行为都不变。留着是因为它们防的是不同的
+        东西（角色 / 分组键），而这个不变式只由一层 Python 校验保着；手插一行
+        进库就能同时绕过。
+        """
+        rows = self._conn.execute(
+            """SELECT user_id, device_name,
+                      COUNT(*)          AS sessions,
+                      MAX(last_used_at) AS last_used_at
+                 FROM app_tokens
+                WHERE role = 'user'
+                  AND user_id IS NOT NULL
+                  AND revoked = 0
+                  AND (expires_at IS NULL OR expires_at >= ?)
+                GROUP BY user_id, device_name
+                ORDER BY user_id, MAX(last_used_at) DESC""",
+            (_utc_now_iso(),),
+        ).fetchall()
+
+        out: dict[str, list[dict]] = {}
+        for r in rows:
+            out.setdefault(r["user_id"], []).append({
+                "name": (r["device_name"] or "").strip() or "未命名设备",
+                "sessions": int(r["sessions"]),
+                "last_used_at": r["last_used_at"],
+            })
+        return out
+
     # ── 状态变更 ────────────────────────────────────────────────────
 
     def revoke_app_token(self, token_id: int) -> bool:

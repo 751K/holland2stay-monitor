@@ -68,11 +68,14 @@
     </div>
   </div>
 
-  <!-- Channels -->
-  <div class="flex flex-wrap gap-1 mb-2">
+  {# 这个人登录着的 App 客户端。渠道那一排和「测试通知」按钮都要用。 #}
+  {% set uc = (clients or {}).get(user.id) or [] %}
+
+  <!-- Channels + 登录着的客户端 -->
+  <div class="flex flex-wrap items-center gap-1 mb-2">
     {% if not user.notifications_enabled %}
       <span class="badge badge-danger">{{ _('users_notif_off') }}</span>
-    {% elif user.notification_channels %}
+    {% elif user.notification_channels or uc %}
       {% for ch in user.notification_channels %}
         {% if ch == 'imessage' %}
           <span class="channel-pill imessage"><i class="bi bi-apple mr-1"></i>iMessage</span>
@@ -85,6 +88,20 @@
         {% else %}
           <span class="channel-pill">{{ ch }}</span>
         {% endif %}
+      {% endfor %}
+      {#
+        登录着的客户端。活跃 token 本身就是一条渠道，和上面四个平级——所以它在
+        同一个分支里，跟着同一个开关走，也一起算进「有没有渠道」。
+
+        判据（Storage.get_active_clients_by_user）和推送那边一致：revoked=0 且
+        未过期。同名归并：同一台设备重装 App / 重新登录各签一枚新 token，线上
+        有人在同一台 vivo 上攒了 7 枚，逐条列就是七个一模一样的 pill。
+      #}
+      {% for c in uc %}
+        <span class="channel-pill app"
+              {% if c.last_used_at %}title="{{ _('users_client_last_used') }}{{ c.last_used_at | time_ago }}"{% endif %}>
+          <i class="bi bi-phone-fill mr-1"></i>{{ c.name }}{% if c.sessions > 1 %} ×{{ c.sessions }}{% endif %}
+        </span>
       {% endfor %}
     {% else %}
       <span class="text-xs text-tertiary">{{ _('users_no_channels') }}</span>
@@ -131,7 +148,9 @@
     <button class="btn btn-outline btn-sm js-test-notify"
             data-user-id="{{ user.id }}"
             data-user-name="{{ user.name }}"
-            {% if not user.notification_channels %}disabled{% endif %}>
+            {# 只登录了 App、没配其它渠道的人照样能测：/users/<id>/test 会走
+               设备推送。判据漏掉 uc 的话，这批人的按钮是灰的，而推送其实发得出去。 #}
+            {% if not user.notification_channels and not uc %}disabled{% endif %}>
       <i class="bi bi-send mr-1"></i>{{ _('users_test_notif') }}
     </button>
     {% if is_admin %}

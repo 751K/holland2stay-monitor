@@ -59,6 +59,10 @@ a{color:inherit;text-decoration:none}
   --pill-telegram:#38bdf8;
   --pill-email-bg:rgba(59,130,246,.1);
   --pill-email:#60a5fa;
+  /* App 客户端。四个渠道里三个是蓝系（telegram / email / imessage），再挑蓝
+     就分不出来了——紫是这一排里唯一还空着的色相。 */
+  --pill-app-bg:rgba(139,92,246,.1);
+  --pill-app:#8b5cf6;
 }
 
 [data-theme="dark"]{
@@ -88,6 +92,8 @@ a{color:inherit;text-decoration:none}
   --pill-telegram:#7dd3fc;
   --pill-email-bg:rgba(96,165,250,.15);
   --pill-email:#93c5fd;
+  --pill-app-bg:rgba(167,139,250,.15);
+  --pill-app:#c4b5fd;
 }
 
 /* ── Dark mode overrides — kill hardcoded white lines ──────────── */
@@ -944,6 +950,7 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .channel-pill.telegram{background:var(--pill-telegram-bg);color:var(--pill-telegram)}
 .channel-pill.email{background:var(--pill-email-bg);color:var(--pill-email)}
 .channel-pill.whatsapp{background:var(--success-soft);color:var(--success)}
+.channel-pill.app{background:var(--pill-app-bg);color:var(--pill-app)}
 /* 兜底：过滤条件摘要里可能出现没有空格的长串（片区名用 / 连接、长邮箱），
    没有断行机会就会溢出卡片。摘要已经截断到前几项，这里再保一道。 */
 .filter-tags{font-size:12px;color:var(--text2);margin:8px 0;line-height:1.6;overflow-wrap:anywhere}

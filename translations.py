@@ -467,6 +467,7 @@ TRANSLATIONS = {
     "users_disabled":       {"zh": "停用",                    "en": "Disabled"},
     "users_notif_off":      {"zh": "通知已关闭",              "en": "Notifications off"},
     "users_no_channels":    {"zh": "无通知渠道",              "en": "No channels"},
+    "users_client_last_used": {"zh": "最近使用 ", "en": "Last used "},
     "users_no_filter":      {"zh": "无过滤条件",              "en": "No filters"},
     "users_filter_prefix":  {"zh": "以下",                    "en": "Under "},
     "users_auto_on":        {"zh": "自动预订已开启",          "en": "Auto-book enabled"},
