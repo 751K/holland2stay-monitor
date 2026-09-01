@@ -5,7 +5,7 @@
 > English version: [README.md](README.md)
 
 FlatRadar 是一套可自部署的荷兰租房监控工具。它同时追踪 Holland2Stay、OurDomain、
-OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即通过所选渠道发出通知，
+OurCampus、Xior 与 Magis 五个平台，一旦出现符合所设条件的房源，即通过所选渠道发出通知，
 通知中附有直达链接。对 Holland2Stay 更进一步——先将预订推进至支付页面，再连同
 付款链接一并发出，因此收到通知时仅余付款一步。
 
@@ -29,7 +29,7 @@ OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即�
 
 | | |
 |---|---|
-| **监控范围** | Holland2Stay、OurDomain、OurCampus、Xior 共四个平台；新房源集中上架的时段轮询更为频繁 |
+| **监控范围** | Holland2Stay、OurDomain、OurCampus、Xior、Magis 共五个平台；新房源集中上架的时段轮询更为频繁 |
 | **通知渠道** | Web、Telegram、邮件、WhatsApp、iOS 推送、Android 推送、iMessage，可同时启用多个 |
 | **筛选条件** | 租金上限、面积下限、楼层下限、户型、入住人数、城市、街区、平台、合同类型、租客要求等 |
 | **浏览方式** | 列表、地图、日历、仪表盘、图表，界面支持中英文 |
@@ -44,6 +44,7 @@ OurCampus 与 Xior 四个平台，一旦出现符合所设条件的房源，即�
 | OurDomain | Amsterdam Diemen / South-East | 稳定 | 仅通知（预订链路已实现，未开放）|
 | Xior | 14 个城市共 30 栋楼，可按需选择 | 稳定 | 仅通知（预订链路已实现，未开放）|
 | OurCampus | Amsterdam Diemen（1 栋） | 已用真实 markup 校准；出房极少 | 仅通知 |
+| Magis | 5 城 17 栋（Eindhoven 占 9 栋） | 2026-09-01 接入，纯 HTTP 无反爬 | 仅通知 |
 
 第三方站点随时可能变更，覆盖范围亦随之变化。各平台的抓取实现见
 [H2S.md](H2S.md)、[XIOR.md](XIOR.md)、[OURDOMAIN.md](OURDOMAIN.md)、
@@ -342,6 +343,7 @@ Xior、OurDomain、OurCampus 运行的是同一套 RENTCafe 后端，共用一�
 | Xior | 已推进至申请表、保存草稿并代为上传证件（2026-08-03，真实账号） | 代传证件后表单能否正常保存尚未确认。此外 Xior 的草稿**并不锁定房源**——它比 Holland2Stay 提前一步终止，下一页即需填写 IBAN/SWIFT |
 | OurDomain | 入口段已对真实站点走通（2026-08-04）：floorplans → 可用单元 → 条款页 POST，18 个字段全部落位 | 登录之后的环节全部未验证。该流程**不含选房页**，一旦脱离流程便没有重选入口——代码的处理方式为明确报错中止，绝不携带错位的上下文继续执行。验证需要一个真实的 OurDomain 账号 |
 | OurCampus | 无 | 预订流程尚未侦察 |
+| Magis | 无 | 预订流程尚未侦察 |
 
 > 线上演示环境对普通用户关闭了自动预订。如有需要请邮件联系，或[自行部署](#快速开始)。
 

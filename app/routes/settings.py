@@ -11,7 +11,8 @@ from typing import Any
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 
-from config import KNOWN_SOURCES, source_display_name, KNOWN_CITIES, KNOWN_OURDOMAIN_CITIES, KNOWN_XIOR_CITIES
+from config import (KNOWN_SOURCES, source_display_name, KNOWN_CITIES,
+                    KNOWN_MAGIS_CITIES, KNOWN_OURDOMAIN_CITIES, KNOWN_XIOR_CITIES)
 
 from app.auth import admin_required
 from app.csrf import csrf_required
@@ -90,6 +91,7 @@ def settings() -> Any:
             "CITIES": request.form.getlist("city_selected"),
             "OURDOMAIN_CITIES": request.form.getlist("ourdomain_city_selected"),
             "XIOR_CITIES": request.form.getlist("xior_city_selected"),
+            "MAGIS_CITIES": request.form.getlist("magis_city_selected"),
         }
         for key, picked in city_lists.items():
             pending[key] = sanitize_dotenv("|".join(picked))
@@ -102,10 +104,11 @@ def settings() -> Any:
         #
         #     CITIES            空 → 0 个城市，该平台不抓
         #     OURDOMAIN_CITIES  空 → 0 个楼盘，该平台不抓
-        #     XIOR_CITIES       空 → **全部 30 栋**（config.py:1844 的既有约定）
+        #     XIOR_CITIES       空 → **全部 30 栋**（config.py 的既有约定）
+        #     MAGIS_CITIES      空 → **全部 5 城**（同上）
         #
-        # 所以 xior 不在下面这张表里：它空着不是「没目标」，恰恰是「全都要」，
-        # 对它报「不会抓取」是错的。
+        # 所以 xior 与 magis 不在下面这张表里：它们空着不是「没目标」，恰恰是
+        # 「全都要」，对它们报「不会抓取」是错的。
         _no_target_when_empty = {
             "CITIES": "holland2stay",
             "OURDOMAIN_CITIES": "ourdomain",
@@ -223,6 +226,18 @@ def settings() -> Any:
         if len(parts) >= 2:
             selected_ourdomain_keys.add(parts[-1].strip())
 
+    # 空 = 全部（与 XIOR_CITIES 同一约定），所以未配置时全部勾上，
+    # 而不是一个都不勾——后者会让用户以为默认什么都不抓。
+    selected_magis_keys: set[str] = set()
+    raw_magis = env.get("MAGIS_CITIES", "")
+    if raw_magis:
+        for entry in raw_magis.split("|"):
+            parts = entry.strip().split(",")
+            if len(parts) >= 2:
+                selected_magis_keys.add(parts[-1].strip())
+    else:
+        selected_magis_keys = {c["key"] for c in KNOWN_MAGIS_CITIES}
+
     selected_xior_keys: set[str] = set()
     raw_xior = env.get("XIOR_CITIES", "")
     if raw_xior:
@@ -247,6 +262,7 @@ def settings() -> Any:
         setting_meta=setting_meta,
         known_cities=KNOWN_CITIES,
         known_ourdomain_cities=KNOWN_OURDOMAIN_CITIES,
+        known_magis_cities=KNOWN_MAGIS_CITIES,
         known_xior_cities=KNOWN_XIOR_CITIES,
         xior_by_city=xior_by_city,
         xior_city_all_checked=xior_city_all_checked,
@@ -254,6 +270,7 @@ def settings() -> Any:
         source_options=[(k, source_display_name(k)) for k in KNOWN_SOURCES],
         selected_city_ids=selected_city_ids,
         selected_ourdomain_keys=selected_ourdomain_keys,
+        selected_magis_keys=selected_magis_keys,
         selected_xior_keys=selected_xior_keys,
     )
 

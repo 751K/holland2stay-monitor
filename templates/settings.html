@@ -177,6 +177,23 @@
     </div>
   </div>
 
+  <!-- Section 4b: Magis cities -->
+  <div class="card mb-4">
+    <div class="section-header">
+      <i class="bi bi-building mr-2" style="color:var(--warning);"></i>{{ _('settings_magis_cities') }}
+    </div>
+    <div class="card-body">
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+        {% for city in known_magis_cities %}
+        <label class="checkbox" style="white-space:nowrap;">
+          <input type="checkbox" name="magis_city_selected" value="{{ city.name }},{{ city.key }}" {% if city.key in selected_magis_keys %}checked{% endif %}>
+          {{ city.name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
   <!-- Section 5: Xior buildings -->
   <div class="card mb-4">
     <div class="section-header">

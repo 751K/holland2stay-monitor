@@ -59,7 +59,7 @@ td{color:var(--text2)}
 </nav>
 
 <h1>FlatRadar — User Guide</h1>
-<p class="subtitle">Monitor listings across Holland2Stay, OurDomain, OurCampus and Xior. Get instant notifications and auto-book on Holland2Stay.</p>
+<p class="subtitle">Monitor listings across Holland2Stay, OurDomain, OurCampus, Xior and Magis. Get instant notifications and auto-book on Holland2Stay.</p>
 
 <!-- ─────────────────────────────────────────────── -->
 <h2 id="start">Quick Start</h2>
@@ -108,6 +108,7 @@ python web.py</pre>
   <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam (Diemen + South-East)</td><td>Unit (#6045, sqm, floor, view)</td><td>❌ Notify only</td></tr>
   <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen (1 building)</td><td>Unit (same as OurDomain)</td><td>❌ Notify only</td></tr>
   <tr><td><strong>Xior</strong> (XR)</td><td>30 buildings across 14 Dutch cities</td><td>Unit (M1.30.53, sqm, rent, deposit)</td><td>❌ Notify only</td></tr>
+  <tr><td><strong>Magis</strong> (MG)</td><td>17 buildings across 5 cities — 9 in Eindhoven</td><td>Unit (rent, sqm, floor, energy label)</td><td>❌ Notify only</td></tr>
 </table>
 
 <div class="tip">
@@ -236,7 +237,7 @@ step that is missing.
   <li>Send you the payment link immediately</li>
 </ol>
 <p><strong>It does NOT auto-pay.</strong> You receive the payment URL and complete payment manually.</p>
-<p>OurDomain, OurCampus and Xior are notify-only. Their booking code is written and reCAPTCHA solving is wired up, but the flow has not been verified end to end, so it is not exposed to users.</p>
+<p>OurDomain, OurCampus, Xior and Magis are notify-only, for two different reasons. For OurDomain and Xior the booking code is written and reCAPTCHA solving is wired up, but the flow has not been verified end to end, so it is not exposed to users. For OurCampus and Magis the booking flow has never been scouted at all.</p>
 </div>
 
 <div class="card">
@@ -267,12 +268,12 @@ step that is missing.
   <tr><td>Min floor</td><td>1</td><td>All</td><td>Skip ground floor (0)</td></tr>
   <tr><td>Cities</td><td>Eindhoven, Amsterdam</td><td>All</td><td>Multi-select — any match</td></tr>
   <tr><td>Sources</td><td>H2S, OD</td><td>All</td><td>Multi-select — only notify for these platforms</td></tr>
-  <tr><td>Tenant</td><td>student only</td><td>All</td><td>Multi-select — any match</td></tr>
+  <tr><td>Tenant</td><td>student only</td><td>Except Magis</td><td>Multi-select — any match</td></tr>
   <tr><td>Type</td><td>Studio, 1</td><td>Except Xior</td><td>Multi-select — any match</td></tr>
-  <tr><td>Occupancy</td><td>Single</td><td>Except Xior</td><td>Multi-select — any match</td></tr>
+  <tr><td>Occupancy</td><td>Single</td><td>Except Xior, Magis</td><td>Multi-select — any match</td></tr>
   <tr><td>Furnishing</td><td>Furnished</td><td>Except OurCampus</td><td>Multi-select — any match</td></tr>
   <tr><td>Contract</td><td>Indefinite</td><td>Holland2Stay only</td><td>Long-term only (skip short-stay)</td></tr>
-  <tr><td>Min energy label</td><td>B</td><td>Holland2Stay only</td><td>Only listings rated at or above this label</td></tr>
+  <tr><td>Min energy label</td><td>B</td><td>Holland2Stay, Magis</td><td>Only listings rated at or above this label</td></tr>
   <tr><td>Neighborhood</td><td>Centrum</td><td>Holland2Stay only</td><td>Multi-select; options follow the cities you picked</td></tr>
   <tr><td>Offer type</td><td>Rent</td><td>Holland2Stay only</td><td>Multi-select — distinguishes rentals from other listing types</td></tr>
 </table>
@@ -293,8 +294,9 @@ same scope.</p>
   <tr><td>Xior</td><td><strong>All-in</strong> — base rent plus that building's registered monthly advance charges</td></tr>
   <tr><td>OurDomain</td><td><strong>Base rent</strong>; service costs charged separately</td></tr>
   <tr><td>OurCampus</td><td><strong>Base rent</strong>; service costs charged separately</td></tr>
+  <tr><td>Magis</td><td><strong>All-in</strong> — base rent plus the service costs printed on each listing</td></tr>
 </table>
-<p>For the latter two, service costs vary by floor plan and the upstream feed does not say which unit
+<p>For OurDomain and OurCampus, service costs vary by floor plan and the upstream feed does not say which unit
 belongs to which plan, so an all-in figure cannot be derived. Those listings carry an asterisk beside the
 price; hovering shows that building's service-cost range, and the rent line in notifications carries the
 same note.</p>

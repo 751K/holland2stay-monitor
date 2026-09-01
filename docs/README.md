@@ -5,7 +5,7 @@
 > 中文版：[README_cn.md](README_cn.md)
 
 FlatRadar is a self-hosted monitor for the Dutch rental market. It tracks
-Holland2Stay, OurDomain, OurCampus and Xior, and as soon as a listing matches
+Holland2Stay, OurDomain, OurCampus, Xior and Magis, and as soon as a listing matches
 your criteria it sends a notification through the channels you enabled, with a
 direct link included. For Holland2Stay it goes one step further: it first
 carries the booking through to the payment page, then sends the payment link
@@ -35,7 +35,7 @@ The project runs both locally and on a server.
 
 | | |
 |---|---|
-| **Coverage** | Four platforms: Holland2Stay, OurDomain, OurCampus and Xior. Polling tightens during the hours when new listings tend to appear |
+| **Coverage** | Five platforms: Holland2Stay, OurDomain, OurCampus, Xior and Magis. Polling tightens during the hours when new listings tend to appear |
 | **Alert channels** | Web, Telegram, Email, WhatsApp, iOS push, Android push, iMessage; several may be enabled at once |
 | **Filters** | Maximum rent, minimum area, minimum floor, type, occupancy, city, neighbourhood, platform, contract type, tenant requirements, and others |
 | **Views** | List, map, calendar, dashboard and charts, in English or Chinese |
@@ -50,6 +50,7 @@ The project runs both locally and on a server.
 | OurDomain | Amsterdam Diemen / South-East | Proven | Notify only (booking flow built, not enabled) |
 | Xior | Any of 30 buildings across 14 cities | Proven | Notify only (booking flow built, not enabled) |
 | OurCampus | Amsterdam Diemen (1 building) | Checked against real markup; very low volume | Notify only |
+| Magis | 17 buildings across 5 cities (9 in Eindhoven) | Added 2026-09-01; plain HTTP, no anti-bot | Notify only |
 
 Coverage shifts as third-party sites change. The scrapers are documented in
 [H2S.md](H2S.md), [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
@@ -378,6 +379,7 @@ against a live site. The feature is still **switched off**.
 | Xior | Applicant form, draft saved, ID document uploaded (2026-08-03, real account) | Whether the form saves cleanly once the system supplies the document. And a Xior draft **does not hold the unit** — it stops a step earlier than Holland2Stay, because the next page asks for IBAN/SWIFT |
 | OurDomain | Entry leg verified against the live site (2026-08-04): floorplans → available units → terms POST, all 18 form fields landing | Everything after login. This flow has no unit-picker page, so falling out of it has no recovery path — the code aborts loudly rather than continuing with a mismatched context. Needs a real OurDomain account |
 | OurCampus | Nothing | Booking flow has never been scouted |
+| Magis | Nothing | Booking flow has never been scouted |
 
 > The hosted demo has auto-booking disabled for user accounts. Email us or
 > [self-host](#quick-start) to use it.

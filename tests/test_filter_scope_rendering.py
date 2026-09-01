@@ -104,22 +104,31 @@ class TestListingsPage:
         admin_client = tenant_seeded
         from config import dim_scope_badge, dim_scope_note
 
-        html = admin_client.get("/listings").get_data(as_text=True)
-        # 覆盖范围变过三次：v1.16.2 四家 → 2026-08-18 因白名单缩回三家 →
-        # 2026-08-19 靠 GetProductDetail 详情补齐恢复四家。断言的是「徽标与能力表
-        # 一致」，不是某个具体字样——写死字样会在下次覆盖变化时误报。
+        # 语言必须钉死：不带 Accept-Language 时页面回落到 en（2026-08-27 改的，
+        # Googlebot 就是这么爬的），而 dim_scope_badge 的默认参数是 zh——不指定
+        # 就会拿中文徽标去比英文页面。本文件上面那条用例的 docstring 记着同一个坑。
+        html = admin_client.get(
+            "/listings", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
+        assert '<html lang="zh"' in html
         badge = dim_scope_badge("tenant")
-        assert badge == "", "四家全覆盖时不该有徽标"
         assert 'name="tenant"' in html, "租客筛选没渲染出来，这条测试测了个空"
-        # 通用维度那一行的 label 里不该出现任何「仅 …」范围提示
         head = html[: html.index('name="tenant"')]
         labels = re.findall(
             r'<label class="form-label">(.*?)</label>', head, re.S,
         )
         assert labels, "找不到租客筛选的 label"
-        assert "仅 " not in labels[-1], (
-            f"租客已是通用维度，那一行不该再有范围徽标: {labels[-1]}"
-        )
+
+        # 断言的是「页面上的徽标 == 能力表算出的徽标」，不是某个具体字样。
+        # 2026-09-01 接入 Magis 之后 tenant 不再是通用维度（Magis 只在部分房源上
+        # 打「Students only」徽标，语义未定，不登记），徽标从空变成「Magis 除外」。
+        if badge:
+            assert badge in labels[-1], (
+                f"能力表说该有徽标 {badge!r}，页面上没有: {labels[-1]}"
+            )
+        else:
+            assert "仅 " not in labels[-1] and "除外" not in labels[-1], (
+                f"能力表说是通用维度，那一行不该有范围徽标: {labels[-1]}"
+            )
 
     def test_badge_carries_the_full_note_as_tooltip(self, admin_client):
         html = admin_client.get(

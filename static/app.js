@@ -586,6 +586,7 @@ window.SOURCE_LABELS = {
   ourdomain: 'OurDomain',
   ourcampus: 'OurCampus',
   xior: 'Xior',
+  magis: 'Magis',
 };
 
 window.SOURCE_SHORT = {
@@ -593,6 +594,7 @@ window.SOURCE_SHORT = {
   ourdomain: 'OD',
   ourcampus: 'OC',
   xior: 'XR',
+  magis: 'MG',
 };
 
 /** 平台全名。认不出的 key 首字母大写后返回，而不是硬套一个默认平台名——

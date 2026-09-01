@@ -59,7 +59,7 @@ td{color:var(--text2)}
 </nav>
 
 <h1>FlatRadar — 使用指南</h1>
-<p class="subtitle">跨平台监控 Holland2Stay、OurDomain、OurCampus、Xior 房源，实时通知，Holland2Stay 支持自动预订。</p>
+<p class="subtitle">跨平台监控 Holland2Stay、OurDomain、OurCampus、Xior、Magis 房源，实时通知，Holland2Stay 支持自动预订。</p>
 
 <!-- ─────────── -->
 <h2 id="start">快速开始</h2>
@@ -110,6 +110,7 @@ python monitor.py  # 抓取循环，需另开终端</pre>
   <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam（Diemen 与 South-East）</td><td>单元级（#6045、面积、楼层、朝向）</td><td>❌ 仅通知</td></tr>
   <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen（1 栋）</td><td>单元级（同 OurDomain）</td><td>❌ 仅通知</td></tr>
   <tr><td><strong>Xior</strong> (XR)</td><td>荷兰 30 栋楼，分布于 14 个城市</td><td>单元级（M1.30.53、面积、租金、押金）</td><td>❌ 仅通知</td></tr>
+  <tr><td><strong>Magis</strong> (MG)</td><td>5 个城市共 17 栋楼，Eindhoven 占 9 栋</td><td>单元级（租金、面积、楼层、能耗标签）</td><td>❌ 仅通知</td></tr>
 </table>
 
 <div class="tip">
@@ -234,7 +235,7 @@ python monitor.py  # 抓取循环，需另开终端</pre>
   <li>即时发送付款链接</li>
 </ol>
 <p><strong>系统不会自动完成付款</strong>，收到链接后须自行支付。</p>
-<p>OurDomain、OurCampus 与 Xior 目前仅通知、不预订。其预订链路的代码已实现，验证码亦已对接，但尚未完成端到端验证，因此未对用户开放。</p>
+<p>OurDomain、OurCampus、Xior 与 Magis 目前仅通知、不预订，原因分两种。OurDomain 与 Xior 的预订链路代码已实现、验证码亦已对接，只是尚未完成端到端验证；OurCampus 与 Magis 的预订流程则从未侦察过。</p>
 </div>
 
 <div class="card">
@@ -265,12 +266,12 @@ python monitor.py  # 抓取循环，需另开终端</pre>
   <tr><td>最低楼层</td><td>1</td><td>全部</td><td>排除底层（0 层）</td></tr>
   <tr><td>城市</td><td>Eindhoven, Amsterdam</td><td>全部</td><td>可多选，满足任一项即匹配</td></tr>
   <tr><td>平台</td><td>H2S, OD</td><td>全部</td><td>可多选，仅推送所选平台的房源</td></tr>
-  <tr><td>租客要求</td><td>student only</td><td>全部</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>租客要求</td><td>student only</td><td>Magis 除外</td><td>可多选，满足任一项即匹配</td></tr>
   <tr><td>户型</td><td>Studio, 1</td><td>Xior 除外</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>入住人数</td><td>Single</td><td>Xior 除外</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>入住人数</td><td>Single</td><td>Xior、Magis 除外</td><td>可多选，满足任一项即匹配</td></tr>
   <tr><td>装修类型</td><td>Furnished</td><td>OurCampus 除外</td><td>可多选，满足任一项即匹配</td></tr>
   <tr><td>合同类型</td><td>Indefinite</td><td>仅 Holland2Stay</td><td>仅推送长租房源，排除短租</td></tr>
-  <tr><td>最低能耗</td><td>B</td><td>仅 Holland2Stay</td><td>仅推送不低于该等级的房源</td></tr>
+  <tr><td>最低能耗</td><td>B</td><td>仅 Holland2Stay、Magis</td><td>仅推送不低于该等级的房源</td></tr>
   <tr><td>街区</td><td>Strijp, Centrum</td><td>仅 Holland2Stay</td><td>可多选，选项随所选城市变化</td></tr>
   <tr><td>供应形式</td><td>Rent</td><td>仅 Holland2Stay</td><td>可多选，用于区分出租与其他挂牌形式</td></tr>
 </table>
@@ -282,15 +283,16 @@ Xior、OurDomain、OurCampus 的房源根本没参与这一关。面板的筛选
 
 <div class="card">
 <h3>租金的口径</h3>
-<p>四个平台报的不是同一个数，设置「最高租金」之前请先看清楚：</p>
+<p>五个平台报的不是同一个数，设置「最高租金」之前请先看清楚：</p>
 <table>
   <tr><th>平台</th><th>面板与通知里显示的价格</th></tr>
   <tr><td>Holland2Stay</td><td><strong>到手价</strong>：含服务费与水电预付</td></tr>
   <tr><td>Xior</td><td><strong>到手价</strong>：基础租金加上该楼盘登记的月度预付费用</td></tr>
   <tr><td>OurDomain</td><td><strong>基础租金</strong>，服务费另计</td></tr>
   <tr><td>OurCampus</td><td><strong>基础租金</strong>，服务费另计</td></tr>
+  <tr><td>Magis</td><td><strong>到手价</strong>：基础租金加上每条房源自己印着的服务费</td></tr>
 </table>
-<p>后两个平台的服务费按户型变化，而上游不提供单元与户型的对应关系，因此无法合成到手价。
+<p>OurDomain 与 OurCampus 的服务费按户型变化，而上游不提供单元与户型的对应关系，因此无法合成到手价。
 面板上这类房源的价格右上角带一个星号，悬停可看到该楼盘服务费的区间；通知里的租金行
 也会附上同样的说明。</p>
 <div class="tip warn">

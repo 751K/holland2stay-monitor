@@ -85,6 +85,7 @@ RUNTIME_KEYS: frozenset[str] = frozenset({
     # 监控范围（同样由面板写回）
     "SOURCES", "SHADOW_SOURCES",
     "CITIES", "OURDOMAIN_CITIES", "OURCAMPUS_CITIES", "XIOR_CITIES",
+    "MAGIS_CITIES",
     "AVAILABILITY_FILTERS",
     "SHARD_SIZES", "SOURCE_MIN_INTERVALS", "SOURCE_PEAK_MIN_INTERVALS",
     # 地图显示范围：只保留这么多天内还被抓到过的房源；0 = 不过滤

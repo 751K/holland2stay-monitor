@@ -19,6 +19,7 @@
 
 | # | 平台 | 公开可读 | 反爬 | 数据形态 | 量级 | ToS 风险 | 结论 |
 |---|---|---|---|---|---|---|---|
+| 1 | **Magis (magisrealestate.com)** | ✅ 完全 | **无** | Laravel + Livewire，服务端渲染 HTML | 5 城 17 栋，在架 12 套（可租 4） | 低（`robots.txt` 空 `Disallow:`） | ✅ **已接入**（2026-09-01），见 §0 |
 | 2 | **HousingAnywhere** | ✅ 完全 | 无 | 页面内嵌结构化 JSON（`__staticRouterHydrationData`） | Amsterdam 207 条，每页 23 条 | 低（`/api/*` 被禁；分页 query 处于灰区） | 🟢🟢🟢 **建议作为下一个接入对象** |
 | 3 | **SSH (sshxl.nl)** | ✅ 但为 SPA | 无 | Angular SPA 加 sitemap-offers.xml | 全国 44 条 | 低 | 🟢 推荐（需先定位其 API） |
 | 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ⚠️ **已接入但从未出过房源**，解析器未经真实数据验证，见 §4 |
@@ -26,6 +27,77 @@
 | 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可采用 CloakBrowser（与 Holland2Stay 同一方案） |
 | 7 | DUWO/ROOM | ❌ | 无，但存在 **auth-wall 与付费注册** | API 仅登录后可见 | 未知 | **高**（涉及转发登录后内容）| ❌ 不建议 |
 | 8 | Kamernet | — | paid model | — | — | 高 | ❌ |
+
+---
+
+## §0 Magis Real Estate — **已接入（2026-09-01）**
+
+### Endpoint
+
+```
+GET https://magisrealestate.com/for-rent?only_available=0
+```
+
+### 关键发现（2026-09-01 探测）
+
+- 普通 `Mozilla/5.0` 直接 200，141 KB / 3.2s。**没有 Cloudflare、没有 JS 挑战、
+  不需要浏览器、不需要代理**——是已接入的四个平台里最轻的一个
+- `server: Apache`，Laravel + Livewire（Flux UI），房源在服务端渲染的 HTML 里
+- `robots.txt` 是空 `Disallow:`，全站允许
+- **query 参数能驱动 Livewire**：`only_available=0` 把结果从 4 条变成 12 条，
+  连 `Not available` 的单元一起给
+
+最后一条是接入的关键。本项目的状态变更通知需要「同一个单元从可租变成不可租」这个
+事件，只抓可租的就只能看见「消失」——而消失是有歧义的（见 ARCHITECTURE §5.13）。
+
+### 数据形态
+
+一次请求返回**全部城市**的全部单元，不按城市分请求。因此每轮只发一次 HTTP，各
+城市的 ScrapeTask 从同一份 HTML 里按城市切分（`scrapers/magis.py` 的
+`batch_session`）。
+
+卡片自带：状态、楼盘、户型、能耗标签、城市 + 街道、装修档位、面积、楼层、设施、
+可入住日期、租金，以及**服务费的确切金额**。
+
+### 价格：可以报到手价
+
+```
+€ 932,93 per month excl.
+* service costs, furniture, utilities, internet & TV amount to € 121,51 per month
+```
+
+12 条实测全都带这一行。因此 Magis 与 Holland2Stay / Xior 同属「报到手价」一档，
+不像 OurDomain / OurCampus 只能标注——它们拿不到单元的户型，而服务费按户型变。
+
+### 覆盖面
+
+| 城市 | 栋数 | 楼盘 |
+|---|---:|---|
+| Eindhoven | 9 | Aalsterweg 125-129、Aalsterweg 24-26、Boschdijk、Driek、The General、Kloosterdreef、Montgomerylaan、Woenselse Markt、Zernikestraat |
+| Tilburg | 5 | The City、The Garden、Mr. X、The Rumour、The Vault |
+| Rijswijk | 1 | Novum |
+| 's-Hertogenbosch | 1 | De Wester |
+| Amersfoort | 1 | The Wing |
+
+价格区间 €190–1990，面积 2.3–110.9 m²。
+
+### 风险与取舍
+
+**规模是唯一的疑虑。** 在架 12 套、可租 4 套，远小于 Holland2Stay。接入赌的是这
+17 栋楼的换手率，而一次探测判断不了。它比 §5 的 Student Experience（仅 1 栋可订，
+已否）好得多，且 Eindhoven 占 9 栋——正是本项目的主力城市。
+
+**解析必须按模式而不是按位置。** 卡片的可见文本顺序不稳定：有的多一行设施、有的
+多一行租客徽标，后面的字段会整体顶掉一位。按行号取会把面积读成设施名，而那不会
+抛异常。
+
+**tenant 维度不登记。** 站点只在部分房源上打「Students only」徽标（12 条里 3 条），
+筛选里另有一档「Starters」但没有任何房源带它——措辞与语义都还没见过。「没有徽标」
+是「不限」还是「未标注」没有证据，而该维度 fail-closed，登记之后另外 9 条会被勾了
+租客条件的用户整体过滤掉。徽标本身写进 features，通知里看得见，只是不参与筛选。
+
+**不做自动预订。** 站点有 Account / Login，但下单流程未侦察，ToS 暴露面未评估。
+与 OurCampus 一致。
 
 ---
 

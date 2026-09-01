@@ -583,6 +583,23 @@ KNOWN_OURCAMPUS_CITIES: list[dict] = [
 ]
 
 
+#: Magis 覆盖的城市。
+#:
+#: Magis 与其余三个平台不同：一次 ``/for-rent`` 请求返回**全部城市**的全部单元，
+#: 不按城市分请求。这里登记城市只是为了让用户能按城市订阅、并让抓下来的整页在
+#: 各 ScrapeTask 之间按城市切分——真正的 HTTP 每轮只有一次（见 scrapers/magis.py
+#: 的 batch_session）。
+#:
+#: 五城 17 栋（2026-09-01 侦察）：Eindhoven 9、Tilburg 5，其余三城各 1。
+KNOWN_MAGIS_CITIES: list[dict] = [
+    {"name": "Eindhoven",         "key": "eindhoven",        "city": "Eindhoven"},
+    {"name": "Tilburg",           "key": "tilburg",          "city": "Tilburg"},
+    {"name": "'s-Hertogenbosch",  "key": "s-hertogenbosch",  "city": "'s-Hertogenbosch"},
+    {"name": "Amersfoort",        "key": "amersfoort",       "city": "Amersfoort"},
+    {"name": "Rijswijk",          "key": "rijswijk",         "city": "Rijswijk"},
+]
+
+
 KNOWN_OURDOMAIN_CITIES: list[dict] = [
     {"name": "Amsterdam Diemen",    "key": "diemen",     "city": "Amsterdam"},
     {"name": "Amsterdam South-East","key": "south-east", "city": "Amsterdam"},
@@ -720,6 +737,13 @@ def known_city_names() -> list[str]:
 
 
 @dataclass
+class MagisCityFilter:
+    """Magis 的单个城市条目。"""
+    name: str
+    key: str
+
+
+@dataclass
 class XiorCityFilter:
     """Xior / RENTCafe building filter 的单个条目。"""
     name: str
@@ -775,6 +799,14 @@ _SOURCE_FILTER_DIMS: dict[str, frozenset] = {
     "ourcampus": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type", "tenant"},
     # xior 的 tenant 来自 SOURCE_ASSUMED_FEATURES，每条房源都带，可安全登记。
     "xior": _UNIVERSAL_FILTER_DIMS | {"finishing", "tenant"},
+    # magis 的卡片直接给出楼层、户型、装修档位与能耗标签，12/12 条实测都能解析出，
+    # 因此这四个维度都登记。
+    #
+    # tenant 不登记：站点只在部分房源上打「Students only」徽标（12 条里 3 条），
+    # 而「没有徽标」是「不限」还是「未标注」没有证据。这个维度 fail-closed，
+    # 登记之后另外 9 条会被勾了租客条件的用户整体过滤掉。徽标本身仍写进 features，
+    # 通知里看得见，只是不参与筛选。见 scrapers/magis.py 的 TENANT_MAP。
+    "magis": _UNIVERSAL_FILTER_DIMS | {"floor", "type", "finishing", "energy"},
 }
 
 
@@ -936,6 +968,7 @@ SOURCE_ASSUMED_FEATURES: dict[str, dict[str, str]] = {
 # 取值用 models.py 的规范英文档位（Fully furnished / Semi furnished /
 # Unfurnished），别新造词——过滤下拉是按库里出现过的值去重出来的。
 _FIN_FULLY = "Fully furnished"
+_FIN_FURNISHED = "Furnished"
 _FIN_SEMI = "Semi furnished"
 _FIN_UNFURNISHED = "Unfurnished"
 
@@ -1635,6 +1668,7 @@ class Config:
     ourdomain_cities: list[OurDomainCityFilter] = field(default_factory=list)
     ourcampus_cities: list[OurCampusCityFilter] = field(default_factory=list)
     xior_cities: list[XiorCityFilter] = field(default_factory=list)
+    magis_cities: list[MagisCityFilter] = field(default_factory=list)
 
     def sources_with_full_lifecycle(self) -> frozenset[str]:
         """feed 覆盖了「已预留」状态的 source。
@@ -1681,6 +1715,7 @@ class Config:
             ("ourdomain", self.ourdomain_cities, KNOWN_OURDOMAIN_CITIES),
             ("ourcampus", self.ourcampus_cities, KNOWN_OURCAMPUS_CITIES),
             ("xior", self.xior_cities, KNOWN_XIOR_CITIES),
+            ("magis", self.magis_cities, KNOWN_MAGIS_CITIES),
         ):
             if source not in self.sources:
                 continue
@@ -1749,6 +1784,18 @@ class Config:
                     city_display=c.name,
                 )
                 for c in self.xior_cities
+            )
+
+        # Magis 的每个 task 只是「从同一份页面里取这个城市」，不各自发请求；
+        # 整批共用一次 HTTP，见 scrapers/magis.py 的 batch_session。
+        if "magis" in self.sources:
+            tasks.extend(
+                ScrapeTask(
+                    source="magis",
+                    city_key=c.key,
+                    city_display=c.name,
+                )
+                for c in self.magis_cities
             )
 
         return tasks
@@ -1891,7 +1938,7 @@ def _parse_shard_sizes(raw: str) -> dict[str, int]:
 #: 被漏了三次——前端的 sourceLabel（三份实现都没有它）、monitoring 页（干脆
 #: 不转换）、以及全局设置的白名单（从面板保存一次就会把它从 SOURCES 里悄悄
 #: 删掉）。漏的都是同一个平台，因为它是最后加的那个。
-KNOWN_SOURCES: tuple[str, ...] = ("holland2stay", "ourdomain", "ourcampus", "xior")
+KNOWN_SOURCES: tuple[str, ...] = ("holland2stay", "ourdomain", "ourcampus", "xior", "magis")
 
 #: 平台显示名。前端另有一份同样的表（static/app.js 的 SOURCE_LABELS），
 #: 因为那边是客户端渲染；两边都从这份注释里的同一个事实来。
@@ -1900,6 +1947,7 @@ SOURCE_DISPLAY_NAMES: dict[str, str] = {
     "ourdomain": "OurDomain",
     "ourcampus": "OurCampus",
     "xior": "Xior",
+    "magis": "Magis",
 }
 
 
@@ -1946,6 +1994,10 @@ def _parse_ourcampus_cities(raw: str) -> list[OurCampusCityFilter]:
 
 def _parse_xior_cities(raw: str) -> list[XiorCityFilter]:
     return _parse_name_key_list(raw, XiorCityFilter)
+
+
+def _parse_magis_cities(raw: str) -> list[MagisCityFilter]:
+    return _parse_name_key_list(raw, MagisCityFilter)
 
 
 def load_config() -> Config:
@@ -2064,6 +2116,19 @@ def load_config() -> Config:
     except (ZoneInfoNotFoundError, KeyError):
         raise ValueError(f"无效的 IANA 时区标识符: {timezone_str}")
 
+    magis_cities: list[MagisCityFilter] = []
+    if "magis" in sources:
+        raw_magis_cities = os.environ.get("MAGIS_CITIES", "")
+        if raw_magis_cities:
+            magis_cities = _parse_magis_cities(raw_magis_cities)
+        else:
+            # 未显式配置时监控全部五城。Magis 一次请求就返回全站，多监控几个城市
+            # 不产生额外请求——按城市裁剪的意义只在于用户订阅的粒度。
+            magis_cities = [
+                MagisCityFilter(name=c["name"], key=c["key"])
+                for c in KNOWN_MAGIS_CITIES
+            ]
+
     return Config(
         check_interval=interval,
         cities=cities,
@@ -2088,4 +2153,5 @@ def load_config() -> Config:
         ourdomain_cities=ourdomain_cities,
         ourcampus_cities=ourcampus_cities,
         xior_cities=xior_cities,
+        magis_cities=magis_cities,
     )
