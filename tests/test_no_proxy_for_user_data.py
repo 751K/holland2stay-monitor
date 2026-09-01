@@ -73,7 +73,12 @@ class TestCallSitesUseThem:
         "notifier.py":                    "Telegram / Resend / Twilio",
         "app/email_verify.py":            "Resend（验证邮件）",
         "app/routes/inbound.py":          "Resend（入站邮件）",
-        "app/routes/map_routes.py":       "photon.komoot.io（地理编码）",
+        # 2026-08-29 把 Photon 调用从 map_routes 提到了 mcore/geocode.py（监控进程
+        # 也要用），守卫的清单当时没跟着搬——map_routes 里已经一个 HTTP 调用都没有，
+        # 这条从那天起就是空转，而真正发请求的那个文件没人看着。两个都留着：
+        # map_routes 仍是地图页的入口，哪天有人在那儿直接发请求同样要拦。
+        "app/routes/map_routes.py":       "photon.komoot.io（地理编码，入口）",
+        "mcore/geocode.py":               "photon.komoot.io（地理编码，实际调用）",
         "notifier_channels/apns.py":      "APNs",
         "notifier_channels/fcm.py":       "FCM",
         "tools/geocode_all.py":           "photon.komoot.io",
@@ -89,10 +94,30 @@ class TestCallSitesUseThem:
     def test_no_bare_client_in_user_data_paths(self, rel, who):
         src = (_ROOT / rel).read_text(encoding="utf-8")
         bare = []
-        for m in re.finditer(r"^\s*(?!#).*?\b(req\.Session\(|httpx\.(?:Async)?Client\(|(?<!direct_)urlopen\()",
+        # httpx 的**模块级函数**（httpx.post / httpx.get / ...）也要认：它们自带
+        # trust_env=True，和裸 Client 一样会从环境读 HTTPS_PROXY。此前只扫构造
+        # 函数，fcm.py 里换 token 的那次 httpx.post 因此漏了整整一轮，直到代理
+        # 欠费把 Android 推送打挂才暴露（2026-08-28）。
+        for m in re.finditer(r"^\s*(?!#).*?\b(req\.Session\(|httpx\.(?:Async)?Client\(|"
+                             r"httpx\.(?:post|get|put|patch|delete|head|options|request|stream)\(|"
+                             r"(?<!direct_)urlopen\()",
                              src, re.M):
             line = src[m.start():src.index("\n", m.start())].strip()
-            if "direct_" in line:
+            # 豁免判断必须看**整个调用**而不是首行：多行写法里
+            # ``**direct_httpx_kwargs()`` 往往落在几行之后，只看首行会把已经修好
+            # 的调用误报成裸客户端。从左括号起做括号配对，取到调用结束为止。
+            open_paren = src.index("(", m.end() - 1)
+            depth, i = 0, open_paren
+            while i < len(src):
+                if src[i] == "(":
+                    depth += 1
+                elif src[i] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                i += 1
+            call = src[m.start():i + 1]
+            if "direct_" in call:
                 continue
             bare.append(line[:80])
         assert not bare, (

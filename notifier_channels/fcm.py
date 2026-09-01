@@ -235,6 +235,17 @@ class _AccessTokenCache:
 
     def _exchange(self, assertion: str) -> str:
         import httpx
+
+        from net import direct_httpx_kwargs
+
+        # 换 token 同样不能走抓取代理。这里是漏网的最后一处：send_one /
+        # send_many 用的 AsyncClient 早就走了 direct_httpx_kwargs，唯独这次换
+        # token 用的是 httpx 的**模块级函数**，它自带 trust_env=True，于是照旧
+        # 从环境读 HTTPS_PROXY。
+        #
+        # 后果是整条 Android 推送链路一起挂：token 拿不到，send_many 里每个设备
+        # 都抛同一个异常。2026-08-28 一次公告群发实测——代理账户欠费返回 402，
+        # FCM 全军覆没，而同一批 APNs 正常送达（它没有这个漏洞）。
         resp = httpx.post(
             self._token_uri,
             data={
@@ -242,6 +253,7 @@ class _AccessTokenCache:
                 "assertion": assertion,
             },
             timeout=10.0,
+            **direct_httpx_kwargs(),
         )
         if resp.status_code != 200:
             raise RuntimeError(
