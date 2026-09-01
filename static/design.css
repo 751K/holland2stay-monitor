@@ -609,6 +609,18 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .card:has(.multi-select){overflow:visible}
 .ms-dropdown{display:none;position:absolute;top:calc(100% + 4px);left:0;right:auto;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);min-width:max(100%,180px);max-height:220px;overflow-y:auto;padding:6px 0}
 .multi-select.open .ms-dropdown{display:block}
+/* 展开时把整张卡提到后面几张卡之上。
+   .card 有 backdrop-filter，那会让每张卡都成为**层叠上下文**——下拉的
+   z-index:999 因此被困在自己那张卡里，够不着卡外面。而后面的卡是更晚的兄弟、
+   同样是层叠上下文，于是整个盖在下拉上：看得见（卡是半透明的），点不到。
+   命中测试实测：Magis 那一行返回的是下一张卡的 .section-header。
+
+   只在窄屏之外犯，是因为 .form-row 是 auto-fit——窄屏时字段各占一行，下拉伸不
+   出本卡；拉宽之后字段并排、平台那格贴着卡底，下拉才会探进下一张卡。所以这个
+   问题和「平台从四个变五个」无关，只是列表变长之后第五项恰好落在重叠区里。
+
+   提整张卡而不是提下拉：下拉的 z-index 在卡内部已经够高了，问题出在卡这一层。 */
+.card:has(.multi-select.open){position:relative;z-index:50}
 .ms-option{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:14px;color:var(--text2);cursor:pointer;transition:background .1s}
 .ms-option:hover{background:var(--bg)}
 .ms-option input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;margin:0;cursor:pointer}
