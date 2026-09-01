@@ -21,7 +21,8 @@
 |---|---|---|---|---|---|---|---|
 | 1 | **Magis (magisrealestate.com)** | ✅ 完全 | **无** | Laravel + Livewire，服务端渲染 HTML | 5 城 17 栋，在架 12 套（可租 4） | 低（`robots.txt` 空 `Disallow:`） | ✅ **已接入**（2026-09-01），见 §0 |
 | 2 | **HousingAnywhere** | ✅ 完全 | 无 | 页面内嵌结构化 JSON（`__staticRouterHydrationData`） | Amsterdam 207 条，每页 23 条 | 低（`/api/*` 被禁；分页 query 处于灰区） | 🟢🟢🟢 **建议作为下一个接入对象** |
-| 3 | **SSH (sshxl.nl)** | ✅ 但为 SPA | 无 | Angular SPA 加 sitemap-offers.xml | 全国 44 条 | 低 | 🟢 推荐（需先定位其 API） |
+| 3 | **SSH / SSHXL (sshxl.nl)** | ✅ 完全（API 已定位） | 无 | `POST /api/v1/offering/all`，JSON | 短租按院校配额，实测组合 0 条 | 低 | ❌ **不接**（无 Eindhoven；长租不在 API 内），见 §2 |
+| 3b | **SSH& (sshn.nl)** | ❌ | 无，但 **Keycloak 登录墙 + 注册会员制** | Embrace 平台的 GraphQL 网关 | 未知 | **高**（同 DUWO/ROOM） | ❌ 不接，见 §2b |
 | 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ⚠️ **已接入但从未出过房源**，解析器未经真实数据验证，见 §4 |
 | 5 | **Student Experience** | ✅ 完全 | 无（自研前端） | 自有预订组件，可用性由 JS 拉取 | **仅 1 栋可订**（Minervahaven，2 个房型） | 低 | ❌ 暂不接入（可订范围过小） |
 | 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可采用 CloakBrowser（与 Holland2Stay 同一方案） |
@@ -189,51 +190,119 @@ sitemap: https://housinganywhere.com/sitemap.xml
 
 ---
 
-## §2 SSH (sshxl.nl) — **可做，需挖 SPA bundle**
+## §2 SSH / SSHXL (sshxl.nl) — **不接（2026-09-01 复测后改判）**
 
-### Endpoint
-```
-GET https://www.sshxl.nl/en/rental-offer/{numeric_id}-
-GET https://www.sshxl.nl/sitemap-offers.xml   ← listings 全量索引
-```
+> 2026-08-03 的结论是「🟢 推荐（需先定位其 API）」。API 已于 2026-09-01 定位到，
+> 但同一次侦察推翻了当初推荐的依据——见「为什么改判」。
 
-### 关键发现
-
-- **`sitemap-offers.xml` 直接列出了 44 条当前活跃的 offer URL**
-- 每条 URL 形如 `/en/rental-offer/{numeric_id}-`，为稳定 ID
-- 但**详情页为 SPA**（Angular 风格）：title 仅为 `<title>View</title>`，HTML 中不含
-  数据
-- 真实数据须自 `/api/...` 获取，但初步探测中尚未定位到具体端点
-
-### Backend 指纹
+### Endpoint（已完整定位）
 
 ```
-server: Kestrel               ← .NET 5+
-set-cookie: .AspNetCore.Antiforgery  ← .NET ASP.NET Core CSRF token
-robots.txt: Disallow /hangfire/   ← .NET 后台任务系统
+GET  https://www.sshxl.nl/api/v1/offering/filters
+       ?ContingentId=<guid>&DemographicId=<guid>&MainPeriodId=<guid>
+POST https://www.sshxl.nl/api/v1/offering/all
+       content-type: application/json
+       {"Filter":{"Contingent":"<guid>","Demographic":"<guid>","MainPeriod":"<guid>",
+                  "FlexiblePeriodFilter":{"DateRange":{},"ExactDateRange":{}}}}
 ```
 
-### robots.txt
+匿名可调，两个端点都返回 200 + JSON。路由是从 `js/portal.min.js`（6.2 MB）里挖出
+来的，再在页面上 hook `fetch` 截真实请求体验证。`SearchAfter` 是游标（分页）。
+
+`/api/v1/registration/contingents` 需要登录（匿名 403），但抓取用不到它——
+contingent/demographic/period 三个 GUID 可以从公开的三步向导里取到。
+
+### 反爬与合规
 
 ```
-User-agent: *
-Disallow: /hangfire/, /admin/, /my-ssh/, /mijn-ssh/, /styleguide/
-Sitemap: https://www.sshxl.nl/sitemap-offers.xml ← 公开
+server: Kestrel（.NET）      无 Cloudflare，无挑战
+robots.txt: Disallow /hangfire/ /admin/ /my-ssh/ /mijn-ssh/ /styleguide/
 ```
 
-**listings 不在 Disallow 列表中，抓取 offer 合规**。
+**`/api/` 不在 Disallow 内**，房源页与 sitemap 亦公开。ToS 风险低。
 
-### 工程评估
+### 为什么改判
 
-- 数量较少（44 条），但分布于全国 9 个城市（Utrecht、Eindhoven、Amsterdam、
-  Maastricht 等）
-- **须先解析其 SPA bundle 以定位 listing API 端点**，这是主要的工作量所在
-- 备选方案为使用 Playwright 抓取 SPA 渲染后的 HTML，实现简单但速度慢且资源开销大
-- 数据可能依赖 antiforgery cookie（先 GET 主页取得 cookie，后续携带 cookie 调用
-  API）
+**一、覆盖城市与旧结论记的不一样。** 旧文写「分布于全国 9 个城市（Utrecht、
+Eindhoven、Amsterdam、Maastricht 等）」——**这句是错的**。2026-09-01 从短租向导
+的城市单选里读到的实际列表是：
 
-**预计工程量：2–3 周**（SPA bundle 分析、API 端点测试与入库适配）。其中 SPA bundle
-分析存在不确定性，实际耗时可能超出预估。
+```
+Groningen · Rotterdam · Tilburg · Utrecht · Zwolle      （页脚另有 Amersfoort）
+```
+
+**没有 Eindhoven，也没有 Amsterdam。** 本项目的主力城市不在其中，这一条基本就
+定了结论。
+
+**二、长租根本不在 API 里。** bundle 里只有 `shortStayOfferingApi`，没有长租的
+对应物。长租走注册排队——`/api/v1/cms/en/cities` 自己给出的等待时间是 2 到 36 个
+月不等（规模从 ±30 到 ±13.000 间房）。也就是说学生住房的**主体部分不可监控**。
+
+**三、短租按院校配额发放，不是一个列表。** 要选完四步才查得到：
+
+```
+城市（5）→ 教育机构（每城约 5 个）→ 学生类型（5）→ 租期（若干）
+```
+
+每个组合是独立的一次 POST，覆盖全部即数百次请求一轮；对比 Magis 是一轮一次。
+而且短租只对特定院校的交换/硕士生开放，不是公开房源。
+
+**四、没有真实数据可核对。** 实测组合（Utrecht / Master / 2026-2027）返回 `[]`，
+`filters` 里 `AccomodationTypes` 与 `Complexes` 也都是空的。这与 OurCampus 接入
+时的处境相同，而那次的代价是状态映射错了三周无人发现（见 CHANGELOG v1.26.0）。
+
+### 唯一有利的一点
+
+短租页面明写 **"First-come-first-serve"**，形态与本项目相符——这与长租的排队制
+不同。**若 SSHXL 日后进入 Eindhoven，值得重新评估**：接口契约已在上面记全，
+不必再挖一次 bundle。
+
+---
+
+## §2b SSH& (sshn.nl / mijn.sshn.nl) — **不接**
+
+与 §2 的 SSHXL **不是同一家**，只是都在名字里带「SSH」（荷兰的学生住房基金会
+历史上普遍叫 *Stichting Studenten Huisvesting*，因而撞名）。两者的区别有据可查：
+
+| | SSHXL (sshxl.nl) | SSH& (sshn.nl) |
+|---|---|---|
+| 自我描述 | SSH Student Housing | 「Wij verhuren studentenkamers in **Nijmegen en Arnhem**」 |
+| 城市 | Groningen / Rotterdam / Tilburg / Utrecht / Zwolle / Amersfoort | Nijmegen / Arnhem |
+| 互相引用 | 无 | 无 |
+
+首页文本里 Nijmegen 出现 15 次、Arnhem 9 次，而 Utrecht / Rotterdam / Tilburg /
+Groningen / Zwolle **各 0 次**；SSHXL 那边正好相反。城市集合完全不重叠。
+
+### 技术形态
+
+`mijn.sshn.nl` 是租户门户（React SPA），跑在 **Embrace**（`embracecloud.nl`）
+这个白标住房门户平台上，不是自研。
+
+```
+GraphQL 网关   https://mesh-router.embracecloud.nl/graphql
+认证           Keycloak OIDC · auth.embracecloud.nl/auth/realms/sshn
+证据           页面加载即请求 silent-sso.html?error=login_required
+```
+
+匿名 POST `{ __typename }` 网关会回 `{"data":{"__typename":"Query"}}`，但有数据的
+字段必然要 token。
+
+### 为什么不接
+
+1. **登录墙 + 注册会员制。** 站点自述「you can only react if you have a valid
+   proof of study」。这与 §6 的 DUWO/ROOM 是同一类，本文档对那一类的结论是
+   「高风险（涉及转发登录后内容）❌ 不建议」。
+2. **不是先到先得。** 分配模型是 Register → Respond → Priority → **Lottery**，
+   页面另有「Results allocated rooms」。秒级通知在这里没有价值。
+3. **无 Eindhoven。**
+
+**侦察到此为止，未去枚举 GraphQL schema。** 该系统整站为注册会员制，继续深入即是
+在寻找绕过认证墙的路径，与本文档对 DUWO/ROOM 的既有判断相悖。
+
+> Embrace 是平台供应商而非 SSH& 自研，荷兰可能另有住房法人跑在同一套上
+> （`matomoembracehousing` 这一命名暗示它是其住房产品线）。理论上一份「Embrace
+> 形态」的适配可覆盖多家，但它们共用同一堵认证墙，不改变结论。真正值得找的是
+> **跑在 Embrace 上、却把房源公开**的那种法人。
 
 ---
 
@@ -430,10 +499,13 @@ floorplan 流程，`OurDomainScraper` 的实现无法套用。
 1. **HousingAnywhere —— 覆盖范围最大**
    - 工程量低、合规边界清晰、用户群匹配，且数量可观（仅 Amsterdam 一城即 196 条）
    - 无 Cloudflare，普通 UA 即可；可直接复用现有 `scrapers/` 包的架构
-2. **SSH —— 补足城市覆盖**
-   - 全国 44 条覆盖 9 个城市，恰好补足 Holland2Stay 未覆盖的 Utrecht、Maastricht、
-     Groningen
-   - 工程量略大，须先解析 Angular SPA bundle 以定位 API
+2. ~~**SSH —— 补足城市覆盖**~~ —— **已否决**（2026-09-01）
+   - 本条原写「全国 44 条覆盖 9 个城市，恰好补足 Holland2Stay 未覆盖的 Utrecht、
+     Maastricht、Groningen」。**城市列表是错的**：SSHXL 实际覆盖 Groningen、
+     Rotterdam、Tilburg、Utrecht、Zwolle（另有 Amersfoort），既无 Eindhoven
+     也无 Amsterdam，更无 Maastricht。
+   - API 已定位（见 §2），工程量不再是障碍；否决理由变成了覆盖面、长租不可见、
+     短租按院校配额、以及没有真实数据可核对。
 3. **Pararius / Funda —— 可以启动探测**
    - 此前判断为「需 Playwright，暂缓」，而浏览器传输层现已是现成基建
    - 但其反爬可能严于 Holland2Stay（例如 DataDome 一类），须先实测
@@ -451,7 +523,7 @@ The Social Hub 之后可以得出以下规律：**在荷兰的专业学生公寓
 | 类型 | 例子 | 不予接入的原因 |
 |---|---|---|
 | 规模过小 | OurCampus（1 栋）、Student Experience（1 栋可订） | 抓取成本固定，房源数量过少难以摊薄 |
-| 排队制 | DUWO/ROOM、Basecamp 及社会住房整体 | 等待期以年计，即时推送没有意义 |
+| 排队制 | DUWO/ROOM、SSH&（sshn.nl）、SSHXL 长租、Basecamp 及社会住房整体 | 等待期以月至年计（SSHXL 实测 2–36 个月），即时推送没有意义 |
 | 自研前端 | Vesteda、Camelot | 房源由客户端渲染，须逆向 API 或引入浏览器，成本接近接入一个新平台 |
 
 因此继续沿「运营商」方向寻找的边际收益正在递减。**marketplace 方向
