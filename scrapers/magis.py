@@ -333,9 +333,15 @@ class MagisScraper(AbstractScraper):
         import curl_cffi.requests as req
 
         from config import get_impersonate, get_proxy_url
+        from net import NO_PROXY_CURL
 
+        # 代理全部冷却时必须显式传 NO_PROXY_CURL，**不能传 {}**：curl 拿到空
+        # 字典会回落到 HTTP_PROXY / HTTPS_PROXY 环境变量，也就是回到那个刚被判
+        # 定为失效的代理，于是「降级直连」从来没有真的直连过。
+        # ourdomain.py 有同一段注释和 2026-08-26 的并排实测：
+        # proxies={"http":"","https":""} → 200，proxies={} → 402。
         proxy = get_proxy_url(self.source)
-        proxies = {"http": proxy, "https": proxy} if proxy else {}
+        proxies = {"http": proxy, "https": proxy} if proxy else NO_PROXY_CURL
         with req.Session(impersonate=get_impersonate(), proxies=proxies) as session:
             resp = session.get(LIST_URL, params=LIST_PARAMS, timeout=30,
                                headers={"Accept-Language": "en-US,en;q=0.9"})

@@ -530,3 +530,26 @@ def test_platform_dropdown_lists_every_known_source(admin_client):
         for key in KNOWN_SOURCES:
             assert f'value="{key}"' in html, f"{path} 缺 {key}"
         assert source_display_name("magis") in html, path
+
+
+def test_direct_fallback_really_bypasses_the_proxy():
+    """代理全部冷却时要真的直连。
+
+    curl 拿到 ``proxies={}`` 会回落到 HTTP_PROXY / HTTPS_PROXY 环境变量——也就是
+    回到那个刚被判定为失效的代理，于是「降级直连」从来没有真的直连过。生产容器里
+    这两个变量常年指着 webshare，而 webshare 欠费时一直回 402。
+
+    2026-08-26 ourdomain 踩过同一个坑并留下并排实测：``{"http":"","https":""}``
+    → 200，``{}`` → 402。2026-09-01 接入 magis 时又踩了一次，是部署后在生产上
+    实跑才发现的——本地跑不出来，因为本地没有那两个环境变量。
+    """
+    import inspect
+
+    from net import NO_PROXY_CURL
+
+    import scrapers.magis as m
+
+    src = inspect.getsource(m.MagisScraper._fetch)
+    assert "NO_PROXY_CURL" in src, "代理为空时传的不是 NO_PROXY_CURL"
+    assert not re.search(r"else\s*\{\s*\}", src), "还留着 proxies={} 那种写法"
+    assert NO_PROXY_CURL == {"http": "", "https": ""}
