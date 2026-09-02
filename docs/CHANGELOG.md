@@ -1,5 +1,156 @@
 # Changelog
 
+## v1.32.0 (2026-09-02)
+
+本版本接入第六个平台 Student Experience，并修正三处「判据与被判的东西不是一回
+事」——仪表盘按自带的清单数平台而不是按真正启用的、FCM 换 token 走了抓取代理、
+两个 scraper 把代理故障抛成了不认识的形状。这三处的共同点是：**出错时看起来都很
+正常**，没有异常、没有告警，只是那个数字或那条判定悄悄不对。
+
+### 新增
+
+* **接入 Student Experience**（[11f2989]）
+
+    studentexperience.com，荷兰五处在营：Amsterdam Minervahaven / Zuidas / NDSM /
+    Amstel 与 Leiden（另有 Amstelveen Uilenstede 标注在建，不登记——登记了只会让
+    用户勾一个永远不出房源的城市）。纯 HTTP、服务端渲染、无 Cloudflare、无 JS
+    挑战，工程量与 Magis 同级。上线走**影子模式**（`SHADOW_SOURCES`）：照常抓取
+    入库、参与 stale 收敛与面板统计，但不发任何用户渠道通知。
+
+    接它的理由是 FAQ 里那一句：「For short-stay studios at Amsterdam Minervahaven
+    we work on a **first-come, first-served basis**.」先到先得，早知道就有用。这
+    与同期侦察的 Vesteda 正相反——那边是打分加同分抽签，早三十秒收到通知不会提高
+    中签概率，推送在那种平台上没有价值。判据不是「数据抓不抓得到」，是「抓到了对
+    用户有没有用」。
+
+    平台是纯学生盘：签约前须上传在读证明，入住时须为在校注册状态。合格身份含
+    study programme、internship 与 **PhD research**——**与 OurCampus 相反**，那边
+    的 criteria 明确排除 PhD 与博后。两处都登记为 `student only`，含义却不同；真
+    出现按学位分档的需求时，这两个值不能合并处理。
+
+    站点把库存切成短租（按学期档）与长租（最少一年）两条线，各有入口但共用同一套
+    卡片 DOM。学期档由 `/locations/getAcademicTerms/<locationId>` 给出 JSON；长租
+    路径上 `locationId` 被忽略（传 Granada 的 id 返回的仍是荷兰四栋楼），因此每轮
+    只发一次。整批共用一轮抓取，约七次请求。
+
+    **完整性判据是这次接入唯一不显然的地方。** 短租页上「0 张卡片」有三种成因——
+    真的没货、没选学期档、站点改版换了类名——而从 HTML 上分不出来：页面在前两种
+    情况下也一样干干净净，连「暂无房源」那句提示都不出。三者里只有第三种该判
+    incomplete，而判错的代价不是少推几条，是**整批存量被 stale 收敛判成 Occupied
+    并发一批假的下架通知**。
+
+    解法是拿长租页的按楼盘计数块当结构探针：它有货没货都渲染，读不到就是改版了。
+    这条探针还顺带给出一个交叉校验——计数之和大于零却一张卡片都没解析出来，同样
+    判不完整，那是「计数块还在、卡片结构变了」的情形。
+
+    粒度是户型级而非单元级，因此面积是区间（`20,5-26 m²`），原样写入。
+    `parse_float` 对区间取下界，而 `min_area` 是 fail-closed 的「至少多大」，取
+    下界正是这里该有的保守语义：用户要 ≥25 m² 时，不该因为这个户型里恰好有几间
+    26 m² 就把最小 20,5 m² 的整个户型推给他。通知里看到的是完整区间，筛选用的是
+    下界，两边都对。
+
+    维度只登记 `type` 与 `tenant`。`finishing` 不登记：规格行只出现在主卡片上，
+    「其它户型」滑块里的紧凑卡片没有这一行，而该维度 fail-closed，登记之后那几条
+    会被勾了装修档位的用户整体过滤掉——与 Magis 当初对 `tenant` 的取舍同一个道理。
+    值仍写进 features，通知里看得见，只是不参与筛选。
+
+    粒度问题查过了：archive.org 存有 505 个 2023 年的单元页（`/studios/2512` 一类，
+    id 范围 369–3122），说明站点当年是按单元挂牌的。若那一层还在，scraper 就该做
+    到单元级。2026-09-02 在该区间取样四个 id 复验，全部 404，`canonical` 指向
+    `/404`——站点确已迁到户型粒度，现有层级是对的。
+
+    完整侦察记录见 `docs/SCRAPING_RECON.md` §5。
+
+### 修复
+
+* **两个 scraper 的代理故障被抛成了不认识的形状**（[1572747]、本次）
+
+    上线后第一轮生产日志暴露的。代理 402 欠费那一轮，xior 报「代理已确认故障并
+    进入冷却」，Magis 与刚上线的 Student Experience 报的却是「未预期异常，已隔离
+    该任务」——同一个 402，两条不同的路径。
+
+    原因是这两个 scraper 让 `curl_cffi` 的 `ProxyError` 裸抛了出去。dispatcher
+    只在 `except ScrapeNetworkError` 那一支里调 `is_proxy_error`，裸异常掉进后面
+    的通用 `except Exception`，于是这两个 source **永远不参与代理冷却判定**，只能
+    干等别的 source 去发现代理坏了。Student Experience 的那份是照抄 Magis 写的，
+    所以是同一个洞复制了一次。
+
+    起作用的是 `from e`：`is_proxy_error` 走 `_exception_chain_text`，整条
+    `__cause__` 链都在它的搜索范围内。修复后的生产日志把完整链路演了一遍——包装
+    生效、dispatcher 上抛 `ProxyError`、代理进冷却、降级直连成功。
+
+    顺带补上 5xx 的守卫测试。站点 2026-09-02 07:17–07:38 UTC 有过一段约二十分钟的 500，这条
+    路径当场被实弹验证：必须上抛，不能变成「本轮 0 条房源」。
+
+* **仪表盘的「支持平台」自带了一份清单**（[7d460e9]）
+
+    `SUPPORTED_SOURCES` 是手写的三元组，而平台已经有五个。这类「同一份清单抄两
+    遍」的错误不会报错，只会让那个数字慢慢过时——Magis 与 OurCampus 两次接入都
+    没人想起来改它。改为直接引用 `KNOWN_SOURCES`。
+
+* **FCM 换 token 时走了抓取代理**（[c0cd30f]）
+
+    `_exchange()` 是 `net.py` 迁移时唯一漏掉的调用点，也是那次 Android 推送全挂
+    的直接原因：它从环境读 `HTTPS_PROXY`，于是换 token 的请求走了抓取代理——而那
+    条代理当时正欠费。
+
+    守卫测试本身有两个洞，一并补上：正则只认 `req.Session(` / `httpx.Client(` /
+    `httpx.AsyncClient(` / `urlopen(`，不认模块级的 `httpx.post(`；豁免判断只看
+    匹配到的首行，而 `**direct_httpx_kwargs()` 常常落在几行之后。**守卫和被守的
+    东西对不上，守卫就只是看着像在守。**
+
+### 文档
+
+* **侦察文档：Student Experience 改判，新增 Vesteda 与 antikraak 两节**（本次）
+
+    §5 此前的结论是「暂不做，可订范围过小——为 1 栋楼、2 个房型而逆向其 JS 不成
+    比例」。**那个判据是错的**，而且错的性质值得记下来：不是数据过期，是**把过滤
+    后的视图当成了全集**——当时打开的是 `?los=shortstay`，而 `los` 会反过来过滤
+    地点下拉框。不带参数时荷兰有 5 栋。
+
+    同一节里另外两处原始结论也已更正：「`academicTermId` 的 XHR 端点未能定位」
+    （已定位，写在一个 4 KB 未混淆的 JS 里）、「`los=longstay` 下拉框均不存在」
+    （下拉框确实不在，但那一页有按楼盘的计数块，后来成了完整性探针）。三处都按
+    本文档既有的做法**引用原文并标错**，而不是删掉——写错的判断会一直被当依据用
+    下去，删掉就看不出它曾经影响过什么。
+
+    新增 §6b Vesteda：技术上是全部候选中最省事的一个（`POST /api/units/search/
+    facet`，空 body 返回 524 套 65 城），但打分加同分抽签让推送失去价值。此前它
+    被归在「自研前端」一类并注为「须逆向 API 或引入浏览器」——技术判断是错的，
+    结论却恰好没变，换了一个完全不同而且更硬的理由。
+
+    新增 §6c leegstandbeheer / antikraak：Gapph（Villex 与 Interveste 已并入）
+    46 条、Ad Hoc 住宅 54 条，€150–€774，中位约 €300，先到先得，是唯一在 Eindhoven
+    都市圈有货的候选。挡着的不是工程：`bruikleenovereenkomst` 不是租约，没有租客
+    保护、通常 28 天通知即须搬离，接入前必须先决定 UI 上怎么与正常租约区分标注。
+    **这是产品决定，不是工程决定。**
+
+* **侦察文档：SSHXL 改判为不接，新增 SSH&**（[9773c6f]）
+
+    SSHXL 的 API 已完整定位，工程量不再是障碍，否决理由改成了覆盖面——原文写它
+    「恰好补足 Holland2Stay 未覆盖的 Utrecht、Maastricht、Groningen」，而**那份
+    城市列表是错的**：实际覆盖 Groningen、Rotterdam、Tilburg、Utrecht、Zwolle 与
+    Amersfoort，既无 Eindhoven 也无 Amsterdam，更无 Maastricht。而那句话正是当初
+    「推荐接入」那个结论的依据。
+
+    新增 SSH&（sshn.nl）一节，并说明它与 SSHXL 不是同一家：前者在 Nijmegen 与
+    Arnhem，Embrace 平台加 Keycloak 登录墙，与 DUWO/ROOM 同类。
+
+### 界面
+
+* **筛选栏的适用范围徽标不再随平台数撑破布局**（本次）
+
+    加到第六个来源后，`occupancy` 变成 3 支持 / 3 不支持，两边都不短，徽标 34 字
+    挤在 10px 的 label 后面。这不是一次性的：**每加一个来源都会更长**。
+
+    选边规则从比「平台个数」改成比**渲染字数**——平台名长短差得很远，`Xior` 四字
+    而 `Student Experience` 十八字，数个数会挑错边（`occupancy` 按个数是平手，按
+    字数缺失方短两字）。名字数封顶两个，其余折成「等 N 家」，并且优先选**不需要
+    折叠**的那一边：折叠是丢信息，差一个字不值当。
+
+    折叠仍然点名——「Xior、Magis 等 3 家除外」既说了是谁也说了有几个。当年被误读
+    的是「仅 3 个平台」那种一个名字都没有的写法，完整清单一直在 tooltip 里。
+
 ## v1.31.0 (2026-09-01)
 
 本版本接入第五个平台 Magis Real Estate，并修正四处「界面所说的与系统实际做的不
@@ -5901,3 +6052,8 @@ web.py 长期积累至 1,200 行，涵盖路由、鉴权、表单、i18n、进�
 [b17923b]: https://github.com/751K/holland2stay-monitor/commit/b17923b
 [68716c3]: https://github.com/751K/holland2stay-monitor/commit/68716c3
 [ee6847a]: https://github.com/751K/holland2stay-monitor/commit/ee6847a
+[11f2989]: https://github.com/751K/holland2stay-monitor/commit/11f2989
+[1572747]: https://github.com/751K/holland2stay-monitor/commit/1572747
+[7d460e9]: https://github.com/751K/holland2stay-monitor/commit/7d460e9
+[9773c6f]: https://github.com/751K/holland2stay-monitor/commit/9773c6f
+[c0cd30f]: https://github.com/751K/holland2stay-monitor/commit/c0cd30f

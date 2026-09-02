@@ -24,7 +24,9 @@
 | 3 | **SSH / SSHXL (sshxl.nl)** | ✅ 完全（API 已定位） | 无 | `POST /api/v1/offering/all`，JSON | 短租按院校配额，实测组合 0 条 | 低 | ❌ **不接**（无 Eindhoven；长租不在 API 内），见 §2 |
 | 3b | **SSH& (sshn.nl)** | ❌ | 无，但 **Keycloak 登录墙 + 注册会员制** | Embrace 平台的 GraphQL 网关 | 未知 | **高**（同 DUWO/ROOM） | ❌ 不接，见 §2b |
 | 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ⚠️ **已接入但从未出过房源**，解析器未经真实数据验证，见 §4 |
-| 5 | **Student Experience** | ✅ 完全 | 无（自研前端） | 自有预订组件，可用性由 JS 拉取 | **仅 1 栋可订**（Minervahaven，2 个房型） | 低 | ❌ 暂不接入（可订范围过小） |
+| 5 | **Student Experience** | ✅ 完全 | **无** | 服务端渲染；学期档由 `/locations/getAcademicTerms/<id>` 出 JSON | 5 栋在营（Amsterdam 4 + Leiden），户型级，库存间歇 | 低 | ✅ **已接入**（2026-09-02，影子期），见 §5 |
+| 5b | **Vesteda** | ✅ 完全 | **无** | `POST /api/units/search/facet`，空 body 出全站 JSON | 524 套 65 城，可租 113 | 低（`robots.txt` 无 `Disallow`） | ❌ **不接**：打分 + 同分抽签，推送无价值，见 §6b |
+| 5c | **Gapph / Ad Hoc**（antikraak） | ✅ 完全 | 无 | Gapph 服务端渲染；Ad Hoc 走 WP REST `/wp-json/wp/v2/units` | Gapph 46 条、Ad Hoc 住宅 54 条，€150–€774 | 低 | 🟡 **候选**：价位对学生合适，但合同性质须先在 UI 区分，见 §6c |
 | 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可采用 CloakBrowser（与 Holland2Stay 同一方案） |
 | 7 | DUWO/ROOM | ❌ | 无，但存在 **auth-wall 与付费注册** | API 仅登录后可见 | 未知 | **高**（涉及转发登录后内容）| ❌ 不建议 |
 | 8 | Kamernet | — | paid model | — | — | 高 | ❌ |
@@ -418,52 +420,171 @@ capture 文件正是为此保留。
 
 ---
 
-## §5 Student Experience (studentexperience.com) — **暂不做**
+## §5 Student Experience (studentexperience.com) — **已接入（2026-09-02）**
 
-自营学生公寓运营商，形态上最接近 Xior 与 Holland2Stay（自有房源池、单元级粒度、
-非排队制）。但其**线上可订的范围过小**。
+自营学生公寓运营商，形态上最接近 Xior 与 Holland2Stay（自有房源池、非排队制）。
+荷兰五处在营，另有一处在建。
 
-### 荷兰楼盘（2026-08-03 实测）
+> **2026-09-02 改判。** 本节此前的结论是「暂不做」，理由是「线上可订的范围过小
+> ——为 1 栋楼、2 个房型而逆向其 JS 或增加一个常驻浏览器，投入产出不成比例」。
+> **那个判据是错的**，下面逐条列出错在哪里。错误的性质值得记下来：不是数据过期，
+> 是**把过滤后的视图当成了全集**。
 
-| 楼盘 | 线上可订 |
-|---|---|
-| Amsterdam Minervahaven | ✅ 唯一可订 |
-| Amsterdam Amstel | ❌ |
-| Amsterdam NDSM | ❌ |
-| Amsterdam Zuidas | ❌（站内公告 2026 年关闭） |
-| Leiden | ❌ |
-| Amstelveen Uilenstede | 在建 |
+### 三处需要更正的原始结论
 
-「线上可订」的判据是其自有预订组件 `/studios` 的 `locationId` 下拉框：其中属于荷兰
-的仅有 `2 = Amsterdam Minervahaven`，另外两项为西班牙的 Granada 与 Madrid Pozuelo。
-其余楼盘不提供线上预订路径。
+**一、「荷兰只有 Minervahaven 可订」——错。**
 
-Minervahaven 的两个房型：`14` Core Studio（€1.550/月起）、
-`11` Signature Studio（€1.799/月起）。
+原文的判据是「其自有预订组件 `/studios` 的 `locationId` 下拉框：其中属于荷兰的
+仅有 `2 = Amsterdam Minervahaven`」。这个观察本身没错，错在**当时打开的是
+`?los=shortstay`**——`los` 会反过来过滤地点下拉框。不带 `los` 参数时：
 
-### 两条路径均不可行
+| locationId | 楼盘 | 城市 |
+|---|---|---|
+| 2 | Amsterdam Minervahaven | Amsterdam |
+| 3 | Amsterdam Zuidas | Amsterdam |
+| 4 | Amsterdam NDSM | Amsterdam |
+| 5 | Amsterdam Amstel | Amsterdam |
+| 36 | Leiden | Leiden |
+| — | Amstelveen Uilenstede | 站点标注 "Under development"，无 id |
 
-**RENTCafe 路径**：其后台确为 SecureRC（`studentexperience.securerc.co.uk`），但
-仅 `amsterdam-minervahaven0` 这一 slug 存在（property_id 为 `186778`），
-`amsterdam-amstel0` 与 `amsterdam-ndsm0` 在 RentCafe 上均返回 404。且该
-`floorplans.aspx` 的 76KB 内容中 **不含任何 floorplan tile**（`subPointerId`、
-`myFloorPlanId`、`FloorPlanContainer` 的数量均为 0）——它并不走 online-leasing 的
-floorplan 流程，`OurDomainScraper` 的实现无法套用。
+西班牙另有 `8 = Granada`、`7 = Madrid Pozuelo`，不属本项目范围。
 
-**自有组件路径**：`/studios?los=shortstay&locationId=2&studioTypeId=14` 为服务端
-渲染，参数集包括 `los`、`locationId`、`studioTypeId` 与 `academicTermId`。但
-**承载可用性信息的 `academicTermId` 下拉框始终为空**，即便选定楼盘与房型后亦不
-填充——其内容由 JS 异步拉取，对应的 XHR 端点未能定位。要取得真实可用性，须逆向
-其 JS 或引入浏览器。
+原文另记「Amsterdam Zuidas ❌（站内公告 2026 年关闭）」——2026-09-02 复测时它仍在
+导航、FAQ 与 `locationId` 下拉框中，且出现在长租页的按楼盘计数块里。
 
-在 `los=longstay` 模式下，楼盘与房型的下拉框均不存在。
+**二、「`academicTermId` 下拉框始终为空，对应的 XHR 端点未能定位」——已定位。**
 
-### 结论
+```
+GET /locations/getAcademicTerms/<locationId>
+→ {"terms":[{"yardiAcademicTermIdValue":"1678",
+             "academicTermName":"12 Months (01-Oct-2026 - 30-Sep-2027)",
+             "isShortStay":"1"}], "hasTerms":true}
+```
 
-为 1 栋楼、2 个房型而逆向其 JS 或增加一个常驻浏览器，投入产出不成比例。
+端点写在 `/themes/default/js/location-term-filter.min.js`（4KB，未混淆到读不了）
+里，页面内联脚本给出它的配置对象。下拉框「始终为空」是因为它由该请求异步填充，
+而请求只在选定 `locationId` 之后才发。
 
-**重新评估的触发条件**：该平台为 Leiden、NDSM 或 Amstel 开放线上预订（表现为
-`locationId` 下拉框中出现新选项）。届时可订范围将扩大至 4–5 栋楼，值得重新评估。
+**三、「`los=longstay` 模式下楼盘与房型的下拉框均不存在」——不完整。**
+
+下拉框确实不在，但那一页有别的东西：一个**按楼盘的可订计数块**，有货没货都渲染。
+
+```
+City     Amsterdam 0    Leiden 0
+Complex  Amsterdam Amstel 0   Amsterdam NDSM 0   Amsterdam Zuidas 0   Leiden 0
+```
+
+这个块后来成了 scraper 的完整性探针，见下。
+
+### 为什么现在接
+
+**先到先得。** FAQ 原文：「For short-stay studios at Amsterdam Minervahaven we
+work on a **first-come, first-served basis**. This means that if you're the first
+person responding to a studio advertisement and you meet the requirements, the
+studio is yours.」
+
+这一条是接入的全部理由，也是它与 Vesteda 的分水岭——后者是打分 + 同分抽签，早
+三十秒收到通知不会提高中签概率，推送没有意义（见 §6b）。
+
+**纯学生盘。** 「All Student Experience studios are exclusively available for
+students」，签约前须通过服务门户上传在读证明，入住时须为在校注册状态。合格身份
+含 study programme / internship / **PhD research**——**与 OurCampus 相反**，那边
+的 criteria 明确排除 PhD 与博后。两处都登记为 `student only`，但含义不同，真出现
+按学位分档的需求时不能合并处理。
+
+**库存是间歇性的。** 站点自己提供「有房时邮件通知我」的订阅，等于承认这一点。
+这正是监控类产品的形状：平时安静，放盘时才响。
+
+### 技术形态
+
+纯 HTTP、服务端渲染、无 Cloudflare、无 JS 挑战、不需要浏览器。与 Magis 同级。
+
+库存切成两条互不相交的线，各有入口但**共用同一套卡片 DOM**：
+
+```
+短租  /studios?los=shortstay&locationId=<id>&academicTermId=<term>
+长租  /studios?los=longstay
+```
+
+⚠️ `locationId` 在长租路径上**被忽略**：传 `locationId=8`（Granada）返回的仍是
+荷兰四栋楼的计数。所以长租每轮只发一次请求，不按楼盘循环。
+
+每轮请求预算：长租 1 次 + 学期档 5 次 + 有档期的楼盘各 1 次 ≈ 7 次，整批共用。
+
+### 卡片形态
+
+`<a href="/studio-types/<id>" class="studio is-overview …">`，两种变体：主卡片
+（`has-popularity-header`）与「Or explore our other studios」滑块里的紧凑卡片
+（`studio-compact`）。**两者都是当前可订的户型**——0 库存的楼盘连滑块都不渲染。
+
+粒度是**户型级**而非单元级：一个户型对应多间，面积因此是区间。稀缺徽标
+`Only N studios available` 只在余量少时出现，不能当作余量字段——没有徽标不代表
+没货，只代表站点不觉得需要催。
+
+2026-09-01 快照（Minervahaven）：
+
+| studio-type | 户型 | 起价 | 面积 | 余量徽标 |
+|---|---|---|---|---|
+| 11 | Signature studio | €1.799/月 | 20,5–26 m² | Only 2 studios available |
+| 10 | Essential studio | €1.750/月 | 20–22 m² | 无 |
+
+原文记的是「`14` Core Studio（€1.550/月起）、`11` Signature Studio」。`11` 对得上，
+`14 Core Studio` 现在不在售，取而代之的是 `10 Essential studio`；€1.550 这个数
+2026-09-01 仍出现在楼盘页上，但不是 `/studios` 选择器里的可订项。
+
+### 完整性探针：为什么必须用长租页的计数块
+
+这是接入本平台唯一不显然的工程决定。
+
+短租路径上「0 张卡片」有三种成因，**从 HTML 上分不出来**：真的没货、没选学期档、
+或者站点改版换了卡片类名。三者里只有第三种该判 incomplete，可是页面在前两种情况下
+也一样干干净净——连 "we don't have available studios" 那句提示都不出（实测
+`?los=shortstay&locationId=3`）。
+
+判错的代价不是少推几条，是**整批存量被 stale 收敛判成 Occupied 并发一批假的下架
+通知**。
+
+长租页的计数块有货没货都渲染，因此可以当结构探针：读不到就是改版了，整轮判
+incomplete；读得到则说明 DOM 还是我们认识的那个，此时「0 张卡片」可以放心地当成
+「真的没货」。这条探针还顺带给出一个交叉校验——计数之和大于零却一张长租卡片都没
+解析出来，同样判 incomplete，那是「计数块还在、卡片结构变了」的情形。
+
+### 维度登记
+
+`type`（全站皆 studio，四个档位名是价位分层不是房型）与 `tenant`（来自
+`SOURCE_ASSUMED_FEATURES`）。
+
+`finishing` **不登记**：规格行（"Private & fully furnished"）只出现在主卡片上，
+紧凑卡片没有。该维度 fail-closed，登记之后紧凑卡片那几条会被勾了装修档位的用户
+整体过滤掉——与 Magis 对 `tenant` 的取舍同一个道理。值仍写进 features，通知里
+看得见，只是不参与筛选。
+
+`floor` / `energy` 站点不给。楼层只在设施行的散文里出现过（"located on floor
+5-8"），那是户型的整体描述而非某一间的楼层。
+
+### 短租的额外资格条件（无对应筛选维度）
+
+Minervahaven 短租线要求：临时居留（≤1 年）、荷兰境外常住地址、外国国籍，**不接受
+用荷兰地址提交的申请**。这几条不适合塞进 `tenant`（那个维度的取值表是身份类别，
+不是居留状态），因此只在文档与 scraper 注释里记录，用户仍需自行核对 FAQ。
+
+### 粒度：曾经是单元级，现在不是
+
+archive.org 存有 **505 个 2023 年的单元页**，URL 形如 `/studios/2512`，id 范围
+369–3122——站点当年是**按单元**挂牌的。若这一层还在，scraper 就该改到单元级：
+身份与 churn 信号都会准得多，稀缺徽标那个粗略的余量字段也不再需要。
+
+**2026-09-02 复验：已经不在。** 在 369–3122 区间取样四个 id（369 / 2512 / 2513 /
+3122），全部返回 `404`，`canonical` 指向 `/404`。站点确已迁到户型粒度，现有
+scraper 的层级是对的。
+
+（首次尝试复验时站点正好在故障，07:17–07:38 UTC 返回 HTTP 500，`/studios/2512`
+与 `/studio-types/11` 一并不可达；上述结论取自恢复之后的复测。）
+
+### 不做自动预订
+
+「first-come, first-served」意味着下单窗口很短，但下单流程未做侦察，ToS 暴露面
+亦未评估。与 OurCampus / Magis 一致：只通知，不预订。
 
 ---
 
@@ -492,6 +613,144 @@ floorplan 流程，`OurDomainScraper` 的实现无法套用。
 
 ---
 
+## §6b Vesteda — **不接（技术上最省事的一个，业务模型否决）**
+
+2026-09-01 侦察。本节值得单独写，因为它是**技术判据与业务判据给出相反结论**的
+典型：接口开放到几乎不用写解析器，但推送在这个平台上没有价值。
+
+> 本文档此前把 Vesteda 归在 §7 的「自研前端」一类，注为「房源由客户端渲染，须逆向
+> API 或引入浏览器，成本接近接入一个新平台」，并列为「尚未排除、值得投入约半天
+> 评估」。**技术判断是错的**——实际不到十分钟就拿到了全量数据。
+
+### 接口：一个 POST，空 body 出全站
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+  https://www.vesteda.com/api/units/search/facet
+```
+
+825 KB JSON，**524 套，65 个城市**，无认证、无反爬。`robots.txt` 只有一行
+`Sitemap:`，没有任何 `Disallow`。
+
+端点来自 `/nl/woning-zoeken` 页面里的 `vesteda.apiUrl='/api/units'`，实际调用在
+`/static/vue/dist/js/app.js`（88 KB，未混淆到读不了）：`getUnits(e){return
+Vt.post("/search/facet", e)}`。
+
+字段齐到不需要二次抓详情页：`priceUnformatted` / `price` / `size` /
+`numberOfBedRooms` / `latitude` / `longitude` / `postalCode` / `city` /
+`complex` / `imageSmall` / `status` / `onlyMiddleRent` /
+`prioritizeKeyProfessions` / `suitedForHomeSharers` / `onlySixtyFivePlus`。
+
+`status` 枚举同样写在 `app.js` 里：`1=nieuw`（可租）、`2=verhuurd`、
+`3=verhuurd onder voorbehoud`、`4=gereserveerd`、`5=nieuw`。按 `status==1` 过滤：
+
+| | 总量 | 可租 |
+|---|---|---|
+| Amsterdam | 95 | 27 |
+| Rotterdam | 70 | 24 |
+| Utrecht | 40 | 9 |
+| Maastricht | 18 | 6 |
+| Groningen | 27 | 6 |
+| **Eindhoven** | 14 | **2** |
+| 全国 | 524 | **113** |
+
+可租的 113 套散在 30 个城市，€898–€3000（中位 €1655），45–160 m²。
+
+### 否决理由：打分 + 同分抽签
+
+`/toewijzing` 页面的原文：候选人按四条标准打分（收入是否达标、能否在可用时立即
+入住、资料与文件是否齐全、家庭结构是否匹配，另有最低年龄 / keyworker 优先一类的
+附加条件），满足全部得满分。
+
+> 「Zijn er meerdere kandidaten met dezelfde score? Dan wordt door middel van
+> **loting** bepaald wie de woning mag bezichtigen.」
+
+同分者**抽签**决定谁能去看房。另注明「Vesteda werkt niet met wachtlijsten」——
+没有等候名单，这一点比 DUWO/ROOM 好，但不改变结论：
+
+**FlatRadar 的价值是「比别人早知道」，而抽签制下早三十秒不提高中签概率。**
+这与否决 DUWO/ROOM 是同一个理由，只是机制不同——那边是排队，这边是抽签。
+
+次要理由：每套房挂着「Kan ik deze woning huren?」的最低毛收入要求，中位 €1655
+的房子按荷兰惯例要 3–3.5 倍毛收入，对学生基本是关死的门。
+
+### 它是什么
+
+自称 `woningbelegger en -verhuurder`——住宅投资机构兼房东，管养老金基金与保险公司
+的钱，约 28,000 套自持，定位「middensegment」。是直接出租的房东（与 Xior / H2S
+同一层，不是中介聚合），但不是学生公寓运营商。
+
+**重新评估的触发条件**：分配规则从抽签改为先到先得。这不太可能——「eerlijk en
+transparant」是他们主动宣传的卖点。
+
+---
+
+## §6c Leegstandbeheer / antikraak — **候选，未接**
+
+2026-09-01 侦察。这一整类此前不在文档里。特点是**便宜**（€90–€774，中位约 €300）
+且**先到先得**，学生付得起；代价是合同性质与常规租约不同，见下。
+
+### Gapph（gapph.nl）——这一类里最大的
+
+Villex 与 Interveste 已并入 Gapph，两家首页现在都指向 `gapph.nl/woonruimte`。
+
+两条业务线：`antikraak`（空置看护）与 `tijdelijk-huren`（Leegstandwet 临时出租）。
+服务端渲染，URL 形如 `/woonruimte/tijdelijk-huren/eindhoven/1869`。**无分页**
+（`?page=2` / `?page=3` 返回同一批，已验）。
+
+`robots.txt` 禁 `/beheer/` `/regiobeheer/` `/captcha/` `/cookies/` `/reageer/`
+`/blog/` `/mijngapph/`，**房源页允许**。
+
+2026-09-01 在架 46 条：`tijdelijk-huren` 35、`antikraak` 11。城市分布对本项目
+有利——Eindhoven 各 1，另有 Veldhoven、Geldrop、Valkenswaard、Helmond，都在
+Eindhoven 都市圈；Amsterdam 5、den-bosch 4、Dordrecht 3、Nijmegen / Tilburg /
+Delft 各 1。站点把 **Studentenhuisvesting** 列为业务线之一。
+
+**工程量中等偏上**：详情页的价格与面积写在散文里（「€750 voor een
+2-kamerwoning, €800 voor een 3-kamerwoning en €850 voor een 4-kamerwoning」），
+而且一条 listing 对应**整栋楼的多个户型**——接入前要先想清楚一条 listing 映射成
+几条房源。这比 Magis 的模式化抽取难。
+
+### Ad Hoc Beheer（adhocbeheer.nl）——接口最干净，地理不对
+
+标准 WordPress REST，自定义 post type `units`：
+
+```bash
+curl -s 'https://adhocbeheer.nl/wp-json/wp/v2/units?per_page=100'
+```
+
+100 条（`x-wp-total` 用 `per_page=1` 复核过，就是 100，不是被 per_page 截断），
+其中住宅 54 条（`Woonruimte` 48 / `Woning` 5 / `Antikraak wonen` 1），其余是
+`Werkruimte` / `Kantoorruimte` / `Atelierruimte`。`acf` 字段为空，价格与面积同样
+在正文散文里。
+
+月费 €150–€774，中位 **€300**——价位对学生完全合适。
+
+**问题是位置**：54 套散在 41 个城市，大学城只命中 4 套（Amsterdam / Rotterdam /
+Maastricht / Den Haag 各 1），其余是 Vaals 4、Winterswijk 3、Hoogezand 3、
+Emmen 2、Assen 2 这类地方。Eindhoven 0（Waalre、Maarheeze 勉强算周边）。
+
+**单独接意义不大**，若做应与 Gapph 打包成「antikraak 类」一个来源。
+
+### 接之前必须解决的一件事：合同性质
+
+`antikraak` 签的是 **bruikleenovereenkomst（借用合同）**，不是租约：没有租客
+保护，通常 28 天通知即须搬离，能否在 BRP 登记地址要逐条确认。对学生这是实质风险。
+
+若接入，**必须在 UI 上把这类房源与正常租约区分标注**，不能混在同一个列表里。
+`tijdelijk-huren`（Leegstandwet）那条线有租约，情况好一些，但仍是定期合同。
+
+这是个产品决定而不是工程决定，未做即不应接入。
+
+### 其余同类
+
+- **Alvast**（alvast.nl）——WordPress，但 `projecten` 只有 5 条，是项目介绍不是
+  房源；真实房源入口未定位。
+- **Camelot Europe** ——已改名，`cameloteurope.com` 301 到 `mosaicworld.eu`，
+  旧路径 404。Next.js + Storyblok，入口需重新定位。
+
+---
+
 ## §7 综合建议
 
 ### 接入优先级（按投入产出比排序）
@@ -506,10 +765,19 @@ floorplan 流程，`OurDomainScraper` 的实现无法套用。
      也无 Amsterdam，更无 Maastricht。
    - API 已定位（见 §2），工程量不再是障碍；否决理由变成了覆盖面、长租不可见、
      短租按院校配额、以及没有真实数据可核对。
-3. **Pararius / Funda —— 可以启动探测**
+3. **Gapph / Ad Hoc（antikraak）—— 唯一在 Eindhoven 都市圈有货的候选**
+   - 价位对学生合适（€150–€774，中位约 €300），先到先得，无反爬
+   - 挡着的不是工程：`bruikleenovereenkomst` 不是租约，须先决定 UI 上怎么区分
+     标注。这是产品决定，见 §6c
+4. **Pararius —— 可以启动探测**
    - 此前判断为「需 Playwright，暂缓」，而浏览器传输层现已是现成基建
-   - 但其反爬可能严于 Holland2Stay（例如 DataDome 一类），须先实测
-4. **DUWO / Kamernet —— 放弃**（受限于合规与商业模式，而非技术问题）
+   - 2026-09-01 复测：`403` + `cf-mitigated: challenge`，与 Holland2Stay 同一套
+     Cloudflare 挑战，CloakBrowser 可试
+5. **Funda —— 不建议**
+   - 2026-09-01 复测：`200` 但正文是 Akamai 的 captcha 页，比 Pararius 硬
+6. **Vesteda / DUWO / Kamernet —— 放弃**（受限于分配机制与商业模式，而非技术问题）
+   - Vesteda 是这三个里最值得说明的：技术上是全部候选中最省事的一个（一个 POST
+     出全站），但**打分 + 同分抽签**让推送失去价值。见 §6b
 
 > 接入新平台的实际成本远不止 scraper 本身：反爬机制会变化（见文首），且每增加一个
 > 受 Cloudflare 保护的平台，就需多常驻一个浏览器（约 200–400MB）与一条专属线程。
@@ -522,16 +790,30 @@ The Social Hub 之后可以得出以下规律：**在荷兰的专业学生公寓
 
 | 类型 | 例子 | 不予接入的原因 |
 |---|---|---|
-| 规模过小 | OurCampus（1 栋）、Student Experience（1 栋可订） | 抓取成本固定，房源数量过少难以摊薄 |
+| 规模过小 | OurCampus（1 栋） | 抓取成本固定，房源数量过少难以摊薄 |
 | 排队制 | DUWO/ROOM、SSH&（sshn.nl）、SSHXL 长租、Basecamp 及社会住房整体 | 等待期以月至年计（SSHXL 实测 2–36 个月），即时推送没有意义 |
-| 自研前端 | Vesteda、Camelot | 房源由客户端渲染，须逆向 API 或引入浏览器，成本接近接入一个新平台 |
+| 抽签制 | Vesteda | 同分抽签，早知道不提高中签概率——与排队制殊途同归，见 §6b |
+| 客户端渲染 | The Social Hub、Camelot | 须逆向 API 或引入浏览器，成本接近接入一个新平台 |
+
+> **2026-09-02 这张表改过两行，两处原因不同，都值得记下来。**
+>
+> **Student Experience 从「规模过小」整行删除。** 原文写「1 栋可订」，那是把
+> `?los=shortstay` 过滤后的下拉框当成了全集，实际是 5 栋。真实情况是「5 栋但常态
+> 0 库存」——这与「只有 1 栋」对「该不该接」的含义正好相反：前者是规模问题，接了
+> 也没用；后者是频率问题，平时安静、放盘时才响，而那正是监控的意义。见 §5。
+>
+> **Vesteda 从「自研前端」移到新增的「抽签制」一行。** 原分类的技术判断是错的
+> （实测是一个不需要认证的 POST），但结论恰好没变——换了一个完全不同、而且更硬的
+> 理由。见 §6b。
 
 因此继续沿「运营商」方向寻找的边际收益正在递减。**marketplace 方向
 （HousingAnywhere）单城即有 207 条，是更划算的选择。**
 
-尚未排除、各值得投入约半天进行评估的有：**Vesteda**（大型机构房东，自有门户，
-房源由客户端渲染）与 **Camelot Europe**（Next.js 加 Storyblok，首页的
-`__NEXT_DATA__` 仅含 CMS 内容，房源位于搜索页，尚未深入分析）。
+尚未排除、值得投入约半天进行评估的有：**The Social Hub**——真学生盘，Eindhoven /
+Delft / Maastricht / Groningen / Rotterdam 都有店，是唯一「真学生盘 + 有 Eindhoven
++ 规模够」的组合。但 2026-09-01 实测整站 Optimizely + React 客户端渲染，
+`/eindhoven/student-stay/` 抓下来只有 19 KB 空壳，订房走 `liverates.hotelrez.co.uk`
+这个酒店引擎，可用性接口未定位。
 
 ### 替代发现：可考虑加入候选
 

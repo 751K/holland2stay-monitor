@@ -329,6 +329,21 @@ class MagisScraper(AbstractScraper):
 
         站点本身没有反爬，走代理只是为了和其余 source 共用同一条出口策略——
         代理全部冷却时 ``get_proxy_url`` 返回空串，此处自然降级为直连。
+
+        传输层异常一律包成 ``ScrapeNetworkError``
+        ------------------------------------------
+        包装是为了让代理故障被认出来。dispatcher 只在 ``except
+        ScrapeNetworkError`` 那一支里调 ``is_proxy_error``（见
+        scrapers/__init__.py:272）；裸的 ``curl_cffi.ProxyError`` 会掉进后面的
+        通用 ``except Exception``，被记成「未预期异常」，于是本 source 永远不参与
+        代理冷却判定，只能干等别的 source 去发现代理坏了。
+
+        2026-09-02 生产实测：代理 402 欠费那一轮，xior 报「代理已确认故障并进入
+        冷却」，本 source 与当时刚上线的 studentexperience 报的却是「未预期异常，
+        已隔离该任务」。两处是同一个洞——后者是照抄这里写的。
+
+        起作用的是 ``from e``：``is_proxy_error`` 走 ``_exception_chain_text``，
+        整条 ``__cause__`` 链都在搜索范围内，特征串从原始异常那里就读得到。
         """
         import curl_cffi.requests as req
 
@@ -343,8 +358,14 @@ class MagisScraper(AbstractScraper):
         proxy = get_proxy_url(self.source)
         proxies = {"http": proxy, "https": proxy} if proxy else NO_PROXY_CURL
         with req.Session(impersonate=get_impersonate(), proxies=proxies) as session:
-            resp = session.get(LIST_URL, params=LIST_PARAMS, timeout=30,
-                               headers={"Accept-Language": "en-US,en;q=0.9"})
+            try:
+                resp = session.get(LIST_URL, params=LIST_PARAMS, timeout=30,
+                                   headers={"Accept-Language": "en-US,en;q=0.9"})
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as e:
+                raise ScrapeNetworkError(
+                    f"Magis 总览页请求失败: {type(e).__name__}: {e}") from e
             if resp.status_code != 200:
                 raise ScrapeNetworkError(
                     f"Magis 总览页返回 HTTP {resp.status_code}"

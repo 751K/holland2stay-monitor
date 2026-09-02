@@ -284,6 +284,43 @@ class TestScrapeShape:
             assert s._page is not None
         assert s._page is None
 
+    def test_proxy_failure_is_recognisable_as_one(self, monkeypatch):
+        """代理故障必须包成 ScrapeNetworkError，且保住 ``__cause__``。
+
+        dispatcher 只在 ``except ScrapeNetworkError`` 那一支里调
+        ``is_proxy_error``（scrapers/__init__.py:272）。裸的 curl_cffi ProxyError
+        会掉进后面的通用 ``except Exception``，被记成「未预期异常」——本 source
+        于是永远不触发代理冷却，只能等别的 source 去发现代理坏了。
+
+        2026-09-02 生产实测：代理 402 欠费那一轮，xior 报「代理已确认故障并进入
+        冷却」，本 source 报的是「未预期异常，已隔离该任务」。
+        """
+        from scrapers.base import ScrapeNetworkError, is_proxy_error
+
+        class _ProxyError(Exception):
+            pass
+
+        class _Session:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def get(self, *_a, **_kw):
+                raise _ProxyError(
+                    "Failed to perform, curl: (56) CONNECT tunnel failed, "
+                    "response 402.")
+
+        import curl_cffi.requests as req
+        monkeypatch.setattr(req, "Session", lambda **_kw: _Session())
+
+        s = MagisScraper()
+        with pytest.raises(ScrapeNetworkError) as ei:
+            s._fetch()
+        assert is_proxy_error(ei.value), (
+            f"代理故障没被认出来：{ei.value!r}——冷却机制不会被触发")
+
     def test_zero_cards_is_incomplete_not_empty(self):
         """一张卡都切不出来 ≠ 这一轮没有房。
 
