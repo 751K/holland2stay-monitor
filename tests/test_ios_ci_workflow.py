@@ -215,3 +215,56 @@ class TestSchemeActuallyRunsUnitTests:
         """必须在 xcshareddata 下，否则新克隆的仓库里 xcodebuild 找不到它。"""
         assert SCHEME.exists()
         assert "xcshareddata" in str(SCHEME)
+
+
+class TestUnitTestTargetHasSources:
+    """``FlatRadarTests`` 必须挂着它自己那个目录，否则整个 target 是空的。
+
+    这是「CI 绿着但一条没跑」的**根因**，而且它同时解释了另外两件怪事：
+
+    - ``ListingTests.swift`` 里引用了 ``Listing`` 上根本不存在的成员，却从来
+      没让构建失败——因为那个文件压根没被编译；
+    - 测试 bundle 链接成功、``xcodebuild test`` 报 Test Succeeded、退出 0，
+      而执行条数是 0。
+
+    工程用的是 Xcode 16+ 的目录同步（``PBXFileSystemSynchronizedRootGroup``）：
+    另外两个 target 都挂了自己的目录，唯独 ``FlatRadarTests`` 漏了。漏掉之后
+    没有任何报错——它只是安静地什么都不编译。
+    """
+
+    PBXPROJ = ROOT / "ios/FlatRadar/FlatRadar.xcodeproj/project.pbxproj"
+
+    def _text(self) -> str:
+        return self.PBXPROJ.read_text(encoding="utf-8")
+
+    def test_the_folder_is_declared_as_a_synchronized_group(self):
+        import re
+
+        text = self._text()
+        section = text[text.index("Begin PBXFileSystemSynchronizedRootGroup"):
+                       text.index("End PBXFileSystemSynchronizedRootGroup")]
+        paths = set(re.findall(r"path = (\w+);", section))
+        assert "FlatRadarTests" in paths, f"同步组里没有测试目录：{paths}"
+
+    def test_the_target_actually_uses_it(self):
+        """光声明不够——必须挂在 target 的 fileSystemSynchronizedGroups 上。"""
+        import re
+
+        text = self._text()
+        m = re.search(
+            r"/\* FlatRadarTests \*/ = \{\s*isa = PBXNativeTarget;(.*?)\n\t\t\};",
+            text, re.S)
+        assert m, "找不到 FlatRadarTests target"
+        assert "fileSystemSynchronizedGroups" in m.group(1), (
+            "target 没挂同步目录——它会编译出一个空的 xctest bundle")
+
+    def test_every_test_target_is_wired_the_same_way(self):
+        """三个 target 一视同仁。漏掉哪一个，那一个就静默变空。"""
+        import re
+
+        text = self._text()
+        for name in ("FlatRadar", "FlatRadarUITests", "FlatRadarTests"):
+            m = re.search(
+                r"/\* " + name + r" \*/ = \{\s*isa = PBXNativeTarget;(.*?)\n\t\t\};",
+                text, re.S)
+            assert m and "fileSystemSynchronizedGroups" in m.group(1), name

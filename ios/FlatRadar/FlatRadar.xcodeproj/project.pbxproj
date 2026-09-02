@@ -41,6 +41,11 @@
 			path = FlatRadarUITests;
 			sourceTree = "<group>";
 		};
+		FCB189392FCCC22E006E5796 /* FlatRadarTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = FlatRadarTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +79,7 @@
 				FCA5BF452FBA1D5F0081A5E4 /* FlatRadar.storekit */,
 				FC1F38652FB72DA000FC7A33 /* FlatRadar */,
 				FC5588742FBDB6A300855C9D /* FlatRadarUITests */,
+				FCB189392FCCC22E006E5796 /* FlatRadarTests */,
 				FC1F38642FB72DA000FC7A33 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -103,6 +109,9 @@
 			);
 			dependencies = (
 				CCB5ABCC2B325B8F89AE238A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				FCB189392FCCC22E006E5796 /* FlatRadarTests */,
 			);
 			name = FlatRadarTests;
 			packageProductDependencies = (
