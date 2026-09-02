@@ -96,32 +96,53 @@ class TestReportingItself:
 
 
 class TestWiredIntoTheIsolationBranch:
-    """接线断了，上面那些用例一条都不会红——这正是这个 bug 当初的形态。"""
+    """接线断了，上面那些用例一条都不会红——这正是这个 bug 当初的形态。
 
-    def _isolation_block(self) -> str:
+    ⚠️ ``_isolation_blocks`` 返回**全部**隔离分支，不是第一个。
+
+    上一版用的是 ``src.index("整体抓取失败，已隔离该 source")``——取第一处。可是
+    那句日志在 ``run_once`` 里有两份：跨源隔离的 ``_dispatch_isolated`` 一份，
+    Holland2Stay 走独立熔断路径又抄了一份。``index`` 命中的永远是前者，于是
+    **H2S 那份从 2026-08-17 写下起就没有 `_report_source_proxy_failure`，
+    而这组用例全绿**。
+
+    这正是本文件开头描述的那个死锁里最关键的一环：H2S 是最不容易失败的 source
+    （浏览器建在好线路上、会话缓存两小时），它每成功一轮整轮就不算全灭，外层的
+    `except ProxyError` 就够不着。它自己失败时又不上报——环就闭合了。
+    """
+
+    def _isolation_blocks(self) -> list[str]:
         import inspect
+        import re
         src = inspect.getsource(monitor.run_once)
-        i = src.index("整体抓取失败，已隔离该 source")
-        return src[i:i + 1600]
+        return [src[m.start():m.start() + 1600]
+                for m in re.finditer("整体抓取失败，已隔离该 source", src)]
 
-    def test_isolation_reports_to_the_pool(self):
-        block = self._isolation_block()
-        assert "_report_source_proxy_failure" in block, (
-            "跨源隔离又变回「接住就 return」了——代理池永远听不到坏消息")
+    def test_there_is_more_than_one_such_branch(self):
+        """前提本身要钉住：只剩一处时说明有人合并了，上面那些「每一处」就该改写。"""
+        assert len(self._isolation_blocks()) >= 2
 
-    def test_guarded_by_is_proxy_error(self):
+    def test_every_isolation_branch_reports_to_the_pool(self):
+        for i, block in enumerate(self._isolation_blocks()):
+            assert "_report_source_proxy_failure" in block, (
+                f"第 {i + 1} 处隔离分支又变回「接住就 return」了——代理池永远听不到坏消息")
+
+    def test_every_branch_is_guarded_by_is_proxy_error(self):
         """只有代理造成的失败才报。403 / 平台维护 / 解析错误跟代理无关，
         拿它们去冷却代理会把好线路误伤下线。"""
-        assert "is_proxy_error(e)" in self._isolation_block()
+        for i, block in enumerate(self._isolation_blocks()):
+            assert "is_proxy_error(e)" in block, f"第 {i + 1} 处没有守卫"
 
     def test_reported_before_the_telemetry_write(self):
         """顺序无所谓对错，但要稳定：遥测那行会 return，报告写在它后面就永远不执行。"""
-        block = self._isolation_block()
-        assert block.index("_report_source_proxy_failure") < block.index("_record_source_round")
+        for i, block in enumerate(self._isolation_blocks()):
+            assert (block.index("_report_source_proxy_failure")
+                    < block.index("_record_source_round")), f"第 {i + 1} 处顺序反了"
 
     def test_not_in_dry_run(self):
         """dry_run 不该改动全局代理状态。"""
-        assert "if not dry_run and is_proxy_error(e):" in self._isolation_block()
+        for i, block in enumerate(self._isolation_blocks()):
+            assert "if not dry_run and is_proxy_error(e):" in block, f"第 {i + 1} 处"
 
 
 class TestTheScenarioThatCausedIt:

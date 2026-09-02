@@ -1596,6 +1596,7 @@ def _submit_bookings(
     prewarm_futures: dict[str, "asyncio.Future"],
     status_transition: dict[str, tuple[str, str]],
     booking_deadline: float,
+    storage: "Storage | None" = None,
 ) -> list[tuple]:
     """把每个用户的候选 book_with_fallback() 立即提交线程池（快速下单通道）。
 
@@ -1640,6 +1641,12 @@ def _submit_bookings(
                     # OperationNotAllowedError 刻意不在此列（它不继承
                     # BlockedError）：那种 403 抑制多久都不会好，
                     # 落到下面返回 None、由 try_book 报 operation_rejected 才对。
+                    #
+                    # ``storage`` 曾经不是参数——这一行引用的是个不存在的名字，
+                    # 于是**这条分支一执行就 NameError**：异常穿透 run_once，
+                    # 本轮通知全丢，而抑制窗口一秒都没开。上一条注释说的「这条
+                    # 分支从未执行过」正好掩盖了它：修好 BlockedError 的类型之后，
+                    # 它才第一次真的跑到这里。
                     _mark_h2s_login_blocked(e, storage)
                     prewarmed = None
                 except Exception:
@@ -2377,6 +2384,20 @@ async def run_once(
                 # ——**所有** source 都失败才算整轮失败。H2S 喂进去即可，不必自己
                 # 决定整轮的生死。403 熔断仍走上面的 BlockedError 分支，不受影响。
                 source_failures.append((_H2S_SOURCE, e))
+                # 下面两件与 _dispatch_isolated 的失败分支保持一致。**H2S 曾经
+                # 两件都没做**：这段是 2026-08-17 把 H2S 从「一票否决整轮」改成
+                # 「只隔离」时照着写的，只搬了隔离那一半。后果是
+                #
+                #   - 429 时不 penalize：H2S 的 pacing 倍率恒为 1.0，自适应节奏
+                #     对它整个不生效（multiplier() 按 source 取，没有排除 H2S）；
+                #   - 代理坏了不上报：而 H2S 又是**最不容易失败的那个 source**
+                #     （浏览器建在好线路上、会话缓存两小时），于是它每成功一轮，
+                #     整轮就不算全灭，外层那个 `except ProxyError` 就够不着——
+                #     同一段注释在 _dispatch_isolated 里已经描述过这个死锁，
+                #     只是当时没意识到 H2S 自己也在环里。
+                if isinstance(e, RateLimitError):
+                    _source_pacing.penalize(_H2S_SOURCE,
+                                            storage=None if dry_run else storage)
                 for t in selected_h2s:
                     completeness_all.setdefault(
                         completeness_key(_H2S_SOURCE, t.city_display,
@@ -2386,6 +2407,8 @@ async def run_once(
                     _H2S_SOURCE, len(selected_h2s), type(e).__name__, e,
                     exc_info=True,
                 )
+                if not dry_run and is_proxy_error(e):
+                    _report_source_proxy_failure(_H2S_SOURCE, e)
                 if not dry_run:
                     _record_source_round(
                         storage, round_at=round_at, source=_H2S_SOURCE,
@@ -2398,6 +2421,11 @@ async def run_once(
                 completeness_all.update(completeness_part)
                 if h2s_mode == "canary":
                     _mark_h2s_scrape_recovered(storage)
+                # 与 _dispatch_isolated 的成功分支一致。只 penalize 不 relax 会让
+                # 倍率只升不降，而 H2S 这边原本两个都没有——补上就要成对补，
+                # 单补一个比一个都不补更糟。
+                _source_pacing.relax(_H2S_SOURCE,
+                                     storage=None if dry_run else storage)
                 if not dry_run:
                     complete_n, total_n = _completeness_stats(completeness_part)
                     _record_source_round(
@@ -2861,6 +2889,7 @@ async def run_once(
         ab_futures = _submit_bookings(
             loop, ab_candidates, user_notifiers,
             prewarm_cached, prewarm_futures, status_transition, booking_deadline,
+            storage=storage,
         )
 
         # 没有候选的用户的 prewarm（如果是新刷新的）存入缓存供下轮复用

@@ -344,6 +344,45 @@ class TestMonitorWiring:
             "——倍率将只升不降"
         )
 
+    # ── 逐处检查，不是「有一处就算过」 ───────────────────────────────
+    #
+    # 上面两条用例都是「找到一处合格的就通过」：test_success_path_relaxes 遍历函数、
+    # 命中第一个含 relax 的就 return；test_only_rate_limit_penalizes 只检查已有的
+    # penalize 守卫对不对，不管有没有漏掉某个分支。
+    #
+    # run_once 里这两件事各写了两份——跨源隔离的 _dispatch_isolated 一份，
+    # Holland2Stay 走独立熔断路径又一份。于是 **H2S 从 2026-08-17 起既不 penalize
+    # 也不 relax，倍率恒为 1.0，自适应节奏对它整个不生效**，而这组用例全绿。
+    #
+    # 下面两条按「每一处」检查。同类的接线守卫见
+    # tests/test_source_isolation_reports_proxy.py 的 TestWiredIntoTheIsolationBranch。
+
+    @staticmethod
+    def _sites(marker: str) -> list[str]:
+        import inspect
+        import re
+        import monitor
+        src = inspect.getsource(monitor.run_once)
+        return [src[m.start():m.start() + 1600]
+                for m in re.finditer(re.escape(marker), src)]
+
+    def test_more_than_one_site_of_each(self):
+        """前提本身要钉住：合并成一处时，下面的「每一处」就该改写。"""
+        assert len(self._sites("succeeded_sources.append(")) >= 2
+        assert len(self._sites("source_failures.append(")) >= 2
+
+    def test_every_success_site_relaxes(self):
+        for i, block in enumerate(self._sites("succeeded_sources.append(")):
+            assert "_source_pacing.relax" in block, (
+                f"第 {i + 1} 处「本轮成功」没有 relax——该 source 的倍率只升不降")
+
+    def test_every_failure_site_penalizes(self):
+        for i, block in enumerate(self._sites("source_failures.append(")):
+            assert "_source_pacing.penalize" in block, (
+                f"第 {i + 1} 处「整源失败」没有 penalize——该 source 撞 429 也不会退让")
+            assert "RateLimitError" in block, (
+                f"第 {i + 1} 处的 penalize 没有 429 守卫")
+
 
 class TestShippedDefaults:
     """出厂参数就是生产行为，必须钉住。
