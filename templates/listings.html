@@ -200,6 +200,9 @@
         <tr>
           <td>
             <a href="{{ l.url }}" target="_blank" class="cell-name">{{ l.name }}</a>
+            <a href="{{ url_for('map_view') }}?focus={{ l.id | urlencode }}"
+               class="cell-map-pin" title="{{ _('view_on_map') }}"
+               aria-label="{{ _('view_on_map') }}"><i class="bi bi-geo-alt-fill"></i></a>
             {% if fm.building %}<span class="cell-secondary ml-1">· {{ fm.building }}</span>{% endif %}
           </td>
           <td><span class="badge badge-neutral">{{ l.source | source_label }}</span></td>
@@ -216,7 +219,7 @@
           <td class="cell-secondary">{{ fm.floor or '—' }}</td>
           <td class="cell-secondary">{{ fm.type or '—' }}</td>
           <td class="cell-secondary">{{ fm.occupancy or '—' }}</td>
-          <td class="cell-secondary">{{ l.available_from or '—' }}</td>
+          <td class="cell-secondary">{{ l.available_from | available_display }}</td>
           <td class="cell-secondary">{{ l.city or '—' }}</td>
           <td class="cell-secondary">{{ l.first_seen | time_ago }}</td>
           <td class="cell-secondary">{{ l.last_seen | time_ago }}</td>
@@ -234,6 +237,7 @@
   {% for l in listings %}
     {% set fm = l.features | parse_features %}
     {% set cap = l.status | status_capsule %}
+    <div class="lc-wrap">
     <a href="{{ l.url }}" target="_blank" rel="noopener noreferrer" class="listing-card-item">
       <div class="lc-top">
         <div class="lc-name">{{ l.name }}</div>
@@ -258,6 +262,10 @@
         <span>{{ _('col_last_seen') }}: {{ l.last_seen | time_ago }}</span>
       </div>
     </a>
+    <a href="{{ url_for('map_view') }}?focus={{ l.id | urlencode }}"
+       class="lc-map-pin" title="{{ _('view_on_map') }}"
+       aria-label="{{ _('view_on_map') }}"><i class="bi bi-geo-alt-fill"></i></a>
+    </div>
   {% else %}
     <div class="text-center py-5 text-tertiary">{{ _('filter_no_results') }}</div>
   {% endfor %}

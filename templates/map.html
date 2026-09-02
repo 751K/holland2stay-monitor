@@ -3,9 +3,11 @@
 
 {% block extra_style %}
 #map-container{position:relative;border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-sm)}
-#map{height:calc(100vh - 160px);min-height:500px;background:#f0f0f0}
-.map-legend{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
-.legend-dot{display:inline-block;width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 3px rgba(0,0,0,.08)}
+/* 兜底高度。真实高度由 sizeMap() 按 #map-container 的实际位置算出来——
+   工具栏会换行（chip 数量、提示条在不在、计数换不换行都影响），写死一个
+   偏移量的话，多出一行地图就被挤出屏幕，页面开始上下滚，而在手机上拖地图
+   和滚页面是同一个手势。 */
+#map{height:calc(100vh - 250px);min-height:320px;background:#f0f0f0}
 /* Google Maps InfoWindow overrides */
 .gm-style .gm-style-iw-c{border-radius:12px!important;padding:0!important}
 .gm-style .gm-style-iw-d{overflow:hidden!important;padding:12px 16px!important;font-size:14px!important;line-height:1.5!important}
@@ -15,9 +17,49 @@
 .geocode-bar{height:100%;width:40px;background:var(--accent);border-radius:4px;animation:geocode-run 1s linear infinite}
 @keyframes geocode-run{0%{margin-left:-40px}100%{margin-left:100%}}
 .geocode-errors{display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text2);max-height:140px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);margin-top:6px}
+
+/* ── 筛选栏 ───────────────────────────────────────────────────────
+   状态筛选就是图例本身：颜色、名称、数量、开关四件事挤在一个控件里。
+   分成「图例」和「筛选器」两块的话，用户得先看懂颜色再去别处找开关。 */
+.map-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
+.map-chip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border-radius:100px;
+  border:1px solid var(--border);background:var(--surface);color:var(--text2);
+  font-size:13px;line-height:1;cursor:pointer;user-select:none;transition:background .12s,border-color .12s,opacity .12s}
+.map-chip[hidden]{display:none}   /* inline-flex 会盖掉 hidden 自带的 display:none */
+.map-chip:hover{border-color:var(--text3)}
+.map-chip .cdot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.map-chip .cnum{font-size:11px;color:var(--text3);font-variant-numeric:tabular-nums}
+.map-chip[aria-pressed="false"]{opacity:.45;background:transparent}
+.map-chip[aria-pressed="false"] .cdot{background:var(--text3)!important}
+.map-tool-sep{width:1px;height:22px;background:var(--border);margin:0 2px}
+.map-toolbar select.form-select,.map-toolbar input.form-input{font-size:12px;padding:6px 10px;height:32px}
+.map-toolbar select.form-select{min-width:120px;max-width:170px}
+.map-toolbar input.form-input{width:96px}
+.map-showing{margin-left:auto;font-size:12px;color:var(--text3);font-variant-numeric:tabular-nums}
+
+/* ── 定位提示条 ───────────────────────────────────────────────────
+   ?focus= 命中不了时说明是哪一种命中不了。三种原因用三种颜色，
+   因为用户能做的事不同：等解析 / 改筛选 / 链接作废。 */
+.map-notice{display:none;align-items:flex-start;gap:10px;padding:10px 14px;margin-bottom:12px;
+  border-radius:var(--radius-md,10px);font-size:13.5px;line-height:1.5;
+  background:var(--info-soft);color:var(--text)}
+.map-notice.is-warn{background:var(--warning-soft)}
+.map-notice.is-dim{background:var(--surface-hover)}
+.map-notice i{flex-shrink:0;margin-top:2px}
+.map-notice .mn-x{margin-left:auto;flex-shrink:0;background:none;border:0;cursor:pointer;
+  color:var(--text3);font-size:12px;padding:0 2px}
+
 @media(max-width:768px){
-  #map{height:calc(100dvh - 260px);min-height:360px}
+  #map{min-height:320px}
+  /* 两个输入框 + 重置挤一行。只给 flex-basis 不封顶的话，两个输入框会
+     grow 到把整行吃满，重置被挤到下一行，白占 50px 高。 */
+  .map-toolbar input.form-input{flex:1 1 26%;max-width:38%}
   .geocode-errors{position:relative;top:auto;left:auto;right:auto;margin-top:8px;max-height:120px}
+  .map-toolbar{gap:6px}
+  .map-tool-sep{display:none}
+  .map-toolbar select.form-select{min-width:0;flex:1 1 40%;max-width:none}
+  .map-toolbar input.form-input{width:auto}
+  .map-showing{margin-left:0;flex-basis:100%}
 }
 {% endblock %}
 
@@ -26,7 +68,6 @@
 <div class="page-header" style="position:relative;">
   <h1>{{ _('map_title') }}</h1>
   <div class="flex items-center gap-2">
-    <span id="map-count" class="meta"></span>
     <span class="meta" id="map-loading"><i class="bi bi-arrow-clockwise mr-1"></i>{{ _('map_loading') }}</span>
     {% if is_admin %}
     <button type="button" class="btn btn-ghost btn-sm" id="btn-geocode" onclick="runGeocode()" title="{{ _('map_geocode_hint') }}">
@@ -38,16 +79,37 @@
        onwheel="var t=this,atTop=t.scrollTop<=0,atBot=t.scrollTop+t.clientHeight>=t.scrollHeight-1;if((atTop&&event.deltaY<0)||(atBot&&event.deltaY>0))event.preventDefault();"></div>
 </div>
 
-<div class="map-legend mb-4">
-  <span class="flex items-center gap-1 text-sm text-secondary">
-    <span class="legend-dot" style="background:var(--success);"></span> {{ _('cal_direct_book') }}
-  </span>
-  <span class="flex items-center gap-1 text-sm text-secondary">
-    <span class="legend-dot" style="background:var(--warning);"></span> {{ _('cal_lottery') }}
-  </span>
-  <span class="flex items-center gap-1 text-sm text-secondary">
-    <span class="legend-dot" style="background:var(--text3);"></span> {{ '其他' if lang=='zh' else 'Other' }}
-  </span>
+<div class="map-notice" id="map-notice">
+  <i class="bi bi-info-circle" id="map-notice-icon"></i>
+  <span id="map-notice-text"></span>
+  <button type="button" class="mn-x" id="map-notice-x" title="{{ _('map_focus_dismiss') }}">✕</button>
+</div>
+
+<div class="map-toolbar" id="map-toolbar">
+  <button type="button" class="map-chip" data-bucket="book"     aria-pressed="true">
+    <span class="cdot" style="background:#10b981"></span>{{ _('map_st_book') }}<span class="cnum" data-count="book">—</span></button>
+  <button type="button" class="map-chip" data-bucket="lottery"  aria-pressed="true">
+    <span class="cdot" style="background:#f59e0b"></span>{{ _('map_st_lottery') }}<span class="cnum" data-count="lottery">—</span></button>
+  <button type="button" class="map-chip" data-bucket="reserved" aria-pressed="false">
+    <span class="cdot" style="background:#3b82f6"></span>{{ _('map_st_reserved') }}<span class="cnum" data-count="reserved">—</span></button>
+  <button type="button" class="map-chip" data-bucket="occupied" aria-pressed="false">
+    <span class="cdot" style="background:#9b9b9b"></span>{{ _('map_st_occupied') }}<span class="cnum" data-count="occupied">—</span></button>
+  {# 认不出的状态。默认开着、计数为 0 时整个隐藏——只有站点真的冒出新状态时
+     它才现身，那正是最需要看见的时刻。 #}
+  <button type="button" class="map-chip" data-bucket="other" aria-pressed="true" hidden>
+    <span class="cdot" style="background:#8b5cf6"></span>{{ _('map_st_other') }}<span class="cnum" data-count="other">—</span></button>
+
+  <span class="map-tool-sep"></span>
+
+  <select class="form-select" id="f-city"   aria-label="{{ _('map_filter_city') }}"></select>
+  <select class="form-select" id="f-source" aria-label="{{ _('map_filter_source') }}"></select>
+  <input type="number" class="form-input" id="f-rent" min="0" step="50"
+         placeholder="{{ _('map_max_rent') }} €" aria-label="{{ _('map_max_rent') }}">
+  <input type="number" class="form-input" id="f-area" min="0" step="5"
+         placeholder="{{ _('map_min_area') }} m²" aria-label="{{ _('map_min_area') }}">
+  <button type="button" class="btn btn-ghost btn-sm" id="f-reset">{{ _('map_reset') }}</button>
+
+  <span class="map-showing" id="map-count"></span>
 </div>
 
 <div id="map-container">
@@ -63,26 +125,53 @@
 (function() {
 var GMAPS_KEY = '{{ google_maps_key }}';
 var LANG = '{{ lang }}';
-var zh = LANG === 'zh';
 
-// City center coords for initial view
-var CITY_CENTERS = {
-  'Eindhoven': {lat: 51.4416, lng: 5.4697},
-  'Amsterdam': {lat: 52.3676, lng: 4.9041},
-  'Rotterdam': {lat: 51.9225, lng: 4.4792},
-  'Den Haag': {lat: 52.0705, lng: 4.3007},
-  'Utrecht': {lat: 52.0907, lng: 5.1214},
-  'Maastricht': {lat: 50.8514, lng: 5.6910},
-  'Groningen': {lat: 53.2194, lng: 6.5665},
-  'Delft': {lat: 52.0116, lng: 4.3571},
-  'Leiden': {lat: 52.1601, lng: 4.4970},
-  'Tilburg': {lat: 51.5555, lng: 5.0913},
-  'Breda': {lat: 51.5719, lng: 4.7683},
-  'Nijmegen': {lat: 51.8126, lng: 5.8372},
-  'Den Bosch': {lat: 51.6978, lng: 5.3037},
-  'Dordrecht': {lat: 51.8133, lng: 4.6901},
-  'Haarlem': {lat: 52.3874, lng: 4.6462},
+// 文案统一从 Jinja 注入，JS 里不再写第二套中英三元表达式。
+// 原先这里有二十多处 `zh ? '…' : '…'`，翻译改一处要改两个地方——而只有一份
+// 会被改到，另一份就此和界面其余部分对不上。
+//
+// app.js 在 base.html 里先于本块加载，所以 window.statusBucket /
+// window.spreadStackedCoords / window.STATUS_BUCKETS 在这里一定已经就位。
+var T = {
+  loading:      {{ _('map_loading')        | tojson }},
+  loadError:    {{ _('map_load_error')     | tojson }},
+  showing:      {{ _('map_showing')        | tojson }},
+  of:           {{ _('map_of')             | tojson }},
+  all:          {{ _('map_filter_all')     | tojson }},
+  city:         {{ _('map_filter_city')    | tojson }},
+  source:       {{ _('map_filter_source')  | tojson }},
+  perMonth:     {{ ('/月' if lang == 'zh' else '/mo') | tojson }},
+  stacked:      {{ _('map_stacked_note')   | tojson }},
+  uncached:     {{ _('map_uncached_note')  | tojson }},
+  outOfView:    {{ _('map_focus_out_of_view') | tojson }},
+  noCoords:     {{ _('map_focus_no_coords')   | tojson }},
+  notFound:     {{ _('map_focus_not_found')   | tojson }},
+  stBook:       {{ _('map_st_book')        | tojson }},
+  stLottery:    {{ _('map_st_lottery')     | tojson }},
+  stReserved:   {{ _('map_st_reserved')    | tojson }},
+  stOccupied:   {{ _('map_st_occupied')    | tojson }},
+  stOther:      {{ _('map_st_other')       | tojson }},
+  clusterOf:    {{ ('包含 N 个房源' if lang == 'zh' else 'Cluster of N listings') | tojson }},
+  geocoding:    {{ ('解析中 ' if lang == 'zh' else 'Geocoding ') | tojson }},
+  geocodeBtn:   {{ _('map_geocode_btn')    | tojson }},
+  rendering:    {{ ('渲染中 ' if lang == 'zh' else 'Rendering ') | tojson }},
+  startFailed:  {{ ('启动失败' if lang == 'zh' else 'Start failed') | tojson }},
+  allCached:    {{ ('所有地址已缓存' if lang == 'zh' else 'All addresses cached') | tojson }},
+  starting:     {{ ('启动中…' if lang == 'zh' else 'Starting…') | tojson }},
+  failedN:      {{ ('失败 ' if lang == 'zh' else 'Failed ') | tojson }},
+  doneN:        {{ ('完成 ' if lang == 'zh' else 'Done ') | tojson }},
+  reqFailed:    {{ ('请求失败' if lang == 'zh' else 'Request failed') | tojson }},
+  geoFailures:  {{ ('解析失败详情：' if lang == 'zh' else 'Geocode failures:') | tojson }},
+  scriptFailed: {{ ('Google Maps 加载失败，请检查网络、API key 或浏览器控制台。' if lang == 'zh' else 'Google Maps failed to load. Check network, API key, or browser console.') | tojson }},
+  scriptSilent: {{ ('Google Maps 没有完成初始化，请检查 API key、CSP 或网络连接。' if lang == 'zh' else 'Google Maps did not finish initializing. Check API key, CSP, or network connection.') | tojson }}
 };
+
+var BUCKET_COLOR = {book:'#10b981', lottery:'#f59e0b', reserved:'#3b82f6',
+                   other:'#8b5cf6', occupied:'#9b9b9b'};
+var BUCKET_LABEL = {book:T.stBook, lottery:T.stLottery, reserved:T.stReserved,
+                    other:T.stOther, occupied:T.stOccupied};
+// 聚合泡取「最值得看」的那一档的颜色，顺序即优先级。
+var BUCKET_ORDER = window.STATUS_BUCKETS;
 
 // Google Maps dark style
 var DARK_STYLE = [
@@ -108,14 +197,22 @@ var DARK_STYLE = [
   {featureType:'water',elementType:'labels.text.fill',stylers:[{color:'#3d3d3d'}]},
 ];
 
-var map;
+var map, infoWindow, mapsLoaded = false;
+var markerCluster = null, clustererLib = null, clustererPromise = null;
+var ALL = [];            // 全量 payload（散开坐标后）
+var UNCACHED = 0;
 var markers = [];
-var bounds;
-var infoWindow;
-var mapsLoaded = false;
-var markerCluster = null;
-var clustererPromise = null;
-var renderRun = 0;
+var extraFocus = null;   // /api/map/locate 兜底拿到的那一条（不在 ALL 里）
+
+// 加载与渲染各自一个令牌，**每个只在自己那一处自增**。
+// 旧代码在 loadMapData 里 +1、又在 renderMarkers 里 ++，两次自增让先到的那批
+// 渲染反而胜出：它的 marker 既不在 markers[] 里、也不会被下一次清理，从此永远
+// 留在图上。清理和渲染必须由同一个令牌决定。
+var loadToken = 0, renderToken = 0;
+var renderBusy = false;   // 渲染分批进行；聚合库迟到时靠它决定由谁来收尾
+
+var focusId = (new URLSearchParams(location.search).get('focus') || '').trim();
+var initialView = readViewFromUrl();
 
 function isDark() {
   return document.documentElement.getAttribute('data-theme') === 'dark';
@@ -127,36 +224,227 @@ function srcLabel(s) {
   return window.sourceLabel ? window.sourceLabel(s) : String(s || '');
 }
 
-function statusClass(s) {
-  var sl = (s||'').toLowerCase();
-  if (sl.indexOf('book') !== -1) return 'book';
-  if (sl.indexOf('lottery') !== -1) return 'lottery';
-  return 'other';
-}
+// 分桶与同址散开都在 static/app.js——日历页迟早要用同一套颜色，而这个仓库
+// 已经有过「三处各写一份 sourceLabel、三份都漏掉 ourcampus」的教训。
+var statusBucket = window.statusBucket;
 
 function priceShort(raw) {
   if (!raw) return '—';
-  var m = raw.match(/€[\d,\.]+/);
+  var m = String(raw).match(/€\s?[\d,\.]+/);
   return m ? m[0] : raw;
 }
 
-function getMarkerColor(sc) {
-  if (sc === 'book') return '#10b981';
-  if (sc === 'lottery') return '#f59e0b';
-  return '#9b9b9b';
+function priceNumber(raw) {
+  // "€ 1.647" / "€1,647" → 1647。荷兰站点用点做千分位，去掉所有分隔符即可。
+  var m = String(raw || '').match(/[\d.,]+/);
+  if (!m) return null;
+  var n = parseFloat(m[0].replace(/[.,]/g, ''));
+  return isFinite(n) ? n : null;
 }
 
-function createMarkerIcon(color) {
-  return {
-    path: google.maps.SymbolPath.CIRCLE,
-    fillColor: color,
-    fillOpacity: 1,
-    strokeColor: '#ffffff',
-    strokeWeight: 3,
-    scale: 10,
-  };
+function areaNumber(a) {
+  var m = String(a || '').match(/[\d.]+/);
+  return m ? parseFloat(m[0]) : null;
 }
 
+// ── 同址散开 ────────────────────────────────────────────────────────
+// 几何在服务端算好（display_lat / display_lng / stack_n），这里只负责取值。
+// 见 static/app.js 的 mapDisplayCoord。
+function spread(list) {
+  list.forEach(function(l) {
+    var c = window.mapDisplayCoord(l);
+    l._ok = !!c;
+    if (c) { l.mlat = c.lat; l.mlng = c.lng; }
+    if (!l.stackN) l.stackN = Number(l.stack_n) || 1;
+  });
+  return list;
+}
+
+// ── 筛选 ────────────────────────────────────────────────────────────
+function activeBuckets() {
+  var on = {};
+  document.querySelectorAll('#map-toolbar .map-chip').forEach(function(b) {
+    on[b.getAttribute('data-bucket')] = b.getAttribute('aria-pressed') === 'true';
+  });
+  return on;
+}
+
+function passesFilters(l) {
+  var on = activeBuckets();
+  if (!on[l.bucket]) return false;
+  var city = document.getElementById('f-city').value;
+  if (city && (l.city || '') !== city) return false;
+  var src = document.getElementById('f-source').value;
+  if (src && (l.source || '') !== src) return false;
+  var maxRent = parseFloat(document.getElementById('f-rent').value);
+  if (isFinite(maxRent)) {
+    var p = priceNumber(l.price_raw);
+    // 价格解析不出来时**保留**：读不出 ≠ 超预算。丢掉才是替上游做判断。
+    if (p !== null && p > maxRent) return false;
+  }
+  var minArea = parseFloat(document.getElementById('f-area').value);
+  if (isFinite(minArea)) {
+    var a = areaNumber(l.area);
+    if (a !== null && a < minArea) return false;
+  }
+  return true;
+}
+
+function currentView() {
+  var out = ALL.filter(function(l) {
+    // 深链指定的那一套无条件保留：用户是点着它过来的，
+    // 被默认筛选（比如「已租出」默认关）挡掉会变成「点了没反应」。
+    if (focusId && String(l.id) === focusId) return l._ok;
+    return l._ok && passesFilters(l);
+  });
+  if (extraFocus) out = out.concat([extraFocus]);
+  return out;
+}
+
+function updateChipCounts() {
+  var counts = {};
+  BUCKET_ORDER.forEach(function(b) { counts[b] = 0; });
+  ALL.forEach(function(l) { if (l._ok) counts[l.bucket] += 1; });
+  BUCKET_ORDER.forEach(function(b) {
+    var el = document.querySelector('#map-toolbar .cnum[data-count="' + b + '"]');
+    if (!el) return;
+    el.textContent = counts[b];
+    // 「其他」只在真的有认不出的状态时才出现；其余四档常驻，
+    // 数字是 0 也要让人看见「这一档确实是零」。
+    if (b === 'other') el.closest('.map-chip').hidden = counts[b] === 0;
+  });
+  sizeMap();     // 多一个 chip 可能就多一行
+}
+
+function fillSelect(id, label, values) {
+  var sel = document.getElementById(id);
+  var prev = sel.value;
+  sel.innerHTML = '';
+  var o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = label + '：' + T.all;
+  sel.appendChild(o0);
+  values.forEach(function(v) {
+    var o = document.createElement('option');
+    o.value = v; o.textContent = v;
+    sel.appendChild(o);
+  });
+  sel.value = prev;
+}
+
+function fillSourceSelect(values) {
+  var sel = document.getElementById('f-source');
+  var prev = sel.value;
+  sel.innerHTML = '';
+  var o0 = document.createElement('option');
+  o0.value = ''; o0.textContent = T.source + '：' + T.all;
+  sel.appendChild(o0);
+  values.forEach(function(v) {
+    var o = document.createElement('option');
+    o.value = v; o.textContent = srcLabel(v);
+    sel.appendChild(o);
+  });
+  sel.value = prev;
+}
+
+function uniqSorted(list, key) {
+  var seen = {};
+  list.forEach(function(l) { if (l[key]) seen[l[key]] = true; });
+  return Object.keys(seen).sort();
+}
+
+// ── 提示条 ──────────────────────────────────────────────────────────
+function showNotice(text, kind) {
+  var box = document.getElementById('map-notice');
+  document.getElementById('map-notice-text').textContent = text;
+  box.className = 'map-notice' + (kind ? ' is-' + kind : '');
+  document.getElementById('map-notice-icon').className =
+    kind === 'warn' ? 'bi bi-exclamation-triangle' :
+    kind === 'dim'  ? 'bi bi-slash-circle' : 'bi bi-info-circle';
+  box.style.display = 'flex';
+  sizeMap();
+}
+function hideNotice() {
+  document.getElementById('map-notice').style.display = 'none';
+  sizeMap();
+}
+
+// ── 弹窗 ────────────────────────────────────────────────────────────
+function row(parent, text, css) {
+  var s = document.createElement('span');
+  s.style.cssText = css || '';
+  s.textContent = text;
+  parent.appendChild(s);
+  parent.appendChild(document.createElement('br'));
+  return s;
+}
+
+function buildPopupContent(l) {
+  var color = BUCKET_COLOR[l.bucket];
+  var div = document.createElement('div');
+
+  row(div, priceShort(l.price_raw) + T.perMonth, 'color:var(--text2)');
+
+  var facts = [];
+  if (l.area) facts.push(l.area);
+  // 哨兵日期（2050-01-01 = 「未定」）不当日期显示，见 app.js isSentinelDate
+  if (l.available_from && !window.isSentinelDate(l.available_from)) {
+    facts.push(l.available_from);
+  }
+  if (facts.length) row(div, facts.join(' · '), 'color:var(--text2);font-size:12.5px');
+
+  var place = [];
+  if (l.neighborhood) place.push(l.neighborhood);
+  if (l.city) place.push(l.city);
+  if (place.length) row(div, place.join(' · '), 'color:var(--text3);font-size:12px');
+
+  var badges = document.createElement('div');
+  badges.style.marginTop = '6px';
+  var b1 = document.createElement('span');
+  b1.style.cssText = 'display:inline-block;margin-right:6px;padding:2px 8px;' +
+    'border-radius:100px;font-size:11px;background:var(--surface2);color:var(--text2);';
+  b1.textContent = srcLabel(l.source);
+  badges.appendChild(b1);
+  var b2 = document.createElement('span');
+  b2.style.cssText = 'display:inline-block;padding:2px 8px;border-radius:100px;' +
+    'font-size:11px;background:' + color + '18;color:' + color + ';';
+  b2.textContent = BUCKET_LABEL[l.bucket];
+  badges.appendChild(b2);
+  div.appendChild(badges);
+
+  // 位置是近似值这件事必须写出来。不写的话用户会以为图钉就是门牌号。
+  if (l.stackN > 1) {
+    var note = document.createElement('div');
+    note.style.cssText = 'margin-top:6px;font-size:11px;color:var(--text3);line-height:1.4';
+    note.textContent = T.stacked.replace('{n}', l.stackN);
+    div.appendChild(note);
+  }
+  return div;
+}
+
+function openPopup(l, marker) {
+  if (infoWindow) infoWindow.close();
+  var titleNode = document.createElement('div');
+  titleNode.style.cssText = 'font-weight:600;font-size:15px;padding:12px 12px 0 16px';
+  var a = document.createElement('a');
+  a.href = (l.url && /^https?:\/\//i.test(l.url)) ? l.url : '#';
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.textContent = l.name;
+  a.style.cssText = 'color:var(--accent);text-decoration:none';
+  titleNode.appendChild(a);
+  infoWindow = new google.maps.InfoWindow({
+    headerContent: titleNode,
+    content: buildPopupContent(l)
+  });
+  infoWindow.open(map, marker);
+}
+
+// ── 聚合库 ──────────────────────────────────────────────────────────
+//
+// 旧写法是 Promise.race(加载, 1200ms)，输了就把库**丢掉**，于是 235 个 marker
+// 一个不聚合地铺上去，而且迟到的那份永远不会被用上。现在超时只是「先不带聚合
+// 画出来」，库到了再补一次聚合——CDN 慢的代价从「这一次访问全程卡」降成
+// 「前一秒没有聚合」。
 function loadMarkerClusterer() {
   if (window.markerClusterer && window.markerClusterer.MarkerClusterer) {
     return Promise.resolve(window.markerClusterer);
@@ -172,238 +460,374 @@ function loadMarkerClusterer() {
   return clustererPromise;
 }
 
-function loadMarkerClustererWithTimeout() {
-  return Promise.race([
-    loadMarkerClusterer(),
-    new Promise(function(resolve) { setTimeout(function() { resolve(null); }, 1200); })
-  ]);
+function clusterRenderer() {
+  return {
+    render: function(cluster) {
+      var count = cluster.count;
+      var isDarkTheme = isDark();
+      var best = 'occupied';
+      if (cluster.markers) {
+        for (var j = 0; j < cluster.markers.length; j++) {
+          var b = cluster.markers[j].flatradarBucket;
+          if (BUCKET_ORDER.indexOf(b) < BUCKET_ORDER.indexOf(best)) best = b;
+        }
+      }
+      var bgColor = BUCKET_COLOR[best];
+      var strokeColor = isDarkTheme ? '#2a2a2a' : '#ffffff';
+      var textStr = String(count);
+      var height = 34;
+      var width = Math.max(34, 24 + textStr.length * 10);
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+(width+12)+'" height="'+(height+12)+'">' +
+        '<defs><filter id="drop-shadow" x="-20%" y="-20%" width="140%" height="140%">' +
+        '<feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="'+(isDarkTheme?'0.4':'0.15')+'" />' +
+        '</filter></defs>' +
+        '<rect x="6" y="4" width="'+width+'" height="'+height+'" rx="17" ry="17" fill="'+bgColor+'" stroke="'+strokeColor+'" stroke-width="2.5" filter="url(#drop-shadow)"/>' +
+        '<text x="'+(width/2 + 6)+'" y="26.5" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" font-weight="700" fill="#ffffff" text-anchor="middle">'+textStr+'</text>' +
+        '</svg>';
+      return new google.maps.Marker({
+        position: cluster.position,
+        icon: {
+          url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+          anchor: new google.maps.Point(width/2 + 6, height/2 + 4)
+        },
+        title: T.clusterOf.replace('N', count),
+        zIndex: 1000 + count
+      });
+    }
+  };
 }
 
-function buildPopupContent(l) {
-  var sc = statusClass(l.status);
-  var color = getMarkerColor(sc);
-  var badgeText = sc === 'book' ? (zh ? '直订' : 'Direct')
-    : sc === 'lottery' ? (zh ? '摇号' : 'Lottery')
-    : l.status;
-  var platformText = srcLabel(l.source);
-
-  var div = document.createElement('div');
-
-  var priceSpan = document.createElement('span');
-  priceSpan.style.color = 'var(--text2)';
-  priceSpan.textContent = priceShort(l.price_raw || '') + (zh ? '/月' : '/mo');
-  div.appendChild(priceSpan);
-  div.appendChild(document.createElement('br'));
-
-  if (l.neighborhood) {
-    var neighborSpan = document.createElement('span');
-    neighborSpan.style.color = 'var(--text3)';
-    neighborSpan.style.fontSize = '12px';
-    neighborSpan.textContent = l.neighborhood + ' · ';
-    div.appendChild(neighborSpan);
-  }
-  var citySpan = document.createElement('span');
-  citySpan.style.color = 'var(--text3)';
-  citySpan.style.fontSize = '12px';
-  citySpan.textContent = l.city || '';
-  div.appendChild(citySpan);
-  div.appendChild(document.createElement('br'));
-
-  var sourceSpan = document.createElement('span');
-  sourceSpan.style.cssText = 'display:inline-block;margin-top:4px;margin-right:6px;padding:2px 8px;' +
-    'border-radius:100px;font-size:11px;background:var(--surface2);color:var(--text2);';
-  sourceSpan.textContent = platformText;
-  div.appendChild(sourceSpan);
-
-  var badgeSpan = document.createElement('span');
-  badgeSpan.style.cssText = 'display:inline-block;margin-top:4px;padding:2px 8px;' +
-    'border-radius:100px;font-size:11px;background:' + color + '18;color:' + color + ';';
-  badgeSpan.textContent = badgeText;
-  div.appendChild(badgeSpan);
-
-  return div;
-}
-
-function loadMapData() {
-  // Clear old markers
-  renderRun += 1;
-  if (markerCluster) {
-    markerCluster.clearMarkers();
-    markerCluster = null;
-  }
-  markers.forEach(function(m){ m.setMap(null); });
-  markers = [];
-  bounds = new google.maps.LatLngBounds();
-  if (infoWindow) infoWindow.close();
-  document.getElementById('map-loading').style.display = '';
-  document.getElementById('map-loading').textContent = zh ? '加载中…' : 'Loading…';
-
-  fetch('/api/map')
-  .then(function(r){ return r.json(); })
-  .then(function(d) {
-    var listings = d.listings || [];
-    document.getElementById('map-count').textContent =
-      (zh ? '共 ' : '') + listings.length + (zh ? ' 套可展示房源' : ' listings shown');
-    return loadMarkerClustererWithTimeout().then(function(clustererLib) {
-      renderMarkers(listings, clustererLib);
-    });
-  })
-  .catch(function() {
-    document.getElementById('map-loading').textContent = zh ? '地图数据加载失败' : 'Map data load failed';
+function applyClusterer() {
+  if (!clustererLib || !clustererLib.MarkerClusterer || markers.length === 0) return;
+  if (markerCluster) { markerCluster.clearMarkers(); markerCluster = null; }
+  markers.forEach(function(m) { m.setMap(null); });
+  markerCluster = new clustererLib.MarkerClusterer({
+    map: map, markers: markers, renderer: clusterRenderer()
   });
 }
 
-function renderMarkers(listings, clustererLib) {
-  var run = ++renderRun;
-  var i = 0;
-  var batchSize = 60;
-  var clusterMarkers = [];
-  var useClusterer = !!(clustererLib && clustererLib.MarkerClusterer);
-  bounds = new google.maps.LatLngBounds();
+// ── 渲染 ────────────────────────────────────────────────────────────
+function clearMarkers() {
+  if (markerCluster) { markerCluster.clearMarkers(); markerCluster = null; }
+  markers.forEach(function(m) { m.setMap(null); });
+  markers = [];
+  if (infoWindow) { infoWindow.close(); infoWindow = null; }
+}
+
+function makeIcon(l, isFocus) {
+  return {
+    path: google.maps.SymbolPath.CIRCLE,
+    fillColor: BUCKET_COLOR[l.bucket],
+    fillOpacity: isFocus ? 1 : 1,
+    strokeColor: isFocus ? '#111827' : '#ffffff',
+    strokeWeight: isFocus ? 4 : 3,
+    scale: isFocus ? 13 : 10,
+  };
+}
+
+function render(list) {
+  var run = ++renderToken;
+  renderBusy = true;
+  clearMarkers();
+  var bounds = new google.maps.LatLngBounds();
+  var loading = document.getElementById('map-loading');
+  var i = 0, batchSize = 60;
 
   function createOne(l) {
-    var lat = Number(l.lat);
-    var lng = Number(l.lng);
-    if (!isFinite(lat) || !isFinite(lng)) return;
-
-    var sc = statusClass(l.status);
-    var color = getMarkerColor(sc);
+    var isFocus = focusId && String(l.id) === focusId;
     var marker = new google.maps.Marker({
-      position: {lat: lat, lng: lng},
-      map: useClusterer ? null : map,
-      icon: createMarkerIcon(color),
+      position: {lat: l.mlat, lng: l.mlng},
+      map: null,                 // 先不上图，聚合或收尾时统一处理
+      icon: makeIcon(l, isFocus),
       title: l.name,
       optimized: true,
+      zIndex: isFocus ? 9999 : undefined,
     });
-    marker.flatradarStatus = sc;
-
-    marker.addListener('click', function() {
-      if (infoWindow) infoWindow.close();
-      
-      var titleNode = document.createElement('div');
-      titleNode.style.fontWeight = '600';
-      titleNode.style.fontSize = '15px';
-      titleNode.style.padding = '12px 12px 0 16px';
-      
-      var a = document.createElement('a');
-      a.href = (l.url && /^https?:\/\//i.test(l.url)) ? l.url : '#';
-      a.target = '_blank';
-      a.rel = 'noopener noreferrer';
-      a.textContent = l.name;
-      a.style.color = 'var(--accent)';
-      a.style.textDecoration = 'none';
-      titleNode.appendChild(a);
-
-      infoWindow = new google.maps.InfoWindow({
-        headerContent: titleNode,
-        content: buildPopupContent(l)
-      });
-      infoWindow.open(map, marker);
-    });
+    marker.flatradarBucket = l.bucket;
+    marker.flatradarId = String(l.id);
+    marker.addListener('click', function() { openPopup(l, marker); });
     marker.addListener('mouseover', function() {
       document.getElementById('map-status').textContent = l.name;
     });
     marker.addListener('mouseout', function() {
       document.getElementById('map-status').textContent = '';
     });
-
     bounds.extend(marker.getPosition());
     markers.push(marker);
-    clusterMarkers.push(marker);
+  }
+
+  function finish() {
+    renderBusy = false;
+    if (clustererLib && clustererLib.MarkerClusterer && markers.length) {
+      markerCluster = new clustererLib.MarkerClusterer({
+        map: map, markers: markers, renderer: clusterRenderer()
+      });
+    } else {
+      markers.forEach(function(m) { m.setMap(map); });
+    }
+    document.getElementById('map-status').textContent = '';
+    loading.style.display = 'none';
+    fitOrRestore(bounds);
+    focusIfRequested();
   }
 
   function step() {
-    if (run !== renderRun) return;
-    var end = Math.min(i + batchSize, listings.length);
-    for (; i < end; i += 1) createOne(listings[i]);
-
-    if (i < listings.length) {
-      document.getElementById('map-loading').textContent =
-        (zh ? '渲染中 ' : 'Rendering ') + i + '/' + listings.length;
-      requestAnimationFrame(step);
+    if (run !== renderToken) { renderBusy = false; return; }
+    var end = Math.min(i + batchSize, list.length);
+    for (; i < end; i += 1) createOne(list[i]);
+    if (i < list.length) {
+      loading.style.display = '';
+      loading.textContent = T.rendering + i + '/' + list.length;
+      setTimeout(step, 0);
       return;
     }
-
-    if (useClusterer && clusterMarkers.length > 0) {
-      markerCluster = new clustererLib.MarkerClusterer({
-        map: map,
-        markers: clusterMarkers,
-        renderer: {
-          render: function(cluster, stats) {
-            var count = cluster.count;
-            var isDarkTheme = isDark();
-            
-            // Priority logic: if any 'book' exists -> green. else if 'lottery' -> orange. else -> grey.
-            var hasBook = false;
-            var hasLottery = false;
-            if (cluster.markers) {
-              for (var j = 0; j < cluster.markers.length; j++) {
-                if (cluster.markers[j].flatradarStatus === 'book') hasBook = true;
-                if (cluster.markers[j].flatradarStatus === 'lottery') hasLottery = true;
-              }
-            }
-            
-            var bgColor = hasBook ? '#10b981' : (hasLottery ? '#f59e0b' : '#9b9b9b');
-            var strokeColor = isDarkTheme ? '#2a2a2a' : '#ffffff';
-            var textColor = '#ffffff';
-
-            var textStr = String(count);
-            // Make it larger
-            var height = 34;
-            var width = Math.max(34, 24 + textStr.length * 10);
-
-            var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+(width+12)+'" height="'+(height+12)+'">' +
-              '<defs>' +
-                '<filter id="drop-shadow" x="-20%" y="-20%" width="140%" height="140%">' +
-                  '<feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="'+(isDarkTheme?'0.4':'0.15')+'" />' +
-                '</filter>' +
-              '</defs>' +
-              '<rect x="6" y="4" width="'+width+'" height="'+height+'" rx="17" ry="17" fill="'+bgColor+'" stroke="'+strokeColor+'" stroke-width="2.5" filter="url(#drop-shadow)"/>' +
-              '<text x="'+(width/2 + 6)+'" y="26.5" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" font-weight="700" fill="'+textColor+'" text-anchor="middle">'+textStr+'</text>' +
-              '</svg>';
-
-            return new google.maps.Marker({
-              position: cluster.position,
-              icon: {
-                url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
-                anchor: new google.maps.Point(width/2 + 6, height/2 + 4)
-              },
-              title: (zh ? '包含 ' : 'Cluster of ') + count + (zh ? ' 个房源' : ' listings'),
-              zIndex: 1000 + count
-            });
-          }
-        }
-      });
-    }
-    if (markers.length > 0) {
-      map.fitBounds(bounds, 60);
-    }
-    document.getElementById('map-status').textContent = '';
-    document.getElementById('map-loading').style.display = 'none';
+    finish();
   }
+  // 分批用 setTimeout 而不是 requestAnimationFrame。
+  //
+  // rAF 只在浏览器准备绘制时才回调，而 document.visibilityState 为 hidden 时
+  // 它一次都不来（规范如此，不是 bug）。于是页面在后台标签、或被放进不绘制
+  // 的内嵌视图里时，render 会停在第一批之前：renderBusy 恒为 true、shown 恒
+  // 为 0、界面停在「Loading…」，控制台里没有任何异常。本地对照实测：同一份
+  // 数据，rAF 版 shown=0，setTimeout 版 shown=28。
+  //
+  // 切回前台之后 rAF 版会自己接上，所以这不算功能缺陷；但「渲染完成」是
+  // focus 定位、聚合、计数收尾的前提，把它挂在「浏览器什么时候想画一帧」上
+  // 没有任何好处，而 setTimeout 一样是让出主线程。
+  setTimeout(step, 0);
+}
 
-  requestAnimationFrame(step);
+function updateCount(shown) {
+  var total = ALL.filter(function(l) { return l._ok; }).length;
+  var txt = T.showing + ' ' + shown + ' ' + T.of + ' ' + total;
+  if (UNCACHED > 0) txt += ' · ' + T.uncached.replace('{n}', UNCACHED);
+  document.getElementById('map-count').textContent = txt;
+}
+
+function refresh() {
+  var list = currentView();
+  updateCount(list.filter(function(l) { return !l._extra; }).length);
+  render(list);
+}
+
+// ── 视角：URL 记住 center/zoom ──────────────────────────────────────
+//
+// 旧版每次加载都 fitBounds，于是你永远从「能同时看见安特卫普和杜塞尔多夫」
+// 的那张图开始，要点三四次才看得到单套房源；而且视角不进 URL，分享不了，
+// 后退回来也没了。
+function readViewFromUrl() {
+  var q = new URLSearchParams(location.search);
+  var c = (q.get('c') || '').split(',');
+  var z = parseInt(q.get('z'), 10);
+  var lat = parseFloat(c[0]), lng = parseFloat(c[1]);
+  if (!isFinite(lat) || !isFinite(lng) || !isFinite(z)) return null;
+  return {lat: lat, lng: lng, zoom: Math.min(21, Math.max(3, z))};
+}
+
+var persistTimer = null;
+function persistView() {
+  if (!map || !map.getCenter()) return;
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(function() {
+    var c = map.getCenter();
+    var q = new URLSearchParams(location.search);
+    q.set('c', c.lat().toFixed(5) + ',' + c.lng().toFixed(5));
+    q.set('z', String(map.getZoom()));
+    q.delete('focus');   // 深链只消费一次，之后这张图归用户自己操纵
+    history.replaceState(null, '', location.pathname + '?' + q.toString());
+  }, 400);
+}
+
+function fitOrRestore(bounds) {
+  if (initialView) {
+    map.setCenter({lat: initialView.lat, lng: initialView.lng});
+    map.setZoom(initialView.zoom);
+    initialView = null;
+    return;
+  }
+  if (focusId) return;          // 交给 focusIfRequested 决定视角
+  if (!markers.length) return;
+  map.fitBounds(bounds, 60);
+  // 只剩一个点时 fitBounds 会顶到最大缩放，贴着地面看一栋楼。
+  google.maps.event.addListenerOnce(map, 'idle', function() {
+    if (map.getZoom() > 16) map.setZoom(16);
+  });
+}
+
+// ── 深链 ?focus=<id> ────────────────────────────────────────────────
+var focusDone = false;
+function focusIfRequested() {
+  if (!focusId || focusDone) return;
+  var m = markers.filter(function(x) { return x.flatradarId === focusId; })[0];
+  if (!m) return;               // 还没渲染到 / 需要 locate 兜底
+  focusDone = true;
+  map.setCenter(m.getPosition());
+  map.setZoom(18);
+  var l = currentView().filter(function(x) { return String(x.id) === focusId; })[0];
+  if (l) openPopup(l, m);
+}
+
+// 三种「看不到」必须分开说：等解析 / 改筛选 / 链接作废。
+// 合并成一句「没找到」的话，用户能做的事完全不同却看到同一句话。
+function resolveFocusMiss() {
+  if (!focusId || focusDone) return;
+  if (ALL.some(function(l) { return String(l.id) === focusId; })) return;
+  fetch('/api/map/locate?id=' + encodeURIComponent(focusId), {credentials: 'same-origin'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d && d.ok && d.listing) {
+        var l = d.listing;
+        l.bucket = statusBucket(l.status);
+        spread([l]);
+        l._extra = true;
+        extraFocus = l;
+        showNotice(T.outOfView, 'warn');
+        refresh();
+        return;
+      }
+      var reason = d && d.reason;
+      showNotice(reason === 'no_coords' ? T.noCoords : T.notFound,
+                 reason === 'no_coords' ? 'warn' : 'dim');
+      giveUpFocus();
+    })
+    .catch(function() { showNotice(T.notFound, 'dim'); giveUpFocus(); });
+}
+
+// 定位不到就把 focus 放掉，让视角回到正常的 fitBounds。
+// 不放掉的话 fitOrRestore 会一直让路给一个永远不会到来的 focus，
+// 地图就卡在初始的全国视角上——「没找到」不该顺带把地图也弄坏。
+function giveUpFocus() {
+  if (!focusId) return;
+  focusId = '';
+  var q = new URLSearchParams(location.search);
+  q.delete('focus');
+  history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : ''));
+  refresh();
+}
+
+// ── 数据加载 ────────────────────────────────────────────────────────
+function loadMapData() {
+  var token = ++loadToken;
+  clearMarkers();
+  var loading = document.getElementById('map-loading');
+  loading.style.display = '';
+  loading.textContent = T.loading;
+
+  fetch('/api/map', {credentials: 'same-origin'})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (token !== loadToken) return;      // 这一批已经过期，连渲染都别开始
+      ALL = (d.listings || []).slice();
+      UNCACHED = d.uncached || 0;
+      ALL.forEach(function(l) { l.bucket = statusBucket(l.status); });
+      spread(ALL);
+      updateChipCounts();
+      fillSelect('f-city', T.city, uniqSorted(ALL, 'city'));
+      fillSourceSelect(uniqSorted(ALL, 'source'));
+      refresh();
+      resolveFocusMiss();
+      return loadMarkerClusterer().then(function(lib) {
+        if (token !== loadToken || !lib) return;
+        clustererLib = lib;
+        // 还在分批渲染的话交给 finish()——它现在能看到 clustererLib 了；
+        // 已经渲染完才轮到这里补一次。两边都做会清掉对方的 marker。
+        if (!renderBusy) applyClusterer();
+      });
+    })
+    .catch(function() {
+      if (token !== loadToken) return;
+      document.getElementById('map-loading').textContent = T.loadError;
+    });
+}
+
+// ── 筛选交互 ────────────────────────────────────────────────────────
+function wireFilters() {
+  document.querySelectorAll('#map-toolbar .map-chip').forEach(function(b) {
+    b.addEventListener('click', function() {
+      b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+      refresh();
+    });
+  });
+  ['f-city', 'f-source'].forEach(function(id) {
+    document.getElementById(id).addEventListener('change', refresh);
+  });
+  ['f-rent', 'f-area'].forEach(function(id) {
+    var t = null;
+    document.getElementById(id).addEventListener('input', function() {
+      clearTimeout(t); t = setTimeout(refresh, 250);
+    });
+  });
+  document.getElementById('f-reset').addEventListener('click', function() {
+    document.querySelectorAll('#map-toolbar .map-chip').forEach(function(b) {
+      var d = b.getAttribute('data-bucket');
+      b.setAttribute('aria-pressed',
+        (d === 'book' || d === 'lottery' || d === 'other') ? 'true' : 'false');
+    });
+    document.getElementById('f-city').value = '';
+    document.getElementById('f-source').value = '';
+    document.getElementById('f-rent').value = '';
+    document.getElementById('f-area').value = '';
+    refresh();
+  });
+  document.getElementById('map-notice-x').addEventListener('click', hideNotice);
+}
+
+// 让地图正好填满视口剩下的部分。
+//
+// 原先高度是 calc(100dvh - 330px) 这样的写死偏移。工具栏的高度并不固定——
+// 「未知状态」那个 chip 只在真有这种房源时才出现、定位提示条会占一行、计数
+// 文案在窄屏上会换行——偏移一旦对不上，地图底部就被推到视口外，页面开始上下
+// 滚；而在手机上拖动地图和滚动页面是同一个手势，两者一打架，地图就变得没法用。
+//
+// 按 #map-container 的实际位置算，上面那些变化自动都算进去了。
+function sizeMap() {
+  var box = document.getElementById('map-container');
+  if (!box) return;
+  var top = box.getBoundingClientRect().top + (window.scrollY || 0);
+  var h = Math.max(320, Math.round(window.innerHeight - top - 16));
+  document.getElementById('map').style.height = h + 'px';
+  // 容器尺寸变了要告诉 Google Maps，否则它按旧尺寸算瓦片和居中。
+  if (map && window.google && google.maps && google.maps.event) {
+    google.maps.event.trigger(map, 'resize');
+  }
 }
 
 // ── Map init (called by Google Maps callback) ──
 window.initMap = function() {
   mapsLoaded = true;
   map = new google.maps.Map(document.getElementById('map'), {
-    center: {lat: 51.8, lng: 5.0},
-    zoom: 8,
+    center: initialView ? {lat: initialView.lat, lng: initialView.lng} : {lat: 51.8, lng: 5.0},
+    zoom: initialView ? initialView.zoom : 8,
     mapTypeControl: true,
     fullscreenControl: false,
     streetViewControl: false,
     styles: isDark() ? DARK_STYLE : [],
   });
+  map.addListener('idle', persistView);
 
+  sizeMap();
+  var sizeTimer = null;
+  window.addEventListener('resize', function() {
+    clearTimeout(sizeTimer);
+    sizeTimer = setTimeout(sizeMap, 120);
+  });
+  // 工具栏自己的高度会变（chip 显隐、计数文案换行、提示条出现），而那些变化
+  // 发生在哪一步并不好一一挂钩——挂漏一处，地图就多出几十像素顶到视口外。
+  // 直接盯它的尺寸，谁改的都算。
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(function() { sizeMap(); });
+    ro.observe(document.getElementById('map-toolbar'));
+    ro.observe(document.getElementById('map-notice'));
+  }
+
+  wireFilters();
   loadMapData();
 
-  // Watch theme changes to toggle dark map style
   var observer = new MutationObserver(function(mutations) {
     mutations.forEach(function(m) {
       if (m.attributeName === 'data-theme') {
         map.setOptions({styles: isDark() ? DARK_STYLE : []});
+        applyClusterer();          // 聚合泡的描边色随主题走
       }
     });
   });
@@ -417,29 +841,29 @@ function runGeocode() {
   var csrf = getCsrf();
   if (!btn || !csrf) return;
   btn.disabled = true;
-  loading.textContent = (zh ? '启动中…' : 'Starting…');
+  loading.style.display = '';
+  loading.textContent = T.starting;
 
   fetch('/api/map/geocode', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': csrf } })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      if (!data.ok) { loading.textContent = (zh ? '启动失败' : 'Start failed'); btn.disabled = false; return; }
-      if (data.total === 0) { loading.textContent = (zh ? '所有地址已缓存' : 'All addresses cached'); btn.disabled = false; btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode'); return; }
+      if (!data.ok) { loading.textContent = T.startFailed; btn.disabled = false; return; }
+      if (data.total === 0) { loading.textContent = T.allCached; btn.disabled = false; btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + T.geocodeBtn; return; }
       var timer = setInterval(function() {
         fetch('/api/map/geocode/status').then(function(r){ return r.json(); }).then(function(s) {
-          btn.innerHTML = '<i class="bi bi-arrow-clockwise mr-1"></i>' + (zh ? '解析中 ' : 'Geocoding ') + s.done + '/' + s.total;
-          loading.textContent = s.failed > 0 ? (zh ? '失败 ' : 'Failed ') + s.failed : '';
+          btn.innerHTML = '<i class="bi bi-arrow-clockwise mr-1"></i>' + T.geocoding + s.done + '/' + s.total;
+          loading.textContent = s.failed > 0 ? T.failedN + s.failed : '';
           if (s.finished) {
             clearInterval(timer);
             btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode');
-            loading.textContent = (zh ? '完成 ' : 'Done ') + s.done + (s.failed > 0 ? (zh ? ' 失败 ' : ' fail ') + s.failed : '');
-            // Auto-refresh map after geocoding so new coords appear immediately
+            btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + T.geocodeBtn;
+            loading.textContent = T.doneN + s.done + (s.failed > 0 ? ' · ' + T.failedN + s.failed : '');
             if (s.done > 0) setTimeout(function(){ loadMapData(); }, 800);
             var errDiv = document.getElementById('geocode-errors');
             if (errDiv && s.errors && s.errors.length > 0) {
               errDiv.innerHTML = '';
               var title = document.createElement('strong');
-              title.textContent = (zh ? '解析失败详情：' : 'Geocode failures:');
+              title.textContent = T.geoFailures;
               errDiv.appendChild(title);
               errDiv.appendChild(document.createElement('br'));
               s.errors.forEach(function(e){
@@ -459,9 +883,9 @@ function runGeocode() {
       }, 800);
     })
     .catch(function() {
-      loading.textContent = zh ? '请求失败' : 'Request failed';
+      loading.textContent = T.reqFailed;
       btn.disabled = false;
-      btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + (zh ? '解析地址' : 'Geocode');
+      btn.innerHTML = '<i class="bi bi-geo-alt mr-1"></i>' + T.geocodeBtn;
     });
 }
 
@@ -470,35 +894,45 @@ function getCsrf() {
   return meta ? meta.getAttribute('content') : '';
 }
 
+function mapFailure(text) {
+  document.getElementById('map-loading').textContent = text;
+  document.getElementById('map').innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:14px;text-align:center;padding:40px">' +
+    text + '</div>';
+}
+
 // Load Google Maps API — dynamic injection guarantees initMap is defined first
 var gmapsScript = document.createElement('script');
 gmapsScript.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(GMAPS_KEY) + '&loading=async&callback=initMap';
-gmapsScript.onerror = function() {
-  document.getElementById('map-loading').textContent = zh ? '地图脚本加载失败' : 'Map script failed to load';
-  document.getElementById('map').innerHTML =
-    '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:14px;text-align:center;padding:40px">' +
-    (zh ? 'Google Maps 加载失败，请检查网络、API key 或浏览器控制台。' : 'Google Maps failed to load. Check network, API key, or browser console.') +
-    '</div>';
-};
+gmapsScript.onerror = function() { mapFailure(T.scriptFailed); };
 document.head.appendChild(gmapsScript);
-setTimeout(function() {
-  if (!mapsLoaded) {
-    document.getElementById('map-loading').textContent = zh ? '地图脚本未响应' : 'Map script did not respond';
-    document.getElementById('map').innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:14px;text-align:center;padding:40px">' +
-      (zh ? 'Google Maps 没有完成初始化，请检查 API key、CSP 或网络连接。' : 'Google Maps did not finish initializing. Check API key, CSP, or network connection.') +
-      '</div>';
-  }
-}, 10000);
+setTimeout(function() { if (!mapsLoaded) mapFailure(T.scriptSilent); }, 10000);
 
   // Expose for the HTML onclick handler (must be global since onclick attribute
   // evaluates in global scope, but runGeocode is defined inside this IIFE).
   window.runGeocode = runGeocode;
+
+  // 只读探针。地图的状态全在这个 IIFE 里，从外面一个字都看不见——而「focus
+  // 有没有命中」「筛选之后还剩几套」「聚合到底生效没有」正是最容易悄悄坏掉、
+  // 又最难从截图上判断的三件事。只读，不改任何东西。
+  window.__mapProbe = function() {
+    var c = map && map.getCenter ? map.getCenter() : null;
+    return {
+      total: ALL.length,
+      shown: markers.length,
+      uncached: UNCACHED,
+      focusId: focusId,
+      focusDone: focusDone,
+      clustered: !!markerCluster,
+      renderBusy: renderBusy,
+      zoom: map ? map.getZoom() : null,
+      center: c ? [c.lat(), c.lng()] : null
+    };
+  };
 })();
 </script>
 {% else %}
 <script>
-// Google Maps API key not configured — show inline message
 document.getElementById('map').innerHTML =
   '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text2);font-size:14px;text-align:center;padding:40px">' +
   (document.documentElement.lang === 'zh'

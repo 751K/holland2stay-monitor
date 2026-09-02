@@ -609,18 +609,68 @@ window.sourceLabel = function (source) {
   return key ? key.charAt(0).toUpperCase() + key.slice(1) : '';
 };
 
-/** 平台缩写，给图表轴之类空间紧张的地方用。 */
-window.sourceShort = function (source) {
-  var key = String(source || '').toLowerCase();
-  return window.SOURCE_SHORT[key] || window.sourceLabel(source);
+/* ── 房源状态分桶 ──────────────────────────────────────────────────
+ * 判据抄自 app/jinja_filters.py 的 status_capsule。地图从前只分三档，把
+ * Reserved 和 Occupied 并进「其他」——一个可能回来、一个永远不会，正是最该
+ * 分开的一对。
+ *
+ * 与 status_capsule 有一处**故意的不同**：认不出的状态归 'other'，不归
+ * 'occupied'。徽章那边把两者都画成灰色无所谓，地图这边不行——'occupied'
+ * 在筛选栏里默认是关的，认不出的状态要是掉进去，新平台冒出的新状态会**从
+ * 地图上静默消失**，而这正是这个仓库反复出现的那个形状：把「不知道」当成
+ * 一个确定的答案。'other' 默认开着，且只在真的有这种房源时才显示出来。
+ *
+ * 放在这里而不是 map.html 里，是因为日历页迟早要用同一套颜色；上面那段
+ * sourceLabel 的注释记着三处各写一份、三份都漏掉 ourcampus 的教训。
+ */
+window.STATUS_BUCKETS = ['book', 'lottery', 'reserved', 'other', 'occupied'];
+
+window.statusBucket = function (status) {
+  var s = String(status || '').toLowerCase();
+  if (s.indexOf('book') !== -1) return 'book';
+  if (s.indexOf('lottery') !== -1) return 'lottery';
+  if (s.indexOf('reserved') !== -1 || s.indexOf('in process') !== -1 ||
+      s.indexOf('pending') !== -1) return 'reserved';
+  if (s.indexOf('occupied') !== -1 || s.indexOf('rented') !== -1 ||
+      s.indexOf('not available') !== -1) return 'occupied';
+  return 'other';
 };
 
-/* ── 引导清单的「发送测试通知」按钮 ─────────────────────────────
+/* ── 哨兵入住日 ──────────────────────────────────────────────────
+ * H2S 在「入住日未定」时发的是 2050-01-01。scraper / 存储层 / booker 都认得
+ * 它，唯独界面把它原样当日期显示：地图弹窗写「2050-01-01」，日历更离谱——
+ * 那套房会被排到 2050 年那一格里去。
  *
- * 走的是 /users/<id>/test，和「我的配置」页上那个按钮同一个端点。结果按渠道
- * 逐条展示，不合并成一句「成功/失败」——用户配了两个渠道、只有一个通的时候，
- * 一句「失败」会让他去查错的那一头。
+ * 判据与 models.is_sentinel_available_from、app/jinja_filters.available_display
+ * 保持一致：按**年份**判而不是精确匹配那一天，哨兵改成 2099 时不至于漏。
  */
+window.SENTINEL_AVAILABLE_FROM_YEAR = 2050;
+
+window.isSentinelDate = function (value) {
+  var v = String(value || '').trim();
+  var y = parseInt(v.slice(0, 4), 10);
+  return !!v && /^\d{4}/.test(v) && y >= window.SENTINEL_AVAILABLE_FROM_YEAR;
+};
+
+/* ── 同址散开 ──────────────────────────────────────────────────────
+ * 几何已经**挪到服务端**（app/services/listing_service.spread_stacked_coords）。
+ * 载荷里直接带 display_lat / display_lng / stack_n 三个字段，Web / iOS / Android
+ * 三端都只是照着画。
+ *
+ * 为什么挪走：圆环本身只有十几行，但三份实现迟早分叉，而分叉的表现是同一套房
+ * 在不同端显示在不同位置——没有任何地方会报错。
+ *
+ * 客户端剩下的责任只有一条：stack_n > 1 时必须说明位置是近似值。
+ */
+window.mapDisplayCoord = function (l) {
+  var lat = Number(l.display_lat), lng = Number(l.display_lng);
+  // 服务端没给（老版本 / locate 兜底）就退回真实坐标，而不是丢掉这个点。
+  if (!isFinite(lat) || !isFinite(lng)) {
+    lat = Number(l.lat); lng = Number(l.lng);
+  }
+  return isFinite(lat) && isFinite(lng) ? {lat: lat, lng: lng} : null;
+};
+
 document.addEventListener('click', function (e) {
   var btn = e.target.closest('[data-onb-test]');
   if (!btn) return;

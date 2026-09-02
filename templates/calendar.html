@@ -118,7 +118,8 @@ function statusClass(s) {
 function buildByDate() {
   byDate = {};
   allListings.forEach(function(l) {
-    if(!l.available_from) return;
+    // 哨兵日期会在 2050 年凭空造出一格，见 app.js isSentinelDate
+    if(!l.available_from || window.isSentinelDate(l.available_from)) return;
     if(selectedCities.size > 0 && !selectedCities.has(l.city)) return;
     var key = l.available_from.slice(0,10);
     if(!byDate[key]) byDate[key] = [];

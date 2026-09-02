@@ -115,6 +115,25 @@ def status_short(status: str) -> str:
     return status or ""
 
 
+def available_display(value: "str | None", dash: str = "—") -> str:
+    """``available_from`` 的显示值：哨兵日期一律显示成 ``dash``。
+
+    H2S 在「入住日未定」时发的是 ``2050-01-01``。scraper 认得它、存储层认得它、
+    booker 也拦得住它，唯独**界面把它原样显示成一个日期**——列表页、首页、
+    日历、地图弹窗都是。用户看到的是「2050 年可入住」，读起来像一个（荒唐的）
+    事实，而它其实是「不知道」。
+
+    判据走 models.is_sentinel_available_from，与 scraper / 存储层同一份，
+    免得哨兵换成 2099 之后界面这边又漏。
+    """
+    from models import is_sentinel_available_from
+
+    v = (value or "").strip()
+    if not v or is_sentinel_available_from(v):
+        return dash
+    return v
+
+
 class StatusCapsule:
     """一次 .lower() 同时产出标签文案 + CSS 类名，避免模板里调两次 filter。
 
@@ -236,4 +255,5 @@ def register(app: "Flask") -> None:
     app.add_template_filter(status_short,    "status_short")
     app.add_template_filter(status_capsule,  "status_capsule")
     app.add_template_filter(summarize_list,  "summarize_list")
+    app.add_template_filter(available_display, "available_display")
     app.add_template_global(status_badge,   "status_badge")

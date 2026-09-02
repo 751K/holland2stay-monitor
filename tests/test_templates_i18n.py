@@ -30,6 +30,10 @@ _BLANKED = [
     re.compile(r"<!--.*?-->", re.S),     # HTML 注释
     re.compile(r"<script\b.*?</script>", re.S | re.I),  # 见下方说明
     re.compile(r"<style\b.*?</style>", re.S | re.I),
+    # {% block extra_style %} 就是样式块，只是 <style> 标签写在 base.html 里。
+    # 里面的中文是 CSS 注释，不是界面文案；不豁免的话，给样式写中文注释会被
+    # 判成「英文界面会显示中文」——而它根本不进 DOM 文本。
+    re.compile(r"\{%-?\s*block\s+extra_style\s*-?%\}.*?\{%-?\s*endblock\s*-?%\}", re.S),
 ]
 
 #: 行内双语三元式：``{{ 'X' if lang == 'en' else '中文' }}`` / ``zh ? '中文' : 'X'``。
