@@ -671,12 +671,12 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   display:flex;align-items:flex-start;gap:10px;
   padding:14px 16px;margin-bottom:20px;
   background:var(--info-soft);border-radius:var(--radius-lg);
-  font-size:13.5px;line-height:1.5;
+  font-size:15px;line-height:1.55;
 }
-.coverage-banner > i{font-size:16px;line-height:1.4;color:var(--info);flex-shrink:0}
+.coverage-banner > i{font-size:17px;line-height:1.4;color:var(--info);flex-shrink:0}
 .coverage-body{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
 .coverage-title{
-  font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
   color:var(--text3);
 }
 /* 平台名一列、城市一列。max-content 让平台名列刚好贴合最长的那个名字，
@@ -684,22 +684,32 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
    平台名那一列撑开。 */
 .coverage-grid{
   display:grid;grid-template-columns:max-content minmax(0,1fr);
-  gap:5px 18px;align-items:baseline;
+  gap:7px 20px;align-items:baseline;
 }
+/* nowrap 只加在平台名那个 span 上，容器本身要能换行：窄屏英文下
+   「Student Experience」+「trial run — no alerts yet」在 375px 里放不下，
+   容器 nowrap 会让角标顶穿右边距。 */
 .coverage-src{
-  display:flex;align-items:center;gap:6px;
-  font-weight:600;color:var(--text1);white-space:nowrap;
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+  font-weight:600;color:var(--text1);min-width:0;
 }
+.coverage-src > span:first-child{white-space:nowrap}
 .coverage-cities{color:var(--text2);min-width:0}
-/* 影子来源的角标。描边而非实底：它是贴在平台名旁边的一个限定词，实底会和
-   平台名抢视觉权重，看起来像两个并列的标签。 */
+/* 影子来源的角标。
+   第一版做成了 --text3 + 细边框——全站最淡的一组，理由写的是「实底会和平台名抢
+   视觉权重」。那个理由对这个语义是错的：它说的是「**这个平台不会给你发通知**」，
+   本来就该抢。看不见的警示等于没有警示。
+   所以用 warning 语义色实底，并带一个 bell-slash 图标——图标让人不必读完文字就
+   知道是「没有提醒」。 */
 .coverage-shadow{
-  font-size:10px;font-weight:500;line-height:1.6;
-  padding:0 6px;border-radius:var(--radius-lg);
-  color:var(--text3);border:1px solid var(--border);
+  display:inline-flex;align-items:center;gap:4px;
+  font-size:12px;font-weight:600;line-height:1.7;
+  padding:1px 8px;border-radius:var(--radius-lg);
+  background:var(--warning-soft);color:var(--warning);
   white-space:nowrap;
 }
-.coverage-foot{font-size:12.5px;color:var(--text3)}
+.coverage-shadow i{font-size:11px;line-height:1}
+.coverage-foot{font-size:13.5px;color:var(--text3)}
 .coverage-foot a{color:var(--text2);text-decoration:underline;text-underline-offset:2px}
 .coverage-foot a:hover{color:var(--accent)}
 

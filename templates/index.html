@@ -73,7 +73,7 @@
       {% for row in coverage %}
       <div class="coverage-src">
         <span>{{ row.label }}</span>{% if row.shadow %}
-        <span class="coverage-shadow">{{ _('dash_coverage_shadow') }}</span>{% endif %}
+        <span class="coverage-shadow"><i class="bi bi-bell-slash" aria-hidden="true"></i>{{ _('dash_coverage_shadow') }}</span>{% endif %}
       </div>
       <div class="coverage-cities">{{ row.cities }}</div>
       {% endfor %}

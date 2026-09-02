@@ -326,7 +326,16 @@ class TestBannerLayout:
             assert cls in css, f"{cls} 没有样式，会渲染成裸文本"
 
     def test_narrow_screens_stack(self):
-        """窄屏必须把 max-content 那一列拆开，否则城市被挤成一条缝。"""
+        """窄屏必须把 max-content 那一列拆开，否则城市被挤成一条缝。
+
+        断言按**内容**判而不是按距离：上一版写的是「从 .coverage-grid 往后 1200
+        字符内出现 max-width:640px」，中间插一段注释就会失败——那验的是源码排版，
+        不是行为。
+        """
+        import re
+
         css = (ROOT / "static" / "design.css").read_text(encoding="utf-8")
-        i = css.index(".coverage-grid")
-        assert "max-width:640px" in css[i:i + 1200]
+        blocks = re.findall(r"@media\s*\(max-width:\s*640px\)\s*\{(.*?)\n\}",
+                            css, re.S)
+        assert any(".coverage-grid" in b and "grid-template-columns:1fr" in b
+                   for b in blocks), "窄屏没有把平台名与城市拆成上下两行"
