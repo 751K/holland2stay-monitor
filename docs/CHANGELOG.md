@@ -1,5 +1,261 @@
 # Changelog
 
+## v1.34.0 (2026-09-02)
+
+一次集中的缺陷清理：**二十一处修复，零新功能**，横跨主循环、存储、抓取、预订、
+通知与 Web 六层。其中会造成静默数据损坏或静默漏推的十一处，外部可触发的四处。
+
+这些问题都**不会报错**。它们的共同形状只有三种，值得先说，因为下一个多半还是它们：
+
+**「认不出」被当成了一个确定的答案。** magis 认不出城市 → 当成「哪个城市都算」；
+xior 认不出页面结构 → 当成「一套都订不了」；FCM 拿散文当错误码 → 当成「这个 token
+没问题」。三处都不是「不知道」，而是替上游做了一个它没说过的判断。
+
+**爆炸半径没有边界。** 一个 scraper 的重复 id 让**所有平台**整轮回滚；一个用户的
+构造异常打断**其余所有用户**的预订结果处理；一台设备的异常丢掉**整批** Android
+推送；热重载构造失败让**所有渠道**永久哑掉。
+
+**同一段逻辑写了两遍，只改了一处。** H2S 的隔离分支照抄了跨源隔离却漏掉三件；
+`/login` 用 `sleep` 而同一个限流器在 `api_auth` 里早就是 429；入住日判据在 booker
+里抄了两份，两份都缺哨兵检查。
+
+### 安全
+
+* **`/api/v1/devices/test` 是一次全站广播**（[5a27e8f]）
+
+    测试通知写的是 `user_id=""`，而那是「系统通知」——`get_notifications` 的过滤是
+    `user_id = ? OR user_id = ''`，也就是说**每个用户（含访客）都看得到**。而这个
+    接口的 title/body 完全由调用方控制、没有任何限流：任何一个拿得到 app token 的
+    人都能借它向全站广播自己写的文案。
+
+    改成写给发起人自己。admin token 没有 `user_id`，退到一个固定的私有作用域——
+    有一条测试专门守「哪怕调用方漏传也不能写成空串」。
+
+* **`/system` 每三十秒开一次 admin 窗口**（[5a27e8f]）
+
+    原实现是 `load_dotenv(override=True)` → 读 → `os.environ.clear()` 再还原。
+    gunicorn 是单进程八线程，`os.environ` 全进程共享：`clear()` 到 `update()` 之间
+    那一瞬 `WEB_PASSWORD` 不存在 → `auth_enabled()` 返回 False →
+    **`is_admin()` 对所有人返回 True**（它第一行就是「鉴权没开就当 admin」）。
+    这一页每三十秒自动整页刷新，等于每三十秒开一次窗，任何并发请求都可能落在里面。
+
+    改用 `dotenv_values()` 读成 dict，完全不碰 `os.environ`。
+
+* **反代后所有 IP 限流退化成一个全局桶**（[5a27e8f]）
+
+    全库没有 ProxyFix，而十一处限流靠 `request.remote_addr`——Caddy 后面它恒为代理
+    地址。后果是双向的：**防不住**（攻击者换多少 IP 都是同一个计数），也**能被打**
+    （三次注册就能把全站的注册桶打满一小时）。
+
+    加 ProxyFix，但**默认关闭**（`TRUSTED_PROXY_HOPS=0`）：直接暴露端口的部署里开它
+    等于让客户端自报 IP。`x_for` 只信任最后一跳，前面的部分客户端可以伪造。生产已
+    设为 1 并实测：`X-Forwarded-For: 1.2.3.4, 203.0.113.77` → `remote_addr` 取到
+    `203.0.113.77`，伪造的前缀被忽略。
+
+    顺带把 `/login` 的限流从 `time.sleep(delay)` 改成返回 429。sleep 是拿自己的工作
+    线程去关自己：gunicorn 只有八条，八个并发失败登录就能占满整个 web，而攻击者花的
+    是一条 TCP 连接。同一个限流器在 `app/api_auth.py` 里早就是「返回 429」的用法。
+
+* **`/login` 对未知用户名静默自动注册**（[5a27e8f]）
+
+    绕过 `terms_accepted` 与 64 字符截断，而且构成**用户枚举侧信道**：名字存在 →
+    「密码错误」，不存在 → 直接登录成功，一次 POST 就能判断任意用户名是否注册过。
+
+    `terms_accepted` 这条补不出来——它是同意条款的凭证，而登录表单上根本没有那个
+    勾选框，补校验只能替用户默认同意。所以直接移除自动注册：注册走 `register_user`
+    （同一页面上就有表单），那里校验齐全。失败文案与「密码错误」一致。
+
+### 修复：静默数据损坏
+
+* **重放时间窗退化成「当天 UTC 零点起」**（[3f2868d]）
+
+    四条查询拿 `first_seen` / `changed_at` 跟 `datetime('now','-N minutes')` 比
+    **字符串**。写入端 `_now_iso()` 产出带时区的 ISO
+    （`2026-09-02T10:30:06.916515+00:00`），SQLite 那个函数返回空格分隔的
+    `2026-09-02 09:00:06`——第 10 位 `T`(0x54) 对空格(0x20)，**同一 UTC 日期内恒为
+    真**。实测九小时前的行仍判为窗口内，跨天才失效。
+
+    后果不是少推是**多推**：投递失败后的重放会把最多一整天的旧事件重新捞出来。
+    配套的 `retire_stale_pending` 用的是同一比较的补集，于是当天的积压永远归档不掉。
+
+    改用 `julianday`。`mstorage/_map_calendar.py` 对 `last_seen` 早就踩过同一个坑并
+    改用了 julianday，注释里连字符编码都写了——**同一个 bug 在同一个仓库里出现了第
+    二次**，而那几处没跟着改。
+
+* **`.env` 丢失时静默换一把加密密钥**（[3f2868d]）
+
+    原实现「没有密钥就生成一把」，不看库里有没有已加密的数据。生产实测
+    `user_configs.telegram_token` 有十一行 `$F$` 密文——`.env` 一丢，这十一行当场变成
+    永远解不开的乱码，而且要等到有人去读某个用户的 token 才会发现。
+
+    生成前先查库，有密文就拒绝启动；库读不出来时按「有」处理（fail-safe）。
+
+    另一半是跨进程竞争：`threading.Lock` 挡不住 supervisord 起的 `monitor` 与
+    `gunicorn` 两个进程，冷启动时各生成一把、各写 `.env`，后写的赢而先写的那个进程
+    继续用自己内存里那把加密。改成 fcntl 文件锁，且**拿到锁之后重读 `.env`**——
+    `os.environ` 是进程启动快照，另一个进程赢了的话只能从文件里看到。
+
+* **prewarm 撞 403 时 `NameError`**（[4705207]）
+
+    `_submit_bookings` 里写的是 `_mark_h2s_login_blocked(e, storage)`，而函数没有这个
+    参数、模块也没有同名全局。分支一执行就 `NameError`：异常穿透 `run_once`，**本轮
+    通知全丢**，而抑制窗口一秒都没开。
+
+    它长期没暴露，是因为紧挨着的注释说的正是「这条分支从未执行过」——原先 except 的
+    是一个没人 raise 的 `BookingBlockedError`。**修好类型之后它才第一次真的跑到这里，
+    NameError 就在那儿等着**：一个 bug 被另一个 bug 挡住了。
+
+### 修复：爆炸半径
+
+* **一条重复 id 让所有平台整轮丢失**（[2195920]）
+
+    magis 的城市分派写成 `if item.city and item.city != task.city_display`，把「城市
+    认不出」当成了「哪个城市都算」，于是同一条房源被五个城市 task 各收一次。而
+    `diff()` 的 `existing` 是循环**前**的快照，第二条同 id 查不到自己刚插的行，再走
+    一次 INSERT → UNIQUE 冲突 → 整个事务回滚。实测复现：一条这样的房源就让本轮所有
+    平台都不入库、不通知，连正常抓到的那些也一起没了。
+
+    根因在 magis（改成严格相等，Plaza / Student Experience 本来就是这么写的），
+    但**爆炸半径不该由调用方来管**：`diff()` 现在按 id 去重，并留 WARNING 让根因仍
+    然看得见。
+
+* **xior 的权威闸门没有结构探针**（[2195920]）
+
+    `parse_bookable_floorplan_ids` 在 floorplans.aspx 改版时返回**空集**而不是
+    `None`。调用方把空集读作「查过了，一个都订不了」——全部真房源判 Occupied 且标记
+    为已核实。没有异常、没有告警，表现就是「今天没房」。`None` 才是设计好的
+    fail-open 信号，但解析器从来不返回它。
+
+    判据定在「切不出任何 tile」而不是「解析出 0 个可订 id」：真的一套都订不完时页面
+    仍然有 tile（按钮是 contactButton / Rented Out），那种 0 是真实的，必须保留。
+
+* **一行畸形数据让整个 Plaza 每轮失败**（[2195920]）
+
+    `netRent="n.v.t."`（荷兰语「不适用」）让裸 `float()` 抛 ValueError，穿过
+    `_parse_all`、`scrape`，被 dispatcher 记成整源失败。加安全转换，并给每行套一层
+    try——上游是自由文本，某条冒出意料之外的类型完全可能。
+
+* **详情补齐吞掉 `BlockedError`**（[2195920]）
+
+    `except Exception` 接住它当成「这一条不巧失败了」，continue 接着打下一条——每次
+    失败都可能触发一次浏览器重建加换 IP，一个六十条的批次就是六十次。而被挡是「对方
+    现在不想服务这个出口」，接着打只会让 WAF 更热。加独立分支，整批收手。
+
+* **渲染器卡死会挂住整个监控**（[2195920]）
+
+    `page.evaluate` 在 Playwright 里**根本没有 timeout 参数**（它等的是 JS promise，
+    `set_default_timeout` 也管不到），`page.content()` 同样；而 monitor 侧的
+    `await run_in_executor` 也没有上限。一个 wedged 页面 → 该 source 的线程永远停住
+    → `run_once` 不返回 → `last_round_at` 不断变老，与「进程挂了」无从区分。
+
+    两层兜底：页面级默认超时，以及 monitor 侧的墙钟超时。超时**救不回那条线程**
+    （future 取消不了底层调用），但能让本轮其余 source 走完，并把这个 source 交给
+    既有的隔离与熔断路径。新增 `BROWSER_PAGE_TIMEOUT_MS` /
+    `SOURCE_DISPATCH_TIMEOUT_SEC` 两个环境变量。
+
+* **Holland2Stay 完全不参与代理冷却与自适应节奏**（[4705207]）
+
+    H2S 走独立熔断路径，那段是 2026-08-17 把它从「一票否决整轮」改成「只隔离」时
+    照抄跨源隔离写的，只搬了隔离那一半，漏了三件：失败时不上报代理故障、429 时不
+    penalize、成功时不 relax。
+
+    代理那件尤其要命：H2S 是**最不容易失败的 source**（浏览器建在好线路上、会话缓存
+    两小时），它每成功一轮整轮就不算全灭，外层的 `except ProxyError` 就够不着；它
+    自己失败时又不上报——环就闭合了。`_dispatch_isolated` 的注释早就描述过这个死锁，
+    只是当时没意识到 H2S 自己也在环里。pacing 那件的后果是 H2S 的倍率恒为 1.0。
+
+### 修复：预订
+
+* **占房成立之后失败，用户被告知「预订失败」**（[5dc7954]）
+
+    `create_booking` 一返回，这套房就被账号占着了。此后任一步失败，cart/order 号是
+    局部变量、随异常一起丢掉，外层只报「预订失败」。用户以为没抢到，实际房在自己名
+    下挂着——既不知道去哪付款，也不知道要去取消。
+
+    新增 `held_incomplete` 阶段，把凭据带到通知文案里，明写「房占在你的账号下，
+    不是没抢到」。**刻意不自动回滚**：取消不可逆，而失败可能只是支付链接生成超时
+    （房还好好占着）。有一条测试钉住这个决定。
+
+* **取消预留会删掉用户手动订的房**（[5dc7954]）
+
+    原判据只看 status，会把账号下**全部**待处理预留一起取消——为了抢另一套，把用户
+    自己看中的那套删掉，不可逆。
+
+    改成只取消自己记过的 SKU（占房成立时记，存 meta，跨重启保留）。没有记录时一笔
+    都不取消，并 WARNING 说明跳过了几笔——静默跳过会让人以为「取消坏了」，进而把
+    判据放宽回原样。
+
+* **哨兵日期 `01-01-2050` 会被带去占房**（[5dc7954]）
+
+    `available_from` 过了哨兵检查，`contract_start_date` 没过——两者来自**同一个**
+    `next_contract_startdate`。而 booker 优先用后者，它那道 `>= today` 守卫对 2050
+    恰好放行：那道防的是「过期日期」，不是「假日期」。Reserved 里约一半是哨兵值。
+
+    修的过程中发现这段判据在 booker 里**抄了两份**，两份都只有 `>= today` 那一道，
+    而后者直接读原始字段、连 scraper 那道过滤都绕过。抽成一个函数两处共用，并加了
+    一条测试禁止再抄第三份。
+
+* **`RentCafeSession` 构造在 try 之外**（[5dc7954]）
+
+    构造一抛就穿过 `run_in_executor` 的 future，在 `_process_booking_results` 的
+    `await future` 处炸掉——那个循环没有 try，于是**后续所有用户**的预订结果都不再
+    处理：通知不发、重试队列不更新、屏蔽聚合不发。目前只有 H2S 开了自动预订，
+    Xior / OurDomain 一开即命中。构造移进 try，同时给那个循环加逐用户兜底。
+
+### 修复：通知
+
+* **一次 OAuth 失败丢掉整批 Android 推送**（[5bfa70b]）
+
+    三件叠在一起：取 token 在 try 之外；它在缓存过期时会走**同步** httpx 换 token，
+    直接调会把整个事件循环停在那一行（包括其余渠道的推送与 web 的 SSE）；而
+    `send_many` 的 `gather` 没有 `return_exceptions`，任何一台设备抛异常都会让整批
+    结果一起丢——包括那些已经发成功的。三处一并修好。
+
+* **失效 token 永远清理不掉**（[5bfa70b]）
+
+    `device_dead` 拿 `error.message` 当判据——那是给人看的散文（「The registration
+    token is not a valid FCM registration token」），和 `unregistered` 之类的常量永远
+    不相等，于是这个判定**从来没有命中过**，每轮都对着墓碑重发一次。改取
+    `details[].errorCode`，其次 `error.status`，message 只留给日志。
+
+* **返回 False 也重试**（[5bfa70b]）
+
+    `_send` 返回 False 至少有三种含义，只有一种重试才有意义，而返回值里分不出来：
+    配置缺失（重试无意义）、**配额拒发**（`ResendNotifier` 拒发时会记一笔，重试等于
+    同一条消息记两笔，把面板的配额统计做成假数据）、网络错误（渠道内部已吞掉异常，
+    再试也不知道上次到底送没送到）。改成只在传输层异常时重试。
+
+* **热重载失败后所有渠道永久哑掉**（[5bfa70b]）
+
+    顺序是先 close 旧 notifier 再构造新的。构造一抛错，except 打印「继续使用旧配置」
+    ——而旧的已经关了，于是所有渠道哑到进程重启为止，日志上还写着一切照旧。改成先
+    构造成功再关旧的。
+
+### 测试
+
+这一轮里有**四条测试是绿的，因为它们把 bug 钉成了期望行为**。单独记一下，因为
+「全量通过」在这几处完全没有信息量：
+
+- FCM 的假响应只造了 `message` 字段（真实响应的机器判据在 `status` /
+  `details[].errorCode` 里），用例便拿 `message="unregistered"` 去比；
+- 重放窗口的用例用 `datetime('now','-3 hours')` 构造数据，那是 SQLite 自己的格式，
+  和查询里的格式一致，字符串比较恰好正确；
+- `MultiNotifier` 的用例断言 `len(d1.sent) == 2`，注释写着「d1 fails → retried
+  once」；
+- 跨源隔离的接线守卫用 `src.index(...)` 取**第一处**，而那句日志有两份，命中的永远
+  是已经正确的那一份。
+
+另有两组守卫是「找到一处合格的就通过」，同样漏掉了第二份实现。全部改成**逐处检查**，
+并各加一条「至少有两处」把前提本身钉住——哪天合并成一处，那条会红。
+
+安全那四条原先**一条测试都没守住**，新增 `tests/test_security_regressions.py`，
+其中一条不测修复本身，而是钉住「`WEB_PASSWORD` 一消失所有人就是 admin」这个前提。
+
+全套 3982 → **4062**。每一处修复都做了变异验证（把修复撤掉，确认对应测试会红）；
+过程中发现并修正了三条自己写虚的用例：grep 源码时没剥注释、用一个已被优雅处理的
+字段当畸形输入、以及验证「不阻塞事件循环」时在最后把心跳任务跑完了——两种情况都是
+二十次，测不出差别。
+
 ## v1.33.0 (2026-09-02)
 
 本版本接入第七个平台 Plaza。与前六个来源不同，它不是自营运营商而是**平台**——多家
@@ -6209,3 +6465,9 @@ web.py 长期积累至 1,200 行，涵盖路由、鉴权、表单、i18n、进�
 [a24889a]: https://github.com/751K/holland2stay-monitor/commit/a24889a
 [c00d5e2]: https://github.com/751K/holland2stay-monitor/commit/c00d5e2
 [c3c29ee]: https://github.com/751K/holland2stay-monitor/commit/c3c29ee
+[2195920]: https://github.com/751K/holland2stay-monitor/commit/2195920
+[3f2868d]: https://github.com/751K/holland2stay-monitor/commit/3f2868d
+[4705207]: https://github.com/751K/holland2stay-monitor/commit/4705207
+[5a27e8f]: https://github.com/751K/holland2stay-monitor/commit/5a27e8f
+[5bfa70b]: https://github.com/751K/holland2stay-monitor/commit/5bfa70b
+[5dc7954]: https://github.com/751K/holland2stay-monitor/commit/5dc7954
