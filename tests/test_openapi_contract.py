@@ -20,6 +20,7 @@ EXPECTED_PATH_METHODS = {
     "/listings": {"get"},
     "/listings/{listing_id}": {"get"},
     "/map": {"get"},
+    "/map/locate": {"get"},
     "/calendar": {"get"},
     "/notifications": {"get"},
     "/notifications/read": {"post"},

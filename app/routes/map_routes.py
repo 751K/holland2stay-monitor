@@ -4,6 +4,7 @@
 挂载的 endpoint
 - GET  /map                      → map_view
 - GET  /api/map                  → api_map（纯只读，仅返回已缓存坐标）
+- GET  /api/map/locate           → api_map_locate（按 id 定位，绕过窗口与筛选）
 - POST /api/map/geocode          → api_map_geocode（手动启动）
 - GET  /api/map/geocode/status   → api_map_geocode_status
 - GET  /api/neighborhoods        → api_neighborhoods
@@ -22,7 +23,7 @@ from flask import Flask, jsonify, render_template, request
 from app.auth import admin_api_required, api_login_required, login_required
 from app.csrf import csrf_required
 from app.db import storage
-from app.services.listing_service import get_map_payload
+from app.services.listing_service import get_map_payload, locate_map_listing
 from mcore.geocode import geocode_addresses
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,32 @@ def map_view() -> str:
     )
 
 
+def _current_map_user():
+    """当前登录用户的 UserConfig；admin / guest / 匿名返回 None。
+
+    地图此前一律走 ``get_map_payload()`` 不带 user，于是用户在设置里配好的
+    listing_filter 对地图完全不生效——列表页按他的条件筛过，地图上却是全量。
+    ``/api/v1/map`` 早就按角色区分了，这里跟上。
+
+    算不出来时返回 None（= 不额外筛）而不是抛：地图少一层筛选是退化，
+    整页 500 才是故障。
+    """
+    from app.auth import current_user_id, is_user
+
+    if not is_user():
+        return None
+    uid = current_user_id()
+    if not uid:
+        return None
+    try:
+        from users import load_users
+
+        return next((u for u in load_users() if u.id == uid), None)
+    except Exception:
+        logger.warning("地图取用户筛选失败 user_id=%s", uid, exc_info=True)
+        return None
+
+
 @api_login_required
 def api_map():
     """
@@ -72,7 +99,19 @@ def api_map():
     未缓存地址的房源不包含 lat/lng，前端不渲染标记。
     需 geocode 时由 admin 通过 POST /api/map/geocode 手动启动。
     """
-    return jsonify(get_map_payload())
+    return jsonify(get_map_payload(_current_map_user()))
+
+
+@api_login_required
+def api_map_locate():
+    """按 id 定位一套房源，绕过新鲜度窗口与用户筛选。
+
+    供 ``/map?focus=<id>`` 在「这个 id 不在已渲染集合里」时兜底。
+    """
+    listing_id = (request.args.get("id") or "").strip()
+    if not listing_id:
+        return jsonify({"ok": False, "reason": "not_found"}), 400
+    return jsonify(locate_map_listing(listing_id))
 
 
 @admin_api_required
@@ -138,6 +177,7 @@ def api_neighborhoods():
 def register(app: Flask) -> None:
     app.add_url_rule("/map",                    endpoint="map_view",               view_func=map_view,               methods=["GET"])
     app.add_url_rule("/api/map",                endpoint="api_map",                view_func=api_map,                methods=["GET"])
+    app.add_url_rule("/api/map/locate",         endpoint="api_map_locate",         view_func=api_map_locate,         methods=["GET"])
     app.add_url_rule("/api/map/geocode",        endpoint="api_map_geocode",        view_func=api_map_geocode,        methods=["POST"])
     app.add_url_rule("/api/map/geocode/status", endpoint="api_map_geocode_status", view_func=api_map_geocode_status, methods=["GET"])
     app.add_url_rule("/api/neighborhoods",      endpoint="api_neighborhoods",      view_func=api_neighborhoods,      methods=["GET"])

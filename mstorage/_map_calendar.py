@@ -46,6 +46,49 @@ _CITY_FORMAL: dict[str, str] = {
 }
 
 
+#: 地图条目用到的列。两处查询（全量 / 按 id）共用，避免改一处漏一处。
+_MAP_COLUMNS = "id, name, status, price_raw, available_from, url, city, source, features"
+
+
+def row_to_map_entry(r) -> dict:
+    """把一行 listings 转成地图条目。
+
+    ``address`` 的推导只有这一份：``get_map_listings`` 与
+    ``get_map_listing_by_id`` 都走它。地址是 geocode 缓存的**主键**，两处若推
+    出不同的字符串，深链就会查不到那套房已经缓存好的坐标——而且不报错。
+    """
+    try:
+        feats = json.loads(r["features"] or "[]")
+    except (json.JSONDecodeError, TypeError):
+        feats = []
+    feat_map = parse_features_list(feats)
+    city = r["city"] or ""
+    city_full = _CITY_FORMAL.get(city, city)
+    # 优先用 features 里的 Address:（OurDomain 写入建筑街道地址，
+    # 因为 unit 名是 "Diemen #6045" 这种内部编号，geocode 不到）。
+    # H2S 不写 Address feature，回退到 name+city 老路径（name 本身
+    # 含街道地址，例如 "Kastanjelaan 1-718, Eindhoven"）。
+    street = feat_map.get("address", "").strip()
+    if street:
+        address = ", ".join(filter(None, [street, "Netherlands"]))
+    else:
+        address = ", ".join(filter(None, [r["name"], city_full, "Netherlands"]))
+    return {
+        "id": r["id"],
+        "name": r["name"],
+        "status": r["status"],
+        "price_raw": r["price_raw"] or "",
+        "available_from": r["available_from"] or "",
+        "url": r["url"] or "",
+        "city": r["city"] or "",
+        "source": r["source"] or "holland2stay",
+        "neighborhood": feat_map.get("neighborhood", ""),
+        "building": feat_map.get("building", ""),
+        "area": feat_map.get("area", ""),
+        "address": address,
+    }
+
+
 class MapCalendarOps:
     """依赖 self._conn。"""
 
@@ -105,7 +148,7 @@ class MapCalendarOps:
         days = _map_max_age_days() if max_age_days is None else max(0, int(max_age_days))
         if days:
             rows = self._conn.execute(
-                """SELECT id, name, status, price_raw, available_from, url, city, source, features
+                f"""SELECT {_MAP_COLUMNS}
                    FROM listings
                    WHERE julianday(last_seen) >= julianday('now') - ?
                    ORDER BY city, name LIMIT 2000""",
@@ -113,39 +156,19 @@ class MapCalendarOps:
             ).fetchall()
         else:
             rows = self._conn.execute(
-                """SELECT id, name, status, price_raw, available_from, url, city, source, features
+                f"""SELECT {_MAP_COLUMNS}
                    FROM listings ORDER BY city, name LIMIT 2000"""
             ).fetchall()
-        results: list[dict] = []
-        for r in rows:
-            try:
-                feats = json.loads(r["features"] or "[]")
-            except (json.JSONDecodeError, TypeError):
-                feats = []
-            feat_map = parse_features_list(feats)
-            city = r["city"] or ""
-            city_full = _CITY_FORMAL.get(city, city)
-            # 优先用 features 里的 Address:（OurDomain 写入建筑街道地址，
-            # 因为 unit 名是 "Diemen #6045" 这种内部编号，geocode 不到）。
-            # H2S 不写 Address feature，回退到 name+city 老路径（name 本身
-            # 含街道地址，例如 "Kastanjelaan 1-718, Eindhoven"）。
-            street = feat_map.get("address", "").strip()
-            if street:
-                address = ", ".join(filter(None, [street, "Netherlands"]))
-            else:
-                address = ", ".join(filter(None, [r["name"], city_full, "Netherlands"]))
-            results.append({
-                "id": r["id"],
-                "name": r["name"],
-                "status": r["status"],
-                "price_raw": r["price_raw"] or "",
-                "available_from": r["available_from"] or "",
-                "url": r["url"] or "",
-                "city": r["city"] or "",
-                "source": r["source"] or "holland2stay",
-                "neighborhood": feat_map.get("neighborhood", ""),
-                "building": feat_map.get("building", ""),
-                "area": feat_map.get("area", ""),
-                "address": address,
-            })
-        return results
+        return [row_to_map_entry(r) for r in rows]
+
+    def get_map_listing_by_id(self, listing_id: str) -> dict | None:
+        """按 id 取单条地图条目，**不带新鲜度过滤**。
+
+        深链（``/map?focus=<id>``）要能定位到已经下架的房源——用户是从房源列表
+        点过来的，那一套确实存在，只是过了 14 天窗口。这里返回 None 只意味着
+        「库里没有这个 id」，与「有但没坐标」是两件事，由调用方分别处置。
+        """
+        row = self._conn.execute(
+            f"SELECT {_MAP_COLUMNS} FROM listings WHERE id = ?", (listing_id,)
+        ).fetchone()
+        return row_to_map_entry(row) if row else None

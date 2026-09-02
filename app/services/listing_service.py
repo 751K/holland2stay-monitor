@@ -7,6 +7,8 @@ own auth and response envelopes while sharing the same listing behavior.
 """
 from __future__ import annotations
 
+import math
+
 import json
 import logging
 import re
@@ -504,7 +506,90 @@ def get_map_payload(user: UserConfig | None = None) -> dict[str, Any]:
                 results.append({**listing, "lat": lat, "lng": lng})
             else:
                 uncached += 1
-    return {"listings": results, "uncached": uncached}
+    return {"listings": spread_stacked_coords(results), "uncached": uncached}
+
+
+#: 同址散开的基准半径（纬度度数）。0.00012° ≈ 13 m。
+#:
+#: 一栋楼的每个单元共用同一个街道地址，geocode 出来是**同一个坐标**。生产实测
+#: 235 条里有 66 条（28%）压在别人身上，最多的一处十套叠一个点。这种点在 Web 上
+#: 低于 zoom 17 是个永远点不开的聚合泡，高过 zoom 17 则是十个圆点画在同一个像素
+#: 上；在 iOS 上更糟——网格聚类对**完全重合**的点在任何 cell 大小下都归一格，点
+#: 击展开又会被 boundingRegion 的 minSpan 兜成固定视野，于是那十套一套都碰不到。
+#:
+#: 摆成一圈解决。半径随数量增长，让相邻两点的弧长大致恒定，十套和三套看起来一样
+#: 疏；排序用 id，同一套房每次刷新都落在圈上的同一个位置，不会跳。
+#:
+#: **放在服务端而不是各端各写一遍**：几何本身只有十几行，但 Web/iOS/Android 三份
+#: 实现迟早分叉，而分叉的表现是同一套房在不同端显示在不同位置——没有任何地方会
+#: 报错。客户端只需要认 display_lat / display_lng / stack_n 三个字段。
+MAP_SPREAD_BASE_DEG = 0.00012
+
+
+def spread_stacked_coords(rows: list[dict]) -> list[dict]:
+    """就地写入 ``display_lat`` / ``display_lng`` / ``stack_n``，返回同一个列表。
+
+    位置因此是**近似值**，客户端在 ``stack_n > 1`` 时必须说明这一点——不说的话
+    用户会以为图钉就是门牌号。
+    """
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for row in rows:
+        try:
+            lat, lng = float(row["lat"]), float(row["lng"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        groups.setdefault((f"{lat:.6f}", f"{lng:.6f}"), []).append(row)
+
+    for group in groups.values():
+        n = len(group)
+        for row in group:
+            row["stack_n"] = n
+        if n == 1:
+            group[0]["display_lat"] = float(group[0]["lat"])
+            group[0]["display_lng"] = float(group[0]["lng"])
+            continue
+        group.sort(key=lambda r: str(r.get("id", "")))
+        lat0, lng0 = float(group[0]["lat"]), float(group[0]["lng"])
+        radius = MAP_SPREAD_BASE_DEG * max(1.0, n / 6.0)
+        # 经度一度的实际距离随纬度收缩；不补这一下，圈在图上会被压成椭圆。
+        lng_scale = 1.0 / max(0.2, math.cos(math.radians(lat0)))
+        for i, row in enumerate(group):
+            angle = 2 * math.pi * i / n - math.pi / 2
+            row["display_lat"] = lat0 + radius * math.sin(angle)
+            row["display_lng"] = lng0 + radius * math.cos(angle) * lng_scale
+    return rows
+
+
+def locate_map_listing(listing_id: str) -> dict[str, Any]:
+    """按 id 定位单条房源，**绕过新鲜度窗口与用户筛选**。
+
+    ``/map?focus=<id>`` 用它兜底。前端只在「这个 id 不在已渲染的集合里」时才
+    调用，所以这里的任务不是再判一次可见性，而是把「为什么看不到」分成两种
+    可以分别应对的答案：
+
+    - ``not_found``：库里根本没有这个 id（链接过期 / 手改的 URL）
+    - ``no_coords``：房源在，但地址还没解析出坐标——地图上确实没有这个点
+    - 成功：房源在、坐标也在，只是被 14 天窗口或用户筛选挡在视图之外；
+      前端据此单独落一个标记并说明情况
+
+    三者绝不能合并成一句「没找到」。合并之后，「这套下架了」和「你的筛选把它
+    藏了」在界面上长得一模一样，而用户能做的事完全不同。
+    """
+    with storage_ctx() as st:
+        entry = st.get_map_listing_by_id(listing_id)
+        if entry is None:
+            return {"ok": False, "reason": "not_found"}
+        cached = st.get_cached_coords(entry["address"])
+        if not cached:
+            return {"ok": False, "reason": "no_coords", "listing": entry}
+        lat, lng = cached
+        # 这一条是视图之外单独落的一枚标记，同址的其余几套并不在图上，
+        # 没有可散开的对象——给真实坐标，并显式带上 stack_n=1，免得客户端
+        # 因为字段缺失去猜。
+        return {"ok": True, "listing": {
+            **entry, "lat": lat, "lng": lng,
+            "display_lat": lat, "display_lng": lng, "stack_n": 1,
+        }}
 
 
 def get_calendar_payload(user: UserConfig | None = None) -> dict[str, Any]:
