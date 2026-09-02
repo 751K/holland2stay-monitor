@@ -35,6 +35,17 @@
             parallelizable = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "071AE7CD17E459F6973B8ABD"
+               BuildableName = "FlatRadarTests.xctest"
+               BlueprintName = "FlatRadarTests"
+               ReferencedContainer = "container:FlatRadar.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "FC5588722FBDB6A300855C9D"
                BuildableName = "FlatRadarUITests.xctest"
                BlueprintName = "FlatRadarUITests"

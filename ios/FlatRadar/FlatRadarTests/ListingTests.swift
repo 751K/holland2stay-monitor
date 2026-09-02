@@ -49,58 +49,79 @@ final class ListingTests: XCTestCase {
         XCTAssertEqual(listing.city, "")
     }
 
-    // MARK: - displayPrice
+    // MARK: - 展示用文案
+    //
+    // 这一组用例长期编译不过：断言里的 displayPrice / displayArea /
+    // displayAvailableFrom 在 Listing 上根本不存在（真实名字是 priceRaw /
+    // areaText / availableShortText），而**整个测试 target 编译不过 = 一条
+    // iOS 测试都没在跑**。改名那次没人发现，正是因为它早就是红的。
 
-    func test_displayPrice_uses_priceRaw() throws {
+    func test_priceRaw_is_kept_verbatim() throws {
         let json = """
         {"id": "1", "name": "N", "status": "S", "price_raw": "€1200/mo"}
         """
         let listing = try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
-        XCTAssertEqual(listing.displayPrice, "€1200/mo")
+        XCTAssertEqual(listing.priceRaw, "€1200/mo")
     }
 
-    func test_displayPrice_uses_priceValue_fallback() throws {
+    func test_priceValue_is_decoded() throws {
         let json = """
         {"id": "1", "name": "N", "status": "S", "price_value": 850.0}
         """
         let listing = try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
-        XCTAssertTrue(listing.displayPrice.contains("850"))
+        XCTAssertEqual(listing.priceValue, 850.0)
     }
 
-    // MARK: - displayArea
-
-    func test_displayArea_from_featureMap() throws {
+    func test_areaText_from_featureMap() throws {
         let json = """
         {"id": "1", "name": "N", "status": "S", "feature_map": {"area": "45 m²"}}
         """
         let listing = try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
-        XCTAssertEqual(listing.displayArea, "45 m²")
+        XCTAssertEqual(listing.areaText, "45 m²")
     }
 
-    func test_displayArea_missing_returns_dash() throws {
+    func test_areaText_missing_is_nil() throws {
         let json = """
         {"id": "1", "name": "N", "status": "S", "feature_map": {}}
         """
         let listing = try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
-        XCTAssertEqual(listing.displayArea, "—")
+        XCTAssertNil(listing.areaText)
     }
 
-    // MARK: - displayAvailableFrom
-
-    func test_displayAvailableFrom_shortens_date() throws {
+    func test_availableShortText_shortens_date() throws {
         let json = """
         {"id": "1", "name": "N", "status": "S", "available_from": "2026-06-15 00:00:00"}
         """
         let listing = try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
-        XCTAssertEqual(listing.displayAvailableFrom, "06-15")
+        XCTAssertNotNil(listing.availableShortText)
+        XCTAssertTrue(listing.availableShortText?.contains("15") == true)
     }
 
-    func test_displayAvailableFrom_missing_returns_dash() throws {
+    func test_availableShortText_missing_is_nil() throws {
         let json = """
         {"id": "1", "name": "N", "status": "S"}
         """
         let listing = try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
-        XCTAssertEqual(listing.displayAvailableFrom, "—")
+        XCTAssertNil(listing.availableShortText)
+    }
+
+    func test_sentinel_available_from_is_not_a_real_date() throws {
+        // 与 ServerTime.isSentinelDate / 后端 is_sentinel_available_from 同判据。
+        let json = """
+        {"id": "1", "name": "N", "status": "S", "available_from": "2050-01-01"}
+        """
+        let listing = try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
+        XCTAssertFalse(listing.hasRealAvailableDate)
+        XCTAssertNil(listing.availableShortText)
+    }
+
+    func test_sentinel_judgement_follows_the_year_not_one_exact_day() throws {
+        // 哨兵换成 2099 时，写死 hasPrefix("2050") 的实现会漏。
+        let json = """
+        {"id": "1", "name": "N", "status": "S", "available_from": "2099-03-04"}
+        """
+        let listing = try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
+        XCTAssertFalse(listing.hasRealAvailableDate)
     }
 
     // MARK: - statusKind
@@ -131,16 +152,26 @@ final class ListingTests: XCTestCase {
 
     // MARK: - Hashable / Equatable
 
-    func test_equality_by_id() {
-        let a = Listing(id: "x", name: "A", status: "S", features: [], featureMap: [:], url: "", city: "")
-        let b = Listing(id: "x", name: "B", status: "T", features: [], featureMap: [:], url: "", city: "")
+    /// Listing 自定义了 `init(from decoder:)`，因此**没有** memberwise init——
+    /// 原用例直接 `Listing(id:name:...)` 构造，同样是编译不过的一条。
+    private func makeListing(id: String, name: String, status: String) throws -> Listing {
+        let json = """
+        {"id": "\(id)", "name": "\(name)", "status": "\(status)",
+         "features": [], "feature_map": {}, "url": "", "city": ""}
+        """
+        return try JSONDecoder().decode(Listing.self, from: Data(json.utf8))
+    }
+
+    func test_equality_by_id() throws {
+        let a = try makeListing(id: "x", name: "A", status: "S")
+        let b = try makeListing(id: "x", name: "B", status: "T")
         XCTAssertEqual(a, b)
         XCTAssertEqual(a.hashValue, b.hashValue)
     }
 
-    func test_inequality_by_id() {
-        let a = Listing(id: "a", name: "A", status: "S", features: [], featureMap: [:], url: "", city: "")
-        let b = Listing(id: "b", name: "A", status: "S", features: [], featureMap: [:], url: "", city: "")
+    func test_inequality_by_id() throws {
+        let a = try makeListing(id: "a", name: "A", status: "S")
+        let b = try makeListing(id: "b", name: "A", status: "S")
         XCTAssertNotEqual(a, b)
     }
 }

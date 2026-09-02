@@ -49,31 +49,36 @@ final class NotificationItemTests: XCTestCase {
         XCTAssertEqual(item.listingTitleHint, "Just a listing")
     }
 
-    // MARK: - NotificationKind classification
+    // MARK: - Kind classification
+    //
+    // 这一组同样长期编译不过：类型叫 ``NotificationItem.Kind``，不叫
+    // `NotificationKind`；分类入口是 ``classifyKind(type:title:body:)``，
+    // 不是 `classify(_:)`。而 target 编译不过 = 一条 iOS 测试都没在跑。
+
+    private func kind(type: String, title: String, body: String) -> NotificationItem.Kind {
+        NotificationItem.classifyKind(type: type, title: title, body: body)
+    }
 
     func test_kind_book() throws {
-        let item = makeItem(type: "new_listing", title: "New listing", body: "Available")
-        XCTAssertEqual(NotificationKind.classify(item), .book)
+        XCTAssertEqual(kind(type: "new_listing", title: "New listing", body: "Available"), .book)
     }
 
     func test_kind_lottery() throws {
-        let item = makeItem(type: "new_listing", title: "New listing", body: "lottery available")
-        XCTAssertEqual(NotificationKind.classify(item), .lottery)
+        XCTAssertEqual(kind(type: "new_listing", title: "New listing", body: "lottery available"),
+                       .lottery)
     }
 
     func test_kind_status_change() throws {
-        let item = makeItem(type: "status_change", title: "Status change", body: "lottery → available")
-        XCTAssertEqual(NotificationKind.classify(item), .status)
+        XCTAssertEqual(kind(type: "status_change", title: "Status change",
+                            body: "lottery → available"), .status)
     }
 
     func test_kind_test() throws {
-        let item = makeItem(type: "test", title: "SSE test", body: "test push")
-        XCTAssertEqual(NotificationKind.classify(item), .test)
+        XCTAssertEqual(kind(type: "test", title: "SSE test", body: "test push"), .test)
     }
 
     func test_kind_alert() throws {
-        let item = makeItem(type: "error", title: "Error", body: "block detected")
-        XCTAssertEqual(NotificationKind.classify(item), .alert)
+        XCTAssertEqual(kind(type: "error", title: "Error", body: "block detected"), .alert)
     }
 
     // MARK: - Helper
