@@ -188,15 +188,34 @@ def delete_device_for_token(*, token_id: int, device_id: int) -> bool | None:
         return bool(st.delete_device(device_id))
 
 
-def create_web_test_notification(*, title: str, body: str) -> int:
-    """Insert the Web/SSE part of the push test."""
+def create_web_test_notification(*, title: str, body: str,
+                                 user_id: str = "") -> int:
+    """Insert the Web/SSE part of the push test.
+
+    ⚠️ ``user_id`` 必须传，而且必须是**发起这次测试的那个人**。
+
+    留空写出来的是**系统通知**：``get_notifications`` 的过滤是
+    ``user_id = ? OR user_id = ''``，也就是说 user_id="" 的行**每个用户都看得到**
+    （含访客）。而这个接口的 title/body 完全由调用方控制、没有任何限流——任何一个
+    拿得到 app token 的人都能借它向全站广播自己写的文案。
+
+    admin token 没有 user_id（``role="admin"`` 时它就是 NULL），此时退而用一个
+    固定的私有作用域，仍然不写空串。
+    """
     with storage_ctx() as st:
         return st.add_web_notification(
             type="new_listing",
             title=title,
             body=body,
             listing_id="",
+            user_id=user_id or _ADMIN_TEST_SCOPE,
         )
+
+
+#: admin token 没有 user_id，但测试通知也不该落进「所有人可见」那一档。
+#: 用一个不会与任何 UserConfig.id 相撞的固定值，效果是只有 admin 视角
+#: （get_notifications(user_id=None)）看得到。
+_ADMIN_TEST_SCOPE = "__admin_test__"
 
 
 def send_test_push(
@@ -206,6 +225,7 @@ def send_test_push(
     body: str,
     apns_only: bool = False,
     notification_only: bool = False,
+    user_id: str = "",
 ) -> dict:
     """
     Run the app's end-to-end notification test for the current auth token.
@@ -219,7 +239,8 @@ def send_test_push(
 
     notification_id: int | None = None
     if not apns_only:
-        notification_id = create_web_test_notification(title=title, body=body)
+        notification_id = create_web_test_notification(
+            title=title, body=body, user_id=user_id)
         logger.info("test push 已写 web_notifications id=%d", notification_id)
 
     sent = 0

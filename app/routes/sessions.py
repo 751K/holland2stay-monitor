@@ -92,11 +92,18 @@ def login() -> Any:
         return redirect(url_for("index"))
 
     if request.method == "POST":
-        # 爆破防护：连续失败超阈值后指数退避
+        # 爆破防护：连续失败超阈值后拒绝，**不是 sleep**。
+        #
+        # sleep 是拿自己的工作线程去关自己：gunicorn 只有 8 条线程，退避最长
+        # 到 _MAX_DELAY，八个并发的失败登录就能把整个 web 占满——攻击者花的是
+        # 一条 TCP 连接，我们花的是全部服务能力。
+        # app/api_auth.py 的同一个限流器早就是「返回 429」的用法，这里对齐它。
         client_ip = request.remote_addr or "0.0.0.0"
         delay = check_login_rate(client_ip)
         if delay > 0:
-            _time.sleep(delay)
+            flash(f"尝试过于频繁，请 {int(delay) + 1} 秒后再试", "danger")
+            return _render_login(next_value=request.form.get("next", ""),
+                                 status=429)
 
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -135,53 +142,18 @@ def login() -> Any:
                 record_login_failure(client_ip)
                 flash("用户名或密码错误", "danger")
         else:
-            # 用户不存在 -> 自动注册
-            reg_ok, reg_reason = check_register_rate(client_ip)
-            if not reg_ok:
-                flash(reg_reason, "danger")
-            elif len(username) < 2:
-                flash("用户名至少需要 2 个字符", "danger")
-            elif len(password) < 4:
-                flash("密码至少需要 4 个字符", "danger")
-            elif username.lower() == "__admin__" or username.startswith("__"):
-                flash("该用户名不可用", "danger")
-            else:
-                try:
-                    from users import UserConfig, set_app_password, update_users
-
-                    def _append_user(users: list[UserConfig]) -> UserConfig:
-                        from users import get_user_by_name
-                        if get_user_by_name(users, username) is not None:
-                            raise ValueError("duplicate")
-                        user = UserConfig(
-                            name=username,
-                            enabled=True,
-                            notifications_enabled=False,
-                            app_login_enabled=True,
-                        )
-                        set_app_password(user, password)
-                        users.append(user)
-                        return user
-
-                    user_record = update_users(_append_user)
-                    record_registration(client_ip)
-                    clear_login_failures(client_ip)
-                    logger.info("Web 自动注册并登录: name=%r id=%s ip=%s", username, user_record.id, client_ip)
-
-                    session.permanent = True
-                    session["authenticated"] = True
-                    session["role"] = "user"
-                    session["user_id"] = user_record.id
-                    next_url = safe_next_url(request.form.get("next", ""))
-                    return redirect(next_url)
-                except ValueError as e:
-                    if str(e) == "duplicate":
-                        flash("并发注册冲突，请重试", "danger")
-                    else:
-                        raise
-                except Exception as e:
-                    logger.exception("自动注册失败: %s", e)
-                    flash("自动注册失败，请稍后再试", "danger")
+            # **不再自动注册。** 原先这里「用户不存在就建一个」，有三个问题：
+            #
+            # 1. 绕过 terms_accepted。那是同意条款的凭证，而登录表单上根本没有
+            #    那个勾选框——补校验也补不出来，只能替用户默认同意，那是不对的。
+            # 2. 绕过 64 字符截断（register_user 有 `[:64]`）。
+            # 3. **用户枚举侧信道**：名字存在 → 「密码错误」，不存在 → 直接登录
+            #    成功。攻击者用一次 POST 就能判断任意用户名是否注册过。
+            #
+            # 注册走 register_user（同一个页面上就有表单），那里校验齐全。
+            # 这里的文案与「密码错误」保持一致，不透露用户是否存在。
+            record_login_failure(client_ip)
+            flash("用户名或密码错误", "danger")
 
     return _render_login(next_value=request.args.get("next", ""))
 

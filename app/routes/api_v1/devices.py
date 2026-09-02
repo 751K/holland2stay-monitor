@@ -130,6 +130,9 @@ def _test_push():
 
     try:
         return _err.ok(send_test_push(
+            # 测试通知只写给发起人自己。不传的话写出来是「系统通知」，
+            # 全站（含访客）都能看到调用方控制的 title/body，且无限流。
+            user_id=api_auth.current_user_id() or "",
             token_id=token_id,
             title=title,
             body=body_text,

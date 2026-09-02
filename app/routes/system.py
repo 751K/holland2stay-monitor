@@ -77,28 +77,36 @@ def system_info():
 
     # ── 配置 ──
     from config import load_config as _lc
-    # 这一页要显示 .env 的**当前**内容，而 os.environ 可能还是启动时的旧值，
-    # 所以得 override=True 重新灌一遍。但那样会永久改写整个进程环境：
-    #   - docker-compose 的 environment: 里设的值（NO_PROXY、代理等）会被
-    #     .env 的同名键顶掉；
-    #   - WEB_PASSWORD / FLASK_SECRET 一变，正在用的会话当场失效。
-    # 而这一页每 30 秒自动整页刷新，等于每 30 秒重来一次。
-    # 因此：读之前快照，读完原样还原，副作用不出这个函数。
-    from dotenv import load_dotenv as _ld
-    _env_before = dict(os.environ)
-    try:
-        _ld(dotenv_path=ENV_PATH, override=True)
-        cfg = _lc()
-    finally:
-        os.environ.clear()
-        os.environ.update(_env_before)
+    # 这一页要显示 .env 的**当前**内容，而 os.environ 可能还是启动时的旧值。
+    #
+    # ⚠️ 原实现是「load_dotenv(override=True) → 读 → os.environ.clear() 再还原」。
+    # 那是一个**权限提升漏洞**，不只是副作用问题：gunicorn 是单进程八线程，
+    # os.environ 是全进程共享的。`clear()` 到 `update()` 之间那一瞬 WEB_PASSWORD
+    # 不存在 → auth.auth_enabled() 返回 False → **is_admin() 对所有人返回 True**
+    # （它的第一行就是「鉴权没开就当 admin」）。这一页每 30 秒自动整页刷新，
+    # 等于每 30 秒开一次窗，任何并发请求都可能正好落在里面。
+    #
+    # 改用 dotenv_values()：把 .env 读成一个 dict，**完全不碰 os.environ**。
+    # 代价是 load_config() 读的仍是进程环境，所以用一份「环境覆盖 .env」的合并
+    # 视图单独渲染这几行——它们本来也只是展示用。
+    from dotenv import dotenv_values as _dv
+    _file_env = {k: v for k, v in (_dv(dotenv_path=ENV_PATH) or {}).items()
+                 if v is not None}
+    cfg = _lc()
+
+    def _shown(key: str, fallback):
+        """展示值：.env 里写了就显示它，否则显示进程里生效的那个。
+
+        与旧行为一致（override=True 让文件值胜出），但只影响这几行文本。
+        """
+        return _file_env.get(key, fallback)
     info["cities"] = [c.name for c in cfg.cities]
-    info["check_interval"] = cfg.check_interval
-    info["peak_interval"] = cfg.peak_interval
-    info["peak_start"] = cfg.peak_start
-    info["peak_end"] = cfg.peak_end
-    info["min_interval"] = cfg.min_interval
-    info["log_level"] = cfg.log_level
+    info["check_interval"] = _shown("CHECK_INTERVAL", cfg.check_interval)
+    info["peak_interval"] = _shown("PEAK_INTERVAL", cfg.peak_interval)
+    info["peak_start"] = _shown("PEAK_START", cfg.peak_start)
+    info["peak_end"] = _shown("PEAK_END", cfg.peak_end)
+    info["min_interval"] = _shown("MIN_INTERVAL", cfg.min_interval)
+    info["log_level"] = _shown("LOG_LEVEL", cfg.log_level)
 
     # ── 用户 ──
     users = load_users()

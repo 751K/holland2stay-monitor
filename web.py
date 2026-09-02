@@ -129,6 +129,32 @@ app = Flask(
     static_folder=str(ASSETS_DIR / "static"),
 )
 
+# ── 反代后的真实客户端 IP ──────────────────────────────────────────
+#
+# 不加这层的话 ``request.remote_addr`` 恒为 Caddy 的地址，而**十一处限流全靠它**
+# （登录爆破、注册、访客、崩溃上传、API 鉴权…）。后果是双向的：
+#
+#   防不住  ——  所有来源共用一个桶，攻击者换多少 IP 都是同一个计数；
+#   能被打  ——  反过来，三次注册就能把**全站**的注册桶打满一小时。
+#
+# ``x_for=1`` 表示只信任 X-Forwarded-For 的**最后一跳**（我们自己的 Caddy 写的
+# 那个），前面的部分是客户端可以随便伪造的，不能信。代理层数变了要改这个数字，
+# 所以做成环境变量而不是写死。
+#
+# 只在确实有可信反代时启用：直接暴露端口的部署里开它等于让客户端自报 IP。
+_TRUSTED_PROXY_HOPS = int(os.environ.get("TRUSTED_PROXY_HOPS") or "0")
+if _TRUSTED_PROXY_HOPS > 0:
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=_TRUSTED_PROXY_HOPS,
+        x_proto=_TRUSTED_PROXY_HOPS,
+        x_host=_TRUSTED_PROXY_HOPS,
+        x_port=0,
+        x_prefix=0,
+    )
+
 # SameSite=Lax：阻止跨站 POST 请求携带 session cookie（主要 CSRF 防护层）。
 # HttpOnly=True：禁止 JS 读取 session cookie（Flask 默认已是 True，此处显式声明）。
 # Secure=True：仅 HTTPS 下发送 cookie；本地开发通过 SESSION_COOKIE_SECURE=false 关闭。
