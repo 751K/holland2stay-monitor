@@ -45,6 +45,7 @@ from config import (
     KNOWN_OURDOMAIN_CITIES,
     KNOWN_SOURCES,
     KNOWN_MAGIS_CITIES,
+    KNOWN_STUDENTEXPERIENCE_CITIES,
     KNOWN_XIOR_CITIES,
 )
 
@@ -152,6 +153,8 @@ _KNOWN_TARGETS: dict[str, dict[str, str]] = {
     "ourcampus": {c["key"]: c["name"] for c in KNOWN_OURCAMPUS_CITIES},
     "xior": {c["key"]: f"{c['city']} {c['bldg']}" for c in KNOWN_XIOR_CITIES},
     "magis": {c["key"]: c["name"] for c in KNOWN_MAGIS_CITIES},
+    "studentexperience": {c["key"]: c["name"]
+                          for c in KNOWN_STUDENTEXPERIENCE_CITIES},
 }
 
 #: 环境变量名 → 它描述的是哪个平台。
@@ -160,6 +163,7 @@ TARGET_KEYS: dict[str, str] = {
     "OURCAMPUS_CITIES": "ourcampus",
     "XIOR_CITIES": "xior",
     "MAGIS_CITIES": "magis",
+    "STUDENTEXPERIENCE_CITIES": "studentexperience",
 }
 
 

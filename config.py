@@ -600,6 +600,20 @@ KNOWN_MAGIS_CITIES: list[dict] = [
 ]
 
 
+#: Student Experience 覆盖的城市。
+#:
+#: 与 Magis 同一形态：一轮抓取就拿到全部楼盘，登记城市只为让用户按城市订阅并在
+#: 各 ScrapeTask 之间切分（见 scrapers/studentexperience.py 的 batch_session）。
+#:
+#: 荷兰五处在营，Amsterdam 占四处（Minervahaven / Zuidas / NDSM / Amstel），
+#: Leiden 一处。Amstelveen Uilenstede 站点标注 "Under development"，未开放预订，
+#: 因此不登记——登记了只会让用户勾一个永远不出房源的城市。
+KNOWN_STUDENTEXPERIENCE_CITIES: list[dict] = [
+    {"name": "Amsterdam", "key": "amsterdam", "city": "Amsterdam"},
+    {"name": "Leiden",    "key": "leiden",    "city": "Leiden"},
+]
+
+
 KNOWN_OURDOMAIN_CITIES: list[dict] = [
     {"name": "Amsterdam Diemen",    "key": "diemen",     "city": "Amsterdam"},
     {"name": "Amsterdam South-East","key": "south-east", "city": "Amsterdam"},
@@ -744,6 +758,13 @@ class MagisCityFilter:
 
 
 @dataclass
+class StudentExperienceCityFilter:
+    """Student Experience 的单个城市条目。"""
+    name: str
+    key: str
+
+
+@dataclass
 class XiorCityFilter:
     """Xior / RENTCafe building filter 的单个条目。"""
     name: str
@@ -807,6 +828,22 @@ _SOURCE_FILTER_DIMS: dict[str, frozenset] = {
     # 登记之后另外 9 条会被勾了租客条件的用户整体过滤掉。徽标本身仍写进 features，
     # 通知里看得见，只是不参与筛选。见 scrapers/magis.py 的 TENANT_MAP。
     "magis": _UNIVERSAL_FILTER_DIMS | {"floor", "type", "finishing", "energy"},
+    # Student Experience 是户型级而非单元级：一条 listing 对应一个户型（多间），
+    # 面积因此是区间。登记的维度只有 type 与 tenant——
+    #
+    #   type    站点全部产品都是 studio，四个档位名（Signature / Essential /
+    #           Prestige / Comfort）是价位分层不是房型，统一写 Type: Studio。
+    #   tenant  来自 SOURCE_ASSUMED_FEATURES，整个 source 恒为 student only
+    #           （FAQ：exclusively available for students，签约需在读证明）。
+    #
+    # finishing **不登记**：规格行只出现在主卡片上，「其它户型」滑块里的紧凑卡片
+    # 没有这一行。该维度 fail-closed，登记之后紧凑卡片那几条会被勾了装修档位的
+    # 用户整体过滤掉——与 magis 的 tenant 同一取舍。值仍写进 features
+    # （Finishing note），通知里看得见，只是不参与筛选。
+    #
+    # floor / energy 站点不给。楼层只在设施行的散文里出现过（"located on
+    # floor 5-8"），那是户型的整体描述而非某一间的楼层。
+    "studentexperience": _UNIVERSAL_FILTER_DIMS | {"type", "tenant"},
 }
 
 
@@ -874,6 +911,10 @@ def dim_scope_note(dim: str, lang: str = "zh") -> str:
             f"attribute, so their listings are unaffected by this filter")
 
 
+#: 徽标里最多点名几个平台，多出来的折成「等 N 家」。见 dim_scope_badge。
+_BADGE_MAX_NAMES = 2
+
+
 def dim_scope_badge(dim: str, lang: str = "zh") -> str:
     """紧凑版的适用范围标记，给列表页那种横排筛选栏用。
 
@@ -884,22 +925,55 @@ def dim_scope_badge(dim: str, lang: str = "zh") -> str:
     不说缺谁，读的人只能去开 tooltip；2026-08-21 实际被误读成「和 Holland2Stay
     有关」，而那三个维度恰恰是 Holland2Stay 全都支持的。
 
-    规则是**说短的那一边**——哪边名字少就报哪边，信息量一样而字数更省：
+    规则是**说短的那一边**——哪边字少就报哪边，信息量一样而字数更省：
 
         缺的少   → 「Xior 除外」
         支持的少 → 「仅 Holland2Stay」
-        一样多   → 报支持方（正面陈述「对谁生效」比「对谁不生效」好读）
+
+    比的是**渲染后的字数**，不是平台个数。两者不等价：``occupancy`` 是 3 支持 /
+    3 不支持，按个数是平手（旧实现平手时报支持方，得到 34 字），按字数则缺失方
+    32 字更短。平台名长短差得很远（"Xior" 4 字 vs "Student Experience" 18 字），
+    数个数会挑错边。
+
+    名字数封顶
+    ----------
+    只列前 ``_BADGE_MAX_NAMES`` 个，其余折成「等 N 家」。这条是随平台数增长的
+    刹车：六个平台时中间分裂的维度两边各三个名字，不封顶就是三十多字，塞在
+    10px 的 label 后面会把整行顶散（templates/listings.html 的筛选栏）。
+
+    折叠**保留点名**，只是名字不全：「Xior、Magis 等 3 家除外」既说了是谁，也说了
+    有几个。这与「不要只报个数」的规矩不冲突——当年被误读的是「仅 3 个平台」那种
+    一个名字都没有的写法（2026-08-21），完整清单一直在 tooltip 里。
     """
     supported = sources_supporting_dim(dim)
     if not supported or len(supported) == len(KNOWN_SOURCES):
         return ""
     missing = [s for s in KNOWN_SOURCES if s not in supported]
-    sep = "、" if lang == "zh" else ", "
-    if len(missing) < len(supported):
-        listed = sep.join(source_display_name(s) for s in missing)
-        return f"{listed} 除外" if lang == "zh" else f"Except {listed}"
-    listed = sep.join(source_display_name(s) for s in supported)
-    return f"仅 {listed}" if lang == "zh" else f"{listed} only"
+
+    def _render(sources: list[str], *, positive: bool) -> tuple[bool, str]:
+        """→ (是否折叠过, 徽标文本)。"""
+        sep = "、" if lang == "zh" else ", "
+        names = [source_display_name(s) for s in sources]
+        folded = len(names) > _BADGE_MAX_NAMES
+        if folded:
+            shown = sep.join(names[:_BADGE_MAX_NAMES])
+            listed = (f"{shown} 等 {len(names)} 家" if lang == "zh"
+                      else f"{shown} +{len(names) - _BADGE_MAX_NAMES} more")
+        else:
+            listed = sep.join(names)
+        if positive:
+            return folded, (f"仅 {listed}" if lang == "zh" else f"{listed} only")
+        # 中文不在「家」后面再空一格；平台名以拉丁字母收尾时才需要那个空格。
+        gap = "" if lang == "zh" and listed[-1:] in ("家", "）") else " "
+        return folded, (f"{listed}{gap}除外" if lang == "zh"
+                        else f"Except {listed}")
+
+    # 排序键先看折没折叠：折叠是**丢信息**（清单不全），只有在不折叠那边明显更长
+    # 时才值得。finishing 就是这个情形——支持方折叠后 30 字、缺失方完整 31 字，
+    # 按纯字数会挑走那个信息不全的，差一个字不值当。
+    return min(_render(supported, positive=True),
+               _render(missing, positive=False),
+               key=lambda r: (r[0], len(r[1])))[1]
 
 
 #: 平台整体成立、但 feed 里不上报的属性。
@@ -940,6 +1014,18 @@ SOURCE_ASSUMED_FEATURES: dict[str, dict[str, str]] = {
     # 名判定，验证过一栋登记一栋；没登记的不写该字段。
     "xior": {"Tenant": "student only"},
     "ourdomain": {"Finishing": "Furnished"},
+    # Student Experience 同为纯学生盘，且判据比 Xior 更硬——不是从品牌宣传推断的，
+    # 是 FAQ 的明文规则：「All Student Experience studios are exclusively
+    # available for students」，签约前必须通过服务门户上传在读证明，入住时必须
+    # 是在校注册状态。合格身份含 study programme / internship / PhD research。
+    #
+    # ⚠️ 与 OurCampus 相反：那边的 criteria 明确排除 PhD 与博后。两处都写了
+    # student only，但含义不同——本平台收 PhD，OurCampus 不收。真出现按学位分档
+    # 的筛选需求时，这两个值不能合并处理。
+    #
+    # Finishing 不放这里：它按户型变（Signature 有规格行、Essential 的紧凑卡片
+    # 没有），整个 source 一刀切正是 Xior 2026-08-21 栽过的那个跟头。
+    "studentexperience": {"Tenant": "student only"},
 }
 
 
@@ -1669,6 +1755,8 @@ class Config:
     ourcampus_cities: list[OurCampusCityFilter] = field(default_factory=list)
     xior_cities: list[XiorCityFilter] = field(default_factory=list)
     magis_cities: list[MagisCityFilter] = field(default_factory=list)
+    studentexperience_cities: list[StudentExperienceCityFilter] = field(
+        default_factory=list)
 
     def sources_with_full_lifecycle(self) -> frozenset[str]:
         """feed 覆盖了「已预留」状态的 source。
@@ -1716,6 +1804,8 @@ class Config:
             ("ourcampus", self.ourcampus_cities, KNOWN_OURCAMPUS_CITIES),
             ("xior", self.xior_cities, KNOWN_XIOR_CITIES),
             ("magis", self.magis_cities, KNOWN_MAGIS_CITIES),
+            ("studentexperience", self.studentexperience_cities,
+             KNOWN_STUDENTEXPERIENCE_CITIES),
         ):
             if source not in self.sources:
                 continue
@@ -1796,6 +1886,18 @@ class Config:
                     city_display=c.name,
                 )
                 for c in self.magis_cities
+            )
+
+        # Student Experience 同 Magis：每个 task 只是从同一轮抓取结果里取这个
+        # 城市，不各自发请求。见 scrapers/studentexperience.py 的 batch_session。
+        if "studentexperience" in self.sources:
+            tasks.extend(
+                ScrapeTask(
+                    source="studentexperience",
+                    city_key=c.key,
+                    city_display=c.name,
+                )
+                for c in self.studentexperience_cities
             )
 
         return tasks
@@ -1938,7 +2040,8 @@ def _parse_shard_sizes(raw: str) -> dict[str, int]:
 #: 被漏了三次——前端的 sourceLabel（三份实现都没有它）、monitoring 页（干脆
 #: 不转换）、以及全局设置的白名单（从面板保存一次就会把它从 SOURCES 里悄悄
 #: 删掉）。漏的都是同一个平台，因为它是最后加的那个。
-KNOWN_SOURCES: tuple[str, ...] = ("holland2stay", "ourdomain", "ourcampus", "xior", "magis")
+KNOWN_SOURCES: tuple[str, ...] = ("holland2stay", "ourdomain", "ourcampus",
+                                  "xior", "magis", "studentexperience")
 
 #: 平台显示名。前端另有一份同样的表（static/app.js 的 SOURCE_LABELS），
 #: 因为那边是客户端渲染；两边都从这份注释里的同一个事实来。
@@ -1948,6 +2051,7 @@ SOURCE_DISPLAY_NAMES: dict[str, str] = {
     "ourcampus": "OurCampus",
     "xior": "Xior",
     "magis": "Magis",
+    "studentexperience": "Student Experience",
 }
 
 
@@ -1998,6 +2102,10 @@ def _parse_xior_cities(raw: str) -> list[XiorCityFilter]:
 
 def _parse_magis_cities(raw: str) -> list[MagisCityFilter]:
     return _parse_name_key_list(raw, MagisCityFilter)
+
+
+def _parse_studentexperience_cities(raw: str) -> list[StudentExperienceCityFilter]:
+    return _parse_name_key_list(raw, StudentExperienceCityFilter)
 
 
 def load_config() -> Config:
@@ -2129,6 +2237,19 @@ def load_config() -> Config:
                 for c in KNOWN_MAGIS_CITIES
             ]
 
+    studentexperience_cities: list[StudentExperienceCityFilter] = []
+    if "studentexperience" in sources:
+        raw_se_cities = os.environ.get("STUDENTEXPERIENCE_CITIES", "")
+        if raw_se_cities:
+            studentexperience_cities = _parse_studentexperience_cities(raw_se_cities)
+        else:
+            # 与 Magis 同理：一轮抓取就拿到全部楼盘，少勾城市不减少请求，
+            # 只是不再收这些城市的房源。留空即两城全收。
+            studentexperience_cities = [
+                StudentExperienceCityFilter(name=c["name"], key=c["key"])
+                for c in KNOWN_STUDENTEXPERIENCE_CITIES
+            ]
+
     return Config(
         check_interval=interval,
         cities=cities,
@@ -2154,4 +2275,5 @@ def load_config() -> Config:
         ourcampus_cities=ourcampus_cities,
         xior_cities=xior_cities,
         magis_cities=magis_cities,
+        studentexperience_cities=studentexperience_cities,
     )

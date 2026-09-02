@@ -194,6 +194,23 @@
     </div>
   </div>
 
+  <!-- Section 4c: Student Experience cities -->
+  <div class="card mb-4">
+    <div class="section-header">
+      <i class="bi bi-building mr-2" style="color:var(--success);"></i>{{ _('settings_se_cities') }}
+    </div>
+    <div class="card-body">
+      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
+        {% for city in known_se_cities %}
+        <label class="checkbox" style="white-space:nowrap;">
+          <input type="checkbox" name="se_city_selected" value="{{ city.name }},{{ city.key }}" {% if city.key in selected_se_keys %}checked{% endif %}>
+          {{ city.name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
   <!-- Section 5: Xior buildings -->
   <div class="card mb-4">
     <div class="section-header">

@@ -412,6 +412,8 @@ TRANSLATIONS = {
     "settings_xior_cities":     {"zh": "Xior 监控楼盘",       "en": "Xior Buildings"},
     "settings_xior_hint":       {"zh": "荷兰 30 栋楼（15 城市）。只有启用 Xior 平台时才会抓取。", "en": "30 buildings across 15 Dutch cities. Scraped only when the Xior platform is enabled."},
     "settings_magis_cities":    {"zh": "Magis 监控城市",      "en": "Magis Cities"},
+    "settings_se_cities":       {"zh": "Student Experience 监控城市",
+                                 "en": "Student Experience Cities"},
     "settings_save":        {"zh": "保存配置",                "en": "Save Config"},
     "settings_apply":       {"zh": "立即生效",                "en": "Apply Now"},
     "settings_apply_hint":  {"zh": "热重载 .env / 用户配置，不重新加载代码",

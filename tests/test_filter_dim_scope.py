@@ -29,7 +29,7 @@ class TestSupportMatrix:
             assert sources_supporting_dim(dim) == ["holland2stay"], dim
         assert sources_supporting_dim("energy") == ["holland2stay", "magis"]
 
-    def test_tenant_covers_all_four_platforms(self):
+    def test_tenant_covers_every_platform_but_magis(self):
         """租客资格四家全覆盖。**这个断言被来回改过两次，两次都是有原因的。**
 
         v1.16.2 加这个维度时四家都在。2026-08-18 H2S 上线 operation 白名单，
@@ -45,6 +45,7 @@ class TestSupportMatrix:
         """
         assert sources_supporting_dim("tenant") == [
             "holland2stay", "ourdomain", "ourcampus", "xior",
+            "studentexperience",
         ]
 
     def test_tenant_badge_says_magis_is_excluded(self):
@@ -144,8 +145,9 @@ class TestScopeNote:
         # 缺 1 个（Xior）→ 报缺的
         assert dim_scope_badge("type") == "Xior 除外"
         assert dim_scope_badge("type", "en") == "Except Xior"
-        # 缺 1 个（OurCampus）
-        assert dim_scope_badge("finishing") == "OurCampus 除外"
+        # 缺 2 个：OurCampus（从未返回过单元，档位无从核实）与 Student
+        # Experience（规格行只在主卡片上有，紧凑卡片没有，见其 scraper 文档）
+        assert dim_scope_badge("finishing") == "OurCampus、Student Experience 除外"
         # 只支持 1 个 → 报支持的
         assert dim_scope_badge("contract") == "仅 Holland2Stay"
 

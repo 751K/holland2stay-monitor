@@ -45,6 +45,7 @@ from .base import (
 )
 from .holland2stay import HollandStayScraper
 from .magis import MagisScraper
+from .studentexperience import StudentExperienceScraper
 from .ourcampus import OurCampusScraper
 from .ourdomain import OurDomainScraper
 from .xior import XiorScraper
@@ -56,6 +57,7 @@ SCRAPER_REGISTRY: dict[str, type[AbstractScraper]] = {
     cls.source: cls for cls in [
         HollandStayScraper,
         MagisScraper,
+        StudentExperienceScraper,
         OurCampusScraper,
         OurDomainScraper,
         XiorScraper,
