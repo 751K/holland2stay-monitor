@@ -273,7 +273,8 @@ def _payload_new_listing(listing, *, lang: str = "en") -> dict:
         area = fm.get("area", "")
     except Exception:
         pass
-    body_parts = [listing.status, _t("{status} · {price}/mo", lang).format(status=listing.status, price=price)]
+    body_parts = [_t("{status} · {price}/mo", lang).format(
+        status=listing.status, price=price)]
     if area:
         body_parts.append(area)
     if listing.available_from:
@@ -438,8 +439,8 @@ def _fcm_payload_new_listing(listing, *, lang: str = "en") -> dict:
         area = fm.get("area", "")
     except Exception:
         pass
-    body_parts = [listing.status,
-                  _t("{status} · {price}/mo", lang).format(status=listing.status, price=price)]
+    body_parts = [_t("{status} · {price}/mo", lang).format(
+        status=listing.status, price=price)]
     if area:
         body_parts.append(area)
     if listing.available_from:
