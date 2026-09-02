@@ -150,6 +150,60 @@ class AuthError(Exception):
     """登录被平台拒绝（凭据错误）。换 IP / 重试都无意义——要用户改账号密码。"""
 
 
+def resolve_start_date(*candidates: "str | None") -> "str | None":
+    """按顺序挑第一个**可用**的入住日；都不可用返回 None。
+
+    两道判据，缺一不可：
+
+    ``is_sentinel_available_from``
+        ``2050-01-01`` 是上游「没有下一个合同起始日」的哨兵，不是日期。它比今天
+        大，所以下面那道 ``>= today`` 挡不住它——挡不住就会带着一个平台从没承诺过
+        的入住日去占房。
+    ``>= today``
+        过期日期同样不能传。
+
+    抽成函数是因为这段逻辑原先在 booker 里**抄了两份**（try_book 的 Step 1 与
+    ``_extract_sku_contract``），两份都只有第二道判据。同一段逻辑写两遍，改的时候
+    一定只改一处。
+    """
+    from datetime import date as _date
+
+    from models import is_sentinel_available_from
+
+    today = _date.today().isoformat()
+    for c in candidates:
+        c = (c or "").strip()
+        if not c:
+            continue
+        if is_sentinel_available_from(c):
+            logger.warning("入住日 %s 是哨兵值，不采用", c)
+            continue
+        if c >= today:
+            return c
+    return None
+
+
+class BookingHeldButIncomplete(Exception):
+    """占房已成立，但后续步骤失败。
+
+    ``create_booking`` 一返回，这套房就被账号占着了。此后任何一步失败都不改变
+    这个事实——所以**不能报成普通失败**。用户需要 cart/order 号才能自己去付款
+    或取消；没有它，房就一直挂在那里直到预留超时。
+
+    刻意不做自动回滚：取消不可逆，而失败可能只是支付链接生成超时（房还好好占着，
+    登录站点就能付）。把事实交出去，由用户决定。
+    """
+
+    def __init__(self, *, cart_id: str, order_number: str,
+                 booking_url: str, original: str) -> None:
+        self.cart_id = cart_id
+        self.order_number = order_number
+        self.booking_url = booking_url
+        self.original = original
+        super().__init__(
+            "占房已成立，但后续步骤失败：" + original)
+
+
 class TwoFactorRequiredError(Exception):
     """登录成功但账号开了两步验证，需要人工输入验证码，无法全自动下单。
 
@@ -398,8 +452,90 @@ _REST_BOOKING_CANCEL = "/api/rest/V1/customer/bookingcancel/{sku}"
 _CANCEL_STATUSES = {"pending", "pending_payment", "reserved", "processing", "reservation"}
 
 
-def cancel_pending_orders(fetcher: BrowserFetcher, token: str) -> int:
-    """取消账号下所有待处理的预留，返回取消成功的笔数。
+#: 「这笔预留是我们下的」记录的 meta 键前缀。按账号分开存。
+_OUR_RESERVATIONS_META = "booking:our_skus:"
+#: 每个账号最多记多少条。预留是短命的，留太多只会让旧记录误伤。
+_OUR_RESERVATIONS_CAP = 20
+
+
+def _account_key(email: str) -> str:
+    import hashlib
+    return hashlib.sha1((email or "").strip().lower().encode()).hexdigest()[:16]
+
+
+def _meta_storage():
+    """惰性拿一个 Storage。拿不到返回 None（调用方据此 fail-safe）。
+
+    booker 与它上面两层（``book_with_fallback`` / ``dispatch_book``）都没有
+    storage 参数，而把它一路穿下来会改三个签名。这里按 crypto.py 同一个办法
+    自己开一个只读/写 meta 的连接——记录的量极小，不值得为它改调用链。
+    """
+    try:
+        from pathlib import Path
+
+        from config import load_config
+        from storage import Storage
+        return Storage(Path(load_config().db_path))
+    except Exception:
+        logger.warning("拿不到 storage，无法记录/读取自有预留", exc_info=True)
+        return None
+
+
+def remember_our_reservation(email: str, sku: str) -> None:
+    """记下「这个 SKU 是我们替这个账号占的」。
+
+    ``cancel_pending_orders`` 只取消记在这里的那些——见它的 docstring。
+    记不下来不影响下单，只会让将来那次取消变保守（不敢动）。
+    """
+    if not sku:
+        return
+    st = _meta_storage()
+    if st is None:
+        return
+    import json as _j
+    key = _OUR_RESERVATIONS_META + _account_key(email)
+    try:
+        cur = _j.loads(st.get_meta(key, "") or "[]")
+        if not isinstance(cur, list):
+            cur = []
+    except Exception:
+        cur = []
+    if sku in cur:
+        return
+    cur.append(sku)
+    try:
+        st.set_meta(key, _j.dumps(cur[-_OUR_RESERVATIONS_CAP:]))
+    except Exception:
+        logger.warning("记录自有预留失败（下次取消会变保守）", exc_info=True)
+
+
+def _our_reservations(email: str) -> set[str]:
+    st = _meta_storage()
+    if st is None:
+        return set()
+    import json as _j
+    try:
+        cur = _j.loads(st.get_meta(_OUR_RESERVATIONS_META + _account_key(email), "")
+                       or "[]")
+        return {str(x) for x in cur} if isinstance(cur, list) else set()
+    except Exception:
+        return set()
+
+
+def cancel_pending_orders(fetcher: BrowserFetcher, token: str,
+                          email: str = "") -> int:
+    """取消**我们自己下的**待处理预留，返回取消成功的笔数。
+
+    ⚠️ 判据不能只看 status
+    ----------------------
+    原实现按 ``status in _CANCEL_STATUSES`` 取消账号下的**全部**待处理预留。
+    那里面完全可能有用户自己在站点上手动订的房——为了抢另一套，把人家看中的
+    那套取消掉，而且**不可逆**。
+
+    现在只取消 ``remember_our_reservation`` 记过的 SKU。没有记录时**一笔都不
+    取消**（fail-safe）：宁可这次抢不到，也不能动用户自己的预留。记录会在进程
+    重启后保留（存在 meta 里），但更早的、或别的部署下的预留仍然认不出——那种
+    情况下保守是对的。
 
     传输层已确定（2026-08-19 逐字读自站点 module 82361，见 §6.9）：
     ``/api/rest/*`` **走加密信封**——GET 把路径塞进 ``x-enc-q``，POST 加密 body。
@@ -418,13 +554,25 @@ def cancel_pending_orders(fetcher: BrowserFetcher, token: str) -> int:
         logger.warning("查询预留列表失败（忽略，机制见 §6.6/§6.9）: %s", e)
         return 0
 
-    to_cancel = [
+    ours = _our_reservations(email)
+    pending = [
         (it.get("sku"), it.get("product_name") or it.get("sku"))
         for it in items
         if it.get("sku") and str(it.get("status", "")).lower() in _CANCEL_STATUSES
     ]
+    to_cancel = [(sku, name) for sku, name in pending if str(sku) in ours]
+
+    skipped = [name for sku, name in pending if str(sku) not in ours]
+    if skipped:
+        # **必须吵一声。** 静默跳过会让人以为「取消功能坏了」，进而去把判据放宽
+        # 回原样——而那正是会误删用户手动预留的写法。
+        logger.warning(
+            "账号下有 %d 笔待处理预留不是我们下的，已跳过不取消：%s。"
+            "如需释放请自行到站点操作", len(skipped), skipped,
+        )
     if not to_cancel:
-        logger.debug("无待处理预留，无需取消")
+        logger.info("没有可安全取消的自有预留（待处理 %d 笔，其中自有 0 笔）",
+                    len(pending))
         return 0
 
     logger.info("发现 %d 笔待处理预留，准备取消: %s",
@@ -630,6 +778,10 @@ BookingPhase = Literal[
     # 走到了最后一步但服务端拒绝保存。**绝不能报成 draft_saved**——那条消息
     # 让用户以为表单已填好、安心去传证件，而实际上什么都没存下。
     "save_rejected",
+    # 占房已成立，但后续（支付方式 / 下单 / 支付链接）某一步失败。**绝不能报成
+    # race_lost 或 unknown_error**：房正被这个账号占着，用户以为没抢到就不会去
+    # 处理，既不付款也不取消，直到预留超时。必须把 cart/order 号给他。
+    "held_incomplete",
 ]
 
 
@@ -642,6 +794,14 @@ class BookingResult:
     pay_url: str = ""
     contract_start_date: str = ""
     phase: BookingPhase = ""
+    #: 占房已经成立、但后续步骤失败时的凭据。**必须交给用户。**
+    #:
+    #: create_booking 一旦返回，这套房就被这个账号占着了。此后
+    #: set_payment_method / place_order / _ideal_checkout 任一失败，原实现只报
+    #: 「预订失败」——用户以为没抢到，实际房在自己名下挂着，既不知道去哪付款，
+    #: 也不知道要去取消，直到预留超时自动释放（或者更糟：一直占着）。
+    held_cart_id: str = ""
+    held_order_number: str = ""
 
 
 def create_prewarmed_session(email: str, password: str) -> PrewarmedSession:
@@ -707,9 +867,9 @@ def try_book(
     if listing.sku:
         sku = listing.sku
         contract_id = listing.contract_id
-        from datetime import date as _date
-        candidate = listing.contract_start_date or listing.available_from
-        start_date = candidate if (candidate and candidate >= _date.today().isoformat()) else None
+        # 这道防线是**独立**于 scraper 那道的：库里可能还留着修复之前写进去的行。
+        start_date = resolve_start_date(
+            listing.contract_start_date, listing.available_from)
         logger.info(
             "[%s]%s SKU: %s  contract_id: %s  start_date: %s  (pre-extracted)",
             listing.name, " [DRY RUN]" if dry_run else "",
@@ -774,6 +934,9 @@ def try_book(
 
         booking_url = f"https://www.holland2stay.com/residences/{listing.id}.html"
 
+        # 占房成立后的凭据。写在闭包外面，_do_book 里逐步填——失败时外层要拿得到。
+        held = {"cart_id": "", "order_number": ""}
+
         def _do_book() -> tuple[str, float, float]:
             ta = time.monotonic()
 
@@ -781,12 +944,20 @@ def try_book(
             # 这是唯一的占房入口，没有 fallback——addNewBooking 已被摘出公开
             # API（实测 403），见 _BOOKING_API_PATH 注释。
             new_cart_id = create_booking(fetcher, token, sku, start_date)
+            # **从这一行起，这套房已经被这个账号占着了。** 后面任何一步失败都不
+            # 改变这个事实，所以先记下来——外层据此告诉用户「房占上了，但流程没
+            # 走完」，而不是含糊地报「预订失败」。
+            held["cart_id"] = str(new_cart_id or "")
+            # 记下「这个 SKU 是我们占的」。cancel_pending_orders 只敢动记过的，
+            # 没记录就一笔都不取消——见它的 docstring。
+            remember_our_reservation(email, str(sku))
             set_payment_method(fetcher, token, new_cart_id, code=payment_method)
             _fetch_checkout_agreements(fetcher, token)
             t_add_val = time.monotonic() - ta
 
             tp = time.monotonic()
             order_number = place_order(fetcher, token, new_cart_id)
+            held["order_number"] = str(order_number or "")
             pay_url = _ideal_checkout(fetcher, token, order_number)
             t_pay_val = time.monotonic() - tp
 
@@ -825,7 +996,7 @@ def try_book(
                 logger.info("[%s] 账号已有预留单（%s），正在取消后重试...",
                             listing.name, err_str)
                 tc1 = time.monotonic()
-                cancelled = cancel_pending_orders(fetcher, token)
+                cancelled = cancel_pending_orders(fetcher, token, email)
                 t_cancel = time.monotonic() - tc1
                 logger.info("[%s] 已取消 %d 笔旧订单 (%.2fs)，重新预订...",
                             listing.name, cancelled, t_cancel)
@@ -833,6 +1004,25 @@ def try_book(
 
             else:
                 phase = "unknown_error"
+                if held["cart_id"]:
+                    # 占房成立、后续步骤挂了。**这不是「没抢到」**，用户手上有一
+                    # 套占着的房。不给出 cart/order 号的话他既没法去付款，也不知
+                    # 道要去取消——那是最坏的一种「失败」。
+                    #
+                    # 这里刻意**不自动回滚**：取消是不可逆的，而失败可能只是支付
+                    # 链接生成超时（房还好好地占着，登录站点就能付）。把事实交给
+                    # 用户，由他决定。
+                    logger.error(
+                        "[%s] 占房已成立但后续步骤失败 cart=%s order=%s: %s",
+                        listing.name, held["cart_id"],
+                        held["order_number"] or "(未生成)", err_str,
+                    )
+                    raise BookingHeldButIncomplete(
+                        cart_id=held["cart_id"],
+                        order_number=held["order_number"],
+                        booking_url=booking_url,
+                        original=err_str,
+                    ) from book_err
                 raise
 
         total = time.monotonic() - t0
@@ -858,6 +1048,37 @@ def try_book(
         )
         return BookingResult(listing, True, msg, pay_url=pay_url,
                              contract_start_date=start_date or "", phase="success")
+
+    except BookingHeldButIncomplete as held_err:
+        total = time.monotonic() - t0
+        logger.error(
+            "[%s] ⚠️ 占房成立但流程未走完 phase=held_incomplete | listing_id=%s "
+            "cart=%s order=%s | 耗时 %.1fs | %s",
+            listing.name, listing.id, held_err.cart_id,
+            held_err.order_number or "(未生成)", total, held_err.original,
+        )
+        msg = (
+            f"⚠️ 房已占住，但后续步骤没走完——**请尽快自行处理**\n"
+            f"\n"
+            f"🏠 {listing.name}\n"
+            f"🧾 购物车号：{held_err.cart_id}\n"
+            + (f"📄 订单号：{held_err.order_number}\n"
+               if held_err.order_number else "")
+            + f"\n"
+            f"这套房现在**占在你的账号下**，不是没抢到。请登录 Holland2Stay：\n"
+            f"· 想要 → 完成付款\n"
+            f"· 不要 → 手动取消，否则会一直占着\n"
+            f"\n"
+            f"{held_err.booking_url}\n"
+            f"\n"
+            f"📋 原始错误：{held_err.original}"
+        )
+        return BookingResult(
+            listing, False, msg, phase="held_incomplete",
+            held_cart_id=held_err.cart_id,
+            held_order_number=held_err.order_number,
+            contract_start_date=start_date or "",
+        )
 
     except TwoFactorRequiredError as tfa_err:
         # 凭据对，但账号开了 2FA，全自动到此为止。和 auth_failed 分开：给用户的
@@ -966,9 +1187,8 @@ def _fetch_sku_and_contract(fetcher: BrowserFetcher, url_key: str) -> tuple[str,
     next_start = (item.get("next_contract_startdate") or "").strip()[:10] or None
     avail_date = (item.get("available_startdate") or "").strip()[:10] or None
 
-    from datetime import date
-    today_str = date.today().isoformat()
-    candidate = next_start or avail_date
-    start_date = candidate if (candidate and candidate >= today_str) else None
+    # 这里直接读原始字段，连 scraper 那道哨兵过滤都绕过了——所以更需要
+    # resolve_start_date 里的那道。
+    start_date = resolve_start_date(next_start, avail_date)
 
     return sku, contract_id, start_date

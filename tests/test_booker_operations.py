@@ -119,23 +119,99 @@ class TestCancelUsesRestEnvelope:
             self.plain_calls.append(a)
             raise AssertionError("/api/rest/* 走了明文——服务端解不开")
 
-    def test_list_and_cancel_both_go_through_fetch_rest(self):
+    @pytest.fixture
+    def ours(self, monkeypatch):
+        """把 r-x-1 标成「我们下的」——否则现在一笔都不会取消，见下面那组用例。"""
+        import booker
+        monkeypatch.setattr(booker, "_our_reservations", lambda _email: {"r-x-1"})
+
+    def test_list_and_cancel_both_go_through_fetch_rest(self, ours):
         import booker
         f = self._Fetcher()
-        n = booker.cancel_pending_orders(f, "tok")
+        n = booker.cancel_pending_orders(f, "tok", "a@b.c")
         assert n == 1
         assert f.plain_calls == []
         paths = [p for p, _ in f.rest_calls]
         assert any("newdashboard/contract/me" in p for p in paths), "没查预留列表"
         assert any("bookingcancel/r-x-1" in p for p in paths), "没按 SKU 取消"
 
-    def test_cancel_is_post_and_list_is_get(self):
+    def test_cancel_is_post_and_list_is_get(self, ours):
         import booker
         f = self._Fetcher()
-        booker.cancel_pending_orders(f, "tok")
+        booker.cancel_pending_orders(f, "tok", "a@b.c")
         methods = dict((p.split("?")[0], m) for p, m in f.rest_calls)
         assert methods["/api/rest/V1/newdashboard/contract/me"] == "GET"
         assert methods["/api/rest/V1/customer/bookingcancel/r-x-1"] == "POST"
+
+
+class TestCancelOnlyTouchesOurOwnReservations:
+    """**绝不能取消用户自己手动订的房。**
+
+    原实现只按 ``status in _CANCEL_STATUSES`` 过滤，会把账号下所有待处理预留一起
+    取消——为了抢另一套，把用户看中的那套删掉，而且不可逆。
+    """
+
+    def _fetcher(self):
+        return TestCancelUsesRestEnvelope._Fetcher()
+
+    def test_unknown_reservation_is_not_cancelled(self, monkeypatch):
+        """没有记录 = 不知道是不是我们的 = 一笔都不动（fail-safe）。"""
+        import booker
+        monkeypatch.setattr(booker, "_our_reservations", lambda _e: set())
+        f = self._fetcher()
+        assert booker.cancel_pending_orders(f, "tok", "a@b.c") == 0
+        assert not any("bookingcancel" in p for p, _ in f.rest_calls), (
+            "取消了一笔不属于我们的预留")
+
+    def test_skipping_is_reported(self, monkeypatch, caplog):
+        """静默跳过会让人以为「取消坏了」，进而把判据放宽回原样。"""
+        import logging
+
+        import booker
+        monkeypatch.setattr(booker, "_our_reservations", lambda _e: set())
+        with caplog.at_level(logging.WARNING):
+            booker.cancel_pending_orders(self._fetcher(), "tok", "a@b.c")
+        assert "不是我们下的" in caplog.text
+
+    def test_only_ours_among_several(self, monkeypatch):
+        """混合场景：只动记过的那一笔。"""
+        import json as _j
+
+        import booker
+
+        class _F(TestCancelUsesRestEnvelope._Fetcher):
+            def fetch_rest(self, path, *, method="GET", body="", headers=None,
+                           timeout_ms=30_000):
+                self.rest_calls.append((path, method))
+                if method == "GET":
+                    return {"status": 200, "ok": True, "headers": {},
+                            "text": _j.dumps({"items": [
+                                {"sku": "ours", "product_name": "A",
+                                 "status": "reserved"},
+                                {"sku": "manual", "product_name": "B",
+                                 "status": "reserved"},
+                            ]})}
+                return {"status": 200, "ok": True, "text": "{}", "headers": {}}
+
+        monkeypatch.setattr(booker, "_our_reservations", lambda _e: {"ours"})
+        f = _F()
+        assert booker.cancel_pending_orders(f, "tok", "a@b.c") == 1
+        cancelled = [p for p, _ in f.rest_calls if "bookingcancel" in p]
+        assert any("ours" in p for p in cancelled)
+        assert not any("manual" in p for p in cancelled), "动了用户手动订的那笔"
+
+    def test_recording_round_trips(self, tmp_path, monkeypatch):
+        """记录要能存下来并读回——否则重启后就再也认不出自己的预留。"""
+        import booker
+        from storage import Storage
+
+        st = Storage(tmp_path / "t.db")
+        monkeypatch.setattr(booker, "_meta_storage", lambda: st)
+        booker.remember_our_reservation("a@b.c", "sku-1")
+        booker.remember_our_reservation("a@b.c", "sku-2")
+        assert booker._our_reservations("a@b.c") == {"sku-1", "sku-2"}
+        # 换个账号读不到
+        assert booker._our_reservations("other@b.c") == set()
 
 
 class TestCreateBooking:

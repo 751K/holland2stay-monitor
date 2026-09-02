@@ -1988,7 +1988,23 @@ async def _process_booking_results(
     rejected_in_round: list[tuple[UserConfig, BaseNotifier, str, "Listing"]] = []
 
     for user, notifier, sorted_cands, future, prewarmed in ab_futures:
-        result = await future
+        # 逐个用户兜底。**没有它的话一个用户的异常会带走所有人**：这个循环负责
+        # 发预订成功/失败通知、更新重试队列、聚合屏蔽通知，异常从这里穿出去，
+        # 后面排队的用户就什么都没有了——而且是静默的。
+        #
+        # 2026-09-02 的实例：bookers/rentcafe.py 把 RentCafeSession(...) 写在
+        # try 外面，构造一抛就是这个形状。根因已修，但**爆炸半径不该由被调用方
+        # 来保证**。
+        try:
+            result = await future
+        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+            raise
+        except Exception:
+            logger.error(
+                "[%s] 预订任务抛出未捕获异常，已隔离该用户（其余用户照常处理）",
+                user.name, exc_info=True,
+            )
+            continue
         if result is None:
             continue
         # phase="blocked" 或 unknown_error 都意味着 session 可能已被 H2S 标记，

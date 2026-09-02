@@ -835,8 +835,13 @@ class RentCafeBooker(AbstractBooker):
                 message=f"试运行：凭据与档案齐备，可为 {listing.name} 起草申请。",
             )
 
-        session = RentCafeSession(self._api_key, source=self.source)
+        # 构造放在 try **里面**。放外面的话它一抛（凭据格式不对、依赖初始化失败
+        # 等），异常会穿过本方法、穿过 run_in_executor 的 future，在
+        # monitor._process_booking_results 的 ``result = await future`` 处炸掉——
+        # 那个循环没有 try，于是**后续所有用户的预订结果都不再处理**：通知不发、
+        # 重试队列不更新、屏蔽聚合不发。一个用户的配置问题变成全体静默。
         try:
+            session = RentCafeSession(self._api_key, source=self.source)
             # ① 一路走到 Applicant Info。这一段是两个平台唯一不同的地方，
             #    整体交给子类——见 _reach_applicant_info 的说明。
             reached = self._reach_applicant_info(session, listing, email, password)

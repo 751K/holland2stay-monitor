@@ -557,6 +557,15 @@ def _to_listing(
 
         raw_next = item.get("next_contract_startdate") or ""
         contract_start_date = raw_next.strip()[:10] if raw_next.strip() else None
+        # **同一个字段，同一道哨兵检查。** 上面 available_from 过了，这里没过——
+        # 而 booker 优先用 contract_start_date（booker.py 的 Step 1：
+        # ``listing.contract_start_date or listing.available_from``），它那道
+        # ``>= today`` 的守卫对 2050 恰好放行。于是「没有下一个合同起始日」这个
+        # 哨兵会被当成真日期，带着 01-01-2050 去占房。
+        #
+        # Reserved 里约一半是哨兵值（见上面那段实测），所以这不是边角情况。
+        if is_sentinel_available_from(contract_start_date):
+            contract_start_date = None
 
         # ── features ──
         labels = attr_labels
