@@ -247,6 +247,70 @@ class TestCompleteness:
         assert r.complete is False and r.listings == []
 
 
+class TestTransportErrors:
+    def test_proxy_failure_is_recognisable_as_one(self, monkeypatch):
+        """代理故障必须包成 ScrapeNetworkError，且消息保留原文。
+
+        dispatcher 只在 ``except ScrapeNetworkError`` 那一支里调
+        ``is_proxy_error``（scrapers/__init__.py:272）。裸的 curl_cffi ProxyError
+        会掉进后面的通用 ``except Exception``，被记成「未预期异常」——本 source
+        于是永远不触发代理冷却，只能等别的 source 去发现代理坏了。
+
+        2026-09-02 生产实测：代理 402 欠费，同一轮里 xior 报「代理已确认故障并
+        进入冷却」，本 source 报的是「未预期异常，已隔离该任务」。
+        """
+        from scrapers.base import ScrapeNetworkError, is_proxy_error
+
+        class _ProxyError(Exception):
+            pass
+
+        class _Boom:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def get(self, *_a, **_kw):
+                raise _ProxyError(
+                    "Failed to perform, curl: (56) CONNECT tunnel failed, "
+                    "response 402.")
+
+        s = StudentExperienceScraper()
+        monkeypatch.setattr(s, "_session", lambda: _Boom())
+        with pytest.raises(ScrapeNetworkError) as ei:
+            with s.batch_session():
+                s.scrape(ScrapeTask(source="studentexperience",
+                                    city_key="amsterdam", city_display="Amsterdam"))
+        assert is_proxy_error(ei.value), (
+            f"代理故障没被认出来：{ei.value!r}——冷却机制不会被触发")
+
+    def test_http_error_does_not_become_zero_listings(self, monkeypatch):
+        """站点 5xx 必须上抛，**绝不能**变成「本轮 0 条房源」。
+
+        读成 0 条的后果不是少推几条，是整批存量被 stale 收敛判成 Occupied 并发一
+        批假下架通知。2026-09-02 站点真的 500 过一次，这条路径当时被实弹验证过。
+        """
+        from scrapers.base import ScrapeNetworkError
+
+        class _Down:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def get(self, *_a, **_kw):
+                return _Resp("<html>500</html>", status=500)
+
+        s = StudentExperienceScraper()
+        monkeypatch.setattr(s, "_session", lambda: _Down())
+        with pytest.raises(ScrapeNetworkError, match="500"):
+            with s.batch_session():
+                s.scrape(ScrapeTask(source="studentexperience",
+                                    city_key="amsterdam", city_display="Amsterdam"))
+
+
 class TestCitySplit:
     def test_listings_are_dispatched_by_city(self, monkeypatch, live_page, empty_page):
         s = StudentExperienceScraper()
@@ -360,5 +424,5 @@ class _FakeSession:
 
 
 class _Resp:
-    def __init__(self, text: str):
-        self.text, self.status_code = text, 200
+    def __init__(self, text: str, status: int = 200):
+        self.text, self.status_code = text, status

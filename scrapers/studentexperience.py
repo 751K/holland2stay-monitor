@@ -391,8 +391,31 @@ class StudentExperienceScraper(AbstractScraper):
 
     @staticmethod
     def _get(session, url: str, params: Optional[dict] = None) -> str:
-        resp = session.get(url, params=params, timeout=30,
-                           headers={"Accept-Language": "en-US,en;q=0.9"})
+        """取一个页面。**传输层异常一律包成 ScrapeNetworkError。**
+
+        包装不是为了好看，是为了让代理故障被认出来。dispatcher 只在
+        ``except ScrapeNetworkError`` 那一支里调 ``is_proxy_error``（见
+        scrapers/__init__.py:272）；裸的 ``curl_cffi.ProxyError`` 会掉进后面的
+        通用 ``except Exception``，被记成「未预期异常」，于是**永远不会**触发代理
+        冷却，本 source 就只能干等别的 source 去发现代理坏了。
+
+        2026-09-02 生产实测正是这样：代理 402 欠费，同一轮里 xior 报「代理已确认
+        故障并进入冷却」，本 source 报的却是「未预期异常，已隔离该任务」。
+
+        起作用的是 ``from e``——``is_proxy_error`` 走 ``_exception_chain_text``，
+        整条 ``__cause__`` 链都在它的搜索范围里，"CONNECT tunnel failed" /
+        curl (56) 这些特征串从原始异常那里就能读到。消息里再抄一遍原文只是为了
+        日志好读，**不是**识别的前提（照抄与否对 ``is_proxy_error`` 无差别，
+        变异测试证实了这一点）。裸抛才是真的会漏——那时根本走不到这一支。
+        """
+        try:
+            resp = session.get(url, params=params, timeout=30,
+                               headers={"Accept-Language": "en-US,en;q=0.9"})
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as e:
+            raise ScrapeNetworkError(
+                f"Student Experience {url} 请求失败: {type(e).__name__}: {e}") from e
         if resp.status_code != 200:
             raise ScrapeNetworkError(
                 f"Student Experience {url} 返回 HTTP {resp.status_code}")
