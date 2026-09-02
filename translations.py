@@ -445,11 +445,21 @@ TRANSLATIONS = {
         "en": "{sources} enabled but no property selected; these platforms will not be scraped. To disable a platform, uncheck the platform itself.",
     },
     # 真实环境变量盖过 app_settings 时的提示。不提示的话，改了没反应会被当成 bug。
-    # 仪表盘覆盖范围横幅。{cities} 由 Config.monitored_city_names() 填入——
-    # 分隔符与语序中英不同，所以整句带占位符，不在模板里拼接。
+    # 仪表盘覆盖范围横幅。城市按平台分组渲染（Config.monitored_cities_by_source），
+    # 所以这里只剩标题与结尾两句，城市名不再拼进译文。
+    "dash_coverage_title": {
+        "zh": "当前监控的平台与城市",
+        "en": "Platforms and cities currently monitored",
+    },
     "dash_coverage_notice": {
-        "zh": "当前监控的城市：{cities}。需要其他城市，请",
-        "en": "Currently monitoring: {cities}. For other cities, please ",
+        "zh": "需要其他城市，请",
+        "en": "For other cities, please ",
+    },
+    # 影子 source 的角标。它们在抓、在入库、在房源列表里看得见，但不发通知——
+    # 不标注就等于承诺了一个不会兑现的推送。
+    "dash_coverage_shadow": {
+        "zh": "试运行中，暂不推送",
+        "en": "trial run — no alerts yet",
     },
     "dash_coverage_contact": {"zh": "联系支持", "en": "contact support"},
     "settings_invalid_value": {

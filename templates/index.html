@@ -54,19 +54,34 @@
    紧急得多。能收到通知时这块整体不渲染。 #}
 {% include "_onboarding.html" %}
 
-{# 覆盖范围说明。城市名取自**当前生效的配置**（Config.monitored_city_names），
-   不写死——这些值现在存在 app_settings 里，随时能从「设置」页改，写死的横幅迟早
-   和实际不符，而且不会有任何地方报错。 #}
-{% if monitored_cities_text %}
+{# 覆盖范围说明。按平台分组，取自**当前生效的配置**
+   （Config.monitored_cities_by_source）——这些值存在 app_settings 里，随时能从
+   「设置」页改，写死的横幅迟早和实际不符，而且不会有任何地方报错。
+
+   影子 source 带「试运行中，暂不推送」角标：它们在抓、在入库、在房源列表里看得见，
+   隐藏会让用户在列表里看见房源却在这里找不到那个城市，不标注则等于承诺了一个不会
+   兑现的推送。 #}
+{% if coverage %}
 <div class="alert alert-info mb-4" role="status">
-  <i class="bi bi-geo-alt mr-2"></i>
-  <span>
+  <div class="flex items-center gap-2 mb-2">
+    <i class="bi bi-geo-alt"></i><strong>{{ _('dash_coverage_title') }}</strong>
+  </div>
+  <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:baseline;">
+    {% for row in coverage %}
+    <div style="white-space:nowrap;font-weight:600;">
+      {{ row.label }}{% if row.shadow %}
+      <span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;">{{ _('dash_coverage_shadow') }}</span>{% endif %}
+    </div>
+    <div>{{ row.cities }}</div>
+    {% endfor %}
+  </div>
+  <div class="mt-2">
     {#- 标签之间不留换行：中文的「请」和「联系支持」之间不该有空格，
         英文所需的那一个空格写在译文末尾。 -#}
-    {{ _('dash_coverage_notice') | replace('{cities}', monitored_cities_text) -}}
+    {{ _('dash_coverage_notice') -}}
     <a href="{{ url_for('support_page') }}">{{ _('dash_coverage_contact') }}</a>{% if support_email %}
     <a href="mailto:{{ support_email }}" style="white-space:nowrap;">{{ support_email }}</a>{% endif %}
-  </span>
+  </div>
 </div>
 {% endif %}
 

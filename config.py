@@ -1840,9 +1840,40 @@ class Config:
         「Maastricht Brusselsepoort」这种半截地名。注册表里本来就带 ``city`` 字段，
         用它是精确的。查不到才退回 ``canonical_city``。
         """
-        names: set[str] = set()
+        merged: set[str] = set()
+        for cities in self.monitored_cities_by_source().values():
+            merged.update(cities)
+        return sorted(merged)
+
+    def monitored_cities_by_source(self) -> dict[str, list[str]]:
+        """按平台分组的监控城市：``{source: [城市名]}``，只含真正启用的平台。
+
+        为什么要按平台分，而不是并集
+        ----------------------------
+        并集在三四个平台时还读得动，七个平台之后是一行十七个城市名，读的人既不知道
+        哪个城市由谁覆盖，也无从判断自己那个城市的房源大概是什么类型——Plaza 的
+        Groot-Ammers 和 Holland2Stay 的 Eindhoven 在同一行里长得一模一样，实际
+        一个是一条房源、另一个是几十条。
+
+        楼盘归属按 key 查官方注册表，不对显示名做前缀猜测：``canonical_city`` 走的是
+        显式别名表，表里没有的新楼盘会原样漏出去，横幅上就会出现「Maastricht
+        Brusselsepoort」这种半截地名。注册表里本来就带 ``city`` 字段，用它是精确的。
+        查不到才退回 ``canonical_city``。
+
+        同一平台内部仍然去重归一：OurDomain 的「Amsterdam Diemen」、Xior 的
+        「Eindhoven Kronehoefstraat」都是楼盘名，对用户而言就是 Amsterdam 和
+        Eindhoven，分开列只会让人以为监控了七八个城市。
+
+        **影子 source 照常返回**，由调用方决定怎么呈现——它们确实在抓、在入库、在
+        面板上看得见，只是不发通知。是否要在横幅上标注「暂不推送」是展示层的事，
+        不该由这里静默过滤掉：过滤掉的话，用户在房源列表里看见 Plaza 的房子却在
+        覆盖说明里找不到那个城市，那是另一种自相矛盾。
+        """
+        out: dict[str, list[str]] = {}
         if "holland2stay" in self.sources:
-            names.update(canonical_city(c.name) for c in self.cities)
+            names = {canonical_city(c.name) for c in self.cities}
+            if names:
+                out["holland2stay"] = sorted(n for n in names if n)
         for source, targets, registry in (
             ("ourdomain", self.ourdomain_cities, KNOWN_OURDOMAIN_CITIES),
             ("ourcampus", self.ourcampus_cities, KNOWN_OURCAMPUS_CITIES),
@@ -1855,9 +1886,11 @@ class Config:
             if source not in self.sources:
                 continue
             by_key = {r["key"]: r.get("city", "") for r in registry}
-            for t in targets:
-                names.add(by_key.get(t.key) or canonical_city(t.name))
-        return sorted(n for n in names if n)
+            names = {by_key.get(t.key) or canonical_city(t.name) for t in targets}
+            names = {n for n in names if n}
+            if names:
+                out[source] = sorted(names)
+        return out
 
     def scrape_tasks_v2(self) -> list["ScrapeTask"]:  # type: ignore[name-defined]
         """

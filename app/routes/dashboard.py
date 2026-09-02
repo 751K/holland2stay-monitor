@@ -73,26 +73,45 @@ def index() -> str:
         st.close()
     pid = monitor_pid()
 
-    # 覆盖范围横幅的城市名。取自当前生效的配置而非写死——这些值存在 app_settings
-    # 里，随时能从「设置」页改；写死的横幅迟早和实际不符，且不会有任何地方报错。
-    # 分隔符按语言给：中文用顿号，英文用逗号加空格。
+    # 覆盖范围横幅。取自当前生效的配置而非写死——这些值存在 app_settings 里，
+    # 随时能从「设置」页改；写死的横幅迟早和实际不符，且不会有任何地方报错。
+    #
+    # **按平台分组**，不是并集：七个平台之后并集是一行十七个城市名，读的人既不知道
+    # 哪个城市由谁覆盖，也无从判断房源类型——Plaza 的 Groot-Ammers 和 Holland2Stay
+    # 的 Eindhoven 在同一行里长得一样，实际一个是一条房源、另一个是几十条。
+    #
+    # 影子 source 单独标注而**不是过滤掉**：它们在抓、在入库、在房源列表里看得见，
+    # 只是不发通知。整个隐藏会让用户在列表里看见 Plaza 的房子却在覆盖说明里找不到
+    # 那个城市；不标注则等于承诺了一个不会兑现的推送。两种都是「界面说的和系统做的
+    # 不一致」，标注是唯一两头都对的做法。
     lang = get_lang()
+    coverage: list[dict] = []
     try:
-        from config import load_config
+        from config import load_config, source_display_name
 
-        cities = load_config().monitored_city_names()
+        cfg = load_config()
+        shadow = {s.lower() for s in (cfg.shadow_sources or ())}
+        sep = "、" if lang == "zh" else ", "
+        coverage = [
+            {
+                "source": src,
+                "label": source_display_name(src),
+                "cities": sep.join(cities),
+                "shadow": src.lower() in shadow,
+            }
+            for src, cities in cfg.monitored_cities_by_source().items()
+        ]
     except Exception:
         # 配置读不出来时不显示横幅，而不是让整个首页 500
         logger.warning("读取监控城市失败，本次不显示覆盖范围横幅", exc_info=True)
-        cities = []
-    monitored_cities_text = ("、" if lang == "zh" else ", ").join(cities)
+        coverage = []
     # 支持邮箱同样取配置（SUPPORT_EMAIL）：写死会和支持页显示的不一致，
     # 而那正是 App Store 登记的 Support URL 上写的地址。
     from support_text import CONTACT_EMAIL as support_email
 
     return render_template(
         "index.html",
-        monitored_cities_text=monitored_cities_text,
+        coverage=coverage,
         support_email=support_email,
         onb=_onboarding_state(),
         stats=stats,
