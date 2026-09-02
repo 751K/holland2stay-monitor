@@ -152,6 +152,62 @@ class TestFieldMapping:
             assert "speed does not help" in ALLOCATION_LABELS[k]
 
 
+class TestBuilding:
+    """Plaza 不发布楼盘名，这一列是从地址结构推导的。"""
+
+    def test_every_listing_gets_one(self, parsed):
+        """不推导的话「楼盘」列全是「—」——2026-09-02 上线后就是这个样子。"""
+        for item in parsed:
+            fm = dict(f.split(": ", 1) for f in item.features)
+            assert fm.get("Building"), f"{item.id} 没有 Building"
+
+    def test_addition_means_the_number_marks_the_building(self, parsed):
+        """有附加号：门牌标楼、附加号标单元 → 楼盘 = 街道 + 门牌。"""
+        fm = dict(f.split(": ", 1)
+                  for f in next(x for x in parsed if x.name.startswith("Bogardeind")).features)
+        assert fm["Building"] == "Bogardeind 219"
+
+    def test_no_addition_means_the_number_is_the_unit(self, parsed):
+        """无附加号：门牌本身就是单元 → 楼一级只到街道。
+
+        Limapad 那 32 条分布在六个邮编（3584 SR/ST/SV/SW/SX/SZ，同一综合体的不同
+        入口），只有街道这一级能把它们归到一起。
+        """
+        limapad = [x for x in parsed if x.name.startswith("Limapad")]
+        assert len(limapad) == 32
+        for item in limapad:
+            fm = dict(f.split(": ", 1) for f in item.features)
+            assert fm["Building"] == "Limapad"
+
+    def test_the_source_really_has_no_building_field(self, payload):
+        """推导是因为**上游确实没有**，不是因为懒得找。
+
+        这条钉住那个前提：哪天 Plaza 开始发楼盘名，它会失败，提醒改用真实字段。
+        """
+        rows = [r for r in payload["result"]
+                if (r["dwellingType"] or {}).get("categorie") == HOUSING_CATEGORY
+                and str((r.get("land") or {}).get("id")) == NL_LAND_ID]
+        assert all(not (r.get("neighborhood") or {}).get("name") for r in rows)
+        assert all(not r.get("projectID") for r in rows)
+        assert all(not r.get("verzameladvertentieID") for r in rows)
+        assert all("complex" not in r for r in rows)
+        # quarter / municipality 只是城市名，不能当楼盘
+        for r in rows:
+            city = (r.get("city") or {}).get("name")
+            assert (r.get("quarter") or {}).get("name") == city
+
+    def test_rule_is_structural_not_data_dependent(self):
+        """判据是地址结构，不是「同街道有几条」。
+
+        按数据分布判会让同一栋楼今天一条、明天五条时标签翻来覆去。
+        """
+        from scrapers.plaza import _building
+        assert _building("Bogardeind", 219, "D21") == "Bogardeind 219"
+        assert _building("Limapad", 16, "") == "Limapad"
+        assert _building("Limapad", 16, None) == "Limapad"
+        assert _building("", 16, "A") == ""
+
+
 class TestTenant:
     def test_student_only_comes_from_the_listing_not_a_site_wide_claim(self, payload):
         """租客维度逐条读 doelgroepen，不是整站断言。

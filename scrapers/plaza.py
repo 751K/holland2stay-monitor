@@ -68,6 +68,14 @@ Arnhem）与当时实际在架的十个城市取并集。两份清单本来就�
 WARNING 记下城市名，日志里看得见，加进表即可。宁可漏推几条也不要猜城市——猜错
 会把房源分派给错误的 ScrapeTask，用户按城市订阅就会收到不该收的。
 
+楼盘名是推导的
+--------------
+**Plaza 不发布楼盘名。** 列表接口里没有任何字段承载它：``neighborhood`` 49 条全空，
+``quarter`` / ``municipality`` 就是城市名，``projectID`` / ``verzameladvertentieID``
+全为 0，也没有 ``complex`` 一类字段。所以 ``Building`` 由地址结构推出（见
+``_building``），不是上游数据——有一条测试钉住这个前提，哪天 Plaza 开始发楼盘名，
+它会失败并提醒改用真实字段。
+
 价格口径
 --------
 ``totalRent`` 是到手价（实测 €867.75），``netRent`` 是 kale huur（€653）。
@@ -195,6 +203,36 @@ def _fmt_euro(value: float) -> str:
     return f"€{value:.2f}".replace(".", ",")
 
 
+def _building(street: str, number: object, addition: str) -> str:
+    """从地址推导楼盘名。**Plaza 不发布楼盘名**，这是推导出来的。
+
+    列表接口里没有任何一个字段承载楼盘：``neighborhood`` 2026-09-02 快照 49 条全空，
+    ``quarter`` 与 ``municipality`` 就是城市名，``projectID`` /
+    ``verzameladvertentieID`` 全为 0，也没有 ``complex`` 一类的字段。详情接口
+    ``getobject`` 需要另一组参数（几种猜测都返回 500），未能取到。
+
+    规则按**地址结构**走，不按数据分布：
+
+        有 houseNumberAddition   「Bogardeind 219」+「D21」——门牌标楼、附加号标
+                                 单元，楼盘 = 街道 + 门牌
+        无 houseNumberAddition   「Limapad 16」——门牌本身就是单元，楼一级只到
+                                 街道，楼盘 = 街道
+
+    不按「同街道有几条房源」来判：那是数据依赖的，同一栋楼今天一条明天五条，标签
+    会跟着翻来覆去。
+
+    第二种情形下这个值对独栋房源（Sluis 51）与地址重复，是有意的取舍：Limapad 那
+    32 条学生 studio 分布在六个邮编上（3584 SR/ST/SV/SW/SX/SZ，是同一综合体的不同
+    入口），只有街道这一级能把它们归到一起，而那正是用户口中的「Limapad」。
+    """
+    street = (street or "").strip()
+    if not street:
+        return ""
+    if (addition or "").strip() and str(number or "").strip():
+        return f"{street} {str(number).strip()}"
+    return street
+
+
 def _name_of(node: object) -> str:
     """从 ``{"name": …}`` / ``{"localizedName": …}`` 这类节点取名字。"""
     if not isinstance(node, dict):
@@ -255,6 +293,7 @@ def _parse_object(obj: dict) -> Optional[Listing]:
     _add("Allocation", ALLOCATION_LABELS.get(
         "dth" if model.get("advertentieSluitenNaEersteReactie") else code, code))
 
+    _add("Building", _building(street, number, addition))
     _add("Type", TYPE_MAP.get(_name_of(dwelling).lower(), ""))
     _add("Dwelling type", _name_of(dwelling))
     area = obj.get("areaDwelling")
