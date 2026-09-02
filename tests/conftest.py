@@ -65,12 +65,20 @@ def fresh_crypto(tmp_path, monkeypatch):
     - 全局 _CIPHER 被重置
     - DATA_ENCRYPTION_KEY 环境变量被清除
     - ENV_PATH 指向 tmp_path/.env（避免污染真实 .env）
+    - **DB_PATH 指向 tmp_path 下一个不存在的库**
+
+    最后一条是 2026-09-02 加的。crypto 现在在生成新密钥之前会先查库里有没有
+    ``$F$`` 密文——有就拒绝生成（否则那些密文永久解不开）。不隔离 DB_PATH 的话，
+    这些用例会读到**开发机上真实的 data/listings.db**，那里面是有密文的，于是
+    「首次运行自动生成密钥」这一契约在测试里被正确地拒绝掉。
+    库不存在 = 首次部署，正是这些用例要表达的场景。
     """
     import os
     import crypto
     monkeypatch.setattr(crypto, "_CIPHER", None)
     monkeypatch.setattr(crypto, "ENV_PATH", tmp_path / ".env")
     monkeypatch.delenv("DATA_ENCRYPTION_KEY", raising=False)
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "fresh-deployment.db"))
     # 阻止 crypto.write_env_key 写到真实 .env
     import config
     monkeypatch.setattr(config, "ENV_PATH", tmp_path / ".env")

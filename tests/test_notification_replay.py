@@ -44,6 +44,17 @@ from models import Listing
 from storage import Storage
 
 
+def _ago(**kw) -> str:
+    """生产格式的「N 小时前」。
+
+    **必须与 mstorage._listings._now_iso() 同格式**——用 SQLite 的
+    ``datetime('now', ...)`` 构造会和查询里的格式凑巧一致，把字符串比较的 bug
+    整个盖住（这个文件原先就是那么写的）。
+    """
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) - timedelta(**kw)).isoformat()
+
+
 def _l(lid="L1", status="Available to book", features=None):
     return Listing(
         id=lid, name=lid, status=status, price_raw="€1000",
@@ -156,14 +167,46 @@ class TestNoNotificationStorm:
             s2.close()
 
     def test_replay_has_a_time_window(self, st):
-        """闸③时间窗：太老的不重放。房子早没了，推过去只是打扰。"""
+        """闸③时间窗：太老的不重放。房子早没了，推过去只是打扰。
+
+        ⚠️ 时间戳必须用**生产写入的那个格式**（``_now_iso()`` 的带时区 ISO）。
+        这条用例原先写 ``datetime('now','-3 hours')``——SQLite 自己的空格分隔格式，
+        和查询里 ``datetime('now','-N minutes')`` 的格式一致，字符串比较恰好正确。
+        于是它绿着，而**生产里那个 90 分钟的窗口一直退化成「当天 UTC 零点起」**：
+        第 10 位 ``T``(0x54) 对空格(0x20)，同一 UTC 日期内恒为真。
+
+        用 _ago() 构造就把这层伪装拆掉了。
+        """
         st.diff([_l("L1")])
         st.conn.execute(
-            "UPDATE listings SET first_seen = datetime('now','-3 hours') WHERE id='L1'"
+            "UPDATE listings SET first_seen = ? WHERE id='L1'", (_ago(hours=3),)
         )
         st.conn.commit()
         assert st.pending_new_listings(within_minutes=60) == []
         assert len(st.pending_new_listings(within_minutes=600)) == 1
+
+    def test_window_is_not_a_string_comparison(self, st):
+        """同一 UTC 日期内的旧行必须被挡住——这正是 bug 的形状。
+
+        取 9 小时前而不是 25 小时前：跨天的那种字符串比较也能挡住，只有当天的
+        才暴露问题。实测就是「9 小时前仍判为窗口内」。
+        """
+        st.diff([_l("L1")])
+        st.conn.execute(
+            "UPDATE listings SET first_seen = ? WHERE id='L1'", (_ago(hours=9),)
+        )
+        st.conn.commit()
+        assert st.pending_new_listings(within_minutes=90) == [], (
+            "9 小时前的行落进了 90 分钟的窗口——比较退化成了字符串比较")
+
+    def test_status_change_window_too(self, st):
+        """状态变更那条查询是同一个形状，也要挡住。"""
+        st.diff([_l("L1", status="Available to book")])
+        st.diff([_l("L1", status="Occupied")])
+        assert len(st.pending_status_changes(within_minutes=90)) == 1
+        st.conn.execute("UPDATE status_changes SET changed_at = ?", (_ago(hours=9),))
+        st.conn.commit()
+        assert st.pending_status_changes(within_minutes=90) == []
 
     def test_replay_has_a_batch_cap(self, st):
         """闸③条数：单轮重放有上限，异常情况下不会一次性炸开。"""
@@ -174,7 +217,7 @@ class TestNoNotificationStorm:
         """超窗的积压要能被「归档」，否则 0 池只增不减，每轮白查一次。"""
         st.diff([_l("L1")])
         st.conn.execute(
-            "UPDATE listings SET first_seen = datetime('now','-3 hours') WHERE id='L1'"
+            "UPDATE listings SET first_seen = ? WHERE id='L1'", (_ago(hours=3),)
         )
         st.conn.commit()
         n = st.retire_stale_pending(within_minutes=60)

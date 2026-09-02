@@ -150,6 +150,11 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _days(minutes: float) -> float:
+    """分钟 → 儒略日的天数差，喂给 ``julianday('now') - ?``。"""
+    return float(minutes) / 1440.0
+
+
 def _parse_iso(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -409,15 +414,30 @@ class ListingOps:
         within_minutes: int | None = None,
         limit: int | None = None,
     ) -> list[Listing]:
-        """还没走完通知阶段的新房源（时间窗内、按条数封顶）。"""
+        """还没走完通知阶段的新房源（时间窗内、按条数封顶）。
+
+        ⚠️ 比较必须走 ``julianday``，不能拿字符串比。
+        ``first_seen`` 存的是 ``_now_iso()`` 的带时区 ISO
+        （``2026-09-02T10:30:06.916515+00:00``），而 ``datetime('now','-N minutes')``
+        返回空格分隔、无时区的 ``2026-09-02 09:00:06``。直接比字符串时第 10 位是
+        ``T``(0x54) 对空格(0x20)，**同一 UTC 日期内恒为真**——90 分钟的窗口退化成
+        「当天 UTC 零点起」，实测 9 小时前的行仍判为窗口内，跨天才失效。
+
+        后果不是少推，是**多推**：投递失败后的重放会把最多一整天的旧事件重新捞
+        出来。配套的 ``retire_stale_pending`` 用的是同一个比较的补集（``<=``），
+        于是当天的积压永远归档不掉，0 池只增不减。
+
+        `mstorage/_map_calendar.py` 对 ``last_seen`` 早就踩过同一个坑并改用
+        julianday，只是这几处没跟着改。
+        """
         win = self.PENDING_WINDOW_MINUTES if within_minutes is None else within_minutes
         lim = self.PENDING_BATCH_LIMIT if limit is None else limit
         rows = self._conn.execute(
-            f"""SELECT * FROM listings
+            """SELECT * FROM listings
                 WHERE notified = 0
-                  AND first_seen > datetime('now', '-{int(win)} minutes')
+                  AND julianday(first_seen) > julianday('now') - ?
                 ORDER BY first_seen ASC LIMIT ?""",
-            (int(lim),),
+            (_days(win), int(lim)),
         ).fetchall()
         return [self._row_to_listing(r) for r in rows]
 
@@ -430,13 +450,13 @@ class ListingOps:
         win = self.PENDING_WINDOW_MINUTES if within_minutes is None else within_minutes
         lim = self.PENDING_BATCH_LIMIT if limit is None else limit
         rows = self._conn.execute(
-            f"""SELECT sc.listing_id, sc.old_status, sc.new_status, l.*
+            """SELECT sc.listing_id, sc.old_status, sc.new_status, l.*
                 FROM status_changes sc
                 JOIN listings l ON l.id = sc.listing_id
                 WHERE sc.notified = 0
-                  AND sc.changed_at > datetime('now', '-{int(win)} minutes')
+                  AND julianday(sc.changed_at) > julianday('now') - ?
                 ORDER BY sc.changed_at ASC LIMIT ?""",
-            (int(lim),),
+            (_days(win), int(lim)),
         ).fetchall()
         return [
             (self._row_to_listing(r), r["old_status"] or "", r["new_status"] or "")
@@ -452,14 +472,16 @@ class ListingOps:
         win = self.PENDING_WINDOW_MINUTES if within_minutes is None else within_minutes
         with self._conn:
             c1 = self._conn.execute(
-                f"""UPDATE listings SET notified = 1
+                """UPDATE listings SET notified = 1
                     WHERE notified = 0
-                      AND first_seen <= datetime('now', '-{int(win)} minutes')"""
+                      AND julianday(first_seen) <= julianday('now') - ?""",
+                (_days(win),),
             ).rowcount
             c2 = self._conn.execute(
-                f"""UPDATE status_changes SET notified = 1
+                """UPDATE status_changes SET notified = 1
                     WHERE notified = 0
-                      AND changed_at <= datetime('now', '-{int(win)} minutes')"""
+                      AND julianday(changed_at) <= julianday('now') - ?""",
+                (_days(win),),
             ).rowcount
         return (c1 or 0) + (c2 or 0)
 
