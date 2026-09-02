@@ -62,25 +62,29 @@
    隐藏会让用户在列表里看见房源却在这里找不到那个城市，不标注则等于承诺了一个不会
    兑现的推送。 #}
 {% if coverage %}
-<div class="alert alert-info mb-4" role="status">
-  <div class="flex items-center gap-2 mb-2">
-    <i class="bi bi-geo-alt"></i><strong>{{ _('dash_coverage_title') }}</strong>
-  </div>
-  <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;align-items:baseline;">
-    {% for row in coverage %}
-    <div style="white-space:nowrap;font-weight:600;">
-      {{ row.label }}{% if row.shadow %}
-      <span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;">{{ _('dash_coverage_shadow') }}</span>{% endif %}
+{# 用专用的 .coverage-banner 而**不是** .alert：后者是 display:flex + align-items:
+   center，三个子元素会被排成一行并垂直居中（标题贴左、联系方式飘到最右、中间
+   一大片空白）。样式见 design.css 的 Coverage banner 一节。 #}
+<div class="coverage-banner" role="status">
+  <i class="bi bi-geo-alt" aria-hidden="true"></i>
+  <div class="coverage-body">
+    <div class="coverage-title">{{ _('dash_coverage_title') }}</div>
+    <div class="coverage-grid">
+      {% for row in coverage %}
+      <div class="coverage-src">
+        <span>{{ row.label }}</span>{% if row.shadow %}
+        <span class="coverage-shadow">{{ _('dash_coverage_shadow') }}</span>{% endif %}
+      </div>
+      <div class="coverage-cities">{{ row.cities }}</div>
+      {% endfor %}
     </div>
-    <div>{{ row.cities }}</div>
-    {% endfor %}
-  </div>
-  <div class="mt-2">
-    {#- 标签之间不留换行：中文的「请」和「联系支持」之间不该有空格，
-        英文所需的那一个空格写在译文末尾。 -#}
-    {{ _('dash_coverage_notice') -}}
-    <a href="{{ url_for('support_page') }}">{{ _('dash_coverage_contact') }}</a>{% if support_email %}
-    <a href="mailto:{{ support_email }}" style="white-space:nowrap;">{{ support_email }}</a>{% endif %}
+    <div class="coverage-foot">
+      {#- 标签之间不留换行：中文的「请」和「联系支持」之间不该有空格，
+          英文所需的那一个空格写在译文末尾。 -#}
+      {{ _('dash_coverage_notice') -}}
+      <a href="{{ url_for('support_page') }}">{{ _('dash_coverage_contact') }}</a>{% if support_email %}
+      <a href="mailto:{{ support_email }}" style="white-space:nowrap;">{{ support_email }}</a>{% endif %}
+    </div>
   </div>
 </div>
 {% endif %}

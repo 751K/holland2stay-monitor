@@ -299,3 +299,34 @@ class TestShadowIsVisible:
         html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
         assert "row.shadow" in html
         assert "dash_coverage_shadow" in html
+
+
+class TestBannerLayout:
+    def test_uses_a_dedicated_class_not_alert(self):
+        """横幅**不能**用 .alert。
+
+        那个类是 `display:flex; align-items:center`——标题、表格、联系方式三个子元素
+        会被排成一行并垂直居中：标题贴最左、联系方式飘到最右、中间一大片空白。
+        2026-09-02 就是这么渲染出来的。
+        """
+        import re
+
+        html = (ROOT / "templates" / "index.html").read_text(encoding="utf-8")
+        # 先剥 Jinja 注释：模板里那段说明本身就写着「而不是 .alert」，
+        # 不剥的话测试咬中的是自己的注释而不是标记。
+        html = re.sub(r"\{#.*?#\}", " ", html, flags=re.S)
+        i = html.index("coverage-banner")
+        block = html[i - 200:i + 1400]
+        assert "alert" not in block, "覆盖横幅又用回 .alert 了，布局会塌"
+
+    def test_styles_exist(self):
+        css = (ROOT / "static" / "design.css").read_text(encoding="utf-8")
+        for cls in (".coverage-banner", ".coverage-grid", ".coverage-src",
+                    ".coverage-cities", ".coverage-shadow", ".coverage-foot"):
+            assert cls in css, f"{cls} 没有样式，会渲染成裸文本"
+
+    def test_narrow_screens_stack(self):
+        """窄屏必须把 max-content 那一列拆开，否则城市被挤成一条缝。"""
+        css = (ROOT / "static" / "design.css").read_text(encoding="utf-8")
+        i = css.index(".coverage-grid")
+        assert "max-width:640px" in css[i:i + 1200]

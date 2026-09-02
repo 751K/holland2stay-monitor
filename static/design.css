@@ -659,6 +659,56 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .alert-info{background:var(--info-soft);color:var(--info)}
 .alert-dismiss{background:none;border:none;color:inherit;opacity:.6;cursor:pointer;margin-left:auto;font-size:18px;padding:0 4px}
 
+/* ── Coverage banner ───────────────────────────────────────────────
+   「当前监控的平台与城市」。**不能用 .alert**：那个类是
+   `display:flex; align-items:center`，塞进标题、表格、联系方式三个子元素会被
+   排成一行并垂直居中——标题贴左、联系方式飘到最右、中间一大片空白。
+   2026-09-02 就是这么渲染出来的。
+
+   与 .maintenance-banner 同一套结构（图标 + 纵向 body），但语气更淡：这是常驻
+   的信息说明，不是状态告警，所以不描边、字号更小。 */
+.coverage-banner{
+  display:flex;align-items:flex-start;gap:10px;
+  padding:14px 16px;margin-bottom:20px;
+  background:var(--info-soft);border-radius:var(--radius-lg);
+  font-size:13.5px;line-height:1.5;
+}
+.coverage-banner > i{font-size:16px;line-height:1.4;color:var(--info);flex-shrink:0}
+.coverage-body{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
+.coverage-title{
+  font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--text3);
+}
+/* 平台名一列、城市一列。max-content 让平台名列刚好贴合最长的那个名字，
+   城市列拿走剩下的宽度并在内部换行——城市多的平台（Plaza 十二个）才不会把
+   平台名那一列撑开。 */
+.coverage-grid{
+  display:grid;grid-template-columns:max-content minmax(0,1fr);
+  gap:5px 18px;align-items:baseline;
+}
+.coverage-src{
+  display:flex;align-items:center;gap:6px;
+  font-weight:600;color:var(--text1);white-space:nowrap;
+}
+.coverage-cities{color:var(--text2);min-width:0}
+/* 影子来源的角标。描边而非实底：它是贴在平台名旁边的一个限定词，实底会和
+   平台名抢视觉权重，看起来像两个并列的标签。 */
+.coverage-shadow{
+  font-size:10px;font-weight:500;line-height:1.6;
+  padding:0 6px;border-radius:var(--radius-lg);
+  color:var(--text3);border:1px solid var(--border);
+  white-space:nowrap;
+}
+.coverage-foot{font-size:12.5px;color:var(--text3)}
+.coverage-foot a{color:var(--text2);text-decoration:underline;text-underline-offset:2px}
+.coverage-foot a:hover{color:var(--accent)}
+
+/* 窄屏：平台名与城市改为上下两行，否则 max-content 那一列会把城市挤成一条缝 */
+@media (max-width:640px){
+  .coverage-grid{grid-template-columns:1fr;gap:2px}
+  .coverage-cities{margin-bottom:8px}
+}
+
 /* ── Upstream maintenance banner ───────────────────────────────────
    平台维护态——比 .alert 更温和，专门用于"对方运维窗口、我们什么都不用做"
    的状态。颜色用 warning 软底，但措辞要明显是 informational 不是 error。 */
