@@ -95,15 +95,24 @@ class TestFormatEmailSubject:
 # ── MultiNotifier ─────────────────────────────────────────
 
 class _DummyNotifier:
-    """可配置成功/失败的通知器。"""
-    def __init__(self, succeed: bool = True, name: str = "dummy"):
+    """可配置成功/失败的通知器。
+
+    ``raises`` 用来区分两种失败：返回 False（渠道自己判定「没发」，可能是配额
+    拒发或配置缺失）与抛传输层异常。两者的重试语义**不同**，见
+    MultiNotifier._send_with_retry。
+    """
+    def __init__(self, succeed: bool = True, name: str = "dummy",
+                 raises: bool = False):
         self.succeed = succeed
         self.name = name
+        self.raises = raises
         self.sent: list[str] = []
         self.closed = False
 
     async def _send(self, text: str) -> bool:
         self.sent.append(text)
+        if self.raises:
+            raise OSError("connection reset")
         return self.succeed
 
     async def close(self):
@@ -118,9 +127,28 @@ class TestMultiNotifier:
         mn = MultiNotifier([d1, d2])
         ok = asyncio.run(mn._send("test"))
         assert ok is True
-        # d1 fails → retried once (2 calls); d2 succeeds first try (1 call)
-        assert len(d1.sent) == 2  # fail + retry
+        # **返回 False 不重试。** 这条原先断言 len(d1.sent) == 2，注释写着
+        # 「d1 fails → retried once」——把 bug 钉成了期望行为。
+        assert len(d1.sent) == 1
         assert len(d2.sent) == 1
+
+    def test_returning_false_is_not_retried(self):
+        """False 至少有三种含义，只有一种重试才有意义，而返回值里分不出来。
+
+        最坏的是配额拒发：ResendNotifier 在拒发时会 record_resend_rejected()，
+        重试等于**同一条消息记两笔拒发**，把面板上的配额统计做成假数据。
+        """
+        import asyncio
+        d = _DummyNotifier(succeed=False)
+        assert asyncio.run(MultiNotifier([d])._send("x")) is False
+        assert len(d.sent) == 1, "返回 False 被重试了"
+
+    def test_transport_exception_is_retried_once(self):
+        """传输层异常仍然重试——那是这层唯一能确定「我这次没发出去」的信号。"""
+        import asyncio
+        d = _DummyNotifier(raises=True)
+        assert asyncio.run(MultiNotifier([d])._send("x")) is False
+        assert len(d.sent) == 2, "传输异常没有重试"
 
     def test_all_fail_returns_false(self):
         import asyncio

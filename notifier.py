@@ -216,13 +216,28 @@ class MultiNotifier(BaseNotifier):
             return False
 
         async def _send_with_retry(n):
+            """只在**传输层异常**时重试一次；返回 False 一律不重试。
+
+            为什么 False 不能重试
+            ---------------------
+            ``_send`` 返回 False 至少有三种含义，只有第三种重试才有意义，而它们
+            在返回值上分不出来：
+
+            - **配置缺失**（没 API key / 没收件人）——重试一百次也一样；
+            - **配额拒发**——更糟：``ResendNotifier._send`` 在拒发时会
+              ``record_resend_rejected()``，重试等于**同一条消息记两笔拒发**，
+              把面板上的配额统计做实成假数据；
+            - 网络错误——渠道内部已经吞掉异常返回 False 了，这里再试也不知道上一次
+              到底送没送到。
+
+            传输层异常那条路仍然重试：那是这层唯一能确定「我这次没发出去」的信号。
+            即便如此，POST 超时也可能是**已经送达**——所以支持幂等键的渠道要自己带
+            上（见 ResendNotifier 的 Idempotency-Key）。
+            """
             try:
-                ok = await n._send(text)
-                if ok:
-                    return True
+                return await n._send(text)
             except (OSError, asyncio.TimeoutError) as e:
                 logger.debug("通知渠道首次发送失败 %s: %s", type(n).__name__, e)
-            # 失败后等待 3 秒重试一次
             await asyncio.sleep(3)
             try:
                 return await n._send(text)

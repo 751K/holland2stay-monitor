@@ -81,17 +81,35 @@ def _client(fcm_cfg, handler):
     return FcmClient(fcm_cfg, transport=httpx.MockTransport(handler))
 
 
-def _make_handler(status, error_message=""):
+def _make_handler(status, error_code="", *, message=""):
+    """按 **FCM v1 真实的错误形状** 造响应。
+
+    真实响应长这样（注意 message 是给人看的散文，机器判据在 status /
+    details[].errorCode 里）：
+
+        {"error": {"code": 404, "status": "NOT_FOUND",
+                   "message": "Requested entity was not found.",
+                   "details": [{"@type": ".../FcmError",
+                                "errorCode": "UNREGISTERED"}]}}
+
+    这个 helper 原先只造 ``message``，于是 device_dead 那几条用例是拿
+    ``message="unregistered"`` 去比的——**把 bug 钉成了期望行为**：真实响应里
+    message 是散文，判定从来没命中过，失效 token 一直没被清理。
+    """
     def h(request):
         if status == 200:
             return httpx.Response(200, content=b'{"name":"projects/p/messages/msg-123"}')
-        content = json.dumps({
-            "error": {
-                "code": status,
-                "message": error_message or "Unknown error",
-            },
-        }).encode()
-        return httpx.Response(status, content=content)
+        err = {
+            "code": status,
+            "message": message or "Requested entity was not found.",
+        }
+        if error_code:
+            err["status"] = "NOT_FOUND" if status == 404 else "INVALID_ARGUMENT"
+            err["details"] = [{
+                "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+                "errorCode": error_code,
+            }]
+        return httpx.Response(status, content=json.dumps({"error": err}).encode())
     return h
 
 
@@ -119,7 +137,7 @@ class TestSendOne:
 
     def test_400_unregistered_is_device_dead(self, fcm_cfg):
         async def go():
-            client = _client(fcm_cfg, _make_handler(400, "registration-token-not-registered"))
+            client = _client(fcm_cfg, _make_handler(400, "INVALID_ARGUMENT"))
             r = await client.send_one(
                 device_token="dead" + "0" * 60,
                 payload={"message": {"data": {"title": "x"}}},
@@ -131,7 +149,7 @@ class TestSendOne:
 
     def test_404_not_found_is_device_dead(self, fcm_cfg):
         async def go():
-            client = _client(fcm_cfg, _make_handler(404, "unregistered"))
+            client = _client(fcm_cfg, _make_handler(404, "UNREGISTERED"))
             r = await client.send_one(
                 device_token="gone" + "0" * 60,
                 payload={"message": {"data": {"title": "x"}}},
@@ -298,10 +316,45 @@ class TestFcmResult:
 
     def test_device_dead_unregistered(self):
         from notifier_channels.fcm import FcmResult
-        r = FcmResult(status=404, reason="unregistered", device="tok")
+        r = FcmResult(status=404, reason="UNREGISTERED", device="tok")
         assert not r.ok and r.device_dead
 
     def test_device_dead_bad_token(self):
         from notifier_channels.fcm import FcmResult
-        r = FcmResult(status=400, reason="invalid-argument", device="tok")
+        r = FcmResult(status=400, reason="INVALID_ARGUMENT", device="tok")
+        assert r.device_dead
+
+    def test_prose_message_is_not_a_verdict(self):
+        """**这条是那个 bug 的形状。**
+
+        真实响应里 error.message 是「The registration token is not a valid FCM
+        registration token」这样的散文。拿它当判据，任何常量都不相等，于是失效
+        token 永远清理不掉，每轮都对着墓碑重发一次。
+        """
+        from notifier_channels.fcm import FcmResult
+        prose = "The registration token is not a valid FCM registration token"
+        assert not FcmResult(status=404, reason=prose, device="t").device_dead
+
+    def test_reason_comes_from_error_code_not_message(self):
+        """_build_result 必须取 details[].errorCode，其次 status，最后才是 message。"""
+        import httpx
+
+        from notifier_channels.fcm import FcmClient
+
+        class _Resp:
+            status_code = 404
+            text = ""
+
+            @staticmethod
+            def json():
+                return {"error": {
+                    "code": 404, "status": "NOT_FOUND",
+                    "message": "Requested entity was not found.",
+                    "details": [{
+                        "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError",
+                        "errorCode": "UNREGISTERED"}],
+                }}
+
+        r = FcmClient._build_result(None, _Resp(), "tok")
+        assert r.reason == "UNREGISTERED", f"取错了字段：{r.reason!r}"
         assert r.device_dead

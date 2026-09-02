@@ -39,6 +39,7 @@ data payload 字段（客户端消费）：
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -171,15 +172,30 @@ class FcmResult:
     def ok(self) -> bool:
         return self.status == 200
 
+    #: FCM v1 里代表「这个 token 已经没用了」的机器可读错误码。
+    #:
+    #: 取自 ``error.details[].errorCode``（``type.googleapis.com/
+    #: google.firebase.fcm.v1.FcmError``），拿不到时退回 ``error.status``。
+    #: **不能拿 ``error.message`` 比**——那是给人看的散文，例如
+    #: 「The registration token is not a valid FCM registration token」，
+    #: 和这里任何一个常量都不相等，于是这个判定**从来没有命中过**，失效 token
+    #: 永远不会被清理，每轮都对着墓碑重发一次。
+    DEAD_CODES = frozenset({
+        "UNREGISTERED",
+        "INVALID_ARGUMENT",
+        "SENDER_ID_MISMATCH",
+    })
+
     @property
     def device_dead(self) -> bool:
-        """需要把对应 device token 软停的状态。"""
-        return self.status in (400, 404) and self.reason.lower() in (
-            "unregistered",
-            "invalid-argument",
-            "registration-token-not-registered",
-            "sender-id-mismatch",
-        )
+        """需要把对应 device token 软停的状态。
+
+        判据是 ``reason``（现在装的是 errorCode / status，不是 message）加上
+        HTTP 状态。两者都要：``INVALID_ARGUMENT`` 也可能是我们自己 payload 写错，
+        那时状态码同样是 400——但那种情况下每台设备都会 400，而不是某一台。
+        软停单台设备是可逆的（客户端下次上报 token 会复活），所以这里取宽。
+        """
+        return self.status in (400, 404) and self.reason.upper() in self.DEAD_CODES
 
 
 # ── OAuth2 Token 管理 ────────────────────────────────────────────────
@@ -311,8 +327,24 @@ class FcmClient:
     ) -> FcmResult:
         """发一条到指定 FCM token；返回归一化结果。"""
         url = _build_url(self.cfg.project_id)
+        # 取 token 必须在 try **里面**，而且不能直接调——``_auth.token()`` 在缓存
+        # 过期时会走同步 httpx 去换 token，**阻塞事件循环**（整个进程的 asyncio
+        # 都停在这一行上，包括其余渠道的推送和 web 的 SSE）。
+        #
+        # 放在 try 外面的后果更直接：换 token 一失败，异常穿出 send_one，而
+        # send_many 的 gather 没有 return_exceptions，**整批 Android 推送一起丢**。
+        # 2026-08-28 实测过一次：代理欠费 402，FCM 全军覆没而 APNs 正常。
+        try:
+            token = await asyncio.to_thread(self._auth.token)
+        except Exception as e:
+            logger.warning("FCM 取 access token 失败 dev=%s: %s",
+                           device_token[:12], e)
+            return FcmResult(
+                status=0, reason=f"auth_error:{type(e).__name__}",
+                device=device_token,
+            )
         headers = {
-            "Authorization": f"Bearer {self._auth.token()}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json; charset=UTF-8",
         }
 
@@ -335,8 +367,8 @@ class FcmClient:
         # 401 Unauthorized → token 过期，强刷重试一次
         if resp.status_code == 401:
             try:
-                self._auth.force_refresh()
-                headers["Authorization"] = f"Bearer {self._auth.token()}"
+                fresh = await asyncio.to_thread(self._auth.force_refresh)
+                headers["Authorization"] = f"Bearer {fresh}"
                 resp = await self._client.post(url, content=body, headers=headers)
             except Exception as e:
                 return FcmResult(
@@ -357,8 +389,18 @@ class FcmClient:
                 message_id=name,
             )
         try:
-            error = resp.json().get("error", {})
-            reason = error.get("message", "")
+            error = resp.json().get("error", {}) or {}
+            # 优先 details[].errorCode（FcmError），其次 error.status。
+            # message 只留给日志——它是散文，拿来做判定永远不会相等。
+            reason = ""
+            for d in error.get("details") or []:
+                if isinstance(d, dict) and d.get("errorCode"):
+                    reason = str(d["errorCode"])
+                    break
+            if not reason:
+                reason = str(error.get("status") or "")
+            if not reason:
+                reason = str(error.get("message") or "")[:80]
         except Exception:
             reason = resp.text[:80]
         return FcmResult(
@@ -395,4 +437,20 @@ class FcmClient:
                 kwargs["device_token"] = t["device_token"]
                 return await self.send_one(**kwargs)
 
-        return await asyncio.gather(*[_one(t) for t in targets])
+        # **return_exceptions=True 不可省。** 少了它，任何一台设备抛异常都会让
+        # 整批的结果一起丢——包括那些本来已经发成功的。归一化成 FcmResult 之后
+        # 上层的失效清理、重试、统计才都还能正常工作。
+        raw = await asyncio.gather(*[_one(t) for t in targets],
+                                   return_exceptions=True)
+        out: list[FcmResult] = []
+        for t, r in zip(targets, raw):
+            if isinstance(r, BaseException):
+                logger.warning("FCM 单设备异常 dev=%s: %s",
+                               str(t.get("device_token", ""))[:12], r)
+                out.append(FcmResult(
+                    status=0, reason=f"task_error:{type(r).__name__}",
+                    device=t.get("device_token", ""),
+                ))
+            else:
+                out.append(r)
+        return out

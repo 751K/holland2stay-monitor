@@ -3419,12 +3419,21 @@ async def main_loop(
                 try:
                     cfg = load_config()
                     users = load_users()
+                    # **先构造新的，成功之后再关旧的。** 反过来的话，构造一抛错，
+                    # 下面那个 except 会打印「继续使用旧配置」——而旧的 notifier
+                    # 已经 close 掉了，于是**所有渠道永久哑掉**直到进程重启，
+                    # 日志上还写着一切照旧。
+                    fresh_notifiers = _build_user_notifiers(users)
                     for _, n in user_notifiers:
-                        await n.close()
+                        try:
+                            await n.close()
+                        except Exception:
+                            # 关旧的失败最多泄漏一个 session，不该连累这次热重载
+                            logger.warning("关闭旧 notifier 失败（忽略）", exc_info=True)
+                    user_notifiers = fresh_notifiers
                     # 用户可能改了密码/邮箱/账号 → 全量失效 prewarm 缓存。
                     # 下一轮 run_once 会按需重建（命中策略已对齐 active_user_ids）。
                     prewarm_cache.clear()
-                    user_notifiers = _build_user_notifiers(users)
                     # 热重载后重置自适应间隔（用户可能改了 peak_interval / min_interval）
                     adaptive_peak = float(cfg.peak_interval)
                     logger.info(
