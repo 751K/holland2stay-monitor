@@ -148,9 +148,57 @@ class TestWorkflow:
         assert "name=iPhone" not in t
         assert "pick_simulator.py" in t
 
-    def test_uploads_the_result_bundle_on_failure(self):
+    def test_uploads_the_result_bundle(self):
         t = self._text()
-        assert "xcresult" in t and "if: failure()" in t
+        assert "xcresult" in t and "upload-artifact" in t
+
+    def test_asserts_that_tests_actually_ran(self):
+        """核心：``xcodebuild test`` 一条用例都没跑时同样报 Test Succeeded、
+        同样退出 0。第一次跑这条流水线就是这个情形——日志里没有任何用例名，
+        而 CI 是绿的。只看退出码分不出「全过了」和「压根没跑」。
+        """
+        t = self._text()
+        assert "summarize_xcresult.py" in t, "没有任何一步核对执行条数"
+
+
+class TestResultSummary:
+    def _load(self):
+        import importlib.util
+        path = ROOT / "ios" / "scripts" / "summarize_xcresult.py"
+        spec = importlib.util.spec_from_file_location("summarize_xcresult", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_zero_tests_is_a_failure(self, monkeypatch, capsys):
+        m = self._load()
+        monkeypatch.setattr(m, "summary", lambda _p: {"totalTestCount": 0,
+                                                      "passedTests": 0, "failedTests": 0})
+        monkeypatch.setattr("sys.argv", ["x", "dummy.xcresult"])
+        assert m.main() != 0, "一条没跑也算通过的话，这个守卫等于不存在"
+
+    def test_failures_are_a_failure(self, monkeypatch):
+        m = self._load()
+        monkeypatch.setattr(m, "summary", lambda _p: {"totalTestCount": 5,
+                                                      "passedTests": 4, "failedTests": 1})
+        monkeypatch.setattr("sys.argv", ["x", "dummy.xcresult"])
+        assert m.main() == 1
+
+    def test_unreadable_bundle_is_a_failure(self, monkeypatch):
+        """读不出来时判失败而不是放行——放行的话，xcresulttool 哪天换了子命令，
+        这个守卫会在没人察觉的情况下退化成永远通过。"""
+        m = self._load()
+        monkeypatch.setattr(m, "summary", lambda _p: None)
+        monkeypatch.setattr("sys.argv", ["x", "dummy.xcresult"])
+        assert m.main() != 0
+
+    def test_a_healthy_run_passes(self, monkeypatch, capsys):
+        m = self._load()
+        monkeypatch.setattr(m, "summary", lambda _p: {"totalTestCount": 60,
+                                                      "passedTests": 60, "failedTests": 0})
+        monkeypatch.setattr("sys.argv", ["x", "dummy.xcresult"])
+        assert m.main() == 0
+        assert "60" in capsys.readouterr().out
 
 
 class TestSchemeActuallyRunsUnitTests:

@@ -75,10 +75,19 @@ jobs:
           # xcpretty 不一定在镜像里；没有就原样打印。退出码必须取 xcodebuild
           # 那一段，否则格式化工具成功就把测试失败吞掉了。
 
-      # 失败时把 result bundle 传上来：xcodebuild 的终端输出经常只说
-      # "Test Suite failed"，具体哪条断言、什么值要开这个包才看得到。
+      # xcodebuild 在**一条用例都没执行**时同样打印 "Test Succeeded"、同样
+      # 退出 0。第一次跑这条流水线就撞上了：日志里从头到尾没有一个用例名，
+      # 而 CI 是绿的——「全过了」和「压根没跑」分不开。
+      #
+      # 绿色必须由执行条数背书，不能由退出码背书。
+      - name: Assert tests actually ran
+        if: always()
+        run: python3 ios/scripts/summarize_xcresult.py ios-tests.xcresult
+
+      # 无论成败都传：成功时用来核对条数，失败时用来看是哪条断言、什么值——
+      # xcodebuild 的终端输出经常只说一句 "Test Suite failed"。
       - name: Upload result bundle
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ios-test-results
