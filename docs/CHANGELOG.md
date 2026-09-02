@@ -5,9 +5,13 @@
 本版本接入第七个平台 Plaza。与前六个来源不同，它不是自营运营商而是**平台**——多家
 机构把房源挂在同一套 Zig/Hexia 系统上，因此一个匿名接口就覆盖十个荷兰城市。
 
+接第七个来源顺带把仪表盘的覆盖范围横幅逼到了改版的临界点：并集的城市名列到十七个，
+读的人已经分不出哪个城市由谁覆盖；而分组之后才看出更实质的一件事——那十七个城市里
+有十一个只由影子 source 覆盖，横幅却在承诺一个不会兑现的推送。
+
 ### 新增
 
-* **接入 Plaza（plaza.newnewnew.space）**（本次）
+* **接入 Plaza（plaza.newnewnew.space）**（[c00d5e2]）
 
     运营方 Plaza Resident Services，跑在 Zig / Hexia 平台上。站点自我描述是
     「Woonruimte voor **studenten**, starters en expats」。与前六个平台不同，它不是
@@ -53,9 +57,77 @@
 
     完整侦察记录见 `docs/SCRAPING_RECON.md` §5b。
 
+### 修复
+
+* **Plaza 的房源没有楼盘名**（[a24889a]）
+
+    上线后「楼盘」列全是「—」：那一列读 features 里的 `Building`，而 Plaza 的
+    scraper 从来没写过。
+
+    Plaza 确实不发布楼盘名——列表接口里 `neighborhood` 49 条全空，`quarter` 与
+    `municipality` 就是城市名，`projectID` / `verzameladvertentieID` 全为 0，也没有
+    `complex` 一类字段；详情接口 `getobject` 需要另一组参数（几种猜测都返回 500），
+    未能取到。
+
+    所以从**地址结构**推导：有 `houseNumberAddition` 时门牌标楼、附加号标单元
+    （`Bogardeind 219` + `D21` → `Bogardeind 219`）；没有时门牌本身就是单元，楼一级
+    只到街道（`Limapad 16` → `Limapad`）。
+
+    **不按「同街道有几条房源」判**——那是数据依赖的，同一栋楼今天一条明天五条，
+    标签会跟着翻来覆去。第二种情形对独栋房源与地址重复，是有意的取舍：Limapad 那
+    32 条学生 studio 分布在六个邮编上（3584 SR/ST/SV/SW/SX/SZ，同一综合体的不同
+    入口），按邮编分会切成六块、按街道加门牌分会碎成 32 个，只有街道这一级能把它们
+    归到一起。
+
+    有一条测试钉住「上游确实没有楼盘字段」这个前提——哪天 Plaza 开始发，它会失败并
+    提醒改用真实字段，而不是让推导值一直盖着真值。
+
+### 界面
+
+* **覆盖范围横幅按平台分组，并标出影子来源**（[4491267]）
+
+    并集在三四个平台时还读得动，七个平台之后是一行十七个城市名，读的人既不知道哪个
+    城市由谁覆盖，也无从判断房源类型——Plaza 的 Groot-Ammers 和 Holland2Stay 的
+    Eindhoven 在同一行里长得一模一样，实际一个是一条房源、另一个是几十条。新增
+    `Config.monitored_cities_by_source()`，`monitored_city_names()` 改为由它推导，
+    两者不会再各说各的。
+
+    分组之后暴露出一件更实质的事：**横幅列出的十七个城市里有十一个只由影子 source
+    覆盖**——Plaza 的 Arnhem、Breda、Delft、Deventer、Duivendrecht、Enschede、
+    Geldrop、Groot-Ammers、Maastricht、Utrecht，以及 Student Experience 的 Leiden。
+    那些城市的用户一条通知都不会收到，而横幅在说「当前监控的城市」并让人「需要其他
+    城市请联系支持」。
+
+    （提交 [4491267] 的说明里写的是「九个」，漏数了 Enschede 与 Maastricht——两个都
+    只有 Plaza 覆盖。实际非影子来源只到六个城市：Amsterdam、Eindhoven 与 Magis 的
+    's-Hertogenbosch、Amersfoort、Rijswijk、Tilburg。）
+
+    没有整个隐藏：影子 source 在抓、在入库、在房源列表里看得见，隐藏会让用户在列表里
+    看见 Plaza 的房子却在覆盖说明里找不到那个城市。两种都是「界面说的和系统做的不
+    一致」，标注是唯一两头都对的做法。分组函数本身不过滤影子，由展示层决定——过滤
+    放在 config 里会让一个产品决定变成隐式的。
+
+* **横幅改用专用样式，字号对齐设计系统**（[c3c29ee]、[4d40fc4]）
+
+    第一版借了 `.alert` 的壳。那个类是 `display:flex` 加 `align-items:center`，
+    标题、平台表格、联系方式三个子元素被排成一行并垂直居中——标题贴最左、联系方式
+    飘到最右、中间一大片空白。改成专用的 `.coverage-banner`，结构照
+    `.maintenance-banner` 那套，但语气更淡：常驻的信息说明不是状态告警。
+
+    平台名一列用 `max-content`、城市一列 `minmax(0,1fr)`，城市多的平台在自己那格里
+    换行；窄屏（≤640px）改成上下两行。
+
+    字号原来是 13.5px 正文、11px 标题、10px 角标，**比全站任何正文都小**（`.alert`、
+    表格单元格、侧栏都是 15px）。按设计系统对齐到 15 / 12 / 12 / 13.5。
+
+    影子角标第一版做成 `--text3` 加细边框，全站最淡的一组，理由写的是「实底会和平台
+    名抢视觉权重」。**那个理由对这个语义是错的**：它说的是「这个平台不会给你发
+    通知」，本来就该抢。看不见的警示等于没有警示。改成 warning 语义色实底并加
+    bell-slash 图标——不必读完文字就知道是「没有提醒」。
+
 ### 文档
 
-* **侦察文档：新增 Plaza 一节，并补两处对照**（本次）
+* **侦察文档：新增 Plaza 一节，并补两处对照**（[c00d5e2]）
 
     §5b 新增 Plaza 完整侦察记录，其中分配机制那一小节保留了第一版的错误说法并标错
     ——那句从荷兰语字段名直译来的「首个回应后广告关闭」正是当初判断的依据，删掉就
@@ -6132,3 +6204,8 @@ web.py 长期积累至 1,200 行，涵盖路由、鉴权、表单、i18n、进�
 [7d460e9]: https://github.com/751K/holland2stay-monitor/commit/7d460e9
 [9773c6f]: https://github.com/751K/holland2stay-monitor/commit/9773c6f
 [c0cd30f]: https://github.com/751K/holland2stay-monitor/commit/c0cd30f
+[4491267]: https://github.com/751K/holland2stay-monitor/commit/4491267
+[4d40fc4]: https://github.com/751K/holland2stay-monitor/commit/4d40fc4
+[a24889a]: https://github.com/751K/holland2stay-monitor/commit/a24889a
+[c00d5e2]: https://github.com/751K/holland2stay-monitor/commit/c00d5e2
+[c3c29ee]: https://github.com/751K/holland2stay-monitor/commit/c3c29ee
