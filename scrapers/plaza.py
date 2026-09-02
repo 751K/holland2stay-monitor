@@ -193,6 +193,22 @@ def _floor(label: str) -> str:
     return m.group(1) if m else ""
 
 
+def _num(value: object) -> Optional[float]:
+    """尽力转成 float，转不了返回 None。
+
+    上游是自由文本字段：``netRent`` 出现 ``"n.v.t."``（荷兰语的「不适用」）之类
+    完全可能。裸 ``float()`` 会把 ValueError 抛出 ``_parse_object``，穿过
+    ``_parse_all``、``scrape``，最后被 dispatcher 记成「整源失败」——**一行畸形
+    数据让 Plaza 每轮都抓不到东西**。
+    """
+    if value in (None, "", []):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _fmt_euro(value: float) -> str:
     """``867.75`` → ``"€867,75"``；整数不带小数。
 
@@ -266,9 +282,8 @@ def _parse_object(obj: dict) -> Optional[Listing]:
     rent = obj.get("totalRent")
     if oid in (None, "") or not city or rent in (None, "", 0):
         return None
-    try:
-        rent = float(rent)
-    except (TypeError, ValueError):
+    rent = _num(rent)
+    if rent is None:
         return None
 
     features: list[str] = []
@@ -313,9 +328,9 @@ def _parse_object(obj: dict) -> Optional[Listing]:
         _add("Tenant", "student only")
     _add("Target group", ", ".join(sorted(c for c in codes if c)) or "")
 
-    net = obj.get("netRent")
-    if net not in (None, "", 0) and float(net) != rent:
-        _add("Net rent", _fmt_euro(float(net)))
+    net = _num(obj.get("netRent"))
+    if net is not None and net != 0 and net != rent:
+        _add("Net rent", _fmt_euro(net))
     _add("Construction year", obj.get("constructionYear") or "")
     closing = (obj.get("closingDate") or "").strip()
     if closing and not closing.startswith("0000"):
@@ -457,7 +472,16 @@ class PlazaScraper(AbstractScraper):
             if str((obj.get("land") or {}).get("id") or "") != NL_LAND_ID:
                 skipped_foreign += 1
                 continue
-            item = _parse_object(obj)
+            try:
+                item = _parse_object(obj)
+            except Exception:
+                # **一行畸形数据不该毁掉整个 source。** 上游字段是自由文本，
+                # 某一条冒出个意料之外的类型完全可能；此处吞掉并计入 dropped，
+                # 由下面那条「过半认不出就判不完整」的判据兜住系统性的改版。
+                logger.warning("Plaza 有一条记录解析时抛异常，已跳过（id=%s）",
+                               obj.get("id"), exc_info=True)
+                dropped += 1
+                continue
             if item is None:
                 dropped += 1
                 continue

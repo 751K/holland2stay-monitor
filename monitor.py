@@ -142,10 +142,33 @@ async def _dispatch_scrape_tasks_async(
     executor = (
         _get_browser_executor(browser_source or _H2S_SOURCE) if isolated else None
     )
-    return await loop.run_in_executor(
+    fut = loop.run_in_executor(
         executor,
         lambda: dispatch_scrape_tasks(selected, multi_source=multi_source),
     )
+    # 墙钟兜底。**没有它的话，渲染器一卡就是整个监控停摆**：
+    # ``page.evaluate`` 在 Playwright 里根本没有 timeout 参数（它等的是 JS
+    # promise，``set_default_timeout`` 也管不到），``page.content()`` 同样。
+    # 一个 wedged 页面会让浏览器线程永远停在那里，而这里的 await 没有上限，
+    # run_once 就不返回了——表现是 last_round_at 不断变老，与「进程挂了」无从区分。
+    #
+    # ⚠️ 超时**救不回那条线程**：run_in_executor 的 future 取消不了底层调用，
+    # 卡住的浏览器线程会一直占着。这里能做到的是让**本轮继续走完**（其余
+    # source 照常入库、通知照发），并把这个 source 报成失败，由既有的隔离 /
+    # 熔断路径处置。真正的修复是让浏览器侧自己有超时；在那之前，这一层保证
+    # 一个源的死锁不会变成全局死锁。
+    try:
+        return await asyncio.wait_for(fut, timeout=_SOURCE_DISPATCH_TIMEOUT_SEC)
+    except asyncio.TimeoutError as e:
+        src = browser_source or (selected[0].source if selected else "?")
+        logger.error(
+            "source %s 抓取超过 %.0f 秒没返回，判为卡死并放弃本轮"
+            "（%d 个任务；该线程可能仍占着，下轮会重建）",
+            src, _SOURCE_DISPATCH_TIMEOUT_SEC, len(selected),
+        )
+        raise ScrapeNetworkError(
+            f"{src} 抓取超时（>{_SOURCE_DISPATCH_TIMEOUT_SEC:.0f}s），疑似渲染器卡死"
+        ) from e
 
 
 def _setup_logging(level: str) -> None:
@@ -910,6 +933,14 @@ _PERSONAL_PROXY_MIN_INTERVAL = _env_int_positive("PERSONAL_PROXY_MIN_INTERVAL", 
 _H2S_SOURCE = "holland2stay"
 _PREWARM_CANDIDATE_WAIT_SEC = 2.0  # 有真实候选时最多等 2s 让预登录赶上快速通道
 _H2S_LOGIN_BLOCKED_SUPPRESS_SEC = 3600  # H2S 登录/预订 403 后 1 小时内不碰登录链路
+
+#: 单个 source 一轮抓取的墙钟上限。见 _dispatch_scrape_tasks_async。
+#:
+#: 取 600 秒的依据：最慢的 source 是 Xior（实测每栋楼 13.9 秒，分片后每轮
+#: 上限 8 栋 ≈ 112 秒），留出 5 倍余量。比 CHECK_INTERVAL(300) 大是有意的——
+#: 这不是「该多久跑完」的目标，是「卡死了」的判据，宁可宽也不要误杀慢轮。
+_SOURCE_DISPATCH_TIMEOUT_SEC = float(
+    os.environ.get("SOURCE_DISPATCH_TIMEOUT_SEC") or "600")
 _H2S_CIRCUIT_BASE_COOLDOWN = 1800  # H2S 抓取 403 后 30 分钟后做 canary
 _H2S_CIRCUIT_MAX_COOLDOWN = 21600  # H2S 抓取连续 403 时最多暂停 6 小时
 _H2S_LONG_BLOCK_STREAK = 3  # 第 3 次连续 H2S 403 起视为长时间被 block

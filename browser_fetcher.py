@@ -25,6 +25,7 @@ event loop，第二个 launch() 随即被判成「在 asyncio loop 里用同步 
 from __future__ import annotations
 
 import logging
+import os
 import platform
 import re
 import time
@@ -171,6 +172,11 @@ _XIOR_AJAX_PATH = "/wp-admin/admin-ajax.php"
 #     用它判定会把正常会话误判成被挡。
 # 只有挑战页脚本自身的 ``_cf_chl_opt`` 会随文档被真实页面替换而消失。
 _CF_CHALLENGE_HTML_MARKER = "_cf_chl_opt"
+
+#: 页面级默认超时（毫秒）。覆盖 content() / 等待类操作；**不覆盖 evaluate()**。
+#: 见 _open_browser 之后那段注释。
+_PAGE_DEFAULT_TIMEOUT_MS = float(
+    os.environ.get("BROWSER_PAGE_TIMEOUT_MS") or "45000")
 
 # 响应体里出现这些 = 拿到的是 CF 挑战页而不是真实响应。用于把「clearance 还
 # 没生效」和「这个 IP 被封了」区分开——前者重新导航就好，后者得换 IP。
@@ -698,6 +704,17 @@ class BrowserFetcher:
             chromium_args = chromium_args + ["--no-proxy-server"]
 
         self._browser, self._page = self._open_browser(chromium_args, proxy_url)
+        # 给页面一把默认超时。**不设的话 Playwright 的默认是 30 秒**，看起来够用，
+        # 但它只覆盖导航与等待类操作——``page.content()`` 受它管，``page.evaluate``
+        # 不受（后者等的是 JS promise，Playwright 的 API 里根本没有 timeout 参数）。
+        #
+        # 所以这一行只是把「受管的那部分」收紧到一个我们自己定的数；evaluate 的
+        # 兜底在 monitor 侧的墙钟超时（_SOURCE_DISPATCH_TIMEOUT_SEC）。两层都要，
+        # 少任何一层都会让一个 wedged 页面挂住整个 source。
+        try:
+            self._page.set_default_timeout(_PAGE_DEFAULT_TIMEOUT_MS)
+        except Exception:
+            logger.debug("设置页面默认超时失败，沿用 Playwright 默认", exc_info=True)
         self._blocked_count = 0
         self._wire_bytes = 0
         self._response_count = 0

@@ -391,6 +391,7 @@ def _enrich(
     spent = 0
     failed = 0
     rate_limited = False
+    blocked = False
     first_err: str = ""
     for l in listings:
         extra = _DETAIL_CACHE.get(l.id)
@@ -417,6 +418,21 @@ def _enrich(
                     budget.stopped = True
                     break
                 continue
+            except BlockedError as e:
+                # 403 / Cloudflare 挑战。**必须整批收手**，理由与 429 同类而更硬：
+                # 被挡是「对方现在不想服务这个出口」，接着打只会让 WAF 状态更热。
+                #
+                # 这条分支曾经不存在，BlockedError 落进下面的 except Exception
+                # 被当成「这一条不巧失败了」——于是每条都重试、每次失败都可能触发
+                # 一次浏览器重建 + 换 IP。一个 60 条的批次就是 60 次。
+                budget.started = True
+                budget.remaining -= 1
+                blocked = True
+                failed += 1
+                if not first_err:
+                    first_err = f"BlockedError: {e}"
+                budget.stopped = True
+                break
             except Exception as e:
                 # 只跳过这一条，不缓存失败——下轮还有机会。
                 # **但要吵一声**：fail-open + debug 日志 = 静默半残，
@@ -444,7 +460,8 @@ def _enrich(
             "失败的房源这轮没有 Building/Tenant，会被 fail-closed 的租客筛选拒掉。"
             "首个错误: %s",
             failed, spent, len(listings),
-            "，已因 429 本批次收手（下轮继续）" if rate_limited else "",
+            "，已因 403 本批次收手（下轮继续）" if blocked
+            else "，已因 429 本批次收手（下轮继续）" if rate_limited else "",
             first_err,
         )
     return spent

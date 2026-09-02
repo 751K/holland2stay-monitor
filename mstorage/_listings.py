@@ -177,6 +177,41 @@ class ListingOps:
 
     # ── diff（核心）──────────────────────────────────────────────────
 
+    @staticmethod
+    def _dedupe_by_id(fresh: list[Listing]) -> list[Listing]:
+        """同 id 只留第一条。
+
+        为什么这道防线值得存在
+        ----------------------
+        ``existing`` 是循环**前**的一次性快照，第二条同 id 的 Listing 查不到自己
+        刚插进去的那行，于是再走一次 INSERT → ``UNIQUE constraint failed`` →
+        ``with self._conn`` 把**整个事务**回滚。也就是说：任何一个 scraper 产出
+        一条重复 id，本轮**所有平台**都不入库、不通知——连正常抓到的那些也一起没。
+
+        2026-09-02 实测过这条路径：magis 的城市分派把「城市认不出」当成「哪个城市
+        都算」，一条房源被五个城市 task 各收一次，整轮全灭。根因已在 magis.py 修掉，
+        但**爆炸半径不该由调用方来管**：一个 source 的解析 bug 只该影响那个 source。
+
+        去重而不是改成 upsert：同一轮里出现同 id 本身就是上游 bug，静默合并会把它
+        藏起来。这里留一条 WARNING，让根因仍然看得见。
+        """
+        seen: set[str] = set()
+        out: list[Listing] = []
+        dupes: dict[str, int] = {}
+        for l in fresh:
+            if l.id in seen:
+                dupes[l.source] = dupes.get(l.source, 0) + 1
+                continue
+            seen.add(l.id)
+            out.append(l)
+        if dupes:
+            logger.warning(
+                "本轮有重复 id 的房源，已按首条去重（source: 条数 = %s）"
+                "——这是 scraper 侧的 bug，不该出现",
+                ", ".join(f"{k}: {v}" for k, v in sorted(dupes.items())),
+            )
+        return out
+
     def diff(
         self, fresh: list[Listing]
     ) -> tuple[list[Listing], list[tuple[Listing, str, str]]]:
@@ -184,6 +219,8 @@ class ListingOps:
         now_dt = datetime.now(timezone.utc)
         new_listings: list[Listing] = []
         status_changes: list[tuple[Listing, str, str]] = []
+
+        fresh = self._dedupe_by_id(fresh)
 
         cur = self._conn.cursor()
         with self._conn:

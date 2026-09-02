@@ -603,10 +603,34 @@ def _floorplans_url(apply_url: str) -> Optional[str]:
     )
 
 
-def parse_bookable_floorplan_ids(html_body: str) -> set[int]:
-    """解析 floorplans.aspx HTML，返回「真正可订」（applyButton）的 floorplan id 集合。"""
+def parse_bookable_floorplan_ids(html_body: str) -> Optional[set[int]]:
+    """解析 floorplans.aspx HTML，返回「真正可订」（applyButton）的 floorplan id 集合。
+
+    **认不出页面结构时返回 None，不是空集。** 这是这道闸门唯一的结构探针。
+
+    调用方把返回值当作权威判据：不在集合里的单元一律降级为 ``Occupied``，且
+    ``status_unverified=False``——也就是「我们查过了，它确实订不了」。空集的含义
+    因此是「查过了，一个都订不了」，而 ``None`` 才是「没查成，信 feed」
+    （见 _fetch_bookable_floorplan_ids 的 fail-open 约定）。
+
+    HTTP 200 但页面不是我们认识的那个（改版、维护页、登录墙）时，
+    ``_FP_TILE_SPLIT`` 一个 tile 都切不出来，原实现返回空集——于是**全部真房源被
+    静默判成 Occupied，且标记为已核实**。没有异常、没有告警，表现就是「今天没房」。
+
+    判据是「切不出任何 tile」而不是「解析出 0 个可订 id」：真的一套都订不完时页面
+    仍然有 tile（只是按钮是 contactButton / Rented Out），那种 0 是真实的。
+    """
+    tiles = _FP_TILE_SPLIT.split(html_body)[1:]
+    if not tiles:
+        logger.warning(
+            "Xior floorplans.aspx 切不出任何户型 tile（%d 字节）——页面结构可能变了。"
+            "按「无法判定」处理（fail-open 信 feed），而不是判定全部订不了",
+            len(html_body),
+        )
+        return None
+
     ids: set[int] = set()
-    for tile in _FP_TILE_SPLIT.split(html_body)[1:]:
+    for tile in tiles:
         seg = tile[:4000]  # 一个户型 tile 的范围；apply 按钮+floorPlans id 都在内
         btn = _FP_APPLY_BTN.search(seg)
         if not btn or "applyButton" not in btn.group(0):

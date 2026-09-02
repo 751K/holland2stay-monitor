@@ -407,14 +407,37 @@ class MagisScraper(AbstractScraper):
 
         listings: list[Listing] = []
         dropped = 0
+        no_city = 0
         for url, building, unit, segment in cards:
             item = _parse_card(url, building, unit, segment)
             if item is None:
                 dropped += 1
                 continue
-            if item.city and item.city != task.city_display:
+            # **严格相等**，不能写成 `if item.city and item.city != ...: continue`。
+            #
+            # 那个写法把「城市认不出」当成了「哪个城市都算」：``_parse_card`` 在
+            # 卡片城市不在 ``CITIES`` 里时给的是空串（站点新开一城、或卡片排版
+            # 变动都会这样），于是同一条房源被**每个城市 task 各收一次**。
+            #
+            # 后果不止是重复：五个 task 产出五条同 id 的 Listing，而
+            # ``Storage.diff()`` 的 ``existing`` 是循环**前**的快照，第二条查不到
+            # 自己刚插的那行，于是再走一次 INSERT → UNIQUE 冲突 → ``with
+            # self._conn`` 整个事务回滚。实测：一条这样的房源就能让**本轮所有平台**
+            # 都不入库、不通知（连正常的那些也一起没了）。
+            #
+            # Plaza 与 Student Experience 用的就是严格相等，没有这个洞。
+            if item.city != task.city_display:
+                if not item.city:
+                    no_city += 1
                 continue
             listings.append(item)
+
+        # 认不出城市的卡片现在会被丢掉（上面那条严格相等），所以必须说一声——
+        # 否则站点新开一个城市时，那批房源就是凭空消失，日志里一点痕迹都没有。
+        if no_city:
+            logger.warning(
+                "Magis 有 %d 张卡片的城市不在 KNOWN_MAGIS_CITIES 里，已跳过"
+                "——站点可能新开了城市，需要把它加进配置", no_city)
 
         if dropped:
             logger.warning("Magis 有 %d/%d 张卡片缺状态或价格，已跳过",
