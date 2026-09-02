@@ -7,7 +7,7 @@ final class APIResponseTests: XCTestCase {
 
     func test_ok_with_data() throws {
         let json = """
-        {"ok": true, "data": {"id": "abc", "name": "Test"}, "error": null}
+        {"ok": true, "data": {"id": "abc", "name": "Test", "status": "Available to book", "url": "", "city": ""}, "error": null}
         """
         let resp = try JSONDecoder().decode(APIResponse<Listing>.self, from: Data(json.utf8))
         XCTAssertTrue(resp.ok)

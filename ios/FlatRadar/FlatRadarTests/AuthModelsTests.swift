@@ -37,7 +37,7 @@ final class AuthModelsTests: XCTestCase {
 
     func test_meResponse_with_user() throws {
         let json = """
-        {"role": "user", "user_id": "u1", "user": {"id": "u1", "name": "Alice", "enabled": true}}
+        {"role": "user", "user_id": "u1", "user": {"id": "u1", "name": "Alice", "enabled": true, "notifications_enabled": true, "listing_filter": {}}}
         """
         let resp = try JSONDecoder().decode(MeResponse.self, from: Data(json.utf8))
         XCTAssertEqual(resp.role, "user")
