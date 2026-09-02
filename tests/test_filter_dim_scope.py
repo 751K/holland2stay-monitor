@@ -45,7 +45,7 @@ class TestSupportMatrix:
         """
         assert sources_supporting_dim("tenant") == [
             "holland2stay", "ourdomain", "ourcampus", "xior",
-            "studentexperience",
+            "studentexperience", "plaza",
         ]
 
     def test_tenant_badge_says_magis_is_excluded(self):
@@ -141,15 +141,28 @@ class TestScopeNote:
                 )
 
     def test_badge_names_the_shorter_side(self):
-        """哪边名字少就报哪边——信息量一样，字数更省。"""
+        """哪边字少就报哪边——信息量一样，字数更省。"""
         # 缺 1 个（Xior）→ 报缺的
         assert dim_scope_badge("type") == "Xior 除外"
         assert dim_scope_badge("type", "en") == "Except Xior"
-        # 缺 2 个：OurCampus（从未返回过单元，档位无从核实）与 Student
-        # Experience（规格行只在主卡片上有，紧凑卡片没有，见其 scraper 文档）
-        assert dim_scope_badge("finishing") == "OurCampus、Student Experience 除外"
+        # 缺 1 个（Magis：只在部分房源上打徽标，「没徽标」的语义没有证据）
+        assert dim_scope_badge("tenant") == "Magis 除外"
         # 只支持 1 个 → 报支持的
         assert dim_scope_badge("contract") == "仅 Holland2Stay"
+
+    def test_badge_prefers_the_unfolded_side_when_both_are_long(self):
+        """两边都长时，优先选不需要折叠的那边；都要折叠才比字数。
+
+        finishing 现在是 4 支持 / 3 不支持（缺 OurCampus、Student Experience、
+        Plaza），两边都超过 _BADGE_MAX_NAMES，于是都折叠、按字数取短——支持方
+        30 字胜过缺失方。floor 则是 5 支持 / 2 不支持，缺失方两个名字不用折叠，
+        直接胜出。
+
+        这条守的是「折叠是丢信息」那个优先级：曾经按纯字数比，会为了省一个字
+        挑走信息不全的那一边。
+        """
+        assert dim_scope_badge("finishing") == "仅 Holland2Stay、OurDomain 等 4 家"
+        assert dim_scope_badge("floor") == "Xior、Student Experience 除外"
 
     def test_badge_and_note_agree_on_which_platforms(self):
         """徽标是 tooltip 的缩写，两者不能各说各的。"""

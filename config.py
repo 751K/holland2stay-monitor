@@ -614,6 +614,31 @@ KNOWN_STUDENTEXPERIENCE_CITIES: list[dict] = [
 ]
 
 
+#: Plaza 覆盖的荷兰城市（2026-09-02 快照）。
+#:
+#: 与 Magis / Student Experience 同一形态：一个 POST 就返回全站，登记城市只为让
+#: 用户按城市订阅并在各 ScrapeTask 之间切分。
+#:
+#: ⚠️ **这份清单一定会漂。** 它是站点导航自述的八个城市与当时实际在架的十个城市
+#: 取并集——两份本来就对不上：在架的 Geldrop（当时 6 条，第二多）、Groot-Ammers、
+#: Deventer、Duivendrecht 都不在导航里。站点上架新城市时不会有人来改这里，因此
+#: scrapers/plaza.py 在遇到未登记城市时按 WARNING 记下城市名，日志里看得见。
+KNOWN_PLAZA_CITIES: list[dict] = [
+    {"name": "Utrecht",      "key": "utrecht",      "city": "Utrecht"},
+    {"name": "Amsterdam",    "key": "amsterdam",    "city": "Amsterdam"},
+    {"name": "Eindhoven",    "key": "eindhoven",    "city": "Eindhoven"},
+    {"name": "Delft",        "key": "delft",        "city": "Delft"},
+    {"name": "Enschede",     "key": "enschede",     "city": "Enschede"},
+    {"name": "Maastricht",   "key": "maastricht",   "city": "Maastricht"},
+    {"name": "Breda",        "key": "breda",        "city": "Breda"},
+    {"name": "Arnhem",       "key": "arnhem",       "city": "Arnhem"},
+    {"name": "Geldrop",      "key": "geldrop",      "city": "Geldrop"},
+    {"name": "Deventer",     "key": "deventer",     "city": "Deventer"},
+    {"name": "Duivendrecht", "key": "duivendrecht", "city": "Duivendrecht"},
+    {"name": "Groot-Ammers", "key": "groot-ammers", "city": "Groot-Ammers"},
+]
+
+
 KNOWN_OURDOMAIN_CITIES: list[dict] = [
     {"name": "Amsterdam Diemen",    "key": "diemen",     "city": "Amsterdam"},
     {"name": "Amsterdam South-East","key": "south-east", "city": "Amsterdam"},
@@ -758,6 +783,13 @@ class MagisCityFilter:
 
 
 @dataclass
+class PlazaCityFilter:
+    """Plaza 的单个城市条目。"""
+    name: str
+    key: str
+
+
+@dataclass
 class StudentExperienceCityFilter:
     """Student Experience 的单个城市条目。"""
     name: str
@@ -844,6 +876,17 @@ _SOURCE_FILTER_DIMS: dict[str, frozenset] = {
     # floor / energy 站点不给。楼层只在设施行的散文里出现过（"located on
     # floor 5-8"），那是户型的整体描述而非某一间的楼层。
     "studentexperience": _UNIVERSAL_FILTER_DIMS | {"type", "tenant"},
+    # Plaza 的 feed 是结构化 JSON，房型、楼层、租客都是主键字段而不是散文，因此
+    # 三个都登记。
+    #
+    # tenant 与 Xior / OurCampus / Student Experience 不同：**不是**整站断言，是
+    # 每条房源自己的 doelgroepen（2026-09-02 快照 student 39 / regulier 16 并存）。
+    # 只有 doelgroepen 恰好等于 {student} 的才写 student only——混合标记的房源
+    # 不写，让该维度对它们 fail-open，而不是替站点断言「学生也能租」。
+    #
+    # energy 不登记：energyLabel 53 条全是空对象。
+    # finishing / occupancy / contract 站点不给（typeContract 53 条全为 null）。
+    "plaza": _UNIVERSAL_FILTER_DIMS | {"type", "floor", "tenant"},
 }
 
 
@@ -1757,6 +1800,7 @@ class Config:
     magis_cities: list[MagisCityFilter] = field(default_factory=list)
     studentexperience_cities: list[StudentExperienceCityFilter] = field(
         default_factory=list)
+    plaza_cities: list[PlazaCityFilter] = field(default_factory=list)
 
     def sources_with_full_lifecycle(self) -> frozenset[str]:
         """feed 覆盖了「已预留」状态的 source。
@@ -1806,6 +1850,7 @@ class Config:
             ("magis", self.magis_cities, KNOWN_MAGIS_CITIES),
             ("studentexperience", self.studentexperience_cities,
              KNOWN_STUDENTEXPERIENCE_CITIES),
+            ("plaza", self.plaza_cities, KNOWN_PLAZA_CITIES),
         ):
             if source not in self.sources:
                 continue
@@ -1898,6 +1943,18 @@ class Config:
                     city_display=c.name,
                 )
                 for c in self.studentexperience_cities
+            )
+
+        # Plaza 同上：一个 POST 拿全站，各 task 只是从同一份结果里取这个城市。
+        # 见 scrapers/plaza.py 的 batch_session。
+        if "plaza" in self.sources:
+            tasks.extend(
+                ScrapeTask(
+                    source="plaza",
+                    city_key=c.key,
+                    city_display=c.name,
+                )
+                for c in self.plaza_cities
             )
 
         return tasks
@@ -2041,7 +2098,7 @@ def _parse_shard_sizes(raw: str) -> dict[str, int]:
 #: 不转换）、以及全局设置的白名单（从面板保存一次就会把它从 SOURCES 里悄悄
 #: 删掉）。漏的都是同一个平台，因为它是最后加的那个。
 KNOWN_SOURCES: tuple[str, ...] = ("holland2stay", "ourdomain", "ourcampus",
-                                  "xior", "magis", "studentexperience")
+                                  "xior", "magis", "studentexperience", "plaza")
 
 #: 平台显示名。前端另有一份同样的表（static/app.js 的 SOURCE_LABELS），
 #: 因为那边是客户端渲染；两边都从这份注释里的同一个事实来。
@@ -2052,6 +2109,7 @@ SOURCE_DISPLAY_NAMES: dict[str, str] = {
     "xior": "Xior",
     "magis": "Magis",
     "studentexperience": "Student Experience",
+    "plaza": "Plaza",
 }
 
 
@@ -2106,6 +2164,10 @@ def _parse_magis_cities(raw: str) -> list[MagisCityFilter]:
 
 def _parse_studentexperience_cities(raw: str) -> list[StudentExperienceCityFilter]:
     return _parse_name_key_list(raw, StudentExperienceCityFilter)
+
+
+def _parse_plaza_cities(raw: str) -> list[PlazaCityFilter]:
+    return _parse_name_key_list(raw, PlazaCityFilter)
 
 
 def load_config() -> Config:
@@ -2250,6 +2312,19 @@ def load_config() -> Config:
                 for c in KNOWN_STUDENTEXPERIENCE_CITIES
             ]
 
+    plaza_cities: list[PlazaCityFilter] = []
+    if "plaza" in sources:
+        raw_plaza_cities = os.environ.get("PLAZA_CITIES", "")
+        if raw_plaza_cities:
+            plaza_cities = _parse_plaza_cities(raw_plaza_cities)
+        else:
+            # 与 Magis / Student Experience 同理：一个 POST 拿全站，少勾城市不减少
+            # 请求，只是不再收这些城市的房源。留空即全收。
+            plaza_cities = [
+                PlazaCityFilter(name=c["name"], key=c["key"])
+                for c in KNOWN_PLAZA_CITIES
+            ]
+
     return Config(
         check_interval=interval,
         cities=cities,
@@ -2276,4 +2351,5 @@ def load_config() -> Config:
         xior_cities=xior_cities,
         magis_cities=magis_cities,
         studentexperience_cities=studentexperience_cities,
+        plaza_cities=plaza_cities,
     )

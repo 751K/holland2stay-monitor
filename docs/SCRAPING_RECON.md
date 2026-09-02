@@ -25,8 +25,9 @@
 | 3b | **SSH& (sshn.nl)** | ❌ | 无，但 **Keycloak 登录墙 + 注册会员制** | Embrace 平台的 GraphQL 网关 | 未知 | **高**（同 DUWO/ROOM） | ❌ 不接，见 §2b |
 | 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ⚠️ **已接入但从未出过房源**，解析器未经真实数据验证，见 §4 |
 | 5 | **Student Experience** | ✅ 完全 | **无** | 服务端渲染；学期档由 `/locations/getAcademicTerms/<id>` 出 JSON | 5 栋在营（Amsterdam 4 + Leiden），户型级，库存间歇 | 低 | ✅ **已接入**（2026-09-02，影子期），见 §5 |
-| 5b | **Vesteda** | ✅ 完全 | **无** | `POST /api/units/search/facet`，空 body 出全站 JSON | 524 套 65 城，可租 113 | 低（`robots.txt` 无 `Disallow`） | ❌ **不接**：打分 + 同分抽签，推送无价值，见 §6b |
-| 5c | **Gapph / Ad Hoc**（antikraak） | ✅ 完全 | 无 | Gapph 服务端渲染；Ad Hoc 走 WP REST `/wp-json/wp/v2/units` | Gapph 46 条、Ad Hoc 住宅 54 条，€150–€774 | 低 | 🟡 **候选**：价位对学生合适，但合同性质须先在 UI 区分，见 §6c |
+| 5b | **Plaza (plaza.newnewnew.space)** | ✅ 完全 | **无** | `POST /portal/object/frontend/getallobjects/format/json`，空 body 出全站 JSON | 荷兰住宅 49 条，其中 31 条当场成交制 | 低（房源公开；ToS 无再分发限制） | ✅ **已接入**（2026-09-02，影子期），见 §5b |
+| 5c | **Vesteda** | ✅ 完全 | **无** | `POST /api/units/search/facet`，空 body 出全站 JSON | 524 套 65 城，可租 113 | 低（`robots.txt` 无 `Disallow`） | ❌ **不接**：打分 + 同分抽签，推送无价值，见 §6b |
+| 5d | **Gapph / Ad Hoc**（antikraak） | ✅ 完全 | 无 | Gapph 服务端渲染；Ad Hoc 走 WP REST `/wp-json/wp/v2/units` | Gapph 46 条、Ad Hoc 住宅 54 条，€150–€774 | 低 | 🟡 **候选**：价位对学生合适，但合同性质须先在 UI 区分，见 §6c |
 | 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可采用 CloakBrowser（与 Holland2Stay 同一方案） |
 | 7 | DUWO/ROOM | ❌ | 无，但存在 **auth-wall 与付费注册** | API 仅登录后可见 | 未知 | **高**（涉及转发登录后内容）| ❌ 不建议 |
 | 8 | Kamernet | — | paid model | — | — | 高 | ❌ |
@@ -606,6 +607,158 @@ scraper 的层级是对的。
 
 ---
 
+## §5b Plaza (plaza.newnewnew.space) — **已接入（2026-09-02）**
+
+运营方 Plaza Resident Services，跑在 **Zig / Hexia** 平台上（`sdk.zig365.nl`、
+`zds-cdn.zig365.nl`）。站点自我描述是「Woonruimte voor **studenten**, starters en
+expats」。覆盖荷兰多城，另有德国 Bochum 与波兰 Poznan——本项目只取荷兰。
+
+### 接口：一个 POST 拿全站
+
+```bash
+curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
+  https://plaza.newnewnew.space/portal/object/frontend/getallobjects/format/json
+```
+
+匿名 200，无 cookie、无 referer，2026-09-02 实测 167 KB / 55 条。GET 也返回同样
+内容。字段是结构化 JSON 而非散文：`totalRent` / `netRent` / `areaDwelling` /
+`floor` / `latitude` / `longitude` / `postalcode` / `doelgroepen` /
+`constructionYear` / `closingDate` / `publicationDate` / `urlKey`。
+
+端点是从 `/aanbod/wonen` 页面的内联配置顺着 `wzp-angular-bundle.min.js`（367 KB，
+未混淆到读不了）找到的，同一份 bundle 里列着 115 个 `/portal/**/format/json`
+端点。另有一个更现代的 `POST /api/v1/actueel-aanbod`，但在这台主机上 404——bundle
+是所有 Zig 门户共用的，那条路由 Plaza 没开。
+
+`robots.txt` 只禁 `/portal/uploads/*/floorplans/*` 与 `/portal/uploads/*.pdf`，
+本端点不在禁用范围内。**因此 `floorplans` 里的文件不抓**，只用 `pictures`。
+
+### 分配机制：这一节是接入判断的全部依据
+
+⚠️ **本节的第一版是错的。** 当时从荷兰语字段名
+`model.advertentieSluitenNaEersteReactie` 直译，写成「首个回应之后广告即关闭」，
+并把另一类说成「有截止时间，到点后再分配」。**两半都不准**，下面是站点自己的文案
+（取自 `POST /portal/core/frontend/gettranslations/format/json`，3595 条）。
+
+**`dth`（31 条，`advertentieSluitenNaEersteReactie` 为真）**
+
+站点内部叫 DTH，标题 `ModelTitleDTH` = "Eerste reactie"：
+
+> `VolgordeBepalingDescriptionDTH`：「De eerste die reageert en voldoet aan de
+> voorwaarden die genoemd worden in de advertentie, krijgt de woning aangeboden」
+
+应征时会弹确认框 `bevestigAdvertentieSluitenNaEersteReactie`：
+
+> 「Wil je deze kamer **definitief boeken**? Dat betekent dat je deze kamer
+> accepteert en **geen andere aanbieding meer krijgt**。」
+
+也就是说：**点下去当场成交**，不是「排队等挑」。这是本文档考察过的所有平台里最强
+的形态。但代价也最重——**接受即放弃其它全部 offer**，第一版完全漏掉了这一条，而
+催用户「快点」却不说清代价是不负责的。因此这句话原样写进 `Listing.features`。
+
+这 31 条全部是 Utrecht 的学生 studio（16 m²，€712.75–€867.75）。
+
+**`reactiedatum`（荷兰 18 条 / 含德国共 22 条）**
+
+站点给用户看的标签是 `reactiedatumfilteroptionlabel` = **「Snelle reageerder」**
+（快速响应者）：
+
+> `ModelCategorieExplanationReactiedatum`：「Wij werken **niet met een
+> wachtlijst**。Dus deel zo snel mogelijk alle benodigde gegevens met ons. Voldoe
+> jij daarmee aan alle criteria dan maak je **meteen** kans op de woning」
+>
+> 搜索档说明：「Snelle reageerder — **Wees er snel bij!** Zo maak jij de grootste
+> kans om deel te nemen aan een bezichtiging」
+
+有 `closingDate` 兜底，但**不是**「到点统一开奖」。第一版把它说成截止分配，等于把
+这一类的价值说轻了——实际上它同样奖励速度。
+
+**平台支持、但 Plaza 当前一条都没用的模型**
+
+| code | 站点说明 | 推送价值 |
+|---|---|---|
+| `loting` | 「Na het sluiten van de reactietermijn wordt er door de computer **geloot**」 | ❌ 抽签，早知道不提高中签率 |
+| `inschrijfduur` | 「We bepalen de volgorde aan de hand van **inschrijfduur**」 | ❌ 按注册时长排队 |
+| `hospiteren` | 「De bewoners nodigen kandidaten uit… en kiezen een nieuwe huisgenoot」 | ❌ 合租面试 |
+| `woningruil` | 换房 | ❌ |
+
+这四类正是否决 Vesteda（§6b）与 DUWO/ROOM（§6）的那一类理由。当前 55 条一条都没
+有，但**将来可能出现**——因此 scraper 逐条记录模型而不是整站断言，
+`ALLOCATION_LABELS` 里六种文案都给全了，抽签与排队那两条明写 `speed does not
+help`，真出现时通知里看得见。
+
+### 与 DUWO/ROOM 的区别——这一条决定能不能接
+
+两者都要花钱注册：ROOM 约 €30/年，Plaza 是 €27.50/年
+（`/inschrijven/registreren`：「Registreren op NewNewNew kost €27,50. Daarmee kun
+je één jaar lang reageren op woningen」）。DUWO 因此被否（§6），但**否决理由不是
+收费本身**：
+
+| | DUWO / ROOM | Plaza |
+|---|---|---|
+| 匿名能否看到房源 | ❌ `product-search` 对匿名请求返回 404 | ✅ 无 cookie 无 referer 直接 200（两次独立验证） |
+| ToS 是否禁止再分发 | ✅ 明确禁止「将通过本服务获得的信息再行分发」 | ❌ disclaimer 只有标准免责声明 |
+| 我们要不要持账号 | 必须——否则连数据都拿不到 | 不必——只读监控完全不需要账号 |
+
+那 €27.50 买的是「能应征」，不是「能看见」，与 Xior / H2S 需要账号才能下单是同一
+类，不影响只读监控。
+
+**但这笔钱必须让用户知道**：全部 55 条的 `inschrijvingVereistVoorReageren` 都是
+true，收到通知却没注册就动不了。因此每条 listing 都写一条
+`Registration: required to respond (paid account)`。
+
+### 数据形态与过滤
+
+同一个端点返回全部对象类型与全部国家，三道过滤都必须做：
+
+```
+55 条响应
+ ├─ 2 条 dwellingType.categorie == "voorVoertuig"   停车位 —— 不筛会推「€50 的房源」
+ ├─ 4 条 land.id != "524"                            德国 Bochum
+ └─ 49 条荷兰住宅                                     ← 实际入库
+```
+
+国别判据用 `land.id` 这个主键，**不用 `regio.name` 的前缀**——后者是展示文案
+（"Nederland - Utrecht"），改一次文案就会让按前缀判断的实现静默漏掉全部荷兰房源。
+两者 2026-09-02 一致，可互为交叉校验。
+
+城市分布（2026-09-02）：Utrecht 32、Geldrop 6、Amsterdam 3、Enschede 2，
+Delft / Maastricht / Eindhoven / Deventer / Duivendrecht / Groot-Ammers 各 1。
+
+租客维度**逐条读 `doelgroepen`**，不是整站断言：同一批里 student 39 / regulier 16
+并存。只有恰好等于 `{student}` 的才写 `student only`，混合标记的不写、让该维度对
+它们 fail-open——替站点断言「只有学生能租」是错的，而这正是 Xior 2026-08-21 在
+finishing 上栽过的那种错。
+
+### 城市清单一定会漂
+
+`KNOWN_PLAZA_CITIES` 是站点导航自述的八城与当时实际在架的十城取并集。**两份本来
+就对不上**：在架的 Geldrop（6 条，第二多）、Groot-Ammers、Deventer、Duivendrecht
+都不在导航里。
+
+站点上架新城市时不会有人来改这份表。未登记城市的房源不会被静默丢掉——scraper 按
+WARNING 记下城市名，日志里看得见，加进表即可。宁可漏推几条也不猜城市：猜错会把
+房源分派给错误的 ScrapeTask，用户按城市订阅就会收到不该收的。
+
+### 完整性探针
+
+响应里的 `sAngularServiceData` 带着门户配置，**有房没房都返回**，因此拿它当结构
+探针：读得到就说明这是一份真的接口响应，此时 `result` 为空可以放心当成「当前没有
+在架房源」（先到先得那 31 条在首个回应后即关闭，短时间清空是可能的）；读不到则说
+明拿到的是别的东西（改版、网关、登录墙），不能把空结果当成「没房源」——那会让存量
+被整体收敛成 Occupied 并发一批假的下架通知。
+
+另外，路由不认识时站点返回的是**一整页 HTML** 而不是 JSON（实测 `/api/v1/*` 的
+404 是 158 KB HTML），因此 JSON 解析失败要上抛 `ScrapeNetworkError` 而不是当成空
+结果。
+
+### 不做自动预订
+
+应征需要付费账号，流程未侦察，ToS 暴露面未评估。与 OurCampus / Magis /
+Student Experience 一致：只通知，不预订。
+
+---
+
 ## §6 DUWO/ROOM (room.nl) — **不建议**
 
 ### 端点
@@ -628,6 +781,11 @@ scraper 的层级是对的。
 
 **结论：不予接入**。有意监控 DUWO 的用户应自行注册，并使用 ROOM 自带的邮件提醒
 功能。
+
+> ⚠️ **别把「要付费注册」本身当成否决理由。** Plaza（§5b）同样收费（€27.50/年），
+> 却接了——区别在于 Plaza 的房源**匿名可见**、ToS 也没有再分发限制，那笔钱买的是
+> 「能应征」而不是「能看见」，只读监控完全不需要账号。DUWO 的两条否决理由是
+> **数据在登录墙后**与**ToS 明确禁止再分发**，缺了任一条结论都会不同。
 
 ---
 
@@ -773,6 +931,12 @@ Emmen 2、Assen 2 这类地方。Eindhoven 0（Waalre、Maarheeze 勉强算周�
 
 ### 接入优先级（按投入产出比排序）
 
+0. ~~**Plaza**~~ —— **已接入**（2026-09-02，影子期），见 §5b
+   - 荷兰住宅 49 条，其中 **31 条是当场成交制**——本文档考察过的所有平台里最强的
+     形态。另 18 条是「Snelle reageerder」，同样奖励速度
+   - 一个匿名 POST 拿全站，字段结构化，工程量与 Magis 同级
+   - ⚠️ 用户须付费注册（€27.50/年）才能应征。这不影响只读监控（房源匿名可见），
+     但每条 listing 都要标注出来
 1. **HousingAnywhere —— 覆盖范围最大**
    - 工程量低、合规边界清晰、用户群匹配，且数量可观（仅 Amsterdam 一城即 196 条）
    - 无 Cloudflare，普通 UA 即可；可直接复用现有 `scrapers/` 包的架构
@@ -812,6 +976,11 @@ The Social Hub 之后可以得出以下规律：**在荷兰的专业学生公寓
 | 排队制 | DUWO/ROOM、SSH&（sshn.nl）、SSHXL 长租、Basecamp 及社会住房整体 | 等待期以月至年计（SSHXL 实测 2–36 个月），即时推送没有意义 |
 | 抽签制 | Vesteda | 同分抽签，早知道不提高中签概率——与排队制殊途同归，见 §6b |
 | 客户端渲染 | The Social Hub、Camelot | 须逆向 API 或引入浏览器，成本接近接入一个新平台 |
+
+**但这条规律只对「自营运营商」成立。** Plaza（§5b）不是运营商而是**平台**——多家
+机构把房源挂在同一套 Zig/Hexia 系统上，因此单个接口就覆盖十个城市。往这个方向找
+（找平台而不是找楼盘）比继续数运营商划算得多：同类的还有 Woningnet、Thuisvester
+一系，尚未侦察。
 
 > **2026-09-02 这张表改过两行，两处原因不同，都值得记下来。**
 >

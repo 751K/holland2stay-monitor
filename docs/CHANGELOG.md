@@ -1,5 +1,74 @@
 # Changelog
 
+## v1.33.0 (2026-09-02)
+
+本版本接入第七个平台 Plaza。与前六个来源不同，它不是自营运营商而是**平台**——多家
+机构把房源挂在同一套 Zig/Hexia 系统上，因此一个匿名接口就覆盖十个荷兰城市。
+
+### 新增
+
+* **接入 Plaza（plaza.newnewnew.space）**（本次）
+
+    运营方 Plaza Resident Services，跑在 Zig / Hexia 平台上。站点自我描述是
+    「Woonruimte voor **studenten**, starters en expats」。与前六个平台不同，它不是
+    自营运营商而是**平台**——多家机构把房源挂在同一套系统上，因此一个接口就覆盖
+    十个荷兰城市。上线走**影子模式**：照常抓取入库、参与收敛与统计，不发通知。
+
+    一个匿名 POST 拿全站，无认证、无 Cloudflare、无 JS 挑战：
+
+        POST /portal/object/frontend/getallobjects/format/json
+
+    字段是结构化 JSON 而非散文，工程量与 Magis 同级。`robots.txt` 只禁
+    `/portal/uploads/` 下的 floorplans 与 PDF，因此那两类文件不抓。
+
+    **接它的理由是分配机制。** 荷兰住宅 49 条里 31 条是「当场成交」——应征时站点
+    自己弹的确认框写着「Wil je deze kamer **definitief boeken**? Dat betekent dat
+    je deze kamer accepteert en **geen andere aanbieding meer krijgt**」。不是排队
+    等挑，是点下去房子就是你的。这是本项目考察过的所有平台里最强的形态，代价也
+    最重（接受即放弃其它全部 offer），因此这句话原样写进 features——催用户「快点」
+    却不说清代价是不负责的。另外 18 条是「Snelle reageerder」，站点明写「不设等候
+    名单」，同样奖励速度。
+
+    平台还支持 `loting`（截止后电脑抽签）、`inschrijfduur`（按注册时长排队）、
+    `hospiteren`（合租面试）三种模型——**这三类推送没有价值**，正是否决 Vesteda 与
+    DUWO/ROOM 的那类理由。Plaza 当前一条都没用到，但将来可能出现，因此模型是逐条
+    记录的，抽签与排队那两条文案明写 `speed does not help`。
+
+    **与 DUWO/ROOM 的区别决定了能不能接。** 两者都要付费注册（ROOM 约 €30/年，
+    Plaza €27.50/年），但 DUWO 的否决理由不是收费本身：它的 `product-search` 对
+    匿名请求返回 404，房源只有登录后才看得见，而其 ToS 明确禁止再分发。Plaza 的
+    房源匿名可见（两次独立验证），disclaimer 也只有标准免责声明——那 €27.50 买的是
+    「能应征」而不是「能看见」。但这笔钱必须让用户知道：全部房源的
+    `inschrijvingVereistVoorReageren` 都是 true，收到通知却没注册就动不了，因此每条
+    listing 都写一条 `Registration`。
+
+    三道过滤都必须做：同一个端点还返回停车位（不筛会推「€50 的房源」）与德国房源。
+    国别判据用 `land.id` 这个主键而不是 `regio.name` 的展示文案——改一次文案就会让
+    按前缀判断的实现静默漏掉全部荷兰房源。
+
+    租客维度**逐条读 `doelgroepen`**，不是整站断言：同一批里 student 39 /
+    regulier 16 并存。只有恰好等于 `{student}` 的才写 `student only`，混合标记的
+    不写、让该维度 fail-open——替站点断言「只有学生能租」正是 Xior 在 finishing 上
+    栽过的那种错。
+
+    完整侦察记录见 `docs/SCRAPING_RECON.md` §5b。
+
+### 文档
+
+* **侦察文档：新增 Plaza 一节，并补两处对照**（本次）
+
+    §5b 新增 Plaza 完整侦察记录，其中分配机制那一小节保留了第一版的错误说法并标错
+    ——那句从荷兰语字段名直译来的「首个回应后广告关闭」正是当初判断的依据，删掉就
+    看不出它曾经影响过什么。
+
+    §6 DUWO 加一条与 Plaza 的对照：**别把「要付费注册」本身当成否决理由**。两者都
+    收费，但 DUWO 的房源在登录墙后、ToS 明确禁止再分发，Plaza 的房源匿名可见、
+    disclaimer 只有标准免责声明——缺了任一条结论都会不同。
+
+    §7 补上「找平台而不是找楼盘」这条方向性结论：Plaza 是第一个非自营运营商的来源，
+    多家机构挂在同一套 Zig/Hexia 上，单个接口覆盖十个城市，同类的 Woningnet 一系
+    尚未侦察。
+
 ## v1.32.0 (2026-09-02)
 
 本版本接入第六个平台 Student Experience，并修正三处「判据与被判的东西不是一回

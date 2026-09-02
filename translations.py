@@ -414,6 +414,7 @@ TRANSLATIONS = {
     "settings_magis_cities":    {"zh": "Magis 监控城市",      "en": "Magis Cities"},
     "settings_se_cities":       {"zh": "Student Experience 监控城市",
                                  "en": "Student Experience Cities"},
+    "settings_plaza_cities":    {"zh": "Plaza 监控城市",      "en": "Plaza Cities"},
     "settings_save":        {"zh": "保存配置",                "en": "Save Config"},
     "settings_apply":       {"zh": "立即生效",                "en": "Apply Now"},
     "settings_apply_hint":  {"zh": "热重载 .env / 用户配置，不重新加载代码",

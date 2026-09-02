@@ -173,6 +173,7 @@ def source_label(source: str) -> str:
         "xior": "Xior",
         "magis": "Magis",
         "studentexperience": "Student Experience",
+        "plaza": "Plaza",
     }
     return mapping.get((source or "").lower(), source or "Holland2Stay")
 
@@ -186,6 +187,7 @@ def source_short(source: str) -> str:
         "xior": "XR",
         "magis": "MG",
         "studentexperience": "SE",
+        "plaza": "PZ",
     }
     return mapping.get((source or "").lower(), source_label(source))
 

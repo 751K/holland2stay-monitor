@@ -45,6 +45,7 @@ from .base import (
 )
 from .holland2stay import HollandStayScraper
 from .magis import MagisScraper
+from .plaza import PlazaScraper
 from .studentexperience import StudentExperienceScraper
 from .ourcampus import OurCampusScraper
 from .ourdomain import OurDomainScraper
@@ -58,6 +59,7 @@ SCRAPER_REGISTRY: dict[str, type[AbstractScraper]] = {
         HollandStayScraper,
         MagisScraper,
         StudentExperienceScraper,
+        PlazaScraper,
         OurCampusScraper,
         OurDomainScraper,
         XiorScraper,

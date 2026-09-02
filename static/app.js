@@ -588,6 +588,7 @@ window.SOURCE_LABELS = {
   xior: 'Xior',
   magis: 'Magis',
   studentexperience: 'Student Experience',
+  plaza: 'Plaza',
 };
 
 window.SOURCE_SHORT = {
@@ -597,6 +598,7 @@ window.SOURCE_SHORT = {
   xior: 'XR',
   magis: 'MG',
   studentexperience: 'SE',
+  plaza: 'PZ',
 };
 
 /** 平台全名。认不出的 key 首字母大写后返回，而不是硬套一个默认平台名——

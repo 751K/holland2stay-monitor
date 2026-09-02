@@ -13,6 +13,7 @@ from flask import Flask, flash, redirect, render_template, request, url_for
 
 from config import (KNOWN_SOURCES, source_display_name, KNOWN_CITIES,
                     KNOWN_MAGIS_CITIES, KNOWN_OURDOMAIN_CITIES,
+                    KNOWN_PLAZA_CITIES,
                     KNOWN_STUDENTEXPERIENCE_CITIES, KNOWN_XIOR_CITIES)
 
 from app.auth import admin_required
@@ -95,6 +96,7 @@ def settings() -> Any:
             "MAGIS_CITIES": request.form.getlist("magis_city_selected"),
             "STUDENTEXPERIENCE_CITIES":
                 request.form.getlist("se_city_selected"),
+            "PLAZA_CITIES": request.form.getlist("plaza_city_selected"),
         }
         for key, picked in city_lists.items():
             pending[key] = sanitize_dotenv("|".join(picked))
@@ -111,9 +113,10 @@ def settings() -> Any:
         #     MAGIS_CITIES      空 → **全部 5 城**（同上）
         #     STUDENTEXPERIENCE_CITIES
         #                       空 → **全部 2 城**（同上）
+        #     PLAZA_CITIES      空 → **全部 12 城**（同上）
         #
-        # 所以 xior / magis / studentexperience 不在下面这张表里：它们空着
-        # 不是「没目标」，恰恰是「全都要」，对它们报「不会抓取」是错的。
+        # 所以 xior / magis / studentexperience / plaza 不在下面这张表里：它们
+        # 空着不是「没目标」，恰恰是「全都要」，对它们报「不会抓取」是错的。
         _no_target_when_empty = {
             "CITIES": "holland2stay",
             "OURDOMAIN_CITIES": "ourdomain",
@@ -253,6 +256,16 @@ def settings() -> Any:
     else:
         selected_se_keys = {c["key"] for c in KNOWN_STUDENTEXPERIENCE_CITIES}
 
+    selected_plaza_keys: set[str] = set()
+    raw_plaza = env.get("PLAZA_CITIES", "")
+    if raw_plaza:
+        for entry in raw_plaza.split("|"):
+            parts = entry.strip().split(",")
+            if len(parts) >= 2:
+                selected_plaza_keys.add(parts[-1].strip())
+    else:
+        selected_plaza_keys = {c["key"] for c in KNOWN_PLAZA_CITIES}
+
     selected_xior_keys: set[str] = set()
     raw_xior = env.get("XIOR_CITIES", "")
     if raw_xior:
@@ -279,6 +292,7 @@ def settings() -> Any:
         known_ourdomain_cities=KNOWN_OURDOMAIN_CITIES,
         known_magis_cities=KNOWN_MAGIS_CITIES,
         known_se_cities=KNOWN_STUDENTEXPERIENCE_CITIES,
+        known_plaza_cities=KNOWN_PLAZA_CITIES,
         known_xior_cities=KNOWN_XIOR_CITIES,
         xior_by_city=xior_by_city,
         xior_city_all_checked=xior_city_all_checked,
@@ -288,6 +302,7 @@ def settings() -> Any:
         selected_ourdomain_keys=selected_ourdomain_keys,
         selected_magis_keys=selected_magis_keys,
         selected_se_keys=selected_se_keys,
+        selected_plaza_keys=selected_plaza_keys,
         selected_xior_keys=selected_xior_keys,
     )
 
