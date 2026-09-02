@@ -178,7 +178,7 @@ struct ListingDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
 
                     HStack(spacing: 8) {
-                        sourceBadge(listing.sourceShortText, source: listing.normalizedSourceKey)
+                        PlatformBadge(source: listing.normalizedSourceKey, size: .large)
 
                         Label(listing.city, systemImage: "mappin.and.ellipse")
                             .font(.subheadline)
@@ -225,7 +225,19 @@ struct ListingDetailView: View {
                 if !secondaryDetails(for: listing).isEmpty {
                     DetailSection(title: "All Details") {
                         ForEach(secondaryDetails(for: listing), id: \.key) { key, value in
-                            LabeledContent(displayKey(key), value: value)
+                            LabeledContent(displayKey(key), value: displayValue(value))
+                                // 地址是这一屏唯一会被拷去别处用的东西（发给中介、
+                                // 贴进别的地图、查通勤）。长按复制。
+                                //
+                                // 每一行都挂：哪一行"值得复制"是用户说了算，
+                                // 只给地址开的话，其余行长按没反应反而像坏了。
+                                .contextMenu {
+                                    Button {
+                                        UIPasteboard.general.string = value
+                                    } label: {
+                                        Label("Copy", systemImage: "doc.on.doc")
+                                    }
+                                }
                         }
                     }
                 } else if !listing.features.isEmpty {
@@ -285,8 +297,11 @@ struct ListingDetailView: View {
         Button {
             coord.openMap(focusing: listing.id)
         } label: {
+            // 字号跟上面那颗「Open on …」一致（.headline）。两颗按钮上下叠着、
+            // 宽度一样，字号却差一档时，看着像其中一颗没做完。
+            // 层级差别交给按钮样式表达：主操作 borderedProminent，这颗 bordered。
             Label("View on map", systemImage: "map")
-                .font(.subheadline.weight(.medium))
+                .font(.headline)
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
@@ -319,7 +334,37 @@ struct ListingDetailView: View {
                 return !primaryKeys.contains(where: { normalized.contains($0) })
                     && !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
+            .filter { !Self.isRedundant(value: $0.value, on: listing) }
             .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+    }
+
+    /// 这一行说的事，本屏别处是否已经写过。
+    ///
+    /// 起因是 `Detail: ourcampus`——值就是平台名，而平台徽标就在标题旁边。
+    /// 这类行不是错的，是**没有信息**：占一行、让人扫一遍、什么也没多知道。
+    ///
+    /// 判据刻意用**完全相等**（去空白 + 忽略大小写），不用包含匹配。包含匹配
+    /// 会把 "Building: OurCampus Amsterdam Diemen Tower B" 这种真有增量的行
+    /// 一起删掉——宁可漏删几行冗余，也不能删掉用户唯一能看到那条信息的地方。
+    private static func isRedundant(value: String, on listing: Listing) -> Bool {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !v.isEmpty else { return true }
+
+        // 平台名：标题旁边就是平台徽标
+        if Platform.knownKeys.contains(v) { return true }
+        if v == Platform.displayName(listing.normalizedSourceKey).lowercased() { return true }
+        // 状态：标题旁边就是状态徽标
+        if v == listing.status.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            return true
+        }
+        // 房源名 / 城市：标题和它下面那行就是
+        if v == listing.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            return true
+        }
+        if v == listing.city.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            return true
+        }
+        return false
     }
 
     private func displayKey(_ key: String) -> String {
@@ -334,27 +379,29 @@ struct ListingDetailView: View {
             .joined(separator: " ")
     }
 
+    /// 值的显示形态：统一首字母大写。
+    ///
+    /// 后端把 feature 的值原样透出来，大小写全看各平台怎么写的——同一屏上
+    /// "One"、"student only"、"ourcampus" 三种风格并排，看着像没做完。
+    ///
+    /// 已登记的平台走 ``Platform.displayName``，因为机械地首字母大写会得到
+    /// "Ourcampus"——那既不是原样也不是正确写法，比不改还糟。
+    private func displayValue(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = trimmed.first else { return trimmed }
+        if Platform.knownKeys.contains(trimmed.lowercased()) {
+            return Platform.displayName(trimmed)
+        }
+        // 只动第一个字母：值里常有 "m²"、"excl."、"XC" 这类不能碰的写法，
+        // 整串 title case 会把它们改坏。
+        guard first.isLowercase else { return trimmed }
+        return first.uppercased() + trimmed.dropFirst()
+    }
+
     private func statusColor(for listing: Listing) -> Color {
         ListingStatus.from(listing.status).color
     }
 
-    private func sourceBadge(_ label: String, source: String?) -> some View {
-        Text(label)
-            .font(.system(size: 11, weight: .heavy, design: .monospaced))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(sourceColor(source).opacity(0.14), in: Capsule())
-            .foregroundStyle(sourceColor(source))
-            .accessibilityLabel("Platform \(label)")
-    }
-
-    private func sourceColor(_ source: String?) -> Color {
-        switch (source ?? "holland2stay").lowercased() {
-        case "ourdomain": return .purple
-        case "xior": return .teal
-        default: return .blue
-        }
-    }
 }
 
 private struct DetailItem {

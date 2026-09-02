@@ -1,5 +1,17 @@
 import SwiftUI
 
+/// 地图底部浮层的左右内缩。
+///
+/// 取值对齐**浮动 tab bar 的左右边界**——iOS 26 的 tab bar 不再贴边，而是一颗
+/// 内缩的胶囊。底部这几行控件若还按 12pt 贴着屏幕边，会比 tab bar 各突出一截，
+/// 三条边界参差不齐。
+///
+/// 系统没有公开这个内缩值，所以这里是**目测对齐**的常量，不是读来的。
+/// 哪天 tab bar 的内缩变了，改这一处。
+enum MapLayout {
+    static let horizontalInset: CGFloat = 20
+}
+
 /// 地图筛选：状态 chip 条 + 其余条件的 sheet。
 ///
 /// 为什么状态筛选长成「图例」的样子
@@ -13,21 +25,23 @@ struct MapStatusChips: View {
     @Environment(MapStore.self) private var store
 
     var body: some View {
-        @Bindable var store = store
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(ListingStatus.byPriority) { kind in
-                    let count = store.statusCounts[kind] ?? 0
-                    // 「未知状态」只在真的出现时才占位置——它默认开着，平时是 0，
-                    // 常驻一个空 chip 只是噪音；真冒出来时反而最该被看见。
-                    if kind != .other || count > 0 {
-                        chip(kind, count: count)
+            GlassGroup(spacing: 6) {
+                HStack(spacing: 6) {
+                    ForEach(ListingStatus.byPriority) { kind in
+                        let count = store.statusCounts[kind] ?? 0
+                        // 「未知状态」只在真的出现时才占位置——它默认开着，平时是 0，
+                        // 常驻一个空 chip 只是噪音；真冒出来时反而最该被看见。
+                        if kind != .other || count > 0 {
+                            chip(kind, count: count)
+                        }
                     }
                 }
             }
-            .padding(.horizontal, 12)
         }
-        .scrollClipDisabled()
+        // 不加 scrollClipDisabled：加了 chip 会画到 ScrollView 边界之外，被屏幕
+        // 边缘从字中间硬切开，看着像布局坏了而不是「可以左右滑」。
+        .padding(.horizontal, MapLayout.horizontalInset)
     }
 
     private func chip(_ kind: ListingStatus, count: Int) -> some View {
@@ -38,21 +52,30 @@ struct MapStatusChips: View {
         } label: {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(on ? kind.color : Color.secondary)
-                    .frame(width: 9, height: 9)
+                    .fill(on ? kind.color : Color.secondary.opacity(0.55))
+                    .frame(width: 8, height: 8)
                 Text(kind.label)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 14.5, weight: on ? .semibold : .medium))
+                    .fixedSize()
                 Text("\(count)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12.5, weight: .bold))
                     .monospacedDigit()
+                    .fixedSize()
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background((on ? kind.color : Color.primary).opacity(0.14),
+                                in: Capsule())
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().strokeBorder(
-                on ? kind.color.opacity(0.55) : Color.clear, lineWidth: 1.5))
-            .opacity(on ? 1 : 0.5)
+            // 选中态只给**文字**上色，玻璃保持中性。
+            //
+            // 之前是给玻璃 tint：绿橙蓝紫灰五档底色亮度差很多，前景色只好一档
+            // 一档去凑，凑到最后是「颜色太浓」和「数字看不见」。文字上色没有这个
+            // 问题——色相由状态决定，对比度由系统的中性玻璃保证，两件事解耦。
+            .foregroundStyle(on ? kind.color : Color.secondary)
+            .padding(.horizontal, 13)
+            .padding(.vertical, 9)
+            .liquidGlass(Capsule(), interactive: true)
+            .opacity(on ? 1 : 0.8)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(kind.label), \(count) listings")

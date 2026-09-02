@@ -327,8 +327,8 @@ TRANSLATIONS = {
     "map_st_occupied":      {"zh": "已租出",                  "en": "Occupied"},
     "map_st_other":         {"zh": "未知状态",                "en": "Unknown status"},
     # 同址散开 / 深链
-    "map_stacked_note":     {"zh": "此处共 {n} 套，已散开显示，位置为近似值",
-                             "en": "{n} units at this address, spread out; positions are approximate"},
+    "map_stacked_note":     {"zh": "该地址共有 {n} 套房源。图钉已散开，以便逐一点选，因此显示的位置是近似值。",
+                             "en": "This address has {n} listings. Their pins are spread apart so that each one can be tapped, so the positions shown are approximate."},
     "map_uncached_note":    {"zh": "另有 {n} 套尚未解析出坐标，未显示在图上",
                              "en": "{n} more have no coordinates yet and are not on the map"},
     "map_focus_out_of_view": {"zh": "这套房源不在当前地图范围内（已超出新鲜度窗口或被筛选条件排除），下面标出的是它的位置。",

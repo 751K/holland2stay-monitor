@@ -10,7 +10,7 @@ import SwiftUI
 ///   （Holland2Stay 大部分房源所在城市）
 /// - ``Annotation`` 自定义 pin，颜色按状态区分（available/lottery/unavailable）
 /// - ``Map(selection:)`` 双向绑 ``store.selectedID``，点 pin 选中 → sheet 弹卡
-/// - 选中状态用 ``.mapStyle(.standard(elevation:.realistic))``——美观且性能可接受
+/// - 底图用 ``.mapStyle(.standard(elevation: .flat))``——不要地形高程
 ///
 /// 详情入口
 /// --------
@@ -147,7 +147,12 @@ struct MapView: View {
                 .onChange(of: clusters.count) { _, _ in
                     focusIfNeeded()
                 }
-                .mapStyle(.standard(elevation: .realistic))
+                // .realistic 会把地形高程画出来——深色模式下整张图变成一片
+                // 诡异的蓝绿，房源图钉全被淹没。找房子跟地形没有关系。
+                // pointsOfInterest 全关：截图里「Clown Juju」「Dental Clinics」
+                // 「Global Dance Centre」这些跟找房子毫无关系，却在跟房源图钉
+                // 抢注意力，密度还比图钉高得多。
+                .mapStyle(.standard(elevation: .flat, pointsOfInterest: .excludingAll))
                 .mapControls {
                     MapCompass()
                     MapScaleView()
@@ -159,8 +164,21 @@ struct MapView: View {
                     get: { store.selected },
                     set: { _ in store.selectedID = nil }
                 )) { l in
-                    listingCard(l)
-                        .presentationDetents([.fraction(0.32), .medium])
+                    // 卡片高度随房源变：标题可能换行，同址提示可能占两行。
+                    // 写死 detent 必然一边留白、一边裁掉——0.4 时下半截是空的，
+                    // 收到 0.34 又把标题切了。套一层 ScrollView：装得下就不滚
+                    // （scrollBounceBehavior(.basedOnSize)），装不下也丢不了内容。
+                    ScrollView {
+                        listingCard(l)
+                    }
+                    .scrollBounceBehavior(.basedOnSize)
+                        // 收紧到贴着内容。0.4 时卡片下半截是空的——空白本身不是
+                        // 留白，是"这里本来还该有东西"。
+                        .presentationDetents([.fraction(0.42), .large])
+                        // 小尺寸下地图仍可拖动：这是张地图，卡片弹出来不该把
+                        // 它锁死。
+                        .presentationBackgroundInteraction(
+                            .enabled(upThrough: .fraction(0.42)))
                         .presentationDragIndicator(.visible)
                 }
 
@@ -183,7 +201,22 @@ struct MapView: View {
                 }
             }
         .navigationBarTitleDisplayMode(.inline)
-        .overlay(alignment: .top) { topBar }
+        // 控件全部沉到底部。浮在地图中上部时它们既盖住内容、又离拇指最远——
+        // 单手拿 iPhone 时够不着。用 safeAreaInset 而不是 overlay：它会自动落在
+        // tab bar 之上，不必去猜 tab bar 有多高，换机型/换系统版本也不会错位。
+        .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
+        .overlay(alignment: .top) { topNotice }
+        // 必须**居中**。放进上面那个 ZStack(alignment: .top) 的话会跟 topBar
+        // 叠在一起——真机上第一版就是这样：计数、三个圆钮、chip 条全部压在
+        // 说明卡上面，一个字都读不清。
+        .overlay(alignment: .center) {
+            if !store.listings.isEmpty && store.visibleCount == 0 {
+                emptyFilterNotice
+                    .padding(.horizontal, 24)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: store.visibleCount)
         .sheet(isPresented: $showFilters) { MapFilterSheet() }
         .task {
             if store.listings.isEmpty {
@@ -223,7 +256,7 @@ struct MapView: View {
         }
     }
 
-    private func mapTopButton(
+    private func mapControlButton(
         systemName: String,
         label: String,
         action: @escaping () -> Void
@@ -233,8 +266,7 @@ struct MapView: View {
                 .font(.system(size: 17, weight: .semibold))
                 // 44×44 命中 iOS HIG 最小可点击区域，之前 42×42 差 2pt。
                 .frame(width: 44, height: 44)
-                .background(.regularMaterial, in: Circle())
-                .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
+                .liquidGlass(Circle(), interactive: true)
         }
         .buttonStyle(.plain)
         // VoiceOver: SF symbol 自带 a11y label 但是英文符号名（如 "location fill"），
@@ -368,36 +400,133 @@ struct MapView: View {
         ListingStatus.from(status).color
     }
 
-    // MARK: - Top bar
+    // MARK: - Bottom bar
 
-    /// 计数 + 三个圆钮一行，状态 chip 条一行，需要时再加一条定位提示。
+    /// 状态 chip 条 + 计数 + 三个圆钮，全部贴着 tab bar 上方。
     ///
-    /// 原先计数在左上、两个圆钮竖排在右上，中间那块空着。加了 chip 条之后竖排
-    /// 会和 chip 抢位置，所以并成一条横排——地图类 App 的常见排法。
-    private var topBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    /// 原先它们浮在地图中上部：既盖住地图内容，又离拇指最远——单手拿 iPhone
+    /// 时根本够不着。地图类 App 把常用控件放底部是通例，原因就是这个。
+    ///
+    /// 定位提示条仍留在**顶部**：它是需要读的一段话，不是要点的控件，放在
+    /// 底部会跟这一堆按钮挤在一起。
+    private var bottomBar: some View {
+        GlassGroup(spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
+            // 顺序：圆钮在上、chip 条在下、再下面是 tab bar。
+            //
+            // chip 是这里最常动的一格（切个状态看一眼），贴着 tab bar 放在最下
+            // 就是离拇指最近的位置；三个圆钮用得少，让一层给它。
             HStack(spacing: 10) {
                 countBadge
                 Spacer(minLength: 8)
-                mapTopButton(systemName: "line.3.horizontal.decrease.circle",
-                             label: "Filter listings") { showFilters = true }
-                mapTopButton(systemName: "location.fill",
-                             label: "Center on my location") { centerOnUserLocation() }
-                mapTopButton(systemName: "arrow.clockwise",
-                             label: "Refresh listings") {
+                mapControlButton(systemName: "line.3.horizontal.decrease.circle",
+                                 label: "Filter listings") { showFilters = true }
+                mapControlButton(systemName: "location.fill",
+                                 label: "Center on my location") { centerOnUserLocation() }
+                mapControlButton(systemName: "arrow.clockwise",
+                                 label: "Refresh listings") {
                     Task { await store.refresh() }
                 }
                 .disabled(store.isLoading)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, MapLayout.horizontalInset)
 
             MapStatusChips()
+        }
+        }
+        .padding(.bottom, 8)
+    }
 
+    /// 定位提示条单独留在顶部——它是要读的文字，不是要点的控件。
+    private var topNotice: some View {
+        Group {
             if let notice = store.focusNotice {
                 focusNoticeBar(notice)
+                    .padding(.top, overlayTopPadding + 54)
             }
         }
-        .padding(.top, overlayTopPadding + 54)
+    }
+
+    /// 筛完一套不剩时的说明卡。
+    ///
+    /// 原因**从实际数据算出来**，不写死。此前这里硬写了一句「多数已出租或预留」，
+    /// 那是猜的：空图若是城市或租金条件筛出来的，这句话就是错的，而界面上看不出来。
+    private var emptyFilterNotice: some View {
+        let breakdown = store.emptyBreakdown
+        return VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.20))
+                    .frame(width: 46, height: 46)
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 19, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+
+            VStack(spacing: 5) {
+                Text("No listings match")
+                    .font(.headline)
+                Text("\(breakdown.total) hidden by the current filter")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // 各档实际藏了几套——按数量降序，用各自的颜色，和 chip 条对得上。
+            if !breakdown.byStatus.isEmpty {
+                HStack(spacing: 6) {
+                    ForEach(breakdown.byStatus.prefix(3), id: \.status) { item in
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(item.status.color)
+                                .frame(width: 7, height: 7)
+                            Text("\(item.count)")
+                                .fontWeight(.semibold)
+                                .monospacedDigit()
+                            Text(item.status.label)
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.caption)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(Color.primary.opacity(0.06), in: Capsule())
+                    }
+                }
+            }
+
+            // 状态之外还有别的条件在起作用时才提——不提的话，用户会以为
+            // 只要打开那几档就够了。
+            if breakdown.byOtherFilters > 0 {
+                Text("\(breakdown.byOtherFilters) more excluded by city, platform, rent or area")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button {
+                store.showEverything()
+            } label: {
+                Text("Show all \(breakdown.total)")
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+            }
+            .glassProminentButtonStyle()
+            .controlSize(.regular)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 22)
+        .padding(.bottom, 18)
+        .frame(maxWidth: 300)
+        // 这张卡**不用玻璃**。
+        //
+        // Liquid Glass 是给悬浮小控件的：面积小、内容少、背景透过来是加分。
+        // 一整张说明卡糊在地图上时，玻璃的折射和模糊会把卡片自己的内容也搅浑
+        // ——真机上看就是"多加了一层模糊"。这里要的是把地图挡住、把字读清楚，
+        // 所以用不透明度更高的 thickMaterial。
+        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.22), radius: 20, y: 8)
     }
 
     /// 深链没能直接落到图上时，说明是**哪一种**没落上。
@@ -425,8 +554,7 @@ struct MapView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+        .liquidGlass(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .padding(.horizontal, 12)
     }
 
@@ -435,12 +563,19 @@ struct MapView: View {
             HStack(spacing: 6) {
                 Image(systemName: "house.circle.fill")
                     .foregroundStyle(.blue)
-                // 「筛掉了多少」和「一共有多少」都要在，否则用户看到 27 会以为
-                // 全荷兰只剩 27 套。
-                Text("\(store.visibleCount) / \(store.listings.count)")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .monospacedDigit()
+                // 「1 / 9」没人看得懂——真机上第一反应就是「这什么意思」。
+                // 写清楚是「显示 N / 共 M」，并且只在真的筛掉了东西时才显示分母。
+                if store.visibleCount == store.listings.count {
+                    Text("\(store.listings.count)")
+                        .font(.subheadline).fontWeight(.medium).monospacedDigit()
+                } else {
+                    Text("\(store.visibleCount)")
+                        .font(.subheadline).fontWeight(.semibold).monospacedDigit()
+                    Text("/ \(store.listings.count)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
             if store.uncached > 0 {
                 Text("\(store.uncached) without coords")
@@ -450,8 +585,8 @@ struct MapView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+        // 不开 interactive：它只是个读数，按下去会形变的话看起来像能点。
+        .liquidGlass(Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(store.visibleCount) of \(store.listings.count) listings shown")
     }
@@ -484,70 +619,81 @@ struct MapView: View {
                 center: l.displayCoordinate,
                 span: MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004)))
         }
-        store.selectedID = id
+        // **不**自动弹卡片。
+        //
+        // 用户是从这套房的详情页点过来的——他已经知道是哪套了，弹一张卡片把刚看过
+        // 的信息再念一遍，还盖住半张他专门来看的地图。这里要回答的问题只有一个：
+        // 它在哪。图钉自己有加粗描边+放大（见 makeIcon 的 isFocus），够了。
+        //
+        // 想看详情点那个图钉就行，和地图上其它房源一样。
     }
 
     // MARK: - Bottom card
 
     @ViewBuilder
     private func listingCard(_ l: MapListing) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Title row
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(l.name)
-                            .font(.headline)
-                            .lineLimit(2)
-                        sourceBadge(l.sourceShortText, source: l.source)
-                    }
-                    HStack(spacing: 6) {
-                        Text(l.city)
-                        if !l.neighborhood.isEmpty {
-                            Text("·")
-                            Text(l.neighborhood)
-                        }
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                }
-                Spacer()
+        VStack(alignment: .leading, spacing: 16) {
+            // ── 标题 ──────────────────────────────────────────────
+            // 平台徽标从标题旁边挪到了下面那行。挤在标题右边时，长房源名会被它
+            // 顶得换行，而"Occupied"又在更右边——一行里塞三样东西，谁都不突出。
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(l.name)
+                    .font(.title3).fontWeight(.semibold)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
                 statusBadge(l.status)
             }
 
-            // Stats row
-            HStack(spacing: 16) {
-                if !l.priceRaw.isEmpty {
-                    Label(l.priceRaw + "/mo", systemImage: "eurosign.circle")
-                }
-                if !l.area.isEmpty {
-                    Label(l.area, systemImage: "square.dashed")
-                }
-                // 哨兵日期（2050-01-01 =「未定」）整格不显示，
-                // 比显示一个 "—" 更干净——这一行本来就是可有可无的几件事。
-                if !l.availableFrom.isEmpty,
-                   !ServerTime.isSentinelDate(l.availableFrom) {
-                    Label(ServerTime.displayDate(l.availableFrom), systemImage: "calendar")
+            // 平台 + 地点。地点为空、或者已经被房源名包含时就不重复——
+            // Xior 的 city 字段是楼盘名（"Amsterdam Naritaweg"），而房源名是
+            // "Amsterdam Naritaweg 155C"，照原样并排会念两遍同一件事。
+            HStack(spacing: 8) {
+                PlatformBadge(source: l.source, size: .medium)
+                if let place = placeText(for: l) {
+                    Text(place)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
+            .padding(.top, -8)
+
+            // ── 三格数据 ──────────────────────────────────────────
+            // 等宽 + 分隔线。原先是 Label 横排，间距由文字长短决定，三样东西
+            // 疏密不一，看着像没对齐。
+            HStack(spacing: 0) {
+                statCell(l.priceRaw.isEmpty ? "—" : l.priceRaw, caption: "per month")
+                statDivider
+                statCell(l.area.isEmpty ? "—" : l.area, caption: "area")
+                statDivider
+                // 哨兵日期（2050-01-01 =「未定」）显示成 "—"，不冒充成日期。
+                statCell(availableText(l), caption: "available")
+            }
+            .padding(.vertical, 10)
+            .background(Color.primary.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
 
             // 同址散开之后位置是**近似值**。不写这一句的话，用户会以为图钉就是
             // 门牌号——而这几套其实只是共用一个街道地址。
             if l.stackCount > 1 {
                 Label {
-                    Text("\(l.stackCount) units at this address, spread out; positions are approximate")
+                    // 完整句子、首字母大写。原文 "5 units at this address, spread
+                    // out; positions are approximate" 以数字开头、用分号拼接，
+                    // 读起来是个残句；而这句话是在更正图钉的位置，必须说清楚。
+                    Text("This address has \(l.stackCount) listings. Their pins are spread apart so that each one can be tapped, so the positions shown are approximate.")
                 } icon: {
                     Image(systemName: "circle.grid.2x2")
                 }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Action
-            HStack(spacing: 8) {
+            // ── 操作 ──────────────────────────────────────────────
+            // 主操作整宽独占一行；两个次要动作各占一半。原先是"整宽+圆钮"再
+            // 叠一个整宽，三种宽度堆在一起，没有一条边是对齐的。
+            VStack(spacing: 10) {
                 Button {
                     let id = l.id
                     let title = l.name
@@ -559,60 +705,83 @@ struct MapView: View {
                     }
                 } label: {
                     Label("View Details", systemImage: "arrow.right.circle.fill")
+                        .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
 
-                if let url = URL(string: l.url), !l.url.isEmpty {
-                    Link(destination: url) {
-                        Image(systemName: "safari")
+                HStack(spacing: 10) {
+                    Button {
+                        // 传**真实坐标**：同址那几套在图上被摆成一圈只是为了能
+                        // 分别点到，圈上的点谁都不是真的门牌位置。
+                        AppleMaps.openDirections(to: l.coordinate, name: l.name)
+                    } label: {
+                        // ⚠️ 必须带 .circle.fill：裸的 arrow.triangle.turn.up.right
+                        // 不是一个存在的 SF Symbol。名字写错不报错、不崩溃，
+                        // 只是**什么都不画**——上一版就这么把图标弄丢了。
+                        Label("Directions",
+                              systemImage: "arrow.triangle.turn.up.right.circle.fill")
+                            .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
-                    // icon-only：默认 VO 朗读"safari"——补 a11y label 说明意图
-                    .accessibilityLabel("Open in browser")
+
+                    if let url = URL(string: l.url), !l.url.isEmpty {
+                        Link(destination: url) {
+                            Label("Website", systemImage: "safari")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
             }
+            .controlSize(.large)
         }
-        .padding()
+        .padding(20)
     }
 
-    @ViewBuilder
+    /// 一格数据：数值在上，说明在下。
+    private func statCell(_ value: String, caption: LocalizedStringKey) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.subheadline).fontWeight(.semibold)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(caption)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var statDivider: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.08))
+            .frame(width: 1, height: 26)
+    }
+
+    /// 地点行的文字。实现在 PlaceSummary——日历行用的是同一份。
+    private func placeText(for l: MapListing) -> String? {
+        PlaceSummary.text(name: l.name, parts: [l.neighborhood, l.city])
+    }
+
+    private func availableText(_ l: MapListing) -> String {
+        guard !l.availableFrom.isEmpty,
+              !ServerTime.isSentinelDate(l.availableFrom) else { return "—" }
+        return ServerTime.displayDate(l.availableFrom)
+    }
+
     private func statusBadge(_ status: String) -> some View {
-        let color = pinColor(for: status)
-        Text(shortStatus(status))
-            .font(.caption)
-            .fontWeight(.medium)
+        let kind = ListingStatus.from(status)
+        return Text(kind.label)
+            .font(.caption).fontWeight(.semibold)
             .lineLimit(1)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 9)
             .padding(.vertical, 4)
-            .background(color.opacity(0.18), in: Capsule())
-            .foregroundStyle(color)
+            .background(kind.color.opacity(0.18), in: Capsule())
+            .foregroundStyle(kind.color)
     }
 
-    private func shortStatus(_ s: String) -> String {
-        let lower = s.lowercased()
-        if lower.contains("available to book") { return String(localized: "Available") }
-        if lower.contains("lottery") { return String(localized: "Lottery") }
-        if lower.contains("not available") { return String(localized: "Unavailable") }
-        return s
-    }
-
-    private func sourceBadge(_ label: String, source: String?) -> some View {
-        Text(label)
-            .font(.system(size: 10, weight: .heavy, design: .monospaced))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(sourceColor(source).opacity(0.14), in: Capsule())
-            .foregroundStyle(sourceColor(source))
-    }
-
-    private func sourceColor(_ source: String?) -> Color {
-        switch (source ?? "holland2stay").lowercased() {
-        case "ourdomain": return .purple
-        case "xior": return .teal
-        default: return .blue
-        }
-    }
 }
 
 private final class UserLocationProvider: NSObject, CLLocationManagerDelegate {

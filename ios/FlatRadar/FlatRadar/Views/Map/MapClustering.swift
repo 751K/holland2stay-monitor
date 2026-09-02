@@ -34,8 +34,15 @@ struct ListingCluster: Identifiable, Hashable, Sendable {
         let maxLat = lats.max() ?? coordinate.latitude
         let minLng = lngs.min() ?? coordinate.longitude
         let maxLng = lngs.max() ?? coordinate.longitude
-        // 至少给一个 minSpan 避免单点 bounding 是 0
-        let minSpan = 0.005
+        // 至少给一个 minSpan，避免单点 bounding 是 0。
+        //
+        // ⚠️ 这个值必须**比同址散开的圆环小**。原值 0.005°（≈550 m）远大于
+        // 圆环直径（9 套时 ≈40 m），于是 max() 永远取 minSpan：点击聚合泡 →
+        // 视野 891 m → 网格 cell 72 m → 相距 14 m 的九个点仍在同一格 →
+        // 还是那个泡。放大到底也散不开，界面上表现为"点了没反应、不知道是啥房子"。
+        //
+        // 0.0006°（≈66 m）之后：视野 107 m、cell 9 m，14 m 的间距散得开。
+        let minSpan = 0.0006
         let latSpan = max(maxLat - minLat, minSpan) * paddingFactor
         let lngSpan = max(maxLng - minLng, minSpan) * paddingFactor
         return MKCoordinateRegion(

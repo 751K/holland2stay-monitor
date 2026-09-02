@@ -129,6 +129,52 @@ final class MapStore {
         return true
     }
 
+    /// 一套都不剩时，说明是被**哪一层**挡下的。
+    ///
+    /// 只报核查过的事实。此前那张卡片写死一句「多数已出租或预留」——那是猜的：
+    /// 若空图其实是城市或租金条件筛出来的，这句话就是错的，而界面上看不出来。
+    struct EmptyBreakdown: Equatable, Sendable {
+        /// 被关掉的状态档 → 各有几套，按数量降序。
+        var byStatus: [(status: ListingStatus, count: Int)]
+        /// 状态这一关过了，却被城市 / 平台 / 租金 / 面积挡下的条数。
+        var byOtherFilters: Int
+        var total: Int
+
+        static func == (a: Self, b: Self) -> Bool {
+            a.total == b.total && a.byOtherFilters == b.byOtherFilters
+                && a.byStatus.map(\.count) == b.byStatus.map(\.count)
+        }
+    }
+
+    var emptyBreakdown: EmptyBreakdown {
+        var byStatus: [ListingStatus: Int] = [:]
+        var other = 0
+        for l in listings {
+            if !activeStatuses.contains(l.statusKind) {
+                byStatus[l.statusKind, default: 0] += 1
+            } else {
+                other += 1          // 状态放行了，那就是别的条件挡的
+            }
+        }
+        return EmptyBreakdown(
+            byStatus: byStatus.sorted { $0.value > $1.value }
+                .map { (status: $0.key, count: $0.value) },
+            byOtherFilters: other,
+            total: listings.count)
+    }
+
+    /// 「显示全部」：打开所有状态档**并且**清掉城市/平台/租金/面积。
+    ///
+    /// 只开状态档是不够的——空图若是被城市或租金筛出来的，那样点下去毫无反应，
+    /// 成了一个死按钮。这个名字承诺的是「全部」，就得真的是全部。
+    func showEverything() {
+        activeStatuses = Set(ListingStatus.allCases)
+        cityFilter = ""
+        sourceFilter = ""
+        maxRentText = ""
+        minAreaText = ""
+    }
+
     func resetFilters() {
         activeStatuses = Set(ListingStatus.allCases.filter(\.isOnByDefault))
         cityFilter = ""

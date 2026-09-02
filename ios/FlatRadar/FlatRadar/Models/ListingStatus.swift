@@ -65,16 +65,19 @@ enum ListingStatus: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// 地图筛选栏里这一档是否默认打开。
+    /// 地图筛选栏里这一档是否默认打开。**全部默认打开。**
     ///
-    /// 生产实测：地图上 235 条里 Occupied 117 条、Reserved 48 条——七成是租不到的。
-    /// 默认全开等于把能租的那三成淹掉。`.other` 默认开着的理由见类型注释。
-    var isOnByDefault: Bool {
-        switch self {
-        case .book, .lottery, .other: return true
-        case .reserved, .occupied:    return false
-        }
-    }
+    /// 起初这里默认关掉了 Reserved / Occupied：生产全量 235 条里那两档占 165 条，
+    /// 藏起来确实能让能租的那 70 条浮出来。
+    ///
+    /// 但那是**全量**的比例。真机上用一个 listing_filter 收得很窄的账号打开地图，
+    /// 9 条里 0 条可订——于是默认筛完一套不剩，地图整个是空的。用户第一反应不是
+    /// 「筛选起作用了」，而是「这功能坏了」。
+    ///
+    /// 空图的代价比"噪音多"大得多：噪音还看得见、能自己关掉；空图什么都没有，
+    /// 连该点哪里都不知道。所以默认全开，收窄交给用户自己按 chip——那一排就在
+    /// 手边，每档还带着计数。
+    var isOnByDefault: Bool { true }
 
     /// 聚合气泡取簇内「最值得看」的一档，顺序即优先级。
     static let byPriority: [ListingStatus] = [.book, .lottery, .reserved, .other, .occupied]

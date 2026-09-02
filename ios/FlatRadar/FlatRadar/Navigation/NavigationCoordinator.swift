@@ -106,6 +106,12 @@ final class NavigationCoordinator {
     func openMap(focusing id: String) {
         guard Self.isValidListingID(id) else { return }
         pendingMapFocusID = id
+        // **必须清空导航栈**。MapView 是 BrowseView 那个 NavigationStack 的
+        // 根视图，而用户此刻正站在推上去的房源详情页上——只换根视图的话，详情页
+        // 还盖在上面，点「在地图上查看」看起来毫无反应。
+        //
+        // 而且在 path 非空时换根视图，SwiftUI 的行为是未定义的。
+        listingsPath = []
         selectedTab = .map
         selectedBrowseMode = .map
     }
