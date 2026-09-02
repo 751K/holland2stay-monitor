@@ -425,7 +425,7 @@ struct NotificationsView: View {
                 .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 14).padding(.vertical, 9)
-            .background(Color(.systemBackground), in: Capsule())
+            .background(Color(.secondarySystemGroupedBackground), in: Capsule())
             .overlay(Capsule().strokeBorder(.secondary.opacity(0.15), lineWidth: 1))
             Spacer(minLength: 0)
         }
@@ -564,7 +564,7 @@ private extension View {
             )
         } else {
             self
-                .background(Color(.systemBackground), in: Capsule())
+                .background(Color(.secondarySystemGroupedBackground), in: Capsule())
                 .overlay(
                     Capsule()
                         .strokeBorder(.white.opacity(0.42), lineWidth: 0.6)

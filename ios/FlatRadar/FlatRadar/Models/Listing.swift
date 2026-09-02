@@ -232,15 +232,41 @@ extension Listing {
         return "\(Int(interval / 86400))d"
     }
 
+    /// 归一化的平台 key。
+    ///
+    /// **顺序很重要：先信 `source` 字段，认不出来才去嗅 URL。**
+    ///
+    /// 原实现只在第一段里认 holland2stay / ourdomain / xior 三个，`ourcampus`
+    /// 落不进去，于是掉到 URL 那一段——而 OurCampus 和 OurDomain 共用 RentCafe
+    /// 的 `securerc.co.uk`，那行 `host.contains("securerc.co.uk") → ourdomain`
+    /// 就把每一条 OurCampus 都标成了 OD。
+    ///
+    /// 后端明明发了准确的 `source`，却被一条猜测覆盖掉。URL 嗅探只该在 source
+    /// 缺失时兜底，不该凌驾于它之上。
     var normalizedSourceKey: String? {
         let raw = (source ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if raw.contains("holland2stay") || raw == "h2s" { return "holland2stay" }
-        if raw.contains("ourdomain") || raw == "od" { return "ourdomain" }
-        if raw.contains("xior") || raw == "xr" { return "xior" }
 
+        // 1) 后端登记过的平台，直接采信。
+        if Platform.knownKeys.contains(raw) { return raw }
+        // 2) 少量历史缩写。
+        switch raw {
+        case "h2s": return "holland2stay"
+        case "od":  return "ourdomain"
+        case "oc":  return "ourcampus"
+        case "xr":  return "xior"
+        case "mg":  return "magis"
+        case "se":  return "studentexperience"
+        case "pz":  return "plaza"
+        default: break
+        }
+
+        // 3) 只有到这里才轮到 URL——source 为空或是个没见过的值。
         let host = URL(string: url)?.host(percentEncoded: false)?.lowercased() ?? url.lowercased()
         if host.contains("holland2stay") { return "holland2stay" }
-        if host.contains("ourdomain") || host.contains("securerc.co.uk") { return "ourdomain" }
+        // securerc.co.uk 是 RentCafe 的共用域名，两家都在上面，必须看子域区分；
+        // 只匹配这个域名会把两家混成一家。
+        if host.contains("ourcampus") { return "ourcampus" }
+        if host.contains("ourdomain") { return "ourdomain" }
         if host.contains("xior") { return "xior" }
 
         return raw.isEmpty ? nil : raw

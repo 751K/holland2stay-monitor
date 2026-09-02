@@ -80,11 +80,20 @@ struct CalendarView: View {
                             }
                         }
                     } else {
-                        monthHeader
-                        weekdayHeader
-                        daysGrid
+                        // 月份标题 / 星期行 / 日期格合成一张卡。原先三者各自
+                        // 平铺在页面上，没有边界，读起来是一堆散元素而不是
+                        // 「一个月历」。大面板用实体表面而不是玻璃——玻璃在大
+                        // 面积上会把自己的内容也搅浑（地图那张说明卡踩过）。
+                        VStack(spacing: 14) {
+                            monthHeader
+                            weekdayHeader
+                            daysGrid
+                        }
+                        .padding(.vertical, 16)
+                        .background(Color(.secondarySystemGroupedBackground),
+                                    in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        .padding(.horizontal, 16)
                         if let day = selectedDay {
-                            Divider().padding(.horizontal)
                             dayListings(for: day)
                                 .padding(.horizontal)
                         } else if store.listings.isEmpty {
@@ -141,8 +150,12 @@ struct CalendarView: View {
     private var monthHeader: some View {
         HStack(spacing: 8) {
             Button { shiftMonth(-1) } label: {
-                Image(systemName: "chevron.left").font(.title3)
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 36, height: 36)
+                    .liquidGlass(Circle(), interactive: true)
             }
+            .buttonStyle(.plain)
             .disabled(!canShiftMonth(-1))
             // icon-only：补 VoiceOver / Voice Control 用的语义化标签
             .accessibilityLabel("Previous month")
@@ -155,8 +168,12 @@ struct CalendarView: View {
                 .accessibilityAddTraits(.isHeader)
 
             Button { shiftMonth(1) } label: {
-                Image(systemName: "chevron.right").font(.title3)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 36, height: 36)
+                    .liquidGlass(Circle(), interactive: true)
             }
+            .buttonStyle(.plain)
             .disabled(!canShiftMonth(1))
             .accessibilityLabel("Next month")
         }
@@ -219,27 +236,35 @@ struct CalendarView: View {
                     Text("\(Self.cal.component(.day, from: date))")
                         .font(.subheadline)
                         .fontWeight(selected ? .bold : .regular)
+                        // 选中态**不用白字**。玻璃是透光的，白字的对比度会随底下
+                        // 内容变——筛选 chip 上已经踩过。改成强调色加粗：色相
+                        // 表示"选中"，对比度交给系统的中性玻璃保证。
                         .foregroundStyle(
-                            selected ? .white :
+                            selected ? Color.accentColor :
                                 (count == 0 ? Color.secondary : Color.primary))
                     if count > 0 {
                         Text("\(count)")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(selected ? .white : .blue)
+                            .foregroundStyle(Color.accentColor)
+                        .opacity(selected ? 1 : 0.85)
                     } else {
                         Text(" ")
                             .font(.caption2)
                     }
                 }
                 .frame(maxWidth: .infinity, minHeight: 50)
+                // 选中态用玻璃，但**不给玻璃着色**——色相由上面的文字承担。
+                // 有房源但未选中的那些用一层很淡的强调色底，和空格子区分开。
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(selected ? Color.blue :
-                              (count > 0 ? Color.blue.opacity(0.12) : Color.clear))
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(!selected && count > 0
+                              ? Color.accentColor.opacity(0.12) : Color.clear)
                 )
+                .modifier(SelectedDayGlass(active: selected))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(isToday ? Color.blue : .clear, lineWidth: 1.5)
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(isToday && !selected ? Color.accentColor : .clear,
+                                      lineWidth: 1.5)
                 )
                 // 选中态平滑过渡：foregroundStyle / background / overlay 的颜色切换
                 // 加上 spring 消除瞬间跳变的生硬感。
@@ -309,17 +334,17 @@ struct CalendarView: View {
                     Text(l.name)
                         .font(.subheadline.weight(.medium))
                         .lineLimit(2)
-                    sourceBadge(l.sourceShortText, source: l.source)
+                    PlatformBadge(source: l.source, size: .small)
                 }
-                HStack(spacing: 6) {
-                    Text(l.city)
-                    if !l.building.isEmpty {
-                        Text("·")
-                        Text(l.building)
-                    }
+                // OurCampus 的 city 和 building 是同一个值，而标题里也有它——
+                // 原来这里会把同一件事念三遍。去重逻辑见 PlaceSummary。
+                if let place = PlaceSummary.text(name: l.name,
+                                                 parts: [l.building, l.city]) {
+                    Text(place)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
                 Text(l.status)
                     .font(.caption2)
                     .foregroundStyle(statusColor(for: l.status))
@@ -335,31 +360,15 @@ struct CalendarView: View {
                     .foregroundStyle(.tertiary)
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .liquidGlass(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private func statusColor(for status: String) -> Color {
         ListingStatus.from(status).color
     }
 
-    private func sourceBadge(_ label: String, source: String?) -> some View {
-        Text(label)
-            .font(.system(size: 9, weight: .heavy, design: .monospaced))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(sourceColor(source).opacity(0.14), in: Capsule())
-            .foregroundStyle(sourceColor(source))
-    }
-
-    private func sourceColor(_ source: String?) -> Color {
-        switch (source ?? "holland2stay").lowercased() {
-        case "ourdomain": return .purple
-        case "xior": return .teal
-        default: return .blue
-        }
-    }
 
     // MARK: - Helpers
 
@@ -438,6 +447,25 @@ private enum CalendarCell: Identifiable, Hashable {
             return "empty-\(index)"
         case .day(let date):
             return "day-\(Int(date.timeIntervalSince1970))"
+        }
+    }
+}
+
+
+/// 选中那一天的玻璃底。
+///
+/// 单独抽成 ViewModifier，是因为 `liquidGlass` 只能在选中时加——写成行内的
+/// `if` 会把 background 链拆成两条分支，SwiftUI 会当成两个不同的视图，选中/
+/// 取消时整格重建，动画跳变。
+private struct SelectedDayGlass: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content.liquidGlass(RoundedRectangle(cornerRadius: 14, style: .continuous),
+                                interactive: true)
+        } else {
+            content
         }
     }
 }

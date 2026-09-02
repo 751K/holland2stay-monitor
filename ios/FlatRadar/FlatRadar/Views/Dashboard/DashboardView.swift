@@ -138,7 +138,7 @@ struct DashboardView: View {
                         .foregroundStyle(.primary)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Color(.systemBackground), in: Capsule())
+                .background(Color(.secondarySystemGroupedBackground), in: Capsule())
                 .overlay(Capsule().strokeBorder(.secondary.opacity(0.2), lineWidth: 1))
             }
             .menuOrder(.fixed)
@@ -163,7 +163,7 @@ struct DashboardView: View {
                         .foregroundStyle(.primary)
                 }
                 .padding(.horizontal, 12).padding(.vertical, 6)
-                .background(Color(.systemBackground), in: Capsule())
+                .background(Color(.secondarySystemGroupedBackground), in: Capsule())
                 .overlay(Capsule().strokeBorder(.secondary.opacity(0.2), lineWidth: 1))
             }
             .menuOrder(.fixed)
@@ -245,7 +245,7 @@ struct DashboardView: View {
         }
         .font(.subheadline)
         .padding(.horizontal, 14).padding(.vertical, 9)
-        .background(Color(.systemBackground), in: Capsule())
+        .background(Color(.secondarySystemGroupedBackground), in: Capsule())
         .overlay(Capsule().strokeBorder(.secondary.opacity(0.15), lineWidth: 1))
         .padding(.horizontal, 20)
         .padding(.bottom, 16)
@@ -304,8 +304,7 @@ struct DashboardView: View {
                     }
                 }
                 Spacer()
-                Sparkline(data: chartDailyNew?.data.map(\.count) ?? [])
-                    .stroke(.blue, lineWidth: 2.5)
+                SparklineView(data: chartDailyNew?.data.map(\.count) ?? [])
                     .frame(width: 130, height: 70)
                     .opacity(chartDailyNew == nil ? 0 : 1)
             }
@@ -339,7 +338,7 @@ struct DashboardView: View {
             .padding(.vertical, 14)
             .padding(.horizontal, 20)
         }
-        .background(Color(.systemBackground))
+        .background(Color(.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(.secondary.opacity(0.12), lineWidth: 1))
         .shadow(color: .black.opacity(0.04), radius: 10, y: 4)
@@ -431,7 +430,7 @@ struct DashboardView: View {
                 }
             }
             .padding(15)
-            .background(Color(.systemBackground))
+            .background(Color(.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .overlay(RoundedRectangle(cornerRadius: 20).strokeBorder(.secondary.opacity(0.12), lineWidth: 1))
             .padding(.horizontal, 20)
@@ -592,7 +591,7 @@ struct DashboardView: View {
             }
             .padding(14)
             .frame(height: 116)
-            .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16))
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.secondary.opacity(0.1), lineWidth: 1))
             .contentShape(Rectangle())
         }
@@ -655,14 +654,18 @@ struct DashboardView: View {
         exploreCard(title: "By platform", tapKey: "source_dist", tapTitle: "By Platform") {
             if !sourceBuckets.isEmpty {
                 let total = max(sourceBuckets.reduce(0) { $0 + $1.count }, 1)
-                let palette: [Color] = [.statusBook, .statusLottery, .statusOccupied]
+                // 颜色按**平台**取，不再按下标取模。三个平台时 palette[idx % 3]
+                // 够用，接到七个之后颜色开始重复：堆叠条上相邻两段可能同色，
+                // 图例和条形也对不上号。见 Platform.color。
+                let shown = sourceBuckets.prefix(3)
+                let hidden = sourceBuckets.count - shown.count
                 VStack(alignment: .leading, spacing: 8) {
                     GeometryReader { proxy in
                         let w = proxy.size.width
                         HStack(spacing: 0) {
-                            ForEach(Array(sourceBuckets.enumerated()), id: \.element.id) { idx, entry in
+                            ForEach(sourceBuckets) { entry in
                                 RoundedRectangle(cornerRadius: 2)
-                                    .fill(palette[idx % palette.count])
+                                    .fill(Platform.color(entry.label))
                                     .frame(width: max(4, w * CGFloat(entry.count) / CGFloat(total)))
                             }
                         }
@@ -671,13 +674,26 @@ struct DashboardView: View {
                     .clipShape(Capsule())
 
                     HStack {
-                        ForEach(Array(sourceBuckets.prefix(3).enumerated()), id: \.element.id) { idx, entry in
+                        ForEach(shown) { entry in
                             VStack(spacing: 2) {
                                 Text("\(entry.count)")
                                     .fontWeight(.bold)
-                                    .foregroundStyle(palette[idx % palette.count])
+                                    .foregroundStyle(Platform.color(entry.label))
                                 Text(entry.label)
                                     .foregroundStyle(.secondary)
+                            }
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(maxWidth: .infinity)
+                        }
+                        // 卡片只放得下三列，但不能让另外几个平台**无声消失**——
+                        // 用户会以为只有三家。点开卡片有完整图表。
+                        if hidden > 0 {
+                            VStack(spacing: 2) {
+                                Text("+\(hidden)")
+                                    .fontWeight(.bold)
+                                    .foregroundStyle(.secondary)
+                                Text("more")
+                                    .foregroundStyle(.tertiary)
                             }
                             .font(.system(size: 11, design: .monospaced))
                             .frame(maxWidth: .infinity)
@@ -1184,18 +1200,69 @@ struct ScaleButtonStyle: ButtonStyle {
 
 // MARK: - Sparkline
 
+/// 迷你趋势线。
+///
+/// 原来是直线段相连——七个点、130pt 宽，每个折角都很扎眼，读起来像锯齿而不像
+/// 趋势。改成 Catmull-Rom 插值出的三次贝塞尔：点还是那些点，只是拐弯变圆。
+///
+/// `closed` 用来复用同一条曲线画填充：曲线本身必须两处完全一致，各画一遍迟早
+/// 分叉，填充和描边就会错开一条缝。
 private struct Sparkline: Shape {
     let data: [Int]
+    var closed: Bool = false
+
     func path(in rect: CGRect) -> Path {
         Path { p in
             guard data.count > 1, let maxVal = data.max(), maxVal > 0 else { return }
             let stepX = rect.width / CGFloat(data.count - 1)
             let scaleY = rect.height / CGFloat(maxVal)
-            p.move(to: CGPoint(x: 0, y: rect.height - CGFloat(data[0]) * scaleY))
-            for i in data.indices.dropFirst() {
-                p.addLine(to: CGPoint(x: CGFloat(i) * stepX,
-                                      y: rect.height - CGFloat(data[i]) * scaleY))
+            let pts = data.indices.map {
+                CGPoint(x: CGFloat($0) * stepX,
+                        y: rect.height - CGFloat(data[$0]) * scaleY)
             }
+
+            p.move(to: pts[0])
+            for i in 0..<(pts.count - 1) {
+                // Catmull-Rom → 三次贝塞尔。端点各自复用自己，避免越界。
+                let p0 = pts[max(i - 1, 0)]
+                let p1 = pts[i]
+                let p2 = pts[i + 1]
+                let p3 = pts[min(i + 2, pts.count - 1)]
+                // 控制点的 y 夹回画布内：Catmull-Rom 在相邻值落差大时会冲出
+                // 上下沿，迷你图上表现为曲线被裁掉一截。
+                let c1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6,
+                                 y: min(max(p1.y + (p2.y - p0.y) / 6, 0), rect.height))
+                let c2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6,
+                                 y: min(max(p2.y - (p3.y - p1.y) / 6, 0), rect.height))
+                p.addCurve(to: p2, control1: c1, control2: c2)
+            }
+
+            if closed {
+                p.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+                p.addLine(to: CGPoint(x: 0, y: rect.maxY))
+                p.closeSubpath()
+            }
+        }
+    }
+}
+
+/// 曲线 + 底部渐变。
+///
+/// 只有一根线时它读起来像"一条线"；加上向下淡出的填充才读起来像"一段趋势"。
+private struct SparklineView: View {
+    let data: [Int]
+    var tint: Color = .blue
+
+    var body: some View {
+        ZStack {
+            Sparkline(data: data, closed: true)
+                .fill(LinearGradient(
+                    colors: [tint.opacity(0.28), tint.opacity(0.02)],
+                    startPoint: .top, endPoint: .bottom))
+            Sparkline(data: data)
+                // 圆头圆角：折线的尖角正是"丑"的来源，端点也一并磨圆。
+                .stroke(tint, style: StrokeStyle(lineWidth: 2.5,
+                                                 lineCap: .round, lineJoin: .round))
         }
     }
 }

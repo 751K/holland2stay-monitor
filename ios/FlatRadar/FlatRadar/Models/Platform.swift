@@ -1,4 +1,4 @@
-import Foundation
+import SwiftUI
 
 /// 平台（source）显示名——**全 App 唯一一份**。
 ///
@@ -65,6 +65,39 @@ enum Platform {
         if key.isEmpty { return "PLT" }
         if let s = shortNames[key] { return s }
         return String(key.prefix(3)).uppercased()
+    }
+
+    /// 每个平台一个**稳定**的颜色。
+    ///
+    /// 图表原先用 `palette[idx % 3]`——三个平台时够用，接到七个之后颜色开始重复，
+    /// 堆叠条上相邻两段可能同色，图例和条形也对不上号。按平台取色之后，同一个
+    /// 平台在任何图表、任何排序下都是同一个颜色。
+    ///
+    /// 刻意避开 statusBook / statusLottery 那套语义色：那几个表示"能不能租"，
+    /// 用在平台上会让人误读。
+    static func color(_ source: String?) -> Color {
+        switch resolveKey(source) {
+        // 前三个沿用界面上原有的取值，不动——徽标的颜色是用户已经认熟的东西，
+        // 为了"配一套新色"把它们换掉，代价比收益大。
+        case "holland2stay":      return .blue
+        case "ourdomain":         return .purple
+        case "xior":              return .teal
+        // 后四个此前全部落到 default 的蓝色，和 H2S 撞在一起——等于没有颜色。
+        // OurCampus 与 OurDomain 同属一家，取相邻的 indigo，既能区分又能看出亲缘。
+        case "ourcampus":         return .indigo
+        case "magis":             return .pink
+        case "studentexperience": return .orange
+        case "plaza":             return .brown
+        default:                  return .gray
+        }
+    }
+
+    /// 把 key 或缩写都归到 key 上——图表里传进来的往往已经是缩写（"OC"）。
+    private static func resolveKey(_ source: String?) -> String {
+        let raw = normalize(source)
+        if displayNames[raw] != nil { return raw }
+        for (key, short) in shortNames where short.lowercased() == raw { return key }
+        return raw
     }
 
     /// 归一化：去空白、小写。`nil` / 空串返回空串，由调用方决定兜底文案。

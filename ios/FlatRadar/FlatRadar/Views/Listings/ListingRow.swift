@@ -187,14 +187,9 @@ struct ListingRow: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
 
-            Text(listing.sourceShortText)
-                .font(.system(size: 9, weight: .heavy, design: .monospaced))
-                .tracking(0.5)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(Color.secondary.opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: 4))
+            // 原先这里是灰底灰字的圆角小块：列表页所有平台一个颜色，而地图、
+            // 日历、详情页都是彩色胶囊——同一个东西在四个页面上四种样子。
+            PlatformBadge(source: listing.normalizedSourceKey, size: .small)
                 .fixedSize()
 
             let now = Date()
