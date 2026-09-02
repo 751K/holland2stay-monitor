@@ -68,22 +68,51 @@ final class NavigationCoordinator {
     var selectedBrowseMode: BrowseMode = .list
     var listingsPath: [ListingRoute] = []
 
+    /// deep link 里的 listing id 是否可信。
+    ///
+    /// - 非空
+    /// - ≤ 128 字符，防止超长 URL 撑爆后端 path
+    /// - 只允许字母数字 / `-` / `_` —— 各平台的 listing id 都在这个集合里，
+    ///   挡掉路径穿越 / 控制字符 / URL 编码注入
+    ///
+    /// 抽成一处：``openListing`` 与 ``openMap`` 都要验，两份写法迟早分叉，
+    /// 而分叉的那一半就是没人看守的那个入口。
+    /// `nonisolated`：纯函数，不碰任何状态。不标的话它会继承 @MainActor，
+    /// 想在非主线程（比如同步的单元测试）校验一个 id 都得 await。
+    nonisolated static func isValidListingID(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= 128 else { return false }
+        return id.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
+    }
+
     /// 由 deep link / 通知点击调用：切到 List 视图并 push 详情。
     /// 多次连点不重复 push 同一条；切换 tab 顺手清空已有 path。
     func openListing(id: String, titleHint: String? = nil) {
-        // Deep link 来源不可信，必须验输入：
-        // - 非空
-        // - ≤ 128 字符，防止超长 URL 撑爆后端 path
-        // - 只允许字母数字 / `-` / `_` —— Holland2Stay listing id 是这个集合，
-        //   挡掉路径穿越 / 控制字符 / URL 编码注入
-        guard !id.isEmpty, id.count <= 128 else { return }
-        let allowed = id.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-        guard allowed else { return }
+        guard Self.isValidListingID(id) else { return }
 
         selectedTab = .listings
         selectedBrowseMode = .list
         listingsPath = [.byId(id, titleHint: titleHint)]
     }
+
+    /// 切到地图并聚焦某一套房源。
+    ///
+    /// 房源详情页的「在地图上查看」和 `h2smonitor://map/<id>` 都走这里。
+    /// `.map` 这个 tab 只在 iPad 存在；iPhone 上 ``MainTabView.normalizeSelection``
+    /// 会把它翻译成 `.browse` + `.map` 模式，所以两种设备都设同一个值就行。
+    ///
+    /// 实际的定位由 ``MapStore.focus(on:)`` 完成——那套房可能超出 14 天新鲜度
+    /// 窗口、或被用户自己的 listing_filter 排除，此时要走 `/map/locate` 兜底
+    /// 并说明是哪一种「看不到」。
+    func openMap(focusing id: String) {
+        guard Self.isValidListingID(id) else { return }
+        pendingMapFocusID = id
+        selectedTab = .map
+        selectedBrowseMode = .map
+    }
+
+    /// 待聚焦的房源 id。``MapView`` 出现时取走并清空——放在 coordinator 而不是
+    /// 直接调 MapStore，是因为地图视图此刻可能还没挂载。
+    var pendingMapFocusID: String?
 
     /// Logout / 401 auto-logout / 删号时清空全部导航状态。
     ///
@@ -98,6 +127,7 @@ final class NavigationCoordinator {
         selectedTab = .dashboard
         selectedBrowseMode = .list
         listingsPath = []
+        pendingMapFocusID = nil
     }
 }
 

@@ -165,6 +165,9 @@ struct FlatRadarApp: App {
         case "listing":
             let id = url.lastPathComponent
             coordinator.openListing(id: id)
+        case "map":
+            // h2smonitor://map/<id> —— 直接把地图开到那套房上。
+            coordinator.openMap(focusing: url.lastPathComponent)
         default:
             #if DEBUG
             print("[FlatRadarApp] unknown deep link host=\(url.host ?? "")")

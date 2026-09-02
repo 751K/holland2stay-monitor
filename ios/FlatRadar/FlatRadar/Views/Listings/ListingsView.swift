@@ -487,12 +487,7 @@ struct ListingsView: View {
     }
 
     private func sourceShortLabel(_ source: String) -> String {
-        switch source.lowercased() {
-        case "holland2stay": return "H2S"
-        case "ourdomain": return "OD"
-        case "xior": return "XR"
-        default: return source.uppercased()
-        }
+        Platform.shortName(source)
     }
 }
 
@@ -819,21 +814,11 @@ private struct ListingFilterSheet: View {
     }
 
     private func sourceShortLabel(_ source: String) -> String {
-        switch source.lowercased() {
-        case "holland2stay": return "H2S"
-        case "ourdomain": return "OD"
-        case "xior": return "XR"
-        default: return source.uppercased()
-        }
+        Platform.shortName(source)
     }
 
     private func sourceDisplayName(_ source: String) -> String {
-        switch source.lowercased() {
-        case "holland2stay": return "Holland2Stay"
-        case "ourdomain": return "OurDomain"
-        case "xior": return "Xior"
-        default: return source
-        }
+        Platform.displayName(source)
     }
 
     private func loadOptions() async {

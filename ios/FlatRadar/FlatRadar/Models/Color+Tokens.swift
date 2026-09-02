@@ -23,8 +23,19 @@ extension Color {
     /// "Available in lottery"——橙色，抽签状态。
     static let statusLottery = Color("Status/Lottery")
 
-    /// "Reserved" / "Rented" / "Not available"——灰色，已订/不可订状态。
+    /// "Reserved" / "In Process"——蓝色，**暂时**订不了但可能回来。
+    ///
+    /// 2026-09-02 由灰改蓝：此前 Reserved 和 Occupied 共用同一个灰，于是「有人
+    /// 占着，退订就放出来」和「已经租出去了」在界面上完全一样。原来那套灰保留
+    /// 在 ``statusOccupied``，语义没变的调用点应当改指它。
     static let statusReserved = Color("Status/Reserved")
+
+    /// "Occupied" / "Rented" / "Not available"——灰色，**终态**。
+    static let statusOccupied = Color("Status/Occupied")
+
+    /// 认不出的状态——紫色。不并进灰色，否则新平台的新状态会跟着终态一起被
+    /// 地图筛选默认隐藏，从图上静默消失。见 ``ListingStatus``。
+    static let statusUnknown = Color("Status/Unknown")
 
     // MARK: - Energy label 能效等级光谱
 

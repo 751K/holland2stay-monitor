@@ -145,12 +145,7 @@ extension Array where Element == ChartEntry {
     }
 
     static func sourceBucketLabel(_ label: String) -> String {
-        switch label.lowercased() {
-        case "holland2stay": return "H2S"
-        case "ourdomain": return "OD"
-        case "xior": return "XR"
-        default: return label.uppercased()
-        }
+        Platform.shortName(label)
     }
 
     static func energyBucketLabel(_ label: String) -> String {

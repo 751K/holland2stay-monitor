@@ -397,6 +397,18 @@ final class APIClient {
         try await request("GET", "api/v1/map")
     }
 
+    /// 按 id 定位单条房源，**绕过新鲜度窗口与用户筛选**。
+    ///
+    /// 房源详情 →「在地图上查看」时，那一套可能并不在地图当前这批数据里：
+    /// 超出 14 天窗口、或被用户自己的 listing_filter 排除。这个接口把
+    /// 「看不到」分成三种分别报，界面才能说清楚用户该做什么。
+    func locateMapListing(id: String) async throws -> MapLocateResult {
+        var comps = URLComponents()
+        comps.queryItems = [URLQueryItem(name: "id", value: id)]
+        let query = comps.percentEncodedQuery ?? ""
+        return try await request("GET", "api/v1/map/locate?\(query)")
+    }
+
     // MARK: - Calendar (Phase 2)
 
     /// 后端是 bearer_optional：未登录 guest 看全量，登录的 user 走 listing_filter。

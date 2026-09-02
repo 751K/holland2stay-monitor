@@ -341,11 +341,7 @@ struct CalendarView: View {
     }
 
     private func statusColor(for status: String) -> Color {
-        let s = status.lowercased()
-        if s.contains("available to book") { return .statusBook }
-        if s.contains("lottery") { return .statusLottery }
-        if s.contains("not available") { return .statusReserved }
-        return .secondary
+        ListingStatus.from(status).color
     }
 
     private func sourceBadge(_ label: String, source: String?) -> some View {

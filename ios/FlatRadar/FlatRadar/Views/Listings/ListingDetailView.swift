@@ -12,6 +12,8 @@ import UIKit
 struct ListingDetailView: View {
     let route: ListingRoute
 
+    @Environment(NavigationCoordinator.self) private var coord
+
     @State private var listing: Listing?
     @State private var isLoading = false
     @State private var errorMessage: String?
@@ -262,9 +264,33 @@ struct ListingDetailView: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                 }
+
+                viewOnMapButton(for: listing)
             }
             .padding()
         }
+    }
+
+    /// 「在地图上查看」。
+    ///
+    /// 此前详情页只有一个出口：跳到平台官网的预订页。想知道这套房在城里的哪个
+    /// 位置，得自己退回去开地图、再在几百个图钉里找。地图 → 详情这一向早就有
+    /// （弹卡上的 View Details），反过来一直是缺的。
+    ///
+    /// 不在这里直接调 MapStore：点下去的这一刻地图视图可能还没挂载（iPhone 上
+    /// 它在 Browse 的另一个模式里）。交给 coordinator 挂一个待办，MapView 出现
+    /// 时自取。定位不到时由地图那边说明是哪一种「看不到」。
+    @ViewBuilder
+    private func viewOnMapButton(for listing: Listing) -> some View {
+        Button {
+            coord.openMap(focusing: listing.id)
+        } label: {
+            Label("View on map", systemImage: "map")
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
     }
 
     private func primaryDetails(for listing: Listing) -> [DetailItem] {
@@ -309,11 +335,7 @@ struct ListingDetailView: View {
     }
 
     private func statusColor(for listing: Listing) -> Color {
-        let s = listing.status.lowercased()
-        if s.contains("available to book") { return .statusBook }
-        if s.contains("lottery") { return .statusLottery }
-        if s.contains("reserved") || s.contains("rented") { return .statusReserved }
-        return .secondary
+        ListingStatus.from(listing.status).color
     }
 
     private func sourceBadge(_ label: String, source: String?) -> some View {

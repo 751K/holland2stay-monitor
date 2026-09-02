@@ -34,6 +34,9 @@ struct MapView: View {
             span: MKCoordinateSpan(latitudeDelta: 0.55, longitudeDelta: 0.55)))
     @State private var showRefreshError = false
     @State private var showLocationError = false
+    @State private var showFilters = false
+    /// 深链只消费一次——聚焦完成后不再抢镜头，之后这张图归用户自己操纵。
+    @State private var focusConsumed = false
 
     /// 当前 visible region；onMapCameraChange 实时刷新。clustering 依赖它推 cell 大小。
     /// 初值与 camera 初值一致（Eindhoven 60km）。
@@ -56,7 +59,7 @@ struct MapView: View {
         // region 只取两个 Double delta），聚类计算丢到后台 detached 跑——
         // 2000 条的 grid 分桶 + 排序不再阻塞首屏/拖动那一帧。算完回主线程
         // 赋值 @State 触发渲染。
-        let snapshot = store.listings
+        let snapshot = store.visibleListings
         let latDelta = currentRegion.span.latitudeDelta
         let lngDelta = currentRegion.span.longitudeDelta
 
@@ -93,7 +96,7 @@ struct MapView: View {
                 Map(position: $camera, selection: $store.selectedID) {
                     ForEach(clusters) { cluster in
                         if cluster.isSingle, let l = cluster.single {
-                            Annotation(l.name, coordinate: l.coordinate) {
+                            Annotation(l.name, coordinate: l.displayCoordinate) {
                                 pinView(for: l)
                                     .transition(.asymmetric(
                                         insertion: .scale(scale: 0.4).combined(with: .opacity),
@@ -133,6 +136,17 @@ struct MapView: View {
                 .onChange(of: store.listings.count) { _, _ in
                     recomputeClusters()
                 }
+                // 筛选是本地的，改一下就要立刻重画。visibleCount 变化能覆盖
+                // 状态 chip / 城市 / 平台 / 租金 / 面积任意一项的改动。
+                .onChange(of: store.visibleCount) { _, _ in
+                    recomputeClusters()
+                }
+                .onChange(of: store.focusExtra?.id) { _, _ in
+                    recomputeClusters()
+                }
+                .onChange(of: clusters.count) { _, _ in
+                    focusIfNeeded()
+                }
                 .mapStyle(.standard(elevation: .realistic))
                 .mapControls {
                     MapCompass()
@@ -140,9 +154,7 @@ struct MapView: View {
                 }
                 .ignoresSafeArea(edges: .bottom)
                 // 左上角：避开右上的 MapUserLocationButton/Compass/ScaleView
-                .overlay(alignment: .topLeading) {
-                    countBadge
-                }
+
                 .sheet(item: Binding(
                     get: { store.selected },
                     set: { _ in store.selectedID = nil }
@@ -171,25 +183,27 @@ struct MapView: View {
                 }
             }
         .navigationBarTitleDisplayMode(.inline)
-        .overlay(alignment: .topTrailing) {
-            VStack(spacing: 10) {
-                mapTopButton(systemName: "location.fill",
-                             label: "Center on my location") {
-                    centerOnUserLocation()
-                }
-                mapTopButton(systemName: "arrow.clockwise",
-                             label: "Refresh listings") {
-                    Task { await store.refresh() }
-                }
-                .disabled(store.isLoading)
-            }
-            .padding(.trailing, 16)
-            .padding(.top, overlayTopPadding + 54)
-        }
+        .overlay(alignment: .top) { topBar }
+        .sheet(isPresented: $showFilters) { MapFilterSheet() }
         .task {
             if store.listings.isEmpty {
                 await store.fetch()
             }
+            await consumePendingFocus()
+        }
+        // 地图已经挂载时再点「在地图上查看」，.task 不会重跑，靠这个接住。
+        .onChange(of: coord.pendingMapFocusID) { _, _ in
+            Task { await consumePendingFocus() }
+        }
+        .onChange(of: store.focusID) { _, id in
+            focusConsumed = (id == nil)
+            focusIfNeeded()
+        }
+        .onDisappear {
+            // 离开地图就把深链状态清掉：留着的话下次进来会莫名其妙又飞过去，
+            // 而那次进入跟那条链接已经没有关系了。
+            store.clearFocus()
+            focusConsumed = false
         }
         .onChange(of: store.errorMessage) { _, new in
             showRefreshError = new != nil && !store.listings.isEmpty
@@ -312,19 +326,17 @@ struct MapView: View {
         }
     }
 
-    /// 簇颜色取簇内最高优先级状态：Available > Lottery > 其它。
-    /// 用 `statusLowered` 缓存避免 2000 pin 每帧重复堆分配。
+    /// 簇颜色取簇内**最值得看**的那一档，优先级见 ``ListingStatus.byPriority``。
+    ///
+    /// 此前只认 available / lottery 两档，Reserved 和 Occupied 一起落进 `.blue`
+    /// 兜底——既和 App 其它页面的配色对不上，又让「暂时没了」和「彻底没了」长得
+    /// 一模一样。
     private func clusterColor(for cluster: ListingCluster) -> Color {
-        var hasAvailable = false
-        var hasLottery = false
-        for l in cluster.listings {
-            let s = l.statusLowered
-            if s.contains("available to book") { hasAvailable = true }
-            else if s.contains("lottery") { hasLottery = true }
+        var best = ListingStatus.occupied
+        for l in cluster.listings where l.statusKind.priority < best.priority {
+            best = l.statusKind
         }
-        if hasAvailable { return .statusBook }
-        if hasLottery { return .statusLottery }
-        return .blue
+        return best.color
     }
 
     /// 点击簇：相机动画到该簇 bounding 区域，触发自动 zoom-in。
@@ -353,23 +365,82 @@ struct MapView: View {
     }
 
     private func pinColor(for status: String) -> Color {
-        let s = status.lowercased()
-        if s.contains("available to book") { return .statusBook }
-        if s.contains("lottery") { return .statusLottery }
-        if s.contains("not available") { return .statusReserved }
-        return .blue
+        ListingStatus.from(status).color
     }
 
-    // MARK: - Top badge
+    // MARK: - Top bar
+
+    /// 计数 + 三个圆钮一行，状态 chip 条一行，需要时再加一条定位提示。
+    ///
+    /// 原先计数在左上、两个圆钮竖排在右上，中间那块空着。加了 chip 条之后竖排
+    /// 会和 chip 抢位置，所以并成一条横排——地图类 App 的常见排法。
+    private var topBar: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                countBadge
+                Spacer(minLength: 8)
+                mapTopButton(systemName: "line.3.horizontal.decrease.circle",
+                             label: "Filter listings") { showFilters = true }
+                mapTopButton(systemName: "location.fill",
+                             label: "Center on my location") { centerOnUserLocation() }
+                mapTopButton(systemName: "arrow.clockwise",
+                             label: "Refresh listings") {
+                    Task { await store.refresh() }
+                }
+                .disabled(store.isLoading)
+            }
+            .padding(.horizontal, 12)
+
+            MapStatusChips()
+
+            if let notice = store.focusNotice {
+                focusNoticeBar(notice)
+            }
+        }
+        .padding(.top, overlayTopPadding + 54)
+    }
+
+    /// 深链没能直接落到图上时，说明是**哪一种**没落上。
+    ///
+    /// 三种原因用户能做的事完全不同：等地址被解析 / 改一下筛选 / 这条链接作废了。
+    /// 合并成一句「没找到」的话，三种情况在界面上长得一模一样。
+    private func focusNoticeBar(_ notice: MapStore.FocusNotice) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: notice.systemImage)
+                .font(.system(size: 13, weight: .semibold))
+            Text(notice.text)
+                .font(.footnote)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button {
+                store.focusNotice = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+        .padding(.horizontal, 12)
+    }
 
     private var countBadge: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Image(systemName: "house.circle.fill")
                     .foregroundStyle(.blue)
-                Text("\(store.listings.count) listings")
+                // 「筛掉了多少」和「一共有多少」都要在，否则用户看到 27 会以为
+                // 全荷兰只剩 27 套。
+                Text("\(store.visibleCount) / \(store.listings.count)")
                     .font(.subheadline)
                     .fontWeight(.medium)
+                    .monospacedDigit()
             }
             if store.uncached > 0 {
                 Text("\(store.uncached) without coords")
@@ -381,8 +452,39 @@ struct MapView: View {
         .padding(.vertical, 8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
-        .padding(.top, overlayTopPadding + 54)
-        .padding(.leading, 12)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(store.visibleCount) of \(store.listings.count) listings shown")
+    }
+
+    // MARK: - Deep link focus
+
+    /// 把镜头移到深链指定的那一套，并弹出它的卡片。
+    ///
+    /// 要等 clusters 算完才能确认那枚 pin 真的在图上——所以这个函数会被数据、
+    /// 筛选、聚类三处变化各调一次，靠 ``focusConsumed`` 保证只生效一次。
+    /// 取走 coordinator 上挂着的待聚焦 id。
+    ///
+    /// 中转一道而不是让详情页直接调 MapStore：点「在地图上查看」的那一刻，
+    /// 地图视图可能还没挂载（iPhone 上它在 Browse 的另一个模式里）。
+    private func consumePendingFocus() async {
+        guard let id = coord.pendingMapFocusID else { return }
+        coord.pendingMapFocusID = nil
+        focusConsumed = false
+        await store.focus(on: id)
+        focusIfNeeded()
+    }
+
+    private func focusIfNeeded() {
+        guard !focusConsumed, let id = store.focusID else { return }
+        let target = store.visibleListings.first { $0.id == id }
+        guard let l = target else { return }
+        focusConsumed = true
+        withAnimation(.easeInOut(duration: 0.45)) {
+            camera = .region(MKCoordinateRegion(
+                center: l.displayCoordinate,
+                span: MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004)))
+        }
+        store.selectedID = id
     }
 
     // MARK: - Bottom card
@@ -421,12 +523,28 @@ struct MapView: View {
                 if !l.area.isEmpty {
                     Label(l.area, systemImage: "square.dashed")
                 }
-                if !l.availableFrom.isEmpty {
+                // 哨兵日期（2050-01-01 =「未定」）整格不显示，
+                // 比显示一个 "—" 更干净——这一行本来就是可有可无的几件事。
+                if !l.availableFrom.isEmpty,
+                   !ServerTime.isSentinelDate(l.availableFrom) {
                     Label(ServerTime.displayDate(l.availableFrom), systemImage: "calendar")
                 }
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
+
+            // 同址散开之后位置是**近似值**。不写这一句的话，用户会以为图钉就是
+            // 门牌号——而这几套其实只是共用一个街道地址。
+            if l.stackCount > 1 {
+                Label {
+                    Text("\(l.stackCount) units at this address, spread out; positions are approximate")
+                } icon: {
+                    Image(systemName: "circle.grid.2x2")
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
 
             // Action
             HStack(spacing: 8) {

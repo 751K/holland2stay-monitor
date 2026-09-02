@@ -178,9 +178,18 @@ extension Listing {
 
     /// 后端用 "2050-01-01" / "1900-01-01" 这种远端日期当 "未知" 占位 —
     /// 列表里不应直接展示给用户（设计稿 ⑨ "干掉 1 Jan 2050"）。
+    ///
+    /// 主判据走 ``ServerTime.isSentinelDate``（按年份 ≥ 2050），与后端的
+    /// `models.is_sentinel_available_from` 和 `app.js` 的 `isSentinelDate`
+    /// 是同一份——原先这里写死 `hasPrefix("2050")`，是第四份实现，哨兵换成
+    /// 2099 时它会漏。
+    ///
+    /// 1900 / 2049 是客户端另外观察到的两种占位，后端目前没有对应判据；
+    /// 保留在这里作为**更严**的一层，不上收，免得改动后端判据的人被牵连。
     var hasRealAvailableDate: Bool {
         guard let day = availableDayKey else { return false }
-        if day.hasPrefix("2049") || day.hasPrefix("2050") || day.hasPrefix("1900") { return false }
+        if ServerTime.isSentinelDate(day) { return false }
+        if day.hasPrefix("2049") || day.hasPrefix("1900") { return false }
         return true
     }
 
@@ -237,35 +246,9 @@ extension Listing {
         return raw.isEmpty ? nil : raw
     }
 
-    var sourceShortText: String {
-        switch normalizedSourceKey {
-        case "holland2stay": return "H2S"
-        case "ourdomain":    return "OD"
-        case "xior":         return "XR"
-        case .some(let source): return source.uppercased()
-        case .none: return "PLT"
-        }
-    }
+    var sourceShortText: String { Platform.shortName(normalizedSourceKey) }
 
-    var sourceDisplayText: String {
-        switch normalizedSourceKey {
-        case "holland2stay": return "Holland2Stay"
-        case "ourdomain":    return "OurDomain"
-        case "xior":         return "Xior"
-        case .some(let source): return sourceShortText(for: source)
-        case .none: return "Platform"
-        }
-    }
-
-    private func sourceShortText(for source: String) -> String {
-        source
-            .split { $0 == "_" || $0 == "-" || $0 == " " }
-            .map { word in
-                let lower = word.lowercased()
-                return lower.prefix(1).uppercased() + lower.dropFirst()
-            }
-            .joined(separator: " ")
-    }
+    var sourceDisplayText: String { Platform.displayName(normalizedSourceKey) }
 
     func featureValue(matching aliases: [String]) -> String? {
         // 只归一化少量别名（每属性 1–5 个字面量）；featureMap 的键已在

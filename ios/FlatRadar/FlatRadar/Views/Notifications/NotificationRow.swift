@@ -171,12 +171,7 @@ struct NotificationRow: View {
     /// "Book" / "Reserved" / "Occupied" / "Lottery" → 颜色映射
     private func statusColor(for raw: String, isRead: Bool) -> Color {
         if isRead { return .secondary }
-        let s = raw.lowercased()
-        if s.contains("book")     { return .statusBook }
-        if s.contains("lottery")  { return .statusLottery }
-        if s.contains("reserved") { return .statusReserved }
-        if s.contains("occupied") { return .statusReserved }
-        return .primary
+        return ListingStatus.from(raw).color
     }
 
     // MARK: - Styles

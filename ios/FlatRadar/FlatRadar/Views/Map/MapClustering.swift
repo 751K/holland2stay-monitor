@@ -26,8 +26,10 @@ struct ListingCluster: Identifiable, Hashable, Sendable {
 
     /// 把这一簇所有点的 bounding 加 padding 得出 zoom-in 用的 region。
     func boundingRegion(paddingFactor: Double = 1.6) -> MKCoordinateRegion {
-        let lats = listings.map(\.lat)
-        let lngs = listings.map(\.lng)
+        // 用 display 坐标：同址那几套的真实坐标完全相同，按真实坐标算 bounding
+        // 永远是 0 → 被 minSpan 兜成固定视野 → 点了没反应，簇也永远散不开。
+        let lats = listings.map(\.displayCoordinate.latitude)
+        let lngs = listings.map(\.displayCoordinate.longitude)
         let minLat = lats.min() ?? coordinate.latitude
         let maxLat = lats.max() ?? coordinate.latitude
         let minLng = lngs.min() ?? coordinate.longitude
@@ -115,9 +117,10 @@ enum MapClustering {
         var grid: [Key: [MapListing]] = [:]
         grid.reserveCapacity(listings.count)
         for l in listings {
+            let c = l.displayCoordinate
             let k = Key(
-                lat: Int((l.lat / cellLat).rounded(.down)),
-                lng: Int((l.lng / cellLng).rounded(.down)))
+                lat: Int((c.latitude / cellLat).rounded(.down)),
+                lng: Int((c.longitude / cellLng).rounded(.down)))
             grid[k, default: []].append(l)
         }
 
@@ -127,12 +130,14 @@ enum MapClustering {
             if items.count == 1, let one = items.first {
                 out.append(ListingCluster(
                     id: "single:\(one.id)",
-                    coordinate: one.coordinate,
+                    coordinate: one.displayCoordinate,
                     listings: items))
             } else {
                 // 簇中心 = 几何平均
-                let avgLat = items.map(\.lat).reduce(0, +) / Double(items.count)
-                let avgLng = items.map(\.lng).reduce(0, +) / Double(items.count)
+                let avgLat = items.map(\.displayCoordinate.latitude)
+                    .reduce(0, +) / Double(items.count)
+                let avgLng = items.map(\.displayCoordinate.longitude)
+                    .reduce(0, +) / Double(items.count)
                 // ID 用 **grid 坐标** 而不是 firstId / count——这样只要 cellSize 不变、
                 // 桶里点的归属不变，cluster ID 就稳定，SwiftUI 复用 annotation view，
                 // 不会出现"看似同一团但闪一下"。

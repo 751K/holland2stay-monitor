@@ -30,21 +30,9 @@ struct CalendarListing: Decodable, Identifiable, Hashable, Sendable {
     /// 用于按"日"分组的 key（YYYY-MM-DD），保证同一天的房源会聚合在一起。
     var dayKey: String { String(availableFrom.prefix(10)) }
 
-    var sourceShortText: String {
-        switch (source ?? "holland2stay").lowercased() {
-        case "holland2stay": return "H2S"
-        case "ourdomain": return "OD"
-        default: return (source ?? "H2S").uppercased()
-        }
-    }
+    var sourceShortText: String { Platform.shortName(source ?? "holland2stay") }
 
-    var sourceDisplayText: String {
-        switch (source ?? "holland2stay").lowercased() {
-        case "holland2stay": return "Holland2Stay"
-        case "ourdomain": return "OurDomain"
-        default: return sourceShortText
-        }
-    }
+    var sourceDisplayText: String { Platform.displayName(source ?? "holland2stay") }
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()

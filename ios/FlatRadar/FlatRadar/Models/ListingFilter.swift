@@ -136,12 +136,7 @@ struct ListingFilter: Codable, Equatable, Sendable {
     }
 
     private static nonisolated func sourceShortText(_ source: String) -> String {
-        switch source.lowercased() {
-        case "holland2stay": return "H2S"
-        case "ourdomain": return "OD"
-        case "xior": return "XR"
-        default: return source.uppercased()
-        }
+        Platform.shortName(source)
     }
 }
 

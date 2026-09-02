@@ -308,8 +308,8 @@ struct ListingRow: View {
         switch listing.statusKind {
         case .book:     return ("Book",     .statusBook)
         case .lottery:  return ("Lottery",  .statusLottery)
-        case .reserved: return ("Reserved", .statusReserved)
-        case .other:    return (listing.status, .statusReserved)
+        case .reserved: return ("Reserved", ListingStatus.from(listing.status).color)
+        case .other:    return (listing.status, ListingStatus.from(listing.status).color)
         }
     }
 }

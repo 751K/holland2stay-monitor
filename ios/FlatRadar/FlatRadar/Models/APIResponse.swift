@@ -94,9 +94,33 @@ enum ServerTime {
         return fmt.string(from: date)
     }
 
+    /// 「入住日未定」的哨兵年份。
+    ///
+    /// H2S 在入住日未定时发的是 `2050-01-01`。scraper、存储层、booker 都认得它，
+    /// 唯独界面把它当成一个日期显示——地图弹卡和房源详情都写着「2050 年 1 月 1 日
+    /// 可入住」，读起来像一个（荒唐的）事实，而它的意思其实是「不知道」。
+    ///
+    /// 按**年份**判而不是精确匹配那一天，哨兵改成 2099 时不至于漏。判据与
+    /// `models.SENTINEL_AVAILABLE_FROM_YEAR`、`app.js` 的
+    /// `SENTINEL_AVAILABLE_FROM_YEAR` 保持一致。
+    nonisolated static let sentinelAvailableFromYear = 2050
+
+    /// 这个 `available_from` 是不是哨兵（而不是真日期）。
+    nonisolated static func isSentinelDate(_ raw: String?) -> Bool {
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 4, let year = Int(trimmed.prefix(4)) else { return false }
+        return year >= sentinelAvailableFromYear
+    }
+
+    /// 显示用日期。哨兵返回 "—"，不冒充成一个日期。
+    ///
+    /// **不加 `dash:` 之类的默认参数**：带默认值的函数引用没法当
+    /// `(String) -> String` 传，而 `availableFrom.map(ServerTime.displayDate)`
+    /// 这种写法在详情页有两处。
     nonisolated static func displayDate(_ raw: String) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return raw }
+        if isSentinelDate(trimmed) { return "—" }
         let source = String(trimmed.prefix(10))
 
         guard let date = dateParser.date(from: source) else { return raw }

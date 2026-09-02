@@ -513,7 +513,7 @@ struct DashboardView: View {
         switch listing.statusKind {
         case .book:             return .statusBook
         case .lottery:          return .statusLottery
-        case .reserved, .other: return .statusReserved
+        case .reserved, .other: return .statusOccupied
         }
     }
 
@@ -622,7 +622,7 @@ struct DashboardView: View {
                                     .frame(width: max(4, w * CGFloat(lottery) / CGFloat(sum)))
                             }
                             if unavailable > 0 {
-                                RoundedRectangle(cornerRadius: 2).fill(Color.statusReserved.opacity(0.4))
+                                RoundedRectangle(cornerRadius: 2).fill(Color.statusOccupied.opacity(0.4))
                                     .frame(width: max(4, w * CGFloat(unavailable) / CGFloat(sum)))
                             }
                         }
@@ -641,7 +641,7 @@ struct DashboardView: View {
                         }
                         Spacer()
                         VStack(spacing: 2) {
-                            Text("\(unavailable)").fontWeight(.bold).foregroundStyle(Color.statusReserved)
+                            Text("\(unavailable)").fontWeight(.bold).foregroundStyle(Color.statusOccupied)
                             Text("other").foregroundStyle(.secondary)
                         }
                     }
@@ -655,7 +655,7 @@ struct DashboardView: View {
         exploreCard(title: "By platform", tapKey: "source_dist", tapTitle: "By Platform") {
             if !sourceBuckets.isEmpty {
                 let total = max(sourceBuckets.reduce(0) { $0 + $1.count }, 1)
-                let palette: [Color] = [.statusBook, .statusLottery, .statusReserved]
+                let palette: [Color] = [.statusBook, .statusLottery, .statusOccupied]
                 VStack(alignment: .leading, spacing: 8) {
                     GeometryReader { proxy in
                         let w = proxy.size.width
