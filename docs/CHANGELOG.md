@@ -1,29 +1,211 @@
 # Changelog
 
+## v1.35.0 (2026-09-03)
+
+本次发布包含二十一次提交，覆盖测试基础设施、认证、通知筛选、地图、界面、通知与
+访客七个方面，共二十二条。
+
+### 测试基础设施
+
+* **iOS 测试 target 从未挂载自己的源码目录**（[f378fc3]）
+
+    该 target 缺少 `fileSystemSynchronizedGroups`，因而编译出的是一个空 bundle。
+    `xcodebuild test` 在执行零条用例的情况下打印「Test Succeeded」并以 0 退出。这解
+    释了为何此前若干处明显失效的测试代码从未导致构建失败。
+
+* **CI 的通过与否改为由执行条数背书**（[3659213]、[99065fa]）
+
+    新增的 GitHub Actions 流水线在读取 xcresult 之后校验实际执行的用例数；执行数为
+    零或结果包无法读取时，流水线判定为失败。此前的判据是退出码，而退出码在零条用例
+    时同样为 0。
+
+* **真机执行暴露出三项此前无法暴露的问题**（[e15bf5a]）
+
+    测试 target 缺少 `DEVELOPMENT_TEAM`，因而无法在真机上签名；模拟器构建不签名，
+    故 CI 从未触及此问题。另有若干测试 fixture 缺少模型的必需字段。其中一条断言主张
+    `Listing` 按 id 相等，而该类型从未具备这一语义——它使用编译器合成的 `Hashable`，
+    比较的是全部存储属性。该断言被改写为三条各自成立的断言。
+
+* **四处空断言被重写**（[c9e96bc]、[3c91b5e]、[522702d]）
+
+    `assert r.status_code in (200, 302)` 无法区分「自动注册成功」与「注册被拒」，因
+    而删除自动注册的那次改动未使任何测试变红；`assert b"register" in r.data.lower()`
+    会被页面上任何一处 CSS 类名满足；`get_feature_values` 的去重规则因 SQL 的
+    `ORDER BY val` 而与「先到先得」等价，故该规则被整体替换后测试仍然全绿；一条针对
+    模板 JS 的断言写作 `"form.action" not in body`，而
+    `getElementById(…).action = …` 从其旁边绕过。
+
+    每一处的修复方式均为：先构造一个复现原缺陷的变异，确认测试变红，再提交。
+
+### 认证
+
+* **设置页无法开启 Face ID 登录**（[b937d21]）
+
+    该开关的 `set` 闭包只处理 `enable == false`。向开启方向拨动时程序不写入任何内
+    容，`get` 再次读取 `hasStoredCredentials` 仍得到 false，开关因而弹回原位，且没有
+    任何提示。全应用不存在任何一处能够从设置页启用该功能。
+
+    其成因在于：写入 Keychain 的是明文密码，而设置页只持有 token。密码仅在登录的那
+    一刻存在于内存中。原设计因此把开启动作放在登录成功之后的弹窗中，但该弹窗以
+    `!hasStoredCredentials` 为前置条件，且「Not Now」不留下任何标记——曾经点击过一次
+    「Not Now」的用户，除非手动退出登录，否则再无办法开启该功能。
+
+* **新增 `POST /api/v1/auth/verify`**（[522702d]）
+
+    该接口只回答当前登录用户的密码是否正确，不签发任何 token。设置页据此在用户重新
+    输入一次密码之后写入 Keychain。不复用 `/auth/login` 完成此项确认的原因是：后者会
+    真实签发 token，用户每确认一次，设置页显示的活跃设备会话数便增加一个。
+
+    操作对象由 `g.api_user_id` 锁定，接口不接受 body 中的 username。接受该参数即等同
+    于把它变为密码验证预言机：任何持有合法 token 的人可借此撞测其他账号的密码。校验
+    失败计入登录限流。`/auth/login` 中的用户密码校验被抽出为
+    `verify_user_password()`，两个接口共用同一份判定。
+
+* **网页端新用户无法注册**（[c9e96bc]）
+
+    `/login` 中的自动注册曾被删除，其理由有三：绕过 `terms_accepted`、绕过用户名的
+    六十四字符截断、构成用户枚举侧信道。删除本身是正确的，但登录页的界面未随之修
+    改：按钮仍写作「Sign in / Register」，表单下方仍写作「未注册的账户将自动完成注
+    册」，弹窗仍承诺「首次登录将自动创建账户」，而 `confirmLogin()` 在确认之后仍将表
+    单投向 `/login`。全站不存在任何指向 `/register` 的表单。
+
+    实测结果为：以一个全新用户名向 `/login` 提交，得到状态码 200，未创建任何账号，
+    页面提示「用户名或密码错误」。
+
+    本次修复使确认弹窗把表单改投 `/register` 并附带 `terms_accepted=1`。
+    `register_user` 的后端实现未作任何改动——它的校验一直是完整的，只是无法到达。上
+    述三条理由全部保留：条款同意仅在弹窗确认时写入，六十四字符截断原样生效，
+    `/login` 一行未动，仍不区分「密码错误」与「查无此人」。
+
+* **iOS 登录页合并注册入口**（[d26b0fc]）
+
+    按钮改为「Sign In / Register」，独立的注册表单被移除。登录被拒时，应用询问用户
+    是否以该名称创建账号，确认之后才执行注册。此处未采用网页端所述的「自动注册」，
+    因为该行为在网页端本身即被有意删除。条款同意落在确认框上，用户名在客户端先行截
+    至六十四字符，而登录失败的响应不区分「密码错误」与「查无此人」——确认框的措辞是
+    「用这个密码无法以 X 登录」，不声称该账号不存在。
+
+    仅当收到 401 时才提议创建账号。网络故障、限流与服务端错误一律不提议：在断网时询
+    问用户是否注册，会使其误以为自己的账号已经消失。
+
+* **Staff 登录入口被移除**（[a715606]）
+
+    `/auth/login` 一直按用户名分流，`__admin__` 走管理分支，其余走用户表，角色由服务
+    端在响应中给出。管理员因此从同一个表单登录即可，前端不需要独立入口。移除该入口
+    时一并处理了两处副作用：管理员密码输错时不再提议创建名为 `__admin__` 的账号（后
+    端明确拒绝以 `__` 开头的用户名），以及登录成功但角色不是 user 时显式清除
+    `pendingBiometricCredential`——该变量持有明文密码，而消费它的提示仅对 user 弹出。
+
+### 通知筛选
+
+* **筛选摘要遗漏十三个维度中的七个**（[84290c7]）
+
+    房型、合同、租客、入住人数、街区、优惠与装修七个维度不出现在摘要中。其后果并非
+    「显示得不完整」，而是「显示了相反的意思」：仅设置了装修档位的用户在设置页读到
+    「No filters」，而后端的 `matches()` 正依据这一条过滤其推送。摘要现已覆盖全部十
+    三个维度，并新增一条断言保证「摘要为空」与「过滤器为空」互为充要条件。
+
+* **筛选维度的平台适用范围此前从未在界面上出现**（[d3e8c50]）
+
+    `config._SOURCE_FILTER_DIMS` 规定，一个过滤维度只对登记了它的平台生效，其余平台
+    整条跳过。转置之后可见：合同期限、街区与优惠三项在七个平台中仅对 Holland2Stay 生
+    效，能耗标签对两个平台生效，入住人数对三个平台生效。用户勾选「Contract:
+    Indefinite」时看似设置了一条全局条件，实际只约束了七分之一的房源来源。
+
+    新增 `filter_dim_sources()`，它是上述表格的转置而非另一份副本，经
+    `/filter/options` 的 `dim_sources` 字段下发。客户端据此在筛选表单中标注适用范
+    围；当用户所选平台无一支持某维度时，界面以警示样式说明该条件当前不产生任何效果。
+
+* **房型下拉中并列着两个字面相同的「Studio」**（[3c91b5e]）
+
+    magis 将房型写作小写的 `studio`，另外四个平台写作 `Studio`。`canonical_feature`
+    只归一已收录的同义词，对大小写不同的同一个词原样放行。该问题不影响过滤结果——
+    `whitelist_matches` 的两个分支均不区分大小写——受影响的只是候选列表本身。八个维度
+    经逐一排查，仅房型存在此问题。
+
+* **筛选表单重做**（[84290c7]、[c8dc1b1]）
+
+    十一个多选维度此前平铺为十一个 Section，每个取值占据一行 Toggle；主表单需滚动十
+    余屏，且 `choices.count > 6` 这一阈值使其中一半默认折叠、另一半默认展开。现每个
+    维度在主表单中占据一行，其取值列表由二级页面承担，并提供搜索与一键清空。用户已选
+    但已不在候选中的取值会被并入列表并单独标注——此类取值仍在参与过滤，而此前的界面既
+    不显示也无法删除它们。
+
+    数值输入新增校验。此前 `save()` 直接调用 `Double(text)`，`"90O"`（含字母 O）解析
+    为 nil，「最高 €900」因而被静默保存为「不限价」，界面上没有任何迹象。
+
+### 地图
+
+* **同址房源的散开计算移至服务端**（[34d3608]）
+
+    一栋楼中的每个单元共用街道地址，其坐标完全相同。网格聚类对重合点在任何 cell 大小
+    下都归入同一格，因而它们在任何缩放级别下都无法被分别点选。服务端现按 id 排序将其
+    摆成一圈并输出 `display_lat` / `display_lng` / `stack_n`，三个客户端共用同一份计
+    算结果。
+
+* **网页端与 iOS 地图重做**（[bf43ed5]、[a6d57d5]、[bacdbf6]）
+
+    两端新增按 id 定位的深链入口，使用户可从房源直接跳转至其在地图上的位置；新增筛选
+    栏、视角记忆与哨兵日期处理。iOS 端的聚类最小跨度由 0.005 调整为 0.0006——此前约
+    550 米的下限完全淹没了约 40 米的散开半径，聚类因而在任何缩放下都不会裂开。
+
+### 界面
+
+* **首次启动引导指向一个不存在的控件**（[a715606]）
+
+    引导第一页写作「用顶部的分段选择器切换视图」，而分段选择器仅在 iPad 上存在
+    （`BrowseView` 依 `userInterfaceIdiom == .pad` 判断），iPhone 上是左上角的菜单。
+    文案现按设备分别措辞，其判据与 `BrowseView` 一致。
+
+* **整组引导文案从未被本地化**（[a715606]）
+
+    `OnboardingPage` 的标题与正文声明为 `String`，`Text` 因而走非本地化重载，这些文
+    案一条都不曾进入 `Localizable.xcstrings`。西班牙语、荷兰语与中文用户首次打开应用
+    时看到四页英文，随后进入一个已经翻译完毕的界面。类型已改为
+    `LocalizedStringKey`，并补齐四种语言。
+
+    引导新增一页说明本应用聚合了哪些平台，置于首位。此前四页对此只字未提，而这正是
+    本应用与直接访问单一平台官网的全部区别。平台数量取自 `Platform.knownKeys`，不写
+    死。
+
+* **平台徽标的配色收拢为一份**（[8b0e3d6]）
+
+    徽标配色此前在三个文件中各存在一份，三份均只认得三个平台，其余四个平台与
+    Holland2Stay 同色，颜色因而不承载任何信息。现由 `Platform.color` 统一提供，一
+    个平台在任何页面均为同一颜色。深色模式下的层次亦一并调整：`systemBackground` 与
+    `systemGroupedBackground` 在深色下均为纯黑，六处表面改用
+    `secondarySystemGroupedBackground`。
+
+* **登录页改用应用自身的 logo**（[a715606]）
+
+    此前是一个手绘的房屋形状套在 `Color(.systemBackground)` 的圆形之中；该颜色在深色
+    模式下为纯黑，扣在深蓝色的页首背景上呈现为一块生硬的黑色圆饼。现改用 `BrandLogo`
+    图集，其浅色与深色两版取自应用图标，由 SwiftUI 依 `colorScheme` 自行选取。
+
+* **免责声明的表述由 unofficial 改为 independent**（[a715606]）
+
+    共五处。此前一次替换遗漏了全大写的 `UNOFFICIAL`，原因是检索模式未包含该写法。
+
+### 通知
+
+* **新房源推送正文中状态出现两次**（[df968a9]）
+
+    i18n 模板已经包含状态字段之后，`body_parts` 中仍保留着 `listing.status`。APNs 与
+    FCM 两条通道各存在一处。此前的测试只断言 title，未覆盖 body。
+
+### 访客
+
+* **访客模式下新增注册入口**（[a715606]）
+
+    访客是纯本地状态，不持有 token。此前若要转为正式账号，唯一路径是先点击「Sign Out
+    of Guest Mode」返回登录页——而该按钮看起来像是要将用户请出应用，不会有人为了注册
+    去点击它。设置页的 Account 一节现提供「Create an Account」入口。
+
 ## v1.34.0 (2026-09-02)
 
 本次发布是一次集中的缺陷清理，共修复二十一处问题，未引入任何新功能。修复范围横跨
 主循环、存储、抓取、预订、通知与 Web 六个层次。其中十一处会造成静默的数据损坏或
 静默的漏推送，四处可由外部触发。
-
-这些问题在运行时均不产生任何错误输出。它们的成因可以归纳为三种形状。此处先行说明
-这三种形状，因为此后出现的缺陷很可能仍然属于其中之一。
-
-**第一种形状是程序把「无法识别」当成了一个确定的答案。** magis 在无法识别城市时，
-把该房源判定为属于每一个城市；xior 在无法识别页面结构时，把结果判定为「没有任何
-房源可以预订」；FCM 通道拿服务端返回的散文描述与错误码常量比对，因而把已经失效的
-token 判定为正常。这三处的共同点在于，程序并未如实地表达「不知道」，而是代替上游
-作出了一个上游从未给出的判断。
-
-**第二种形状是故障的爆炸半径没有边界。** 单个 scraper 产出的一条重复 id 会使所有
-平台的本轮结果一并回滚；单个用户的构造异常会中断其余所有用户的预订结果处理；单台
-设备的异常会丢弃整批 Android 推送的结果；热重载过程中的构造失败会使所有通知渠道
-永久静默。
-
-**第三种形状是同一段逻辑被实现了两遍，而修改只落在其中一处。** H2S 的隔离分支照抄
-了跨源隔离的写法，却遗漏了其中三项；`/login` 仍在使用 `sleep` 实施限流，而同一个
-限流器在 `api_auth` 中早已改为返回 429；入住日期的判据在 booker 中存在两份副本，
-两份都缺少哨兵检查。
 
 ### 安全
 
@@ -542,7 +724,7 @@ token 判定为正常。这三处的共同点在于，程序并未如实地表�
 
 ### 文档
 
-* **侦察文档：Student Experience 改判，新增 Vesteda 与 antikraak 两节**（本次）
+* **侦察文档：Student Experience 改判，新增 Vesteda 与 antikraak 两节**（[a715606]）
 
     §5 此前的结论是「暂不做，可订范围过小——为 1 栋楼、2 个房型而逆向其 JS 不成
     比例」。**那个判据是错的**，而且错的性质值得记下来：不是数据过期，是**把过滤
@@ -579,7 +761,7 @@ token 判定为正常。这三处的共同点在于，程序并未如实地表�
 
 ### 界面
 
-* **筛选栏的适用范围徽标不再随平台数撑破布局**（本次）
+* **筛选栏的适用范围徽标不再随平台数撑破布局**（[a715606]）
 
     加到第六个来源后，`occupancy` 变成 3 支持 / 3 不支持，两边都不短，徽标 34 字
     挤在 10px 的 label 后面。这不是一次性的：**每加一个来源都会更长**。
@@ -6451,6 +6633,25 @@ web.py 长期积累至 1,200 行，涵盖路由、鉴权、表单、i18n、进�
 - 支持打包发布，MacOs和Windows双平台兼容
 
 <!-- commit 链接定义；新版本在上面用 [hash] 引用即可 -->
+[34d3608]: https://github.com/751K/holland2stay-monitor/commit/34d3608
+[3659213]: https://github.com/751K/holland2stay-monitor/commit/3659213
+[3c91b5e]: https://github.com/751K/holland2stay-monitor/commit/3c91b5e
+[522702d]: https://github.com/751K/holland2stay-monitor/commit/522702d
+[84290c7]: https://github.com/751K/holland2stay-monitor/commit/84290c7
+[8b0e3d6]: https://github.com/751K/holland2stay-monitor/commit/8b0e3d6
+[99065fa]: https://github.com/751K/holland2stay-monitor/commit/99065fa
+[a6d57d5]: https://github.com/751K/holland2stay-monitor/commit/a6d57d5
+[a715606]: https://github.com/751K/holland2stay-monitor/commit/a715606
+[b937d21]: https://github.com/751K/holland2stay-monitor/commit/b937d21
+[bacdbf6]: https://github.com/751K/holland2stay-monitor/commit/bacdbf6
+[bf43ed5]: https://github.com/751K/holland2stay-monitor/commit/bf43ed5
+[c8dc1b1]: https://github.com/751K/holland2stay-monitor/commit/c8dc1b1
+[c9e96bc]: https://github.com/751K/holland2stay-monitor/commit/c9e96bc
+[d26b0fc]: https://github.com/751K/holland2stay-monitor/commit/d26b0fc
+[d3e8c50]: https://github.com/751K/holland2stay-monitor/commit/d3e8c50
+[df968a9]: https://github.com/751K/holland2stay-monitor/commit/df968a9
+[e15bf5a]: https://github.com/751K/holland2stay-monitor/commit/e15bf5a
+[f378fc3]: https://github.com/751K/holland2stay-monitor/commit/f378fc3
 [daa15fc]: https://github.com/751K/holland2stay-monitor/commit/daa15fc
 [925e657]: https://github.com/751K/holland2stay-monitor/commit/925e657
 [1b34a63]: https://github.com/751K/holland2stay-monitor/commit/1b34a63
