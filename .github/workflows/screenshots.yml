@@ -80,9 +80,6 @@ jobs:
           xcodebuild -version
           xcrun simctl list devices available | grep -E 'iPhone|iPad' || true
 
-      - name: Install xcparse
-        run: brew install chargepoint/xcparse/xcparse
-
       # 每个 (displayType, locale) 组合一轮。
       #
       # 不用 matrix：matrix 会把每个组合分到独立的 runner，而 10 个 runner 各
@@ -91,6 +88,11 @@ jobs:
         env:
           LOCALES: ${{ github.event.inputs.locales }}
           DISPLAY_TYPES: ${{ matrix.display_type }}
+          # 截图账号。仓库是公开的，凭据只能走 secrets，绝不能落进文件。
+          # 没配也能跑——App 会退回访客模式，只是 Notifications 那一屏拍不到，
+          # 对应的用例会失败（而不是悄悄拍下 Dashboard）。
+          UI_TEST_USERNAME: ${{ secrets.UI_TEST_USERNAME }}
+          UI_TEST_PASSWORD: ${{ secrets.UI_TEST_PASSWORD }}
         run: |
           set -euo pipefail
           mkdir -p screenshots
@@ -120,7 +122,10 @@ jobs:
               OUT="screenshots/$DT/$LC"
               mkdir -p "$OUT"
               set +e
-              UI_TEST_LOCALE="$LC" xcodebuild test-without-building \
+              UI_TEST_LOCALE="$LC" \
+              UI_TEST_USERNAME="${UI_TEST_USERNAME:-}" \
+              UI_TEST_PASSWORD="${UI_TEST_PASSWORD:-}" \
+              xcodebuild test-without-building \
                 -project ios/FlatRadar/FlatRadar.xcodeproj \
                 -scheme FlatRadar \
                 -destination "id=$UDID" \
@@ -140,7 +145,12 @@ jobs:
               # 字符的首字节当成变量名的一部分，配合 set -u 直接报
               # "RC?: unbound variable"，整个步骤在这里挂掉。
               echo "xcodebuild 退出码 ${RC}（仅供参考，成败以 verify 为准）"
-              xcparse screenshots "rb-$DT-$LC.xcresult" "$OUT" || true
+              # 不用 xcparse：它读不了 Xcode 26 的 result bundle
+              #   Error: Unhandled test reference type ActionTestPlanRunSummaries
+              # 而且是静默失败——那一行原本带着 || true，Capture 照样绿，直到
+              # Verify 数出 0 张 PNG 才暴露。改用 Xcode 自带的 xcresulttool。
+              python3 ios/scripts/extract_screenshots.py \
+                "rb-$DT-$LC.xcresult" "$OUT" || true
             done
             echo "::endgroup::"
           done

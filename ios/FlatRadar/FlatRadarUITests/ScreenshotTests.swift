@@ -45,6 +45,7 @@ final class ScreenshotTests: XCTestCase {
     func testCapture01_Dashboard() throws {
         launch(extra: ["UI_TEST_TAB=dashboard"])
         waitForMainUI()
+        assertOnScreen("Dashboard")
         // 给 Dashboard chart 渲染
         sleep(2)
         snap(named: "01-Dashboard")
@@ -77,8 +78,12 @@ final class ScreenshotTests: XCTestCase {
 
     @MainActor
     func testCapture05_Notifications() throws {
+        // 这一屏访客看不到——tab bar 里根本没有 Notifications。必须带凭据跑
+        // （UI_TEST_USERNAME / UI_TEST_PASSWORD），否则下面的断言会直接失败，
+        // 而不是悄悄拍下 Dashboard。
         launch(extra: ["UI_TEST_TAB=notifications"])
         waitForMainUI()
+        assertOnScreen("Alerts")
         sleep(2)
         snap(named: "05-Notifications")
     }
@@ -87,6 +92,7 @@ final class ScreenshotTests: XCTestCase {
     func testCapture06_Settings() throws {
         launch(extra: ["UI_TEST_TAB=settings"])
         waitForMainUI()
+        assertOnScreen("Settings")
         sleep(1)
         snap(named: "06-Settings")
     }
@@ -98,6 +104,13 @@ final class ScreenshotTests: XCTestCase {
     private func launch(extra: [String]) {
         var args = ["UI_TEST_SCREENSHOT_MODE"]
         args.append(contentsOf: extra)
+        // 凭据从环境变量取，**不写在代码里**——这个仓库是公开的。
+        // CI 由 GitHub secrets 注入；本地不设就自动退回访客模式。
+        let env = ProcessInfo.processInfo.environment
+        if let u = env["UI_TEST_USERNAME"], let p = env["UI_TEST_PASSWORD"],
+           !u.isEmpty, !p.isEmpty {
+            args += ["UI_TEST_USER=\(u)", "UI_TEST_PASS=\(p)"]
+        }
         // locale 从环境变量传，给跨语言批量截图用
         if let locale = ProcessInfo.processInfo.environment["UI_TEST_LOCALE"] {
             args += ["-AppleLanguages", "(\(locale))", "-AppleLocale", locale]
@@ -110,7 +123,26 @@ final class ScreenshotTests: XCTestCase {
     /// LoginView 不会有 tab bar，所以 Login test 不调这个。
     private func waitForMainUI() {
         let tabs = app.tabBars.firstMatch
-        XCTAssertTrue(tabs.waitForExistence(timeout: 15), "tab bar 未在 15s 内出现")
+        // 60 而不是 15：CI 的 runner 上一次冷启动就要一分多钟，15 秒是按本机
+        // 真机调的。第一次跑云端时 Listings 就死在
+        // "Timed out while evaluating UI query"。
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "tab bar 未在 60s 内出现")
+    }
+
+    /// 断言当前确实停在 `title` 那一屏。
+    ///
+    /// 为什么要有这一步
+    /// ----------------
+    /// 「测试通过」和「拍对了」是两回事。访客模式下 tab bar 里没有
+    /// Notifications，``UI_TEST_TAB=notifications`` 把 selectedTab 设成一个不
+    /// 存在的值，SwiftUI 静默回落到第一个 tab——于是拍出一张名叫
+    /// 05-Notifications、内容却是 Dashboard 的图。测试通过、尺寸正确、渲染
+    /// 完整，只有内容是错的；而下游 verify 只查张数和像素，查不出来。
+    private func assertOnScreen(_ title: String, timeout: TimeInterval = 30) {
+        let heading = app.staticTexts[title]
+        XCTAssertTrue(heading.waitForExistence(timeout: timeout),
+                      "没有停在「\(title)」那一屏——多半是 launch arg 没生效，"
+                      + "而截图会照拍不误")
     }
 
     /// 保存当前屏幕为 XCTAttachment，跟测试结果一起进 .xcresult 包。

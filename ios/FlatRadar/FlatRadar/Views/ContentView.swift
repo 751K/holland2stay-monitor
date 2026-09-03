@@ -174,12 +174,29 @@ struct ContentView: View {
     ///                                  (dashboard / browse / listings / map / calendar / notifications / settings)
     /// - ``UI_TEST_BROWSE_MODE=<m>``  → Browse tab 初始 mode (list / map / calendar)
     ///                                  绕开 menu UI 不稳定性
+    /// - ``UI_TEST_USER=<name>`` + ``UI_TEST_PASS=<pw>``
+    ///                                → 以该账号登录，而不是进访客模式
+    ///
+    /// 凭据从 launch arg 传，**不写在代码里**：这个仓库是公开的。CI 里由
+    /// GitHub secrets 注入（见 .github/workflows/screenshots.yml）。
     private func applyScreenshotLaunchArgs() {
         let args = CommandLine.arguments
         guard args.contains("UI_TEST_SCREENSHOT_MODE") else { return }
 
-        // 1. 自动 guest（默认开；UI_TEST_SHOW_LOGIN 跳过让登录页可被截）
-        if !args.contains("UI_TEST_SHOW_LOGIN"), !auth.isAuthenticated {
+        // 1. 身份。
+        //
+        // 访客模式**看不到 Notifications tab**——tab bar 里只有 Dashboard /
+        // Browse / Settings。此前 UI_TEST_TAB=notifications 会把
+        // coord.selectedTab 设成一个不在 tab bar 里的值，SwiftUI 静默回落到第
+        // 一个 tab，于是拍出一张名叫 05-Notifications、内容却是 Dashboard 的
+        // 图：测试通过、尺寸正确、渲染完整，只有内容是错的。
+        //
+        // 要拍那一屏就必须真的登录。给了账号就登录，没给才退回访客。
+        if let user = argValue("UI_TEST_USER", in: args),
+           let pass = argValue("UI_TEST_PASS", in: args),
+           !user.isEmpty, !pass.isEmpty {
+            Task { await auth.loginAsUser(name: user, password: pass) }
+        } else if !args.contains("UI_TEST_SHOW_LOGIN"), !auth.isAuthenticated {
             auth.enterAsGuest()
         }
 
