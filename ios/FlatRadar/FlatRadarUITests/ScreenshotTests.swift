@@ -83,6 +83,16 @@ final class ScreenshotTests: XCTestCase {
         // 而不是悄悄拍下 Dashboard。
         launch(extra: ["UI_TEST_TAB=notifications"])
         waitForMainUI()
+        // launch arg 落位在这一屏上不可靠：登录是异步的，而 tab 是同步设的，
+        // 两轮云端实测都停在了 Dashboard。改顺序（先 await 再设 tab）也没解决，
+        // 大概率是 MainTabView 挂载时又把 selectedTab 读回了自己的默认值。
+        //
+        // 不再猜——直接点那个 tab。UI 点击对单个 tab 是可靠的（原设计避开
+        // menu 是因为 Browse 的三个子模式藏在 Menu 里，那才不稳）。
+        let alertsTab = app.tabBars.buttons["Alerts"]
+        if alertsTab.waitForExistence(timeout: 30) {
+            alertsTab.tap()
+        }
         assertOnScreen("Alerts")
         sleep(2)
         snap(named: "05-Notifications")
