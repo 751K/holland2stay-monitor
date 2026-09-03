@@ -306,6 +306,13 @@ struct DashboardView: View {
                 Spacer()
                 SparklineView(data: chartDailyNew?.data.map(\.count) ?? [])
                     .frame(width: 130, height: 70)
+                    // HStack 是 .top 对齐，左边那列（标题 + 58pt 数字 + 涨幅）
+                    // 比曲线高一截，曲线就贴在最上面。撑满高度再居中，让它对着
+                    // 大数字而不是对着标题。
+                    //
+                    // 用 maxHeight 而不是写死 padding：左列高度会随涨幅那行在不在
+                    // 而变，写死的偏移量迟早对不上。
+                    .frame(maxHeight: .infinity, alignment: .center)
                     .opacity(chartDailyNew == nil ? 0 : 1)
             }
             .padding(20)
@@ -1213,12 +1220,24 @@ private struct Sparkline: Shape {
 
     func path(in rect: CGRect) -> Path {
         Path { p in
-            guard data.count > 1, let maxVal = data.max(), maxVal > 0 else { return }
+            guard data.count > 1, let hi = data.max(), let lo = data.min() else { return }
+
+            // 纵向按 **min–max** 归一，不是从 0 算起。
+            //
+            // 原先是 y = h - v * (h / max)：数据落在 40–80 时，最小的那一点也在
+            // y ≈ 0.5h，整条线被压在上半部，下面一半永远空着——看着就是"曲线偏上"。
+            //
+            // 迷你趋势线没有坐标轴，本来就只表达**形状**，不表达绝对量级；量级由
+            // 旁边那个大数字负责。上下各留一点余量，免得线宽把峰谷削平。
+            let inset: CGFloat = 4
+            let usable = max(rect.height - inset * 2, 1)
+            let span = CGFloat(hi - lo)
             let stepX = rect.width / CGFloat(data.count - 1)
-            let scaleY = rect.height / CGFloat(maxVal)
-            let pts = data.indices.map {
-                CGPoint(x: CGFloat($0) * stepX,
-                        y: rect.height - CGFloat(data[$0]) * scaleY)
+            let pts = data.indices.map { i -> CGPoint in
+                // 全平时（span == 0）画在正中，而不是除零。
+                let t = span > 0 ? CGFloat(data[i] - lo) / span : 0.5
+                return CGPoint(x: CGFloat(i) * stepX,
+                               y: inset + (1 - t) * usable)
             }
 
             p.move(to: pts[0])
@@ -1231,9 +1250,11 @@ private struct Sparkline: Shape {
                 // 控制点的 y 夹回画布内：Catmull-Rom 在相邻值落差大时会冲出
                 // 上下沿，迷你图上表现为曲线被裁掉一截。
                 let c1 = CGPoint(x: p1.x + (p2.x - p0.x) / 6,
-                                 y: min(max(p1.y + (p2.y - p0.y) / 6, 0), rect.height))
+                                 y: min(max(p1.y + (p2.y - p0.y) / 6, inset),
+                                        rect.height - inset))
                 let c2 = CGPoint(x: p2.x - (p3.x - p1.x) / 6,
-                                 y: min(max(p2.y - (p3.y - p1.y) / 6, 0), rect.height))
+                                 y: min(max(p2.y - (p3.y - p1.y) / 6, inset),
+                                        rect.height - inset))
                 p.addCurve(to: p2, control1: c1, control2: c2)
             }
 

@@ -18,7 +18,7 @@ import SwiftUI
 /// 归进 `.occupied` 的话，它会跟着 occupied 一起被地图筛选默认隐藏，于是**新平台
 /// 冒出的新状态会从地图上静默消失**。这正是这个项目反复出现的那个形状：把
 /// 「不知道」当成一个确定的答案。`.other` 默认显示，且只在真的出现时才占一个位置。
-enum ListingStatus: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum ListingStatus: String, CaseIterable, Identifiable, Sendable {
     case book
     case lottery
     case reserved

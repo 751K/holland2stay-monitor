@@ -2,19 +2,27 @@ import SwiftUI
 
 /// 当前 user 的 ``ListingFilter`` 编辑表单 —— 与网页端 user_form.html 维度对齐。
 ///
-/// 字段（与网页端对齐，按使用频率排序）
-/// ----------------------------------
-/// 1. **Price & Space**：max rent / min area / min floor
-/// 2. **Energy** ⚡ —— 单选 picker，min energy label (A+++ 优 → F 差)
-/// 3. **Types** 🏠 房型
-/// 4. **Contract** 📅 长短租（"Indefinite" / "6 months max" 等）
-/// 5. **Tenant** 👥 租客要求（student/employed/...）
-/// 6. **Occupancy** 👤 入住人数
-/// 7. **Cities** 🌆
-/// 8. **Neighborhoods** 📍（可能很长，DisclosureGroup 默认折叠）
-/// 9. **Offer** 🎁 优惠
-/// 10. **Finishing** 🛋 装修
-/// 11. **Reset All**
+/// 布局
+/// ----
+/// 十一个多选维度每个只占主表单一行，右侧显示当前选了什么，点进
+/// ``FilterChoiceList`` 才是取值列表。改版前它们是十一个平铺的 Section、每个取值
+/// 一行 Toggle，主表单长到要滚十几屏，而且 `choices.count > 6` 这条阈值让一半
+/// 维度默认折叠、一半默认展开。
+///
+/// 分组按"用户在想什么"而不是按后端字段顺序：
+/// 1. **Price & Space** —— 先决条件，绝大多数人只改这里
+/// 2. **Location** —— 城市 / 街区
+/// 3. **Platforms** —— 房源来源（七项，直接内联，它是其它维度的前提）
+/// 4. **Property** —— 房型 / 装修 / 能耗
+/// 5. **Eligibility** —— 租客 / 入住人数 / 合同
+/// 6. **Perks** —— 优惠
+/// 7. **Reset All**
+///
+/// 平台适用范围
+/// ------------
+/// 每个维度带一句"这条对哪些平台生效"（见 ``PlatformScope``）。Contract /
+/// Neighborhood / Offer 七个平台里只对 Holland2Stay 生效，此前界面上没有任何
+/// 地方说过——用户设了以为是全局条件，其实只约束了七分之一的来源。
 ///
 /// 后端 ``_coerce_filter_payload`` 会做白名单 + 边界校验，少传字段不会报错。
 struct FilterEditView: View {
@@ -32,36 +40,26 @@ struct FilterEditView: View {
     @State private var minAreaText = ""
     @State private var minFloorText = ""
 
+    /// 打开时的快照，用于判断"有没有改过"。
+    @State private var baseline = ListingFilter.empty
+    @State private var baselineNumbers: [String] = ["", "", ""]
+
     @State private var showResetConfirm = false
+    @State private var showDiscardConfirm = false
+    @FocusState private var focusedNumber: NumberField?
+
+    private enum NumberField: Hashable { case rent, area, floor }
 
     var body: some View {
         NavigationStack {
             Form {
+                summarySection
                 priceSection
-                energySection
-                sourceSection
-                multiSelect("Types", icon: "house.lodge",
-                            choices: options.types,
-                            selection: $draft.allowedTypes)
-                multiSelect("Contract", icon: "calendar",
-                            choices: options.contract,
-                            selection: $draft.allowedContract)
-                multiSelect("Tenant", icon: "person.2.fill",
-                            choices: options.tenant,
-                            selection: $draft.allowedTenant)
-                multiSelect("Occupancy", icon: "person.fill",
-                            choices: options.occupancy,
-                            selection: $draft.allowedOccupancy)
-                multiSelect("Cities", icon: "building.2.fill",
-                            choices: options.cities,
-                            selection: $draft.allowedCities)
-                neighborhoodsSection
-                multiSelect("Offer", icon: "tag.fill",
-                            choices: options.offer,
-                            selection: $draft.allowedOffer)
-                multiSelect("Finishing", icon: "sofa.fill",
-                            choices: options.finishing,
-                            selection: $draft.allowedFinishing)
+                locationSection
+                platformSection
+                propertySection
+                eligibilitySection
+                perksSection
                 resetSection
                 if let err = saveStore.errorMessage {
                     Section {
@@ -75,13 +73,20 @@ struct FilterEditView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        if hasChanges { showDiscardConfirm = true } else { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         Task { await save() }
                     }
-                    .disabled(saveStore.isSaving)
+                    .disabled(saveStore.isSaving || !numberErrors.isEmpty)
+                }
+                // numberPad 没有 return 键 —— 不给一个 Done，键盘只能靠点别处收起。
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedNumber = nil }
                 }
             }
             .overlay {
@@ -105,63 +110,136 @@ struct FilterEditView: View {
             } message: {
                 Text("All filters will be cleared. You'll start receiving notifications for every new listing.")
             }
+            .confirmationDialog(
+                "Discard changes?",
+                isPresented: $showDiscardConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Discard", role: .destructive) { dismiss() }
+                Button("Keep Editing", role: .cancel) {}
+            }
         }
     }
 
     // MARK: - Sections
 
+    /// 表单顶部先说清楚"现在这套条件是什么" —— 十一个维度分散在下面七个 Section 里，
+    /// 没有这一行，用户得逐个点进去才知道自己到底设了些什么。
+    private var summarySection: some View {
+        Section {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: preview.isEmpty
+                      ? "bell.badge.fill" : "line.3.horizontal.decrease.circle.fill")
+                    .foregroundStyle(preview.isEmpty ? Color.orange : Color.accentColor)
+                    .font(.title3)
+                VStack(alignment: .leading, spacing: 3) {
+                    // 三元里的字面量会被合并成 String，Text 就走非本地化重载，
+                    // 这两句会从 Localizable.xcstrings 里消失。分支写。
+                    if preview.isEmpty {
+                        Text("Every new listing").font(.subheadline.weight(.semibold))
+                        Text("No conditions set — you'll be notified about everything.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("\(activeCount) conditions").font(.subheadline.weight(.semibold))
+                        Text(verbatim: preview.summary)
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.vertical, 2)
+        } footer: {
+            Text("A listing must match every condition below to notify you.")
+        }
+    }
+
     private var priceSection: some View {
         Section {
-            HStack {
-                Text("Max rent")
-                Spacer()
-                TextField("Any", text: $maxRentText)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
-                Text("€/mo").foregroundStyle(.secondary)
-            }
-            HStack {
-                Text("Min area")
-                Spacer()
-                TextField("Any", text: $minAreaText)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
-                Text("m²").foregroundStyle(.secondary)
-            }
-            HStack {
-                Text("Min floor")
-                Spacer()
-                TextField("Any", text: $minFloorText)
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 100)
+            numberRow("Max rent", text: $maxRentText, field: .rent,
+                      placeholder: "Any", unit: "€/mo")
+            numberRow("Min area", text: $minAreaText, field: .area,
+                      placeholder: "Any", unit: "m²")
+            numberRow("Min floor", text: $minFloorText, field: .floor,
+                      placeholder: "Any", unit: nil)
+            if let note = scopeNote(for: "floor"), !minFloorText.isEmpty {
+                noteLabel(note)
             }
         } header: {
             Label("Price & Space", systemImage: "eurosign.circle.fill")
         } footer: {
-            Text("Empty = no limit. Floor 0 = ground floor.")
+            if numberErrors.isEmpty {
+                Text("Empty = no limit. Floor 0 = ground floor.")
+            } else {
+                Text(verbatim: numberErrors.joined(separator: "\n")).foregroundStyle(.red)
+            }
         }
     }
 
-    private var energySection: some View {
+    private var locationSection: some View {
         Section {
-            Picker("Min energy label", selection: $draft.allowedEnergy) {
+            choiceRow(.cities)
+            choiceRow(.neighborhoods)
+        } header: {
+            Label("Location", systemImage: "mappin.and.ellipse")
+        } footer: {
+            if options.neighborhoods.isEmpty && !loadingOptions {
+                Text("Neighborhoods appear once listings in your cities have been indexed.")
+            }
+        }
+    }
+
+    private var propertySection: some View {
+        Section {
+            choiceRow(.types)
+            choiceRow(.finishing)
+            energyRow
+        } header: {
+            Label("Property", systemImage: "house.lodge")
+        }
+    }
+
+    private var eligibilitySection: some View {
+        Section {
+            choiceRow(.tenant)
+            choiceRow(.occupancy)
+            choiceRow(.contract)
+        } header: {
+            Label("Eligibility", systemImage: "person.2.fill")
+        } footer: {
+            Text("Tenant and occupancy are checked strictly: a listing that doesn't state them is filtered out.")
+        }
+    }
+
+    private var perksSection: some View {
+        Section {
+            choiceRow(.offer)
+        } header: {
+            Label("Perks", systemImage: "tag.fill")
+        }
+    }
+
+    private var energyRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker(selection: $draft.allowedEnergy) {
                 Text("Any").tag("")
                 ForEach(options.energy.isEmpty ? energyLabels : options.energy, id: \.self) { label in
                     Text(label).tag(label)
                 }
+            } label: {
+                Text("Min energy label")
             }
             .pickerStyle(.menu)
-        } header: {
-            Label("Energy", systemImage: "bolt.fill")
-        } footer: {
-            Text("Min B = A/A+/A++/A+++ also accepted; C and worse filtered out.")
+            if !draft.allowedEnergy.isEmpty {
+                Text("A/A+/A++/A+++ above \(draft.allowedEnergy) also pass.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let note = scopeNote(for: "energy") { noteLabel(note) }
+            }
         }
     }
 
-    private var sourceSection: some View {
+    /// 平台是所有其它维度的前提（一个维度对哪些平台生效取决于这里选了谁），
+    /// 所以七项直接内联，不再推一层。
+    private var platformSection: some View {
         Section {
             if loadingOptions && options.sources.isEmpty {
                 ProgressView().padding(.vertical, 4)
@@ -169,25 +247,10 @@ struct FilterEditView: View {
                 Text("No platforms available").font(.subheadline).foregroundStyle(.secondary)
             } else {
                 ForEach(options.sources, id: \.self) { source in
-                    Toggle(isOn: Binding(
-                        get: { draft.allowedSources.contains(source) },
-                        set: { add in
-                            if add {
-                                if !draft.allowedSources.contains(source) {
-                                    draft.allowedSources.append(source)
-                                }
-                            } else {
-                                draft.allowedSources.removeAll { $0 == source }
-                            }
-                        }
-                    )) {
-                        HStack {
-                            Text(sourceShortLabel(source))
-                                .font(.system(size: 12, weight: .heavy, design: .monospaced))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(Color.secondary.opacity(0.12), in: Capsule())
-                            Text(sourceDisplayName(source))
+                    Toggle(isOn: sourceBinding(source)) {
+                        HStack(spacing: 8) {
+                            PlatformBadge(source: source, size: .large)
+                            Text(Platform.displayName(source))
                         }
                     }
                 }
@@ -195,99 +258,11 @@ struct FilterEditView: View {
         } header: {
             Label("Platforms", systemImage: "rectangle.3.group.fill")
         } footer: {
-            Text("This only controls which platforms can trigger your notifications.")
-        }
-    }
-
-    private func sourceShortLabel(_ source: String) -> String {
-        Platform.shortName(source)
-    }
-
-    private func sourceDisplayName(_ source: String) -> String {
-        Platform.displayName(source)
-    }
-
-    /// 通用多选 section。空候选时显示 ProgressView（options 还没加载好）。
-    /// 候选过多（≥ 6 项）会用 DisclosureGroup 折叠，避免表单太长。
-    @ViewBuilder
-    private func multiSelect(
-        _ title: LocalizedStringKey,
-        icon: String,
-        choices: [String],
-        selection: Binding<[String]>
-    ) -> some View {
-        let count = selection.wrappedValue.count
-        Section {
-            if loadingOptions && choices.isEmpty {
-                ProgressView().padding(.vertical, 4)
-            } else if choices.isEmpty {
-                Text("No options available").font(.subheadline).foregroundStyle(.secondary)
-            } else if choices.count > 6 {
-                DisclosureGroup {
-                    multiSelectRows(choices: choices, selection: selection)
-                } label: {
-                    HStack {
-                        Text("\(count) selected")
-                        Spacer()
-                    }
-                }
+            if draft.allowedSources.isEmpty {
+                Text("Nothing selected = all platforms can notify you.")
             } else {
-                multiSelectRows(choices: choices, selection: selection)
+                Text("Only these platforms can trigger your notifications.")
             }
-        } header: {
-            HStack {
-                Label(title, systemImage: icon)
-                Spacer()
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(.blue.opacity(0.18), in: Capsule())
-                        .foregroundStyle(.blue)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func multiSelectRows(choices: [String], selection: Binding<[String]>) -> some View {
-        ForEach(choices, id: \.self) { c in
-            Toggle(isOn: Binding(
-                get: { selection.wrappedValue.contains(c) },
-                set: { add in
-                    if add {
-                        if !selection.wrappedValue.contains(c) {
-                            selection.wrappedValue.append(c)
-                        }
-                    } else {
-                        selection.wrappedValue.removeAll { $0 == c }
-                    }
-                }
-            )) {
-                Text(c)
-            }
-        }
-    }
-
-    /// Neighborhoods 一般是空的 / 数量很大 —— 用 DisclosureGroup 默认折叠。
-    /// 后端目前 distinct 出来的 neighborhood 只在用户选了 city 后才合理。
-    private var neighborhoodsSection: some View {
-        Section {
-            if options.neighborhoods.isEmpty {
-                Text(loadingOptions ? "Loading…" : "Select cities first to see neighborhoods")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                DisclosureGroup {
-                    multiSelectRows(choices: options.neighborhoods,
-                                    selection: $draft.allowedNeighborhoods)
-                } label: {
-                    Text("\(draft.allowedNeighborhoods.count) selected")
-                }
-            }
-        } header: {
-            Label("Neighborhoods", systemImage: "mappin.and.ellipse")
         }
     }
 
@@ -298,7 +273,138 @@ struct FilterEditView: View {
             } label: {
                 Label("Reset All Filters", systemImage: "arrow.counterclockwise")
             }
+            .disabled(preview.isEmpty)
         }
+    }
+
+    // MARK: - Row builders
+
+    private func numberRow(
+        _ title: LocalizedStringKey,
+        text: Binding<String>,
+        field: NumberField,
+        placeholder: LocalizedStringKey,
+        unit: String?
+    ) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            TextField(placeholder, text: text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .focused($focusedNumber, equals: field)
+                .frame(width: 100)
+            if let unit {
+                Text(unit).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 主表单里的一行：维度名 + 当前选了什么 + chevron。
+    private func choiceRow(_ dim: FilterDim) -> some View {
+        let choices = dim.choices(options)
+        let selected = draft[keyPath: dim.path]
+        return NavigationLink {
+            FilterChoiceList(
+                title: dim.title,
+                choices: choices,
+                selection: binding(dim.path),
+                appliesTo: options.dimSources[dim.backendKey] ?? [],
+                selectedSources: draft.allowedSources)
+        } label: {
+            HStack {
+                Text(dim.title)
+                Spacer(minLength: 12)
+                Group {
+                    if selected.isEmpty {
+                        Text("Any").foregroundStyle(.secondary)
+                    } else {
+                        Text(verbatim: ListingFilter.brief(selected)).foregroundStyle(.primary)
+                    }
+                }
+                .lineLimit(1)
+                .truncationMode(.tail)
+            }
+        }
+        .disabled(choices.isEmpty && selected.isEmpty)
+    }
+
+    private func noteLabel(_ note: PlatformScope.Note) -> some View {
+        Label {
+            Text(verbatim: note.text)
+        } icon: {
+            Image(systemName: note.isWarning ? "exclamationmark.triangle.fill" : "info.circle")
+        }
+        .font(.caption)
+        .foregroundStyle(note.isWarning ? Color.orange : Color.secondary)
+    }
+
+    private func scopeNote(for dim: String) -> PlatformScope.Note? {
+        PlatformScope.note(appliesTo: options.dimSources[dim] ?? [],
+                           selectedSources: draft.allowedSources)
+    }
+
+    // MARK: - Bindings
+
+    private func binding(_ path: WritableKeyPath<ListingFilter, [String]>) -> Binding<[String]> {
+        Binding(get: { draft[keyPath: path] }, set: { draft[keyPath: path] = $0 })
+    }
+
+    private func sourceBinding(_ source: String) -> Binding<Bool> {
+        Binding(
+            get: { draft.allowedSources.contains(source) },
+            set: { add in
+                if add {
+                    if !draft.allowedSources.contains(source) {
+                        draft.allowedSources.append(source)
+                    }
+                } else {
+                    draft.allowedSources.removeAll { $0 == source }
+                }
+            })
+    }
+
+    // MARK: - Derived state
+
+    /// 把三个文本框并进 draft 之后的样子 —— 顶部摘要和 Reset 的可用性都看它，
+    /// 否则用户刚输入的 "Max rent 900" 要等保存后才反映到摘要里。
+    private var preview: ListingFilter {
+        var f = draft
+        f.maxRent = Double(maxRentText.trimmingCharacters(in: .whitespaces))
+        f.minArea = Double(minAreaText.trimmingCharacters(in: .whitespaces))
+        f.minFloor = Int(minFloorText.trimmingCharacters(in: .whitespaces))
+        return f
+    }
+
+    private var activeCount: Int { preview.summaryParts.count }
+
+    private var hasChanges: Bool {
+        draft != baseline
+            || [maxRentText, minAreaText, minFloorText] != baselineNumbers
+    }
+
+    /// 数字框写了东西但解析不出来 —— 必须拦住。
+    ///
+    /// 旧的 `save()` 直接 `Double(text)`，"90O"（字母 O）解析成 nil，于是
+    /// "最高 €900" 被静默保存成"不限价"，用户从此收到所有价位的推送，界面上
+    /// 没有任何迹象。认不出的输入不能当成一个确定的答案。
+    private var numberErrors: [String] {
+        var errs: [String] = []
+        func check(_ text: String, _ name: String, allowZero: Bool) {
+            let t = text.trimmingCharacters(in: .whitespaces)
+            guard !t.isEmpty else { return }
+            guard let v = Double(t) else {
+                errs.append("\(name): \"\(t)\" is not a number.")
+                return
+            }
+            if v < 0 || (!allowZero && v == 0) {
+                errs.append("\(name) must be greater than 0.")
+            }
+        }
+        check(maxRentText, "Max rent", allowZero: false)
+        check(minAreaText, "Min area", allowZero: false)
+        check(minFloorText, "Min floor", allowZero: true)
+        return errs
     }
 
     // MARK: - Lifecycle
@@ -309,6 +415,8 @@ struct FilterEditView: View {
         maxRentText = f.maxRent.map { String(Int($0)) } ?? ""
         minAreaText = f.minArea.map { String(Int($0)) } ?? ""
         minFloorText = f.minFloor.map { String($0) } ?? ""
+        baseline = f
+        baselineNumbers = [maxRentText, minAreaText, minFloorText]
     }
 
     private func loadOptions() async {
@@ -331,9 +439,8 @@ struct FilterEditView: View {
     }
 
     private func save() async {
-        draft.maxRent = Double(maxRentText.trimmingCharacters(in: .whitespaces))
-        draft.minArea = Double(minAreaText.trimmingCharacters(in: .whitespaces))
-        draft.minFloor = Int(minFloorText.trimmingCharacters(in: .whitespaces))
+        guard numberErrors.isEmpty else { return }
+        draft = preview
 
         guard let resp = await saveStore.save(draft) else {
             return  // 错误显示在表单底部
@@ -341,4 +448,41 @@ struct FilterEditView: View {
         auth.updateLocalFilter(resp.filter)
         dismiss()
     }
+}
+
+/// 主表单一行对应的维度描述。
+///
+/// 把「显示名 / 后端维度名 / 候选来自 options 的哪个字段 / 存进 filter 的哪个字段」
+/// 四件事绑在一起，因为它们必须一致：`backendKey` 用来查 `dim_sources`，写错了
+/// 提示语会指到别的维度上去，而这种错不会有任何报错。
+private struct FilterDim {
+    let backendKey: String
+    let title: LocalizedStringKey
+    let choices: (FilterOptions) -> [String]
+    let path: WritableKeyPath<ListingFilter, [String]>
+
+    static let cities = FilterDim(
+        backendKey: "city", title: "Cities",
+        choices: { $0.cities }, path: \.allowedCities)
+    static let neighborhoods = FilterDim(
+        backendKey: "neighborhood", title: "Neighborhoods",
+        choices: { $0.neighborhoods }, path: \.allowedNeighborhoods)
+    static let types = FilterDim(
+        backendKey: "type", title: "Types",
+        choices: { $0.types }, path: \.allowedTypes)
+    static let finishing = FilterDim(
+        backendKey: "finishing", title: "Finishing",
+        choices: { $0.finishing }, path: \.allowedFinishing)
+    static let tenant = FilterDim(
+        backendKey: "tenant", title: "Tenant",
+        choices: { $0.tenant }, path: \.allowedTenant)
+    static let occupancy = FilterDim(
+        backendKey: "occupancy", title: "Occupancy",
+        choices: { $0.occupancy }, path: \.allowedOccupancy)
+    static let contract = FilterDim(
+        backendKey: "contract", title: "Contract",
+        choices: { $0.contract }, path: \.allowedContract)
+    static let offer = FilterDim(
+        backendKey: "offer", title: "Offer",
+        choices: { $0.offer }, path: \.allowedOffer)
 }

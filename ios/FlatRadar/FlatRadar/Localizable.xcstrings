@@ -307,6 +307,9 @@
         }
       }
     },
+    "/ %lld" : {
+
+    },
     "%@, %@" : {
       "localizations" : {
         "en" : {
@@ -447,16 +450,6 @@
         }
       }
     },
-    "%lld / %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld / %2$lld"
-          }
-        }
-      }
-    },
     "%lld %@ · matches your filter" : {
       "localizations" : {
         "en" : {
@@ -524,6 +517,37 @@
           }
         }
       }
+    },
+    "%lld conditions" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld condiciones"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld voorwaarden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 项条件"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 項條件"
+          }
+        }
+      }
+    },
+    "%lld hidden by the current filter" : {
+
     },
     "%lld listings" : {
       "comment" : "Duplicate key — this one for calendar day",
@@ -594,6 +618,9 @@
         }
       }
     },
+    "%lld more excluded by city, platform, rent or area" : {
+
+    },
     "%lld of %lld listings shown" : {
       "localizations" : {
         "en" : {
@@ -605,32 +632,7 @@
       }
     },
     "%lld selected" : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld seleccionado"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld geselecteerd"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已选择%lld "
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已選擇%lld "
-          }
-        }
-      }
+
     },
     "%lld status changes" : {
       "localizations" : {
@@ -693,9 +695,6 @@
           }
         }
       }
-    },
-    "%lld units at this address, spread out; positions are approximate" : {
-
     },
     "%lld without coords" : {
       "localizations" : {
@@ -814,6 +813,9 @@
           }
         }
       }
+    },
+    "+%lld" : {
+
     },
     "⋯⋯" : {
       "localizations" : {
@@ -946,6 +948,7 @@
       }
     },
     "€/mo" : {
+      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
@@ -969,6 +972,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "€/月"
+          }
+        }
+      }
+    },
+    "A listing must match every condition below to notify you." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un anuncio debe cumplir todas las condiciones para avisarte."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Een woning moet aan alle onderstaande voorwaarden voldoen om je te melden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "房源需同时满足以下全部条件才会通知你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "房源需同時滿足以下全部條件才會通知你。"
           }
         }
       }
@@ -1007,36 +1038,30 @@
         }
       }
     },
-    "A real-time monitor for Holland2Stay availability." : {
+    "A/A+/A++/A+++ above %@ also pass." : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A real-time monitor for Holland2Stay availability."
-          }
-        },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Un monitor en tiempo real de la disponibilidad de Holland2Stay."
+            "value" : "A/A+/A++/A+++ por encima de %@ también se aceptan."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Een realtime overzicht van de beschikbaarheid bij Holland2Stay."
+            "value" : "A/A+/A++/A+++ boven %@ worden ook geaccepteerd."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Holland2Stay 房源实时监控。"
+            "value" : "高于 %@ 的 A/A+/A++/A+++ 同样通过。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Holland2Stay 房源實時監控。"
+            "value" : "高於 %@ 的 A/A+/A++/A+++ 同樣通過。"
           }
         }
       }
@@ -1530,41 +1555,6 @@
         }
       }
     },
-    "Always verify listing details on the official Holland2Stay website before making decisions." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Always verify listing details on the official Holland2Stay website before making decisions."
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Comprueba siempre los detalles del anuncio en la página web oficial de Holland2Stay antes de tomar una decisión."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Controleer altijd de details van de accommodatie op de officiële website van Holland2Stay voordat u een beslissing neemt."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "做决定前，请在 Holland2Stay 官网核实房源详情。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "做決定前，請在 Holland2Stay 官網覈實房源詳情。"
-          }
-        }
-      }
-    },
     "Always verify listing details on the official platform website before making decisions." : {
       "localizations" : {
         "es" : {
@@ -1757,6 +1747,9 @@
         }
       }
     },
+    "area" : {
+
+    },
     "Authorized" : {
       "localizations" : {
         "en" : {
@@ -1791,7 +1784,11 @@
         }
       }
     },
+    "available" : {
+
+    },
     "Available" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2439,6 +2436,34 @@
         }
       }
     },
+    "Clear selection" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Borrar selección"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selectie wissen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空所选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清空所選"
+          }
+        }
+      }
+    },
     "Color Scheme" : {
       "localizations" : {
         "en" : {
@@ -2630,6 +2655,9 @@
           }
         }
       }
+    },
+    "Copy" : {
+
     },
     "Count" : {
       "localizations" : {
@@ -3098,6 +3126,37 @@
     "Direct book" : {
 
     },
+    "Directions" : {
+
+    },
+    "Discard" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Descartar"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verwerpen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放弃"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放棄"
+          }
+        }
+      }
+    },
     "Discard changes" : {
       "localizations" : {
         "es" : {
@@ -3122,6 +3181,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "取消修改"
+          }
+        }
+      }
+    },
+    "Discard changes?" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Descartar los cambios?"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wijzigingen verwerpen?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放弃所做的修改？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放棄所做的修改？"
           }
         }
       }
@@ -3283,6 +3370,34 @@
     },
     "Double tap to toggle" : {
 
+    },
+    "Eligibility" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requisitos"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voorwaarden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "租住资格"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "租住資格"
+          }
+        }
+      }
     },
     "Email or username" : {
       "localizations" : {
@@ -3500,6 +3615,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "失敗"
+          }
+        }
+      }
+    },
+    "Every new listing" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cada anuncio nuevo"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Elke nieuwe woning"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有新房源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有新房源"
           }
         }
       }
@@ -3845,36 +3988,36 @@
         }
       }
     },
-    "FlatRadar is an **unofficial** third-party client.\nNot affiliated with, endorsed by, or sponsored by Holland2Stay.\nAll listing data belongs to its respective owners." : {
+    "FlatRadar is an **unofficial** third-party client.\nNot affiliated with, endorsed by, or sponsored by any of the platforms it monitors.\nAll listing data belongs to its respective owners." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FlatRadar is an **unofficial** third-party client.\nNot affiliated with, endorsed by, or sponsored by Holland2Stay.\nAll listing data belongs to its respective owners."
+            "value" : "FlatRadar is an **unofficial** third-party client.\nNot affiliated with, endorsed by, or sponsored by any of the platforms it monitors.\nAll listing data belongs to its respective owners."
           }
         },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FlatRadar es un cliente de terceros **no oficial**.\nNo está afiliado a Holland2Stay, ni cuenta con su respaldo ni su patrocinio.\nTodos los datos de los anuncios pertenecen a sus respectivos propietarios."
+            "value" : "FlatRadar es un cliente de terceros **no oficial**.\nNo está afiliado, avalado ni patrocinado por ninguna de las plataformas que monitoriza.\nTodos los datos de los anuncios pertenecen a sus respectivos propietarios."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FlatRadar is een **onofficiële** client van een derde partij.\nHeeft geen banden met, wordt niet aanbevolen door en wordt niet gesponsord door Holland2Stay.\nAlle gegevens over de advertenties zijn eigendom van de respectievelijke eigenaren."
+            "value" : "FlatRadar is een **onofficiële** client van derden.\nNiet gelieerd aan, goedgekeurd door of gesponsord door de platforms die het volgt.\nAlle advertentiegegevens behoren toe aan de respectieve eigenaren."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FlatRadar 是一个**非官方**的第三方客户端。\n与 Holland2Stay 无关联、认可或赞助关系。\n所有房源数据归其各自所有者。"
+            "value" : "FlatRadar 是**非官方**第三方客户端。\n与其监控的任何平台均无关联、未获认可或赞助。\n所有房源数据归各自所有者所有。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "FlatRadar 是一個**非官方**的第三方客戶端。\n與 Holland2Stay 無關聯、認可或贊助關係。\n所有房源數據歸其各自所有者。"
+            "value" : "FlatRadar 是**非官方**第三方用戶端。\n與其監控的任何平台均無關聯、未獲認可或贊助。\n所有房源資料歸各自擁有者所有。"
           }
         }
       }
@@ -4222,6 +4365,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "保持編輯"
+          }
+        }
+      }
+    },
+    "Keep Editing" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Seguir editando"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verder bewerken"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续编辑"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "繼續編輯"
           }
         }
       }
@@ -4637,6 +4808,34 @@
         }
       }
     },
+    "Location" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ubicación"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Locatie"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "位置"
+          }
+        }
+      }
+    },
     "Location Unavailable" : {
       "localizations" : {
         "es" : {
@@ -4870,6 +5069,7 @@
       }
     },
     "m²" : {
+      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
@@ -5355,6 +5555,9 @@
         }
       }
     },
+    "more" : {
+
+    },
     "More breakdowns ›" : {
       "localizations" : {
         "en" : {
@@ -5487,6 +5690,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "街區"
+          }
+        }
+      }
+    },
+    "Neighborhoods appear once listings in your cities have been indexed." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Los barrios aparecen cuando se hayan indexado anuncios de tus ciudades."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Buurten verschijnen zodra woningen in jouw steden zijn geïndexeerd."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选城市的房源被收录后，街区选项才会出现。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所選城市的房源被收錄後，街區選項才會出現。"
           }
         }
       }
@@ -5901,6 +6132,90 @@
         }
       }
     },
+    "No conditions — every new listing notifies you." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin condiciones: cada anuncio nuevo te avisa."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geen voorwaarden — elke nieuwe woning meldt je."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设条件——每条新房源都会通知你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未設條件——每條新房源都會通知你。"
+          }
+        }
+      }
+    },
+    "No conditions set — you'll be notified about everything." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin condiciones: recibirás avisos de todo."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geen voorwaarden — je krijgt een melding voor alles."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未设任何条件——所有房源都会通知你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未設任何條件——所有房源都會通知你。"
+          }
+        }
+      }
+    },
+    "No current listings use this value" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ningún anuncio actual usa este valor"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geen huidige woning gebruikt deze waarde"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前没有房源使用该取值"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "當前沒有房源使用該取值"
+          }
+        }
+      }
+    },
     "No Data" : {
       "localizations" : {
         "en" : {
@@ -6003,6 +6318,9 @@
         }
       }
     },
+    "No listings match" : {
+
+    },
     "No listings match your filter." : {
       "localizations" : {
         "en" : {
@@ -6067,6 +6385,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "過去24小時內沒有匹配過濾條件的房源。"
+          }
+        }
+      }
+    },
+    "No match" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin coincidencias"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Geen resultaat"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无匹配项"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無匹配項"
           }
         }
       }
@@ -6495,6 +6841,62 @@
         }
       }
     },
+    "Nothing selected = all platforms can notify you." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin selección = todas las plataformas pueden avisarte."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Niets geselecteerd = alle platforms mogen je melden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不勾选 = 所有平台都可以通知你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不勾選 = 所有平台都可以通知你。"
+          }
+        }
+      }
+    },
+    "Nothing selected = this condition is not applied." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sin selección = esta condición no se aplica."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Niets geselecteerd = deze voorwaarde geldt niet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不勾选 = 该条件不生效。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不勾選 = 該條件不生效。"
+          }
+        }
+      }
+    },
     "Notification Filter" : {
       "localizations" : {
         "es" : {
@@ -6746,6 +7148,34 @@
         }
       }
     },
+    "Only these platforms can trigger your notifications." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Solo estas plataformas pueden activar tus notificaciones."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alleen deze platforms kunnen je meldingen activeren."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有这些平台会触发通知。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有這些平台會觸發通知。"
+          }
+        }
+      }
+    },
     "Only user accounts can change password here." : {
       "localizations" : {
         "es" : {
@@ -6775,6 +7205,7 @@
       }
     },
     "Open in browser" : {
+      "extractionState" : "stale",
       "localizations" : {
         "es" : {
           "stringUnit" : {
@@ -6826,41 +7257,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 %@ 上開啟"
-          }
-        }
-      }
-    },
-    "Open on Holland2Stay" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Open on Holland2Stay"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Visita Holland2Stay"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ga naar Holland2Stay"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Holland2Stay 打开"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Holland2Stay 打開"
           }
         }
       }
@@ -7019,6 +7415,37 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "支付等待批准中。"
+          }
+        }
+      }
+    },
+    "per month" : {
+
+    },
+    "Perks" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ventajas"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extra's"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "优惠"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "優惠"
           }
         }
       }
@@ -7450,6 +7877,34 @@
         }
       }
     },
+    "Property" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vivienda"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Woning"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "房屋"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "房屋"
+          }
+        }
+      }
+    },
     "Provisional" : {
       "localizations" : {
         "en" : {
@@ -7480,40 +7935,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "臨時授權"
-          }
-        }
-      }
-    },
-    "Push Filter" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Push Filter"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Filtro de empuje"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Duwfilter"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推送过滤"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "推送過濾"
           }
         }
       }
@@ -7617,6 +8038,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已讀"
+          }
+        }
+      }
+    },
+    "Real-time availability across %lld rental platforms." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Real-time availability across %lld rental platforms."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disponibilidad en tiempo real en %lld plataformas de alquiler."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Realtime beschikbaarheid op %lld huurplatforms."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "实时监控 %lld 个租房平台的房源。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即時監控 %lld 個租屋平台的房源。"
           }
         }
       }
@@ -8352,40 +8807,6 @@
         }
       }
     },
-    "Select cities first to see neighborhoods" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Select cities first to see neighborhoods"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Selecciona primero las ciudades para ver los barrios"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Selecteer eerst steden om de wijken te bekijken"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "先选择城市以查看街区"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "先選擇城市以查看街區"
-          }
-        }
-      }
-    },
     "Send" : {
       "localizations" : {
         "es" : {
@@ -8667,6 +9088,9 @@
           }
         }
       }
+    },
+    "Show all %lld" : {
+
     },
     "Show password" : {
       "localizations" : {
@@ -9343,6 +9767,34 @@
         }
       }
     },
+    "Tenant and occupancy are checked strictly: a listing that doesn't state them is filtered out." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inquilino y ocupación se comprueban de forma estricta: un anuncio que no los indique queda excluido."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Huurder en bezetting worden strikt gecontroleerd: een woning die ze niet vermeldt valt af."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "租客与入住人数按严格口径核验：房源未标注该属性即被排除。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "租客與入住人數按嚴格口徑核驗：房源未標註該屬性即被排除。"
+          }
+        }
+      }
+    },
     "Terms" : {
       "localizations" : {
         "en" : {
@@ -9541,6 +9993,9 @@
         }
       }
     },
+    "This address has %lld listings. Their pins are spread apart so that each one can be tapped, so the positions shown are approximate." : {
+
+    },
     "This chart has no entries yet." : {
       "localizations" : {
         "en" : {
@@ -9583,34 +10038,6 @@
     },
     "This listing's address has not been geocoded yet, so it has no position on the map." : {
 
-    },
-    "This only controls which platforms can trigger your notifications." : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Esto solo controla qué plataformas pueden activar tus notificaciones."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hiermee bepaal je alleen welke platforms je meldingen kunnen activeren."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此设置仅控制哪些平台可以触发你的通知。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "此設定僅控制哪些平台可以觸發你的通知。"
-          }
-        }
-      }
     },
     "this week" : {
       "localizations" : {
@@ -10049,6 +10476,7 @@
       }
     },
     "Unavailable" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -10368,6 +10796,9 @@
       }
     },
     "View on map" : {
+
+    },
+    "Website" : {
 
     },
     "What's on your mind?" : {

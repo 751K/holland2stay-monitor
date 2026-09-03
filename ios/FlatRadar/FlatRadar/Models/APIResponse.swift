@@ -327,19 +327,30 @@ struct FilterOptions: Decodable, Sendable {
     let finishing: [String]
     let energy: [String]
 
+    /// 每个过滤维度实际生效于哪些平台，key 是**后端的维度名**
+    /// （`contract` / `neighborhood` / `offer` / …），值是 source key 列表。
+    ///
+    /// 后端 `_SOURCE_FILTER_DIMS` 决定的是一件沉默的事：勾了 Contract 只会
+    /// 影响 Holland2Stay，其余六个平台整条跳过。老 backend 不返回这个 key，
+    /// 此时为空字典——界面退回不作标注，而不是标成"对所有平台生效"。
+    let dimSources: [String: [String]]
+
     enum CodingKeys: String, CodingKey {
         case cities, sources, occupancy, types, neighborhoods
         case contract, tenant, offer, finishing, energy
+        case dimSources = "dim_sources"
     }
 
     init(
         cities: [String], sources: [String], occupancy: [String],
         types: [String], neighborhoods: [String], contract: [String],
-        tenant: [String], offer: [String], finishing: [String], energy: [String]
+        tenant: [String], offer: [String], finishing: [String], energy: [String],
+        dimSources: [String: [String]] = [:]
     ) {
         self.cities = cities; self.sources = sources; self.occupancy = occupancy
         self.types = types; self.neighborhoods = neighborhoods; self.contract = contract
         self.tenant = tenant; self.offer = offer; self.finishing = finishing; self.energy = energy
+        self.dimSources = dimSources
     }
 
     init(from decoder: Decoder) throws {
@@ -354,6 +365,7 @@ struct FilterOptions: Decodable, Sendable {
         self.offer         = try c.decodeIfPresent([String].self, forKey: .offer)         ?? []
         self.finishing     = try c.decodeIfPresent([String].self, forKey: .finishing)     ?? []
         self.energy        = try c.decodeIfPresent([String].self, forKey: .energy)        ?? []
+        self.dimSources    = try c.decodeIfPresent([String: [String]].self, forKey: .dimSources) ?? [:]
     }
 
     static let empty = FilterOptions(

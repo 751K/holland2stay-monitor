@@ -117,22 +117,53 @@ struct ListingFilter: Codable, Equatable, Sendable {
             && allowedEnergy.isEmpty
     }
 
-    /// 人类可读的一行摘要，用于 Settings 入口卡片下方提示。
+    /// 人类可读摘要，用于 Settings 入口卡片下方提示。
     /// 例 "≤ €900/mo · ≥ 25 m² · Eindhoven, Amsterdam · Energy ≥ B"
     var summary: String {
+        let parts = summaryParts
+        return parts.isEmpty ? "No filters" : parts.joined(separator: " · ")
+    }
+
+    /// 摘要的各段，按"用户最可能先关心"排序。
+    ///
+    /// 为什么单独暴露出来
+    /// ------------------
+    /// 这个数组必须覆盖 ``isEmpty`` 判断的**全部十三个维度**。此前只覆盖六个
+    /// （rent / area / floor / cities / sources / energy），另外七个——房型、
+    /// 合同、租客、入住人数、街区、优惠、装修——一个字都不出现。后果不是"显示
+    /// 得不全"，是**显示成了相反的意思**：只勾了 "Finishing: Furnished" 的用户，
+    /// 设置页写着 "No filters"，而后端 ``config.py`` 的 ``matches()`` 正在按这
+    /// 条过滤掉推送。用户会去别处找"为什么收不到通知"。
+    ///
+    /// 用数组而不是直接拼字符串，是为了让测试能逐段断言，而不是对一整行做
+    /// 子串匹配——后者在漏掉一个维度时照样通过。
+    var summaryParts: [String] {
         var parts: [String] = []
         if let r = maxRent { parts.append("≤ €\(Int(r))/mo") }
         if let a = minArea { parts.append("≥ \(Int(a)) m²") }
         if let f = minFloor { parts.append("Floor ≥ \(f)") }
-        if !allowedCities.isEmpty {
-            parts.append(allowedCities.prefix(3).joined(separator: ", ")
-                + (allowedCities.count > 3 ? "…" : ""))
-        }
+        if !allowedCities.isEmpty { parts.append(Self.brief(allowedCities)) }
+        if !allowedNeighborhoods.isEmpty { parts.append(Self.brief(allowedNeighborhoods)) }
         if !allowedSources.isEmpty {
             parts.append(allowedSources.map(Self.sourceShortText).joined(separator: ", "))
         }
         if !allowedEnergy.isEmpty { parts.append("Energy ≥ \(allowedEnergy)") }
-        return parts.isEmpty ? "No filters" : parts.joined(separator: " · ")
+        if !allowedTypes.isEmpty { parts.append(Self.brief(allowedTypes)) }
+        if !allowedOccupancy.isEmpty { parts.append(Self.brief(allowedOccupancy, label: "Occupancy")) }
+        if !allowedTenant.isEmpty { parts.append(Self.brief(allowedTenant, label: "Tenant")) }
+        if !allowedContract.isEmpty { parts.append(Self.brief(allowedContract, label: "Contract")) }
+        if !allowedFinishing.isEmpty { parts.append(Self.brief(allowedFinishing)) }
+        if !allowedOffer.isEmpty { parts.append(Self.brief(allowedOffer, label: "Offer")) }
+        return parts
+    }
+
+    /// 列表压成一段：最多两项，其余记成 "+N"。
+    /// 值本身读不出维度的（"Two"、"Indefinite"）由调用方给 `label`。
+    static nonisolated func brief(_ values: [String], label: String? = nil) -> String {
+        let shown = values.prefix(2).joined(separator: ", ")
+        let rest = values.count - min(2, values.count)
+        let body = rest > 0 ? "\(shown) +\(rest)" : shown
+        return label.map { "\($0): \(body)" } ?? body
     }
 
     private static nonisolated func sourceShortText(_ source: String) -> String {

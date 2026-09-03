@@ -290,7 +290,9 @@ struct LoginView: View {
                     .lineSpacing(4)
                     .padding(.top, 26)
 
-                Text("A real-time monitor for Holland2Stay availability.")
+                // 平台数由 Platform 推出来，不写死——写死的数字就是下一次
+                // "登录页还写着 H2S"。接第八个平台时这里自动跟上。
+                Text("Real-time availability across \(Platform.knownKeys.count) rental platforms.")
                     .font(.system(size: 16))
                     .foregroundStyle(descriptionColor)
                     .padding(.top, 14)
@@ -600,7 +602,9 @@ struct LoginView: View {
         VStack(spacing: 12) {
             Divider().padding(.horizontal, 25)
 
-            Text("FlatRadar is an **unofficial** third-party client.\nNot affiliated with, endorsed by, or sponsored by Holland2Stay.\nAll listing data belongs to its respective owners.")
+            // 只声明"与 Holland2Stay 无关"是不够的：现在监控七个平台，其余六个
+            // 一个都没覆盖到。改成泛指，加平台时不必再回来改这句法律声明。
+            Text("FlatRadar is an **unofficial** third-party client.\nNot affiliated with, endorsed by, or sponsored by any of the platforms it monitors.\nAll listing data belongs to its respective owners.")
                 .font(.system(size: 12))
                 .foregroundStyle(footerTextColor)
                 .multilineTextAlignment(.center).lineSpacing(3)

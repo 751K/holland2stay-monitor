@@ -18,7 +18,7 @@ import SwiftUI
 /// ------------
 /// 与 `static/app.js` 的 `SOURCE_LABELS` / `SOURCE_SHORT`、以及
 /// `notifier.py` 的 `_source_short` 对齐。新增平台时三处一起加。
-enum Platform {
+nonisolated enum Platform {
 
     /// 全名，用于卡片、徽章、筛选器选项。
     private static let displayNames: [String: String] = [

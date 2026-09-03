@@ -244,8 +244,8 @@ private struct TermsAgreementView: View {
                         Text("By continuing, you agree that:")
                             .font(.subheadline.weight(.semibold))
 
-                        bullet("FlatRadar is an unofficial, independent tool. Not affiliated with or endorsed by Holland2Stay.")
-                        bullet("You are responsible for complying with Holland2Stay's Terms of Service.")
+                        bullet("FlatRadar is an unofficial, independent tool. Not affiliated with or endorsed by any of the platforms it monitors.")
+                        bullet("You are responsible for complying with the Terms of Service of each platform you interact with.")
                         bullet("Listing data may be delayed, incomplete, inaccurate, or change without notice.")
                         bullet("Push notifications are best-effort. Always verify listings on the official website.")
                         bullet("FlatRadar is for personal, non-commercial use only.")
@@ -277,7 +277,7 @@ private struct TermsAgreementView: View {
 
     private var termsSummary: String {
         """
-        FlatRadar is an independent, unofficial monitoring tool for Holland2Stay listings. It is not affiliated with, endorsed by, sponsored by, maintained by, or operated by Holland2Stay.
+        FlatRadar is an independent, unofficial monitoring tool for rental listings across multiple platforms. It is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the platforms it monitors.
 
         By using FlatRadar, you acknowledge that you have read and agree to the Terms of Use and Privacy Policy. Full legal terms are available on the login screen.
         """

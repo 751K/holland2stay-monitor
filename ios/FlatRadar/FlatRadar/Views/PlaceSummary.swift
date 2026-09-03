@@ -15,7 +15,7 @@ import Foundation
 ///
 /// **只有一份实现**：地图弹卡和日历行都用它。此前地图那边修好了、日历那边没有，
 /// 正是"同一段逻辑写两遍、只改一处"——这个项目反复出现的形状。
-enum PlaceSummary {
+nonisolated enum PlaceSummary {
 
     /// - Parameters:
     ///   - name: 房源名，用来判断哪些部分是重复的。

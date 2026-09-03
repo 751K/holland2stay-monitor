@@ -44,19 +44,35 @@ struct SettingsView: View {
                                           systemImage: "line.3.horizontal.decrease.circle.fill")
                                         .foregroundStyle(.primary)
                                     Spacer()
+                                    // 条件数先于条件内容 —— 摘要会被截断，而"设了几条"
+                                    // 是一眼要看到的。空过滤器不显示 0，改在下一行说明。
+                                    if !info.listingFilter.isEmpty {
+                                        Text("\(info.listingFilter.summaryParts.count)")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(Color.accentColor)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 2)
+                                            .background(Color.accentColor.opacity(0.14), in: Capsule())
+                                    }
                                     Image(systemName: "chevron.right")
                                         .font(.caption)
                                         .foregroundStyle(.tertiary)
                                 }
-                                Text(info.listingFilter.summary)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
+                                Group {
+                                    if info.listingFilter.isEmpty {
+                                        Text("No conditions — every new listing notifies you.")
+                                    } else {
+                                        Text(verbatim: info.listingFilter.summary)
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
                             }
                         }
                         .buttonStyle(.plain)
                     } header: {
-                        Text("Push Filter")
+                        Text("Notification Filter")
                     } footer: {
                         Text("Only listings matching this filter trigger APNs and notification tab updates.")
                     }

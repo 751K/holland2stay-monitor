@@ -13,7 +13,15 @@ import SwiftUI
 ///   的就别再造 token。这里只定义 SwiftUI 体系里**没有现成对应**的业务色：
 ///     - status 是 Holland2Stay 三态业务语义（book/lottery/reserved）
 ///     - energy 是房源能效等级颜色光谱（A+++ 深绿 → D+ 红，跨多色 hue）
-extension Color {
+/// `nonisolated`：这些是**纯常量**，没有任何可变状态。
+///
+/// 工程开着 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`（Xcode 26 为视图代码
+/// 省事的默认值），没标注的类型一律隐式 @MainActor——色板跟着被钉在主 actor 上，
+/// 于是任何 nonisolated 的地方（模型层、后台解码、同步的单元测试）引用它都要报
+/// "cannot be referenced from a nonisolated context"。
+///
+/// 模型层和常量是这个默认值的例外：它们本来就该跟 actor 无关。
+nonisolated extension Color {
     // MARK: - Status (Holland2Stay 三态业务语义)
 
     /// "Available to book"——绿色，先到先得状态。
