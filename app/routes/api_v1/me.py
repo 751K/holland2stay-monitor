@@ -27,7 +27,7 @@ from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
 from app.process_ctrl import write_reload_request
-from config import ENERGY_LABELS, ListingFilter
+from config import ENERGY_LABELS, ListingFilter, filter_dim_sources
 from users import update_users
 
 from ._helpers import (
@@ -238,7 +238,8 @@ def _filter_options():
           "tenant":        [str, ...],
           "offer":         [str, ...],
           "finishing":     [str, ...],
-          "energy":        ["A+++", "A++", "A+", "A", "B", "C", "D", "E", "F"]
+          "energy":        ["A+++", "A++", "A+", "A", "B", "C", "D", "E", "F"],
+          "dim_sources":   {dim: [source, ...]}   # 该维度对哪些平台生效
         }
 
     与 ``GET /me/filter`` 配合：客户端拿到 options + 当前 filter，
@@ -257,6 +258,10 @@ def _filter_options():
             "offer":         st.get_feature_values("Offer"),
             "finishing":     st.get_feature_values("Finishing"),
             "energy":        list(ENERGY_LABELS),
+            # 每个维度实际生效于哪些平台。客户端拿它在筛选表单里标注
+            # "Only applies to Holland2Stay"——contract / neighborhood / offer
+            # 七个平台里只对一个生效，此前界面上没有任何地方说过。
+            "dim_sources":   filter_dim_sources(),
         }
     return _err.ok(data)
 

@@ -1151,6 +1151,31 @@ def source_supports_dim(source: Optional[str], dim: str) -> bool:
     return _source_supports_dim(source, dim)
 
 
+def filter_dim_sources() -> dict[str, list[str]]:
+    """每个过滤维度实际生效于哪些平台，形如 ``{"contract": ["holland2stay"]}``。
+
+    为什么要把这张表送到客户端
+    --------------------------
+    ``_SOURCE_FILTER_DIMS`` 决定的是**沉默的**行为：用户在筛选表单里勾了
+    "Contract: Indefinite"，对 Holland2Stay 生效，对其余六个平台整条跳过
+    （fail-open，见 ``_source_supports_dim``）。界面上没有任何地方说过这件事，
+    用户会以为自己设了一条全局条件——他设的其实是一条单平台条件。
+
+    这张表是 ``_SOURCE_FILTER_DIMS`` 的转置，不是另抄一份：新增平台或调整维度
+    只改上面那张表，这里跟着变。
+
+    未登记的平台按 ``_UNIVERSAL_FILTER_DIMS`` 处理，与 ``_source_supports_dim``
+    的回退一致——它们不出现在专有维度的列表里。
+    """
+    dims: dict[str, list[str]] = {}
+    for source, caps in _SOURCE_FILTER_DIMS.items():
+        for dim in caps:
+            dims.setdefault(dim, []).append(source)
+    for dim in dims:
+        dims[dim].sort()
+    return dims
+
+
 def _source_supports_dim(source: Optional[str], dim: str) -> bool:
     """该平台是否稳定提供某过滤维度。
 

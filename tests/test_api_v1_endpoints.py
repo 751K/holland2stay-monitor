@@ -431,6 +431,23 @@ class TestMe:
         sources = set(r.get_json()["data"]["sources"])
         assert {"holland2stay", "ourdomain"} <= sources
 
+    def test_filter_options_include_dim_sources(self, api_client, seeded):
+        """客户端靠这张表标注"这条维度只对某几个平台生效"。"""
+        import config
+        r = api_client.get("/api/v1/filter/options")
+        table = r.get_json()["data"]["dim_sources"]
+        assert table == config.filter_dim_sources()
+        # 抽一格实质核对：合同期限七个平台里只对 Holland2Stay 生效。
+        assert table["contract"] == ["holland2stay"]
+
+    def test_dim_sources_keys_are_real_source_keys(self, api_client, seeded):
+        import config
+        r = api_client.get("/api/v1/filter/options")
+        table = r.get_json()["data"]["dim_sources"]
+        known = set(config._SOURCE_FILTER_DIMS)
+        for dim, sources in table.items():
+            assert set(sources) <= known, dim
+
 
 # ── SSE 鉴权 ───────────────────────────────────────────────────────
 
