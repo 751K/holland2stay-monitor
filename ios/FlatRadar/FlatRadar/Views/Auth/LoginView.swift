@@ -98,7 +98,7 @@ struct LoginView: View {
     }
 
     private var subtitleColor: Color {
-        // 默认 light vs 白 ≈ 4.3:1（边缘失败，11pt UNOFFICIAL 字号小风险更高）。
+        // 默认 light vs 白 ≈ 4.3:1（边缘失败，11pt INDEPENDENT 字号小风险更高）。
         if highContrast {
             return isDark ? Color(red: 0.82, green: 0.84, blue: 0.90)
                           : Color(red: 0.25, green: 0.27, blue: 0.31)
@@ -227,7 +227,10 @@ struct LoginView: View {
                 }
                 Button("Cancel", role: .cancel) { pendingRegistrationName = nil }
             } message: { name in
-                Text("No account signed in as \"\(name)\" with that password. Create a new account with this name and password?\n\nBy creating an account you agree to the Terms of Use and Privacy Policy.")
+                // 第一句必须留着：这个确认框对**任何** 401 都弹，包括"账号存在但
+                // 密码打错了"。写成"这个名字还没被注册"就等于替后端确认了账号不
+                // 存在——那正是后端刻意不透露的东西。
+                Text("No account signed in as \"\(name)\" with that password.\n\nSigning in with a new name creates the account — no separate registration needed.\n\nBy continuing you agree to the Terms of Use and Privacy Policy.")
             }
         }
     }
@@ -273,16 +276,19 @@ struct LoginView: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
-                    ZStack {
-                        Circle().fill(Color(.systemBackground)).frame(width: 48, height: 48)
-                        houseShape
-                            .fill(brandBlue)
-                            .frame(width: 26, height: 18)
-                            // 减弱动态效果开启时，呼吸缩放固定在中间值（1.0），
-                            // 不再随时间变化；动画完全跳过。
-                            .scaleEffect(reduceMotion ? 1.0 : (breathe ? 1.12 : 0.88))
-                    }
-                    .clipShape(Circle())
+                    // App 自己的 logo，而不是手画的 houseShape 套一个白/黑圆。
+                    //
+                    // 圆底原本是 Color(.systemBackground)：深色模式下那是**纯黑**，
+                    // 扣在深蓝色的 hero 背景上是一块硬邦邦的黑饼。
+                    // BrandLogo 图集里浅深两版各自带背景（与 App 图标同源），
+                    // SwiftUI 按 colorScheme 自己挑，不需要在这里判断主题。
+                    Image("BrandLogo")
+                        .resizable()
+                        .frame(width: 48, height: 48)
+                        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        // 呼吸幅度从 ±12% 收到 ±3%：原先缩放的是圆里那个小房子，
+                        // 现在缩放的是整枚徽标，同样的幅度会晃得很明显。
+                        .scaleEffect(reduceMotion ? 1.0 : (breathe ? 1.03 : 0.97))
                     .onAppear {
                         guard !reduceMotion else { return }
                         withAnimation(.easeInOut(duration: 2.2).repeatForever(autoreverses: true)) {
@@ -293,7 +299,7 @@ struct LoginView: View {
                         Text("FlatRadar")
                             .font(.system(size: 19, weight: .heavy))
                             .foregroundStyle(brandBlue)
-                        Text("UNOFFICIAL · v\(appVersion)")
+                        Text("INDEPENDENT · v\(appVersion)")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundStyle(subtitleColor)
                             .tracking(1.5)
@@ -452,11 +458,11 @@ struct LoginView: View {
                 description: "Browse current listings only",
                 isExpanded: expandedRole == .guest
             )
-            expandableCard(
-                mode: .admin, icon: "shield.fill", title: "Staff",
-                description: "Manage scrapers, users, push alerts",
-                isExpanded: expandedRole == .admin
-            )
+            // Staff 卡片已移除。后端 /auth/login 本来就按用户名分流——
+            // `__admin__` + 管理密码走 admin 分支，其余走 user 表，角色由服务端
+            // 在响应里给出（AuthStore.applyMe 读 me.role）。管理员从这同一个
+            // 表单登录即可，前端不需要一个独立入口，也不该在登录页上公示后台的
+            // 存在。
 
             if BiometricAuthService.hasStoredCredentials {
                 biometricButton
@@ -588,16 +594,17 @@ struct LoginView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(loginDisabled(for: mode))
-                    .tint(mode == .admin ? .red : .blue)
+                    .tint(.blue)
 
                     if mode == .user {
                         // 注册不再是单独一屏：名字没被注册过时，登录失败会问一句
                         // 「要不要用这个名字建号」，同意即注册（见 offerRegistration）。
                         VStack(spacing: 2) {
-                            Text("New name = new account.")
+                            // 与网页端登录页同一句：「未注册的账户将自动完成注册。」
+                            Text("Unregistered accounts are created automatically.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text("By continuing you agree to the Terms of Use and Privacy Policy.")
-                                .font(.caption2).foregroundStyle(.tertiary)
+                                .font(.caption).foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                         }
                         .padding(.top, 4)
@@ -715,13 +722,6 @@ struct LoginView: View {
 
     // MARK: - Helpers
 
-    private var houseShape: some Shape {
-        MountainPath(points: [
-            (0, 1.0), (0, 0.55), (0.35, 0.20), (0.55, 0.45),
-            (0.80, 0.20), (1.0, 0.55), (1.0, 1.0)
-        ])
-    }
-
     /// 当前应该在哪个角色的卡片里显示内联错误。
     /// - 只在卡片展开 && 该 mode 不是 guest && AuthStore 有错时显示
     /// - guest 模式没有密码字段，错误也没什么位置可放（理论上 guest 不会失败）
@@ -762,15 +762,33 @@ struct LoginView: View {
             auth.pendingBiometricCredential = nil
             // 凭据被拒（401）才提议建号。网络故障、限流、服务端错误一律不提——
             // 断网时问「要不要注册」会让用户以为自己的账号不存在了。
-            if mode == .user, case .unauthorized = auth.lastError {
+            // 管理员用同一个表单登录（Staff 入口已删）。他打错密码时不能弹
+            // 「要用 __admin__ 建个号吗」——后端 /auth/register 明确拒绝 `__`
+            // 开头的用户名，那个提议从一开始就不可能成立。
+            if mode == .user,
+               !isReservedName(username),
+               case .unauthorized = auth.lastError {
                 pendingRegistrationName = username
             }
             return
         }
 
+        // 登录成功但拿到的不是 user 角色（管理员走同一个表单）——pending 里
+        // 存着明文密码，而 ContentView 的保存提示只对 user 弹，它不会被消费，
+        // 就这么留在内存里。这里显式清掉。
+        if !auth.isUser {
+            auth.pendingBiometricCredential = nil
+        }
+
         if !auth.isGuest {
             await push.requestPermissionAndRegister()
         }
+    }
+
+    /// 后端保留给自己的用户名（`__admin__` 等以 `__` 开头的），不可注册。
+    /// 与 `app/routes/api_v1/auth.py` 的 `_register` 校验对齐。
+    private func isReservedName(_ name: String) -> Bool {
+        name.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("__")
     }
 
     private func performLoginAsGuest() async {

@@ -1611,6 +1611,34 @@
         }
       }
     },
+    "An account keeps your notification filter and alert history, and lets FlatRadar push new listings to you." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Una cuenta conserva tu filtro de notificaciones y el historial de avisos, y permite que FlatRadar te envíe anuncios nuevos."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Met een account blijven je meldingsfilter en meldingsgeschiedenis bewaard, en kan FlatRadar je nieuwe woningen sturen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账户会保留你的通知筛选和提醒历史，并让 FlatRadar 把新房源推送给你。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "賬戶會保留你的通知篩選和提醒歷史，並讓 FlatRadar 把新房源推送給你。"
+          }
+        }
+      }
+    },
     "Any" : {
       "localizations" : {
         "es" : {
@@ -2257,6 +2285,34 @@
         }
       }
     },
+    "By creating an account you agree to the Terms of Use and Privacy Policy." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Al crear una cuenta aceptas las Condiciones de uso y la Política de privacidad."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Door een account aan te maken ga je akkoord met de Gebruiksvoorwaarden en het Privacybeleid."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建账户即表示你同意《使用条款》与《隐私政策》。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "創建賬戶即表示你同意《使用條款》與《隱私政策》。"
+          }
+        }
+      }
+    },
     "By creating an account, you agree to our" : {
       "localizations" : {
         "en" : {
@@ -2833,6 +2889,34 @@
         }
       }
     },
+    "Create" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crear"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aanmaken"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "創建"
+          }
+        }
+      }
+    },
     "Create Account" : {
       "localizations" : {
         "en" : {
@@ -2897,6 +2981,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "創建賬號並登錄"
+          }
+        }
+      }
+    },
+    "Create an Account" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Crear una cuenta"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account aanmaken"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建账户"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "創建賬戶"
           }
         }
       }
@@ -4547,6 +4659,34 @@
         }
       }
     },
+    "INDEPENDENT · v%@" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "INDEPENDIENTE · v%@"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ONAFHANKELIJK · v%@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "独立开发 · v%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "獨立開發 · v%@"
+          }
+        }
+      }
+    },
     "Invalid Request" : {
       "localizations" : {
         "en" : {
@@ -6114,34 +6254,6 @@
         }
       }
     },
-    "New name = new account." : {
-      "localizations" : {
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Un nombre nuevo crea una cuenta nueva."
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Een nieuwe naam maakt een nieuw account."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没用过的名字会创建新账户。"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "沒用過的名字會創建新賬戶。"
-          }
-        }
-      }
-    },
     "NEW · %@" : {
       "localizations" : {
         "es" : {
@@ -6456,30 +6568,30 @@
         }
       }
     },
-    "No account signed in as \"%@\" with that password. Create a new account with this name and password?\n\nBy creating an account you agree to the Terms of Use and Privacy Policy." : {
+    "No account signed in as \"%@\" with that password.\n\nSigning in with a new name creates the account — no separate registration needed.\n\nBy continuing you agree to the Terms of Use and Privacy Policy." : {
       "localizations" : {
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No se pudo iniciar sesión como «%@» con esa contraseña. ¿Crear una cuenta nueva con este nombre y contraseña?\n\nAl crear una cuenta aceptas las Condiciones de uso y la Política de privacidad."
+            "value" : "No se pudo iniciar sesión como «%@» con esa contraseña.\n\nIniciar sesión con un nombre nuevo crea la cuenta; no hace falta registrarse aparte.\n\nAl continuar aceptas las Condiciones de uso y la Política de privacidad."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Inloggen als \"%@\" met dat wachtwoord is niet gelukt. Een nieuw account aanmaken met deze naam en dit wachtwoord?\n\nDoor een account aan te maken ga je akkoord met de Gebruiksvoorwaarden en het Privacybeleid."
+            "value" : "Inloggen als \"%@\" met dat wachtwoord is niet gelukt.\n\nInloggen met een nieuwe naam maakt het account aan — apart registreren is niet nodig.\n\nDoor verder te gaan ga je akkoord met de Gebruiksvoorwaarden en het Privacybeleid."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "用这个密码无法以「%@」登录。要用这个名字和密码创建一个新账户吗？\n\n创建账户即表示你同意《使用条款》与《隐私政策》。"
+            "value" : "用这个密码无法以「%@」登录。\n\n用没使用过的名字登录即会创建账户，无需单独注册。\n\n继续即表示你同意《使用条款》与《隐私政策》。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "用這個密碼無法以「%@」登入。要用這個名字和密碼創建一個新賬戶嗎？\n\n創建賬戶即表示你同意《使用條款》與《隱私政策》。"
+            "value" : "用這個密碼無法以「%@」登入。\n\n用沒使用過的名字登入即會創建賬戶，無需單獨註冊。\n\n繼續即表示你同意《使用條款》與《隱私政策》。"
           }
         }
       }
@@ -7789,6 +7901,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "密碼"
+          }
+        }
+      }
+    },
+    "Password must be at least 4 characters." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La contraseña debe tener al menos 4 caracteres."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Het wachtwoord moet minstens 4 tekens bevatten."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码至少需要 4 个字符。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密碼至少需要 4 個字符。"
           }
         }
       }
@@ -10467,6 +10607,34 @@
         }
       }
     },
+    "That username isn't available." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ese nombre de usuario no está disponible."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die gebruikersnaam is niet beschikbaar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该用户名不可用。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "該用戶名不可用。"
+          }
+        }
+      }
+    },
     "The server returned data in an unexpected format." : {
       "localizations" : {
         "en" : {
@@ -11111,36 +11279,30 @@
     "Unknown status" : {
 
     },
-    "UNOFFICIAL · v%@" : {
+    "Unregistered accounts are created automatically." : {
       "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "UNOFFICIAL · v%@"
-          }
-        },
         "es" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "NO OFICIAL · v%@"
+            "value" : "Las cuentas no registradas se crean automáticamente."
           }
         },
         "nl" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ONOFFICIEEL · v%@"
+            "value" : "Niet-geregistreerde accounts worden automatisch aangemaakt."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "第三方 · v%@"
+            "value" : "未注册的账户将自动完成注册。"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "第三方 · v%@"
+            "value" : "未註冊的賬戶將自動完成註冊。"
           }
         }
       }
@@ -11287,6 +11449,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用戶賬戶會收到與其篩選條件匹配的房源推送通知。測試推送用於端到端驗證當前設備會話。"
+          }
+        }
+      }
+    },
+    "Username must be at least 2 characters." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El nombre de usuario debe tener al menos 2 caracteres."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De gebruikersnaam moet minstens 2 tekens bevatten."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用户名至少需要 2 个字符。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用戶名至少需要 2 個字符。"
           }
         }
       }

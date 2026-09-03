@@ -24,6 +24,7 @@ struct SettingsView: View {
     @State private var showFeedback = false
     @State private var showRemoveBiometric = false
     @State private var showEnableBiometric = false
+    @State private var showGuestRegister = false
     @State private var isExporting = false
     @State private var exportString: String?
     @State private var showShareSheet = false
@@ -244,6 +245,23 @@ struct SettingsView: View {
                     }
                 } else if auth.isGuest {
                     Section("Account") {
+                        // 注册入口。访客是纯本地状态，手里没有 token，此前要变成
+                        // 真账号只能先「退出访客模式」回登录页——而那个按钮看起来
+                        // 像是要把人赶出去，没人会为了注册去点它。
+                        Button {
+                            showGuestRegister = true
+                        } label: {
+                            HStack {
+                                Text("Create an Account")
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption).foregroundStyle(.tertiary)
+                            }
+                            .contentShape(.rect)
+                        }
+                        .buttonStyle(.plain)
+
                         // 不再显示 "Role: Guest" —— 底下那个按钮就叫
                         // "Sign Out of Guest Mode"，已经把身份说清楚了。
                         Button(role: .destructive) {
@@ -345,12 +363,7 @@ struct SettingsView: View {
                         // 用 SF Symbol 替代 ☕ emoji——iOS HIG 推荐 UI chrome 用
                         // SF Symbol，跟系统字体度量、字重一致，且 VoiceOver 会朗读
                         // "cup and saucer"语义而非泛指 emoji。
-                        // Label 默认 icon 在前；这里手动用 HStack 把文字放前面 + 图标放后面，
-                        // 视觉与中文阅读习惯（"赞赏开发者 ☕"）一致。
-                        HStack(spacing: 4) {
-                            Text("Buy me a coffee")
-                            Image(systemName: "cup.and.saucer.fill")
-                        }
+                        Text("Buy me a coffee")
                     } footer: {
                         Text("A one-time tip to support development.\nDoes not unlock any features.")
                     }
@@ -377,6 +390,9 @@ struct SettingsView: View {
             .onAppear { editedURL = serverURL }
             .sheet(isPresented: $showEnableBiometric) {
                 EnableBiometricSheet()
+            }
+            .sheet(isPresented: $showGuestRegister) {
+                RegisterAccountSheet()
             }
             .confirmationDialog("Remove Face ID Sign-In?", isPresented: $showRemoveBiometric, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) {
