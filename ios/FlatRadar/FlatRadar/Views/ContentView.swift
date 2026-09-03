@@ -195,10 +195,26 @@ struct ContentView: View {
         if let user = argValue("UI_TEST_USER", in: args),
            let pass = argValue("UI_TEST_PASS", in: args),
            !user.isEmpty, !pass.isEmpty {
-            Task { await auth.loginAsUser(name: user, password: pass) }
-        } else if !args.contains("UI_TEST_SHOW_LOGIN"), !auth.isAuthenticated {
+            // 登录是异步的，而下面那些 tab / mode 是同步设的。第一版把它们并排
+            // 写在一起，结果是：设 tab 的那一刻还没认证，ContentView 显示的仍是
+            // LoginView；等登录完成切到 MainTabView，tab 已经被重置回默认值。
+            // 于是 UI_TEST_TAB=notifications 拍出来的是 Dashboard。
+            //
+            // 必须等登录落地再设 tab。
+            Task {
+                await auth.loginAsUser(name: user, password: pass)
+                applyScreenshotDestination(args)
+            }
+            return
+        }
+        if !args.contains("UI_TEST_SHOW_LOGIN"), !auth.isAuthenticated {
             auth.enterAsGuest()
         }
+        applyScreenshotDestination(args)
+    }
+
+    /// 落位到指定的 tab / browse mode。与身份分开，因为登录是异步的。
+    private func applyScreenshotDestination(_ args: [String]) {
 
         // 2. 初始 tab
         if let tab = argValue("UI_TEST_TAB", in: args) {
