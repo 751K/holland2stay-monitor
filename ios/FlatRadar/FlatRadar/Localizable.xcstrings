@@ -7552,6 +7552,34 @@
         }
       }
     },
+    "Plain numbers are room counts." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Los números sueltos son el número de habitaciones."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Losse getallen zijn het aantal kamers."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "单独的数字表示房间数。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "單獨的數字表示房間數。"
+          }
+        }
+      }
+    },
     "Platform" : {
 
     },

@@ -310,7 +310,8 @@ struct FilterEditView: View {
                 choices: choices,
                 selection: binding(dim.path),
                 appliesTo: options.dimSources[dim.backendKey] ?? [],
-                selectedSources: draft.allowedSources)
+                selectedSources: draft.allowedSources,
+                hint: dim.hint(choices))
         } label: {
             HStack {
                 Text(dim.title)
@@ -460,6 +461,21 @@ private struct FilterDim {
     let title: LocalizedStringKey
     let choices: (FilterOptions) -> [String]
     let path: WritableKeyPath<ListingFilter, [String]>
+
+    /// 取值本身需要解释时补一句，否则 nil。
+    ///
+    /// 只有 Types 用得上：Holland2Stay 的房型字段是 ``no_of_rooms``，取值直接
+    /// 就是 "1" "2" "3" "4"，和其它平台的 "Studio"、"2-room apartment" 并排
+    /// 列在一起，看不出那几个数字是什么意思。
+    ///
+    /// 只写一句说明，不把 "2" 改写成 "2 rooms"：勾选和回传用的是后端原值，
+    /// 显示与取值一旦分家，五种语言的单复数各写一遍，收益不抵成本；而且
+    /// ``no_of_rooms`` 是"房间数"不是"卧室数"，改写措辞就得替平台断言语义。
+    func hint(_ choices: [String]) -> LocalizedStringKey? {
+        guard backendKey == "type" else { return nil }
+        let hasBareNumber = choices.contains { !$0.isEmpty && $0.allSatisfy(\.isNumber) }
+        return hasBareNumber ? "Plain numbers are room counts." : nil
+    }
 
     static let cities = FilterDim(
         backendKey: "city", title: "Cities",

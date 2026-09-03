@@ -379,23 +379,9 @@ struct ListingDetailView: View {
             .joined(separator: " ")
     }
 
-    /// 值的显示形态：统一首字母大写。
-    ///
-    /// 后端把 feature 的值原样透出来，大小写全看各平台怎么写的——同一屏上
-    /// "One"、"student only"、"ourcampus" 三种风格并排，看着像没做完。
-    ///
-    /// 已登记的平台走 ``Platform.displayName``，因为机械地首字母大写会得到
-    /// "Ourcampus"——那既不是原样也不是正确写法，比不改还糟。
+    /// 值的显示形态：统一首字母大写。规则见 ``FeatureText/display(_:)``。
     private func displayValue(_ value: String) -> String {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let first = trimmed.first else { return trimmed }
-        if Platform.knownKeys.contains(trimmed.lowercased()) {
-            return Platform.displayName(trimmed)
-        }
-        // 只动第一个字母：值里常有 "m²"、"excl."、"XC" 这类不能碰的写法，
-        // 整串 title case 会把它们改坏。
-        guard first.isLowercase else { return trimmed }
-        return first.uppercased() + trimmed.dropFirst()
+        FeatureText.display(value)
     }
 
     private func statusColor(for listing: Listing) -> Color {

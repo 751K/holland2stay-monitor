@@ -113,6 +113,21 @@ final class FilterSummaryTests: XCTestCase {
         }
     }
 
+    /// 后端把 feature 值原样透出来，大小写全看各平台怎么写的。摘要和筛选页
+    /// 必须是同一个写法，否则设置页写着 "Tenant: student only"、点进去是
+    /// "Student only"，像两个来源。
+    func test_brief_capitalizes_lowercase_backend_values() {
+        XCTAssertEqual(ListingFilter.brief(["student only", "employed only"]),
+                       "Student only, Employed only")
+    }
+
+    /// 只动第一个字母 —— "m²"、"1-Bedroom Loft"、"excl." 这类写法整串
+    /// title case 会被改坏。
+    func test_brief_leaves_non_lowercase_values_untouched() {
+        XCTAssertEqual(ListingFilter.brief(["1-Bedroom Loft"]), "1-Bedroom Loft")
+        XCTAssertEqual(ListingFilter.brief(["A+++"]), "A+++")
+    }
+
     func test_brief_label_prefixes_the_body() {
         XCTAssertEqual(ListingFilter.brief(["X", "Y", "Z"], label: "Tenant"),
                        "Tenant: X, Y +1")

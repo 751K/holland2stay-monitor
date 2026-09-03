@@ -28,6 +28,8 @@ struct FilterChoiceList: View {
     var appliesTo: [String] = []
     /// 用户当前勾选的平台，用于判断"这条维度对你选的平台一个都不生效"。
     var selectedSources: [String] = []
+    /// 该维度取值本身需要解释时补一句。目前只有 Types 用得上——见 ``FilterEditView``。
+    var hint: LocalizedStringKey?
 
     @State private var query = ""
 
@@ -45,7 +47,10 @@ struct FilterChoiceList: View {
     private var filtered: [String] {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return allChoices }
-        return allChoices.filter { $0.localizedCaseInsensitiveContains(q) }
+        return allChoices.filter {
+            $0.localizedCaseInsensitiveContains(q)
+                || FeatureText.display($0).localizedCaseInsensitiveContains(q)
+        }
     }
 
     var body: some View {
@@ -62,18 +67,6 @@ struct FilterChoiceList: View {
 
     private var list: some View {
         List {
-            if !selection.isEmpty {
-                Section {
-                    Button(role: .destructive) {
-                        selection = []
-                    } label: {
-                        Label("Clear selection", systemImage: "xmark.circle")
-                    }
-                } footer: {
-                    Text("Nothing selected = this condition is not applied.")
-                }
-            }
-
             Section {
                 if filtered.isEmpty {
                     Group {
@@ -92,6 +85,20 @@ struct FilterChoiceList: View {
             } footer: {
                 footer
             }
+
+            // 清空放在列表末尾：它是收尾动作，不是入口。摆在顶部会把第一屏
+            // 最显眼的位置让给一个破坏性操作，而用户来这一页是为了挑取值。
+            if !selection.isEmpty {
+                Section {
+                    Button(role: .destructive) {
+                        selection = []
+                    } label: {
+                        Text("Clear selection")
+                    }
+                } footer: {
+                    Text("Nothing selected = this condition is not applied.")
+                }
+            }
         }
     }
 
@@ -102,7 +109,9 @@ struct FilterChoiceList: View {
         } label: {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: choice)
+                    // 只改显示。勾选、比对、回传用的都是后端原值——把
+                    // "student only" 大写后存回去，后端白名单就匹配不上了。
+                    Text(verbatim: FeatureText.display(choice))
                         .foregroundStyle(.primary)
                     if stale.contains(choice) {
                         Text("No current listings use this value")
@@ -124,6 +133,9 @@ struct FilterChoiceList: View {
 
     @ViewBuilder
     private var footer: some View {
+        if let hint {
+            Text(hint)
+        }
         if let note = PlatformScope.note(appliesTo: appliesTo, selectedSources: selectedSources) {
             Label {
                 Text(verbatim: note.text)

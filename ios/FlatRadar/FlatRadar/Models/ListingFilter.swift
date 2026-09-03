@@ -159,8 +159,12 @@ struct ListingFilter: Codable, Equatable, Sendable {
 
     /// 列表压成一段：最多两项，其余记成 "+N"。
     /// 值本身读不出维度的（"Two"、"Indefinite"）由调用方给 `label`。
+    ///
+    /// 取值走 ``FeatureText/display(_:)`` 统一首字母大写——摘要和筛选页看到的
+    /// 必须是同一个写法，否则设置页写着 "Tenant: student only"、点进去列表里
+    /// 是 "Student only"，像两个来源。
     static nonisolated func brief(_ values: [String], label: String? = nil) -> String {
-        let shown = values.prefix(2).joined(separator: ", ")
+        let shown = values.prefix(2).map(FeatureText.display).joined(separator: ", ")
         let rest = values.count - min(2, values.count)
         let body = rest > 0 ? "\(shown) +\(rest)" : shown
         return label.map { "\($0): \(body)" } ?? body
