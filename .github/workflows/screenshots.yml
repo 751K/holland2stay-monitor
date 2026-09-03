@@ -1,0 +1,127 @@
+# App Store 截图自动化。
+#
+# 为什么必须在云端
+# ----------------
+# 本地开发机装了 Xcode，但一个 iOS 模拟器 runtime 都没有（`xcrun simctl list
+# runtimes` 是空的），截图测试连 destination 都找不到。GitHub 的 macOS runner
+# 自带若干模拟器，正好补上这一环。同 ios.yml。
+#
+# 为什么手动触发而不是每次推送
+# ----------------------------
+# 一次跑 2 种尺寸 × 5 种语言 = 10 轮 UI 测试，每轮要重启 App 七次。这既慢又与
+# 代码正确性无关，不该挡住合并——只在准备提交 App Store 审核时跑。
+name: App Store Screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      locales:
+        description: '要跑的语言（空格分隔）'
+        default: 'en-US zh-Hans zh-Hant nl-NL es-ES'
+      display_types:
+        description: '要跑的显示类型（空格分隔）'
+        default: 'APP_IPHONE_61 APP_IPAD_PRO_3GEN_129'
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: macos-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # runner 镜像里的 Xcode 与模拟器列表会随 GitHub 更新漂移。哪天挂了，
+      # 第一眼要能看出是不是换了镜像。
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | grep -E 'iPhone|iPad' || true
+
+      - name: Install xcparse
+        run: brew install chargepoint/xcparse/xcparse
+
+      # 每个 (displayType, locale) 组合一轮。
+      #
+      # 不用 matrix：matrix 会把每个组合分到独立的 runner，而 10 个 runner 各
+      # 装一次 Xcode 环境、各跑一次构建，比串行还慢，产物还要再合并一次。
+      - name: Capture
+        env:
+          LOCALES: ${{ github.event.inputs.locales }}
+          DISPLAY_TYPES: ${{ github.event.inputs.display_types }}
+        run: |
+          set -euo pipefail
+          mkdir -p screenshots
+          for DT in $DISPLAY_TYPES; do
+            PICKED=$(xcrun simctl list devices available --json \
+              | python3 ios/scripts/pick_screenshot_device.py "$DT")
+            UDID=$(echo "$PICKED" | cut -f1)
+            echo "::group::$DT → $(echo "$PICKED" | cut -f2-3)"
+            for LC in $LOCALES; do
+              echo "--- $DT / $LC ---"
+              OUT="screenshots/$DT/$LC"
+              mkdir -p "$OUT"
+              set +e
+              UI_TEST_LOCALE="$LC" xcodebuild test \
+                -project ios/FlatRadar/FlatRadar.xcodeproj \
+                -scheme FlatRadar \
+                -destination "id=$UDID" \
+                -only-testing:FlatRadarUITests/ScreenshotTests \
+                -resultBundlePath "rb-$DT-$LC.xcresult" \
+                CODE_SIGNING_ALLOWED=NO \
+                > "log-$DT-$LC.txt" 2>&1
+              RC=$?
+              set -e
+              tail -30 "log-$DT-$LC.txt"
+              # 退出码不作数：UI 测试可能整体失败但仍截到了图，也可能"成功"
+              # 却一条用例都没跑。判据统一交给下面的 verify 步骤。
+              echo "xcodebuild 退出码 $RC（仅供参考，成败以 verify 为准）"
+              xcparse screenshots "rb-$DT-$LC.xcresult" "$OUT" || true
+            done
+            echo "::endgroup::"
+          done
+
+      # 绿色必须由产出背书：张数对、尺寸对，缺一不可。
+      # 尺寸不是猜的——是从 ASC 上现有截图读出来的实际像素。
+      - name: Verify
+        env:
+          LOCALES: ${{ github.event.inputs.locales }}
+          DISPLAY_TYPES: ${{ github.event.inputs.display_types }}
+        run: |
+          set -euo pipefail
+          FAIL=0
+          for DT in $DISPLAY_TYPES; do
+            case "$DT" in
+              APP_IPHONE_61)          W=1206; H=2622 ;;
+              APP_IPHONE_67)          W=1320; H=2868 ;;
+              APP_IPAD_PRO_3GEN_129)  W=2064; H=2752 ;;
+              *) echo "未登记尺寸: $DT"; exit 1 ;;
+            esac
+            for LC in $LOCALES; do
+              python3 ios/scripts/verify_screenshots.py "screenshots/$DT/$LC" \
+                --expect 7 --width "$W" --height "$H" || FAIL=1
+            done
+          done
+          exit $FAIL
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-store-screenshots
+          path: screenshots
+          retention-days: 14
+
+      # 失败时要能看出是哪一轮、卡在哪个页面。
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshot-logs
+          path: |
+            log-*.txt
+            rb-*.xcresult
+          retention-days: 7
