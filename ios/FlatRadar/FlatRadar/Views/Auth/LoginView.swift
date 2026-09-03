@@ -34,9 +34,8 @@ struct LoginView: View {
     @State private var liveCore = false
     @State private var showTerms = false
     @State private var showPrivacy = false
-    @State private var showRegister = false
-    @State private var regUsername = ""
-    @State private var regPassword = ""
+    /// 登录被拒且是 401 时，待确认建号的用户名。非 nil 即弹确认框。
+    @State private var pendingRegistrationName: String?
     @State private var isAuthenticatingBiometric = false
     @State private var contentWidth: CGFloat = 0
     private var useLargeCards: Bool { contentWidth > 410 }
@@ -207,8 +206,28 @@ struct LoginView: View {
                 !old && new
             }
             .task { await fetchStats() }
-            .sheet(isPresented: $showRegister) {
-                registerSheet
+            // 登录即注册：名字没被注册过时，登录会被后端以 401 拒绝（响应刻意
+            // 不区分"密码错"和"查无此人"，不给用户枚举留侧信道）。这里把决定权
+            // 交回用户——要不要用这个名字建一个号。
+            //
+            // 条款同意就落在这个确认框上：Web 端删掉自动注册时列的第一条理由，
+            // 正是"登录表单上根本没有勾选框，只能替用户默认同意"。
+            .confirmationDialog(
+                "Create an account?",
+                isPresented: Binding(
+                    get: { pendingRegistrationName != nil },
+                    set: { if !$0 { pendingRegistrationName = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: pendingRegistrationName
+            ) { name in
+                Button("Create Account") {
+                    pendingRegistrationName = nil
+                    Task { await performRegister() }
+                }
+                Button("Cancel", role: .cancel) { pendingRegistrationName = nil }
+            } message: { name in
+                Text("No account signed in as \"\(name)\" with that password. Create a new account with this name and password?\n\nBy creating an account you agree to the Terms of Use and Privacy Policy.")
             }
         }
     }
@@ -559,7 +578,11 @@ struct LoginView: View {
                     } label: {
                         HStack(spacing: 6) {
                             if auth.isLoading { ProgressView() }
-                            Text("Login").fontWeight(.semibold)
+                            if mode == .user {
+                                Text("Sign In / Register").fontWeight(.semibold)
+                            } else {
+                                Text("Login").fontWeight(.semibold)
+                            }
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 10)
                     }
@@ -568,16 +591,16 @@ struct LoginView: View {
                     .tint(mode == .admin ? .red : .blue)
 
                     if mode == .user {
-                        HStack(spacing: 4) {
-                            Text("Don't have an account?")
+                        // 注册不再是单独一屏：名字没被注册过时，登录失败会问一句
+                        // 「要不要用这个名字建号」，同意即注册（见 offerRegistration）。
+                        VStack(spacing: 2) {
+                            Text("New name = new account.")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Button("Register") {
-                                showRegister = true
-                            }
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(brandBlue).underline()
+                            Text("By continuing you agree to the Terms of Use and Privacy Policy.")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                                .multilineTextAlignment(.center)
                         }
-                        .padding(.top, 2)
+                        .padding(.top, 4)
                     }
                 }
                 .padding(.horizontal, 12).padding(.bottom, 12)
@@ -604,7 +627,7 @@ struct LoginView: View {
 
             // 只声明"与 Holland2Stay 无关"是不够的：现在监控七个平台，其余六个
             // 一个都没覆盖到。改成泛指，加平台时不必再回来改这句法律声明。
-            Text("FlatRadar is an **unofficial** third-party client.\nNot affiliated with, endorsed by, or sponsored by any of the platforms it monitors.\nAll listing data belongs to its respective owners.")
+            Text("FlatRadar is an **independent** third-party client.\nNot affiliated with, endorsed by, or sponsored by any of the platforms it monitors.\nAll listing data belongs to its respective owners.")
                 .font(.system(size: 12))
                 .foregroundStyle(footerTextColor)
                 .multilineTextAlignment(.center).lineSpacing(3)
@@ -737,6 +760,11 @@ struct LoginView: View {
         // 登录失败 → 清理 pending（isAuthenticated 未变，onChange 没触发）
         if !auth.isAuthenticated {
             auth.pendingBiometricCredential = nil
+            // 凭据被拒（401）才提议建号。网络故障、限流、服务端错误一律不提——
+            // 断网时问「要不要注册」会让用户以为自己的账号不存在了。
+            if mode == .user, case .unauthorized = auth.lastError {
+                pendingRegistrationName = username
+            }
             return
         }
 
@@ -749,101 +777,27 @@ struct LoginView: View {
         auth.enterAsGuest()
     }
 
-    // MARK: - Register sheet
-
-    private var registerSheet: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                Image(systemName: "person.badge.plus")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.blue)
-                    .padding(.top, 24)
-
-                Text("Create Account")
-                    .font(.title2.weight(.bold))
-
-                VStack(spacing: 12) {
-                    HStack(spacing: 0) {
-                        Image(systemName: "person.fill")
-                            .font(.caption).foregroundStyle(.secondary).frame(width: 28)
-                        TextField("Username", text: $regUsername)
-                            .textContentType(.username).textFieldStyle(.plain)
-                            .autocorrectionDisabled().textInputAutocapitalization(.never)
-                    }
-                    .padding(12).background(.quinary, in: RoundedRectangle(cornerRadius: 10))
-
-                    HStack(spacing: 0) {
-                        Image(systemName: "key.fill")
-                            .font(.caption).foregroundStyle(.secondary).frame(width: 28)
-                        if showRegPasswordPlain {
-                            TextField("Password (min 4 characters)", text: $regPassword)
-                                .textContentType(.newPassword).textFieldStyle(.plain)
-                                .autocorrectionDisabled().textInputAutocapitalization(.never)
-                        } else {
-                            SecureField("Password (min 4 characters)", text: $regPassword)
-                                .textContentType(.newPassword).textFieldStyle(.plain)
-                        }
-                        Button {
-                            showRegPasswordPlain.toggle()
-                        } label: {
-                            Image(systemName: showRegPasswordPlain ? "eye.slash.fill" : "eye.fill")
-                                .font(.caption).foregroundStyle(.secondary)
-                                .frame(width: 28, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(showRegPasswordPlain ? "Hide password" : "Show password")
-                    }
-                    .padding(12).background(.quinary, in: RoundedRectangle(cornerRadius: 10))
-                }
-                .padding(.horizontal)
-
-                Button {
-                    Task { await performRegister() }
-                } label: {
-                    HStack(spacing: 6) {
-                        if auth.isLoading { ProgressView() }
-                        Text("Create Account & Login").fontWeight(.semibold)
-                    }
-                    .frame(maxWidth: .infinity).padding(.vertical, 12)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(regUsername.count < 2 || regPassword.count < 4 || auth.isLoading)
-                .padding(.horizontal)
-
-                if let err = auth.errorMessage {
-                    Text(err)
-                        .font(.caption).foregroundStyle(.red)
-                        .multilineTextAlignment(.center).padding(.horizontal)
-                }
-
-                HStack(spacing: 4) {
-                    Text("By creating an account, you agree to our")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                    Button("Terms") { showTerms = true }
-                        .font(.caption2).foregroundStyle(brandBlue)
-                }
-
-                Spacer()
-            }
-            .presentationDetents([.fraction(0.48)])
-            .presentationDragIndicator(.visible)
-        }
-    }
-
+    /// 用主表单里那对用户名/密码建号。
+    ///
+    /// 只在用户于确认框里点了「Create Account」之后才会走到这里——那个确认框
+    /// 上写着条款同意，这是 App 端 terms_accepted 的落点。Web 端把自动注册删掉
+    /// 时列的头一条理由就是"登录表单上根本没有那个勾选框，只能替用户默认同意"。
+    ///
+    /// 用户名按后端同样的规则截到 64 字符：Web 那条理由之二是自动注册绕过了
+    /// `[:64]`，客户端先截一次，显示的名字与真正建出来的账号一致。
     private func performRegister() async {
-        guard regUsername.count >= 2, regPassword.count >= 4 else { return }
+        let name = String(username.trimmingCharacters(in: .whitespaces).prefix(64))
+        guard name.count >= 2, password.count >= 4 else { return }
 
         // 注册前设 pending，同 performLogin——register 内部 login 完成后
         // isAuthenticated → true，ContentView.onChange 需要此时 pending 已就位。
         if BiometricAuthService.isAvailable,
            !BiometricAuthService.hasStoredCredentials {
-            auth.pendingBiometricCredential = (regUsername, regPassword, "user")
+            auth.pendingBiometricCredential = (name, password, "user")
         }
 
-        await auth.register(name: regUsername, password: regPassword)
+        await auth.register(name: name, password: password)
         if auth.isAuthenticated, !auth.isGuest {
-            showRegister = false
             await push.requestPermissionAndRegister()
         } else {
             auth.pendingBiometricCredential = nil

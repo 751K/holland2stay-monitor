@@ -244,10 +244,7 @@ struct FilterEditView: View {
             } else {
                 ForEach(options.sources, id: \.self) { source in
                     Toggle(isOn: sourceBinding(source)) {
-                        HStack(spacing: 8) {
-                            PlatformBadge(source: source, size: .large)
-                            Text(Platform.displayName(source))
-                        }
+                        Text(Platform.displayName(source))
                     }
                 }
             }

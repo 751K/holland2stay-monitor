@@ -139,21 +139,6 @@ struct SettingsView: View {
                 // 4. Account
                 if auth.isAuthenticated, auth.role != .guest {
                     Section("Account") {
-                        HStack {
-                            Text("Role")
-                            Spacer()
-                            Text(auth.role.rawValue.capitalized)
-                                .foregroundStyle(.secondary)
-                        }
-                        if let user = auth.userInfo {
-                            HStack {
-                                Text("Name")
-                                Spacer()
-                                Text(user.name)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
                         if auth.isUser, BiometricAuthService.isAvailable {
                             let name = BiometricAuthService.biometryName
                             if BiometricAuthService.hasStoredCredentials {
@@ -259,12 +244,8 @@ struct SettingsView: View {
                     }
                 } else if auth.isGuest {
                     Section("Account") {
-                        HStack {
-                            Text("Role")
-                            Spacer()
-                            Text("Guest")
-                                .foregroundStyle(.secondary)
-                        }
+                        // 不再显示 "Role: Guest" —— 底下那个按钮就叫
+                        // "Sign Out of Guest Mode"，已经把身份说清楚了。
                         Button(role: .destructive) {
                             showLogoutConfirm = true
                         } label: {

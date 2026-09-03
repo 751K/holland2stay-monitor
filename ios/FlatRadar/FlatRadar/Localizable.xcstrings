@@ -2042,6 +2042,34 @@
         }
       }
     },
+    "Browse Listings" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Explora los anuncios"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bekijk woningen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浏览房源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "瀏覽房源"
+          }
+        }
+      }
+    },
     "Browse listings\nread-only." : {
       "localizations" : {
         "en" : {
@@ -2163,6 +2191,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "請我喝杯咖啡 ☕"
+          }
+        }
+      }
+    },
+    "By continuing you agree to the Terms of Use and Privacy Policy." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Al continuar aceptas las Condiciones de uso y la Política de privacidad."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Door verder te gaan ga je akkoord met de Gebruiksvoorwaarden en het Privacybeleid."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续即表示你同意《使用条款》与《隐私政策》。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "繼續即表示你同意《使用條款》與《隱私政策》。"
           }
         }
       }
@@ -2845,6 +2901,34 @@
         }
       }
     },
+    "Create an account?" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Crear una cuenta?"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account aanmaken?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要创建账户吗？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要創建賬戶嗎？"
+          }
+        }
+      }
+    },
     "Create users via the web admin panel." : {
       "localizations" : {
         "en" : {
@@ -2971,6 +3055,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "儀表盤"
+          }
+        }
+      }
+    },
+    "Dashboard cards are interactive.\nTap any mini chart to drill into daily trends, price distributions, or energy labels.\nThe \"New · 24h\" stat shows real matching listings." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las tarjetas del panel son interactivas.\nToca cualquier minigráfico para ver tendencias diarias, distribuciones de precio o etiquetas energéticas.\nLa cifra \"New · 24h\" muestra anuncios reales que coinciden."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De kaarten op het dashboard zijn interactief.\nTik op een minigrafiek voor dagtrends, prijsverdelingen of energielabels.\nHet cijfer \"New · 24h\" toont echte woningen die matchen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仪表盘卡片都可以点。\n点任意迷你图表可展开每日趋势、价格分布或能耗等级。\n「New · 24h」显示的是真实匹配到的房源。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儀表板卡片都可以點。\n點任意迷你圖表可展開每日趨勢、價格分佈或能耗等級。\n「New · 24h」顯示的是真實匹配到的房源。"
           }
         }
       }
@@ -3356,40 +3468,6 @@
         }
       }
     },
-    "Don't have an account?" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Don't have an account?"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "¿No tienes una cuenta?"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Heb je nog geen account?"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "还没有账号？"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "還沒有賬號？"
-          }
-        }
-      }
-    },
     "Done" : {
       "localizations" : {
         "en" : {
@@ -3731,6 +3809,34 @@
         }
       }
     },
+    "Every Platform, One Place" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Todas las plataformas en un solo lugar"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle platforms op één plek"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有平台，一处看全"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有平台，一處看全"
+          }
+        }
+      }
+    },
     "Explore" : {
       "localizations" : {
         "en" : {
@@ -3761,6 +3867,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "數據探索"
+          }
+        }
+      }
+    },
+    "Explore Stats" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Explora las estadísticas"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verken de statistieken"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看统计"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看統計"
           }
         }
       }
@@ -3845,6 +3979,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "反饋"
+          }
+        }
+      }
+    },
+    "Filter & Search" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtra y busca"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filteren en zoeken"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "筛选与搜索"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "篩選與搜索"
           }
         }
       }
@@ -4102,6 +4264,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "FlatRadar 是**非官方**第三方用戶端。\n與其監控的任何平台均無關聯、未獲認可或贊助。\n所有房源資料歸各自擁有者所有。"
+          }
+        }
+      }
+    },
+    "FlatRadar watches %lld Dutch rental platforms and gathers their listings into a single feed.\nEvery listing is labelled with the platform it came from." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FlatRadar vigila %lld plataformas de alquiler neerlandesas y reúne sus anuncios en un único listado.\nCada anuncio indica de qué plataforma procede."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FlatRadar volgt %lld Nederlandse huurplatforms en brengt hun woningen samen in één overzicht.\nBij elke woning staat van welk platform die komt."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FlatRadar 持续监控 %lld 个荷兰租房平台，把它们的房源汇总到一处。\n每条房源都标注了来源平台。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "FlatRadar 持續監控 %lld 個荷蘭租房平台，把它們的房源匯總到一處。\n每條房源都標註了來源平台。"
           }
         }
       }
@@ -4715,6 +4905,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "列表"
+          }
+        }
+      }
+    },
+    "List, Map, and Calendar show the same listings from different angles.\nSwitch between them from the menu at the top left." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista, Mapa y Calendario muestran los mismos anuncios desde ángulos distintos.\nCambia entre ellos desde el menú de arriba a la izquierda."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lijst, Kaart en Agenda tonen dezelfde woningen vanuit een andere hoek.\nWissel ertussen via het menu linksboven."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列表、地图、日历是同一批房源的三种视角。\n从左上角的菜单切换。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列表、地圖、日曆是同一批房源的三種視角。\n從左上角的選單切換。"
+          }
+        }
+      }
+    },
+    "List, Map, and Calendar show the same listings from different angles.\nSwitch between them with the picker at the top." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista, Mapa y Calendario muestran los mismos anuncios desde ángulos distintos.\nCambia entre ellos con el selector de arriba."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lijst, Kaart en Agenda tonen dezelfde woningen vanuit een andere hoek.\nWissel ertussen met de kiezer bovenaan."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列表、地图、日历是同一批房源的三种视角。\n用顶部的选择器切换。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列表、地圖、日曆是同一批房源的三種視角。\n用頂部的選擇器切換。"
           }
         }
       }
@@ -5744,6 +5990,34 @@
         }
       }
     },
+    "Narrow by city, platform, status, type, or energy label.\nUse search to find a specific address.\nActive filters appear as chips — tap to remove." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acota por ciudad, plataforma, estado, tipo o etiqueta energética.\nUsa la búsqueda para encontrar una dirección concreta.\nLos filtros activos aparecen como etiquetas: tócalas para quitarlas."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter op stad, platform, status, type of energielabel.\nGebruik zoeken om een specifiek adres te vinden.\nActieve filters verschijnen als labels — tik erop om ze te verwijderen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按城市、平台、状态、房型或能耗等级收窄范围。\n用搜索查找具体地址。\n已生效的筛选会显示为标签，点一下即可移除。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按城市、平台、狀態、房型或能耗等級收窄範圍。\n用搜索查找具體地址。\n已生效的篩選會顯示為標籤，點一下即可移除。"
+          }
+        }
+      }
+    },
     "Neighborhoods" : {
       "localizations" : {
         "en" : {
@@ -5836,6 +6110,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "網絡錯誤：%@"
+          }
+        }
+      }
+    },
+    "New name = new account." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Un nombre nuevo crea una cuenta nueva."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Een nieuwe naam maakt een nieuw account."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没用过的名字会创建新账户。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒用過的名字會創建新賬戶。"
           }
         }
       }
@@ -6150,6 +6452,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下次登陸使用 %@ 替代密碼登陸"
+          }
+        }
+      }
+    },
+    "No account signed in as \"%@\" with that password. Create a new account with this name and password?\n\nBy creating an account you agree to the Terms of Use and Privacy Policy." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No se pudo iniciar sesión como «%@» con esa contraseña. ¿Crear una cuenta nueva con este nombre y contraseña?\n\nAl crear una cuenta aceptas las Condiciones de uso y la Política de privacidad."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggen als \"%@\" met dat wachtwoord is niet gelukt. Een nieuw account aanmaken met deze naam en dit wachtwoord?\n\nDoor een account aan te maken ga je akkoord met de Gebruiksvoorwaarden en het Privacybeleid."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用这个密码无法以「%@」登录。要用这个名字和密码创建一个新账户吗？\n\n创建账户即表示你同意《使用条款》与《隐私政策》。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用這個密碼無法以「%@」登入。要用這個名字和密碼創建一個新賬戶嗎？\n\n創建賬戶即表示你同意《使用條款》與《隱私政策》。"
           }
         }
       }
@@ -7463,40 +7793,6 @@
         }
       }
     },
-    "Password (min 4 characters)" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Password (min 4 characters)"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Contraseña (mínimo 4 caracteres)"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Wachtwoord (min. 4 tekens)"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "密码（至少4个字符）"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "密碼（至少4個字符）"
-          }
-        }
-      }
-    },
     "Password Updated" : {
       "localizations" : {
         "es" : {
@@ -8300,40 +8596,6 @@
         }
       }
     },
-    "Register" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Register"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Registrarse"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Registreren"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "注册"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "註冊"
-          }
-        }
-      }
-    },
     "Registration failed" : {
       "localizations" : {
         "en" : {
@@ -8649,40 +8911,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重試"
-          }
-        }
-      }
-    },
-    "Role" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Role"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Función"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Functie"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "角色"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "角色"
           }
         }
       }
@@ -9223,6 +9451,34 @@
         }
       }
     },
+    "Set a notification filter in Settings to receive push alerts for new listings that match your criteria.\nThe Alerts tab shows a live stream of every match." : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Configura un filtro de notificaciones en Ajustes para recibir avisos de anuncios nuevos que cumplan tus criterios.\nLa pestaña Alertas muestra en directo cada coincidencia."
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stel in Instellingen een meldingsfilter in om pushberichten te krijgen voor nieuwe woningen die aan je criteria voldoen.\nHet tabblad Meldingen toont live elke match."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在设置里配置通知筛选，符合条件的新房源会推送给你。\n「提醒」标签页实时列出每一条命中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在設置裡配置通知篩選，符合條件的新房源會推送給你。\n「提醒」標籤頁實時列出每一條命中。"
+          }
+        }
+      }
+    },
     "Set Up" : {
       "localizations" : {
         "es" : {
@@ -9318,6 +9574,34 @@
     },
     "Shown" : {
 
+    },
+    "Sign In / Register" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Iniciar sesión / Registrarse"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggen / Registreren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录 / 注册"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登入 / 註冊"
+          }
+        }
+      }
     },
     "Sign in to your\naccount." : {
       "localizations" : {
@@ -9637,6 +9921,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "狀態變更"
+          }
+        }
+      }
+    },
+    "Stay Updated" : {
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mantente al día"
+          }
+        },
+        "nl" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blijf op de hoogte"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保持同步"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保持同步"
           }
         }
       }
@@ -10975,40 +11287,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用戶賬戶會收到與其篩選條件匹配的房源推送通知。測試推送用於端到端驗證當前設備會話。"
-          }
-        }
-      }
-    },
-    "Username" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Username"
-          }
-        },
-        "es" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Nombre de usuario"
-          }
-        },
-        "nl" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Gebruikersnaam"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用户名"
-          }
-        },
-        "zh-Hant" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "用戶名"
           }
         }
       }

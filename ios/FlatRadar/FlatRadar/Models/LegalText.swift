@@ -6,7 +6,7 @@ Last updated: May 26, 2026
 
 These Terms of Use govern your access to and use of FlatRadar.
 
-FlatRadar is an independent, unofficial monitoring tool for rental housing listings across multiple housing platforms. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.
+FlatRadar is an independent monitoring tool for rental housing listings across multiple housing platforms. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.
 
 By creating an account, accessing, or using FlatRadar, you agree to these Terms.
 
@@ -156,7 +156,7 @@ Last updated: May 26, 2026
 
 This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
 
-FlatRadar is an independent, unofficial monitoring tool for rental housing listings across multiple housing platforms. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.
+FlatRadar is an independent monitoring tool for rental housing listings across multiple housing platforms. FlatRadar is not affiliated with, endorsed by, sponsored by, maintained by, or operated by any of the housing platforms it monitors.
 
 By using FlatRadar, you acknowledge that you have read and understood this Privacy Policy.
 
