@@ -140,6 +140,43 @@ def verify_h2s_credentials(email: str, password: str) -> bool:
         return False
 
 
+def verify_user_password(user: UserConfig, password: str) -> bool:
+    """user 的密码是否正确。``/auth/login`` 与 ``/auth/verify`` **共用这一份**。
+
+    为什么必须共用
+    --------------
+    ``/auth/verify`` 校验通过后，客户端会把这个密码存进 Keychain，日后由
+    Face ID 解锁并回放给 ``/auth/login``。两处判定一旦分家：
+
+    - verify 比 login 宽 → 存进去的密码登录时不认，用户下次开 App 直接被
+      Face ID 卡住，而且看不出为什么；
+    - verify 比 login 严 → 明明能登录的密码被告知"密码错误"。
+
+    抄第二份最可能漏掉的就是下面这个 fallback——它默认关闭，测试环境几乎
+    永远走不到，抄漏了不会有任何症状，直到某个开了它的用户来报障。
+
+    H2S fallback 是历史遗留的"用 H2S 邮箱+密码登录本地账号"快捷路径。若本地
+    用户名 == 用户的 H2S 邮箱，且攻击者通过钓鱼/撞库/泄露拿到 H2S 那边的密码，
+    就能直接以受害者身份签出 role=user 的 Bearer token。因此默认 fail-closed，
+    只在用户记录显式 ``allow_h2s_login=True`` 时才允许。
+    """
+    authed = False
+    if user.app_login_enabled:
+        authed = verify_app_password(user, password)
+    if not authed and user.allow_h2s_login:
+        logger.info(
+            "app_password 校验失败，尝试 H2S 凭据 fallback（用户显式允许）user=%s",
+            user.name,
+        )
+        authed = verify_h2s_credentials(user.name, password)
+    elif not authed:
+        logger.info(
+            "app_password 校验失败 user=%s，H2S fallback 未启用，拒绝",
+            user.name,
+        )
+    return authed
+
+
 def _login() -> Any:
     """POST /auth/login —— JSON body: {username, password, device_name?, ttl_days?}"""
     # 限流：复用 Web 后台的 IP 退避，行为完全一致
@@ -204,24 +241,7 @@ def _login() -> Any:
             _dummy_bcrypt_verify(password)
             record_login_failure(client_ip)
             return _err.err_forbidden("该用户已停用")
-        authed = False
-        if user.app_login_enabled:
-            authed = verify_app_password(user, password)
-        # H2S fallback 是历史遗留的"用 H2S 邮箱+密码登录本地账号"快捷路径。
-        # 但若本地用户名 == 用户的 H2S 邮箱，且攻击者通过钓鱼/撞库/泄露拿到
-        # H2S 那边的密码，就能直接以受害者身份签出 role=user 的 Bearer token。
-        # 因此默认 fail-closed，只在用户记录显式 allow_h2s_login=True 时才允许。
-        if not authed and user.allow_h2s_login:
-            logger.info(
-                "app_password 校验失败，尝试 H2S 凭据 fallback（用户显式允许）user=%s",
-                username,
-            )
-            authed = verify_h2s_credentials(username, password)
-        elif not authed:
-            logger.info(
-                "app_password 校验失败 user=%s，H2S fallback 未启用，拒绝",
-                username,
-            )
+        authed = verify_user_password(user, password)
         if not authed:
             record_login_failure(client_ip)
             return _err.err_unauthorized("用户名或密码错误")
@@ -496,6 +516,68 @@ def _change_password() -> Any:
     return _err.ok({"revoked_other_sessions": revoked})
 
 
+
+def _verify_password() -> Any:
+    """
+    POST /auth/verify —— 确认当前登录 user 的密码，**不签发任何 token**。
+
+    Body: ``{password}`` → ``{"ok": true}``；密码错误返回 401。
+
+    为什么需要它
+    ------------
+    iOS 要开启 Face ID 登录，必须把明文密码写进 Keychain（日后由生物认证解锁
+    并回放给 ``/auth/login``）。密码只在登录那一刻存在于客户端内存里，设置页
+    手里只有 token——所以设置页要开启 Face ID，只能让用户重新输一次密码，
+    并需要一个"只回答对不对"的端点来确认。
+
+    不复用 ``/auth/login`` 来确认的原因：那会真的签出一个 token，用户每确认
+    一次，设置页里的"活跃设备会话数"就莫名其妙涨一个。
+
+    安全设计（与 ``/auth/password`` 一致）
+    -------------------------------------
+    - 仅 ``role='user'``：admin 密码在 .env，且 Face ID 只对 user 开放
+    - 操作对象由 ``g.api_user_id`` 锁定，不接受 username 参数——否则持有
+      任意一个 token 的人就能拿它当**密码验证预言机**去撞别人的账号
+    - 失败计入登录限流，防止用同一个 token 暴力试密码
+    - 成功不改变任何状态：不发 token、不撤销会话、不动用户记录
+    """
+    from flask import g
+
+    user_id = getattr(g, "api_user_id", None)
+    if not user_id:
+        return _err.err_unauthorized()
+
+    body = request.get_json(silent=True) or {}
+    password = body.get("password") or ""
+    if not password:
+        return _err.err_validation("password 不能为空")
+    if len(password) > 256:
+        return _err.err_validation("密码过长")
+
+    client_ip = request.remote_addr or "?"
+    allowed, wait = api_auth.login_rate_check()
+    if not allowed:
+        _time.sleep(wait)
+
+    try:
+        users = load_users()
+    except RuntimeError as e:
+        logger.error("密码确认: 用户配置加载失败: %s", e)
+        return _err.err_server_error(e, "服务暂时不可用，请稍后再试")
+
+    user = next((u for u in users if u.id == user_id), None)
+    if user is None or not user.enabled:
+        # token 合法但用户已被删/停用 —— fail-closed
+        return _err.err_unauthorized()
+
+    if not verify_user_password(user, password):
+        record_login_failure(client_ip)
+        return _err.err_unauthorized("密码错误")
+
+    clear_login_failures(client_ip)
+    return _err.ok({"ok": True})
+
+
 # ── Blueprint 注册 ───────────────────────────────────────────────────
 
 def register(bp: Blueprint) -> None:
@@ -527,5 +609,11 @@ def register(bp: Blueprint) -> None:
         "/auth/password",
         endpoint="auth_password",
         view_func=api_auth.bearer_required(("user",))(_change_password),
+        methods=["POST"],
+    )
+    bp.add_url_rule(
+        "/auth/verify",
+        endpoint="auth_verify",
+        view_func=api_auth.bearer_required(("user",))(_verify_password),
         methods=["POST"],
     )
