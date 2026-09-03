@@ -151,11 +151,19 @@ class TestWebRegister:
         from app.auth import _REGISTER_RECORDS
         _REGISTER_RECORDS.clear()
 
-    def test_login_page_has_register_form(self, client):
+    def test_login_page_can_actually_reach_register(self, client):
+        """注册入口必须真的**能到达** /register。
+
+        原断言是 ``b"register" in r.data.lower()``——页面上任何一处 CSS 类名、
+        任何一句文案里带 register 都能让它通过。事实上有很长一段时间：按钮写着
+        「Sign in / Register」、弹窗承诺「未注册的账户将自动完成注册」，而全站
+        没有任何东西指向 /register，新用户根本注册不了。这条断言全程是绿的。
+        """
         r = client.get("/login")
         assert r.status_code == 200
-        # v1.7.6+ 注册改版为确认弹窗 + 自动注册，不再有独立 HTML 表单
-        assert b"register" in r.data.lower() or b"Register" in r.data
+        page = r.data.decode("utf-8", "ignore")
+        assert "/register" in page, "页面上没有任何通往 /register 的路径"
+        assert 'id="register-action"' in page, "确认弹窗拿不到 register 的 URL"
 
     def test_register_without_csrf_returns_403(self, client):
         r = client.post("/register", data={
@@ -219,8 +227,11 @@ class TestLoginFailureAndBackoff:
             "password": "WRONG",
             "csrf_token": csrf,
         })
-        # v1.7.6+ 自动注册：admin 密码 + 不存在 username → 自动创建并 302
-        assert r.status_code in (200, 302)
+        # /login 不再自动注册：用户不存在与密码错误必须**同样**回到登录页，
+        # 否则一次 POST 就能判断任意用户名是否注册过。
+        # 原断言写的是 `in (200, 302)`，两种结果都放行——把自动注册删掉那次
+        # 改动没有让任何一条测试变红，正是因为这种写法。
+        assert r.status_code == 200
 
     def test_wrong_username_returns_200(self, client, test_credentials):
         client.get("/login")
@@ -231,8 +242,8 @@ class TestLoginFailureAndBackoff:
             "password": test_credentials["password"],
             "csrf_token": csrf,
         })
-        # v1.7.6+ 自动注册：不存在用户会被创建并重定向
-        assert r.status_code in (200, 302)
+        # 同上：不存在的用户名不能被静默建号，也不能与「密码错误」区分开。
+        assert r.status_code == 200
 
     def test_brute_force_state_is_module_level(self):
         """app.auth 维护 IP → 失败时间戳 list，超阈值后产生延迟。
@@ -350,7 +361,8 @@ class TestNonAsciiInputs:
             "password": test_credentials["password"],
             "csrf_token": csrf,
         })
-        # v1.7.6+ 自动注册：中文用户名 → 自动创建账户并重定向，绝不 500
+        # 中文用户名不能让 /login 抛 500（hmac.compare_digest 对非 ASCII str
+        # 会 TypeError，必须先 encode）。这里只守「不 500」。
         assert r.status_code in (200, 302), f"non-ASCII username crashed: {r.status_code}"
 
     def test_chinese_password_returns_200_not_500(self, client, test_credentials):

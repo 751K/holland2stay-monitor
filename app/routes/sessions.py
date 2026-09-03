@@ -174,8 +174,13 @@ def register_user() -> Any:
         flash(reg_reason, "danger")
         return _render_login(next_value=next_value, status=429)
 
-    username = request.form.get("register_username", "").strip()[:64]
-    password = request.form.get("register_password", "")
+    # 字段名接受两种写法。登录页只有一个表单（用户名/密码叫 username/password），
+    # 「登录即注册」的确认弹窗把它整个改投到这里；而独立的 register_username /
+    # register_password 是老写法，测试仍在用。两个都收，取先出现的那个。
+    username = (request.form.get("register_username")
+                or request.form.get("username") or "").strip()[:64]
+    password = (request.form.get("register_password")
+                or request.form.get("password") or "")
     terms_accepted = request.form.get("terms_accepted") == "1"
 
     if not username or not password:

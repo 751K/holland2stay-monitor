@@ -568,6 +568,10 @@
     <form method="POST" action="{{ url_for('login') }}" id="login-form" autocomplete="on" onsubmit="return handleLoginSubmit(this)">
       <input type="hidden" name="next" value="{{ next }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      {# 「登录即注册」确认后，confirmLogin() 把表单整个改投到这里。
+         同一个 POST 会带上 terms_accepted=1——那是同意条款的凭证，
+         由 register_user 校验。#}
+      <input type="hidden" id="register-action" value="{{ url_for('register_user') }}">
 
       <div class="login-field">
         <label for="username">{{ _('login_username') }}</label>
@@ -692,6 +696,25 @@ function cancelLogin() {
 
 function confirmLogin() {
   document.getElementById('register-modal-card').classList.add('hidden');
+  // 改投 /register，而不是再 POST 一次 /login。
+  //
+  // /login 早就不自动注册了（见 app/routes/sessions.py 里那段注释：绕过
+  // terms_accepted、绕过 64 字符截断、构成用户枚举侧信道），但这个弹窗一直
+  // 在承诺「首次登录将自动创建账户」，确认之后拿到的却是「用户名或密码错误」。
+  // 全站没有任何表单指向 /register，新用户因此根本注册不了。
+  //
+  // terms_accepted 只有走到这一步才写：用户是在读完上面那两条之后按的确认，
+  // 这才是同意条款的凭证。直接在 /login 里替用户默认同意是不对的。
+  var form = document.getElementById('login-form');
+  var action = document.getElementById('register-action');
+  if (form && action && action.value) {
+    form.action = action.value;
+    var t = document.createElement('input');
+    t.type = 'hidden';
+    t.name = 'terms_accepted';
+    t.value = '1';
+    form.appendChild(t);
+  }
   submitLoginForm();
 }
 
