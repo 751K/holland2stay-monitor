@@ -157,6 +157,40 @@ struct ListingFilter: Codable, Equatable, Sendable {
         return parts
     }
 
+    /// 摘要的结构化形态，用于把设置页那行连排文字排成可折行的 chip。
+    ///
+    /// 为什么不直接用 ``summaryParts``
+    /// -------------------------------
+    /// 那个数组把平台压成了一段字符串（`"H2S, OC, XR, MG, PZ, SE"`），排成
+    /// chip 时它会变成一枚很长的胶囊，而平台本来就有一套认得出的彩色徽章
+    /// （``PlatformBadge``）。这里把平台拆开单独给出，其余条件仍是文本。
+    ///
+    /// 选中平台多于三个时反而合并成一枚 "N platforms"：七选六的时候摆六枚
+    /// 徽章，占掉整张卡片却几乎等于"没筛"，信息密度是负的。
+    var summaryChips: [SummaryChip] {
+        var chips: [SummaryChip] = []
+        if let r = maxRent { chips.append(.text("≤ €\(Int(r))/mo")) }
+        if let a = minArea { chips.append(.text("≥ \(Int(a)) m²")) }
+        if let f = minFloor { chips.append(.text("Floor ≥ \(f)")) }
+        if !allowedCities.isEmpty { chips.append(.text(Self.brief(allowedCities))) }
+        if !allowedNeighborhoods.isEmpty { chips.append(.text(Self.brief(allowedNeighborhoods))) }
+        if !allowedSources.isEmpty {
+            if allowedSources.count > 3 {
+                chips.append(.platformCount(allowedSources.count))
+            } else {
+                chips += allowedSources.map { .platform($0) }
+            }
+        }
+        if !allowedEnergy.isEmpty { chips.append(.text("Energy ≥ \(allowedEnergy)")) }
+        if !allowedTypes.isEmpty { chips.append(.text(Self.brief(allowedTypes))) }
+        if !allowedOccupancy.isEmpty { chips.append(.text(Self.brief(allowedOccupancy, label: "Occupancy"))) }
+        if !allowedTenant.isEmpty { chips.append(.text(Self.brief(allowedTenant, label: "Tenant"))) }
+        if !allowedContract.isEmpty { chips.append(.text(Self.brief(allowedContract, label: "Contract"))) }
+        if !allowedFinishing.isEmpty { chips.append(.text(Self.brief(allowedFinishing))) }
+        if !allowedOffer.isEmpty { chips.append(.text(Self.brief(allowedOffer, label: "Offer"))) }
+        return chips
+    }
+
     /// 列表压成一段：最多两项，其余记成 "+N"。
     /// 值本身读不出维度的（"Two"、"Indefinite"）由调用方给 `label`。
     ///
@@ -173,6 +207,19 @@ struct ListingFilter: Codable, Equatable, Sendable {
     private static nonisolated func sourceShortText(_ source: String) -> String {
         Platform.shortName(source)
     }
+}
+
+/// 设置页摘要里的一枚 chip。
+///
+/// 平台单独成一档：它有 ``PlatformBadge`` 那套彩色徽章，塞进文本胶囊等于把
+/// 已经建立起来的辨识度丢掉。
+enum SummaryChip: Hashable, Sendable {
+    /// 单个平台，渲染成彩色徽章。关联值是 source key。
+    case platform(String)
+    /// 选中平台过多时的合并写法。
+    case platformCount(Int)
+    /// 其余条件，中性胶囊。
+    case text(String)
 }
 
 /// 已知能耗等级白名单，与后端 ``config.ENERGY_LABELS`` 对齐（优→差排序）。

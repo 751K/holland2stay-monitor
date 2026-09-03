@@ -649,10 +649,10 @@ struct MapView: View {
             // Xior 的 city 字段是楼盘名（"Amsterdam Naritaweg"），而房源名是
             // "Amsterdam Naritaweg 155C"，照原样并排会念两遍同一件事。
             HStack(spacing: 8) {
-                PlatformBadge(source: l.source, size: .medium)
+                PlatformBadge(source: l.source, size: .large)
                 if let place = placeText(for: l) {
                     Text(place)
-                        .font(.subheadline)
+                        .font(.body)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -748,8 +748,8 @@ struct MapView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
             Text(caption)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
     }

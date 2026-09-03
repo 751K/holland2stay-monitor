@@ -208,6 +208,30 @@ final class AuthStore {
     ///
     /// 副作用：后端会撤销该 user 名下"除当前 token 外"的所有 session。
     /// 当前设备保持登录态。
+    /// 确认密码，用于设置页开启 Face ID。
+    ///
+    /// 返回 `false` 只表示"这次没通过"——密码错、网络断、服务端故障都归到
+    /// 这里，具体原因写进 ``errorMessage``。调用方**不能**把 false 当成
+    /// "密码错误"直接展示，否则断网时会告诉用户密码打错了。
+    func verifyPassword(_ password: String) async -> Bool {
+        guard role == .user else {
+            errorMessage = String(localized: "Only user accounts can do this.")
+            return false
+        }
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            return try await client.verifyPassword(password).ok
+        } catch {
+            #if DEBUG
+            print("[AuthStore] verifyPassword error: \(error)")
+            #endif
+            recordError(error)
+            return false
+        }
+    }
+
     func changePassword(current: String, new: String) async -> Bool {
         guard role == .user else {
             errorMessage = String(localized: "Only user accounts can change password here.")

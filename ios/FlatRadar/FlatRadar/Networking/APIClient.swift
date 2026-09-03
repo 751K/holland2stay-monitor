@@ -311,6 +311,20 @@ final class APIClient {
         return try await request("POST", "api/v1/auth/password", body: body)
     }
 
+    /// 确认当前登录 user 的密码，**不签发 token**。
+    ///
+    /// 设置页开启 Face ID 用：要把明文密码写进 Keychain，而设置页手里只有
+    /// token——密码只在登录那一刻存在于内存里，所以只能让用户重输一次。
+    ///
+    /// 不复用 ``login`` 来确认：那会真的签出一个 token，用户每确认一次，
+    /// 设置页里的"活跃设备会话数"就莫名其妙涨一个。
+    ///
+    /// 密码错误时后端返回 401，这里抛错；调用方据此区分"密码不对"和"网络问题"。
+    func verifyPassword(_ password: String) async throws -> VerifyPasswordResponse {
+        struct Body: Encodable { let password: String }
+        return try await request("POST", "api/v1/auth/verify", body: Body(password: password))
+    }
+
     // MARK: - Public Stats (Phase 1, no auth)
 
     func getPublicSummary() async throws -> MonitorStatus {

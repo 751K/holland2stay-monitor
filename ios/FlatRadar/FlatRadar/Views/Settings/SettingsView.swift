@@ -23,6 +23,7 @@ struct SettingsView: View {
     @State private var showLegalPrivacy = false
     @State private var showFeedback = false
     @State private var showRemoveBiometric = false
+    @State private var showEnableBiometric = false
     @State private var isExporting = false
     @State private var exportString: String?
     @State private var showShareSheet = false
@@ -38,37 +39,7 @@ struct SettingsView: View {
                         Button {
                             showFilterEdit = true
                         } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Label("Notification Filter",
-                                          systemImage: "line.3.horizontal.decrease.circle.fill")
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    // 条件数先于条件内容 —— 摘要会被截断，而"设了几条"
-                                    // 是一眼要看到的。空过滤器不显示 0，改在下一行说明。
-                                    if !info.listingFilter.isEmpty {
-                                        Text("\(info.listingFilter.summaryParts.count)")
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(Color.accentColor)
-                                            .padding(.horizontal, 7)
-                                            .padding(.vertical, 2)
-                                            .background(Color.accentColor.opacity(0.14), in: Capsule())
-                                    }
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
-                                }
-                                Group {
-                                    if info.listingFilter.isEmpty {
-                                        Text("No conditions — every new listing notifies you.")
-                                    } else {
-                                        Text(verbatim: info.listingFilter.summary)
-                                    }
-                                }
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                            }
+                            filterSummaryRow(info.listingFilter)
                         }
                         .buttonStyle(.plain)
                     } header: {
@@ -185,14 +156,35 @@ struct SettingsView: View {
 
                         if auth.isUser, BiometricAuthService.isAvailable {
                             let name = BiometricAuthService.biometryName
-                            Toggle("Sign in with \(name)", isOn: Binding(
-                                get: { BiometricAuthService.hasStoredCredentials },
-                                set: { enable in
-                                    if !enable {
-                                        showRemoveBiometric = true
+                            if BiometricAuthService.hasStoredCredentials {
+                                Toggle("Sign in with \(name)", isOn: Binding(
+                                    get: { true },
+                                    set: { enable in
+                                        if !enable { showRemoveBiometric = true }
                                     }
+                                ))
+                            } else {
+                                // 这里**不能**是开关。启用要把明文密码写进 Keychain，
+                                // 而设置页手里只有 token——密码只在登录那一刻存在，
+                                // 所以得让用户重新输一次（见 EnableBiometricSheet）。
+                                //
+                                // 之前这里是个开关，set 闭包只处理 enable == false：
+                                // 往开的方向拨，什么都不写，get 再读一次仍是 false，
+                                // 开关弹回原位，没有任何提示。
+                                Button {
+                                    showEnableBiometric = true
+                                } label: {
+                                    HStack {
+                                        Text("Sign in with \(name)")
+                                            .foregroundStyle(.primary)
+                                        Spacer()
+                                        Text("Set Up")
+                                            .foregroundStyle(Color.accentColor)
+                                    }
+                                    .contentShape(.rect)
                                 }
-                            ))
+                                .buttonStyle(.plain)
+                            }
                         }
 
                         if auth.isUser {
@@ -402,6 +394,9 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .onAppear { editedURL = serverURL }
+            .sheet(isPresented: $showEnableBiometric) {
+                EnableBiometricSheet()
+            }
             .confirmationDialog("Remove Face ID Sign-In?", isPresented: $showRemoveBiometric, titleVisibility: .visible) {
                 Button("Remove", role: .destructive) {
                     BiometricAuthService.deleteCredentials()
@@ -444,6 +439,59 @@ struct SettingsView: View {
     }
 
     // MARK: - Push permission UI helpers
+
+    /// 筛选条件摘要 —— 一枚条件一枚 chip，装不下就折行。
+    ///
+    /// 之前是一整行用 `·` 连起来的文字。七条条件连成一句
+    /// "≤ €1400/mo · ≥ 20 m² · Amsterdam, Diemen · H2S, OC, XR, MG, PZ, SE ·
+    /// Tenant: Student only, Student and empl…"，三行还是被截断，而且价格、
+    /// 面积、城市、平台、租客五种完全不同的条件长得一模一样，只能逐字读。
+    ///
+    /// 拆成 chip 之后边界自己就分开了，折行也不会截在词中间；平台复用
+    /// ``PlatformBadge`` 的彩色徽章，那套颜色在地图和房源页已经用熟了。
+    @ViewBuilder
+    private func filterSummaryRow(_ filter: ListingFilter) -> some View {
+        HStack(spacing: 10) {
+            if filter.isEmpty {
+                Text("No conditions — every new listing notifies you.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                FlowLayout(spacing: 6, lineSpacing: 6) {
+                    ForEach(Array(filter.summaryChips.enumerated()), id: \.offset) { _, chip in
+                        summaryChip(chip)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func summaryChip(_ chip: SummaryChip) -> some View {
+        switch chip {
+        case .platform(let source):
+            PlatformBadge(source: source, size: .medium)
+        case .platformCount(let n):
+            neutralChip(Text("\(n) platforms"))
+        case .text(let value):
+            neutralChip(Text(verbatim: value))
+        }
+    }
+
+    private func neutralChip(_ label: Text) -> some View {
+        label
+            .font(.caption)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.secondary.opacity(0.14), in: Capsule())
+    }
 
     private var pushPermissionLabel: String {
         switch push.permissionStatus {

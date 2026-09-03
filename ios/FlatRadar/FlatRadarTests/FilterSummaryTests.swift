@@ -140,6 +140,64 @@ final class FilterSummaryTests: XCTestCase {
         XCTAssertEqual(f.summaryParts, ["Amsterdam, Eindhoven +2"])
     }
 
+    // MARK: - summaryChips
+
+    /// chip 和文本摘要必须覆盖同一批维度。两者各写一遍 if 链，新增维度时
+    /// 很容易只加一处——加了 chip 没加 parts，徽章上的条件数就对不上；
+    /// 加了 parts 没加 chip，卡片上那条条件直接消失。
+    func test_chips_cover_every_dimension_that_parts_do() {
+        for (name, filter) in Self.singleDimensionFilters {
+            XCTAssertFalse(filter.summaryChips.isEmpty,
+                           "\(name) 已设置，chip 却一枚都没有")
+        }
+        XCTAssertTrue(ListingFilter.empty.summaryChips.isEmpty)
+    }
+
+    /// 三个及以下的平台逐个给徽章 —— 颜色是认得出来的信息。
+    func test_few_platforms_render_as_individual_badges() {
+        var f = ListingFilter.empty
+        f.allowedSources = ["holland2stay", "xior"]
+        XCTAssertEqual(f.summaryChips, [.platform("holland2stay"), .platform("xior")])
+    }
+
+    /// 超过三个就合并 —— 七选六摆六枚徽章占满整张卡片，却几乎等于没筛。
+    func test_many_platforms_collapse_to_a_count() {
+        var f = ListingFilter.empty
+        f.allowedSources = ["holland2stay", "xior", "magis", "plaza"]
+        XCTAssertEqual(f.summaryChips, [.platformCount(4)])
+    }
+
+    func test_boundary_between_badges_and_count_is_three() {
+        var f = ListingFilter.empty
+        f.allowedSources = ["a", "b", "c"]
+        XCTAssertEqual(f.summaryChips.count, 3, "三个仍应逐个给徽章")
+        f.allowedSources = ["a", "b", "c", "d"]
+        XCTAssertEqual(f.summaryChips, [.platformCount(4)])
+    }
+
+    /// 除平台外，每个维度贡献的 chip 数必须和 parts 一致。
+    func test_non_platform_dimensions_map_one_to_one() {
+        for (name, filter) in Self.singleDimensionFilters where name != "sources" {
+            XCTAssertEqual(filter.summaryChips.count, filter.summaryParts.count,
+                           "\(name): chip 数与 parts 数不一致")
+        }
+    }
+
+    /// 非平台的 chip 文案必须和 parts 逐字一致 —— 两处分别措辞会让同一条
+    /// 条件在卡片上和别处写法不同。
+    func test_text_chips_match_the_parts_verbatim() {
+        var f = ListingFilter.empty
+        f.maxRent = 1400
+        f.minArea = 20
+        f.allowedCities = ["Amsterdam", "Diemen"]
+        f.allowedTenant = ["Student only"]
+        let texts = f.summaryChips.compactMap { chip -> String? in
+            if case .text(let v) = chip { return v }
+            return nil
+        }
+        XCTAssertEqual(texts, f.summaryParts)
+    }
+
     // MARK: - 样例
 
     /// 每个维度一条、其余留空的十三个过滤器。

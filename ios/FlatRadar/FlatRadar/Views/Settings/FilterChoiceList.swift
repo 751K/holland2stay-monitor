@@ -137,12 +137,17 @@ struct FilterChoiceList: View {
             Text(hint)
         }
         if let note = PlatformScope.note(appliesTo: appliesTo, selectedSources: selectedSources) {
-            Label {
-                Text(verbatim: note.text)
-            } icon: {
-                Image(systemName: note.isWarning ? "exclamationmark.triangle.fill" : "info.circle")
+            // 图标只在出问题时出现，说明性的那一档就是一句话。
+            if note.isWarning {
+                Label {
+                    Text(verbatim: note.text)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                }
+                .foregroundStyle(Color.orange)
+            } else {
+                Text(verbatim: note.text).foregroundStyle(.secondary)
             }
-                .foregroundStyle(note.isWarning ? Color.orange : Color.secondary)
         }
     }
 

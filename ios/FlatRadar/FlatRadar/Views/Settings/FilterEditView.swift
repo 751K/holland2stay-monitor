@@ -128,10 +128,6 @@ struct FilterEditView: View {
     private var summarySection: some View {
         Section {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: preview.isEmpty
-                      ? "bell.badge.fill" : "line.3.horizontal.decrease.circle.fill")
-                    .foregroundStyle(preview.isEmpty ? Color.orange : Color.accentColor)
-                    .font(.title3)
                 VStack(alignment: .leading, spacing: 3) {
                     // 三元里的字面量会被合并成 String，Text 就走非本地化重载，
                     // 这两句会从 Localizable.xcstrings 里消失。分支写。
@@ -164,7 +160,7 @@ struct FilterEditView: View {
                 noteLabel(note)
             }
         } header: {
-            Label("Price & Space", systemImage: "eurosign.circle.fill")
+            Text("Price & Space")
         } footer: {
             if numberErrors.isEmpty {
                 Text("Empty = no limit. Floor 0 = ground floor.")
@@ -179,7 +175,7 @@ struct FilterEditView: View {
             choiceRow(.cities)
             choiceRow(.neighborhoods)
         } header: {
-            Label("Location", systemImage: "mappin.and.ellipse")
+            Text("Location")
         } footer: {
             if options.neighborhoods.isEmpty && !loadingOptions {
                 Text("Neighborhoods appear once listings in your cities have been indexed.")
@@ -193,7 +189,7 @@ struct FilterEditView: View {
             choiceRow(.finishing)
             energyRow
         } header: {
-            Label("Property", systemImage: "house.lodge")
+            Text("Property")
         }
     }
 
@@ -203,7 +199,7 @@ struct FilterEditView: View {
             choiceRow(.occupancy)
             choiceRow(.contract)
         } header: {
-            Label("Eligibility", systemImage: "person.2.fill")
+            Text("Eligibility")
         } footer: {
             Text("Tenant and occupancy are checked strictly: a listing that doesn't state them is filtered out.")
         }
@@ -213,7 +209,7 @@ struct FilterEditView: View {
         Section {
             choiceRow(.offer)
         } header: {
-            Label("Perks", systemImage: "tag.fill")
+            Text("Perks")
         }
     }
 
@@ -256,7 +252,7 @@ struct FilterEditView: View {
                 }
             }
         } header: {
-            Label("Platforms", systemImage: "rectangle.3.group.fill")
+            Text("Platforms")
         } footer: {
             if draft.allowedSources.isEmpty {
                 Text("Nothing selected = all platforms can notify you.")
@@ -271,7 +267,7 @@ struct FilterEditView: View {
             Button(role: .destructive) {
                 showResetConfirm = true
             } label: {
-                Label("Reset All Filters", systemImage: "arrow.counterclockwise")
+                Text("Reset All Filters")
             }
             .disabled(preview.isEmpty)
         }
@@ -330,14 +326,23 @@ struct FilterEditView: View {
         .disabled(choices.isEmpty && selected.isEmpty)
     }
 
+    /// 图标只在出问题时出现：``isWarning`` 那一档是"这条筛选对你选的平台
+    /// 一个都不生效"，需要跳出来；纯说明性的一档就是一句话，不配图标。
+    @ViewBuilder
     private func noteLabel(_ note: PlatformScope.Note) -> some View {
-        Label {
+        if note.isWarning {
+            Label {
+                Text(verbatim: note.text)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            .font(.caption)
+            .foregroundStyle(Color.orange)
+        } else {
             Text(verbatim: note.text)
-        } icon: {
-            Image(systemName: note.isWarning ? "exclamationmark.triangle.fill" : "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
-        .font(.caption)
-        .foregroundStyle(note.isWarning ? Color.orange : Color.secondary)
     }
 
     private func scopeNote(for dim: String) -> PlatformScope.Note? {

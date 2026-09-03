@@ -373,6 +373,11 @@ struct FilterOptions: Decodable, Sendable {
         contract: [], tenant: [], offer: [], finishing: [], energy: [])
 }
 
+/// `POST /api/v1/auth/verify` 响应。密码正确才会返回，错误走 401 抛错路径。
+struct VerifyPasswordResponse: Decodable {
+    let ok: Bool
+}
+
 /// `POST /api/v1/devices/test` 响应。
 struct DeviceTestPushResponse: Decodable {
     let sent: Int

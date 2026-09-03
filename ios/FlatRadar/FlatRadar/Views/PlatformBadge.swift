@@ -29,7 +29,9 @@ struct PlatformBadge: View {
             switch self {
             case .small: return 9
             case .medium: return 10
-            case .large: return 11
+            // 12 而不是 11：用它的两处（地图弹卡、房源详情页头部）旁边都是
+            // 17pt 的正文，11pt 的徽标在那个语境里显小。
+            case .large: return 12
             }
         }
         var hPadding: CGFloat {
