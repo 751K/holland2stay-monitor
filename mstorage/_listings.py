@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from collections.abc import Iterable
 from typing import Optional
 
 from config import canonical_city
@@ -170,6 +171,54 @@ def _booking_hold_minutes() -> int:
         return max(1, int(raw))
     except (TypeError, ValueError):
         return 120
+
+
+def _prefer_spelling(candidate: str, current: str) -> bool:
+    """同一个词的两种大小写写法里，``candidate`` 是否比 ``current`` 更适合显示。
+
+    判据只有两条，都不依赖数据量：首字母大写的优先；同为大写或同为小写时取
+    排序在前的。不按出现条数取——那样一个新平台灌进 500 条 ``STUDIO`` 就能
+    把显示写法改掉。
+    """
+    cand_upper = candidate[:1].isupper()
+    curr_upper = current[:1].isupper()
+    if cand_upper != curr_upper:
+        return cand_upper
+    return candidate < current
+
+
+def dedupe_feature_values(raw_values: Iterable[str]) -> list[str]:
+    """归一 + 去重，供筛选页的候选列表使用。**结果与输入顺序无关。**
+
+    两层归一：
+
+    1. ``canonical_feature`` 合并收录过的同义词。上游对同一种合同既写
+       ``Indefinite`` 又写 ``Onbepaalde tijd``，不合并的话下拉里会并排出现
+       两个同义选项（见 ``models.FEATURE_SYNONYMS``）。
+    2. 去重键额外 ``casefold``。``canonical_feature`` 对没收录的词只做 strip，
+       大小写不同的同一个词会原样放行：magis 的房型写 ``studio``，另外四个
+       平台写 ``Studio``，下拉里于是并排出现两个字面完全一样的 "Studio"。
+
+    第二层不影响过滤结果——``config.whitelist_matches`` 两个分支都大小写不
+    敏感，勾哪个都命中全部房源；坏的只是候选列表本身。
+
+    为什么是独立的纯函数
+    --------------------
+    原先这段揉在 ``get_feature_values`` 里，去重结果因此**碰巧**由 SQL 的
+    ``ORDER BY val`` 兜着：二进制排序下大写字母永远排在小写前，于是"先到先得"
+    和"首字母大写优先"给出同一个答案，两者无法用测试区分——把选择规则整个
+    删掉，测试照样全绿。拆出来之后可以直接喂任意顺序，规则本身才被真正测到。
+    """
+    seen: dict[str, str] = {}
+    for raw in raw_values:
+        if not raw:
+            continue
+        value = canonical_feature(raw)
+        key = value.casefold()
+        kept = seen.get(key)
+        if kept is None or _prefer_spelling(value, kept):
+            seen[key] = value
+    return list(seen.values())
 
 
 class ListingOps:
@@ -986,11 +1035,4 @@ class ListingOps:
                    ORDER BY val""",
                 (pattern,),
             ).fetchall()
-        # 归一 + 去重：上游对同一种合同既写 Indefinite 又写 Onbepaalde tijd，
-        # 不合并的话筛选下拉里会并排出现两个同义选项，用户勾了其中一个就
-        # 收不到另一半房源（见 models.FEATURE_SYNONYMS）。
-        seen: dict[str, None] = {}
-        for r in rows:
-            if r[0]:
-                seen.setdefault(canonical_feature(r[0]), None)
-        return list(seen)
+        return dedupe_feature_values(r[0] for r in rows)
