@@ -29,7 +29,22 @@ concurrency:
 jobs:
   capture:
     runs-on: macos-latest
-    timeout-minutes: 120
+    timeout-minutes: 300
+
+    # 按显示类型并行，不按 (类型 × 语言) 并行。
+    #
+    # 实测一个组合 25 分钟，10 个组合串行是四个多小时，超过 GitHub 单 job 的
+    # 六小时上限之前先撞上我们自己的 timeout。拆成每个显示类型一个 job：两个
+    # job 并行，各自编译一次、跑五种语言，墙钟时间减半。
+    #
+    # 不拆到「每个组合一个 job」：那样十个 runner 各编译一次 App，编译的总开销
+    # 反而超过省下来的等待，产物还要再合并一次。
+    strategy:
+      fail-fast: false
+      matrix:
+        # 把 "A B" 变成 ["A","B"]。引号必须自己补：join 不加引号，
+        # 得到的 [A,B] 不是合法 JSON，fromJSON 会直接失败。
+        display_type: ${{ fromJSON(format('["{0}"]', join(split(github.event.inputs.display_types, ' '), '","'))) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +66,7 @@ jobs:
       - name: Capture
         env:
           LOCALES: ${{ github.event.inputs.locales }}
-          DISPLAY_TYPES: ${{ github.event.inputs.display_types }}
+          DISPLAY_TYPES: ${{ matrix.display_type }}
         run: |
           set -euo pipefail
           mkdir -p screenshots
@@ -60,17 +75,36 @@ jobs:
               | python3 ios/scripts/pick_screenshot_device.py "$DT")
             UDID=$(echo "$PICKED" | cut -f1)
             echo "::group::$DT → $(echo "$PICKED" | cut -f2-3)"
+
+            # 先启动模拟器再跑测试。第一次跑时四条用例失败在
+            # "Failed to launch" / "Failed to get matching snapshots"——冷启动
+            # 的模拟器要一分多钟才能接受第一次 App launch，而测试等不了那么久。
+            xcrun simctl bootstatus "$UDID" -b || true
+
+            # 编译一次，之后每种语言只跑不编。原先每轮都走 xcodebuild test，
+            # 十轮就编译十遍；单轮总耗时 25 分钟里编译占了相当一部分。
+            xcodebuild build-for-testing \
+              -project ios/FlatRadar/FlatRadar.xcodeproj \
+              -scheme FlatRadar \
+              -destination "id=$UDID" \
+              -derivedDataPath dd \
+              CODE_SIGNING_ALLOWED=NO \
+              > "log-build-$DT.txt" 2>&1 || { tail -40 "log-build-$DT.txt"; exit 1; }
+
             for LC in $LOCALES; do
               echo "--- $DT / $LC ---"
               OUT="screenshots/$DT/$LC"
               mkdir -p "$OUT"
               set +e
-              UI_TEST_LOCALE="$LC" xcodebuild test \
+              UI_TEST_LOCALE="$LC" xcodebuild test-without-building \
                 -project ios/FlatRadar/FlatRadar.xcodeproj \
                 -scheme FlatRadar \
                 -destination "id=$UDID" \
                 -only-testing:FlatRadarUITests/ScreenshotTests \
                 -resultBundlePath "rb-$DT-$LC.xcresult" \
+                -derivedDataPath dd \
+                -retry-tests-on-failure -test-iterations 3 \
+                -maximum-concurrent-test-simulator-destinations 1 \
                 CODE_SIGNING_ALLOWED=NO \
                 > "log-$DT-$LC.txt" 2>&1
               RC=$?
@@ -78,7 +112,10 @@ jobs:
               tail -30 "log-$DT-$LC.txt"
               # 退出码不作数：UI 测试可能整体失败但仍截到了图，也可能"成功"
               # 却一条用例都没跑。判据统一交给下面的 verify 步骤。
-              echo "xcodebuild 退出码 $RC（仅供参考，成败以 verify 为准）"
+              # 必须写 ${RC} 而不是 $RC：后面紧跟的是全角括号，bash 会把多字节
+              # 字符的首字节当成变量名的一部分，配合 set -u 直接报
+              # "RC?: unbound variable"，整个步骤在这里挂掉。
+              echo "xcodebuild 退出码 ${RC}（仅供参考，成败以 verify 为准）"
               xcparse screenshots "rb-$DT-$LC.xcresult" "$OUT" || true
             done
             echo "::endgroup::"
@@ -89,7 +126,7 @@ jobs:
       - name: Verify
         env:
           LOCALES: ${{ github.event.inputs.locales }}
-          DISPLAY_TYPES: ${{ github.event.inputs.display_types }}
+          DISPLAY_TYPES: ${{ matrix.display_type }}
         run: |
           set -euo pipefail
           FAIL=0
@@ -111,7 +148,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: app-store-screenshots
+          name: app-store-screenshots-${{ matrix.display_type }}
           path: screenshots
           retention-days: 14
 
@@ -120,7 +157,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: screenshot-logs
+          name: screenshot-logs-${{ matrix.display_type }}
           path: |
             log-*.txt
             rb-*.xcresult
