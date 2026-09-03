@@ -27,7 +27,33 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # 把 "A B" 转成 ["A","B"] 供下面的 matrix 用。
+  #
+  # 为什么要单独一个 job：GitHub 的表达式语言**没有 split()**——可用的只有
+  # contains / startsWith / endsWith / format / join / toJSON / fromJSON /
+  # hashFiles。第一版直接写了 split()，dispatch 时被拒：
+  #
+  #     Unrecognized function: 'split'
+  #
+  # 换成让 shell 转一遍再经 outputs 传出去。代价是多一次 runner 启动（约 30 秒），
+  # 换来 display_types 这个输入仍然可以按人话写空格分隔，而不是逼人手打 JSON。
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      display_types: ${{ steps.parse.outputs.display_types }}
+    steps:
+      - id: parse
+        env:
+          RAW: ${{ github.event.inputs.display_types }}
+        run: |
+          set -euo pipefail
+          JSON=$(printf '%s' "$RAW" | tr ' ' '\n' | grep -v '^$' \
+            | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          echo "解析结果: $JSON"
+          echo "display_types=$JSON" >> "$GITHUB_OUTPUT"
+
   capture:
+    needs: setup
     runs-on: macos-latest
     timeout-minutes: 300
 
@@ -42,9 +68,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 把 "A B" 变成 ["A","B"]。引号必须自己补：join 不加引号，
-        # 得到的 [A,B] 不是合法 JSON，fromJSON 会直接失败。
-        display_type: ${{ fromJSON(format('["{0}"]', join(split(github.event.inputs.display_types, ' '), '","'))) }}
+        display_type: ${{ fromJSON(needs.setup.outputs.display_types) }}
 
     steps:
       - uses: actions/checkout@v4
