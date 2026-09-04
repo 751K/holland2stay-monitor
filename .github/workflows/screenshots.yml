@@ -122,9 +122,17 @@ jobs:
               OUT="screenshots/$DT/$LC"
               mkdir -p "$OUT"
               set +e
-              UI_TEST_LOCALE="$LC" \
-              UI_TEST_USERNAME="${UI_TEST_USERNAME:-}" \
-              UI_TEST_PASSWORD="${UI_TEST_PASSWORD:-}" \
+              # TEST_RUNNER_ 前缀是必须的。xcodebuild **不会**把任意环境变量
+              # 转发给测试进程——只转发这个前缀的，并在注入时剥掉前缀。
+              #
+              # 第一版写的是裸的 UI_TEST_LOCALE / UI_TEST_USERNAME，测试进程里
+              # ProcessInfo.processInfo.environment 读不到，于是：五种语言跑出
+              # 五套一模一样的英文截图，登录也没发生（截图右上角是 Guest 徽章、
+              # tab bar 只有三个），Notifications 那条因此必然失败。
+              # 一个原因，两个症状。
+              TEST_RUNNER_UI_TEST_LOCALE="$LC" \
+              TEST_RUNNER_UI_TEST_USERNAME="${UI_TEST_USERNAME:-}" \
+              TEST_RUNNER_UI_TEST_PASSWORD="${UI_TEST_PASSWORD:-}" \
               xcodebuild test-without-building \
                 -project ios/FlatRadar/FlatRadar.xcodeproj \
                 -scheme FlatRadar \

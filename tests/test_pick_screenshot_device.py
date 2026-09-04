@@ -54,16 +54,38 @@ class TestPicking:
         }}, "APP_IPHONE_67")
         assert got[0] == "new"
 
+    def test_ipad_prefers_m5(self):
+        """runner 镜像（2026-09）装的是 M5，ASC 上现有截图也来自 M5。
+
+        第一版候选表只写到 M4，整个 iPad job 在挑机型那步就退出了。
+        """
+        got = mod.pick({"devices": {IOS26: [
+            dev("iPad Pro 13-inch (M4)", "m4"), dev("iPad Pro 13-inch (M5)", "m5")]}},
+            "APP_IPAD_PRO_3GEN_129")
+        assert got[0] == "m5"
+
+    def test_ipad_falls_back_when_m5_absent(self):
+        got = mod.pick({"devices": {IOS26: [
+            dev("iPad Pro 13-inch (M4)", "m4")]}}, "APP_IPAD_PRO_3GEN_129")
+        assert got[0] == "m4"
+
+    def test_ipad_does_not_accept_air_or_11_inch(self):
+        """Air 和 11 寸的像素与 2064x2752 不同，挑中就是静默产出错尺寸。"""
+        got = mod.pick({"devices": {IOS26: [
+            dev("iPad Air 13-inch (M4)", "air"), dev("iPad Pro 11-inch (M5)", "p11"),
+            dev("iPad (A16)", "base")]}}, "APP_IPAD_PRO_3GEN_129")
+        assert got is None, f"不该挑中 {got}"
+
     def test_ipad_display_type(self):
         got = mod.pick({"devices": {IOS26: [
-            dev("iPhone 17 Pro Max", "p"), dev("iPad Pro 13-inch (M4)", "t")]}},
+            dev("iPhone 17 Pro Max", "p"), dev("iPad Pro 13-inch (M5)", "t")]}},
             "APP_IPAD_PRO_3GEN_129")
         assert got[0] == "t"
 
     def test_name_match_tolerates_a_parenthesised_suffix(self):
         """镜像里机型名可能带后缀，匹配不能因此漏掉。"""
         got = mod.pick({"devices": {IOS26: [
-            dev("iPad Pro 13-inch (M4) (2nd generation)", "x")]}},
+            dev("iPad Pro 13-inch (M5) (2nd generation)", "x")]}},
             "APP_IPAD_PRO_3GEN_129")
         assert got[0] == "x"
 

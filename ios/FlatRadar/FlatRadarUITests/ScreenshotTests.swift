@@ -45,7 +45,7 @@ final class ScreenshotTests: XCTestCase {
     func testCapture01_Dashboard() throws {
         launch(extra: ["UI_TEST_TAB=dashboard"])
         waitForMainUI()
-        assertOnScreen("Dashboard")
+        assertTabSelected(0, "Dashboard")
         // 给 Dashboard chart 渲染
         sleep(2)
         snap(named: "01-Dashboard")
@@ -89,11 +89,12 @@ final class ScreenshotTests: XCTestCase {
         //
         // 不再猜——直接点那个 tab。UI 点击对单个 tab 是可靠的（原设计避开
         // menu 是因为 Browse 的三个子模式藏在 Menu 里，那才不稳）。
-        let alertsTab = app.tabBars.buttons["Alerts"]
-        if alertsTab.waitForExistence(timeout: 30) {
-            alertsTab.tap()
+        // 按序号点，不按标题——标题在非英文语言下是翻译过的。
+        let bar = app.tabBars.firstMatch
+        if bar.waitForExistence(timeout: 60), bar.buttons.count > 2 {
+            bar.buttons.element(boundBy: 2).tap()
         }
-        assertOnScreen("Alerts")
+        assertTabSelected(2, "Alerts")
         sleep(2)
         snap(named: "05-Notifications")
     }
@@ -102,7 +103,7 @@ final class ScreenshotTests: XCTestCase {
     func testCapture06_Settings() throws {
         launch(extra: ["UI_TEST_TAB=settings"])
         waitForMainUI()
-        assertOnScreen("Settings")
+        assertTabSelected(3, "Settings")
         sleep(1)
         snap(named: "06-Settings")
     }
@@ -139,20 +140,32 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(tabs.waitForExistence(timeout: 60), "tab bar 未在 60s 内出现")
     }
 
-    /// 断言当前确实停在 `title` 那一屏。
+    /// 断言选中的是第 `index` 个 tab。
     ///
-    /// 为什么要有这一步
-    /// ----------------
-    /// 「测试通过」和「拍对了」是两回事。访客模式下 tab bar 里没有
+    /// 为什么按序号而不按标题
+    /// ----------------------
+    /// 「测试通过」和「拍对了」是两回事：访客模式下 tab bar 里没有
     /// Notifications，``UI_TEST_TAB=notifications`` 把 selectedTab 设成一个不
-    /// 存在的值，SwiftUI 静默回落到第一个 tab——于是拍出一张名叫
-    /// 05-Notifications、内容却是 Dashboard 的图。测试通过、尺寸正确、渲染
-    /// 完整，只有内容是错的；而下游 verify 只查张数和像素，查不出来。
-    private func assertOnScreen(_ title: String, timeout: TimeInterval = 30) {
-        let heading = app.staticTexts[title]
-        XCTAssertTrue(heading.waitForExistence(timeout: timeout),
-                      "没有停在「\(title)」那一屏——多半是 launch arg 没生效，"
-                      + "而截图会照拍不误")
+    /// 存在的值，SwiftUI 静默回落到第一个 tab，于是拍出一张名叫
+    /// 05-Notifications、内容却是 Dashboard 的图——尺寸正确、渲染完整，只有内容
+    /// 是错的。
+    ///
+    /// 第一版按导航栏标题断言（``app.staticTexts["Alerts"]``）。那样写在跑非英
+    /// 文语言时会**全部失败**——标题本身是翻译过的。序号与语言无关。
+    ///
+    /// 登录后的 tab 顺序：0 Dashboard / 1 Browse / 2 Alerts / 3 Settings。
+    /// 访客没有 Alerts，只有三个。
+    private func assertTabSelected(_ index: Int, _ label: String) {
+        let bar = app.tabBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 60), "tab bar 未出现")
+        let buttons = bar.buttons
+        XCTAssertTrue(index < buttons.count,
+                      "tab bar 只有 \(buttons.count) 个 tab，取不到第 \(index) 个"
+                      + "（\(label)）——多半是没登录成功，访客看不到 Alerts")
+        guard index < buttons.count else { return }
+        XCTAssertTrue(buttons.element(boundBy: index).isSelected,
+                      "选中的不是第 \(index) 个 tab（\(label)）"
+                      + "——launch arg 没生效，而截图会照拍不误")
     }
 
     /// 保存当前屏幕为 XCTAttachment，跟测试结果一起进 .xcresult 包。

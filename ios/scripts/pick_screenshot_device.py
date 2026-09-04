@@ -51,10 +51,16 @@ DEVICE_CANDIDATES: dict[str, tuple[str, ...]] = {
         "iPhone 15 Pro Max",
     ),
     # 2064x2752（竖）。13" M4 与 12.9" 共用同一个 displayType。
+    # 2064x2752（竖）。13" 与 12.9" 共用同一个 displayType。
+    #
+    # M5 排在最前：runner 镜像 2026-09 装的就是它，而 ASC 上现有那批 iPad 截图
+    # 的文件名也写着 "iPad Pro 13-inch (M5)"。第一版只登记到 M4，整个 iPad job
+    # 在挑机型那一步就退出了——退出是对的（总比退回一台别的 iPad 静默产出错尺寸
+    # 好），但候选表本身漏了。
     "APP_IPAD_PRO_3GEN_129": (
+        "iPad Pro 13-inch (M5)",
         "iPad Pro 13-inch (M4)",
         "iPad Pro (12.9-inch)",
-        "iPad Pro 11-inch (M4)",
     ),
 }
 
