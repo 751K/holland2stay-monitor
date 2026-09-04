@@ -21,6 +21,15 @@
 # Notifications 那一屏拍不到（访客的 tab bar 里没有 Alerts）。
 set -eu
 
+# 这个目录必须紧挨 .xcodeproj，不是仓库根。
+#
+# Xcode Cloud 只在「workflow 里配置的那个项目文件旁边」找 ci_scripts。我们的
+# 项目在 ios/FlatRadar/，第一版把脚本放在了仓库根——那样它**静默不执行**，
+# 构建照常绿，只是凭据没注入、Notifications 那屏拍不到，而没有任何地方会说
+# 一句「脚本没找到」。
+#
+# 脚本的工作目录就是 ci_scripts 本身，所以路径用 CI_PRIMARY_REPOSITORY_PATH
+# 这个环境变量，它指向克隆下来的仓库根。
 PLAN="$CI_PRIMARY_REPOSITORY_PATH/ios/FlatRadar/FlatRadar/Screenshots.xctestplan"
 
 if [ ! -f "$PLAN" ]; then

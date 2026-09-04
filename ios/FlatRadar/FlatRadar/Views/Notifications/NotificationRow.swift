@@ -71,7 +71,7 @@ struct NotificationRow: View {
     /// 与 Live pill / Browse 状态药丸视觉语言一致，类型颜色由 tint + 文字色
     /// 双重表达，未读时饱和、已读时降至 secondary 灰。
     @ViewBuilder
-    private func eventPill(label: String, color: Color, isRead: Bool) -> some View {
+    private func eventPill(label: LocalizedStringKey, color: Color, isRead: Bool) -> some View {
         let textColor: AnyShapeStyle = {
             if isRead { return AnyShapeStyle(Color.secondary) }
             if contrast == .increased { return AnyShapeStyle(Color.primary) }
@@ -195,13 +195,16 @@ struct NotificationRow: View {
 
     private var a11yLabel: Text {
         let style = TypeSpec(kind: notification.kind)
-        var parts: [String] = [style.label.replacingOccurrences(of: " · ", with: ", ")]
+        // 用 Text 拼接而不是拼字符串：label 现在是 LocalizedStringKey，拿不到
+        // 它的字符串形态。这样也不必为读屏再复制一份「类型 → 文案」的映射——
+        // 复制一份就意味着新增通知类型时有一处会被漏掉。
+        var parts: [String] = []
         parts.append(displayTitle)
         let bodyText = notification.body.trimmingCharacters(in: .whitespacesAndNewlines)
         if !bodyText.isEmpty { parts.append(bodyText) }
         parts.append(notification.ageText + " ago")
         if notification.isRead { parts.append("Read") }
-        return Text(parts.joined(separator: ", "))
+        return Text(style.label) + Text(verbatim: ", " + parts.joined(separator: ", "))
     }
 }
 
@@ -211,7 +214,12 @@ struct NotificationRow: View {
 /// 与 Color+Tokens.swift 里的 status 颜色（Asset Catalog）对齐，
 /// dark mode 自动切色相不糊。
 private struct TypeSpec {
-    let label: String
+    /// `LocalizedStringKey` 而不是 `String`。
+    ///
+    /// 声明成 String 时，``Text(label)`` 走的是非本地化重载，这六个标签一条都
+    /// 没进过 `Localizable.xcstrings`。2026-09-04 的中文截图上看得很清楚：提醒
+    /// 列表里每一行的徽章都是英文的 STATUS CHANGE，而周围全是中文。
+    let label: LocalizedStringKey
     /// mono caps 事件标签 + 左侧小色点用同一颜色
     let color: Color
     let dot: Color

@@ -164,7 +164,7 @@ struct ListingsView: View {
                         row(for: listing, lastID: lastID)
                     }
                 } header: {
-                    sectionHeader(title: "NEW TODAY · \(new.count)",
+                    sectionHeader("NEW TODAY · \(new.count)",
                                   color: Color(red: 52/255, green: 199/255, blue: 89/255))
                 }
             }
@@ -176,8 +176,13 @@ struct ListingsView: View {
                         row(for: listing, lastID: lastID)
                     }
                 } header: {
-                    sectionHeader(title: new.isEmpty ? "ALL LISTINGS" : "EARLIER",
-                                  color: .secondary)
+                    // 分支写，不用三元：三元里的两个字面量会被合并成 String，
+                    // Text 就走非本地化重载，这两句会从 xcstrings 里消失。
+                    if new.isEmpty {
+                        sectionHeader("ALL LISTINGS", color: .secondary)
+                    } else {
+                        sectionHeader("EARLIER", color: .secondary)
+                    }
                 }
             }
 
@@ -218,7 +223,13 @@ struct ListingsView: View {
     }
 
     @ViewBuilder
-    private func sectionHeader(title: String, color: Color) -> some View {
+    /// 分区标题。
+    ///
+    /// 参数是 `LocalizedStringKey` 而不是 `String`：后者会让 ``Text`` 走非本地化
+    /// 重载，标题就此从 `Localizable.xcstrings` 里消失。2026-09-04 的截图上看得
+    /// 很清楚——五种语言的列表页，分区标题全是英文的 ALL LISTINGS / EARLIER，
+    /// 而周围的内容都翻译好了。
+    private func sectionHeader(_ title: LocalizedStringKey, color: Color) -> some View {
         Text(title)
             .font(.system(size: 11, weight: .bold, design: .monospaced))
             .tracking(0.7)
