@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FlatRadar Backend API",
-    "version": "1.18.0",
+    "version": "1.19.0",
     "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
@@ -241,6 +241,45 @@
         "responses": {
           "200": {
             "$ref": "#/components/responses/ChangePasswordOk"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/auth/verify": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "operationId": "verifyPassword",
+        "summary": "Confirm the current user's password without issuing a token.",
+        "description": "Used by clients that need to re-confirm the password while holding only a bearer token — e.g. enabling biometric sign-in from the settings screen, where the plaintext password must be written to the device keychain. Deliberately not /auth/login: that would mint a new token and inflate the user's active-session count. The account is taken from the bearer token, never from the request body, so a token holder cannot use this as a password oracle against another account. Failures count towards the login rate limiter. Success changes no state.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/VerifyPasswordOk"
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
@@ -1480,6 +1519,37 @@
           }
         }
       },
+      "VerifyPasswordOk": {
+        "description": "Password confirmed. No token is issued.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "ok"
+                      ],
+                      "properties": {
+                        "ok": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
       "PublicSummaryOk": {
         "description": "Public summary.",
         "content": {
@@ -2547,6 +2617,20 @@
         },
         "additionalProperties": false
       },
+      "VerifyPasswordRequest": {
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "additionalProperties": false
+      },
       "AuthTokenData": {
         "type": "object",
         "required": [
@@ -3293,6 +3377,16 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "dim_sources": {
+            "type": "object",
+            "description": "Which platforms actually populate each filter dimension, keyed by dimension name (contract, neighborhood, tenant, source, type, finishing, offer, energy, occupancy, floor, ...). Clients use it to tell the user that a dimension only narrows some of the platforms they have selected. Absent on older backends — treat a missing key as \"unknown\", not as \"applies to every platform\".",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           }
         },
