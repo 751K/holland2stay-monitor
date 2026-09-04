@@ -219,8 +219,18 @@ final class ScreenshotTests: XCTestCase {
                       "找不到「\(label)」这个 tab（\(symbol)）。当前界面层级：\n"
                       + dumpHierarchy())
         guard button.exists else { return }
+        // 失败信息里要带上「当时选中的到底是哪个」。
+        //
+        // 第一版只写了一句「选中的不是 Listings」，云端跑一轮四十分钟，拿回来
+        // 的却是 63 个字——按钮存在、但没选中，而选中的是谁不知道，只能再猜一轮。
+        // 「找不到」那条我加了层级 dump，偏偏这条没加。
+        let selected = app.buttons.allElementsBoundByIndex
+            .filter { $0.exists && $0.isSelected }
+            .map { $0.identifier.isEmpty ? $0.label : $0.identifier }
         XCTAssertTrue(button.isSelected,
-                      "选中的不是「\(label)」——launch arg 没生效，而截图会照拍不误")
+                      "选中的不是「\(label)」（\(symbol)）——launch arg 没生效，"
+                      + "而截图会照拍不误。当前选中的是：\(selected)\n"
+                      + dumpHierarchy())
     }
 
     /// 保存当前屏幕为 XCTAttachment，跟测试结果一起进 .xcresult 包。
