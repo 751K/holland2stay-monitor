@@ -202,14 +202,66 @@ class TestResultSummary:
 
 
 class TestSchemeActuallyRunsUnitTests:
-    def test_unit_test_target_is_in_the_scheme(self):
-        """``xcodebuild test`` 只跑 scheme 的 TestAction 里列出的 target。
+    """``xcodebuild test`` 必须真的执行到单元测试。
 
-        此前 Testables 里**只有 FlatRadarUITests**——就算单元测试能编译，
-        也一条都不会执行。这和「测试挂了」不同：它是绿的，只是空的。
+    守的是「绿着，但是空的」：Testables 里只有 FlatRadarUITests 的那阵子，
+    单元测试能编译、bundle 能链接、xcodebuild 报 Test Succeeded 退出 0，
+    执行条数是 0。
+
+    2026-09 加了 .xctestplan 之后，这条链路变了：scheme 的 TestAction 不再
+    直接列 target，而是指向一个 test plan，target 写在 plan 里。原来那句
+    ``assert 'BlueprintName = "FlatRadarTests"' in xml`` 从此查的是一个不再
+    存在的结构——它是真的红了，不是误报，但它红的理由和它想守的东西已经没
+    关系了。所以顺着新的链路重写：scheme → 默认 plan → testTargets。
+    """
+
+    @staticmethod
+    def _default_plan_path():
+        """scheme 的 TestAction 里标了 ``default="YES"`` 的那个 plan。
+
+        ``container:`` 相对于 .xcodeproj 所在的目录。SCHEME 是
+        ``<项目目录>/FlatRadar.xcodeproj/xcshareddata/xcschemes/FlatRadar.xcscheme``，
+        往上数四层正好是项目目录——这样单仓库和独立仓库两种布局都不用改。
         """
+        import re
+
         xml = SCHEME.read_text(encoding="utf-8")
-        assert 'BlueprintName = "FlatRadarTests"' in xml
+        action = re.search(r"<TestAction.*?</TestAction>", xml, re.S)
+        assert action, "scheme 里没有 TestAction —— xcodebuild test 无事可做"
+
+        refs = re.findall(r"<TestPlanReference\s+(.*?)>", action.group(0), re.S)
+        assert refs, ("TestAction 里既没有 TestPlans 也没有 Testables；"
+                      "这种 scheme 跑 test 会是空的")
+
+        default = [r for r in refs if 'default = "YES"' in r]
+        assert len(default) == 1, (
+            f"应当恰好有一个 default plan，实际 {len(default)} 个。"
+            "没有默认 plan 时，不带 -testPlan 的 xcodebuild test 行为不确定。")
+
+        ref = re.search(r'reference = "container:([^"]+)"', default[0])
+        assert ref, "默认 TestPlanReference 上没有 container: 路径"
+        return SCHEME.parents[3] / ref.group(1)
+
+    def test_default_test_plan_exists(self):
+        plan = self._default_plan_path()
+        assert plan.is_file(), (
+            f"scheme 指向的默认 test plan 不存在：{plan}。"
+            "路径写错时 Xcode 不会报错，只会当作没有测试。")
+
+    def test_unit_test_target_is_in_the_default_plan(self):
+        import json
+
+        plan = json.loads(self._default_plan_path().read_text(encoding="utf-8"))
+        targets = {t["target"]["name"]: t for t in plan.get("testTargets", [])}
+
+        assert "FlatRadarTests" in targets, (
+            f"默认 test plan 里没有 FlatRadarTests，只有 {sorted(targets)}。"
+            "这样 xcodebuild test 会绿，但一条单元测试都不跑。")
+
+        # plan 里可以把某个 target 标成 enabled: false —— 它仍然列在那里，
+        # 只是不执行。缺了这一句，禁用和启用在测试眼里是一样的。
+        assert targets["FlatRadarTests"].get("enabled", True), \
+            "FlatRadarTests 在默认 test plan 里被禁用了"
 
     def test_scheme_is_shared(self):
         """必须在 xcshareddata 下，否则新克隆的仓库里 xcodebuild 找不到它。"""
