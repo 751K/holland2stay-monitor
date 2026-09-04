@@ -171,24 +171,13 @@ final class ScreenshotTests: XCTestCase {
             id == "tab-alerts" ? "notifications" : String(id.dropFirst("tab-".count))
         }
 
-        /// iPhone 的 tab bar 里这个 tab 排第几；不在 iPhone 上出现则返回 nil。
-        ///
-        /// iPhone 是四个 tab：Dashboard、Browse、Alerts、Settings，其中 Alerts
-        /// 只对登录用户显示。Listings / Map / Calendar 在 iPhone 上不是 tab，
-        /// 它们是 Browse 里的三个子模式——`browse(_:padTab:)` 已经把它们折成
-        /// Tab.browse 了，所以这里返回 nil 是"不该有人问"。
-        func phoneIndex(barCount n: Int) -> Int? {
-            switch id {
-            case Tab.dashboard.id: return 0
-            case Tab.browse.id:    return 1
-            // 从后往前数，才不会被"访客没有 Alerts"这件事错位。
-            case Tab.settings.id:  return n - 1
-            case Tab.alerts.id:    return n >= 4 ? n - 2 : nil
-            default:               return nil
-            }
-        }
     }
 
+    /// ⚠️ 这跟 App 的判据**不是同一个东西**。``MainTabView`` 用的是内容宽度
+    /// （``width < 920``，为了照顾 iPad 分屏 / 台前调度下窗口变窄的情况），
+    /// 而这里用的是设备类型。两台截图设备（iPhone 17 Pro Max / iPad Pro 13"）
+    /// 上两者结论一致，所以现在不出问题；哪天加一台窄窗口的 iPad，就会出现
+    /// 「App 走 compact 布局、测试按 wide 布局找 tab」的错位。
     private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
     /// 三个浏览视图在当前设备上怎么到达：(launch args, 目标 tab)。
@@ -261,40 +250,26 @@ final class ScreenshotTests: XCTestCase {
     /// iPhone 上只剩序号可用（identifier 空、label 是翻译过的）。但不写死数字：
     /// 访客模式下没有 Alerts，四个 tab 变三个，写死的 3 会指到别处。
     /// Settings 永远是最后一个，Alerts 永远是倒数第二个（存在时）——按这个推。
+    /// 一个 tab 按钮。**只认 identifier，没有按序号的退路。**
+    ///
+    /// 曾经有过。iPhone 上 identifier 出现得晚，于是我加了「找不到就按位置取
+    /// tab bar 里的第几个」。那条退路是 build 269 和 273 里**每一条**失败的
+    /// 来源：
+    ///
+    ///     Failed to tap "Settings" Button: No matches found for Element at
+    ///     index 7 from input {(Button, Selected, Button, Button, Button)}
+    ///
+    /// tab bar 的按钮在快照里出现两次，数出来是 8，据此算的下标到真正取元素时
+    /// 只有 4 个可取。换成 allElementsBoundByIndex 也没用——数组建好之后快照
+    /// 还会变。
+    ///
+    /// 而 identifier 那条路本身是好的：273 里七条有五条两台设备全绿。那两条挂
+    /// 的，是在 identifier 还没出现的那一刻就退去走了序号。所以正确的做法是
+    /// **等**，不是退。等不到就超时报错，附上按钮清单——那比按序号猜中一个
+    /// 错的元素、然后拍一张内容不对的图要好。
     private func tabButton(_ tab: Tab) -> XCUIElement? {
-        // identifier 优先，两种设备都试。
-        //
-        // 「iPhone 上没有 identifier」这个结论是错的——它只是**晚一点才出现**。
-        // build 265 在等待超时那一刻拍的清单里 iPhone 全是 id=""，我据此断定
-        // UITabBar 把它吞了；build 269 用同一份 App 代码（MainTabView 没动过）
-        // 拍到的却是：
-        //
-        //     app.buttons=13
-        //       id="tab-dashboard" label="仪表盘"
-        //       id="tab-browse"    label="浏览"
-        //
-        // 同样的代码、不同的时刻，两种结果。所以判据不能是「这台设备有没有
-        // identifier」，而是「此刻找不找得到」——找不到再退到位置。
-        let byIdentifier = identifierQuery(tab).firstMatch
-        if byIdentifier.exists { return byIdentifier }
-
-        // 退路：tab bar 里按位置。iPhone 专用，iPad 没有 tabBars。
-        let bar = app.tabBars.firstMatch
-        guard bar.exists else { return nil }
-
-        // ⚠️ 用 allElementsBoundByIndex 而**不是** .count。
-        //
-        // 两者在 iPhone 上会给出不一样的数：build 269 里 .count 是 8（每个 tab
-        // 在快照里出现两次），我拿 n-1 算出 7，而真正去点的时候只解析出 4 个：
-        //
-        //     Failed to tap "Settings" Button: No matches found for Element at
-        //     index 7 from input {(Button, Selected, Button, Button, Button)}
-        //
-        // allElementsBoundByIndex 拿的是已解析的那一份，跟点击看到的是同一批。
-        let resolved = bar.buttons.allElementsBoundByIndex
-        guard let idx = tab.phoneIndex(barCount: resolved.count),
-              idx >= 0, idx < resolved.count else { return nil }
-        return resolved[idx]
+        let e = identifierQuery(tab).firstMatch
+        return e.exists ? e : nil
     }
 
     /// iPad 那条路：App 声明的 identifier 优先，SF Symbol 兜底。
@@ -306,15 +281,12 @@ final class ScreenshotTests: XCTestCase {
     }
 
     /// 等到 tab 出现；超时返回 nil，由调用方决定怎么报。
+    ///
+    /// iPhone 上 identifier 是延迟出现的（见 ``tabButton``），所以这里必须真的
+    /// 等，不能查一次就走。
     private func waitForTab(_ tab: Tab, timeout: TimeInterval = 60) -> XCUIElement? {
-        let deadline = Date().addingTimeInterval(timeout)
-        repeat {
-            if let e = tabButton(tab) { return e }
-            // 轮询而不是 waitForExistence：解析方式本身依赖 tabBars 存不存在，
-            // 而那要等主 UI 挂上才知道，不能提前固定成一条查询。
-            _ = app.buttons.firstMatch.waitForExistence(timeout: 1)
-        } while Date() < deadline
-        return nil
+        let e = identifierQuery(tab).firstMatch
+        return e.waitForExistence(timeout: timeout) ? e : nil
     }
 
     /// 失败时打印的诊断。**必须短，而且要点在最前面。**
