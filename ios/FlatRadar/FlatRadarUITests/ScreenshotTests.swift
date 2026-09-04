@@ -163,12 +163,22 @@ final class ScreenshotTests: XCTestCase {
 
     /// 等主 UI 出现（tab bar 渲染完成）。
     /// LoginView 不会有 tab bar，所以 Login test 不调这个。
+    /// 失败时把界面层级打出来。
+    ///
+    /// iPad 上 `app.tabBars` 不存在（iPadOS 26 的 TabView 渲染成别的东西），
+    /// 而错误信息只说「tab bar 未出现」，不说它到底叫什么。云端跑一轮一小时，
+    /// 靠猜元素类型的代价太高——让它把实际的层级报回来，一轮就知道。
+    private func dumpHierarchy() -> String {
+        String(app.debugDescription.prefix(3000))
+    }
+
     private func waitForMainUI() {
         let tabs = app.tabBars.firstMatch
         // 60 而不是 15：CI 的 runner 上一次冷启动就要一分多钟，15 秒是按本机
         // 真机调的。第一次跑云端时 Listings 就死在
         // "Timed out while evaluating UI query"。
-        XCTAssertTrue(tabs.waitForExistence(timeout: 60), "tab bar 未在 60s 内出现")
+        XCTAssertTrue(tabs.waitForExistence(timeout: 60),
+                      "tab bar 未在 60s 内出现。当前界面层级：\n\(dumpHierarchy())")
     }
 
     /// 断言选中的是第 `index` 个 tab。
@@ -188,7 +198,8 @@ final class ScreenshotTests: XCTestCase {
     /// 访客没有 Alerts，只有三个。
     private func assertTabSelected(_ index: Int, _ label: String) {
         let bar = app.tabBars.firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 60), "tab bar 未出现")
+        XCTAssertTrue(bar.waitForExistence(timeout: 60),
+                      "tab bar 未出现。当前界面层级：\n\(dumpHierarchy())")
         let buttons = bar.buttons
         XCTAssertTrue(index < buttons.count,
                       "tab bar 只有 \(buttons.count) 个 tab，取不到第 \(index) 个"

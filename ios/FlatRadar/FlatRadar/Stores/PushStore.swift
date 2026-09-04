@@ -99,6 +99,20 @@ final class PushStore {
     /// 登录成功后调：弹通知权限框 + APNs 注册。
     /// guest 角色不应调（没 token 调不通 ``/devices/register``）。
     func requestPermissionAndRegister() async {
+        // 截图自动化下**不弹**系统权限框。
+        //
+        // 它是一个系统 alert，会盖在界面正中间，而带系统弹窗的截图不能上架
+        // App Store。2026-09-04 的那批产出里，每种语言的 01-Dashboard 与
+        // 02-Listings 都被它挡住——测试全过、尺寸全对，图却不能用。
+        //
+        // 拦在这里而不是逐个调用点：这个方法有六处调用（App 启动、登录、注册、
+        // 设置页重新注册…），漏掉任何一处，弹窗就会在某张截图上重新出现。
+        guard !CommandLine.arguments.contains("UI_TEST_SCREENSHOT_MODE") else {
+            #if DEBUG
+            print("[PushStore] 截图模式，跳过通知权限申请")
+            #endif
+            return
+        }
         let center = UNUserNotificationCenter.current()
         do {
             let granted = try await center.requestAuthorization(
