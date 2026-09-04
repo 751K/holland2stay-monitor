@@ -130,54 +130,45 @@ jobs:
             xcodebuild build-for-testing \
               -project ios/FlatRadar/FlatRadar.xcodeproj \
               -scheme FlatRadar \
+              -testPlan Screenshots \
               -destination "generic/platform=iOS Simulator" \
               -derivedDataPath dd \
               CODE_SIGNING_ALLOWED=NO \
               > "log-build-$DT.txt" 2>&1 || { tail -40 "log-build-$DT.txt"; exit 1; }
 
-            for LC in $LOCALES; do
-              echo "--- $DT / $LC ---"
-              OUT="screenshots/$DT/$LC"
-              mkdir -p "$OUT"
-              set +e
-              # TEST_RUNNER_ 前缀是必须的。xcodebuild **不会**把任意环境变量
-              # 转发给测试进程——只转发这个前缀的，并在注入时剥掉前缀。
-              #
-              # 第一版写的是裸的 UI_TEST_LOCALE / UI_TEST_USERNAME，测试进程里
-              # ProcessInfo.processInfo.environment 读不到，于是：五种语言跑出
-              # 五套一模一样的英文截图，登录也没发生（截图右上角是 Guest 徽章、
-              # tab bar 只有三个），Notifications 那条因此必然失败。
-              # 一个原因，两个症状。
-              TEST_RUNNER_UI_TEST_LOCALE="$LC" \
-              TEST_RUNNER_UI_TEST_USERNAME="${UI_TEST_USERNAME:-}" \
-              TEST_RUNNER_UI_TEST_PASSWORD="${UI_TEST_PASSWORD:-}" \
-              xcodebuild test-without-building \
-                -project ios/FlatRadar/FlatRadar.xcodeproj \
-                -scheme FlatRadar \
-                -destination "id=$UDID" \
-                -only-testing:"${ONLY_TESTING:-FlatRadarUITests/ScreenshotTests}" \
-                -resultBundlePath "rb-$DT-$LC.xcresult" \
-                -derivedDataPath dd \
-                -retry-tests-on-failure -test-iterations 3 \
-                -maximum-concurrent-test-simulator-destinations 1 \
-                CODE_SIGNING_ALLOWED=NO \
-                > "log-$DT-$LC.txt" 2>&1
-              RC=$?
-              set -e
-              tail -30 "log-$DT-$LC.txt"
-              # 退出码不作数：UI 测试可能整体失败但仍截到了图，也可能"成功"
-              # 却一条用例都没跑。判据统一交给下面的 verify 步骤。
-              # 必须写 ${RC} 而不是 $RC：后面紧跟的是全角括号，bash 会把多字节
-              # 字符的首字节当成变量名的一部分，配合 set -u 直接报
-              # "RC?: unbound variable"，整个步骤在这里挂掉。
-              echo "xcodebuild 退出码 ${RC}（仅供参考，成败以 verify 为准）"
-              # 不用 xcparse：它读不了 Xcode 26 的 result bundle
-              #   Error: Unhandled test reference type ActionTestPlanRunSummaries
-              # 而且是静默失败——那一行原本带着 || true，Capture 照样绿，直到
-              # Verify 数出 0 张 PNG 才暴露。改用 Xcode 自带的 xcresulttool。
-              python3 ios/scripts/extract_screenshots.py \
-                "rb-$DT-$LC.xcresult" "$OUT" || true
-            done
+            # 一次 xcodebuild test 跑完全部语言。
+            #
+            # 语言由 Screenshots.xctestplan 的五个 configuration 声明，不再靠外
+            # 层 shell 循环 + 环境变量传。此前那套踩过一个大坑：xcodebuild 不转
+            # 发不带 TEST_RUNNER_ 前缀的环境变量，五种语言于是跑出五套一模一样
+            # 的英文截图，而张数和尺寸全都合格。test plan 把语言变成构建配置的
+            # 一部分，这个坑从根上消失。
+            #
+            # 顺带省掉四次重复安装：原先每种语言都要重新装一遍 App。
+            set +e
+            TEST_RUNNER_UI_TEST_USERNAME="${UI_TEST_USERNAME:-}" \
+            TEST_RUNNER_UI_TEST_PASSWORD="${UI_TEST_PASSWORD:-}" \
+            xcodebuild test-without-building \
+              -project ios/FlatRadar/FlatRadar.xcodeproj \
+              -scheme FlatRadar \
+              -testPlan Screenshots \
+              -destination "id=$UDID" \
+              -resultBundlePath "rb-$DT.xcresult" \
+              -derivedDataPath dd \
+              -retry-tests-on-failure -test-iterations 3 \
+              -maximum-concurrent-test-simulator-destinations 1 \
+              CODE_SIGNING_ALLOWED=NO \
+              > "log-$DT.txt" 2>&1
+            RC=$?
+            set -e
+            tail -40 "log-$DT.txt"
+            echo "xcodebuild 退出码 ${RC}（仅供参考，成败以 verify 为准）"
+
+            # 提取时按 configuration 分桶——五种语言的附件都在同一个 xcresult 里，
+            # manifest 的 configurationName 就是 test plan 里的语言名。
+            python3 ios/scripts/extract_screenshots.py \
+              "rb-$DT.xcresult" "screenshots/$DT" || true
+
             echo "::endgroup::"
           done
 
@@ -198,14 +189,24 @@ jobs:
               APP_IPAD_PRO_3GEN_129)  W=2064; H=2752 ;;
               *) echo "未登记尺寸: $DT"; exit 1 ;;
             esac
-            for LC in $LOCALES; do
-              # 只重拍某几条时不能还要求七张——那样 verify 必然红，
-              # 而它红了 artifact 也就没人看了。
+            # 遍历实际产出的语言目录，而不是遍历输入的语言列表——语言现在由
+            # test plan 决定，输入里那份可能已经对不上了。
+            FOUND=0
+            for D in screenshots/$DT/*/; do
+              [ -d "$D" ] || continue
+              FOUND=$((FOUND+1))
               EXPECT=7
               [ -n "${ONLY_TESTING:-}" ] && EXPECT=0
-              python3 ios/scripts/verify_screenshots.py "screenshots/$DT/$LC" \
+              python3 ios/scripts/verify_screenshots.py "$D" \
                 --expect "$EXPECT" --width "$W" --height "$H" || FAIL=1
             done
+            if [ "$FOUND" -eq 0 ]; then
+              echo "::error::$DT 一个语言目录都没产出"
+              FAIL=1
+            elif [ -z "${ONLY_TESTING:-}" ] && [ "$FOUND" -ne 5 ]; then
+              echo "::error::$DT 只产出了 $FOUND 种语言，期望 5 种"
+              FAIL=1
+            fi
           done
           exit $FAIL
 

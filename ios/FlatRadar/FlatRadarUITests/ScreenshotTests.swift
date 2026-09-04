@@ -175,10 +175,12 @@ final class ScreenshotTests: XCTestCase {
            !u.isEmpty, !p.isEmpty {
             args += ["UI_TEST_USER=\(u)", "UI_TEST_PASS=\(p)"]
         }
-        // locale 从环境变量传，给跨语言批量截图用
-        if let locale = ProcessInfo.processInfo.environment["UI_TEST_LOCALE"] {
-            args += ["-AppleLanguages", "(\(locale))", "-AppleLocale", locale]
-        }
+        // 语言不在这里设——由 Screenshots.xctestplan 的 configuration 决定。
+        //
+        // 原先是读 UI_TEST_LOCALE 再拼 -AppleLanguages。那条路踩过一个坑：
+        // xcodebuild 不转发不带 TEST_RUNNER_ 前缀的环境变量，变量根本到不了这
+        // 里，于是五种语言跑出五套一模一样的英文截图，而张数和尺寸全合格。
+        // 交给 test plan 之后，语言是构建配置的一部分，传不到就直接跑不起来。
         app.launchArguments = args
         app.launch()
     }
@@ -225,9 +227,10 @@ final class ScreenshotTests: XCTestCase {
     private func snap(named step: String) {
         let screenshot = XCUIScreen.main.screenshot()
         let attachment = XCTAttachment(screenshot: screenshot)
-        let locale = ProcessInfo.processInfo.environment["UI_TEST_LOCALE"] ?? "en-US"
+        // 名字里不再带语言：语言由 test plan 决定，附件的 configurationName
+        // 已经带着它，提取脚本按那个分桶。名字里再写一份只会有机会写错。
         let device = UIDevice.current.name.replacingOccurrences(of: " ", with: "-")
-        attachment.name = "\(step)_\(device)_\(locale)"
+        attachment.name = "\(step)_\(device)"
         attachment.lifetime = .keepAlways
         add(attachment)
     }

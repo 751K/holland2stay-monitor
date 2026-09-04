@@ -44,8 +44,17 @@ from pathlib import Path
 NAME_RE = re.compile(r"^(\d{2})-([A-Za-z0-9]+)_")
 
 
-def exported(bundle: Path, workdir: Path) -> list[tuple[int, str, Path]]:
-    """导出附件，返回 [(序号, 页面名, 文件路径)]，已按序号排序。"""
+def exported(bundle: Path, workdir: Path) -> dict[str, list[tuple[int, str, Path]]]:
+    """导出附件，返回 {configuration 名: [(序号, 页面名, 文件路径)]}。
+
+    按 configuration 分组，是为了配合 test plan：一次 ``xcodebuild test`` 跑完
+    五种语言，产物全在**同一个** xcresult 里。manifest 的每条附件带
+    ``configurationName``，而 test plan 里的 configuration 就是按语言命名的
+    （en-US / zh-Hans / …），正好用来分桶。
+
+    没有 test plan 时 configurationName 是 "Test Scheme Action"，此时只有一个
+    桶，调用方照旧。
+    """
     subprocess.run(
         ["xcrun", "xcresulttool", "export", "attachments",
          "--path", str(bundle), "--output-path", str(workdir)],
@@ -55,7 +64,7 @@ def exported(bundle: Path, workdir: Path) -> list[tuple[int, str, Path]]:
     if not manifest.exists():
         raise SystemExit(f"没有生成 manifest：{manifest}")
 
-    out: dict[int, tuple[int, str, Path]] = {}
+    buckets: dict[str, dict[int, tuple[int, str, Path]]] = {}
     for entry in json.loads(manifest.read_text()):
         for att in entry.get("attachments") or []:
             human = att.get("suggestedHumanReadableName") or ""
@@ -65,11 +74,12 @@ def exported(bundle: Path, workdir: Path) -> list[tuple[int, str, Path]]:
             src = workdir / att["exportedFileName"]
             if not src.exists() or src.suffix.lower() != ".png":
                 continue
+            cfg = att.get("configurationName") or "default"
             idx = int(m.group(1))
             # 同一序号可能出现多次（-test-iterations 重试）。保留最后一次：
             # 重试是因为前一次失败，后一次才是成功那张。
-            out[idx] = (idx, m.group(2), src)
-    return [out[k] for k in sorted(out)]
+            buckets.setdefault(cfg, {})[idx] = (idx, m.group(2), src)
+    return {cfg: [d[k] for k in sorted(d)] for cfg, d in sorted(buckets.items())}
 
 
 def main() -> int:
@@ -87,18 +97,27 @@ def main() -> int:
     outdir = Path(a.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
+    bad = 0
     with tempfile.TemporaryDirectory() as tmp:
-        shots = exported(bundle, Path(tmp))
-        for idx, name, src in shots:
-            dst = outdir / f"{idx:02d}-{name}.png"
-            shutil.copy2(src, dst)
-            print(f"  {dst.name}  ({src.stat().st_size // 1024} KB)")
-
-    print(f"提取 {len(shots)} 张 → {outdir}")
-    if a.expect and len(shots) != a.expect:
-        print(f"期望 {a.expect} 张，实际 {len(shots)} 张", file=sys.stderr)
-        return 1
-    return 0
+        buckets = exported(bundle, Path(tmp))
+        if not buckets:
+            print("xcresult 里没有截图附件", file=sys.stderr)
+            return 1
+        single = len(buckets) == 1 and next(iter(buckets)) in ("default", "Test Scheme Action")
+        for cfg, shots in buckets.items():
+            # 只有一个默认 configuration 时不再套一层目录，保持老用法不变。
+            target = outdir if single else outdir / cfg
+            target.mkdir(parents=True, exist_ok=True)
+            print(f"[{cfg}]")
+            for idx, name, src in shots:
+                dst = target / f"{idx:02d}-{name}.png"
+                shutil.copy2(src, dst)
+                print(f"  {dst.name}  ({src.stat().st_size // 1024} KB)")
+            print(f"  → {len(shots)} 张 {target}")
+            if a.expect and len(shots) != a.expect:
+                print(f"  {cfg}: 期望 {a.expect} 张，实际 {len(shots)} 张", file=sys.stderr)
+                bad = 1
+    return bad
 
 
 if __name__ == "__main__":
