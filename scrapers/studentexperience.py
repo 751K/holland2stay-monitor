@@ -123,6 +123,8 @@ import html as html_mod
 import json
 import logging
 import re
+import time
+from datetime import datetime
 from contextlib import contextmanager
 from typing import Optional
 
@@ -236,6 +238,48 @@ _RE_COMPLEX_ITEM = re.compile(
     r'.*?<span[^>]*class="[^"]*\bamount\b[^"]*"[^>]*>\s*(\d+)\s*</span>',
     re.S | re.I,
 )
+
+#: 详情页。入住日期只在这里有——列表卡片上完全没有日期（2026-09-04 实测：
+#: 整页零个日期串，"Start date" 那两次是排序选项）。
+DETAIL_URL = f"{BASE_URL}/studios/{{sid}}"
+
+#: 详情页里的两个日期。取前者当 ``available_from``；后者是申请截止，不是入住。
+#:
+#:     Start date contract   1 October 2026
+#:     Respond until         6 September 2026
+_RE_START_DATE = re.compile(
+    r"Start date contract\s+(\d{1,2}\s+[A-Za-z]+\s+\d{4})", re.I)
+
+#: 每轮最多取几个详情页，以及两次之间的间隔。
+#:
+#: 这不是正确性旋钮，是流量旋钮：``mstorage._sticky_available_from`` 保证本轮
+#: 没问到的房源会沿用上次的真值，所以铺不满一轮不会造成「补一批、抹一批」的
+#: 拉锯（H2S 那边为这件事踩过坑，见 holland2stay.py 的四层机制注释）。
+#:
+#: 站点没有 Cloudflare，但**不是不限速**：2026-09-04 连发两次同一页就吃了一个
+#: 403。所以间隔比预算更要紧。
+_DETAIL_BUDGET_PER_ROUND = 12
+_DETAIL_REQUEST_SPACING = 0.8
+
+#: 进程内缓存：studio id → ISO 日期。开始日期是单元的稳定属性，一个进程里
+#: 问一次就够。进程重启后重新铺满，按上面的预算分摊到几轮。
+_DETAIL_CACHE: dict[str, str] = {}
+
+
+def _parse_start_date(page: str) -> "str | None":
+    """详情页 → ``YYYY-MM-DD``；认不出返回 None。
+
+    站点写的是 ``1 October 2026`` 这种英文长格式，而库里各 source 统一存 ISO
+    （``models.is_sentinel_available_from`` 按前四位判年份，非 ISO 会被误判）。
+    """
+    m = _RE_START_DATE.search(_plain(page))
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1).strip(), "%d %B %Y").strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
 
 #: 分页链接。``?page=3`` 会**回绕到第 1 页**而不是返回空，所以「翻到空为止」的
 #: 循环永远不会停；必须先从这里读出最大页号。
@@ -532,9 +576,55 @@ class StudentExperienceScraper(AbstractScraper):
                     })
                     _collect(page, term_name)
 
+            # ── 入住日期：只在详情页有，逐条补 ──
+            #
+            # 失败**不**影响本轮判定：房源本身是完整的，只是少一个字段；而
+            # mstorage._sticky_available_from 会让已经问到过的房源沿用旧值。
+            # 把这里的失败升格成 incomplete，等于让一个可选字段有权否决整轮。
+            self._fill_start_dates(session, listings)
+
         logger.info("Student Experience 共抓取 %d 条户型（长租计数：%s）",
                     len(listings), counts)
         return listings, self._complete
+
+    def _fill_start_dates(self, session, listings: list[Listing]) -> None:
+        """给 listing 补 ``available_from``。缓存命中的不发请求，其余按预算取。"""
+        budget = _DETAIL_BUDGET_PER_ROUND
+        fetched = failed = 0
+        for item in listings:
+            sid = item.id[3:] if item.id.startswith("se_") else item.id
+            if sid in _DETAIL_CACHE:
+                item.available_from = _DETAIL_CACHE[sid]
+                continue
+            if budget <= 0:
+                continue
+            budget -= 1
+            if fetched:
+                time.sleep(_DETAIL_REQUEST_SPACING)
+            try:
+                page = self._get(session, DETAIL_URL.format(sid=sid))
+            except ScrapeNetworkError as e:
+                # 详情页限速/抖动很常见（实测连发两次就吃 403）。记一次、继续，
+                # 下一轮再补——不抛，否则一个可选字段能让整轮抓取失败。
+                failed += 1
+                logger.debug("Student Experience 详情页 %s 取失败: %s", sid, e)
+                continue
+            fetched += 1
+            date = _parse_start_date(page)
+            if date:
+                _DETAIL_CACHE[sid] = date
+                item.available_from = date
+            else:
+                # 页面拿到了却认不出日期 —— 这是结构变了，值得说出来；
+                # 但同样不升格成 incomplete。
+                logger.warning(
+                    "Student Experience 详情页 %s 里读不到 Start date contract", sid)
+        if fetched or failed:
+            logger.info(
+                "Student Experience 入住日期：本轮取 %d 条（失败 %d），"
+                "缓存 %d 条，仍缺 %d 条",
+                fetched, failed, len(_DETAIL_CACHE),
+                sum(1 for x in listings if not x.available_from))
 
     @contextmanager
     def batch_session(self):

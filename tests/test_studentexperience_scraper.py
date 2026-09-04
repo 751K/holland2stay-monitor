@@ -409,10 +409,14 @@ class TestRegistration:
 class _FakeSession:
     """只认三类 URL 的假会话：长租页（可分页）、学期档 JSON、短租页。"""
 
-    def __init__(self, long_pages: list[str] | None = None, short_page: str = ""):
+    def __init__(self, long_pages: list[str] | None = None, short_page: str = "",
+                 detail_page: str = "", detail_raises: Exception | None = None):
         self._long = list(long_pages or [])
         self._short = short_page
+        self._detail = detail_page
+        self._detail_raises = detail_raises
         self.long_hits = 0
+        self.detail_hits = 0
 
     def __enter__(self):
         return self
@@ -425,6 +429,11 @@ class _FakeSession:
         if "getAcademicTerms" in url:
             import json
             return _Resp(json.dumps({"terms": [], "hasTerms": False}))
+        if "/studios/" in url:                       # 详情页
+            self.detail_hits += 1
+            if self._detail_raises is not None:
+                raise self._detail_raises
+            return _Resp(self._detail)
         if params.get("los") == "longstay":
             self.long_hits += 1
             n = int(params.get("page", 1))
@@ -437,3 +446,127 @@ class _FakeSession:
 class _Resp:
     def __init__(self, text: str, status: int = 200):
         self.text, self.status_code = text, status
+
+
+class TestStartDate:
+    """入住日期只在详情页有，列表卡片上完全没有。
+
+    2026-09-04 实测：长租列表页里零个日期串（"Start date" 那两次是排序选项）。
+    所以每个新单元要多发一次请求；这一组守的是「多发请求」带来的三个风险。
+    """
+
+    def test_english_long_date_becomes_iso(self):
+        """站点写 ``1 October 2026``，库里各 source 统一存 ISO。
+
+        不转换的后果不只是难看：``models.is_sentinel_available_from`` 按前四位
+        判年份，``"1 Oc"`` 会走进 ``isdigit()`` 为假的分支，整条判断静默失效。
+        """
+        from scrapers.studentexperience import _parse_start_date
+        page = _fx("studentexperience_detail_1525.html")
+        assert _parse_start_date(page) == "2026-10-01"
+
+    def test_the_deadline_is_not_mistaken_for_the_move_in_date(self):
+        """详情页上有两个日期，取的必须是前一个。
+
+            Start date contract   1 October 2026     ← 入住
+            Respond until         6 September 2026   ← 申请截止
+        """
+        from scrapers.studentexperience import _parse_start_date
+        page = _fx("studentexperience_detail_1525.html")
+        assert "Respond until" in page
+        assert _parse_start_date(page) == "2026-10-01"      # 不是 2026-09-06
+
+    def test_unparseable_page_yields_none_not_a_crash(self):
+        from scrapers.studentexperience import _parse_start_date
+        assert _parse_start_date("<html>改版了</html>") is None
+        assert _parse_start_date("Start date contract 32 Foguary 2026") is None
+
+    def test_a_failing_detail_page_does_not_fail_the_round(self, page1, page2, monkeypatch):
+        """详情页取不到时，房源照常入库、本轮照常判 complete。
+
+        它是一个**可选字段**。把它的失败升格成 incomplete，等于让一个可选字段
+        有权否决整轮——而 incomplete 的代价是 monitor 跳过 stale 收敛。
+        """
+        import scrapers.studentexperience as se
+        from scrapers.base import ScrapeNetworkError
+
+        monkeypatch.setattr(se, "_DETAIL_CACHE", {})
+        s = se.StudentExperienceScraper()
+        monkeypatch.setattr(s, "_session",
+                            lambda: _FakeSession(long_pages=[page1, page2],
+                                                 detail_raises=ScrapeNetworkError("429")))
+        with s.batch_session():
+            r = s.scrape(ScrapeTask(source="studentexperience",
+                                    city_key="amsterdam", city_display="Amsterdam"))
+        assert r.complete is True
+        assert len(r.listings) == 14
+        assert all(x.available_from is None for x in r.listings)
+
+    def test_budget_caps_requests_per_round(self, page1, page2, monkeypatch):
+        """一轮最多发 ``_DETAIL_BUDGET_PER_ROUND`` 个详情请求。
+
+        铺不满不是问题：``mstorage._sticky_available_from`` 会让已问到的房源
+        沿用旧值，所以渐进补齐没有「补一批、抹一批」的拉锯。
+        """
+        import scrapers.studentexperience as se
+
+        monkeypatch.setattr(se, "_DETAIL_CACHE", {})
+        monkeypatch.setattr(se, "_DETAIL_BUDGET_PER_ROUND", 3)
+        monkeypatch.setattr(se.time, "sleep", lambda *_a: None)
+        sess = _FakeSession(long_pages=[page1, page2],
+                            detail_page=_fx("studentexperience_detail_1525.html"))
+        s = se.StudentExperienceScraper()
+        monkeypatch.setattr(s, "_session", lambda: sess)
+        with s.batch_session():
+            s.scrape(ScrapeTask(source="studentexperience",
+                                city_key="amsterdam", city_display="Amsterdam"))
+        assert sess.detail_hits == 3
+
+    def test_cached_ids_are_not_refetched(self, page1, page2, monkeypatch):
+        """开始日期是单元的稳定属性，一个进程里问一次就够。"""
+        import scrapers.studentexperience as se
+
+        monkeypatch.setattr(se, "_DETAIL_CACHE", {})
+        monkeypatch.setattr(se.time, "sleep", lambda *_a: None)
+        # 预算调到能一轮铺满，否则第二轮的请求是「补剩下的」而不是「重问已知的」，
+        # 这条测试就分不清缓存有没有生效。
+        monkeypatch.setattr(se, "_DETAIL_BUDGET_PER_ROUND", 99)
+        detail = _fx("studentexperience_detail_1525.html")
+
+        def _run(sess):
+            s = se.StudentExperienceScraper()
+            monkeypatch.setattr(s, "_session", lambda: sess)
+            with s.batch_session():
+                return s.scrape(ScrapeTask(source="studentexperience",
+                                           city_key="amsterdam",
+                                           city_display="Amsterdam"))
+
+        first = _FakeSession(long_pages=[page1, page2], detail_page=detail)
+        _run(first)
+        second = _FakeSession(long_pages=[page1, page2], detail_page=detail)
+        r = _run(second)
+        assert first.detail_hits > 0
+        assert second.detail_hits == 0, "第二轮不该再问同一批 id"
+        assert all(x.available_from == "2026-10-01" for x in r.listings)
+
+    def test_requests_are_spaced(self, page1, page2, monkeypatch):
+        """两次详情请求之间要有间隔。
+
+        站点没有 Cloudflare，但**不是不限速**：2026-09-04 连发两次同一页就吃了
+        一个 403。间隔比预算更要紧——预算只是省流量，间隔是能不能拿到数据。
+        """
+        import scrapers.studentexperience as se
+
+        monkeypatch.setattr(se, "_DETAIL_CACHE", {})
+        monkeypatch.setattr(se, "_DETAIL_BUDGET_PER_ROUND", 4)
+        slept: list[float] = []
+        monkeypatch.setattr(se.time, "sleep", lambda s: slept.append(s))
+        sess = _FakeSession(long_pages=[page1, page2],
+                            detail_page=_fx("studentexperience_detail_1525.html"))
+        s = se.StudentExperienceScraper()
+        monkeypatch.setattr(s, "_session", lambda: sess)
+        with s.batch_session():
+            s.scrape(ScrapeTask(source="studentexperience",
+                                city_key="amsterdam", city_display="Amsterdam"))
+        assert len(slept) == 3          # 4 次请求之间 3 个间隔
+        assert all(x > 0 for x in slept)
