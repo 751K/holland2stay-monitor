@@ -44,9 +44,9 @@ final class ScreenshotTests: XCTestCase {
         //
         // 用「主界面不该存在」来判定，而不是找登录页上的某个控件：后者要么是
         // 翻译过的文案，要么依赖具体布局；而 tab bar 在登录页上一定不存在。
-        XCTAssertFalse(app.buttons[Tab.dashboard].exists,
+        XCTAssertFalse(tabQuery(.dashboard).firstMatch.exists,
                        "登录页上不该有主界面的 tab——说明它自动登录了。"
-                       + "当前界面层级：\n" + dumpHierarchy())
+                       + "当前按钮清单：\n" + buttonInventory())
         snap(named: "00-Login")
     }
 
@@ -106,7 +106,7 @@ final class ScreenshotTests: XCTestCase {
         // menu 是因为 Browse 的三个子模式藏在 Menu 里，那才不稳）。
         // 按序号点，不按标题——标题在非英文语言下是翻译过的。
         // 按 symbol 点。两种设备共用 bell.fill，且与语言无关。
-        let alerts = app.buttons[Tab.alerts].firstMatch
+        let alerts = tabQuery(.alerts).firstMatch
         if alerts.waitForExistence(timeout: 60) { alerts.tap() }
         assertTabSelected(Tab.alerts, "Alerts")
         sleep(2)
@@ -124,30 +124,39 @@ final class ScreenshotTests: XCTestCase {
 
     // MARK: - 设备差异
 
-    /// tab 用 **SF Symbol 名**定位，不用序号、不用标题、也不经过 `tabBars`。
+    /// 一个 tab 的两种定位方式。
     ///
-    /// 三个依赖是逐个踩掉的：
+    /// 定位方式换过四轮，每一轮都是被上一轮的盲区打回来的：
     ///
-    /// 1. **不用标题**（`app.staticTexts["Alerts"]`）——标题是翻译过的，跑非
-    ///    英文语言时会全部失败。
-    /// 2. **不用序号**——iPhone 四个 tab、iPad 六个，Alerts 在两边分别是 2 和 4。
-    /// 3. **不经过 `tabBars`**——iPad 上**根本没有**这个元素。2026-09-04 让测试
-    ///    把界面层级打回来才看清：iPadOS 26 的 TabView 渲染成一个普通 `Other`
-    ///    容器装着六个 `Button`，每个 Button 的 identifier 就是 SF Symbol 名：
+    /// 1. **标题**（`app.staticTexts["Alerts"]`）——标题是翻译过的，非英文语言
+    ///    下全线失败。
+    /// 2. **序号**——iPhone 四个 tab、iPad 六个，Alerts 分别在 2 和 4。
+    /// 3. **SF Symbol 名**——iPadOS 26 的 TabView 渲染成一个普通 `Other` 容器
+    ///    装着六个 `Button`，Button 的 identifier 恰好是 symbol 名：
     ///
     ///        Button, identifier: 'chart.bar.fill', label: 'Dashboard', Selected
-    ///        Button, identifier: 'bell.fill',      label: 'Alerts'
     ///
-    /// identifier 来自 `MainTabView` 的 `Label(_, systemImage:)`，两种设备共用
-    /// 同一批符号，且与语言无关。
-    private enum Tab {
-        static let dashboard = "chart.bar.fill"
-        static let browse    = "square.grid.2x2.fill"   // 仅 iPhone
-        static let listings  = "list.bullet"            // 仅 iPad
-        static let map       = "map.fill"               // 仅 iPad
-        static let calendar  = "calendar"               // 仅 iPad
-        static let alerts    = "bell.fill"
-        static let settings  = "gear"
+    ///    这是从 iPad 的层级 dump 里读出来的，然后我把它当成了两种设备的共同
+    ///    事实。**iPhone 上不成立。** build 262 里 iPhone 七条挂了六条，全是
+    ///    「主界面未在 60s 内出现」——而层级里明明有 'Panel de control'，
+    ///    人早就登录进主界面了，只是这个锚点找不到。改成 symbol 之前用的
+    ///    `app.tabBars` 在 iPhone 上一直是好的，坏的只有 iPad；我修好 iPad 的
+    ///    同时打断了 iPhone，因为我拿单设备的证据当了普遍事实。
+    /// 4. **App 自己声明的 identifier**——`MainTabView` 给每个 tabItem 挂了
+    ///    `.accessibilityIdentifier("tab-…")`。不依赖任何一种设备把 Label 渲染
+    ///    成什么，两边都是同一个字符串。symbol 作为兜底留着，万一某个系统版本
+    ///    不把 identifier 透出来，iPad 那条路还在。
+    private struct Tab {
+        let id: String
+        let symbol: String
+
+        static let dashboard = Tab(id: "tab-dashboard", symbol: "chart.bar.fill")
+        static let browse    = Tab(id: "tab-browse",    symbol: "square.grid.2x2.fill")
+        static let listings  = Tab(id: "tab-listings",  symbol: "list.bullet")
+        static let map       = Tab(id: "tab-map",       symbol: "map.fill")
+        static let calendar  = Tab(id: "tab-calendar",  symbol: "calendar")
+        static let alerts    = Tab(id: "tab-alerts",    symbol: "bell.fill")
+        static let settings  = Tab(id: "tab-settings",  symbol: "gear")
     }
 
     private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
@@ -155,7 +164,7 @@ final class ScreenshotTests: XCTestCase {
     /// 三个浏览视图在当前设备上怎么到达：(launch args, 目标 tab 的 symbol)。
     ///
     /// iPhone 上它们是 Browse 的三个子模式；iPad 上各占一个 tab。
-    private func browse(_ mode: String, padTab: String) -> ([String], String) {
+    private func browse(_ mode: String, padTab: Tab) -> ([String], Tab) {
         isPad
             ? (["UI_TEST_TAB=\(mode)"], padTab)
             : (["UI_TEST_TAB=browse", "UI_TEST_BROWSE_MODE=\(mode)"], Tab.browse)
@@ -185,52 +194,72 @@ final class ScreenshotTests: XCTestCase {
         app.launch()
     }
 
-    /// 等主 UI 出现（tab bar 渲染完成）。
-    /// LoginView 不会有 tab bar，所以 Login test 不调这个。
-    /// 失败时把界面层级打出来。
+    /// 一个 tab 按钮：App 声明的 identifier 优先，SF Symbol 兜底。
     ///
-    /// iPad 上 `app.tabBars` 不存在（iPadOS 26 的 TabView 渲染成别的东西），
-    /// 而错误信息只说「tab bar 未出现」，不说它到底叫什么。云端跑一轮一小时，
-    /// 靠猜元素类型的代价太高——让它把实际的层级报回来，一轮就知道。
-    private func dumpHierarchy() -> String {
-        String(app.debugDescription.prefix(3000))
+    /// 用 identifier 上的谓词而不是两次 `app.buttons[...]`：两种写法都能匹配，
+    /// 但谓词只需要**一次**等待就同时覆盖两条路，不必先把一条等超时。
+    private func tabQuery(_ tab: Tab) -> XCUIElementQuery {
+        app.buttons.matching(
+            NSPredicate(format: "identifier == %@ OR identifier == %@",
+                        tab.id, tab.symbol))
     }
 
+    /// 失败时打印的诊断。**必须短，而且要点在最前面。**
+    ///
+    /// 上一版打的是 `app.debugDescription.prefix(3000)`——整棵界面层级的前 3000
+    /// 字符。iPhone 上那三千字符全是嵌套的 `Other` 容器，tab bar 在树的末尾，
+    /// 一个字都没印到。更糟的是 App Store Connect 的 issues 接口把失败信息截在
+    /// 三千字符左右，所以「多打一点」这条路本来就是堵死的：跑完一整轮，仍然
+    /// 不知道那些按钮到底叫什么。
+    ///
+    /// 换成只印按钮清单——正好是要回答的那个问题，而且短到不会被截断。
+    private func buttonInventory() -> String {
+        var lines = ["tabBars=\(app.tabBars.count)"]
+        for bar in app.tabBars.allElementsBoundByIndex {
+            for b in bar.buttons.allElementsBoundByIndex {
+                lines.append("  [tabBar] id=\(b.identifier.debugDescription) "
+                             + "label=\(b.label.debugDescription) sel=\(b.isSelected)")
+            }
+        }
+        let all = app.buttons.allElementsBoundByIndex
+        lines.append("app.buttons=\(all.count)")
+        for b in all.prefix(24) {
+            lines.append("  id=\(b.identifier.debugDescription) "
+                         + "label=\(b.label.debugDescription) sel=\(b.isSelected)")
+        }
+        if all.count > 24 { lines.append("  …(还有 \(all.count - 24) 个)") }
+        return lines.joined(separator: "\n")
+    }
+
+    /// 等主 UI 出现。LoginView 上没有 tab，所以 Login 那条不调这个。
     private func waitForMainUI() {
-        // 等 Dashboard 那个 tab 按钮出现，而不是等 `tabBars`——后者在 iPad 上
-        // 不存在，60 秒等下来只会得到一句「tab bar 未出现」。
-        let anchor = app.buttons[Tab.dashboard].firstMatch
+        let anchor = tabQuery(.dashboard).firstMatch
         XCTAssertTrue(anchor.waitForExistence(timeout: 60),
-                      "主界面未在 60s 内出现。当前界面层级：\n" + dumpHierarchy())
+                      "主界面未在 60s 内出现。当前按钮清单：\n" + buttonInventory())
     }
 
-    /// 断言选中的是 `symbol` 那个 tab。
+    /// 断言选中的是 `tab`。
     ///
     /// 「测试通过」和「拍对了」是两回事：访客模式下没有 Notifications 这个 tab，
     /// ``UI_TEST_TAB=notifications`` 把 selectedTab 设成一个不存在的值，SwiftUI
     /// 静默回落到第一个 tab，于是拍出一张名叫 05-Notifications、内容却是
     /// Dashboard 的图——尺寸正确、渲染完整，只有内容是错的。下游 verify 只查张数
     /// 和像素，查不出来。
-    ///
-    /// 定位方式换过三轮，见 ``Tab`` 的注释。
-    private func assertTabSelected(_ symbol: String, _ label: String) {
-        let button = app.buttons[symbol].firstMatch
+    private func assertTabSelected(_ tab: Tab, _ label: String) {
+        let button = tabQuery(tab).firstMatch
         XCTAssertTrue(button.waitForExistence(timeout: 60),
-                      "找不到「\(label)」这个 tab（\(symbol)）。当前界面层级：\n"
-                      + dumpHierarchy())
+                      "找不到「\(label)」这个 tab（\(tab.id) / \(tab.symbol)）。"
+                      + "当前按钮清单：\n" + buttonInventory())
         guard button.exists else { return }
-        // 失败信息里要带上「当时选中的到底是哪个」。
-        //
-        // 第一版只写了一句「选中的不是 Listings」，云端跑一轮四十分钟，拿回来
-        // 的却是 63 个字——按钮存在、但没选中，而选中的是谁不知道，只能再猜一轮。
-        // 「找不到」那条我加了层级 dump，偏偏这条没加。
+        // 失败信息里要带上「当时选中的到底是哪个」：第一版只写了一句「选中的
+        // 不是 Listings」，云端跑一轮回来只有 63 个字，还得再猜一轮。
         let selected = app.buttons.allElementsBoundByIndex
             .filter { $0.exists && $0.isSelected }
             .map { $0.identifier.isEmpty ? $0.label : $0.identifier }
         XCTAssertTrue(button.isSelected,
-                      "选中的不是「\(label)」（\(symbol)）——launch arg 没生效，"
+                      "选中的不是「\(label)」（\(tab.id)）——launch arg 没生效，"
                       + "而截图会照拍不误。当前选中的是：\(selected)\n"
-                      + dumpHierarchy())
+                      + buttonInventory())
     }
 
     /// 保存当前屏幕为 XCTAttachment，跟测试结果一起进 .xcresult 包。

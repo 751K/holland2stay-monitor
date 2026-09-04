@@ -56,22 +56,26 @@ struct MainTabView: View {
     private var compactTabView: some View {
         TabView(selection: tab) {
             DashboardView()
-                .tabItem { Label("Dashboard", systemImage: "chart.bar.fill") }
+                .tabItem { Label("Dashboard", systemImage: "chart.bar.fill")
+                    .accessibilityIdentifier("tab-dashboard") }
                 .tag(AppTab.dashboard)
 
             BrowseView()
-                .tabItem { Label("Browse", systemImage: "square.grid.2x2.fill") }
+                .tabItem { Label("Browse", systemImage: "square.grid.2x2.fill")
+                    .accessibilityIdentifier("tab-browse") }
                 .tag(AppTab.browse)
 
             if auth.role == .user || auth.role == .admin {
                 NotificationsView()
-                    .tabItem { Label("Alerts", systemImage: "bell.fill") }
+                    .tabItem { Label("Alerts", systemImage: "bell.fill")
+                    .accessibilityIdentifier("tab-alerts") }
                     .modifier(AlertsTabBadge())
                     .tag(AppTab.notifications)
             }
 
             SettingsView()
-                .tabItem { Label("Settings", systemImage: "gear") }
+                .tabItem { Label("Settings", systemImage: "gear")
+                    .accessibilityIdentifier("tab-settings") }
                 .tag(AppTab.settings)
         }
     }
@@ -81,30 +85,36 @@ struct MainTabView: View {
     private var wideTabView: some View {
         TabView(selection: tab) {
             DashboardView()
-                .tabItem { Label("Dashboard", systemImage: "chart.bar.fill") }
+                .tabItem { Label("Dashboard", systemImage: "chart.bar.fill")
+                    .accessibilityIdentifier("tab-dashboard") }
                 .tag(AppTab.dashboard)
 
             listingsTab
-                .tabItem { Label("Listings", systemImage: "list.bullet") }
+                .tabItem { Label("Listings", systemImage: "list.bullet")
+                    .accessibilityIdentifier("tab-listings") }
                 .tag(AppTab.listings)
 
             mapTab
-                .tabItem { Label("Map", systemImage: "map.fill") }
+                .tabItem { Label("Map", systemImage: "map.fill")
+                    .accessibilityIdentifier("tab-map") }
                 .tag(AppTab.map)
 
             calendarTab
-                .tabItem { Label("Calendar", systemImage: "calendar") }
+                .tabItem { Label("Calendar", systemImage: "calendar")
+                    .accessibilityIdentifier("tab-calendar") }
                 .tag(AppTab.calendar)
 
             if auth.role == .user || auth.role == .admin {
                 NotificationsView()
-                    .tabItem { Label("Alerts", systemImage: "bell.fill") }
+                    .tabItem { Label("Alerts", systemImage: "bell.fill")
+                    .accessibilityIdentifier("tab-alerts") }
                     .modifier(AlertsTabBadge())
                     .tag(AppTab.notifications)
             }
 
             SettingsView()
-                .tabItem { Label("Settings", systemImage: "gear") }
+                .tabItem { Label("Settings", systemImage: "gear")
+                    .accessibilityIdentifier("tab-settings") }
                 .tag(AppTab.settings)
         }
     }
