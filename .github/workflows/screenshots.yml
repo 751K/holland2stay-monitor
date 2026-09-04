@@ -119,10 +119,18 @@ jobs:
 
             # 编译一次，之后每种语言只跑不编。原先每轮都走 xcodebuild test，
             # 十轮就编译十遍；单轮总耗时 25 分钟里编译占了相当一部分。
+            # 编译用 generic 目标，不绑具体设备。
+            #
+            # 绑 id 的话，CoreSimulator 偶尔会在这一步枚举不到任何模拟器：
+            #   xcodebuild: error: Unable to find a device matching { id:… }
+            #   Available destinations: （只剩 My Mac 和两个 placeholder）
+            # 2026-09-04 实测撞到一次，而同一条流水线四十分钟前刚跑成功过。
+            # 编译产物与具体设备无关，没必要承担这个风险；真正需要那台设备的是
+            # 下面的 test-without-building。
             xcodebuild build-for-testing \
               -project ios/FlatRadar/FlatRadar.xcodeproj \
               -scheme FlatRadar \
-              -destination "id=$UDID" \
+              -destination "generic/platform=iOS Simulator" \
               -derivedDataPath dd \
               CODE_SIGNING_ALLOWED=NO \
               > "log-build-$DT.txt" 2>&1 || { tail -40 "log-build-$DT.txt"; exit 1; }
