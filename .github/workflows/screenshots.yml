@@ -21,6 +21,9 @@ on:
       display_types:
         description: '要跑的显示类型（空格分隔）'
         default: 'APP_IPHONE_61 APP_IPAD_PRO_3GEN_129'
+      only_testing:
+        description: '只跑某几条用例（xcodebuild -only-testing 的值）。留空跑全部。'
+        default: ''
 
 concurrency:
   # 组名必须带上设备类型。
@@ -98,6 +101,8 @@ jobs:
           # 对应的用例会失败（而不是悄悄拍下 Dashboard）。
           UI_TEST_USERNAME: ${{ secrets.UI_TEST_USERNAME }}
           UI_TEST_PASSWORD: ${{ secrets.UI_TEST_PASSWORD }}
+          # 只重拍某一张时用。全套七条要跑四十多分钟，而单条约十分钟。
+          ONLY_TESTING: ${{ github.event.inputs.only_testing }}
         run: |
           set -euo pipefail
           mkdir -p screenshots
@@ -142,7 +147,7 @@ jobs:
                 -project ios/FlatRadar/FlatRadar.xcodeproj \
                 -scheme FlatRadar \
                 -destination "id=$UDID" \
-                -only-testing:FlatRadarUITests/ScreenshotTests \
+                -only-testing:"${ONLY_TESTING:-FlatRadarUITests/ScreenshotTests}" \
                 -resultBundlePath "rb-$DT-$LC.xcresult" \
                 -derivedDataPath dd \
                 -retry-tests-on-failure -test-iterations 3 \
@@ -174,6 +179,7 @@ jobs:
         env:
           LOCALES: ${{ github.event.inputs.locales }}
           DISPLAY_TYPES: ${{ matrix.display_type }}
+          ONLY_TESTING: ${{ github.event.inputs.only_testing }}
         run: |
           set -euo pipefail
           FAIL=0
@@ -185,8 +191,12 @@ jobs:
               *) echo "未登记尺寸: $DT"; exit 1 ;;
             esac
             for LC in $LOCALES; do
+              # 只重拍某几条时不能还要求七张——那样 verify 必然红，
+              # 而它红了 artifact 也就没人看了。
+              EXPECT=7
+              [ -n "${ONLY_TESTING:-}" ] && EXPECT=0
               python3 ios/scripts/verify_screenshots.py "screenshots/$DT/$LC" \
-                --expect 7 --width "$W" --height "$H" || FAIL=1
+                --expect "$EXPECT" --width "$W" --height "$H" || FAIL=1
             done
           done
           exit $FAIL

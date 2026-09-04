@@ -192,6 +192,15 @@ struct ContentView: View {
         // 图：测试通过、尺寸正确、渲染完整，只有内容是错的。
         //
         // 要拍那一屏就必须真的登录。给了账号就登录，没给才退回访客。
+        // UI_TEST_SHOW_LOGIN 优先于凭据。
+        //
+        // 第一版把凭据判断放在前面，而 CI 上凭据永远存在（来自 secrets），于是
+        // 登录页那条用例也登录了——00-Login.png 拍出来是 Dashboard。商店里因此
+        // 出现两张 Dashboard、没有登录页。
+        if args.contains("UI_TEST_SHOW_LOGIN") {
+            applyScreenshotDestination(args)
+            return
+        }
         if let user = argValue("UI_TEST_USER", in: args),
            let pass = argValue("UI_TEST_PASS", in: args),
            !user.isEmpty, !pass.isEmpty {

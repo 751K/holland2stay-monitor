@@ -60,7 +60,12 @@ def _token(cfg: dict) -> str:
 def _req(cfg, method, path, body=None, absolute=False, raw=None, headers=None):
     url = path if absolute else BASE + path
     data = raw if raw is not None else (json.dumps(body).encode() if body else None)
-    h = {"Authorization": "Bearer " + _token(cfg)}
+    # 预签名的上传 URL **不能**带 Authorization。
+    #
+    # 那些 URL 自带签名，再附一个 Bearer 头，对端直接 400 Invalid request：
+    #   <Error><Code>400</Code><Message>Invalid request: </Message></Error>
+    # 只有 App Store Connect 自己的 API 需要 Bearer。
+    h: dict[str, str] = {} if absolute else {"Authorization": "Bearer " + _token(cfg)}
     if raw is None and body is not None:
         h["Content-Type"] = "application/json"
     h.update(headers or {})
@@ -198,16 +203,21 @@ def cmd_upload(cfg, args):
             print("已取消")
             return
 
-    if args.replace:
+    # **先传后删**。第一版是反过来的，结果第一次实跑就把 en-US 下用户手动传的
+    # 八张删光、而 PUT 那步 400 失败——集合被清空，什么都没剩下。
+    #
+    # 先传的代价是中间态会有新旧两批并存（顺序上新的在后），失败时旧的还在，
+    # 重跑一次即可；反过来的代价是失败即数据丢失。
+    for i, p in enumerate(pngs, 1):
+        _upload_one(cfg, set_id, p)
+        print(f"  [{i}/{len(pngs)}] ✅ {p.name}")
+
+    if args.replace and existing:
         for sh in existing:
             code, out = _req(cfg, "DELETE", f"appScreenshots/{sh['id']}")
             if code not in (200, 204):
                 _die(code, out, "删除旧截图")
         print(f"  已删除 {len(existing)} 张旧截图")
-
-    for i, p in enumerate(pngs, 1):
-        _upload_one(cfg, set_id, p)
-        print(f"  [{i}/{len(pngs)}] ✅ {p.name}")
     print("完成")
 
 
