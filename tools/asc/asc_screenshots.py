@@ -180,6 +180,49 @@ def _upload_one(cfg, set_id: str, path: Path) -> None:
         _die(code, out, f"提交 {path.name}")
 
 
+# App Store Connect 每个截图集最多 10 张。超了会在「预留」那步 409：
+#
+#     Too many screenshots. | Set: <id> has already 10 appScreenshots
+#
+SET_CAPACITY = 10
+
+
+def plan_replacement(existing: int, incoming: int, cap: int = SET_CAPACITY) -> list[str]:
+    """替换一组截图的操作序列：``"upload"`` / ``"delete"``。
+
+    为什么不能简单地「先全传、再全删」
+    ----------------------------------
+    那是上一版的做法，为的是避免「先删后传」在中途失败时把集合清空——那次
+    实跑真的删光了 en-US 下八张手动传的图。但先传后删有个它自己的边界：
+    ``existing + incoming`` 一旦超过 cap，就永远传不完。6 张旧的 + 7 张新的
+    = 13 > 10，传到第 4 张就 409。
+
+    也不能简单地「先删够位置」——那又回到了「失败即数据丢失」。
+
+    所以边传边删：满了就先腾一个位置再传。集合在任何时刻都不为空，也不超顶。
+
+    >>> plan_replacement(0, 3)          # 空集合，直接传
+    ['upload', 'upload', 'upload']
+    >>> plan_replacement(6, 7)[:5]      # 前四张有空位，第五张要先腾位
+    ['upload', 'upload', 'upload', 'upload', 'delete']
+    >>> plan_replacement(6, 7).count('upload'), plan_replacement(6, 7).count('delete')
+    (7, 6)
+    """
+    if incoming > cap:
+        raise ValueError(f"一组最多 {cap} 张，给了 {incoming} 张")
+    ops: list[str] = []
+    live, old_left = existing, existing
+    for _ in range(incoming):
+        while live + 1 > cap and old_left > 0:
+            ops.append("delete")
+            live -= 1
+            old_left -= 1
+        ops.append("upload")
+        live += 1
+    ops.extend(["delete"] * old_left)
+    return ops
+
+
 def cmd_upload(cfg, args):
     pngs = sorted(Path(args.dir).glob("*.png"))
     if not pngs:
@@ -203,21 +246,23 @@ def cmd_upload(cfg, args):
             print("已取消")
             return
 
-    # **先传后删**。第一版是反过来的，结果第一次实跑就把 en-US 下用户手动传的
-    # 八张删光、而 PUT 那步 400 失败——集合被清空，什么都没剩下。
-    #
-    # 先传的代价是中间态会有新旧两批并存（顺序上新的在后），失败时旧的还在，
-    # 重跑一次即可；反过来的代价是失败即数据丢失。
-    for i, p in enumerate(pngs, 1):
-        _upload_one(cfg, set_id, p)
-        print(f"  [{i}/{len(pngs)}] ✅ {p.name}")
-
-    if args.replace and existing:
-        for sh in existing:
+    # 边传边删，序列由 plan_replacement 算好（那里写了为什么不能先全传或先全删）。
+    to_delete = list(existing) if args.replace else []
+    ops = plan_replacement(len(existing) if args.replace else 0, len(pngs))
+    it = iter(pngs)
+    done = 0
+    for op in ops:
+        if op == "delete":
+            sh = to_delete.pop(0)
             code, out = _req(cfg, "DELETE", f"appScreenshots/{sh['id']}")
             if code not in (200, 204):
                 _die(code, out, "删除旧截图")
-        print(f"  已删除 {len(existing)} 张旧截图")
+            print(f"  🗑  腾出位置（旧图 {sh['id'][:8]}…）")
+        else:
+            p = next(it)
+            _upload_one(cfg, set_id, p)
+            done += 1
+            print(f"  [{done}/{len(pngs)}] ✅ {p.name}")
     print("完成")
 
 
