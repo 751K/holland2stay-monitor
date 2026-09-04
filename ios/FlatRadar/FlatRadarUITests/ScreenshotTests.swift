@@ -262,15 +262,39 @@ final class ScreenshotTests: XCTestCase {
     /// 访客模式下没有 Alerts，四个 tab 变三个，写死的 3 会指到别处。
     /// Settings 永远是最后一个，Alerts 永远是倒数第二个（存在时）——按这个推。
     private func tabButton(_ tab: Tab) -> XCUIElement? {
+        // identifier 优先，两种设备都试。
+        //
+        // 「iPhone 上没有 identifier」这个结论是错的——它只是**晚一点才出现**。
+        // build 265 在等待超时那一刻拍的清单里 iPhone 全是 id=""，我据此断定
+        // UITabBar 把它吞了；build 269 用同一份 App 代码（MainTabView 没动过）
+        // 拍到的却是：
+        //
+        //     app.buttons=13
+        //       id="tab-dashboard" label="仪表盘"
+        //       id="tab-browse"    label="浏览"
+        //
+        // 同样的代码、不同的时刻，两种结果。所以判据不能是「这台设备有没有
+        // identifier」，而是「此刻找不找得到」——找不到再退到位置。
+        let byIdentifier = identifierQuery(tab).firstMatch
+        if byIdentifier.exists { return byIdentifier }
+
+        // 退路：tab bar 里按位置。iPhone 专用，iPad 没有 tabBars。
         let bar = app.tabBars.firstMatch
-        guard bar.exists else {                     // iPad：认 identifier
-            let e = identifierQuery(tab).firstMatch
-            return e.exists ? e : nil
-        }
-        let buttons = bar.buttons                   // iPhone：只剩序号
-        let n = buttons.count
-        guard n > 0, let idx = tab.phoneIndex(barCount: n), idx < n else { return nil }
-        return buttons.element(boundBy: idx)
+        guard bar.exists else { return nil }
+
+        // ⚠️ 用 allElementsBoundByIndex 而**不是** .count。
+        //
+        // 两者在 iPhone 上会给出不一样的数：build 269 里 .count 是 8（每个 tab
+        // 在快照里出现两次），我拿 n-1 算出 7，而真正去点的时候只解析出 4 个：
+        //
+        //     Failed to tap "Settings" Button: No matches found for Element at
+        //     index 7 from input {(Button, Selected, Button, Button, Button)}
+        //
+        // allElementsBoundByIndex 拿的是已解析的那一份，跟点击看到的是同一批。
+        let resolved = bar.buttons.allElementsBoundByIndex
+        guard let idx = tab.phoneIndex(barCount: resolved.count),
+              idx >= 0, idx < resolved.count else { return nil }
+        return resolved[idx]
     }
 
     /// iPad 那条路：App 声明的 identifier 优先，SF Symbol 兜底。
