@@ -1,0 +1,174 @@
+# 打包并上传到 App Store Connect。
+#
+# 为什么必须放云端
+# ----------------
+# 开发机的 macOS 是测试版，装不了正式版 Xcode，本机只有 Xcode-beta。而 Apple
+# 明确拒收 beta 版 Xcode 打的包：
+#
+#   This build is using a beta version of Xcode and can't be submitted.
+#
+# build 198 就是这么报废的——我用 DEVELOPER_DIR 指向 Xcode-beta.app 归档并上传，
+# 路径里写着 beta 却没停下来想过。GitHub 的 macOS runner 自带正式版
+# （2026-09 是 Xcode_26.6），正好补上这一环。
+name: Release to App Store Connect
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: '构建号（必须大于 App Store Connect 上已有的最大值）'
+        required: true
+      marketing_version:
+        description: '版本号，留空则沿用项目里的设置'
+        default: ''
+      upload:
+        description: '真的上传；留空只归档+校验，不投递'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 显式选正式版 Xcode，不靠默认。runner 镜像里同时装着多个版本，默认指向
+      # 哪个会随镜像更新漂移——而"用了 beta"这件事要到 Apple 拒收才会发现。
+      - name: Select a GM Xcode
+        run: |
+          set -euo pipefail
+          ls -d /Applications/Xcode*.app
+          # 只认不带 beta 字样的
+          XC=$(ls -d /Applications/Xcode*.app | grep -iv beta | sort -V | tail -1)
+          echo "选中 $XC"
+          sudo xcode-select -s "$XC/Contents/Developer"
+          xcodebuild -version
+          # 双保险：版本字符串里不能有 beta
+          xcodebuild -version | grep -iq beta && { echo "::error::选中的仍是 beta"; exit 1; } || true
+
+      - name: Set version numbers
+        env:
+          BUILD_NUMBER: ${{ github.event.inputs.build_number }}
+          MARKETING_VERSION: ${{ github.event.inputs.marketing_version }}
+        run: |
+          set -euo pipefail
+          cd ios/FlatRadar
+          agvtool new-version -all "$BUILD_NUMBER"
+          if [ -n "$MARKETING_VERSION" ]; then
+            agvtool new-marketing-version "$MARKETING_VERSION"
+          fi
+          grep -m2 -E "CURRENT_PROJECT_VERSION|MARKETING_VERSION" FlatRadar.xcodeproj/project.pbxproj
+
+      - name: Write ASC API key
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.appstoreconnect/private_keys
+          printf '%s' "$ASC_KEY_P8" > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          # 只验存在与非空，不打印内容
+          test -s ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      # 签名交给 Xcode 自动管理 + API key。这样不必把 .p12 证书塞进 secrets——
+      # Xcode 会用 API key 去申请/下载所需的证书与描述文件。
+      - name: Archive
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project ios/FlatRadar/FlatRadar.xcodeproj \
+            -scheme FlatRadar \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/FlatRadar.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | { command -v xcpretty >/dev/null && xcpretty || cat; }
+
+      # 归档里的版本号与签名要当场核对。等 Apple 拒收再回头看，一轮就是几十分钟。
+      - name: Verify the archive
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/FlatRadar.xcarchive/Products/Applications/FlatRadar.app"
+          PLIST="$APP/Info.plist"
+          echo "版本 $(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+          echo "构建 $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+          BN="${{ github.event.inputs.build_number }}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")" = "$BN" \
+            || { echo "::error::构建号没生效"; exit 1; }
+          # 打包用的 Xcode 版本记在归档里，这是 Apple 拒收 198 的那一项
+          /usr/libexec/PlistBuddy -c 'Print :DTXcode' "$PLIST"
+          /usr/libexec/PlistBuddy -c 'Print :DTXcodeBuild' "$PLIST"
+          codesign -dvv "$APP" 2>&1 | grep -E "Authority|TeamIdentifier" | head -3
+
+      - name: Export ipa
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>HGXZB3UC25</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>stripSwiftSymbols</key><true/>
+            <!-- false：构建号由上面的 agvtool 定死，让 Xcode 自作主张改它，
+                 就没法保证传上去的到底是哪一个号。 -->
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/FlatRadar.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+          ls -lh "$RUNNER_TEMP/export"
+
+      # 先校验后上传。altool 的 validate 会跑 Apple 的那套检查（含「是否 beta
+      # Xcode」），失败时什么都不投递。
+      - name: Validate
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcrun altool --validate-app -f "$RUNNER_TEMP/export/FlatRadar.ipa" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Upload to App Store Connect
+        if: ${{ github.event.inputs.upload == 'true' }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          xcrun altool --upload-app -f "$RUNNER_TEMP/export/FlatRadar.ipa" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Upload ipa as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlatRadar-ipa-${{ github.event.inputs.build_number }}
+          path: ${{ runner.temp }}/export/*.ipa
+          retention-days: 7
