@@ -178,7 +178,7 @@ struct ContentView: View {
     ///                                → 以该账号登录，而不是进访客模式
     ///
     /// 凭据从 launch arg 传，**不写在代码里**：这个仓库是公开的。CI 里由
-    /// GitHub secrets 注入（见 .github/workflows/screenshots.yml）。
+    /// 由 Xcode Cloud 的 Secret 环境变量注入（见 ci_scripts/ci_post_clone.sh）。
     private func applyScreenshotLaunchArgs() {
         let args = CommandLine.arguments
         guard args.contains("UI_TEST_SCREENSHOT_MODE") else { return }

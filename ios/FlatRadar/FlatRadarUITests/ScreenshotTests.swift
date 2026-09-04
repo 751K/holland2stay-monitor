@@ -176,7 +176,10 @@ final class ScreenshotTests: XCTestCase {
         var args = ["UI_TEST_SCREENSHOT_MODE"]
         args.append(contentsOf: extra)
         // 凭据从环境变量取，**不写在代码里**——这个仓库是公开的。
-        // CI 由 GitHub secrets 注入；本地不设就自动退回访客模式。
+        // 截图现在只在 Xcode Cloud 上跑，值由 ci_scripts/ci_post_clone.sh
+        // 写进 test plan 的 environmentVariableEntries（Xcode Cloud 禁止
+        // TEST_RUNNER_ 前缀，而 xcodebuild 只转发这个前缀，那个脚本里写了
+        // 完整缘由）。本地不设就自动退回访客模式。
         let env = ProcessInfo.processInfo.environment
         if let u = env["UI_TEST_USERNAME"], let p = env["UI_TEST_PASSWORD"],
            !u.isEmpty, !p.isEmpty {
