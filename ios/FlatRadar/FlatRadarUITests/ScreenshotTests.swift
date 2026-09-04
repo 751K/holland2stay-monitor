@@ -54,7 +54,7 @@ final class ScreenshotTests: XCTestCase {
     func testCapture01_Dashboard() throws {
         launch(extra: ["UI_TEST_TAB=dashboard"])
         waitForMainUI()
-        assertTabSelected(Tab.dashboard, "Dashboard")
+        selectTab(Tab.dashboard, "Dashboard")
         // 给 Dashboard chart 渲染
         sleep(2)
         snap(named: "01-Dashboard")
@@ -65,7 +65,7 @@ final class ScreenshotTests: XCTestCase {
         let (args, tab) = browse("list", padTab: Tab.listings)
         launch(extra: args)
         waitForMainUI()
-        assertTabSelected(tab, "Listings")
+        selectTab(tab, "Listings")
         sleep(2)
         snap(named: "02-Listings")
     }
@@ -75,7 +75,7 @@ final class ScreenshotTests: XCTestCase {
         let (args, tab) = browse("map", padTab: Tab.map)
         launch(extra: args)
         waitForMainUI()
-        assertTabSelected(tab, "Map")
+        selectTab(tab, "Map")
         // Leaflet 渲染稍慢
         sleep(3)
         snap(named: "03-Map")
@@ -86,7 +86,7 @@ final class ScreenshotTests: XCTestCase {
         let (args, tab) = browse("calendar", padTab: Tab.calendar)
         launch(extra: args)
         waitForMainUI()
-        assertTabSelected(tab, "Calendar")
+        selectTab(tab, "Calendar")
         sleep(2)
         snap(named: "04-Calendar")
     }
@@ -105,10 +105,8 @@ final class ScreenshotTests: XCTestCase {
         // 不再猜——直接点那个 tab。UI 点击对单个 tab 是可靠的（原设计避开
         // menu 是因为 Browse 的三个子模式藏在 Menu 里，那才不稳）。
         // 按序号点，不按标题——标题在非英文语言下是翻译过的。
-        // 按 symbol 点。两种设备共用 bell.fill，且与语言无关。
-        let alerts = tabQuery(.alerts).firstMatch
-        if alerts.waitForExistence(timeout: 60) { alerts.tap() }
-        assertTabSelected(Tab.alerts, "Alerts")
+        // 这条最早改成「直接点」，现在其余几条也走同一个 selectTab。
+        selectTab(Tab.alerts, "Alerts")
         sleep(2)
         snap(named: "05-Notifications")
     }
@@ -117,7 +115,7 @@ final class ScreenshotTests: XCTestCase {
     func testCapture06_Settings() throws {
         launch(extra: ["UI_TEST_TAB=settings"])
         waitForMainUI()
-        assertTabSelected(Tab.settings, "Settings")
+        selectTab(Tab.settings, "Settings")
         sleep(1)
         snap(named: "06-Settings")
     }
@@ -231,11 +229,47 @@ final class ScreenshotTests: XCTestCase {
         return lines.joined(separator: "\n")
     }
 
+    /// **任意**一个 tab 按钮。
+    ///
+    /// 「主界面出来了没有」不能盯住某一个具体的 tab。iPad 的六个 tab 是分页的：
+    /// App 直接落在 Settings 上时，tab bar 显示的是后半页，dashboard 在「上一页」
+    /// 里，根本不进无障碍树。盯着 dashboard 等，就会在主界面明明已经渲染完的
+    /// 情况下等满 60 秒——build 265 的 06-Settings 就是这么挂的，而清单里
+    /// tab-settings 正亮着 sel=true。
+    private var anyTabQuery: XCUIElementQuery {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tab-"))
+    }
+
     /// 等主 UI 出现。LoginView 上没有 tab，所以 Login 那条不调这个。
     private func waitForMainUI() {
-        let anchor = tabQuery(.dashboard).firstMatch
-        XCTAssertTrue(anchor.waitForExistence(timeout: 60),
+        XCTAssertTrue(anyTabQuery.firstMatch.waitForExistence(timeout: 60),
                       "主界面未在 60s 内出现。当前按钮清单：\n" + buttonInventory())
+    }
+
+    /// 落到指定 tab：launch arg 没生效就直接点它。
+    ///
+    /// `UI_TEST_TAB=` 这条路是不可靠的——登录是异步的，tab 是同步设的，
+    /// MainTabView 挂载时又会把 selectedTab 读回默认值。表现是随机的：build 265
+    /// 里 03-Map 第一次失败、重跑通过，02-Listings 两次都停在 Dashboard。
+    ///
+    /// Notifications 那条早就改成直接点了，一直很稳。这里把同样的做法推广到
+    /// 其余几条：等按钮出现 → 没选中就点一下 → 再断言。断言留着不动，
+    /// 「点了但没落位」仍然要红——点击是让它更可能对，不是替代验证。
+    private func selectTab(_ tab: Tab, _ label: String) {
+        let button = tabQuery(tab).firstMatch
+        XCTAssertTrue(button.waitForExistence(timeout: 60),
+                      "找不到「\(label)」这个 tab（\(tab.id) / \(tab.symbol)）。"
+                      + "当前按钮清单：\n" + buttonInventory())
+        guard button.exists else { return }
+        if !button.isSelected {
+            guard button.isHittable else {
+                XCTFail("「\(label)」这个 tab 在但点不到——多半在 tab bar 的另一页上。"
+                        + "当前按钮清单：\n" + buttonInventory())
+                return
+            }
+            button.tap()
+        }
+        assertTabSelected(tab, label)
     }
 
     /// 断言选中的是 `tab`。
