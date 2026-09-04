@@ -47,12 +47,12 @@
 <link rel="alternate" href="https://studentexperience.com/studios" hreflang="en" />
 <meta property="og:title" content="Find a studio"/>
 <meta property="og:type" content="website"/>
-<meta property="og:url" content="https://studentexperience.com/studios?los=longstay"/>
+<meta property="og:url" content="https://studentexperience.com/studios?los=shortstay&amp;locationId=3"/>
 <meta property="og:description" content="Select your dream location below."/>
-<link rel="canonical" href="https://studentexperience.com/studios?los=longstay">
-<link rel="preload" href="/themes/default/cache/housing-default-screen-14.css?hash=e78509ccae1c88801c137e45a0ad1924a12c1fee0b8e220ec3231c69f4413608f0f536387de8513c96dc1ec14e74a15c3004" as="style" />
-<link rel="stylesheet" href="/themes/default/cache/housing-default-screen-14.css?hash=e78509ccae1c88801c137e45a0ad1924a12c1fee0b8e220ec3231c69f4413608f0f536387de8513c96dc1ec14e74a15c3004" fetchpriority="high" />
-<link rel="stylesheet" href="/themes/default/cache/housing-default-print-14.css?hash=e78509ccae1c88801c137e45a0ad1924a12c1fee0b8e220ec3231c69f4413608f0f536387de8513c96dc1ec14e74a15c3004" media="print" />
+<link rel="canonical" href="https://studentexperience.com/studios?los=shortstay">
+<link rel="preload" href="/themes/default/cache/housing-default-screen-14.css?hash=b18e8aa9329f7510131db182fd75508a3cd321d50b4cb76074e542a48440dd8e275a2b14ce168f773fc1f3a15223a720fd4f" as="style" />
+<link rel="stylesheet" href="/themes/default/cache/housing-default-screen-14.css?hash=b18e8aa9329f7510131db182fd75508a3cd321d50b4cb76074e542a48440dd8e275a2b14ce168f773fc1f3a15223a720fd4f" fetchpriority="high" />
+<link rel="stylesheet" href="/themes/default/cache/housing-default-print-14.css?hash=b18e8aa9329f7510131db182fd75508a3cd321d50b4cb76074e542a48440dd8e275a2b14ce168f773fc1f3a15223a720fd4f" media="print" />
 <link rel="preload" href="/themes/default/fonts/HelveticaNowText-Regular.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="/themes/default/vendor/fancybox/jquery.fancybox.min.css" media="print" onload="this.media='all'" />
 <noscript><link rel="stylesheet" href="/themes/default/vendor/fancybox/jquery.fancybox.min.css" /></noscript>
@@ -196,9 +196,9 @@ opacity: 1!important;
                                data-label-continue="Continue booking"
                                data-studios-overview-url="https://studentexperience.com/studios"
                                data-longstay-url="https://studentexperience.com/studios?los=longstay"
-                               data-force-longstay="1"
+                               data-force-longstay="0"
                                data-is-location-detail="0"
-                               data-booking-state="{&quot;url&quot;:&quot;\/studios?los=longstay&quot;,&quot;depth&quot;:&quot;longstay&quot;}">
+                               data-booking-state="{}">
                                 Book your studio                            </a>
                                                             <a class="login-btn" href="#">Login</a>
                                 <nav class="portal-menu hidden-touch">
@@ -216,9 +216,9 @@ opacity: 1!important;
                                data-label-continue="Continue booking"
                                data-studios-overview-url="https://studentexperience.com/studios"
                                data-longstay-url="https://studentexperience.com/studios?los=longstay"
-                               data-force-longstay="1"
+                               data-force-longstay="0"
                                data-is-location-detail="0"
-                               data-booking-state="{&quot;url&quot;:&quot;\/studios?los=longstay&quot;,&quot;depth&quot;:&quot;longstay&quot;}">
+                               data-booking-state="{}">
                                 Book your studio                            </a>
                                             </div>
                     <div class="portal-button-wrapper is-hidden-touch">
@@ -250,162 +250,86 @@ opacity: 1!important;
             <div class="breadcrumb-wrapper">
     <div class="container">
         <nav class="breadcrumb" aria-label="breadcrumbs">
-            <ul itemscope itemtype="http://schema.org/BreadcrumbList"><li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class=" first"><a itemprop="item" href="https://studentexperience.com"><span itemprop="name">Home</span></a><meta itemprop="position" content="1"/></li><li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="is-active"><a itemprop="item" href="https://studentexperience.com/studios/country"><span itemprop="name">Select a country</span></a><meta itemprop="position" content="2"/></li></ul>        </nav>
+            <ul itemscope itemtype="http://schema.org/BreadcrumbList"><li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class=" first"><a itemprop="item" href="https://studentexperience.com"><span itemprop="name">Home</span></a><meta itemprop="position" content="1"/></li><li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="is-active"><a itemprop="item" href="https://studentexperience.com/studios"><span itemprop="name">Find a studio</span></a><meta itemprop="position" content="2"/></li></ul>        </nav>
     </div>
 </div>    
+
 <section class="section mobile-section">
-    <div class="container">
-        <div class="columns is-centered">
-            <div class="column is-9">
-                <div class="content">
-                    <h1 class="title">Select a country</h1>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="container">
+        <div class="container">
     <div class="columns">
         <div class="column is-9 is-offset-3">
-            <div class="filter-interactions">
+            <div class="filter-interactions filter-interactions-shortstay-hidden">
                 <div class="active-filters">
                                     </div>
                 <a href="#" class="button is-dark is-outlined is-small is-hidden-tablet toggle-filter">
                     <span class="icon"><i class="fas fa-filter"></i></span>
                     <span>Filter</span>
                 </a>
-                                    <div class="sort">
-                        <label for="sort">Sort by</label>
-                        <form method="get" id="order" action="https://studentexperience.com/studios">
-                            <div class="select is-black">
-                                <input type="hidden" name="los" value="longstay">
-                                <select id="sort" name="order">
-                                                                            <option SELECTED                                            value="price-asc">
-                                            Price ascending                                        </option>
-                                                                            <option                                             value="price-desc">
-                                            Price descending                                        </option>
-                                                                            <option                                             value="city-asc">
-                                            City A-Z                                        </option>
-                                                                            <option                                             value="city-desc">
-                                            City Z-A                                        </option>
-                                                                            <option                                             value="contract-asc">
-                                            Start date contract ascending                                        </option>
-                                                                            <option                                             value="contract-desc">
-                                            Start date contract descending                                        </option>
-                                                                    </select>
-                            </div>
-                        </form>
-                    </div>
                             </div>
         </div>
     </div>
 </div>
     <div class="container">
-                    <div class="columns">
-                <div class="column">
-                    <div class="side-filter-wrapper">
-    <a href="#" class="close-side-filter">
-        <i class="far fa-times"></i>
-    </a>
-    <form method="get" id="filterForm" action="https://studentexperience.com/studios" class="validateForm">
-        <input type="hidden" name="los" value="longstay" />
-                <input type="hidden" name="los" value="longstay">
+                    <div class="shortstay-layout">
+                <div class="shortstay-filter-wrapper">
+                    
+<div class="shortstay-filter-card">
+    <div class="shortstay-filter-card-header">
+        <h2>Let&rsquo;s see if we can help you find the perfect studio in Amsterdam Zuidas</h2>
+    </div>
+    <form method="get" id="filterForm" action="https://studentexperience.com/studios" class="shortstay-filter-form validateForm">
+        <input type="hidden" name="los" value="shortstay" />
+        <input type="hidden" name="los" value="shortstay">
+<input type="hidden" name="locationId" value="3">
 
-        <div class="filter-wrap">
-            <h2>Filter</h2>
-            <div class="filter-group" style="display:none;">
-                                                            <div class="filter">
-                            <div class="control">
-                                <input type="radio"
-                                       value="166"                                        class="radio" name="countryId"
-                                       id="166">
-                                <label for="166"><span></span>Netherlands                                </label>
-                            </div>
-                        </div>
-                                                                                <div class="filter">
-                            <div class="control">
-                                <input type="radio"
-                                       value="68"                                        class="radio" name="countryId"
-                                       id="68">
-                                <label for="68"><span></span>Spain                                </label>
-                            </div>
-                        </div>
-                                                </div>
-            <div class="filter-group">
-                <h3>City</h3>
-                                                            <div class="filter">
-                            <div class="control" style="opacity: .5;">
-                                <input type="checkbox"
-                                       value="Amsterdam"  class="checkbox" name="cities[]"
-                                       id="city-Amsterdam">
-                                <label for="city-Amsterdam"><span></span>Amsterdam                                </label>
-                            </div>
-                            <span class="amount">0</span>
-                        </div>
-                                                                                <div class="filter">
-                            <div class="control" style="opacity: .5;">
-                                <input type="checkbox"
-                                       value="Leiden"  class="checkbox" name="cities[]"
-                                       id="city-Leiden">
-                                <label for="city-Leiden"><span></span>Leiden                                </label>
-                            </div>
-                            <span class="amount">0</span>
-                        </div>
-                                                </div>
-            <div class="filter-group">
-                <h3>Complex</h3>
-                                    <div class="filter">
-                        <div class="control" style="opacity: .5;">
-                            <input type="checkbox"
-                                   value="Amsterdam Amstel"  class="checkbox"
-                                   name="complexes[]"
-                                   id="complex-Amsterdam Amstel">
-                            <label for="complex-Amsterdam Amstel"><span></span>Amsterdam Amstel</label>
-                        </div>
-                        <span class="amount">0</span>
-                    </div>
-                                    <div class="filter">
-                        <div class="control" style="opacity: .5;">
-                            <input type="checkbox"
-                                   value="Amsterdam NDSM"  class="checkbox"
-                                   name="complexes[]"
-                                   id="complex-Amsterdam NDSM">
-                            <label for="complex-Amsterdam NDSM"><span></span>Amsterdam NDSM</label>
-                        </div>
-                        <span class="amount">0</span>
-                    </div>
-                                    <div class="filter">
-                        <div class="control" style="opacity: .5;">
-                            <input type="checkbox"
-                                   value="Amsterdam Zuidas"  class="checkbox"
-                                   name="complexes[]"
-                                   id="complex-Amsterdam Zuidas">
-                            <label for="complex-Amsterdam Zuidas"><span></span>Amsterdam Zuidas</label>
-                        </div>
-                        <span class="amount">0</span>
-                    </div>
-                                    <div class="filter">
-                        <div class="control" style="opacity: .5;">
-                            <input type="checkbox"
-                                   value="Leiden"  class="checkbox"
-                                   name="complexes[]"
-                                   id="complex-Leiden">
-                            <label for="complex-Leiden"><span></span>Leiden</label>
-                        </div>
-                        <span class="amount">0</span>
-                    </div>
-                            </div>
-
+        <div>
             
+<div class="location-term-filter location-term-filter-hide-location">
+    <div class="field is-hidden">
+        <label for="shortstay-location">Location of choice</label>
+        <div class="select">
+            <select
+                name="locationId"
+                id="shortstay-location"
+                                 data-filter-key="locationId">
+                <option value="">Choose location</option>
+                                                            <option
+                            value="8"
+                                                        data-stay-type="shortstay">
+                            Granada                        </option>
+                                                </select>
+            <span class="triangle"></span>
+        </div>
+    </div>
+    <div class="field">
+        <label for="shortstay-term">Length of stay</label>
+        <div class="select">
+            <select
+                name="academicTermId"
+                id="shortstay-term"
+                disabled                 data-filter-key="academicTermId">
+                <option value="">Select length of stay</option>
+            </select>
+            <span class="triangle"></span>
+        </div>
+    </div>
+</div>
+
+
                     </div>
     </form>
 </div>
-
                 </div>
-                <div class="column is-9 mt-2">
+                <section class="shortstay-google-review">
+    <script src="https://elfsightcdn.com/platform.js" async></script>
+    <div class="elfsight-app-1759a844-669f-4b51-ae2e-9f6453c87834" data-elfsight-app-lazy></div>
+    </section>
+                <div class="shortstay-studios-wrapper">
                     <div class="columns is-multiline">
                                                     <div class="column">
-                                <p>It seems we don't have available studios at this location right now. <a href="/account/register">Sign up</a> to receive an e-mail notification when a studio becomes available. :)</p>                            </div>
-                                                                    </div>
+                                It seems we don&#039;t have any studios available right now.                            </div>
+                                                
+                                            </div>
                     <div class="columns">
                         <div class="column">
                                                     </div>
@@ -699,7 +623,8 @@ opacity: 1!important;
                 }
 
                 getScript('/themes/default/cache/main-default-bottom-cached-14.js', function() {
-                    getScript('/themes/default/js/cookieconsent.min.js',function(){});
+                    getScript('/themes/default/js/location-term-filter.min.js?v=1776866252',function(){});
+getScript('/themes/default/js/cookieconsent.min.js',function(){});
 getScript('https://maps.googleapis.com/maps/api/js?key=AIzaSyAF9Rc10WDg5C1oC29Jpqmpm0HUgDwjQjo',function(){});
 
     $(document).on('change', '#filterForm [name="countryId"]', function() {
@@ -753,9 +678,181 @@ getScript('https://maps.googleapis.com/maps/api/js?key=AIzaSyAF9Rc10WDg5C1oC29Jp
     });
 
 
-    $(document).on('change', '#filterForm', function(){
-        this.submit();
+(function() {
+    var config = {"locationSelectId":"shortstay-location","termSelectId":"shortstay-term","longStayText":"Long stay (min. one-year contract)","selectLengthOfStayText":"Select length of stay","noOptionsText":"No options available","loadingText":"Loading...","studiosUrl":"/studios","madridPozueloLocationId":7,"madridShortStayText":"Less than a month","madridShortStayUrl":"https://shortstay.studentexperience.com","madridShortStayOptionValue":"madrid-pozuelo-less-then-month","granadaLocationId":8,"granadaShortStayText":"Less than a month","granadaShortStayUrl":"https://shortstay.studentexperience.com","granadaShortStayOptionValue":"granada-less-then-month","granada2LocationId":38};
+    var shouldEnableLocation = false;
+    
+    function init() {
+        // Resolve callback function from string name
+        if (config.onTermChangeFunction && typeof window[config.onTermChangeFunction] === 'function') {
+            config.onTermChange = window[config.onTermChangeFunction];
+        }
+        delete config.onTermChangeFunction;
+        
+        // Enable location select if configured
+        if (shouldEnableLocation) {
+            var locationSelect = document.getElementById(config.locationSelectId);
+            if (locationSelect) {
+                locationSelect.removeAttribute('disabled');
+            }
+        }
+        
+        var result = initLocationTermFilter(config);
+        if (!result || !result.initialized) {
+            console.error('LocationTermFilter: initialization failed', config);
+        }
+    }
+
+    function initWhenScriptReady(retriesLeft) {
+        if (typeof initLocationTermFilter === 'function') {
+            init();
+            return;
+        }
+
+        if (retriesLeft <= 0) {
+            console.error('LocationTermFilter: script not loaded');
+            return;
+        }
+
+        setTimeout(function() {
+            initWhenScriptReady(retriesLeft - 1);
+        }, 50);
+    }
+    
+    // Initialize when DOM is ready and script has loaded.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            initWhenScriptReady(100);
+        });
+    } else {
+        initWhenScriptReady(100);
+    }
+})();
+
+
+    $(document).ready(function() {
+        // Store initial location value from URL to detect if change is from initialization
+        var sInitialLocationId = null;
+        var sUrlParams = new URLSearchParams(window.location.search);
+        var sUrlLocationId = sUrlParams.get('locationId');
+        if (sUrlLocationId) {
+            sInitialLocationId = sUrlLocationId;
+        }
+        
+        $(document).on('change', '#filterForm select, #filterForm input[type="checkbox"], #filterForm input[type="radio"]', function(e) {
+            var sFieldName = $(this).attr('name');
+            
+            // Handle location change - only redirect if it's a user-initiated change
+            if (sFieldName === 'locationId') {
+                // Check if this is a programmatic trigger (no originalEvent means it was triggered via .trigger())
+                if (!e.originalEvent) {
+                    // This is a programmatic change from location-term-filter.js initialization
+                    // Let it handle loading terms, don't redirect
+                    return;
+                }
+                
+                var sNewLocationId = $(this).val();
+                
+                // Double-check: if value matches URL, it's initialization
+                if (sNewLocationId === sInitialLocationId || (!sNewLocationId && !sInitialLocationId)) {
+                    return;
+                }
+                
+                // User manually changed location - redirect to update page with new locationId
+                var url = new URL(window.location.href);
+                
+                // Update or remove locationId parameter
+                if (sNewLocationId && sNewLocationId !== '') {
+                    url.searchParams.set('locationId', sNewLocationId);
+                } else {
+                    url.searchParams.delete('locationId');
+                }
+                
+                // Remove academicTermId when location changes (terms will be reloaded)
+                url.searchParams.delete('academicTermId');
+                
+                // Remove complexes parameter if it exists (legacy)
+                url.searchParams.delete('complexes[]');
+                
+                // Redirect to update page
+                window.location.href = url.toString();
+                return false;
+            }
+            
+            // Skip academicTermId changes - handled by location-term-filter.js (redirects when term selected)
+            if (sFieldName === 'academicTermId') {
+                return;
+            }
+            
+            // For other fields, submit form normally
+            this.form.submit();
+        });
     });
+
+
+    document.addEventListener('click', function (event) {
+        var oArrow = event.target.closest('.studio.is-overview.shortstay .media-slider .slick-arrow');
+        if (!oArrow) {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+    });
+
+    var $slider = $('.shortstay-other-studios-slider');
+    var $dots = $slider.closest('.shortstay-other-studios').find('.shortstay-other-studios-dots');
+    var oMobileQuery = window.matchMedia('(max-width: 767px)');
+
+    function initOtherStudiosSlider() {
+        if (!$slider.length || typeof $slider.slick !== 'function') {
+            return;
+        }
+
+        var iSlideCount = $slider.find('.shortstay-other-studios-slide').length;
+        if (iSlideCount < 2) {
+            return;
+        }
+
+        if (oMobileQuery.matches) {
+            if ($slider.hasClass('slick-initialized')) {
+                $slider.slick('unslick');
+            }
+            return;
+        }
+
+        if ($slider.hasClass('slick-initialized')) {
+            return;
+        }
+
+        $slider.slick({
+            slidesToShow: 3,
+            slidesToScroll: 3,
+            infinite: false,
+            dots: true,
+            arrows: true,
+            speed: 400,
+            appendDots: $dots,
+            responsive: [
+                {
+                    breakpoint: 1024,
+                    settings: {
+                        slidesToShow: 2,
+                        slidesToScroll: 2
+                    }
+                }
+            ]
+        });
+
+        $dots.find('.slick-dots').addClass('is-visible');
+    }
+
+    initOtherStudiosSlider();
+    if (oMobileQuery.addEventListener) {
+        oMobileQuery.addEventListener('change', initOtherStudiosSlider);
+    } else if (oMobileQuery.addListener) {
+        oMobileQuery.addListener(initOtherStudiosSlider);
+    }
 
 
                                     });

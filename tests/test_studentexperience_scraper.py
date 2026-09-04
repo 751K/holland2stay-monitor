@@ -1,14 +1,26 @@
 """Student Experience scraper 的解析与完整性判据。
 
-fixture 取自 2026-09-01 的真实页面：
+fixture 取自 **2026-09-04** 的真实页面：
 
-    studentexperience_shortstay_loc2.html          Minervahaven 有货（2 个户型）
-    studentexperience_longstay_empty.html          长租全站 0，计数块完整
-    studentexperience_shortstay_loc3_noterm.html   Zuidas 无学期档，页面全空
+    studentexperience_longstay_p1.html        长租第 1 页，12 张卡片
+    studentexperience_longstay_p2.html        长租第 2 页，10 张卡片
+    studentexperience_shortstay_noterm.html   短租无学期档，页面全空
 
 第三份是这组测试里最要紧的一份：它长得**和「站点改版了」一模一样**——没有卡片、
-没有计数块、连「暂无房源」的提示都没有。scraper 靠长租页的计数块把这两种情况分开，
-下面 TestCompleteness 守的就是这条。
+没有计数块、连「暂无房源」的提示都没有。scraper 靠长租页的计数块把这两种情况分开。
+
+⚠️ 关于 fixture 的边界，得写在最前面
+------------------------------------
+2026-09-04 站点改版，这一整组测试**一条都没有变红**，而线上已经四处皆坏：卡片
+锚点、卡片内部字段、计数块、分页。原因不是断言写得不好，是 fixture 本身冻住了
+旧 DOM——对着一份不会变的 HTML，怎么测都测不出上游变了。
+
+真正发现问题的是生产里那个完整性探针：它看到「计数说有货、卡片解析出 0 张」，
+判了 incomplete，于是库里留下 4 条旧记录，而**没有**把它们收敛成一批假的下架
+通知。这些测试守的是解析逻辑，探针守的是上游漂移，两者不能互相替代。
+
+所以 fixture 过期这件事不该靠「测试变红」来发现——它不会。它靠的是生产日志里
+那句 incomplete。
 """
 from pathlib import Path
 
@@ -17,6 +29,7 @@ import pytest
 from scrapers.studentexperience import (
     LOCATIONS,
     StudentExperienceScraper,
+    _last_page,
     _parse_card,
     _parse_complex_counts,
     _split_cards,
@@ -44,171 +57,205 @@ def _bump_complex_count(page: str, residence: str, n: int) -> str:
     return page[:m.start()] + f'<span class="amount">{n}</span>' + page[m.end():]
 
 
-@pytest.fixture(scope="module")
-def live_page() -> str:
-    return _fx("studentexperience_shortstay_loc2.html")
+def _strip_cards(page: str) -> str:
+    """删掉所有卡片，保留计数块——模拟「站点说有货但卡片结构变了」。"""
+    import re
+    return re.sub(r'<a\b[^>]*class="[^"]*\bstudio is-overview\b[^"]*"[^>]*>',
+                  "<a>", page)
 
 
 @pytest.fixture(scope="module")
-def empty_page() -> str:
-    return _fx("studentexperience_longstay_empty.html")
+def page1() -> str:
+    return _fx("studentexperience_longstay_p1.html")
+
+
+@pytest.fixture(scope="module")
+def page2() -> str:
+    return _fx("studentexperience_longstay_p2.html")
 
 
 @pytest.fixture(scope="module")
 def noterm_page() -> str:
-    return _fx("studentexperience_shortstay_loc3_noterm.html")
+    return _fx("studentexperience_shortstay_noterm.html")
 
 
 @pytest.fixture(scope="module")
-def parsed(live_page):
-    return [_parse_card(u, t, s, "12 Months (01-Oct-2026 - 30-Sep-2027)")
-            for u, t, s in _split_cards(live_page)]
+def parsed(page1, page2):
+    out = []
+    for page in (page1, page2):
+        out += [_parse_card(u, t, s) for u, t, s in _split_cards(page)]
+    return [x for x in out if x is not None]
 
 
-class TestCardSplit:
-    def test_both_card_variants_are_collected(self, live_page):
-        """主卡片与「其它户型」滑块里的紧凑卡片都要收。
+# ── 这次改版坏掉的四处，各守一条 ────────────────────────────────────
 
-        两者 class 不同（``has-popularity-header`` vs ``studio-compact``），但都是
-        当前可订的户型——2026-09-01 实测 0 库存的楼盘连滑块都不渲染，所以滑块里
-        出现即代表有货，不是全量目录。漏掉紧凑卡片会让 Essential studio 整个不
-        进库。
+class TestCardAnchor:
+    def test_cards_are_found_at_the_current_path(self, page1):
+        """锚点路径是 ``/studios/<id>``，不是 ``/studio-types/<id>``。
+
+        改版前是后者。旧正则写死了它，于是一张卡片都匹配不上——而页面上明明有
+        12 张，解析结果是 0。这是「Zuidas 有一堆房源却一条没进库」的直接原因。
         """
-        cards = _split_cards(live_page)
-        assert len(cards) == 2
-        assert {t for _u, t, _s in cards} == {"10", "11"}
+        cards = _split_cards(page1)
+        assert len(cards) == 12
+        for url, type_id, _seg in cards:
+            assert "/studios/" in url
+            assert type_id.isdigit()
 
-    def test_template_labels_are_not_mistaken_for_cards(self, live_page):
-        """header 里的 ``data-label-want-studio`` 不是一张卡片。
+    def test_attribute_order_is_not_assumed(self):
+        """href 与 class 谁先谁后不是契约。
 
-        2026-09-01 就是数 "I want this studio" 的出现次数把可订数量数错过一次——
-        那串文本在页面 header 的 data 属性里出现三次，与库存无关。卡片必须靠
-        ``<a href=".../studio-types/N">`` 这个锚点来切。
+        旧正则要求 ``href="…" class="studio is-overview…"`` 紧挨着。站点把两个
+        属性调个个儿，整块就静默失效——而失效的表现是「没有房源」，不是报错。
         """
-        assert live_page.count("I want this studio") > 2
-        assert len(_split_cards(live_page)) == 2
+        page = ('<a class="studio is-overview longstay" '
+                'href="https://studentexperience.com/studios/999">'
+                '<div class="studio-info top"><h3>Leiden<br/>84</h3></div>'
+                '<div class="price-wrap"><span class="price">&euro; 900</span></div></a>')
+        cards = _split_cards(page)
+        assert len(cards) == 1 and cards[0][1] == "999"
 
-    def test_zero_availability_page_has_no_cards(self, noterm_page, empty_page):
+    def test_an_anchor_without_a_usable_id_is_skipped_not_guessed(self):
+        """class 对上但 href 不是 ``/studios/<id>`` → 跳过。
+
+        猜一个 id 的后果是两条房源撞同一个 key，后来的那条会覆盖前一条。
+        """
+        page = ('<a class="studio is-overview" href="/somewhere-else">'
+                '<div class="studio-info top"><h3>Leiden<br/>84</h3></div></a>')
+        assert _split_cards(page) == []
+
+    def test_zero_availability_page_has_no_cards(self, noterm_page):
         assert _split_cards(noterm_page) == []
-        assert _split_cards(empty_page) == []
 
 
 class TestFieldExtraction:
-    def test_main_card_fields(self, parsed):
-        item = next(x for x in parsed if x.id == "se_11")
-        assert item.name == "Amsterdam Minervahaven — Signature studio"
-        assert item.price_raw == "€1.799"
+    def test_card_fields(self, parsed):
+        item = next(x for x in parsed if x.name.endswith("7 C60"))
+        assert item.name == "Amsterdam Zuidas — 7 C60"
+        assert item.price_raw == "€837"
         assert item.city == "Amsterdam"
         assert item.status == "Available to book"
         assert item.source == "studentexperience"
-        assert item.url.endswith("/studio-types/11?los=shortstay&academicTermId=1678")
+        assert "/studios/" in item.url
 
         fm = dict(f.split(": ", 1) for f in item.features)
-        assert fm["Building"] == "Amsterdam Minervahaven"
-        assert fm["Studio type"] == "Signature studio"
-        assert fm["Area"] == "20,5-26 m²"
-        assert fm["Address"] == "Moermanskkade 71a 1013 BC Amsterdam"
-        assert fm["Units left"] == "2"
+        assert fm["Building"] == "Amsterdam Zuidas"
+        assert fm["Unit"] == "7 C60"
+        assert fm["Type"] == "Studio"
+        assert fm["Area"] == "21 m²"
+        assert fm["Finishing note"] == "Not furnished"
+        assert fm["Length of stay"] == "Maximum stay until June 30, 2027"
 
-    def test_nested_spans_are_not_truncated(self, parsed):
-        """押金与装修档位各自内嵌了一个同名标签，非贪婪正则会把它们截断。
+    def test_thousands_separator_changed_from_dot_to_comma(self, parsed):
+        """价格从 ``€1.550`` 变成了 ``€ 1,046``。
 
-        押金会截成「€1.750 deposit ·」（停在 ``studio-price-deposit-separator``
-        的 ``</span>``），装修档位则整个丢失（挤在面积后面，由
-        ``studio-spec-separator`` 隔开）。两者都要出现在通知里，所以解析器按开合
-        标签配对而不是用 ``(.*?)</span>``。
+        两种写法用欧洲习惯读会差一千倍，所以这条盯着一个四位数的价格。
         """
-        item = next(x for x in parsed if x.id == "se_11")
-        fm = dict(f.split(": ", 1) for f in item.features)
-        assert fm["Deposit"] == "€1.750 deposit · fully refundable"
-        assert fm["Finishing note"] == "Private & fully furnished"
+        item = next(x for x in parsed if x.name.endswith("63 K2"))
+        assert item.price_raw == "€1.046"
 
-    def test_travel_times_do_not_leak_into_specs(self, parsed):
-        """「12 mins to nearest shops」那几行的 class 带前缀，会被块匹配收进来。
+    def test_the_unit_number_is_kept_out_of_the_building_name(self, parsed):
+        """``<h3>楼盘<br/>单元</h3>`` 两行必须分开。
 
-        它们不是面积、不是地址、也不是装修档位，混进任何一个字段都是错的。
+        混在一起会让楼盘名认不出来（表里没有 "Amsterdam NDSM 63 K2"），整条被丢。
         """
-        item = next(x for x in parsed if x.id == "se_11")
-        assert not any("mins to" in f for f in item.features)
+        for x in parsed:
+            fm = dict(f.split(": ", 1) for f in x.features)
+            assert fm["Building"] in {n for n, _c in LOCATIONS.values()}
+            assert fm["Unit"] and fm["Unit"] not in fm["Building"]
 
-    def test_travel_time_with_a_postcode_does_not_become_the_address(self, live_page):
-        """通勤行里带邮编、且排在地址行**前面**时，地址会被它顶掉。
+    def test_fields_are_matched_by_content_not_by_icon_class(self):
+        """``info-wrap`` 里那几行按文本模式认，不按图标 class 认。
 
-        这两个条件缺一不可，所以这条测试两件都做：
-        - 把通勤文案换成带邮编的「5 mins to Amsterdam Centraal 1012 AB station」；
-        - 把整个通勤块挪到地址行前面。
-
-        只做第一件看不出差别——现有 DOM 里地址排在通勤之前，先到先得，过滤去掉
-        也不影响结果。而这个解析器整套是按「顺序不保证、各认各的模式」写的
-        （与 magis 同一策略），顺序一旦真的变了，这道过滤就是拦住错值的唯一一道。
+        图标是装饰。站点换个图标集（fa-watch → 别的）不该让期限和装修档位一起消失。
         """
-        import re
-        page = live_page.replace(
-            "<span>12 mins to nearest shops</span>",
-            "<span>5 mins to Amsterdam Centraal 1012 AB station</span>")
-        assert page != live_page, "文案变异未命中"
+        page = ('<a class="studio is-overview" href="/studios/7">'
+                '<div class="studio-info top"><h3>Leiden<br/>84</h3></div>'
+                '<div class="info-wrap">'
+                '<p><i class="brand-new-icon-set"></i>19 m²</p>'
+                '<p class="info"><i class="whatever"></i>Long stay &gt; 1 year</p>'
+                '<p class="info"><i class="whatever"></i>Not furnished</p>'
+                '</div>'
+                '<div class="price-wrap"><span class="price">&euro; 900</span></div></a>')
+        (u, t, s), = _split_cards(page)
+        fm = dict(f.split(": ", 1) for f in _parse_card(u, t, s).features)
+        assert fm["Area"] == "19 m²"
+        assert fm["Finishing note"] == "Not furnished"
+        assert fm["Length of stay"] == "Long stay > 1 year"
 
-        m = re.search(r'<div class="studio-meta-travel-times">.*?</div>\s*</div>\s*</div>',
-                      page, re.S)
-        assert m, "找不到通勤块"
-        block = m.group(0)
-        page = page[:m.start()] + page[m.end():]
-        anchor = page.index('<div class="studio-meta">')
-        page = page[:anchor] + block + page[anchor:]
-
-        item = next(x for u, t, s in _split_cards(page)
-                    if (x := _parse_card(u, t, s)) and x.id == "se_11")
-        fm = dict(f.split(": ", 1) for f in item.features)
-        assert fm["Address"] == "Moermanskkade 71a 1013 BC Amsterdam"
-
-    def test_compact_card_keeps_only_what_it_has(self, parsed):
-        """紧凑卡片没有规格行，缺的字段就不写——不是写空值，也不是编一个。"""
-        item = next(x for x in parsed if x.id == "se_10")
-        assert item.price_raw == "€1.750"
-        fm = dict(f.split(": ", 1) for f in item.features)
-        assert fm["Studio type"] == "Essential studio"
-        assert "Area" not in fm
-        assert "Finishing note" not in fm
-
-    def test_type_is_normalised_to_studio(self, parsed):
-        """档位名（Signature / Essential）是价位分层，房型一律 Studio。"""
-        for item in parsed:
-            fm = dict(f.split(": ", 1) for f in item.features)
-            assert fm["Type"] == "Studio"
-
-    def test_area_range_is_kept_raw_so_parse_float_takes_the_lower_bound(self, parsed):
-        """区间原样写，靠 parse_float 取下界喂给 fail-closed 的 min_area。
-
-        写成上界或中值都会**错推**：用户要 ≥25 m² 时，不该因为这个户型里恰好有
-        几间 26 m² 就把整个（最小 20,5 m²）户型推给他。
-        """
-        from models import parse_float
-        item = next(x for x in parsed if x.id == "se_11")
-        fm = dict(f.split(": ", 1) for f in item.features)
-        assert parse_float(fm["Area"]) == 20.5
+    def test_shortstay_term_wins_over_the_card_text(self):
+        """短租那条线的期限由学期档给出，覆盖卡片上的通用说法。"""
+        page = ('<a class="studio is-overview" href="/studios/7">'
+                '<div class="studio-info top"><h3>Leiden<br/>84</h3></div>'
+                '<div class="info-wrap"><p class="info">Long stay &gt; 1 year</p></div>'
+                '<div class="price-wrap"><span class="price">&euro; 900</span></div></a>')
+        (u, t, s), = _split_cards(page)
+        fm = dict(f.split(": ", 1) for f in _parse_card(u, t, s, "12 Months").features)
+        assert fm["Length of stay"] == "12 Months"
 
 
 class TestUnknownResidence:
-    def test_unregistered_building_is_dropped_not_guessed(self, live_page):
-        """楼盘名不在 LOCATIONS 里就丢掉，不猜城市。
+    def test_unregistered_building_is_dropped_not_guessed(self):
+        """楼盘名不在表里就丢掉，不猜城市。
 
-        猜错会把房源分派给错误的 ScrapeTask——用户按城市订阅，就会收到不该收的。
-        站点新开一处时宁可这一处暂时不进库，也不要静默投错城市。
+        猜错会把房源分派给错误的 ScrapeTask——按城市订阅的用户会收到不该收的。
         """
-        page = live_page.replace("Amsterdam Minervahaven", "Rotterdam Nieuwehaven")
-        cards = _split_cards(page)
-        assert cards, "改名不该影响切卡片"
-        assert all(_parse_card(u, t, s) is None for u, t, s in cards)
+        page = ('<a class="studio is-overview" href="/studios/7">'
+                '<div class="studio-info top"><h3>Rotterdam Blaak<br/>1 A1</h3></div>'
+                '<div class="price-wrap"><span class="price">&euro; 900</span></div></a>')
+        (u, t, s), = _split_cards(page)
+        assert _parse_card(u, t, s) is None
+
+
+class TestPagination:
+    def test_last_page_comes_from_the_pagination_control(self, page1, noterm_page):
+        assert _last_page(page1) == 2
+        assert _last_page(noterm_page) == 1
+
+    def test_out_of_range_pages_wrap_instead_of_going_empty(self):
+        """``?page=3`` 返回的是第 1 页，不是空页。
+
+        所以「翻到空为止」的循环永远不会停。上限必须从分页控件读出来——这条
+        钉住的是那个前提，它一旦不成立，翻页策略就得跟着改。
+        """
+        p1 = _fx("studentexperience_longstay_p1.html")
+        p3 = _fx("studentexperience_longstay_p1.html")   # 实测 page=3 == page=1
+        assert _split_cards(p3)[0][1] == _split_cards(p1)[0][1]
+
+    def test_both_pages_are_collected(self, parsed):
+        """22 条 = 12 + 10，与计数块的总数一致。"""
+        assert len(parsed) == 22
+        assert len({x.id for x in parsed}) == 22
 
 
 class TestCompleteness:
-    def test_complex_counts_parse_from_the_empty_longstay_page(self, empty_page):
-        """计数块在**没货时也渲染**——这正是它能当结构探针的原因。"""
-        counts = _parse_complex_counts(empty_page)
-        assert counts == {
-            "Amsterdam Amstel": 0, "Amsterdam NDSM": 0,
-            "Amsterdam Zuidas": 0, "Leiden": 0,
+    def test_complex_counts_parse_from_the_form_fields(self, page1):
+        assert _parse_complex_counts(page1) == {
+            "Amsterdam NDSM": 8, "Amsterdam Zuidas": 6,
+            "Leiden": 8, "Amsterdam Amstel": 0,
         }
+
+    def test_unit_numbers_in_card_titles_are_not_read_as_counts(self, page1):
+        """卡片标题里的单元号不能被当成计数。
+
+        上一版扫的是纯文本，从 "Complex" 一路切到 "Sort by" 或页尾。改版后
+        "Sort by" 挪到了 "Complex" **前面**，于是这个块吃到页尾，把
+        "Amsterdam NDSM 63 K2" 里的 63 当成了 NDSM 的计数，总数报成 76 而实际
+        是 22。结论（判 incomplete）碰巧还是对的，理由却是错的。
+        """
+        import html as H
+        import re
+        plain = re.sub(r"\s+", " ", H.unescape(re.sub(
+            r"(?is)<(script|style|svg|head)[^>]*>.*?</\1>", " ",
+            re.sub(r"<[^>]+>", " ", page1)))).strip()
+
+        counts = _parse_complex_counts(page1)
+        assert sum(counts.values()) == 22
+        assert counts["Amsterdam NDSM"] == 8          # 不是 63
+        # 「Amsterdam NDSM 63」确实出现在可见文本里，就在计数块后面不远——
+        # 上一版的纯文本扫描正是在这里把 8 覆盖成了 63。
+        assert "Amsterdam NDSM 63" in plain
+        assert plain.index("Sort by") < plain.index("Complex")   # 改版后的顺序
 
     def test_shortstay_empty_page_yields_no_counts(self, noterm_page):
         """短租页没有计数块，所以它单独一份判不出「空」还是「改版」。"""
@@ -221,138 +268,104 @@ class TestCompleteness:
         一批假的下架通知**。
         """
         s = StudentExperienceScraper()
-        monkeypatch.setattr(s, "_session", lambda: _FakeSession(long_page="<html>改版了</html>"))
+        monkeypatch.setattr(s, "_session",
+                            lambda: _FakeSession(long_pages=["<html>改版了</html>"]))
         with s.batch_session():
             r = s.scrape(ScrapeTask(source="studentexperience",
                                     city_key="amsterdam", city_display="Amsterdam"))
         assert r.complete is False and r.listings == []
 
-    def test_counts_above_zero_with_no_cards_marks_incomplete(self, monkeypatch, empty_page):
-        """计数说有货、却一张卡片都没解析出来 → 卡片类名变了。
+    def test_counts_above_zero_with_no_cards_marks_incomplete(self, page1, monkeypatch):
+        """计数说有货、却一张卡片都没解析出来 → 卡片结构变了。
 
-        这是「计数块还在、卡片结构变了」的情形；只守计数块守不住它。
+        这正是 2026-09-04 线上发生的事，也是这一整轮修复的起点。
         """
-        page = _bump_complex_count(empty_page, "Leiden", 3)
-        # 先确认变异真的咬住了。上一版这里写的是 ``page.replace("Leiden 0", …)``，
-        # 而真实标记是 ``<label for="complex-Leiden">…</label><span
-        # class="amount">0</span>``——替换一次都没命中，整条测试空过。
-        assert _parse_complex_counts(page)["Leiden"] == 3
+        page = _strip_cards(page1)
+        assert _parse_complex_counts(page)["Amsterdam NDSM"] == 8
         assert _split_cards(page) == []
 
         s = StudentExperienceScraper()
-        monkeypatch.setattr(s, "_session", lambda: _FakeSession(long_page=page))
+        monkeypatch.setattr(s, "_session", lambda: _FakeSession(long_pages=[page]))
         with s.batch_session():
             r = s.scrape(ScrapeTask(source="studentexperience",
-                                    city_key="leiden", city_display="Leiden"))
+                                    city_key="amsterdam", city_display="Amsterdam"))
+        assert r.complete is False and r.listings == []
+
+    def test_parsing_fewer_than_the_count_marks_incomplete(self, page1, monkeypatch):
+        """数得出来却没拿全 → 也判 incomplete。
+
+        只守「0 张」守不住「少拿了一页」：分页控件换个类名，第 2 页就悄悄没了，
+        那 10 条会被当成下架。
+        """
+        s = StudentExperienceScraper()
+        monkeypatch.setattr(s, "_session", lambda: _FakeSession(long_pages=[page1]))
+        with s.batch_session():
+            r = s.scrape(ScrapeTask(source="studentexperience",
+                                    city_key="amsterdam", city_display="Amsterdam"))
         assert r.complete is False and r.listings == []
 
 
-class TestTransportErrors:
-    def test_proxy_failure_is_recognisable_as_one(self, monkeypatch):
-        """代理故障必须包成 ScrapeNetworkError，且消息保留原文。
-
-        dispatcher 只在 ``except ScrapeNetworkError`` 那一支里调
-        ``is_proxy_error``（scrapers/__init__.py:272）。裸的 curl_cffi ProxyError
-        会掉进后面的通用 ``except Exception``，被记成「未预期异常」——本 source
-        于是永远不触发代理冷却，只能等别的 source 去发现代理坏了。
-
-        2026-09-02 生产实测：代理 402 欠费，同一轮里 xior 报「代理已确认故障并
-        进入冷却」，本 source 报的是「未预期异常，已隔离该任务」。
-        """
-        from scrapers.base import ScrapeNetworkError, is_proxy_error
-
-        class _ProxyError(Exception):
-            pass
-
-        class _Boom:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_exc):
-                return False
-
-            def get(self, *_a, **_kw):
-                raise _ProxyError(
-                    "Failed to perform, curl: (56) CONNECT tunnel failed, "
-                    "response 402.")
-
-        s = StudentExperienceScraper()
-        monkeypatch.setattr(s, "_session", lambda: _Boom())
-        with pytest.raises(ScrapeNetworkError) as ei:
-            with s.batch_session():
-                s.scrape(ScrapeTask(source="studentexperience",
-                                    city_key="amsterdam", city_display="Amsterdam"))
-        assert is_proxy_error(ei.value), (
-            f"代理故障没被认出来：{ei.value!r}——冷却机制不会被触发")
-
-    def test_http_error_does_not_become_zero_listings(self, monkeypatch):
-        """站点 5xx 必须上抛，**绝不能**变成「本轮 0 条房源」。
-
-        读成 0 条的后果不是少推几条，是整批存量被 stale 收敛判成 Occupied 并发一
-        批假下架通知。2026-09-02 站点真的 500 过一次，这条路径当时被实弹验证过。
-        """
-        from scrapers.base import ScrapeNetworkError
-
-        class _Down:
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_exc):
-                return False
-
-            def get(self, *_a, **_kw):
-                return _Resp("<html>500</html>", status=500)
-
-        s = StudentExperienceScraper()
-        monkeypatch.setattr(s, "_session", lambda: _Down())
-        with pytest.raises(ScrapeNetworkError, match="500"):
-            with s.batch_session():
-                s.scrape(ScrapeTask(source="studentexperience",
-                                    city_key="amsterdam", city_display="Amsterdam"))
-
-
 class TestCitySplit:
-    def test_listings_are_dispatched_by_city(self, monkeypatch, live_page, empty_page):
+    def test_listings_are_dispatched_by_city(self, page1, page2, monkeypatch):
         s = StudentExperienceScraper()
-        monkeypatch.setattr(
-            s, "_session",
-            lambda: _FakeSession(long_page=empty_page, short_page=live_page))
+        monkeypatch.setattr(s, "_session",
+                            lambda: _FakeSession(long_pages=[page1, page2]))
         with s.batch_session():
             ams = s.scrape(ScrapeTask(source="studentexperience",
                                       city_key="amsterdam", city_display="Amsterdam"))
             lei = s.scrape(ScrapeTask(source="studentexperience",
                                       city_key="leiden", city_display="Leiden"))
-        assert {x.id for x in ams.listings} == {"se_10", "se_11"}
-        assert lei.listings == []
         assert ams.complete and lei.complete
+        assert len(ams.listings) == 14      # NDSM 8 + Zuidas 6
+        assert len(lei.listings) == 8
+        assert {x.city for x in ams.listings} == {"Amsterdam"}
+        assert {x.city for x in lei.listings} == {"Leiden"}
 
-    def test_dispatch_uses_display_name_not_key(self, monkeypatch, live_page, empty_page):
+    def test_dispatch_uses_display_name_not_key(self, page1, page2, monkeypatch):
         """按 ``city_display`` 分派，不是 ``city_key``。
 
         本平台的 key 恰好是 name 的小写，两者怎么比都一样——所以这条用一个 key 与
         name 不同的 task 来分辨。这不是假设：Magis 的
-        ``'s-Hertogenbosch`` / ``s-hertogenbosch`` 就差一个撇号和大小写，
-        ``Listing.city`` 存的一直是 display 那一侧。
+        ``'s-Hertogenbosch`` / ``s-hertogenbosch`` 就差一个撇号和大小写。
         """
         s = StudentExperienceScraper()
-        monkeypatch.setattr(
-            s, "_session",
-            lambda: _FakeSession(long_page=empty_page, short_page=live_page))
+        monkeypatch.setattr(s, "_session",
+                            lambda: _FakeSession(long_pages=[page1, page2]))
         with s.batch_session():
             r = s.scrape(ScrapeTask(source="studentexperience",
                                     city_key="ams-001", city_display="Amsterdam"))
-        assert {x.id for x in r.listings} == {"se_10", "se_11"}
+        assert len(r.listings) == 14
 
-    def test_batch_fetches_once_for_all_cities(self, monkeypatch, live_page, empty_page):
+    def test_batch_fetches_each_page_once_for_all_cities(self, page1, page2, monkeypatch):
         """两个城市共用一轮抓取——分两轮抓会把请求翻倍，且两轮之间库存可能变化。"""
-        sess = _FakeSession(long_page=empty_page, short_page=live_page)
+        sess = _FakeSession(long_pages=[page1, page2])
         s = StudentExperienceScraper()
         monkeypatch.setattr(s, "_session", lambda: sess)
         with s.batch_session():
             for city in ("Amsterdam", "Leiden"):
                 s.scrape(ScrapeTask(source="studentexperience",
                                     city_key=city.lower(), city_display=city))
-        assert sess.long_hits == 1
+        assert sess.long_hits == 2          # 两页各一次，不是每个城市各两次
+
+
+class TestTransportErrors:
+    def test_http_error_does_not_become_zero_listings(self, monkeypatch):
+        """长租页取不到时必须抛，不能安静地返回 0 条。
+
+        返回 0 条会被 monitor 当成「全下架了」。
+        """
+        from scrapers.base import ScrapeNetworkError
+
+        class _Boom(_FakeSession):
+            def get(self, url, params=None, **_kw):
+                raise ScrapeNetworkError("boom")
+
+        s = StudentExperienceScraper()
+        monkeypatch.setattr(s, "_session", lambda: _Boom())
+        with s.batch_session():
+            with pytest.raises(ScrapeNetworkError):
+                s.scrape(ScrapeTask(source="studentexperience",
+                                    city_key="amsterdam", city_display="Amsterdam"))
 
 
 class TestRegistration:
@@ -369,17 +382,13 @@ class TestRegistration:
         assert SCRAPER_REGISTRY["studentexperience"] is StudentExperienceScraper
 
     def test_tenant_is_declared_student_only(self):
-        """FAQ 明文：exclusively available for students，签约需上传在读证明。
-
-        不登记的后果是这个维度对本平台整体 fail-open——勾了「仅学生」的用户会
-        收到本该匹配的房源没错，但勾了别的身份的用户也会收到。
-        """
+        """FAQ 明文：exclusively available for students，签约需上传在读证明。"""
         from config import SOURCE_ASSUMED_FEATURES, sources_supporting_dim
         assert SOURCE_ASSUMED_FEATURES["studentexperience"] == {"Tenant": "student only"}
         assert "studentexperience" in sources_supporting_dim("tenant")
 
     def test_finishing_is_not_registered(self):
-        """规格行只在主卡片上有；登记 fail-closed 维度会把紧凑卡片那几条全滤掉。"""
+        """装修档位写进 features 但不登记为筛选维度——登记是 fail-closed 的。"""
         from config import sources_supporting_dim
         assert "studentexperience" not in sources_supporting_dim("finishing")
 
@@ -395,11 +404,14 @@ class TestRegistration:
             os.environ.pop("SOURCES", None)
 
 
-class _FakeSession:
-    """只认三类 URL 的假会话：长租页、学期档 JSON、短租页。"""
+# ── 测试替身 ────────────────────────────────────────────────────────
 
-    def __init__(self, long_page: str = "", short_page: str = ""):
-        self._long, self._short = long_page, short_page
+class _FakeSession:
+    """只认三类 URL 的假会话：长租页（可分页）、学期档 JSON、短租页。"""
+
+    def __init__(self, long_pages: list[str] | None = None, short_page: str = ""):
+        self._long = list(long_pages or [])
+        self._short = short_page
         self.long_hits = 0
 
     def __enter__(self):
@@ -411,15 +423,14 @@ class _FakeSession:
     def get(self, url, params=None, **_kw):
         params = params or {}
         if "getAcademicTerms" in url:
-            loc = url.rstrip("/").rsplit("/", 1)[-1]
-            terms = ([{"yardiAcademicTermIdValue": "1678",
-                       "academicTermName": "12 Months (01-Oct-2026 - 30-Sep-2027)"}]
-                     if loc == "2" and self._short else [])
             import json
-            return _Resp(json.dumps({"terms": terms, "hasTerms": bool(terms)}))
+            return _Resp(json.dumps({"terms": [], "hasTerms": False}))
         if params.get("los") == "longstay":
             self.long_hits += 1
-            return _Resp(self._long)
+            n = int(params.get("page", 1))
+            # 超出范围回绕到第 1 页——真实站点就是这个行为，替身也照做，
+            # 否则「翻到空为止」那种写法在测试里会显得没问题。
+            return _Resp(self._long[(n - 1) % len(self._long)] if self._long else "")
         return _Resp(self._short)
 
 

@@ -157,12 +157,15 @@ CITIES = ("Amsterdam", "Leiden")
 
 # ── 卡片解析 ────────────────────────────────────────────────────────
 
-#: 一张卡片。两种变体（主卡片 has-popularity-header / 滑块里的 studio-compact）
-#: 共用这个 class 前缀，一条正则都收。
-_CARD = re.compile(
-    r'<a\s+href="([^"]*?/studio-types/(\d+)[^"]*)"\s+class="studio is-overview([^"]*)"',
-    re.I,
-)
+#: 一张卡片的锚点。
+#:
+#: 2026-09-04 站点改版，路径从 ``/studio-types/<id>`` 换成了 ``/studios/<id>``。
+#: 旧正则要求前者，于是一张卡片都匹配不上——而页面明明有 12 张。
+#:
+#: 顺带把「href 必须紧挨 class」这个假设也去掉：先整体框住 ``<a …>``，再分别
+#: 取两个属性。属性顺序不是契约，站点调一下顺序不该让整块失效。
+_CARD_TAG = re.compile(r'<a\b[^>]*class="[^"]*\bstudio is-overview\b[^"]*"[^>]*>', re.I)
+_CARD_HREF = re.compile(r'href="([^"]*/studios/(\d+)[^"]*)"', re.I)
 
 _TAG = re.compile(r"<[^>]+>")
 
@@ -214,9 +217,29 @@ _RE_ONLY_N = re.compile(r"Only\s+(\d+)\s+studios?\s+available", re.I)
 #: 通勤时间行，"12 mins to nearest shops" 一类。
 _RE_TRAVEL = re.compile(r"^\d+\s*mins?\s+to\b", re.I)
 
-#: 长租页的按楼盘计数块。**这是完整性探针**，见模块文档。
-_RE_COMPLEX_BLOCK = re.compile(r"Complex(.*?)(?:It seems|Sort by|$)", re.S)
-_RE_COMPLEX_ITEM = re.compile(r"([A-Z][\w\s]{2,28}?)\s+(\d+)\b")
+#: 长租页的按楼盘计数。**这是完整性探针**，见模块文档。
+#:
+#: 认的是筛选表单里的复选框，不是可见文本：
+#:
+#:     <input type="checkbox" value="Amsterdam NDSM" name="complexes[]" …>
+#:     <label …>Amsterdam NDSM</label>
+#:     <span class="amount">8</span>
+#:
+#: 上一版扫的是纯文本，从 "Complex" 一直切到 "Sort by" 或页尾。2026-09-04 改版
+#: 把 "Sort by" 挪到了 "Complex" **前面**，于是这个块一路吃到页尾，把卡片标题里
+#: 的单元号当成了计数——"Amsterdam NDSM 63 K2" 里的 63 覆盖掉真正的 8，总数报
+#: 成 76 而实际是 22。结论（判 incomplete）碰巧还是对的，理由却是错的。
+#:
+#: ``name="complexes[]"`` 是表单契约，改它就等于改后端；比版面顺序稳得多。
+_RE_COMPLEX_ITEM = re.compile(
+    r'<input[^>]*\bvalue="([^"]+)"[^>]*\bname="complexes\[\]"'
+    r'.*?<span[^>]*class="[^"]*\bamount\b[^"]*"[^>]*>\s*(\d+)\s*</span>',
+    re.S | re.I,
+)
+
+#: 分页链接。``?page=3`` 会**回绕到第 1 页**而不是返回空，所以「翻到空为止」的
+#: 循环永远不会停；必须先从这里读出最大页号。
+_RE_PAGE_LINK = re.compile(r'class="pagination-link[^"]*"\s+href="[^"]*[?&]page=(\d+)', re.I)
 
 
 def _text(fragment: str) -> str:
@@ -240,14 +263,19 @@ def _split_cards(page: str) -> list[tuple[str, str, str]]:
     按 ``<a class="studio is-overview…">`` 切；每张卡片切到下一张卡片的开头，
     最后一张切到页尾。卡片内部不会再出现同样的锚点，所以这么切是安全的。
     """
-    hits = list(_CARD.finditer(page))
+    hits = list(_CARD_TAG.finditer(page))
     cards: list[tuple[str, str, str]] = []
     for i, m in enumerate(hits):
+        href = _CARD_HREF.search(m.group(0))
+        if href is None:
+            # class 对上但 href 不是 /studios/<id> —— 结构又变了。跳过而不是
+            # 硬猜一个 id：id 猜错会让这条房源和另一条撞 key。
+            continue
         end = hits[i + 1].start() if i + 1 < len(hits) else len(page)
-        url = html_mod.unescape(m.group(1))
+        url = html_mod.unescape(href.group(1))
         if url.startswith("/"):
             url = BASE_URL + url
-        cards.append((url, m.group(2), page[m.start():end]))
+        cards.append((url, href.group(2), page[m.start():end]))
     return cards
 
 
@@ -255,27 +283,45 @@ def _parse_card(url: str, type_id: str, segment: str,
                 term: str = "") -> Optional[Listing]:
     """一张卡片 → Listing；认不出楼盘或价格时返回 None。
 
-    「关键」只有楼盘和价格两项。楼盘决定这条属于哪个城市（没有它就无法分派给
-    ScrapeTask），价格缺失会让房源被所有带租金上限的筛选整体漏掉——与其余
-    scraper 同一判据。
-    """
-    residence = _text(_first(segment, "span", "studio-title-location"))
-    if not residence:
-        return None
+    2026-09-04 改版后的结构：
 
-    price = parse_float(_text(_first(segment, "span", "studio-price-amount")))
+        <a href=".../studios/1943" class="studio is-overview longstay">
+          <div class="studio-info top">
+            <h3>Amsterdam NDSM<br/>63  K2</h3>        ← 楼盘 / 单元
+          </div>
+          <div class="studio-info bottom">
+            <div class="info-wrap">
+              <p><i class="far fa-ruler-combined"></i>24.5 m²</p>
+              <p class="info"><i class="fal fa-watch"></i>Long stay &gt; 1 year</p>
+              <p class="info"><i class="fal fa-loveseat"></i>Not furnished</p>
+            </div>
+            <div class="price-wrap"><span class="price">&euro; 1,046<sup>*</sup></span></div>
+          </div>
+
+    改版同时改了粒度：以前一张卡片是一个**户型**（"Core Studio"），现在是一个
+    **具体单元**（"7 C60"）。所以 name 用单元号，它是用户在站点上看到的那个标识。
+
+    ``info-wrap`` 里那几行按文本模式认，不按图标 class 认。图标是装饰，站点换个
+    图标集就全失效；而「N m²」「furnish」「stay」这些模式是内容本身。这跟改版前
+    对 ``studio-meta-item`` 的做法是同一条：认内容，别认修饰。
+    """
+    head = _text(_first(segment, "div", "studio-info top"))
+    if not head:
+        return None
+    # <h3>楼盘<br/>单元</h3> —— _text 把 <br/> 变成空格，按已知楼盘名切
+    residence = next((loc for loc, _c in LOCATIONS.values()
+                      if head.startswith(loc)), "")
+    if not residence:
+        logger.warning("Student Experience 出现未登记的楼盘（卡片标题 %r，"
+                       "studio %s）", head[:60], type_id)
+        return None
+    unit = head[len(residence):].strip()
+
+    price = parse_float(_text(_first(segment, "span", "price")))
     if price is None:
         return None
 
     city = next((c for loc, c in LOCATIONS.values() if loc == residence), "")
-    if not city:
-        # 楼盘名不在表里：站点新开了一处，或者改了名字。不猜城市——猜错会把房源
-        # 分派给错误的 ScrapeTask，用户按城市订阅就会收到不该收的。
-        logger.warning("Student Experience 出现未登记的楼盘 %r（studio-type %s）",
-                       residence, type_id)
-        return None
-
-    studio_type = _text(_first(segment, "span", "studio-title-type"))
 
     features: list[str] = []
 
@@ -283,53 +329,32 @@ def _parse_card(url: str, type_id: str, segment: str,
         if value not in (None, ""):
             features.append(f"{key}: {value}")
 
-    # meta 行的顺序不保证，各认各的模式（与 magis 同一策略）。
-    #
-    # 通勤时间那几行（"12 mins to nearest shops"）的 class 是
-    # ``studio-meta-item studio-meta-item-travel-time``，前缀匹配也会收进来，
-    # 按文本模式剔除——比收紧 class 匹配稳，站点加个修饰类不会让整块失效。
-    area = furnishing = address = ""
-    for raw in _blocks(segment, "div", "studio-meta-item"):
-        # 规格行是「面积 + 分隔符 + 装修」两段挤在同一个 span 里，先按分隔标签切开
-        for part in re.split(r'<span class="studio-spec-separator"[^>]*>\s*</span>',
-                             raw):
-            piece = _text(part)
-            if not piece or _RE_TRAVEL.match(piece):
+    area = furnishing = stay = ""
+    for raw in _blocks(segment, "div", "info-wrap"):
+        for piece in (_text(x) for x in re.split(r"(?i)</p\s*>", raw)):
+            if not piece:
                 continue
             mm = _RE_AREA.match(piece)
             if mm and not area:
                 area = mm.group(1).replace(" ", "")
-            elif _RE_ADDRESS.search(piece) and not address:
-                address = piece
             elif "furnish" in piece.lower() and not furnishing:
                 furnishing = piece
+            elif "stay" in piece.lower() and not stay:
+                stay = piece
 
     _add("Building", residence)
-    if "studio" in studio_type.lower():
-        _add("Type", "Studio")
-    _add("Studio type", studio_type)
-    # 区间原样写。parse_float 取下界，正是 min_area 该有的保守语义（见模块文档）。
+    _add("Unit", unit)
+    _add("Type", "Studio")
     _add("Area", f"{area} m²" if area else "")
-    # 装修档位写进 features 但**不登记为筛选维度**——紧凑卡片没有这一行，
-    # 登记会让那几条被 fail-closed 整体拒掉（见模块文档「维度登记」）。
+    # 装修档位写进 features 但**不登记为筛选维度**（见模块文档「维度登记」）。
     _add("Finishing note", furnishing)
-    _add("Address", address)
-    _add("Length of stay", term)
-
-    # 稀缺徽标只在余量少时出现，**不能当成余量字段**——没有徽标不代表没货，
-    # 只代表站点不觉得需要催。
-    mm = _RE_ONLY_N.search(_text(_first(segment, "span", "badge")))
-    _add("Units left", mm.group(1) if mm else None)
-
-    _add("Deposit", _text(_first(segment, "span", "studio-price-deposit")))
-
-    m = _RE_FACIL_HEAD.search(segment)
-    if m:
-        _add("Included", _text(m.group(1)).rstrip(":"))
+    # 长租卡片自带期限（"Long stay > 1 year" / "Maximum stay until June 30, 2027"）；
+    # 短租那条线的期限由调用方按学期档传进来。两者都写同一个键。
+    _add("Length of stay", term or stay)
 
     return Listing(
         id=f"se_{type_id}",
-        name=f"{residence} — {studio_type}".strip().strip("—").strip(),
+        name=f"{residence} — {unit}".strip().strip("—").strip(),
         status="Available to book",
         price_raw=f"€{price:,.0f}".replace(",", "."),
         available_from=None,
@@ -346,13 +371,15 @@ def _parse_complex_counts(page: str) -> dict[str, int]:
     调用方拿空 dict 当「站点改版」的信号——这个块在有货没货时都渲染，
     读不到就说明 DOM 不是我们认识的那个了。
     """
-    m = _RE_COMPLEX_BLOCK.search(_plain(page))
-    if not m:
-        return {}
     known = {name for name, _ in LOCATIONS.values()}
     return {name.strip(): int(n)
-            for name, n in _RE_COMPLEX_ITEM.findall(m.group(1))
+            for name, n in _RE_COMPLEX_ITEM.findall(page)
             if name.strip() in known}
+
+
+def _last_page(page: str) -> int:
+    """分页里的最大页号；没有分页返回 1。"""
+    return max((int(n) for n in _RE_PAGE_LINK.findall(page)), default=1)
 
 
 # ── Scraper ────────────────────────────────────────────────────────
@@ -453,12 +480,29 @@ class StudentExperienceScraper(AbstractScraper):
                 return [], False
 
             long_cards = _collect(long_page)
+
+            # 长租分页。上限从分页控件读，**不能**「翻到空为止」——超出范围的
+            # 页号（?page=3）返回的是第 1 页而不是空页，那种循环停不下来。
+            last = _last_page(long_page)
+            for n in range(2, last + 1):
+                long_cards += _collect(
+                    self._get(session, STUDIOS_URL,
+                              {"los": "longstay", "page": n}))
+
             expected = sum(counts.values())
             if expected > 0 and long_cards == 0:
-                # 计数说有货、卡片一张都没解析出来 → 卡片类名变了。
+                # 计数说有货、卡片一张都没解析出来 → 卡片结构变了。
                 logger.warning(
                     "Student Experience 长租计数为 %d 但解析出 0 张卡片，"
                     "本轮标记不完整（计数：%s）", expected, counts)
+                return [], False
+            if long_cards < expected:
+                # 数得出来、却没拿全。多半是分页没翻到底（站点换了分页控件），
+                # 也可能是某些卡片解析失败。这两种都不该当成「其余的下架了」。
+                logger.warning(
+                    "Student Experience 长租计数 %d 但只解析出 %d 张（共 %d 页），"
+                    "本轮标记不完整（计数：%s）",
+                    expected, long_cards, last, counts)
                 return [], False
 
             # ── 短租：按楼盘取学期档，有档期的才去取卡片 ──
