@@ -235,7 +235,15 @@ struct ContentView: View {
             case "calendar":      coord.selectedTab = .calendar
             case "notifications": coord.selectedTab = .notifications
             case "settings":      coord.selectedTab = .settings
-            default: break
+            default:
+                // 不认识的值**不能静默放过**。放过的后果是 tab 原地不动，然后
+                // 截图照拍——拍出一张名字对、尺寸对、内容是 Dashboard 的图。
+                //
+                // 这不是假想：测试端在 iPad 上发的是 UI_TEST_TAB=list，而这里
+                // 认的是 "listings"。两套词表只有这一个词不同（map / calendar
+                // 恰好同名），所以 02-Listings 每轮都挂、03/04 每轮都过，而
+                // 失败信息只说「选中的不是 Listings」，看不出是拼写对不上。
+                assertionFailure("UI_TEST_TAB 的值无法识别：\(tab)")
             }
         }
 
@@ -245,7 +253,8 @@ struct ContentView: View {
             case "list":     coord.selectedBrowseMode = .list
             case "map":      coord.selectedBrowseMode = .map
             case "calendar": coord.selectedBrowseMode = .calendar
-            default: break
+            default:
+                assertionFailure("UI_TEST_BROWSE_MODE 的值无法识别：\(mode)")
             }
         }
     }

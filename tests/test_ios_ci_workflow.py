@@ -320,3 +320,130 @@ class TestUnitTestTargetHasSources:
                 r"/\* " + name + r" \*/ = \{\s*isa = PBXNativeTarget;(.*?)\n\t\t\};",
                 text, re.S)
             assert m and "fileSystemSynchronizedGroups" in m.group(1), name
+
+
+class TestLaunchArgVocabulariesAgree:
+    """截图测试发出去的 ``UI_TEST_TAB`` / ``UI_TEST_BROWSE_MODE``，App 那边得认识。
+
+    这两个 launch arg 用的是**两套词表**：
+
+        UI_TEST_BROWSE_MODE ∈ { list,     map, calendar }
+        UI_TEST_TAB         ∈ { listings, map, calendar, dashboard, ... }
+
+    只有 list / listings 这一个词不同，map 和 calendar 两边同名。所以把 mode
+    直接当 tab 名发过去时，02-Listings 每轮都挂、03-Map 和 04-Calendar 每轮都过
+    ——看起来完全像是 Listings 那一条有偶发问题，而不是拼写对不上。
+
+    实际发生过：``browse(_:padTab:)`` 的 iPad 分支发的是 ``UI_TEST_TAB=list``，
+    ContentView 的 switch 认的是 ``"listings"``，落进 ``default`` 静默放过，tab
+    原地不动，截图照拍——名字对、尺寸对、内容是 Dashboard。云端跑一轮才知道，
+    而失败信息只说「选中的不是 Listings」。
+
+    这条测试在本地 0.2 秒内回答同一个问题。
+
+    ⚠️ 第一版有两个洞，都属于「看着对、但永远不会红」：
+
+    1. 取 switch 内容时按固定字符数截，跨到了下一个 switch 里，于是
+       BROWSE_MODE 的 ``"list"`` 被算进「App 认识的 tab 名」，要查的分歧被自己
+       抹平了。现在按 ``argValue(`` 的下一次出现切断。
+    2. 用 ``tab-[a-z]+`` 抓 Tab 的 id，抓不到的（含数字、下划线……）**被静默
+       跳过**，集合里少一个自然没有分歧。现在先数一遍 ``static let`` 的个数，
+       解析出来的对不上就直接失败——解析器漏了东西，不能表现成「检查通过」。
+    """
+
+    SCREENSHOT_TESTS = ROOT / "ios/FlatRadar/FlatRadarUITests/ScreenshotTests.swift"
+    CONTENT_VIEW = ROOT / "ios/FlatRadar/FlatRadar/Views/ContentView.swift"
+
+    @classmethod
+    def _switch_cases(cls, marker: str) -> set[str]:
+        """``argValue("<marker>", …)`` 那个 switch 里的 case 字面量。
+
+        边界切在下一个 ``argValue(`` 上。按固定长度截会跨进下一个 switch，
+        而那正好是另一套词表——两套一混，这个测试就废了。
+        """
+        import re
+
+        text = cls.CONTENT_VIEW.read_text(encoding="utf-8")
+        start = text.index(f'argValue("{marker}"')
+        nxt = text.find("argValue(", start + 1)
+        block = text[start:nxt if nxt != -1 else len(text)]
+        cases = set(re.findall(r'case "([^"]+)"', block))
+        assert cases, f"{marker} 后面没解析出任何 case"
+        return cases
+
+    @classmethod
+    def _tab_launch_names(cls) -> set[str]:
+        """每个 ``Tab`` 的 launchName：id 去掉 ``tab-`` 前缀，alerts 特判。
+
+        跟 Swift 那边两行实现保持一致。这里重算而不是解析实现本身——实现只有
+        两行，重算比解析可靠；真有分歧，下面的断言会指出来。
+        """
+        import re
+
+        text = cls.SCREENSHOT_TESTS.read_text(encoding="utf-8")
+        declared = re.findall(r"static let (\w+)\s*=\s*Tab\(", text)
+        ids = re.findall(r'Tab\(id: "([^"]+)"', text)
+        assert declared, "没在 ScreenshotTests 里找到 static let … = Tab(…)"
+        # 解析器漏掉一个，就会少比一个名字，然后这条测试「通过」。
+        assert len(ids) == len(declared), (
+            f"解析到 {len(ids)} 个 Tab id，但声明了 {len(declared)} 个"
+            f"（{declared}）——正则漏了东西，这时候不能算检查通过")
+        for tab_id in ids:
+            assert tab_id.startswith("tab-"), f"Tab id 不以 tab- 开头：{tab_id}"
+        return {"notifications" if i == "tab-alerts" else i[len("tab-"):]
+                for i in ids}
+
+    def test_every_tab_launch_name_is_handled_by_the_app(self):
+        handled = self._switch_cases("UI_TEST_TAB")
+        unknown = self._tab_launch_names() - handled
+        assert not unknown, (
+            f"ScreenshotTests 会发出这些 UI_TEST_TAB 值，但 ContentView 的 "
+            f"switch 不认识：{sorted(unknown)}。App 认识的是 {sorted(handled)}。"
+            "对不上就落进 default，tab 原地不动，而截图照拍。")
+
+    def test_ipad_sends_tab_names_not_browse_modes(self):
+        """``browse(_:padTab:)`` 的 iPad 分支必须发 tab 名，不能发 mode 名。
+
+        这是那个 bug 的原始形态：两个参数长得一样，写错了编译照过。
+        """
+        import re
+
+        text = self.SCREENSHOT_TESTS.read_text(encoding="utf-8")
+        start = text.index("private func browse(")
+        body = text[start:text.index("\n    }", start)]
+        ipad_line = [ln for ln in body.splitlines() if "UI_TEST_TAB=" in ln
+                     and "BROWSE_MODE" not in ln]
+        assert ipad_line, "browse(…) 里没找到 iPad 那支的 UI_TEST_TAB="
+        assert not re.search(r"UI_TEST_TAB=\\\(mode\)", ipad_line[0]), (
+            "iPad 分支把 browse mode 当 tab 名发出去了。mode 的词表是 "
+            "{list, map, calendar}，tab 的是 {listings, map, calendar}——"
+            "只有 list/listings 不同，所以只有 Listings 会挂，看着像偶发。")
+
+    def test_browse_modes_are_handled_by_the_app(self):
+        import re
+
+        text = self.SCREENSHOT_TESTS.read_text(encoding="utf-8")
+        sent = set(re.findall(r'browse\("([a-z]+)"', text))
+        assert sent, "没在 ScreenshotTests 里找到 browse(…) 的调用"
+        handled = self._switch_cases("UI_TEST_BROWSE_MODE")
+        unknown = sent - handled
+        assert not unknown, (
+            f"这些 browse mode 发得出去但 App 不认识：{sorted(unknown)}，"
+            f"App 认识的是 {sorted(handled)}")
+
+    def test_unknown_values_are_not_silently_ignored(self):
+        """``default: break`` 是这个 bug 能活下来的原因。
+
+        拼错一个值不会有任何提示——没有日志、没有崩溃，只有一张内容不对的图。
+        改成 assertionFailure 之后，Debug 构建（截图就是 Debug）会当场停下。
+        """
+        for marker in ("UI_TEST_TAB", "UI_TEST_BROWSE_MODE"):
+            block_cases = self._switch_cases(marker)
+            assert block_cases  # 上面已断言非空，这里只是让意图明确
+            text = self.CONTENT_VIEW.read_text(encoding="utf-8")
+            start = text.index(f'argValue("{marker}"')
+            nxt = text.find("argValue(", start + 1)
+            block = text[start:nxt if nxt != -1 else len(text)]
+            assert "assertionFailure" in block, (
+                f"{marker} 的 switch 里没有 assertionFailure —— "
+                "不认识的值会被静默放过，然后拍出一张内容不对的截图")

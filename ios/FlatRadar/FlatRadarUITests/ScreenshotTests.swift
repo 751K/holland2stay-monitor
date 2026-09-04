@@ -55,7 +55,7 @@ final class ScreenshotTests: XCTestCase {
 
     @MainActor
     func testCapture01_Dashboard() throws {
-        launch(extra: ["UI_TEST_TAB=dashboard"])
+        launch(extra: ["UI_TEST_TAB=\(Tab.dashboard.launchName)"])
         waitForMainUI()
         selectTab(Tab.dashboard, "Dashboard")
         // 给 Dashboard chart 渲染
@@ -99,7 +99,7 @@ final class ScreenshotTests: XCTestCase {
         // 这一屏访客看不到——tab bar 里根本没有 Notifications。必须带凭据跑
         // （UI_TEST_USERNAME / UI_TEST_PASSWORD），否则下面的断言会直接失败，
         // 而不是悄悄拍下 Dashboard。
-        launch(extra: ["UI_TEST_TAB=notifications"])
+        launch(extra: ["UI_TEST_TAB=\(Tab.alerts.launchName)"])
         waitForMainUI()
         // launch arg 落位在这一屏上不可靠：登录是异步的，而 tab 是同步设的，
         // 两轮云端实测都停在了 Dashboard。改顺序（先 await 再设 tab）也没解决，
@@ -116,7 +116,7 @@ final class ScreenshotTests: XCTestCase {
 
     @MainActor
     func testCapture06_Settings() throws {
-        launch(extra: ["UI_TEST_TAB=settings"])
+        launch(extra: ["UI_TEST_TAB=\(Tab.settings.launchName)"])
         waitForMainUI()
         selectTab(Tab.settings, "Settings")
         sleep(1)
@@ -159,6 +159,18 @@ final class ScreenshotTests: XCTestCase {
         static let alerts    = Tab(id: "tab-alerts",    symbol: "bell.fill")
         static let settings  = Tab(id: "tab-settings",  symbol: "gear")
 
+        /// `UI_TEST_TAB=` 要用的名字。默认从 id 去掉 "tab-" 前缀推出来，不另写
+        /// 一份——另写一份就意味着有一天两份会不一致，而不一致的表现是「截图
+        /// 内容不对」，不是编译错误。
+        ///
+        /// Alerts 是唯一的例外：界面上叫 Alerts，AppTab 枚举里却是
+        /// `.notifications`，ContentView 的 switch 认的也是 "notifications"。
+        /// 这一处硬写，其余全推。tests/test_ios_ci_workflow.py 会拿这里的名字
+        /// 和 ContentView 里的 case 对一遍，对不上就红。
+        var launchName: String {
+            id == "tab-alerts" ? "notifications" : String(id.dropFirst("tab-".count))
+        }
+
         /// iPhone 的 tab bar 里这个 tab 排第几；不在 iPhone 上出现则返回 nil。
         ///
         /// iPhone 是四个 tab：Dashboard、Browse、Alerts、Settings，其中 Alerts
@@ -179,12 +191,25 @@ final class ScreenshotTests: XCTestCase {
 
     private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
-    /// 三个浏览视图在当前设备上怎么到达：(launch args, 目标 tab 的 symbol)。
+    /// 三个浏览视图在当前设备上怎么到达：(launch args, 目标 tab)。
     ///
     /// iPhone 上它们是 Browse 的三个子模式；iPad 上各占一个 tab。
+    ///
+    /// ⚠️ 两个参数用的是**两套词表**，别把 mode 直接当 tab 名发过去：
+    ///
+    ///     UI_TEST_BROWSE_MODE ∈ { list,     map, calendar }
+    ///     UI_TEST_TAB         ∈ { listings, map, calendar, ... }
+    ///
+    /// 上一版就是这么写的——iPad 那支发 `UI_TEST_TAB=\(mode)`，于是发出去的是
+    /// `list`，而 ContentView 认的是 `listings`。对不上就落进 default，tab 原地
+    /// 不动，截图照拍。map / calendar 两边同名所以看不出来，只有 Listings 每轮
+    /// 都挂——而失败信息只说「选中的不是 Listings」，看着像竞态。
+    ///
+    /// 现在 iPad 那支从 `padTab` 推 tab 名，`mode` 只喂给 BROWSE_MODE，
+    /// 两套词表不再有互相串门的机会。
     private func browse(_ mode: String, padTab: Tab) -> ([String], Tab) {
         isPad
-            ? (["UI_TEST_TAB=\(mode)"], padTab)
+            ? (["UI_TEST_TAB=\(padTab.launchName)"], padTab)
             : (["UI_TEST_TAB=browse", "UI_TEST_BROWSE_MODE=\(mode)"], Tab.browse)
     }
 
@@ -315,9 +340,11 @@ final class ScreenshotTests: XCTestCase {
 
     /// 落到指定 tab：launch arg 没生效就直接点它。
     ///
-    /// `UI_TEST_TAB=` 这条路是不可靠的——登录是异步的，tab 是同步设的，
-    /// MainTabView 挂载时又会把 selectedTab 读回默认值。表现是随机的：build 265
-    /// 里 03-Map 第一次失败、重跑通过，02-Listings 两次都停在 Dashboard。
+    /// `UI_TEST_TAB=` 落位偶尔会失手：build 265 里 03-Map 第一次失败、重跑通过。
+    ///
+    /// （02-Listings 那两次**不是**这个原因，是发过去的值拼错了——见
+    /// `browse(_:padTab:)` 的注释。我一度把两者混成一类，还给这里写过一段
+    /// 「登录异步、MainTabView 挂载时读回默认值」的解释，那是编的。）
     ///
     /// Notifications 那条早就改成直接点了，一直很稳。其余几条走同一条路：
     /// 等按钮出现 → 没选中就点一下 → 再断言。断言留着不动，「点了但没落位」
