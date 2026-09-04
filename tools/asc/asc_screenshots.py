@@ -33,6 +33,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import pathlib
 from pathlib import Path
 
 import jwt
@@ -187,46 +188,49 @@ def _upload_one(cfg, set_id: str, path: Path) -> None:
 SET_CAPACITY = 10
 
 
-def plan_replacement(existing: int, incoming: int, cap: int = SET_CAPACITY) -> list[str]:
-    """替换一组截图的操作序列：``"upload"`` / ``"delete"``。
+class PreflightError(Exception):
+    """上传前的本地体检没过。此时**一张旧图都还没删**。"""
 
-    为什么不能简单地「先全传、再全删」
-    ----------------------------------
-    那是上一版的做法，为的是避免「先删后传」在中途失败时把集合清空——那次
-    实跑真的删光了 en-US 下八张手动传的图。但先传后删有个它自己的边界：
-    ``existing + incoming`` 一旦超过 cap，就永远传不完。6 张旧的 + 7 张新的
-    = 13 > 10，传到第 4 张就 409。
 
-    也不能简单地「先删够位置」——那又回到了「失败即数据丢失」。
+def preflight(paths: list[pathlib.Path], cap: int = SET_CAPACITY) -> None:
+    """删任何东西之前，先确认这批文件真的传得上去。
 
-    所以边传边删：满了就先腾一个位置再传。集合在任何时刻都不为空，也不超顶。
+    这个顺序是「先删后传」唯一的安全阀。删完再发现某张图是 0 字节、或者这一
+    组有 11 张，那时集合已经空了，而 iPad 截图是提审必需项——版本会卡住，
+    直到有人重跑。
 
-    >>> plan_replacement(0, 3)          # 空集合，直接传
-    ['upload', 'upload', 'upload']
-    >>> plan_replacement(6, 7)[:5]      # 前四张有空位，第五张要先腾位
-    ['upload', 'upload', 'upload', 'upload', 'delete']
-    >>> plan_replacement(6, 7).count('upload'), plan_replacement(6, 7).count('delete')
-    (7, 6)
+    体检本身很便宜（读每个文件的前八个字节），放在最前面就把那个窗口关掉了。
+
+    这里**故意不**保证「集合在任何时刻都不为空」。上一版为此写了边传边删，
+    代价是十来行状态机。放弃它是有前提的：这批图由 Xcode Cloud 生成、本地有
+    副本，删错了重跑一次就回来。哪天这个工具要去传一批不可复现的图（比如人
+    手做的），这个取舍就不成立了——那时该回到边传边删，而不是把这段注释删掉。
     """
-    if incoming > cap:
-        raise ValueError(f"一组最多 {cap} 张，给了 {incoming} 张")
-    ops: list[str] = []
-    live, old_left = existing, existing
-    for _ in range(incoming):
-        while live + 1 > cap and old_left > 0:
-            ops.append("delete")
-            live -= 1
-            old_left -= 1
-        ops.append("upload")
-        live += 1
-    ops.extend(["delete"] * old_left)
-    return ops
+    if not paths:
+        raise PreflightError("没有可上传的 PNG")
+    if len(paths) > cap:
+        raise PreflightError(
+            f"一组最多 {cap} 张，给了 {len(paths)} 张——"
+            "删光旧图之后这批也传不完，所以现在就停下")
+    bad = []
+    for p in paths:
+        if not p.is_file():
+            bad.append(f"{p.name}: 不存在")
+        elif p.stat().st_size == 0:
+            bad.append(f"{p.name}: 0 字节")
+        elif p.read_bytes()[:8] != b"\x89PNG\r\n\x1a\n":
+            bad.append(f"{p.name}: 不是 PNG")
+    if bad:
+        raise PreflightError("这些文件有问题，未删除任何旧截图：\n  "
+                             + "\n  ".join(bad))
 
 
 def cmd_upload(cfg, args):
     pngs = sorted(Path(args.dir).glob("*.png"))
-    if not pngs:
-        print(f"{args.dir} 里没有 PNG", file=sys.stderr)
+    try:
+        preflight(pngs)
+    except PreflightError as e:
+        print(f"上传前检查未通过：{e}", file=sys.stderr)
         raise SystemExit(1)
 
     vid = _version_id(cfg, args.version)
@@ -246,23 +250,18 @@ def cmd_upload(cfg, args):
             print("已取消")
             return
 
-    # 边传边删，序列由 plan_replacement 算好（那里写了为什么不能先全传或先全删）。
-    to_delete = list(existing) if args.replace else []
-    ops = plan_replacement(len(existing) if args.replace else 0, len(pngs))
-    it = iter(pngs)
-    done = 0
-    for op in ops:
-        if op == "delete":
-            sh = to_delete.pop(0)
+    # 先删后传。体检已经在上面跑过了——到这一步文件都确认可用，
+    # 「删完了传不上」的窗口基本关掉了。
+    if args.replace and existing:
+        for sh in existing:
             code, out = _req(cfg, "DELETE", f"appScreenshots/{sh['id']}")
             if code not in (200, 204):
                 _die(code, out, "删除旧截图")
-            print(f"  🗑  腾出位置（旧图 {sh['id'][:8]}…）")
-        else:
-            p = next(it)
-            _upload_one(cfg, set_id, p)
-            done += 1
-            print(f"  [{done}/{len(pngs)}] ✅ {p.name}")
+        print(f"  🗑  已删除 {len(existing)} 张旧截图")
+
+    for i, p in enumerate(pngs, 1):
+        _upload_one(cfg, set_id, p)
+        print(f"  [{i}/{len(pngs)}] ✅ {p.name}")
     print("完成")
 
 

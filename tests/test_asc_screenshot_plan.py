@@ -1,19 +1,24 @@
-"""替换一组 App Store 截图的操作顺序。
+"""上传前的本地体检——「先删后传」唯一的安全阀。
 
-这个顺序被改过两次，两次都是被实跑打回来的：
+这个工具的替换顺序改过三次，值得把账记清楚：
 
-1. **先删后传**——第一次实跑就把 en-US 下用户手动传的八张删光，而紧接着的
-   PUT 400 失败，集合被清空，什么都没剩下。
-2. **先传后删**（为修上面那条）——安全，但有它自己的边界：App Store Connect
-   每组上限 10 张，``existing + incoming`` 超过就永远传不完。6 张旧的 + 7 张
-   新的 = 13，传到第 4 张拿到
+1. **先删后传**。2026-09-04 第一次实跑就把 en-US 下用户手动传的八张删光，而
+   紧接着的 PUT 400 失败（给预签名 URL 发了 Authorization 头），集合清空，
+   那八张再也找不回来。
+2. **先传后删**。修好了上面那条，但引进了新的边界：App Store Connect 每组
+   上限 10 张，``旧 + 新`` 一超就永远传不完。6 张旧 iPad 图 + 7 张新的 = 13，
+   传到第 4 张拿到 ``Too many screenshots``。这个错误只有对着一个已经有 6 张
+   的集合跑才会出现——空集合上怎么试都是绿的。
+3. **边传边删**。两条边界都守住了，代价是十来行状态机。
+4. **回到先删后传**（现在），这是一个有前提的选择：这批图由 Xcode Cloud 生成、
+   本地有副本，删错了重跑一次就回来。第 1 条的伤害不在「空了」，在于那八张
+   是人手做的、没有副本。
 
-       Too many screenshots. | Set: … has already 10 appScreenshots
+所以现在的安全阀不是「集合永不为空」，而是**删之前先把这批文件检查一遍**：
+0 字节、不是 PNG、超过 10 张，这些都在删任何东西之前就停下。
 
-   而这个错误只在真正对着一个已有 6 张的集合跑时才会出现——空集合上怎么试
-   都是绿的。
-
-现在是边传边删。这些断言守的就是那两条边界。
+⚠️ 哪天这个工具要去传一批不可复现的图，这个取舍就不成立了——那时该回到
+第 3 条，而不是把这些注释删掉。
 """
 from __future__ import annotations
 
@@ -24,6 +29,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
 
 def _mod():
     path = ROOT / "tools" / "asc" / "asc_screenshots.py"
@@ -33,63 +40,82 @@ def _mod():
     return m
 
 
-plan = None
+@pytest.fixture(scope="module")
+def asc():
+    return _mod()
 
 
-def setup_module(_):
-    global plan
-    plan = _mod().plan_replacement
+def _png(dirpath: Path, name: str, size: int = 64) -> Path:
+    p = dirpath / name
+    p.write_bytes(_PNG_MAGIC + b"\x00" * size)
+    return p
 
 
-def _live_counts(ops, existing, cap=10):
-    """回放序列，返回每一步之后集合里的张数。"""
-    live = existing
-    out = []
-    for op in ops:
-        live += 1 if op == "upload" else -1
-        out.append(live)
-    return out
+def test_a_healthy_batch_passes(asc, tmp_path):
+    paths = [_png(tmp_path, f"{i:02d}.png") for i in range(7)]
+    asc.preflight(paths)          # 不抛就是通过
 
 
-def test_empty_set_just_uploads():
-    assert plan(0, 3) == ["upload"] * 3
+def test_empty_batch_is_refused(asc):
+    with pytest.raises(asc.PreflightError):
+        asc.preflight([])
 
 
-def test_all_incoming_are_uploaded_and_all_existing_deleted():
-    ops = plan(6, 7)
-    assert ops.count("upload") == 7
-    assert ops.count("delete") == 6
+def test_more_than_the_cap_is_refused_before_anything_is_deleted(asc, tmp_path):
+    """11 张在删光旧图之后也传不完，所以现在就停。
+
+    这正是第 2 版撞上的那堵墙，只是那时是在删/传到一半才撞上。
+    """
+    paths = [_png(tmp_path, f"{i:02d}.png") for i in range(11)]
+    with pytest.raises(asc.PreflightError) as e:
+        asc.preflight(paths)
+    assert "10" in str(e.value)
 
 
-def test_never_exceeds_the_cap():
-    """撞顶就是那个 409。"""
-    for existing in range(0, 11):
-        for incoming in range(1, 11):
-            ops = plan(existing, incoming)
-            assert max(_live_counts(ops, existing)) <= 10, (
-                f"existing={existing} incoming={incoming} 超过了 10 张上限")
+def test_exactly_the_cap_is_allowed(asc, tmp_path):
+    asc.preflight([_png(tmp_path, f"{i:02d}.png") for i in range(10)])
 
 
-def test_never_empties_the_set_while_old_ones_are_still_needed():
-    """中途失败时集合里必须还有东西——那是「先删后传」毁掉八张图的教训。"""
-    for existing in range(1, 11):
-        for incoming in range(1, 11):
-            ops = plan(existing, incoming)
-            assert min(_live_counts(ops, existing)) >= 1, (
-                f"existing={existing} incoming={incoming} 中途把集合清空了")
+def test_zero_byte_file_is_caught(asc, tmp_path):
+    good = _png(tmp_path, "00.png")
+    bad = tmp_path / "01.png"
+    bad.write_bytes(b"")
+    with pytest.raises(asc.PreflightError) as e:
+        asc.preflight([good, bad])
+    assert "01.png" in str(e.value) and "0 字节" in str(e.value)
 
 
-def test_the_replacement_that_actually_failed():
-    """6 张旧的 + 7 张新的——上一版就是在这组数字上 409 的。"""
-    ops = plan(6, 7)
-    live = _live_counts(ops, 6)
-    assert max(live) <= 10
-    assert min(live) >= 1
-    assert live[-1] == 7
-    # 前四张有空位可以直接传，第五张之前必须先腾一个
-    assert ops[:5] == ["upload", "upload", "upload", "upload", "delete"]
+def test_a_file_that_is_not_a_png_is_caught(asc, tmp_path):
+    """扩展名对不代表内容对。提取脚本换过一次实现，产出格式不该没人查。"""
+    good = _png(tmp_path, "00.png")
+    bad = tmp_path / "01.png"
+    bad.write_bytes(b"<html>nope</html>")
+    with pytest.raises(asc.PreflightError) as e:
+        asc.preflight([good, bad])
+    assert "不是 PNG" in str(e.value)
 
 
-def test_incoming_larger_than_the_cap_is_rejected_not_silently_truncated():
-    with pytest.raises(ValueError):
-        plan(0, 11)
+def test_a_missing_file_is_caught(asc, tmp_path):
+    good = _png(tmp_path, "00.png")
+    with pytest.raises(asc.PreflightError):
+        asc.preflight([good, tmp_path / "does-not-exist.png"])
+
+
+def test_the_error_names_every_bad_file_not_just_the_first(asc, tmp_path):
+    """一次说清，别让人删一次跑一次。"""
+    good = _png(tmp_path, "00.png")
+    (tmp_path / "01.png").write_bytes(b"")
+    (tmp_path / "02.png").write_bytes(b"not a png")
+    with pytest.raises(asc.PreflightError) as e:
+        asc.preflight([good, tmp_path / "01.png", tmp_path / "02.png"])
+    msg = str(e.value)
+    assert "01.png" in msg and "02.png" in msg
+
+
+def test_preflight_says_nothing_was_deleted(asc, tmp_path):
+    """错误信息要让人放心：这一步失败时旧图还在。"""
+    bad = tmp_path / "00.png"
+    bad.write_bytes(b"")
+    with pytest.raises(asc.PreflightError) as e:
+        asc.preflight([bad])
+    assert "未删除" in str(e.value)
