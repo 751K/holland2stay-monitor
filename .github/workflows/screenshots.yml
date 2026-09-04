@@ -23,7 +23,12 @@ on:
         default: 'APP_IPHONE_61 APP_IPAD_PRO_3GEN_129'
 
 concurrency:
-  group: screenshots-${{ github.ref }}
+  # 组名必须带上设备类型。
+  #
+  # 只用 github.ref 的话，iPhone 和 iPad 两次 dispatch 落在同一个组里，后触发
+  # 的会把前一条掐掉——2026-09-04 实测：iPhone 那轮 setup 成功、capture 0 秒
+  # 被 cancel，而我当时以为是 matrix 没展开。
+  group: screenshots-${{ github.ref }}-${{ github.event.inputs.display_types }}
   cancel-in-progress: true
 
 jobs:
