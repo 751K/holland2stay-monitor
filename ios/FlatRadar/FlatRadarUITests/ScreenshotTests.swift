@@ -15,6 +15,7 @@
 //    UIView.setAnimationsEnabled(false)
 //
 
+import UIKit
 import XCTest
 
 final class ScreenshotTests: XCTestCase {
@@ -53,16 +54,20 @@ final class ScreenshotTests: XCTestCase {
 
     @MainActor
     func testCapture02_Listings() throws {
-        launch(extra: ["UI_TEST_TAB=browse", "UI_TEST_BROWSE_MODE=list"])
+        let (args, idx) = browse("list", padIndex: 1)
+        launch(extra: args)
         waitForMainUI()
+        assertTabSelected(idx, "Listings")
         sleep(2)
         snap(named: "02-Listings")
     }
 
     @MainActor
     func testCapture03_Map() throws {
-        launch(extra: ["UI_TEST_TAB=browse", "UI_TEST_BROWSE_MODE=map"])
+        let (args, idx) = browse("map", padIndex: 2)
+        launch(extra: args)
         waitForMainUI()
+        assertTabSelected(idx, "Map")
         // Leaflet 渲染稍慢
         sleep(3)
         snap(named: "03-Map")
@@ -70,8 +75,10 @@ final class ScreenshotTests: XCTestCase {
 
     @MainActor
     func testCapture04_Calendar() throws {
-        launch(extra: ["UI_TEST_TAB=browse", "UI_TEST_BROWSE_MODE=calendar"])
+        let (args, idx) = browse("calendar", padIndex: 3)
+        launch(extra: args)
         waitForMainUI()
+        assertTabSelected(idx, "Calendar")
         sleep(2)
         snap(named: "04-Calendar")
     }
@@ -91,10 +98,10 @@ final class ScreenshotTests: XCTestCase {
         // menu 是因为 Browse 的三个子模式藏在 Menu 里，那才不稳）。
         // 按序号点，不按标题——标题在非英文语言下是翻译过的。
         let bar = app.tabBars.firstMatch
-        if bar.waitForExistence(timeout: 60), bar.buttons.count > 2 {
-            bar.buttons.element(boundBy: 2).tap()
+        if bar.waitForExistence(timeout: 60), bar.buttons.count > alertsIndex {
+            bar.buttons.element(boundBy: alertsIndex).tap()
         }
-        assertTabSelected(2, "Alerts")
+        assertTabSelected(alertsIndex, "Alerts")
         sleep(2)
         snap(named: "05-Notifications")
     }
@@ -103,10 +110,34 @@ final class ScreenshotTests: XCTestCase {
     func testCapture06_Settings() throws {
         launch(extra: ["UI_TEST_TAB=settings"])
         waitForMainUI()
-        assertTabSelected(3, "Settings")
+        assertTabSelected(settingsIndex, "Settings")
         sleep(1)
         snap(named: "06-Settings")
     }
+
+    // MARK: - 设备差异
+
+    /// iPad 与 iPhone 的 tab 结构不同，截图脚本必须按设备分别取值。
+    ///
+    /// - iPhone（4 个）：Dashboard / Browse / Alerts / Settings
+    ///   List、Map、Calendar 是 Browse 里的三个子模式，靠 UI_TEST_BROWSE_MODE 选。
+    /// - iPad（6 个）：Dashboard / Listings / Map / Calendar / Alerts / Settings
+    ///   三个视图各占一个 tab，没有 Browse。
+    ///
+    /// 2026-09-04 实测：iPad job 七张只出了 00-Login。原因就是这里——
+    /// `UI_TEST_TAB=browse` 在 iPad 上落不了位，而断言用的又是 iPhone 的序号
+    /// （Alerts=2、Settings=3，iPad 上是 4 和 5）。
+    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+
+    /// 三个浏览视图在当前设备上怎么到达：(launch args, tab 序号)。
+    private func browse(_ mode: String, padIndex: Int) -> ([String], Int) {
+        isPad
+            ? (["UI_TEST_TAB=\(mode)"], padIndex)
+            : (["UI_TEST_TAB=browse", "UI_TEST_BROWSE_MODE=\(mode)"], 1)
+    }
+
+    private var alertsIndex: Int { isPad ? 4 : 2 }
+    private var settingsIndex: Int { isPad ? 5 : 3 }
 
     // MARK: - Helpers
 
