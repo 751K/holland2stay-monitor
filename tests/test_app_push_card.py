@@ -70,6 +70,19 @@ class TestContent:
     def test_download_links(self, admin_client, needle):
         assert needle in _form_html(admin_client)
 
+    def test_the_android_link_points_at_the_repo_that_publishes_it(self, admin_client):
+        """光有 ``app-release.apk`` 这个串不够——它不说链接指向哪个仓库。
+
+        2026-09-05 安卓客户端迁到 751K/FlatRadar-Android，Release 从那边发。这个
+        页面上的链接当时还指着 holland2stay-monitor，而上面那条断言照样是绿的：
+        子串还在，只是它会把人送到一个**再也不会有新版本**的 Release 页。
+
+        「链接存在」和「链接指对地方」是两件事，后者才是用户点下去关心的。
+        """
+        html = _form_html(admin_client)
+        assert "751K/FlatRadar-Android/releases/latest/download/app-release.apk" in html
+        assert "holland2stay-monitor/releases/latest/download/app-release.apk" not in html
+
     @pytest.mark.parametrize("lang,needle", [
         ("zh", "使用账号登录即可收到通知"),
         ("en", "sign in with this account"),
