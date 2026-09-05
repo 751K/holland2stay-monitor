@@ -112,6 +112,7 @@ def register_device_for_token(
     model: str = "",
     bundle_id: str = "",
     language: str = "en",
+    os_version: str = "",
     user_id: str | None = None,
 ) -> dict:
     """Validate and register/refresh a device for one app auth token.
@@ -125,6 +126,9 @@ def register_device_for_token(
     model = (model or "").strip()[:64]
     bundle_id = (bundle_id or "").strip()[:128]
     language = (language or "en").strip().lower()[:8]
+    # 只截长度，不校验形状——见 ``MonitorStorage.register_device`` 里的说明。
+    # 缺失是合法的：低于 2.1.0 的 iOS 客户端和当前的 Android 客户端都不发。
+    os_version = (os_version or "").strip()[:32]
 
     if not device_token:
         raise DeviceValidationError("缺少 device_token")
@@ -143,6 +147,7 @@ def register_device_for_token(
                 model=model,
                 bundle_id=bundle_id,
                 language=language,
+                os_version=os_version,
             )
         except ValueError as exc:
             raise DeviceValidationError(str(exc)) from exc
@@ -166,6 +171,8 @@ def list_devices_for_token_safe(*, token_id: int) -> dict:
             "env": row["env"],
             "platform": row["platform"],
             "model": row.get("model") or "",
+            # 没上报时给 null 而不是 ""——和库里一样，让「不知道」可辨认。
+            "os_version": row.get("os_version") or None,
             "created_at": row["created_at"],
             "last_seen": row["last_seen"],
             "disabled": bool(row.get("disabled_at")),

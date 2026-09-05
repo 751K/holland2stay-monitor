@@ -828,8 +828,10 @@ Body：
   "device_token": "push-token",
   "env": "production",
   "platform": "ios",
-  "model": "iPhone 17 Pro",
-  "bundle_id": "com.j.kong.FlatRadar"
+  "model": "iPhone16,2",
+  "bundle_id": "com.j.kong.FlatRadar",
+  "language": "zh",
+  "os_version": "26.0.1"
 }
 ```
 
@@ -837,11 +839,38 @@ Body：
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---:|---|
-| `device_token` | string | 是 | APNs token；未来 Android 为 FCM token |
+| `device_token` | string | 是 | APNs token；Android 为 FCM token |
 | `env` | string | 否 | `production` / `sandbox`，默认 `production` |
 | `platform` | string | 否 | 当前默认 `ios`；Android 应传 `android` |
-| `model` | string | 否 | 设备型号，最长 64 |
+| `model` | string | 否 | **硬件标识符**，不是市场名称。iOS 端取 `utsname().machine`，形如 `iPhone16,2`。最长 64 |
 | `bundle_id` | string | 否 | App bundle/package id，最长 128 |
+| `language` | string | 否 | 推送语言（`en` / `zh`），默认 `en`。iOS 从很早就在发，但直到 v1.20.0 才登记进 spec |
+| `os_version` | string | 否 | 客户端系统版本，原样存储不做格式校验（`18.5` / `26.0.1`）。iOS 2.1.0 起上报；更早的客户端与当前的 Android 客户端不发，缺失即「未上报」 |
+
+`model` 与 `os_version` 是一对
+-----------------------------
+
+单看任何一个都没有意义——App Store Connect 的 Analytics 已经免费给了机型分布和
+系统版本分布。自己收一份的唯一理由是**交叉表**：`model` × `os_version`（限
+`disabled = false`），也就是「硬件够格 **且** 系统够新」的设备占多少。ASC 给的
+是两张互相独立的边缘分布，拼不出这个数。
+
+正因为如此，`model` 存的必须是硬件标识符（`iPhone16,2`）而不是市场名称
+（`iPhone 17 Pro`）——后者对不上任何硬件能力表。
+
+`os_version` 的两条约束
+-----------------------
+
+- **不做格式校验。** Apple 给的是 `18.5` / `26.0`，偶尔 `18.5.1`；Android 将来
+  又是另一套。卡正则的话，被丢掉的恰好是还没见过的那些版本——而那正是想了解的。
+- **缺失存 NULL，不存空串。** 「没上报」和「上报了但值奇怪」必须能分开，否则
+  统计时分母是错的。同理，这一列不会用崩溃诊断里的 `ios_version` 回填：那批
+  样本的触发条件是「崩过 + 同意上传」，而崩溃率本身与系统版本相关，回填等于
+  往干净数据里掺一批有偏的。
+
+字段名是 `os_version` 不是 `ios_version`：这个端点的 `platform` 枚举含 `android`。
+`POST /diagnostics/crash` 那条路径仍叫 `ios_version`（同时也接受 `os_version`），
+因为那个端点目前只有 iOS 在打——两处不一致是有意的。
 
 返回：
 
@@ -874,7 +903,8 @@ Body：
         "device_token_hint": "abcdef123456…7890",
         "env": "production",
         "platform": "ios",
-        "model": "iPhone 17 Pro",
+        "model": "iPhone16,2",
+        "os_version": "26.0.1",
         "created_at": "2026-05-17T10:00:00Z",
         "last_seen": "2026-05-21T10:00:00Z",
         "disabled": false,
@@ -1003,11 +1033,35 @@ Body：
 {
   "kind": "crash",
   "app_version": "1.6.0",
+  "platform": "ios",
   "ios_version": "26.0",
-  "device_model": "iPhone 17 Pro",
+  "device_model": "iPhone",
   "payload": {}
 }
 ```
+
+字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `kind` | string | 见下 |
+| `app_version` | string | 最长 32 |
+| `platform` | string | `ios` / `android`，默认 `ios` |
+| `ios_version` | string | 系统版本。也接受 `os_version`（优先），`ios_version` 为兼容旧客户端保留 |
+| `device_model` | string | ⚠️ 这里是 `UIDevice.current.model`，**族名**（`iPhone` / `iPad`），不是硬件标识符 |
+| `payload` | object | 诊断正文 |
+
+⚠️ 这条路径的数据不能用来回填 `device_tokens.os_version`
+
+两个理由，各自都足够：
+
+1. `device_model` 在这里只有 `iPhone` / `iPad`，和 `/devices/register` 上报的
+   `iPhone16,2` 不是一回事——拼不出机型 × 系统版本的交叉表。
+2. 即使只取版本号也不行：这批样本的触发条件是「崩过 **且** 同意上传」，而崩溃率
+   本身与系统版本相关，老系统会被系统性高估。回填等于往干净数据里掺一批有偏的。
+
+字段名叫 `ios_version` 而不是 `os_version`，是因为这个端点目前只有 iOS 在打；
+`/devices/register` 那条是跨平台的，所以叫 `os_version`。两处不一致是有意的。
 
 `kind` 可选：
 

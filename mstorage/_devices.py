@@ -57,6 +57,7 @@ class DeviceOps:
         model: str = "",
         bundle_id: str = "",
         language: str = "en",
+        os_version: str = "",
     ) -> int:
         """
         注册或刷新一台设备的 APNs token。
@@ -66,11 +67,28 @@ class DeviceOps:
         - 已 disabled 的：清空 disabled_at（用户重装 App 时复活）
 
         Returns 设备行 id。
+
+        ``os_version`` 两条分支都要写
+        -----------------------------
+        客户端每次启动只要「已登录 + 有推送权限」就调一次注册，用的是同一个
+        device_token——**所有现存用户走的都是 UPDATE 分支**。只在 INSERT 里写的
+        话：新装的用户有数据，看着像在正常工作；老用户永远是 NULL，而他们正是
+        要统计的那批；用户升级系统之后值也不会变，冻结在第一次注册时的版本，
+        比没有更糟。
+
+        空值按 NULL 存：低于 2.1.0 的客户端不发这个字段，那种情况下这一行的
+        含义是「最近一次注册没有上报」，不是「上报了一个空串」。语义就此和
+        ``last_seen`` 绑在一起——值永远描述最近一次注册，不会是陈年旧值。
         """
         if env not in ("production", "sandbox"):
             raise ValueError(f"invalid env: {env!r}")
         if not device_token or len(device_token) < 32:
             raise ValueError("device_token 长度不合理")
+
+        # 不对形状做任何校验（不卡正则）：Apple 给的是 "18.5" / "26.0" / 偶尔
+        # "18.5.1"，将来 Android 又是另一套。真卡了，被丢掉的恰好是还没见过的
+        # 那些系统版本，而那正是想了解的。当字符串存，查询时再解析。
+        os_version_value: str | None = (os_version or "").strip()[:32] or None
 
         now = _utc_now_iso()
         with self._conn:
@@ -84,11 +102,12 @@ class DeviceOps:
                 self._conn.execute(
                     """UPDATE device_tokens SET
                           env = ?, platform = ?, model = ?, bundle_id = ?,
-                          language = ?,
+                          language = ?, os_version = ?,
                           last_seen = ?,
                           disabled_at = NULL, disabled_reason = NULL
                        WHERE id = ?""",
-                    (env, platform, model, bundle_id, language, now, row["id"]),
+                    (env, platform, model, bundle_id, language,
+                     os_version_value, now, row["id"]),
                 )
                 # 复活这一行的同时也要停掉别的：用户可能 A→B→A 地切回来，
                 # 此时 B 的行还活着。
@@ -97,10 +116,11 @@ class DeviceOps:
             cur = self._conn.execute(
                 """INSERT INTO device_tokens
                        (app_token_id, device_token, env, platform,
-                        model, bundle_id, language, created_at, last_seen)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        model, bundle_id, language, os_version,
+                        created_at, last_seen)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (app_token_id, device_token, env, platform,
-                 model, bundle_id, language, now, now),
+                 model, bundle_id, language, os_version_value, now, now),
             )
             new_id = int(cur.lastrowid)  # type: ignore[arg-type]
             self._retire_stale_rows_for(device_token, keep_id=new_id, now=now)
@@ -150,6 +170,7 @@ class DeviceOps:
         """列出所有推送设备（含 disabled），JOIN app_tokens 拿到 user/role。"""
         rows = self._conn.execute(
             """SELECT d.id, d.device_token, d.platform, d.env, d.model,
+                      d.os_version,
                       d.bundle_id, d.language, d.created_at, d.last_seen,
                       d.disabled_at, d.disabled_reason,
                       t.user_id, t.role, t.device_name

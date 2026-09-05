@@ -40,6 +40,9 @@ def _register():
     model = (body.get("model") or "").strip()[:64]
     bundle_id = (body.get("bundle_id") or "").strip()[:128]
     language = (body.get("language") or "en").strip().lower()[:8]
+    # 低于 2.1.0 的客户端不发这个键，Android 目前也不发；缺失一律当没上报，
+    # 不能设成必填，否则老客户端会被 400 挡在设备注册之外。
+    os_version = (body.get("os_version") or "").strip()[:32]
 
     token_id = api_auth.current_token_id()
     if token_id is None:
@@ -55,6 +58,7 @@ def _register():
             model=model,
             bundle_id=bundle_id,
             language=language,
+            os_version=os_version,
             # user 角色才传：登记设备顺带打开通知总开关（见 device_service）。
             # admin 调试登记的设备没有 UserConfig 行，传了也没东西可翻。
             user_id=(api_auth.current_user_id()

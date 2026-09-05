@@ -442,7 +442,7 @@ profile 位于 `<DATA_DIR>/browser_profiles/`，每槽位磁盘缓存上限 128 
 | `meta` | 键值对：心跳、维护状态、最后抓取时间等 |
 | `user_configs` | 用户、过滤条件、通知渠道及加密后的凭据 |
 | `web_notifications` | 面板内通知（支持按用户区分） |
-| `device_tokens` / `app_tokens` | APNs / FCM 设备令牌与 App 登录令牌 |
+| `device_tokens` / `app_tokens` | APNs / FCM 设备令牌与 App 登录令牌。`device_tokens.os_version` 可空——低于 iOS 2.1.0 的客户端与当前的 Android 客户端不上报，NULL 表示「未上报」而非「未知版本」，见 `docs/API.md` |
 | `geocode_cache` | 地址至坐标的缓存，用于避免重复请求 |
 | `round_stats` | 每轮每 source 一行的抓取遥测，保留 30 天（见 §5.12） |
 

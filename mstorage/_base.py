@@ -192,6 +192,11 @@ class StorageBase:
                 disabled_at     TEXT,
                 disabled_reason TEXT,
                 language        TEXT NOT NULL DEFAULT 'en',
+                -- 客户端系统版本（iOS "18.5" / "26.0.1"，将来 Android 同列）。
+                -- 可空且**不给默认值**：老行、以及还没跟进的 Android 客户端都是
+                -- NULL。统计时「没上报」必须能和「上报了但值奇怪」分开，否则
+                -- 交叉表的分母就是错的。
+                os_version      TEXT,
                 UNIQUE(app_token_id, device_token)
             );
             CREATE INDEX IF NOT EXISTS idx_device_tokens_active
@@ -398,6 +403,21 @@ class StorageBase:
             "device_tokens", "language",
             "TEXT NOT NULL DEFAULT 'en'",
         )
+
+        # device_tokens.os_version：客户端系统版本，iOS 2.1.0 起上报。
+        #
+        # 为什么可空、为什么不给默认值
+        # ----------------------------
+        # 低于 2.1.0 的客户端不发这个字段，Android 目前也不发。给个 '' 默认值
+        # 会把「没上报」伪装成「上报了一个空串」，而这批设备恰恰是统计时要单独
+        # 算的那部分。NULL 是唯一能表达「不知道」的值。
+        #
+        # 为什么不从崩溃上报回填
+        # ----------------------
+        # crash 诊断那条路径里有 ios_version，看着能补历史。不补：那个样本的
+        # 触发条件是「崩过 + 同意上传」，而崩溃率本身与系统版本相关，老系统会
+        # 被系统性高估。回填等于往干净数据里掺一批有偏的。
+        self._add_column_if_missing("device_tokens", "os_version", "TEXT")
 
         # listings.city_normalized：归一后的城市名。
         #

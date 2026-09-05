@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FlatRadar Backend API",
-    "version": "1.19.0",
+    "version": "1.20.0",
     "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
@@ -3425,6 +3425,18 @@
           "bundle_id": {
             "type": "string",
             "maxLength": 128
+          },
+          "os_version": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "客户端系统版本，原样上报不做格式约束（iOS \"18.5\" / \"26.0.1\"；Android 将来同字段）。iOS 2.1.0 起发送；更早的客户端和当前的 Android 客户端不发，缺失即「未上报」。",
+            "example": "26.0.1"
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 16,
+            "description": "APNs 推送语言（'en' | 'zh'）。缺省 'en'。",
+            "example": "zh"
           }
         },
         "additionalProperties": true
@@ -3491,6 +3503,13 @@
           },
           "disabled_reason": {
             "type": "string"
+          },
+          "os_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "最近一次注册上报的系统版本；从未上报过的设备为 null。"
           }
         },
         "additionalProperties": true
@@ -3610,6 +3629,15 @@
           "payload": {
             "type": "object",
             "additionalProperties": true
+          },
+          "platform": {
+            "type": "string",
+            "enum": [
+              "ios",
+              "android"
+            ],
+            "default": "ios",
+            "description": "上报端平台。此前代码一直在读，spec 里漏登记。"
           }
         },
         "additionalProperties": true

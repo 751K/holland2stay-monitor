@@ -336,8 +336,9 @@ def _export():
 
         # 活跃设备令牌
         device_rows = st.conn.execute(
+            # os_version 也是我们就这台设备收集的个人数据，导出里不能漏。
             "SELECT dt.id, dt.device_token, dt.env, dt.platform, dt.model, "
-            "       dt.bundle_id, dt.created_at, dt.last_seen "
+            "       dt.os_version, dt.bundle_id, dt.created_at, dt.last_seen "
             "FROM device_tokens dt "
             "JOIN app_tokens at ON dt.app_token_id = at.id "
             "WHERE at.user_id = ? AND dt.disabled_at IS NULL",

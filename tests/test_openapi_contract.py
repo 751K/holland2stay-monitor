@@ -21,9 +21,26 @@
 所以改成从 ``app.url_map`` 枚举——真实的路由表就是唯一事实来源，两个方向都比：
 后端多一条会红，spec 多一条也会红。手写清单不再有维护余地，也就不会再有
 「白名单和 spec 同时漏，于是绿着」这种事。
+
+路由比完了，字段没人比
+----------------------
+上面这套只管**路径**。2026-09-05 发现它挡不住的另一层：``DeviceRegisterRequest``
+的 schema 里从来没有 ``language``，而 iOS 从很久以前就在发它（APNs 双语推送靠
+它），后端也一直在读。整条路由在 spec 里、写法也对，只是字段少了一个——双向
+diff 一路是绿的。同一次还查出 ``POST /diagnostics/crash`` 的 ``platform`` 也没
+登记。
+
+字段漂移的后果和路由漂移一样：客户端照着一份不完整的文档在写，发出去的东西
+是不是会被读，只能靠翻后端源码。所以下面加了一条按 ``body.get("…")`` 反推的
+字段级 diff，方向和路由那条一致——**代码读了而 spec 没写**就是红。
+
+它只比这一个方向。反过来（spec 写了但代码不读）不比，因为那可能是有意的向前
+兼容声明；而且 ``body.get`` 这个正则天生只会漏报不会误报——handler 把取值挪进
+辅助函数，这条就看不见了。宁可少抓，不可错杀。
 """
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from pathlib import Path
@@ -41,6 +58,13 @@ _CONVERTER = re.compile(r"<(?:[^:<>]+:)?([^<>]+)>")
 _IMPLICIT_METHODS = {"HEAD", "OPTIONS"}
 
 _HTTP_METHODS = {"get", "put", "post", "delete", "patch", "head", "options", "trace"}
+
+# ``app/routes/api_v1/*.py`` 里读请求体的写法是统一的：
+#     body = request.get_json(silent=True) or {}
+#     x = body.get("x")
+# 九个带请求体的 handler 全是这个形状，所以一个正则就够反推出「代码实际读了
+# 哪些字段」。哪天有人改用别的变量名，这条只会少抓，不会错杀。
+_BODY_GET = re.compile(r'body\.get\(\s*["\']([A-Za-z0-9_]+)["\']')
 
 
 def _load_openapi() -> dict:
@@ -172,3 +196,93 @@ def test_every_ref_in_the_spec_resolves() -> None:
 
     walk(spec, "#")
     assert not broken, "docs/openapi.json 里有悬空的 $ref：\n  " + "\n  ".join(broken)
+
+
+def _resolve(spec: dict, ref: str):
+    node = spec
+    for part in ref.lstrip("#/").split("/"):
+        node = node[part]
+    return node
+
+
+def _endpoint_index(test_app) -> dict[tuple[str, str], str]:
+    """``(spec 路径, 小写方法) → Flask endpoint 名``。"""
+    index: dict[tuple[str, str], str] = {}
+    for rule in test_app.url_map.iter_rules():
+        if not rule.rule.startswith(API_PREFIX):
+            continue
+        path = _normalize(rule.rule)
+        for method in (rule.methods or set()) - _IMPLICIT_METHODS:
+            index[(path, method.lower())] = rule.endpoint
+    return index
+
+
+def _declared_body_fields(spec: dict, operation: dict) -> set[str] | None:
+    """spec 为这个操作声明的请求体字段；没有请求体时返回 None。"""
+    body = operation.get("requestBody")
+    if not body:
+        return None
+    schema = body.get("content", {}).get("application/json", {}).get("schema", {})
+    if "$ref" in schema:
+        schema = _resolve(spec, schema["$ref"])
+    return set(schema.get("properties", {}))
+
+
+def _fields_the_handler_reads(test_app, endpoint: str) -> set[str]:
+    view = test_app.view_functions[endpoint]
+    # ``bearer_required(...)`` 包了一层；不 unwrap 的话读到的是装饰器的源码。
+    source = inspect.getsource(inspect.unwrap(view))
+    return set(_BODY_GET.findall(source))
+
+
+def test_openapi_documents_every_request_field_the_code_reads(test_app) -> None:
+    """代码从请求体里读、而 spec 没登记的字段，一个都不该有。
+
+    这是路由级 diff 挡不住的那一层：整条路由在 spec 里，写法也对，只是少了个
+    字段。``DeviceRegisterRequest.language`` 就是这么漏了很久的——iOS 一直在
+    发，后端一直在读，spec 里根本没有这个属性。
+    """
+    spec = _load_openapi()
+    index = _endpoint_index(test_app)
+
+    checked = 0
+    seen_fields: set[str] = set()
+    drift: dict[str, list[str]] = {}
+    for path, operations in spec.get("paths", {}).items():
+        for method, operation in operations.items():
+            if method.lower() not in _HTTP_METHODS:
+                continue
+            declared = _declared_body_fields(spec, operation)
+            if declared is None:
+                continue
+            endpoint = index.get((path, method.lower()))
+            if endpoint is None:
+                continue          # 路由级那两条测试会报这个，不在这里重复
+            checked += 1
+            read = _fields_the_handler_reads(test_app, endpoint)
+            seen_fields |= {f"{endpoint}.{name}" for name in read}
+            extra = read - declared
+            if extra:
+                drift[f"{method.upper()} {path}"] = sorted(extra)
+
+    assert not drift, (
+        "这些字段后端会读，但 spec 里没登记：\n"
+        + "\n".join(f"  {op}: {fields}" for op, fields in sorted(drift.items()))
+        + "\n客户端照着 spec 写，发不发这些字段全靠翻源码。")
+
+    # 上面那句 `not drift` 在「一个字段都没抽出来」时同样成立——恒真的绿。
+    # 所以要分别为两件事背书：
+    #
+    #   checked      端点映射还对得上（spec 路径 ↔ url_map）
+    #   seen_fields  正则真的从 handler 源码里抽出了字段
+    #
+    # 只断言 checked 是不够的：把正则改成匹配不到任何东西，checked 照样是 10。
+    # 第一版就是这么写的，变异测试当场证明它是摆设。
+    assert checked >= 8, (
+        f"只比对了 {checked} 个带请求体的端点，太少了。多半是 spec 的 "
+        "requestBody 写法变了、或者路由映射对不上。")
+    assert len(seen_fields) >= 20, (
+        f"只从 handler 源码里抽出了 {len(seen_fields)} 个字段（预期 20+）。"
+        "多半是 handler 改了读请求体的写法（不再是 `body.get(\"…\")`），"
+        "于是这条测试什么都没在比——绿的，但空的。"
+        f"\n抽到的：{sorted(seen_fields)}")
