@@ -49,13 +49,20 @@ Bearer Token 持久化（iOS / 第三方客户端用）
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 #: token 的滑动有效期（天）。每次被使用就从「现在」重新起算。
 #: api_v1/auth.py 的 DEFAULT_TTL_DAYS 从这里取，避免两处慢慢分叉。
 SLIDING_TTL_DAYS = 90
+
+#: 同一 (user_id, device_name) 下最多保留几枚活跃会话，超出的按新旧撤销最旧的。
+#: 见 ``TokenOps._retire_surplus_sessions`` 里为什么是 10。
+MAX_SESSIONS_PER_DEVICE_NAME = 10
 
 
 def _utc_now_iso() -> str:
@@ -70,6 +77,67 @@ def hash_token(plaintext: str) -> str:
 def generate_token() -> str:
     """生成 256-bit 随机 token（base64url，无 padding，长度 43）。"""
     return secrets.token_urlsafe(32)
+
+
+#: 设备名种类超过这个数就按机型族归并显示。
+#:
+#: 2026-09-06：Test 账号的卡片上并排挂着八个标签——iPhone 17 Pro Max ×271、
+#: iPad Pro 13-inch (M5) (16GB) ×241、Clone 1 of iPad Pro 13-inch (M5) ×151…
+#: 全是模拟器，一轮 UI 测试就换一批名字。逐个列出来既占满整张卡片，又没有任何
+#: 一个名字是有信息量的。
+#:
+#: 触发条件是「名字种类太多」而不是「这个用户叫 Test」：写死账号名的话，半年后
+#: 换个测试账号就失效，而没有人会记得去改。真实用户这边，全站名字最多的是 3 种，
+#: 阈值 4 对他们是彻底的无操作。
+_COLLAPSE_NAMES_ABOVE = 4
+
+#: 机型族的判据。按顺序匹配子串，命中即停——"Clone 1 of iPhone 17 Pro Max" 里
+#: 同时有 iPhone，没有 iPad，所以顺序在这里不敏感；列成有序表是为了将来加
+#: "iPhone SE" 这种更具体的族时有个确定的位置。
+_DEVICE_FAMILIES = ("iPhone", "iPad", "iPod", "Mac", "Apple Watch", "Vision")
+
+
+def _device_family(name: str) -> str:
+    """从设备名里取机型族；认不出来的归到「其他」。
+
+    认不出的既有安卓（"meizu MEIZU 18"、"vivo V2458A"），也有人手填的
+    （"probe"、"未命名设备"）。它们**不能**被并进 iPhone/iPad 里，也不能被
+    丢掉——卡片上少一台设备，比多八个标签更难发现。
+    """
+    lowered = name.lower()
+    for family in _DEVICE_FAMILIES:
+        if family.lower() in lowered:
+            return family
+    return "其他"
+
+
+def _collapse_client_names(items: list[dict]) -> list[dict]:
+    """名字种类过多时按机型族归并；否则原样返回。
+
+    归并后 ``sessions`` 是族内求和，``last_used_at`` 取族内最大——两者都必须是
+    聚合而不是「取第一条」，否则卡片上写的会话数会比真实的少，而那正是当初要
+    看这张卡片的原因。
+    """
+    if len(items) <= _COLLAPSE_NAMES_ABOVE:
+        return items
+
+    merged: dict[str, dict] = {}
+    for item in items:
+        family = _device_family(item["name"])
+        cur = merged.get(family)
+        if cur is None:
+            merged[family] = {
+                "name": family,
+                "sessions": item["sessions"],
+                "last_used_at": item["last_used_at"],
+                "collapsed": True,
+            }
+            continue
+        cur["sessions"] += item["sessions"]
+        # None 排在所有时间戳之前：从没用过的那条不该顶掉真实的 last_used_at。
+        if (item["last_used_at"] or "") > (cur["last_used_at"] or ""):
+            cur["last_used_at"] = item["last_used_at"]
+    return sorted(merged.values(), key=lambda d: -d["sessions"])
 
 
 class TokenOps:
@@ -126,7 +194,112 @@ class TokenOps:
                 (token_hash, role, user_id, device_name, now, expires_at),
             )
             token_id = cur.lastrowid
+            self._retire_surplus_sessions(
+                role=role, user_id=user_id, device_name=device_name,
+                keep_id=int(token_id), now=now)
         return int(token_id), plaintext  # type: ignore[arg-type]
+
+    def _retire_surplus_sessions(
+        self, *, role: str, user_id: Optional[str], device_name: str,
+        keep_id: int, now: str,
+    ) -> int:
+        """同一 (user_id, device_name) 下只保留最新 ``MAX_SESSIONS_PER_DEVICE_NAME``
+        枚活跃会话，更旧的一律撤销。返回撤销条数。
+
+        为什么需要
+        ----------
+        每次登录都签一枚新 token，而**从来没有人撤销旧的**——客户端重装、重新
+        登录、每一次 UI 测试启动，都各留下一枚 90 天的活跃会话。2026-09-06 查
+        线上：Test 账号 791 枚活跃会话，占全站 991 枚的 88%，其中 9-04 一天新增
+        637 枚（一轮截图测试）。用户管理页按 device_name 归并之后仍然是一张
+        塞了八个标签、每个标签后面挂着 ×271 的卡片。
+
+        为什么按 (user_id, device_name) 而不是按 user_id
+        ------------------------------------------------
+        同名再次登录，几乎一定是**同一台设备又登了一次**——旧那枚已经没有客户端
+        在用了。按用户整体设上限则会在「一个人有 12 台设备」时误伤，而按设备名
+        分组时，12 台设备是 12 个组，各留 10 枚，谁都不受影响。
+
+        阈值为什么是 10
+        ---------------
+        改之前量过全站：活跃会话超过 5 枚的 (user, device_name) 组一共 6 个，
+        5 个是 Test，第 6 个是某人同一台 vivo 上攒的 7 枚。留 10 的话真实用户
+        **一枚都不会被撤销**，而 Test 从 791 收到 50 上下。这个数字是按当时的
+        真实分布定的，不是拍的。
+
+        admin token 没有 user_id，全都会落进同一组，所以整个规则只对
+        ``role='user'`` 生效。
+        """
+        if role != "user" or not user_id:
+            return 0
+
+        surplus = self._conn.execute(
+            """SELECT id FROM app_tokens
+                WHERE role = 'user' AND user_id = ? AND device_name = ?
+                  AND revoked = 0 AND id != ?
+                ORDER BY id DESC
+                LIMIT -1 OFFSET ?""",
+            (user_id, device_name, keep_id, MAX_SESSIONS_PER_DEVICE_NAME - 1),
+        ).fetchall()
+        if not surplus:
+            return 0
+
+        ids = [int(r["id"]) for r in surplus]
+        self._conn.execute(
+            "UPDATE app_tokens SET revoked = 1 WHERE id IN (%s)"
+            % ",".join("?" * len(ids)),
+            ids,
+        )
+        logger.info(
+            "会话超额：user_id=%s device_name=%r 撤销 %d 枚旧会话（上限 %d）",
+            user_id, device_name, len(ids), MAX_SESSIONS_PER_DEVICE_NAME)
+        return len(ids)
+
+    def retire_surplus_sessions_globally(self) -> int:
+        """对**存量**行施加同一条上限。返回撤销条数。
+
+        ``_retire_surplus_sessions`` 只在签发新 token 时收口，所以它管不到已经
+        躺在库里的那 700 多枚——那些账号不再登录的话，卡片会一直是现在这个样子。
+        启动时跑一遍，把历史一次性拉平。
+
+        幂等：跑完之后每组都 ≤ 上限，再跑一次是零更新。所以放在每次启动都跑的
+        位置上是安全的，不需要一次性标记。
+        """
+        rows = self._conn.execute(
+            """SELECT user_id, device_name FROM app_tokens
+                WHERE role = 'user' AND user_id IS NOT NULL AND revoked = 0
+                GROUP BY user_id, device_name
+                HAVING COUNT(*) > ?""",
+            (MAX_SESSIONS_PER_DEVICE_NAME,),
+        ).fetchall()
+        if not rows:
+            return 0
+
+        total = 0
+        with self._conn:
+            for r in rows:
+                surplus = self._conn.execute(
+                    """SELECT id FROM app_tokens
+                        WHERE role = 'user' AND user_id = ? AND device_name = ?
+                          AND revoked = 0
+                        ORDER BY id DESC
+                        LIMIT -1 OFFSET ?""",
+                    (r["user_id"], r["device_name"], MAX_SESSIONS_PER_DEVICE_NAME),
+                ).fetchall()
+                if not surplus:
+                    continue
+                ids = [int(x["id"]) for x in surplus]
+                self._conn.execute(
+                    "UPDATE app_tokens SET revoked = 1 WHERE id IN (%s)"
+                    % ",".join("?" * len(ids)),
+                    ids,
+                )
+                total += len(ids)
+        if total:
+            logger.info(
+                "存量会话拉平：%d 组超额，共撤销 %d 枚（每组上限 %d）",
+                len(rows), total, MAX_SESSIONS_PER_DEVICE_NAME)
+        return total
 
     # ── 查询 ────────────────────────────────────────────────────────
 
@@ -213,7 +386,7 @@ class TokenOps:
                 "sessions": int(r["sessions"]),
                 "last_used_at": r["last_used_at"],
             })
-        return out
+        return {uid: _collapse_client_names(items) for uid, items in out.items()}
 
     # ── 状态变更 ────────────────────────────────────────────────────
 

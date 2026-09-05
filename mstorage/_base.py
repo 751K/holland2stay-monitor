@@ -429,6 +429,7 @@ class StorageBase:
             "listings", "city_normalized", "TEXT NOT NULL DEFAULT ''",
         )
         self._backfill_city_normalized()
+        self.retire_surplus_sessions_globally()
         self._retire_legacy_notification_backlog()
         self._backfill_assumed_features()
         self._resync_xior_furnishing()
