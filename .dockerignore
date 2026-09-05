@@ -42,8 +42,7 @@ tools/
 packaging/
 launcher.py
 
-# iOS 客户端（不打包进服务端镜像）。Android 已迁出本仓库。
-ios/
+# iOS / Android 客户端已各自迁出本仓库（751K/FlatRadar-iOS、751K/FlatRadar-Android）。
 
 # CI / GitHub
 .github/

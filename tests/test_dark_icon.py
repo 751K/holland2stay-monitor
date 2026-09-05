@@ -6,6 +6,8 @@
 1. 资源本身。深色版必须和浅色版是同一个轮廓（alpha 逐像素相同）、确实更暗、
    并且图形和底色之间还留着足够的对比——旧的 iOS AppIcon-Dark.png 就是一张
    去饱和的灰白图，在深色模式下比浅色版还刺眼，这种东西不能再混进来。
+   （iOS 图标那两条已随客户端迁去 751K/FlatRadar-iOS 的
+   tests/test_ios_dark_icon.py，这里只剩网页资源。）
 2. 接线。模板里每出现一个 /static/logo* 引用，就必须有对应的主题分支，
    否则深色主题下会露出一块白底。
 
@@ -105,7 +107,6 @@ def _contrast(l1: float, l2: float) -> float:
 @pytest.fixture(scope="module")
 def decoded() -> dict[str, tuple[int, int, list]]:
     paths = [STATIC / n for pair in LOGO_PAIRS for n in pair]
-    paths.append(APPICON / "AppIcon-Dark.png")
     return {p.name: _decode_png(p) for p in paths if p.exists()}
 
 
@@ -159,27 +160,6 @@ def test_dark_mark_stays_legible(_light, dark, decoded):
 
 
 # ── iOS ─────────────────────────────────────────────────────────
-def test_ios_dark_icon_registered():
-    contents = json.loads((APPICON / "Contents.json").read_text())
-    dark = [img for img in contents["images"]
-            if any(a.get("value") == "dark" for a in img.get("appearances", []))]
-    assert len(dark) == 1, "AppIcon 里应当正好有一条 dark 外观条目"
-    assert (APPICON / dark[0]["filename"]).exists()
-    assert dark[0]["size"] == "1024x1024"
-
-
-def test_ios_dark_icon_is_opaque_and_dark(decoded):
-    """1024、不透明、够暗。旧那张灰白 AppIcon-Dark.png 在这里挂。"""
-    w, h, px = decoded["AppIcon-Dark.png"]
-    assert (w, h) == (1024, 1024)
-    assert all(p[3] == 255 for p in px[::997]), "iOS 图标不能带透明像素"
-    mean = sum(_luma(p) for p in px[::13]) / len(px[::13])
-    assert mean < 0.25, f"AppIcon-Dark.png 平均亮度 {mean:.3f}，不算深色图标"
-    # 四角也要是深色：留白底的话系统切圆角后会露出一圈亮边
-    for corner in (px[0], px[w - 1], px[-w], px[-1]):
-        assert _luma(corner) < 0.25, f"角落 {corner} 太亮"
-
-
 # ── 接线 ─────────────────────────────────────────────────────────
 def test_sidebar_brand_mark_has_both_themes():
     css = (STATIC / "design.css").read_text()

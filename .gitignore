@@ -39,6 +39,8 @@ DerivedData/
 
 # App Store Connect API
 **/AuthKey_*.p8
+# tools/asc 已随 iOS 一起迁出（751K/FlatRadar-iOS）。这几条留着当网兜——
+# 忽略一个不存在的路径没有代价，而漏掉一个 ASC 凭据有。
 tools/asc/config.json
 tools/asc/*.cache.json
 tools/asc/metadata-drafts/

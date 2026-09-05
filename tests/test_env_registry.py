@@ -41,8 +41,8 @@ _READER_NAMES = ("environ", "getenv", "_env_int", "_env_float", "_env_bool", "_e
 #: 环境变量键名的形状。三字符起步，避免把 "ID" "OK" 这类常量当成配置键。
 _KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
 
-#: tools/ 是独立的开发脚本（App Store Connect 上传、clearance 探针等），不随应用
-#: 部署，也不该出现在部署文档里。ASC_CONFIG 只服务于 tools/asc。
+#: tools/ 是独立的开发脚本（clearance 探针、数据回填等），不随应用部署，也不该
+#: 出现在部署文档里。（App Store Connect 那套已随 iOS 迁去 751K/FlatRadar-iOS。）
 _SKIP_DIRS = {"tests", ".venv", "__pycache__", "node_modules", "build", "dist", "tools"}
 
 
