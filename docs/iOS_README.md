@@ -2,7 +2,7 @@
 
 The iOS app is feature-complete for the current FlatRadar product scope and is now in maintenance mode. Large feature development has moved to backend reliability and multi-platform data quality.
 
-For the Android client — its status, distribution, and roadmap — see [ANDROID_PLAN.md](ANDROID_PLAN.md). This document is iOS only.
+For the Android client — its status, distribution, and roadmap — see [ANDROID_PLAN.md](https://github.com/751K/FlatRadar-Android/blob/master/docs/ANDROID_PLAN.md) in [FlatRadar-Android](https://github.com/751K/FlatRadar-Android). This document is iOS only.
 
 [Download on the App Store](https://apps.apple.com/us/app/flarradar/id6769857080)
 

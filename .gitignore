@@ -54,9 +54,10 @@ fastlane/AuthKey_*.p8
 # ──────────────────────────────────────────────────────────────
 # Android
 # ──────────────────────────────────────────────────────────────
-# local.properties 含 sdk.dir + 任何 ${MY_KEY}=xxx 配置（比如 Google
-# Maps API Key）。**绝对禁止上传**——本仓库当前的 android/local.properties
-# 就含一个生效的 MAPS_API_KEY。每个开发者本地各自维护。
+# Android 客户端已迁至 751K/FlatRadar-Android，本仓库不再有 android/。
+# 下面这一段**故意保留**：忽略规则宁可多余，也不要在删掉之后某天有人把
+# 密钥文件放进来而没有网兜。local.properties 含 sdk.dir 与 ${MY_KEY}=xxx
+# 一类配置（比如 Google Maps API Key），绝对禁止上传。
 **/local.properties
 
 .gradle/

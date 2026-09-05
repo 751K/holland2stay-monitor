@@ -1,6 +1,6 @@
 # FlatRadar 房源监控
 
-[![Website](https://img.shields.io/badge/Website-flatradar.app-0057CC?style=flat-square)](https://flatradar.app) [![Guide](https://img.shields.io/badge/Guide-Chinese-10B981?style=flat-square)](https://flatradar.app/guide?lang=zh) [![Support](https://img.shields.io/badge/Support-help-64748B?style=flat-square)](https://flatradar.app/support) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/751K) [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue?style=flat-square)](../LICENSE) [![Release](https://img.shields.io/github/v/release/751K/holland2stay-monitor?style=flat-square)](https://github.com/751K/holland2stay-monitor/releases) [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/) [![iOS](https://img.shields.io/badge/iOS-SwiftUI-000000?style=flat-square&logo=apple&logoColor=white)](../ios/FlatRadar) [![Android](https://img.shields.io/badge/Android-Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](../android)
+[![Website](https://img.shields.io/badge/Website-flatradar.app-0057CC?style=flat-square)](https://flatradar.app) [![Guide](https://img.shields.io/badge/Guide-Chinese-10B981?style=flat-square)](https://flatradar.app/guide?lang=zh) [![Support](https://img.shields.io/badge/Support-help-64748B?style=flat-square)](https://flatradar.app/support) [![Sponsor](https://img.shields.io/badge/Sponsor-GitHub-EA4AAA?style=flat-square&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/751K) [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue?style=flat-square)](../LICENSE) [![Release](https://img.shields.io/github/v/release/751K/holland2stay-monitor?style=flat-square)](https://github.com/751K/holland2stay-monitor/releases) [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/) [![iOS](https://img.shields.io/badge/iOS-SwiftUI-000000?style=flat-square&logo=apple&logoColor=white)](../ios/FlatRadar) [![Android](https://img.shields.io/badge/Android-Compose-3DDC84?style=flat-square&logo=android&logoColor=white)](https://github.com/751K/FlatRadar-Android)
 
 > English version: [README.md](README.md)
 
@@ -56,7 +56,7 @@ OurCampus、Xior 与 Magis 五个平台，一旦出现符合所设条件的房�
 |---|---|
 | Web 面板 | 稳定，为自部署的主要入口 |
 | [iOS App](https://apps.apple.com/us/app/flarradar/id6769857080) | 维护阶段，已上架 App Store，在当前范围内功能完整 |
-| [Android App](https://github.com/751K/holland2stay-monitor/releases/latest/download/app-release.apk) | Beta，提供已签名的 `.apk`，直接安装即可。FCM 推送已验证。不上架 Play Store，直接下载即为其分发方式 |
+| [Android App](https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk) | Beta，提供已签名的 `.apk`，直接安装即可。FCM 推送已验证。不上架 Play Store，直接下载即为其分发方式 |
 | 桌面版 | macOS `.dmg` 与 Windows `.zip`，见 [Releases](https://github.com/751K/holland2stay-monitor/releases) |
 
 ---
@@ -391,7 +391,8 @@ Xior、OurDomain、OurCampus 运行的是同一套 RENTCafe 后端，共用一�
 | [API.md](API.md) | 面向移动端与外部集成的后端契约 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
 | [H2S.md](H2S.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | 各平台抓取侦察 |
-| [ANDROID_PLAN.md](ANDROID_PLAN.md) · [iOS_README.md](iOS_README.md) | 移动端开发 |
+| [iOS_README.md](iOS_README.md) | iOS 客户端（App 本体已迁至 [FlatRadar-iOS](https://github.com/751K/FlatRadar-iOS)）|
+| [ANDROID_PLAN.md](https://github.com/751K/FlatRadar-Android/blob/master/docs/ANDROID_PLAN.md) | Android 客户端 — 已迁至 [FlatRadar-Android](https://github.com/751K/FlatRadar-Android) |
 | [dataflow_ch.mmd](dataflow_ch.mmd) · [dataflow_en.mmd](dataflow_en.mmd) | 完整抓取与通知流程的 Mermaid 图 |
 
 ---

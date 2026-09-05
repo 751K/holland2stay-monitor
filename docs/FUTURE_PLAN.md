@@ -87,7 +87,7 @@ ARCHITECTURE §5.12。
 
 ## 1. Android 客户端
 
-> 状态更新（2026-05-30）：iOS 客户端进入维护阶段。Android 客户端 A0–A5 已完成，FCM 推送端到端拉通，CI 自动构建签名 APK。Play Store 上架已于 2026-08-03 放弃，改为 Release 页直接下载。详见 `docs/ANDROID_PLAN.md` 进度复盘。
+> 状态更新（2026-05-30）：iOS 客户端进入维护阶段。Android 客户端 A0–A5 已完成，FCM 推送端到端拉通，CI 自动构建签名 APK。Play Store 上架已于 2026-08-03 放弃，改为 Release 页直接下载。详见 [FlatRadar-Android](https://github.com/751K/FlatRadar-Android) 里的 `docs/ANDROID_PLAN.md` 进度复盘。
 
 ### 目标
 

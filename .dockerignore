@@ -42,9 +42,8 @@ tools/
 packaging/
 launcher.py
 
-# iOS / Android 客户端（不打包进服务端镜像）
+# iOS 客户端（不打包进服务端镜像）。Android 已迁出本仓库。
 ios/
-android/
 
 # CI / GitHub
 .github/
