@@ -64,6 +64,31 @@ SLIDING_TTL_DAYS = 90
 #: 见 ``TokenOps._retire_surplus_sessions`` 里为什么是 10。
 MAX_SESSIONS_PER_DEVICE_NAME = 10
 
+#: 个别账号的上限例外：``{UserConfig.id: 上限}``。
+#:
+#: 上限的真正约束是「同时在用的会话数」，不是「历史累计」。普通用户同一台设备
+#: 上同时在用的会话就是 1 枚，10 是宽裕到不可能碰到的数。但自动化测试账号不
+#: 一样：UI 测试并行跑几十个模拟器克隆，它们的 device_name 是同一个
+#: （"Clone 1 of iPhone 17 Pro Max" 这种），于是几十枚会话**同时**有效。上限
+#: 卡在 10 的话，后启动的实例会把先启动的撤掉，那条测试中途拿到 401——表现是
+#: 随机失败，而失败信息指向鉴权，查起来完全不像是会话上限干的。
+#:
+#: 键用 UserConfig.id 不用用户名：用户名可以改，改完这条例外会静默失效。
+#:
+#: 这是一张**数据表**，不是算法里的分支。``_session_cap_for`` 之外的任何地方都
+#: 不该出现账号 id——测试 ``test_the_algorithm_does_not_branch_on_identity``
+#: 盯着这一点。
+SESSION_CAP_OVERRIDES: dict[str, int] = {
+    # Test（f1e17cff）——UI / 截图测试账号，2026-09-04 一天登录 637 次，
+    # 并行的模拟器克隆共用同一个 device_name。
+    "f1e17cff": 100,
+}
+
+
+def _session_cap_for(user_id: Optional[str]) -> int:
+    """这个账号的会话上限。唯一读 ``SESSION_CAP_OVERRIDES`` 的地方。"""
+    return SESSION_CAP_OVERRIDES.get(user_id or "", MAX_SESSIONS_PER_DEVICE_NAME)
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -233,13 +258,14 @@ class TokenOps:
         if role != "user" or not user_id:
             return 0
 
+        cap = _session_cap_for(user_id)
         surplus = self._conn.execute(
             """SELECT id FROM app_tokens
                 WHERE role = 'user' AND user_id = ? AND device_name = ?
                   AND revoked = 0 AND id != ?
                 ORDER BY id DESC
                 LIMIT -1 OFFSET ?""",
-            (user_id, device_name, keep_id, MAX_SESSIONS_PER_DEVICE_NAME - 1),
+            (user_id, device_name, keep_id, cap - 1),
         ).fetchall()
         if not surplus:
             return 0
@@ -252,7 +278,7 @@ class TokenOps:
         )
         logger.info(
             "会话超额：user_id=%s device_name=%r 撤销 %d 枚旧会话（上限 %d）",
-            user_id, device_name, len(ids), MAX_SESSIONS_PER_DEVICE_NAME)
+            user_id, device_name, len(ids), cap)
         return len(ids)
 
     def retire_surplus_sessions_globally(self) -> int:
@@ -265,17 +291,22 @@ class TokenOps:
         幂等：跑完之后每组都 ≤ 上限，再跑一次是零更新。所以放在每次启动都跑的
         位置上是安全的，不需要一次性标记。
         """
+        # HAVING 里不能写死单一常量——例外账号的上限更高，用默认值筛会把它们
+        # 也捞进来，然后在下面按各自上限算出 0 条超额，白跑一趟。这里先用**最小**
+        # 上限粗筛（够宽，不会漏），再逐组按各自上限精算。
+        floor = min([MAX_SESSIONS_PER_DEVICE_NAME, *SESSION_CAP_OVERRIDES.values()])
         rows = self._conn.execute(
             """SELECT user_id, device_name FROM app_tokens
                 WHERE role = 'user' AND user_id IS NOT NULL AND revoked = 0
                 GROUP BY user_id, device_name
                 HAVING COUNT(*) > ?""",
-            (MAX_SESSIONS_PER_DEVICE_NAME,),
+            (floor,),
         ).fetchall()
         if not rows:
             return 0
 
         total = 0
+        touched = 0
         with self._conn:
             for r in rows:
                 surplus = self._conn.execute(
@@ -284,7 +315,7 @@ class TokenOps:
                           AND revoked = 0
                         ORDER BY id DESC
                         LIMIT -1 OFFSET ?""",
-                    (r["user_id"], r["device_name"], MAX_SESSIONS_PER_DEVICE_NAME),
+                    (r["user_id"], r["device_name"], _session_cap_for(r["user_id"])),
                 ).fetchall()
                 if not surplus:
                     continue
@@ -295,10 +326,9 @@ class TokenOps:
                     ids,
                 )
                 total += len(ids)
+                touched += 1
         if total:
-            logger.info(
-                "存量会话拉平：%d 组超额，共撤销 %d 枚（每组上限 %d）",
-                len(rows), total, MAX_SESSIONS_PER_DEVICE_NAME)
+            logger.info("存量会话拉平：%d 组超额，共撤销 %d 枚", touched, total)
         return total
 
     # ── 查询 ────────────────────────────────────────────────────────

@@ -37,8 +37,13 @@ SUPERVISORD = ROOT / "docker" / "supervisord.conf"
 NOTIFICATION_SERVICE = ROOT / "app" / "services" / "notification_service.py"
 
 #: 线程数至少要能扛住这么多个同时在线的客户端，再留一截给普通页面请求。
-#: 依据是故障当天的真实规模：81 台活跃设备、31 条并发连接。
-MIN_THREADS = 64
+#:
+#: 2026-09-05 第一版定 64，依据是「81 台活跃设备不会同时在线」。**漏了测试**：
+#: 自动化测试并发跑约 70 个模拟器，每个启动后都开一条通知流——而正是一轮测试
+#: 把上一版的 8 撞爆的。定这个数要按并发峰值算：
+#:
+#:     ~70 测试模拟器 + ~40 真实客户端 + ~30 普通请求 ≈ 140，留一倍 → 256
+MIN_THREADS = 256
 
 
 def _gunicorn_command() -> str:

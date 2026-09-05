@@ -34,8 +34,10 @@ import pytest
 
 from mstorage._tokens import (
     MAX_SESSIONS_PER_DEVICE_NAME,
+    SESSION_CAP_OVERRIDES,
     _collapse_client_names,
     _device_family,
+    _session_cap_for,
 )
 
 
@@ -221,19 +223,77 @@ class TestCardCollapsing:
         assert _device_family(name) == family
 
 
-class TestNoAccountNameIsHardcoded:
-    """规则不认账号名——写死的话半年后换个测试账号就失效，而没人会记得改。"""
+class TestPerAccountOverride:
+    """上限的真正约束是「同时在用的会话数」，不是「历史累计」。
 
-    def test_the_source_does_not_mention_the_test_account(self):
+    普通用户同一台设备上同时在用的就是 1 枚，10 宽裕到碰不到。自动化测试账号
+    不一样：并行跑几十个模拟器克隆，它们共用同一个 device_name，于是几十枚会话
+    **同时**有效。卡在 10 的话后启动的实例会把先启动的撤掉，那条测试中途拿到
+    401——表现是随机失败，而失败信息指向鉴权，看上去完全不像会话上限干的。
+    """
+
+    def test_an_overridden_account_keeps_its_own_ceiling(self, temp_db):
+        uid, cap = next(iter(SESSION_CAP_OVERRIDES.items()))
+        assert cap > MAX_SESSIONS_PER_DEVICE_NAME, "例外值不高于默认值就没有意义"
+        for _ in range(cap + 5):
+            temp_db.create_app_token(role="user", user_id=uid, device_name="Clone 1")
+        assert _active(temp_db, uid, "Clone 1") == cap
+
+    def test_everyone_else_still_gets_the_default(self, temp_db):
+        for _ in range(MAX_SESSIONS_PER_DEVICE_NAME + 5):
+            temp_db.create_app_token(role="user", user_id="ordinary",
+                                     device_name="iPhone")
+        assert _active(temp_db, "ordinary", "iPhone") == MAX_SESSIONS_PER_DEVICE_NAME, (
+            "例外泄漏到了普通账号上。例外必须逐 id 生效，不能变成「大家都放宽」。")
+
+    def test_the_global_flattening_honours_the_override(self, temp_db):
+        """粗筛用最小上限、精算用各自上限——写死单一常量会把例外账号也砍到 10。"""
+        uid, cap = next(iter(SESSION_CAP_OVERRIDES.items()))
+        import hashlib
+        with temp_db.conn:
+            for i in range(cap + 30):
+                temp_db.conn.execute(
+                    "INSERT INTO app_tokens (token_hash, role, user_id, device_name,"
+                    " created_at, expires_at) VALUES (?,?,?,?,?,?)",
+                    (hashlib.sha256(f"o{i}".encode()).hexdigest(), "user", uid,
+                     "Clone 1", "2026-01-01T00:00:00Z", "2099-01-01T00:00:00Z"))
+        temp_db.retire_surplus_sessions_globally()
+        assert _active(temp_db, uid, "Clone 1") == cap, (
+            "存量拉平没有认例外，把例外账号也砍到默认上限了。")
+
+    def test_the_algorithm_does_not_branch_on_identity(self):
+        """账号 id 只能出现在那张例外表里，不能散进逻辑。
+
+        例外是**数据**：一行一个 id，写着为什么。散进逻辑就成了
+        ``if user == "Test"``——半年后换个测试账号，没有人会知道要去改哪几处。
+        """
         from pathlib import Path
 
         src = Path(__file__).resolve().parents[1] / "mstorage" / "_tokens.py"
-        text = src.read_text(encoding="utf-8")
-        code = "\n".join(
-            line for line in text.splitlines()
-            if not line.lstrip().startswith("#")
-        )
-        for needle in ('"Test"', "'Test'", "f1e17cff"):
-            assert needle not in code, (
-                f"_tokens.py 的代码里出现了 {needle}。这条规则的触发条件必须是"
-                "「会话/名字太多」这种一般性质，不是某个账号的名字或 id。")
+        lines = src.read_text(encoding="utf-8").splitlines()
+
+        inside_table = False
+        offenders = []
+        for i, line in enumerate(lines, 1):
+            if line.startswith("SESSION_CAP_OVERRIDES"):
+                inside_table = True
+                continue
+            if inside_table:
+                if line.startswith("}"):
+                    inside_table = False
+                continue
+            if line.lstrip().startswith("#"):
+                continue
+            for uid in SESSION_CAP_OVERRIDES:
+                if uid in line:
+                    offenders.append(f"{i}: {line.strip()}")
+        assert not offenders, (
+            "例外表之外出现了账号 id：\n  " + "\n  ".join(offenders)
+            + "\n例外只能是数据。要改行为请改 SESSION_CAP_OVERRIDES 或 "
+              "_session_cap_for，不要在算法里加分支。")
+
+    def test_the_lookup_is_total(self):
+        """任何输入都要给出一个上限，包括 admin 的 None。"""
+        assert _session_cap_for(None) == MAX_SESSIONS_PER_DEVICE_NAME
+        assert _session_cap_for("") == MAX_SESSIONS_PER_DEVICE_NAME
+        assert _session_cap_for("never-seen") == MAX_SESSIONS_PER_DEVICE_NAME
