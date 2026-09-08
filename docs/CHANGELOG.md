@@ -2,8 +2,8 @@
 
 ## v1.36.0 (2026-09-08)
 
-本次发布包含二十一次提交，覆盖自动预订、容量与会话、客户端仓库拆分、抓取平台、
-配置一致性与 App Store 发布六个方面，共十八条。
+本次发布包含二十二次提交，覆盖自动预订、容量与会话、客户端仓库拆分、抓取平台、
+配置一致性与 App Store 发布六个方面，共十九条。
 
 本次多数条目共享同一种缺陷形状：**判据成立，但它无法与故障区分**。绿色的测试、
 安静的日志、正常的进程状态各自都为真，而被断言的那件事从未发生。逐条修复方式统
@@ -29,6 +29,21 @@
     化：`cf_clearance` 的标称有效期无效，实际生效的是同域 `h2s_clr`，寿命 0.5 小
     时。常驻仅借给本轮优先级最高的、需要它的用户，其余用户维持原行为——不采用排
     队，该队列在此改动前并不存在，且线程锁唤醒任意等待者，不遵循用户排序。
+
+* **常驻浏览器的心跳改在 executor 线程中执行**（[bea5589]）
+
+    `BrowserFetcher` 使用 Playwright 的**同步** API，而该 API 拒绝在正在运行的
+    asyncio 事件循环中工作；`run_once` 是协程，心跳在其中直接调用即落在事件循环线
+    程上。上一条上线当轮即报出 `It looks like you are using Playwright Sync API
+    inside the asyncio loop`。预登录一侧一直经由 `run_in_executor`，心跳遗漏。
+
+    fail-safe 按设计生效：退避 5 分钟、下单回退至现开浏览器，即该改动之前的行为，
+    线上未因此变差。
+
+    同时补上一处测试环境的缺口：此前测试从未真正建立浏览器——因心跳运行于事件循环
+    线程，Playwright 每次立即拒绝，那是一层巧合的保护。改入 executor 后该巧合消
+    失，`run_once` 的用例开始真实拉起 Chromium 并连接外网，整个文件挂起且不报错、
+    不超时。conftest 中新增 autouse fixture 将建立过程钉为 no-op。
 
 * **预登录中的 `TypeError` / `AttributeError` 改判为错误**（[dfef982]）
 
@@ -154,6 +169,7 @@
     该流水线从未成功过，唯一一次真跑止于 Export ipa；账号内无任何描述文件，而云
     端签名需要它。Xcode Cloud 一直在产出可上架的包，截图流程一并交由其执行。
 
+[bea5589]: https://github.com/751K/holland2stay-monitor/commit/bea5589
 [dfef982]: https://github.com/751K/holland2stay-monitor/commit/dfef982
 [4126def]: https://github.com/751K/holland2stay-monitor/commit/4126def
 [86b041c]: https://github.com/751K/holland2stay-monitor/commit/86b041c
