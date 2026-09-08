@@ -272,3 +272,39 @@ class TestXiorEmptyMeansAll:
         }, headers={"X-CSRF-Token": "test_csrf"})
         html = admin_client.get("/settings").get_data(as_text=True)
         assert "不会抓取" not in html
+
+
+class TestRegistryAck:
+    """保存设置 = 「我看过整张菜单了」，此后 monitor 不再提醒注册表新增。
+
+    见 target_config 的「注册表漂移」。这条测的是**接线**：确认页面保存真的会把
+    快照写进 meta。少了这一句，monitor 那边的提醒就永远关不掉，用户每次重启都被
+    提醒一个他已经明确不要的城市。
+    """
+
+    def test_saving_settings_writes_the_registry_snapshot(
+            self, admin_client, isolated_data_dir):
+        import json
+
+        from config import DB_PATH
+        from storage import Storage
+        from target_config import REGISTRY_SEEN_META_KEY, ack_registry
+
+        st = Storage(DB_PATH)
+        try:
+            st.set_meta(REGISTRY_SEEN_META_KEY, "")
+        finally:
+            st.close()
+
+        r = admin_client.post("/settings", data={
+            "CHECK_INTERVAL": "120",
+            "city_selected": "Eindhoven,29",
+        }, headers={"X-CSRF-Token": "test_csrf"})
+        assert r.status_code in (200, 302)
+
+        st = Storage(DB_PATH)
+        try:
+            stored = json.loads(st.get_meta(REGISTRY_SEEN_META_KEY))
+        finally:
+            st.close()
+        assert stored == ack_registry()

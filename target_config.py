@@ -303,6 +303,109 @@ _PARSERS = {
 STRUCTURED_KEYS = frozenset(_PARSERS)
 
 
+# ── 注册表漂移 ────────────────────────────────────────────────────────
+#
+# 2026-09-08 Plaza 上架 Rijswijk，暴露出这条链子上第三个副本。城市清单一共有三
+# 处，只有最后一处真正决定抓不抓：
+#
+#     scrapers/<平台>.py 的 CITIES   报不报「未登记城市」的 WARNING
+#     config.KNOWN_*_CITIES          设置页上能勾哪些（**菜单**）
+#     app_settings 里的订阅串        实际抓哪些（**点的菜**）
+#
+# 前两处当天合并成了一处。但把城市加进注册表**只是让它出现在菜单上**——订阅串
+# 是明确列举的，新增项不在里面，于是：WARNING 因为注册表有了它而闭嘴，抓取因为
+# 订阅串没有它而照旧不抓。唯一的痕迹被加城市这个动作本身抹掉了。
+#
+# 为什么不能直接判「注册表有、订阅没有」：那不是缺陷，多数时候是本意。实测生效
+# 配置——holland2stay 26 城订 2 个、Xior 30 栋订 4 栋，全是明确的选择。照这个判据
+# 首轮就会报 50 条，而其中 0 条是真的。
+#
+# 所以判的是**增量**：与上次看到的注册表相比新出现、且没进订阅的那些。第一次运行
+# （没有快照）只记录不报，否则升级上来的头一轮就是那 50 条。
+
+#: 空串含义是「全选」的键。见 app/routes/settings.py 里的同一张表——那边说的是
+#: 保存时怎么解释空串，这边说的是算订阅集时怎么解释，必须一致。
+_ALL_WHEN_EMPTY = frozenset({
+    "XIOR_CITIES", "MAGIS_CITIES", "STUDENTEXPERIENCE_CITIES", "PLAZA_CITIES",
+})
+
+#: 参与漂移检查的键：形如「一张注册表 + 一条订阅串」的那些。
+DRIFT_KEYS: tuple[str, ...] = ("CITIES", *TARGET_KEYS)
+
+#: 快照存在 ``meta`` 表的这个键下。monitor 写、设置页也写，所以名字只能有一份。
+#: 放 meta 而不是 app_settings：后者只装 runtime 配置，混进别的键会让 hydrate()
+#: 每次启动报一句「不属于 runtime 类」。
+REGISTRY_SEEN_META_KEY = "registry_targets_seen"
+
+
+def registry_of(env_key: str) -> dict[str, str]:
+    """这个配置键背后的注册表：key → 显示名。不认识的键返回空表。"""
+    if env_key == "CITIES":
+        return {str(c["id"]): c["name"] for c in KNOWN_CITIES}
+    return dict(_KNOWN_TARGETS.get(TARGET_KEYS.get(env_key, ""), {}))
+
+
+def subscribed_keys(env_key: str, raw: str) -> set[str]:
+    """这条订阅串实际订到的 key 集合。
+
+    **空串不是空集**——对 ``_ALL_WHEN_EMPTY`` 里的键它是「全选」。把这两者搞混
+    会让「全收」的平台被判成「一个都没订」，于是每加一个城市都报一次假警。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return set(registry_of(env_key)) if env_key in _ALL_WHEN_EMPTY else set()
+    return {e.rsplit(",", 1)[-1].strip() for e in _entries(raw)
+            if "," in e and e.rsplit(",", 1)[-1].strip()}
+
+
+def registry_drift(
+    env: dict[str, str],
+    seen: dict[str, list[str]] | None,
+) -> tuple[list[Problem], dict[str, list[str]]]:
+    """注册表新增、却没进订阅的目标。
+
+    返回 ``(问题清单, 新快照)``。``seen`` 是上次存下的快照；``None`` 表示第一次
+    运行——此时只产出快照、不报问题。某个键第一次出现（新接的平台）同理。
+
+    **新快照会刻意漏掉还没处理的新增项**：报过一次就把它记进快照的话，重启一次
+    警告就永远消失了，而问题还在。留着，它每次启动都会再说一遍，直到那个城市被
+    勾上、或者用户在设置页保存一次（保存 = 看过菜单了，见 ``ack_registry``）。
+    """
+    problems: list[Problem] = []
+    snapshot: dict[str, list[str]] = {}
+
+    for key in DRIFT_KEYS:
+        reg = registry_of(key)
+        if not reg:
+            continue
+        if seen is None or key not in seen:
+            snapshot[key] = sorted(reg)      # 头一次，只记不报
+            continue
+
+        added = set(reg) - set(seen[key])
+        missing = sorted(added - subscribed_keys(key, env.get(key, "")))
+        # 未处理的新增不写进快照，好让它下次启动还能再说一遍
+        snapshot[key] = sorted(set(reg) - set(missing))
+        if missing:
+            problems.append(Problem(
+                key, "",
+                "注册表新增了 " + "、".join(f"{reg[k]}({k})" for k in missing)
+                + "，但订阅里没有它们——加进注册表只是让它出现在设置页上，"
+                  "不勾就不会抓。去设置页勾上，或者保存一次表示确实不要",
+                fatal=False,
+            ))
+    return problems, snapshot
+
+
+def ack_registry() -> dict[str, list[str]]:
+    """当前注册表的完整快照，用作「我看过菜单了」。
+
+    设置页保存时写这个：那一刻用户面前就是整张菜单，新城市是页面上的一个复选框，
+    他提交的就是自己的选择。此后不该再提醒。
+    """
+    return {key: sorted(registry_of(key)) for key in DRIFT_KEYS if registry_of(key)}
+
+
 def validate(values: dict[str, str]) -> list[Problem]:
     """校验一批结构化配置，返回全部问题（无问题则空列表）。
 

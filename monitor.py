@@ -3626,6 +3626,47 @@ def _validate_structured_config() -> None:
             logger.warning("⚙️  配置提示：%s", p)
 
 
+def _check_registry_drift(storage) -> None:
+    """注册表加了城市、订阅串没跟上——启动时报出来。
+
+    见 target_config 里「注册表漂移」那段：这是 2026-09-08 Plaza / Rijswijk 那次
+    的第三个副本。加城市只是让它出现在设置页上，不勾就不会抓，而 scraper 那条
+    「未登记城市」的 WARNING 恰恰会因为注册表有了它而闭嘴。
+
+    整段吞异常：这只是一条提醒，读不出快照不该让 monitor 起不来。
+
+    快照坏了（手工改库、写到一半断电）按「第一次运行」处理，本轮不报、顺手写一份
+    好的回去。**这一段不能和下面共用一个 except**：读快照抛异常时如果连
+    ``set_meta`` 一起跳过，坏值就永远留在那儿，这条检查从此静默失效——正是它要防
+    的那种失败。
+    """
+    import json
+    import os
+
+    from target_config import REGISTRY_SEEN_META_KEY, registry_drift
+
+    seen: dict | None = None
+    try:
+        raw = storage.get_meta(REGISTRY_SEEN_META_KEY, "")
+        if raw and raw != "—":
+            seen = json.loads(raw)
+        if not isinstance(seen, dict):
+            seen = None
+    except Exception:
+        logger.warning("注册表快照读不出来（本轮按首次运行处理，将重写一份）",
+                       exc_info=True)
+        seen = None
+
+    try:
+        problems, snapshot = registry_drift(dict(os.environ), seen)
+        for p in problems:
+            logger.warning("⚙️  配置提示：%s", p)
+        storage.set_meta(REGISTRY_SEEN_META_KEY,
+                         json.dumps(snapshot, sort_keys=True))
+    except Exception:
+        logger.debug("注册表漂移自检失败（已忽略）", exc_info=True)
+
+
 def _bootstrap_settings() -> None:
     """把 runtime 类配置从 app_settings 表注入 os.environ；首次运行顺带做迁移。
 
@@ -3655,6 +3696,7 @@ def _bootstrap_settings() -> None:
                     ", ".join(leftover),
                 )
             _validate_structured_config()
+            _check_registry_drift(st)
         finally:
             st.close()
 

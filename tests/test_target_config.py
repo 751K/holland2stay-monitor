@@ -189,3 +189,151 @@ class TestWiredIn:
         src = inspect.getsource(monitor._validate_structured_config)
         assert "raise" not in src
         assert "sys.exit" not in src
+
+
+class TestRegistryDrift:
+    """注册表加了城市、订阅串没跟上。
+
+    2026-09-08 Plaza 上架 Rijswijk 那次暴露的第三个副本：注册表是菜单，订阅串
+    才是点的菜。把城市加进注册表会让 scraper 那条「未登记城市」的 WARNING 闭嘴，
+    但不会让它被抓——唯一的痕迹被修复动作本身抹掉了。
+    """
+
+    def test_first_run_reports_nothing(self):
+        """没有快照时只记录不报。
+
+        这条不是「宽容一点」，是**不报假警**：实测生效配置里 holland2stay 26 城
+        订 2 个、Xior 30 栋订 4 栋，都是明确的选择。首轮把它们全报出来，50 条里
+        0 条是真的，然后没人再看这类提醒。
+        """
+        problems, snapshot = tc.registry_drift({}, None)
+        assert problems == []
+        assert "PLAZA_CITIES" in snapshot and snapshot["PLAZA_CITIES"]
+
+    def test_a_deliberate_subset_is_not_drift(self):
+        """只订两个城市不是漂移——快照里已经有的，不管订没订都不报。"""
+        seen = {k: sorted(tc.registry_of(k)) for k in tc.DRIFT_KEYS if tc.registry_of(k)}
+        env = {"CITIES": "Amsterdam,24|Eindhoven,29"}
+        problems, _ = tc.registry_drift(env, seen)
+        assert problems == []
+
+    def test_a_new_registry_entry_that_is_not_subscribed_is_reported(self):
+        """注册表新增、订阅串没有 → 报。这就是 Rijswijk 那一次。"""
+        seen = {k: sorted(tc.registry_of(k)) for k in tc.DRIFT_KEYS if tc.registry_of(k)}
+        seen["PLAZA_CITIES"] = [k for k in seen["PLAZA_CITIES"] if k != "rijswijk"]
+        env = {"PLAZA_CITIES": "|".join(
+            f"{n},{k}" for k, n in tc.registry_of("PLAZA_CITIES").items()
+            if k != "rijswijk")}
+
+        problems, _ = tc.registry_drift(env, seen)
+        assert len(problems) == 1
+        assert problems[0].key == "PLAZA_CITIES"
+        assert "Rijswijk" in str(problems[0])
+        assert not problems[0].fatal      # 不该挡住启动
+
+    def test_a_new_entry_that_is_subscribed_is_not_reported(self):
+        """新增但已经勾上了 → 不报。漂移的定义是「没跟上」，不是「变了」。"""
+        seen = {k: sorted(tc.registry_of(k)) for k in tc.DRIFT_KEYS if tc.registry_of(k)}
+        seen["PLAZA_CITIES"] = [k for k in seen["PLAZA_CITIES"] if k != "rijswijk"]
+        env = {"PLAZA_CITIES": "|".join(
+            f"{n},{k}" for k, n in tc.registry_of("PLAZA_CITIES").items())}
+
+        problems, _ = tc.registry_drift(env, seen)
+        assert problems == []
+
+    def test_unhandled_additions_stay_out_of_the_snapshot(self):
+        """报过一次不算处理过。
+
+        把新增项写进快照的话，重启一次警告就永远消失了，而城市还是没被抓——那正是
+        这条检查要防的那种「痕迹被抹掉」。所以未处理的新增要留在快照外面，下次启动
+        再说一遍。
+        """
+        seen = {k: sorted(tc.registry_of(k)) for k in tc.DRIFT_KEYS if tc.registry_of(k)}
+        seen["PLAZA_CITIES"] = [k for k in seen["PLAZA_CITIES"] if k != "rijswijk"]
+        env = {"PLAZA_CITIES": "Utrecht,utrecht"}
+
+        first, snap = tc.registry_drift(env, seen)
+        assert len(first) == 1
+        assert "rijswijk" not in snap["PLAZA_CITIES"]
+
+        second, _ = tc.registry_drift(env, snap)      # 拿新快照再跑一次
+        assert len(second) == 1, "重启一次就不再提醒了"
+
+    def test_saving_settings_acknowledges_everything(self):
+        """设置页保存 = 看过整张菜单，此后不再提醒。"""
+        env = {"PLAZA_CITIES": "Utrecht,utrecht"}
+        seen = {k: sorted(tc.registry_of(k)) for k in tc.DRIFT_KEYS if tc.registry_of(k)}
+        seen["PLAZA_CITIES"] = [k for k in seen["PLAZA_CITIES"] if k != "rijswijk"]
+        assert tc.registry_drift(env, seen)[0]           # 先确认本来会报
+
+        problems, _ = tc.registry_drift(env, tc.ack_registry())
+        assert problems == []
+
+    def test_empty_means_all_for_the_platforms_that_say_so(self):
+        """空串对 plaza / magis / se / xior 是「全选」，不是「一个都没订」。
+
+        搞混的后果是每加一个城市都报一次假警——而那些平台留空恰恰表示「全都要」，
+        新城市本来就自动包含在内。
+        """
+        for key in ("PLAZA_CITIES", "MAGIS_CITIES",
+                    "STUDENTEXPERIENCE_CITIES", "XIOR_CITIES"):
+            assert tc.subscribed_keys(key, "") == set(tc.registry_of(key)), key
+        # CITIES / OURDOMAIN_CITIES 的空串是真的空
+        assert tc.subscribed_keys("CITIES", "") == set()
+        assert tc.subscribed_keys("OURDOMAIN_CITIES", "") == set()
+
+    def test_empty_all_platforms_never_drift(self):
+        """留空的平台永远不该报漂移——新城市自动就在订阅里。"""
+        seen = {k: sorted(tc.registry_of(k)) for k in tc.DRIFT_KEYS if tc.registry_of(k)}
+        seen["PLAZA_CITIES"] = [k for k in seen["PLAZA_CITIES"] if k != "rijswijk"]
+        problems, _ = tc.registry_drift({"PLAZA_CITIES": ""}, seen)
+        assert problems == []
+
+    def test_a_newly_added_source_reports_nothing_on_its_first_run(self):
+        """接新平台的那一轮，它整张表都是「新增」，全报出来没有意义。"""
+        seen = {k: sorted(tc.registry_of(k)) for k in tc.DRIFT_KEYS if tc.registry_of(k)}
+        del seen["PLAZA_CITIES"]
+        problems, snap = tc.registry_drift({"PLAZA_CITIES": "Utrecht,utrecht"}, seen)
+        assert problems == []
+        assert snap["PLAZA_CITIES"] == sorted(tc.registry_of("PLAZA_CITIES"))
+
+    def test_the_meta_key_has_exactly_one_definition(self):
+        """monitor 和设置页都写这个键，名字只能有一份。"""
+        import pathlib
+        import re
+        literal = re.compile(r'["\']registry_targets_seen["\']')
+        hits = [f.name for f in (pathlib.Path("monitor.py"),
+                                 pathlib.Path("app/routes/settings.py"))
+                if literal.search(f.read_text())]
+        assert hits == [], f"这些文件写死了 meta 键名，应该用常量：{hits}"
+
+    def test_all_when_empty_matches_what_config_actually_does(self, monkeypatch):
+        """``_ALL_WHEN_EMPTY`` 必须和 config.load_config() 的真实行为一致。
+
+        这张表是手抄的一份约定。抄错的后果是安静的：把「空=全选」的键漏掉，那个
+        平台每加一个城市都会报一次假警；把「空=不抓」的键错列进去，真漂移反而不报。
+        所以不比对文档，直接问 load_config——留空之后它到底给出几个目标。
+        """
+        from config import load_config
+
+        attr = {
+            "CITIES": "cities",
+            "OURDOMAIN_CITIES": "ourdomain_cities",
+            "OURCAMPUS_CITIES": "ourcampus_cities",
+            "XIOR_CITIES": "xior_cities",
+            "MAGIS_CITIES": "magis_cities",
+            "STUDENTEXPERIENCE_CITIES": "studentexperience_cities",
+            "PLAZA_CITIES": "plaza_cities",
+        }
+        source_of_key = {"CITIES": "holland2stay", **tc.TARGET_KEYS}
+
+        for key, field in attr.items():
+            monkeypatch.setenv("SOURCES", source_of_key[key])
+            monkeypatch.setenv(key, "")
+            got = len(getattr(load_config(), field))
+            empty_means_all = got == len(tc.registry_of(key)) and got > 0
+            assert (key in tc._ALL_WHEN_EMPTY) is empty_means_all, (
+                f"{key}：留空时 load_config 给出 {got} 个目标，"
+                f"注册表有 {len(tc.registry_of(key))} 个，"
+                f"但 _ALL_WHEN_EMPTY 里{'有' if key in tc._ALL_WHEN_EMPTY else '没有'}它"
+            )

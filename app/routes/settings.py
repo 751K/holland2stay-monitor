@@ -109,11 +109,15 @@ def settings() -> Any:
         #
         #     CITIES            空 → 0 个城市，该平台不抓
         #     OURDOMAIN_CITIES  空 → 0 个楼盘，该平台不抓
-        #     XIOR_CITIES       空 → **全部 30 栋**（config.py 的既有约定）
-        #     MAGIS_CITIES      空 → **全部 5 城**（同上）
+        #     XIOR_CITIES       空 → **注册表里的全部楼盘**（config.py 的既有约定）
+        #     MAGIS_CITIES      空 → **注册表里的全部城市**（同上）
         #     STUDENTEXPERIENCE_CITIES
-        #                       空 → **全部 2 城**（同上）
-        #     PLAZA_CITIES      空 → **全部 12 城**（同上）
+        #                       空 → 同上
+        #     PLAZA_CITIES      空 → 同上
+        #
+        # 这里刻意不写具体数目：注册表会长（2026-09-08 Plaza 从 12 加到 13），
+        # 写死的数字过一阵就是错的，而注释错了没有任何东西会发现。这四个键的
+        # 权威清单是 target_config._ALL_WHEN_EMPTY。
         #
         # 所以 xior / magis / studentexperience / plaza 不在下面这张表里：它们
         # 空着不是「没目标」，恰恰是「全都要」，对它们报「不会抓取」是错的。
@@ -187,6 +191,17 @@ def settings() -> Any:
             flash(str(p), "warning")
 
         st.set_app_settings(pending, updated_by=_UPDATED_BY)
+        # 保存 = 用户刚看过整张菜单。新登记的城市就是这个页面上的一个复选框，
+        # 他提交的就是自己的选择——此后 monitor 启动时不该再提醒（见
+        # target_config 的「注册表漂移」与 monitor._check_registry_drift）。
+        try:
+            import json
+
+            from target_config import REGISTRY_SEEN_META_KEY, ack_registry
+            st.set_meta(REGISTRY_SEEN_META_KEY,
+                        json.dumps(ack_registry(), sort_keys=True))
+        except Exception:
+            logger.debug("记录注册表快照失败（已忽略）", exc_info=True)
         # 让 monitor 立刻重读，而不是等到下次重启。改完配置要等一个不确定的时长
         # 才生效，人会以为没保存上，于是再点一次。
         try:
