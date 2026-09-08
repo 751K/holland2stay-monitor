@@ -115,7 +115,7 @@ class TestPrewarmCacheLifecycle:
                 l, True, "ok", pay_url="https://pay", phase="success"
             )
 
-        def fake_prewarm(email, password):
+        def fake_prewarm(email, password, **kw):
             prewarm_log.append(email)
             return _make_fake_prewarmed(email)
 
@@ -293,7 +293,7 @@ class TestPhaseBLongRunEconomy:
         notifs = [(user_ab, _FakeNotifier())]
 
         def run(scrape_fn):
-            def fake_prewarm(e, p):
+            def fake_prewarm(e, p, **kw):
                 prewarm_log.append(e)
                 return _make_fake_prewarmed(e)
 
@@ -331,3 +331,81 @@ class TestPhaseBLongRunEconomy:
                 try_book.assert_not_called()
 
         asyncio.run(go())
+
+
+class TestWhoGetsTheWarmLane:
+    """常驻浏览器给谁——走真的 run_once，不看源码。
+
+    这一族的问题是 2026-09-08 被问出来的：「排名 1 的用户没开自动预订、排名 2 的
+    开了，怎么办？」当时代码是对的（资格过滤排在借用决策前面），但**一条测试都
+    没有**——也就是说它当时是对的，明天被谁重排一下循环就不是了，而且不会有任何
+    东西变红。
+
+    这里断言的是 create() 收到的 ``may_borrow_lane``：谁拿到 True，常驻就是谁的。
+    """
+
+    def _run(self, cfg, storage, notifs, log, listings):
+        def scrape(*a, **k):
+            return listings, {}
+
+        def fake_create(user, *, may_borrow_lane=True):
+            log.append((user.name, may_borrow_lane))
+            return _make_fake_prewarmed(user.auto_book.email)
+
+        async def go():
+            with patch.object(monitor.prewarm_cache, "create",
+                              side_effect=fake_create), \
+                 patch("bookers.holland2stay.try_book",
+                       side_effect=lambda l, *a, **k: BookingResult(
+                           l, True, "ok", pay_url="https://p", phase="success")), \
+                 patch("monitor.dispatch_scrape_tasks", side_effect=scrape):
+                await run_once(cfg, storage, notifs, dry_run=False)
+
+        asyncio.run(go())
+
+    @staticmethod
+    def _user(name, uid, *, auto_book: bool):
+        return UserConfig(
+            name=name, id=uid, enabled=True, notifications_enabled=True,
+            notification_channels=[],
+            auto_book=AutoBookConfig(enabled=auto_book,
+                                     email=f"{uid}@x.com", password="pw"),
+        )
+
+    def test_an_ineligible_first_user_does_not_consume_the_lane(
+            self, clean_cache, fake_storage, cfg):
+        """排名 1 没开自动预订 → 常驻归排名 2。
+
+        资格过滤（active_user_ids / candidate_user_ids）必须排在借用决策**前面**。
+        排反了的话，常驻会被一个压根不下单的人「占掉」，于是真正要用的人每次都
+        走冷启动——而日志里什么都看不出来。
+        """
+        # 名字刻意与优先级**逆序**（Zeta 排第一、Alpha 排第二）。
+        # 起成 First/Second/Third 的话，「按名字排序」这个变异改不动顺序，
+        # 于是「循环被重排」这类缺陷测不出来——第一版就是这么写的。
+        notifs = [
+            (self._user("Zeta", "u1", auto_book=False), _FakeNotifier()),
+            (self._user("Alpha", "u2", auto_book=True), _FakeNotifier()),
+            (self._user("Mu", "u3", auto_book=True), _FakeNotifier()),
+        ]
+        log = []
+        self._run(cfg, fake_storage, notifs, log, [_make_listing(1), _make_listing(2)])
+
+        assert log, "一个 prewarm 都没触发，这条测试什么也没测到"
+        assert dict(log).get("Zeta") is None, "没开自动预订的人被 prewarm 了"
+        borrowers = [n for n, may in log if may]
+        assert borrowers == ["Alpha"], f"常驻给错人了: {log}"
+
+    def test_the_lane_goes_to_exactly_one_user(
+            self, clean_cache, fake_storage, cfg):
+        """两个人都拿 True 就等于回到排队——而那个队列不认 sort_order。"""
+        # 同上：名字与优先级逆序，好让「循环被重排」露出来。
+        notifs = [
+            (self._user("Zeta", "u1", auto_book=True), _FakeNotifier()),
+            (self._user("Alpha", "u2", auto_book=True), _FakeNotifier()),
+        ]
+        log = []
+        self._run(cfg, fake_storage, notifs, log, [_make_listing(1), _make_listing(2)])
+
+        assert sum(1 for _, may in log if may) == 1, f"借用者不止一个: {log}"
+        assert log[0] == ("Zeta", True), f"没给优先级最高的那个: {log}"

@@ -178,7 +178,7 @@ class TestMonitorRunOnceBlockedAggregation:
             with patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn), \
                  patch("bookers.holland2stay.try_book", side_effect=try_book_fn), \
                  patch("mcore.prewarm.create_prewarmed_session",
-                       side_effect=lambda e, p: None):
+                       side_effect=lambda e, p, **kw: None):
                 await run_once(cfg, storage, notifs, dry_run=False)
         asyncio.run(go())
 
@@ -268,7 +268,7 @@ class TestPrewarmBlockSuppressesLogin:
 
     def _run_with_prewarm_error(self, cfg, storage, notifs, exc):
         async def go():
-            def _boom(email, password):
+            def _boom(email, password, **kw):
                 raise exc
 
             with patch("monitor.dispatch_scrape_tasks",

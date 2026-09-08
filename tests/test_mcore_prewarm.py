@@ -155,7 +155,8 @@ class TestPrewarmCacheCreate:
             pc = PrewarmCache()
             result = pc.create(user)
             assert result is ps
-            mock_create.assert_called_once_with("a@x.com", "pw")
+            # shared=None：这一路没有常驻可借，走老路自己开浏览器
+            mock_create.assert_called_once_with("a@x.com", "pw", shared=None)
 
     def test_create_failure_returns_none(self):
         with patch("mcore.prewarm.create_prewarmed_session") as mock_create:

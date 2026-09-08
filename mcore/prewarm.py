@@ -63,7 +63,17 @@ class PrewarmCache:
     def set(self, user_id: str, session: "PrewarmedSession") -> None:
         self._cache[user_id] = session
 
-    def create(self, user: "UserConfig") -> "PrewarmedSession | None":
+    def lane_in_use(self) -> bool:
+        """缓存里已经有人占着常驻浏览器了吗。
+
+        同一时刻只让一个 session 绑常驻——两个都绑就会在下单时排队，而那个队列
+        既不认用户优先级，也是改动之前根本不存在的东西（此前每个用户各开一个
+        浏览器，完全并行）。
+        """
+        return any(not ps.owns_fetcher for ps in self._cache.values())
+
+    def create(self, user: "UserConfig", *,
+               may_borrow_lane: bool = True) -> "PrewarmedSession | None":
         """在 executor 线程中为单个用户建立预登录 session。
 
         返回 None = 这次没建成，下单时走正常登录路径。
@@ -72,7 +82,8 @@ class PrewarmCache:
         """
         try:
             return create_prewarmed_session(
-                user.auto_book.email, user.auto_book.password
+                user.auto_book.email, user.auto_book.password,
+                shared=self._borrow_lane() if may_borrow_lane else None,
             )
         except BlockedError:
             # CF 屏蔽要上抛，让调用方推进登录抑制窗口——**不能**说成「回退正常
@@ -83,6 +94,20 @@ class PrewarmCache:
                 "[%s] 预登录遭 Cloudflare 屏蔽，上抛以暂停登录链路", user.name,
             )
             raise
+        except (TypeError, AttributeError):
+            # **这两类永远不是「这次没建成」，是代码本身错了**（签名对不上、
+            # 属性没了）。和网络抖动混在一个 WARNING 里的后果，2026-09-08 在本仓
+            # 自己的测试里就复现过一次：给 create_prewarmed_session 加了个参数，
+            # 桩函数没跟上，于是每一轮都「预登录失败，回退正常登录路径」——系统
+            # 照常跑、房子照常抓不到，日志读起来像 CF 又不高兴了。
+            #
+            # 仍然不上抛（一个笔误不该让整轮监控停摆），但要 ERROR + 堆栈，让它
+            # 进 errors.log 和 /monitoring 面板，而不是混在噪音里。
+            logger.error(
+                "[%s] 预登录代码有误（不是网络问题），下单将一直退回正常登录路径",
+                user.name, exc_info=True,
+            )
+            return None
         except Exception as e:
             logger.warning(
                 "[%s] 预登录失败 (%s)，下单时将回退到正常登录路径",
@@ -92,14 +117,38 @@ class PrewarmCache:
 
     # -- 清理 ----------------------------------------------------------
 
+    @staticmethod
+    def _borrow_lane():
+        """常驻浏览器可用就借，返回 ``(fetcher, lock)``；不可用返回 None。
+
+        这里**不加锁**：只读一个属性和 ``is_alive()``，后者按其文档只看本地标志
+        位、不发任何 IPC。为这个去抢锁的话，就得排在别人整笔下单后面，而我们要
+        判断的仅仅是「有没有这条常驻」。
+
+        真正的互斥发生在用它的时候——``create_prewarmed_session`` 拿这把锁做登录，
+        ``try_book`` 拿它做整笔下单。拿不到就等，登录只要 ~1.5 秒；等太久的话
+        monitor 那边的 2 秒上限会先放弃，自动退回「自己开一个」的老路。
+        """
+        try:
+            from mcore.warm_browser import warm_lane
+
+            f = warm_lane.fetcher
+            if f is None or not f.is_alive():
+                return None
+            return (f, warm_lane.lock)
+        except Exception:
+            return None
+
     def invalidate(self, user_id: str) -> None:
-        """移除并关闭指定用户的缓存 session（已不在缓存中时为 no-op）。"""
+        """移除并关闭指定用户的缓存 session（已不在缓存中时为 no-op）。
+
+        借来的常驻浏览器不关——``close_if_owned`` 负责区分。在这里无差别 close()
+        会把全进程共用的那一个关掉，而调用方（用户被禁用、改邮箱）完全想不到自己
+        顺手废掉了下单通道。
+        """
         ps = self._cache.pop(user_id, None)
         if ps:
-            try:
-                ps.fetcher.close()
-            except Exception:
-                pass
+            ps.close_if_owned()
 
     def clear(self) -> None:
         """关闭所有缓存的 session（热重载 / 进程退出时调用）。"""

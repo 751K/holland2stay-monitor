@@ -1675,6 +1675,29 @@ class BrowserFetcher:
                 )
             time.sleep(_CLEARANCE_POLL_INTERVAL)
 
+    def probe_clearance(self, timeout_ms: int = 15_000) -> bool:
+        """打一次 profile 自己声明的 clearance 探针，返回它过没过。
+
+        公开出来给常驻浏览器做保活用（见 mcore/warm_browser.py）。用探针而不是
+        随便一个请求，是因为初始化最后一步 ``_wait_for_clearance`` 判「能不能用」
+        用的就是它——保活和健康检查因此是同一件事，不必做两遍。
+
+        没配探针的 profile 返回 True：它本来就是「由首个真实请求兜底」的约定，
+        这里报 False 会让调用方把一条好好的浏览器丢掉。
+        """
+        probe = self._profile.clearance_probe
+        if probe is None:
+            return True
+        try:
+            result = self._raw_fetch(
+                probe.path, method=probe.method, body=probe.body,
+                headers=probe.headers, timeout_ms=timeout_ms,
+            )
+        except Exception as e:
+            logger.debug("%s clearance 探针异常: %s", self._profile.name, e)
+            return False
+        return "error" not in result and not self._is_clearance_required(result)
+
     def fetch_gql(
         self,
         query: str,

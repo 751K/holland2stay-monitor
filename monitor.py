@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -2509,6 +2510,34 @@ async def run_once(
     prewarm_cached: dict[str, "PrewarmedSession"] = {}  # 命中：同步可用
     prewarm_futures: dict[str, "asyncio.Future"] = {}  # 未命中：后台刷新
 
+    def _heartbeat_warm_browser(user_notifiers) -> None:
+        """维护下单链路的常驻浏览器（见 mcore/warm_browser.py）。
+
+        每轮都调，**和有没有候选无关**——它存在的意义就是在候选出现之前就已经过了
+        CF。等有候选再建，就是 2026-09-08 之前那个每次现过挑战的老样子。
+
+        它只保住浏览器和 clearance，**不碰登录**。「没有候选的轮次完全不碰 H2S
+        登录接口」那条约束原样成立：登录仍然只在 _start_prewarm_for_candidates
+        里发生。
+        """
+        if dry_run:
+            return
+        from mcore.warm_browser import warm_lane
+
+        wanted = any(
+            u.auto_book.enabled and u.auto_book.email and u.auto_book.password
+            for u, _ in user_notifiers
+        )
+        # 登录被 CF 熔断期间不新建：正在被拒绝的时候去开浏览器，只会给同一个出口
+        # IP 再添几条失败记录。但**已经健康的那条要继续保活**——它是我们眼下唯一
+        # 还通着的路，丢了就得等熔断结束再从头过挑战。
+        may_rebuild = _h2s_login_suppressed_remaining() <= 0
+        try:
+            warm_lane.heartbeat(wanted=wanted, may_rebuild=may_rebuild)
+        except Exception:
+            logger.warning("常驻浏览器心跳异常（已忽略，下单会退回现开浏览器）",
+                           exc_info=True)
+
     def _start_prewarm_for_candidates(candidate_user_ids: set[str]) -> None:
         """只为本轮实际有 H2S 自动预订候选的用户启动预登录。"""
         if dry_run:
@@ -2549,6 +2578,7 @@ async def run_once(
             if ps:
                 prewarm_cache.set(user_id, ps)
 
+        lane_offered = False
         for user, _ in user_notifiers:
             if user.id not in active_user_ids:
                 continue
@@ -2560,8 +2590,22 @@ async def run_once(
             else:
                 if cached:
                     prewarm_cache.invalidate(user.id)
+                # 常驻浏览器**只给本轮优先级最高的那个需要它的用户**。
+                #
+                # 剩下的人照旧自己开浏览器——也就是改动之前所有人的行为，没人变
+                # 差。让他们排队等这一条共用通道才是错的：那个队列在改动之前根本
+                # 不存在（每个用户各开各的，完全并行），而且 threading 的锁是随
+                # 便唤醒一个等待者的，既不 FIFO 更不认 sort_order。用户排序是用
+                # 户明确配的东西，不该被一把锁的唤醒顺序悄悄改写。
+                #
+                # user_notifiers 本身就是 sort_order 序（list_user_config_rows
+                # 的 ORDER BY），所以「循环里第一个」就是「优先级最高的」。
+                may_borrow = not lane_offered and not prewarm_cache.lane_in_use()
+                lane_offered = lane_offered or may_borrow
                 fut = loop.run_in_executor(
-                    None, prewarm_cache.create, user
+                    None,
+                    functools.partial(prewarm_cache.create, user,
+                                      may_borrow_lane=may_borrow),
                 )
                 prewarm_futures[user.id] = fut
                 fut.add_done_callback(
@@ -2927,6 +2971,7 @@ async def run_once(
         candidate_user_ids = {
             uid for uid, candidates in ab_candidates.items() if candidates
         }
+        _heartbeat_warm_browser(user_notifiers)
         _start_prewarm_for_candidates(candidate_user_ids)
         await _wait_for_candidate_prewarms()
 
@@ -3835,6 +3880,13 @@ async def _async_main() -> None:
         for _, n in user_notifiers:
             await n.close()
         prewarm_cache.clear()
+        # 常驻浏览器不归 prewarm_cache 管（借出去的 session 一律不许关它），
+        # 所以进程退出要在这里单独关一次，否则漏一个 Chromium。
+        try:
+            from mcore.warm_browser import warm_lane
+            warm_lane.close(reason="monitor 退出")
+        except Exception:
+            logger.debug("关闭常驻浏览器失败（已忽略）", exc_info=True)
         _remove_pid()
 
 

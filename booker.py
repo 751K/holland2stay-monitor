@@ -98,16 +98,40 @@ class PrewarmedSession:
     token      : NextAuth session 的 accessToken(JWT)，用作下单的 Bearer
     created_at : time.monotonic() 创建时刻
     email      : 对应的 H2S 账号邮箱
+    owns_fetcher : 这个 fetcher 归本 session 所有吗。
+
+        False 表示借的是常驻浏览器（mcore/warm_browser.py）。**借来的一律不许
+        关**——它是全进程共用的那一个，关掉之后下一个用它的人拿到的是空壳，而
+        且没人会察觉，只会看到「莫名其妙又要过一次挑战」。
+
+    use_lock   : 借来时是那条常驻的锁，自有时为 None。
+
+        一个 BrowserFetcher 不能被多线程同时使唤。持有者在整段 I/O 期间握着它，
+        所以多个用户同时下单会串行——每笔下单是秒级，而实测可订窗口 p10 约 10
+        分钟，这个代价换得起。
     """
 
-    __slots__ = ("fetcher", "token", "created_at", "token_expiry", "email")
+    __slots__ = ("fetcher", "token", "created_at", "token_expiry", "email",
+                 "owns_fetcher", "use_lock")
 
-    def __init__(self, fetcher, token: str, created_at: float, token_expiry: float, email: str):
+    def __init__(self, fetcher, token: str, created_at: float, token_expiry: float,
+                 email: str, owns_fetcher: bool = True, use_lock=None):
         self.fetcher = fetcher
         self.token = token
         self.created_at = created_at
         self.token_expiry = token_expiry
         self.email = email
+        self.owns_fetcher = owns_fetcher
+        self.use_lock = use_lock
+
+    def close_if_owned(self) -> None:
+        """只关自己的。借来的常驻浏览器留给下一个人。"""
+        if not self.owns_fetcher:
+            return
+        try:
+            self.fetcher.close()
+        except Exception:
+            pass
 
 
 # Magento store_id
@@ -804,12 +828,48 @@ class BookingResult:
     held_order_number: str = ""
 
 
-def create_prewarmed_session(email: str, password: str) -> PrewarmedSession:
+def _mark_lane_used() -> None:
+    """告诉常驻浏览器「刚用过」。
+
+    延迟 import：``mcore.prewarm`` 已经 import 本模块，模块级反向 import 会成环。
+    整段吞异常——保活计时不准的代价是多打一次探针，让它把下单弄挂就本末倒置了。
+    """
+    try:
+        from mcore.warm_browser import warm_lane
+        warm_lane.mark_used()
+    except Exception:
+        pass
+
+
+def create_prewarmed_session(email: str, password: str, *,
+                             shared=None) -> PrewarmedSession:
     """
     创建已登录的 BrowserFetcher，供 try_book() 直接复用。
 
-    调用方负责在使用完毕后调用 ps.fetcher.close() 释放浏览器。
+    调用方负责在使用完毕后调用 ps.close_if_owned() 释放浏览器。
+
+    Parameters
+    ----------
+    shared
+        借来的常驻浏览器 ``(fetcher, lock)``（见 mcore/warm_browser.py）。给了就
+        不再新开——**贵的那 16.5 秒是过 CF，属于浏览器；登录只要 ~1.5 秒，属于
+        用户**。借来时本函数只做后者。
+
+        传 None 走老路：自己开一个，自己负责关。
     """
+    if shared is not None:
+        fetcher, lock = shared
+        with lock:
+            token = login(fetcher, email, password)
+            # 登录也是 I/O，同样要记进保活计时，否则一条一直在下单的常驻会被
+            # 心跳当成「闲了 10 分钟」而多打一次探针。
+            now = time.monotonic()
+        return PrewarmedSession(
+            fetcher=fetcher, token=token, created_at=now,
+            token_expiry=now + _TOKEN_MAX_AGE, email=email,
+            owns_fetcher=False, use_lock=lock,
+        )
+
     from config import CLOAKBROWSER_HEADLESS
 
     fetcher = BrowserFetcher(headless=CLOAKBROWSER_HEADLESS)
@@ -881,10 +941,18 @@ def try_book(
     using_prewarmed = prewarmed is not None and now < prewarmed.token_expiry
     own_fetcher = False
 
+    # 借来的常驻浏览器要在整段 I/O 期间独占（见 PrewarmedSession.use_lock）。
+    # 自有 fetcher 时是 None，不产生任何等待。**必须在 finally 里释放**：中途
+    # 抛异常而不放锁，会把整条下单通道永久焊死，且没有任何日志说得出为什么。
+    lane_guard = None
+
     if using_prewarmed:
         fetcher = prewarmed.fetcher      # type: ignore[union-attr]
         token = prewarmed.token          # type: ignore[union-attr]
-        logger.debug("复用预登录 BrowserFetcher (email=%s)", _mask_email(email))
+        if prewarmed.use_lock is not None:      # type: ignore[union-attr]
+            lane_guard = prewarmed.use_lock     # type: ignore[union-attr]
+        logger.debug("复用预登录 BrowserFetcher (email=%s, 常驻=%s)",
+                     _mask_email(email), not prewarmed.owns_fetcher)  # type: ignore[union-attr]
     else:
         if prewarmed is not None:
             age = now - prewarmed.created_at
@@ -892,16 +960,17 @@ def try_book(
                 "预登录 session 已过期 (%.0f 秒前创建，上限 %d 秒)，退回正常登录",
                 age, _TOKEN_MAX_AGE,
             )
-            try:
-                prewarmed.fetcher.close()
-            except Exception:
-                pass
+            # 只关自己的。常驻是全进程共用的那一个，在这里关掉，下一个用它的人
+            # 拿到的是空壳，而且没有任何地方会报错。
+            prewarmed.close_if_owned()
         from config import CLOAKBROWSER_HEADLESS
 
         fetcher = BrowserFetcher(headless=CLOAKBROWSER_HEADLESS)
         fetcher.__enter__()
         own_fetcher = True
 
+    if lane_guard is not None:
+        lane_guard.acquire()
     try:
         # ---- Step 1 fallback ---- #
         if not listing.sku:
@@ -1148,6 +1217,12 @@ def try_book(
     finally:
         if own_fetcher:
             fetcher.__exit__(None, None, None)
+        else:
+            # 借来的：不关，只把「刚用过」告诉常驻，免得心跳把一条正忙的浏览器
+            # 当成闲置而多打探针。
+            _mark_lane_used()
+        if lane_guard is not None:
+            lane_guard.release()
 
 
 def _fetch_sku_and_contract(fetcher: BrowserFetcher, url_key: str) -> tuple[str, Optional[int], Optional[str]]:
