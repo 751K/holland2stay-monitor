@@ -1,5 +1,181 @@
 # Changelog
 
+## v1.36.0 (2026-09-08)
+
+本次发布包含二十一次提交，覆盖自动预订、容量与会话、客户端仓库拆分、抓取平台、
+配置一致性与 App Store 发布六个方面，共十八条。
+
+本次多数条目共享同一种缺陷形状：**判据成立，但它无法与故障区分**。绿色的测试、
+安静的日志、正常的进程状态各自都为真，而被断言的那件事从未发生。逐条修复方式统
+一为：先构造一个复现原缺陷的变异，确认判据变红，再提交。
+
+### 自动预订
+
+* **下单不再在房源翻牌那一刻现过 Cloudflare**（[dfef982]）
+
+    自动预订的关键路径由两段成本拼成，量级差一个数量级且归属不同：过 Cloudflare
+    挑战属于**浏览器**（中位 16.5 秒，480 次实测），NextAuth 登录属于**用户**
+    （约 1.5 秒）。`try_book` 的每次调用均以 `Authorization: Bearer <JWT>` 认证，
+    浏览器仅作为已通过挑战的 HTTP 通道，与登录者无关——因此昂贵且会失败的那一半
+    可由所有用户共用一份。
+
+    此前预登录仅在「本轮出现候选」时启动，而候选的定义即「房源已变为
+    Available」，故预登录与下单在同一瞬间开始，每次都需现场通过一次挑战；给予它
+    的等待上限为 2 秒，该数值系照 1.5 秒的登录成本设定，未计入浏览器。留存日志中
+    快速通道触发 4 次、`prewarmed=no` 4 次、成功 0 次；两次有记录的失败（08-27
+    代理 402 配额耗尽、09-08 挑战熔断）均未走到实际下单。
+
+    现常驻一个已通过挑战的浏览器，由 monitor 每轮心跳维护。保活为必需项而非优
+    化：`cf_clearance` 的标称有效期无效，实际生效的是同域 `h2s_clr`，寿命 0.5 小
+    时。常驻仅借给本轮优先级最高的、需要它的用户，其余用户维持原行为——不采用排
+    队，该队列在此改动前并不存在，且线程锁唤醒任意等待者，不遵循用户排序。
+
+* **预登录中的 `TypeError` / `AttributeError` 改判为错误**（[dfef982]）
+
+    此二类异常永远不是「本次未建成」，而是代码本身有误，此前与网络抖动同归一条
+    WARNING。开发期间已复现一次：函数新增参数而桩未跟进，于是每轮均记录「预登录
+    失败，回退正常登录路径」——系统照常运行、房源照常抓不到，日志读来形似平台侧
+    拒绝。
+
+### 容量与会话
+
+* **gunicorn 线程数是容量上限，不是性能参数**（[12c2ec6]）
+
+    SSE 在 `gthread` 下每条连接独占一个线程并保持至 `SSE_MAX_AGE_SECONDS`，故线
+    程数即并发客户端上限。原值 8 导致全站无法访问，而故障表征具有最大误导性：容
+    器健康、零错误日志、CPU 低位——仅并发探测可暴露（25 秒、25 秒、15.2 秒，随后
+    连续 5 次 0.1 秒）。同时加入 `--timeout=0`，避免 gunicorn 在 30 秒处切断长
+    连接。
+
+* **线程预算按并发峰值重算**（[12ab06c]）
+
+    首次修复取 64，依据是「81 台设备不会同时在线」，遗漏了并发测试期间约 70 台模
+    拟器——与原值 8 属同一类错误：按日活量而非并发峰值估算。改按并发峰值重算：约
+    70 台测试模拟器 + 约 40 个真实客户端 + 约 30 个请求，加倍后取 256。宿主实测
+    150 条并发流 CPU 占用 7.6%。
+
+* **会话不再无限累积**（[d68dc5f]）
+
+    每次登录签发 90 天令牌且从不回收。同一 (用户, 设备名) 至多保留 10 枚，超出者
+    按签发时间由旧至新撤销；启动时对存量执行一次同规则清理。
+
+* **测试账号的会话上限放宽到 100**（[12ab06c]）
+
+    并行模拟器克隆共用同一 `device_name`，上限 10 会在测试进行中撤销使用中的会
+    话，表现为随机 401。改以数据表承载例外，并附一条测试禁止算法本体出现账号标
+    识——例外是数据，不是分支。
+
+* **管理面板按机型族归并设备卡片**（[d68dc5f]）
+
+    触发条件为「同名条目超过 4 个」这一通用性质，而非特定用户名。
+
+### 客户端仓库拆分
+
+* **Android 客户端迁出**（[146dc94]）
+
+    迁至 751K/FlatRadar-Android。`build.yml` 中的 android job 一并移出，该文件由
+    150 行缩至 69 行；macOS 与 Windows 两个 job 保留。
+
+* **iOS 客户端迁出**（[bd956fc]）
+
+    迁至 751K/FlatRadar-iOS。删除前验证了三条，而非仅确认配置页面显示正确——此前
+    「配置已改、进程未重读」已出现多次。其中一条判据为 05-Notifications 在两台设
+    备上均通过：该屏需要登录态，是 `ci_post_clone.sh` 确实执行过的唯一可靠证据。
+
+* **安卓下载链接改指新仓库**（[475c2d9]）
+
+    四处链接更新。原测试仅检查页面是否含 `app-release.apk` 子串，而该子串在迁移
+    前后均存在，故对本次迁移完全无感——用户会被送至一个不再更新的 Release 页，而
+    测试为绿。「链接存在」与「链接指对地方」是两件事。
+
+### 抓取平台
+
+* **Student Experience 站点改版，四处同时坏了**（[828471a]）
+
+    卡片锚点路径由 `/studio-types/<id>` 改为 `/studios/<id>`，页面 12 张卡片解析
+    出 0 张；卡片内部 class 全量更换。
+
+* **Student Experience 补上入住日期**（[f4cede9]）
+
+    列表页无日期字段，入住日期仅存在于详情页（`Start date contract`，需与
+    `Respond until` 区分），故每个新单元额外发起一次请求。
+
+* **Plaza 登记 Rijswijk，城市清单不再有第二份**（[86b041c]）
+
+    生产日志报出未登记城市 Rijswijk，实抓核实为 4 条真实房源，当时全站第五多，站
+    点导航中没有它。但报出该 WARNING 的判据读的是 scraper 内另一份手写清单，而日
+    志提示修改的是 `config.KNOWN_PLAZA_CITIES`。两份表分工不同，其中一个失败方向
+    是静默的：仅修改 scraper 一侧，WARNING 消失而房源照旧无法分派——唯一的痕迹被
+    修复动作本身抹除。故不采用两处各加一行，而是令 scraper 的清单从注册表派生。
+
+* **`device_tokens` 接住客户端上报的 `os_version`**（[bca6643]）
+
+    写入位于 upsert 的 UPDATE 分支：既有设备全部走该分支，仅写 INSERT 会表现为
+    「新装可用、旧用户永远为空、且值冻结在首次注册时」。列可空且无默认值，不做格
+    式校验——被丢弃的恰是尚未见过的系统版本，而那正是采集目的。同时补上 iOS 长期
+    在发、而规格中从未声明的 `language` 字段。
+
+### 配置一致性
+
+* **注册表加了城市、订阅串没跟上时启动报出**（[4126def]）
+
+    城市清单共有三处副本，仅最后一处决定实际抓取：scraper 内的清单决定 WARNING、
+    注册表决定设置页可勾选项、`app_settings` 中的订阅串决定实际抓取。前两处已于
+    [86b041c] 合并，第三处不可合并——它是用户的选择。由此产生静默失败：将城市加入
+    注册表仅使其出现在菜单上，订阅串为明确列举，新增项不在其中，于是 WARNING 因
+    注册表已包含而停止、抓取因订阅串未包含而不发生。
+
+    判据取**增量**而非集合包含：仅报告「相较上次所见注册表为新增、且未进入订阅」
+    者。集合包含不可用——实测生效配置中 holland2stay 26 城订阅 2 个、Xior 30 栋订
+    阅 4 栋，均为明确选择，按该判据首轮即产生 50 条报告，其中 0 条为真。未处理的
+    新增不写回快照，否则重启一次警告即永久消失而问题仍在。
+
+### App Store 发布
+
+* **截图替换的顺序改过三次，最终回到先删后传**（[c6fa154]、[0848df7]）
+
+    先删后传曾于实跑中删光用户手动上传的八张，而随后的 PUT 因向预签名 URL 发送
+    `Authorization` 头而 400，集合清空且无法恢复。改为先传后删可避免该情形，但引
+    入新边界：每组上限 10 张，旧 6 张加新 7 张即在第 4 张处失败。最终回到先删后
+    传，安全阀改为上传前的本地体检。
+
+* **UI 截图的设备差异消不掉，改为不依赖 identifier 与序号**（[5eabafa]、
+  [b3c5fd0]、[ab442c4]、[3d23e67]、[3589027]）
+
+    `waitForMainUI` 盯死单一 tab 属误判；`accessibilityIdentifier` 在 iPad 上可
+    见、在 iPhone 上出现较晚，据某一时刻的快照断言其「不存在」是错的；02-Listings
+    的失败并非竞态，而是发送值取自 `{list, map, calendar}` 而 App 认的是
+    `listings`，落入 `default` 后 tab 原地不动、截图照拍——文件名与尺寸均正确，内
+    容却是另一屏。按序号定位 tab 的退路全部删除：快照中按钮出现两次，据此计算的
+    下标在取元素时越界。
+
+* **删除 release.yml**（[5e9cfb7]、[98108d7]）
+
+    该流水线从未成功过，唯一一次真跑止于 Export ipa；账号内无任何描述文件，而云
+    端签名需要它。Xcode Cloud 一直在产出可上架的包，截图流程一并交由其执行。
+
+[dfef982]: https://github.com/751K/holland2stay-monitor/commit/dfef982
+[4126def]: https://github.com/751K/holland2stay-monitor/commit/4126def
+[86b041c]: https://github.com/751K/holland2stay-monitor/commit/86b041c
+[12ab06c]: https://github.com/751K/holland2stay-monitor/commit/12ab06c
+[d68dc5f]: https://github.com/751K/holland2stay-monitor/commit/d68dc5f
+[12c2ec6]: https://github.com/751K/holland2stay-monitor/commit/12c2ec6
+[bca6643]: https://github.com/751K/holland2stay-monitor/commit/bca6643
+[bd956fc]: https://github.com/751K/holland2stay-monitor/commit/bd956fc
+[475c2d9]: https://github.com/751K/holland2stay-monitor/commit/475c2d9
+[146dc94]: https://github.com/751K/holland2stay-monitor/commit/146dc94
+[f4cede9]: https://github.com/751K/holland2stay-monitor/commit/f4cede9
+[828471a]: https://github.com/751K/holland2stay-monitor/commit/828471a
+[5e9cfb7]: https://github.com/751K/holland2stay-monitor/commit/5e9cfb7
+[0848df7]: https://github.com/751K/holland2stay-monitor/commit/0848df7
+[c6fa154]: https://github.com/751K/holland2stay-monitor/commit/c6fa154
+[3589027]: https://github.com/751K/holland2stay-monitor/commit/3589027
+[3d23e67]: https://github.com/751K/holland2stay-monitor/commit/3d23e67
+[ab442c4]: https://github.com/751K/holland2stay-monitor/commit/ab442c4
+[b3c5fd0]: https://github.com/751K/holland2stay-monitor/commit/b3c5fd0
+[98108d7]: https://github.com/751K/holland2stay-monitor/commit/98108d7
+[5eabafa]: https://github.com/751K/holland2stay-monitor/commit/5eabafa
+
 ## v1.35.0 (2026-09-03)
 
 本次发布包含二十一次提交，覆盖测试基础设施、认证、通知筛选、地图、界面、通知与
