@@ -413,6 +413,32 @@ class TestRegistration:
         registered = {c["name"] for c in KNOWN_PLAZA_CITIES}
         assert {x.city for x in parsed} <= registered
 
+    def test_warning_list_is_derived_from_the_registry(self):
+        """报 WARNING 用的清单和决定分派的清单必须是同一张表。
+
+        这两处曾经各写各的。分开写有两个失败方向，其中一个是静默的：只往
+        ``scrapers.plaza.CITIES`` 里加一个城市，WARNING 就不报了，但用户勾不到
+        它、``scrape()`` 也拿不到对应的 task——房源照旧分派不出去，唯一的痕迹却
+        没了。所以这里钉的不是「两份内容相等」，是「只有一份」。
+        """
+        from config import KNOWN_PLAZA_CITIES
+        assert set(CITIES) == {c["name"] for c in KNOWN_PLAZA_CITIES}
+
+    def test_every_registered_city_has_a_usable_key(self):
+        """``key`` 是订阅与 ``PLAZA_CITIES`` 环境变量的主键，不能重复或带空格。"""
+        from config import KNOWN_PLAZA_CITIES
+        keys = [c["key"] for c in KNOWN_PLAZA_CITIES]
+        assert len(keys) == len(set(keys))
+        for c in KNOWN_PLAZA_CITIES:
+            assert c["key"] == c["name"].lower(), c
+            assert "," not in c["key"] and "|" not in c["key"], c
+            assert c["city"] == c["name"], c
+
+    def test_rijswijk_is_registered(self):
+        """2026-09-08 生产日志报出的未登记城市，别在后续重构里掉回去。"""
+        from config import KNOWN_PLAZA_CITIES
+        assert "Rijswijk" in {c["name"] for c in KNOWN_PLAZA_CITIES}
+
     def test_energy_is_not_registered(self):
         """energyLabel 在 fixture 里 53 条全是空对象，登记了只会 fail-closed 误杀。"""
         from config import sources_supporting_dim

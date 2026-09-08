@@ -623,6 +623,13 @@ KNOWN_STUDENTEXPERIENCE_CITIES: list[dict] = [
 #: 取并集——两份本来就对不上：在架的 Geldrop（当时 6 条，第二多）、Groot-Ammers、
 #: Deventer、Duivendrecht 都不在导航里。站点上架新城市时不会有人来改这里，因此
 #: scrapers/plaza.py 在遇到未登记城市时按 WARNING 记下城市名，日志里看得见。
+#:
+#: 漂移记录（这条机制确实在工作，别删）：
+#: 2026-09-08 生产日志报出 Rijswijk（4 条，当时全站第五多），导航里仍然没有它。
+#:
+#: 这份清单是**唯一**一份 Plaza 城市表——``scrapers/plaza.py`` 的 ``CITIES``
+#: 从这里派生，不要在那边另抄一份。抄了就会出现「加进 config 但 WARNING 照报」
+#: 或者更糟的「WARNING 不报了但房源仍然没人接」。
 KNOWN_PLAZA_CITIES: list[dict] = [
     {"name": "Utrecht",      "key": "utrecht",      "city": "Utrecht"},
     {"name": "Amsterdam",    "key": "amsterdam",    "city": "Amsterdam"},
@@ -636,6 +643,7 @@ KNOWN_PLAZA_CITIES: list[dict] = [
     {"name": "Deventer",     "key": "deventer",     "city": "Deventer"},
     {"name": "Duivendrecht", "key": "duivendrecht", "city": "Duivendrecht"},
     {"name": "Groot-Ammers", "key": "groot-ammers", "city": "Groot-Ammers"},
+    {"name": "Rijswijk",     "key": "rijswijk",     "city": "Rijswijk"},
 ]
 
 

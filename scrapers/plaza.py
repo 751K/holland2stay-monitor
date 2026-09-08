@@ -64,8 +64,10 @@ Plaza（plaza.newnewnew.space，运营方 Plaza Resident Services）是跑在 **
 Arnhem）与当时实际在架的十个城市取并集。两份清单本来就对不上——在架的 Geldrop
 （6 条，当时第二多）、Groot-Ammers、Deventer、Duivendrecht 都不在导航里。
 
-所以这个清单**一定会漂**。未登记城市的房源不会被静默丢掉：``scrape()`` 里按
-WARNING 记下城市名，日志里看得见，加进表即可。宁可漏推几条也不要猜城市——猜错
+所以这个清单**一定会漂**，而且已经漂过：2026-09-08 生产日志报出 Rijswijk（4 条，
+当时全站第五多），站点导航里至今没有它。未登记城市的房源不会被静默丢掉：
+``scrape()`` 里按 WARNING 记下城市名，日志里看得见，加进 ``KNOWN_PLAZA_CITIES``
+即可——只有那一张表，本模块的 ``CITIES`` 从它派生。宁可漏推几条也不要猜城市——猜错
 会把房源分派给错误的 ScrapeTask，用户按城市订阅就会收到不该收的。
 
 楼盘名是推导的
@@ -108,6 +110,7 @@ import re
 from contextlib import contextmanager
 from typing import Optional
 
+from config import KNOWN_PLAZA_CITIES
 from models import Listing
 
 from .base import AbstractScraper, ScrapeNetworkError, ScrapeResult, ScrapeTask
@@ -131,11 +134,14 @@ NL_LAND_ID = "524"
 HOUSING_CATEGORY = "woning"
 
 
-#: 荷兰城市清单（2026-09-02 快照，见模块文档「城市清单会漂」）。
-CITIES: tuple[str, ...] = (
-    "Amsterdam", "Arnhem", "Breda", "Delft", "Deventer", "Duivendrecht",
-    "Eindhoven", "Enschede", "Geldrop", "Groot-Ammers", "Maastricht", "Utrecht",
-)
+#: 荷兰城市清单，从 ``config.KNOWN_PLAZA_CITIES`` 派生——**不要在这里另抄一份**。
+#:
+#: 这两处曾经是两份手写清单。它们分工不同：config 那份决定用户能勾哪些城市、
+#: 因而决定 ``scrape()`` 拿得到哪些 task；这份只决定下面那条 WARNING 报不报。
+#: 分开写就有两个失败方向，其中一个是静默的——只改这里，WARNING 消失了，房源
+#: 却仍然分派不出去，正好把唯一的痕迹擦掉。派生掉这份，那个方向就不存在了。
+CITIES: tuple[str, ...] = tuple(
+    sorted(c["name"] for c in KNOWN_PLAZA_CITIES))
 
 #: 站点房型 → 本项目词表。归一到英文，理由见模块文档「维度登记」。
 TYPE_MAP = {

@@ -740,6 +740,13 @@ finishing 上栽过的那种错。
 WARNING 记下城市名，日志里看得见，加进表即可。宁可漏推几条也不猜城市：猜错会把
 房源分派给错误的 ScrapeTask，用户按城市订阅就会收到不该收的。
 
+**这套机制确实兜住了一次。** 2026-09-08 生产日志报出 Rijswijk：4 条（Polakweg 13C
+与 Volmerlaan 20B 两栋，€796–854），当时全站第五多，导航里至今没有它。已登记。
+
+表只有一张。`scrapers/plaza.py` 的 `CITIES` 从 `KNOWN_PLAZA_CITIES` 派生——两处各
+写一份的时候有个静默的失败方向：只改 scraper 那份，WARNING 就不报了，但用户勾不到
+这个城市、`scrape()` 也拿不到对应的 task，房源照旧分派不出去，唯一的痕迹却被擦掉了。
+
 ### 完整性探针
 
 响应里的 `sAngularServiceData` 带着门户配置，**有房没房都返回**，因此拿它当结构
