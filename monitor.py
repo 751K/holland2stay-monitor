@@ -2519,6 +2519,18 @@ async def run_once(
         它只保住浏览器和 clearance，**不碰登录**。「没有候选的轮次完全不碰 H2S
         登录接口」那条约束原样成立：登录仍然只在 _start_prewarm_for_candidates
         里发生。
+
+        **必须扔进 executor，不能在这里直接调。** BrowserFetcher 用的是 Playwright
+        的同步 API，而它拒绝在一个正在跑的 asyncio loop 里工作：
+
+            It looks like you are using Playwright Sync API inside the asyncio loop.
+
+        run_once 是协程，直接调就是这个形状。2026-09-08 上线当轮就撞上了——好在
+        fail-safe 生效，退避 5 分钟、下单退回现开浏览器，等于改动之前的行为。
+        prewarm 那条路一直是对的（loop.run_in_executor），心跳漏了。
+
+        也**不 await**：建一次十几秒，await 会把整轮监控卡在这。心跳自己是非阻塞
+        的（拿不到锁就直接返回），所以多轮之间不会堆叠。
         """
         if dry_run:
             return
@@ -2532,11 +2544,21 @@ async def run_once(
         # IP 再添几条失败记录。但**已经健康的那条要继续保活**——它是我们眼下唯一
         # 还通着的路，丢了就得等熔断结束再从头过挑战。
         may_rebuild = _h2s_login_suppressed_remaining() <= 0
-        try:
-            warm_lane.heartbeat(wanted=wanted, may_rebuild=may_rebuild)
-        except Exception:
-            logger.warning("常驻浏览器心跳异常（已忽略，下单会退回现开浏览器）",
-                           exc_info=True)
+
+        def _done(fut) -> None:
+            # 不 await 的 future 会把异常吞进垃圾回收。这里读一次 exception()，
+            # 让它至少留下一行日志。
+            exc = fut.exception()
+            if exc is not None:
+                logger.warning("常驻浏览器心跳异常（已忽略，下单会退回现开浏览器）",
+                               exc_info=exc)
+
+        fut = loop.run_in_executor(
+            None,
+            functools.partial(warm_lane.heartbeat,
+                              wanted=wanted, may_rebuild=may_rebuild),
+        )
+        fut.add_done_callback(_done)
 
     def _start_prewarm_for_candidates(candidate_user_ids: set[str]) -> None:
         """只为本轮实际有 H2S 自动预订候选的用户启动预登录。"""

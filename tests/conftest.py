@@ -183,6 +183,33 @@ def _isolate_browser_profiles(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_warm_browser(monkeypatch):
+    """测试里绝不真开下单常驻浏览器。
+
+    2026-09-08 差点在自己脚上开了一枪：心跳原本直接跑在事件循环线程上，Playwright
+    的同步 API 在那里会立刻拒绝，于是**测试从来没有真的建过浏览器**——一次巧合的
+    保护。把心跳改成扔进 executor（生产必须这么做）之后，那层巧合没了，
+    ``run_once`` 的用例开始真的拉起 Chromium 并连外网：整个文件挂住，不报错。
+
+    所以这里显式钉死：``_build`` 变成 no-op。需要验证建立逻辑的用例自己在
+    tests/test_warm_browser.py 里换掉它。
+
+    每个用例后顺手 close()，免得某个用例塞进去的假 fetcher 漏给下一个。
+    """
+    try:
+        from mcore.warm_browser import warm_lane
+    except ImportError:
+        yield
+        return
+    monkeypatch.setattr(warm_lane, "_build", lambda: None)
+    yield
+    try:
+        warm_lane.close(reason="测试收尾")
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _reset_scraper_instances():
     """清掉跨轮复用的 scraper 实例缓存，避免用例间共享 scraper 状态。"""
     try:

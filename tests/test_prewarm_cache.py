@@ -409,3 +409,58 @@ class TestWhoGetsTheWarmLane:
 
         assert sum(1 for _, may in log if may) == 1, f"借用者不止一个: {log}"
         assert log[0] == ("Zeta", True), f"没给优先级最高的那个: {log}"
+
+
+class TestHeartbeatRunsOffTheEventLoop:
+    """常驻浏览器的心跳必须在 executor 线程里跑。
+
+    ``BrowserFetcher`` 用的是 Playwright 的**同步** API，而它拒绝在一个正在跑的
+    asyncio loop 里工作：
+
+        It looks like you are using Playwright Sync API inside the asyncio loop.
+
+    2026-09-08 上线当轮就撞上了。之前的单测拿假 fetcher 直接调 heartbeat()，没有
+    loop、也没有真的 Playwright，所以这个约束完全不可见——测得再密也照不到。
+
+    这条从 run_once 里调，断言心跳看到的是「没有正在运行的 loop」。
+    """
+
+    def test_heartbeat_is_not_called_on_the_loop_thread(
+            self, clean_cache, fake_storage, cfg, user_ab):
+        seen = []
+
+        def _fake_heartbeat(*, wanted, may_rebuild):
+            try:
+                asyncio.get_running_loop()
+                seen.append("loop")     # 在事件循环线程上 —— Playwright 会拒绝
+            except RuntimeError:
+                seen.append("thread")   # 干净的 executor 线程
+
+        def scrape(*a, **k):
+            return [_make_listing(1)], {}
+
+        async def go():
+            from mcore import warm_browser
+            with patch.object(warm_browser.warm_lane, "heartbeat",
+                              side_effect=_fake_heartbeat), \
+                 patch("mcore.prewarm.create_prewarmed_session",
+                       side_effect=lambda e, p, **kw: _make_fake_prewarmed(e)), \
+                 patch("bookers.holland2stay.try_book",
+                       side_effect=lambda l, *a, **k: BookingResult(
+                           l, True, "ok", pay_url="https://p", phase="success")), \
+                 patch("monitor.dispatch_scrape_tasks", side_effect=scrape):
+                await run_once(cfg, fake_storage, [(user_ab, _FakeNotifier())],
+                               dry_run=False)
+                # 心跳是 fire-and-forget，给 executor 一点时间跑完
+                for _ in range(50):
+                    if seen:
+                        break
+                    await asyncio.sleep(0.02)
+
+        asyncio.run(go())
+
+        assert seen, "心跳压根没被调用"
+        assert seen[0] == "thread", (
+            "心跳跑在事件循环线程上——Playwright 同步 API 会直接拒绝，"
+            "常驻浏览器永远建不起来"
+        )

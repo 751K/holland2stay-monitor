@@ -108,7 +108,12 @@ class WarmBrowserLane:
             self.close(reason="没有启用自动预订的用户")
             return
 
-        with self.lock:
+        # **非阻塞**。拿不到锁只有两种情况：另一次心跳正在建（建一次要十几秒，
+        # 而轮次是 20 秒一跑，阻塞就会把心跳堆起来），或者有人正在下单——两种都
+        # 轮不到这里做事。
+        if not self.lock.acquire(blocking=False):
+            return
+        try:
             now = time.monotonic()
 
             if self._fetcher is not None:
@@ -124,6 +129,8 @@ class WarmBrowserLane:
 
             if now - self._last_io >= _KEEPALIVE_INTERVAL:
                 self._keepalive()
+        finally:
+            self.lock.release()
 
     def close(self, *, reason: str = "") -> None:
         with self.lock:
