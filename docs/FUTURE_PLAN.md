@@ -4,48 +4,243 @@
 
 ---
 
-## v2.0 方向（2026-08-03 决定）
+## v2.0 规划（2026-09-07 重定，基线 `12ab06c`）
 
-v2.0 只做两件事。
+> 本节 09-07 早些时候写过一版，依据的审查做在 **v1.33–v1.35 那批修复之前**，
+> 于是把二十余条已经修掉的缺陷当成了待办。这一版对着 HEAD 逐条复核后重写。
+> 复核结论：原「方向二（交付语义）」与「方向三（安全边界）」的绝大部分已经
+> 交付，v2.0 的实际内容收敛成 **CI 门禁 + 结构重构 + 一把零头**。
 
-### 方向一：可观测性 —— **已完成第一批**
+### 复核：原计划里已经做完的部分
 
-排查工作完全依赖登录服务器：本系统中的每一个缺陷均是通过人工 grep 日志定位的，
-而 2026-06-13 起的那次 7 周静默停摆，正是同一短板的极端表现。
+09-01 至 09-02 的一批提交（`c0cd30f` `4926ffc` `2195920` `3f2868d` `4705207`
+`5dc7954` `5bfa70b` `5a27e8f`）覆盖了原方向二、原方向三，以及原方向五的一半：
 
-已落地：`round_stats` 轮次遥测表、`mcore/health.py` 分 source 健康判定、
-`mcore/watchdog.py` 退化告警（含恢复通知，节流持久化）、`/logs` 服务端过滤、
-`/monitoring` 面板。判据与告警规则的设计理由见
-ARCHITECTURE §5.12。
+| 原条目 | 现状 |
+|---|---|
+| 重放窗口字符串比较，退化成「当天零点起」 | ✅ 改 `julianday`（`mstorage/_listings.py:524/543/563`） |
+| FCM `device_dead` 比散文 `message` | ✅ 读 `details[].errorCode` / `error.status`（`notifier_channels/fcm.py:393-401`） |
+| OAuth 失败丢整批 Android 推送 | ✅ `token()` 进 try + `gather(return_exceptions=True)`（`fcm.py:337/444`） |
+| FCM 换 token 走抓取代理 | ✅ `direct_httpx_kwargs()`（`fcm.py:255`），守卫测试同时补上两个洞 |
+| 热重载先关旧 notifier 再建新的 | ✅ 先构造成功再 close（`monitor.py:3425`） |
+| `_submit_bookings` 引用不存在的 `storage` | ✅ 已带参数（`monitor.py:1622`） |
+| 占房成功后订单号不交给用户 | ✅ `cart_id` / `order_number` 进结果（`booker.py:197-200`） |
+| `cancel_pending_orders` 会取消用户手动订的房 | ✅ 只取消 `remember_our_reservation` 记过的 SKU，无记录时一笔不取消 |
+| `contract_start_date` 漏哨兵过滤 | ✅ 复用 `is_sentinel_available_from`（`scrapers/holland2stay.py:567`） |
+| `RentCafeSession` 构造在 try 外 | ✅ 已移进 try（`bookers/rentcafe.py:843`） |
+| 反代之后 `remote_addr` 恒为代理 IP | ✅ `ProxyFix`（`web.py:147-149`） |
+| `/system` 的 `os.environ.clear()` 权限提升窗口 | ✅ 改用 `dotenv_values()`（`app/routes/system.py:89`） |
+| `/api/v1/devices/test` 写 `user_id=""` 的全站通知 | ✅ 已改为当前用户 |
+| `/login` 对不存在用户名静默自动注册 | ✅ 已移除，注册统一走 `register_user`（`app/routes/sessions.py:145`） |
+| `next` 未过滤 | ✅ `app/safety.py:safe_next_url`，四处调用点已接 |
+| crypto 密钥静默自举 | ✅ 库里有密文时不再自动生成（fail-safe） |
+| 每个 source 的 dispatch 无墙钟超时 | ✅ `_SOURCE_DISPATCH_TIMEOUT_SEC`（`monitor.py:161`） |
+| `update_checker` 的 `git pull` 无 timeout | ✅ `timeout=15`（`update_checker.py:26`） |
+| `run_once` 收尾步骤无隔离 | 🟡 `mark_stale` / 两处 prune 已各自 try；`count_all` / `send_heartbeat` / `prune_notifications` 仍裸露 |
+| 影子 source 过滤排在重放之前 | 🟡 顺序未变（`monitor.py:2884` vs `2901`），但 `_drop_shadow_sources` 现在把事件标 `notified`，漏洞已从另一侧堵上，降为低危 |
 
-后续可继续推进的方向：将遥测数据接入 `/api/v1` 供移动端使用；增加抓取耗时趋势图；
-提供按城市而不仅按 source 的细分维度。
+### 为什么 v2.0 的定义是「CI 加结构」
 
-### 方向二：RENTCafe 自动预订 —— **侦察和编码都做完了，卡在验证**
+上面这张表说明缺陷本身是能修的，问题在于**没有东西守着它们不复发**：CI 至今
+只打桌面包、不跑测试，而 843 行的 `run_once` 与四个平行的 source 集合仍在按
+同一种方式放大同一类错误。复核里新发现的一条正好是活样本——
 
-本条最初的判断是「下一步是侦察，而非编码」。侦察已于 2026-08-03/04 完成，其结论
-推翻了当时的顾虑：`oleapplication.aspx` 九步流程的第 4 步之后既无人工审核，也无
-阻塞流程的文件上传（证件需要上传，但**不阻塞**表单保存）。`bookers/rentcafe.py`
-随之完成，reCAPTCHA 对接 2Captcha，OurDomain 与 Xior 共用一份实现。详见
-[XIOR.md](XIOR.md) §8.6 / §8.7 与 [OURDOMAIN.md](OURDOMAIN.md) §7。
+`notifier.py:235` 的注释写着「支持幂等键的渠道要自己带上（见 ResendNotifier 的
+Idempotency-Key）」，而 `ResendNotifier` 的 headers 里只有 `Authorization`。
+这是**修完那批「注释里说有的保护、代码里没接线」之后新长出来的同一种脱节**，
+而且没有任何测试或 lint 能发现它。
 
-当前真正余下的三项工作均不属于编码：
+所以 v2.0 不加平台、不加客户端功能。**v2.0 的定义是：让「测试全绿」这件事真的
+能背书生产行为，并让这个状态被 CI 守住。**
 
-1. **Xior 的最后一步尚未确认。** 系统代为上传证件后申请表能否正常保存，仅差一次
-   真实尝试。需注意 Xior 的草稿**不锁定房源**——它比 Holland2Stay 提前一步终止，
-   下一页即需填写 IBAN/SWIFT。因此即使走通，其价值也远低于 Holland2Stay 一线。
-2. **OurDomain 欠缺一个真实账号。** 登录之后的环节全部未验证，且该流程不含选房
-   页，一旦脱离流程便没有重选入口。验证需要一个 OurDomain 的 RENTCafe 账号
-   （含完整申请人资料、背景调查同意及已上传的证件）。
-3. **账号粒度尚不明确。** 两栋 OurDomain 楼分属两个 securerc 主机，cookie 不跨
-   主机。参照 Xior 的经验，很可能需要一栋楼一套账号；目前使用的是面板上单一的
-   `ourdomain_email` / `ourdomain_password`，待验证暴露问题后再照 `xior_accounts`
-   拆分。
+### 方向一：CI 成为门禁 —— **其它方向的前提**
 
-在完成上述三项之前，`monitor._AUTO_BOOK_SOURCES` 保持仅含 `holland2stay`。
+现状：`.github/workflows/` 只有 `build.yml`（macOS / Windows 打包），不跑
+pytest、不跑 lint。本地 `pytest` 87 秒，215 个测试文件全绿。
 
-**OurCampus 不在该线之内**：其预订流程从未侦察，且至今未出现过任何房源，不存在
-可预订的标的。
+`ruff check --select E9,F,B,PLE` 的实测（2026-09-07）：
+
+```
+含 tests   231 项   （其中 tests 里 64 处 F811 redefined-while-unused）
+排除 tests  65 项   （F401 32、F541 11、B905 5、B007 4、F841 4、F821 3、其余 6）
+```
+
+F821 四处，三处在生产代码：`app/forms/user_form.py:121`（`ApplicantProfile`）、
+`users.py:188`（同）、`config.py:1920`（`ScrapeTask`）——前两处是 `TYPE_CHECKING`
+下的类型名漏了引号，第三处同理。第四处在 `tests/test_inbound_webhook.py:224`。
+
+要做的：
+
+1. `pytest` + `ruff check --select E9,F,B,PLE` 进 CI，push 与 PR 都跑，失败即红。
+   先清零：`--fix` 能处理 141 项，剩下的手改。**tests 目录一并纳入**——那 64 处
+   F811 多半是重复定义的 fixture 或用例，正是「测试看着全绿其实少跑了」的形状。
+2. 补一类「调用链固定」测试：对每个已实现但可能没接线的判定，断言生产路径真的
+   调到它。样板是 `tests/test_proxy_failover.py::TestClassifierIsActuallyCalled`。
+   v2.0 至少覆盖：`is_proxy_error` 在浏览器型 source 与 H2S 分支上被调用、
+   `_mark_h2s_login_blocked` 在三处 prewarm 失败点上被调用、`device_dead` 用真实
+   FCM 响应体命中、`cleanup_expired_tokens` 有调用方、**Resend 请求带幂等键**。
+3. 测试构造数据一律走生产写入路径（`_now_iso()`、`add_web_notification()`），
+   不再手写 SQL 塞时间戳。这是一条 review 规则，写进 `tests/README` 或 conftest 注释。
+
+完成标准：CI 在 `master` 上连续红过至少一次并被修好（证明门禁真的在拦）；
+`ruff`（含 tests）零报告。
+
+### 方向二：结构重构 —— **让同一类 bug 没有地方再长**
+
+09-02 那批修复几乎全是「一处一处地改对」，结构一行没动。不动结构，方向一的门禁
+只能拦住重复犯的错，拦不住换个地方长出来的同一种错。五项，按能挡住多少复核发现
+排序。
+
+**2.1 `run_once` 拆成显式管线**（方向四的前置）
+
+`run_once` 现在 **844 行**（`monitor.py:2159-3002`），monitor.py 68 个顶层函数、
+10 个模块级可变全局。已经修掉的三条高危——`_submit_bookings` 抽函数时漏掉
+`storage`、影子过滤排在重放之前、收尾步骤没有隔离——全都是「顺序」和「作用域」
+错误，在一条显式的 `scrape → diff → replay → filter → book → notify → persist`
+阶段链里是一眼可见的属性，而在 844 行里要靠人读出来。**它们已经各修一次，但下
+一条同类错误仍会长在同一片土壤上**。每个阶段一个函数，输入输出是 dataclass；
+超时与异常隔离在阶段边界统一套，而不是每处手写。
+
+**2.2 source 差异收进一个 `SourceSpec`**（方向四的前置）
+
+平台差异现在靠四个集合加分支表达：`KNOWN_SOURCES`、`_BROWSER_SOURCES`
+（`monitor.py:1230`）、`_PROXYLESS_CAPABLE_SOURCES`（`:302`）、
+`_AUTO_BOOK_SOURCES`（`:1508`），外加 run_once 里 H2S 一整段与 `_dispatch_isolated`
+平行的代码。H2S 不参与代理冷却与 pacing 就是这个结构的直接产物（已于 `4705207`
+单点修好，结构没变）。改法是每个 source 声明自己的 executor 类型、可否无代理、
+屏蔽处理钩子、canary 钩子、可否自动预订，调度层只剩一条路径。09-01 到 09-02 三
+周内接了 Magis、Student Experience、Plaza 三个平台，每次都要往四个集合里各加一
+次——第八个平台是这条的直接受益者。
+
+**2.3 配置不再以 `os.environ` 作总线**（方向三的形态）
+
+现在的机制是 `settings_store` 每轮往 `os.environ` 注水，各模块随时
+`os.environ.get`。import 时求值的常量热重载不到、三套布尔解析
+（`config.py:134`、`config.py:2397`、`notifier.py:833`、`app/auth.py:150` 四处
+`lower() != "false"` 都不 `strip()`，`APNS_ENABLED=" true"` 静默关推送）、
+`target_config` 的严格解析器至今没有调用方（`grep target_config config.py` 零命中），
+全是这个总线的后果。目标形态：进程持有一个不可变的 `Settings` 快照，热重载就是
+换掉这个对象，启动之后没有任何代码再读 `os.environ`。
+
+**2.4 Notifier 分发走事件，不走拍平的文本**
+
+`MultiNotifier._send`（`notifier.py:220`）把所有高层方法压成一段字符串再分发，
+于是 `EmailNotifier.send_heartbeat` 的豁免是死的、`WebNotifier` 把聚合房源显示成
+error 类型。改成 `send_event(event)`，格式化在各渠道内做，渠道能力用标志声明。
+顺带把 `notifier.py:1044` 与 `app/routes/users.py:541` 两份渠道构造合成一个工厂。
+
+**2.5 模块级可变状态收成一个 `RuntimeState`**（随各方向顺手做）
+
+`mcore/push.py:179` 的 `_dedup`、app 层六张限流字典、`_DETAIL_CACHE`、
+`mcore/health.py:33-88` 的阈值、monitor 的一批 `PersistedBackoff` 都是 import 时
+建好的单例。无界增长、热重载失效、测试要靠 `reset()` 清场，是同一个原因。不需要
+依赖注入框架，一个显式传递的对象就够。
+
+**明确不动的：** 单机 SQLite + web / monitor 双进程这个模型没有问题。不拆库、
+不上队列、不把 scraper 改成全异步。那些是运维成本，不是正确性问题，而这个项目是
+一个人在运营。
+
+完成标准：`run_once` 不超过 150 行且不含嵌套函数；`grep -n 'holland2stay' monitor.py`
+只剩 `SourceSpec` 注册处；生产代码里 `os.environ.get` 只出现在 `load_config()` 与
+`settings_store`；`MultiNotifier` 没有 `_send(text)`；`tests/` 里不再有
+`monitor._h2s_login_blocked_until = 0.0` 这类直接重置模块状态的写法。
+
+### 方向三：配置系统收口 —— **一份实现，热重载覆盖全部**
+
+现状是三个平行世界：`config.py`（2413 行，混着代理池、TLS 指纹池、申请人档案、
+过滤能力表）、`target_config.py`（344 行严格解析器，**没有调用方**）、
+`settings_store.py`（241 行，按 `env_registry.RUNTIME_KEYS` 热重载）。
+
+具体的洞：`target_config.TARGET_KEYS` 有六个平台键，`_PARSERS` 只覆盖其中三个
+——`MAGIS_CITIES` / `STUDENTEXPERIENCE_CITIES` / `PLAZA_CITIES` 落在
+`STRUCTURED_KEYS` 之外，面板上写进去的值**完全不过校验**。这三个键正是最近三周
+新加的，也就是说：加平台时忘了同步这张表，没有任何东西会提醒。
+
+要做的：
+
+1. `load_config()` 改调 `target_config.parse_*`；fatal 的拒绝启动，非 fatal 的 WARNING。
+2. `_PARSERS` 覆盖 `TARGET_KEYS` 的每一个键，用参数化测试守住（加平台时自动红）。
+3. `_bool` / `_env_int` 各一份实现并 `strip()`，全仓库改调；`tools/doctor.py:63`
+   那份是对的，提上来。
+4. 热重载能刷到的常量改成函数式读取（与 `enabled_sources()` 一致）；做不到的
+   在面板上标「需重启」。
+5. `config.py` 拆分：代理池 / 指纹池 → `net.py` 或 `mcore/proxy.py`；
+   `ApplicantProfile` → `bookers/`；过滤能力表 → `models.py`。目标是 `config.py`
+   只剩 `Config` 与 `load_config()`。
+
+1、2、3 不依赖新结构，先做；4、5 就是 2.3 本身。
+
+完成标准：`grep -rn 'lower() != "false"'` 零命中；`STRUCTURED_KEYS == set(TARGET_KEYS) | {…}`
+有测试守；`tests/test_config.py` 从 happy-path 用例变成坏配置矩阵。
+
+### 方向四：残余的正确性缺陷
+
+复核后仍然成立的只剩下面这些。除超时两条外都不依赖重构，可以随时做。
+
+| 问题 | 位置 | 修法 |
+|---|---|---|
+| Resend 重试无幂等键，而注释已声称有 | `notifier.py:235` / `ResendNotifier._send` | 带 `Idempotency-Key`（按 listing id + 事件类型派生）；否则把那句注释改掉 |
+| `mark_status_change_notified` 按 `listing_id` 而非主键 | `mstorage/_listings.py:590` | 按 `status_changes.id` 标记；`_batch` 同改 |
+| 预订 future `await` 无超时 | `monitor.py:1999` | `asyncio.wait_for`；`booking_deadline` 只管「要不要试下一套」，管不住这里 |
+| geocode 同步跑在事件循环里 | `monitor.py:3367` | 进 executor。Photon 不可达时最坏 150 秒 |
+| `count_all` / `send_heartbeat` / `prune_notifications` 无隔离 | `monitor.py:3332-3341` | 各自 try，与相邻两处 prune 对齐 |
+| `MAX_CONTENT_LENGTH` 未设 | `web.py` | 加上；Caddy 侧同时配 `request_body max_size` |
+| bcrypt 72 字节上限未拦 | `users.py:767 _bcrypt_hash` | 超长直接 4xx，而不是让 `hashpw` 抛 `ValueError` 变 500 |
+| SSE 的 `?token=` 是长期 token | `app/routes/api_v1/notifications.py:111` | 换成短期 ticket（长期 token 会落进代理日志与浏览器历史） |
+| `page.evaluate` / `page.content()` 无墙钟超时 | `browser_fetcher.py:1273/1102` | 渲染器卡死时 `_SOURCE_DISPATCH_TIMEOUT_SEC` 能兜住整轮，但单页仍会白等到上限 |
+| 公告群发没有逐用户投递记录 | `app/services/announcement_service.py` | 2026-08-28 那次 FCM 全挂，事后无法精确补发。落一张投递结果表 |
+| 城市选择器提供未监控的城市 | `app/routes/users.py:277` | `known_city_names()` 收敛到实际启用的城市 |
+
+### 附带清理（不单独立项，随上面各方向顺手做）
+
+- 死代码：`bookers/rentcafe.py:307 submit_step`（实现的正是文档警告过的坑）与
+  `:634 _needs_recaptcha`、`scrapers/xior.py:476` 末尾不可达的 `raise`。
+- 注释与实现脱节：`mstorage/_base.py:832` 「全部 9 张表」实际 14 张；
+  `app/routes/api_v1/diagnostics.py:15` docstring 写 256 KB，常量是 2 MB。
+  （原列表里 `booker.py:687` 的 `addNewBooking` 与 `app/routes/notifications.py:88`
+  的「自建连接」两条复核不成立，已删。）
+- `_dedup`（`mcore/push.py:179`）、六张限流字典、`_DETAIL_CACHE`、
+  `app_tokens` / `device_tokens` 四处无界增长，各加上限或清理入口。
+- 裸 SQL 散落在六处路由 / 服务层，收回 `mstorage`；`feedback` 表的建表语句从
+  请求路径挪进迁移。
+
+### 明确不在 v2.0 内
+
+- **新平台。** DUWO / SSH / Pararius 的调研（下方 §2）保留，但在方向一落地之前，
+  每加一个 scraper 都是在往一个 CI 不跑测试的仓库里加一份新的「测试全绿但生产
+  路径不同」。09-01 至 09-02 连接三个平台之后 `_PARSERS` 漏了三个键，就是证据。
+- **RENTCafe 预订的端到端验证。** 它卡的是真实账号，不是代码。账号到位随时可做，
+  但不作为 v2.0 的发布条件；`_AUTO_BOOK_SOURCES` 保持仅含 `holland2stay`。
+- **可观测性第二批**（遥测进 `/api/v1`、耗时趋势、按城市维度）。留给 v2.1。
+- **客户端功能。** 两个客户端已迁出，本仓库只提供 API。
+
+### 发布判据
+
+v2.0 打 tag 的条件，缺一不可：
+
+1. CI 跑 pytest + ruff（含 tests 目录），`master` 全绿。
+2. 上面四个方向各自的「完成标准」全部满足。
+3. `ARCHITECTURE.md` §5、§6、§7 与实现一致；§6.1 的 at-least-once 承诺补上
+   「重试有幂等键」这一句并与实现一致。
+4. 重构前后 `tests/` 的用例数不减少。
+5. 方向四那张表零残留；本节以外新发现的中危项允许残留，但每一条在 §9 已知限制
+   里有记录。
+
+### 顺序与依赖
+
+```
+方向一（CI 门禁）
+  ├─► 方向四（残余缺陷，前八条）────────────────┐
+  ├─► 方向三（配置收口 1/2/3）─────────────────┤
+  └─► 方向二（结构重构）                        │
+        ├─ 2.3 ─► 方向三（4/5）────────────────┼─► v2.0
+        ├─ 2.4 ─► 幂等键与通知事件化 ───────────┤
+        └─ 2.1 + 2.2 ─► 方向四（超时两条）──────┘
+```
+
+方向一先行，它是所有重构的安全网：没有 CI 跑测试，拆 `run_once` 就是盲改。
+方向二内部 2.1 与 2.2 一起做（都在 run_once 里），2.3、2.4 各自独立，2.5 随手。
+每个方向按 v1.x 的节奏各出一个小版本，v2.0 是它们的合集，不是一次大爆炸发布。
 
 ---
 
@@ -60,20 +255,23 @@ ARCHITECTURE §5.12。
 - 为 Pararius / Funda 等 CF 保护的平台提供了通用基建
 
 ### 第一期：Android Play Store 上架 —— **已放弃（2026-08-03）**
-- Android 客户端 A0–A5 已完成（57 个文件，约 9.5k 行代码，47 项单元测试），功能上
-  无遗留
-- FCM 推送已完成端到端联调并通过真机验收
-- CI 自动构建签名 APK（`build.yml` 的 android job）；AAB 相关步骤已移除
-- **不再上架**：分发方式确定为自 Release 页直接下载 APK。原计划中的 Google Play
-  Billing 内购、Data Safety、封闭测试与商店截图一并取消
-- 详见下方 [§1 Android 客户端](#1-android-客户端)
+
+Android 客户端 A0–A5 已完成，FCM 推送端到端拉通并通过真机验收。**不再上架 Play
+Store**，分发方式确定为自 Release 页直接下载签名 APK；原计划中的 Google Play
+Billing 内购、Data Safety、封闭测试与商店截图一并取消。
+
+客户端已迁出本仓库，构建与进度复盘见
+[FlatRadar-Android](https://github.com/751K/FlatRadar-Android)
+（`docs/ANDROID_PLAN.md`），CI 也在该仓库。本仓库的 `build.yml` 只构建桌面端。
 
 ### 第二期：iOS 性能优化
-- 对现有 iOS 客户端做性能专项优化
-- 已完成：DateFormatter 静态化、featureMap 键预归一化、URLCache 条件 GET、通知首屏非阻塞、地图聚类后台化（v1.7.10）
-- 继续：列表滚动帧率、图片加载、内存占用、启动时间
-- SwiftUI 视图 diff 优化，减少不必要的 body 重算
-- Instruments profiling（Time Profiler / Allocations / SwiftUI View Body）
+
+已完成：DateFormatter 静态化、featureMap 键预归一化、URLCache 条件 GET、通知首屏
+非阻塞、地图聚类后台化（v1.7.10）。其中 URLCache 条件 GET 依赖后端的 ETag / 304
+中间件，那部分在本仓库（见下方 [§1 后端改动](#后端改动全部已完成)）。
+
+剩余的客户端侧优化项已随客户端迁出，见
+[FlatRadar-iOS](https://github.com/751K/FlatRadar-iOS)。
 
 ### 第三期：Xior 自动预订研究 —— **研究部分已完成（2026-08-04）**
 - 三个攻坚项均已落地：登录流程（两段式，四处陷阱逐一实测）、多步表单自动填写
@@ -81,39 +279,28 @@ ARCHITECTURE §5.12。
   `captcha/rentcafe_pages.py` 逐页记录所用版本为 v2 或 v3）
 - 实现位于 `bookers/rentcafe.py`，OurDomain / OurCampus 共用同一份
 - 分析原文见 [XIOR.md](XIOR.md) §8（此处早先所写的 §11 系笔误，XIOR.md 无该节）
-- 余下的三项工作见上方[方向二](#方向二rentcafe-自动预订--侦察和编码都做完了卡在验证)
+- 余下的三项工作均不属于编码，且不在 v2.0 发布条件内（见上方
+  [明确不在 v2.0 内](#明确不在-v20-内)）：
+  1. **Xior 的最后一步尚未确认。** 系统代为上传证件后申请表能否正常保存，仅差一次
+     真实尝试。Xior 的草稿**不锁定房源**，比 Holland2Stay 提前一步终止，下一页即需
+     填写 IBAN/SWIFT，因此即使走通，价值也远低于 Holland2Stay 一线。
+  2. **OurDomain 欠缺一个真实账号。** 登录之后的环节全部未验证，且该流程不含选房
+     页，一旦脱离流程便没有重选入口。需要含完整申请人资料、背景调查同意及已上传
+     证件的 RENTCafe 账号。
+  3. **账号粒度尚不明确。** 两栋 OurDomain 楼分属两个 securerc 主机，cookie 不跨
+     主机，很可能一栋楼一套账号；目前用的是面板上单一的 `ourdomain_email` /
+     `ourdomain_password`，待验证暴露问题后再照 `xior_accounts` 拆分。
+- OurCampus 不在该线之内：其预订流程从未侦察，出房极少，不存在可预订的标的。
 
 ---
 
-## 1. Android 客户端
+## 1. Android 客户端 —— 已迁出
 
-> 状态更新（2026-05-30）：iOS 客户端进入维护阶段。Android 客户端 A0–A5 已完成，FCM 推送端到端拉通，CI 自动构建签名 APK。Play Store 上架已于 2026-08-03 放弃，改为 Release 页直接下载。详见 [FlatRadar-Android](https://github.com/751K/FlatRadar-Android) 里的 `docs/ANDROID_PLAN.md` 进度复盘。
+客户端代码、技术栈、架构对齐、阶段拆分与风险评估已随仓库迁至
+[FlatRadar-Android](https://github.com/751K/FlatRadar-Android)，规划原文见该仓库的
+`docs/ANDROID_PLAN.md`。
 
-### 目标
-
-把 FlatRadar 的核心租客体验稳定带到 Android，覆盖另一半潜在用户群。国际学生 / 流动 young professional 群体里 Android 占比 ~40-50%，Android parity 已完成；Play Store 上架已于 2026-08-03 放弃，改为 Release 页直接下载签名 APK。
-
-### 技术栈
-
-**Kotlin + Jetpack Compose 原生开发**，不引入 KMP / 跨平台框架。理由：
-
-- iOS 端 SwiftUI 代码已稳定并进入维护阶段，没必要为了共享 60% 逻辑回去重构
-- Compose 与 SwiftUI 声明式范式接近，视图层迁移心智成本低
-- Material 3 组件体系成熟，设计系统可对等映射
-- 原生推送（FCM）、地图（Google Maps / OSM）、图表库支持最完整
-- 两套代码并行维护的代价远低于跨平台框架的集成 / 调试 / 平台适配成本
-
-### 架构对齐
-
-与 iOS 端保持分层对称，降低跨端理解成本：
-
-| 层 | iOS (SwiftUI) | Android (Compose) | 说明 |
-|---|---|---|---|
-| View | SwiftUI Views | `@Composable` + Navigation | 声明式 UI，组件级对应 |
-| State | `@Observable` / `@StateObject` | `ViewModel` + `StateFlow` | MVVM，响应式数据流 |
-| Network | `URLSession` + async/await | OkHttp / Ktor + coroutines | REST + SSE（OkHttp EventSource） |
-| Storage | `UserDefaults` / Keychain | `DataStore` / `EncryptedSharedPreferences` | Token / 偏好持久化 |
-| DI | `@Environment` / 单例 | Hilt (Dagger) | 依赖注入 |
+本节只保留**属于本仓库的那部分**——为支持 Android 所做的后端改动。
 
 ### 后端改动（全部已完成）
 - FCM 推送通道：`notifier_channels/fcm.py` ✅（HTTP v1 API + OAuth2 service account），与 `apns.py` 对称
@@ -124,24 +311,6 @@ ARCHITECTURE §5.12。
 - 服务端已部署：`FCM_ENABLED=true` + service account JSON `/secrets/` ✅
 - 条件缓存中间件：`app/routes/api_v1/__init__.py` ✅ ETag + Cache-Control + 304 对所有 GET 200 JSON 响应
 - 每小时存活采样：`mstorage/_base.py` ✅ `record_uptime_sample()` / `uptime_percent_7d()` 替代旧的 `monitor_started_at`
-
-### 阶段拆分
-
-| 阶段 | 内容 | 状态 |
-|---|---|---|
-| **A0** | 项目骨架：Android Studio + Gradle (Kotlin DSL) + Compose + Hilt + 主题 / Navigation scaffold | ✅ 已完成 |
-| **A1** | 鉴权 + Dashboard + Listings：Bearer Token 管理、三档登录、BiometricPrompt、实时统计、房源列表 + 筛选 + 详情 | ✅ 已完成 |
-| **A2** | Map + Calendar：Google Maps Compose + clustering + 日历月格视图 | ✅ 已完成 |
-| **A3** | SSE + 通知列表：OkHttp 实时推送、TODAY/YESTERDAY/EARLIER 分组、滑动已读、导航 unread 角标 | ✅ 已完成 |
-| **A4** | FCM 集成：Firebase 初始化、token 注册/刷新、后端推送通道适配、深链跳转 | ✅ 已完成 |
-| **A5** | Settings + 多语言 + 深色模式 + 错误处理：DataStore、System/Light/Dark、~170 中英字符串、CrashReporter | ✅ 已完成 |
-| **A6** | 打磨 + Play Store 上架 | ❌ 已放弃（2026-08-03）。上架相关全部取消；只剩 Material 3 视觉打磨可独立进行 |
-
-### 风险
-
-- **Material vs HIG 设计差异**：Dashboard / List 卡片样式要重新对齐 Material 3 token（spacing、elevation、shape），不能照搬 iOS HIG 数值
-- **FCM token 失效回收**：服务端做 `NotRegistered` 清理，与 APNs `unregistered` 处理路径共用逻辑
-- **地图组件选型**：Google Maps Compose 需 API key + Play Services；若考虑无 GMS 设备（华为等），需 osmdroid 备选方案
 
 ---
 
@@ -240,26 +409,11 @@ FlatRadar 已由 Holland2Stay 单源演进为多平台监控。面向荷兰国�
 
 ---
 
-## 3. iOS 客户端 — 剩余低优项
+## 3. iOS 客户端 —— 已迁出
 
-> 性能优化专项（v1.7.10）已完成：DateFormatter 静态化、featureMap 键预归一化、URLCache 条件 GET（配合后端 ETag/304 中间件）、通知首屏非阻塞、地图聚类后台化。详见 `docs/CHANGELOG.md`。
-
-### Larger Text / Dynamic Type 完整支持（accessibility nutrition label 第 7 项）
-
-- 代码内 `.font(.system(size: N))` 固定字号全部替换为 `.body` / `.subheadline` / `.caption` 等语义字号
-- mono caps 标签加 `.dynamicTypeSize(...DynamicTypeSize.accessibility1)` 上限避免撑爆卡片
-- 跑 AX5 字号回归，调整 ListingRow / NotificationRow / DashboardView 在最大字号下的截断 / 换行行为
-- ASC nutrition label 补勾 "Larger Text"
-
-### Swift Charts 无障碍
-
-- DashboardView 的 sparkline + KPI charts 加 `.chartDescriptor` / audio graph 支持
-- VoiceOver 用户能听到趋势走向、最大值、最小值
-
-### iPad 多窗口（Stage Manager）
-
-- 支持 iPad 多窗口同时打开两个不同的 listing 详情
-- `NSUserActivity` 状态恢复
+性能优化专项（v1.7.10）已完成，见 `docs/CHANGELOG.md`。剩余的低优项（Dynamic Type
+完整支持、Swift Charts 无障碍、iPad Stage Manager 多窗口）属于客户端侧，已随仓库迁至
+[FlatRadar-iOS](https://github.com/751K/FlatRadar-iOS)。
 
 ---
 
