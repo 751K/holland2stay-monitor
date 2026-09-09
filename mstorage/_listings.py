@@ -10,6 +10,8 @@ from collections.abc import Iterable
 from typing import Optional
 
 from config import canonical_city
+
+from ._derived import derived_from_features
 from models import (
     STATUS_AVAILABLE,
     Listing,
@@ -307,6 +309,13 @@ class ListingOps:
                     old_row.get("available_from") if old_row else None,
                 )
 
+                # 排序用的派生列，和 features 同源同时写。
+                # **三个写入分支都要带上它们**：只写 INSERT 的话，存量房源的面积
+                # 和能耗永远停在第一次入库时的值，而 features 是会变的（上游改了
+                # 面积、补了能耗标签）。这正是 2026-09-05 os_version 只写 INSERT
+                # 分支那次的形状——看上去成了，其实只对新数据成。
+                area_value, energy_rank_value = derived_from_features(features_json)
+
                 if old_status is None:
                     # P0: 写入 source 字段。老的 INSERT 不传 source 时
                     # 走 schema 默认值 'holland2stay'，但 Listing.source 已
@@ -315,14 +324,15 @@ class ListingOps:
                         """INSERT INTO listings
                            (id, name, status, price_raw, available_from,
                             features, url, city, first_seen, last_seen, notified, last_status,
-                            source, city_normalized)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?)""",
+                            source, city_normalized, area_value, energy_rank)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)""",
                         (
                             listing.id, listing.name, listing.status,
                             listing.price_raw, listing.available_from,
                             features_json,
                             listing.url, listing.city, now, now, listing.status,
                             listing.source, canonical_city(listing.city or ""),
+                            area_value, energy_rank_value,
                         ),
                     )
                     new_listings.append(listing)
@@ -341,11 +351,12 @@ class ListingOps:
                         cur.execute(
                             """UPDATE listings
                                SET name=?, price_raw=?, available_from=?,
-                                   features=?, last_seen=?, source=?
+                                   features=?, area_value=?, energy_rank=?,
+                                   last_seen=?, source=?
                                WHERE id=?""",
                             (
                                 listing.name, listing.price_raw, listing.available_from,
-                                features_json,
+                                features_json, area_value, energy_rank_value,
                                 now, listing.source, listing.id,
                             ),
                         )
@@ -358,13 +369,14 @@ class ListingOps:
                     cur.execute(
                         """UPDATE listings
                            SET name=?, status=?, price_raw=?, available_from=?,
-                               features=?, last_seen=?, last_status=?,
+                               features=?, area_value=?, energy_rank=?,
+                               last_seen=?, last_status=?,
                                status_is_inferred=0, status_hold_until='', source=?
                            WHERE id=?""",
                         (
                             listing.name, listing.status, listing.price_raw,
                             listing.available_from,
-                            features_json,
+                            features_json, area_value, energy_rank_value,
                             now, listing.status, listing.source, listing.id,
                         ),
                     )

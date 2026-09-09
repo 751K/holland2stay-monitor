@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FlatRadar Backend API",
-    "version": "1.22.0",
+    "version": "1.23.0",
     "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
@@ -1354,13 +1354,17 @@
       "SortQuery": {
         "name": "sort",
         "in": "query",
-        "description": "Sort key; a leading '-' means descending. Omitted means '-first_seen', which is part of the contract, not an implementation detail. Results always carry an implicit ', id ASC' tiebreak so that offset paging is stable. Unknown values are rejected with 400 rather than silently falling back. 'price' sorts on the parsed numeric value; 'status' uses a business order (available to book < in lottery < reserved < occupied/rented/not available < other), not lexical order. Rows whose key is unknown — unparseable price, empty or sentinel available_from — sort last in both directions. The comma form (e.g. 'city,-price') is reserved for future multi-key sorting and is currently rejected.",
+        "description": "Sort key; a leading '-' means descending. Omitted means '-first_seen', which is part of the contract, not an implementation detail. Results always carry an implicit ', id ASC' tiebreak so that offset paging is stable. Unknown values are rejected with 400 rather than silently falling back. 'price' sorts on the parsed numeric value, not the price_raw text. 'area' sorts on square metres and 'energy' on the label's rank, where ascending means best first (A+++ before F) — both are stored as derived columns because the raw feature values are text. 'status' uses a business order (available to book < in lottery < reserved < occupied/rented/not available < other), not lexical order. Rows whose key is unknown — unparseable price, missing area or energy label, empty or sentinel available_from — sort last in both directions. The comma form (e.g. 'city,-price') is reserved for future multi-key sorting and is currently rejected.",
         "schema": {
           "type": "string",
           "default": "-first_seen",
           "enum": [
             "price",
             "-price",
+            "area",
+            "-area",
+            "energy",
+            "-energy",
             "first_seen",
             "-first_seen",
             "last_seen",

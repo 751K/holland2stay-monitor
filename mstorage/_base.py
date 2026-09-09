@@ -77,7 +77,13 @@ class StorageBase:
                 -- mark_stale_listings 把 7 天未刷新的 listing 标为 Occupied），
                 -- 不是从 API 真实读到的。下次 API 真的返回该 listing 时，
                 -- diff() 会把 inferred 复位为 0。Phase 3 的"鬼影回归"检测靠它。
-                status_is_inferred INTEGER NOT NULL DEFAULT 0
+                status_is_inferred INTEGER NOT NULL DEFAULT 0,
+                -- 从 features 派生、只为排序而存在的两列（见 mstorage/_derived.py）。
+                -- 可空且**无默认值**：NULL = 不知道（抓不到面积、能耗标签不在
+                -- 白名单里）。给默认 0 的话，那些房子会挤在最优的一端，而 0 是
+                -- 一个合法的面积/等级，看起来像真值。
+                area_value        REAL,      -- 平方米，越大越大
+                energy_rank       INTEGER    -- ENERGY_LABELS 下标，越小越好
             );
 
             CREATE TABLE IF NOT EXISTS status_changes (
@@ -419,6 +425,14 @@ class StorageBase:
         # 被系统性高估。回填等于往干净数据里掺一批有偏的。
         self._add_column_if_missing("device_tokens", "os_version", "TEXT")
 
+        # area_value / energy_rank：从 features 派生的排序列。
+        # 两列一起判：只回填「刚加上的那次」，之后不再全表扫。NULL 在这里是
+        # 合法取值（这条房源就是没有面积），所以不能拿「值为 NULL」当「还没算过」。
+        added_area = self._add_column_if_missing("listings", "area_value", "REAL")
+        added_energy = self._add_column_if_missing("listings", "energy_rank", "INTEGER")
+        if added_area or added_energy:
+            self._backfill_derived_sort_columns()
+
         # listings.city_normalized：归一后的城市名。
         #
         # `city` 这一列在四个平台上存的不是同一种东西——H2S 存真城市
@@ -523,6 +537,40 @@ class StorageBase:
                     (want, raw, want),
                 )
 
+    def _backfill_derived_sort_columns(self, ids: "list[str] | None" = None) -> int:
+        """从 ``features`` 重算 ``area_value`` / ``energy_rank``。返回改了几行。
+
+        两处用它：加列时把存量补齐；以及任何**改写了 features 的迁移**跑完之后
+        （见 ``_backfill_assumed_features`` / ``_resync_xior_furnishing``）。后者
+        容易漏——改了 features 却不重算派生列，两者就此分叉，而分叉的表现是排序
+        安静地按旧数据来，没有任何报错。
+
+        ``ids`` 给了就只重算这些行，省得为一次小迁移全表扫。
+        """
+        from ._derived import derived_from_features
+
+        if ids is not None and not ids:
+            return 0
+        if ids is None:
+            rows = self._conn.execute(
+                "SELECT id, features FROM listings").fetchall()
+        else:
+            ph = ",".join("?" * len(ids))
+            rows = self._conn.execute(
+                f"SELECT id, features FROM listings WHERE id IN ({ph})", ids
+            ).fetchall()
+
+        updates = [(*derived_from_features(r["features"]), r["id"]) for r in rows]
+        if not updates:
+            return 0
+        with self._conn:
+            self._conn.executemany(
+                "UPDATE listings SET area_value=?, energy_rank=? WHERE id=?",
+                updates,
+            )
+        logger.info("已重算 %d 条房源的 area_value / energy_rank", len(updates))
+        return len(updates)
+
     def _backfill_assumed_features(self) -> None:
         """给存量房源补上 ``SOURCE_ASSUMED_FEATURES`` 声明的属性。
 
@@ -573,6 +621,9 @@ class StorageBase:
                     "UPDATE listings SET features=? WHERE id=?", updates
                 )
             logger.info("已为 %d 条存量房源补上平台声明属性", len(updates))
+            # features 变了，派生列跟着重算——否则两者分叉，而分叉的表现是排序
+            # 安静地按旧数据来。
+            self._backfill_derived_sort_columns([u[1] for u in updates])
 
     def _resync_xior_furnishing(self) -> None:
         """把存量 Xior 房源的装修档位重算一遍。
@@ -640,6 +691,7 @@ class StorageBase:
                     "UPDATE listings SET features=? WHERE id=?", updates
                 )
             logger.info("已重算 %d 条 Xior 房源的装修档位", len(updates))
+            self._backfill_derived_sort_columns([u[1] for u in updates])
 
     def _encrypt_applicant_profiles(self) -> None:
         """把存量申请人档案里该加密而没加密的字段补上。

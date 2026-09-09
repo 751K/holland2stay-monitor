@@ -43,7 +43,7 @@ class TestParsing:
         assert parse_sort(key) == (key, False)
         assert parse_sort("-" + key) == (key, True)
 
-    @pytest.mark.parametrize("bad", ["pirce", "-pirce", "area", "energy",
+    @pytest.mark.parametrize("bad", ["pirce", "-pirce", "areaa", "enrgy",
                                      "name", "id", "--price", "price-"])
     def test_unknown_keys_raise(self, bad):
         """**不静默回退。** 回退的话返回的是一份错的顺序，而客户端无从察觉。"""
@@ -55,10 +55,13 @@ class TestParsing:
         with pytest.raises(SortError):
             parse_sort("city,-price")
 
-    def test_area_and_energy_are_not_in_v1(self):
-        """它们埋在 feature_map 里是文本，服务端排序要先抽成派生列。"""
-        assert "area" not in SORT_KEYS
-        assert "energy" not in SORT_KEYS
+    def test_area_and_energy_are_in(self):
+        """它们最初不在 v1 里——features 里存的是文本，按文本排是字典序。
+
+        2026-09-09 落成派生列 area_value / energy_rank 之后进来。派生列本身的
+        测试在 tests/test_derived_sort_columns.py。
+        """
+        assert "area" in SORT_KEYS and "energy" in SORT_KEYS
 
 
 class TestStableTiebreak:
@@ -176,3 +179,29 @@ class TestHttp:
     def test_multi_key_is_400(self, admin_client):
         assert admin_client.get(
             "/api/v1/listings?sort=city,-price").status_code == 400
+
+
+class TestAreaAndEnergy:
+    """走派生列，不是每次现从 features 里抽。"""
+
+    def _row(self, rid, area=None, rank=None):
+        return {"id": rid, "area_value": area, "energy_rank": rank}
+
+    def test_area_is_numeric_not_lexical(self):
+        """按文本排的话 "9 m²" 会排到 "87.28 m²" 后面。"""
+        rows = [self._row("big", 87.28), self._row("small", 9.0)]
+        assert _ids(rows, "area") == ["small", "big"]
+        assert _ids(rows, "area", desc=True) == ["big", "small"]
+
+    def test_energy_ascending_is_best_first(self):
+        """rank 越小越好（A+++ = 0），所以升序 = 最好的在前。"""
+        rows = [self._row("f", rank=8), self._row("aaa", rank=0),
+                self._row("b", rank=4)]
+        assert _ids(rows, "energy") == ["aaa", "b", "f"]
+
+    def test_missing_values_sink_in_both_directions(self):
+        rows = [self._row("has", 66.0, 3), self._row("none")]
+        assert _ids(rows, "area") == ["has", "none"]
+        assert _ids(rows, "area", desc=True) == ["has", "none"]
+        assert _ids(rows, "energy") == ["has", "none"]
+        assert _ids(rows, "energy", desc=True) == ["has", "none"]

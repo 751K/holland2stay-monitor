@@ -311,10 +311,14 @@ class SortError(ValueError):
         super().__init__(raw)
 
 
-#: ``sort`` 允许的键。值是「取排序键的函数」，不是列名——见下面为什么不在 SQL 里排。
+#: ``sort`` 允许的键。
+#:
+#: ``area`` / ``energy`` 在 v1 里曾被排除，因为它们埋在 features 里是文本。
+#: 2026-09-09 落成派生列 ``area_value`` / ``energy_rank``（见
+#: ``mstorage/_derived.py``）之后进来。
 SORT_KEYS: tuple[str, ...] = (
-    "price", "first_seen", "last_seen", "available_from", "city", "status",
-    "source",
+    "price", "area", "energy", "first_seen", "last_seen", "available_from",
+    "city", "status", "source",
 )
 
 #: 不传 ``sort`` 时的顺序。**这是契约的一部分**，不是实现细节。
@@ -388,6 +392,15 @@ def _sort_value(row: dict, key: str):
     if key == "price":
         v = parse_float(row.get("price_raw", ""))
         return (v is None, v if v is not None else 0.0)
+    if key in ("area", "energy"):
+        # 这两个走派生列（mstorage/_derived.py），不是每次现从 features 里抽：
+        # features 里存的是文本（"87.28 m²" / "B"），按文本排是字典序——
+        # "9 m²" 会排到 "87.28 m²" 后面，"A+++" 会排到 "A" 前面。
+        #
+        # energy_rank 越小越好（A+++ = 0），所以「energy 升序」= 最好的在前，
+        # 正是用户对"按能耗排"的默认理解。
+        v = row.get("area_value" if key == "area" else "energy_rank")
+        return (v is None, v if v is not None else 0)
     if key == "status":
         return (False, status_rank(row.get("status")))
     if key == "available_from":
