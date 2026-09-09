@@ -1,5 +1,120 @@
 # Changelog
 
+## v1.37.0 (2026-09-09)
+
+本次发布包含六次提交，覆盖浏览器资源、API 契约与规划三个方面，共六条。
+
+主线是一次生产事故与它的两层修复。v1.36.0 上线的下单常驻浏览器在生产里泄漏
+Chromium，18 小时后拖垮了 Xior 与 Holland2Stay 两个抓取源。第一层是关掉它并清理
+现场，第二层是修掉泄漏的根因——那个根因不属于常驻浏览器，属于所有 BrowserFetcher
+使用者，只是此前重建频率低得多而未曾暴露。
+
+### 浏览器资源
+
+* **下单常驻浏览器默认关闭**（[cbf2a00]）
+
+    v1.36.0 上线，一天后关闭。生产实测：每次建立成功后 5–6 分钟即被 `is_alive()`
+    判死，而 `close()` 并未收掉进程——Playwright 的 node 驱动与整棵 Chromium 进程
+    树都还在（父进程亦在，非孤儿，是 Python 侧丢弃了引用）。18 小时泄漏 5 套，容
+    器内存自 1.14 GiB 升至 1.73 GiB（上限 2 GiB），进程数 245 → 576。随后
+    Holland2Stay 于 16:42 因挑战失败熔断，Xior 于次日 03:46 起每轮渲染器卡死 600
+    秒，共 32 次。
+
+    即：它未能加快下单，反而拖垮了两个抓取源；且自 13:44 起连建立都不再成功，最
+    后十余小时只在泄漏。
+
+    开关置于 `RUNTIME_KEYS` 而非 `TUNING_KEYS`：仅前者会被 `settings_store.hydrate`
+    自数据库注水，也就是仅它能在不重新部署的前提下关闭。一个用于救火的开关，若关
+    闭它本身需要一次部署，则在最需要之时无用。
+
+* **`close()` 之后确认 profile 目录确已清空**（[ddafcc9]）
+
+    上一条的根因。链条自我维持：连接断开后 `close()` 对着已断的通道调用，既不报
+    错也不生效；紧接着释放槽位锁；下一次 `_open_browser` 取得同一目录，
+    `_clear_stale_singleton_locks` 删除**仍在运行**的那个实例的单实例锁；两个
+    Chromium 同时打开同一 profile，随即再次死亡。每死一次泄漏一套，而泄漏本身使
+    下一次更易死亡。
+
+    现于释放槽位锁**之前**调用 `_reap_profile()`：按 `--user-data-dir=<本目录>`
+    反查仍在运行的进程（Playwright 的 `BrowserContext` 不暴露 pid），SIGTERM 后
+    SIGKILL。该回收对所有 `BrowserFetcher` 使用者生效，抓取侧属同一路径，仅重建
+    频率低得多而此前未暴露。
+
+    另有两处诊断改动：`_drop()` 中 `close()` 抛出异常自 DEBUG 提升至 WARNING——
+    「关不掉」正是「进程还在」的直接征兆，而线上日志级别为 INFO，等同未记录；
+    「浏览器已死」补上具体原因（页面被关闭 / 连接断开 / 对象为空），三者处置不同，
+    此前记为同一句话。
+
+    此条修复的是「泄漏不再累积」，非「浏览器为何 5 分钟即死」。后者首发原因尚未
+    查明，常驻浏览器保持默认关闭。
+
+### API 契约
+
+* **文档全量核对：三层此前无人比对**（[1b1ede6]）
+
+    既有契约测试仅覆盖路径双向 diff 与请求体字段。查出四处漂移，无一会使既有测试
+    变红：
+
+    `DaysQuery` 的默认值写 30，而代码 `DEFAULT_STATS_DAYS` 为 7。`LimitQuery` 被
+    `/listings`（100/500）与 `/notifications`（50/200）共用——一个组件同时对两个
+    边界不同的端点发言，对其中之一必然为错；客户端照 spec 请求 500 条通知，得到的
+    是被静默截断的 200 条。`MapLocateOk` 写着空的 `"allOf": []`，因而既未继承
+    `ok` / `error` 也无人报错。`API.md` 缺三个端点：`GET /legal`、
+    `GET /map/locate`、`POST /auth/verify`。
+
+    新增四条守卫，各钉一层。守卫必须解 `$ref`——`$ref` 形式的参数没有 `in` 键，
+    审计脚本首版据此把三条早已写好的参数报为缺失；亦必须解常量名，`DaysQuery` 那
+    处漂移只有解开常量才比得出来。
+
+* **`GET /listings` 支持 `sort`**（[f7c97ae]）
+
+    单键，前导 `-` 为降序。四处按序处理：
+
+    `id` 兜底比排序本身更要紧。此前顺序来自 `ORDER BY first_seen DESC`，契约从未
+    承诺，而三端的 `offset` 分页均建于其上；现于任何排序键之后附一唯一列，且不传
+    `sort` 时亦排序，故兜底始终生效。默认值 `-first_seen` 一并写入契约。
+
+    取不到值的行一律沉底，升降序皆然；`available_from` 的 2050 哨兵与空值同等对待
+    ——按日期排的话「最早可入住」首屏将全是它，比空值更糟，因它看似真日期。
+
+    `status` 按业务序而非字典序：按字母排是「抽签」在「可订」之前。归一化与客户端
+    `Listing.statusKind` 一致。
+
+    非法值返回 400 并附可用值，不静默回退。此与 `limit` 超范围即 clamp 非同类：
+    clamp 一个数字仍尊重意图，而悄然替换一个拼错的排序键，返回的是一份错误的顺序，
+    客户端无从察觉。
+
+* **`area` / `energy` 落成派生列**（[e8d4b0e]）
+
+    二者在 `features` 中为文本（`"87.28 m²"` / `"B"`），按文本排即字典序：
+    `"9 m²"` 排在 `"87.28 m²"` 之后，`"A+++"` 排在 `"A"` 之前。故新增
+    `area_value`（平方米，越大越大）与 `energy_rank`（`ENERGY_LABELS` 下标，越小
+    越好，`A+++` = 0）两列，均可空且无默认值——`NULL` 表示不知道，给默认 0 会使这
+    些行挤在最优的一端，而 0 是合法的面积与等级，看上去像真值。
+
+    `mstorage` 中写 `features` 之处共五个：`diff()` 的一个 INSERT 与两个 UPDATE，
+    以及两处改写 features 的迁移，全部同写派生列。仅写 INSERT 的后果是「新数据正
+    确、存量永远为空」，与 v1.36.0 中 `os_version` 那次同形。另以静态扫描兜底：任
+    何写 `features=?` 的 SQL 附近若不含 `area_value` 即判定失败。
+
+    生产迁移回填 822 条；两处 features 迁移执行后各重算受影响的行。
+
+### 规划
+
+* **`FUTURE_PLAN` 的 v2.0 重定**（[49bd7d6]）
+
+    原计划成于 2026-08-03，其中一部分已完成、一部分前提不再成立。v2.0 收敛为
+    「CI 加结构」四个方向，并明确写出不动的部分：单机 SQLite 与 web / monitor 双
+    进程模型不拆库、不上队列、不改全异步——那些是运维成本，不是正确性问题。
+    Android / iOS 两章随仓库拆分缩为一行。
+
+[49bd7d6]: https://github.com/751K/holland2stay-monitor/commit/49bd7d6
+[cbf2a00]: https://github.com/751K/holland2stay-monitor/commit/cbf2a00
+[ddafcc9]: https://github.com/751K/holland2stay-monitor/commit/ddafcc9
+[1b1ede6]: https://github.com/751K/holland2stay-monitor/commit/1b1ede6
+[f7c97ae]: https://github.com/751K/holland2stay-monitor/commit/f7c97ae
+[e8d4b0e]: https://github.com/751K/holland2stay-monitor/commit/e8d4b0e
+
 ## v1.36.0 (2026-09-08)
 
 本次发布包含二十二次提交，覆盖自动预订、容量与会话、客户端仓库拆分、抓取平台、
