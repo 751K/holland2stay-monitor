@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FlatRadar Backend API",
-    "version": "1.20.0",
+    "version": "1.21.0",
     "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
@@ -520,7 +520,7 @@
         ],
         "parameters": [
           {
-            "$ref": "#/components/parameters/LimitQuery"
+            "$ref": "#/components/parameters/NotificationLimitQuery"
           },
           {
             "$ref": "#/components/parameters/OffsetQuery"
@@ -597,8 +597,10 @@
             "in": "query",
             "schema": {
               "type": "integer",
-              "minimum": 0
-            }
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Resume from this notification id; 0 means from the start."
           }
         ],
         "responses": {
@@ -1309,7 +1311,8 @@
           "minimum": 1,
           "maximum": 500,
           "default": 100
-        }
+        },
+        "description": "Page size for /listings. Out-of-range values are clamped, not rejected."
       },
       "OffsetQuery": {
         "name": "offset",
@@ -1327,7 +1330,19 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 365,
-          "default": 30
+          "default": 7
+        },
+        "description": "Time window in days. Out-of-range values are clamped, not rejected; the effective value is echoed back in data.days."
+      },
+      "NotificationLimitQuery": {
+        "name": "limit",
+        "in": "query",
+        "description": "Page size for /notifications. Out-of-range values are clamped, not rejected.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "default": 50
         }
       }
     },
@@ -2444,12 +2459,19 @@
         "content": {
           "application/json": {
             "schema": {
-              "allOf": [],
-              "properties": {
-                "data": {
-                  "$ref": "#/components/schemas/MapLocateResult"
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MapLocateResult"
+                    }
+                  }
                 }
-              }
+              ]
             }
           }
         }

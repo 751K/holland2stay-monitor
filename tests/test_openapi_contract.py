@@ -286,3 +286,217 @@ def test_openapi_documents_every_request_field_the_code_reads(test_app) -> None:
         "多半是 handler 改了读请求体的写法（不再是 `body.get(\"…\")`），"
         "于是这条测试什么都没在比——绿的，但空的。"
         f"\n抽到的：{sorted(seen_fields)}")
+
+# ── 查询参数 ────────────────────────────────────────────────────────
+#
+# 路由比过了、请求体字段比过了，2026-09-09 的全量核对发现第三层没人比：**查询
+# 参数**，而且不是「有没有」，是「写的值对不对」。
+#
+# 当时查出两处，都是值不对而不是缺失：
+#
+#   * ``DaysQuery`` 的 default 写 30，代码 ``DEFAULT_STATS_DAYS`` 是 7
+#   * ``LimitQuery`` 被 ``/listings``（100/500）和 ``/notifications``（50/200）
+#     共用——一个组件同时对两个边界不同的端点说话，对其中一个必然是错的。
+#     客户端照 spec 要 500 条通知，拿到的是被静默截断的 200 条。
+#
+# 也因此这个测试**必须解 $ref**。审计脚本第一版只看 ``prm["in"] == "query"``，
+# 而 ``$ref`` 形式的参数没有 ``in`` 键，于是三条早就写好的参数被当成「spec 里没
+# 有」报了出来——差点照着这份假清单往 spec 里补重复定义。
+
+_ARG_GET = re.compile(
+    r'request\.args\.get\(\s*["\']([A-Za-z0-9_]+)["\']\s*,?\s*([^)]*)\)')
+
+
+def _resolve_param(spec: dict, prm: dict) -> dict:
+    """把 ``$ref`` 形式的参数解开。不解的话它连 ``in`` 都没有。"""
+    seen = set()
+    while isinstance(prm, dict) and "$ref" in prm:
+        ref = prm["$ref"]
+        if ref in seen:
+            return {}
+        seen.add(ref)
+        cur: object = spec
+        for part in ref.lstrip("#/").split("/"):
+            cur = (cur or {}).get(part, {})   # type: ignore[union-attr]
+        prm = cur          # type: ignore[assignment]
+    return prm if isinstance(prm, dict) else {}
+
+
+def _query_params(spec: dict, path: str) -> dict[str, dict]:
+    """这条路径上所有查询参数：名字 → schema。"""
+    out: dict[str, dict] = {}
+    for _meth, op in spec["paths"].get(path, {}).items():
+        if not isinstance(op, dict):
+            continue
+        for prm in op.get("parameters") or []:
+            prm = _resolve_param(spec, prm)
+            if prm.get("in") == "query" and prm.get("name"):
+                out[prm["name"]] = prm.get("schema") or {}
+    return out
+
+
+def _default_value(expr: str, view) -> int | None:
+    """把代码里那个默认值表达式解成整数；解不出返回 None。
+
+    不能只认字面量数字：``request.args.get("days", DEFAULT_STATS_DAYS)`` 写的是
+    常量名，而**今天查出的那处漂移恰恰是它**（spec 写 30、常量是 7）。只比字面量
+    的话，这个测试对那一处永远是绿的——那就等于没测到唯一一个真出问题的地方。
+    """
+    expr = expr.strip()
+    if expr.lstrip("-").isdigit():
+        return int(expr)
+    if not expr.isidentifier():
+        return None
+    mod = inspect.getmodule(inspect.unwrap(view))
+    val = getattr(mod, expr, None)
+    return val if isinstance(val, int) and not isinstance(val, bool) else None
+
+
+def _reads_query_args(test_app):
+    """路由 → {参数名: (默认值表达式, view 函数)}。"""
+    for rule in test_app.url_map.iter_rules():
+        raw = str(rule.rule)
+        if not raw.startswith(API_PREFIX + "/"):
+            continue
+        view = test_app.view_functions.get(rule.endpoint)
+        if view is None:
+            continue
+        try:
+            src = inspect.getsource(inspect.unwrap(view))
+        except (OSError, TypeError):
+            continue
+        found = {m.group(1): (m.group(2).strip(), view)
+                 for m in _ARG_GET.finditer(src)}
+        if found:
+            yield _normalize(raw), found
+
+
+def test_openapi_documents_every_query_parameter_the_code_reads(test_app) -> None:
+    """代码 ``request.args.get`` 读的查询参数，spec 里都要有。"""
+    spec = _load_openapi()
+    drift: list[str] = []
+    checked = 0
+    seen: set[str] = set()
+
+    for path, found in _reads_query_args(test_app):
+        checked += 1
+        seen |= set(found)
+        missing = sorted(set(found) - set(_query_params(spec, path)))
+        if missing:
+            drift.append(f"{path} 读了 {missing}，spec 里没有")
+
+    assert not drift, (
+        "这些查询参数代码在读、spec 没写——客户端照契约写就用不上：\n  "
+        + "\n  ".join(drift))
+    # 挡住「正则或归一化坏掉导致一条都没扫到」，那会让上面的断言恒真。
+    assert checked >= 5, f"只扫到 {checked} 条读查询参数的路由，正则多半坏了"
+    assert len(seen) >= 12, f"只认出 {len(seen)} 个参数名，正则多半坏了"
+
+
+def test_openapi_query_parameter_defaults_match_the_code(test_app) -> None:
+    """spec 里写的默认值，要和代码里那个字面量一致。
+
+    「参数在」不等于「参数对」。``DaysQuery`` 写着 default 30 而代码用 7，整整
+    一年没人发现——路由 diff、字段 diff、存在性检查全都是绿的。
+    """
+    spec = _load_openapi()
+    drift: list[str] = []
+    compared = 0
+    via_constant = 0
+
+    for path, found in _reads_query_args(test_app):
+        documented = _query_params(spec, path)
+        for name, (default_expr, view) in sorted(found.items()):
+            if name not in documented or not default_expr:
+                continue
+            code_default = _default_value(default_expr, view)
+            if code_default is None:
+                continue          # 默认值不是整数常量，比不了
+            compared += 1
+            if not default_expr.lstrip("-").isdigit():
+                via_constant += 1
+            spec_default = documented[name].get("default")
+            if spec_default != code_default:
+                drift.append(
+                    f"{path} 的 {name}：代码默认 {code_default}"
+                    f"（{default_expr}），spec 写 {spec_default!r}")
+
+    assert not drift, "spec 的默认值和代码对不上：\n  " + "\n  ".join(drift)
+    assert compared >= 5, f"只比到 {compared} 个默认值，正则多半坏了"
+    # 至少有一个默认值是**常量名**而不是字面量（``DEFAULT_STATS_DAYS``）。
+    # 去掉常量解析之后 compared 只少 1，光靠上面那个下限挡不住——而唯一真出过
+    # 问题的那处恰恰是常量写的。
+    assert via_constant >= 1, (
+        "没有比到任何「默认值写成常量名」的参数——常量解析多半失效了，"
+        "而 DaysQuery 那类漂移只有它能发现")
+
+
+def test_every_success_response_wraps_the_standard_envelope() -> None:
+    """所有返回 ``data`` 的 200 响应都要引 ``SuccessEnvelope``。
+
+    2026-09-09 查出 ``MapLocateOk`` 写着 ``"allOf": []``——一个空数组，于是它既没
+    继承 ``ok`` / ``error``，也没人报错：``$ref`` 全都能解、JSON 也合法，前面那些
+    检查一条都不会红。而后端走的是同一个 ``_err.ok()``，客户端照这份 schema 生成
+    模型就会少掉整个信封。
+
+    空 allOf 单独判一次：它比「忘了引」更隐蔽，看起来像是写了。
+    """
+    spec = _load_openapi()
+    empty, unwrapped = [], []
+    for name, resp in (spec.get("components", {}).get("responses") or {}).items():
+        schema = ((resp.get("content") or {}).get("application/json") or {}).get("schema")
+        if not isinstance(schema, dict):
+            continue
+        if "allOf" in schema and not schema["allOf"]:
+            empty.append(name)
+        blob = json.dumps(schema)
+        if '"data"' in blob and "SuccessEnvelope" not in blob:
+            unwrapped.append(name)
+    assert not empty, f"这些响应写了空的 allOf（看着像写了，其实什么都没继承）：{empty}"
+    assert not unwrapped, f"这些响应带 data 却没挂 SuccessEnvelope：{unwrapped}"
+
+
+# ── 人读的那份文档 ──────────────────────────────────────────────────
+#
+# ``docs/openapi.json`` 是机器契约，``docs/API.md`` 是人读的那份，而**只有前者
+# 有测试**。2026-09-09 的全量核对发现 API.md 少了三个端点：``GET /legal``、
+# ``GET /map/locate``、``POST /auth/verify``——其中 ``/auth/verify`` 是 2026-09-03
+# 加的，spec 后来补上了，API.md 一直没有。
+#
+# 少写一个端点不会让任何东西变红，只会让看文档的人以为它不存在。
+
+_MD_ENDPOINT = re.compile(
+    r"^#{2,4}\s+(GET|POST|PUT|PATCH|DELETE)\s+`([^`]+)`", re.MULTILINE)
+
+#: API.md 里刻意收录、但不属于 ``/api/v1`` 移动端契约的端点。
+#: webhook 走 Svix 签名而不是 Bearer，spec 的 server 是 ``…/api/v1``，装不下它。
+_MD_OUTSIDE_V1 = {("POST", "/api/inbound/email")}
+
+
+def _api_md_endpoints() -> set[tuple[str, str]]:
+    text = (OPENAPI_PATH.parent / "API.md").read_text(encoding="utf-8")
+    return {(m.group(1), _CONVERTER.sub(r"{\1}", m.group(2)))
+            for m in _MD_ENDPOINT.finditer(text)}
+
+
+def test_api_md_documents_every_endpoint_in_the_spec() -> None:
+    spec = _load_openapi()
+    in_spec = {(meth.upper(), path)
+               for path, item in spec["paths"].items()
+               for meth in item
+               if meth.upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}}
+    in_md = _api_md_endpoints()
+
+    assert len(in_md) >= 30, (
+        f"只从 API.md 里认出 {len(in_md)} 个端点，标题正则多半坏了——"
+        "那会让下面两条断言恒真")
+
+    missing = sorted(in_spec - in_md)
+    assert not missing, (
+        "spec 里有、API.md 没写（看文档的人会以为它不存在）：\n  "
+        + "\n  ".join(f"{m} {p}" for m, p in missing))
+
+    extra = sorted(in_md - in_spec - _MD_OUTSIDE_V1)
+    assert not extra, (
+        "API.md 写了 spec 里没有的端点（写错了、已删除、或者 spec 漏了）：\n  "
+        + "\n  ".join(f"{m} {p}" for m, p in extra))

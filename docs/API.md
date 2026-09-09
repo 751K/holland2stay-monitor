@@ -2,7 +2,7 @@
 
 本文档整理 FlatRadar 移动端和第三方客户端使用的后端 API。当前稳定接口集中在 `/api/v1/*`，Web 后台的 HTML 页面和 `/api/*` 旧接口不作为移动端契约。
 
-最后更新：2026-08-04（v1.13.0）
+最后更新：2026-09-09（openapi.json 1.21.0）
 
 机器可读契约：
 
@@ -114,12 +114,14 @@ SSE 特例：`GET /notifications/stream` 支持 `Authorization` header，也支�
 | POST | `/auth/logout` | admin/user | 撤销当前 token |
 | GET | `/auth/me` | admin/user | 当前身份摘要 |
 | POST | `/auth/password` | user | 修改当前用户密码 |
+| POST | `/auth/verify` | user | 校验当前密码，不签发 token |
 | GET | `/stats/public/summary` | 可选 | 公开统计概览 |
 | GET | `/stats/public/charts` | 可选 | 图表 key 列表 |
 | GET | `/stats/public/charts/<key>` | 可选 | 图表数据 |
 | GET | `/listings` | 可选 | 房源列表 |
-| GET | `/listings/<id>` | 可选 | 房源详情 |
+| GET | `/listings/<listing_id>` | 可选 | 房源详情 |
 | GET | `/map` | 可选 | 已缓存坐标的地图房源 |
+| GET | `/map/locate` | 可选 | 按 id 定位单条房源，区分三种「看不到」 |
 | GET | `/calendar` | 可选 | 有入住日期的日历房源 |
 | GET | `/notifications` | admin/user | 通知列表 |
 | POST | `/notifications/read` | admin/user | 标记通知已读 |
@@ -132,13 +134,14 @@ SSE 特例：`GET /notifications/stream` 支持 `Authorization` header，也支�
 | GET | `/filter/options` | 可选 | 过滤器候选值 |
 | POST | `/devices/register` | admin/user | 注册/刷新设备推送 token |
 | GET | `/devices` | admin/user | 当前 session 下设备列表 |
-| DELETE | `/devices/<id>` | admin/user | 删除当前 session 下设备 |
+| DELETE | `/devices/<device_id>` | admin/user | 删除当前 session 下设备 |
 | POST | `/devices/test` | admin/user | 测试推送 |
 | POST | `/feedback` | admin/user | 提交反馈 |
 | POST | `/diagnostics/crash` | 可选 | 上传崩溃/性能诊断 |
+| GET | `/legal` | 无 | 服务条款与隐私政策正文 |
 | GET | `/admin/users` | admin | 用户列表 |
-| POST | `/admin/users/<id>/toggle` | admin | 启用/停用用户 |
-| DELETE | `/admin/users/<id>` | admin | 删除用户 |
+| POST | `/admin/users/<user_id>/toggle` | admin | 启用/停用用户 |
+| DELETE | `/admin/users/<user_id>` | admin | 删除用户 |
 | GET | `/admin/monitor/status` | admin | 监控进程状态 |
 | POST | `/admin/monitor/start` | admin | 启动监控 |
 | POST | `/admin/monitor/stop` | admin | 停止监控 |
@@ -316,6 +319,30 @@ Body：
 - admin 密码不通过此接口修改。
 - 修改成功后保留当前 token，撤销同一 user 的其他 token。
 
+### POST `/auth/verify`
+
+校验当前用户的密码，**不签发新 token**。
+
+鉴权：`user`
+
+给只握着 Bearer token、却需要再确认一次密码的场景用——典型是在设置页开启生物识别
+登录：平台要求先证明「人还在」，而此时再走一次 `/auth/login` 会多签一枚 token，
+等于每开一次 Face ID 就往会话表里堆一条。
+
+**请求：**
+
+```json
+{ "password": "current-password" }
+```
+
+**响应：**
+
+```json
+{ "ok": true, "data": { "ok": true } }
+```
+
+密码不对返回 `401`；admin 调用返回 `403`（该接口只对 `user` 开放）。
+
 ## Public Stats
 
 ### GET `/stats/public/summary`
@@ -462,7 +489,7 @@ Query：
 
 详见 [ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号)。
 
-### GET `/listings/<id>`
+### GET `/listings/<listing_id>`
 
 单条房源详情。
 
@@ -513,7 +540,40 @@ Query：
 - guest 可访问，但只读取缓存，不产生外部请求或写入。
 - **本端点不返回 `status_is_inferred`**，`/calendar` 同样不返回，该字段仅由
   `/listings` 提供。需区分平台上报与系统推断时，请以 `id` 向 `/listings`
-  或 `/listings/<id>` 查询。
+  或 `/listings/<listing_id>` 查询。
+
+### GET `/map/locate`
+
+按 id 定位单条房源，**绕过新鲜度窗口和用户自己的筛选**。
+
+鉴权：可选
+
+查询参数：`id`（必填）
+
+三种「地图上看不到」分开报，不合并成一句「没找到」：
+
+| `reason` | 含义 | 用户能做什么 |
+|---|---|---|
+| `not_found` | 库里没有这条 | 链接作废了 |
+| `no_coords` | 有这条，但还没解析出坐标 | 等地址解析 |
+| （无，`ok: true`） | 有坐标，只是被当前筛选挡住了 | 改一下筛选 |
+
+合并的话，这三种在界面上长得一模一样，而用户能做的事完全不同。
+
+**响应：**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "ok": true,
+    "listing": { "id": "…", "lat": 51.44, "lng": 5.47, "…": "…" }
+  }
+}
+```
+
+定位不到时 `data.ok` 为 `false` 并带 `reason`；`listing` 缺省。
+注意外层信封的 `ok` 和 `data.ok` 是两件事：前者说请求成功，后者说找到没找到。
 
 ## Calendar
 
@@ -915,7 +975,7 @@ Body：
 }
 ```
 
-### DELETE `/devices/<id>`
+### DELETE `/devices/<device_id>`
 
 删除当前 session 下的设备。只能删除当前 Bearer token 绑定的设备；越权返回 404。
 
@@ -1095,6 +1155,29 @@ Android 客户端可复用此端点，但建议字段改为：
 
 当前后端字段名仍有 `ios_version` 历史命名，后续可扩展 `os_version`。
 
+## Legal
+
+### GET `/legal`
+
+服务条款与隐私政策正文。公开接口，不需要鉴权。
+
+查询参数：`lang`（可选，语言代码）
+
+**响应：**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "terms": "…",
+    "privacy": "…",
+    "updated_at": "2026-08-20"
+  }
+}
+```
+
+客户端应以 `updated_at` 判断是否需要重新征求同意，而不是比对正文。
+
 ## Admin
 
 ### GET `/admin/users`
@@ -1137,7 +1220,7 @@ Android 客户端可复用此端点，但建议字段改为：
 }
 ```
 
-### POST `/admin/users/<id>/toggle`
+### POST `/admin/users/<user_id>/toggle`
 
 启用或停用用户。
 
@@ -1155,7 +1238,7 @@ Android 客户端可复用此端点，但建议字段改为：
 }
 ```
 
-### DELETE `/admin/users/<id>`
+### DELETE `/admin/users/<user_id>`
 
 删除用户并撤销其 App token。
 
@@ -1369,7 +1452,7 @@ guest 不调用 `/auth/login`。客户端本地标记 guest，然后访问 optio
 - `/stats/public/charts`
 - `/stats/public/charts/<key>`
 - `/listings`
-- `/listings/<id>`
+- `/listings/<listing_id>`
 - `/map`
 - `/calendar`
 - `/filter/options`
@@ -1394,7 +1477,7 @@ Android 客户端已接入全部接口，FCM 推送已端到端拉通：
 4. `/stats/public/summary` ✅
 5. `/stats/public/charts/<key>` ✅
 6. `/listings` ✅
-7. `/listings/<id>` ✅
+7. `/listings/<listing_id>` ✅
 8. `/me/summary` ✅
 9. `/me/filter` ✅
 10. `/filter/options` ✅
@@ -1405,7 +1488,7 @@ Android 客户端已接入全部接口，FCM 推送已端到端拉通：
 
 1. `/devices/register` ✅
 2. `/devices` ✅
-3. `/devices/<id>` (DELETE) ✅
+3. `/devices/<device_id>` (DELETE) ✅
 4. `/devices/test` ✅
 3. `/devices/test`
 
