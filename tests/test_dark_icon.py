@@ -26,9 +26,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
-APPICON = (ROOT / "ios" / "FlatRadar" / "FlatRadar" / "Assets.xcassets"
-           / "AppIcon.appiconset")
-
 # (浅色, 深色) 成对的网页资源
 LOGO_PAIRS = [
     ("logo.png", "logo-dark.png"),
@@ -216,3 +213,117 @@ def test_referenced_logo_files_all_exist():
         referenced.update(pattern.findall(path.read_text()))
     missing = [n for n in referenced if not (STATIC / n).exists()]
     assert not missing, f"模板/CSS 引用了不存在的文件：{missing}"
+
+
+# ── 网页资源与设计源同版 ────────────────────────────────────────────
+#
+# 2026-09-09：iOS 换成运河屋图标（FlatRadar-iOS 的 1839ba6）时，网页端的 8 个
+# PNG 还是上一版的蓝色房子轮廓。那边同一次也漏了登录页的 BrandLogo——「换了图标，
+# 但某一处还是上一版」在这个项目里已经是第三次。
+#
+# 漏得掉是因为这些 PNG 和设计源之间没有任何自动关系：尺寸对、格式对、深浅两版
+# 齐全、alpha 轮廓一致，上面那 23 条断言全绿。它们检查的是资源**自洽**，而不是
+# 资源**是不是这一版**。
+#
+# 这里补上后者。不重算像素（那要重现 LANCZOS 重采样，得引入 Pillow，而它不是本
+# 项目的依赖），只比色：母版中心那栋红房子和四周底色，缩放不会改变它们。
+
+MASTERS = ROOT / "tools" / "icon_masters"
+
+#: 每个网页资源该对哪一张母版。
+WEB_ASSETS = {
+    "logo.png": "appicon-light-1024.png",
+    "logo-md.png": "appicon-light-1024.png",
+    "logo-small.png": "appicon-light-1024.png",
+    "favicon.png": "appicon-light-1024.png",
+    "apple-touch-icon.png": "appicon-light-1024.png",
+    "logo-dark.png": "appicon-dark-1024.png",
+    "logo-md-dark.png": "appicon-dark-1024.png",
+    "logo-small-dark.png": "appicon-dark-1024.png",
+}
+
+
+def _pixel(decoded_img, fx: float, fy: float):
+    w, h, px = decoded_img
+    return px[int(h * fy) * w + int(w * fx)]
+
+
+def _close(a, b, tol: int) -> bool:
+    """缩放会让边缘像素混色，取样点选在平色区域，容差留给重采样的舍入。"""
+    return all(abs(a[i] - b[i]) <= tol for i in range(3))
+
+
+@pytest.mark.parametrize("asset,master", sorted(WEB_ASSETS.items()))
+def test_web_asset_comes_from_the_current_master(asset, master):
+    """网页上的图必须和 App 图标是同一版画。"""
+    asset_path, master_path = STATIC / asset, MASTERS / master
+    assert asset_path.exists(), f"缺少 {asset}"
+    assert master_path.exists(), (
+        f"缺少母版 {master}——它随仓库走，不是跨仓库引用；"
+        "上一版脚本指向已删除的 ios/ 目录，一跑就 FileNotFoundError")
+
+    a = _decode_png(asset_path)
+    m = _decode_png(master_path)
+    # 取样点要**在 squircle 里面、且离边够远**：靠近轮廓的像素带着 alpha 羽化，
+    # 缩到 56 / 64 px 时会明显偏色。(0.08, 0.5) 在 64px 上落到 x=5，正好在羽化带
+    # 上，第一版就是这么红的。下面两点在所有尺寸上都是平色区，实测最大偏差 1。
+    for fx, fy, what in ((0.5, 0.5, "中心的房子"), (0.25, 0.15, "底色")):
+        got, want = _pixel(a, fx, fy), _pixel(m, fx, fy)
+        assert _close(got, want, 12), (
+            f"{asset} 的{what}是 {got[:3]}，母版 {master} 是 {want[:3]}——"
+            "网页资源还停在上一版图标，跑一次 tools/make_web_icons.py")
+
+
+def test_the_generator_agrees_that_everything_is_current():
+    """``tools/make_web_icons.py --check`` 必须是干净的。
+
+    上面那条只比两个取样点；这条是像素级的兜底。需要 Pillow，没装就跳过——
+    **跳过是有代价的**，所以两条都留着：取样比在任何环境下都跑。
+    """
+    import subprocess
+    import sys
+
+    pytest.importorskip("PIL", reason="生成器需要 Pillow，非本项目依赖")
+    r = subprocess.run(
+        [sys.executable, str(ROOT / "tools" / "make_web_icons.py"), "--check"],
+        capture_output=True, text=True, cwd=ROOT)
+    assert r.returncode == 0, (r.stdout + r.stderr).strip()
+
+
+def test_the_generators_comparison_looks_at_colour_not_just_alpha():
+    """``_identical`` 必须比到 RGB。
+
+    这是 2026-09-09 开发当天踩的坑：原先用
+    ``ImageChops.difference(a, b).getbbox()``，而 Pillow 10 起 ``getbbox()`` 对
+    RGBA 默认 ``alpha_only=True``——只看 alpha。深浅两版共用同一个蒙版，alpha 恒
+    等，于是它对「整张画换掉了」返回 ``None``。表现是 ``logo.png`` 明明还是上一
+    版的蓝房子，脚本报「已是最新」跳过，另外 6 个文件正常重写——**一半新一半旧**。
+
+    ``--check`` 是资源新旧的第二道防线（第一道是上面的取样比对）。它自己坏掉时
+    第一道仍然会红，但一道防线坏了而不自知，本身就是要修的东西。
+    """
+    pytest.importorskip("PIL", reason="生成器需要 Pillow，非本项目依赖")
+    import importlib.util
+
+    from PIL import Image
+
+    spec = importlib.util.spec_from_file_location(
+        "_mwi", ROOT / "tools" / "make_web_icons.py")
+    mwi = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mwi)
+
+    # 两张图：alpha 完全相同，RGB 完全不同——正是深浅两版共用蒙版的形状。
+    mask = Image.new("L", (8, 8), 128)
+    red, blue = Image.new("RGBA", (8, 8), (200, 30, 30, 255)), \
+        Image.new("RGBA", (8, 8), (30, 30, 200, 255))
+    red.putalpha(mask)
+    blue.putalpha(mask)
+
+    tmp = ROOT / "static" / "_tmp_cmp_probe.png"
+    blue.save(tmp)
+    try:
+        assert not mwi._identical(red, tmp), (
+            "alpha 相同、画面不同却判成「一致」——只比了 alpha")
+        assert mwi._identical(blue, tmp), "同一张图却判成不一致"
+    finally:
+        tmp.unlink(missing_ok=True)
