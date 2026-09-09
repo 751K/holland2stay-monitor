@@ -5,7 +5,8 @@
 > 中文版：[README_cn.md](README_cn.md)
 
 FlatRadar is a self-hosted monitor for the Dutch rental market. It tracks
-Holland2Stay, OurDomain, OurCampus, Xior and Magis, and as soon as a listing matches
+Holland2Stay, OurDomain, OurCampus, Xior, Magis, Student Experience and Plaza,
+and as soon as a listing matches
 your criteria it sends a notification through the channels you enabled, with a
 direct link included. For Holland2Stay it goes one step further: it first
 carries the booking through to the payment page, then sends the payment link
@@ -35,7 +36,7 @@ The project runs both locally and on a server.
 
 | | |
 |---|---|
-| **Coverage** | Five platforms: Holland2Stay, OurDomain, OurCampus, Xior and Magis. Polling tightens during the hours when new listings tend to appear |
+| **Coverage** | Seven platforms: Holland2Stay, OurDomain, OurCampus, Xior, Magis, Student Experience and Plaza. Polling tightens during the hours when new listings tend to appear |
 | **Alert channels** | Web, Telegram, Email, WhatsApp, iOS push, Android push, iMessage; several may be enabled at once |
 | **Filters** | Maximum rent, minimum area, minimum floor, type, occupancy, city, neighbourhood, platform, contract type, tenant requirements, and others |
 | **Views** | List, map, calendar, dashboard and charts, in English or Chinese |
@@ -51,6 +52,12 @@ The project runs both locally and on a server.
 | Xior | Any of 30 buildings across 14 cities | Proven | Notify only (booking flow built, not enabled) |
 | OurCampus | Amsterdam Diemen (1 building) | Checked against real markup; very low volume | Notify only |
 | Magis | 17 buildings across 5 cities (9 in Eindhoven) | Added 2026-09-01; plain HTTP, no anti-bot | Notify only |
+| Student Experience | Amsterdam (4 sites) and Leiden | Added 2026-09-02; the listing date lives only on the detail page, so each unit costs an extra request | Notify only |
+| Plaza | 13 Dutch cities | Added 2026-09-02; a paid account (€27.50/yr) is required to *apply*, not to see listings | Notify only |
+
+A platform can also run in **shadow mode** (`SHADOW_SOURCES`): scraped and stored
+as usual, but it sends no notifications. That is how a newly added scraper is
+validated against live data without anyone's alerts depending on it yet.
 
 Coverage shifts as third-party sites change. The scrapers are documented in
 [H2S.md](H2S.md), [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
@@ -429,7 +436,7 @@ own monitoring if you want to be paged.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How the system runs, and every failure mode worth knowing before you debug one |
 | [API.md](API.md) | Backend contracts for mobile and integrations |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
-| [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | Per-platform scraping research |
+| [H2S.md](H2S.md) · [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | Per-platform scraping research; `SCRAPING_RECON.md` also covers Magis, Student Experience and Plaza |
 | [iOS_README.md](https://github.com/751K/FlatRadar-iOS/blob/master/docs/iOS_README.md) | iOS client — moved to [FlatRadar-iOS](https://github.com/751K/FlatRadar-iOS) |
 | [ANDROID_PLAN.md](https://github.com/751K/FlatRadar-Android/blob/master/docs/ANDROID_PLAN.md) | Android client — moved to [FlatRadar-Android](https://github.com/751K/FlatRadar-Android) |
 | [dataflow_en.mmd](dataflow_en.mmd) · [dataflow_ch.mmd](dataflow_ch.mmd) | Full scrape/notify flow as a Mermaid diagram |

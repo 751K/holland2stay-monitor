@@ -5,7 +5,8 @@
 > English version: [README.md](README.md)
 
 FlatRadar 是一套可自部署的荷兰租房监控工具。它同时追踪 Holland2Stay、OurDomain、
-OurCampus、Xior 与 Magis 五个平台，一旦出现符合所设条件的房源，即通过所选渠道发出通知，
+OurCampus、Xior、Magis、Student Experience 与 Plaza 七个平台，一旦出现符合所设条件的
+房源，即通过所选渠道发出通知，
 通知中附有直达链接。对 Holland2Stay 更进一步——先将预订推进至支付页面，再连同
 付款链接一并发出，因此收到通知时仅余付款一步。
 
@@ -29,7 +30,7 @@ OurCampus、Xior 与 Magis 五个平台，一旦出现符合所设条件的房�
 
 | | |
 |---|---|
-| **监控范围** | Holland2Stay、OurDomain、OurCampus、Xior、Magis 共五个平台；新房源集中上架的时段轮询更为频繁 |
+| **监控范围** | Holland2Stay、OurDomain、OurCampus、Xior、Magis、Student Experience、Plaza 共七个平台；新房源集中上架的时段轮询更为频繁 |
 | **通知渠道** | Web、Telegram、邮件、WhatsApp、iOS 推送、Android 推送、iMessage，可同时启用多个 |
 | **筛选条件** | 租金上限、面积下限、楼层下限、户型、入住人数、城市、街区、平台、合同类型、租客要求等 |
 | **浏览方式** | 列表、地图、日历、仪表盘、图表，界面支持中英文 |
@@ -45,6 +46,11 @@ OurCampus、Xior 与 Magis 五个平台，一旦出现符合所设条件的房�
 | Xior | 14 个城市共 30 栋楼，可按需选择 | 稳定 | 仅通知（预订链路已实现，未开放）|
 | OurCampus | Amsterdam Diemen（1 栋） | 已用真实 markup 校准；出房极少 | 仅通知 |
 | Magis | 5 城 17 栋（Eindhoven 占 9 栋） | 2026-09-01 接入，纯 HTTP 无反爬 | 仅通知 |
+| Student Experience | Amsterdam（4 处）与 Leiden | 2026-09-02 接入；入住日期只在详情页，故每个单元多一次请求 | 仅通知 |
+| Plaza | 13 个荷兰城市 | 2026-09-02 接入；付费账号（€27.50/年）是「能应征」的门槛，不是「能看见」的门槛 | 仅通知 |
+
+平台还可以跑在**影子模式**（`SHADOW_SOURCES`）下：照常抓取入库，但不发任何通知。
+新接入的抓取器靠这个用真实数据验证一段时间，期间没有人的提醒依赖于它。
 
 第三方站点随时可能变更，覆盖范围亦随之变化。各平台的抓取实现见
 [H2S.md](H2S.md)、[XIOR.md](XIOR.md)、[OURDOMAIN.md](OURDOMAIN.md)、
@@ -390,7 +396,7 @@ Xior、OurDomain、OurCampus 运行的是同一套 RENTCafe 后端，共用一�
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 系统运行方式，以及排障前应先了解的全部失败模式 |
 | [API.md](API.md) | 面向移动端与外部集成的后端契约 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
-| [H2S.md](H2S.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | 各平台抓取侦察 |
+| [H2S.md](H2S.md) · [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | 各平台抓取侦察；Magis / Student Experience / Plaza 三家在 `SCRAPING_RECON.md` 里 |
 | [iOS_README.md](https://github.com/751K/FlatRadar-iOS/blob/master/docs/iOS_README.md) | iOS 客户端 — 已迁至 [FlatRadar-iOS](https://github.com/751K/FlatRadar-iOS) |
 | [ANDROID_PLAN.md](https://github.com/751K/FlatRadar-Android/blob/master/docs/ANDROID_PLAN.md) | Android 客户端 — 已迁至 [FlatRadar-Android](https://github.com/751K/FlatRadar-Android) |
 | [dataflow_ch.mmd](dataflow_ch.mmd) · [dataflow_en.mmd](dataflow_en.mmd) | 完整抓取与通知流程的 Mermaid 图 |
