@@ -290,3 +290,61 @@ class TestWiring:
         body = src[src.index("def _heartbeat_warm_browser"):]
         body = body[:body.index("def _start_prewarm_for_candidates")]
         assert "if dry_run:" in body
+
+
+class TestKillSwitch:
+    """总开关。2026-09-09 泄漏事故之后默认关。
+
+    钉的不只是「默认关」，还有「关掉时要把已经建起来的那条收干净」——留一个没人
+    维护的 Chromium 在那儿正是那次事故的形状。
+    """
+
+    def test_default_is_off(self, monkeypatch):
+        import mcore.warm_browser as m
+        monkeypatch.delenv("WARM_BROWSER_LANE", raising=False)
+        assert m.lane_enabled() is False
+
+    @pytest.mark.parametrize("val,want", [
+        ("1", True), ("true", True), ("TRUE", True), ("yes", True), ("on", True),
+        ("0", False), ("false", False), ("", False), ("maybe", False),
+    ])
+    def test_parsing(self, monkeypatch, val, want):
+        import mcore.warm_browser as m
+        monkeypatch.setenv("WARM_BROWSER_LANE", val)
+        assert m.lane_enabled() is want
+
+    def test_turning_it_off_closes_a_running_lane(self, lane):
+        """关掉 = 收干净，不是「不再维护」。"""
+        lane.heartbeat(wanted=True)
+        f = lane.fetcher
+        assert f is not None
+        lane.heartbeat(wanted=False)
+        assert lane.fetcher is None
+        assert f.closed == 1
+
+    def test_the_switch_is_hydratable_from_the_database(self):
+        """必须在 RUNTIME_KEYS 里。
+
+        只有 RUNTIME_KEYS 会被 settings_store.hydrate 从库里注水；放进 TUNING_KEYS
+        的话，关掉这个开关本身就要走一次部署——一个救火开关如果这样，它在最需要的
+        时候就是没用的。第一版就写错了地方。
+        """
+        from env_registry import RUNTIME_KEYS, TUNING_KEYS
+        assert "WARM_BROWSER_LANE" in RUNTIME_KEYS
+        assert "WARM_BROWSER_LANE" not in TUNING_KEYS
+
+
+class TestKillSwitchWiring:
+
+    def test_the_heartbeat_respects_the_switch(self):
+        import inspect
+
+        import monitor
+        src = inspect.getsource(monitor.run_once)
+        body = src[src.index("def _heartbeat_warm_browser"):]
+        body = body[:body.index("def _start_prewarm_for_candidates")]
+        assert "lane_enabled()" in body, "心跳没读总开关"
+        assert "wanted = lane_enabled() and any(" in body, (
+            "开关没有并进 wanted——关掉时必须让 heartbeat 走 wanted=False 那条路，"
+            "它才会把已经建起来的浏览器收掉"
+        )

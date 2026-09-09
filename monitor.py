@@ -2534,9 +2534,12 @@ async def run_once(
         """
         if dry_run:
             return
-        from mcore.warm_browser import warm_lane
+        from mcore.warm_browser import lane_enabled, warm_lane
 
-        wanted = any(
+        # 总开关关着时 wanted=False，heartbeat 会把已经建起来的那条关掉——不是
+        # 「不再维护」而是「收干净」。留一个没人维护的 Chromium 在那儿，正是
+        # 2026-09-09 那次泄漏的形状。
+        wanted = lane_enabled() and any(
             u.auto_book.enabled and u.auto_book.email and u.auto_book.password
             for u, _ in user_notifiers
         )

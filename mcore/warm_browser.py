@@ -45,6 +45,29 @@ import time
 
 logger = logging.getLogger("monitor")
 
+def lane_enabled() -> bool:
+    """这条常驻现在开着吗。**默认关。**
+
+    为什么默认是关的
+    ----------------
+    2026-09-08 上线，2026-09-09 关掉。它在生产里泄漏浏览器：每次「就绪」5–6 分钟
+    后 ``is_alive()`` 就判死，``_drop()`` 调了 ``close()`` 而 OS 进程并没有退——
+    playwright 的 node 驱动和整棵 Chromium 进程树都还在。18 小时泄漏 5 套，容器
+    从 1.14 GiB 涨到 1.73 GiB（上限 2 GiB），随后 xior 渲染器卡死 600 秒、h2s 过
+    不了 CF 挑战并熔断。也就是说它没能加快下单，反而把两个 source 拖垮了。
+
+    重新打开之前要先答出两个问题：浏览器为什么 5 分钟就死；``close()`` 收不掉时
+    ``_drop()`` 怎么核实并强杀。**在那之前默认关。**
+
+    开关放 RUNTIME_KEYS，可以从数据库注水、SIGHUP 热重载——救火用的开关如果关它
+    本身要走一次部署，它在最需要的时候就是没用的。
+    """
+    import os
+
+    return (os.environ.get("WARM_BROWSER_LANE") or "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 #: 多久没发过请求就补一次探测。``h2s_clr`` 是 0.5 小时，取三分之一留足余量——
 #: 保活本身极便宜（一个 GraphQL 探针），而漏一次的代价是整条常驻退化成冷启动。
 _KEEPALIVE_INTERVAL = 600.0

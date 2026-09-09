@@ -82,6 +82,11 @@ RUNTIME_KEYS: frozenset[str] = frozenset({
     "PEAK_START", "PEAK_END", "PEAK_START_2", "PEAK_END_2",
     "PEAK_WEEKDAYS_ONLY", "JITTER_RATIO",
     "HEARTBEAT_INTERVAL_MINUTES",
+    # 下单常驻浏览器的总开关，默认关（见 mcore/warm_browser.py「为什么默认是关的」）。
+    # 放 RUNTIME 而不是 TUNING：只有 RUNTIME 会被 settings_store.hydrate 从库里注水，
+    # 也就是说只有它能在不重新部署的情况下关掉。一个用来救火的开关，如果关它本身
+    # 要走一次部署，那它在最需要的时候就是没用的。
+    "WARM_BROWSER_LANE",
     # 监控范围（同样由面板写回）
     "SOURCES", "SHADOW_SOURCES",
     "CITIES", "OURDOMAIN_CITIES", "OURCAMPUS_CITIES", "XIOR_CITIES",
