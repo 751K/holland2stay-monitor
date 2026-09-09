@@ -166,6 +166,33 @@ CF 的 HTTP 通道，与登录者无关。也就是说贵的、会失败的那�
 - **熔断期间不新建，但已健康者继续保活**——它是熔断期内唯一仍然连通的路径。
 - 内存约 +190MB（一个 Chromium），且仅在存在启用自动预订的用户时建立。
 
+#### profile 槽位与进程回收
+
+浏览器复用磁盘 profile 以省下 Cloudflare 挑战的流量（挑战载荷曾占代理流量的一半
+以上）。一个 profile 目录同一时刻只能被一个 Chromium 打开，故按槽位加文件锁
+（`_PROFILE_SLOTS = 3`），锁持有至浏览器关闭。
+
+**`close()` 不足以证明进程已退出。** `self._browser.close()` 外层包着
+`except: pass`；连接一旦断开（Chromium 被 OOM 终止、驱动崩溃、代理拖死页面），该
+调用既不报错也不生效，而进程仍在。此前 `close()` 随即释放槽位锁，于是：
+
+1. 下一次 `_open_browser` 取得同一目录；
+2. `_clear_stale_singleton_locks` 删除**仍在运行**的那个实例的单实例锁；
+3. 两个 Chromium 同时打开同一 profile，很快再次死亡——回到第 1 步。
+
+2026-09-09 由此产生一次生产事故：常驻浏览器每次建立成功后 5–6 分钟即被判死，每次
+泄漏一整套（Playwright 的 node 驱动 + 整棵 Chromium 进程树）。18 小时泄漏 5 套，容
+器内存自 1.14 GiB 升至 1.73 GiB（上限 2 GiB），随后 Xior 渲染器卡死 600 秒、
+Holland2Stay 无法通过挑战并熔断。
+
+现 `close()` 在释放槽位锁**之前**调用 `_reap_profile()`：按 `--user-data-dir=<本
+目录>` 反查仍在运行的进程（Playwright 的 `BrowserContext` 不暴露 pid），SIGTERM 后
+SIGKILL，并打 WARNING。杀不掉时仍释放槽位——扣住槽位会使所有调用方退回临时
+profile，流量翻数倍，代价高于目录冲突的风险。
+
+该回收对所有 `BrowserFetcher` 使用者生效，不限于常驻浏览器；抓取侧同样存在这条路
+径，只是重建频率低得多，此前未暴露。
+
 #### 注册表漂移
 
 城市清单一共有三处副本，只有最后一处真正决定抓不抓：

@@ -384,6 +384,99 @@ def _clear_stale_singleton_locks(path) -> None:
             logger.warning("清理 %s 失败，持久化 profile 可能启动不了: %s", target, e)
 
 
+def _pids_using_profile(path) -> list[int]:
+    """还开着这个 profile 目录的 Chromium 进程。
+
+    Playwright 的 ``BrowserContext`` 不暴露进程 pid，而我们需要的正是「``close()``
+    之后进程到底还在不在」。靠 ``--user-data-dir=<我们这个目录>`` 反查——这个参数
+    是我们自己传进去的，精确到目录，不会误伤别的浏览器。
+
+    生产是 Linux，走 ``/proc``（零开销、不 fork）。没有 ``/proc`` 的平台（本地
+    macOS 开发）退回 ``ps``——**不是为了 macOS 也要回收，是为了这段逻辑在本地也
+    能被测到**。只在生产上生效的代码，等于只在生产上才发现写错了。
+    """
+    import os
+
+    needle = f"--user-data-dir={path}"
+    out: list[int] = []
+
+    if os.path.isdir("/proc"):
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/cmdline", "rb") as fh:
+                    cmd = fh.read().decode("utf8", "replace").replace("\0", " ")
+            except OSError:
+                continue          # 进程刚退出，正常
+            if needle in cmd:
+                out.append(int(entry))
+        return out
+
+    import subprocess
+
+    try:
+        ps = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True,
+                            text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    for line in ps.stdout.splitlines():
+        line = line.strip()
+        if needle not in line:
+            continue
+        pid, _, _ = line.partition(" ")
+        if pid.isdigit():
+            out.append(int(pid))
+    return out
+
+
+def _reap_profile(path) -> int:
+    """确认这个 profile 上的 Chromium 真的没了；没死的强杀。返回杀掉几个。
+
+    **为什么不能只调 ``close()`` 就当干净了**（2026-09-09 生产事故）：连接一旦断
+    了（Chromium 被 OOM 杀、驱动崩了、代理把页面拖死），``close()`` 就是对着一根
+    断掉的管子说话——它不报错，进程却还在。而 ``close()`` 紧接着会释放槽位 flock，
+    于是下一次 ``_open_browser`` 拿到同一个目录，``_clear_stale_singleton_locks``
+    把还活着那个实例的单实例锁删掉，两个 Chromium 同时开同一个 profile。
+
+    实测后果：常驻浏览器每次「就绪」5–6 分钟就死，一次泄漏一整套（node 驱动 +
+    整棵进程树）。18 小时泄漏 5 套，容器内存 1.14 → 1.73 GiB（上限 2 GiB），随后
+    xior 渲染器卡死 600 秒、Holland2Stay 过不了 CF 挑战并熔断。
+
+    所以槽位锁释放之前必须先确认目录真的空了。
+    """
+    import os
+    import signal
+    import time as _t
+
+    pids = _pids_using_profile(path)
+    if not pids:
+        return 0
+    logger.warning(
+        "close() 之后仍有 %d 个 Chromium 开着 profile %s，强制回收：%s",
+        len(pids), getattr(path, "name", path), pids,
+    )
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass          # 已经没了
+        deadline = _t.monotonic() + (3.0 if sig is signal.SIGTERM else 1.0)
+        while _t.monotonic() < deadline:
+            pids = _pids_using_profile(path)
+            if not pids:
+                return len(_pids_using_profile(path)) or 1
+            _t.sleep(0.1)
+    left = _pids_using_profile(path)
+    if left:
+        # 杀不掉（僵尸 / 权限）。**槽位照样要放**——扣着它只会让所有人退回临时
+        # profile，流量翻几倍，而目录冲突的风险由下一次的 singleton 清理兜。
+        logger.error("profile %s 上仍有杀不掉的进程 %s，槽位照常释放",
+                     getattr(path, "name", path), left)
+    return 1
+
+
 def _release_lock(handle) -> None:
     """放掉槽位锁。关闭文件即释放 flock，出错也不能往外抛——它挂在 close()
     路径上，抛出去会把浏览器的资源释放一起带停。"""
@@ -940,8 +1033,18 @@ class BrowserFetcher:
             self._browser = None
             self._page = None
             self._initialized = False
-        # 锁必须在浏览器真正关掉之后才放：提前释放会让另一个线程拿到同一个
-        # profile，而 Chromium 还没退出，它会直接报锁冲突。
+        # 锁必须在浏览器**真的**关掉之后才放：提前释放会让另一个线程拿到同一个
+        # profile，而 Chromium 还没退出。
+        #
+        # 上面那句 close() 外面包着 `except: pass`——连接断了的时候它既不报错也
+        # 不生效，进程照旧活着。只信它的后果见 _reap_profile 的 docstring
+        # （2026-09-09：泄漏 5 套浏览器，拖垮 xior 与 h2s）。所以这里先核实。
+        if self._profile_path is not None:
+            try:
+                _reap_profile(self._profile_path)
+            except Exception:
+                # 回收失败不能把 close() 带停：锁不放的话所有人都退回临时 profile。
+                logger.warning("回收 profile %s 失败", self._profile_path, exc_info=True)
         _release_lock(self._profile_lock)
         self._profile_lock = None
         self._profile_path = None

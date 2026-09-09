@@ -141,7 +141,7 @@ class WarmBrowserLane:
 
             if self._fetcher is not None:
                 if not self._alive():
-                    self._drop("浏览器已死")
+                    self._drop(f"浏览器已死：{self._death_reason()}")
                 elif now - self._born_at > _MAX_AGE:
                     self._drop(f"到龄 {_MAX_AGE / 60:.0f} 分钟")
 
@@ -168,12 +168,35 @@ class WarmBrowserLane:
         except Exception:
             return False
 
+    def _death_reason(self) -> str:
+        """它到底是哪一处不对了。
+
+        原来只记「浏览器已死」，于是 2026-09-09 排查时无从下手——是页面被关了、
+        驱动断了、还是 Chromium 被 OOM 干掉了，三种原因的处置完全不同，而日志把
+        它们写成同一句话。
+        """
+        f = self._fetcher
+        try:
+            if getattr(f, "_browser", None) is None:
+                return "浏览器对象为空"
+            page = getattr(f, "_page", None)
+            if page is None:
+                return "页面对象为空"
+            if page.is_closed():
+                return "页面已被关闭"
+            return "连接已断开（驱动或 Chromium 没了）"
+        except Exception as e:
+            return f"连状态都问不出来（{type(e).__name__}: {e}）"
+
     def _drop(self, reason: str) -> None:
         logger.info("下单常驻浏览器关闭（%s）", reason)
         try:
             self._fetcher.close()
         except Exception:
-            logger.debug("关闭常驻浏览器失败（已忽略）", exc_info=True)
+            # **WARNING 不是 DEBUG。** 2026-09-09 那次泄漏里，close() 到底抛没抛
+            # 是关键线索，而它被记在 DEBUG 上——线上是 INFO，等于什么都没记。
+            # 一条「关不掉」正是「进程还在」的直接征兆，不该藏起来。
+            logger.warning("关闭常驻浏览器时抛异常（进程可能还在）", exc_info=True)
         self._fetcher = None
         self._born_at = 0.0
         self._last_io = 0.0
