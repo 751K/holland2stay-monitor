@@ -1280,12 +1280,17 @@ tr:hover .cell-map-pin{opacity:1}
   width:52px;height:52px;border-radius:var(--radius-lg);background:var(--accent);color:#fff;
   display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 16px;
 }
-/* 同 .brand-mark：深浅两版走 background-image，由 data-theme 切换。 */
+/* 同 .brand-mark：深浅两版走 background-image，由 data-theme 切换。
+   但这里用的是**无底色**的一版：登录页背景是一层黄色渐变，带奶油底色的图落上去
+   是一块边界分明的浅色方砖。去掉底色，房子就直接坐在页面上。
+
+   连带去掉 box-shadow 和 .login-icon 继承来的圆角/底色：阴影跟的是元素盒子而不
+   是图的 alpha，配一张透明图就是一个框着空气的圆角矩形阴影。 */
 .login-logo{
-  display:block;box-shadow:0 10px 28px rgba(56,189,248,.16);
-  background:url("/static/logo-md.png") center/100% 100% no-repeat;
+  display:block;box-shadow:none;border-radius:0;background-color:transparent;
+  background:url("/static/logo-bare.png") center/100% 100% no-repeat;
 }
-[data-theme="dark"] .login-logo{background-image:url("/static/logo-md-dark.png")}
+[data-theme="dark"] .login-logo{background-image:url("/static/logo-bare-dark.png")}
 .login-field{margin-bottom:16px}
 .login-field label{display:block;font-size:14px;font-weight:550;color:var(--text2);margin-bottom:6px}
 .login-field input{

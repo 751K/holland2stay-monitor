@@ -46,6 +46,11 @@ LIGHT_MASTER = MASTERS / "appicon-light-1024.png"
 DARK_MASTER = MASTERS / "appicon-dark-1024.png"
 MASK = MASTERS / "squircle-mask-512.png"
 
+#: 无底色母版：只有房子、窗户、运河线和倒影，背景透明。
+#: 由 tools/render_bare_masters.py 从设计源 SVG 出（仅 macOS，设计变了才跑）。
+BARE_LIGHT_MASTER = MASTERS / "bare-light-1024.png"
+BARE_DARK_MASTER = MASTERS / "bare-dark-1024.png"
+
 #: 目标文件 → (尺寸, 用深色母版吗)。
 #:
 #: favicon 与 apple-touch-icon 只有浅色一版：两者都由浏览器 / 系统按自己的规则
@@ -59,6 +64,17 @@ OUTPUTS: dict[str, tuple[int, bool]] = {
     "logo-small-dark.png":  (56,  True),
     "favicon.png":          (64,  False),
     "apple-touch-icon.png": (180, False),
+}
+
+#: 无底色的一版，登录页用。
+#:
+#: 那一页的图不该是一块贴在渐变上的方砖——它有自己的奶油底色，落在黄色渐变上就是
+#: 一个边界分明的浅色方块。去掉底色之后房子直接坐在页面上。
+#:
+#: **不上 squircle 蒙版**：这一版本来就没有底，蒙版只会把倒影的两端切掉。
+BARE_OUTPUTS: dict[str, tuple[int, bool]] = {
+    "logo-bare.png":      (112, False),
+    "logo-bare-dark.png": (112, True),
 }
 
 
@@ -78,6 +94,16 @@ def _compose(dark: bool, size: int) -> Image.Image:
     if size != mask.size[0]:
         out = out.resize((size, size), Image.LANCZOS)
     return out
+
+
+def _bare(dark: bool, size: int) -> Image.Image:
+    """无底色母版直接缩到目标尺寸——不上蒙版。
+
+    它本来就没有底色，squircle 蒙版只会把左右两端的倒影切掉。
+    """
+    src = BARE_DARK_MASTER if dark else BARE_LIGHT_MASTER
+    with Image.open(src) as im:
+        return im.convert("RGBA").resize((size, size), Image.LANCZOS)
 
 
 def _identical(a: Image.Image, path: Path) -> bool:
@@ -101,13 +127,16 @@ def main() -> int:
                     help="只比对，不写；有差异时以 1 退出")
     args = ap.parse_args()
 
-    for missing in (p for p in (LIGHT_MASTER, DARK_MASTER, MASK) if not p.exists()):
+    for missing in (p for p in (LIGHT_MASTER, DARK_MASTER, MASK,
+                                BARE_LIGHT_MASTER, BARE_DARK_MASTER)
+                    if not p.exists()):
         print(f"缺少母版：{missing.relative_to(ROOT)}", file=sys.stderr)
         return 2
 
     stale: list[str] = []
-    for name, (size, dark) in OUTPUTS.items():
-        img = _compose(dark, size)
+    for name, (size, dark) in {**OUTPUTS, **BARE_OUTPUTS}.items():
+        img = (_bare(dark, size) if name in BARE_OUTPUTS
+               else _compose(dark, size))
         target = STATIC / name
         if _identical(img, target):
             continue
@@ -122,7 +151,7 @@ def main() -> int:
             print("这些资源和母版对不上（跑一次 tools/make_web_icons.py）："
                   + "、".join(stale), file=sys.stderr)
             return 1
-        print(f"{len(OUTPUTS)} 个资源都和母版一致")
+        print(f"{len(OUTPUTS) + len(BARE_OUTPUTS)} 个资源都和母版一致")
     elif not stale:
         print("全部已是最新，无需改动")
     return 0

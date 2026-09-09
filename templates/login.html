@@ -244,9 +244,9 @@
     .login-logo {
       width: 64px !important;
       height: 64px !important;
-      border-radius: 18px;
-      box-shadow: 0 8px 16px rgba(0,0,0,0.1);
       margin-bottom: 24px !important;
+      /* 圆角和投影跟着底色一起去掉：图是透明的，阴影跟的是元素盒子而不是图的
+         alpha，留着就是一个框着空气的圆角矩形。 */
     }
     .login-card h1 {
       font-size: 28px !important;
