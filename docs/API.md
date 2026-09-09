@@ -2,7 +2,7 @@
 
 本文档整理 FlatRadar 移动端和第三方客户端使用的后端 API。当前稳定接口集中在 `/api/v1/*`，Web 后台的 HTML 页面和 `/api/*` 旧接口不作为移动端契约。
 
-最后更新：2026-09-09（openapi.json 1.21.0）
+最后更新：2026-09-09（openapi.json 1.22.0）
 
 机器可读契约：
 
@@ -118,7 +118,7 @@ SSE 特例：`GET /notifications/stream` 支持 `Authorization` header，也支�
 | GET | `/stats/public/summary` | 可选 | 公开统计概览 |
 | GET | `/stats/public/charts` | 可选 | 图表 key 列表 |
 | GET | `/stats/public/charts/<key>` | 可选 | 图表数据 |
-| GET | `/listings` | 可选 | 房源列表 |
+| GET | `/listings` | 可选 | 房源列表（支持 `sort`） |
 | GET | `/listings/<listing_id>` | 可选 | 房源详情 |
 | GET | `/map` | 可选 | 已缓存坐标的地图房源 |
 | GET | `/map/locate` | 可选 | 按 id 定位单条房源，区分三种「看不到」 |
@@ -398,7 +398,7 @@ Query：
 
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---:|---|
-| `days` | int | 30 | 1-365 |
+| `days` | int | 7 | 1-365，超范围会 clamp；实际生效的值在 `data.days` 里回显 |
 
 返回：
 
@@ -407,7 +407,7 @@ Query：
   "ok": true,
   "data": {
     "key": "type_dist",
-    "days": 30,
+    "days": 7,
     "data": []
   }
 }
@@ -437,9 +437,69 @@ Query：
 | `energy` | string | 最低能耗等级，例如 `B` |
 | `limit` | int | 1-500，默认 100 |
 | `offset` | int | 默认 0 |
+| `sort` | string | 排序键，前导 `-` 为降序。默认 `-first_seen` |
 
 `source` / `city` 是 `sources` / `cities` 的单值旧写法；两者同时给出时以复数形式
 为准。
+
+#### 排序
+
+`sort` 取单个键，前导 `-` 表示降序：
+
+| 值 | 依据 |
+|---|---|
+| `price` | 从 `price_raw` 解析出的数值（不是文本） |
+| `first_seen` | 首次发现时间 |
+| `last_seen` | 最近一次见到 |
+| `available_from` | 可入住日期 |
+| `city` | 城市名，不区分大小写 |
+| `status` | **业务序**，不是字典序，见下 |
+| `source` | 平台 |
+
+三件需要客户端知道的事：
+
+**一、结果总是带一个隐含的 `id` 兜底。** 排序键相同的行之间顺序是确定的，所以
+`offset` 翻页不会重复或漏项。不传 `sort` 时也一样——默认顺序 `-first_seen`
+现在是契约的一部分，不再是实现细节。
+
+**二、`status` 按业务序排**，字典序在这里没有意义（按字母排是
+`Available in lottery` < `Available to book` < `Occupied` < `Reserved`，
+把"能抢的"排在"抽签的"后面）：
+
+```text
+Available to book                  → 0
+Available in lottery               → 1
+Reserved                           → 2
+Occupied / Rented / Not available  → 3
+其它                                → 9
+```
+
+归一化和客户端 `Listing.statusKind` 一致，`available_to_book` 这类下划线写法同样
+认得。
+
+**三、取不到值的行一律排最后**，升降序都是。价格解析不出来的、`available_from`
+为空或是 2050 哨兵的，都算取不到。「从便宜到贵」的开头戳着一堆价格未知的房，
+不是任何人想要的；哨兵尤其糟，因为它看起来像个真日期。
+
+不认识的 `sort` 值返回 **400**，不会静默回退到默认顺序：
+
+```json
+{
+  "ok": false,
+  "error": { "code": "validation",
+             "message": "未知的 sort 值 'pirce'；可用：price / -price、…" }
+}
+```
+
+这跟 `limit` 超范围就 clamp 不是一类——clamp 一个数字仍然尊重了意图，而悄悄换掉
+一个拼错的排序键，返回的是一份错的顺序，客户端无从察觉。
+
+`area` 和 `energy` **不在 v1 内**：它们埋在 `feature_map` 里是文本
+（`"87.28 m²"` / `"B"`），服务端排序要先抽成派生列。客户端在拿到那两列之前，只能
+标注"仅排序已加载结果"。
+
+逗号形式（`sort=city,-price`）语法上预留给将来的多键排序，v1 会拒绝——多键在 UI
+上还没有入口，与其悄悄只用第一个键，不如明确报错。
 
 返回：
 

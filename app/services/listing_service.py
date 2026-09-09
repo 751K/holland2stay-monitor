@@ -301,6 +301,125 @@ def serialize_filter(user: Optional[UserConfig]) -> dict:
     return asdict(user.listing_filter)
 
 
+# ── 排序 ────────────────────────────────────────────────────────────
+
+class SortError(ValueError):
+    """``sort`` 参数不认识。带上允许值，好让 400 说得清。"""
+
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+        super().__init__(raw)
+
+
+#: ``sort`` 允许的键。值是「取排序键的函数」，不是列名——见下面为什么不在 SQL 里排。
+SORT_KEYS: tuple[str, ...] = (
+    "price", "first_seen", "last_seen", "available_from", "city", "status",
+    "source",
+)
+
+#: 不传 ``sort`` 时的顺序。**这是契约的一部分**，不是实现细节。
+#:
+#: 在它写进契约之前，顺序来自 ``get_all_listings`` 里那句
+#: ``ORDER BY first_seen DESC``——没有任何地方承诺过它，而三端的分页
+#: （``offset``/``limit``）全建在这个没承诺的顺序上。
+DEFAULT_SORT = "-first_seen"
+
+#: 状态的业务序。字典序在这里毫无意义——按字母排是
+#: ``Available in lottery < Available to book < Occupied < Reserved``，
+#: 把"能抢的"排在"抽签的"后面。
+#:
+#: 归一化（小写 + 下划线换空格 + 子串匹配）跟客户端 ``Listing.statusKind``
+#: 保持一致，那边同样要认 ``available_to_book`` 这种写法。**判断顺序不能改**：
+#: lottery 必须先判，否则 "Available in lottery" 会被 "available to book"
+#: 之外的规则先接走。
+_STATUS_RANK_OTHER = 9
+
+
+def status_rank(status: str | None) -> int:
+    """状态 → 业务序。认不出的一律排最后。"""
+    s = (status or "").strip().lower().replace("_", " ")
+    if "lottery" in s:
+        return 1
+    if "available to book" in s or s == "book":
+        return 0
+    if "reserved" in s:
+        return 2
+    if "occupied" in s or "rented" in s or "not available" in s:
+        return 3
+    return _STATUS_RANK_OTHER
+
+
+def parse_sort(raw: str | None) -> tuple[str, bool]:
+    """``"-price"`` → ``("price", True)``。不认识就抛 ``SortError``。
+
+    **不静默回退。** ``sort=pirce`` 悄悄退回默认顺序的话，返回的是一份错的顺序，
+    而客户端无从察觉——这跟 ``limit`` 超范围就 clamp 不是一类：clamp 一个数字仍然
+    尊重了意图，回退一个拼错的排序键则是把错误藏起来。
+
+    逗号形式（``sort=city,-price``）语法上先留着，但 v1 只认单键：多键排序在 UI
+    上没有入口，先不做。给了多键直接报错，而不是悄悄只用第一个。
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        raw = DEFAULT_SORT
+    if "," in raw:
+        raise SortError(raw)
+    desc = raw.startswith("-")
+    key = raw[1:] if desc else raw
+    if key not in SORT_KEYS:
+        raise SortError(raw)
+    return key, desc
+
+
+def _sort_value(row: dict, key: str):
+    """取排序键。返回 ``(未知?, 值)``——未知的一律排在最后。
+
+    为什么不在 SQL 里排
+    ------------------
+    ``price`` 对应的 ``price_value`` **不是列**：库里只有 ``price_raw``，形如
+    ``"€1212"`` 的文本，按它排是字典序（``"€867"`` 会排在 ``"€1212"`` 后面）。
+    ``status`` 要业务序，``available_from`` 要把 2050 哨兵当未知——三者都得先算。
+
+    而这条路径本来就把结果整批取进内存（SQL 只做粗筛 + 2000 条硬上限），过滤和
+    分页也都在 Python 里做，所以排序放在这里是顺着现有形状，不是绕路。
+    """
+    from models import is_sentinel_available_from, parse_float
+
+    if key == "price":
+        v = parse_float(row.get("price_raw", ""))
+        return (v is None, v if v is not None else 0.0)
+    if key == "status":
+        return (False, status_rank(row.get("status")))
+    if key == "available_from":
+        raw = (row.get("available_from") or "").strip()
+        # 2050 哨兵不是日期，是「不知道」。当成日期排的话，「最早可入住」的第一屏
+        # 全是它——比空值更糟，因为它看起来像个真日期。
+        unknown = not raw or is_sentinel_available_from(raw)
+        return (unknown, "" if unknown else raw)
+    v = row.get(key)
+    if isinstance(v, str):
+        v = v.strip()
+        if key == "city":
+            v = v.lower()          # 城市按显示名排，大小写不该影响顺序
+    return (v in (None, ""), v if v not in (None, "") else "")
+
+
+def sort_listing_rows(rows: list[dict], key: str, desc: bool) -> list[dict]:
+    """按 ``key`` 排序，``id`` 兜底。
+
+    **``id`` 兜底比排序本身更要紧。** 分页是 ``offset``/``limit`` 切片，而在一个
+    有并列值的集合上，不同请求之间的相对顺序可以不同——翻页时同一条会重复出现，
+    另一条则从没出现过。加 sort 顺手把这个钉上：任何排序键之后都跟一个唯一列。
+
+    未知值（价格解析不出、日期是哨兵或为空）**无论升降序一律排最后**：
+    「从便宜到贵」的开头戳着一堆价格未知的房，不是任何人想要的。
+    """
+    rows = sorted(rows, key=lambda r: str(r.get("id") or ""))
+    rows.sort(key=lambda r: _sort_value(r, key)[1], reverse=desc)
+    rows.sort(key=lambda r: _sort_value(r, key)[0])     # 未知的一律沉底
+    return rows
+
+
 def query_listing_rows(
     *,
     user: UserConfig | None = None,

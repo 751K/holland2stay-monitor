@@ -60,9 +60,13 @@ def _check_guest_rate(ip: str) -> bool:
 
 
 from app.services.listing_service import (
+    SORT_KEYS,
+    SortError,
     get_listing_detail,
+    parse_sort,
     query_listing_rows,
     serialize_listing,
+    sort_listing_rows,
 )
 
 from ._helpers import get_current_user
@@ -114,6 +118,16 @@ def _list_listings():
     contract = request.args.get("contract") or None
     energy = request.args.get("energy") or None
 
+    # 排序键先解析：认不出就 400，**不静默回退到默认顺序**。
+    # 拼错一个键却拿到一份看起来正常、其实顺序是错的列表，客户端无从察觉——
+    # 这跟 limit 超范围就 clamp 不是一类。
+    try:
+        sort_key, sort_desc = parse_sort(request.args.get("sort"))
+    except SortError as e:
+        return _err.err_validation(
+            f"未知的 sort 值 {e.raw!r}；可用：" + "、".join(
+                f"{k} / -{k}" for k in SORT_KEYS))
+
     SQL_HARD_CAP = 2000
     filtered = query_listing_rows(
         user=user if role == "user" else None,
@@ -127,6 +141,10 @@ def _list_listings():
         energy=energy,
         limit=SQL_HARD_CAP,
     )
+
+    # 排序必须在切片之前，而且**任何时候都排**（不传 sort 也走默认键）——
+    # 这样 id 兜底始终生效，offset 翻页才不会重复或漏项。
+    filtered = sort_listing_rows(filtered, sort_key, sort_desc)
 
     total = len(filtered)
     page = filtered[offset : offset + limit]
