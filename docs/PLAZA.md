@@ -1,9 +1,13 @@
 # Plaza — 平台状态
 
 > 抓取侧已接入（2026-09-02），见 `docs/SCRAPING_RECON.md` §5b 与
-> `scrapers/plaza.py`。**本文只写自动预订**：这是 2026-09-10 的一次纯静态侦察，
-> 全部结论来自匿名可取的接口与前端 bundle，**没有账号，一次写请求都没发过**。
-> 每条结论后面标了是「实测」还是「读代码推断」——这两者在下单这件事上不能混。
+> `scrapers/plaza.py`。**本文只写自动预订。**
+>
+> 2026-09-10 分两轮：先是纯静态侦察（读匿名接口与前端 bundle），随后用**真实账号**
+> 登录把整条链路走了一遍。后一轮推翻了前一轮的若干结论，推翻的经过原样留着——
+> 每条都标了是「实测」还是「读代码推断」，这两者在下单这件事上不能混。
+>
+> **一次写请求都没发过**（`react` / `verwijderreactie` 全程没调用）。
 
 平台是 Zig / Hexia，Plaza 只是跑在上面的一个门户（`clientId = "wzp"`）。所以下面
 这套端点大概率对所有 Zig 门户通用，将来接别的荷兰门户可以复用。
@@ -173,20 +177,107 @@ id=16613
 > 把「这个账号此刻能不能应征这一条」算好了。虽然不是 `/v1/reactie/validate` 那种
 > 官方 validate，但语义等价，而且不用发写请求。`dry_run=True` 就停在这一步。
 
+### 3.3a `kanReageren` 也不是「能不能应征」
+
+⚠️ **本文档踩过的最深的一个坑，而且是端到端真跑才撞出来的。**
+
+它回答的是「能不能操作」。**已经应征过的房源，它仍然是 `true`**——因为确实可以
+操作，只是那个操作是撤回（2026-09-10 实测，两条已应征的房源）：
+
+```jsonc
+{ "action": "remove", "kanReageren": true, "label": "Delete comment",
+  "url": "?remove=999001&dwellingID=16626" }
+```
+
+只看 `kanReageren` 的实现会：预检通过 → 把 `url` 原样回传 → **POST 一个 remove**
+→ 静默撤销用户已有的应征 → 回查发现没有 → 报「已提交但回查不到」。
+
+**毁掉用户要的东西、报告还不说实话。** 而在撞上它之前，`bookers/plaza.py` 的
+34 条单元测试全绿——因为测试替身里 `action` 永远是 `"add"`。测试再多也测不出一个
+从没在替身里出现过的服务端状态；这个洞只有真账号真跑才会露出来。
+
+判据是 **`action`**：
+
+| `action` | 含义 | booker |
+|---|---|---|
+| `add` | 还没应征，可以应征 | 正常提交 |
+| `remove` | **已经应征过**，这个动作是撤回 | 当成功返回，**不发写请求** |
+| 其它 | 没侦察过 | 拒绝 |
+
+实现里设了**两道闸**：`action` 必须是 `add`，且解析出的参数里必须有 `add`、不能有
+`remove`。两个信号独立、都来自服务端，同时要求才不可能出现「以为在应征、实际在撤回」。
+
+> 顺带纠正：`WINKEL-REACTIE-DUBBEL` **不是**「已应征」在预检里的信号——那个码只出现
+> 在**提交的响应**里。稳态预检给的是 `action="remove"`。第一版把两者搞混了。
+
+### 3.3b `kanReageren` 不是会话检查
+
+2026-09-10 会话掉线后偶然撞见的，**很容易写错且错了不报错**：
+
+```
+loggedin:    false      ← 没登录
+kanReageren: true       ← 仍然是 true
+```
+
+两个字段答的是不同问题：
+
+| 字段 | 答的是 |
+|---|---|
+| `kanReageren` | **这条广告**本身开不开放应征——与你是谁无关 |
+| `loggedin` | **这个会话**认不认你 |
+
+匿名访客点「Reageer」得到的是登录弹窗，不是提交。所以只查 `kanReageren` 的实现会
+带着一个无效会话一路走到 `POST react`。
+
+`bookers/plaza.py` 里那道 `loggedin` 检查因此是**载荷性的**，不是消歧用的锦上添花。
+本文档与该文件的第一版都把它写成「两者都为 false，靠 kanReageren 区分不了」——
+那是推的，而且推反了。有一条测试专门钉住它不能被删。
+
 ### 3.4 下单与撤回
 
-```http
-POST /portal/object/frontend/react/format/json           # 下单
-Content-Type: application/x-www-form-urlencoded
-add=11882&dwellingID=16613
+> **2026-09-10 抓包实测重写。** 用户自己在浏览器里点了一次 Reply，把真实请求抓了
+> 下来。抓之前这一节写的是「参数就是 `reactionData.url` 里那两个」——**不完整**，
+> 照着写的实现发出去不会成功。
 
+```http
+POST /portal/object/frontend/react/format/json
+Accept: application/json, text/plain, */*
+Content-Type: application/x-www-form-urlencoded; charset=UTF-8
+X-Requested-With: XMLHttpRequest
+
+__id__=Portal_Form_SubmitOnly&__hash__=672e…&add=11884&dwellingID=16626
+```
+
+body 是**两半拼起来**的：
+
+| 来源 | 参数 |
+|---|---|
+| `reactionData.url`（该房源的） | `add` / `dwellingID`（DTH 还多一个 `redirect=1`） |
+| **`GET /portal/core/frontend/getformsubmitonlyconfiguration/format/json`** | `__id__` = `form.id`，`__hash__` = `form.elements.__hash__.initialData` |
+
+`__hash__` 是防重放令牌。**没有 CSRF 头、没有 referer 要求**——防护全在这个 body 参数上。
+`formService` 里另有一段「提交的响应若带 `formHash`，用它替换下次的 `__hash__`」
+（读 bundle），也就是它会轮换；每次提交前现取即可绕开，实测同一会话内连取两次值相同。
+
+⚠️ **响应顶层没有 `result`**：是 `success` / `reactionData` / `reactionId` /
+`messages` / `numberOfReactions`。把 `result` 写死成必须存在的话，一次**成功**的应征
+会被抛成传输错误——比失败更糟，房子应征上了而用户收到「失败」，于是既不去确认也不撤回。
+
+响应里的 `reactionData` 是**提交之后**的状态（`kanReageren` 变 false、原因码
+`WINKEL-REACTIE-DUBBEL`），不要拿它当提交前的判断。
+
+```http
 POST /portal/registration/frontend/getactievereacties/format/json   # 事后核对
 POST /portal/registration/frontend/verwijderreactie/format/json     # 撤回
 ```
 
-**`react` 本次一次都没调用**——见 §7。参数形状来自前端把 `reactionData.url` 的
-query string 解析后原样回传（读代码 + `url` 字段实测存在），booker **原样回传即可，
-不要自己拼**：哪天上游多塞一个参数，原样回传照常能用，手拼的会漏。
+### 已知的 `redenMagNietReagerenCode`
+
+| 码 | 含义 | booker 怎么处理 |
+|---|---|---|
+| `WINKEL-REACTIE-NIETMEERGEPUBLICEERD` | 广告不再发布 | `race_lost`，换下一个候选 |
+| `WINKEL-REACTIE-DUBBEL` | 这个账号已应征过 | **当成功**——终态已成立，报失败会让上层不停重试 |
+| 其它 | 没侦察过 | fail-safe：不发写请求，把原码带出来 |
 
 `getactievereacties` 返回的每条带 `kanVerwijderdWorden`（实测为 `true`）、`positie`、
 `aantalKandidatenVoorMij`——**位次和前面排了多少人是能读到的**，值得进通知。
@@ -302,13 +393,19 @@ POST /portal/proxy/frontend/api/v1/oauth/token        # 凭据 → token
 POST /portal/account/frontend/loginbyservice/format/json   # token → portal session（空 body）
 ```
 
-第一步的 body **本次没有采集**——里面是用户的明文密码，抓包时只记了 URL 和方法。
-字段名可以从 bundle 推：表单字段是 `username` / `password`（读 `LoginForm`），
-OAuth 侧是 `client_id: "wzp"` + `grant_type: "password"`（读 `useQueryParams` 的
-refresh 分支，它对称地用 `grant_type: "refresh_token"`）。
+第一步的 body **没有采集**——里面是明文密码，抓包时只记了 URL 和方法。
 
-**这一步 booker 第一次跑的时候要用真实账号验一次**，因为字段名是推的不是抓的。
-验的方式：用户自己在本地跑，凭据不经过任何第三方——与 `gh secret set` 同一模式。
+字段名改用**形状探针**验（2026-09-10 实测，全程只用假账号，没碰真实凭据）：
+
+| 发什么 | 回什么 | 说明 |
+|---|---|---|
+| `{client_id:"wzp", grant_type:"password", username, password}` | `invalid_grant`「The user credentials were incorrect」 | 形状被完全接受，一路走到校验凭据 |
+| 漏掉 `grant_type` | `unsupported_grant_type`「Check that all required parameters have been provided」 | 形状不对时报的是另一种错 |
+| `grant_type: "bogus_grant"` | 同上 | |
+
+两种错误可区分，所以第一行不是「没报错就当对了」。响应取 `access_token`——字段名
+来自 bundle 里消费**这同一个端点**的 refresh 分支（它解构
+`{access_token, refresh_token}`）。
 
 拿到 token 之后有两条路，**登录之后就分叉了**：
 
@@ -460,66 +557,119 @@ supervisorctl -c /etc/supervisor/conf.d/app.conf start monitor
 
 ---
 
-## 6. 建议的落地形态
+## 6. 落地状态：端到端已验证（2026-09-10）
 
-按本项目既有惯例（`bookers/__init__.py` 那张支持矩阵）：先注册 booker、但**不**加进
-`monitor._AUTO_BOOK_SOURCES`，等端到端走通再开——Xior 和 OurDomain 现在就是这个
-状态，理由写在 `monitor.py:1505`：
+`bookers/plaza.py` 的 `PlazaBooker` 已注册进 `BOOKER_REGISTRY`，并用**真实账号**
+跑通了全部路径：
 
-> 「放开等于拿用户的真实账号去提交半懂不懂的表单」
+| 路径 | 结果 |
+|---|---|
+| 登录（`oauth/token` → `loginbyservice`） | ✅ 真实凭据跑通 |
+| `action="remove"`（已应征过） | ✅ 提前返回 success，**不发写请求** |
+| `action="add"` + `dry_run` | ✅ 预检通过、信封取到、停在提交前 |
+| `action="add"` + 真提交 | ✅ 应征成立 |
 
-Plaza 到时要过的也是这一关，**不是**「DTH 太危险」那一关（§4 已经推翻了）。
-两类房源走同一条路：都自动应征，都用 `/v1/reactie/validate` 先校验。
+### 6.1 已开到 source 级，用户侧默认关
 
-### 6.1 反而值得做全自动
+`plaza` 在 `monitor._AUTO_BOOK_SOURCES` 里（2026-09-10 端到端验证之后进的）。
+但进这个元组**不等于对谁都开**——还有第二道闸：
 
-把 §4.1 的流程文案再读一遍，会发现它几乎是在描述本项目存在的理由：
+```
+_AUTO_BOOK_SOURCES 含 plaza        ← source 级，代码里
+  ∧ auto_book.plaza_enabled        ← 用户级，面板里的开关，默认关
+  ∧ plaza_username / plaza_password ← 凭据
+```
 
-- 「**first come, first serve**」——先到先得，速度就是全部
-- 「we controleren je documenten pas **als we je een woning toewijzen**」——
-  资料只在分配时才查，所以应征那一刻真的什么都不用带
-- 「**Alleen wanneer je geselecteerd bent** ontvang je bericht」——
-  没被选中连通知都没有，人工盯盘的反馈回路等于零
+**为什么 Plaza 比另外三个平台多一道开关**：那三个都还有一步在用户手里——H2S 下单
+后要付款、Xior / OurDomain 停在存草稿——所以「填了凭据」约等于「授权到那一步」。
+Plaza 的应征**一次 POST 就落地**，中间没有任何人工关卡。让填凭据顺带等于授权自动
+应征，跨度太大。
 
-一个只要两个 id、没有 captcha、没有 Cloudflare、上游还自带 validate 和 delete 的
-先到先得平台——这是目前所有已接平台里**最适合自动化的一个**。
+凭据那一半也不能省：没凭据就不产生候选，否则每条新房源都会跑一次注定失败的登录，
+而失败会消耗上游的尝试额度。
 
-### 6.2 真正要防的风险换了一个
+#### `maxAantalReacties = "0"` = 不限（2026-09-10 查清）
 
-不是「替用户签了租约」，是这两条：
+门户配置里这个值是字符串 `"0"`，一度当成待查项。判据在 bundle 里
+（`zig.portal.reacties` 的 `reactiePlaatsenMogelijk`）：
 
-1. **资料不齐却抢到了位置。** 站点反复在说 *Zijn jouw gegevens bijgewerkt en klopt
-   jouw inkomen?*。资料不全 → 被选中 → 核验不过 → `GEWEIGERD`，位置白占。
-   这是**用户侧的前置条件**，booker 造不成也修不了，但**应该在开自动预订前检查一次
-   并拦住**（`inschrijving` 完整性可以在登录后查）。
-2. **DTH 的排他性。** 「geen andere aanbieding meer krijgt」是真的：这一轮里应征了
-   DTH 就不再接别的 offer。所以**并发应征多条 DTH 没有意义**，且 filter 要收紧
-   ——auto_book 的 `listing_filter` 在 Plaza 上比在 H2S 上更重要。
+```js
+return portalConfig !== undefined
+  && ( !(0 < portalConfig.maxAantalReacties && !neemtDeelAanHaastrij)
+       || totaalAantalReacties < portalConfig.maxAantalReacties )
+```
 
-### 6.3 配置
+`0 < maxAantalReacties` 是**启用上限的前提**。值为 `0` 时前提不成立，`!(false)`
+恒真——不限。（JS 里 `0 < "0"` 会把字符串转成数字，即 `0 < 0` 为假。）
 
-`AutoBookConfig` 加一对 Plaza 独立凭据（`plaza_username` / `plaza_password`，与
-H2S / Xior / OurDomain 互不通用）。**不需要** `plaza_allow_dth` 那个开关——第一版
-提议它是基于错误的风险判断；用户要区分两类模型，用现成的 `listing_filter` 就够了，
-多一个语义可疑的开关只会让人以为 DTH 是另一种东西。
+与实测一致：账号上挂着 5 条在跑的应征时，新房源的 `kanReageren` 仍为 true。
 
-`dry_run` 直接映射到 `POST /v1/reactie/validate`——本项目第一次有真正的 dry-run。
+⚠️ 两点保留：这是**前端**的闸，只决定 UI 给不给按钮，服务端有没有自己的上限没测过；
+而且这个值是**门户配置**，Plaza 哪天改成非 0 我们不会收到通知。真出现上限，表现会是
+`kanReageren` 变 false 带一个我们没见过的原因码——booker 对未知码 fail-safe，
+不会硬闯，日志里看得到。
+
+#### DTH 一律不自动应征（2026-09-10 决定）
+
+`bookers/plaza.py` 里有一道硬闸：`is_dth(obj)` 为真直接返回 `unsupported`，
+**不发写请求，dry_run 也不放行**。
+
+**理由是一个查不到的事实。** DTH 应征前那句确认——「geen andere aanbieding meer
+krijgt」——的**范围站点没有说明**：是只管这一轮，还是会连带影响用户手上其它在跑的
+应征。3595 条 `gettranslations` 全搜过，除确认框本身没有第二处提到它。而这一条恰好
+决定代价有多大。
+
+事实未知时两边不对称：
+
+| | 不自动应征 | 照常应征 |
+|---|---|---|
+| 代价 | 少自动化一类**当前一条都够不着**的房源（29 条全是额外供给，已判 `Not available`）；用户自己点一下即可 | 可能自动放弃用户手上**全部**其它 offer，中间无人工介入 |
+
+**刻意没做成用户开关。** 开关的前提是用户能做出知情选择，而这里谁都不知道那句话的
+范围——给个开关等于把我们的无知包装成用户的同意。等真出现一条在架的 DTH、能观察到
+实际行为了，再回来改。
+
+两个实现细节：
+
+- **判据是 `model.advertentieSluitenNaEersteReactie`**，不是 `label`（本地化的：
+  荷兰语 "Boeken"、英文 "Reply"），也不是 `modelCategorie.code`（DTH 那批是 null）。
+- **闸放在预检之前。** 挪到之后同样不会提交，但一条不可应征的 DTH 会走成
+  `race_lost`——那个 phase 会被 `monitor` 放进重试队列，于是一条我们永远不打算按的
+  房源会被无限重试。这个差别「有没有提交」类的断言抓不到，有一条测试专门钉位置。
+
+### 6.2 实现里的四条硬规矩
+
+1. **`action` 必须是 `add`。** `kanReageren` 不是「能不能应征」，已应征的房源它
+   仍为 true 而动作是 `remove`（§3.3a）。两道闸：`action` 和参数各验一次。
+2. **`kanReageren` 为 false 时绝不发写请求。** 未知原因码一律当作不能应征。
+3. **下单参数原样回传 + 提交信封**（§3.4）。两半缺一不可。
+4. **不信 `react` 的响应判成功**，一律回查 `getactievereacties`。
+
+另外 `_portal_post` 的 `expect` 要能关掉（react 的响应没有 `result`），`loggedin`
+要单独检查（未登录时 `kanReageren` 仍为 true）。
+
+### 6.3 凭据
+
+`AutoBookConfig.plaza_username` / `plaza_password` / `plaza_enabled`，面板里有独立
+一块，含那道开关。**用户名不是邮箱**，所以字段名与另外三个平台不同是有意的。
+密码走既有的加解密路径；开关是布尔，不加密。
+
+Plaza **不参与** `_BACKFILLED_CRED_PAIRS` 那套 H2S 凭据回退——那是历史包袱，而且
+把邮箱抄过来必然登录失败，失败还会消耗上游的尝试额度。
 
 ---
 
-## 7. 本次侦察没做的事
+## 7. 仍然没查清的
 
-- **一次写请求都没发。** `react` / `verwijderreactie` 全程没调用过——账号上那两条
-  在跑的应征是用户自己点的，不是这次侦察产生的。所以 `react` 的**响应**形状仍未知
-  （`reactionId` / `kanVerwijderdWorden` / `positie` 这些字段名来自读 bundle）。
-- **登录端点未知**（§5）。
-- **MFA 是否可开未知**——bundle 里有 `/v1/mfa/*`，但 §3.1 说了 `/v1/*` 在这台主机上
-  是 404，所以大概率不适用。没验证。
-- **写接口限流未知。** 读接口连打十几次没被拦，但写接口是另一回事。
-- **`redenMagNietReagerenCode` 只见到一个值**（`WINKEL-REACTIE-NIETMEERGEPUBLICEERD`）。
-  还有哪些码、分别什么含义，没有清单——booker 里对未知码要 fail-safe（当作不能应征），
-  不要当作能应征。
-- **只用了一个账号（regulier，非学生）测。** 学生类型的 `inschrijving` 看到的
-  `kanReageren` 会不会不同，没验证。
-- **自动下单的 ToS 暴露面没看。** 抓取侧看过 disclaimer（`SCRAPING_RECON.md` §5b），
-  自动**下单**是另一件事，开之前要单独看一遍。
+- **`redenMagNietReagerenCode` 没有完整清单。** 见过两个
+  （`WINKEL-REACTIE-NIETMEERGEPUBLICEERD` / `WINKEL-REACTIE-DUBBEL`）。booker 对
+  未知码 fail-safe（当作不能应征），但那意味着遇到新码会白白放弃一次机会——日志
+  里能看到原码，攒到了就补进 `_REASON_PHASES`。
+- **会话有效期未知。** 侦察当天遇到过一次掉线。booker 每次调用都重新登录，所以
+  不影响正确性，但如果站点对登录频率有限制，那会成为问题——没测过。
+- **写接口限流未知。** 读接口连打几十次没被拦，写接口是另一回事。
+- **只用一个账号（regulier，非学生）测过。** 学生类型的 `inschrijving` 看到的
+  `action` / `kanReageren` 会不会不同，没验证。
+- **自动下单的 ToS 暴露面没单独看过。** 抓取侧看过 disclaimer
+  （`SCRAPING_RECON.md` §5b），自动**下单**是另一件事。
+- **`verwijderreactie`（撤回）从没调用过。** booker 目前也不需要它。
