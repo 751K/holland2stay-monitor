@@ -234,6 +234,7 @@ def _filter_options():
           "occupancy":     [str, ...],   # 来自 features "Occupancy:" 前缀
           "types":         [str, ...],
           "neighborhoods": [str, ...],
+          "buildings":     [str, ...],   # 来自 features "Building:" 前缀
           "contract":      [str, ...],
           "tenant":        [str, ...],
           "offer":         [str, ...],
@@ -253,6 +254,7 @@ def _filter_options():
             "occupancy":     st.get_feature_values("Occupancy"),
             "types":         st.get_feature_values("Type"),
             "neighborhoods": st.get_feature_values("Neighborhood"),
+            "buildings":     st.get_feature_values("Building"),
             "contract":      st.get_feature_values("Contract"),
             "tenant":        st.get_feature_values("Tenant"),
             "offer":         st.get_feature_values("Offer"),

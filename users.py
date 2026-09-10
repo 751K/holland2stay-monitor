@@ -153,6 +153,7 @@ def _lf_from_dict(d: dict) -> ListingFilter:
         allowed_occupancy=d.get("allowed_occupancy", []),
         allowed_types=d.get("allowed_types", []),
         allowed_neighborhoods=d.get("allowed_neighborhoods", []),
+        allowed_buildings=d.get("allowed_buildings", []),
         allowed_contract=d.get("allowed_contract", []),
         allowed_tenant=d.get("allowed_tenant", []),
         allowed_offer=d.get("allowed_offer", []),

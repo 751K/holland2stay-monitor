@@ -823,7 +823,15 @@ class XiorCityFilter:
 # 不削弱该平台的过滤严格度（对自动预订安全很重要）。
 #
 # 新增 scraper 时在此登记它能稳定产出的可过滤维度即可。
-_UNIVERSAL_FILTER_DIMS = frozenset({"max_rent", "min_area", "city", "source"})
+# building 在通用集里，不是逐平台登记的。2026-09-10 实测生产库 836 条房源，
+# 835 条带 Building 特征（七个平台全都写），所以它确实通用。
+#
+# 更重要的是**方向**：登记在通用里，新平台若不写 Building 就匹配不上（fail-closed，
+# 用户少收几条）；逐平台登记则是新平台整条跳过（fail-open）——而
+# allowed_buildings 的语义是「只要这栋楼」，fail-open 会把用户明确排除掉的楼放行。
+# 如果这个过滤器挂在 auto_book 上，那就是替他自动申请一栋他没要的楼。
+_UNIVERSAL_FILTER_DIMS = frozenset({
+    "max_rent", "min_area", "city", "source", "building"})
 _SOURCE_FILTER_DIMS: dict[str, frozenset] = {
     # tenant 曾在 2026-08-18 被摘出此表：H2S 上线 operation 白名单后我们只能照抄
     # 它那条 GetCategories，而租客属性不在该查询的字段集里，房源因此不带 Tenant
@@ -1215,8 +1223,8 @@ class ListingFilter:
     理由：无法核验时放行（fail-open）对自动预订是危险的——
     可能误触发价格未知或面积未知房源的自动预订。
 
-    字符串白名单字段（allowed_occupancy / allowed_types / allowed_neighborhoods）
-    本身已是 fail-closed：字段缺失时为空字符串，白名单匹配必然失败。
+    字符串白名单字段（allowed_occupancy / allowed_types / allowed_neighborhoods /
+    allowed_buildings）本身已是 fail-closed：字段缺失时为空字符串，白名单匹配必然失败。
 
     注意
     ----
@@ -1248,6 +1256,19 @@ class ListingFilter:
     """
     片区白名单（子串匹配，大小写不敏感）。非空时只通知指定片区的房源。
     e.g. ["Strijp", "Centrum"]
+    """
+
+    allowed_buildings: list[str] = field(default_factory=list)
+    """
+    楼盘白名单（子串匹配，大小写不敏感）。非空时只通知指定楼盘的房源。
+    e.g. ["Teteringsedijk 120"] → 该楼所有单元；["Laagstraat"] → 该楼盘全部。
+
+    这是「只要这栋楼里的任何一间」那个需求。七个平台都写 ``Building``，取值形态
+    各不相同：H2S / Magis 是楼盘名（``Laagstraat`` / ``Novum``），Plaza 是从地址
+    推出来的街道或街道+门牌（``Teteringsedijk 120`` 恰好覆盖 B16/B22/B26），
+    Student Experience 是「城市 + 楼」（``Amsterdam NDSM``）。所以匹配用子串，
+    与其余白名单字段一致；候选值由 ``/api/buildings`` 从库里现取，用户从下拉里
+    选，不手打。
     """
 
     allowed_cities: list[str] = field(default_factory=list)
@@ -1401,6 +1422,11 @@ class ListingFilter:
         if self.allowed_types and _source_supports_dim(listing.source, "type"):
             rtype = fm.get("type", "")
             if not any(whitelist_matches(a, rtype) for a in self.allowed_types):
+                return False
+
+        if self.allowed_buildings and _source_supports_dim(listing.source, "building"):
+            bld = fm.get("building", "")
+            if not any(whitelist_matches(a, bld) for a in self.allowed_buildings):
                 return False
 
         if self.allowed_neighborhoods and _source_supports_dim(listing.source, "neighborhood"):

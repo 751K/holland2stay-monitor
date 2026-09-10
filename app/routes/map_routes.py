@@ -174,6 +174,24 @@ def api_neighborhoods():
     return jsonify({"neighborhoods": hoods})
 
 
+def api_buildings():
+    """返回指定城市的所有楼盘（供用户过滤表单动态加载）。
+
+    与 ``api_neighborhoods`` 同一形状：按城市收窄，因为库里楼盘有近百个
+    （2026-09-10：H2S 58 个、Plaza 24 个），不收窄的下拉没法用。
+    """
+    cities = request.args.get("cities", "").split(",")
+    cities = [c.strip() for c in cities if c.strip()]
+    st = storage()
+    try:
+        buildings = st.get_feature_values("Building", cities=cities or None)
+    except Exception:
+        buildings = []
+    finally:
+        st.close()
+    return jsonify({"buildings": buildings})
+
+
 def register(app: Flask) -> None:
     app.add_url_rule("/map",                    endpoint="map_view",               view_func=map_view,               methods=["GET"])
     app.add_url_rule("/api/map",                endpoint="api_map",                view_func=api_map,                methods=["GET"])
@@ -181,3 +199,4 @@ def register(app: Flask) -> None:
     app.add_url_rule("/api/map/geocode",        endpoint="api_map_geocode",        view_func=api_map_geocode,        methods=["POST"])
     app.add_url_rule("/api/map/geocode/status", endpoint="api_map_geocode_status", view_func=api_map_geocode_status, methods=["GET"])
     app.add_url_rule("/api/neighborhoods",      endpoint="api_neighborhoods",      view_func=api_neighborhoods,      methods=["GET"])
+    app.add_url_rule("/api/buildings",          endpoint="api_buildings",          view_func=api_buildings,          methods=["GET"])
