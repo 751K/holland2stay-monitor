@@ -427,6 +427,13 @@
           </div>
         </div>
         <div class="form-group">
+          <label class="form-label">{{ _('user_form_buildings') }}</label>
+          <div class="multi-select" id="ms-building">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown" id="building-dropdown">{% set sel_bld = lf.allowed_buildings if lf else [] %}{% for b in sel_bld %}<label class="ms-option"><input type="checkbox" name="ALLOWED_BUILDINGS" value="{{ b }}" checked> {{ b }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
           <label class="form-label">{{ _('user_form_offer') }}{% set _b = dim_scope_badge('contract') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('contract') }}">{{ _b }}</span>{% endif %}</label>
           <div class="multi-select">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
@@ -595,8 +602,6 @@
           <span class="toggle-track"></span>{{ _('user_form_ab_plaza_on') }}
         </label>
         <input type="hidden" id="ab_plaza_on_h" name="AUTO_BOOK_PLAZA_ENABLED" value="{{ 'true' if ab and ab.plaza_enabled else 'false' }}">
-        <span class="text-xs text-tertiary">{{ _('user_form_ab_plaza_on_note') }}</span>
-        <span class="text-xs text-tertiary">{{ _('user_form_ab_plaza_note') }}</span>
 
       </div>
 
@@ -781,6 +786,13 @@
           <div class="multi-select" id="ms-ab-neighborhood">
             <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
             <div class="ms-dropdown" id="ab-neighborhood-dropdown">{% set ab_nbhd = ab_lf.allowed_neighborhoods if ab_lf else [] %}{% for n in ab_nbhd %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">{{ _('user_form_buildings') }}</label>
+          <div class="multi-select" id="ms-ab-building">
+            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+            <div class="ms-dropdown" id="ab-building-dropdown">{% set ab_bld = ab_lf.allowed_buildings if ab_lf else [] %}{% for b in ab_bld %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_BUILDINGS" value="{{ b }}" checked> {{ b }}</label>{% endfor %}</div>
           </div>
         </div>
         <div class="form-group">
@@ -1146,9 +1158,36 @@ function testNotify(userId, btn) {
     .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
 }
 
-// ── 片区动态加载（根据所选城市）──────────────────────────────
+// ── 片区 / 楼盘动态加载（根据所选城市）────────────────────────
+// 楼盘同样按城市收窄：库里近百个楼盘（2026-09-10：H2S 58、Plaza 24），
+// 不收窄的下拉没法用。
 var selNbh = {{ (lf.allowed_neighborhoods if lf else []) | tojson }};
 var selAbNbh = {{ (ab_lf.allowed_neighborhoods if ab_lf else []) | tojson }};
+var selBld = {{ (lf.allowed_buildings if lf else []) | tojson }};
+var selAbBld = {{ (ab_lf.allowed_buildings if ab_lf else []) | tojson }};
+
+function loadBuildings() {
+  var curSel = [];
+  document.querySelectorAll('input[name="ALLOWED_BUILDINGS"]:checked').forEach(function(cb){ curSel.push(cb.value); });
+  var curAbSel = [];
+  document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_BUILDINGS"]:checked').forEach(function(cb){ curAbSel.push(cb.value); });
+
+  var cities = [];
+  document.querySelectorAll('input[name="ALLOWED_CITIES"]:checked').forEach(function(cb){ cities.push(cb.value); });
+  var url = '/api/buildings';
+  if(cities.length > 0) url += '?cities=' + encodeURIComponent(cities.join(','));
+  fetch(url).then(function(r){ return r.json(); }).then(function(d){
+    renderHoods('building-dropdown', 'ALLOWED_BUILDINGS', d.buildings, curSel.length ? curSel : selBld);
+  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
+
+  var abCities = [];
+  document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_CITIES"]:checked').forEach(function(cb){ abCities.push(cb.value); });
+  var abUrl = '/api/buildings';
+  if(abCities.length > 0) abUrl += '?cities=' + encodeURIComponent(abCities.join(','));
+  fetch(abUrl).then(function(r){ return r.json(); }).then(function(d){
+    renderHoods('ab-building-dropdown', 'AUTO_BOOK_ALLOWED_BUILDINGS', d.buildings, curAbSel.length ? curAbSel : selAbBld);
+  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
+}
 
 function loadNeighborhoods() {
   // 先读取当前 DOM 中的勾选状态，避免重新渲染时丢失用户刚刚的选择
@@ -1194,9 +1233,11 @@ function renderHoods(dropId, inputName, hoods, selected) {
 // Init when DOM is ready (no dependency on script execution order)
 function _initNeighborhoods() {
   loadNeighborhoods();
+  loadBuildings();
   ['ALLOWED_CITIES','AUTO_BOOK_ALLOWED_CITIES'].forEach(function(name){
     document.querySelectorAll('input[name="' + name + '"]').forEach(function(cb){
       cb.addEventListener('change', loadNeighborhoods);
+      cb.addEventListener('change', loadBuildings);
     });
   });
 }
