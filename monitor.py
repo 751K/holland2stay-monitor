@@ -1547,13 +1547,60 @@ def _can_auto_book(user, listing) -> bool:
     return True
 
 
+def _can_reach_user(user, notifier, storage) -> bool:
+    """能不能把「抢到了」这件事告诉用户——自动预订的前置条件。
+
+    为什么自动预订要和「能不能通知」绑定
+    ------------------------------------
+    替人下了单却没法告诉他，比不下单更糟：他不知道要去付款、去确认、或者去取消。
+    这条耦合是有意的，不解。
+
+    为什么不能只看 ``notifier.has_channels``
+    ----------------------------------------
+    系统里有**两条**投递路径，而 ``has_channels`` 只认其中一条：
+
+        传统渠道  create_user_notifier 从 user.notification_channels 建
+                  （iMessage / Telegram / WhatsApp / 邮件）→ has_channels
+        推送      mcore.push.dispatch 独立走 APNs，只看 notifications_enabled
+                  与去重，**不看 has_channels**
+
+    也就是说只用 App 的用户照常收到房源推送，却永远开不了自动预订——他配置得再
+    正确也没用，而且界面上没有任何地方说过这件事。2026-09-10 线上撞到一个真实
+    用户：楼盘、城市、平台、凭据、开关全对，候选阶段被这道闸挡掉，`PlazaBooker`
+    一次都没被调用过。
+
+    判据不自己写 SQL
+    ----------------
+    直接调 ``get_active_devices_for_user``。它的条件里有一条容易抄漏的
+    ``expires_at``（``revoked`` 与「自己到期」互不蕴含），
+    ``tools/backfill_push_optin.py`` 就栽在照抄 WHERE 上。判据必须是同一段代码，
+    不是同一段描述。
+
+    取不到设备时 fail-closed
+    ------------------------
+    查不出来 = 不确定能不能通知 = 不自动下单。这道闸存在的意义就是这个。
+    """
+    if notifier.has_channels:
+        return True
+    try:
+        return bool(storage.get_active_devices_for_user(user.id))
+    except Exception:
+        logger.warning("查不到用户 %s 的活跃设备，本轮不产生自动预订候选",
+                       user.id, exc_info=True)
+        return False
+
+
 def _collect_booking_candidates(
     new_listings: list["Listing"],
     status_changes: list[tuple["Listing", str, str]],
     fresh: list["Listing"],
     user_notifiers: "UserNotifiers",
+    storage: "Storage",
 ) -> tuple[dict[str, list["Listing"]], dict[str, tuple[str, str]]]:
-    """纯内存收集每个用户的自动预订候选（不发任何通知 / 不触网）。
+    """收集每个用户的自动预订候选（不发任何通知 / 不触网）。
+
+    「能不能通知到这个用户」每轮每人只算一次（``_can_reach_user``），不在逐条房源
+    的循环里查——那会变成 用户数 × 房源数 次查询。
 
     三个来源合并：
     1. new_listings 中新上线即 Available to book 的
@@ -1568,13 +1615,16 @@ def _collect_booking_candidates(
     """
     ab_candidates: dict[str, list["Listing"]] = {u.id: [] for u, _ in user_notifiers}
     status_transition: dict[str, tuple[str, str]] = {}
+    reachable: dict[str, bool] = {
+        u.id: _can_reach_user(u, n, storage) for u, n in user_notifiers
+    }
 
     for listing in new_listings:
         for user, notifier in user_notifiers:
             if (
                     user.auto_book.enabled
                     and user.notifications_enabled
-                    and notifier.has_channels
+                    and reachable[user.id]
                     and _can_auto_book(user, listing)
                     and listing.status.lower() == STATUS_AVAILABLE
                     and (user.auto_book.listing_filter.is_empty()
@@ -1589,7 +1639,7 @@ def _collect_booking_candidates(
             if (
                     user.auto_book.enabled
                     and user.notifications_enabled
-                    and notifier.has_channels
+                    and reachable[user.id]
                     and _can_auto_book(user, listing)
                     and new_status.lower() == STATUS_AVAILABLE
                     and (user.auto_book.listing_filter.is_empty()
@@ -1608,7 +1658,8 @@ def _collect_booking_candidates(
         if l.source in _AUTO_BOOK_SOURCES and l.status.lower() == STATUS_AVAILABLE
     }
     for user, notifier in user_notifiers:
-        if not user.auto_book.enabled or not user.notifications_enabled or not notifier.has_channels:
+        if (not user.auto_book.enabled or not user.notifications_enabled
+                or not reachable[user.id]):
             continue
         user_retry = retry_queue.get(user.id)
         if not user_retry:
@@ -3009,7 +3060,7 @@ async def run_once(
 
         # ── 快速候选预扫描：纯内存收集候选，抢在发通知之前提交预订 ──────── #
         ab_candidates, status_transition = _collect_booking_candidates(
-            new_listings, status_changes, fresh, user_notifiers,
+            new_listings, status_changes, fresh, user_notifiers, storage,
         )
         candidate_user_ids = {
             uid for uid, candidates in ab_candidates.items() if candidates
