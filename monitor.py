@@ -3272,36 +3272,36 @@ async def main_loop(
         ab = user.auto_book
         if ab.enabled:
             mode = "⚠️  试运行（dry_run）" if ab.dry_run else "🚀 真实预订"
+            # 摘要打「他实际会碰到哪些平台、各自凭据齐没齐」。此前只打 ab.email
+            # （H2S 的），于是一个只订 Plaza 的用户永远显示「账号: (未设置)」。
+            targets = _autobook_targets(user)
+            gaps = _autobook_credential_gaps(user)
             logger.info(
-                "自动预订 [%s]: %s  账号: %s",
-                user.name, mode, ab.email or "(未设置)",
+                "自动预订 [%s]: %s  平台: %s  凭据: %s",
+                user.name, mode, "/".join(targets) or "(无)",
+                "缺 " + "；".join(gaps) if gaps else "齐",
             )
-            # 自动预订开启时，通知渠道必须可用，否则付款链接无法送达
+            # 自动预订开启时必须能通知到用户，否则付款链接 / 结果无法送达。
+            # 判据与 _can_reach_user 同一条——只看 notification_channels 会把
+            # 「只用 App、靠推送」的用户误报成配置不全（2026-09-10 线上真实案例）。
             if not user.notifications_enabled:
                 logger.warning(
                     "⚠️  [%s] 自动预订已开启，但该用户通知已关闭（notifications_enabled=false）！"
                     "预订成功后付款链接将无法送达，请开启通知或在日志中查找 CRITICAL 行。",
                     user.name,
                 )
-            elif not user.notification_channels:
+            elif not _can_reach_user(user, notifier, storage):
                 logger.warning(
-                    "⚠️  [%s] 自动预订已开启，但未配置任何通知渠道！"
-                    "预订成功后付款链接将无法送达，请添加 iMessage/Telegram/Email/WhatsApp 渠道。",
+                    "⚠️  [%s] 自动预订已开启，但既没有通知渠道也没有活跃设备！"
+                    "预订结果将无法送达——该用户本轮不会产生任何自动预订候选。"
+                    "请添加 iMessage/Telegram/Email/WhatsApp 渠道，或在手机 App 上登录一次。",
                     user.name,
                 )
 
-            # 检查自动预订账号密码是否填写
-            if not ab.email:
+            for gap in gaps:
                 logger.warning(
-                    "⚠️  [%s] 自动预订已开启，但未填写 H2S 账号邮箱！"
-                    "请前往 Web 面板「用户管理」填写 AUTO_BOOK_EMAIL。",
-                    user.name,
-                )
-            if not ab.password:
-                logger.warning(
-                    "⚠️  [%s] 自动预订已开启，但未填写 H2S 账号密码！"
-                    "请前往 Web 面板「用户管理」填写 AUTO_BOOK_PASSWORD。",
-                    user.name,
+                    "⚠️  [%s] 自动预订已开启，但缺少 %s——该平台不会产生候选。",
+                    user.name, gap,
                 )
         else:
             logger.info("自动预订 [%s]: 已关闭", user.name)
@@ -3861,6 +3861,42 @@ def _reload_settings() -> None:
             st.close()
     except Exception:
         logger.warning("热重载时读取 app_settings 失败，沿用当前值", exc_info=True)
+
+
+def _autobook_targets(user) -> list[str]:
+    """这个用户的自动预订实际会碰到哪些平台。
+
+    ``allowed_sources`` 为空 = 不限平台，那就是所有支持下单的 source。非空时取交集
+    ——用户只订 Plaza 的话，H2S 凭据缺不缺跟他没关系。
+
+    与 ``_AUTO_BOOK_SOURCES`` 取交集而不是直接用 ``allowed_sources``：后者可以写进
+    还没实现 booker 的平台，据此去警告「没填凭据」会让人去填一个填了也没用的东西。
+    """
+    allowed = {s.strip().lower()
+               for s in (user.auto_book.listing_filter.allowed_sources or [])
+               if s and s.strip()}
+    targets = set(_AUTO_BOOK_SOURCES)
+    return sorted(targets & allowed) if allowed else sorted(targets)
+
+
+def _autobook_credential_gaps(user) -> list[str]:
+    """他会碰到的平台里，哪些缺凭据。返回人话，供启动摘要告警。
+
+    **按平台分别判**。此前这里无条件检查 H2S 的 email / password，于是一个
+    ``allowed_sources=['plaza']`` 的用户每次启动都吃两条「未填写 H2S 账号」——
+    他根本不抓 H2S。运维日志里的警告要是经常是假的，真的那条就没人看了。
+    """
+    ab = user.auto_book
+    gaps: list[str] = []
+    for src in _autobook_targets(user):
+        if src == "holland2stay" and not (ab.email and ab.password):
+            gaps.append("H2S 账号邮箱/密码（AUTO_BOOK_EMAIL / AUTO_BOOK_PASSWORD）")
+        elif src == "plaza":
+            if not (ab.plaza_username and ab.plaza_password):
+                gaps.append("Plaza 用户名/密码")
+            elif not ab.plaza_enabled:
+                gaps.append("Plaza 开关（凭据已填但「开启 Plaza 自动申请」没勾）")
+    return gaps
 
 
 async def _async_main() -> None:

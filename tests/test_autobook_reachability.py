@@ -125,3 +125,69 @@ class TestCandidateCollection:
         st = FakeStorage({"u1": [{"id": 1}]})
         cands, _ = self._collect(u, FakeNotifier(True), st, _listing(source="ourcampus"))
         assert cands["u1"] == []
+
+
+class TestStartupSummary:
+    """启动摘要那几条警告——它们此前经常在说不成立的事。
+
+    运维日志里的警告要是经常是假的，真的那条就没人看了。所以这里盯的不是「有没有
+    警告」，而是「该不该有」。
+    """
+
+    def test_a_plaza_only_user_is_not_nagged_about_h2s(self):
+        """线上真实案例：allowed_sources=['plaza'] 的用户每次启动吃两条
+        「未填写 H2S 账号」——他根本不抓 H2S。"""
+        u = _user()
+        u.auto_book.listing_filter.allowed_sources = ["plaza"]
+        u.auto_book.plaza_username = "zoeker"
+        u.auto_book.plaza_password = "pw"
+        u.auto_book.plaza_enabled = True
+        assert monitor._autobook_targets(u) == ["plaza"]
+        assert monitor._autobook_credential_gaps(u) == []
+
+    def test_a_plaza_user_without_credentials_is_told_so(self):
+        u = _user()
+        u.auto_book.listing_filter.allowed_sources = ["plaza"]
+        gaps = monitor._autobook_credential_gaps(u)
+        assert len(gaps) == 1 and "Plaza" in gaps[0]
+
+    def test_credentials_filled_but_switch_off_is_its_own_message(self):
+        """填了凭据没勾开关，是最容易「以为在跑」的状态，要单独说。"""
+        u = _user()
+        u.auto_book.listing_filter.allowed_sources = ["plaza"]
+        u.auto_book.plaza_username = "zoeker"
+        u.auto_book.plaza_password = "pw"
+        u.auto_book.plaza_enabled = False
+        gaps = monitor._autobook_credential_gaps(u)
+        assert len(gaps) == 1 and "开关" in gaps[0]
+
+    def test_no_source_filter_means_every_supported_platform(self):
+        u = _user()
+        assert monitor._autobook_targets(u) == sorted(monitor._AUTO_BOOK_SOURCES)
+
+    def test_a_source_without_a_booker_is_not_warned_about(self, monkeypatch):
+        """allowed_sources 可以写还没实现 booker 的平台。据此警告「没填凭据」
+        会让人去填一个填了也没用的东西。"""
+        u = _user()
+        u.auto_book.listing_filter.allowed_sources = ["ourcampus"]
+        assert monitor._autobook_targets(u) == []
+        assert monitor._autobook_credential_gaps(u) == []
+
+    def test_h2s_gap_is_reported_when_it_is_targeted(self):
+        u = _user()
+        u.auto_book.listing_filter.allowed_sources = ["holland2stay"]
+        gaps = monitor._autobook_credential_gaps(u)
+        assert len(gaps) == 1 and "H2S" in gaps[0]
+
+    def test_the_channel_warning_uses_the_same_criterion_as_the_gate(self):
+        """摘要里那条「没有通知渠道」必须和真正的闸同一判据。
+
+        不同判据的后果是：闸放行了，日志却在说这个用户配置不全（此前就是这样），
+        或者反过来——日志说没问题，实际一条候选都不产生。
+        """
+        import inspect
+        src = inspect.getsource(monitor.main_loop)
+        assert "_can_reach_user(user, notifier, storage)" in src, \
+            "摘要应当调 _can_reach_user，而不是自己判 notification_channels"
+        assert "elif not user.notification_channels:" not in src, \
+            "旧判据还在——它把只用 App 的用户误报成配置不全"
