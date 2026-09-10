@@ -97,6 +97,16 @@ Arnhem）与当时实际在架的十个城市取并集。两份清单本来就�
 - ``finishing`` / ``occupancy`` / ``contract`` 站点不给（``typeContract`` 53 条全
   为 null）。
 
+一多半房源是「额外供给」，应征不了
+----------------------------------
+2026-09-10 用真实账号实测：54 条荷兰住宅里 **29 条 ``isExtraAanbod`` 为真**，服务端
+``reactionData.kanReageren`` 全为 false——那批是 Utrecht Limapad 的 UU Reserved
+Accommodation，只对被 Utrecht University 邀请的国际硕士生开放。
+
+本模块此前给**每一条**都写死 ``status="Available to book"``，于是一多半推送是够不着
+的房源；而 ``Available to book`` 正是 ``monitor`` 触发自动预订候选的那个状态。判据与
+不能用的三个替代品见 ``_EXTRA_AANBOD_NOTE``。
+
 不做自动预订
 ------------
 应征需要付费账号，且流程未侦察、ToS 暴露面未评估。与 OurCampus / Magis /
@@ -266,6 +276,37 @@ def _name_of(node: object) -> str:
     return ""
 
 
+#: 为什么用 ``isExtraAanbod`` 判「应征不了」，而不是别的字段
+#: ------------------------------------------------------
+#: 2026-09-10 用真实账号登录后逐条读服务端的 ``reactionData.kanReageren``：
+#: 25 条 ``reactiedatum`` 全为 true，29 条 DTH 全为 false（原因码
+#: ``WINKEL-REACTIE-NIETMEERGEPUBLICEERD``）。把两组所有字段拉平做差集，
+#: 「组内恒定且两组不相交」的候选大多是这批房源恰好同质造成的巧合——它们本来就是
+#: 同一批：同一条街（Limapad）、同一个价（€867.75）、同一天发布。
+#:
+#: ``isExtraAanbod`` 不是巧合，因为**账号那边有一个咬合的字段**：
+#: ``account.persons.seeker.registration.hasAccessToExtraAanbod``。
+#: 「这条房源属于额外供给」配「这个账号有没有额外供给权限」，语义自洽；
+#: UU Reserved Accommodation 正是这种只对被邀请者开放的额外供给。
+#:
+#: **不要改成下面这三个**，每个都有静默失败的方向：
+#:
+#: - ``model.advertentieSluitenNaEersteReactie``（DTH）：这 29 条恰好都是 DTH，
+#:   但 DTH 是**分配模型**不是可用性。拿它判等于断言「所有 DTH 都应征不了」，
+#:   而真正在架的 DTH 恰恰是最该推的一类（先到先得、当场定）——会被静默吞掉。
+#:   这与本模块把分配模型写进 features 而不是 status 是同一条理由。
+#: - ``closingDate``：实测恒等于 ``publicationDate`` + 整一年，是形式字段，
+#:   拿它判在架与否永远为真。
+#: - ``isGepubliceerd``：54 条**全是 True**，包括那 29 条。上游自己的
+#:   「不再发布」原因码与这个字段互相矛盾，它兜不住。
+#:
+#: 仍然未定的一件事：原因码说的是「不再发布」而不是「你没权限」，所以
+#: ``isExtraAanbod`` 与 ``kanReageren=false`` 之间是因果还是共现，一个账号看不出来。
+#: 另有 ``model.modelCategorie.toonOpWebsite=False`` 同样完美分组——将来若出现
+#: 「isExtraAanbod=False 却仍应征不了」的反例，先查它。
+_EXTRA_AANBOD_NOTE = "isExtraAanbod"
+
+
 def _parse_object(obj: dict) -> Optional[Listing]:
     """一条 API 记录 → Listing；不是荷兰住宅、或缺关键字段时返回 None。
 
@@ -345,13 +386,22 @@ def _parse_object(obj: dict) -> Optional[Listing]:
     if obj.get("inschrijvingVereistVoorReageren"):
         _add("Registration", "required to respond (paid account)")
 
+    # 额外供给：只对被上游邀请的账号开放，普通用户点进去是「不能再应征」。
+    # 2026-09-10 实测 54 条荷兰住宅里 29 条如此（Utrecht Limapad 那批 UU
+    # Reserved Accommodation），服务端 reactionData.kanReageren 全是 false。
+    #
+    # 判据用 isExtraAanbod，不是 DTH——见 _EXTRA_AANBOD_NOTE。
+    extra_aanbod = bool(obj.get("isExtraAanbod"))
+    if extra_aanbod:
+        _add("Access", "extra aanbod — invited accounts only")
+
     url_key = (obj.get("urlKey") or "").strip()
     available = (obj.get("availableFromDate") or "").strip()
 
     return Listing(
         id=f"pz_{oid}",
         name=f"{address}, {city}".strip().strip(",") or f"Plaza {oid}",
-        status="Available to book",
+        status="Not available" if extra_aanbod else "Available to book",
         price_raw=_fmt_euro(rent),
         available_from=available or None,
         features=features,

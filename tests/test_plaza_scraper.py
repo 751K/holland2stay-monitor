@@ -459,3 +459,80 @@ class TestRegistration:
             assert "plaza" not in load_config().sources_with_full_lifecycle()
         finally:
             os.environ.pop("SOURCES", None)
+
+
+class TestExtraAanbod:
+    """「额外供给」的房源应征不了，不能报成 Available to book。
+
+    2026-09-10 用真实账号实测：登录后逐条读服务端的 ``reactionData.kanReageren``，
+    49 条荷兰住宅里 31 条为 false（原因码 ``WINKEL-REACTIE-NIETMEERGEPUBLICEERD``），
+    正是 ``isExtraAanbod`` 为真的那 31 条——Utrecht Limapad 的 UU Reserved
+    Accommodation，只对被邀请的账号开放。
+
+    在这份 fixture 里 ``isExtraAanbod`` 与 DTH **完全重合**（31/31），所以只靠 fixture
+    的计数断言分不出用的是哪个判据。下面两条 discriminator 用构造数据把它们拆开——
+    那才是真正钉住判据的地方。
+    """
+
+    def test_extra_aanbod_rows_are_not_bookable(self, payload):
+        rows = [r for r in payload["result"] if _parse_object(r)]
+        extra = [r for r in rows if r.get("isExtraAanbod")]
+        rest = [r for r in rows if not r.get("isExtraAanbod")]
+        assert len(extra) == 31 and len(rest) == 18, "fixture 变了，先确认判据仍成立"
+
+        assert {_parse_object(r).status for r in extra} == {"Not available"}
+        assert {_parse_object(r).status for r in rest} == {"Available to book"}
+
+    def test_a_live_dth_is_still_bookable(self, payload):
+        """判据不是 DTH：在架的 DTH 必须照常推。
+
+        这条是整个类里最重要的一条。DTH 是**分配模型**（先到先得、当场定），恰恰是
+        最该推的一类；fixture 里它碰巧与 extra aanbod 重合，一旦有人把判据顺手改成
+        ``advertentieSluitenNaEersteReactie``，这类房源会被静默吞掉而没有任何报错。
+        """
+        row = copy.deepcopy(next(
+            r for r in payload["result"]
+            if r.get("isExtraAanbod")
+            and (r.get("model") or {}).get("advertentieSluitenNaEersteReactie")))
+        row["isExtraAanbod"] = False
+
+        assert row["model"]["advertentieSluitenNaEersteReactie"] is True, "构造的样本不是 DTH，这条会空过"
+
+        item = _parse_object(row)
+        assert item.status == "Available to book"
+        assert not [f for f in item.features if f.startswith("Access:")]
+
+    def test_a_non_dth_extra_aanbod_is_not_bookable(self, payload):
+        """反方向：非 DTH 但属于额外供给的，同样应征不了。"""
+        row = copy.deepcopy(next(
+            r for r in payload["result"]
+            if not r.get("isExtraAanbod")
+            and not (r.get("model") or {}).get("advertentieSluitenNaEersteReactie")
+            and _parse_object(r)))
+        row["isExtraAanbod"] = True
+
+        assert _parse_object(row).status == "Not available"
+
+    def test_the_reason_is_visible_to_the_user(self, payload):
+        """状态说「不可用」，features 要说清**为什么**——否则用户只看到一条没来由的下架。"""
+        row = next(r for r in payload["result"] if r.get("isExtraAanbod") and _parse_object(r))
+        feats = _parse_object(row).features
+        access = [f for f in feats if f.startswith("Access:")]
+        assert access == ["Access: extra aanbod — invited accounts only"]
+
+    def test_closing_date_is_not_consulted(self, payload):
+        """``closingDate`` 恒等于 publicationDate + 一年，是形式字段，不能当在架判据。"""
+        row = copy.deepcopy(next(
+            r for r in payload["result"]
+            if not r.get("isExtraAanbod") and _parse_object(r)))
+        row["closingDate"] = "2020-01-01 00:00:00"
+        assert _parse_object(row).status == "Available to book"
+
+    def test_the_status_string_is_one_the_app_understands(self, payload):
+        """选的状态词必须是全系统认得的那个，否则排序/胶囊/筛选会各自当成未知。"""
+        from app.services.listing_service import status_rank
+
+        row = next(r for r in payload["result"] if r.get("isExtraAanbod") and _parse_object(r))
+        status = _parse_object(row).status
+        assert status_rank(status) == 3, f"{status!r} 没被 status_rank 归到终态"
+        assert status_rank("Available to book") == 0
