@@ -1,5 +1,141 @@
 # Changelog
 
+## v1.38.0 (2026-09-10)
+
+本次发布包含七次提交，覆盖 Plaza、品牌资源与文档三个方面。
+
+主线是 Plaza。它 2026-09-02 接入时只做只读监控，本次先修掉一个「一多半房源报错了
+状态」的抓取侧缺陷，再把自动应征做到端到端跑通并放进面板。过程中有五处「错了不报
+错」的实现缺陷，**没有一处是单元测试发现的**——它们全部由真实账号的端到端验证暴露，
+而在暴露之前该文件的单元测试是全绿的。这一点本身值得记下来。
+
+### Plaza
+
+* **额外供给的房源不再报成「可预订」**（[c29a935]）
+
+    `scrapers/plaza.py` 给每一条房源都写死 `status="Available to book"`。用真实账号
+    登录后逐条读服务端自己的判定，49 条荷兰住宅里 31 条 `kanReageren` 为 false，
+    原因码 `WINKEL-REACTIE-NIETMEERGEPUBLICEERD`——那批是 Utrecht Limapad 的 UU
+    Reserved Accommodation，只对被 Utrecht University 邀请的账号开放，详情页明写
+    「不能再应征」。生产上这批的 `publicationDate` 是 2026-05-28，比接入还早。
+
+    也就是说一多半推送指向够不着的房源；而 `Available to book` 正是
+    `monitor._collect_booking_candidates` 触发自动预订候选的那个状态。
+
+    判据是 `isExtraAanbod`，因为账号侧有一个咬合的字段
+    `registration.hasAccessToExtraAanbod`。第一版文档写的是「匿名接口里没有字段能
+    区分，只能登录后查」，那是没做逐字段对比就下的结论——把两组所有字段拉平做差集，
+    「组内恒定且两组不相交」的候选大多是这批房源恰好同质造成的巧合（同一条街、同一
+    个价、同一天发布），只有 `isExtraAanbod` 在账号侧有对应物。
+
+    不能用的三个连同理由写进了 `_EXTRA_AANBOD_NOTE`。其中 DTH 布尔最危险：这 31 条
+    恰好都是 DTH，改成它测试仍然全绿，但 DTH 是**分配模型**不是可用性，将来一条真正
+    在架的 DTH（恰恰是最该推的一类）会被静默吞掉。因此钉判据的是两条构造数据的
+    discriminator，不是 fixture 计数——fixture 里两者完全重合，计数断言对两种判据都
+    成立。
+
+    部署另配了 `tools/converge_plaza_extra_aanbod.py`。这批房源会从
+    `Available to book` 变成 `Not available`，`diff()` 因此产出 29 条状态变化，用户
+    会收到一串「下架」通知——内容不假，但下架这件事没有发生，变的是我们的判据。把判据
+    变更播成平台事件，等于用真实事件的通道发假事件。脚本就地改 `listings.status` 让
+    `diff()` 无事可做，并兜底压制已存在的未通知变化；两半各有一条测试，因为只做后者
+    不够（`status_changes` 被标记不影响 `listings.status`，下一轮会再产一次）。
+
+    实际部署没按原计划走。容器重建会自启 monitor，而 monitor 从启动到首次抓 Plaza
+    只有约 12 秒（从上次重启的日志量出）。74 个用户的量级不值得赌手速，改成：停
+    monitor → 拉取 → 构建 → **用新镜像跑一次性容器做收敛** → 再重建容器。镜像已是新
+    代码但服务尚未切换，monitor 全程没机会用新判据跑过一轮。结果：29 条降级，
+    `status_changes` 未通知数 0，当日 Plaza 状态变化 0 条。
+
+* **自动应征，面板里可开**（[5cc426e]）
+
+    Plaza 的提交只要两个 id，没有表单、证件、IBAN 或支付方式，也没有 Cloudflare——
+    Xior / OurDomain 停在「往后要填 IBAN」那道硬限制，Plaza 没有对应的坎。
+
+    三道闸才产生候选：`_AUTO_BOOK_SOURCES` 含 plaza（代码）∧
+    `auto_book.plaza_enabled`（面板开关，默认关）∧ 凭据。比另外三个平台多的那道，
+    是因为那三个都还有一步在用户手里——H2S 下单后要付款、两个 RENTCafe 停在存草稿——
+    所以「填了凭据」约等于「授权到那一步」；Plaza 的应征一次 POST 就落地，中间没有
+    任何人工关卡，那个跨度不能顺带给。
+
+    **DTH 一律不应征，且刻意没做成开关。** 应征前那句确认「geen andere aanbieding
+    meer krijgt」的范围站点没有说明——3595 条 `gettranslations` 全搜过，除确认框本身
+    没有第二处提到它——而它决定代价有多大。事实未知时两边不对称：不按只是少自动化一
+    类当前一条都够不着的房源，按下去可能自动放弃用户手上全部其它 offer。开关的前提是
+    用户能做出知情选择，而这里谁都不知道那句话管多大范围，给个开关等于把我们的无知包
+    装成用户的同意。
+
+    以下五处缺陷全部由真实账号端到端跑出来，各有测试钉着：
+
+    `kanReageren` 不是「能不能应征」，是「能不能操作」。已应征的房源它**仍为 true**，
+    而 `action` 是 `remove`、`url` 是 `?remove=<reactionId>&…`——原样回传那个 url 等于
+    POST 一个 remove，静默撤销用户已有的应征，再报一句「已提交但回查不到」。毁掉用户
+    要的东西、报告还不说实话。现设两道闸：`action` 必须是 `add`，且参数里必须有
+    `add`、不能有 `remove`；两个信号独立且都来自服务端。
+
+    未登录时 `kanReageren` **同样为 true**（它说的是这条广告开不开放，与你是谁无关），
+    只有 `loggedin` 能区分。此前的注释写的是「两者都为 false，靠它区分不了」，那是推
+    的且推反了；只查 `kanReageren` 的实现会带着无效会话一路走到写请求。
+
+    `react` 的 body 是两半：`reactionData.url` 的参数，加上另一个端点
+    （`getformsubmitonlyconfiguration`）来的 `__id__` / `__hash__`。后者是防重放令牌，
+    会轮换，因此每次提交前现取。只回传前一半的 POST 不会成功。
+
+    `react` 的响应顶层**没有 `result` 键**。写死要求它，会把一次**成功**的应征抛成传
+    输错误——比失败更糟：房子应征上了而用户收到「失败」，于是既不去站点确认也不撤回。
+
+    DTH 那道闸必须在预检**之前**。挪到之后同样不会提交 DTH，所以「有没有发写请求」类
+    的断言全都抓不到（变异测试实测：挪位置后 52 条全绿）；区别在 phase——一条不可应征
+    的 DTH 会走成 `race_lost`，而那个 phase 会被 monitor 放进重试队列，于是一条永远不
+    打算按的房源被无限重试。
+
+    另外 `maxAantalReacties = "0"` 查清了是「不限」而非「禁止」：`reactiePlaatsenMogelijk`
+    里 `0 < maxAantalReacties` 是启用上限的前提，为 0 则不启用。与实测一致——挂着 5 条
+    在跑的应征时新房源仍可应征。
+
+    `tools/plaza_booker_probe.py` 用 `getpass` 读密码，凭据不经过第三方；默认只走到
+    预检，`--submit` 要求手打房源 id 二次确认。
+
+### 品牌资源
+
+* **网页端换成运河屋图标**（[305f8b9]）
+
+    与 iOS 端统一。顺带钉住「资源是不是这一版」：`tools/make_web_icons.py --check`
+    比对产物与母版。此前一次改图只改到 6 个文件而漏掉 `logo.png`，成因是 Pillow 10+
+    的 `Image.getbbox()` 对 RGBA 默认 `alpha_only=True`——两张共用同一 alpha 蒙版的图
+    会被报成「相同」，无论 RGB 差多少。
+
+* **登录页的标去掉底色**（[0c9ecbd]）
+
+    只留房子、窗户、倒影三部分，融进页面背景。新增 `logo-bare.png` /
+    `logo-bare-dark.png` 两个无蒙版产物。
+
+### 文档
+
+* **README 补上 Student Experience 和 Plaza**（[3ee44bf]）
+
+    两份 README 都写着「五个平台」，而 `KNOWN_SOURCES` 有七个——两家 2026-09-02 就已
+    接入，脱节八天。三处各写一遍同一个数字（开头介绍、特性表、平台覆盖表），而 README
+    与代码之间没有任何联系，所以测试全绿、部署照常、面板上七家的卡片都在，只有对外的
+    第一份文档在说五个。新增 `tests/test_readme_platforms.py`，中英各跑一遍：每个
+    source 都要被提到、平台表要一家一行、写死的总数要对、文档索引不能漏掉实际存在的
+    侦察文档。
+
+* **Plaza 预订侧侦察**（[c2f064e]、[5a2f635]）
+
+    新增 `docs/PLAZA.md`。每条结论标了是实测还是读代码推断，并原样留下三次判断失误的
+    经过：把确认框当成结论（应征其实只是选择程序的第 2 步，被选中才有下文）、把 bundle
+    里读到当成这个部署开了、把根路径的 404 当成功能不存在（实际只差一个
+    `/portal/proxy/frontend/api` 前缀）。
+
+[c29a935]: https://github.com/751K/holland2stay-monitor/commit/c29a935
+[5cc426e]: https://github.com/751K/holland2stay-monitor/commit/5cc426e
+[305f8b9]: https://github.com/751K/holland2stay-monitor/commit/305f8b9
+[0c9ecbd]: https://github.com/751K/holland2stay-monitor/commit/0c9ecbd
+[3ee44bf]: https://github.com/751K/holland2stay-monitor/commit/3ee44bf
+[c2f064e]: https://github.com/751K/holland2stay-monitor/commit/c2f064e
+[5a2f635]: https://github.com/751K/holland2stay-monitor/commit/5a2f635
+
 ## v1.37.0 (2026-09-09)
 
 本次发布包含六次提交，覆盖浏览器资源、API 契约与规划三个方面，共六条。
