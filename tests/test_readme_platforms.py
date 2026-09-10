@@ -76,6 +76,6 @@ def test_docs_index_lists_every_platform_recon_file(readme):
     name, text = readme
     have = {p.name for p in (ROOT / "docs").glob("*.md")}
     recon = {n for n in have
-             if n.startswith(("H2S", "XIOR", "OURDOMAIN", "SCRAPING_RECON"))}
+             if n.startswith(("H2S", "XIOR", "OURDOMAIN", "PLAZA", "SCRAPING_RECON"))}
     missing = sorted(n for n in recon if f"({n})" not in text)
     assert not missing, f"{name} 的文档索引漏了：{missing}"

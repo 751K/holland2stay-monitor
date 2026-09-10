@@ -60,8 +60,8 @@ as usual, but it sends no notifications. That is how a newly added scraper is
 validated against live data without anyone's alerts depending on it yet.
 
 Coverage shifts as third-party sites change. The scrapers are documented in
-[H2S.md](H2S.md), [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md) and
-[SCRAPING_RECON.md](SCRAPING_RECON.md).
+[H2S.md](H2S.md), [XIOR.md](XIOR.md), [OURDOMAIN.md](OURDOMAIN.md),
+[PLAZA.md](PLAZA.md) and [SCRAPING_RECON.md](SCRAPING_RECON.md).
 
 ### Clients
 
@@ -436,7 +436,7 @@ own monitoring if you want to be paged.
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How the system runs, and every failure mode worth knowing before you debug one |
 | [API.md](API.md) | Backend contracts for mobile and integrations |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
-| [H2S.md](H2S.md) · [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | Per-platform scraping research; `SCRAPING_RECON.md` also covers Magis, Student Experience and Plaza |
+| [H2S.md](H2S.md) · [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [PLAZA.md](PLAZA.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | Per-platform research; `PLAZA.md` covers booking only — Plaza's scraping side, with Magis and Student Experience, is in `SCRAPING_RECON.md` |
 | [iOS_README.md](https://github.com/751K/FlatRadar-iOS/blob/master/docs/iOS_README.md) | iOS client — moved to [FlatRadar-iOS](https://github.com/751K/FlatRadar-iOS) |
 | [ANDROID_PLAN.md](https://github.com/751K/FlatRadar-Android/blob/master/docs/ANDROID_PLAN.md) | Android client — moved to [FlatRadar-Android](https://github.com/751K/FlatRadar-Android) |
 | [dataflow_en.mmd](dataflow_en.mmd) · [dataflow_ch.mmd](dataflow_ch.mmd) | Full scrape/notify flow as a Mermaid diagram |
