@@ -1663,6 +1663,7 @@ class AutoBookConfig:
     - H2S：``email`` / ``password`` / ``payment_method``
     - Xior：``xior_accounts``（**按楼栋**，见下）
     - OurDomain：``ourdomain_email`` / ``ourdomain_password``
+    - Plaza：``plaza_username`` / ``plaza_password``（用户名，不是邮箱）
 
     RENTCafe 平台只存账号凭据——用户须自行在浏览器注册账号，个人信息
     （姓名/电话/出生日期）注册时已录入 RENTCafe，booker 登录后无需再填。
@@ -1730,6 +1731,27 @@ class AutoBookConfig:
     # ── OurDomain（RENTCafe 租户 thisisourdomain）──
     ourdomain_email: str = ""
     ourdomain_password: str = ""
+
+    # ── Plaza（Zig/Hexia 门户，用户名不是邮箱）──
+    #
+    # Plaza 登录用的是**用户名**，不是邮箱（登录表单标签 "Jouw gebruikersnaam"，
+    # 站点另外提供「忘记用户名」入口）。所以这里叫 username 而不是 email——
+    # 与另外三个平台字段名不同是有意的，照着改成 email 会让人以为能填邮箱。
+    #
+    # 应征本身**不需要任何资料**：提交只有两个 id，没有表单、证件、IBAN 或支付
+    # 方式（见 docs/PLAZA.md §1）。资料在**注册**阶段一次性交给站点（€27.50/年），
+    # booker 不碰。
+    plaza_username: str = ""
+    plaza_password: str = ""
+    #: Plaza 自动应征的**显式开关**，默认关（fail-closed）。
+    #:
+    #: 另外三个平台是「有凭据即参与」——凭据本身就是开关。Plaza 多这一道，是因为
+    #: 它和那三个不是一类：H2S 下单后还要付款、Xior / OurDomain 停在存草稿，
+    #: 都还有一步在用户手里；Plaza 的应征**一次 POST 就落地**，中间没有任何人工
+    #: 关卡。让「填了凭据」顺带等于「授权系统替我应征」，这个跨度太大。
+    #:
+    #: 凭据仍然是第二道闸：两个都满足才产生候选（monitor._can_auto_book）。
+    plaza_enabled: bool = False
 
     def xior_account_for(self, building_key: str) -> tuple[str, str]:
         """取某栋楼的 Xior 账号，返回 ``(email, password)``；没有则返回 ``("", "")``。

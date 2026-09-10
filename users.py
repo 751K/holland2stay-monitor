@@ -257,6 +257,13 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         # OurDomain
         ourdomain_email=d.get("ourdomain_email", ""),
         ourdomain_password=decrypt(d.get("ourdomain_password", "")),
+        # Plaza。**不参与 _BACKFILLED_CRED_PAIRS 那套回退**——那是当年把 H2S 凭据
+        # 抄给 Xior / OurDomain 留下的历史包袱，Plaza 从一开始就独立，别把新平台
+        # 接进旧的回退链里。而且 Plaza 用的是用户名不是邮箱，抄过来必然登录失败，
+        # 失败还会消耗上游的尝试额度。
+        plaza_username=d.get("plaza_username", ""),
+        plaza_password=decrypt(d.get("plaza_password", "")),
+        plaza_enabled=bool(d.get("plaza_enabled", False)),
     )
 
 
@@ -361,7 +368,8 @@ def _user_to_row(u: UserConfig) -> dict:
         if d.get(field_name):
             d[field_name] = encrypt(d[field_name])
     ab = d.get("auto_book") or {}
-    for _pw_key in ("password", "xior_password", "ourdomain_password"):
+    for _pw_key in ("password", "xior_password", "ourdomain_password",
+                    "plaza_password"):
         if ab.get(_pw_key):
             ab[_pw_key] = encrypt(ab[_pw_key])
     # 申请人档案：**默认全部加密**，例外清单见 config._PLAINTEXT_PROFILE_FIELDS。

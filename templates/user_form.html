@@ -578,6 +578,28 @@
 
       </div>
 
+      <div class="ab-platform">
+        <div class="ab-platform-head">
+          <span class="badge badge-neutral">Plaza</span>
+          <span class="ab-platform-name">{{ _('user_form_ab_plaza') }}</span>
+        </div>
+        <!-- ── Plaza（Zig/Hexia）：用户名登录，不是邮箱 ── -->
+        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+          <div class="form-group"><label class="form-label">{{ _('user_form_ab_username') }}</label><input type="text" class="form-input" name="AUTO_BOOK_PLAZA_USERNAME" value="{{ ab.plaza_username if ab else '' }}" autocomplete="off"></div>
+          <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_PLAZA_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.plaza_password else '' }}" autocomplete="new-password"></div>
+        </div>
+        <!-- 单独的开关：Plaza 的应征一次提交就落地，填了凭据不等于授权自动应征 -->
+        <label class="toggle mt-2">
+          <input type="checkbox" id="ab_plaza_on" {% if ab and ab.plaza_enabled %}checked{% endif %}
+                 onchange="document.getElementById('ab_plaza_on_h').value=this.checked?'true':'false'">
+          <span class="toggle-track"></span>{{ _('user_form_ab_plaza_on') }}
+        </label>
+        <input type="hidden" id="ab_plaza_on_h" name="AUTO_BOOK_PLAZA_ENABLED" value="{{ 'true' if ab and ab.plaza_enabled else 'false' }}">
+        <span class="text-xs text-tertiary">{{ _('user_form_ab_plaza_on_note') }}</span>
+        <span class="text-xs text-tertiary">{{ _('user_form_ab_plaza_note') }}</span>
+
+      </div>
+
       <div class="ab-platform ab-platform-shared">
         <div class="ab-platform-head">
           <span class="badge badge-neutral">Xior + OurDomain</span>

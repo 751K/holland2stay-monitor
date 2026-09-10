@@ -15,13 +15,24 @@ source           scraper              booker              状态
 holland2stay     HollandStayScraper   HollandStayBooker   完整自动 checkout，**已开**
 xior             XiorScraper          XiorBooker          半自动到「存草稿」，未开
 ourdomain        OurDomainScraper     OurDomainBooker     半自动到「存草稿」，未开
+plaza            PlazaScraper         PlazaBooker         已开，用户侧默认关
 ourcampus        OurCampusScraper     （无）              没探过预订流程
+magis            MagisScraper         （无）              没探过预订流程
+studentexperience StudentExperience…  （无）              没探过预订流程
 ===============  ===================  ==================  =========================
 
 「未开」= 注册了 booker，但 ``monitor._AUTO_BOOK_SOURCES`` 里没有它，用户侧
 这条路是关的。两个 RENTCafe 平台共用 ``RentCafeBooker``，边界都停在 Save
 （往后要填 IBAN，代填金融凭据是硬限制）；开之前各自还差一段端到端验证，
 见 ``docs/XIOR.md`` §8.6 / ``docs/OURDOMAIN.md`` §7。
+
+**Plaza 未开的理由和那两个完全不同。** 那两个是**技术上做不完**（往后要填 IBAN，
+代填金融凭据是硬限制）；Plaza 2026-09-10 已用真实账号端到端验证通过——登录、预检、
+已应征短路、真提交，四条路径都跑过。
+
+它在 ``_AUTO_BOOK_SOURCES`` 里，但**用户侧默认关**：``auto_book.plaza_enabled``
+要在面板里显式打开。多这一道是因为 Plaza 的应征一次 POST 就落地，中间没有付款或
+存草稿那样的人工关卡。见 ``docs/PLAZA.md`` §6。
 
 **改这张表时同步改代码**：它上一次和现实脱节是因为 ``OurDomainBooker`` 加进
 ``BOOKER_REGISTRY`` 时没人回来改这段，于是文档写着「（无）」而代码里明明有
@@ -45,6 +56,7 @@ from booker import BookingResult
 
 from .base import AbstractBooker, BookingRequest
 from .holland2stay import HollandStayBooker
+from .plaza import PlazaBooker
 from .rentcafe import XiorBooker, OurDomainBooker
 
 
@@ -53,6 +65,7 @@ BOOKER_REGISTRY: dict[str, type[AbstractBooker]] = {
         HollandStayBooker,
         XiorBooker,
         OurDomainBooker,
+        PlazaBooker,
     ]
 }
 
@@ -96,6 +109,7 @@ __all__ = [
     "BookingRequest",
     "BookingResult",
     "HollandStayBooker",
+    "PlazaBooker",
     "dispatch_book",
     "get_booker",
     "supports_booking",

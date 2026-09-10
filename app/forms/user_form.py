@@ -323,6 +323,10 @@ def build_user_from_form(
         # ── OurDomain ──
         ourdomain_email=form.get("AUTO_BOOK_OURDOMAIN_EMAIL", ""),
         ourdomain_password=_secret("AUTO_BOOK_OURDOMAIN_PASSWORD", ex_ab.ourdomain_password if ex_ab else ""),
+        # ── Plaza（用户名，不是邮箱）──
+        plaza_username=form.get("AUTO_BOOK_PLAZA_USERNAME", ""),
+        plaza_password=_secret("AUTO_BOOK_PLAZA_PASSWORD", ex_ab.plaza_password if ex_ab else ""),
+        plaza_enabled=form.get("AUTO_BOOK_PLAZA_ENABLED") == "true",
         listing_filter=ListingFilter(
             max_rent=_fv("AUTO_BOOK_MAX_RENT"),
             min_area=_fv("AUTO_BOOK_MIN_AREA"),

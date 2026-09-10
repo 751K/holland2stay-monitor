@@ -28,10 +28,29 @@ def form_html(admin_client) -> str:
     return r.get_data(as_text=True)
 
 
+#: 注册了 booker 的 source → 面板标题行里应当出现的徽标文字。
+#:
+#: 用它把 UI 和 ``BOOKER_REGISTRY`` 绑在一起：注册了 booker 却没给用户填凭据的
+#: 入口，那个 booker 就是够不着的。少一条映射同样会失败——逼着加 booker 的人
+#: 回来面对「用户怎么配它」这个问题。
+PLATFORM_BADGES = {
+    "holland2stay": "H2S",
+    "xior": "Xior",
+    "ourdomain": "OurDomain",
+    "plaza": "Plaza",
+}
+
+
 class TestPlatformsAreVisuallySeparate:
-    @pytest.mark.parametrize("badge", ["H2S", "Xior", "OurDomain"])
+    def test_every_registered_booker_has_a_badge_mapping(self):
+        from bookers import BOOKER_REGISTRY
+        assert set(PLATFORM_BADGES) == set(BOOKER_REGISTRY), (
+            "注册了新 booker 就要在这里登记它的面板徽标——"
+            "没有面板入口的 booker，用户没法配凭据，等于够不着")
+
+    @pytest.mark.parametrize("badge", sorted(PLATFORM_BADGES.values()))
     def test_each_platform_panel_is_labelled(self, form_html, badge):
-        """三块面板各自的标题行里要有平台名——这是「一眼看出这是哪家」的最低要求。"""
+        """每块面板的标题行里要有平台名——这是「一眼看出这是哪家」的最低要求。"""
         heads = re.findall(r'<div class="ab-platform-head">(.*?)</div>', form_html, re.S)
         assert any(badge in h for h in heads), (
             f"没有哪块面板的标题行写着 {badge}；共 {len(heads)} 块")
@@ -41,11 +60,13 @@ class TestPlatformsAreVisuallySeparate:
         empties = re.findall(r'<span class="badge[^"]*">\s*</span>', form_html)
         assert not empties, f"标题行里有空徽标 {len(empties)} 个"
 
-    def test_three_platform_panels_plus_one_shared(self, form_html):
+    def test_one_panel_per_booker_plus_one_shared(self, form_html):
+        """面板数从 registry 推，不写死——写死的数字每加一个平台就要有人记得改。"""
+        n = len(PLATFORM_BADGES)
         total = len(re.findall(r'<div class="ab-platform(?:\s|")', form_html))
         shared = len(re.findall(r'<div class="ab-platform ab-platform-shared"', form_html))
-        assert (total, shared) == (4, 1), (
-            f"应当是 3 块平台 + 1 块共用，实际 total={total} shared={shared}")
+        assert (total, shared) == (n + 1, 1), (
+            f"应当是 {n} 块平台 + 1 块共用，实际 total={total} shared={shared}")
 
     def test_old_tiny_grey_headings_are_gone(self, form_html):
         """原来的小标题是 text-xs 灰字，和正文一样大——那正是「区分不明显」的成因。"""

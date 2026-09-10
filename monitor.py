@@ -1501,12 +1501,17 @@ def _clear_maintenance_meta_if_recovered(storage: Storage) -> None:
         logger.info("🔧→✅ H2S 平台维护已结束，抓取恢复正常")
 
 
-# 目前只有 H2S 的预订流程真正跑通过（2026-05-22 真实下单成功，见 ARCHITECTURE §7）。
+# 进这个元组的条件是「用真实账号端到端跑通过」：
+#   holland2stay  2026-05-22 真实下单成功（见 ARCHITECTURE §7）
+#   plaza         2026-09-10 真实应征成功（见 docs/PLAZA.md §6）
+#
+# Plaza 另有一道**用户侧开关** auto_book.plaza_enabled，默认关——进了这个元组
+# 不等于对谁都开。理由见 _can_auto_book 里的注释。
 #
 # **Xior 先不放进来**：bookers/rentcafe.py 里第 3 步之后的多步表单是没走过流程
 # 硬猜出来的草稿，放开等于拿用户的真实账号去提交半懂不懂的表单。等流程侦察完
 # 并验证过再加 "xior"。凭据判定（_can_auto_book）已经就位，到时只改这个元组。
-_AUTO_BOOK_SOURCES: tuple[str, ...] = ("holland2stay",)
+_AUTO_BOOK_SOURCES: tuple[str, ...] = ("holland2stay", "plaza")
 
 
 def _can_auto_book(user, listing) -> bool:
@@ -1526,6 +1531,19 @@ def _can_auto_book(user, listing) -> bool:
             return False
         email, password = user.auto_book.xior_account_for(key)
         return bool(email and password)
+    if listing.source == "plaza":
+        # Plaza 要**两道闸**：显式开关 + 凭据。
+        #
+        # 另外三个平台只用凭据当开关，因为它们都还有一步在用户手里（H2S 要付款，
+        # 两个 RENTCafe 停在存草稿）。Plaza 的应征一次 POST 就落地，中间没有任何
+        # 人工关卡——所以「填了凭据」不等于「授权系统替我应征」，要单独点头。
+        #
+        # 凭据那一半仍然重要：没凭据就不产生候选，免得每条新房源都跑一次注定失败
+        # 的登录，而失败会消耗上游的尝试额度。
+        ab = user.auto_book
+        if not ab.plaza_enabled:
+            return False
+        return bool((ab.plaza_username or "").strip() and ab.plaza_password)
     return True
 
 

@@ -595,6 +595,23 @@ TRANSLATIONS = {
     "user_form_ab_h2s":       {"zh": "Holland2Stay 账号",     "en": "Holland2Stay account"},
     "user_form_ab_xior":      {"zh": "Xior 账号",             "en": "Xior account"},
     "user_form_ab_ourdomain": {"zh": "OurDomain 账号",        "en": "OurDomain account"},
+    "user_form_ab_plaza":   {"zh": "Plaza 账号",             "en": "Plaza account"},
+    "user_form_ab_plaza_on": {"zh": "开启 Plaza 自动应征",
+                              "en": "Auto-respond on Plaza"},
+    "user_form_ab_plaza_on_note": {
+        "zh": "Plaza 的应征一次提交就落地，中间没有付款或确认环节——不像 H2S "
+              "下单后还要付款。所以这个开关要单独打开，填了账号不等于开启。",
+        "en": "A Plaza response is final the moment it is submitted — there is no "
+              "payment or confirmation step afterwards, unlike H2S. That is why this "
+              "needs its own switch: filling in the account does not enable it."},
+    # Plaza 登录用的是用户名不是邮箱（登录表单标签 "Jouw gebruikersnaam"），
+    # 复用 user_form_ab_email 会让人填邮箱然后登录失败。
+    "user_form_ab_username": {"zh": "用户名",                 "en": "Username"},
+    "user_form_ab_plaza_note": {
+        "zh": "应征需要已注册的 Plaza 账号（€27,50/年）。不需要上传任何资料——"
+              "提交只有房源编号，资料在注册时已交给站点。",
+        "en": "Responding requires a registered Plaza account (€27.50/yr). No documents "
+              "are needed at this step — the details were given to the site at sign-up."},
     "user_form_ab_pass":    {"zh": "密码",                   "en": "Password"},
     "user_form_first_name": {"zh": "名",                     "en": "First Name"},
     "user_form_last_name":  {"zh": "姓",                     "en": "Last Name"},
