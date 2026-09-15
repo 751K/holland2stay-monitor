@@ -1,5 +1,49 @@
 # Changelog
 
+## v1.41.0 (2026-09-16)
+
+本次发布只有一次提交，为 macOS 客户端做推送侧准备。
+
+加 macOS 本身只是在白名单里多一个值。真正要修的是：按平台分流原来散在四处，每处写法
+都不一样，而没有任何测试检查分流，所以一直是绿的。
+
+### 推送
+
+* **按平台分流收成 `push_channel` 白名单，支持 macOS**（[290a61e]）
+
+    四处原来各写一份：
+
+    | 位置 | 原判据 | macOS 设备的结果 |
+    |---|---|---|
+    | `/devices/test` | `in ("ios",)` | APNs、FCM 两边都不走 |
+    | `mcore/push.py` 用户推送 | `!= "android"` | 进 APNs（黑名单碰巧放行） |
+    | `mcore/push.py` admin 推送 | `!= "android"` | 同上 |
+    | 管理员测试推送 | `!= "android"` | 同上 |
+
+    黑名单的另一个后果是任何拼错的平台字符串都会被送去 APNs。现在
+    `app/services/device_service.py` 里的 `push_channel()` 是唯一出处：`ios` / `macos`
+    → APNs，`android` → FCM，空值按 `ios`（老数据和 iOS 客户端都不发这个字段），其余
+    一律不推。`mcore/push.py` 在函数内延迟导入它——`device_service` 顶层会拉进 Flask 与
+    `app.db`，monitor 进程不该为一个判断函数加载整个 web 栈。改成白名单之前核对过生产
+    `device_tokens`：只有 `ios`（142）和 `android`（5），不会有设备因此失去推送。
+
+    注册时校验 `platform`：不认识的值返回 400，不传仍按 `ios`。此前路由、service、
+    storage 三层都不校验，传什么存什么——而 API.md 里「`/devices/register` 对
+    `platform` 做白名单 ✅」这一条一直标着完成，已如实更正。
+
+    macOS 客户端与 iOS 共用 bundle ID `com.j.kong.FlatRadar`，与生产 `APNS_TOPIC`
+    一致，不需要按设备选 topic。
+
+    `docs/openapi.json` 升到 1.24.0：`DeviceRegisterRequest.platform` 与
+    `DiagnosticRequest.platform`（Mac 的 MetricKit 诊断也走这个接口）的枚举加 `macos`。
+    契约测试只比对路由和字段、不比对枚举值，这两处是手改的。管理面板的设备表里 macOS
+    显示苹果图标与 `macOS` 标签。
+
+    `tests/test_push_platform_routing.py` 20 条，其中一条断言四个调用点不得再手写平台
+    比较。把四处分别改回旧写法、去掉注册校验、把 macOS 移出 APNs 等 8 个变异全部命中。
+
+[290a61e]: https://github.com/751K/holland2stay-monitor/commit/290a61e
+
 ## v1.40.1 (2026-09-15)
 
 本次发布只有一次提交，改的是用户编辑页第 4 节「自动预订」的版式，不涉及任何行为变化：
