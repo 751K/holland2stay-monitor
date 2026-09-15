@@ -17,6 +17,33 @@ logger = logging.getLogger(__name__)
 
 VALID_ENVS = {"production", "sandbox"}
 
+#: 允许注册的平台。不认识的值在注册时就 400——否则传什么字符串就存什么，下面的
+#: 分流白名单无从谈起。iOS 客户端不发这个字段，默认值是 ``ios``。
+VALID_PLATFORMS = {"ios", "android", "macos"}
+#: 走 APNs 的平台。macOS 客户端与 iOS 同走 APNs（同一个 APNS_TOPIC）。
+APNS_PLATFORMS = {"ios", "macos"}
+#: 走 FCM 的平台。
+FCM_PLATFORMS = {"android"}
+
+
+def push_channel(platform: str | None) -> str | None:
+    """这个平台的设备走哪条推送通道：``"apns"``、``"fcm"``，或 ``None``（不推）。
+
+    分流的唯一出处。原来四处各写一份，写法还不一样——``/devices/test`` 用
+    ``in ("ios",)``，``mcore/push.py`` 和管理员测试推送用 ``!= "android"``。结果是
+    macOS 设备在前者两边都不走，在后者被当成 iOS；而没有任何测试检查按平台分流，
+    所以一直是绿的。
+
+    **白名单**：认识的平台才推，未知值返回 ``None``。黑名单（``!= "android"``）会把
+    任何拼错的字符串静默送去 APNs。空值按 ``ios``：老数据和 iOS 客户端都不发这个字段。
+    """
+    p = (platform or "ios").strip().lower()
+    if p in APNS_PLATFORMS:
+        return "apns"
+    if p in FCM_PLATFORMS:
+        return "fcm"
+    return None
+
 
 @dataclass
 class DeviceValidationError(Exception):
@@ -136,6 +163,8 @@ def register_device_for_token(
         raise DeviceValidationError("device_token 长度异常")
     if env not in VALID_ENVS:
         raise DeviceValidationError(f"env 必须是 {sorted(VALID_ENVS)} 之一")
+    if platform not in VALID_PLATFORMS:
+        raise DeviceValidationError(f"platform 必须是 {sorted(VALID_PLATFORMS)} 之一")
 
     with storage_ctx() as st:
         try:
@@ -239,7 +268,7 @@ def send_test_push(
 
     The Web notification branch exercises SSE / notification list behavior; the
     APNs / FCM branch sends directly to devices registered under this app token,
-    routing by platform (iOS → APNs, Android → FCM).
+    routing by platform via :func:`push_channel` (iOS / macOS → APNs, Android → FCM).
     """
     title = (title or "").strip()[:64] or "🧪 测试推送"
     body = (body or "").strip()[:180] or "如果你在锁屏看到这条，推送链路工作正常 ✓"
@@ -268,10 +297,9 @@ def send_test_push(
         if not active:
             raise DeviceValidationError("当前会话没有注册过设备")
 
-        # 按 platform 分流：iOS → APNs，Android → FCM
-        # 使用显式允许列表，避免未知/空 platform 被静默当 iOS 处理
-        ios_devices = [d for d in active if d.get("platform", "ios") in ("ios",)]
-        android_devices = [d for d in active if d.get("platform", "ios") == "android"]
+        # 按 platform 分流，规则见 push_channel（白名单）
+        ios_devices = [d for d in active if push_channel(d.get("platform")) == "apns"]
+        android_devices = [d for d in active if push_channel(d.get("platform")) == "fcm"]
 
         # ── iOS / APNs ────────────────────────────────────────────
         if ios_devices:

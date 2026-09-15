@@ -162,12 +162,14 @@
         {% set is_disabled = d.disabled_at is not none %}
         <tr style="border-top:1px solid var(--border);{% if is_disabled %}opacity:0.5;{% endif %}">
           <td style="padding:12px 16px;font-weight:550;" title="{{ d.device_token }}">
-            <i class="bi bi-{{ 'apple' if d.platform == 'ios' else 'android' if d.platform == 'android' else 'phone' }} mr-1" style="color:var(--accent);"></i>
+            <i class="bi bi-{{ 'apple' if d.platform in ('ios', 'macos') else 'android' if d.platform == 'android' else 'phone' }} mr-1" style="color:var(--accent);"></i>
             <code style="font-size:0.8rem;">{{ d.token_hint }}</code>
           </td>
           <td style="padding:12px 16px;">
             {% if d.platform == 'ios' %}
               <span class="badge" style="background:var(--accent);color:#fff;">iOS</span>
+            {% elif d.platform == 'macos' %}
+              <span class="badge" style="background:var(--accent);color:#fff;">macOS</span>
             {% elif d.platform == 'android' %}
               <span class="badge" style="background:#34C759;color:#fff;">Android</span>
             {% else %}

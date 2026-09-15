@@ -2,7 +2,7 @@
 
 本文档整理 FlatRadar 移动端和第三方客户端使用的后端 API。当前稳定接口集中在 `/api/v1/*`，Web 后台的 HTML 页面和 `/api/*` 旧接口不作为移动端契约。
 
-最后更新：2026-09-09（openapi.json 1.23.0）
+最后更新：2026-09-15（openapi.json 1.24.0）
 
 机器可读契约：
 
@@ -942,12 +942,15 @@ Body 支持字段：
 推送链路已支持 iOS 和 Android 双平台：
 
 - **iOS**：APNs 推送，生产可用。
+- **macOS**：与 iOS 同走 APNs（同一个 `APNS_TOPIC`），2026-09-15 起接受注册。
 - **Android**：FCM 推送（v1.7.8 起端到端拉通），OAuth2 服务账号认证 + FCM HTTP v1 API，生产可用。
 
 已完成的平台分流工作：
 
-- `/devices/register` 对 `platform` 做白名单：`ios` / `android`。 ✅
-- `mcore/push.py` 按 platform 分流，所有 dispatch 函数双发 APNs + FCM。 ✅
+- `/devices/register` 对 `platform` 做白名单：`ios` / `android` / `macos`，不认识的值返回 400。 ✅
+  （此前这一条标着 ✅ 但路由、service、storage 三层都没校验，传什么字符串就存什么——2026-09-15 补上。）
+- 分流规则只在 `app.services.device_service.push_channel` 一处：`ios` / `macos` → APNs，
+  `android` → FCM，其余不推。`mcore/push.py`、`/devices/test`、管理员测试推送都调它。 ✅
 - `/devices/test` 支持 Android FCM 测试（data-only payload）。 ✅
 
 ### POST `/devices/register`
@@ -976,7 +979,7 @@ Body：
 |---|---|---:|---|
 | `device_token` | string | 是 | APNs token；Android 为 FCM token |
 | `env` | string | 否 | `production` / `sandbox`，默认 `production` |
-| `platform` | string | 否 | 当前默认 `ios`；Android 应传 `android` |
+| `platform` | string | 否 | `ios` / `android` / `macos`，默认 `ios`；其他值返回 400 |
 | `model` | string | 否 | **硬件标识符**，不是市场名称。iOS 端取 `utsname().machine`，形如 `iPhone16,2`。最长 64 |
 | `bundle_id` | string | 否 | App bundle/package id，最长 128 |
 | `language` | string | 否 | 推送语言（`en` / `zh`），默认 `en`。iOS 从很早就在发，但直到 v1.20.0 才登记进 spec |
@@ -1005,7 +1008,7 @@ Body：
 
 字段名是 `os_version` 不是 `ios_version`：这个端点的 `platform` 枚举含 `android`。
 `POST /diagnostics/crash` 那条路径仍叫 `ios_version`（同时也接受 `os_version`），
-因为那个端点目前只有 iOS 在打——两处不一致是有意的。
+因为那个端点目前只有 Apple 客户端在打（iOS，以及 macOS 的 MetricKit 诊断）——两处不一致是有意的。
 
 返回：
 
@@ -1107,8 +1110,8 @@ Body：
 当前实现说明：
 
 - 写入 `web_notifications` 可验证 SSE / App alerts。
-- APNs 测试仅适用于 iOS。
-- Android FCM 已支持，`POST /devices/test` 按 platform 自动分流（iOS → APNs，Android → FCM data-only payload）。
+- APNs 测试适用于 iOS / macOS。
+- Android FCM 已支持，`POST /devices/test` 按 platform 自动分流（iOS / macOS → APNs，Android → FCM data-only payload）。
 
 ## Feedback
 
@@ -1181,7 +1184,7 @@ Body：
 |---|---|---|
 | `kind` | string | 见下 |
 | `app_version` | string | 最长 32 |
-| `platform` | string | `ios` / `android`，默认 `ios` |
+| `platform` | string | `ios` / `android` / `macos`，默认 `ios` |
 | `ios_version` | string | 系统版本。也接受 `os_version`（优先），`ios_version` 为兼容旧客户端保留 |
 | `device_model` | string | ⚠️ 这里是 `UIDevice.current.model`，**族名**（`iPhone` / `iPad`），不是硬件标识符 |
 | `payload` | object | 诊断正文 |

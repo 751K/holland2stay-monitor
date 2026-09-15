@@ -127,9 +127,10 @@ def app_accounts_test_push(token_id: int) -> Any:
         flash(f"该会话没有活跃设备（共 {len(devices)} 台，{len(active)} 台活跃）", "warning")
         return redirect(url_for("app_accounts"))
 
-    # 按平台分流
-    ios_devs = [d for d in active if d.get("platform", "ios") != "android"]
-    android_devs = [d for d in active if d.get("platform", "ios") == "android"]
+    # 按平台分流，规则见 device_service.push_channel（白名单）
+    from app.services.device_service import push_channel
+    ios_devs = [d for d in active if push_channel(d.get("platform")) == "apns"]
+    android_devs = [d for d in active if push_channel(d.get("platform")) == "fcm"]
 
     msgs: list[str] = []
 

@@ -15,7 +15,8 @@ mcore.push — APNs + FCM 推送调度
 3. **APNs / FCM 未启用时各自 no-op**：返回 0 个发送，不开网络连接。
 4. **运行时单例客户端**：第一次调用时构造（含 .p8 / service account 加载），
    后续复用；同进程内多协程并发安全。
-5. **平台分离**：按 device_tokens.platform 字段分流到 APNs（iOS）或 FCM（Android）。
+5. **平台分离**：按 device_tokens.platform 字段分流到 APNs（iOS / macOS）或 FCM（Android），
+   规则只在 ``app.services.device_service.push_channel`` 一处（白名单）。
 6. **尊重用户的通知开关**：``UserConfig.notifications_enabled=False`` 时不推。
    这条以前不成立——外部渠道被 ``MultiNotifier(enabled=…)`` 挡着，推送却从
    旁边绕了过去，于是面板上那个写着「通知」的开关关掉后手机照响。公告路径
@@ -44,6 +45,18 @@ from notifier_channels.fcm import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _devices_for(devices: list[dict], channel: str) -> list[dict]:
+    """筛出走 ``channel``（``"apns"`` / ``"fcm"``）的设备。
+
+    分流规则在 ``app.services.device_service.push_channel``。**延迟导入**：
+    ``device_service`` 顶层会拉进 Flask 与 ``app.db``，mcore 在模块级不依赖 ``app.*``，
+    monitor 进程启动时不该为一个判断函数加载整个 web 栈。
+    """
+    from app.services.device_service import push_channel
+
+    return [d for d in devices if push_channel(d.get("platform")) == channel]
 
 
 # ── 单例客户端 ──────────────────────────────────────────────────────
@@ -573,8 +586,8 @@ async def _send_to_user(
         logger.info("APNs 跳过：user_id=%s 没有活跃设备", user_id)
         return []
 
-    # 分离 iOS / Android；未设 platform 的老数据默认走 APNs
-    ios_devices = [d for d in devices if d.get("platform", "ios") != "android"]
+    # 只取走 APNs 的设备；未设 platform 的老数据按 ios（见 push_channel）
+    ios_devices = _devices_for(devices, "apns")
 
     # 按语言分组（仅 iOS）
     by_lang: dict[str, list[dict]] = defaultdict(list)
@@ -652,8 +665,8 @@ async def _send_fcm_to_user(
         logger.info("FCM 跳过：user_id=%s 没有活跃设备", user_id)
         return []
 
-    # 只取 Android 设备（platform == "android"）
-    android_devices = [d for d in devices if d.get("platform", "ios") == "android"]
+    # 只取走 FCM 的设备
+    android_devices = _devices_for(devices, "fcm")
     if not android_devices:
         logger.info("FCM 跳过：user_id=%s 没有 Android 设备", user_id)
         return []
@@ -835,8 +848,8 @@ async def _send_to_admin(storage, payload_fn, *, collapse_id: str = "") -> list[
         logger.info("APNs admin 跳过：没有活跃的 admin 设备")
         return []
 
-    # 分离 iOS / Android
-    ios_devices = [d for d in devices if d.get("platform", "ios") != "android"]
+    # 只取走 APNs 的设备
+    ios_devices = _devices_for(devices, "apns")
 
     # 按语言分组（仅 iOS）
     by_lang: dict[str, list[dict]] = defaultdict(list)
@@ -888,7 +901,7 @@ async def _send_fcm_to_admin(storage, payload_fn, *, collapse_key: str = "") -> 
         logger.info("FCM admin 跳过：没有活跃的 admin 设备")
         return []
 
-    android_devices = [d for d in devices if d.get("platform", "ios") == "android"]
+    android_devices = _devices_for(devices, "fcm")
     if not android_devices:
         logger.info("FCM admin 跳过：没有 Android 设备")
         return []

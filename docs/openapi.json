@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FlatRadar Backend API",
-    "version": "1.23.0",
+    "version": "1.24.0",
     "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
@@ -3471,7 +3471,8 @@
             "type": "string",
             "enum": [
               "ios",
-              "android"
+              "android",
+              "macos"
             ],
             "default": "ios"
           },
@@ -3691,7 +3692,8 @@
             "type": "string",
             "enum": [
               "ios",
-              "android"
+              "android",
+              "macos"
             ],
             "default": "ios",
             "description": "上报端平台。此前代码一直在读，spec 里漏登记。"
