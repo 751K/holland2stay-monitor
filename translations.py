@@ -118,17 +118,19 @@ TRANSLATIONS = {
     # bookers/rentcafe.py 一份代码填（XiorBooker / OurDomainBooker 都继承它）。
     "user_form_profile_scope": {"zh": "Xior 与 OurDomain 共用",
                                 "en": "Shared by Xior and OurDomain"},
-    "user_form_profile_note": {
-        # 这里是纯文本，模板不做 Markdown 渲染——写 **粗体** 只会把星号
-        # 原样显示出来
-        "zh": "半自动预订用这些资料自动填 RENTCafe 的申请表，并代传证件——"
-              "平台在证件上传前拒绝保存申请表，而抢房是自动触发的。"
-              "系统只填表，不付款：付款要填银行账号，那一步必须你自己做。",
-        "en": "Used to auto-fill the RENTCafe application form and upload your ID — "
-              "the platform refuses to save anything until the ID is there, and booking "
-              "fires automatically. The system never pays: the payment step needs "
-              "your bank details and stays with you.",
-    },
+    # 档案分组标题，按 RENTCafe 申请表上的分组排
+    "profile_sec_name":        {"zh": "姓名与联系方式", "en": "Name & contact"},
+    "profile_sec_identity":    {"zh": "国籍与证件",   "en": "Nationality & ID"},
+    "profile_sec_address":     {"zh": "当前住址",     "en": "Current address"},
+    "profile_sec_study":       {"zh": "学业与租期",   "en": "Study & lease"},
+    "profile_sec_screening":   {"zh": "背景调查（需本人作答，系统不代答）",
+                                "en": "Screening (answer yourself — never filled in for you)"},
+    # 占位示例的前缀。没有它，「China」「12」这种占位文字看上去就像已经填好的值。
+    "profile_eg":              {"zh": "例：", "en": "e.g. "},
+    "profile_sec_docs":        {"zh": "证件与授权",   "en": "ID document & authorisation"},
+    "profile_id_doc_choose":   {"zh": "上传文件",     "en": "Upload file"},
+    "profile_id_doc_replace":  {"zh": "替换文件",     "en": "Replace file"},
+    "profile_id_doc_picked":   {"zh": "保存后上传：", "en": "Uploads on save: "},
     "profile_title":           {"zh": "称谓",       "en": "Title"},
     "profile_first_name":      {"zh": "名",         "en": "First name"},
     "profile_middle_name":     {"zh": "中间名",     "en": "Middle name"},
@@ -160,22 +162,12 @@ TRANSLATIONS = {
                               "en": "Passport / ID document"},
     "profile_id_doc_delete": {"zh": "删除已上传的证件", "en": "Delete stored document"},
     "profile_id_doc_hint": {
-        "zh": "平台在证件上传前拒绝保存申请表，而抢房是系统自动触发的，"
-              "所以文件需要提前存好（加密落盘）。≤5MB，支持 pdf/jpg/png/doc 等。",
-        "en": "The platform refuses to save the application until the ID is "
-              "uploaded, and booking fires automatically, so the file must be "
-              "stored in advance (encrypted at rest). Max 5MB.",
+        "zh": "≤5MB，支持 pdf/jpg/png/doc 等。",
+        "en": "Max 5MB. PDF, JPG, PNG, DOC and similar.",
     },
     "profile_consent_label": {
         "zh": "授权系统代我勾选申请表上的信用/背景调查声明",
         "en": "Authorise the system to accept the screening declarations on my behalf",
-    },
-    "profile_consent_note": {
-        "zh": "申请表上有两句法律声明：授权做信用/参考/背景调查，以及确认所填属实。"
-              "不授权则系统只填表、不提交，需你自己在浏览器里勾选并保存。",
-        "en": "The application carries two legal declarations: authorising a credit / "
-              "reference / background check, and confirming the details are true. "
-              "Without this, the system fills the form but will not submit it.",
     },
     "profile_consent_given_at": {"zh": "已于", "en": "Authorised at"},
     "profile_incomplete": {

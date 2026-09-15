@@ -502,6 +502,76 @@
         <input type="hidden" id="ab_dry_h" name="AUTO_BOOK_DRY_RUN" value="{{ 'false' if ab and not ab.dry_run else 'true' }}">
       </div>
 
+      {# 过滤条件放在最上面：先决定「抢哪些房」，再配「用哪个账号去抢」。
+         不是平台面板，所以不用 .ab-platform（测试按它数平台面板），样式共用。 #}
+      <div class="ab-filter">
+        <div class="ab-platform-head">
+          <span class="ab-platform-name">{{ _('user_form_ab_filter') }}</span>
+          <button type="button" class="btn btn-ghost btn-sm ml-auto" onclick="copyNotifFilters()" style="font-size:12px;">
+            <i class="bi bi-copy mr-1"></i>{{ _('user_form_copy_filter') }}
+          </button>
+        </div>
+        {% set ab_lf = ab.listing_filter if ab else none %}
+        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+          <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MAX_RENT" value="{{ ab_lf.max_rent | int if ab_lf and ab_lf.max_rent else '' }}"></div>
+          <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_AREA" value="{{ ab_lf.min_area | int if ab_lf and ab_lf.min_area else '' }}"></div>
+          <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_FLOOR" value="{{ ab_lf.min_floor if ab_lf and ab_lf.min_floor is not none else '' }}"></div>
+          <div class="form-group" style="grid-column:span 2;">
+            <label class="form-label">{{ _('user_form_occupancy') }}</label>
+            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_occ = ab_lf.allowed_occupancy if ab_lf else [] %}{% for val, label in occupancy_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OCCUPANCY" value="{{ val }}"{% if val in ab_occ %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+          <div class="form-group" style="grid-column:span 2;">
+            <label class="form-label">{{ _('user_form_types') }}</label>
+            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_type = ab_lf.allowed_types if ab_lf else [] %}{% for val, label in type_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TYPES" value="{{ val }}"{% if val in ab_type %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+        </div>
+        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
+          <div class="form-group">
+            <label class="form-label">{{ _('user_form_cities') }}</label>
+            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_city = ab_lf.allowed_cities if ab_lf else [] %}{% for c in city_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CITIES" value="{{ c }}"{% if c in ab_city %} checked{% endif %}> {{ c }}</label>{% endfor %}</div></div></div>
+          <div class="form-group">
+            <label class="form-label">{{ _('user_form_sources') }}</label>
+            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_src = ab_lf.allowed_sources if ab_lf else [] %}{% for key, label in source_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_SOURCES" value="{{ key }}"{% if key in ab_src %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ _('user_form_hoods') }}</label>
+            <div class="multi-select" id="ms-ab-neighborhood">
+              <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+              <div class="ms-dropdown" id="ab-neighborhood-dropdown">{% set ab_nbhd = ab_lf.allowed_neighborhoods if ab_lf else [] %}{% for n in ab_nbhd %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ _('user_form_buildings') }}</label>
+            <div class="multi-select" id="ms-ab-building">
+              <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
+              <div class="ms-dropdown" id="ab-building-dropdown">{% set ab_bld = ab_lf.allowed_buildings if ab_lf else [] %}{% for b in ab_bld %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_BUILDINGS" value="{{ b }}" checked> {{ b }}</label>{% endfor %}</div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">{{ _('user_form_offer') }}</label>
+            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_contract = ab_lf.allowed_contract if ab_lf else [] %}{% for val, label in contract_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CONTRACT" value="{{ val }}"{% if val in ab_contract %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+          <div class="form-group">
+            <label class="form-label">{{ _('user_form_tenant') }}</label>
+            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_tenant = ab_lf.allowed_tenant if ab_lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TENANT" value="{{ val }}"{% if val in ab_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
+        </div>
+        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
+          <div class="form-group">
+            <label class="form-label">{{ _('user_form_promo') }}</label>
+            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_offer = ab_lf.allowed_offer if ab_lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OFFER" value="{{ o }}"{% if o in ab_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div></div></div>
+          <div class="form-group">
+            <label class="form-label">{{ _('filter_finishing') }}</label>
+            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_fin = ab_lf.allowed_finishing if ab_lf else [] %}{% for f in finishing_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_FINISHING" value="{{ f }}"{% if f in ab_fin %} checked{% endif %}> {{ f }}</label>{% endfor %}</div></div></div>
+          <div class="form-group">
+            <label class="form-label">{{ _('filter_energy') }}</label>
+            {% set ab_en = ab_lf.allowed_energy if ab_lf else '' %}
+            <select name="AUTO_BOOK_ALLOWED_ENERGY" class="form-select" style="font-size:14px;">
+              <option value="">{{ _('filter_min_energy') }}</option>
+              {% for e in energy_options %}
+                <option value="{{ e }}" {% if e == ab_en %}selected{% endif %}>{{ e }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+
       <div class="ab-platform">
         <div class="ab-platform-head">
           <span class="badge badge-neutral">H2S</span>
@@ -611,214 +681,166 @@
           <span class="ab-platform-name">{{ _('user_form_profile') }}</span>
           <span class="text-xs text-tertiary">{{ _('user_form_profile_scope') }}</span>
         </div>
-        <!-- ── 申请人档案（RENTCafe Applicant Info 自动填）── -->
+        <!-- ── 申请人档案（RENTCafe Applicant Info 自动填）──
+             按表单上的分组排：姓名 / 国籍与证件 / 住址 / 学业 / 背景调查。
+             字段 name 与 app/forms/user_form.parse_applicant_profile 一一对应，改排版别改名。 -->
         {% set prof = (ab.applicant_profile if ab else None) %}
-        <div class="xior-note">{{ _('user_form_profile_note') }}</div>
 
-        <div class="prof-grid mb-3">
-          <label class="form-group"><span class="form-label">{{ _('profile_title') }}</span>
-            <select class="form-select" name="AUTO_BOOK_PROFILE_TITLE">
+        {% macro pf_text(label, name, value, required=False, span=False, type='text', example='', autocomplete='') %}
+          <label class="form-group{% if span %} prof-span2{% endif %}">
+            <span class="form-label">{{ _(label) }}{% if required %} <span class="prof-req">*</span>{% endif %}</span>
+            <input type="{{ type }}" class="form-input" name="{{ name }}" value="{{ value }}"
+                   {% if example %}placeholder="{{ _('profile_eg') }}{{ example }}"{% endif %}
+                   {% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %}>
+          </label>
+        {% endmacro %}
+        {% macro pf_select(label, name, current, options, required=False) %}
+          <label class="form-group">
+            <span class="form-label">{{ _(label) }}{% if required %} <span class="prof-req">*</span>{% endif %}</span>
+            <select class="form-select" name="{{ name }}">
               <option value=""></option>
-              {% for t in applicant_titles %}
-              <option value="{{ t }}" {% if prof and prof.title == t %}selected{% endif %}>{{ t }}</option>
+              {% for v in options %}
+              <option value="{{ v }}" {% if current == v %}selected{% endif %}>{{ v }}</option>
               {% endfor %}
-            </select></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_first_name') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_FIRST_NAME"
-                   value="{{ prof.first_name if prof else '' }}"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_last_name') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_LAST_NAME"
-                   value="{{ prof.last_name if prof else '' }}"></label>
+            </select>
+          </label>
+        {% endmacro %}
 
-          <label class="form-group"><span class="form-label">{{ _('profile_middle_name') }}</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_MIDDLE_NAME"
-                   value="{{ prof.middle_name if prof else '' }}"></label>
-          <label class="form-group prof-check">
-            <input type="checkbox" name="AUTO_BOOK_PROFILE_NO_MIDDLE_NAME" value="true"
-                   {% if prof and prof.no_middle_name %}checked{% endif %}>
-            <span>{{ _('profile_no_middle_name') }}</span></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_phone') }}</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_PHONE"
-                   value="{{ prof.phone if prof else '' }}" placeholder="+31 6 ..."></label>
+        <section class="prof-sec">
+          <h4 class="prof-sec-title">{{ _('profile_sec_name') }}</h4>
+          <div class="prof-grid">
+            {{ pf_select('profile_title', 'AUTO_BOOK_PROFILE_TITLE', prof.title if prof else '', applicant_titles) }}
+            {{ pf_text('profile_first_name', 'AUTO_BOOK_PROFILE_FIRST_NAME', prof.first_name if prof else '', required=True) }}
+            {{ pf_text('profile_last_name', 'AUTO_BOOK_PROFILE_LAST_NAME', prof.last_name if prof else '', required=True) }}
+            <div class="form-group">
+              <label class="form-label" for="prof_middle">{{ _('profile_middle_name') }}</label>
+              <input id="prof_middle" type="text" class="form-input" name="AUTO_BOOK_PROFILE_MIDDLE_NAME"
+                     value="{{ prof.middle_name if prof else '' }}">
+              <label class="prof-check prof-subcheck">
+                <input type="checkbox" name="AUTO_BOOK_PROFILE_NO_MIDDLE_NAME" value="true"
+                       {% if prof and prof.no_middle_name %}checked{% endif %}>
+                <span>{{ _('profile_no_middle_name') }}</span>
+              </label>
+            </div>
+            {{ pf_select('profile_gender', 'AUTO_BOOK_PROFILE_GENDER', prof.gender if prof else '', applicant_genders, required=True) }}
+            {{ pf_text('profile_dob', 'AUTO_BOOK_PROFILE_DOB', prof.date_of_birth if prof else '', required=True, type='date') }}
+            {{ pf_text('profile_phone', 'AUTO_BOOK_PROFILE_PHONE', prof.phone if prof else '', example='+31 6 12345678', type='tel') }}
+          </div>
+        </section>
 
-          <label class="form-group"><span class="form-label">{{ _('profile_gender') }} *</span>
-            <select class="form-select" name="AUTO_BOOK_PROFILE_GENDER">
-              <option value=""></option>
-              {% for g in applicant_genders %}
-              <option value="{{ g }}" {% if prof and prof.gender == g %}selected{% endif %}>{{ g }}</option>
-              {% endfor %}
-            </select></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_dob') }} *</span>
-            <input type="date" class="form-input" name="AUTO_BOOK_PROFILE_DOB"
-                   value="{{ prof.date_of_birth if prof else '' }}"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_nationality') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_NATIONALITY"
-                   value="{{ prof.nationality if prof else '' }}" placeholder="China"></label>
+        <section class="prof-sec">
+          <h4 class="prof-sec-title">{{ _('profile_sec_identity') }}</h4>
+          <div class="prof-grid">
+            {{ pf_text('profile_nationality', 'AUTO_BOOK_PROFILE_NATIONALITY', prof.nationality if prof else '', required=True, example='China') }}
+            {{ pf_text('profile_place_of_birth', 'AUTO_BOOK_PROFILE_PLACE_OF_BIRTH', prof.place_of_birth if prof else '', required=True, example='China') }}
+            {{ pf_text('profile_id_number', 'AUTO_BOOK_PROFILE_ID_NUMBER', prof.id_number if prof else '', required=True, autocomplete='off') }}
+            {{ pf_text('profile_id_country', 'AUTO_BOOK_PROFILE_ID_COUNTRY', prof.id_country if prof else '', required=True, example='China') }}
+          </div>
+        </section>
 
-          <label class="form-group"><span class="form-label">{{ _('profile_country') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_COUNTRY"
-                   value="{{ prof.country if prof else 'Netherlands' }}"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_address') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_ADDRESS"
-                   value="{{ prof.address if prof else '' }}"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_address_line2') }}</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_ADDRESS_LINE2"
-                   value="{{ prof.address_line2 if prof else '' }}"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_postcode') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_POSTCODE"
-                   value="{{ prof.postcode if prof else '' }}" placeholder="5612 AB"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_city') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_CITY"
-                   value="{{ prof.city if prof else '' }}" placeholder="Eindhoven"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_housing_type') }} *</span>
-            <select class="form-select" name="AUTO_BOOK_PROFILE_HOUSING_TYPE">
-              {% for v in ['', 'Rent', 'Own', 'Other'] %}
-              <option value="{{ v }}" {% if prof and prof.housing_type == v %}selected{% endif %}>{{ v }}</option>
-              {% endfor %}
-            </select></label>
+        <section class="prof-sec">
+          <h4 class="prof-sec-title">{{ _('profile_sec_address') }}</h4>
+          <div class="prof-grid">
+            {{ pf_text('profile_address', 'AUTO_BOOK_PROFILE_ADDRESS', prof.address if prof else '', required=True, span=True, example='Dorpsstraat 1') }}
+            {{ pf_text('profile_address_line2', 'AUTO_BOOK_PROFILE_ADDRESS_LINE2', prof.address_line2 if prof else '', span=True) }}
+            {{ pf_text('profile_postcode', 'AUTO_BOOK_PROFILE_POSTCODE', prof.postcode if prof else '', required=True, example='5612 AB') }}
+            {{ pf_text('profile_city', 'AUTO_BOOK_PROFILE_CITY', prof.city if prof else '', required=True, example='Eindhoven') }}
+            {{ pf_text('profile_country', 'AUTO_BOOK_PROFILE_COUNTRY', prof.country if prof else 'Netherlands', required=True) }}
+            {{ pf_select('profile_housing_type', 'AUTO_BOOK_PROFILE_HOUSING_TYPE', prof.housing_type if prof else '', ['Rent', 'Own', 'Other'], required=True) }}
+          </div>
+        </section>
 
-          <label class="form-group"><span class="form-label">{{ _('profile_university') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_UNIVERSITY"
-                   value="{{ prof.university if prof else '' }}"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_min_lease_term') }}</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_MIN_LEASE_TERM"
-                   value="{{ prof.min_lease_term if prof else '' }}" placeholder="12"></label>
-
-          <label class="form-group"><span class="form-label">{{ _('profile_place_of_birth') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_PLACE_OF_BIRTH"
-                   value="{{ prof.place_of_birth if prof else '' }}" placeholder="China"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_id_number') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_ID_NUMBER"
-                   value="{{ prof.id_number if prof else '' }}" autocomplete="off"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_student_number') }}</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_STUDENT_NUMBER"
-                   value="{{ prof.student_number if prof else '' }}"></label>
-          <label class="form-group"><span class="form-label">{{ _('profile_id_country') }} *</span>
-            <input type="text" class="form-input" name="AUTO_BOOK_PROFILE_ID_COUNTRY"
-                   value="{{ prof.id_country if prof else '' }}" placeholder="China"></label>
-        </div>
+        <section class="prof-sec">
+          <h4 class="prof-sec-title">{{ _('profile_sec_study') }}</h4>
+          <div class="prof-grid">
+            {{ pf_text('profile_university', 'AUTO_BOOK_PROFILE_UNIVERSITY', prof.university if prof else '', required=True, span=True, example='TU Eindhoven') }}
+            {{ pf_text('profile_student_number', 'AUTO_BOOK_PROFILE_STUDENT_NUMBER', prof.student_number if prof else '') }}
+            {{ pf_text('profile_min_lease_term', 'AUTO_BOOK_PROFILE_MIN_LEASE_TERM', prof.min_lease_term if prof else '', example='12') }}
+          </div>
+        </section>
 
         {# 背景调查三问。和上面那些字段有本质区别：这是关于你本人的**事实陈述**，
            系统不会替你答——留空就不提交，宁可存不上申请。 #}
-        <div class="profile-grid">
-          {% for name, label in [
-               ('EVER_EVICTED', 'profile_ever_evicted'),
-               ('EVER_CONVICTED', 'profile_ever_convicted'),
-               ('CRIMINAL_CHARGES', 'profile_criminal_charges')] %}
-          <label class="form-group"><span class="form-label">{{ _(label) }} *</span>
-            <select class="form-select" name="AUTO_BOOK_PROFILE_{{ name }}">
-              {% set cur = (prof|attr(name.lower())) if prof else '' %}
-              {% for v in ['', 'No', 'Yes'] %}
-              <option value="{{ v }}" {% if cur == v %}selected{% endif %}>{{ v }}</option>
-              {% endfor %}
-            </select></label>
-          {% endfor %}
-        </div>
+        <section class="prof-sec">
+          <h4 class="prof-sec-title">{{ _('profile_sec_screening') }}</h4>
+          <div class="prof-grid prof-grid-3">
+            {% for name, label in [
+                 ('EVER_EVICTED', 'profile_ever_evicted'),
+                 ('EVER_CONVICTED', 'profile_ever_convicted'),
+                 ('CRIMINAL_CHARGES', 'profile_criminal_charges')] %}
+            {{ pf_select(label, 'AUTO_BOOK_PROFILE_' ~ name, (prof|attr(name.lower())) if prof else '', ['No', 'Yes'], required=True) }}
+            {% endfor %}
+          </div>
+        </section>
 
         {# 证件。平台在这份文档到位前**拒绝保存申请表的任何内容**，而自动预订是
-           异步触发的，所以文件必须先存在系统里——没有「用完即走的透传」。 #}
-        <div class="consent-box mb-3">
-          <div class="form-label">{{ _('profile_id_doc') }} *</div>
-          {% if id_doc %}
-          <div class="mb-2">
-            ✓ {{ id_doc[0] }}（{{ '%.1f'|format(id_doc[1] / 1048576) }} MB）
-            <label class="prof-check ms-2">
-              <input type="checkbox" name="AUTO_BOOK_ID_DOC_DELETE" value="true">
-              <span>{{ _('profile_id_doc_delete') }}</span>
+           异步触发的，所以文件必须先存在系统里——没有「用完即走的透传」。
+           与授权一起排成「左说明、右控件」的两行，和上面几组同一种版式。 #}
+        <section class="prof-sec">
+          <h4 class="prof-sec-title">{{ _('profile_sec_docs') }}</h4>
+
+          <div class="prof-row prof-row-file">
+            <div class="prof-row-main">
+              <div class="prof-row-label">{{ _('profile_id_doc') }} <span class="prof-req">*</span></div>
+              <div class="prof-hint">{{ _('profile_id_doc_hint') }}</div>
+              {% if id_doc %}
+              <div class="prof-file-current">
+                <span><i class="bi bi-file-earmark-check"></i> {{ id_doc[0] }}（{{ '%.1f'|format(id_doc[1] / 1048576) }} MB）</span>
+                <label class="prof-check">
+                  <input type="checkbox" name="AUTO_BOOK_ID_DOC_DELETE" value="true">
+                  <span>{{ _('profile_id_doc_delete') }}</span>
+                </label>
+              </div>
+              {% endif %}
+              <div id="prof-file-picked" class="prof-file-picked" hidden></div>
+            </div>
+            <label class="btn btn-ghost btn-sm prof-file-btn">
+              <i class="bi bi-upload"></i>
+              <span>{{ _('profile_id_doc_replace') if id_doc else _('profile_id_doc_choose') }}</span>
+              <input type="file" class="prof-file-input" name="AUTO_BOOK_ID_DOC"
+                     accept=".gif,.jpeg,.jpg,.png,.bmp,.pdf,.doc,.docx,.xlsx"
+                     onchange="showPickedIdDoc(this)">
             </label>
           </div>
-          {% endif %}
-          <input type="file" class="form-input" name="AUTO_BOOK_ID_DOC"
-                 accept=".gif,.jpeg,.jpg,.png,.bmp,.pdf,.doc,.docx,.xlsx">
-          <div class="text-sm muted mt-1">{{ _('profile_id_doc_hint') }}</div>
-        </div>
 
-        <div class="consent-box mb-3">
-          <label class="prof-check">
-            <input type="checkbox" name="AUTO_BOOK_SCREENING_CONSENT" value="true"
-                   {% if ab and ab.has_screening_consent() %}checked{% endif %}>
-            <span>{{ _('profile_consent_label') }}</span>
-          </label>
-          <div class="consent-note">{{ _('profile_consent_note') }}</div>
-          {% if ab and ab.has_screening_consent() %}
-          <div class="consent-when">{{ _('profile_consent_given_at') }}
-            {{ ab.screening_consent_at | local_time }}</div>
-          {% endif %}
-        </div>
+          <div class="prof-row">
+            <div class="prof-row-main">
+              <div class="prof-row-label" id="prof-consent-label">{{ _('profile_consent_label') }}</div>
+              {% if ab and ab.has_screening_consent() %}
+              <div class="prof-hint prof-when">{{ _('profile_consent_given_at') }}
+                {{ ab.screening_consent_at | local_time }}</div>
+              {% endif %}
+            </div>
+            <label class="toggle prof-toggle">
+              <input type="checkbox" name="AUTO_BOOK_SCREENING_CONSENT" value="true"
+                     aria-labelledby="prof-consent-label"
+                     {% if ab and ab.has_screening_consent() %}checked{% endif %}>
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+        </section>
 
         {% if prof and not prof.is_complete() %}
+        {# 缺项用表单上的字段名说，不用代码里的 first_name——用户在页面上找不到 first_name。 #}
+        {% set missing_labels = {
+             'first_name': 'profile_first_name', 'last_name': 'profile_last_name',
+             'middle_name': 'profile_middle_name', 'gender': 'profile_gender',
+             'date_of_birth': 'profile_dob', 'nationality': 'profile_nationality',
+             'place_of_birth': 'profile_place_of_birth', 'id_number': 'profile_id_number',
+             'address': 'profile_address', 'postcode': 'profile_postcode', 'city': 'profile_city',
+             'country': 'profile_country', 'housing_type': 'profile_housing_type',
+             'ever_evicted': 'profile_ever_evicted', 'ever_convicted': 'profile_ever_convicted',
+             'criminal_charges': 'profile_criminal_charges'} %}
         <div class="prof-incomplete mb-3">
-          <i class="bi bi-exclamation-triangle mr-1"></i>{{ _('profile_incomplete') }}
-          <span class="text-mono text-xs">{{ prof.missing_fields() | join(', ') }}</span>
+          <div><i class="bi bi-exclamation-triangle mr-1"></i>{{ _('profile_incomplete') }}</div>
+          <ul class="prof-missing">
+            {% for f in prof.missing_fields() %}
+            <li>{{ _(missing_labels[f]) if f in missing_labels else f }}</li>
+            {% endfor %}
+          </ul>
         </div>
         {% endif %}
 
-      </div>
-
-      <div class="flex items-center gap-2 mb-2">
-        <span class="text-xs font-semibold text-secondary">{{ _('user_form_ab_filter') }}</span>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="copyNotifFilters()" style="font-size:11px;">
-          <i class="bi bi-copy mr-1"></i>{{ _('user_form_copy_filter') }}
-        </button>
-      </div>
-      {% set ab_lf = ab.listing_filter if ab else none %}
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-        <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MAX_RENT" value="{{ ab_lf.max_rent | int if ab_lf and ab_lf.max_rent else '' }}"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_AREA" value="{{ ab_lf.min_area | int if ab_lf and ab_lf.min_area else '' }}"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_FLOOR" value="{{ ab_lf.min_floor if ab_lf and ab_lf.min_floor is not none else '' }}"></div>
-        <div class="form-group" style="grid-column:span 2;">
-          <label class="form-label">{{ _('user_form_occupancy') }}</label>
-          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_occ = ab_lf.allowed_occupancy if ab_lf else [] %}{% for val, label in occupancy_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OCCUPANCY" value="{{ val }}"{% if val in ab_occ %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
-        <div class="form-group" style="grid-column:span 2;">
-          <label class="form-label">{{ _('user_form_types') }}</label>
-          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_type = ab_lf.allowed_types if ab_lf else [] %}{% for val, label in type_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TYPES" value="{{ val }}"{% if val in ab_type %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
-      </div>
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_cities') }}</label>
-          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_city = ab_lf.allowed_cities if ab_lf else [] %}{% for c in city_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CITIES" value="{{ c }}"{% if c in ab_city %} checked{% endif %}> {{ c }}</label>{% endfor %}</div></div></div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_sources') }}</label>
-          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_src = ab_lf.allowed_sources if ab_lf else [] %}{% for key, label in source_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_SOURCES" value="{{ key }}"{% if key in ab_src %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_hoods') }}</label>
-          <div class="multi-select" id="ms-ab-neighborhood">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown" id="ab-neighborhood-dropdown">{% set ab_nbhd = ab_lf.allowed_neighborhoods if ab_lf else [] %}{% for n in ab_nbhd %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_buildings') }}</label>
-          <div class="multi-select" id="ms-ab-building">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown" id="ab-building-dropdown">{% set ab_bld = ab_lf.allowed_buildings if ab_lf else [] %}{% for b in ab_bld %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_BUILDINGS" value="{{ b }}" checked> {{ b }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_offer') }}</label>
-          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_contract = ab_lf.allowed_contract if ab_lf else [] %}{% for val, label in contract_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CONTRACT" value="{{ val }}"{% if val in ab_contract %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_tenant') }}</label>
-          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_tenant = ab_lf.allowed_tenant if ab_lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TENANT" value="{{ val }}"{% if val in ab_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
-      </div>
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_promo') }}</label>
-          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_offer = ab_lf.allowed_offer if ab_lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OFFER" value="{{ o }}"{% if o in ab_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div></div></div>
-        <div class="form-group">
-          <label class="form-label">{{ _('filter_finishing') }}</label>
-          <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_fin = ab_lf.allowed_finishing if ab_lf else [] %}{% for f in finishing_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_FINISHING" value="{{ f }}"{% if f in ab_fin %} checked{% endif %}> {{ f }}</label>{% endfor %}</div></div></div>
-        <div class="form-group">
-          <label class="form-label">{{ _('filter_energy') }}</label>
-          {% set ab_en = ab_lf.allowed_energy if ab_lf else '' %}
-          <select name="AUTO_BOOK_ALLOWED_ENERGY" class="form-select" style="font-size:14px;">
-            <option value="">{{ _('filter_min_energy') }}</option>
-            {% for e in energy_options %}
-              <option value="{{ e }}" {% if e == ab_en %}selected{% endif %}>{{ e }}</option>
-            {% endfor %}
-          </select>
-        </div>
       </div>
 
       <div class="alert alert-info mt-4">
@@ -859,23 +881,66 @@
 .xior-del { color: var(--danger); padding: 4px 8px; line-height: 1; }
 .xior-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .xior-add .form-select { width: auto; min-width: 190px; margin: 0; }
+.prof-sec { margin-bottom: 18px; }
+.prof-sec-title {
+  font-size: 12px; font-weight: 650; color: var(--text2); letter-spacing: .02em;
+  margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
+}
+/* 固定列数而不是 auto-fit：auto-fit 在宽屏上会排出 6 列，同一行里标签和框对不齐，
+   分组也看不出来（2026-09-15 截图就是这个样子）。 */
 .prof-grid {
-  display: grid; gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  display: grid; gap: 12px 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-.prof-grid .form-group { margin: 0; display: flex; flex-direction: column; gap: 4px; }
-.prof-grid .form-label { font-size: 11.5px; }
-.prof-check { flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 12px; }
-.consent-box {
-  border: 1px solid var(--border); border-left: 3px solid var(--warning, #f0a040);
-  border-radius: 6px; padding: 10px 12px; background: var(--bg2);
+.prof-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.prof-grid .form-group { margin: 0; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.prof-grid .form-label { font-size: 12.5px; margin: 0; }
+.prof-span2 { grid-column: span 2; }
+.prof-req { color: var(--danger); font-weight: 600; }
+.prof-check { display: flex; flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 12.5px; }
+.prof-subcheck { color: var(--text2); margin-top: 2px; }
+/* 证件 / 授权：左说明、右控件的行，行间一条细分隔线——不再用带色条的卡片 */
+.prof-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 20px;
+  padding: 12px 0; border-top: 1px solid var(--border);
 }
-.consent-note { font-size: 11.5px; color: var(--text2); margin-top: 6px; line-height: 1.5; }
-.consent-when { font-size: 11px; color: var(--text3); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.prof-sec-title + .prof-row { border-top: none; padding-top: 2px; }
+.prof-row-main { min-width: 0; flex: 1; }
+.prof-row-label { font-size: 13.5px; font-weight: 550; color: var(--text); }
+.prof-hint { font-size: 12px; color: var(--text2); line-height: 1.5; margin-top: 3px; }
+.prof-when { color: var(--text3); font-variant-numeric: tabular-nums; }
+.prof-file-current, .prof-file-picked:not([hidden]) {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 8px; font-size: 13px;
+}
+.prof-file-current .bi { color: var(--success, #2e9e5b); }
+.prof-file-picked .bi { color: var(--accent); }
+/* 原生文件框藏起来但保留可聚焦：键盘仍能 Tab 到它，焦点框画在外面的按钮上 */
+.prof-file-btn { position: relative; flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.prof-file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.prof-file-btn:focus-within { box-shadow: 0 0 0 2px var(--accent); }
+.prof-toggle { flex-shrink: 0; }
 .prof-incomplete {
-  font-size: 12px; color: var(--warning, #f0a040);
+  font-size: 12.5px; color: var(--warning, #f0a040);
   background: var(--bg2); border: 1px solid var(--border);
-  border-radius: 6px; padding: 8px 10px;
+  border-radius: 6px; padding: 8px 12px;
+}
+.prof-missing {
+  display: flex; flex-wrap: wrap; gap: 4px 6px; list-style: none; margin: 6px 0 0; padding: 0;
+}
+.prof-missing li {
+  color: var(--text); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 999px; padding: 1px 8px; font-size: 12px;
+}
+@media (max-width: 1000px) {
+  .prof-grid, .prof-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .prof-grid, .prof-grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .prof-span2 { grid-column: auto; }
+  .prof-row { align-items: flex-start; }
+  /* 按钮在右边会把说明挤成一个字宽的窄列：窄屏换到说明下面 */
+  .prof-row-file { flex-wrap: wrap; }
+  .prof-row-file .prof-row-main { flex-basis: 100%; }
 }
 @media (max-width: 640px) {
   .xior-row { grid-template-columns: 1fr auto; }
@@ -886,6 +951,21 @@
 
 {% block scripts %}
 <script>
+// ── 证件：原生文件框藏在按钮里，选中后把文件名写出来，否则用户看不到选了什么 ──
+function showPickedIdDoc(input) {
+  var out = document.getElementById('prof-file-picked');
+  if (!out) return;
+  var f = input.files && input.files[0];
+  if (!f) { out.hidden = true; out.textContent = ''; return; }
+  out.textContent = '';
+  var icon = document.createElement('i');
+  icon.className = 'bi bi-file-earmark-arrow-up';
+  var text = document.createElement('span');
+  text.textContent = ' ' + {{ _('profile_id_doc_picked') | tojson }} + f.name +
+    '（' + (f.size / 1048576).toFixed(1) + ' MB）';
+  out.appendChild(icon); out.appendChild(text);
+  out.hidden = false;
+}
 // ── Xior 按楼栋账号 ──
 // Xior 每栋楼是独立的 RENTCafe 门户、独立账号，所以凭据一栋楼一套。
 // 下拉里只有「监控中且还没配」的楼；配上的从下拉移走，删掉再放回去。

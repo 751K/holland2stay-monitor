@@ -1086,7 +1086,8 @@ tr:hover .cell-map-pin{opacity:1}
    表单里已有的 .channel-card 一致（surface 里嵌一层 bg）。
    申请人档案挪到两个 RENTCafe 平台之后：它归 Xior 和 OurDomain 共用
    （bookers/rentcafe.py 一份代码填），夹在中间会让人以为它只属于 Xior。 */
-.ab-platform{
+/* .ab-filter：自动预订专用过滤，排在各平台账号之前，同一种面板样式 */
+.ab-filter,.ab-platform{
   /* 面板用 surface + 描边，**不能**用 var(--bg) 填充：.form-input 的底色正是
      var(--bg) 且既无边框也无阴影，同色一填输入框就整个隐形了（实测过）。 */
   background:var(--surface);border:1px solid var(--border);
@@ -1096,8 +1097,10 @@ tr:hover .cell-map-pin{opacity:1}
   display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;
 }
 .ab-platform-name{font-size:14px;font-weight:600;color:var(--text)}
-/* 共用块：不是第四个平台，用虚线边框和无填充把它和三块平台区分开 */
-.ab-platform-shared{background:transparent;border-style:dashed}
+/* 共用块：不是第四个平台，只用虚线边框区分。**填充必须和平台面板一样**——
+   这里曾写 background:transparent，透过去是页面底色 var(--bg)，正是上面那条注释
+   说的「同色一填输入框就整个隐形」：2026-09-15 截图里整块档案的输入框全看不见。 */
+.ab-platform-shared{border-style:dashed}
 
 /* ── Channel Card (user form) — border only on select ──────────── */
 .channel-card{

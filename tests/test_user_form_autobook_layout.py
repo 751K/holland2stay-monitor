@@ -147,3 +147,122 @@ class TestTranslationKeysAreUnique:
         keys = re.findall(r'^\s*"([a-z0-9_]+)":\s*\{', src, re.M)
         dupes = sorted({k for k in keys if keys.count(k) > 1})
         assert not dupes, f"translations.py 里有重复 key，后一条会静默覆盖前一条: {dupes}"
+
+
+class TestApplicantProfilePanel:
+    """2026-09-15 反馈的截图：档案整块的输入框看不见、24 个字段挤成一行 6 列、
+    背景调查三问各占一整行、缺项显示成 first_name 这种代码字段名。"""
+
+    _TPL = Path(__file__).resolve().parent.parent / "templates" / "user_form.html"
+
+    def _css(self) -> str:
+        return re.sub(r"/\*.*?\*/", "", _CSS.read_text(encoding="utf-8"), flags=re.S)
+
+    def test_shared_panel_is_not_see_through(self):
+        """透明填充透出来的是页面底色 var(--bg)——正是 .form-input 的底色，框就隐形了。
+        .ab-platform 那条注释早就写着这个坑，共用块用 transparent 又踩了一遍。"""
+        m = re.search(r"\.ab-platform-shared\s*\{(.*?)\}", self._css(), re.S)
+        assert m
+        bg = re.search(r"(?<![\w-])background(?:-color)?\s*:\s*([^;]+)", m.group(1))
+        assert not bg or not re.search(r"transparent|var\(--bg\)", bg.group(1)), (
+            f"共用块填成了 {bg.group(1)}，档案输入框会隐形")
+
+    def test_profile_grid_has_fixed_columns(self):
+        """auto-fit 在宽屏上排出 6 列，标签和框对不齐、分组也看不出来。"""
+        tpl = self._TPL.read_text(encoding="utf-8")
+        m = re.search(r"\.prof-grid\s*\{(.*?)\}", tpl, re.S)
+        assert m and "repeat(4" in m.group(1) and "auto-fit" not in m.group(1)
+
+    def test_every_profile_class_used_is_defined(self):
+        """背景调查三问曾挂在 class="profile-grid" 上，而 CSS 里只有 prof-grid——
+        名字对不上，三问各占一整行，也没人报错。"""
+        tpl = self._TPL.read_text(encoding="utf-8")
+        used = set(re.findall(r'class="[^"]*?\b(prof(?:ile)?-[a-z0-9-]+)', tpl))
+        defined = set(re.findall(r"\.(prof(?:ile)?-[a-z0-9-]+)\s*[{,.: ]", tpl + self._css()))
+        assert used and not (used - defined), f"模板用了但没有样式的 class: {sorted(used - defined)}"
+
+    def test_sections_render_in_form_order(self, form_html):
+        order = [form_html.find(k) for k in (
+            "Name &amp; contact", "Nationality &amp; ID", "Current address",
+            "Study &amp; lease", "Screening")]
+        if -1 in order:  # 中文界面
+            order = [form_html.find(k) for k in (
+                "姓名与联系方式", "国籍与证件", "当前住址", "学业与租期", "背景调查")]
+        assert -1 not in order and order == sorted(order), order
+
+    def test_every_missing_field_has_a_readable_label(self):
+        """缺项必须用表单上的字段名说。模板里的映射漏一个，就会原样露出 date_of_birth。"""
+        from config import ApplicantProfile
+        tpl = self._TPL.read_text(encoding="utf-8")
+        block = re.search(r"\{% set missing_labels = \{(.*?)\} %\}", tpl, re.S)
+        assert block
+        mapped = set(re.findall(r"'([a-z_]+)':\s*'profile_", block.group(1)))
+        missing = set(ApplicantProfile().missing_fields())
+        assert missing <= mapped, f"没有显示名的缺项: {sorted(missing - mapped)}"
+
+    def test_incomplete_notice_shows_labels_not_field_names(self, admin_client):
+        from config import AutoBookConfig, ApplicantProfile
+        from users import UserConfig, load_users, save_users
+
+        u = UserConfig(name="prof-incomplete")
+        u.auto_book = AutoBookConfig(applicant_profile=ApplicantProfile(nationality="China"))
+        save_users(load_users() + [u])
+        uid = next(x.id for x in load_users() if x.name == "prof-incomplete")
+        html = admin_client.get(f"/users/{uid}").get_data(as_text=True)
+
+        m = re.search(r'<div class="prof-incomplete[^"]*">(.*?)</ul>', html, re.S)
+        assert m, "档案不完整却没有提示"
+        notice = m.group(1)
+        assert "date_of_birth" not in notice and "first_name" not in notice
+        assert ("Date of birth" in notice) or ("出生日期" in notice)
+
+    def test_placeholders_are_marked_as_examples(self, form_html):
+        """「China」「12」没有前缀时看上去像已经填好的值。"""
+        for example in ("China", "5612 AB", "12"):
+            bare = re.findall(rf'placeholder="{re.escape(example)}"', form_html)
+            assert not bare, f"占位 {example!r} 没有「例：/ e.g.」前缀，会被看成已填的值"
+
+    def test_doc_and_consent_are_rows_not_striped_cards(self, form_html):
+        """2026-09-15 反馈：这两块不要用左侧色条的卡片样式，和上面几组保持同一种版式。"""
+        assert "consent-box" not in form_html
+        assert form_html.count('class="prof-row') >= 2
+
+    def test_file_input_keeps_its_name_and_stays_submittable(self, form_html):
+        """原生文件框藏进了按钮里——藏的方式不能是 display:none 之外还丢了 name，
+        也不能挪出 <form>，否则保存时证件静默不上传。"""
+        m = re.search(r'<label class="btn[^"]*prof-file-btn">(.*?)</label>', form_html, re.S)
+        assert m and 'type="file"' in m.group(1) and 'name="AUTO_BOOK_ID_DOC"' in m.group(1)
+        assert 'onchange="showPickedIdDoc(this)"' in m.group(1), "选了文件却看不到文件名"
+        assert "function showPickedIdDoc" in form_html
+
+    def test_consent_toggle_posts_the_same_field(self, form_html):
+        m = re.search(r'<label class="toggle prof-toggle">(.*?)</label>', form_html, re.S)
+        assert m and 'name="AUTO_BOOK_SCREENING_CONSENT"' in m.group(1) and 'value="true"' in m.group(1)
+        assert "aria-labelledby" in m.group(1), "开关本身没有文字，得挂上说明的 id"
+
+
+class TestAutoBookFilterComesFirst:
+    """2026-09-15 反馈：先放过滤条件，再放账户；过滤块也要白底面板。"""
+
+    def test_filter_panel_precedes_every_account_panel(self, form_html):
+        f = form_html.find('<div class="ab-filter">')
+        first_platform = form_html.find('<div class="ab-platform">')
+        assert f != -1, "过滤块没有包进面板"
+        assert f < first_platform, "过滤条件又排到账户后面去了"
+
+    def test_filter_panel_holds_the_filter_fields(self, form_html):
+        start = form_html.find('<div class="ab-filter">')
+        end = form_html.find('<div class="ab-platform">', start)
+        assert end != -1
+        panel = form_html[start:end]
+        for name in ("AUTO_BOOK_MAX_RENT", "AUTO_BOOK_ALLOWED_CITIES", "AUTO_BOOK_ALLOWED_ENERGY"):
+            assert f'name="{name}"' in panel, f"{name} 不在过滤面板里"
+        # 楼盘 / 片区的选项是 JS 按城市现拉的，新建页上没有带 name 的 input，认容器 id
+        for dom_id in ("ab-building-dropdown", "ab-neighborhood-dropdown"):
+            assert f'id="{dom_id}"' in panel, f"#{dom_id} 不在过滤面板里（JS 按 id 找它）"
+        assert "copyNotifFilters()" in panel
+
+    def test_filter_panel_shares_the_panel_fill(self):
+        css = re.sub(r"/\*.*?\*/", "", _CSS.read_text(encoding="utf-8"), flags=re.S)
+        m = re.search(r"\.ab-filter\s*,\s*\.ab-platform\s*\{(.*?)\}", css, re.S)
+        assert m and "var(--surface)" in m.group(1)
