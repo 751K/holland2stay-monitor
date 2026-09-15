@@ -1758,6 +1758,14 @@ class AutoBookConfig:
     ourdomain_email: str = ""
     ourdomain_password: str = ""
 
+    # ── OurCampus（RENTCafe，与 OurDomain 同一套流程，另一个租户）──
+    #
+    # **面板还没有入口**：``OurCampusBooker`` 写好了但未注册，要等「开始申请能
+    # 不能占住名额」实测过再开（见 bookers/__init__.py）。字段先加上，是为了让
+    # booker 和探针有正经的出处；表单保存时原样保留，不会被清空。
+    ourcampus_email: str = ""
+    ourcampus_password: str = ""
+
     # ── Plaza（Zig/Hexia 门户，用户名不是邮箱）──
     #
     # Plaza 登录用的是**用户名**，不是邮箱（登录表单标签 "Jouw gebruikersnaam"，

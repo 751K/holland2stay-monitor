@@ -16,7 +16,7 @@ holland2stay     HollandStayScraper   HollandStayBooker   完整自动 checkout�
 xior             XiorScraper          XiorBooker          半自动到「存草稿」，未开
 ourdomain        OurDomainScraper     OurDomainBooker     半自动到「存草稿」，未开
 plaza            PlazaScraper         PlazaBooker         已开，用户侧默认关
-ourcampus        OurCampusScraper     （无）              没探过预订流程
+ourcampus        OurCampusScraper     OurCampusBooker     写好**未注册**，止于开始申请
 magis            MagisScraper         （无）              没探过预订流程
 studentexperience StudentExperience…  （无）              没探过预订流程
 ===============  ===================  ==================  =========================
@@ -33,6 +33,12 @@ studentexperience StudentExperience…  （无）              没探过预订�
 它在 ``_AUTO_BOOK_SOURCES`` 里，但**用户侧默认关**：``auto_book.plaza_enabled``
 要在面板里显式打开。多这一道是因为 Plaza 的应征一次 POST 就落地，中间没有付款或
 存草稿那样的人工关卡。见 ``docs/PLAZA.md`` §6。
+
+**OurCampus 是另一种「未开」：连注册都没有。** ``OurCampusBooker`` 在
+``bookers/rentcafe.py`` 里写好了，但注册即意味着面板上够得着，而它的前提——
+「开始申请能占住单元」——还没实测。验证方法与步骤见该类的说明和
+``tools/ourcampus_booker_probe.py``；``tests/test_ourcampus_booker.py`` 有一条测试
+专门断言它未注册，注册前先回去做完那两项验证。
 
 **改这张表时同步改代码**：它上一次和现实脱节是因为 ``OurDomainBooker`` 加进
 ``BOOKER_REGISTRY`` 时没人回来改这段，于是文档写着「（无）」而代码里明明有

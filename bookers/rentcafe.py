@@ -1,4 +1,4 @@
-"""bookers/rentcafe.py — RENTCafe automated booking for Xior / OurDomain.
+"""bookers/rentcafe.py — RENTCafe automated booking for Xior / OurDomain / OurCampus.
 
 Targets the securerc.co.uk multi-step form flow (oleapplication.aspx →
 register/guestlogin → rcformsave.ashx → terms → lease creation).
@@ -18,6 +18,7 @@ interface expected by the monitor / web panel.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
@@ -54,6 +55,14 @@ class RentCafeSaveRejectedError(RentCafeError):
 
     单独一类，是为了让「草稿没存下」永远不可能被报成 ``draft_saved``——
     那条消息会让用户以为表单已经填好、安心去传证件，而实际什么都没有。
+    """
+
+
+class RentCafeNotBookableError(RentCafeError):
+    """单元还在，但已经不是「直接订」——例如按钮变成了 Join Lottery。
+
+    与 ``race_lost``（单元没了）分开：那条会进重试队列、转去试备选房源，而这里
+    重试多少次都一样。也不能默默继续——点下去是加入抽签，不是用户授权的动作。
     """
 
 
@@ -218,6 +227,21 @@ class RentCafeSession:
         指纹同一 IP，带头 200、不带头 403，和指纹轮换无关）。
         """
         return self._get(url, headers=_browser_headers(referer=referer, ajax=ajax)).text
+
+    def fetch_post(self, url: str, data, *, referer: str = "", ajax: bool = False) -> str:
+        """POST 取一个片段，返回 HTML。头部与 :meth:`fetch` 同一套。
+
+        OurCampus 的 availableunits 只认 POST + ``floorPlans[]`` 表单体（照抄它
+        自己前端的 ``$.load(url, {floorPlans: names})``，见
+        ``scrapers.ourcampus._fetch_units_html``）。``ajax=True`` 的理由同
+        :meth:`fetch`：``rcLoadContent.ashx`` 缺 ``X-Requested-With`` 一律 403。
+        """
+        resp = self._post(
+            url, data, referer=referer,
+            headers=_browser_headers(referer=referer, ajax=ajax),
+        )
+        resp.raise_for_status()
+        return resp.text
 
     def login(
         self,
@@ -555,6 +579,11 @@ class RentCafeSession:
         """最近一次落地页的 HTML。多步流程里用来核对「我到哪一步了」。"""
         return self._last_html
 
+    @property
+    def impersonate(self) -> str:
+        """本会话正在用的 TLS 指纹（:meth:`open` 轮换后定下来的那个）。"""
+        return self._impersonate
+
     def _follow(self, resp, referer: str) -> str:
         """跟随响应里的 JS 跳转，返回最终页面 HTML。
 
@@ -615,9 +644,11 @@ class RentCafeSession:
         resp.raise_for_status()
         return resp
 
-    def _post(self, url: str, data: dict, referer: str = "") -> req.Response:
+    def _post(
+        self, url: str, data, referer: str = "", *, headers: Optional[dict] = None,
+    ) -> req.Response:
         assert self._session is not None
-        headers = {}
+        headers = dict(headers or {})
         if referer:
             headers["Referer"] = referer
         resp = self._session.post(
@@ -723,6 +754,11 @@ class RentCafeBooker(AbstractBooker):
     #: 抓取侧 ``Listing.id`` 的前缀。**必须和对应 scraper 的 ``ID_PREFIX``
     #: 一致**——它是单元匹配唯一的真相来源。
     id_prefix = ""
+    #: 流程终点。``False``：一路做到 Save（传证件、填表、存草稿）。``True``：
+    #: 进到 Applicant Info（服务端已建出 ProspectId）就停，不传证件、不填表、
+    #: 不保存——此时申请人档案、背景调查授权、证件都用不上，前置校验也不查。
+    #: 这是一个流程终点的选择，不是平台分支：哪个平台用哪个终点由子类声明。
+    stop_at_applicant_info = False
 
     def __init__(self) -> None:
         self._api_key = os.environ.get("CAPTCHA_API_KEY", "")
@@ -763,6 +799,27 @@ class RentCafeBooker(AbstractBooker):
     def _resume_url(self, session, listing) -> str:
         """给用户的「回去把这单做完」链接。默认就是房源链接。"""
         return listing.url
+
+    def _application_started(self, session, listing, unit) -> BookingResult:
+        """``stop_at_applicant_info`` 的终点：服务端已建出申请，其余交给用户。
+
+        文案不说「已锁定」。开始申请能不能占住这个单元**没有验证过**——XIOR.md
+        §8.7 的「锁定发生在付款那一步」是从付款页文字推的，反方向也没人观察过。
+        说错的代价不对称：用户以为到手了就不急着去填，结果被人抢走。
+        """
+        resume = self._resume_url(session, listing) or listing.url
+        logger.info("%s 已开始申请：%s（%s）", self.platform, listing.name, unit.listing_id)
+        return BookingResult(
+            listing=listing, success=True, phase="application_started",
+            message=(
+                f"已在你的 {self.platform} 账号下为 {listing.name} 开始申请，"
+                "停在填写申请人信息那一步，什么都还没提交。\n\n"
+                "**请立刻登录继续填写并付款**，否则可能被他人抢先。\n"
+                f"{resume}"
+            ),
+            pay_url=resume,
+            contract_start_date=unit.available_date,
+        )
 
     # ------------------------------------------------------------------
     # AbstractBooker interface
@@ -816,12 +873,14 @@ class RentCafeBooker(AbstractBooker):
                 message=f"未配置该楼栋（{listing.city}）的 {self.platform} 账号，已跳过。",
             )
         profile = ab.applicant_profile
-        if not profile.is_complete():
+        if self.stop_at_applicant_info:
+            pass  # 不填表：档案、授权、证件都用不上，查它们只会误挡
+        elif not profile.is_complete():
             return BookingResult(
                 listing=listing, success=False, phase="not_configured",
                 message="申请人档案不完整，已跳过。缺：" + ", ".join(profile.missing_fields()),
             )
-        if not ab.has_screening_consent():
+        elif not ab.has_screening_consent():
             return BookingResult(
                 listing=listing, success=False, phase="not_configured",
                 message=(
@@ -832,7 +891,11 @@ class RentCafeBooker(AbstractBooker):
         if request.dry_run or ab.dry_run:
             return BookingResult(
                 listing=listing, success=True, phase="dry_run", dry_run=True,
-                message=f"试运行：凭据与档案齐备，可为 {listing.name} 起草申请。",
+                message=(
+                    f"试运行：凭据齐备，可为 {listing.name} 开始申请。"
+                    if self.stop_at_applicant_info else
+                    f"试运行：凭据与档案齐备，可为 {listing.name} 起草申请。"
+                ),
             )
 
         # 构造放在 try **里面**。放外面的话它一抛（凭据格式不对、依赖初始化失败
@@ -852,6 +915,9 @@ class RentCafeBooker(AbstractBooker):
                     message="该单元已不在可订列表中（可能已被他人选走）。",
                 )
             applicant_html, unit = reached
+
+            if self.stop_at_applicant_info:
+                return self._application_started(session, listing, unit)
 
             # ② 传证件。服务端在这份文档到位前**拒绝保存申请表的任何内容**，
             #    所以必须排在填表之前。文档是**按申请**上传的（URL 里带
@@ -906,6 +972,12 @@ class RentCafeBooker(AbstractBooker):
                 contract_start_date=unit.available_date,
             )
 
+        except RentCafeNotBookableError as exc:
+            logger.info("%s 单元不再可直接订: %s", self.platform, exc)
+            return BookingResult(
+                listing=listing, success=False, phase="unsupported",
+                message=f"{exc}\n{listing.url}",
+            )
         except FormShapeChangedError as exc:
             # 上游改版了。必须显式失败——默默提交一份缺项的申请，用户看不出
             # 任何异常，等发现时房子已经没了。
@@ -1027,6 +1099,33 @@ def _extract_form_fields(
             logger.debug("响应里没有 form#%s（该步骤可以没有）", form_id)
         return {}
     return _extract_hidden_fields(m.group("body"))
+
+
+#: 条款页上关于「提交之后意味着什么」的说明所用的词。
+_TERMS_NOTICE_RE = re.compile(
+    r"reserv|lotter|loting|first come|hold|guarantee|allocat", re.IGNORECASE,
+)
+
+
+def terms_page_notices(html: str) -> list[str]:
+    """条款页上关于「提交之后意味着什么」的句子，去重、保序。
+
+    2026-09-15 OC 抽签单元的条款页原文：「Please note: submitting this
+    application enters you into the lottery for this unit; it does not reserve
+    the apartment.」——「开始申请能不能占住单元」这个问题，站点有时会**自己
+    写在页面上**。把它摘出来进日志，比事后猜强。
+
+    只看可见文字：先去掉 script / style，再去标签。条款正文里的
+    「reservation」一类词也会被带出来，宁多勿漏——这是给人读的线索，不做判断。
+    """
+    text = re.sub(r"<(script|style)\b.*?</\1>", " ", html or "", flags=re.I | re.S)
+    text = unescape(re.sub(r"<[^>]+>", "\n", text))
+    out: list[str] = []
+    for chunk in re.split(r"\n+|(?<=[.!?])\s+", text):
+        s = " ".join(chunk.split())
+        if 12 <= len(s) <= 400 and _TERMS_NOTICE_RE.search(s) and s not in out:
+            out.append(s)
+    return out
 
 
 def _extract_cafeportalkey(html: str) -> str:
@@ -1184,13 +1283,18 @@ class OurDomainBooker(RentCafeBooker):
     platform = "OurDomain"
     id_prefix = "od_"
 
-    def _building_key(self, listing) -> str:
+    @staticmethod
+    def _scraper_cls():
+        """楼栋元数据与 BASE 的出处。**必须是同 source 的 scraper**——拿错会用
+        另一个平台的主机和 slug 去开申请。"""
         from scrapers.ourdomain import OurDomainScraper
+        return OurDomainScraper
 
+    def _building_key(self, listing) -> str:
         city = (getattr(listing, "city", "") or "").strip()
         if not city:
             return ""
-        for key, meta in OurDomainScraper.BUILDINGS.items():
+        for key, meta in self._scraper_cls().BUILDINGS.items():
             if (meta.get("display") or "").strip() == city:
                 return key
         return ""
@@ -1206,8 +1310,7 @@ class OurDomainBooker(RentCafeBooker):
         return (ab.ourdomain_email or "", ab.ourdomain_password or "")
 
     def _building(self, listing) -> dict:
-        from scrapers.ourdomain import OurDomainScraper
-        return dict(OurDomainScraper.BUILDINGS.get(self._building_key(listing)) or {})
+        return dict(self._scraper_cls().BUILDINGS.get(self._building_key(listing)) or {})
 
     def _floorplans_url(self, building: dict) -> str:
         """该楼的 ``floorplans.aspx``——预订流程的入口。
@@ -1215,9 +1318,7 @@ class OurDomainBooker(RentCafeBooker):
         ``base`` 按楼取：两栋楼是两个 securerc 主机（south-east 有自己的
         ``base``），拿错主机会登录到另一栋楼的门户上。
         """
-        from scrapers.ourdomain import OurDomainScraper
-
-        base = building.get("base") or OurDomainScraper.BASE
+        base = building.get("base") or self._scraper_cls().BASE
         return f"{base}/{building['slug']}/floorplans.aspx"
 
     def _find_unit_online(self, session, listing, building: dict):
@@ -1239,21 +1340,94 @@ class OurDomainBooker(RentCafeBooker):
             )
         move_in = _next_month_first()
         property_id = building.get("property_id", "")
+        parser = functools.partial(parse_apply_now_options, id_prefix=self.id_prefix)
         for fp_id in fp_ids:
-            html = session.fetch(
-                session.content_url(
-                    f"contentclass=availableunits&floorPlans={fp_id}"
-                    f"&MoveInDate={move_in}&myolePropertyID={property_id}"
-                ),
-                referer=floorplans_url, ajax=True,
+            html = self._fetch_units_html(
+                session, fp_id=fp_id, move_in=move_in,
+                property_id=property_id, floorplans_url=floorplans_url,
             )
-            unit = find_unit(
-                html, listing.id,
-                id_prefix=self.id_prefix, parser=parse_apply_now_options,
-            )
+            unit = find_unit(html, listing.id, id_prefix=self.id_prefix, parser=parser)
             if unit is not None:
+                self._check_still_direct_booking(html, unit)
                 return unit
         return None
+
+    #: 单元表 403 时最多换几次指纹重开会话。
+    _UNITS_403_REOPENS = 2
+
+    def _open_and_find_unit(self, session, listing, building: dict):
+        """开会话 + 查单元表；单元表 403 时冷却该指纹、重开会话再查。
+
+        为什么 :meth:`RentCafeSession.open` 的轮换不够
+        -----------------------------------------------
+        它只在**打开页面那一下（GET）**被 403 时换指纹。2026-09-15 在 OC 上实测：
+        ``chrome124`` 打开 floorplans.aspx 是 200，紧接着 POST 单元表**连续 403**
+        ——两个会话、两个出口 IP、同会话重试都一样；换 ``chrome136`` 立刻 200。
+        也就是说 WAF 对「页面 GET」和「片段 POST」放行的指纹集合不同，GET 过了
+        不代表这个指纹能用。原实现在这里直接报 blocked，一次预订就这么没了。
+
+        而且在 monitor 进程里它还会**稳定复现**：指纹冷却状态和抓取侧共享，
+        OurDomain 抓取（只发 GET）会把 ``chrome124`` 记成「上次成功」排到首位，
+        预订每次都先拿它开会话。所以 403 时要把它**记进冷却**，下一次
+        ``open()`` 才会排到别的指纹——不记的话重开多少次都是同一个。
+        """
+        from scrapers.ourdomain import _mark_fingerprint_blocked
+
+        entry = self._floorplans_url(building)
+        tried: list[str] = []
+        for attempt in range(self._UNITS_403_REOPENS + 1):
+            session.open(entry)
+            try:
+                return self._find_unit_online(session, listing, building)
+            except RentCafeBlockedError:
+                bad = getattr(session, "impersonate", "") or "?"
+                tried.append(bad)
+                _mark_fingerprint_blocked(bad)
+                if attempt < self._UNITS_403_REOPENS:
+                    logger.warning(
+                        "%s 单元表 403（指纹 %s），冷却该指纹后重开会话 %d/%d",
+                        self.platform, bad, attempt + 1, self._UNITS_403_REOPENS,
+                    )
+        raise RentCafeBlockedError(
+            f"{self.platform} 单元表连续 403，已换过指纹 {', '.join(tried)}。"
+            "多半是出口 IP 被 WAF 盯上，稍后再试。"
+        )
+
+    def _fetch_units_html(
+        self, session, *, fp_id: str, move_in: str, property_id: str, floorplans_url: str,
+    ) -> str:
+        """取一个 floorplan 的单元表。OurDomain 用 GET + query string（实测有效）。"""
+        return session.fetch(
+            session.content_url(
+                f"contentclass=availableunits&floorPlans={fp_id}"
+                f"&MoveInDate={move_in}&myolePropertyID={property_id}"
+            ),
+            referer=floorplans_url, ajax=True,
+        )
+
+    def _check_still_direct_booking(self, html: str, unit) -> None:
+        """单元还在，但点下去还是不是「直接订」？不是就抛 :class:`RentCafeNotBookableError`。
+
+        判据与抓取侧**同一个函数**（``scrapers.ourdomain._extract_status``）：
+        按钮存在且文字不是抽签。另写一份的话，两边迟早对「这是不是抽签」给出
+        不同答案——2026-09-15 抓取侧就是只看了按钮在不在，把 Join Lottery 报成
+        了可订。
+        """
+        from scrapers.ourdomain import _extract_units
+
+        for u in _extract_units(html):
+            if u["unit_id"] == unit.unit_id:
+                if u["status"] != "Available to book":
+                    raise RentCafeNotBookableError(
+                        f"{self.platform} {unit.label or unit.unit_id} 现在是"
+                        f"「{u['status']}」，不是直接预订——系统不替你加入抽签或等位，"
+                        "请点链接自己决定。"
+                    )
+                return
+        raise RentCafeError(
+            f"{self.platform} 单元 {unit.unit_id} 解析得出下单参数、却解析不出状态，"
+            "两个解析器对这张表的理解不一致，已中止。"
+        )
 
     def _reach_applicant_info(self, session, listing, email: str, password: str):
         from bookers.rentcafe_form import parse_applicant_form
@@ -1261,16 +1435,14 @@ class OurDomainBooker(RentCafeBooker):
         building = self._building(listing)
         if not building.get("slug"):
             raise RentCafeError(
-                f"OurDomain 楼栋元数据不全（city={listing.city!r}），无法构造入口。"
+                f"{self.platform} 楼栋元数据不全（city={listing.city!r}），无法构造入口。"
             )
 
         # ① 开 floorplans.aspx：建会话 cookie、轮换 TLS 指纹、定出 base/ole_path。
         #    **不用 listing.url**——那是抓取时写进去的展示链接，这里需要的是
         #    按楼栋元数据算出来的入口，两者哪天不一致时该以后者为准。
-        session.open(self._floorplans_url(building))
-
         # ② 现查 availableunits，拿「Book now」的参数（顺带做竞争检测）。
-        unit = self._find_unit_online(session, listing, building)
+        unit = self._open_and_find_unit(session, listing, building)
         if unit is None:
             return None
 
@@ -1284,6 +1456,8 @@ class OurDomainBooker(RentCafeBooker):
                 "选中单元后条款页上没有 form#termsandotheritems，"
                 "上下文没建起来，已中止。"
             )
+        for note in terms_page_notices(terms_html):
+            logger.info("%s 条款页说明（%s）: %s", self.platform, unit.listing_id, note)
 
         # ④ Start Application（标准 v3，v2 回退是常态）
         session.submit_terms(fields, page="termsandotheritems")
@@ -1305,14 +1479,14 @@ class OurDomainBooker(RentCafeBooker):
         )
         html = session.current_page_html()
         if parse_applicant_form(html) is None:
-            logger.info("OurDomain 登录后不在 Applicant Info，重选一次单元")
+            logger.info("%s 登录后不在 Applicant Info，重选一次单元", self.platform)
             html = session.open_terms_for_unit(unit)
             fields = _extract_form_fields(html, "termsandotheritems")
             if fields:
                 html = session.submit_terms(fields, page="termsandotheritems")
         if parse_applicant_form(html) is None:
             raise RentCafeError(
-                "OurDomain 登录后没能落到 Applicant Info——这一段尚未端到端"
+                f"{self.platform} 登录后没能落到 Applicant Info——这一段尚未端到端"
                 "验证过，已中止，不会在你账号下提交任何东西。请手动完成。"
             )
         return html, unit
@@ -1332,3 +1506,60 @@ class OurDomainBooker(RentCafeBooker):
             return session.ole_url("oleapplication.aspx")
         except Exception:
             return listing.url
+
+
+class OurCampusBooker(OurDomainBooker):
+    """OurCampus：流程与 OurDomain 相同，**只做到「开始申请」**。
+
+    **未注册进 ``BOOKER_REGISTRY``。** 注册即意味着用户够得着，而下面那个前提
+    还没验证过。
+
+    为什么只做到开始申请
+    --------------------
+    需求是「登录后开始申请，锁住名额」。停在 Applicant Info（服务端已建出
+    ProspectId）有两个好处：碰不到 Xior 实测过的两道硬坎——Save 前必须传证件、
+    再往后要填 IBAN——也就不需要申请人档案、背景调查授权和证件。其余交给用户。
+
+    **没验证过的前提：开始申请能占住单元。** ``docs/XIOR.md`` §8.7 的「锁定发生
+    在付款那一步」是从付款页文字推的，反方向（开始申请后单元是否从匿名列表消失）
+    也没人观察过。验证方法：OC 放房时用户手动点到 Applicant Info 停下，对照
+    ``data/ourcampus_capture.txt`` 的时间线看该单元何时消失、会不会再出现；再换
+    一台设备登录看这份申请能否续填。两条都成立再注册。
+
+    与 OurDomain 的差别（均有实证）
+    -------------------------------
+    - 单元表只认 **POST + ``floorPlans[]``**，与抓取侧
+      ``OurCampusScraper._fetch_units_html`` 同一个形状——那是生产上一直在用的。
+    - 条款页 reCAPTCHA 与 Xior / OurDomain 逐字相同（2026-09-15 抓 OC 的
+      ``termsandotheritems.aspx`` 核对：标准 v3、``start_application``、同一对
+      sitekey、同一个回退字段）。
+    - 先到先得与抽签并存，按钮只差文字。只对 ``Book Now`` 开始申请；
+      ``Join Lottery`` 由 :meth:`_check_still_direct_booking` 拦下。
+    """
+
+    source = "ourcampus"
+    platform = "OurCampus"
+    id_prefix = "oc_"
+    stop_at_applicant_info = True
+
+    @staticmethod
+    def _scraper_cls():
+        from scrapers.ourcampus import OurCampusScraper
+        return OurCampusScraper
+
+    def _account_for(self, ab, building_key: str) -> tuple[str, str]:
+        return (ab.ourcampus_email or "", ab.ourcampus_password or "")
+
+    def _fetch_units_html(
+        self, session, *, fp_id: str, move_in: str, property_id: str, floorplans_url: str,
+    ) -> str:
+        """POST + ``floorPlans[]``，``MoveInDate`` / ``myolePropertyID`` 不传。
+
+        照抄 ``OurCampusScraper._fetch_units_html``。OurDomain 那条 GET 形状在
+        OC 上**从来没验证过**，而这条 POST 是抓取侧每天几百轮在用的。
+        """
+        return session.fetch_post(
+            session.content_url("contentclass=availableunits"),
+            [("floorPlans[]", str(fp_id))],
+            referer=floorplans_url, ajax=True,
+        )

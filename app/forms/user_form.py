@@ -324,6 +324,9 @@ def build_user_from_form(
         # ── OurDomain ──
         ourdomain_email=form.get("AUTO_BOOK_OURDOMAIN_EMAIL", ""),
         ourdomain_password=_secret("AUTO_BOOK_OURDOMAIN_PASSWORD", ex_ab.ourdomain_password if ex_ab else ""),
+        # ── OurCampus：面板暂无入口，原样保留（booker 未注册，见 config）──
+        ourcampus_email=ex_ab.ourcampus_email if ex_ab else "",
+        ourcampus_password=ex_ab.ourcampus_password if ex_ab else "",
         # ── Plaza（用户名，不是邮箱）──
         plaza_username=form.get("AUTO_BOOK_PLAZA_USERNAME", ""),
         plaza_password=_secret("AUTO_BOOK_PLAZA_PASSWORD", ex_ab.plaza_password if ex_ab else ""),
