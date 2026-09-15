@@ -1,5 +1,82 @@
 # Changelog
 
+## v1.40.0 (2026-09-15)
+
+本次发布包含两次提交，覆盖 OurCampus 预订与 TLS 指纹两个方面。
+
+两件事都始于同一天 OurCampus 的真实放房，也都在动手之前先对照了线上的真实响应：
+预订侧拿留档的 #2301 单元表做测试，当场抓到一个解析器对 OC 完全失效的缺陷；
+指纹侧把 26 个候选在生产出口上逐个测过，结论是「新」不等于「能过」。
+
+### OurCampus 预订
+
+* **写好 `OurCampusBooker`，止于开始申请，未注册**（[5661529]）
+
+    需求是「登录后开始申请，锁住名额」。流程与 OurDomain 相同，停在 Applicant
+    Info（服务端已建出申请）：不传证件、不填表、不保存。因此不需要申请人档案、背景
+    调查授权与证件，也碰不到 Xior 实测过的两道硬坎（Save 前必须传证件、再往后要填
+    IBAN）。流程终点由基类上的 `stop_at_applicant_info` 声明，`book()` 里没有平台
+    分支。
+
+    **没有注册进 `BOOKER_REGISTRY`**，有测试专门断言这一点。「开始申请能占住单元」
+    从未被观察过：XIOR.md §8.7 的「锁定发生在付款那一步」是从付款页文字推出来的，
+    反方向同样没人看过。通知文案因此不写「已锁定」。当天还查清了 OC 的房型分工：
+    Standard+ Studio 是 Book Now，两种 Furnished 已改为抽签。抽签单元的条款页上
+    明写 it does not reserve the apartment，所以锁房问题只能等 Standard+ 放房时验证。
+
+    以下几处都是对照真实响应做出来的：
+
+    onclick 实参 OC 用双引号、OurDomain 用单引号，而原解析器只认单引号。放到 OC 上
+    每一行都解析不出参数，`find_unit` 恒为 None，表现是一条看起来完全正常的「已被
+    他人选走」，还会进重试队列反复失败。这是拿 09-15 留档的真实响应做测试时发现的。
+
+    `Join Lottery` 不开始申请，判据复用抓取侧的 `_extract_status`。结果是
+    `unsupported`，不是 `race_lost`：后者会进重试队列，而抽签重试多少次都一样。
+
+    单元表 403 时先冷却当前指纹，再重开会话。实测 `chrome124` 打开 floorplans 页
+    是 200，POST 单元表却连续 403；`open()` 只在 GET 被拒时才换指纹。冷却状态又和
+    抓取共享，OurDomain 抓取（只发 GET）会把 `chrome124` 记成「上次成功」排到首位，
+    不记冷却的话重开多少次拿到的都是它。
+
+    条款页上关于「提交之后意味着什么」的句子写进日志（`terms_page_notices`）：
+    自动跑的时候没人看页面，而这类问题的答案有时就写在页面上。
+
+    `tools/ourcampus_booker_probe.py` 的默认预检不需要账号，走到 Start Application
+    前一刻为止，核对条款页上的单元上下文和验证码配置，并打印说明文字；`--start`
+    才会真的开始申请。当天用它在线上抽签单元上跑通了入口段：单元表、条款页 18 个
+    字段、带签名的报价、验证码配置全部对上。
+
+### TLS 指纹
+
+* **指纹池按实测重排，curl_cffi 升到 0.16.3**（[4a5e529]）
+
+    在生产容器里经轮换代理实测 26 个候选，每个 3 个独立会话，打 OC 页面 GET 加单元
+    表 POST、OD 页面 GET 加单元表 GET，另打 Plaza / Magis / Student Experience。
+
+    SecureRC（OurDomain / OurCampus / Xior 的 floorplans.aspx）此刻**只放
+    `chrome150` 这一个桌面 Chrome**，146 及以前全部 403，Safari 家族全过。推测
+    Cloudflare 把明显落后于当前稳定版的 Chrome 当可疑；若成立，Chrome 指纹几个月
+    就会过期，Safari 老版本却一直能用。旧池排第一的正是 `chrome136`，生产日志里
+    每次冷启动 OC 都是 `chrome136` 403 → `chrome131` 403 → `safari18_0` 才过。新池
+    以 Safari 打底，`chrome150` 只占一个位置，前 4 个（默认只取 4 个）均为全过。
+
+    尝试列表不再把全局池随机抽的一个插到最前：全局池里有实测 403 的桌面 Chrome，
+    插在最前等于每次冷启动先白扔一次必然 403 的请求。全局池（Plaza / Magis / SE /
+    通知渠道）实测对全部候选都是 200，改为每个家族取最新的，并去掉 `edge101`。
+
+    `chrome150` / `firefox147` 从 curl_cffi 0.16 起才有。lock 里 curl_cffi 0.14.0
+    → 0.16.3，cffi 1.17.1 → 2.1.1（0.16.3 要求 cffi>=2.0），cryptography 不动；在
+    Docker 构建所用的同一基础镜像里按 Dockerfile 的顺序装过，`pip check` 无冲突。
+    macOS 27 上 0.15 及以后的 wheel 导入会报 `symbol not found
+    '_CFArrayAppendValue'`，需要预加载 CoreFoundation；Linux 容器不受影响。
+
+    `tests/test_impersonate_pools.py` 钉住四件事：池里每个名字都是锁定版本真实支持
+    的 target，SecureRC 池里没有实测 403 的指纹，前 4 个全过，`requirements.txt` 的
+    下限与锁定版本一致。
+
+[5661529]: https://github.com/751K/holland2stay-monitor/commit/5661529
+[4a5e529]: https://github.com/751K/holland2stay-monitor/commit/4a5e529
+
 ## v1.39.0 (2026-09-15)
 
 本次发布包含五次提交，覆盖过滤器、自动预订与 OurCampus 三个方面。
