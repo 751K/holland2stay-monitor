@@ -1,5 +1,93 @@
 # Changelog
 
+## v1.39.0 (2026-09-15)
+
+本次发布包含五次提交，覆盖过滤器、自动预订与 OurCampus 三个方面。
+
+新功能是「楼盘」过滤。其余四条都是同一类问题：**某个判据只实现了一半，另一半
+在生产上以错误的形态出现**——自动预订的「能通知到」只认传统渠道不认推送；启动
+警告与真正的闸用的不是同一判据；OurCampus 的状态判据看了按钮在不在，没看按钮上
+写的字。四处的单元测试在修复前都是全绿的。
+
+### 过滤与自动预订
+
+* **过滤器加「楼盘」：只要这栋楼里的任何一间**（[9a36ee6]）
+
+    判据是 `Building` 特征。2026-09-10 生产实测七个平台都写，836 条里 835 条有值，
+    但形态不同：H2S / Magis 是楼盘名，Plaza 是从地址推的街道或街道加门牌，Student
+    Experience 是城市加楼。所以匹配用子串，与其余白名单字段一致。候选值由新的
+    `/api/buildings` 从库里现取、按所选城市收窄，通知过滤和自动预订过滤两侧都加。
+
+    `building` 登记进 `_UNIVERSAL_FILTER_DIMS`，而不是逐平台登记，这是方向问题。
+    通用登记时，新平台不写 `Building` 就匹配不上（fail-closed，少收几条）；逐平台
+    登记则是新平台整条跳过（fail-open）。挂在 `auto_book` 上的 fail-open，等于替
+    用户自动申请一栋他明确排除掉的楼。有测试钉住这个方向。
+
+    顺带修一个存量缺陷：`ListingFilter` 有四个读写点（表单三处加
+    `users._lf_from_dict`），加字段时漏了两处。加载侧那处对所有来源生效，手机 API
+    设的值写得进库、读回来永远是空。文件里本来就有一条注释记着 `allowed_sources`
+    出过同样的事，所以这次加了通用守卫：每个 dataclass 字段必须在四个点都出现。
+
+* **「能不能通知到」把推送也算进去**（[eda434e]）
+
+    替人下了单却没法告诉他，比不下单更糟，所以自动预订要求用户能被通知到。但系统
+    有两条投递路径，这道闸只认其中一条：传统渠道看 `has_channels`，推送走
+    `mcore.push.dispatch`，根本不看 `has_channels`。于是只用 App 的用户照常收房源
+    推送，却永远产生不了自动预订候选。2026-09-10 撞到一个真实用户：楼盘、城市、
+    平台、凭据、开关全对，booker 一次都没被调用过。
+
+    判据直接调 `get_active_devices_for_user`，不另写 SQL——它的条件里有一条容易
+    抄漏的 `expires_at`，`tools/backfill_push_optin.py` 就栽在照抄 WHERE 上。查不到
+    设备时 fail-closed。`_collect_booking_candidates` 此前没有任何测试，补了 11 条。
+
+* **启动摘要的三条警告都不成立**（[106cab2]）
+
+    一个 `allowed_sources=['plaza']` 的用户每次启动吃三条警告：没有通知渠道、没填
+    H2S 邮箱、没填 H2S 密码。他有活跃设备，而且根本不抓 H2S。运维日志里的警告要是
+    经常是假的，真的那条就没人看了。
+
+    渠道警告改用与闸同一个 `_can_reach_user`，有测试断言旧判据不再出现在
+    `main_loop` 里。凭据按用户实际会碰到的平台分别判（`allowed_sources` 与
+    `_AUTO_BOOK_SOURCES` 取交集），Plaza 另报「凭据填了但开关没勾」——那是最容易
+    「以为在跑」的配置。摘要行也从只打 H2S 邮箱改成打平台与凭据状态。
+
+* **面板：Plaza 开关改叫「自动申请」**（[7563b47]）
+
+    「自动注册」会被读成「系统替我注册 Plaza 账号」，而账号要用户自己去办、自己
+    付年费。两行说明按产品要求删掉，翻译键一并移除。
+
+### 抓取平台
+
+* **OurCampus：按钮写着 Join Lottery 的单元不再报成可订**（[87eb408]）
+
+    OurCampus 先到先得与抽签并存。留档里全部 7 个单元：08-10 至 09-02 的 6 个按钮
+    是 `Book Now`，09-15 的 #2301 是 `Join Lottery`。两者类名、`ApplyNowClick`
+    回调、`muted` 日期格完全一致，只差按钮上的字。v1.26.0 把判据从样式类改成「行里
+    有没有下单按钮」，修对了一半：按钮的**存在**说明能点，按钮的**文字**才说明点了
+    是什么。于是 #2301 和下午那批都以 `Available to book` 推给了用户。
+
+    按钮文字含 `lottery` / `loting` / `loterij` 即为 `Available in lottery`。没见过
+    的文字按可订放行并告警——`Join Lottery` 当初就是一个没见过的文字被默默当成了
+    `Book Now`。OurDomain South-East 当天实测写法是 `Book now`，比较前归一大小写，
+    否则它每轮都会刷一条告警。
+
+    留档文件同时改了。原来每次请求都写摘要、有单元时每轮附 35 KB HTML，09:07 撞上
+    8 MB 上限停写，13:53 那批五套一个字节都没留下，而那正是需要核对按钮文字的时候。
+    现在按 floorplan 记住上次写下的签名（单元、状态、租金、按钮文字），没变就不写；
+    满了轮转到 `.1`，不再停写。签名里的按钮文字一度是空转的——现有测试里文字一变
+    状态也跟着变——补了「文字变了、状态没变」那条才钉住。
+
+    另两处顺带钉住。其一，`available_from` 取回调里的日期而不是「Date Available」
+    格子，两者经常不一致，经确认回调的对。其二，「抽签不急、可以聚合成一条发」是
+    H2S 的实测结论，不是抽签的通性：OurCampus 的 #2301 挂 48 分钟就撤了。聚合的闸
+    本来就按平台开，现在有测试钉住它不能改成按状态开。
+
+[9a36ee6]: https://github.com/751K/holland2stay-monitor/commit/9a36ee6
+[eda434e]: https://github.com/751K/holland2stay-monitor/commit/eda434e
+[106cab2]: https://github.com/751K/holland2stay-monitor/commit/106cab2
+[7563b47]: https://github.com/751K/holland2stay-monitor/commit/7563b47
+[87eb408]: https://github.com/751K/holland2stay-monitor/commit/87eb408
+
 ## v1.38.0 (2026-09-10)
 
 本次发布包含七次提交，覆盖 Plaza、品牌资源与文档三个方面。
