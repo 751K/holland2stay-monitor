@@ -1,4 +1,4 @@
-curl_cffi>=0.6.0
+curl_cffi>=0.16.3  # chrome150 / firefox147 指纹从 0.16 起才有，见 scrapers/ourdomain._DEFAULT_IMPERSONATES
 python-dotenv>=1.0.0
 flask>=3.0.0
 gunicorn>=22.0.0

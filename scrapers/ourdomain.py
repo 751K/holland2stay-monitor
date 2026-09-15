@@ -24,7 +24,7 @@ from typing import Optional
 
 import curl_cffi.requests as req
 
-from config import assumed_features, get_impersonate, get_proxy_url
+from config import assumed_features, get_proxy_url
 from models import Listing
 
 from net import NO_PROXY_CURL  # 见下面 proxies 处的注释
@@ -42,38 +42,37 @@ from .base import (
 
 logger = logging.getLogger(__name__)
 
-# 默认 TLS 指纹池：多浏览器家族 × 多平台，最大化 TLS handshake 差异。
+# SecureRC（OurDomain / OurCampus / Xior 的 floorplans.aspx）专用 TLS 指纹池。
 #
-# 设计思路
-# --------
-# Cloudflare 做 fingerprint 跟踪时同家族同平台的差异很小（同样的 JA3/JA4
-# hash + 极相似的 h2 settings）。混进 Safari / Firefox / 移动端能显著扩大
-# "可用指纹空间"——某家族被烧时还有 3-4 个完全不同的回路可走。
+# **按实测挑，不按「新」挑。** 2026-09-15 从生产容器经轮换代理实测（curl_cffi
+# 0.16.3），每个指纹 3 个独立会话，每个会话打 OC 页面 GET + 单元表 POST、
+# OD 页面 GET + 单元表 GET：
 #
-# 排除条件
-# --------
-# - 老版本（chrome99, chrome100, chrome104, chrome110 等）已经被 CF 标
-#   "可疑 / 过时浏览器"，不放进默认池
-# - tor145 触发 CF 高强度挑战，不当首选
-# - safari_beta / chrome_beta 等带 "beta" 后缀的不稳定，不进默认池
+#   全过       chrome150  safari2601  safari184  safari184_ios  safari18_0
+#              safari180  safari180_ios  safari17_2_ios  safari172_ios  safari170
+#   偶发 403   firefox147  firefox144  firefox135  safari260_ios  safari18_0_ios
+#   全部 403   chrome146  chrome145  chrome142  chrome136  chrome133a  edge101
+#              chrome131_android  safari260；chrome131 / chrome124 页面过、POST 403
 #
-# 共 8 个，覆盖 4 个家族 (Chrome / Safari / Firefox / Edge) × 桌面/移动
-# 不同平台。默认 OURDOMAIN_WAF_RETRIES=4 只取前 4 个；想用全量设为 8。
+# **桌面 Chrome 只有 chrome150 过，146 及以前全部 403。** 推测是 Cloudflare 把
+# 明显落后于当前稳定版的 Chrome 当可疑——若成立，Chrome 指纹几个月就会过期，
+# 而 Safari 老版本一直能用。所以 Safari 打底，chrome150 只占一个位置。旧池排
+# 第一的正是 chrome136，生产日志里每次冷启动 OC 都是 chrome136 403 → chrome131
+# 403 → safari18_0 才过。
+#
+# 这是某一天的快照，WAF 策略会变。重测方法：临时脚本对每个候选各开几个新会话
+# 打上面四个端点（不要在生产进程里跑——冷却状态是进程级的，测试会污染它）。
+# 默认 OURDOMAIN_WAF_RETRIES=4 只取前 4 个，所以前 4 个必须是全过的。
 _DEFAULT_IMPERSONATES: tuple[str, ...] = (
-    # ── Chrome 桌面：主力 ──
-    "chrome136",          # 最新稳定版（2025 Q2），CF 通常优先放行
-    "chrome131",          # 上一稳定版，作为可信备份
-    # ── Safari：完全不同的 TLS 栈，Cloudflare 待遇也不同 ──
-    "safari18_0",         # macOS Safari 18（2024 秋）
-    "safari17_2_ios",     # iOS Safari（移动版 fingerprint 差异巨大）
-    # ── Firefox：又一家族，NSS 栈，h2 settings 完全不同 ──
-    "firefox135",         # 现代稳定版
-    # ── Chrome Android：扩 Chrome 家族但是移动平台 ──
-    "chrome131_android",
-    # ── 旧但仍现代的 Chrome：fallback ──
-    "chrome124",          # 2024 Q2，依然广泛存在
-    # ── Edge：Windows 默认浏览器分布的代表 ──
-    "edge101",
+    "safari2601",         # macOS Safari 26.0.1 —— curl_cffi 里最新的 Safari
+    "chrome150",          # 桌面 Chrome 150，唯一实测能过的桌面 Chrome（需 curl_cffi ≥ 0.16）
+    "safari184",          # macOS Safari 18.4
+    "safari18_0",         # macOS Safari 18.0
+    # ── 兜底：全过但更旧，或偶发 403 ──
+    "safari184_ios",      # iOS Safari 18.4
+    "safari180_ios",      # iOS Safari 18.0
+    "firefox147",         # Firefox 147（NSS 栈，换一个家族；偶发 403 所以排后）
+    "safari17_2_ios",
 )
 
 
@@ -611,7 +610,11 @@ def _impersonate_attempts() -> list[str]:
     """
     raw = os.environ.get("OURDOMAIN_IMPERSONATES", "")
     configured = [p.strip() for p in re.split(r"[,|]", raw) if p.strip()]
-    candidates = configured or [get_impersonate(), *_DEFAULT_IMPERSONATES]
+    # 不再把全局池随机抽的一个插到最前：全局池是给 Plaza / Magis / Student
+    # Experience 这些不挑指纹的平台用的，里面有桌面 Chrome，而 SecureRC 此刻
+    # 一律 403（见 _DEFAULT_IMPERSONATES 的实测）。插在最前等于每次冷启动先白
+    # 扔一次必然 403 的请求，还顺手把它记进冷却。
+    candidates = configured or list(_DEFAULT_IMPERSONATES)
     unique = list(dict.fromkeys(candidates))
     retries = _env_int("OURDOMAIN_WAF_RETRIES", min(4, len(unique)), min_value=1, max_value=8)
 

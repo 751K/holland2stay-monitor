@@ -212,7 +212,6 @@ def test_parse_ourdomain_floor(detail, expected):
 
 def test_scrape_builds_unit_level_listings(monkeypatch):
     monkeypatch.setattr("scrapers.ourdomain.req.Session", FakeSession)
-    monkeypatch.setattr("scrapers.ourdomain.get_impersonate", lambda: "chrome131")
     monkeypatch.setattr(
         "scrapers.ourdomain.get_proxy_url", lambda source="", **kw: ""
     )
@@ -257,7 +256,6 @@ def test_scrape_builds_unit_level_listings(monkeypatch):
 
 def test_scrape_raises_blocked_error(monkeypatch):
     monkeypatch.setattr("scrapers.ourdomain.req.Session", BlockedSession)
-    monkeypatch.setattr("scrapers.ourdomain.get_impersonate", lambda: "chrome131")
     monkeypatch.setattr(
         "scrapers.ourdomain.get_proxy_url", lambda source="", **kw: ""
     )

@@ -145,19 +145,31 @@ CLOAKBROWSER_HEADLESS = os.environ.get("CLOAKBROWSER_HEADLESS", "true").lower() 
 # Cloudflare 看到的"浏览器分布"更接近真实流量直方图。
 #
 # 出现连续 Connection closed abruptly 时可更新或扩充列表。
+#
+# **用它的是不挑指纹的平台**：Plaza、Magis、Student Experience 的抓取与 Plaza
+# 预订，以及通知渠道的 HTTP 会话。2026-09-15 实测这三个平台对 curl_cffi 0.16.3
+# 的全部候选都是 200，所以这里按「每个家族取最新的」来选。
+#
+# SecureRC（OurDomain / OurCampus / Xior 的 floorplans.aspx）**不用这个池**，
+# 它此刻一律拒绝桌面 Chrome，有自己按实测挑的池——见
+# ``scrapers.ourdomain._DEFAULT_IMPERSONATES``。
+#
+# edge101 移出：curl_cffi 里 Edge 只到 101（2022 年），留着只会是池里最显眼的
+# 过时指纹。所有名字由 tests/test_impersonate_pools.py 核对是否为 curl_cffi
+# 真实支持的 target——写错一个字母，请求会在运行时才炸。
 _CURL_IMPERSONATE_POOL = [
-    "chrome136",          # Chrome 136 (2025 Q2, 最新)
-    "chrome131",          # Chrome 131 (2024 Q4)
-    "chrome124",          # Chrome 124 (2024 Q2, fallback)
-    "safari18_0",         # Safari 18 (macOS, 2024 秋)
-    "safari17_2_ios",     # iOS Safari 17.2（移动端，TLS 与 macOS 不同）
-    "firefox135",         # Firefox 135（NSS 栈，与 Chromium 系完全不同）
-    "chrome131_android",  # Android Chrome 131（移动端 Chromium）
-    "edge101",            # Edge 101 (Windows 默认浏览器)
+    "chrome150",          # Chrome 150（桌面，curl_cffi 0.16.3 最新）
+    "chrome146",          # Chrome 146
+    "safari2601",         # macOS Safari 26.0.1
+    "safari184",          # macOS Safari 18.4
+    "safari260_ios",      # iOS Safari 26（移动端，TLS 与 macOS 不同）
+    "firefox147",         # Firefox 147（NSS 栈，与 Chromium 系完全不同）
+    "firefox144",         # Firefox 144
+    "chrome131_android",  # Android Chrome 131（curl_cffi 里最新的 Android）
 ]
-# Chrome 桌面 40% / Safari 25% / Firefox 15% / 移动 15% / Edge 5%
-# 接近 NL 桌面浏览器市场实际分布（StatCounter 2025 数据）。
-_POOL_WEIGHTS = [4, 4, 2, 3, 2, 3, 1, 1]
+# Chrome 桌面 40% / Safari 30% / Firefox 20% / Android 10%。
+_POOL_WEIGHTS = [3, 1, 2, 1, 1, 1, 1, 1]
+assert len(_POOL_WEIGHTS) == len(_CURL_IMPERSONATE_POOL)
 
 _last_impersonate: Optional[str] = None
 

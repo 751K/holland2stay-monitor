@@ -29,8 +29,10 @@
 
 ## 2. 反爬现状
 
-OurDomain 是四个平台中唯一**无需浏览器**的：SecureRC 仅做 WAF 级 403，不设托管
-挑战。但它另有一套机制——按 TLS 指纹与出口 IP 双重跟踪。
+OurDomain 是四个平台中唯一**无需浏览器**的：SecureRC 前面是 Cloudflare，但不需要
+执行 JS 解挑战——普通 curl 会拿到 `403 cf-mitigated: challenge`（2026-09-15 在
+OurCampus 的主机上复核），换一个像样的 TLS 指纹即返回 200。它另有一套机制——按
+TLS 指纹与出口 IP 双重跟踪。
 
 ### 2.1 403 的两个维度
 
@@ -53,13 +55,36 @@ Cloudflare clearance，而 OurDomain 没有可复用的 clearance，更换 IP �
 
 ### 2.2 指纹池与冷却
 
-默认池含 8 个指纹，覆盖 4 个浏览器家族的桌面与移动版本（`_DEFAULT_IMPERSONATES`）。
-如此选取的目的是**扩大可用指纹空间**：同一家族同一平台的 JA3/JA4 与 h2 settings
-差异很小，混入 Safari、Firefox 及移动端指纹后，某一家族被标记时仍有特征完全不同
-的通路可用。
+默认池（`_DEFAULT_IMPERSONATES`）**按实测挑，不按版本新旧挑**。2026-09-15 从生产
+容器经轮换代理、用 curl_cffi 0.16.3 测得（每个指纹 3 个独立会话，每个会话打 OC 页面
+GET + 单元表 POST、OD 页面 GET + 单元表 GET）：
 
-已排除的指纹包括：旧版本（chrome99–110，已被判定为「可疑或过时浏览器」）、
-`tor145`（会触发高强度挑战），以及带 `beta` 后缀的不稳定版本。
+| 结果 | 指纹 |
+|---|---|
+| 全过 | `chrome150`、`safari2601`、`safari184`、`safari184_ios`、`safari18_0`、`safari180`、`safari180_ios`、`safari17_2_ios`、`safari172_ios`、`safari170` |
+| 偶发 403 | `firefox147`、`firefox144`、`firefox135`、`safari260_ios`、`safari18_0_ios` |
+| 全部 403 | `chrome146`、`chrome145`、`chrome142`、`chrome136`、`chrome133a`、`edge101`、`chrome131_android`、`safari260` |
+| 页面过、POST 403 | `chrome131`、`chrome124` |
+
+**桌面 Chrome 只有 `chrome150` 能过，146 及以前全部 403。** 推测 Cloudflare 把明显
+落后于当前稳定版的 Chrome 当可疑；若成立，Chrome 指纹几个月就会过期，Safari 老
+版本却一直能用。因此池子以 Safari 打底，`chrome150` 只占一个位置。旧池把
+`chrome136` 排第一，生产日志里每次冷启动都是 `chrome136` 403 → `chrome131` 403 →
+`safari18_0` 才过。现池前 4 个（`OURDOMAIN_WAF_RETRIES` 默认只取 4 个）均为全过。
+
+`chrome150` / `firefox147` 从 curl_cffi 0.16 起才有，`requirements.lock` 锁定 0.16.3
+（连带 `cffi` 升到 2.x）。在 macOS 27 上 0.15 及以后的 wheel 导入会报
+`symbol not found '_CFArrayAppendValue'`，需在导入前以 `RTLD_GLOBAL` 预加载
+CoreFoundation；Linux 容器不受影响。
+
+尝试列表**不再**把 `config.get_impersonate()` 从全局池随机抽的一个插到最前：全局池
+服务于不挑指纹的平台（Plaza / Magis / Student Experience 实测对所有候选都是 200），
+里面有实测 403 的桌面 Chrome。
+
+这是某一天的快照，WAF 策略会变。重测时用临时脚本、在独立进程里跑——冷却状态是
+进程级的，在生产进程里测会污染它。`tests/test_impersonate_pools.py` 钉住三件事：
+池里每个名字都是锁定版本 curl_cffi 真实支持的 target；SecureRC 池里没有实测 403
+的指纹；`requirements.txt` 的下限与锁定版本一致。
 
 进程级状态机（`_FINGERPRINT_STATE`，重启后清空）的规则如下：
 
