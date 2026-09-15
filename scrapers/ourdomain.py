@@ -1206,6 +1206,17 @@ _DISABLED_CONTROL_RE = re.compile(r"<input\b[^>]*\bdisabled\b", re.IGNORECASE)
 #: 见过并且已经想清楚含义的状态格样式。没见过的形态要告警，不能默默归类。
 _KNOWN_AVAIL_CLASSES = ("success", "warning", "muted", "danger")
 
+#: 下单按钮上的文字。**同一个按钮、同一个 ApplyNowClick，文字决定点下去是什么**：
+#: ``Book Now`` 是先到先得，``Join Lottery`` 是进抽签池。OurCampus 两种并存
+#: （2026-09-15 首次见到后者，见 ``_extract_status``）。
+_CONTROL_LABEL_RE = re.compile(
+    r"<input\b(?=[^>]*(?:UnitSelect|ApplyNowClick))[^>]*?\bvalue\s*=\s*[\"']([^\"']*)[\"']",
+    re.IGNORECASE,
+)
+_LOTTERY_LABEL_WORDS = ("lottery", "loting", "loterij")
+#: 见过并且确认是「直接订」的按钮文字。其余文字放行并告警。
+_KNOWN_BOOK_LABELS = ("book now",)
+
 
 def _has_bookable_control(row_html: str) -> bool:
     if not row_html:
@@ -1213,6 +1224,12 @@ def _has_bookable_control(row_html: str) -> bool:
     if _DISABLED_CONTROL_RE.search(row_html):
         return False
     return bool(_BOOKABLE_CONTROL_RE.search(row_html))
+
+
+def _control_label(row_html: str) -> str:
+    """下单按钮上的文字（小写、去空白）；没有按钮或按钮不带 value 返回空串。"""
+    m = _CONTROL_LABEL_RE.search(row_html or "")
+    return " ".join(m.group(1).split()).lower() if m else ""
 
 
 def _extract_status(avail_html: str, row_html: str = "") -> str:
@@ -1241,6 +1258,21 @@ def _extract_status(avail_html: str, row_html: str = "") -> str:
 
     ``row_html`` 缺省时退回旧的类名判据——老调用方和单元测试还按单格传参，
     不能因为拿不到整行就把所有单元判成不可订。
+
+    按钮文字（2026-09-15）
+    ---------------------
+    上面那次修正把「有按钮」当成了「能直接订」。OurCampus 当天挂出的行::
+
+        <span class='muted'>30-9-2026</span>
+        <input class='UnitSelect btn btn-primary' value ='Join Lottery'
+               onclick='return ApplyNowClick("456556",…,"8-10-2026",…)'>
+
+    和 08-27 的 Book Now 行**只差按钮上的字**：同样的类名、同样的回调、同样
+    的 muted 日期格。于是 #2301 和下午那批全都以「Available to book」推了
+    出去——告诉用户手快就能订到，而实际是进抽签池。
+
+    所以按钮的**存在**决定「能不能点」，按钮的**文字**决定「点了是什么」。
+    二者缺一都会判错，这是同一个判据被拆成两半、只实现了一半。
     """
     m = re.search(
         r"<span\b[^>]*class=[\"']([^\"']*)[\"'][^>]*>(.*?)</span>",
@@ -1261,6 +1293,19 @@ def _extract_status(avail_html: str, row_html: str = "") -> str:
     # test_southeast_style_row_extracts_all_fields 当场抓到过这个回归。
     explicit = "success" in classes or text == "available"
     bookable = _has_bookable_control(row_html)
+    label = _control_label(row_html) if bookable else ""
+
+    # 按钮文字写着抽签，就是抽签——不管状态格是什么样式。
+    if any(w in label for w in _LOTTERY_LABEL_WORDS):
+        return "Available in lottery"
+
+    if bookable and label and label not in _KNOWN_BOOK_LABELS:
+        # 放行并告警：Join Lottery 当初就是一个「没见过的文字」被默默当成了
+        # Book Now。放行是因为漏报比误报贵；告警是为了下一个新文字别再默默过去。
+        logger.warning(
+            "OurDomain/OurCampus 下单按钮出现没见过的文字 %r——按可订放行。"
+            "若它其实是抽签 / 等位 / 订不到，会误报一条可订房源", label[:40],
+        )
 
     if explicit or bookable:
         if bookable and not explicit and classes and not any(

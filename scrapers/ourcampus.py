@@ -18,7 +18,9 @@ OurCampus 是 Greystar 的另一个学生住房品牌，与 OurDomain 同属一�
 规模与预期
 ----------
 只有一栋楼（Amsterdam Diemen，Dalsteindreef 6002），三个房型。官网自述等待期
-16–18 个月，属于排队制而非先到先得，所以「秒级通知」在这里的价值远低于 H2S。
+16–18 个月。**但先到先得和抽签并存**：2026-08-10 至 09-02 挂出的 6 套都是
+``Book Now``，09-15 挂出的是 ``Join Lottery``——同一个页面、同一种按钮，只差
+按钮上的字。所以状态要看按钮文字，见 ``scrapers/ourdomain._extract_status``。
 接入是**产品决策**，不是因为投入产出比划算——文档里对它的评估见
 ``docs/SCRAPING_RECON.md`` §4。
 
@@ -35,10 +37,14 @@ OurCampus 是 Greystar 的另一个学生住房品牌，与 OurDomain 同属一�
 且不发任何通知，修正见 CHANGELOG v1.26.0——判据现依据该行是否带有可用的下单
 按钮，未识别的样式类放行并告警。
 
+2026-09-15 又证伪了一条：「有按钮」不等于「能直接订」。按钮文字为
+``Join Lottery`` 的单元被判成了 Available to book 并按可订推送。判据补上按钮
+文字：写着抽签即为 ``Available in lottery``，没见过的文字放行并告警。
+
 结构真的不同时，基类的完整性守卫会兜住：解析不出单元且响应又不像单元面板时
 标记 incomplete，而不是误报「没有房」。但如果结构不同却仍是合法面板，仍会静默
-返回 0 个单元，所以留档不能停——每次请求都往 ``data/ourcampus_capture.txt``
-记一行摘要，并在**有单元或疑似解析失配时**附完整 HTML。
+返回 0 个单元，所以留档不能停——``data/ourcampus_capture.txt`` 在响应内容
+**发生变化时**记一行摘要，并在**有单元或疑似解析失配时**附完整 HTML。
 """
 from __future__ import annotations
 
@@ -53,6 +59,7 @@ import curl_cffi.requests as req
 from .base import ScrapeTask
 from .ourdomain import (
     OurDomainScraper,
+    _CONTROL_LABEL_RE,
     _extract_units,
     _get_text,
     _headers_for,
@@ -64,17 +71,35 @@ logger = logging.getLogger(__name__)
 
 # ── 抓取留档 ────────────────────────────────────────────────────────
 #
-# 存在的唯一理由：**它的单元表 HTML 至今没有真实样本**（见模块文档）。等到这栋
-# 楼第一次真的有房时，需要拿原始 markup 核对解析器——只看日志里的「共抓取 N 个
-# 单元」不够，因为最危险的情况恰恰是「结构变了但仍是合法面板」，那会静默返回 0。
+# 最初存在的理由是单元表 HTML 没有真实样本（见模块文档）。样本早已有了，它仍然
+# 两次抓到判据错误（08-27 muted、09-15 Join Lottery）——只看日志里的「共抓取 N
+# 个单元」看不出按钮上写的是什么，也看不出「结构变了但仍是合法面板」。
 #
-# 所以：每次请求都记一行摘要，**只在有看头的时候**才附完整 HTML：
-#   - 解析出单元了 → 第一份真实样本，必须留
+# 所以**只在有看头的时候**才附完整 HTML：
+#   - 解析出单元了 → 真实样本，必须留
 #   - 响应里有 unitrow 痕迹但解析出 0 个 → 正是解析器对不上的信号，更要留
-# 平时（零可订）只有摘要行，一天几百轮也就几十 KB。
+#
+# **只记变化，不记重复**（2026-09-15）。原来每次请求都写摘要、有单元就每轮附
+# 35 KB HTML：摘要行 36 天攒了 5 MB，一套房挂着的十几分钟里又每轮三份 HTML，
+# 09:07 撞上 8 MB 上限后停写——13:53 那批五套房一个字节都没留下，而那恰恰是
+# 需要核对「按钮上写的是 Book Now 还是 Join Lottery」的时候。
+#
+# 现在按 floorplan 记住上一次写下的内容签名（单元、状态、租金、按钮文字、
+# unitrow 痕迹），签名没变就整条不写。满了轮转一代（``.1``），不再停写——
+# 停写意味着证据恰好在最需要的时候断掉。
 _CAPTURE_PATH_ENV = "OURCAMPUS_CAPTURE_PATH"
 _CAPTURE_MAX_BYTES = 8 * 1024 * 1024
-_UNITROW_HINT = re.compile(r'id=["\']unitrow_\d+', re.IGNORECASE)
+_UNITROW_HINT = re.compile(r'id=["\']unitrow_(\d+)', re.IGNORECASE)
+_LAST_SIGNATURE: dict[str, tuple] = {}
+
+
+def _capture_signature(html: str, units: list[dict], panel: bool) -> tuple:
+    return (
+        panel,
+        tuple(sorted(set(_UNITROW_HINT.findall(html or "")))),
+        tuple(sorted((u["unit_id"], u["status"], u["rent"]) for u in units)),
+        tuple(sorted({m.strip() for m in _CONTROL_LABEL_RE.findall(html or "")})),
+    )
 
 
 def _capture_path() -> Path:
@@ -88,14 +113,19 @@ def _capture_path() -> Path:
 def _record_capture(fp_id: str, html: str) -> None:
     """把一次 availableunits 响应记进留档文件。任何异常都不许影响抓取。"""
     try:
-        path = _capture_path()
-        if path.exists() and path.stat().st_size > _CAPTURE_MAX_BYTES:
-            return  # 满了就停，不轮转——这是排查用的一次性证据，不是运行日志
-
-        parsed = len(_extract_units(html))
+        units = _extract_units(html)
+        parsed = len(units)
         has_rows = bool(_UNITROW_HINT.search(html or ""))
         panel = _looks_like_availability_panel(html)
         interesting = parsed > 0 or has_rows
+
+        signature = _capture_signature(html, units, panel)
+        if _LAST_SIGNATURE.get(fp_id) == signature:
+            return
+
+        path = _capture_path()
+        if path.exists() and path.stat().st_size > _CAPTURE_MAX_BYTES:
+            path.replace(path.with_name(path.name + ".1"))
 
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         head = (
@@ -106,7 +136,7 @@ def _record_capture(fp_id: str, html: str) -> None:
         body = ""
         if interesting:
             body = (
-                "--- 完整响应（首次出现单元 / 解析器可能对不上，留作核对）---\n"
+                "--- 完整响应（单元有变化 / 解析器可能对不上，留作核对）---\n"
                 + (html or "") + "\n--- 响应结束 ---\n"
             )
             if parsed == 0:
@@ -116,13 +146,14 @@ def _record_capture(fp_id: str, html: str) -> None:
                 )
             else:
                 logger.info(
-                    "OurCampus 首次解析出 %d 个单元，原始 HTML 已留档到 %s",
+                    "OurCampus 单元有变化（%d 个），原始 HTML 已留档到 %s",
                     parsed, path,
                 )
 
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(head + body)
+        _LAST_SIGNATURE[fp_id] = signature  # 写成功才记，写失败下一轮重试
     except Exception:
         logger.debug("OurCampus 抓取留档失败（已忽略）", exc_info=True)
 

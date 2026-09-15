@@ -70,11 +70,20 @@ class TestSplit:
         assert [x.id for x in singles] == ["hot"]
 
     def test_other_sources_never_batched(self):
-        """别的平台没有抽签状态，就算状态里带 lottery 也不该走这条路。"""
+        """聚合只对 H2S 开，别的平台就算状态里带 lottery 也不走这条路。"""
         ms = [_l("a"), _l("b"), _l("x", source="xior"), _l("o", source="ourdomain")]
         batched, singles = _split_batchable(ms)
         assert [x.id for x in batched] == ["a", "b"]
         assert {x.id for x in singles} == {"x", "o"}
+
+    def test_ourcampus_lottery_is_sent_one_by_one(self):
+        """OurCampus **有**抽签，而且一样快：2026-09-15 #2301（Join Lottery）
+        挂了 48 分钟就没了。「抽签不急、可以聚合」是 H2S 的实测结论，不是抽签
+        的通性——聚合的闸必须按平台开，不能按状态开。"""
+        ms = [_l("o1", source="ourcampus"), _l("o2", source="ourcampus"), _l("o3", source="ourcampus")]
+        batched, singles = _split_batchable(ms)
+        assert batched == []
+        assert [x.id for x in singles] == ["o1", "o2", "o3"]
 
     def test_single_lottery_stays_single(self):
         """1 套时聚合没有收益，反而丢掉类型/楼层/能耗那几行。"""

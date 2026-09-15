@@ -33,6 +33,7 @@ from scrapers.base import ScrapeTask
 _FIX = Path(__file__).parent / "fixtures"
 _FP_HTML = (_FIX / "ourcampus_floorplans.html").read_text(encoding="utf-8")
 _EMPTY_UNITS = (_FIX / "ourcampus_availableunits_empty.html").read_text(encoding="utf-8")
+_LOTTERY_UNITS = (_FIX / "ourcampus_availableunits_lottery.html").read_text(encoding="utf-8")
 
 
 # ── 注册与配置 ──────────────────────────────────────────────────────
@@ -243,8 +244,11 @@ class TestCapture:
 
     @pytest.fixture
     def cap(self, tmp_path, monkeypatch):
+        import scrapers.ourcampus as oc
         path = tmp_path / "cap.txt"
         monkeypatch.setenv("OURCAMPUS_CAPTURE_PATH", str(path))
+        # 签名是模块级的：不清空的话，上一个测试写过的同一份响应在这里会被当成重复跳过
+        monkeypatch.setattr(oc, "_LAST_SIGNATURE", {})
         return path
 
     def _read(self, path):
@@ -297,13 +301,71 @@ class TestCapture:
         heads = [l for l in self._read(cap).splitlines() if l.startswith("=== ")]
         assert len(heads) == 3
 
-    def test_size_cap_stops_writing(self, cap, monkeypatch):
+    def test_size_cap_rotates_instead_of_stopping(self, cap, monkeypatch):
+        """原来满了就停写。2026-09-15 09:07 撞上限，13:53 那批五套房的 HTML
+        一个字节都没留下——证据恰好在最需要的时候断掉。"""
         import scrapers.ourcampus as oc
         monkeypatch.setattr(oc, "_CAPTURE_MAX_BYTES", 10)  # 一行摘要就超
         oc._record_capture("a", _EMPTY_UNITS)
         first = self._read(cap)
         oc._record_capture("b", _EMPTY_UNITS)
-        assert self._read(cap) == first, "超过上限后不再写入"
+        assert "fp=b" in self._read(cap), "超过上限后必须继续写"
+        assert "fp=a" not in self._read(cap)
+        rotated = cap.with_name(cap.name + ".1")
+        assert rotated.read_text(encoding="utf-8") == first, "旧内容轮转到 .1，不是丢掉"
+
+    def test_identical_response_is_written_once(self, cap):
+        """36 天 49235 行摘要、有房时每轮三份 35 KB——8 MB 就是这么满的。"""
+        from scrapers.ourcampus import _record_capture
+        for _ in range(50):
+            _record_capture("1113259", _LOTTERY_UNITS)
+        heads = [l for l in self._read(cap).splitlines() if l.startswith("=== ")]
+        assert len(heads) == 1
+        assert self._read(cap).count("完整响应") == 1
+
+    def test_button_label_change_is_written(self, cap):
+        """同一套房、同一个价，只有按钮从 Book Now 变成 Join Lottery——
+        这正是要留档核对的那种变化，不能被当成重复吞掉。"""
+        from scrapers.ourcampus import _record_capture
+        _record_capture("1113259", _LOTTERY_UNITS.replace("Join Lottery", "Book Now"))
+        _record_capture("1113259", _LOTTERY_UNITS)
+        txt = self._read(cap)
+        assert txt.count("完整响应") == 2
+        assert "value ='Book Now'" in txt and "value ='Join Lottery'" in txt
+
+    def test_unknown_label_with_unchanged_status_is_written(self, cap):
+        """新文字按可订放行时状态不变——签名里若只有状态，这次变化就会被吞掉，
+        而「放行并告警」的那条告警恰恰需要这份 HTML 去核对。"""
+        from scrapers.ourcampus import _record_capture
+        book = _LOTTERY_UNITS.replace("Join Lottery", "Book Now")
+        _record_capture("1113259", book)
+        _record_capture("1113259", book.replace("Book Now", "Reserve Your Spot"))
+        assert self._read(cap).count("完整响应") == 2
+
+    def test_units_disappearing_is_written(self, cap):
+        from scrapers.ourcampus import _record_capture
+        _record_capture("1113259", _LOTTERY_UNITS)
+        _record_capture("1113259", _EMPTY_UNITS)
+        heads = [l for l in self._read(cap).splitlines() if l.startswith("=== ")]
+        assert [("parsed=1" in h) for h in heads] == [True, False]
+
+    def test_signatures_are_per_floorplan(self, cap):
+        """三个 FP 返回同一个单元是常态——按 FP 分开记，否则只会留下第一个 FP 的。"""
+        from scrapers.ourcampus import _record_capture
+        for fp in ("1113259", "1112904", "1112905"):
+            _record_capture(fp, _LOTTERY_UNITS)
+        heads = [l for l in self._read(cap).splitlines() if l.startswith("=== ")]
+        assert len(heads) == 3
+
+    def test_failed_write_is_retried_next_round(self, cap, monkeypatch):
+        """写失败时不能先记下签名，否则下一轮同样的响应会被当成已记过。"""
+        import scrapers.ourcampus as oc
+        real = oc._capture_path
+        monkeypatch.setattr(oc, "_capture_path", lambda: (_ for _ in ()).throw(OSError("boom")))
+        oc._record_capture("1113259", _LOTTERY_UNITS)
+        monkeypatch.setattr(oc, "_capture_path", real)
+        oc._record_capture("1113259", _LOTTERY_UNITS)
+        assert "完整响应" in self._read(cap)
 
     def test_failure_never_breaks_scraping(self, cap, monkeypatch):
         """留档是排查辅助，绝不能因为它抓取失败。"""

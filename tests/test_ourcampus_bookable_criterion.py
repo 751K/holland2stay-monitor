@@ -25,9 +25,16 @@ Rented Out」判宽了，这次「按钮明明能订、类名不认识」判严�
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from scrapers.ourdomain import _extract_status, _has_bookable_control
+from scrapers.ourdomain import (
+    _control_label,
+    _extract_status,
+    _extract_units,
+    _has_bookable_control,
+)
 
 #: 生产快照里逐字抄来的按钮（id / aria 号做了脱敏）。
 REAL_BUTTON = (
@@ -138,3 +145,98 @@ class TestWiredIntoExtraction:
         src = inspect.getsource(ourdomain._extract_unit)
         assert "_extract_status(avail_html, row_html)" in src, (
             "没把整行传进去，按钮判据形同虚设")
+
+
+# ── 按钮文字（2026-09-15 生产）───────────────────────────────────────
+
+#: 生产留档里原样取出的整份 availableunits 响应（fp=1113259，单元 #2301）。
+_LOTTERY_HTML = (
+    Path(__file__).parent / "fixtures" / "ourcampus_availableunits_lottery.html"
+).read_text(encoding="utf-8")
+LOTTERY_BUTTON = REAL_BUTTON.replace("Book Now", "Join Lottery")
+
+
+class TestButtonLabelDecidesWhatTheClickIs:
+    """「有按钮」只说明能点，**按钮上的字**才说明点了是什么。
+
+    09-15 那套 #2301 和 08-27 的 Book Now 行只差这一个字段：同样的 UnitSelect、
+    同样的 ApplyNowClick、同样的 muted 日期格。按钮判据只看存在不看文字，于是
+    抽签单元以 Available to book 推给了用户。
+    """
+
+    def test_the_real_row_is_lottery(self):
+        units = _extract_units(_LOTTERY_HTML)
+        assert [(u["apt"], u["status"]) for u in units] == [("#2301", "Available in lottery")]
+
+    def test_old_criterion_would_have_said_bookable(self):
+        """钉住「差别确实来自文字」：去掉文字判据的那一步，同一行就是可订。"""
+        row = MUTED_CELL + LOTTERY_BUTTON
+        assert _has_bookable_control(row)
+        assert _extract_status(MUTED_CELL, row) == "Available in lottery"
+        assert _extract_status(MUTED_CELL, MUTED_CELL + REAL_BUTTON) == "Available to book"
+
+    def test_lottery_label_wins_over_an_explicit_available_cell(self):
+        """状态格写着 Available、按钮写着 Join Lottery——按钮说了算。"""
+        assert _extract_status(SUCCESS_CELL, SUCCESS_CELL + LOTTERY_BUTTON) == "Available in lottery"
+
+    @pytest.mark.parametrize("label", ["Join Lottery", "JOIN LOTTERY", "Doe mee aan loting", "Loterij"])
+    def test_lottery_wording_variants(self, label):
+        row = MUTED_CELL + REAL_BUTTON.replace("Book Now", label)
+        assert _extract_status(MUTED_CELL, row) == "Available in lottery"
+
+    def test_disabled_lottery_button_is_not_lottery(self):
+        disabled = LOTTERY_BUTTON.replace("<input ", "<input disabled ")
+        assert _extract_status(MUTED_CELL, MUTED_CELL + disabled) == "Occupied"
+
+
+class TestAvailableFromComesFromTheCallback:
+    def test_callback_date_not_the_date_cell(self):
+        """格子写 30-9-2026、回调写 8-10-2026——回调的才是入住日期（08-27 那批
+        格子 31-8、回调 10-9，经确认 10-9 是对的）。别看两者对不上就改去取格子。"""
+        assert "30-9-2026" in _LOTTERY_HTML
+        assert [u["avail_date"] for u in _extract_units(_LOTTERY_HTML)] == ["2026-10-08"]
+
+
+class TestControlLabel:
+    def test_reads_the_select_button_not_other_inputs(self):
+        """同一份响应里还有一堆 ``<input type=hidden value=''>``——取错就是空串，
+        文字判据静默失效，一切退回「有按钮即可订」。"""
+        assert _control_label(_LOTTERY_HTML) == "join lottery"
+
+    @pytest.mark.parametrize("html,want", [
+        (REAL_BUTTON, "book now"),
+        ("<input class='UnitSelect' value='  Book   now '>", "book now"),
+        ("<input type='hidden' name='UnitID' value='x'>", ""),
+        ("<input class='UnitSelect'>", ""),
+        ("", ""),
+    ])
+    def test_cases(self, html, want):
+        assert _control_label(html) == want
+
+
+class TestUnknownLabelWarns:
+    def _run(self, caplog, label):
+        import logging
+        row = MUTED_CELL + REAL_BUTTON.replace("Book Now", label)
+        with caplog.at_level(logging.WARNING, logger="scrapers.ourdomain"):
+            got = _extract_status(MUTED_CELL, row)
+        return got, [r.getMessage() for r in caplog.records if "没见过的文字" in r.getMessage()]
+
+    def test_unseen_label_is_allowed_and_logged(self, caplog):
+        """Join Lottery 当初就是一个没见过的文字被默默当成了 Book Now。"""
+        got, warned = self._run(caplog, "Reserve Your Spot")
+        assert got == "Available to book"
+        assert warned, "新文字没告警——下一个 Join Lottery 又会默默过去"
+
+    @pytest.mark.parametrize("label", ["Book Now", "Book now"])
+    def test_known_labels_do_not_warn(self, caplog, label):
+        """``Book now`` 是 OurDomain South-East 2026-09-15 实测的写法——大小写
+        不归一的话，OurDomain 每轮都会刷一条告警。"""
+        got, warned = self._run(caplog, label)
+        assert got == "Available to book"
+        assert not warned
+
+    def test_lottery_does_not_warn(self, caplog):
+        got, warned = self._run(caplog, "Join Lottery")
+        assert got == "Available in lottery"
+        assert not warned

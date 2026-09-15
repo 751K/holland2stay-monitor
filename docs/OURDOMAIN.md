@@ -165,7 +165,10 @@ GET {base}/rcLoadContent.ashx
 匹配——后者在不同主题间更为稳定。核心字段全部为空时会记录一条 WARNING，便于事后
 确认哪些主题仍需补充 label 匹配。
 
-`available_from` 自 `ApplyNowClick(...)` 的 `DD-MM-YYYY` 参数提取。
+`available_from` 自 `ApplyNowClick(...)` 的 `DD-MM-YYYY` 参数提取，**不取「Date
+Available」那一格**。两者经常不一致（OurCampus 08-27：格子 `31-8-2026`、回调
+`10-9-2026`；09-15：格子 `30-9-2026`、回调 `8-10-2026`），经确认回调里的才是
+实际入住日期。
 
 ### 3.3 单元会重复出现在多个 FP 下
 
@@ -181,11 +184,23 @@ GET {base}/rcLoadContent.ashx
 
 ## 4. 状态映射
 
-| `<span>` class 或文本 | 含义 | 映射结果 |
+> 本节原先只按状态格 `<span>` 的样式类判定，两次被生产证伪（v1.26.0 的 `muted`
+> 日期格、2026-09-15 的 `Join Lottery` 按钮）。现行判据如下，按顺序取第一条命中：
+
+| 条件 | 含义 | 映射结果 |
 |---|---|---|
-| `text-success` / `Available` | 可预订 | `Available to book` |
-| `text-warning` / 含 `wait` | 等位中 | `Available in lottery` |
-| 其它情形，或该行不存在 | 已出租 | `Occupied` |
+| 状态格 `text-warning` 或文本含 `wait` | 等位中 | `Available in lottery` |
+| 行内有未禁用的下单按钮（`UnitSelect` / `ApplyNowClick`），**按钮文字**含 `lottery` / `loting` / `loterij` | 抽签，点下去是进池子 | `Available in lottery` |
+| 状态格 `text-success` / 文本 `Available`，或行内有未禁用的下单按钮 | 可预订 | `Available to book` |
+| 其它情形 | 订不到 | `Occupied` |
+
+按钮的**存在**决定能不能点，按钮的**文字**决定点了是什么。两者只看其一都会判错：
+`muted` 日期格 + `Book Now` 是「自该日起可订」（v1.26.0 前被判成 Occupied）；
+`muted` 日期格 + `Join Lottery` 是抽签（2026-09-15 前被判成可订）。
+
+实测过的按钮文字：OurDomain South-East `Book now`、OurCampus `Book Now` /
+`Join Lottery`。其余文字按可订放行并打 WARNING——漏报比误报贵，但新文字不能
+再默默过去（`Join Lottery` 当初就是这么过去的）。
 
 Wait List 仍计为可预订（部分用户愿意等待），这与 `Listing.is_available` 的语义
 一致。

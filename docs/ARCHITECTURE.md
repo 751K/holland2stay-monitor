@@ -1496,8 +1496,10 @@ docker exec h2s python -c "from config import get_proxy_url, probe_proxy; \
 - **OurCampus 出房频率极低。** 接入之后的最初数月，解析器所期待的单元表一次都
   没有出现；该样本此后已经出现，并被用于校准解析器（见 v1.26.0）。校准过程中
   证伪了两条原有前提：feed 并非只列出可订单元，置灰的日期单元格表示「自该日起
-  可订」而非「已出租」。`data/ourcampus_capture.txt` 逐次请求记录一行，并在解析
-  出单元或疑似解析失配时附上 HTML，可自行查阅。尚未验证的是该平台的预订流程。
+  可订」而非「已出租」。`data/ourcampus_capture.txt` 在响应变化时记录一行，并在解析
+  出单元或疑似解析失配时附上 HTML，可自行查阅。2026-09-15 又证伪一条：该楼先到
+  先得（`Book Now`）与抽签（`Join Lottery`）并存，两者只差按钮文字，判据现同时看
+  按钮是否存在与按钮文字。尚未验证的是该平台的预订流程。
 - 单机 SQLite，无水平扩展设计；`--workers=1` 用于规避写锁冲突。
 - Cloudflare 策略随时可能变更，抓取层的稳定性本质上依赖出口 IP 的信誉。
 - 自动预订仅覆盖 Holland2Stay。RENTCafe 线的代码已完整、reCAPTCHA 已对接、流程
