@@ -28,6 +28,7 @@ robots.txt 与 Cloudflare 的关系
 """
 from __future__ import annotations
 
+import json
 import os
 
 from flask import Flask, Response, redirect, request, url_for
@@ -52,6 +53,13 @@ _DISALLOW_NEEDS_AUTH = (
 #: 这类路径对匿名访客返回 200 是正常的，不要拿上面那条判据去要求它。
 _DISALLOW_SENSITIVE = (
     "/verify-email/",
+    # 分享页。**匿名可访问是有意的**（Universal Link 的落地页，见 app/routes/share.py），
+    # 但不该进搜索引擎：房源是会消失的，今天 200 的页面下个月就是 410，
+    # 索引里留一堆死页对谁都没好处。
+    #
+    # robots 拦的是**爬虫**，不拦 iMessage / Slack 那类抓 OpenGraph 的预览器——
+    # 它们不读 robots.txt，分享出去照样有缩略图。
+    "/l/",
 )
 
 #: ``/login`` **刻意不拦**：它对匿名访客返回 200，是真正的公开页面，
@@ -208,6 +216,49 @@ def social_meta() -> dict:
     }
 
 
+#: Universal Link 的应用标识：``<TeamID>.<BundleID>``。
+#:
+#: iOS 和 macOS 两个 app **共用同一个 Bundle ID**（同一条 App Store 记录下的两个
+#: 平台），所以这里只有一条。改 Team 或改 Bundle ID 时这里要跟着改，否则链接会
+#: 静默地退化成"在浏览器里打开"——Universal Link 失效时系统不报错，只是不跳。
+APPLE_APP_ID = "HGXZB3UC25.com.j.kong.FlatRadar"
+
+
+def apple_app_site_association():
+    """``/.well-known/apple-app-site-association``。
+
+    装了 FlatRadar 的人点 ``https://<host>/l/<id>``，系统据此把链接交给 app 而不是
+    浏览器；没装的人正常看到网页。这就是"分享的链接两边都能用"的全部机制。
+
+    四个硬性要求，缺一条就静默失效（系统不会报错，只是不跳转）：
+
+    1. **HTTPS，443 端口，不能有重定向。** Apple 的 CDN 抓这个文件时不跟 301/302。
+    2. **Content-Type: application/json**，且**不能带 ``.json`` 后缀**。
+    3. **不能要鉴权**。这里没挂 ``login_required``，和 ``/privacy`` 同理。
+    4. 路径模式要覆盖分享链接。这里是 ``/l/*``——**只授权这一段**，不写 ``/*``：
+       写 ``/*`` 等于把整个站点的每个链接都交给 app，用户在浏览器里点
+       ``/settings`` 也会被拽进 app 里。
+
+    另外**同时挂根路径那一份**（``/apple-app-site-association``）：新系统只查
+    ``.well-known``，老系统查根路径，两个都给最省事，文件本身一模一样。
+    """
+    body = json.dumps({
+        "applinks": {
+            "details": [{
+                "appIDs": [APPLE_APP_ID],
+                "components": [
+                    {"/": "/l/*", "comment": "Shared listing links open in the app"},
+                ],
+            }],
+        },
+    }, separators=(",", ":"))
+    resp = Response(body, mimetype="application/json")
+    # 这个文件极少变，但变了要能尽快生效（换 Team、加 target）。一小时是
+    # "别让 CDN 天天回源"和"改了不用等一天"之间的折中。
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
 def favicon_ico():
     """``/favicon.ico`` → 实际文件。
 
@@ -232,6 +283,11 @@ def register(app: Flask) -> None:
                      view_func=sitemap_xml, methods=["GET"])
     app.add_url_rule("/favicon.ico", endpoint="favicon_ico",
                      view_func=favicon_ico, methods=["GET"])
+    # 两个路径同一份内容，理由见 ``apple_app_site_association``。
+    for rule in ("/.well-known/apple-app-site-association",
+                 "/apple-app-site-association"):
+        app.add_url_rule(rule, endpoint="aasa" + rule.replace("/", "_").replace(".", "_"),
+                         view_func=apple_app_site_association, methods=["GET"])
     for rule in ("/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):
         app.add_url_rule(rule, endpoint="apple_touch_icon" + rule.replace("/", "_"),
                          view_func=apple_touch_icon, methods=["GET"])

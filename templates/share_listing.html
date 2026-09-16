@@ -1,0 +1,155 @@
+{#
+  分享落地页。路由和职责边界见 app/routes/share.py。
+
+  和 legal.html 一样不引 design.css、不继承 base.html：这是发给站外的人看的
+  单页，侧边栏和 CSRF 上下文对它是纯负担。样式规则照抄 legal.html 那一套，
+  保持两个公开页观感一致。
+
+  `_social_meta.html` 要求 include 之前先设好 social_title / social_desc ——
+  这一页尤其重要：它的全部用途就是**被贴进 iMessage / WhatsApp / Slack**，
+  那些预览卡片读的就是这两个值。
+#}
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  {% if listing %}
+    {% set headline = listing.name %}
+    {% set price = listing.price_raw %}
+    <title>{{ headline }} · FlatRadar</title>
+    {% set social_title = headline ~ (' · ' ~ price if price else '') %}
+    {% set social_desc = (listing.city ~ ' · ' if listing.city else '') ~ 'Listing tracked by FlatRadar.' %}
+  {% else %}
+    <title>Listing no longer available · FlatRadar</title>
+    {% set social_title = 'Listing no longer available · FlatRadar' %}
+    {% set social_desc = 'This listing has been taken down by the platform.' %}
+  {% endif %}
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  {% include '_social_meta.html' %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f7f7f9;
+      --surface: #ffffff;
+      --text: #0b0b0f;
+      --muted: #6b6b73;
+      --border: rgba(60,60,67,0.16);
+      --accent: #0a84ff;
+      --ok: #34c759;
+      --warn: #ff9f0a;
+      --info: #3b82f6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000000;
+        --surface: #1c1c1e;
+        --text: #ffffff;
+        --muted: #98989d;
+        --border: rgba(255,255,255,0.14);
+        --accent: #0a84ff;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+      padding: 32px 16px 56px;
+    }
+    .card {
+      max-width: 520px;
+      margin: 0 auto;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+    }
+    h1 { font-size: 22px; line-height: 1.25; margin: 0 0 4px; letter-spacing: -0.3px; }
+    .sub { color: var(--muted); font-size: 15px; margin: 0 0 18px; }
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 13px; font-weight: 600;
+      padding: 3px 10px; border-radius: 999px;
+      background: color-mix(in srgb, var(--dot) 13%, transparent);
+      color: var(--dot);
+    }
+    .pill::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--dot);
+    }
+    .pill.ok    { --dot: var(--ok); }
+    .pill.warn  { --dot: var(--warn); }
+    .pill.info  { --dot: var(--info); }
+    .pill.muted { --dot: var(--muted); }
+    dl { margin: 20px 0 0; display: grid; grid-template-columns: auto 1fr; gap: 0; }
+    dt, dd {
+      margin: 0; padding: 9px 0;
+      border-top: 1px solid var(--border);
+      font-size: 15px;
+    }
+    dt { color: var(--muted); padding-right: 16px; }
+    dd { text-align: right; font-variant-numeric: tabular-nums; }
+    .actions { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px; }
+    a.btn {
+      display: inline-block; text-decoration: none;
+      font-size: 15px; font-weight: 500;
+      padding: 9px 15px; border-radius: 9px;
+      background: rgba(127,127,127,0.12); color: var(--text);
+    }
+    a.btn.primary { background: var(--accent); color: #fff; }
+    .note { margin-top: 20px; color: var(--muted); font-size: 13px; }
+    .note a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    {% if listing %}
+      <h1>{{ listing.name }}</h1>
+      <p class="sub">
+        {{ listing.city }}{% if building and building != listing.city %} · {{ building }}{% endif %}
+      </p>
+      <span class="pill {{ tone }}">{{ listing.status }}</span>
+
+      <dl>
+        {% if listing.price_raw %}<dt>Price</dt><dd>{{ listing.price_raw }}</dd>{% endif %}
+        {% if area %}<dt>Area</dt><dd>{{ area }}</dd>{% endif %}
+        {% if room_type %}<dt>Type</dt><dd>{{ room_type }}</dd>{% endif %}
+        {% if energy %}<dt>Energy</dt><dd>{{ energy }}</dd>{% endif %}
+        {% if listing.available_from %}<dt>Available</dt><dd>{{ listing.available_from }}</dd>{% endif %}
+        <dt>Platform</dt><dd>{{ listing.source }}</dd>
+      </dl>
+
+      <div class="actions">
+        {% if listing.url %}
+          <a class="btn primary" href="{{ listing.url }}" rel="noopener nofollow">Open on {{ listing.source }}</a>
+        {% endif %}
+        <a class="btn" href="/">What is FlatRadar?</a>
+      </div>
+
+      {#
+        为什么要写这句：这一页是**镜像**，不是房源的家。平台随时会改价改状态，
+        而我们的数据有抓取间隔。让收件人知道以平台那一页为准，比让他以为
+        这里是权威要诚实。
+      #}
+      <p class="note">
+        Details come from {{ listing.source }} and can change at any time —
+        the platform page is the source of truth.
+        FlatRadar is an unofficial monitor, not affiliated with any platform.
+      </p>
+    {% else %}
+      <h1>This listing is gone</h1>
+      <p class="sub">The platform has taken it down, so there is nothing left to show.</p>
+      <div class="actions">
+        <a class="btn" href="/">What is FlatRadar?</a>
+      </div>
+      <p class="note">Listing id: <code>{{ listing_id }}</code></p>
+    {% endif %}
+  </main>
+</body>
+</html>
