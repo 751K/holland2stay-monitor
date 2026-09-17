@@ -367,3 +367,54 @@ class TestTermsPageNotices:
         with caplog.at_level(logging.INFO, logger="bookers.rentcafe"):
             _book(session_cls=S)
         assert any("does not reserve" in r.getMessage() for r in caplog.records)
+
+
+# ── 服务端消息 ───────────────────────────────────────────────────────
+
+class TestServerMessages:
+    """RENTCafe 用一段 JS 说话，不用 HTTP 状态码，正文里可能一个字都没有。
+
+    2026-09-17 OurCampus 实测：登录后重选单元被拒，整个响应 1237 字节，全部信息
+    都在 ``$.showMessage({...text:"..."})`` 里。不解析它，用户只会看到
+    「不知道为什么失败」。
+    """
+
+    #: 生产响应里原样抄来的片段。
+    REAL = (
+        '<script type="text/javascript">(function($) {$(function () {\n'
+        'DecodeFormElementsToBase64(); \n'
+        '$.showMessage({type: "error",text:"Unit is not available. '
+        'Please select another unit.",time:5000,slideTime:500,position:\'top\', '
+        "backgroundColor:'#CC3300', width:210, id:''});\n});\n})(jQuery);\n</script>"
+    )
+
+    def test_reads_the_real_message(self):
+        from bookers.rentcafe import server_messages
+        assert server_messages(self.REAL) == [
+            "Unit is not available. Please select another unit."]
+
+    def test_no_message_is_empty_not_an_error(self):
+        from bookers.rentcafe import server_messages
+        assert server_messages("<p>hello</p>") == []
+        assert server_messages("") == []
+
+    def test_deduplicates_and_decodes_entities(self):
+        from bookers.rentcafe import server_messages
+        html = '$.showMessage({type:"error",text:"It&#39;s gone"});' * 2
+        assert server_messages(html) == ["It's gone"]
+
+    def test_failure_message_quotes_the_server(self):
+        """登录后落错页时，错误消息里必须有服务端的原话。"""
+        class S(_FakeSession):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                self.applicant_html = TestServerMessages.REAL
+
+            def submit_terms(self, fields, *, move_in_date="", page="oleapplication"):
+                super().submit_terms(fields, move_in_date=move_in_date, page=page)
+                self._html = TestServerMessages.REAL
+                return self._html
+
+        r = _book(session_cls=S)
+        assert r.phase == "unknown_error"
+        assert "Unit is not available" in r.message, r.message

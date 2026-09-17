@@ -1107,6 +1107,33 @@ _TERMS_NOTICE_RE = re.compile(
 )
 
 
+#: RENTCafe 的服务端消息。它不用 HTTP 状态码说话，也不渲染成页面文字，而是回一段
+#: ``$.showMessage({type:"error",text:"…"})`` 的 JS 让前端弹出来。
+#: 2026-09-17 OurCampus 实测：登录后重选单元被拒，整个响应只有 1237 字节，正文里
+#: 没有任何可读文字，全部信息都在这段 JS 里——不解析它就只剩「不知道为什么失败」。
+_SERVER_MESSAGE_RE = re.compile(
+    r"""showMessage\(\{[^}]*?\btext\s*:\s*(['"])(?P<text>.*?)\1""",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def server_messages(html: str) -> list[str]:
+    """页面里 RENTCafe 要弹给用户看的消息，去重保序。
+
+    典型取值（实测）::
+
+        Unit is not available. Please select another unit.
+
+    调用方把它原样带进错误消息：服务端说了什么，就告诉用户什么。
+    """
+    out: list[str] = []
+    for m in _SERVER_MESSAGE_RE.finditer(html or ""):
+        text = " ".join(unescape(m.group("text")).split())
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
 def terms_page_notices(html: str) -> list[str]:
     """条款页上关于「提交之后意味着什么」的句子，去重、保序。
 
@@ -1479,15 +1506,27 @@ class OurDomainBooker(RentCafeBooker):
         )
         html = session.current_page_html()
         if parse_applicant_form(html) is None:
-            logger.info("%s 登录后不在 Applicant Info，重选一次单元", self.platform)
+            # ⚠️ 重选单元有副作用：2026-09-17 OurCampus 实测，登录后重选同一个单元，
+            # 服务端回「Unit is not available. Please select another unit.」，而同一
+            # 时刻抓取侧仍然列着这套房——**是这个动作本身把上下文弄坏了**，不是单元
+            # 没了。留着它是因为「登录后落哪儿」这一段还没查清楚（下一批房源出来时
+            # 用 tools/ourcampus_booker_probe.py --diagnose 查）；查清之前，至少要把
+            # 服务端的原话带出来，别让它表现成「不知道为什么失败」。
+            logger.info("%s 登录后不在 Applicant Info，重选一次单元（这一步可能反而"
+                        "破坏上下文，见代码注释）", self.platform)
             html = session.open_terms_for_unit(unit)
             fields = _extract_form_fields(html, "termsandotheritems")
             if fields:
                 html = session.submit_terms(fields, page="termsandotheritems")
         if parse_applicant_form(html) is None:
+            # 服务端的话优先：它会用 showMessage 说明拒绝的理由，而正文可能一个字
+            # 都没有（实测 1237 字节的响应，全部信息都在那段 JS 里）。
+            said = server_messages(html)
+            detail = ("服务端说：" + " / ".join(said) + "。") if said else ""
             raise RentCafeError(
-                f"{self.platform} 登录后没能落到 Applicant Info——这一段尚未端到端"
-                "验证过，已中止，不会在你账号下提交任何东西。请手动完成。"
+                f"{self.platform} 登录后没能落到 Applicant Info。{detail}"
+                "这一段尚未端到端验证过，已中止，不会在你账号下提交任何东西。"
+                "请手动完成。"
             )
         return html, unit
 
@@ -1511,8 +1550,8 @@ class OurDomainBooker(RentCafeBooker):
 class OurCampusBooker(OurDomainBooker):
     """OurCampus：流程与 OurDomain 相同，**只做到「开始申请」**。
 
-    **未注册进 ``BOOKER_REGISTRY``。** 注册即意味着用户够得着，而下面那个前提
-    还没验证过。
+    **已注册，但用户侧关着**：``ourcampus`` 不在 ``monitor._AUTO_BOOK_SOURCES``
+    里，所以面板上填得了凭据、不会自动跑。见下面「还差什么」。
 
     为什么只做到开始申请
     --------------------
