@@ -37,6 +37,7 @@ PLATFORM_BADGES = {
     "holland2stay": "H2S",
     "xior": "Xior",
     "ourdomain": "OurDomain",
+    "ourcampus": "OurCampus",
     "plaza": "Plaza",
 }
 
@@ -266,3 +267,18 @@ class TestAutoBookFilterComesFirst:
         css = re.sub(r"/\*.*?\*/", "", _CSS.read_text(encoding="utf-8"), flags=re.S)
         m = re.search(r"\.ab-filter\s*,\s*\.ab-platform\s*\{(.*?)\}", css, re.S)
         assert m and "var(--surface)" in m.group(1)
+
+
+def test_every_credential_field_the_parser_reads_exists_in_the_form(form_html):
+    """解析器读的名字，模板里必须真有一个同名输入框。
+
+    两边对不上是**完全静默**的：用户填了、保存了、页面不报错，库里却是空的。
+    2026-09-17 加 OurCampus 面板时，把模板里的 name 改错一个字母，所有测试仍然
+    全绿——因为持久化测试是直接 POST 字段名，绕过了渲染出来的表单。
+    """
+    src = (Path(__file__).resolve().parent.parent / "app" / "forms" / "user_form.py").read_text(
+        encoding="utf-8")
+    names = set(re.findall(r'["\'](AUTO_BOOK_[A-Z0-9_]*(?:EMAIL|PASSWORD|USERNAME))["\']', src))
+    assert names, "没在 user_form.py 里找到任何凭据字段名，这条守卫失效了"
+    missing = sorted(n for n in names if f'name="{n}"' not in form_html)
+    assert not missing, f"解析器读这些字段，但表单里没有同名输入框: {missing}"

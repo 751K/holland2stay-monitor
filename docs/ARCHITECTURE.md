@@ -1439,7 +1439,7 @@ sequenceDiagram
   便没有 Xior 那样的重选入口。代码的处理方式为：核对落地页是否为 Applicant
   Info，若否则重新提交一次 Book now，仍不匹配则明确报错中止，绝不携带错位的
   上下文继续执行。验证该环节需要一个真实的 OurDomain 账号。
-- **OurCampus**：`OurCampusBooker` 已写好但**未注册**。流程与 OurDomain 相同，
+- **OurCampus**：`OurCampusBooker` 已注册、面板上有凭据入口，但**不在 `_AUTO_BOOK_SOURCES` 里**（用户侧关闭）。流程与 OurDomain 相同，
   止于 Applicant Info（服务端已建出申请，不传证件、不保存）。已对照真实响应的
   部分：单元表只认 POST + `floorPlans[]`、onclick 实参为双引号（旧解析器只认
   单引号，对 OC 每一行都解析不出参数）、条款页 reCAPTCHA 与 Xior 逐字相同、

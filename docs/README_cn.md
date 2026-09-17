@@ -348,7 +348,7 @@ Xior、OurDomain、OurCampus 运行的是同一套 RENTCafe 后端，共用一�
 |---|---|---|
 | Xior | 已推进至申请表、保存草稿并代为上传证件（2026-08-03，真实账号） | 代传证件后表单能否正常保存尚未确认。此外 Xior 的草稿**并不锁定房源**——它比 Holland2Stay 提前一步终止，下一页即需填写 IBAN/SWIFT |
 | OurDomain | 入口段已对真实站点走通（2026-08-04）：floorplans → 可用单元 → 条款页 POST，18 个字段全部落位 | 登录之后的环节全部未验证。该流程**不含选房页**，一旦脱离流程便没有重选入口——代码的处理方式为明确报错中止，绝不携带错位的上下文继续执行。验证需要一个真实的 OurDomain 账号 |
-| OurCampus | `OurCampusBooker` 已写好但**未注册**：与 OurDomain 同一套流程，止于 Applicant Info（已开始申请，不保存任何内容）。单元表 POST、条款页 reCAPTCHA、Book Now 与 Join Lottery 的区分均已对照真实响应（2026-09-15） | 尚未端到端跑过。「开始申请能否占住单元」这一前提也从未有人观察过 |
+| OurCampus | `OurCampusBooker` 已注册、面板上可填凭据，但**用户侧关闭**（不在 `_AUTO_BOOK_SOURCES`）。真实账号实测：选中单元、条款页、Start Application（v3 一次过）、登录均已跑通 | 登录之后落到 Applicant Info 这一段没通。另外「开始申请能占住单元」已被证伪：站点写明提交只进抽签池、不锁房 |
 | Magis | 无 | 预订流程尚未侦察 |
 
 > 线上演示环境对普通用户关闭了自动预订。如有需要请邮件联系，或[自行部署](#快速开始)。

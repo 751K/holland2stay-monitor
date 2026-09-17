@@ -1559,11 +1559,21 @@ class OurCampusBooker(OurDomainBooker):
     ProspectId）有两个好处：碰不到 Xior 实测过的两道硬坎——Save 前必须传证件、
     再往后要填 IBAN——也就不需要申请人档案、背景调查授权和证件。其余交给用户。
 
-    **没验证过的前提：开始申请能占住单元。** ``docs/XIOR.md`` §8.7 的「锁定发生
-    在付款那一步」是从付款页文字推的，反方向（开始申请后单元是否从匿名列表消失）
-    也没人观察过。验证方法：OC 放房时用户手动点到 Applicant Info 停下，对照
-    ``data/ourcampus_capture.txt`` 的时间线看该单元何时消失、会不会再出现；再换
-    一台设备登录看这份申请能否续填。两条都成立再注册。
+    **「开始申请能占住单元」这个前提已经被证伪**（2026-09-17）：站点自己在条款页
+    上写着 ``submitting this application enters you into the lottery for this unit;
+    it does not reserve the apartment``，而且 OC 2026-09 起 Furnished 全部改为抽签。
+    所以这个 booker 现在的意义不是「锁房」，只是「替你把申请开到填表页」。
+
+    还差什么（2026-09-17 用真实账号实测）
+    ------------------------------------
+    通了：建会话、选中单元、条款页、Start Application（**v3 一次过，不回退 v2**，
+    约 15 秒，比 Xior 便宜得多）、登录（凭据错时 16 秒内报 ``auth_failed``）。
+
+    没通：**登录之后落到 Applicant Info**。登录成功后当前页上解析不出申请表，于是
+    走兜底「重选单元」，服务端回 ``Unit is not available. Please select another
+    unit.``——而同一时刻抓取侧仍列着这套房，**是这个兜底动作本身把上下文弄坏的**。
+    下一批房出来时用 ``tools/ourcampus_booker_probe.py --diagnose`` 把登录后的页面
+    摊开（疑似是 XIOR.md §8.7 说的外壳页，内容要按 ProspectId 走 rcLoadContent 拉）。
 
     与 OurDomain 的差别（均有实证）
     -------------------------------

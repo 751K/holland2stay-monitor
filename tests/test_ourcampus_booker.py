@@ -280,14 +280,40 @@ class TestUnitTable403RotatesFingerprint:
 
 # ── 未注册 ───────────────────────────────────────────────────────────
 
-def test_not_registered_until_the_hold_is_verified():
-    """注册 = 用户够得着。「开始申请能占住单元」没实测之前不注册。
-
-    这条挂了说明有人注册了它——请先确认 bookers/rentcafe.py 里 OurCampusBooker
-    说明的两项验证已经做过，再改这条测试、补面板入口。
-    """
+def test_registered_so_the_panel_entry_is_reachable():
+    """2026-09-17 起注册：面板上有 OurCampus 的凭据入口，二者必须成对出现
+    （tests/test_user_form_autobook_layout.py 按 registry 数面板）。"""
     from bookers import BOOKER_REGISTRY
-    assert "ourcampus" not in BOOKER_REGISTRY
+    assert BOOKER_REGISTRY["ourcampus"] is OurCampusBooker
+
+
+def test_not_in_auto_book_sources_until_the_flow_works():
+    """注册 ≠ 开放。用户侧那道闸是 _AUTO_BOOK_SOURCES，OC 不在里面。
+
+    原先挡着它的是「开始申请能不能占住单元」——那个问题已经有答案：站点自己写明
+    提交只进抽签池、不锁房。现在挡着它的是**登录之后落到 Applicant Info 这一段还
+    没走通**（实测登录成功，但兜底的「重选单元」会让服务端回 Unit is not
+    available）。这条挂了说明有人开放了它——先确认那一段真跑通过。
+    """
+    from monitor import _AUTO_BOOK_SOURCES
+    assert "ourcampus" not in _AUTO_BOOK_SOURCES
+
+
+def test_credentials_typed_in_the_panel_are_persisted(admin_client):
+    """模板有输入框、表单不解析它，是一种完全静默的失败：填了、存了、页面不报错，
+    但库里是空的，验证时还以为是登录逻辑坏了。"""
+    r = admin_client.post("/users/new", data={
+        "name": "oc-ui", "csrf_token": "test_csrf",
+        "AUTO_BOOK_OURCAMPUS_EMAIL": "me@oc.nl",
+        "AUTO_BOOK_OURCAMPUS_PASSWORD": "pw-oc",
+    }, headers={"X-CSRF-Token": "test_csrf"}, follow_redirects=True)
+    assert r.status_code == 200
+
+    from users import load_users
+    u = next((x for x in load_users() if x.name == "oc-ui"), None)
+    assert u is not None
+    assert u.auto_book.ourcampus_email == "me@oc.nl"
+    assert u.auto_book.ourcampus_password == "pw-oc"
 
 
 # ── 凭据存取 ─────────────────────────────────────────────────────────
@@ -312,19 +338,20 @@ class TestCredentialStorage:
         ab = _ab_from_dict({"ourcampus_email": "oc@x", "ourcampus_password": encrypt("pw")})
         assert (ab.ourcampus_email, ab.ourcampus_password) == ("oc@x", "pw")
 
-    def test_saving_the_panel_form_keeps_them(self, admin_client):
-        """面板还没有 OC 输入框。表单每次保存都重建 AutoBookConfig——不显式保留的话，
-        管理员随手改一次别的设置，OC 凭据就被清成空串。"""
+    def test_blank_password_keeps_the_stored_one(self, admin_client):
+        """密码框留空 = 不改密码（和其余平台一致）。每次保存都要重打一遍太荒谬，
+        而清成空串会让 booker 悄无声息地失去凭据。"""
         from users import load_users, save_users
 
-        users = load_users()
         u = UserConfig(name="oc-keep")
         u.auto_book = AutoBookConfig(ourcampus_email="oc@x", ourcampus_password="pw")
-        save_users(users + [u])
+        save_users(load_users() + [u])
         uid = next(x.id for x in load_users() if x.name == "oc-keep")
 
         r = admin_client.post(f"/users/{uid}", data={
             "name": "oc-keep", "csrf_token": "test_csrf",
+            "AUTO_BOOK_OURCAMPUS_EMAIL": "oc@x",
+            "AUTO_BOOK_OURCAMPUS_PASSWORD": "",
         }, headers={"X-CSRF-Token": "test_csrf"}, follow_redirects=True)
         assert r.status_code == 200
 

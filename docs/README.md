@@ -385,7 +385,7 @@ against a live site. The feature is still **switched off**.
 |---|---|---|
 | Xior | Applicant form, draft saved, ID document uploaded (2026-08-03, real account) | Whether the form saves cleanly once the system supplies the document. And a Xior draft **does not hold the unit** — it stops a step earlier than Holland2Stay, because the next page asks for IBAN/SWIFT |
 | OurDomain | Entry leg verified against the live site (2026-08-04): floorplans → available units → terms POST, all 18 form fields landing | Everything after login. This flow has no unit-picker page, so falling out of it has no recovery path — the code aborts loudly rather than continuing with a mismatched context. Needs a real OurDomain account |
-| OurCampus | `OurCampusBooker` written, **not registered**: same flow as OurDomain, stops at Applicant Info (application started, nothing saved). Unit table POST, terms-page reCAPTCHA and the Book Now / Join Lottery split checked against live responses (2026-09-15) | Nothing run end-to-end yet. And the premise — that starting an application holds the unit — has never been observed either way |
+| OurCampus | `OurCampusBooker` registered and credentials can be entered in the panel, but **off for users** (not in `_AUTO_BOOK_SOURCES`). Verified with a real account: unit selection, terms page, Start Application (v3 accepted first try) and login all work | Landing on Applicant Info after login does not work yet. The premise that starting an application holds the unit is disproved: the site states it only enters you into the lottery |
 | Magis | Nothing | Booking flow has never been scouted |
 
 > The hosted demo has auto-booking disabled for user accounts. Email us or

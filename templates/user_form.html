@@ -657,6 +657,22 @@
 
       <div class="ab-platform">
         <div class="ab-platform-head">
+          <span class="badge badge-neutral">OurCampus</span>
+          <span class="ab-platform-name">{{ _('user_form_ab_ourcampus') }}</span>
+          <span class="badge badge-warning text-xs">{{ _('badge_wip') }}</span>
+        </div>
+        <!-- ── OurCampus（RENTCafe，与 OurDomain 同一套流程，另一个租户）──
+             填了凭据也不会自动跑：ourcampus 不在 monitor._AUTO_BOOK_SOURCES 里。
+             入口先放出来，是为了验证时不必每次在终端里手打账号。 -->
+        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
+          <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_OURCAMPUS_EMAIL" value="{{ ab.ourcampus_email if ab else '' }}"></div>
+          <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_OURCAMPUS_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.ourcampus_password else '' }}" autocomplete="new-password"></div>
+        </div>
+
+      </div>
+
+      <div class="ab-platform">
+        <div class="ab-platform-head">
           <span class="badge badge-neutral">Plaza</span>
           <span class="ab-platform-name">{{ _('user_form_ab_plaza') }}</span>
         </div>

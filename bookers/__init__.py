@@ -16,7 +16,7 @@ holland2stay     HollandStayScraper   HollandStayBooker   完整自动 checkout�
 xior             XiorScraper          XiorBooker          半自动到「存草稿」，未开
 ourdomain        OurDomainScraper     OurDomainBooker     半自动到「存草稿」，未开
 plaza            PlazaScraper         PlazaBooker         已开，用户侧默认关
-ourcampus        OurCampusScraper     OurCampusBooker     写好**未注册**，止于开始申请
+ourcampus        OurCampusScraper     OurCampusBooker     已注册，**未开**，止于开始申请
 magis            MagisScraper         （无）              没探过预订流程
 studentexperience StudentExperience…  （无）              没探过预订流程
 ===============  ===================  ==================  =========================
@@ -34,11 +34,12 @@ studentexperience StudentExperience…  （无）              没探过预订�
 要在面板里显式打开。多这一道是因为 Plaza 的应征一次 POST 就落地，中间没有付款或
 存草稿那样的人工关卡。见 ``docs/PLAZA.md`` §6。
 
-**OurCampus 是另一种「未开」：连注册都没有。** ``OurCampusBooker`` 在
-``bookers/rentcafe.py`` 里写好了，但注册即意味着面板上够得着，而它的前提——
-「开始申请能占住单元」——还没实测。验证方法与步骤见该类的说明和
-``tools/ourcampus_booker_probe.py``；``tests/test_ourcampus_booker.py`` 有一条测试
-专门断言它未注册，注册前先回去做完那两项验证。
+**OurCampus 未开的理由又不同。** 它 2026-09-17 起已注册、面板上也有入口（填得了
+凭据），但不在 ``_AUTO_BOOK_SOURCES`` 里，所以用户侧这条路是关的。原先不注册是因为
+「开始申请能占住单元」没实测——那个问题已经有答案：**站点自己写明提交只进抽签池、
+不锁房**，OC 2026-09 起全站抽签。现在挡着它的是另一件事：**登录之后落到 Applicant
+Info 这一段还没走通**（实测登录成功，但兜底的「重选单元」会让服务端回
+``Unit is not available``）。查法见 ``tools/ourcampus_booker_probe.py --diagnose``。
 
 **改这张表时同步改代码**：它上一次和现实脱节是因为 ``OurDomainBooker`` 加进
 ``BOOKER_REGISTRY`` 时没人回来改这段，于是文档写着「（无）」而代码里明明有
@@ -63,7 +64,7 @@ from booker import BookingResult
 from .base import AbstractBooker, BookingRequest
 from .holland2stay import HollandStayBooker
 from .plaza import PlazaBooker
-from .rentcafe import XiorBooker, OurDomainBooker
+from .rentcafe import XiorBooker, OurCampusBooker, OurDomainBooker
 
 
 BOOKER_REGISTRY: dict[str, type[AbstractBooker]] = {
@@ -71,6 +72,7 @@ BOOKER_REGISTRY: dict[str, type[AbstractBooker]] = {
         HollandStayBooker,
         XiorBooker,
         OurDomainBooker,
+        OurCampusBooker,
         PlazaBooker,
     ]
 }

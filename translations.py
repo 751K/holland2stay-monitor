@@ -587,6 +587,7 @@ TRANSLATIONS = {
     "user_form_ab_h2s":       {"zh": "Holland2Stay 账号",     "en": "Holland2Stay account"},
     "user_form_ab_xior":      {"zh": "Xior 账号",             "en": "Xior account"},
     "user_form_ab_ourdomain": {"zh": "OurDomain 账号",        "en": "OurDomain account"},
+    "user_form_ab_ourcampus": {"zh": "OurCampus 账号",        "en": "OurCampus account"},
     "user_form_buildings":  {"zh": "楼盘",                   "en": "Building"},
     "user_form_ab_plaza":   {"zh": "Plaza 账号",             "en": "Plaza account"},
     # 用「申请」不用「注册」：后者会被读成「系统替我注册 Plaza 账号」，而系统不做
