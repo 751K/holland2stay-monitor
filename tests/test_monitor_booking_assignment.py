@@ -217,3 +217,46 @@ def test_run_once_plaza_application_does_not_mark_listing_reserved(tmp_path):
 
     assert row["status"] == "Available to book"
     assert row["status_is_inferred"] == 0
+
+
+def test_run_once_plaza_applies_to_all_matching_listings_without_h2s_prewarm(tmp_path):
+    user = _user("u1", "Alice", "a@example.test", source="plaza")
+    notifier = _Notifier()
+    storage = Storage(tmp_path / "test.db", timezone_str="UTC")
+    listings = [
+        _listing("plaza-1", source="plaza"),
+        _listing("plaza-2", source="plaza"),
+    ]
+    dispatched: list[str] = []
+    prewarm_calls: list[tuple] = []
+
+    def fake_dispatch(request):
+        dispatched.append(request.listing.id)
+        return BookingResult(
+            request.listing,
+            success=True,
+            message="已成功应征这条房源。",
+            pay_url=request.listing.url,
+            phase="success",
+        )
+
+    def fake_prewarm(*args, **kwargs):
+        prewarm_calls.append((args, kwargs))
+        return None
+
+    async def go():
+        with patch("monitor.dispatch_scrape_tasks", return_value=listings), \
+             patch("mcore.prewarm.create_prewarmed_session", side_effect=fake_prewarm), \
+             patch("mcore.booking.dispatch_book", side_effect=fake_dispatch):
+            await run_once(_cfg(tmp_path), storage, [(user, notifier)], dry_run=False)
+
+    try:
+        asyncio.run(go())
+    finally:
+        storage.close()
+
+    assert set(dispatched) == {"plaza-1", "plaza-2"}
+    assert len(dispatched) == 2
+    assert prewarm_calls == []
+    assert set(notifier.booking_success) == {"plaza-1", "plaza-2"}
+    assert len(notifier.booking_success) == 2

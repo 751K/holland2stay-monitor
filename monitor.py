@@ -816,8 +816,12 @@ def _task_labels(tasks) -> list[str]:
 
 def _listing_booking_key(listing: Listing) -> tuple[str, str]:
     """自动预订去重键：同 source + id 的房源每轮只允许一个用户尝试。"""
-    source = (getattr(listing, "source", "") or "holland2stay").strip().lower()
-    return source, str(listing.id)
+    return _listing_source(listing), str(listing.id)
+
+
+def _listing_source(listing: Listing) -> str:
+    """返回 listing 的规范化 source；旧数据缺 source 时按 H2S 处理。"""
+    return (getattr(listing, "source", "") or "holland2stay").strip().lower()
 
 
 def _assign_auto_book_candidates(
@@ -1699,14 +1703,16 @@ def _submit_bookings(
     booking_deadline: float,
     storage: "Storage | None" = None,
 ) -> list[tuple]:
-    """把每个用户的候选 book_with_fallback() 立即提交线程池（快速下单通道）。
+    """把每个用户的候选立即提交线程池（快速下单通道）。
 
-    预订请求在发出通知之前就进入 Holland2Stay 服务器（节省 1-3 秒）。
+    H2S 保持「面积最大优先，只有 race_lost 才回退」的语义；Plaza 则每个候选
+    都单独提交一次，因为 Plaza 的成功是「应征已提交」，不代表房源已被抢走。
+    预订/应征请求在发出通知之前就进入对应平台（节省 1-3 秒）。
 
     Returns
     -------
     ab_futures: [(user, notifier, sorted_candidates, Future, prewarmed), ...]
-      sorted_candidates 按面积降序；fallback 逻辑在线程内按序尝试。
+      H2S 的 sorted_candidates 按面积降序；Plaza 每个 tuple 只包含一套房源。
     """
     ab_futures: list[tuple] = []
 
@@ -1714,79 +1720,124 @@ def _submit_bookings(
         candidates = ab_candidates.get(user.id, [])
         if not (user.auto_book.enabled and candidates):
             continue
-        suppressed = _h2s_login_suppressed_remaining()
-        if suppressed > 0:
-            logger.warning(
-                "[%s] 跳过 H2S 自动预订：登录/预订 403 抑制窗口仍剩 %d 秒",
-                user.name,
-                suppressed,
+
+        # Plaza 是申请制：一次申请成功只表示这套申请已提交，不能像 H2S 那样
+        # 把成功当作「本用户本轮已经抢到房」，否则 book_with_fallback() 会在第一套
+        # 成功后直接 return，后面的合格房源永远不会提交。
+        plaza_candidates = sorted(
+            [c for c in candidates if _listing_source(c) == "plaza"],
+            key=area_key,
+            reverse=True,
+        )
+        for plaza_listing in plaza_candidates:
+            if plaza_listing.id in status_transition:
+                old_s, new_s = status_transition[plaza_listing.id]
+                logger.info(
+                    "[%s] 🚀 Plaza 快速应征 (%s → %s)，提交到 executor: %s",
+                    user.name, old_s, new_s, plaza_listing.name,
+                )
+            else:
+                logger.info(
+                    "[%s] 🚀 Plaza 自动应征（全部符合条件的房源），提交到 executor: %s",
+                    user.name, plaza_listing.name,
+                )
+            f = loop.run_in_executor(
+                None,
+                lambda c=plaza_listing, u=user:
+                book_with_fallback([c], u, booking_deadline, prewarmed=None),
             )
+            ab_futures.append((user, notifier, [plaza_listing], f, None))
+
+        # Plaza 之外的平台仍使用原来的「主候选 + race_lost 回退」策略。这样
+        # H2S、Xior、OurCampus、OurDomain 的行为都保持不变；但只有 H2S 候选会
+        # 消费 prewarm、触发 403 抑制判断或复用 H2S session。
+        sequential_candidates = sorted(
+            [c for c in candidates if _listing_source(c) != "plaza"],
+            key=area_key,
+            reverse=True,
+        )
+        if not sequential_candidates:
             continue
 
-        # 取出该用户的预登录：优先命中缓存（同步），其次取已完成的刷新结果。
-        # 未完成的 future 不 await — 让 try_book() 走正常登录 fallback，
-        # 避免预登录网络延迟削弱"快速下单通道"。
-        prewarmed: PrewarmedSession | None = prewarm_cached.pop(user.id, None)
-        cache_hit = prewarmed is not None
-        if prewarmed is None:
-            pre_fut = prewarm_futures.pop(user.id, None)
-            if pre_fut is not None and pre_fut.done():
-                try:
-                    prewarmed = pre_fut.result()
-                except BlockedError as e:
-                    # 曾经写的是 BookingBlockedError —— 一个没人 raise 的类，
-                    # 于是这条分支从未执行过：prewarm 上抛的一直是裸
-                    # BlockedError，每次都落进下面的 except Exception，
-                    # CF 屏蔽被静默降级成「回退正常登录」，抑制窗口形同虚设。
-                    #
-                    # OperationNotAllowedError 刻意不在此列（它不继承
-                    # BlockedError）：那种 403 抑制多久都不会好，
-                    # 落到下面返回 None、由 try_book 报 operation_rejected 才对。
-                    #
-                    # ``storage`` 曾经不是参数——这一行引用的是个不存在的名字，
-                    # 于是**这条分支一执行就 NameError**：异常穿透 run_once，
-                    # 本轮通知全丢，而抑制窗口一秒都没开。上一条注释说的「这条
-                    # 分支从未执行过」正好掩盖了它：修好 BlockedError 的类型之后，
-                    # 它才第一次真的跑到这里。
-                    _mark_h2s_login_blocked(e, storage)
-                    prewarmed = None
-                except Exception:
-                    prewarmed = None
-                if prewarmed:
-                    prewarm_cache.set(user.id, prewarmed)
-            elif pre_fut is not None:
-                # 仍在运行中，放回 futures 让 _stash_pending_prewarms 收尾
-                prewarm_futures[user.id] = pre_fut
+        h2s_candidates = [
+            c for c in sequential_candidates
+            if _listing_source(c) == "holland2stay"
+        ]
+        prewarmed: PrewarmedSession | None = None
+        cache_hit = False
+        if h2s_candidates:
+            suppressed = _h2s_login_suppressed_remaining()
+            if suppressed > 0:
+                logger.warning(
+                    "[%s] 跳过 H2S 自动预订：登录/预订 403 抑制窗口仍剩 %d 秒",
+                    user.name,
+                    suppressed,
+                )
+                continue
 
-        suppressed = _h2s_login_suppressed_remaining()
-        if suppressed > 0:
-            logger.warning(
-                "[%s] 跳过 H2S 自动预订：prewarm 已确认 403，登录抑制窗口剩 %d 秒",
-                user.name,
-                suppressed,
-            )
-            continue
+            # 取出该用户的预登录：优先命中缓存（同步），其次取已完成的刷新结果。
+            # 未完成的 future 不 await — 让 try_book() 走正常登录 fallback，
+            # 避免预登录网络延迟削弱"快速下单通道"。
+            prewarmed = prewarm_cached.pop(user.id, None)
+            cache_hit = prewarmed is not None
+            if prewarmed is None:
+                pre_fut = prewarm_futures.pop(user.id, None)
+                if pre_fut is not None and pre_fut.done():
+                    try:
+                        prewarmed = pre_fut.result()
+                    except BlockedError as e:
+                        # 曾经写的是 BookingBlockedError —— 一个没人 raise 的类，
+                        # 于是这条分支从未执行过：prewarm 上抛的一直是裸
+                        # BlockedError，每次都落进下面的 except Exception，
+                        # CF 屏蔽被静默降级成「回退正常登录」，抑制窗口形同虚设。
+                        #
+                        # OperationNotAllowedError 刻意不在此列（它不继承
+                        # BlockedError）：那种 403 抑制多久都不会好，
+                        # 落到下面返回 None、由 try_book 报 operation_rejected 才对。
+                        #
+                        # ``storage`` 曾经不是参数——这一行引用的是个不存在的名字，
+                        # 于是**这条分支一执行就 NameError**：异常穿透 run_once，
+                        # 本轮通知全丢，而抑制窗口一秒都没开。上一条注释说的「这条
+                        # 分支从未执行过」正好掩盖了它：修好 BlockedError 的类型之后，
+                        # 它才第一次真的跑到这里。
+                        _mark_h2s_login_blocked(e, storage)
+                        prewarmed = None
+                    except Exception:
+                        prewarmed = None
+                    if prewarmed:
+                        prewarm_cache.set(user.id, prewarmed)
+                elif pre_fut is not None:
+                    # 仍在运行中，放回 futures 让 _stash_pending_prewarms 收尾
+                    prewarm_futures[user.id] = pre_fut
 
-        if prewarmed:
-            age = time.monotonic() - prewarmed.created_at
-            remaining = prewarmed.token_expiry - time.monotonic()
-            logger.info(
-                "[%s] ✅ 复用 prewarm（%s，已 %.0fs，剩余 %.0f 分钟）",
-                user.name, "缓存命中" if cache_hit else "新刷新",
-                age, remaining / 60,
-            )
-        else:
-            logger.info(
-                "[%s] ⚠️  预登录未成功，下单时回退到正常登录路径",
-                user.name,
-            )
+            suppressed = _h2s_login_suppressed_remaining()
+            if suppressed > 0:
+                logger.warning(
+                    "[%s] 跳过 H2S 自动预订：prewarm 已确认 403，登录抑制窗口剩 %d 秒",
+                    user.name,
+                    suppressed,
+                )
+                continue
 
-        sorted_cands = sorted(candidates, key=area_key, reverse=True)
-        primary = sorted_cands[0]
-        if len(sorted_cands) > 1:
+            if prewarmed:
+                age = time.monotonic() - prewarmed.created_at
+                remaining = prewarmed.token_expiry - time.monotonic()
+                logger.info(
+                    "[%s] ✅ 复用 prewarm（%s，已 %.0fs，剩余 %.0f 分钟）",
+                    user.name, "缓存命中" if cache_hit else "新刷新",
+                    age, remaining / 60,
+                )
+            else:
+                logger.info(
+                    "[%s] ⚠️  预登录未成功，下单时回退到正常登录路径",
+                    user.name,
+                )
+
+        primary = sequential_candidates[0]
+        if len(sequential_candidates) > 1:
             logger.info(
                 "[%s] 自动预订候选 %d 套（含 %d 套备选），优先面积最大: %s (%.1f m²)",
-                user.name, len(sorted_cands), len(sorted_cands) - 1,
+                user.name, len(sequential_candidates), len(sequential_candidates) - 1,
                 primary.name, area_key(primary),
             )
         if primary.id in status_transition:
@@ -1802,10 +1853,10 @@ def _submit_bookings(
             )
         f = loop.run_in_executor(
             None,
-            lambda cs=sorted_cands, u=user, pw=prewarmed:
+            lambda cs=sequential_candidates, u=user, pw=prewarmed:
             book_with_fallback(cs, u, booking_deadline, prewarmed=pw),
         )
-        ab_futures.append((user, notifier, sorted_cands, f, prewarmed))
+        ab_futures.append((user, notifier, sequential_candidates, f, prewarmed))
 
     return ab_futures
 
@@ -3069,7 +3120,8 @@ async def run_once(
             new_listings, status_changes, fresh, user_notifiers, storage,
         )
         candidate_user_ids = {
-            uid for uid, candidates in ab_candidates.items() if candidates
+            uid for uid, candidates in ab_candidates.items()
+            if any(_listing_source(listing) == "holland2stay" for listing in candidates)
         }
         _heartbeat_warm_browser(user_notifiers)
         _start_prewarm_for_candidates(candidate_user_ids)
