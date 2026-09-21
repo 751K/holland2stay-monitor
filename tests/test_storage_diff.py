@@ -254,12 +254,15 @@ class TestMarkStaleListings:
 
 
 class TestBookingHoldStatus:
-    def test_booking_success_marks_listing_reserved(self, temp_db):
-        temp_db.diff([_l("a", status="Available to book")])
+    @pytest.mark.parametrize(
+        "source", ["holland2stay", "xior", "ourcampus", "ourdomain"]
+    )
+    def test_booking_success_marks_listing_reserved(self, temp_db, source):
+        temp_db.diff([_l(f"{source}-a", status="Available to book", source=source)])
 
-        assert temp_db.mark_listing_reserved_after_booking("a") is True
+        assert temp_db.mark_listing_reserved_after_booking(f"{source}-a") is True
 
-        row = temp_db.get_listing("a")
+        row = temp_db.get_listing(f"{source}-a")
         assert row["status"] == "Reserved"
         assert row["last_status"] == "Reserved"
         assert row["status_is_inferred"] == 1
@@ -295,6 +298,36 @@ class TestBookingHoldStatus:
         assert row["status"] == "Available to book"
         assert row["status_is_inferred"] == 0
         assert row["status_hold_until"] == ""
+
+    def test_plaza_application_does_not_mark_listing_reserved(self, temp_db):
+        """Plaza 的成功是应征成功，不是平台已把房源保留给用户。"""
+        temp_db.diff([_l("plaza-1", source="plaza")])
+
+        assert temp_db.mark_listing_reserved_after_booking("plaza-1") is False
+
+        row = temp_db.get_listing("plaza-1")
+        assert row["status"] == "Available to book"
+        assert row["status_is_inferred"] == 0
+
+    def test_plaza_does_not_keep_a_previous_booking_hold(self, temp_db):
+        """修复前已误标的 Plaza 房源，下一次真实 feed 应立即恢复。"""
+        temp_db.diff([_l("plaza-2", source="plaza")])
+        hold_until = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        with temp_db.conn:
+            temp_db.conn.execute(
+                """UPDATE listings
+                   SET status='Reserved', last_status='Reserved',
+                       status_is_inferred=1, status_hold_until=?
+                   WHERE id=?""",
+                (hold_until, "plaza-2"),
+            )
+
+        _, changes = temp_db.diff([_l("plaza-2", source="plaza")])
+
+        assert changes and changes[0][1:] == ("Reserved", "Available to book")
+        row = temp_db.get_listing("plaza-2")
+        assert row["status"] == "Available to book"
+        assert row["status_is_inferred"] == 0
 
 
 # ─── 幂等性 & 原子性 ─────────────────────────────────────────────

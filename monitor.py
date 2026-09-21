@@ -63,7 +63,7 @@ from dotenv import load_dotenv
 from booker import PrewarmedSession
 from config import (DATA_DIR, ENV_PATH, get_proxy_url, is_personal_proxy_active,
                     is_proxy_native_fallback_active, load_config)
-from models import STATUS_AVAILABLE
+from models import BOOKING_HOLD_SOURCES, STATUS_AVAILABLE
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.backoff import PersistedBackoff
 from mcore.circuit import SourceCircuits
@@ -2123,11 +2123,14 @@ async def _process_booking_results(
         elif result.phase == "operation_rejected":
             rejected_in_round.append((user, notifier, result.message, booked_listing))
         elif result.success:
-            if storage.mark_listing_reserved_after_booking(booked_listing.id):
-                logger.info(
-                    "[%s] 已将房源本地状态标记为 Reserved（booking hold）: %s",
-                    user.name, booked_listing.name,
-                )
+            # H2S / Xior / OurCampus / OurDomain 的成功结果表示进入占房窗口；
+            # Plaza 的成功结果只表示应征已提交/已存在，平台仍要走筛选和分配流程。
+            if (booked_listing.source or "").strip().lower() in BOOKING_HOLD_SOURCES:
+                if storage.mark_listing_reserved_after_booking(booked_listing.id):
+                    logger.info(
+                        "[%s] 已将房源本地状态标记为 Reserved（booking hold）: %s",
+                        user.name, booked_listing.name,
+                    )
             sent = await notifier.send_booking_success(
                 booked_listing, result.message, result.pay_url, result.contract_start_date
             )

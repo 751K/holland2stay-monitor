@@ -14,7 +14,7 @@ from storage import Storage
 from users import UserConfig
 
 
-def _listing(lid: str = "L-1") -> Listing:
+def _listing(lid: str = "L-1", source: str = "holland2stay") -> Listing:
     return Listing(
         id=lid,
         name=f"Listing {lid}",
@@ -24,26 +24,31 @@ def _listing(lid: str = "L-1") -> Listing:
         features=[],
         url=f"https://example.test/{lid}",
         city="E",
-        source="holland2stay",
+        source=source,
         sku=f"SKU-{lid}",
         contract_id=42,
         contract_start_date="2030-01-01",
     )
 
 
-def _user(uid: str, name: str, email: str) -> UserConfig:
+def _user(uid: str, name: str, email: str, source: str = "holland2stay") -> UserConfig:
+    auto_book = AutoBookConfig(
+        enabled=True,
+        email=email,
+        password="pw",
+        dry_run=False,
+    )
+    if source == "plaza":
+        auto_book.plaza_enabled = True
+        auto_book.plaza_username = "plaza-user"
+        auto_book.plaza_password = "pw"
     return UserConfig(
         id=uid,
         name=name,
         enabled=True,
         notifications_enabled=True,
         notification_channels=[],
-        auto_book=AutoBookConfig(
-            enabled=True,
-            email=email,
-            password="pw",
-            dry_run=False,
-        ),
+        auto_book=auto_book,
     )
 
 
@@ -181,3 +186,34 @@ def test_run_once_web_booking_notification_is_scoped_to_assigned_user(tmp_path):
     booking_rows = [r for r in rows if r["type"] == "booking"]
     assert len(booking_rows) == 1
     assert booking_rows[0]["user_id"] == "u1"
+
+
+def test_run_once_plaza_application_does_not_mark_listing_reserved(tmp_path):
+    user = _user("u1", "Alice", "a@example.test", source="plaza")
+    notifier = _Notifier()
+    storage = Storage(tmp_path / "test.db", timezone_str="UTC")
+    listing = _listing("plaza-application", source="plaza")
+
+    def fake_dispatch(request):
+        return BookingResult(
+            request.listing,
+            success=True,
+            message="已成功应征这条房源。",
+            pay_url=request.listing.url,
+            phase="success",
+        )
+
+    async def go():
+        with patch("monitor.dispatch_scrape_tasks", return_value=[listing]), \
+             patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
+             patch("mcore.booking.dispatch_book", side_effect=fake_dispatch):
+            await run_once(_cfg(tmp_path), storage, [(user, notifier)], dry_run=False)
+
+    try:
+        asyncio.run(go())
+        row = storage.get_listing(listing.id)
+    finally:
+        storage.close()
+
+    assert row["status"] == "Available to book"
+    assert row["status_is_inferred"] == 0

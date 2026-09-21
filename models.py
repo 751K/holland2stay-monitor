@@ -14,6 +14,15 @@ from typing import Optional
 
 STATUS_AVAILABLE = "available to book"
 
+# 自动操作成功后，平台会进入真实占房/订单占用窗口的 source。
+# Plaza 故意不在这里：Plaza 的成功只代表申请已提交，最终分配由平台审核决定。
+BOOKING_HOLD_SOURCES = frozenset({
+    "holland2stay",
+    "xior",
+    "ourcampus",
+    "ourdomain",
+})
+
 #: available_from 的哨兵年份。H2S 的 next_contract_startdate 在「没有下一个合同
 #: 起始日」时返回 2050-01-01——那不是日期，是「不知道」。
 #:

@@ -13,6 +13,7 @@ from config import canonical_city
 
 from ._derived import derived_from_features
 from models import (
+    BOOKING_HOLD_SOURCES,
     STATUS_AVAILABLE,
     Listing,
     canonical_feature,
@@ -281,7 +282,7 @@ class ListingOps:
                 placeholders = ",".join("?" * len(ids))
                 rows = cur.execute(
                     f"""SELECT id, status, status_is_inferred, status_hold_until,
-                               features, available_from
+                               features, available_from, source
                         FROM listings WHERE id IN ({placeholders})""",
                     ids,
                 ).fetchall()
@@ -431,6 +432,11 @@ class ListingOps:
     ) -> bool:
         if not old_row:
             return False
+        # status_hold_until 只适用于真实占房/订单窗口。Plaza 的「成功」只是
+        # 应征成功，平台还没有把房源分配给用户；旧的误标不能继续压住它。
+        source = (old_row.get("source") or "holland2stay").strip().lower()
+        if source not in BOOKING_HOLD_SOURCES:
+            return False
         if old_row.get("status") != "Reserved":
             return False
         if int(old_row.get("status_is_inferred") or 0) != 1:
@@ -445,10 +451,17 @@ class ListingOps:
         return hold_until > now
 
     def mark_listing_reserved_after_booking(self, listing_id: str) -> bool:
-        """自动预订成功后，把本地状态暂时保持为 Reserved。"""
+        """真实占房平台成功后，把本地状态暂时保持为 Reserved。"""
         now_dt = datetime.now(timezone.utc)
         hold_until = now_dt + timedelta(minutes=_booking_hold_minutes())
         with self._conn:
+            row = self._conn.execute(
+                "SELECT source FROM listings WHERE id=?",
+                (listing_id,),
+            ).fetchone()
+            source = ((row["source"] if row else "") or "holland2stay").strip().lower()
+            if source not in BOOKING_HOLD_SOURCES:
+                return False
             cur = self._conn.execute(
                 """UPDATE listings
                    SET status='Reserved',
