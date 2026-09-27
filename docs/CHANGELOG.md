@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.45.0 (2026-09-27)
+
+本次发布调大两处保留上限。
+
+### 运维
+
+* **monitor.log 上限 2MB → 100MB**（[9c75f1a]）
+
+    线上 `data/monitor.log` 一天约写 2MB，原来的上限等于一个文件只装一天，回头查
+    几天前的事只能翻 `.1/.2/.3`。现在单文件能装一个多月，加 3 个备份最多约 400MB。
+    `errors.log`、`web.log` 和 supervisor 的 `monitor_stdout.log` 不变。
+
+    文件变大会放大一个既有问题：仪表盘「平均每轮条数」每次打开都把整份
+    `monitor.log` 读进内存。改成从尾部倒着按块读、读到 7 天窗口起点就停。附带的
+    变化是这个「7 天平均」原来因为文件只有 2MB，实际只覆盖最近一天左右，现在才
+    真的是 7 天。日志页的 `/api/logs` 本来就只读尾部（上限 64MB），不受影响。
+
+* **站内通知保留 500 → 2000 条**（[9c75f1a]）
+
+    收成常量 `WEB_NOTIFICATIONS_KEEP`，monitor 心跳清理和 `prune_notifications()`
+    的默认值都用它。部署时线上正好 501 条，所以不会立刻变多，而是从现在开始攒。
+
+[9c75f1a]: https://github.com/751K/holland2stay-monitor/commit/9c75f1a
+
 ## v1.44.0 (2026-09-21)
 
 本次发布修正 Plaza 自动应征的提交范围与平台隔离，并补上 macOS 客户端入口文案。
