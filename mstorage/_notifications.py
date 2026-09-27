@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+#: 站内通知表保留的最近条数；monitor 每次心跳按它清理一次。
+WEB_NOTIFICATIONS_KEEP = 2000
+
 
 class NotificationOps:
     """依赖 self._conn。"""
@@ -109,7 +112,7 @@ class NotificationOps:
                     ids,
                 )
 
-    def prune_notifications(self, keep: int = 500) -> int:
+    def prune_notifications(self, keep: int = WEB_NOTIFICATIONS_KEEP) -> int:
         with self._conn:
             cur = self._conn.execute(
                 """DELETE FROM web_notifications

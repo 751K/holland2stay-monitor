@@ -87,6 +87,7 @@ from scrapers import (
     is_proxy_service_error,
 )
 from update_checker import check_for_updates
+from mstorage._notifications import WEB_NOTIFICATIONS_KEEP
 from storage import Storage
 from users import UserConfig, load_users, save_users
 from models import Listing
@@ -200,10 +201,13 @@ def _setup_logging(level: str) -> None:
     from logging.handlers import RotatingFileHandler
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 主日志（INFO+）：与之前一致，Web 面板默认查看
+    # 主日志（INFO+）：与之前一致，Web 面板默认查看。
+    # 100MB：2MB 时一个文件只装得下一天左右，回头查几天前的事只能翻 .1/.2/.3。
+    # 读它的地方都是有界的——/api/logs 只读尾部（上限 64MB），仪表盘
+    # _avg_run_count 从尾部倒着读到 7 天前为止——不会因为文件变大而整份读入内存。
     main_fh = RotatingFileHandler(
         str(DATA_DIR / "monitor.log"),
-        maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8",
+        maxBytes=100 * 1024 * 1024, backupCount=3, encoding="utf-8",
     )
     main_fh.setFormatter(logging.Formatter(fmt))
     main_fh.setLevel(getattr(logging, level, "INFO"))
@@ -3534,7 +3538,7 @@ async def main_loop(
                 if web_notifier:
                     await web_notifier.send_heartbeat(total_in_db=total, round_count=round_count)
                 # 清理旧通知，防止 web_notifications 表无限增长
-                pruned = storage.prune_notifications(keep=500)
+                pruned = storage.prune_notifications(keep=WEB_NOTIFICATIONS_KEEP)
                 if pruned:
                     logger.debug("已清理 %d 条旧通知", pruned)
                 # 清理过期验证 token（保留 30 天审计窗口）

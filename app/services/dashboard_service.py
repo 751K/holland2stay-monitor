@@ -63,28 +63,48 @@ def _delta_label(current: int, previous: int, *, zh: bool) -> str:
     return f"{sign}{pct}% {suffix}"
 
 
+def _iter_lines_reversed(path: Path, chunk: int = 1 << 20):
+    """从文件尾部往前逐行产出（已解码）。
+
+    monitor.log 上限 100MB，原来的 ``read_text()`` 每次打开仪表盘都会把整份读进
+    内存再 splitlines。倒着读、读到窗口起点就停，只碰最近 7 天那一段。
+    """
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        pos = f.tell()
+        rest = b""
+        while pos > 0:
+            step = min(chunk, pos)
+            pos -= step
+            f.seek(pos)
+            parts = (f.read(step) + rest).split(b"\n")
+            rest = parts[0]     # 可能是半行，留给下一块拼
+            for raw in reversed(parts[1:]):
+                if raw:
+                    yield raw.decode("utf-8", errors="ignore")
+        if rest:
+            yield rest.decode("utf-8", errors="ignore")
+
+
 def _avg_run_count(*, days: int = 7, fallback: int = 0) -> tuple[int, int]:
     log_path = Path(DATA_DIR) / "monitor.log"
     if not log_path.exists():
         return fallback, 0
 
     since = datetime.now() - timedelta(days=days)
+    # 日志时间戳是零填充定宽格式，字典序 == 时间序，直接比字符串。
+    since_s = since.strftime("%Y-%m-%d %H:%M:%S")
     counts: list[int] = []
     try:
-        text = log_path.read_text(encoding="utf-8", errors="ignore")
+        for line in _iter_lines_reversed(log_path):
+            head = line[:19]
+            if head[:4].isdigit() and head < since_s:
+                break           # 倒着读：再往前都早于窗口
+            m = _RUN_COUNT_RE.match(line)
+            if m:
+                counts.append(int(m.group("count")))
     except OSError:
         return fallback, 0
-
-    for line in text.splitlines():
-        m = _RUN_COUNT_RE.match(line)
-        if not m:
-            continue
-        try:
-            ts = datetime.strptime(m.group("ts"), "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            continue
-        if ts >= since:
-            counts.append(int(m.group("count")))
 
     if not counts:
         return fallback, 0
