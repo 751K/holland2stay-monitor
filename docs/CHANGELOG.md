@@ -1,5 +1,37 @@
 # Changelog
 
+## v1.46.0 (2026-10-02)
+
+本次发布修正 Plaza 应征成功的通知文案，并修好两处过期的测试。
+
+### Plaza
+
+* **应征成功不再按「预订成功 + 立即付款」发通知**（[76f28c2]）
+
+    Plaza 的成功只代表应征进了审核池，但通知走的是 H2S 订房的模板：标题「预订
+    成功！」，正文「立即付款（有时限）」，下面的链接其实是房源页。现在：
+
+    - 邮件 / Telegram / iMessage / WhatsApp 改为「应征已提交！」：房源、租金、
+      可入住日、一句「这不是订房，平台会审核并分配」、房源链接，没有付款字样。
+      邮件标题是 `[FlatRadar] [PZ] Application Submitted!`。
+    - 站内通知标题 `Booking:` → `Applied:`，点进去是房源页。
+    - 通知发送失败时由 CRITICAL（「付款链接已记录于此，请立即操作」）降为 WARNING。
+
+    判据是 `BOOKING_HOLD_SOURCES` 取反，不另立名单；H2S / Xior / OurCampus /
+    OurDomain 照旧是订房 + 付款。
+
+### 测试
+
+* **补 v1.44.0 测试替身缺的 `feature_map`，入住日不再写死**（[b0869b7]）
+
+    `test_submit_bookings_prewarm_blocked` 的 4 条自 v1.44.0 起就是红的：非 Plaza
+    候选新增了按面积排序，替身 `_Listing` 没有 `feature_map()`。补上并直接调真实
+    解析器。`test_booker_guards_independently` 写死的入住日 `2026-10-01` 过期后被
+    「不早于今天」挡掉，改成今天 + 30 天。全量 4708 条恢复全绿。
+
+[76f28c2]: https://github.com/751K/holland2stay-monitor/commit/76f28c2
+[b0869b7]: https://github.com/751K/holland2stay-monitor/commit/b0869b7
+
 ## v1.45.0 (2026-09-27)
 
 本次发布调大两处保留上限。
