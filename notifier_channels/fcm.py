@@ -33,7 +33,7 @@ FCM 使用 **data-only** 消息（无 ``notification`` 字段）：
 data payload 字段（客户端消费）：
 - title / body : 通知展示文案
 - listing_id    : 导航锚点
-- kind          : "new" | "status_change" | "booked" | "round" | "error"
+- kind          : "new" | "status_change" | "booked" | "booking_failed" | "round" | "error"
 - deep_link     : h2smonitor://listing/<id>
 """
 

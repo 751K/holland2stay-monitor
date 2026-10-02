@@ -195,6 +195,13 @@ _per_user: dict[str, deque] = defaultdict(deque)
 _state_lock = threading.Lock()
 
 
+#: 不受每用户限速约束的 kind。限速是为了防新房源刷屏；预订结果（成功或失败）
+#: 一套房只有一条，
+#: 而它恰好和那一轮的新房源推送同时发出——同一轮放 10 套以上，排在后面的
+#: 「订到了、去付款」就会被限速吞掉。去重照旧生效。
+_RATE_EXEMPT_KINDS = frozenset({"booked", "booking_failed"})
+
+
 def _allow_send(user_id: str, listing_id: str, kind: str) -> bool:
     """同时检查 dedup + per-user rate；返回 True 表示放行。"""
     now = time.monotonic()
@@ -207,7 +214,7 @@ def _allow_send(user_id: str, listing_id: str, kind: str) -> bool:
         # 滑动窗口
         while q and now - q[0] > _PER_USER_WINDOW:
             q.popleft()
-        if len(q) >= _PER_USER_LIMIT:
+        if len(q) >= _PER_USER_LIMIT and kind not in _RATE_EXEMPT_KINDS:
             return False
         _dedup[key] = now
         q.append(now)
@@ -238,6 +245,26 @@ _T = {
     },
     "{name} added to cart, please pay promptly": {
         "zh": "{name} 已加入购物车，请尽快支付",
+    },
+    # Plaza 这类注册制平台：成功 = 注册进了审核池，没有购物车也没有付款
+    "Registration submitted": {
+        "zh": "注册已提交",
+    },
+    "{name}: not a reservation, the platform screens and allocates": {
+        "zh": "{name}：这不是订房，平台会审核并分配",
+    },
+    # booking failed
+    "Booking failed": {
+        "zh": "预订失败",
+    },
+    "{name}: auto-booking did not go through, tap to book manually": {
+        "zh": "{name}：自动预订没有成功，点开手动预订",
+    },
+    "Registration failed": {
+        "zh": "注册失败",
+    },
+    "{name}: auto-registration did not go through, tap to register manually": {
+        "zh": "{name}：自动注册没有成功，点开手动注册",
     },
     # round aggregate
     "tap to view": {
@@ -330,13 +357,26 @@ def _payload_status_change(listing, old_status: str, new_status: str, *, lang: s
     }
 
 
-def _payload_booked(listing, *, lang: str = "en") -> dict:
+def _booked_text(listing, lang: str) -> tuple[str, str]:
+    """预订结果推送的 (title, body)。注册制平台不说「预订成功、请支付」。"""
+    from models import is_application_only
+
     source = _source_short(getattr(listing, "source", ""))
+    if is_application_only(listing):
+        return (f"[{source}] {_t('Registration submitted', lang)}",
+                _t("{name}: not a reservation, the platform screens and allocates",
+                   lang).format(name=listing.name))
+    return (f"[{source}] {_t('Booking successful', lang)}",
+            _t("{name} added to cart, please pay promptly", lang).format(name=listing.name))
+
+
+def _payload_booked(listing, *, lang: str = "en") -> dict:
+    title, body = _booked_text(listing, lang)
     return {
         "aps": {
             "alert": {
-                "title": f"[{source}] {_t('Booking successful', lang)}",
-                "body": _trim(_t("{name} added to cart, please pay promptly", lang).format(name=listing.name), 180),
+                "title": title,
+                "body": _trim(body, 180),
             },
             "sound": "default",
             "thread-id": "booking",
@@ -493,11 +533,7 @@ def _fcm_payload_status_change(listing, old_status: str, new_status: str,
 
 
 def _fcm_payload_booked(listing, *, lang: str = "en") -> dict:
-    source = _source_short(getattr(listing, "source", ""))
-    title = f"[{source}] {_t('Booking successful', lang)}"
-    body = _t("{name} added to cart, please pay promptly", lang).format(
-        name=listing.name,
-    )
+    title, body = _booked_text(listing, lang)
     data = _fcm_data(listing, listing.id, "booked",
                      f"h2smonitor://listing/{listing.id}", title, body)
     return {
@@ -506,6 +542,55 @@ def _fcm_payload_booked(listing, *, lang: str = "en") -> dict:
             "android": {
                 "priority": "high",
                 "collapse_key": ("booked_" + listing.id)[:64],
+            },
+        },
+    }
+
+
+def _booking_failed_text(listing, lang: str) -> tuple[str, str]:
+    """预订失败推送的 (title, body)。
+
+    不带失败原因：booker 给的原因只有中文、且多是技术细节（403、原因码），
+    英文用户的锁屏上不该出现一段中文。原因照旧写进站内通知和文本渠道，推送
+    只负责让人知道「没订上、要自己去」，点开就是房源页。
+    """
+    from models import is_application_only
+
+    source = _source_short(getattr(listing, "source", ""))
+    if is_application_only(listing):
+        return (f"[{source}] {_t('Registration failed', lang)}",
+                _t("{name}: auto-registration did not go through, tap to register manually",
+                   lang).format(name=listing.name))
+    return (f"[{source}] {_t('Booking failed', lang)}",
+            _t("{name}: auto-booking did not go through, tap to book manually",
+               lang).format(name=listing.name))
+
+
+def _payload_booking_failed(listing, *, lang: str = "en") -> dict:
+    title, body = _booking_failed_text(listing, lang)
+    return {
+        "aps": {
+            "alert": {"title": title, "body": _trim(body, 180)},
+            "sound": "default",
+            "thread-id": "booking",
+        },
+        "kind": "booking_failed",
+        "listing_id": listing.id,
+        "source": getattr(listing, "source", "") or "holland2stay",
+        "deep_link": f"h2smonitor://listing/{listing.id}",
+    }
+
+
+def _fcm_payload_booking_failed(listing, *, lang: str = "en") -> dict:
+    title, body = _booking_failed_text(listing, lang)
+    data = _fcm_data(listing, listing.id, "booking_failed",
+                     f"h2smonitor://listing/{listing.id}", title, body)
+    return {
+        "message": {
+            "data": data,
+            "android": {
+                "priority": "high",
+                "collapse_key": ("bookfail_" + listing.id)[:64],
             },
         },
     }
@@ -745,7 +830,7 @@ async def dispatch(storage, user, listing, *, kind: str = "new") -> int:
     storage : Storage 实例（mcore/push 不持有，由调用方传入 monitor 的实例）
     user    : UserConfig
     listing : models.Listing
-    kind    : "new" / "status_change" / "booked"
+    kind    : "new" / "status_change" / "booked" / "booking_failed"
 
     返回成功发送的设备数（0 = 没设备 / 被节流 / APNs 未启用 / 全失败）。
     """
@@ -760,6 +845,9 @@ async def dispatch(storage, user, listing, *, kind: str = "new") -> int:
         elif kind == "booked":
             payload_fn = lambda lang: _payload_booked(listing, lang=lang)
             fcm_payload_fn = lambda lang: _fcm_payload_booked(listing, lang=lang)
+        elif kind == "booking_failed":
+            payload_fn = lambda lang: _payload_booking_failed(listing, lang=lang)
+            fcm_payload_fn = lambda lang: _fcm_payload_booking_failed(listing, lang=lang)
         else:
             return 0
         results = await _send_to_user(storage, user.id, payload_fn)

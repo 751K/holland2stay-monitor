@@ -23,6 +23,18 @@ BOOKING_HOLD_SOURCES = frozenset({
     "ourdomain",
 })
 
+
+def is_application_only(listing) -> bool:
+    """自动操作「成功」只代表注册已提交、没有占房也没有付款这一步的平台。
+
+    以 ``BOOKING_HOLD_SOURCES`` 取反，不另立名单：那份名单回答的正是「成功之后
+    有没有占房窗口」。目前落在这一边的是 Plaza——它的成功是注册进了审核池，
+    booker 回传的 ``pay_url`` 只是房源页地址。文本通知、站内通知、App 推送都按
+    它分支，按订房模板发会变成「预订成功！立即付款」加一个不是付款页的链接。
+    """
+    return (getattr(listing, "source", "") or "holland2stay").strip().lower() \
+        not in BOOKING_HOLD_SOURCES
+
 #: available_from 的哨兵年份。H2S 的 next_contract_startdate 在「没有下一个合同
 #: 起始日」时返回 2050-01-01——那不是日期，是「不知道」。
 #:

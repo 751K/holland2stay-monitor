@@ -275,6 +275,16 @@ class TestDedup:
         _run(push.dispatch(store_with_one_device, u, FakeListing("l1"), kind="booked"))
         assert len(with_apns.calls) == 2
 
+    def test_booking_failed_kind_is_dispatched(self, with_apns, store_with_one_device):
+        """预订失败推送走真实 dispatch：认这个 kind、payload 对、豁免每用户限速。"""
+        u = FakeUser("userA")
+        for i in range(push._PER_USER_LIMIT):
+            _run(push.dispatch(store_with_one_device, u, FakeListing(f"n{i}")))
+        n = _run(push.dispatch(store_with_one_device, u, FakeListing("lf"),
+                               kind="booking_failed"))
+        assert n == 1
+        assert with_apns.calls[-1]["payload"]["kind"] == "booking_failed"
+
     def test_different_listing_not_deduped(self, with_apns, store_with_one_device):
         u = FakeUser("userA")
         _run(push.dispatch(store_with_one_device, u, FakeListing("a")))

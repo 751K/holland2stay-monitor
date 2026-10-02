@@ -63,8 +63,8 @@ from dotenv import load_dotenv
 from booker import PrewarmedSession
 from config import (DATA_DIR, ENV_PATH, get_proxy_url, is_personal_proxy_active,
                     is_proxy_native_fallback_active, load_config)
-from models import BOOKING_HOLD_SOURCES, STATUS_AVAILABLE
-from notifier import BaseNotifier, WebNotifier, create_user_notifier, is_application_only
+from models import BOOKING_HOLD_SOURCES, STATUS_AVAILABLE, is_application_only
+from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.backoff import PersistedBackoff
 from mcore.circuit import SourceCircuits
 from mcore.health import CIRCUIT_OPEN_ERROR
@@ -2094,6 +2094,17 @@ async def _notify_status_changes(
     return push_tasks
 
 
+def _push_booking_failed(push, storage, user, listing) -> "asyncio.Task":
+    """给用户推一条「没订上」。丢进 push_tasks，run_once 末尾统一 gather。
+
+    不像成功那条要 await：失败的送达与否不改变任何判断。push.dispatch 自己吞
+    异常、返回 0，不会让 gather 炸。
+    """
+    return asyncio.create_task(
+        push.dispatch(storage, user, listing, kind="booking_failed"),
+    )
+
+
 async def _process_booking_results(
     ab_futures: list[tuple],
     web_notifier: "WebNotifier | None",
@@ -2104,7 +2115,7 @@ async def _process_booking_results(
 
     Returns
     -------
-    push_tasks: 屏蔽聚合时给 admin 推的 asyncio.Task（可能为空）。
+    push_tasks: 预订失败给用户推的、屏蔽聚合时给 admin 推的 asyncio.Task（可能为空）。
     """
     push_tasks: list = []
     # 本轮被屏蔽的用户（含 notifier），所有候选 await 完后聚合发一条节流通知，
@@ -2197,13 +2208,27 @@ async def _process_booking_results(
                     result.contract_start_date,
                     user_id=user.id,
                 )
-            if not sent and is_application_only(booked_listing):
-                # 应征类没有付款时限，不需要 CRITICAL 去吵醒人——应征已经在平台上了
+            # App 推送：预订结果原来**根本不推**——push.dispatch(kind="booked")
+            # 有定义没人调。eda434e 让「只用 App」的用户也能开自动预订（推送算
+            # 可达），结果他们订到了却只收到一条新房源推送，锁屏上没有「订到了、
+            # 去付款」。直接 await 而不是丢进 push_tasks：下面要用它的结果判断
+            # 到底有没有送达。
+            try:
+                pushed = await push.dispatch(storage, user, booked_listing, kind="booked")
+            except Exception:
+                logger.exception("[%s] 预订结果推送异常", user.name)
+                pushed = 0
+            # 渠道或推送任一送达就算送达。原来只看渠道：只用 App 的用户渠道列表
+            # 为空、send_booking_success 恒为 False，每次成功都刷一条假 CRITICAL，
+            # 真的送不到时反而被淹掉（2026-10-01 一天 5 条，全是误报）。
+            delivered = bool(sent) or pushed > 0
+            if not delivered and is_application_only(booked_listing):
+                # 注册类没有付款时限，不需要 CRITICAL 去吵醒人——注册已经在平台上了
                 logger.warning(
                     "[%s] 注册已提交但通知发送失败: %s", user.name, booked_listing.name,
                 )
-            elif not sent:
-                # 通知发送失败（渠道关闭/配置错误/网络问题），付款链接必须保留在日志中
+            elif not delivered:
+                # 渠道和推送都没送达，付款链接必须保留在日志中
                 # 使用 CRITICAL 级别确保即使 LOG_LEVEL=WARNING 也能被看到
                 logger.critical(
                     "❌ [%s] 自动预订成功但通知发送失败，付款链接已记录于此，请立即操作：\n"
@@ -2219,6 +2244,8 @@ async def _process_booking_results(
                     result.message,
                     user_id=user.id,
                 )
+            # 只用 App 的用户原来收不到「没订上」：渠道为空，这里又不推。
+            push_tasks.append(_push_booking_failed(push, storage, user, booked_listing))
 
     # ── 聚合屏蔽通知（共享 scrape 的 30 min 节流，避免双重打扰）────── #
     if blocked_in_round and _should_notify_block():
@@ -2241,6 +2268,7 @@ async def _process_booking_results(
             await n.send_booking_failed(
                 listing, "平台暂时拒绝了自动预订请求，请尽快手动预订",
             )
+            push_tasks.append(_push_booking_failed(push, storage, u, listing))
         if web_notifier:
             await web_notifier.send_error(agg_msg)
         # admin 也要收到 403 屏蔽通知
@@ -2263,6 +2291,7 @@ async def _process_booking_results(
             await n.send_booking_failed(
                 listing, "平台暂时拒绝了自动预订请求，请尽快手动预订",
             )
+            push_tasks.append(_push_booking_failed(push, storage, u, listing))
         if _should_notify_operation_rejected():
             names = sorted({u.name for u, _, _, _ in rejected_in_round})
             detail = rejected_in_round[0][2]

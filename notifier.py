@@ -48,7 +48,7 @@ import curl_cffi.requests as req
 from net import direct_curl_session
 
 from config import get_impersonate
-from models import BOOKING_HOLD_SOURCES, Listing
+from models import Listing, is_application_only
 
 if TYPE_CHECKING:
     from storage import Storage
@@ -1459,18 +1459,6 @@ def _format_status_change(l: Listing, old: str, new: str, *, lang: str = "en") -
         f"",
         f"{l.url}",
     ])
-
-
-def is_application_only(listing: Listing) -> bool:
-    """自动操作「成功」只代表应征已提交、没有占房也没有付款这一步的平台。
-
-    以 ``BOOKING_HOLD_SOURCES`` 为准取反，不另立名单：那份名单回答的正是「成功
-    之后有没有占房窗口」。目前落在这一边的是 Plaza——它的成功是应征进了审核池，
-    booker 回传的 ``pay_url`` 只是房源页地址。按订房成功的模板发，用户会收到
-    「预订成功！立即付款（有时限）」加一个根本不是付款页的链接。
-    """
-    return (getattr(listing, "source", "") or "holland2stay").strip().lower() \
-        not in BOOKING_HOLD_SOURCES
 
 
 def _format_application_submitted(l: Listing, *, lang: str = "en") -> str:
