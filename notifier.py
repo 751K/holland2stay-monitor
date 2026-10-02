@@ -48,7 +48,7 @@ import curl_cffi.requests as req
 from net import direct_curl_session
 
 from config import get_impersonate
-from models import Listing
+from models import BOOKING_HOLD_SOURCES, Listing
 
 if TYPE_CHECKING:
     from storage import Storage
@@ -999,11 +999,16 @@ class WebNotifier(BaseNotifier):
         start = contract_start_date or listing.available_from or "?"
         source = _source_short(getattr(listing, "source", ""))
         price = getattr(listing, "price_display", "") or "?"
+        if is_application_only(listing):
+            # 没有付款页：url 指向房源本身，标题不说 Booking
+            title, url = f"[{source}] Applied: {listing.name}", listing.url
+        else:
+            title, url = f"[{source}] Booking: {listing.name}", pay_url or listing.url
         self._storage.add_web_notification(
             type="booking",
-            title=f"[{source}] Booking: {listing.name}",
+            title=title,
             body=f"→ {start} · {price}/mo",
-            url=pay_url or listing.url,
+            url=url,
             listing_id=listing.id,
             user_id=user_id,
         )
@@ -1353,6 +1358,11 @@ _NOTIF_LABELS = {
     "Reason":              {"zh": "原因"},
     "Manual booking":      {"zh": "手动预订"},
     "Pay now (time-sensitive)": {"zh": "立即付款（有时限）"},
+    "Application Submitted!": {"zh": "应征已提交！"},
+    "Applied":             {"zh": "已应征"},
+    "This is not a reservation: the platform screens applicants and allocates the home. Watch for their message.":
+        {"zh": "这不是订房：平台会审核应征者并分配房源，结果以平台的通知为准。"},
+    "View listing":        {"zh": "查看房源"},
     "Lottery listings":    {"zh": "抽签房源"},
     "in this round":       {"zh": "本轮放出"},
     "and":                 {"zh": "另有"},
@@ -1452,6 +1462,36 @@ def _format_status_change(l: Listing, old: str, new: str, *, lang: str = "en") -
     ])
 
 
+def is_application_only(listing: Listing) -> bool:
+    """自动操作「成功」只代表应征已提交、没有占房也没有付款这一步的平台。
+
+    以 ``BOOKING_HOLD_SOURCES`` 为准取反，不另立名单：那份名单回答的正是「成功
+    之后有没有占房窗口」。目前落在这一边的是 Plaza——它的成功是应征进了审核池，
+    booker 回传的 ``pay_url`` 只是房源页地址。按订房成功的模板发，用户会收到
+    「预订成功！立即付款（有时限）」加一个根本不是付款页的链接。
+    """
+    return (getattr(listing, "source", "") or "holland2stay").strip().lower() \
+        not in BOOKING_HOLD_SOURCES
+
+
+def _format_application_submitted(l: Listing, *, lang: str = "en") -> str:
+    source = _source_short(getattr(l, "source", ""))
+    return "\n".join([
+        f"[{source}] {_tl('Application Submitted!', lang)}",
+        f"",
+        f"{l.name}",
+        f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
+        f"{_tl('Available', lang)}: {l.available_from or '?'}",
+        f"",
+        _tl("This is not a reservation: the platform screens applicants and "
+            "allocates the home. Watch for their message.", lang),
+        f"",
+        f"{_tl('View listing', lang)}:",
+        f"",
+        f"{l.url}",
+    ])
+
+
 def _format_booking_success(
     l: Listing,
     detail: str,
@@ -1460,6 +1500,8 @@ def _format_booking_success(
     *,
     lang: str = "en",
 ) -> str:
+    if is_application_only(l):
+        return _format_application_submitted(l, lang=lang)
     # 优先使用 try_book() 预订时 API 返回的实际合同日期，
     # 回退顺序：contract_start_date → listing.available_from → "待定"
     # 不直接使用 l.available_from 作为第一选择：

@@ -221,3 +221,61 @@ class TestTelegramFormatting:
         assert fake.payload["parse_mode"] == "HTML"
         assert fake.payload["disable_web_page_preview"] is True
         assert "<b>FlatRadar</b>" in fake.payload["text"]
+
+
+# ── Plaza：应征成功 ≠ 订房成功 ─────────────────────────────
+
+class TestPlazaApplicationSubmitted:
+    """Plaza 的「成功」只是应征进了审核池。booker 把房源页地址塞进 pay_url，
+    原来照订房模板发出去就是「预订成功！立即付款（有时限）」+ 一个房源页链接。"""
+
+    _PLAZA_URL = "https://plaza.newnewnew.space/en/availables-places/living-place/details/12345"
+
+    def _plaza(self):
+        return _listing(id="plaza_12345", source="plaza", url=self._PLAZA_URL)
+
+    def test_says_application_not_booking(self):
+        text = _format_booking_success(self._plaza(), "已成功应征这条房源。",
+                                       pay_url=self._PLAZA_URL)
+        assert text.splitlines()[0] == "[PZ] Application Submitted!"
+        assert "Booking" not in text
+        assert "Pay now" not in text
+        assert "not a reservation" in text
+        assert self._PLAZA_URL in text
+
+    def test_chinese(self):
+        text = _format_booking_success(self._plaza(), "x", pay_url=self._PLAZA_URL, lang="zh")
+        assert text.splitlines()[0] == "[PZ] 应征已提交！"
+        assert "预订成功" not in text and "付款" not in text
+        assert "查看房源" in text
+
+    def test_email_subject(self):
+        text = _format_booking_success(self._plaza(), "x", pay_url=self._PLAZA_URL)
+        assert _format_email_subject(text) == "[FlatRadar] [PZ] Application Submitted!"
+
+    def test_hold_sources_keep_booking_template(self):
+        """反向：占房的平台照旧是订房 + 付款。"""
+        from models import BOOKING_HOLD_SOURCES
+        for src in BOOKING_HOLD_SOURCES:
+            text = _format_booking_success(_listing(source=src), "d",
+                                           pay_url="https://pay.example/x")
+            assert "Booking Successful!" in text and "Pay now" in text, src
+
+    def test_web_notification(self):
+        import asyncio
+        from notifier import WebNotifier
+
+        rows = []
+
+        class _St:
+            def add_web_notification(self, **kw):
+                rows.append(kw)
+
+        wn = WebNotifier.__new__(WebNotifier)
+        wn._storage = _St()
+        asyncio.run(wn.send_booking_success(self._plaza(), "x", "https://pay.example/ignored"))
+        asyncio.run(wn.send_booking_success(_listing(), "x", "https://pay.example/h2s"))
+        assert rows[0]["title"].startswith("[PZ] Applied: ")
+        assert rows[0]["url"] == self._PLAZA_URL
+        assert rows[1]["title"].startswith("[H2S] Booking: ")
+        assert rows[1]["url"] == "https://pay.example/h2s"

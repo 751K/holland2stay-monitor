@@ -64,7 +64,7 @@ from booker import PrewarmedSession
 from config import (DATA_DIR, ENV_PATH, get_proxy_url, is_personal_proxy_active,
                     is_proxy_native_fallback_active, load_config)
 from models import BOOKING_HOLD_SOURCES, STATUS_AVAILABLE
-from notifier import BaseNotifier, WebNotifier, create_user_notifier
+from notifier import BaseNotifier, WebNotifier, create_user_notifier, is_application_only
 from mcore.backoff import PersistedBackoff
 from mcore.circuit import SourceCircuits
 from mcore.health import CIRCUIT_OPEN_ERROR
@@ -2197,7 +2197,12 @@ async def _process_booking_results(
                     result.contract_start_date,
                     user_id=user.id,
                 )
-            if not sent:
+            if not sent and is_application_only(booked_listing):
+                # 应征类没有付款时限，不需要 CRITICAL 去吵醒人——应征已经在平台上了
+                logger.warning(
+                    "[%s] 应征已提交但通知发送失败: %s", user.name, booked_listing.name,
+                )
+            elif not sent:
                 # 通知发送失败（渠道关闭/配置错误/网络问题），付款链接必须保留在日志中
                 # 使用 CRITICAL 级别确保即使 LOG_LEVEL=WARNING 也能被看到
                 logger.critical(
