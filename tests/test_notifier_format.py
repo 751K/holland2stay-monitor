@@ -235,7 +235,7 @@ class TestPlazaApplicationSubmitted:
         return _listing(id="plaza_12345", source="plaza", url=self._PLAZA_URL)
 
     def test_says_application_not_booking(self):
-        text = _format_booking_success(self._plaza(), "已成功应征这条房源。",
+        text = _format_booking_success(self._plaza(), "已成功注册这条房源。",
                                        pay_url=self._PLAZA_URL)
         assert text.splitlines()[0] == "[PZ] Application Submitted!"
         assert "Booking" not in text
@@ -245,7 +245,7 @@ class TestPlazaApplicationSubmitted:
 
     def test_chinese(self):
         text = _format_booking_success(self._plaza(), "x", pay_url=self._PLAZA_URL, lang="zh")
-        assert text.splitlines()[0] == "[PZ] 应征已提交！"
+        assert text.splitlines()[0] == "[PZ] 注册已提交！"
         assert "预订成功" not in text and "付款" not in text
         assert "查看房源" in text
 

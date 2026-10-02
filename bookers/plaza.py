@@ -162,12 +162,12 @@ _TIMEOUT = 30
 #: **没有一个被真正触发过**——所以映射表之外的码走 fail-safe 分支，不猜。
 _REASON_PHASES: dict[str, tuple[str, str]] = {
     "WINKEL-REACTIE-NIETMEERGEPUBLICEERD": (
-        "race_lost", "这条广告已经不再发布（多半是被别人先应征了或已下架）"),
+        "race_lost", "这条广告已经不再发布（多半是被别人先注册了或已下架）"),
     # 2026-09-10 实测：这个码出现在**提交的响应**里（提交完那一刻的 reactionData）。
     # 稳态的预检里**不会**看到它——已应征的房源预检给的是 action="remove"，
     # kanReageren 仍为 true。所以「已经应征过」的判据是 action，不是这个码；
     # 留着这条映射只是为了它万一真出现在预检里时不被当成未知码。
-    "WINKEL-REACTIE-DUBBEL": ("success", "这个账号已经应征过这条房源"),
+    "WINKEL-REACTIE-DUBBEL": ("success", "这个账号已经注册过这条房源"),
 }
 
 
@@ -206,7 +206,7 @@ def is_dth(obj: dict) -> bool:
 #: 的误报通知；用户照常收到这条房源的普通通知，里面带着 Allocation 特征
 #: （``scrapers/plaza.py`` 把站点那句原话写进去了），他自己判断要不要点。
 _DTH_MESSAGE = (
-    "这是一条 DTH（「Eerste reactie」）房源：应征前站点会要求确认「definitief "
+    "这是一条 DTH（「Eerste reactie」）房源：注册前站点会要求确认「definitief "
     "boeken」——接受这一套，并且不再收到其它 offer。那句话的具体范围站点没有说明，"
     "所以系统不替你按下去。请点通知里的链接自己决定。"
 )
@@ -435,7 +435,7 @@ class PlazaBooker(AbstractBooker):
 
         if not (username and password):
             return _res(False,
-                        "没有配置 Plaza 账号。应征需要一个已注册的 Plaza 账号"
+                        "没有配置 Plaza 账号。注册房源需要一个 Plaza 账号"
                         "（€27,50/年），在面板里填用户名和密码即可——不需要上传任何资料。",
                         "not_configured")
 
@@ -464,8 +464,8 @@ class PlazaBooker(AbstractBooker):
                 action = (rd.get("action") or "").strip().lower()
                 if action == "remove":
                     return _res(True,
-                                "这个账号已经应征过这条房源了（站点当前给出的动作是"
-                                "撤回，说明应征还在）。", "success", pay_url=listing.url)
+                                "这个账号已经注册过这条房源了（站点当前给出的动作是"
+                                "撤回，说明注册还在）。", "success", pay_url=listing.url)
                 if action and action != "add":
                     return _res(False,
                                 f"站点给的动作是 {action!r}，不是 add——没侦察过这种"
@@ -477,12 +477,12 @@ class PlazaBooker(AbstractBooker):
                         code,
                         # 未知码 fail-safe：不发写请求，把原码带给用户/日志。
                         ("unknown_error",
-                         f"站点拒绝应征，原因码 {code or '(空)'}——这个码还没侦察过"))
+                         f"站点拒绝注册，原因码 {code or '(空)'}——这个码还没侦察过"))
                     if phase == "success":
                         # 已经应征过：期望的终态成立。报失败会让上层不停重试一条
                         # 已经到手的候选。
                         return _res(True, why, phase, pay_url=listing.url)
-                    return _res(False, f"Plaza 不允许应征这条房源：{why}", phase)
+                    return _res(False, f"Plaza 不允许注册这条房源：{why}", phase)
 
                 if request.dry_run:
                     # dry_run 也把信封取掉。它是一次 GET、不产生任何副作用，但
@@ -492,7 +492,7 @@ class PlazaBooker(AbstractBooker):
                     # _form_envelope 这条路从没被真实服务器跑过。
                     envelope = self._form_envelope(session)
                     return _res(True,
-                                f"试运行：已登录，站点确认这条房源现在可以应征，"
+                                f"试运行：已登录，站点确认这条房源现在可以注册，"
                                 f"提交信封也取到了（{len(envelope)} 项）。未提交。",
                                 "dry_run")
 
@@ -508,7 +508,7 @@ class PlazaBooker(AbstractBooker):
                 # 只信其中一个的话，上游哪天让它们不一致，我们就会替用户撤单。
                 if "remove" in params or "add" not in params:
                     raise PlazaTransportError(
-                        f"房源 {object_id} 的提交参数不是一次应征（{params}）——"
+                        f"房源 {object_id} 的提交参数不是一次注册（{params}）——"
                         f"action={action!r}。拒绝提交。")
 
                 # 信封在前、房源参数在后：万一哪天两边键名撞上，以服务端给这条
@@ -517,25 +517,25 @@ class PlazaBooker(AbstractBooker):
                 resp = self._portal_post(session, REACT_URL, payload, expect="")
                 if resp.get("success") is False:
                     return _res(False,
-                                f"站点拒绝了这次应征：{resp.get('messages') or resp}",
+                                f"站点拒绝了这次注册：{resp.get('messages') or resp}",
                                 "save_rejected")
 
                 if not self._has_active_reaction(session, object_id):
                     return _res(False,
-                                "已提交应征，但回查「我的应征」里没有这条——"
+                                "已提交注册，但回查「我的注册」里没有这条——"
                                 "请自己去站点确认一次。", "unknown_error")
 
-                return _res(True, "已成功应征这条房源。", "success",
+                return _res(True, "已成功注册这条房源。", "success",
                             pay_url=listing.url)
 
         except PlazaLoginError as e:
             return _res(False, f"Plaza 登录失败：{e}", "auth_failed")
         except PlazaTransportError as e:
-            logger.warning("Plaza 应征 %s 失败: %s", listing.id, e)
-            return _res(False, f"Plaza 应征失败：{e}", "unknown_error")
+            logger.warning("Plaza 注册 %s 失败: %s", listing.id, e)
+            return _res(False, f"Plaza 注册失败：{e}", "unknown_error")
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as e:
-            logger.exception("Plaza 应征 %s 未预期异常", listing.id)
-            return _res(False, f"Plaza 应征出错：{type(e).__name__}: {e}",
+            logger.exception("Plaza 注册 %s 未预期异常", listing.id)
+            return _res(False, f"Plaza 注册出错：{type(e).__name__}: {e}",
                         "unknown_error")

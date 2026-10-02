@@ -1358,10 +1358,9 @@ _NOTIF_LABELS = {
     "Reason":              {"zh": "原因"},
     "Manual booking":      {"zh": "手动预订"},
     "Pay now (time-sensitive)": {"zh": "立即付款（有时限）"},
-    "Application Submitted!": {"zh": "应征已提交！"},
-    "Applied":             {"zh": "已应征"},
+    "Application Submitted!": {"zh": "注册已提交！"},
     "This is not a reservation: the platform screens applicants and allocates the home. Watch for their message.":
-        {"zh": "这不是订房：平台会审核应征者并分配房源，结果以平台的通知为准。"},
+        {"zh": "这不是订房：平台会审核注册者并分配房源，结果以平台的通知为准。"},
     "View listing":        {"zh": "查看房源"},
     "Lottery listings":    {"zh": "抽签房源"},
     "in this round":       {"zh": "本轮放出"},

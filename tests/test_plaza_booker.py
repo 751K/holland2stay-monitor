@@ -164,7 +164,7 @@ class TestPreflight:
     def test_an_unknown_reason_code_also_blocks_and_is_surfaced(self, monkeypatch, req):
         """未知码 fail-safe：同样不发写请求，并把原码带出来。
 
-        侦察时只见过一个码，没有完整清单——把未知码当成「可以应征」是
+        侦察时只见过一个码，没有完整清单——把未知码当成「可以注册」是
         错向危险一侧。
         """
         res, sess = _run(monkeypatch, req, _routes(
@@ -497,7 +497,7 @@ class TestAlreadyReacted:
 
 
 class TestAlreadyAppliedIsNotAWithdrawal:
-    """已应征的房源不能被当成「可以应征」——否则会替用户撤单。
+    """已应征的房源不能被当成「可以注册」——否则会替用户撤单。
 
     2026-09-10 端到端第一次跑就撞上了。在那之前**这个文件里 34 条测试全绿**，
     因为替身里 ``action`` 永远是 ``"add"``：单元测试再多，也测不出一个从没在替身里
@@ -550,7 +550,7 @@ class TestAlreadyAppliedIsNotAWithdrawal:
 
 class TestDryRunExercisesTheWholePathExceptTheWrite:
     def test_dry_run_fetches_the_envelope(self, monkeypatch, req):
-        """不取信封的 dry_run 会说「可以应征」而真跑在下一步就死——等于没验。"""
+        """不取信封的 dry_run 会说「可以注册」而真跑在下一步就死——等于没验。"""
         req.dry_run = True
         res, sess = _run(monkeypatch, req, _routes())
         assert res.success and res.phase == "dry_run"
@@ -562,7 +562,7 @@ class TestDryRunExercisesTheWholePathExceptTheWrite:
         req.dry_run = True
         res, _ = _run(monkeypatch, req, _routes(
             getformsubmitonlyconfiguration=_ok({"form": {"id": "X", "elements": {}}})))
-        assert not res.success, "信封拿不到就不该说「可以应征」"
+        assert not res.success, "信封拿不到就不该说「可以注册」"
 
     def test_dry_run_on_an_already_applied_listing_short_circuits(self, monkeypatch, req):
         """已应征的那条仍然提前返回——它不需要信封，也不该去取。"""

@@ -1737,12 +1737,12 @@ def _submit_bookings(
             if plaza_listing.id in status_transition:
                 old_s, new_s = status_transition[plaza_listing.id]
                 logger.info(
-                    "[%s] 🚀 Plaza 快速应征 (%s → %s)，提交到 executor: %s",
+                    "[%s] 🚀 Plaza 快速注册 (%s → %s)，提交到 executor: %s",
                     user.name, old_s, new_s, plaza_listing.name,
                 )
             else:
                 logger.info(
-                    "[%s] 🚀 Plaza 自动应征（全部符合条件的房源），提交到 executor: %s",
+                    "[%s] 🚀 Plaza 自动注册（全部符合条件的房源），提交到 executor: %s",
                     user.name, plaza_listing.name,
                 )
             f = loop.run_in_executor(
@@ -2200,7 +2200,7 @@ async def _process_booking_results(
             if not sent and is_application_only(booked_listing):
                 # 应征类没有付款时限，不需要 CRITICAL 去吵醒人——应征已经在平台上了
                 logger.warning(
-                    "[%s] 应征已提交但通知发送失败: %s", user.name, booked_listing.name,
+                    "[%s] 注册已提交但通知发送失败: %s", user.name, booked_listing.name,
                 )
             elif not sent:
                 # 通知发送失败（渠道关闭/配置错误/网络问题），付款链接必须保留在日志中
