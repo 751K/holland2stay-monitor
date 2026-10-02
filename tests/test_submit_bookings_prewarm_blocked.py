@@ -54,6 +54,13 @@ class _Listing:
         self.url = ""
         self.city = "Eindhoven"
 
+    def feature_map(self) -> dict[str, str]:
+        # v1.44.0 起 _submit_bookings 对非 Plaza 候选按 area_key 排序，而
+        # area_key 读 feature_map()。走真实解析器，不手写 {"area": ...}——
+        # 替身和真货各解析一份，迟早对不上。
+        from models import parse_features_list
+        return parse_features_list(self.features)
+
 
 @pytest.fixture
 def blocked_future():

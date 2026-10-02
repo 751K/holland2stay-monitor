@@ -39,8 +39,13 @@ class TestSentinelNeverReachesBooking:
         **真调一次**，不 grep 源码：把 ``if`` 改成 ``if False`` 的话名字还在，
         grep 版照样绿——第一版就是那样，变异测试当场漏网。
         """
+        from datetime import date, timedelta
+
+        # 相对今天取，不写死：原来是 "2026-10-01"，过了那天它就成了过期日期，
+        # 被 >= today 那道挡掉，测试在 2026-10-02 无缘无故变红。
+        future = (date.today() + timedelta(days=30)).isoformat()
         assert booker.resolve_start_date("2050-01-01") is None
-        assert booker.resolve_start_date("2050-01-01", "2026-10-01") == "2026-10-01"
+        assert booker.resolve_start_date("2050-01-01", future) == future
 
     def test_expired_dates_are_still_rejected(self):
         """两道判据是**并列**的：哨兵挡「假日期」，>= today 挡「过期日期」。"""
