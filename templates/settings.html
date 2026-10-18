@@ -117,6 +117,56 @@
         <div class="form-help mt-1"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_weekdays_hint') }}</div>
       </div>
 
+      <!-- H2S fast lane -->
+      <div class="flex items-center gap-2 mb-3 mt-4" style="color:var(--text3);">
+        <div style="height:1px;flex:1;background:var(--border);"></div>
+        <span class="text-xs font-semibold" style="text-transform:uppercase;letter-spacing:.06em;"><i class="bi bi-lightning mr-1"></i>{{ _('settings_h2s_rest') }}</span>
+        <div style="height:1px;flex:1;background:var(--border);"></div>
+      </div>
+
+      {# 默认关。值的判据与 mcore.h2s_rest.rest_enabled 一致：1/true/yes/on 算开。 #}
+      {% set h2s_rest_on = (env.get('H2S_REST_ENABLED','') | lower) in ['1','true','yes','on'] %}
+      <div class="form-row mb-2" style="align-items:center;">
+        <div class="form-group" style="margin:0;">
+          <label class="toggle">
+            <input type="checkbox" id="h2s_rest" {% if h2s_rest_on %}checked{% endif %}
+                   onchange="document.getElementById('h2s_rest_h').value=this.checked?'true':'false'">
+            <span class="toggle-track"></span>
+            {{ _('settings_h2s_rest_toggle') }}
+          </label>
+          <input type="hidden" id="h2s_rest_h" name="H2S_REST_ENABLED" value="{{ 'true' if h2s_rest_on else 'false' }}">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">{{ _('settings_h2s_rest_interval') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_h2s_rest_interval_default') }}</span></label>
+          <input type="number" class="form-input" name="H2S_REST_INTERVAL" value="{{ env.get('H2S_REST_INTERVAL','3') }}" min="1" max="60" step="0.5">
+          <div class="form-help">{{ _('settings_h2s_rest_interval_hint') }}</div>
+        </div>
+      </div>
+      <div class="form-help mb-3"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_h2s_rest_hint') }}</div>
+
+      {# 默认值与 mcore.h2s_rest 的 DEFAULT_START / DEFAULT_END 保持一致 #}
+      {% set h2s_rest_wd = (env.get('H2S_REST_WEEKDAYS_ONLY','true') | lower) not in ['0','false','no','off'] %}
+      <div class="form-row mb-2" style="align-items:center;">
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">{{ _('settings_h2s_rest_start') }}</label>
+          <input type="time" class="form-input" name="H2S_REST_START" value="{{ env.get('H2S_REST_START','08:30') }}">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label">{{ _('settings_h2s_rest_end') }}</label>
+          <input type="time" class="form-input" name="H2S_REST_END" value="{{ env.get('H2S_REST_END','17:45') }}">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="toggle">
+            <input type="checkbox" id="h2s_rest_wd" {% if h2s_rest_wd %}checked{% endif %}
+                   onchange="document.getElementById('h2s_rest_wd_h').value=this.checked?'true':'false'">
+            <span class="toggle-track"></span>
+            {{ _('settings_h2s_rest_weekdays') }}
+          </label>
+          <input type="hidden" id="h2s_rest_wd_h" name="H2S_REST_WEEKDAYS_ONLY" value="{{ 'true' if h2s_rest_wd else 'false' }}">
+        </div>
+      </div>
+      <div class="form-help"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_h2s_rest_window_hint') }}</div>
+
     </div>
   </div>
 

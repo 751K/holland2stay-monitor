@@ -241,6 +241,26 @@ class TestAlertActuallyComesOut:
 
         monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
         monkeypatch.setattr(monitor, "get_interval", lambda cfg: (300, False))
+
+        # main_loop 会在后台起 REST 触发器，它每个 tick 之后 asyncio.sleep。上面
+        # 把 sleep 换成了不让出控制权的空函数，触发器就会空转、把事件循环饿死。
+        class _IdleTrigger:
+            def __init__(self, wake):
+                pass
+
+            async def run(self, get_cfg):
+                await asyncio.Event().wait()
+
+            def begin_round(self):
+                return []
+
+            def end_round(self, *a, **kw):
+                pass
+
+            def has_due(self):
+                return False
+
+        monkeypatch.setattr(monitor, "RestTrigger", _IdleTrigger)
         # 成功那一轮会走到轮末的等待循环，它按真实时钟等 effective_interval。
         # 抖动函数归零 → deadline 立刻到期 → 直接进下一轮，测试不用真等 5 分钟。
         monkeypatch.setattr(monitor, "apply_jitter", lambda value, ratio: 0.0)

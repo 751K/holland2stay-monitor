@@ -87,6 +87,11 @@ RUNTIME_KEYS: frozenset[str] = frozenset({
     # 也就是说只有它能在不重新部署的情况下关掉。一个用来救火的开关，如果关它本身
     # 要走一次部署，那它在最需要的时候就是没用的。
     "WARM_BROWSER_LANE",
+    # H2S REST 触发器总开关（默认关）与轮询间隔，见 mcore/h2s_rest.py。放 RUNTIME：
+    # /settings 面板可改、热重载生效；免检路径哪天被收回、或者对方开始限流，
+    # 要能不部署就关掉。
+    "H2S_REST_ENABLED", "H2S_REST_INTERVAL",
+    "H2S_REST_START", "H2S_REST_END", "H2S_REST_WEEKDAYS_ONLY",
     # 监控范围（同样由面板写回）
     "SOURCES", "SHADOW_SOURCES",
     "CITIES", "OURDOMAIN_CITIES", "OURCAMPUS_CITIES", "XIOR_CITIES",

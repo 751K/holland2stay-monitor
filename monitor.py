@@ -71,6 +71,7 @@ from mcore.health import CIRCUIT_OPEN_ERROR
 from mcore.pacing import AdaptivePacing
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from mcore.interval import apply_jitter, get_interval
+from mcore.h2s_rest import RestTrigger
 from mcore import geocode as _geocode
 from mcore.prewarm import PrewarmCache
 from scrapers import (
@@ -1317,6 +1318,52 @@ _RELOAD_REQUEST_FILE = DATA_DIR / "monitor.reload"
 # 热重载事件（SIGHUP → 唤醒 main_loop 中的 sleep，立即重载配置）
 _reload_event: asyncio.Event | None = None
 
+# H2S REST 触发器发现新房时设置 → 主循环提前结束等待，跑一轮只抓 H2S 的抓取。
+# 见 mcore/h2s_rest.py。
+_h2s_wake_event: asyncio.Event | None = None
+
+#: REST 唤醒轮只抓这些 source。
+_REST_WAKE_SOURCES: frozenset[str] = frozenset({"holland2stay"})
+
+#: 两个唤醒轮之间至少隔多久（从上一轮开始算）。一批房陆续放出时几秒内会有好几次
+#: 新 id，一轮 H2S 抓取约 1 秒，没必要每一次都单独跑；也防补抓定时器和新 id
+#: 撞在一起时连跑。
+_REST_WAKE_MIN_GAP = 5.0
+
+
+async def _wait_reload_or_wake(timeout: float) -> str:
+    """等热重载或 REST 唤醒，返回 ``"reload"`` / ``"wake"`` / ``"timeout"``。
+
+    两个都已设置时热重载优先：配置变了，先换上新配置再跑哪一轮都对。
+    """
+    events: dict[str, asyncio.Event] = {}
+    if _reload_event is not None:
+        events["reload"] = _reload_event
+    if _h2s_wake_event is not None:
+        events["wake"] = _h2s_wake_event
+    for name in ("reload", "wake"):
+        if name in events and events[name].is_set():
+            # 已经置位也先让出一次：调用方要是忘了 clear，下一圈又立刻返回，
+            # 不让出就是一个饿死整个事件循环的忙等（REST 协程、超时全都不动）。
+            await asyncio.sleep(0)
+            return name
+    if not events:
+        await asyncio.sleep(timeout)
+        return "timeout"
+    waiters = {asyncio.ensure_future(ev.wait()): name for name, ev in events.items()}
+    try:
+        done, _ = await asyncio.wait(waiters, timeout=timeout,
+                                     return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for w in waiters:
+            if not w.done():
+                w.cancel()
+    fired = {waiters[w] for w in done}
+    for name in ("reload", "wake"):
+        if name in fired:
+            return name
+    return "timeout"
+
 # 类型别名：每个用户与其对应通知器的配对列表
 UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
 
@@ -2329,9 +2376,13 @@ async def run_once(
         web_notifier: WebNotifier | None = None,
         dry_run: bool = False,
         booking_deadline: float = float("inf"),
+        only_sources: frozenset[str] | None = None,
 ) -> dict[str, bool]:
     """
     执行一次完整的「抓取 → 对比 → 通知 → 自动预订」流程。
+
+    ``only_sources`` 给了就只抓这些 source（H2S REST 触发器叫醒的那一轮只抓
+    H2S，见 mcore/h2s_rest.py）。其余流程不变。
 
     Parameters
     ----------
@@ -2378,6 +2429,19 @@ async def run_once(
     for _t in scrape_tasks:
         source_totals[_t.source] = source_totals.get(_t.source, 0) + 1
 
+    # 整轮是否跨多个 source——按**配置**算，在任何筛选之前。completeness key
+    # 的 source 前缀靠它（scrapers.completeness_key）。按筛剩的任务算会出错：
+    # 节流跳过 Xior、或者 REST 唤醒轮只抓 H2S 的时候，剩下只有 H2S，前缀消失，
+    # 「Eindhoven」这个裸 key 让 mark_stale_listings 退化成不带 source 的
+    # ``city IN (...)``，用 H2S 的完整性把同城 Xior 这轮没抓的房源一起老化掉。
+    multi_source = len(source_totals) > 1
+
+    if only_sources is not None:
+        scrape_tasks = [t for t in scrape_tasks if t.source in only_sources]
+        if not scrape_tasks:
+            logger.info("本轮只抓 %s，但它们都不在配置里，跳过", sorted(only_sources))
+            return {}
+
     # 代理全挂时只留下**直连打得通**的 source。放在节流和分片之前：被代理
     # 挡住的 source 本轮根本不该占分片游标。
     scrape_tasks = _apply_proxyless_gate(scrape_tasks)
@@ -2406,11 +2470,11 @@ async def run_once(
         source_failures: list[tuple[str, Exception]] = []
         succeeded_sources: list[str] = []
 
-        # 整轮是否跨多个 source。dispatcher 自己看不出来——它每次只收到一个
-        # source 的任务，所以 completeness key 的 source 前缀得靠这个开关。
-        # 用 tasks（本轮全部任务）而不是熔断后筛剩的：H2S 熔断期间前缀不该
-        # 忽然消失，否则同一批 listing 的 key 形态会在两轮之间跳变。
-        multi_source = len({t.source for t in tasks}) > 1
+        # 整轮是否跨多个 source：用外层按配置算好的 multi_source。dispatcher
+        # 自己看不出来——它每次只收到一个 source 的任务，所以 completeness key
+        # 的 source 前缀得靠这个开关。也不能用这里的 tasks 现算：熔断、节流、
+        # 只抓 H2S 都会让它变少，前缀一消失，同一批 listing 的 key 形态就在两轮
+        # 之间跳变。
 
         # 整轮共用一个时间戳，各 source 的遥测行靠它分组。用 dispatch 开始的
         # 时刻而不是各 source 各自的完成时刻——否则同一轮的行会散成好几组。
@@ -3341,8 +3405,14 @@ async def main_loop(
     SIGHUP 信号处理器通过 loop.call_soon_threadsafe 设置 _reload_event，
     使 wait_for 提前返回。热重载完成后清除事件，继续下一轮。
     """
-    global _reload_event
+    global _reload_event, _h2s_wake_event
     _reload_event = asyncio.Event()
+    _h2s_wake_event = asyncio.Event()
+    # REST 触发器常驻后台。开关 H2S_REST_ENABLED 每个 tick 现读，关着的时候它
+    # 一个请求都不发，所以无条件启动。lambda 读的是本函数的局部 cfg，热重载
+    # 换掉 cfg 之后它自然看到新的。
+    rest_trigger = RestTrigger(_h2s_wake_event)
+    rest_task = asyncio.create_task(rest_trigger.run(lambda: cfg))
 
     round_count = 0
     last_heartbeat_time = time.monotonic()  # 启动时记为刚发过，避免第一轮立即心跳
@@ -3403,10 +3473,18 @@ async def main_loop(
             logger.info("自动预订 [%s]: 已关闭", user.name)
 
     network_fail_streak = 0  # ScrapeNetworkError 连续计数
+    # 下一轮是不是 REST 唤醒的（只抓 H2S）；以及被唤醒打断时原计划的等待截止
+    # 时刻——唤醒轮跑完回到原计划，不重新起算一整个间隔，否则一批房陆续放出的
+    # 那几分钟里，其它 source 会被一直往后推。
+    next_round_rest_wake = False
+    planned_deadline: float | None = None
+    last_round_started = float("-inf")
     blocked_fail_streak = 0  # Cloudflare 403 连续计数
 
     while True:
         round_count += 1
+        rest_wake_round = next_round_rest_wake
+        next_round_rest_wake = False
         try:
             base_interval, is_peak = get_interval(cfg)
 
@@ -3446,6 +3524,8 @@ async def main_loop(
                     )
                 peak_tag = f"{peak_tag}【代理降级直连】"
 
+            if rest_wake_round:
+                peak_tag = f"{peak_tag}【REST 唤醒·只抓 H2S】"
             logger.info("===== 第 %d 轮 %s=====", round_count, peak_tag)
 
             # 心跳：**在抓取之前**写，抓取成功与否都刷新。
@@ -3464,13 +3544,24 @@ async def main_loop(
 
             # booking_deadline：在此时刻后不再尝试备选房源，让下一轮扫描优先进行
             booking_deadline = time.monotonic() + effective_interval
+            # 任何一轮只要抓了 H2S，就顺带核对 REST 报过的 id——所以每轮都清掉
+            # 唤醒标记，不只是唤醒轮：正常轮刚抓完，没必要再叫醒一次。
+            _h2s_wake_event.clear()
+            rest_check_ids = rest_trigger.begin_round()
+            round_started_at = datetime.now(timezone.utc)
+            last_round_started = time.monotonic()
             city_completeness = await run_once(
                 cfg,
                 storage,
                 user_notifiers,
                 web_notifier=web_notifier,
                 booking_deadline=booking_deadline,
+                only_sources=_REST_WAKE_SOURCES if rest_wake_round else None,
             )
+            try:
+                rest_trigger.end_round(rest_check_ids, storage, round_started_at)
+            except Exception:
+                logger.exception("核对 REST 发现的房源失败（已忽略）")
 
             # 全面故障结束。紧跟 run_once 之后判定，不放到本段末尾——下面那些
             # 收尾步骤（剪枝、watchdog）自己也可能抛，那会被 except Exception 记成
@@ -3507,8 +3598,10 @@ async def main_loop(
                 logger.info("Cloudflare 403 已恢复，连续屏蔽计数已清零（之前 %d 次）", blocked_fail_streak)
                 blocked_fail_streak = 0
 
-            # 成功：高峰期将自适应间隔缩短 5%（逐步逼近 min_interval）
-            if is_peak:
+            # 成功：高峰期将自适应间隔缩短 5%（逐步逼近 min_interval）。
+            # 唤醒轮不算：它不是按间隔排出来的，算进去会让一批房放出的那几秒把
+            # 自适应间隔连压好几档。
+            if is_peak and not rest_wake_round:
                 prev = adaptive_peak
                 adaptive_peak = max(float(cfg.min_interval), adaptive_peak * _ADAPTIVE_DECREASE)
                 if int(prev) != int(adaptive_peak):
@@ -3607,25 +3700,34 @@ async def main_loop(
                 finally:
                     last_geocode_time = time.monotonic()
 
-            actual = apply_jitter(effective_interval, cfg.jitter_ratio)
-            # 抖动是 ±jitter_ratio，会把间隔往下拉——下限必须在抖动之后再夹一次，
-            # 否则 0.4 的抖动能把 120 秒打到 72 秒，降速就漏了。
-            if personal_proxy_active:
-                actual = max(actual, _PERSONAL_PROXY_MIN_INTERVAL)
-            if native_fallback_active:
-                actual = max(actual, _NATIVE_PROXY_FALLBACK_INTERVAL)
-            dev_pct = (actual - effective_interval) / effective_interval * 100
-            logger.info(
-                "等待 %d 秒（基准 %d s，%+.0f%%）%s",
-                actual, effective_interval, dev_pct,
-                "（高峰期自适应）" if is_peak else "",
-            )
+            loop = asyncio.get_running_loop()
+            if (rest_wake_round and planned_deadline is not None
+                    and planned_deadline > loop.time()):
+                # 唤醒轮插在原计划的等待中间：跑完回到原计划，不重新起算。
+                deadline = planned_deadline
+                logger.info("REST 唤醒轮结束，回到原计划：再等 %d 秒",
+                            int(deadline - loop.time()))
+            else:
+                actual = apply_jitter(effective_interval, cfg.jitter_ratio)
+                # 抖动是 ±jitter_ratio，会把间隔往下拉——下限必须在抖动之后再夹一次，
+                # 否则 0.4 的抖动能把 120 秒打到 72 秒，降速就漏了。
+                if personal_proxy_active:
+                    actual = max(actual, _PERSONAL_PROXY_MIN_INTERVAL)
+                if native_fallback_active:
+                    actual = max(actual, _NATIVE_PROXY_FALLBACK_INTERVAL)
+                dev_pct = (actual - effective_interval) / effective_interval * 100
+                logger.info(
+                    "等待 %d 秒（基准 %d s，%+.0f%%）%s",
+                    actual, effective_interval, dev_pct,
+                    "（高峰期自适应）" if is_peak else "",
+                )
+                deadline = loop.time() + float(actual)
+            planned_deadline = deadline
 
-            # 等待下一轮：超时正常继续；SIGHUP 或 reload 文件触发则热重载。
+            # 等待下一轮：超时正常继续；SIGHUP 或 reload 文件触发则热重载；
+            # REST 发现新房则提前结束、下一轮只抓 H2S。
             # Windows 不支持可靠的 SIGHUP，因此每秒轮询一次 reload 请求文件。
             reload_triggered = False
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + float(actual)
 
             while True:
                 if _consume_reload_request_file():
@@ -3637,12 +3739,20 @@ async def main_loop(
                 if remaining <= 0:
                     break
 
-                try:
-                    await asyncio.wait_for(_reload_event.wait(), timeout=min(1.0, remaining))
+                fired = await _wait_reload_or_wake(min(1.0, remaining))
+                if fired == "reload":
                     reload_triggered = True
                     break
-                except (asyncio.TimeoutError, TimeoutError):
-                    pass
+                if fired == "wake":
+                    _h2s_wake_event.clear()
+                    if not rest_trigger.has_due():
+                        # 补抓定时器到点时那个 id 已经被别的轮次核对掉了
+                        continue
+                    gap = _REST_WAKE_MIN_GAP - (time.monotonic() - last_round_started)
+                    if gap > 0:
+                        await asyncio.sleep(min(gap, max(0.0, deadline - loop.time())))
+                    next_round_rest_wake = True
+                    break
 
             if reload_triggered:
                 _reload_event.clear()

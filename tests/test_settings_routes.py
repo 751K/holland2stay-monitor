@@ -308,3 +308,66 @@ class TestRegistryAck:
         finally:
             st.close()
         assert stored == ack_registry()
+
+
+class TestH2SRestSettings:
+    """H2S 快速通道的开关与间隔：面板写 app_settings，monitor 按 rest_enabled 读。"""
+
+    def _post(self, client, **extra):
+        data = {"CHECK_INTERVAL": "300", "city_selected": "Eindhoven,29"}
+        data.update(extra)
+        return client.post("/settings", data=data, headers={"X-CSRF-Token": "test_csrf"})
+
+    def test_enable_and_interval_are_saved(self, admin_client, isolated_data_dir):
+        self._post(admin_client, H2S_REST_ENABLED="true", H2S_REST_INTERVAL="2")
+        saved = _saved()
+        assert saved["H2S_REST_ENABLED"] == "true"
+        assert saved["H2S_REST_INTERVAL"] == "2"
+
+    def test_saved_value_is_what_the_monitor_reads_as_on(self, admin_client,
+                                                         isolated_data_dir, monkeypatch):
+        from mcore.h2s_rest import rest_enabled
+        self._post(admin_client, H2S_REST_ENABLED="true")
+        monkeypatch.setenv("H2S_REST_ENABLED", _saved()["H2S_REST_ENABLED"])
+        assert rest_enabled()
+        self._post(admin_client, H2S_REST_ENABLED="false")
+        monkeypatch.setenv("H2S_REST_ENABLED", _saved()["H2S_REST_ENABLED"])
+        assert not rest_enabled()
+
+    def test_invalid_interval_is_not_written(self, admin_client, isolated_data_dir):
+        self._post(admin_client, H2S_REST_INTERVAL="2")
+        self._post(admin_client, H2S_REST_INTERVAL="fast")
+        assert _saved()["H2S_REST_INTERVAL"] == "2"
+
+    def test_page_defaults_to_off(self, admin_client, isolated_data_dir):
+        html = admin_client.get("/settings").get_data(as_text=True)
+        assert 'id="h2s_rest" ' in html and 'id="h2s_rest" checked' not in html
+        assert 'name="H2S_REST_ENABLED" value="false"' in html
+        assert 'name="H2S_REST_INTERVAL" value="3"' in html
+
+    def test_page_reflects_saved_on(self, admin_client, isolated_data_dir):
+        self._post(admin_client, H2S_REST_ENABLED="true", H2S_REST_INTERVAL="5")
+        html = admin_client.get("/settings").get_data(as_text=True)
+        assert 'id="h2s_rest" checked' in html
+        assert 'name="H2S_REST_ENABLED" value="true"' in html
+        assert 'name="H2S_REST_INTERVAL" value="5"' in html
+
+    def test_window_is_saved(self, admin_client, isolated_data_dir):
+        self._post(admin_client, H2S_REST_START="09:00", H2S_REST_END="17:30",
+                   H2S_REST_WEEKDAYS_ONLY="false")
+        saved = _saved()
+        assert saved["H2S_REST_START"] == "09:00"
+        assert saved["H2S_REST_END"] == "17:30"
+        assert saved["H2S_REST_WEEKDAYS_ONLY"] == "false"
+
+    @pytest.mark.parametrize("bad", ["9am", "25:00", "08:61", ""])
+    def test_bad_time_is_not_written(self, admin_client, isolated_data_dir, bad):
+        self._post(admin_client, H2S_REST_START="09:00")
+        self._post(admin_client, H2S_REST_START=bad)
+        assert _saved()["H2S_REST_START"] == "09:00"
+
+    def test_page_defaults_to_weekday_0830_1745(self, admin_client, isolated_data_dir):
+        html = admin_client.get("/settings").get_data(as_text=True)
+        assert 'name="H2S_REST_START" value="08:30"' in html
+        assert 'name="H2S_REST_END" value="17:45"' in html
+        assert 'name="H2S_REST_WEEKDAYS_ONLY" value="true"' in html
