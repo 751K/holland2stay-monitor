@@ -183,6 +183,38 @@ def _isolate_browser_profiles(tmp_path_factory, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_monitor_control_files(tmp_path_factory, monkeypatch):
+    """monitor 的 PID 文件和热重载请求文件改指向临时目录。
+
+    不能只靠 ``isolated_data_dir``：它不是 autouse，而改用户、改设置、管理员
+    接口这一大批路由都会顺手 ``write_reload_request()``——曾经有 20 个测试文件
+    在真实 ``data/`` 下留 ``monitor.reload``。残留的那个文件会被下一个驱动
+    ``main_loop`` 的用例消费掉，用真实 .env 和真实库热重载（偶发失败，外加一串
+    InvalidToken）；本机开着 monitor 时，跑一遍测试就会让它重载一次。
+
+    写端（app.process_ctrl）和读端（monitor）各自持有一份路径常量，
+    monitor_service 又从 process_ctrl 导入了一份 PID_FILE（它会 unlink），
+    **全部**指到同一组临时文件，写读两端仍然对得上。
+    """
+    root = tmp_path_factory.mktemp("monitor_ctl")
+    pid_file = root / "monitor.pid"
+    reload_file = root / "monitor.reload"
+    for mod, attrs in (
+        ("app.process_ctrl", {"PID_FILE": pid_file, "RELOAD_REQUEST_FILE": reload_file}),
+        ("app.services.monitor_service", {"PID_FILE": pid_file}),
+        ("monitor", {"_PID_FILE": pid_file, "_RELOAD_REQUEST_FILE": reload_file}),
+    ):
+        try:
+            module = __import__(mod, fromlist=["_"])
+        except ImportError:
+            continue
+        for name, value in attrs.items():
+            if hasattr(module, name):
+                monkeypatch.setattr(module, name, value)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _no_real_warm_browser(monkeypatch):
     """测试里绝不真开下单常驻浏览器。
 
