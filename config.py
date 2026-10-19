@@ -424,10 +424,32 @@ def canonical_city(value: str) -> str:
     return _CITY_ALIAS_MAP.get(value.strip().lower(), value.strip())
 
 
-def known_city_names() -> list[str]:
-    """所有平台归一之后的城市全集，供筛选下拉使用。"""
-    names = {c["name"] for c in KNOWN_CITIES}
-    names.update(_CITY_ALIAS_MAP.values())
+def known_city_names(sources=None) -> list[str]:
+    """所有平台归一之后的城市全集，供筛选下拉使用。
+
+    传 ``sources`` 时按**实际启用的平台**收敛：没抓的平台城市不该出现在
+    用户能勾的清单里——勾了也永远不会有房源。``None`` 保持旧的全集行为。
+    """
+    if sources is None:
+        names = {c["name"] for c in KNOWN_CITIES}
+        names.update(_CITY_ALIAS_MAP.values())
+        return sorted(names)
+
+    enabled = {str(s).strip().lower() for s in sources}
+    names: set[str] = set()
+    if "holland2stay" in enabled:
+        names.update(c["name"] for c in KNOWN_CITIES)
+    for src, registry in (
+        ("ourdomain", KNOWN_OURDOMAIN_CITIES),
+        ("ourcampus", KNOWN_OURCAMPUS_CITIES),
+        ("xior", KNOWN_XIOR_CITIES),
+        ("magis", KNOWN_MAGIS_CITIES),
+        ("studentexperience", KNOWN_STUDENTEXPERIENCE_CITIES),
+        ("plaza", KNOWN_PLAZA_CITIES),
+    ):
+        if src in enabled:
+            names.update(c.get("city") or c["name"] for c in registry)
+    names.discard("")
     return sorted(names)
 
 

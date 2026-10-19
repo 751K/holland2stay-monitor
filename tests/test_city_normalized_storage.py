@@ -336,3 +336,17 @@ class TestNotificationFilter:
 
     def test_empty_filter_unaffected(self):
         assert ListingFilter().passes(_city_listing("Amsterdam Diemen", "ourdomain"))
+
+def test_known_city_names_scopes_to_enabled_sources():
+    """城市下拉只该列出实际启用平台的城市。"""
+    from config import known_city_names
+
+    h2s = set(known_city_names(["holland2stay"]))
+    assert "Eindhoven" in h2s
+    assert "Wageningen" not in h2s        # Xior 独有
+
+    xior = set(known_city_names(["xior"]))
+    assert "Wageningen" in xior
+    assert "Eindhoven" in xior
+
+    assert "Rijswijk" in set(known_city_names(["plaza"]))

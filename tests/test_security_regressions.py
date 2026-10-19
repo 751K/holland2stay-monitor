@@ -150,3 +150,7 @@ class TestLoginRateLimitDoesNotBlockThreads:
         src = _code(sessions.login)
         i = src.index("check_login_rate")
         assert "429" in src[i:i + 500]
+
+def test_request_body_is_bounded(test_app):
+    """没有上限时一个大 POST 能把进程内存读空。"""
+    assert test_app.config["MAX_CONTENT_LENGTH"] == 20 * 1024 * 1024

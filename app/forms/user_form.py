@@ -368,7 +368,7 @@ def build_user_from_form(
         try:
             from users import _bcrypt_hash
             app_password_hash = _bcrypt_hash(new_app_pw)
-        except RuntimeError as e:
+        except (RuntimeError, ValueError) as e:
             raise ValueError(str(e)) from e
     else:
         app_password_hash = existing.app_password_hash if existing else ""
@@ -533,7 +533,7 @@ def build_user_from_form_self(
         try:
             from users import _bcrypt_hash
             app_password_hash = _bcrypt_hash(new_app_pw)
-        except RuntimeError as e:
+        except (RuntimeError, ValueError) as e:
             raise ValueError(str(e)) from e
     else:
         app_password_hash = existing.app_password_hash

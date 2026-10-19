@@ -1,6 +1,12 @@
 your.domain.com {
     reverse_proxy h2s:8088
 
+    # 请求体上限：与 app.config['MAX_CONTENT_LENGTH'] 对齐（20 MB）。
+    # 需要 Caddy 2.10+（request_body 指令）。
+    request_body {
+        max_size 20MB
+    }
+
     # 安全响应头
     header {
         X-Frame-Options DENY

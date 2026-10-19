@@ -133,6 +133,10 @@ app = Flask(
     static_folder=str(ASSETS_DIR / "static"),
 )
 
+# 请求体上限：证件上传是唯一的文件入口，20 MB 足够放手机拍的 PDF/照片，
+# 同时挡住把整块内存读空的大请求。Caddy 侧有同样的 max_size。
+app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+
 # ── 反代后的真实客户端 IP ──────────────────────────────────────────
 #
 # 不加这层的话 ``request.remote_addr`` 恒为 Caddy 的地址，而**十一处限流全靠它**

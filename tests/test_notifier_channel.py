@@ -239,3 +239,36 @@ class TestWebNotifier:
         call_kw = st.add_web_notification.call_args[1]
         assert call_kw["type"] == "booking"
         assert call_kw["user_id"] == "u1"
+
+
+class TestResendIdempotency:
+    def test_retry_reuses_the_same_key(self, monkeypatch):
+        """传输层重试必须带同一个 Idempotency-Key，否则可能重复发信。"""
+        import asyncio
+
+        import notifier as n
+
+        monkeypatch.setattr(n, "check_resend_quota", lambda uid: (True, ""))
+        monkeypatch.setattr(n, "record_resend_send", lambda uid: None)
+
+        seen: list[dict] = []
+
+        class _Resp:
+            status_code = 200
+            text = ""
+
+        class _Sess:
+            def post(self, url, json=None, headers=None, timeout=None):
+                seen.append(headers)
+                return _Resp()
+
+        r = n.ResendNotifier("re_test", "a@example.com", "u@example.com")
+        monkeypatch.setattr(r, "_ensure_session", lambda: _Sess())
+
+        assert asyncio.run(r._send("hello")) is True
+        assert asyncio.run(r._send("hello")) is True
+        assert seen[0]["Idempotency-Key"] == seen[1]["Idempotency-Key"]
+        assert seen[0]["Idempotency-Key"]
+
+        asyncio.run(r._send("different"))
+        assert seen[2]["Idempotency-Key"] != seen[0]["Idempotency-Key"]

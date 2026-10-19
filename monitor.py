@@ -1069,16 +1069,28 @@ async def main_loop(
 
             heartbeat_interval_sec = cfg.heartbeat_interval_minutes * 60
             if heartbeat_interval_sec > 0 and time.monotonic() - last_heartbeat_time >= heartbeat_interval_sec:
-                total = storage.count_all()
+                # 三件事各自隔离：任何一件失败都不该打断收尾/下一轮。
+                try:
+                    total = storage.count_all()
+                except Exception:
+                    logger.exception("count_all 失败（本轮心跳跳过）")
+                    total = 0
                 # 心跳只发给 admin。它回答的是「监控还在跑吗」——那是运维问题，
                 # 普通用户既无从判断也无从处置，而每小时一条推送足够让人把整个
                 # 通知渠道静音，连真正的房源通知一起埋掉。
                 if web_notifier:
-                    await web_notifier.send_heartbeat(total_in_db=total, round_count=round_count)
+                    try:
+                        await web_notifier.send_heartbeat(
+                            total_in_db=total, round_count=round_count)
+                    except Exception:
+                        logger.exception("发送心跳失败（已忽略）")
                 # 清理旧通知，防止 web_notifications 表无限增长
-                pruned = storage.prune_notifications(keep=WEB_NOTIFICATIONS_KEEP)
-                if pruned:
-                    logger.debug("已清理 %d 条旧通知", pruned)
+                try:
+                    pruned = storage.prune_notifications(keep=WEB_NOTIFICATIONS_KEEP)
+                    if pruned:
+                        logger.debug("已清理 %d 条旧通知", pruned)
+                except Exception:
+                    logger.exception("prune_notifications 失败（已忽略）")
                 # 清理过期验证 token（保留 30 天审计窗口）
                 try:
                     pruned_tok = storage.prune_expired_verifications()
@@ -1103,7 +1115,10 @@ async def main_loop(
             # 把一个抓取轮次拖成几分钟。剩下的交给下一次。
             if time.monotonic() - last_geocode_time >= _GEOCODE_INTERVAL_SEC:
                 try:
-                    ok, bad = _geocode.geocode_missing(storage)
+                    # Photon 不可达时这一批最坏能阻塞 150 秒，不能占着事件循环。
+                    loop_for_geocode = asyncio.get_running_loop()
+                    ok, bad = await loop_for_geocode.run_in_executor(
+                        None, _geocode.geocode_missing, storage)
                     if ok or bad:
                         logger.info("地图坐标补齐：成功 %d，失败 %d", ok, bad)
                 except Exception:

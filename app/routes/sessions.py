@@ -220,7 +220,9 @@ def register_user() -> Any:
         if str(e) == "duplicate":
             flash("该用户名已被注册", "danger")
             return _render_login(next_value=next_value, status=409)
-        raise
+        # bcrypt 长度上限等表单错误：回 4xx，不要变成 500
+        flash(str(e), "danger")
+        return _render_login(next_value=next_value, status=400)
     except RuntimeError as e:
         logger.error("用户配置迁移/加载失败: %s", e)
         flash("用户配置加载失败，请联系管理员", "danger")

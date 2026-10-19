@@ -668,9 +668,18 @@ class ResendNotifier(BaseNotifier):
             "text": text,
             "html": _format_email_html(text),
         }
+        # 同一逻辑消息的传输层重试（_send_with_retry 3 秒后再调一次 _send）
+        # 必须复用同一个幂等键；10 分钟分桶让内容相同的两次独立通知仍各发一条。
+        import hashlib
+        import time as _time
+        bucket = int(_time.time() // 600)
+        idem = hashlib.sha256(
+            f"{self._to}\n{subject}\n{text}\n{bucket}".encode("utf-8")
+        ).hexdigest()
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
+            "Idempotency-Key": idem,
         }
 
         def _post() -> bool:

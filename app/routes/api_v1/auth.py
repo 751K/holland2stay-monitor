@@ -390,7 +390,8 @@ def _register() -> Any:
     except ValueError as e:
         if str(e) == "duplicate":
             return _err.err_conflict("该用户名已被注册")
-        raise
+        # bcrypt 长度上限等输入错误：4xx
+        return _err.err_validation(str(e))
     except RuntimeError as e:
         logger.error("用户配置迁移/加载失败: %s", e)
         return _err.err_server_error(e, "用户配置加载失败，请联系管理员")
@@ -495,6 +496,8 @@ def _change_password() -> Any:
         update_users(_update)
     except LookupError:
         return _err.err_unauthorized()
+    except ValueError as e:
+        return _err.err_validation(str(e))
     except RuntimeError as e:
         logger.error("改密码: 用户配置加载失败: %s", e)
         return _err.err_server_error(e, "服务暂时不可用，请稍后再试")

@@ -115,3 +115,13 @@ class TestSerializationRoundTrip:
         assert users[0].app_login_enabled is False
         assert users[0].app_password_hash == ""
         assert verify_app_password(users[0], "anything") is False
+
+def test_password_over_72_bytes_is_rejected():
+    """bcrypt 只接受 72 字节；超长要抛 ValueError，由调用方转 4xx。"""
+    import pytest
+    from users import _bcrypt_hash
+
+    with pytest.raises(ValueError, match="72"):
+        _bcrypt_hash("é" * 37)      # UTF-8 下 74 字节
+    # 72 字节整好可以
+    assert _bcrypt_hash("a" * 72)

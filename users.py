@@ -780,9 +780,15 @@ def get_user_by_name(
 
 
 def _bcrypt_hash(plaintext: str) -> str:
-    """纯哈希函数：bcrypt(plaintext) → ascii hash。空串返回空串。"""
+    """纯哈希函数：bcrypt(plaintext) → ascii hash。空串返回空串。
+
+    bcrypt 只处理密码的前 72 字节；更长的部分会被静默截断/抛错。直接拦下来，
+    让调用方回 4xx，而不是在 ``hashpw`` 里变 500。
+    """
     if not plaintext:
         return ""
+    if len(plaintext.encode("utf-8")) > 72:
+        raise ValueError("密码最长 72 字节（UTF-8）")
     try:
         import bcrypt
     except ImportError:

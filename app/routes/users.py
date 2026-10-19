@@ -52,6 +52,15 @@ logger = logging.getLogger(__name__)
 
 
 
+def _city_options() -> list[str]:
+    """用户能勾的城市：按全局启用的平台收敛，读配置失败时退回全集。"""
+    try:
+        from config import load_config
+        return known_city_names(load_config().sources)
+    except Exception:
+        return known_city_names()
+
+
 def _xior_building_options() -> list[dict]:
     """当前监控中的 Xior 楼栋，供用户表单选择要配哪栋楼的账号。
 
@@ -313,7 +322,7 @@ def user_new() -> Any:
     # 全平台归一后的城市并集。只用 KNOWN_CITIES 会漏掉 Xior 独有的
     # Wageningen / Venlo / Breda / Leeuwarden——用户既选不到，一旦设了
     # 城市筛选，这些楼盘的房源就被整体挡掉。
-    city_names = known_city_names()
+    city_names = _city_options()
     opts = _get_all_filter_options()
     return render_template(
         "user_form.html", user=None, id_doc=None, device_count=0,
@@ -422,7 +431,7 @@ def user_edit(user_id: str) -> Any:
     # 全平台归一后的城市并集。只用 KNOWN_CITIES 会漏掉 Xior 独有的
     # Wageningen / Venlo / Breda / Leeuwarden——用户既选不到，一旦设了
     # 城市筛选，这些楼盘的房源就被整体挡掉。
-    city_names = known_city_names()
+    city_names = _city_options()
     opts = _get_all_filter_options()
     # 「App 推送」卡片显示已连接设备数。查不出来时按 0——那张卡会退回
     # 「安装 App 并登录即可」，比谎报一个数字好。
