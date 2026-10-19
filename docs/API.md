@@ -95,7 +95,7 @@ Authorization: Bearer <token>
 | `user` | 普通用户，房源、通知等接口会按该用户的 `listing_filter` 隔离 |
 | guest | 不登录，只能访问公开统计、公开房源、地图、日历、过滤选项等 optional bearer 接口 |
 
-SSE 特例：`GET /notifications/stream` 支持 `Authorization` header，也支持 `?token=<token>`，因为部分 EventSource 客户端不能设置自定义 header。
+SSE 特例：`GET /notifications/stream` 支持 `Authorization` header；不能设置自定义 header 的 EventSource 客户端先用 `POST /notifications/stream/ticket` 换一枚 60 秒有效、只能用于 SSE 的票据，再用 `?ticket=` 连接。**不接受 `?token=`**——长期 token 放进 URL 会落进访问日志。
 
 ### 时间与时区
 
@@ -126,6 +126,7 @@ SSE 特例：`GET /notifications/stream` 支持 `Authorization` header，也支�
 | GET | `/notifications` | admin/user | 通知列表 |
 | POST | `/notifications/read` | admin/user | 标记通知已读 |
 | GET | `/notifications/stream` | admin/user | SSE 通知流 |
+| POST | `/notifications/stream/ticket` | admin/user | 换一枚 60 秒 SSE 票据 |
 | GET | `/me/summary` | admin/user | 当前用户统计 |
 | GET | `/me/filter` | admin/user | 当前用户过滤条件 |
 | PUT | `/me/filter` | user | 更新当前用户过滤条件 |
@@ -760,13 +761,14 @@ Body：
 
 SSE 增量通知流。
 
-鉴权：Bearer header 或 `?token=...`
+鉴权：`Authorization: Bearer <token>`，或先换票再用 `?ticket=<ticket>`
+（见下一节）。长期 token 不允许出现在 query 里——URL 会落进访问日志。
 
 Query：
 
 | 参数 | 类型 | 说明 |
 |---|---|---|
-| `token` | string | 可选；无法设置 Authorization header 时使用 |
+| `ticket` | string | 可选；无法设置 Authorization header 时使用（`POST /notifications/stream/ticket` 获取） |
 | `last_id` | int | 从该通知 id 之后开始增量推送 |
 
 事件格式：
@@ -784,6 +786,24 @@ data: [{"id":1002,"type":"new_listing"}]
 - 连接最长约 5 分钟，服务端会断开；客户端必须自动重连。
 - 收到 `data` 后用最后一条通知的 `id` 更新 `last_id`。
 - 断线重连建议指数退避，最大 30 秒。
+
+### POST `/notifications/stream/ticket`
+
+用长期 Bearer token 换一枚短期 SSE 票据。
+
+鉴权：`admin` / `user`（Bearer header）
+
+```http
+POST /notifications/stream/ticket
+Authorization: Bearer <token>
+```
+
+```json
+{"ok": true, "data": {"ticket": "…", "expires_in": 60}}
+```
+
+票据是长期 token 的短时代替品：60 秒内有效、只能用于 SSE；每次重新连接前
+应重新换票。token 被撤销后，尚未过期的票据也会立即失效。
 
 ## Current User
 

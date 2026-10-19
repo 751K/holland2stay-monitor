@@ -584,7 +584,7 @@
         ],
         "operationId": "streamNotifications",
         "summary": "Server-Sent Events notification stream.",
-        "description": "Accepts Authorization: Bearer <token> or ?token=<token> for EventSource clients.",
+        "description": "Accepts Authorization: Bearer <token>. EventSource clients that cannot set headers exchange a bearer token at POST /notifications/stream/ticket for a 60-second ticket, then pass ?ticket=<ticket>. Long-lived tokens are not accepted in the query string.",
         "security": [
           {
             "bearerAuth": []
@@ -592,11 +592,12 @@
         ],
         "parameters": [
           {
-            "name": "token",
+            "name": "ticket",
             "in": "query",
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Short-lived SSE ticket from POST /notifications/stream/ticket."
           },
           {
             "name": "last_id",
@@ -616,6 +617,61 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/notifications/stream/ticket": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "operationId": "createNotificationsStreamTicket",
+        "summary": "Exchange a bearer token for a short-lived SSE ticket.",
+        "description": "EventSource cannot set custom headers. Exchange the bearer token for a 60-second, SSE-only ticket, then connect to GET /notifications/stream?ticket=<ticket>. The ticket is revoked as soon as its underlying token is revoked.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ticket issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/SuccessEnvelope"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "required": [
+                            "ticket",
+                            "expires_in"
+                          ],
+                          "properties": {
+                            "ticket": {
+                              "type": "string"
+                            },
+                            "expires_in": {
+                              "type": "integer",
+                              "description": "Seconds until the ticket expires."
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ]
                 }
               }
             }

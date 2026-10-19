@@ -346,6 +346,18 @@ class TokenOps:
         ).fetchone()
         return dict(row) if row else None
 
+    def find_app_token_by_id(self, token_id: int) -> Optional[dict]:
+        """按主键查 token，供 SSE 票据兑换时回查权限状态。
+
+        票据本身只带 token_id；连接建立时仍要确认这枚 token 没被撤销、
+        没到期，否则撤销操作对已经发出（但还没用掉）的票据不生效。
+        """
+        row = self._conn.execute(
+            "SELECT * FROM app_tokens WHERE id = ?",
+            (int(token_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
     def list_app_tokens(
         self,
         *,

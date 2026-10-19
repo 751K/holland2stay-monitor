@@ -10,7 +10,7 @@ API v1 只读数据端点测试（Phase 2）
 - /notifications/read：标记已读，user 不能跨越权
 - /me/summary：role-aware 数字
 - /me/filter：返回 user 的 filter，admin 返回空
-- SSE 鉴权：header / query token 都能进入；坏 token 返回 401
+- SSE 鉴权：header 或短期 ticket 能进入；长期 token 放 query、坏票据都返回 401
 
 设计：
 - 用 tmp_path DB 隔离；fixture 预填充 3 套房源 + 部分 web_notifications
@@ -461,8 +461,15 @@ class TestSSEAuth:
                            headers=_bearer("garbage"))
         assert r.status_code == 401
 
-    def test_bad_query_token_401(self, api_client, seeded):
-        r = api_client.get("/api/v1/notifications/stream?token=garbage")
+    def test_long_lived_token_in_query_is_rejected(
+            self, api_client, seeded, admin_token):
+        """URL 会落进访问日志，所以长期 token 不许出现在 query 里。"""
+        r = api_client.get(
+            f"/api/v1/notifications/stream?token={admin_token}")
+        assert r.status_code == 401
+
+    def test_garbage_ticket_401(self, api_client, seeded):
+        r = api_client.get("/api/v1/notifications/stream?ticket=garbage")
         assert r.status_code == 401
 
     def test_valid_header_200_streaming(self, api_client, seeded, admin_token):
@@ -475,8 +482,68 @@ class TestSSEAuth:
         assert r.mimetype == "text/event-stream"
         r.close()
 
-    def test_valid_query_token_200(self, api_client, seeded, admin_token):
-        r = api_client.get(f"/api/v1/notifications/stream?token={admin_token}",
-                           buffered=False)
+    def test_valid_ticket_200(self, api_client, seeded, admin_token):
+        r = api_client.post("/api/v1/notifications/stream/ticket",
+                            headers=_bearer(admin_token))
         assert r.status_code == 200
-        r.close()
+        data = r.get_json()["data"]
+        assert data["expires_in"] > 0
+
+        s = api_client.get(
+            f"/api/v1/notifications/stream?ticket={data['ticket']}",
+            buffered=False,
+        )
+        assert s.status_code == 200
+        assert s.mimetype == "text/event-stream"
+        s.close()
+
+    def test_ticket_requires_bearer(self, api_client, seeded):
+        r = api_client.post("/api/v1/notifications/stream/ticket")
+        assert r.status_code == 401
+
+    def test_tampered_ticket_is_rejected(
+            self, api_client, seeded, admin_token):
+        r = api_client.post("/api/v1/notifications/stream/ticket",
+                            headers=_bearer(admin_token))
+        ticket = r.get_json()["data"]["ticket"]
+        tampered = ticket[:-1] + ("A" if ticket[-1] != "A" else "B")
+        s = api_client.get(
+            f"/api/v1/notifications/stream?ticket={tampered}")
+        assert s.status_code == 401
+
+    def test_expired_ticket_is_rejected(
+            self, api_client, seeded, admin_token, monkeypatch):
+        from app import api_auth
+
+        r = api_client.post("/api/v1/notifications/stream/ticket",
+                            headers=_bearer(admin_token))
+        ticket = r.get_json()["data"]["ticket"]
+
+        # 签发时间戳在票据里；把允许年龄改成负数，任何票据都算过期
+        monkeypatch.setattr(api_auth, "SSE_TICKET_MAX_AGE_SEC", -1)
+        s = api_client.get(
+            f"/api/v1/notifications/stream?ticket={ticket}")
+        assert s.status_code == 401
+
+    def test_ticket_stops_working_after_token_is_revoked(
+            self, api_client, seeded, admin_token):
+        """票据只带 token_id；撤销必须实时生效，不能等票据自己过期。"""
+        from app.db import storage
+
+        r = api_client.post("/api/v1/notifications/stream/ticket",
+                            headers=_bearer(admin_token))
+        ticket = r.get_json()["data"]["ticket"]
+
+        from mstorage._tokens import hash_token
+
+        st = storage()
+        try:
+            row = st.find_app_token(hash_token(admin_token))
+            assert row is not None
+            st.revoke_app_token(row["id"])
+        finally:
+            st.close()
+
+        s = api_client.get(
+            f"/api/v1/notifications/stream?ticket={ticket}")
+        assert s.status_code == 401

@@ -5,6 +5,7 @@ API v1 通知端点
 - GET  /api/v1/notifications        分页通知列表（admin/user）
 - POST /api/v1/notifications/read   标记已读（全部或指定 ids）
 - GET  /api/v1/notifications/stream SSE 推送增量通知
+- POST /api/v1/notifications/stream/ticket 用 Bearer 换短期 SSE 票据
 
 user 视角的过滤
 ---------------
@@ -19,10 +20,12 @@ user 视角的过滤
 
 SSE 鉴权
 --------
-SSE EventSource 默认不支持自定义 header；iOS 端虽然可以用 URLSession
-bytes streaming 带 Authorization header，但为了让浏览器/简单客户端也
-能用，支持 ``?token=<plaintext>`` query 参数。token 走和 header 一样的
-校验路径。
+SSE EventSource 默认不支持自定义 header。能设 header 的客户端直接带
+``Authorization: Bearer``；不能设的客户端先调 ``POST .../stream/ticket``
+换一枚 60 秒有效、只能用于 SSE 的签名票据，再用 ``?ticket=`` 连接。
+
+**不接受 ``?token=``**：长期 token 放进 URL 会原样落进访问日志，撤销前
+一直可复用。票据即使落进日志，60 秒后也失效，且只能读通知。
 """
 
 from __future__ import annotations
@@ -96,24 +99,37 @@ def _mark_read():
 # ── SSE 推送 ────────────────────────────────────────────────────────
 
 
+def _ticket():
+    """用长期 Bearer 换一枚 60 秒、只能连 SSE 的票据。
+
+    ``bearer_required`` 已经完成鉴权并把 token id 放进 ``g``。
+    """
+    return _err.ok({
+        "ticket": api_auth.issue_sse_ticket(g.api_token_id),
+        "expires_in": api_auth.SSE_TICKET_MAX_AGE_SEC,
+    })
+
+
 def _stream():
     """
     SSE 增量通知流。
 
-    鉴权：``Authorization: Bearer xxx`` 或 ``?token=xxx`` 查询参数。
-    URLSession 可用 header；浏览器 EventSource 只能用 query。
+    鉴权：``Authorization: Bearer xxx``，或 ``?ticket=xxx``
+    （先调 ``POST .../stream/ticket`` 换票）。不接受 ``?token=``。
     """
     # 自己处理鉴权（不走装饰器，因为 EventSource 没法带 header）
     tok = request.headers.get("Authorization", "")
+    row = None
     if tok.lower().startswith("bearer "):
-        tok = tok[7:].strip()
+        plaintext = tok[7:].strip()
+        if plaintext:
+            row = api_auth._resolve_token(plaintext)
     else:
-        tok = (request.args.get("token") or "").strip()
-    if not tok:
-        return _err.err_unauthorized()
-    row = api_auth._resolve_token(tok)
+        ticket = (request.args.get("ticket") or "").strip()
+        if ticket:
+            row = api_auth.resolve_sse_ticket(ticket)
     if not row:
-        return _err.err_unauthorized("token 无效或已过期")
+        return _err.err_unauthorized("token/ticket 无效或已过期")
     if not api_auth._user_token_still_allowed(row):
         return _err.err_unauthorized("账户已禁用")
     g.api_role = row["role"]
@@ -164,4 +180,10 @@ def register(bp: Blueprint) -> None:
         endpoint="notifications_stream",
         view_func=_stream,   # 自己处理鉴权（SSE 不能用装饰器）
         methods=["GET"],
+    )
+    bp.add_url_rule(
+        "/notifications/stream/ticket",
+        endpoint="notifications_stream_ticket",
+        view_func=api_auth.bearer_required(("admin", "user"))(_ticket),
+        methods=["POST"],
     )

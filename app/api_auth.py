@@ -179,6 +179,24 @@ def _extract_bearer() -> Optional[str]:
     return tok or None
 
 
+def _token_row_is_usable(row: Optional[dict]) -> bool:
+    """revoked / expires_at 两项状态检查，Bearer 与 SSE 票据共用。"""
+    if not row:
+        return False
+    if row.get("revoked"):
+        return False
+    expires_at = row.get("expires_at")
+    if expires_at:
+        # ISO8601 UTC 字符串可以直接字典序比较（同一格式同一时区）
+        import datetime as _dt
+        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        if expires_at < now_iso:
+            return False
+    return True
+
+
 def _resolve_token(plaintext: str) -> Optional[dict]:
     """
     plaintext -> row dict，None 表示验证失败。
@@ -208,22 +226,86 @@ def _resolve_token(plaintext: str) -> Optional[dict]:
         logger.exception("find_app_token failed")
         return None
 
-    if not row:
+    if not _token_row_is_usable(row):
         return None
-    if row.get("revoked"):
-        return None
-    expires_at = row.get("expires_at")
-    if expires_at:
-        # ISO8601 UTC 字符串可以直接字典序比较（同一格式同一时区）
-        import datetime as _dt
-        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
-        if expires_at < now_iso:
-            return None
 
     _cache_put(token_hash, row)
     return row
+
+
+# ── SSE 短期票据 ────────────────────────────────────────────────────
+#
+# 浏览器 EventSource 不能设置自定义 header，早先的做法是把长期 Bearer token
+# 直接放进 ``?token=``。URL 会原样进入 Caddy / 反向代理的访问日志（生产上保留
+# 30 天），而 token 的滑动有效期是 90 天——每次连接都等于把一份完整账号权限
+# 写到磁盘上，读日志的人可以直接复用。
+#
+# 这里改成换票：客户端先用 ``Authorization`` 调
+# ``POST /api/v1/notifications/stream/ticket``，拿到一枚 60 秒有效、只能用于
+# SSE 的签名票据。票据内容是 HMAC 签名的 (token_id, 签发时间)，不落库，因而
+# 多 worker 部署下天然一致；**连接建立时仍按 token_id 回查 app_tokens**，
+# 撤销与到期照常生效。
+
+#: 票据有效期（秒）。只覆盖「拿到票据 → 发起连接」这一步。
+SSE_TICKET_MAX_AGE_SEC = 60
+
+_TICKET_SALT = "api-v1-sse-ticket"
+
+
+def _ticket_serializer():
+    import hashlib
+
+    from flask import current_app
+    from itsdangerous import URLSafeTimedSerializer
+
+    return URLSafeTimedSerializer(
+        current_app.secret_key,
+        salt=_TICKET_SALT,
+        signer_kwargs={"digest_method": hashlib.sha256},
+    )
+
+
+def issue_sse_ticket(token_id: int) -> str:
+    """签一枚只能用于 SSE 的短期票据。"""
+    return _ticket_serializer().dumps({
+        "tid": int(token_id),
+        "use": "sse",
+    })
+
+
+def resolve_sse_ticket(ticket: str) -> Optional[dict]:
+    """校验票据并返回对应 token 行；任何异常都返回 None（fail-closed）。"""
+    from itsdangerous import BadData
+
+    try:
+        data = _ticket_serializer().loads(
+            ticket, max_age=SSE_TICKET_MAX_AGE_SEC,
+        )
+    except BadData:
+        return None
+    except Exception:
+        logger.exception("SSE 票据校验异常")
+        return None
+
+    if not isinstance(data, dict) or data.get("use") != "sse":
+        return None
+    try:
+        token_id = int(data["tid"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    try:
+        from app.db import storage
+        st = storage()
+        try:
+            row = st.find_app_token_by_id(token_id)
+        finally:
+            st.close()
+    except Exception:
+        logger.exception("find_app_token_by_id failed")
+        return None
+
+    return row if _token_row_is_usable(row) else None
 
 
 def _user_token_still_allowed(row: dict) -> bool:
