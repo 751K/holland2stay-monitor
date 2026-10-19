@@ -304,8 +304,8 @@ class TestMonitorDoesNotSuppressLogin:
         import ast
         import pathlib
 
-        src = pathlib.Path("monitor.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        paths = [pathlib.Path("monitor.py"), pathlib.Path("mcore/booking_round.py")]
+        trees = [ast.parse(p.read_text(encoding="utf-8")) for p in paths]
 
         def _mentions(node, name: str) -> bool:
             return any(
@@ -313,37 +313,38 @@ class TestMonitorDoesNotSuppressLogin:
             )
 
         checked = 0
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Compare):
-                continue
-            # 匹配 `result.phase == "operation_rejected"` 及 in (...) 形态
-            consts = [
-                c.value for c in node.comparators
-                if isinstance(c, ast.Constant) and isinstance(c.value, str)
-            ]
-            for c in node.comparators:
-                if isinstance(c, (ast.Tuple, ast.List, ast.Set)):
-                    consts += [
-                        e.value for e in c.elts
-                        if isinstance(e, ast.Constant) and isinstance(e.value, str)
-                    ]
-            if "operation_rejected" not in consts:
-                continue
-            checked += 1
-            assert "blocked" not in consts, (
-                "operation_rejected 和 blocked 被并进了同一个判断。"
-                "两者上层动作相反：blocked 要暂停登录链路 1 小时，"
-                "operation_rejected 暂停多久都不会好。"
-            )
+        for tree in trees:
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
+                    continue
+                # 匹配 `result.phase == "operation_rejected"` 及 in (...) 形态
+                consts = [
+                    c.value for c in node.comparators
+                    if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                ]
+                for c in node.comparators:
+                    if isinstance(c, (ast.Tuple, ast.List, ast.Set)):
+                        consts += [
+                            e.value for e in c.elts
+                            if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                        ]
+                if "operation_rejected" not in consts:
+                    continue
+                checked += 1
+                assert "blocked" not in consts, (
+                    "operation_rejected 和 blocked 被并进了同一个判断。"
+                    "两者上层动作相反：blocked 要暂停登录链路 1 小时，"
+                    "operation_rejected 暂停多久都不会好。"
+                )
 
         assert checked >= 1, "找不到 operation_rejected 的分支，这条守卫已失效"
 
         # 抑制窗口只该由 blocked 那条分支推进
         markers = [
-            n for n in ast.walk(tree)
+            n for tree in trees for n in ast.walk(tree)
             if isinstance(n, ast.Call)
             and isinstance(n.func, ast.Name)
-            and n.func.id == "_mark_h2s_login_blocked"
+            and n.func.id in ("_mark_h2s_login_blocked", "mark_h2s_login_blocked")
         ]
         assert markers, "_mark_h2s_login_blocked 已不存在，这条守卫已失效"
 
@@ -352,23 +353,24 @@ class TestMonitorDoesNotSuppressLogin:
         import ast
         import pathlib
 
-        src = pathlib.Path("monitor.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        paths = [pathlib.Path("monitor.py"), pathlib.Path("mcore/booking_round.py")]
+        trees = [ast.parse(p.read_text(encoding="utf-8")) for p in paths]
 
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Compare):
-                continue
-            for c in node.comparators:
-                if not isinstance(c, (ast.Tuple, ast.List, ast.Set)):
+        for tree in trees:
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare):
                     continue
-                vals = {
-                    e.value for e in c.elts
-                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
-                }
-                if "unknown_error" in vals and "blocked" in vals:
-                    assert "operation_rejected" not in vals, (
-                        "operation_rejected 被加进了 prewarm 失效名单"
-                    )
+                for c in node.comparators:
+                    if not isinstance(c, (ast.Tuple, ast.List, ast.Set)):
+                        continue
+                    vals = {
+                        e.value for e in c.elts
+                        if isinstance(e, ast.Constant) and isinstance(e.value, str)
+                    }
+                    if "unknown_error" in vals and "blocked" in vals:
+                        assert "operation_rejected" not in vals, (
+                            "operation_rejected 被加进了 prewarm 失效名单"
+                        )
 
 
 # ─────────────────────────────────────────────────────────────────────

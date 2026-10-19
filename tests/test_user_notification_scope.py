@@ -17,6 +17,7 @@ import pytest
 
 MONITOR = Path(__file__).resolve().parent.parent / "monitor.py"
 NOTIFY_ROUND = Path(__file__).resolve().parent.parent / "mcore" / "notify_round.py"
+BOOKING_ROUND = Path(__file__).resolve().parent.parent / "mcore" / "booking_round.py"
 
 #: 允许发给普通用户的推送。都是他要么能行动、要么明确关心的：
 #: 新房源和状态变更是他订阅的内容；预订成功带着付款链接，不发等于白订；
@@ -39,10 +40,11 @@ def _user_notifier_calls() -> set[str]:
     send_* 方法。
 
     按 AST 找 ``<x>.send_*(...)``，排除 web_notifier（那是 admin 面板）。
-    通知阶段已从 monitor.py 拆到 mcore/notify_round.py，两个文件都要扫。
+    通知阶段已从 monitor.py 拆到 mcore/notify_round.py，预订结果在
+    mcore/booking_round.py，三个文件都要扫。
     """
     found: set[str] = set()
-    for path in (MONITOR, NOTIFY_ROUND):
+    for path in (MONITOR, NOTIFY_ROUND, BOOKING_ROUND):
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
@@ -100,15 +102,15 @@ class TestBlockedAutoBookGoesToTheRightPlace:
     """
 
     def test_users_get_a_per_listing_notice(self):
-        src = MONITOR.read_text()
-        i = src.index("blocked_in_round and _should_notify_block()")
+        src = BOOKING_ROUND.read_text()
+        i = src.index("blocked_in_round and should_notify_block()")
         block = src[i:i + 1600]
         assert "send_booking_failed" in block, "改成了不通知用户，那他不知道要手动补"
         assert "n.send_error(agg_msg)" not in block
 
     def test_aggregate_text_never_reaches_a_user(self):
         """「影响用户: A, B, C」只能出现在 admin 那条路上。"""
-        src = MONITOR.read_text()
+        src = BOOKING_ROUND.read_text()
         i = src.index("影响用户")
         after = src[i:i + 900]
         # 聚合文案之后，只能看到 web_notifier / dispatch_admin 消费它

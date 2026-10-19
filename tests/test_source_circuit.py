@@ -232,4 +232,4 @@ class TestMonitorWiring:
         import monitor
 
         src = inspect.getsource(monitor._mark_h2s_scrape_blocked)
-        assert "_mark_h2s_login_blocked" in src
+        assert "mark_h2s_login_blocked" in src

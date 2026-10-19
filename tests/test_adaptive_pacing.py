@@ -280,17 +280,21 @@ class TestMonitorWiring:
         import ast
         import inspect
         import monitor
+        from mcore.state import RuntimeState
 
-        fn = inspect.getsource(monitor._bind_persistent_state)
+        tree = ast.parse(inspect.getsource(RuntimeState.bind_storage).strip())
         calls = [
-            n for n in ast.walk(ast.parse(fn.strip()))
+            n for n in ast.walk(tree)
             if isinstance(n, ast.Call)
             and isinstance(n.func, ast.Attribute)
             and n.func.attr == "load"
-            and isinstance(n.func.value, ast.Name)
-            and n.func.value.id == "_source_pacing"
+            and isinstance(n.func.value, ast.Attribute)
+            and n.func.value.attr == "source_pacing"
         ]
-        assert calls, "_bind_persistent_state 必须调 _source_pacing.load(storage)"
+        assert calls, "RuntimeState.bind_storage 必须调 source_pacing.load(storage)"
+        assert "runtime.bind_storage(storage)" in inspect.getsource(
+            monitor._bind_persistent_state
+        ), "启动路径必须调用 runtime.bind_storage"
 
     def test_only_rate_limit_penalizes(self):
         """403 / 网络错误 / 维护都不是「打得太勤」造成的，拉长间隔治不了它们。"""

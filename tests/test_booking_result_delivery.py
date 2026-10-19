@@ -134,22 +134,25 @@ class TestFailurePushOnEveryUserFacingPath:
     """用户侧「没订上」的文本通知有三处发出点，推送得跟着每一处。"""
 
     def test_blocked(self, monkeypatch):
-        monkeypatch.setattr(monitor, "_should_notify_block", lambda: True)
-        monkeypatch.setattr(monitor, "_mark_h2s_login_blocked", lambda *_: None)
+        from mcore import booking_round
+        monkeypatch.setattr(booking_round, "should_notify_block", lambda: True)
+        monkeypatch.setattr(booking_round, "mark_h2s_login_blocked", lambda *_: None)
         push = _Push()
         _run(_listing(), channel_ok=False, push=push, success=False, phase="blocked")
         assert ("u1", "L1", "booking_failed") in push.calls
 
     def test_blocked_inside_throttle_window_stays_silent(self, monkeypatch):
         """节流期内文本通知不发，推送也不该单独发。"""
-        monkeypatch.setattr(monitor, "_should_notify_block", lambda: False)
-        monkeypatch.setattr(monitor, "_mark_h2s_login_blocked", lambda *_: None)
+        from mcore import booking_round
+        monkeypatch.setattr(booking_round, "should_notify_block", lambda: False)
+        monkeypatch.setattr(booking_round, "mark_h2s_login_blocked", lambda *_: None)
         push = _Push()
         _run(_listing(), channel_ok=False, push=push, success=False, phase="blocked")
         assert push.calls == []
 
     def test_operation_rejected(self, monkeypatch):
-        monkeypatch.setattr(monitor, "_should_notify_operation_rejected", lambda: False)
+        from mcore import booking_round
+        monkeypatch.setattr(booking_round, "should_notify_operation_rejected", lambda: False)
         push = _Push()
         _run(_listing(), channel_ok=False, push=push, success=False,
              phase="operation_rejected")

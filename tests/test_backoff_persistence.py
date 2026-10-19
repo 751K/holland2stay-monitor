@@ -227,7 +227,7 @@ class TestStartupActuallyWiresIt:
         finally:
             monitor._source_circuits.recover("holland2stay")
             monitor._throttle_notify_block.reset()
-            monitor._throttle_storage_ref = None
+            monitor.runtime.throttle_storage = None
 
 
 # ── 节流与冷却常量（原 test_monitor_cooldown.py） ───────────────────
