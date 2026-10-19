@@ -172,12 +172,18 @@ class TestShardConfig:
         import config
         assert config.load_config().shard_sizes["xior"] == 0
 
-    def test_malformed_entries_are_ignored_not_fatal(self, monkeypatch):
-        """配置写错不该让监控起不来。"""
+    def test_malformed_entries_are_fatal(self, monkeypatch):
+        """格式错误必须拒绝启动；实体未知才只警告。"""
         monkeypatch.setenv("SHARD_SIZES", "garbage,xior:abc,:5,ourdomain:3")
+        monkeypatch.setenv("SOURCES", "holland2stay")
+        import config
+        with pytest.raises(ValueError, match="SHARD_SIZES"):
+            config.load_config()
+
+    def test_unknown_source_is_warning_not_fatal(self, monkeypatch):
+        """未知平台名可能是上游新平台，不能因此拒绝启动。"""
+        monkeypatch.setenv("SHARD_SIZES", "nope:5,ourdomain:3")
         monkeypatch.setenv("SOURCES", "holland2stay")
         import config
         sizes = config.load_config().shard_sizes
         assert sizes["ourdomain"] == 3
-        from config import _DEFAULT_SHARD_SIZES
-        assert sizes["xior"] == _DEFAULT_SHARD_SIZES["xior"]   # 非法值不覆盖默认

@@ -2183,24 +2183,16 @@ def _parse_source_min_intervals(
     """解析 ``SOURCE_MIN_INTERVALS``，形如 ``xior:600,ourdomain:120``（秒）。
 
     留空用 :data:`_DEFAULT_SOURCE_MIN_INTERVALS`；显式写 ``xior:0`` 关掉该
-    source 的节流。非法条目忽略而不是报错——配置写错不该让监控起不来。
+    source 的节流。解析逻辑统一在 ``target_config.parse_source_map``，这里只负责
+    合并默认值。
 
     ``SOURCE_PEAK_MIN_INTERVALS`` 走同一个解析器，只是换一份默认值。
     """
+    from target_config import parse_source_map
     out = dict(_DEFAULT_SOURCE_MIN_INTERVALS if defaults is None else defaults)
-    if not (raw or "").strip():
-        return out
-    for part in raw.split(","):
-        if ":" not in part:
-            continue
-        name, _, secs = part.partition(":")
-        name = name.strip().lower()
-        try:
-            n = int(secs.strip())
-        except (TypeError, ValueError):
-            continue
-        if name and n >= 0:
-            out[name] = n
+    out.update(_target_parse(
+        "SOURCE_MIN_INTERVALS",
+        lambda v: parse_source_map("SOURCE_MIN_INTERVALS", v), raw))
     return out
 
 
@@ -2208,22 +2200,12 @@ def _parse_shard_sizes(raw: str) -> dict[str, int]:
     """解析 ``SHARD_SIZES``，形如 ``xior:5,ourdomain:3``。
 
     留空用 :data:`_DEFAULT_SHARD_SIZES`；显式写 ``xior:0`` 可以关掉某个 source
-    的分片（0 表示不限制）。非法条目忽略而不是报错——配置写错不该让监控起不来。
+    的分片（0 表示不限制）。解析逻辑统一在 ``target_config.parse_source_map``。
     """
-    if not (raw or "").strip():
-        return dict(_DEFAULT_SHARD_SIZES)
+    from target_config import parse_source_map
     out = dict(_DEFAULT_SHARD_SIZES)
-    for part in raw.split(","):
-        if ":" not in part:
-            continue
-        name, _, size = part.partition(":")
-        name = name.strip().lower()
-        try:
-            n = int(size.strip())
-        except (TypeError, ValueError):
-            continue
-        if name and n >= 0:
-            out[name] = n
+    out.update(_target_parse(
+        "SHARD_SIZES", lambda v: parse_source_map("SHARD_SIZES", v), raw))
     return out
 
 
@@ -2255,55 +2237,27 @@ def source_display_name(source: str) -> str:
     return SOURCE_DISPLAY_NAMES.get(key, key.capitalize() if key else "")
 
 
-def _parse_sources_raw(raw: str) -> list[str]:
-    """拆 source 列表，不做任何默认值填充。"""
-    values = [
-        p.strip().lower()
-        for p in re.split(r"[,|]", raw or "")
-        if p.strip()
+def _target_parse(key: str, parser, raw: str):
+    """调 target_config 解析器：格式错误拒绝启动，实体未知只 WARNING。"""
+    parsed, problems = parser(raw)
+    fatal = [p for p in problems if p.fatal]
+    for p in problems:
+        if p.fatal:
+            logger.error("⚙️  配置格式有误：%s", p)
+        else:
+            logger.warning("⚙️  配置提示：%s", p)
+    if fatal:
+        raise ValueError("；".join(str(p) for p in fatal))
+    return parsed
+
+
+def _target_city_filters(cls, env_key: str, raw: str):
+    from target_config import parse_targets
+    return [
+        cls(name=name, key=key)
+        for name, key in _target_parse(
+            env_key, lambda v: parse_targets(env_key, v), raw)
     ]
-    return list(dict.fromkeys(values))
-
-
-def _parse_sources(raw: str) -> list[str]:
-    return _parse_sources_raw(raw) or ["holland2stay"]
-
-
-def _parse_name_key_list(raw: str, cls: type):
-    """Parse ``name,key|name,key`` into a list of *cls* instances."""
-    items = []
-    for entry in (raw or "").split("|"):
-        entry = entry.strip()
-        if not entry:
-            continue
-        parts = entry.rsplit(",", 1)
-        if len(parts) == 2:
-            items.append(cls(name=parts[0].strip(), key=parts[1].strip()))
-    return items
-
-
-def _parse_ourdomain_cities(raw: str) -> list[OurDomainCityFilter]:
-    return _parse_name_key_list(raw, OurDomainCityFilter)
-
-
-def _parse_ourcampus_cities(raw: str) -> list[OurCampusCityFilter]:
-    return _parse_name_key_list(raw, OurCampusCityFilter)
-
-
-def _parse_xior_cities(raw: str) -> list[XiorCityFilter]:
-    return _parse_name_key_list(raw, XiorCityFilter)
-
-
-def _parse_magis_cities(raw: str) -> list[MagisCityFilter]:
-    return _parse_name_key_list(raw, MagisCityFilter)
-
-
-def _parse_studentexperience_cities(raw: str) -> list[StudentExperienceCityFilter]:
-    return _parse_name_key_list(raw, StudentExperienceCityFilter)
-
-
-def _parse_plaza_cities(raw: str) -> list[PlazaCityFilter]:
-    return _parse_name_key_list(raw, PlazaCityFilter)
 
 
 def load_config() -> Config:
@@ -2338,31 +2292,36 @@ def load_config() -> Config:
     ValueError  若 CITIES 或 AVAILABILITY_FILTERS 中的 ID 不是合法整数
     ValueError  若 TIMEZONE 不是合法的 IANA 时区标识符
     """
-    interval = int(os.environ.get("CHECK_INTERVAL") or "300")
-    sources = _parse_sources(os.environ.get("SOURCES", "holland2stay"))
-
-    cities: list[CityFilter] = []
-    raw_cities = os.environ.get("CITIES", "Eindhoven,29")
-    for entry in raw_cities.split("|"):
-        parts = entry.strip().rsplit(",", 1)
-        if len(parts) == 2:
-            cities.append(CityFilter(name=parts[0].strip(), id=int(parts[1].strip())))
-
-    availability_filters: list[AvailabilityFilter] = []
-    raw_filters = os.environ.get(
-        "AVAILABILITY_FILTERS", "Available to book,179|Available in lottery,336"
+    from target_config import (
+        parse_availability, parse_cities, parse_sources,
     )
-    for entry in raw_filters.split("|"):
-        parts = entry.strip().rsplit(",", 1)
-        if len(parts) == 2:
-            availability_filters.append(
-                AvailabilityFilter(label=parts[0].strip(), id=int(parts[1].strip()))
-            )
+
+    interval = int(os.environ.get("CHECK_INTERVAL") or "300")
+    _raw_sources = os.environ.get("SOURCES", "holland2stay")
+    sources = _target_parse("SOURCES", parse_sources, _raw_sources)
+    if not sources and not _raw_sources.strip():
+        sources = ["holland2stay"]
+
+    cities: list[CityFilter] = [
+        CityFilter(name=name, id=city_id)
+        for name, city_id in _target_parse(
+            "CITIES", parse_cities, os.environ.get("CITIES", "Eindhoven,29"))
+    ]
+
+    availability_filters: list[AvailabilityFilter] = [
+        AvailabilityFilter(label=label, id=fid)
+        for label, fid in _target_parse(
+            "AVAILABILITY_FILTERS", parse_availability,
+            os.environ.get(
+                "AVAILABILITY_FILTERS",
+                "Available to book,179|Available in lottery,336"))
+    ]
 
     ourdomain_cities: list[OurDomainCityFilter] = []
     if "ourdomain" in sources:
-        raw_od_cities = os.environ.get("OURDOMAIN_CITIES", "Amsterdam Diemen,diemen")
-        ourdomain_cities = _parse_ourdomain_cities(raw_od_cities)
+        ourdomain_cities = _target_city_filters(
+            OurDomainCityFilter, "OURDOMAIN_CITIES",
+            os.environ.get("OURDOMAIN_CITIES", "Amsterdam Diemen,diemen"))
 
     # 影子 source：抓但不通知。只保留同时也在 sources 里的，否则是配置笔误。
     #
@@ -2371,7 +2330,8 @@ def load_config() -> Config:
     # 数据健康面板上自然也没有它的卡片。2026-08-04 线上就是这个状态，
     # 而且是从设置面板保存一次（旧版白名单漏了 ourcampus）无声造成的。
     # 所以留一条 WARNING：影子名单里的 source 不在 sources 里，一定要说出来。
-    _shadow_raw = _parse_sources_raw(os.environ.get("SHADOW_SOURCES", ""))
+    _shadow_raw = _target_parse(
+        "SHADOW_SOURCES", parse_sources, os.environ.get("SHADOW_SOURCES", ""))
     shadow_sources = [s for s in _shadow_raw if s in sources]
     _shadow_dangling = [s for s in _shadow_raw if s not in sources]
     if _shadow_dangling:
@@ -2391,10 +2351,10 @@ def load_config() -> Config:
 
     ourcampus_cities: list[OurCampusCityFilter] = []
     if "ourcampus" in sources:
-        raw_oc_cities = os.environ.get(
-            "OURCAMPUS_CITIES", "OurCampus Amsterdam Diemen,diemen"
-        )
-        ourcampus_cities = _parse_ourcampus_cities(raw_oc_cities)
+        ourcampus_cities = _target_city_filters(
+            OurCampusCityFilter, "OURCAMPUS_CITIES",
+            os.environ.get("OURCAMPUS_CITIES",
+                           "OurCampus Amsterdam Diemen,diemen"))
 
     xior_cities: list[XiorCityFilter] = []
     if "xior" in sources:
@@ -2409,7 +2369,8 @@ def load_config() -> Config:
                 for c in KNOWN_XIOR_CITIES
             ]
         else:
-            xior_cities = _parse_xior_cities(raw_xior_cities)
+            xior_cities = _target_city_filters(
+                XiorCityFilter, "XIOR_CITIES", raw_xior_cities)
 
     db_path = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
     log_level = (os.environ.get("LOG_LEVEL") or "INFO").upper()
@@ -2426,7 +2387,8 @@ def load_config() -> Config:
     if "magis" in sources:
         raw_magis_cities = os.environ.get("MAGIS_CITIES", "")
         if raw_magis_cities:
-            magis_cities = _parse_magis_cities(raw_magis_cities)
+            magis_cities = _target_city_filters(
+                MagisCityFilter, "MAGIS_CITIES", raw_magis_cities)
         else:
             # 未显式配置时监控全部五城。Magis 一次请求就返回全站，多监控几个城市
             # 不产生额外请求——按城市裁剪的意义只在于用户订阅的粒度。
@@ -2439,7 +2401,9 @@ def load_config() -> Config:
     if "studentexperience" in sources:
         raw_se_cities = os.environ.get("STUDENTEXPERIENCE_CITIES", "")
         if raw_se_cities:
-            studentexperience_cities = _parse_studentexperience_cities(raw_se_cities)
+            studentexperience_cities = _target_city_filters(
+                StudentExperienceCityFilter, "STUDENTEXPERIENCE_CITIES",
+                raw_se_cities)
         else:
             # 与 Magis 同理：一轮抓取就拿到全部楼盘，少勾城市不减少请求，
             # 只是不再收这些城市的房源。留空即两城全收。
@@ -2452,7 +2416,8 @@ def load_config() -> Config:
     if "plaza" in sources:
         raw_plaza_cities = os.environ.get("PLAZA_CITIES", "")
         if raw_plaza_cities:
-            plaza_cities = _parse_plaza_cities(raw_plaza_cities)
+            plaza_cities = _target_city_filters(
+                PlazaCityFilter, "PLAZA_CITIES", raw_plaza_cities)
         else:
             # 与 Magis / Student Experience 同理：一个 POST 拿全站，少勾城市不减少
             # 请求，只是不再收这些城市的房源。留空即全收。
