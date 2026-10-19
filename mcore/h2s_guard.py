@@ -15,6 +15,9 @@ logger = logging.getLogger("monitor")
 
 H2S_SOURCE = "holland2stay"
 
+#: 第 3 次连续 H2S 403 起视为长时间被 block（admin 告警用）。
+H2S_LONG_BLOCK_STREAK = 3
+
 
 def h2s_login_suppressed_remaining() -> int:
     """H2S 登录/预订链路是否因 403 被临时抑制；返回剩余秒数。"""

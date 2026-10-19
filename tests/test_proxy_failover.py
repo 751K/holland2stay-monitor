@@ -335,7 +335,9 @@ class TestRunOnceTurnsProxyErrorIntoCooldown:
         import ast
         import textwrap
 
-        tree = ast.parse(textwrap.dedent(inspect.getsource(monitor.run_once)))
+        from mcore import round_failures
+        tree = ast.parse(textwrap.dedent(
+            inspect.getsource(round_failures.handle_scrape_failure)))
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call)
                     and getattr(node.func, "id", "") == "report_proxy_failure"):
@@ -345,10 +347,11 @@ class TestRunOnceTurnsProxyErrorIntoCooldown:
     def test_handler_feeds_the_verdict_into_the_pool(self):
         import ast
 
-        src = inspect.getsource(monitor.run_once)
-        i = src.index("except ProxyError as e:")
-        block = src[i:i + 1400]
-        assert "is_proxy_service_error(e)" in block, (
+        from mcore import round_failures
+        src = inspect.getsource(round_failures.handle_scrape_failure)
+        i = src.index("isinstance(exc, ProxyError)")
+        block = src[i:i + 1800]
+        assert "is_proxy_service_error(exc)" in block, (
             "没有判定「确认代理服务端异常」，report_proxy_failure 拿不到 confirmed"
         )
         kwargs = {k.arg: ast.unparse(k.value) for k in self._report_call().keywords}
@@ -364,8 +367,9 @@ class TestRunOnceTurnsProxyErrorIntoCooldown:
         """
         import ast
 
-        src = inspect.getsource(monitor.run_once)
-        assert "is_proxy_account_error(e)" in src, "没有判定账户级故障"
+        from mcore import round_failures
+        src = inspect.getsource(round_failures.handle_scrape_failure)
+        assert "is_proxy_account_error(exc)" in src, "没有判定账户级故障"
         kwargs = {k.arg: ast.unparse(k.value) for k in self._report_call().keywords}
         assert kwargs.get("account_level") == "account_level", (
             f"账户级判定没传给代理池（实参 {kwargs}）"

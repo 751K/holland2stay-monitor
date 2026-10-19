@@ -70,19 +70,19 @@ from mcore.state import (
     runtime,
 )
 from mcore.throttles import (
-    should_notify_block as _should_notify_block,
-    should_notify_h2s_long_block as _should_notify_h2s_long_block,
-    should_notify_internal as _should_notify_internal,
-    should_notify_maintenance as _should_notify_maintenance,
-    should_notify_proxy as _should_notify_proxy,
+    should_notify_block as _should_notify_block,  # noqa: F401
 )
 from mcore.h2s_guard import (
-    h2s_circuit_remaining as _h2s_circuit_remaining,
+    H2S_SOURCE,
     h2s_login_suppressed_remaining as _h2s_login_suppressed_remaining,  # noqa: F401
 )
 from mcore.interval import apply_jitter, get_interval
 from mcore.prewarm_round import PrewarmRound
 from mcore.post_round import run_post_scrape as _run_post_scrape
+from mcore.round_failures import (
+    handle_h2s_blocked as _handle_h2s_blocked,
+    handle_scrape_failure as _handle_scrape_failure,
+)
 from mcore.h2s_rest import RestTrigger
 from mcore import geocode as _geocode
 # 从 monitor.py 拆出的自包含块。保留带下划线的别名，测试与既有调用点
@@ -167,8 +167,6 @@ from scrapers import (
     ScrapeNetworkError,
     UpstreamMaintenanceError,
     dispatch_scrape_tasks,
-    is_proxy_account_error,
-    is_proxy_service_error,
 )
 from update_checker import check_for_updates
 from mstorage._notifications import WEB_NOTIFICATIONS_KEEP
@@ -376,7 +374,6 @@ def _env_int_positive(name: str, default: int) -> int:
 
 
 _PERSONAL_PROXY_MIN_INTERVAL = _env_int_positive("PERSONAL_PROXY_MIN_INTERVAL", 120)
-_H2S_SOURCE = "holland2stay"
 _PREWARM_CANDIDATE_WAIT_SEC = 2.0  # 有真实候选时最多等 2s 让预登录赶上快速通道
 
 #: 单个 source 一轮抓取的墙钟上限。见 _dispatch_scrape_tasks_async。
@@ -754,255 +751,26 @@ async def run_once(
 
     prewarm = PrewarmRound(loop, storage, user_notifiers, dry_run)
 
-    # 注意：每个 except 路径显式调用 prewarm.stash_pending()。
-    # 未用 try/finally 统一收尾——因为成功路径上 stash 要延迟到
-    # booking 快速通道之后，提前 stash 会导致 booking 代码无法从
-    # prewarm.futures 中取出刚完成的 session。
     try:
         fresh, completeness, h2s_blocked, h2s_mode = await _dispatch_with_h2s_circuit(
             loop, scrape_tasks, storage=storage, source_totals=source_totals,
             multi_source=multi_source, dry_run=dry_run,
         )
         _log_scrape_completeness(completeness)
-        if h2s_blocked is not None:
-            proxy_on = bool(get_proxy_url())
-            if not dry_run and _should_notify_block():
-                cooldown = _h2s_circuit_remaining()
-                err_msg = (
-                    f"🚫 H2S 抓取被 403 屏蔽\n\n{h2s_blocked}\n\n"
-                    f"代理状态: {'已启用' if proxy_on else '未启用'}\n"
-                    f"H2S 已进入 source 熔断，约 {cooldown // 60} 分钟后只做一次 canary 探测；"
-                    f"其他平台会继续监控。30 分钟内不会重复通知。"
-                )
-                await _notify_admin_only(
-                    storage, web_notifier, err_msg, kind="h2s_circuit",
-                )
-            if (
-                not dry_run
-                and _source_circuits.fail_streak(_H2S_SOURCE) >= _H2S_LONG_BLOCK_STREAK
-                and _should_notify_h2s_long_block()
-            ):
-                cooldown = _h2s_circuit_remaining()
-                await _notify_admin_only(
-                    storage,
-                    web_notifier,
-                    (
-                        "H2S 长时间被 block，需要检查服务器\n\n"
-                        f"连续 H2S 403: {_source_circuits.fail_streak(_H2S_SOURCE)} 次\n"
-                        f"当前 H2S 熔断剩余: 约 {max(1, cooldown // 60)} 分钟\n"
-                        f"最近错误: {h2s_blocked}\n\n"
-                        "请检查服务器网络、代理出口、Webshare 状态和 H2S GraphQL 访问情况。"
-                    ),
-                    kind="blocked",
-                )
-            if not fresh:
-                logger.warning(
-                    "H2S %s 触发 403 且没有其它 source 成功，本轮不更新数据库。",
-                    h2s_mode,
-                )
-                return completeness
-        elif h2s_mode == "open" and not fresh:
-            # 条件是 `not fresh`（本轮一条房源都没抓到），不是「没有配置其它 source
-            # 的任务」——原文案写成后者，会把人引去查 SOURCES 配置，而真实原因通常
-            # 是其它 source 确实各自返回了 0 条。Xior 分轮抓之后这尤其常见：某一片
-            # 正好全是没库存的楼，整轮合计就是 0。
-            logger.warning(
-                "H2S 熔断中，且其它 source 本轮未抓到任何房源，无数据可入库。"
-            )
-            return completeness
-    except OperationNotAllowedError as e:
-        # 403，但正文是上游应用说「这条 operation 没登记」，与出口 IP 无关。
-        #
-        # 以前这里没有分支，它会一路落到最底下的 except Exception，被报成
-        # 「未分类的内部异常，请查看服务器日志排查」——**全系统最可诉诸行动的
-        # 一条故障，却把排查引向了服务器日志。** 同一个类在 booker 里早就有专属
-        # phase（operation_rejected），抓取侧一直没补上。
-        #
-        # 不换 IP、不熔断、不抑制登录：那三件事对这种 403 一件都不管用
-        # （见 scrapers.base.OperationNotAllowedError）。上抛让 main_loop 做限流
-        # 冷却，避免在一个必然失败的查询上每轮烧一次代理流量。
-        await prewarm.stash_pending()
-        logger.error(
-            "⛔ 上游拒绝了我们发的 GraphQL operation（HTTP 403，非 Cloudflare）"
-            " cities=%d users=%d：%s",
-            len(scrape_tasks), len(user_notifiers), e,
+        stop = await _handle_h2s_blocked(
+            h2s_blocked, h2s_mode, fresh, completeness,
+            storage=storage, web_notifier=web_notifier, dry_run=dry_run,
         )
-        if not dry_run and _should_notify_internal():
-            await _notify_admin_only(
-                storage, web_notifier,
-                f"⛔ 上游按 operation 白名单拒绝\n\n{e}\n\n"
-                f"这不是 Cloudflare 屏蔽，也不是网络问题——换 IP、重建会话、"
-                f"等冷却都无效。\n"
-                f"唯一的修法是把站点自己发的那条 operation **原样照抄**回来"
-                f"（步骤见 docs/H2S.md §5.1：钩住 crypto.subtle.encrypt 截获"
-                f"加密前的明文）。\n"
-                f"注意白名单按 operationName + 归一化字段集比对，删一个字段"
-                f"就是 403。\n"
-                f"30 分钟内不重复通知。",
-                kind="error",
-            )
-        raise
-    except BlockedError as e:
-        # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。
-        # 给 main_loop 一个长 cooldown（15 min），并节流通知避免刷屏。
-        await prewarm.stash_pending()
-        proxy_on = bool(get_proxy_url())
-        logger.error(
-            "🚫 抓取被屏蔽 (HTTP 403) cities=%d users=%d proxy=%s: %s",
-            len(scrape_tasks), len(user_notifiers),
-            "yes" if proxy_on else "no", e,
-        )
-        if not dry_run and _should_notify_block():
-            err_msg = (
-                f"🚫 抓取被 403 屏蔽\n\n{e}\n\n"
-                f"代理状态: {'已启用' if proxy_on else '未启用'}\n"
-                f"30 分钟内不会重复通知。"
-            )
-            await _notify_admin_only(
-                storage, web_notifier, err_msg, kind="scrape_blocked",
-            )
-        raise
-    except RateLimitError as e:
-        # 429 需要更长冷却，上传给 main_loop 单独处理（不走普通 10s 恢复路径）
-        await prewarm.stash_pending()
-        logger.warning(
-            "⚠️  抓取被限流 cities=%d users=%d proxy=%s: %s",
-            len(scrape_tasks), len(user_notifiers),
-            "yes" if get_proxy_url() else "no",
-            e,
-        )
-        if not dry_run:
-            err_msg = f"⚠️ 抓取被限流（429）\n{e}\n监控将暂停 5 分钟后继续。"
-            await _notify_admin_only(
-                storage, web_notifier, err_msg, kind="scrape_rate_limited",
-            )
-        raise
-    except UpstreamMaintenanceError as e:
-        # 平台维护：自己会恢复，**不给普通用户**发告警（用户什么也做不了），
-        # 但是给 **admin 的 web 通知面板** 发一条（节流 1 小时一次）——admin
-        # 能从中看到维护开始时间，方便日后排查"那段时间为什么没数据"。
-        #
-        # 持久化状态用两个 meta key 驱动 dashboard banner：
-        #   - upstream_maintenance_seen_at：首次探测到维护的时间（持续期间不刷新）
-        #   - upstream_maintenance_last_at：最近一次仍在维护的时间（每次都刷新）
-        # 等再次抓取成功时清空（在成功路径里做）。
-        await prewarm.stash_pending()
-        logger.info(
-            "🔧 H2S 平台维护中，本轮跳过 cities=%d users=%d: %s",
-            len(scrape_tasks), len(user_notifiers), e,
-        )
-        if not dry_run:
-            now_iso = datetime.now(timezone.utc).isoformat()
-            first_detect = not storage.get_meta("upstream_maintenance_seen_at", default="")
-            if first_detect:
-                storage.set_meta("upstream_maintenance_seen_at", now_iso)
-            storage.set_meta("upstream_maintenance_last_at", now_iso)
-
-            # admin web 通知：首次探测 + 1h 节流后再次复查命中时才发，避免每轮刷屏。
-            # 不走 user_notifiers——他们的 push / iMessage 不该在凌晨被维护吵醒。
-            if web_notifier and _should_notify_maintenance():
-                hint = (
-                    "🔧 H2S 平台计划维护中\n\n"
-                    f"{e}\n\n"
-                    "监控已暂停轮询，平台恢复后会自动继续。"
-                    "无需操作；状态会在 dashboard 顶部 banner 显示。"
-                )
-                await web_notifier.send_error(hint)
-        raise
-    except ProxyError as e:
-        # 抓取代理失效（HTTPS_PROXY 502 / 隧道失败）。ProxyError 是
-        # ScrapeNetworkError 子类——控制流仍走网络失败冷却，但：
-        # 1. 把失败的代理标记进 cooldown → 下一轮 get_proxy_url 自动切到备用
-        #    （SCRAPE_PROXIES_FALLBACK 配了的话）
-        # 2. 给 admin 发一条明确告警（30 min 节流）。不发普通用户——改不了代理
-        from config import is_proxy_in_cooldown, proxy_failure_mark_count, report_proxy_failure
-        await prewarm.stash_pending()
-        old_proxy = get_proxy_url()
-        service_error = is_proxy_service_error(e)
-        # 账户级（402 欠费 / 407 认证失败）走长冷却：那种故障不会自己好，
-        # 按 10 分钟回去重试只是每小时自伤六次。
-        account_level = is_proxy_account_error(e)
-        new_proxy = report_proxy_failure(
-            service_error_confirmed=service_error, account_level=account_level,
-        )
-        confirmed_down = is_proxy_in_cooldown(old_proxy)
-        native_fallback = is_proxy_native_fallback_active()
-        switched_proxy = bool(new_proxy and new_proxy != old_proxy)
-        logger.error(
-            "🛰️ 抓取代理故障%s: %s",
-            (
-                "，下一轮切换到备用代理"
-                if switched_proxy
-                else "，下一轮降级为服务器原生 IP 直连"
-                if native_fallback
-                else f"，服务端异常待确认（{proxy_failure_mark_count(old_proxy)}/2）"
-                if old_proxy and not confirmed_down and service_error
-                else "，未确认代理服务端异常，按普通网络失败处理"
-                if old_proxy and not service_error
-                else "（无备用代理可切）"
-            ),
-            e,
-        )
-        # admin 告警只在「已确认且可操作」时发，避免一次瞬时失败就刷消息：
-        #   - switched_proxy   切到了备用代理
-        #   - native_fallback  全部代理冷却、降级直连原生 IP
-        #   - not old_proxy    根本没代理可用、彻底卡住
-        # 未达连续确认阈值的单次失败、或非代理服务端特征的普通网络抖动 →
-        # 只记日志，不打扰 admin（由 main_loop 的网络失败计数兜底）。
-        should_alert = switched_proxy or native_fallback or not old_proxy
-        if not dry_run and should_alert and _should_notify_proxy():
-            if switched_proxy:
-                tail = "已自动切换到备用代理，下一轮重试。请尽快修复主代理。"
-            elif native_fallback:
-                tail = (
-                    "所有已配置代理都在冷却中，监控将临时降级为服务器原生 IP 直连。"
-                    "降级期间抓取频率最多 10 分钟一次，代理冷却结束后会自动恢复。"
-                )
-            else:
-                tail = (
-                    "监控已暂停抓取（代理不通时无法绕过 Cloudflare）。"
-                    "请检查 HTTPS_PROXY，或配置 SCRAPE_PROXIES_FALLBACK 备用代理。"
-                )
-            msg = f"抓取代理失效\n\n{e}\n\n{tail}\n30 分钟内不重复通知。"
-            if web_notifier:
-                await web_notifier.send_error(msg)
-            from mcore import push as _push
-            try:
-                await _push.dispatch_admin(storage, msg, kind="proxy")
-            except Exception:
-                logger.debug("代理失效 admin push 失败（已忽略）", exc_info=True)
-        raise
-    except ScrapeNetworkError as e:
-        # 全部城市第 1 页网络失败 → 不更新 last_scrape_at（非有效抓取），
-        # 上传让 main_loop 做连续失败计数和冷却。不发给用户通知——
-        # 网络抖动通常几轮后自动恢复，连续失败到阈值才告警。
-        await prewarm.stash_pending()
-        logger.error(
-            "抓取全部网络失败 cities=%s users=%d proxy=%s: %s",
-            _task_labels(scrape_tasks), len(user_notifiers),
-            "yes" if get_proxy_url() else "no",
-            e,
-        )
-        raise
+        if stop is not None:
+            return stop
     except Exception as e:
-        # 抓取阶段未被归类的异常（不属于 Blocked/RateLimit/Maintenance/Proxy/
-        # Network）。普通用户对内部异常无能为力——改为只告警 admin 并加 30 min
-        # 节流，避免某个反复抛错的内部 bug 每轮刷屏所有用户渠道。
-        await prewarm.stash_pending()
-        logger.error(
-            "抓取阶段未分类错误 cities=%s users=%d: %s",
-            _task_labels(scrape_tasks), len(user_notifiers), e,
-            exc_info=True,
+        # 失败分支自己 stash prewarm；多数会重抛给 main_loop 做退避。
+        return await _handle_scrape_failure(
+            e,
+            storage=storage, web_notifier=web_notifier,
+            scrape_tasks=scrape_tasks, user_notifiers=user_notifiers,
+            dry_run=dry_run, prewarm=prewarm,
         )
-        if not dry_run and _should_notify_internal():
-            await _notify_admin_only(
-                storage, web_notifier,
-                f"抓取阶段未分类错误\n\n{type(e).__name__}: {e}\n\n"
-                f"这是一条未被归类的内部异常，请查看服务器日志排查。"
-                f"30 分钟内不重复通知。",
-                kind="error",
-            )
-        return {}
 
     logger.info("本次抓取共 %d 条房源", len(fresh))
 
@@ -1620,7 +1388,7 @@ def _autobook_credential_gaps(user) -> list[str]:
     ab = user.auto_book
     gaps: list[str] = []
     for src in _autobook_targets(user):
-        if src == "holland2stay" and not (ab.email and ab.password):
+        if src == H2S_SOURCE and not (ab.email and ab.password):
             gaps.append("H2S 账号邮箱/密码（AUTO_BOOK_EMAIL / AUTO_BOOK_PASSWORD）")
         elif src == "plaza":
             if not (ab.plaza_username and ab.plaza_password):

@@ -125,9 +125,9 @@ class TestAdminStillGetsThem:
     """静音的是用户那一侧，运维信息本身不能丢。"""
 
     def test_admin_helper_covers_the_three_failures(self):
-        import monitor
+        from mcore import round_failures
 
-        src = inspect.getsource(monitor)
+        src = inspect.getsource(round_failures)
         for kind in ("h2s_circuit", "scrape_blocked", "scrape_rate_limited"):
             assert f'kind="{kind}"' in src, f"{kind} 没有走 admin 告警"
 

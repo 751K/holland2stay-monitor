@@ -193,7 +193,7 @@ class TestMonitorBlockedHandling:
             if kind == "h2s_circuit":
                 admin_msgs.append(msg)
 
-        with patch("monitor._notify_admin_only", side_effect=fake_admin):
+        with patch("mcore.round_failures.notify_admin_only", side_effect=fake_admin):
             self._run(tmp_path, scrape_fn, user)
 
     def test_admin_notification_throttled_30min(self, tmp_path):
@@ -379,14 +379,15 @@ class TestOperationNotAllowedHasItsOwnHandling:
         """告警文案必须指向真正的修法，而不是「查服务器日志」。"""
         import inspect
 
-        import monitor
+        from mcore import round_failures
 
-        src = inspect.getsource(monitor.run_once)
-        assert "except OperationNotAllowedError" in src, (
-            "run_once 没有专属分支，只能落进「未分类内部异常」兜底"
+        src = inspect.getsource(round_failures.handle_scrape_failure)
+        marker = "isinstance(exc, OperationNotAllowedError)"
+        assert marker in src, (
+            "失败处置没有专属分支，只能落进「未分类内部异常」兜底"
         )
         # 分支正文里要出现「照抄」这个动作词——它是唯一的修法
-        i = src.index("except OperationNotAllowedError")
+        i = src.index(marker)
         body = src[i:i + 1500]
         assert "照抄" in body, f"告警没说清要做什么: {body[:300]}"
 
