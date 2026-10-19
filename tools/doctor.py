@@ -20,6 +20,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from env_utils import parse_bool
 from urllib import request as urllib_request
 
 from dotenv import dotenv_values
@@ -61,7 +62,7 @@ def _mask_secret(value: str, keep: int = 4) -> str:
 
 
 def _bool(value: str) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+    return parse_bool(value)
 
 
 def _env_duplicates(path: Path) -> list[str]:

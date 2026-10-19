@@ -47,6 +47,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from env_utils import env_bool
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +88,7 @@ class FcmConfig:
         从环境变量读配置；FCM_ENABLED!=true 或缺关键字段时返回 None。
         优先走 FCM_SERVICE_ACCOUNT_PATH JSON 文件；文件不存在时 fallback 单项变量。
         """
-        if os.environ.get("FCM_ENABLED", "").lower() != "true":
+        if not env_bool("FCM_ENABLED", False):
             return None
         path = os.environ.get("FCM_SERVICE_ACCOUNT_PATH", "").strip()
         if path and Path(path).exists():

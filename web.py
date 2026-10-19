@@ -38,6 +38,7 @@ if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import ASSETS_DIR, DATA_DIR  # noqa: E402
+from env_utils import env_bool  # noqa: E402
 from translations import tr as _tr  # noqa: E402
 
 # 配置 Web 进程日志：独立文件 data/web.log，避免与 monitor 进程写冲突。
@@ -161,7 +162,7 @@ if _TRUSTED_PROXY_HOPS > 0:
 # Secure=True：仅 HTTPS 下发送 cookie；本地开发通过 SESSION_COOKIE_SECURE=false 关闭。
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SECURE"]   = os.environ.get("SESSION_COOKIE_SECURE", "false").lower() == "true"
+app.config["SESSION_COOKIE_SECURE"]   = env_bool("SESSION_COOKIE_SECURE", False)
 app.config["PERMANENT_SESSION_LIFETIME"] = int(os.environ.get("SESSION_LIFETIME_HOURS", "24")) * 3600
 
 # 稳定的 secret key：优先读 .env，不存在则自动生成并写入

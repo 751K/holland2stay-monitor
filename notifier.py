@@ -42,6 +42,7 @@ from email.message import EmailMessage
 from functools import partial
 from html import escape as html_escape
 from typing import TYPE_CHECKING, Callable
+from env_utils import env_bool
 
 import curl_cffi.requests as req
 
@@ -832,7 +833,7 @@ def get_shared_email_config() -> tuple[bool, str, str]:
     且 RESEND_FROM 是合法邮箱格式。任何一项不满足即视为关闭，调用方应回退
     到 custom SMTP 或跳过该渠道。
     """
-    enabled = _os.environ.get("SHARED_EMAIL_ENABLED", "true").lower() != "false"
+    enabled = env_bool("SHARED_EMAIL_ENABLED", True)
     api_key = _os.environ.get("RESEND_API_KEY", "").strip()
     from_addr = _os.environ.get("RESEND_FROM", "").strip()
     if enabled and from_addr and not _EMAIL_RE.match(from_addr):

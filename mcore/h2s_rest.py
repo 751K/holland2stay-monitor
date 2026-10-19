@@ -73,6 +73,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
+from env_utils import env_bool
 
 from models import STATUS_AVAILABLE
 
@@ -118,8 +119,7 @@ FAIL_LOG_EVERY = 100
 
 
 def rest_enabled() -> bool:
-    return (os.environ.get(ENABLED_ENV) or "").strip().lower() in (
-        "1", "true", "yes", "on")
+    return env_bool(ENABLED_ENV, False)
 
 
 def rest_interval() -> float:

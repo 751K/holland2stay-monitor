@@ -34,6 +34,7 @@ from typing import Callable
 from flask import jsonify, redirect, request, session, url_for
 
 from config import ENV_PATH
+from env_utils import env_bool
 
 from .env_writer import write_env_key
 
@@ -147,7 +148,7 @@ def auth_enabled() -> bool:
 
 def guest_mode_enabled() -> bool:
     """访客模式开关：默认开启，设 WEB_GUEST_MODE=false 可关闭。"""
-    return os.environ.get("WEB_GUEST_MODE", "true").lower() != "false"
+    return env_bool("WEB_GUEST_MODE", True)
 
 
 def is_admin() -> bool:

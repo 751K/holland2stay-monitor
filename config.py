@@ -28,6 +28,7 @@ import sys
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+from env_utils import env_bool
 
 from dotenv import load_dotenv
 
@@ -132,7 +133,7 @@ TIMEZONE = os.environ.get("TIMEZONE", "Europe/Amsterdam")
 BASE_URL = "https://www.holland2stay.com/residences"
 
 # CloakBrowser 设置（用于 H2S CF Turnstile 绕过）
-CLOAKBROWSER_HEADLESS = os.environ.get("CLOAKBROWSER_HEADLESS", "true").lower() != "false"
+CLOAKBROWSER_HEADLESS = env_bool("CLOAKBROWSER_HEADLESS", True)
 """True=无头模式（Docker/生产），False=可视化（本地调试）"""
 
 # curl_cffi TLS 指纹模拟池，绕过 Cloudflare WAF。
@@ -2471,7 +2472,7 @@ def load_config() -> Config:
         peak_end=os.environ.get("PEAK_END") or "10:00",
         peak_start_2=os.environ.get("PEAK_START_2") or "13:30",
         peak_end_2=os.environ.get("PEAK_END_2") or "15:00",
-        peak_weekdays_only=(os.environ.get("PEAK_WEEKDAYS_ONLY") or "true").lower() != "false",
+        peak_weekdays_only=env_bool("PEAK_WEEKDAYS_ONLY", True),
         min_interval=max(5, int(os.environ.get("MIN_INTERVAL") or "15")),
         jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO") or "0.20"))),
         timezone=timezone_str,

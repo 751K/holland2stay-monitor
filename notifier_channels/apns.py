@@ -33,6 +33,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from env_utils import env_bool
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class ApnsConfig:
         从环境变量读配置；APNS_ENABLED!=true 或缺关键字段时返回 None。
         返回 None 即表示"运行时不启用 APNs"，上层 push.dispatch 应当跳过。
         """
-        if os.environ.get("APNS_ENABLED", "").lower() != "true":
+        if not env_bool("APNS_ENABLED", False):
             return None
         kp = os.environ.get("APNS_KEY_PATH", "").strip()
         kid = os.environ.get("APNS_KEY_ID", "").strip()

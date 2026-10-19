@@ -156,7 +156,7 @@ class TestEveryStructuredKeyHasAParser:
         # runtime 里剩下的都是标量（间隔、时间点、开关），不需要解析
         packed = {
             "SOURCES", "SHADOW_SOURCES", "CITIES",
-            "OURDOMAIN_CITIES", "OURCAMPUS_CITIES", "XIOR_CITIES",
+            *tc.TARGET_KEYS,
             "AVAILABILITY_FILTERS", "SHARD_SIZES", "SOURCE_MIN_INTERVALS",
         }
         assert packed <= RUNTIME_KEYS

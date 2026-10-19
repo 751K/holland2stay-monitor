@@ -36,7 +36,7 @@ import env_registry as reg
 ROOT = Path(__file__).resolve().parent.parent
 
 #: 读取环境变量的函数名片段。见模块 docstring 里的「已知边界」。
-_READER_NAMES = ("environ", "getenv", "_env_int", "_env_float", "_env_bool", "_env_str", "_read")
+_READER_NAMES = ("environ", "getenv", "_env_int", "_env_float", "_env_bool", "env_bool", "_env_str", "_read")
 
 #: 环境变量键名的形状。三字符起步，避免把 "ID" "OK" 这类常量当成配置键。
 _KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
