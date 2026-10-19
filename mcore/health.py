@@ -19,6 +19,9 @@
 """
 from __future__ import annotations
 
+from env_utils import env_int
+
+
 import os
 import re
 from dataclasses import dataclass, field
@@ -31,10 +34,7 @@ from typing import Any
 # 够短到在用户反馈之前先知道。
 
 def _env_int(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.environ.get(name, "") or default))
-    except (TypeError, ValueError):
-        return default
+    return max(1, env_int(name, default))
 
 
 # 连续失败几轮算 down

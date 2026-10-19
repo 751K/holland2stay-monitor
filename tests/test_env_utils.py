@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from env_utils import env_bool, parse_bool
+from env_utils import env_bool, env_int, parse_bool
 
 
 @pytest.mark.parametrize("raw,want", [
@@ -46,3 +46,39 @@ def test_env_bool_uses_default_when_unset(monkeypatch):
     monkeypatch.delenv("FEATURE_FLAG", raising=False)
     assert env_bool("FEATURE_FLAG", True) is True
     assert env_bool("FEATURE_FLAG", False) is False
+
+
+@pytest.mark.parametrize("raw,want", [
+    ("5", 5),
+    (" 5 ", 5),
+    ("-3", -3),
+    ("", 7),
+    (None, 7),
+    ("abc", 7),
+])
+def test_env_int(monkeypatch, raw, want):
+    if raw is None:
+        monkeypatch.delenv("N", raising=False)
+    else:
+        monkeypatch.setenv("N", raw)
+    assert env_int("N", 7) == want
+
+
+def test_env_int_strict_raises(monkeypatch):
+    monkeypatch.setenv("N", "abc")
+    with pytest.raises(ValueError, match="不是整数"):
+        env_int("N", 7, strict=True)
+
+
+def test_env_int_positive_falls_back(monkeypatch):
+    monkeypatch.setenv("N", "0")
+    assert env_int("N", 7, positive=True) == 7
+    monkeypatch.setenv("N", "-3")
+    assert env_int("N", 7, positive=True) == 7
+
+
+def test_env_int_clamps(monkeypatch):
+    monkeypatch.setenv("N", "2")
+    assert env_int("N", 7, minimum=5) == 5
+    monkeypatch.setenv("N", "99")
+    assert env_int("N", 7, maximum=60) == 60

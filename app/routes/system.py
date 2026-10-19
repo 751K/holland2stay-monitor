@@ -16,6 +16,9 @@
 """
 from __future__ import annotations
 
+from env_utils import env_int
+
+
 import logging
 import os
 import re
@@ -39,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 # monitor 心跳容许的最大停滞秒数。默认 15 分钟 ≈ 3–4 个抓取轮次，既能容忍
 # 管理员为部署 / 调试短暂停掉监控，也不会让一次被遗忘的暂停无限期潜伏。
-_HEARTBEAT_MAX_AGE = int(os.environ.get("MONITOR_HEARTBEAT_MAX_AGE", "900"))
+_HEARTBEAT_MAX_AGE = env_int("MONITOR_HEARTBEAT_MAX_AGE", 900)
 from app.services.monitor_service import get_web_status, is_monitor_running
 
 _LOG_PATH = DATA_DIR / "monitor.log"

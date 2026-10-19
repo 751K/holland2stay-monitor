@@ -14,6 +14,9 @@ with unit-level rows. Listings are keyed by physical unit ID and prefixed with
 """
 from __future__ import annotations
 
+from env_utils import env_int
+
+
 from datetime import date
 from html import unescape
 import logging
@@ -641,11 +644,7 @@ def _impersonate_attempts() -> list[str]:
 
 
 def _env_int(name: str, default: int, *, min_value: int, max_value: int) -> int:
-    try:
-        value = int(os.environ.get(name, "") or default)
-    except ValueError:
-        value = default
-    return max(min_value, min(value, max_value))
+    return env_int(name, default, minimum=min_value, maximum=max_value)
 
 
 def _headers_for(url: str, *, referer: str = "", ajax: bool = False) -> dict[str, str]:

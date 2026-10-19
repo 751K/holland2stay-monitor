@@ -46,6 +46,9 @@ config / users：被各模块按需 import
 """
 from __future__ import annotations
 
+from env_utils import env_int
+
+
 import argparse
 import asyncio
 import json
@@ -361,16 +364,8 @@ _NATIVE_PROXY_FALLBACK_INTERVAL = 600  # 10 分钟；代理全挂时直连原生
 #: 可用 PERSONAL_PROXY_MIN_INTERVAL 覆盖：这个值该由线路主人自己定，别人的
 #: 家宽和忍耐度都不一样。
 def _env_int_positive(name: str, default: int) -> int:
-    """读一个正整数环境变量；空/非法/非正一律回落默认值。
-
-    回落而不是抛错：一个手滑写错的降速阈值不该让整个监控起不来，而默认值本身
-    是安全的那一侧（慢）。
-    """
-    try:
-        val = int(os.environ.get(name, "") or default)
-    except (TypeError, ValueError):
-        return default
-    return val if val > 0 else default
+    """读一个正整数环境变量；空/非法/非正一律回落默认值。"""
+    return env_int(name, default, positive=True)
 
 
 _PERSONAL_PROXY_MIN_INTERVAL = _env_int_positive("PERSONAL_PROXY_MIN_INTERVAL", 120)

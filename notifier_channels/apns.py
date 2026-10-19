@@ -26,6 +26,9 @@ JWT 部分用真实 cryptography ES256 签名（依赖该库已存在）。
 
 from __future__ import annotations
 
+from env_utils import env_bool, env_int
+
+
 import json
 import logging
 import os
@@ -33,7 +36,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from env_utils import env_bool
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,7 @@ class ApnsConfig:
         return cls(
             key_path=kp, key_id=kid, team_id=tid, topic=topic,
             env_default=os.environ.get("APNS_ENV_DEFAULT", "production"),
-            concurrency=int(os.environ.get("APNS_CONCURRENCY", "16") or 16),
+            concurrency=env_int("APNS_CONCURRENCY", 16),
         )
 
 

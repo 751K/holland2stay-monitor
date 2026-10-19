@@ -101,7 +101,7 @@ class TestRealClientIp:
         """直接暴露端口的部署里开它 = 让客户端自报 IP。默认必须关。"""
         src = (ROOT / "web.py").read_text(encoding="utf-8")
         i = src.index("_TRUSTED_PROXY_HOPS")
-        assert 'or "0"' in src[i:i + 200], "默认值不是 0"
+        assert 'env_int("TRUSTED_PROXY_HOPS", 0)' in src[i:i + 200], "默认值不是 0"
         assert "if _TRUSTED_PROXY_HOPS > 0:" in src
 
     def test_key_is_registered(self):

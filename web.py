@@ -24,6 +24,9 @@ Docker 容器中由 Gunicorn 启动（supervisord.conf）：
 """
 from __future__ import annotations
 
+from env_utils import env_bool, env_int  # noqa: E402
+
+
 import argparse
 import hashlib
 import logging.handlers
@@ -38,7 +41,6 @@ if not getattr(sys, "frozen", False):
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from config import ASSETS_DIR, DATA_DIR  # noqa: E402
-from env_utils import env_bool  # noqa: E402
 from translations import tr as _tr  # noqa: E402
 
 # 配置 Web 进程日志：独立文件 data/web.log，避免与 monitor 进程写冲突。
@@ -144,7 +146,7 @@ app = Flask(
 # 所以做成环境变量而不是写死。
 #
 # 只在确实有可信反代时启用：直接暴露端口的部署里开它等于让客户端自报 IP。
-_TRUSTED_PROXY_HOPS = int(os.environ.get("TRUSTED_PROXY_HOPS") or "0")
+_TRUSTED_PROXY_HOPS = env_int("TRUSTED_PROXY_HOPS", 0)
 if _TRUSTED_PROXY_HOPS > 0:
     from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -163,7 +165,7 @@ if _TRUSTED_PROXY_HOPS > 0:
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SECURE"]   = env_bool("SESSION_COOKIE_SECURE", False)
-app.config["PERMANENT_SESSION_LIFETIME"] = int(os.environ.get("SESSION_LIFETIME_HOURS", "24")) * 3600
+app.config["PERMANENT_SESSION_LIFETIME"] = env_int("SESSION_LIFETIME_HOURS", 24) * 3600
 
 # 稳定的 secret key：优先读 .env，不存在则自动生成并写入
 app.secret_key = ensure_secret_key()

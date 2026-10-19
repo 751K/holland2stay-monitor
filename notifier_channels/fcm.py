@@ -39,6 +39,9 @@ data payload 字段（客户端消费）：
 
 from __future__ import annotations
 
+from env_utils import env_bool, env_int
+
+
 import asyncio
 import json
 import logging
@@ -47,7 +50,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from env_utils import env_bool
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +116,7 @@ class FcmConfig:
                 client_email=sa["client_email"],
                 private_key=sa["private_key"],
                 token_uri=sa.get("token_uri", "https://oauth2.googleapis.com/token"),
-                concurrency=_safe_int(os.environ.get("FCM_CONCURRENCY", "16") or "16", 16),
+                concurrency=env_int("FCM_CONCURRENCY", 16),
                 request_timeout=_safe_float(
                     os.environ.get("FCM_REQUEST_TIMEOUT", "10") or "10", 10.0,
                 ),
@@ -144,7 +146,7 @@ class FcmConfig:
             project_id=pid,
             client_email=email,
             private_key=key,
-            concurrency=int(os.environ.get("FCM_CONCURRENCY", "16") or 16),
+            concurrency=env_int("FCM_CONCURRENCY", 16),
             request_timeout=float(
                 os.environ.get("FCM_REQUEST_TIMEOUT", "10") or 10,
             ),

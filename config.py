@@ -20,6 +20,9 @@ users.py 和 web.py 都会 import 本模块中的 dataclass。
 """
 from __future__ import annotations
 
+from env_utils import env_bool, env_int
+
+
 import logging
 import os
 import re
@@ -28,7 +31,6 @@ import sys
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
-from env_utils import env_bool
 
 from dotenv import load_dotenv
 
@@ -213,16 +215,8 @@ _PROXY_COOLDOWN_SEC = 600  # 10 分钟
 #: 等不及的话重启进程即可——冷却状态是进程级的，重启就清零（见本节开头注释）。
 #: 充完值重启容器是最快的恢复路径。
 def _env_int_positive(name: str, default: int) -> int:
-    """读一个正整数环境变量；空/非法/非正一律回落默认值。
-
-    回落而不是抛错：手滑写错的冷却时长不该让整个进程起不来，而默认值本身是
-    安全的那一侧（冷却更久 = 少骚扰已知故障的代理）。
-    """
-    try:
-        val = int(os.environ.get(name, "") or default)
-    except (TypeError, ValueError):
-        return default
-    return val if val > 0 else default
+    """读一个正整数环境变量；空/非法/非正一律回落默认值。"""
+    return env_int(name, default, positive=True)
 
 
 _PROXY_ACCOUNT_COOLDOWN_SEC = _env_int_positive("PROXY_ACCOUNT_COOLDOWN_SEC", 3600)
@@ -2296,7 +2290,7 @@ def load_config() -> Config:
         parse_availability, parse_cities, parse_sources,
     )
 
-    interval = int(os.environ.get("CHECK_INTERVAL") or "300")
+    interval = env_int("CHECK_INTERVAL", 300, strict=True)
     _raw_sources = os.environ.get("SOURCES", "holland2stay")
     sources = _target_parse("SOURCES", parse_sources, _raw_sources)
     if not sources and not _raw_sources.strip():
@@ -2432,16 +2426,16 @@ def load_config() -> Config:
         availability_filters=availability_filters,
         db_path=db_path,
         log_level=log_level,
-        peak_interval=int(os.environ.get("PEAK_INTERVAL") or "60"),
+        peak_interval=env_int("PEAK_INTERVAL", 60, strict=True),
         peak_start=os.environ.get("PEAK_START") or "08:30",
         peak_end=os.environ.get("PEAK_END") or "10:00",
         peak_start_2=os.environ.get("PEAK_START_2") or "13:30",
         peak_end_2=os.environ.get("PEAK_END_2") or "15:00",
         peak_weekdays_only=env_bool("PEAK_WEEKDAYS_ONLY", True),
-        min_interval=max(5, int(os.environ.get("MIN_INTERVAL") or "15")),
+        min_interval=env_int("MIN_INTERVAL", 15, minimum=5, strict=True),
         jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO") or "0.20"))),
         timezone=timezone_str,
-        heartbeat_interval_minutes=max(0, int(os.environ.get("HEARTBEAT_INTERVAL_MINUTES") or "60")),
+        heartbeat_interval_minutes=env_int("HEARTBEAT_INTERVAL_MINUTES", 60, minimum=0, strict=True),
         sources=sources,
         shadow_sources=shadow_sources,
         shard_sizes=shard_sizes,
