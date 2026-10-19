@@ -180,7 +180,7 @@ class TestWiredIn:
         import monitor
 
         assert "validate_effective" in inspect.getsource(monitor._validate_structured_config)
-        assert "_validate_structured_config()" in inspect.getsource(monitor._bootstrap_settings)
+        assert "validate_structured_config()" in inspect.getsource(monitor._bootstrap_settings)
 
     def test_startup_check_never_blocks(self):
         """一个配置笔误让整个监控停摆，代价远大于笔误本身。"""

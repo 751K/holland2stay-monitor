@@ -89,4 +89,4 @@ class TestCheckRegistryDriftWiring:
         """
         import inspect
         src = inspect.getsource(monitor._bootstrap_settings)
-        assert "_check_registry_drift" in src
+        assert "check_registry_drift(" in src

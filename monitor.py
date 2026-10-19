@@ -74,6 +74,39 @@ from mcore.interval import apply_jitter, get_interval
 from mcore.h2s_rest import RestTrigger
 from mcore import geocode as _geocode
 from mcore.prewarm import PrewarmCache
+# 从 monitor.py 拆出的自包含块。保留带下划线的别名，测试与既有调用点
+# （monitor._apply_source_intervals 等）继续按原名字工作。
+from mcore.dispatch import (
+    PROXYLESS_CAPABLE_SOURCES as _PROXYLESS_CAPABLE_SOURCES,  # noqa: F401
+    SHARD_CURSOR_PREFIX as _SHARD_CURSOR_PREFIX,  # noqa: F401
+    apply_proxyless_gate as _apply_proxyless_gate,
+    apply_task_sharding as _apply_task_sharding,
+    shard_source_tasks as _shard_source_tasks,  # noqa: F401
+)
+from mcore.stale import (
+    full_lifecycle_sources as _full_lifecycle_sources,  # noqa: F401
+    mark_stale_listings_for_complete_cities as _mark_stale_listings_for_complete_cities,
+    monitored_pairs as _monitored_pairs,
+    stale_hours as _stale_hours,
+    stale_sweep_decision as _stale_sweep_decision,
+    sweep_aging as _sweep_aging,
+)
+from mcore.startup import (
+    apns_startup_diag as _apns_startup_diag,
+    bootstrap_settings as _bootstrap_settings,
+    check_registry_drift as _check_registry_drift,  # noqa: F401
+    reload_settings as _reload_settings,
+    setup_logging as _setup_logging,
+    validate_structured_config as _validate_structured_config,  # noqa: F401
+)
+from mcore.telemetry import (
+    completeness_stats as _completeness_stats,
+    record_source_round as _record_source_round,
+)
+
+#: 地图坐标补齐的间隔（秒）。半小时一次乘以每批 30 个地址，足以跟上新房源的
+#: 出现速度；backlog 大的时候也能在一两天内追平，而不必等管理员想起来点一下。
+_GEOCODE_INTERVAL_SEC = 1800
 from scrapers import (
     BlockedError,
     OperationNotAllowedError,
@@ -174,60 +207,6 @@ async def _dispatch_scrape_tasks_async(
         ) from e
 
 
-def _setup_logging(level: str) -> None:
-    """
-    配置主日志（monitor.log，全量 INFO+）+ 错误日志（errors.log，仅 WARNING+）。
-
-    错误日志的存在意义
-    ------------------
-    monitor.log 长跑下 INFO 噪音淹没真正的告警；errors.log 单独保留
-    WARNING/ERROR/CRITICAL，便于事后排查抓取失败、下单异常、限流等问题。
-    - 更大的 backupCount：错误稀疏，保留更长时间窗口（10MB 历史）
-    - 更详细的 formatter：含 funcName:lineno，一眼定位问题源
-    - 全局 root logger 接管：所有模块的 logger.warning/error 自动入此文件
-
-    **可重入。** 启动时会调两次：第一次用环境里的 LOG_LEVEL 起个头，好让
-    _bootstrap_settings() 里的迁移日志有地方去；注水之后再按最终配置调一次。
-    每次先摘掉自己上一轮装的 handler，否则每行日志会被写两遍。
-    """
-    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-    root = logging.getLogger()
-    for h in [h for h in root.handlers if getattr(h, "_monitor_owned", False)]:
-        root.removeHandler(h)
-        h.close()
-    logging.basicConfig(level=getattr(logging, level, "INFO"), format=fmt)
-    root.setLevel(getattr(logging, level, logging.INFO))
-    logging.getLogger("asyncio").setLevel(logging.WARNING)
-
-    from logging.handlers import RotatingFileHandler
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-    # 主日志（INFO+）：与之前一致，Web 面板默认查看。
-    # 100MB：2MB 时一个文件只装得下一天左右，回头查几天前的事只能翻 .1/.2/.3。
-    # 读它的地方都是有界的——/api/logs 只读尾部（上限 64MB），仪表盘
-    # _avg_run_count 从尾部倒着读到 7 天前为止——不会因为文件变大而整份读入内存。
-    main_fh = RotatingFileHandler(
-        str(DATA_DIR / "monitor.log"),
-        maxBytes=100 * 1024 * 1024, backupCount=3, encoding="utf-8",
-    )
-    main_fh.setFormatter(logging.Formatter(fmt))
-    main_fh.setLevel(getattr(logging, level, "INFO"))
-    main_fh._monitor_owned = True
-    logging.getLogger().addHandler(main_fh)
-
-    # 错误日志（WARNING+）：抓取/下单异常的专用归档
-    error_fh = RotatingFileHandler(
-        str(DATA_DIR / "errors.log"),
-        maxBytes=2 * 1024 * 1024, backupCount=5, encoding="utf-8",
-    )
-    error_fh.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s.%(funcName)s:%(lineno)d %(message)s"
-    ))
-    error_fh.setLevel(logging.WARNING)
-    error_fh._monitor_owned = True
-    logging.getLogger().addHandler(error_fh)
-
-
 logger = logging.getLogger("monitor")
 
 
@@ -259,100 +238,7 @@ def _log_scrape_completeness(completeness: dict[str, bool]) -> None:
     )
 
 
-_SHARD_CURSOR_PREFIX = "shard_cursor:"
-
-
-def _shard_source_tasks(
-        tasks: list,
-        source: str,
-        size: int,
-        cursor: int,
-) -> tuple[list, int]:
-    """取某个 source 本轮该抓的切片，返回 ``(切片, 下一轮游标)``。
-
-    纯函数，游标读写留给调用方——这样分片规则本身能脱离 DB 测试。
-
-    ``size <= 0`` 或 ``size >= len(tasks)`` 时不分片（原样返回）：配置成
-    「每轮 5 个」而实际只有 4 个 target 时，行为必须与没配过一样。
-
-    切片会绕回开头，所以 target 数不是 size 整数倍时也能均匀覆盖，不会让
-    末尾那几个永远排在同一轮。
-    """
-    n = len(tasks)
-    if size <= 0 or n == 0 or size >= n:
-        return tasks, 0
-    start = cursor % n
-    idx = [(start + i) % n for i in range(size)]
-    return [tasks[i] for i in idx], (start + size) % n
-
-
 _SOURCE_LAST_SCRAPE_PREFIX = "source_last_scrape:"
-
-
-#: 代理全挂、降级直连原生 IP 时，哪些 source 还能抓。
-#:
-#: 2026-08-26 在生产服务器上逐个实测（webshare 两个账号同时 402，正好是干净的
-#: 直连环境）：
-#:
-#:     OurDomain    HTTP 200,  8.9 KB      ✅
-#:     OurCampus    HTTP 200, 62.8 KB      ✅
-#:     H2S          真浏览器解 CF 挑战，90 秒未解开 ×3   ❌
-#:     Xior         同上，停在挑战页                    ❌
-#:
-#: 判据是**实测**不是猜的：两家 RENTCafe 站点在机房 IP 上根本没有 Cloudflare
-#: 挑战，而 H2S / Xior 是硬挡——不是慢，是挑战解不开。
-#:
-#: 名单写死而不是自动探测：自动探测意味着每轮都要先打一次试探请求，代价是
-#: 额外流量和额外的被封面。上游哪天变了，这里会表现为「降级期间某个 source
-#: 一直失败」，日志里看得见。
-_PROXYLESS_CAPABLE_SOURCES: frozenset[str] = frozenset({"ourdomain", "ourcampus"})
-
-
-def _apply_proxyless_gate(tasks: list) -> list:
-    """代理全挂时，把直连打不通的 source 整体摘出本轮。
-
-    为什么要摘
-    ----------
-    2026-08-26 生产实况：webshare 两个账号同时 402，五次「降级直连原生 IP」，
-    **一轮都没抓成**——H2S / Xior 在直连下必然失败，而
-    ``dispatch_scrape_tasks`` 的判据是「全员失败就上抛 ProxyError」，于是那两家
-    的必然失败把同一轮里本来能成的 OurDomain / OurCampus 一起掀掉了。
-
-    摘掉之后这一轮就只剩打得通的那些，成功数不再是 0，整轮也就不会被上抛的
-    ProxyError 中止。代价是 H2S / Xior 在代理恢复前完全不抓——但它们本来也
-    抓不到，区别只是「安静地等」还是「每轮制造一批注定失败的请求」。
-
-    这也让遥测说了实话：被摘掉的 source 本轮不写 round_stats，健康判定看到的
-    是「没有这一轮」，而不是「这一轮失败了」。把等代理算成抓取失败，会让
-    fail_streak 报出一个和成因无关的结论——判据和被判的东西不是一回事。
-    """
-    from config import is_proxy_native_fallback_active
-
-    try:
-        if not is_proxy_native_fallback_active():
-            return tasks
-    except Exception:
-        # 判不出代理状态就当作正常：宁可让它去试一轮，也不能因为读状态出错
-        # 把 source 静默停掉。
-        logger.debug("代理降级状态判定失败，本轮不启用直连闸门", exc_info=True)
-        return tasks
-
-    kept, dropped = [], []
-    for t in tasks:
-        (kept if (t.source or "") in _PROXYLESS_CAPABLE_SOURCES else dropped).append(t)
-
-    if dropped:
-        by_source: dict[str, int] = {}
-        for t in dropped:
-            by_source[t.source] = by_source.get(t.source, 0) + 1
-        logger.warning(
-            "🛰️ 代理全部失效，本轮跳过直连打不通的 source：%s"
-            "（它们在机房 IP 上会被 Cloudflare 挡住，不是抓取故障）｜"
-            "仍在抓：%s",
-            "、".join(f"{k}×{v}" for k, v in sorted(by_source.items())),
-            "、".join(sorted({t.source for t in kept})) or "无",
-        )
-    return kept
 
 
 def _apply_source_intervals(
@@ -454,279 +340,6 @@ def _apply_source_intervals(
                 logger.warning("写 %s 抓取时刻失败，本轮不节流", src, exc_info=True)
         out.extend(group)
     return out
-
-
-def _apply_task_sharding(
-        tasks: list,
-        cfg,
-        storage: Storage,
-        *,
-        dry_run: bool = False,
-) -> list:
-    """按 ``cfg.shard_sizes`` 把 target 多的 source 拆到多轮抓。
-
-    为什么必须有这个：Xior 的请求间隔是 5s（限流按速率算，调小会直接撞回
-    429），实测每栋楼 13.9 秒。官方注册表 30 栋 ≈ 417 秒/轮，而 CHECK_INTERVAL
-    是 300 秒；更糟的是 H2S 排在其它 source **之后**执行，不分片等于每轮把真正
-    出房源的那个 source 推迟 7 分钟。
-
-    游标存 meta，重启后接着转——否则每次重启都从第一片开始，后面的楼栋会被
-    系统性地少抓。
-
-    任何异常都回退成「不分片」：宁可这一轮慢，也不能悄悄漏抓楼栋。
-    """
-    sizes = getattr(cfg, "shard_sizes", None) or {}
-    if not sizes:
-        return tasks
-
-    by_source: dict[str, list] = {}
-    for t in tasks:
-        by_source.setdefault(t.source, []).append(t)
-
-    out: list = []
-    for src, group in by_source.items():
-        size = int(sizes.get(src, 0) or 0)
-        if size <= 0 or size >= len(group):
-            out.extend(group)
-            continue
-        key = _SHARD_CURSOR_PREFIX + src
-        try:
-            cursor = int(storage.get_meta(key, default="") or 0)
-        except (TypeError, ValueError):
-            cursor = 0
-        except Exception:
-            logger.debug("读取 %s 分片游标失败，本轮不分片", src, exc_info=True)
-            out.extend(group)
-            continue
-
-        picked, next_cursor = _shard_source_tasks(group, src, size, cursor)
-        if not dry_run:
-            try:
-                storage.set_meta(key, str(next_cursor))
-            except Exception:
-                # 游标写不进去就不分片：否则每轮都从同一个位置切，后面的楼栋永远抓不到
-                logger.warning("写 %s 分片游标失败，本轮改为全量抓取", src, exc_info=True)
-                out.extend(group)
-                continue
-        logger.info(
-            "source %s 分轮抓取：本轮 %d/%d 个 target（%s），下轮游标 %d",
-            src, len(picked), len(group),
-            ", ".join(t.city_display for t in picked), next_cursor,
-        )
-        out.extend(picked)
-    return out
-
-
-def _completeness_stats(completeness: dict[str, bool]) -> tuple[int, int]:
-    """把 completeness 字典压成 (完整数, 总数)，用于轮次遥测。"""
-    return sum(1 for ok in completeness.values() if ok), len(completeness)
-
-
-def _record_source_round(
-        storage: Storage,
-        *,
-        round_at: str,
-        source: str,
-        listings: int = 0,
-        targets: int = 0,
-        complete: int = 0,
-        started_at: float | None = None,
-        error: BaseException | None = None,
-        error_type: str = "",
-        error_msg: str = "",
-        total_targets: int = 0,
-) -> None:
-    """给 ``round_stats`` 记一行。
-
-    每个 source 跑完就立即写，不攒到整轮结束——「整轮全失败」恰恰是最该留痕的
-    情形，而那条路径会直接上抛，攒着的记录就丢了。
-
-    失败可以用 ``error=`` 传异常（类名即 error_type），也可以用
-    ``error_type=`` / ``error_msg=`` 直接写——后者是给「没有异常对象、但确实
-    没抓成」的情形用的，比如熔断期跳过。
-
-    storage 写失败不上抛（``record_round_stat`` 内部已吞），这里再兜一层是防
-    round_at 之类的参数构造本身出错。观测不该把被观测的东西弄崩。
-    """
-    try:
-        duration_ms = (
-            int((time.monotonic() - started_at) * 1000) if started_at is not None else 0
-        )
-        if error is not None:
-            error_type = error_type or type(error).__name__
-            error_msg = error_msg or str(error)
-        storage.record_round_stat(
-            round_at=round_at,
-            source=source,
-            listings=listings,
-            targets=targets,
-            complete=complete,
-            duration_ms=duration_ms,
-            error_type=error_type,
-            error_msg=error_msg,
-            total_targets=total_targets,
-        )
-    except Exception:
-        logger.debug("轮次遥测记录失败（已忽略）", exc_info=True)
-
-
-def _monitored_pairs(cfg) -> list[tuple[str, str]]:
-    """当前配置里全部 (source, city) 抓取目标。
-
-    给 ``mark_stale_listings`` 判断"哪些城市已经彻底不监控了"用。读配置失败
-    时返回空列表 → 孤儿收敛整条跳过（fail-open）。绝不能因为一次配置读取
-    异常就把整库判成孤儿。
-    """
-    try:
-        return [(t.source, t.city_display) for t in cfg.scrape_tasks_v2()]
-    except Exception:
-        logger.debug("读取监控目标失败，跳过孤儿收敛", exc_info=True)
-        return []
-
-
-#: 「消失多久算不再可订 / 算彻底没了」。四个平台、所有状态统一一套。
-#:
-#: 曾经按 (source, 状态类) 分开配过，最后收掉了：那些差别描述的是「feed 会不会
-#: 保留下架房源」，而实测下来四个平台的终态都是**从 feed 里消失**——只有 Xior
-#: 的 feed 里真有 Occupied，其余三个平台的终态基本全靠推。既然消失是共同的
-#: 下架信号，就不该有四套判据。
-#:
-#: 数怎么定的：轮次约 1 分钟一次，30 分钟 ≈ 30 轮连续完整扫描里都没有它，
-#: 而同一次响应里通常还有二十几条别的房源作旁证。OurDomain / OurCampus 另有
-#: 一道闸——``scrapers.ourdomain`` 要求连续 3 轮返回 0 个单元才承认「真没房」。
-#:
-#: 收得太早的代价不是「少通知」而是「多通知」：房源被误判之后又出现在 feed 里，
-#: 会产生一次状态变更，用户收到一条假的重新上架。中间那站 Reserved 就是为此
-#: 存在的——2 小时内回来只是 ``Reserved → 可订``，是最常见的正常迁移。
-#: 地图坐标补齐的间隔（秒）。半小时一次乘以每批 30 个地址，足以跟上新房源的
-#: 出现速度；backlog 大的时候也能在一两天内追平，而不必等管理员想起来点一下。
-_GEOCODE_INTERVAL_SEC = 1800
-
-_STALE_RESERVED_HOURS = 0.5
-#: 2 小时对齐 **H2S 官方的付款限时**：消失超过它，预留必然已经落定。
-_STALE_OCCUPIED_HOURS = 2.0
-
-
-def _stale_hours() -> tuple[float, float]:
-    """``(消失多久转 Reserved, 消失多久判 Occupied)``，环境变量可覆盖。"""
-    def _read(name: str, default: float) -> float:
-        raw = os.environ.get(name, "").strip()
-        if not raw:
-            return default
-        try:
-            return max(0.25, min(24.0 * 30, float(raw)))
-        except ValueError:
-            logger.warning("%s=%r 不是数字，改用默认值 %s", name, raw, default)
-            return default
-
-    reserved = _read("STALE_RESERVED_HOURS", _STALE_RESERVED_HOURS)
-    occupied = _read("STALE_OCCUPIED_HOURS", _STALE_OCCUPIED_HOURS)
-    # 终态窗口必须 >= 中间站，否则第二段会抢在第一段之前把房源直接判死，
-    # 中间那一站形同虚设——而它正是「判错时代价小」的全部来源。
-    if occupied < reserved:
-        logger.warning(
-            "STALE_OCCUPIED_HOURS(%s) 小于 STALE_RESERVED_HOURS(%s)，"
-            "会让 Reserved 那一站失效；已按 reserved 取齐。", occupied, reserved,
-        )
-        occupied = reserved
-    return reserved, occupied
-
-
-def _mark_stale_listings_for_complete_cities(
-        storage: Storage,
-        completeness: dict[str, bool],
-        *,
-        monitored_pairs: list[tuple[str, str]] | None = None,
-        orphan_days: int = 30,
-) -> int:
-    """只对本轮完整扫描成功的城市执行 stale listing 收敛。
-
-    key 带 ``source:`` 前缀时按 (source, city) 精确限定，避免用一个 source
-    的完整性去收敛另一个 source 的同名城市。
-
-    ``monitored_pairs`` 是**配置里**的全部目标，和上面那个"本轮扫全了的"
-    不是一回事——分片和节流会让正常监控的城市这轮不出现。它只用于孤儿路径：
-    把已经彻底移出监控的城市里的鬼影 listing 也收敛掉。
-    """
-    complete_cities: list[str] = []
-    complete_source_cities: list[tuple[str, str]] = []
-    for key, ok in completeness.items():
-        if not ok:
-            continue
-        if ":" in key:
-            source, city = key.split(":", 1)
-            complete_source_cities.append((source, city))
-        else:
-            complete_cities.append(key)
-
-    if not complete_cities and not complete_source_cities:
-        logger.info("跳过 stale listing 状态收敛：本轮无完整扫描城市")
-        return 0
-
-    reserved_hours, occupied_hours = _stale_hours()
-    return storage.mark_stale_listings(
-        cities=complete_cities if complete_cities else None,
-        source_city_pairs=complete_source_cities if complete_source_cities else None,
-        monitored_pairs=monitored_pairs,
-        orphan_days=orphan_days,
-        reserved_hours=reserved_hours,
-        occupied_hours=occupied_hours,
-        full_lifecycle_sources=_full_lifecycle_sources(),
-    )
-
-
-def _full_lifecycle_sources() -> set[str]:
-    """feed 已覆盖「已预留」状态的 source。读配置失败时返回空集。
-
-    fail-open 到旧行为：拿不准就按「消失有歧义」处理，先推 Reserved。宁可多一站
-    推测，也不要因为一次配置读取失败就把还在付款窗口里的房源直接判终态。
-    """
-    try:
-        from config import load_config
-        return set(load_config().sources_with_full_lifecycle())
-    except Exception:
-        logger.warning("读取 full_lifecycle_sources 失败，按旧判据收敛", exc_info=True)
-        return set()
-
-
-def _sweep_aging(storage: Storage, completeness: dict[str, bool]) -> int:
-    """每轮跑一趟老化收敛（不含孤儿路径），返回收敛条数。
-
-    为什么必须每轮跑
-    ----------------
-    孤儿那趟 24 小时一次。那个节奏对 30 天的宽限期是合适的，但会把小时级的
-    老化窗口整个吃掉——房源满 2 小时该判终态了，实际要等到下一次 24 小时的
-    整点，最坏挂 26 小时。**阈值调了不改节奏，等于没调。**
-
-    每轮跑没有累积开销：到终态的行之后一律被 WHERE 排除，稳态下命中 0 行。
-    **阈值本身就是节流器**，不需要再加一个间隔开关。
-
-    抽成函数不是为了复用（只有一个调用点），是为了让**调用点本身**可测：
-    这里最容易写错的是「顺手把 ``monitored_pairs`` 也传进去」，那会把扫全库
-    的孤儿收敛拉进一条每轮都跑的路径上。那种错误在功能上看不出来——孤儿本来
-    也该被收敛，只是不该由这一趟来做——只有盯着调用参数才能发现。
-    """
-    return _mark_stale_listings_for_complete_cities(storage, completeness)
-
-
-def _stale_sweep_decision(
-    completeness: dict[str, bool],
-    last_sweep_at: float,
-    interval_sec: float,
-    *,
-    now: float,
-) -> str:
-    """本轮该不该跑 stale 收敛。返回 ``"run"`` / ``"wait"`` / ``"defer"``。
-
-    ``defer`` = 到点了、但本轮一个完整扫描城市都没有。这时**不能重置计时器**：
-    run_once 的兜底路径（未分类错误 / 管线错误）和 H2S 熔断期都会返回空
-    completeness，24 小时那一次刚好撞上就会白白跳过，鬼影 listing 再多挂一天。
-    """
-    if now - last_sweep_at < interval_sec:
-        return "wait"
-    if not any(completeness.values()):
-        return "defer"
-    return "run"
 
 
 def _merge_pending_events(
@@ -3299,76 +2912,6 @@ async def run_once(
         return {}
 
 
-def _apns_startup_diag(st, users: list[UserConfig]) -> None:
-    """启动时诊断 APNs 设备关联，发现配置问题尽早 WARNING。"""
-    from mcore import push as _push
-
-    if _push.get_client() is None:
-        logger.warning("APNs 未启用：启动时无法获取 ApnsClient（检查 APNS_ENABLED / .p8 / APNS_*）")
-        return
-
-    # 统计全局数据
-    try:
-        total_devs = st.conn.execute(
-            "SELECT COUNT(*) FROM device_tokens WHERE disabled_at IS NULL"
-        ).fetchone()
-        total_tokens = st.conn.execute(
-            "SELECT COUNT(*) FROM app_tokens WHERE revoked = 0"
-        ).fetchone()
-        logger.info(
-            "APNs 启动诊断：DB 中 %d 个活跃设备，%d 个活跃 token",
-            total_devs[0] if total_devs else 0,
-            total_tokens[0] if total_tokens else 0,
-        )
-    except Exception:
-        logger.exception("APNs 启动诊断：查询设备/ token 计数失败")
-        return
-
-    # admin 设备诊断
-    try:
-        admin_devs = st.get_active_devices_for_admin()
-        if admin_devs:
-            logger.info("APNs admin: %d 个可推送设备", len(admin_devs))
-        else:
-            admin_tokens = st.conn.execute(
-                "SELECT COUNT(*) FROM app_tokens WHERE role='admin' AND user_id IS NULL AND revoked=0"
-            ).fetchone()
-            logger.warning(
-                "APNs admin: 没有可推送设备！（%s活跃 admin token）",
-                "有" if (admin_tokens and admin_tokens[0] > 0) else "无",
-            )
-    except Exception:
-        logger.exception("APNs 启动诊断：get_active_devices_for_admin 失败")
-
-    # 逐用户查关联
-    for u in users:
-        if not u.enabled:
-            continue
-        try:
-            devs = st.get_active_devices_for_user(u.id)
-        except Exception:
-            logger.exception("APNs 启动诊断：get_active_devices_for_user 失败 user=%s", u.name)
-            continue
-        if devs:
-            logger.info(
-                "APNs 用户 %s (id=%s): %d 个可推送设备",
-                u.name, u.id, len(devs),
-            )
-        else:
-            # 查一下这个 user_id 有没有 token
-            token_count = st.conn.execute(
-                "SELECT COUNT(*) FROM app_tokens WHERE user_id = ? AND revoked = 0",
-                (u.id,),
-            ).fetchone()
-            has_tokens = token_count and token_count[0] > 0
-            logger.warning(
-                "APNs 用户 %s (id=%s): 没有可推送设备！（该 user %s活跃 token）"
-                "—— 请确认 iOS App 已用此账号登录并在 Settings 中注册了设备",
-                u.name, u.id,
-                "有" if has_tokens else "无",
-            )
-
-
 def _build_user_notifiers(users: list[UserConfig]) -> UserNotifiers:
     """
     为所有 enabled=True 的用户创建对应的 MultiNotifier。
@@ -3946,129 +3489,6 @@ async def main_loop(
 # ------------------------------------------------------------------ #
 # 入口
 # ------------------------------------------------------------------ #
-
-def _validate_structured_config() -> None:
-    """校验监控范围那批「塞在字符串里的表格」，把问题吼出来。
-
-    面板保存时已经挡过一道，但值还能从别处来：手工改库、迁移、环境变量覆盖、
-    从旧版本升上来。这里是最后一道。
-
-    **不阻断启动。** 一个配置笔误让整个监控停摆，代价远大于笔误本身；何况多数
-    问题只影响一个平台，其余照跑更有价值。但要打 ERROR，让它进 errors.log 和
-    /monitoring 面板。
-    """
-    try:
-        from target_config import validate_effective
-
-        problems = validate_effective()
-    except Exception:
-        logger.debug("结构化配置自检失败（已忽略）", exc_info=True)
-        return
-
-    for p in problems:
-        if p.fatal:
-            logger.error("⚙️  配置格式有误：%s", p)
-        else:
-            logger.warning("⚙️  配置提示：%s", p)
-
-
-def _check_registry_drift(storage) -> None:
-    """注册表加了城市、订阅串没跟上——启动时报出来。
-
-    见 target_config 里「注册表漂移」那段：这是 2026-09-08 Plaza / Rijswijk 那次
-    的第三个副本。加城市只是让它出现在设置页上，不勾就不会抓，而 scraper 那条
-    「未登记城市」的 WARNING 恰恰会因为注册表有了它而闭嘴。
-
-    整段吞异常：这只是一条提醒，读不出快照不该让 monitor 起不来。
-
-    快照坏了（手工改库、写到一半断电）按「第一次运行」处理，本轮不报、顺手写一份
-    好的回去。**这一段不能和下面共用一个 except**：读快照抛异常时如果连
-    ``set_meta`` 一起跳过，坏值就永远留在那儿，这条检查从此静默失效——正是它要防
-    的那种失败。
-    """
-    import json
-    import os
-
-    from target_config import REGISTRY_SEEN_META_KEY, registry_drift
-
-    seen: dict | None = None
-    try:
-        raw = storage.get_meta(REGISTRY_SEEN_META_KEY, "")
-        if raw and raw != "—":
-            seen = json.loads(raw)
-        if not isinstance(seen, dict):
-            seen = None
-    except Exception:
-        logger.warning("注册表快照读不出来（本轮按首次运行处理，将重写一份）",
-                       exc_info=True)
-        seen = None
-
-    try:
-        problems, snapshot = registry_drift(dict(os.environ), seen)
-        for p in problems:
-            logger.warning("⚙️  配置提示：%s", p)
-        storage.set_meta(REGISTRY_SEEN_META_KEY,
-                         json.dumps(snapshot, sort_keys=True))
-    except Exception:
-        logger.debug("注册表漂移自检失败（已忽略）", exc_info=True)
-
-
-def _bootstrap_settings() -> None:
-    """把 runtime 类配置从 app_settings 表注入 os.environ；首次运行顺带做迁移。
-
-    必须在 ``load_config()`` 之前调用——后者读的就是 ``os.environ``。
-
-    整段吞异常：配置存储出问题时全部回落到 .env / 代码默认值继续跑。让监控因为
-    读不出配置而起不来，代价远大于用一轮旧配置。
-    """
-    try:
-        from config import DB_PATH, TIMEZONE
-        from settings_store import env_overrides, hydrate, migrate_env_to_db
-        from storage import Storage
-
-        st = Storage(DB_PATH, timezone_str=TIMEZONE)
-        try:
-            migrate_env_to_db(st, ENV_PATH)
-            n = hydrate(st)
-            if n:
-                logger.info("已从 app_settings 载入 %d 项运维配置", n)
-            # 迁移之后 .env 里不该再有 runtime 键。有就是被手工加回来了——它会
-            # 盖过面板，而面板不会有任何提示，改了没反应会让人以为是坏了。
-            leftover = env_overrides(ENV_PATH)
-            if leftover:
-                logger.warning(
-                    "⚙️  .env 里这些键会盖过面板设置（面板改了不生效）：%s。"
-                    "确认要用面板管理的话，从 .env 删掉即可",
-                    ", ".join(leftover),
-                )
-            _validate_structured_config()
-            _check_registry_drift(st)
-        finally:
-            st.close()
-
-    except Exception:
-        logger.warning("载入 app_settings 失败，本次使用 .env / 默认值", exc_info=True)
-
-
-def _reload_settings() -> None:
-    """热重载时重新注水。
-
-    ``load_dotenv(override=True)`` 会把 .env 重放一遍，而 runtime 配置早已不在
-    .env 里；不重新注水的话，面板刚改的值这一程都不会生效。
-    """
-    try:
-        from config import DB_PATH, TIMEZONE
-        from settings_store import hydrate
-        from storage import Storage
-
-        st = Storage(DB_PATH, timezone_str=TIMEZONE)
-        try:
-            hydrate(st)
-        finally:
-            st.close()
-    except Exception:
-        logger.warning("热重载时读取 app_settings 失败，沿用当前值", exc_info=True)
-
 
 def _autobook_targets(user) -> list[str]:
     """这个用户的自动预订实际会碰到哪些平台。

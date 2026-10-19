@@ -72,6 +72,9 @@ def test_missing_log_falls_back(tmp_path, monkeypatch):
 def test_notification_keep_is_2000_and_monitor_uses_it():
     from pathlib import Path
     assert WEB_NOTIFICATIONS_KEEP == 2000
-    src = (Path(__file__).resolve().parent.parent / "monitor.py").read_text(encoding="utf-8")
-    assert "prune_notifications(keep=WEB_NOTIFICATIONS_KEEP)" in src
-    assert "maxBytes=100 * 1024 * 1024" in src
+    root = Path(__file__).resolve().parent.parent
+    monitor_src = (root / "monitor.py").read_text(encoding="utf-8")
+    startup_src = (root / "mcore" / "startup.py").read_text(encoding="utf-8")
+    assert "prune_notifications(keep=WEB_NOTIFICATIONS_KEEP)" in monitor_src
+    # 日志 handler 随 _setup_logging 搬到了 mcore/startup.py
+    assert "maxBytes=100 * 1024 * 1024" in startup_src
