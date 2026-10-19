@@ -19,7 +19,8 @@ import pytest
 
 from bookers.base import BookingRequest
 from bookers.rentcafe import XiorBooker
-from config import ApplicantProfile, AutoBookConfig
+from config import AutoBookConfig
+from bookers.applicant_profile import ApplicantProfile
 from models import Listing
 from users import UserConfig
 

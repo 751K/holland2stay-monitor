@@ -23,7 +23,8 @@ import pytest
 from bookers.base import BookingRequest
 from bookers.rentcafe import OurDomainBooker, XiorBooker
 from bookers.rentcafe_units import find_unit, parse_apply_now_options
-from config import ApplicantProfile, AutoBookConfig
+from config import AutoBookConfig
+from bookers.applicant_profile import ApplicantProfile
 from models import Listing
 from scrapers.ourdomain import OurDomainScraper
 from users import UserConfig

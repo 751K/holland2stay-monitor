@@ -30,10 +30,13 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field, fields as dc_fields
-from typing import Callable, Optional, TypeVar
+from typing import TYPE_CHECKING, Callable, Optional, TypeVar
 
-from config import ApplicantProfile, AutoBookConfig, DATA_DIR, ListingFilter
+from config import AutoBookConfig, DATA_DIR, ListingFilter
 from crypto import decrypt, encrypt
+
+if TYPE_CHECKING:
+    from bookers.applicant_profile import ApplicantProfile
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +195,7 @@ def _profile_from_dict(raw) -> "ApplicantProfile":
     未知 key 直接丢弃（而不是塞进构造器炸掉）——上游加字段、用户手改 JSON、
     版本回退都可能带来多余 key，一个坏 key 不该让整个用户配置加载失败。
     """
-    from config import ApplicantProfile, profile_field_is_encrypted
+    from bookers.applicant_profile import ApplicantProfile, profile_field_is_encrypted
 
     if not isinstance(raw, dict):
         return ApplicantProfile()
@@ -380,7 +383,7 @@ def _user_to_row(u: UserConfig) -> dict:
     # 这里面有国籍、出生地、身份证号，以及 GDPR 第 10 条的犯罪记录。
     prof = ab.get("applicant_profile")
     if isinstance(prof, dict):
-        from config import profile_field_is_encrypted
+        from bookers.applicant_profile import profile_field_is_encrypted
         ab["applicant_profile"] = {
             k: (encrypt(v) if (profile_field_is_encrypted(k) and isinstance(v, str) and v) else v)
             for k, v in prof.items()

@@ -26,10 +26,11 @@ import re
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from config import ApplicantProfile, AutoBookConfig, ListingFilter, ENERGY_LABELS
+from config import AutoBookConfig, ListingFilter, ENERGY_LABELS
 from users import UserConfig
 
 if TYPE_CHECKING:
+    from bookers.applicant_profile import ApplicantProfile
     from werkzeug.datastructures import ImmutableMultiDict
 
 logger = logging.getLogger(__name__)
@@ -128,7 +129,7 @@ def parse_applicant_profile(
     回填到 HTML（不像密码），所以留空确实表示用户想清空——这里不做「留空即
     保留」，直接按提交值走。
     """
-    from config import ApplicantProfile
+    from bookers.applicant_profile import ApplicantProfile
 
     def _s(key: str) -> str:
         return (form.get("AUTO_BOOK_PROFILE_" + key, "") or "").strip()

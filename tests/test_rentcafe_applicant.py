@@ -33,7 +33,7 @@ from bookers.rentcafe_applicant import (
     to_rentcafe_date,
 )
 from bookers.rentcafe_form import parse_applicant_form
-from config import ApplicantProfile
+from bookers.applicant_profile import ApplicantProfile
 
 PID = "2057105"
 

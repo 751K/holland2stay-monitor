@@ -28,7 +28,8 @@ from flask import (
 
 import sys
 
-from config import KNOWN_SOURCES, source_display_name, APPLICANT_GENDERS, APPLICANT_TITLES, known_city_names
+from config import KNOWN_SOURCES, source_display_name, known_city_names
+from bookers.applicant_profile import APPLICANT_GENDERS, APPLICANT_TITLES
 from users import get_user, load_users, update_users
 
 from app.auth import (

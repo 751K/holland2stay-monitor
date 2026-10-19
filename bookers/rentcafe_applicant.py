@@ -210,7 +210,7 @@ def build_form_fields(
     strict: bool = True,
     screening_consent: bool = False,
 ) -> dict[str, str]:
-    """把 :class:`config.ApplicantProfile` 映射成申请表字段。
+    """把 :class:`bookers.applicant_profile.ApplicantProfile` 映射成申请表字段。
 
     Parameters
     ----------

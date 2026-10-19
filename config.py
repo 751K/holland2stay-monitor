@@ -35,6 +35,19 @@ from typing import TYPE_CHECKING, Optional
 from dotenv import load_dotenv
 
 from models import canonical_feature, parse_float, parse_int
+from mcore.sources import (  # noqa: F401  （从 config 拆出，保留 re-export）
+    KNOWN_SOURCES,
+    SOURCE_ASSUMED_FEATURES,
+    SOURCE_DISPLAY_NAMES,
+    _SOURCE_FILTER_DIMS,
+    _UNIVERSAL_FILTER_DIMS,
+    _source_supports_dim,
+    assumed_features,
+    filter_dim_sources,
+    source_display_name,
+    source_supports_dim,
+    sources_supporting_dim,
+)
 
 
 # 已知能耗等级白名单（大写），按优→差排序
@@ -57,6 +70,7 @@ def energy_rank(label: str) -> int | None:
 
 
 if TYPE_CHECKING:
+    from bookers.applicant_profile import ApplicantProfile
     from models import Listing
     from scrapers.base import ScrapeTask
 
@@ -139,413 +153,39 @@ CLOAKBROWSER_HEADLESS = env_bool("CLOAKBROWSER_HEADLESS", True)
 """True=无头模式（Docker/生产），False=可视化（本地调试）"""
 
 # curl_cffi TLS 指纹模拟池，绕过 Cloudflare WAF。
-# 配合代理使用时每个 IP 随机选取不同指纹，模拟真实多用户浏览器分布。
-# 池中指纹均来自 curl_cffi 支持的现代浏览器版本。
-#
-# 多元化思路
-# ----------
-# 旧池只有 Chrome × 2 + Safari + Edge，TLS 栈集中在 BoringSSL 系。新池
-# 加入 Firefox（NSS 栈）和移动端（iOS Safari / Android Chrome），让
-# Cloudflare 看到的"浏览器分布"更接近真实流量直方图。
-#
-# 出现连续 Connection closed abruptly 时可更新或扩充列表。
-#
-# **用它的是不挑指纹的平台**：Plaza、Magis、Student Experience 的抓取与 Plaza
-# 预订，以及通知渠道的 HTTP 会话。2026-09-15 实测这三个平台对 curl_cffi 0.16.3
-# 的全部候选都是 200，所以这里按「每个家族取最新的」来选。
-#
-# SecureRC（OurDomain / OurCampus / Xior 的 floorplans.aspx）**不用这个池**，
-# 它此刻一律拒绝桌面 Chrome，有自己按实测挑的池——见
-# ``scrapers.ourdomain._DEFAULT_IMPERSONATES``。
-#
-# edge101 移出：curl_cffi 里 Edge 只到 101（2022 年），留着只会是池里最显眼的
-# 过时指纹。所有名字由 tests/test_impersonate_pools.py 核对是否为 curl_cffi
-# 真实支持的 target——写错一个字母，请求会在运行时才炸。
-_CURL_IMPERSONATE_POOL = [
-    "chrome150",          # Chrome 150（桌面，curl_cffi 0.16.3 最新）
-    "chrome146",          # Chrome 146
-    "safari2601",         # macOS Safari 26.0.1
-    "safari184",          # macOS Safari 18.4
-    "safari260_ios",      # iOS Safari 26（移动端，TLS 与 macOS 不同）
-    "firefox147",         # Firefox 147（NSS 栈，与 Chromium 系完全不同）
-    "firefox144",         # Firefox 144
-    "chrome131_android",  # Android Chrome 131（curl_cffi 里最新的 Android）
-]
-# Chrome 桌面 40% / Safari 30% / Firefox 20% / Android 10%。
-_POOL_WEIGHTS = [3, 1, 2, 1, 1, 1, 1, 1]
-assert len(_POOL_WEIGHTS) == len(_CURL_IMPERSONATE_POOL)
-
-_last_impersonate: Optional[str] = None
-
-
-# ── 代理池 + 故障切换 ───────────────────────────────────────────────
-#
-# 主代理（HTTPS_PROXY/HTTP_PROXY/ALL_PROXY）+ 备用代理（SCRAPE_PROXIES_FALLBACK，
-# 逗号/换行分隔多个）。主代理挂了（webshare 502 之类）自动切到下一个可用的。
-#
-# 代理连续确认故障后进 cooldown（默认 10 min），期间 get_proxy_url 跳过它；
-# 冷却结束后自动重新纳入候选。若所有代理都在 cooldown，则抓取降级为直连
-# 服务器原生 IP；monitor 会把轮询频率降到最多 10 min 一次，避免原生 IP
-# 被快速打穿。
-# 状态进程级，monitor 重启清零（重启即重新从主代理试）。
-import time as _time  # noqa: E402  (局部别名，避免与文件其它 time 用法冲突)
-import hashlib as _hashlib  # noqa: E402
-import re as _re  # noqa: E402
-import itertools as _itertools  # noqa: E402
-from urllib.parse import (  # noqa: E402
-    quote as _quote,
-    unquote as _unquote,
-    urlparse as _urlparse,
-    urlunparse as _urlunparse,
+# 代理池 / 故障切换 / TLS 指纹池已搬到 mcore.proxy。保留 re-export，
+# 旧调用点（config.get_proxy_url 等）与测试不用一次性改完。
+from mcore.proxy import (  # noqa: F401  （兼容旧调用点）
+    _CURL_IMPERSONATE_POOL,
+    _POOL_WEIGHTS,
+    _PROXY_ACCOUNT_COOLDOWN_SEC,
+    _PROXY_COOLDOWN_SEC,
+    _PROXY_FAILURE_CONFIRM_THRESHOLD,
+    _PROXY_FAILURE_CONFIRM_WINDOW_SEC,
+    _PROXY_REJECT_HINTS,
+    _STICKY_SESSION_RE,
+    _derive_session_id,
+    _env_int_positive,
+    _last_impersonate,
+    _personal_proxies,
+    _proxy_cooldown_until,
+    _proxy_failure_marks,
+    _proxy_pool,
+    _record_proxy_failure_mark,
+    _rotating_counter,
+    _same_proxy_endpoint,
+    _time,
+    _with_source_session,
+    get_impersonate,
+    get_proxy_url,
+    is_personal_proxy_active,
+    is_proxy_in_cooldown,
+    is_proxy_native_fallback_active,
+    probe_proxy,
+    proxy_failure_mark_count,
+    proxy_pool_size,
+    report_proxy_failure,
 )
-
-_PROXY_COOLDOWN_SEC = 600  # 10 分钟
-
-#: 账户级故障（402 欠费 / 407 认证失败）的冷却时长，默认 1 小时。
-#:
-#: 为什么要和 10 分钟分开：账户级故障**不会自己好**，10 分钟一到就把死代理放回
-#: 候选，等于每小时自伤六次。2026-08-26 生产实况——webshare 两个账号同时 402，
-#: 每 10 分钟 Xior 和 OurCampus 就各丢一轮，而 H2S 因为浏览器一建用 2 小时反而
-#: 躲过了（``_BROWSER_MAX_AGE``），同一次故障在三个 source 上表现完全不同。
-#:
-#: 为什么是 1 小时而不是更长：判错的代价是「一个其实已经充上值的代理白等」。
-#: 10 分钟 → 1 小时已经把自伤从每小时 6 次压到 1 次，再往上（比如 4 小时）边际
-#: 收益只有 0.75 次/小时，而恢复延迟涨 4 倍。不划算。
-#:
-#: 等不及的话重启进程即可——冷却状态是进程级的，重启就清零（见本节开头注释）。
-#: 充完值重启容器是最快的恢复路径。
-def _env_int_positive(name: str, default: int) -> int:
-    """读一个正整数环境变量；空/非法/非正一律回落默认值。"""
-    return env_int(name, default, positive=True)
-
-
-_PROXY_ACCOUNT_COOLDOWN_SEC = _env_int_positive("PROXY_ACCOUNT_COOLDOWN_SEC", 3600)
-_PROXY_FAILURE_CONFIRM_THRESHOLD = 2
-_PROXY_FAILURE_CONFIRM_WINDOW_SEC = 600
-_proxy_cooldown_until: dict[str, float] = {}  # proxy_url -> monotonic 截止
-_proxy_failure_marks: dict[str, tuple[int, float]] = {}  # proxy_url -> (count, first_seen)
-
-
-def _proxy_pool() -> list[str]:
-    """主代理 + 备用代理，去重保序，去空。"""
-    primary = (
-        os.environ.get("HTTPS_PROXY", "")
-        or os.environ.get("HTTP_PROXY", "")
-        or os.environ.get("ALL_PROXY", "")
-    ).strip()
-    fallback_raw = os.environ.get("SCRAPE_PROXIES_FALLBACK", "")
-    pool = [primary] + [p.strip() for p in re.split(r"[,\n]", fallback_raw)]
-    return list(dict.fromkeys(p for p in pool if p))  # 去重保序 + 去空
-
-
-# webshare sticky 端点的用户名形如 ``{user}-{country}-{session_id}``，
-# 末段是纯数字的 session id；``-rotate`` 则表示每请求换 IP。
-_STICKY_SESSION_RE = _re.compile(r"^(?P<head>.+)-(?P<session>\d+)$")
-
-
-_rotating_counter = _itertools.count(1)
-
-
-def _derive_session_id(source: str, rotating: bool = False) -> str:
-    """由 source 名派生 6 位 session id。
-
-    ``rotating=False``（默认）——同一个 source 每次都得到同一个 id，出口 IP
-    因此稳定，Cloudflare clearance 才能复用。H2S / Xior 用这个。
-
-    ``rotating=True``——每次调用都换一个新 id，即每次拿到不同出口 IP。
-    给**不依赖 clearance、反而依赖换 IP 来解 403** 的 source 用（OurDomain）。
-    """
-    if rotating:
-        return str(100000 + next(_rotating_counter) * 7919 % 900000)
-    digest = _hashlib.sha1(source.encode("utf-8")).hexdigest()
-    return str(100000 + int(digest[:8], 16) % 900000)
-
-
-def _with_source_session(url: str, source: str, rotating: bool = False) -> str:
-    """把代理 URL 的 sticky session id 换成该 source 专属的。
-
-    只在用户名**已经**以数字 session id 结尾时才替换；其它形态（如
-    ``-rotate``、或根本没有 session 段）原样返回——凭空拼接可能被
-    webshare 解析成国家码之类，反而把配置搞坏。
-    """
-    try:
-        parsed = _urlparse(url)
-        username = _unquote(parsed.username or "")
-        password = parsed.password or ""
-    except Exception:
-        return url
-    if not username or not parsed.hostname:
-        return url
-
-    m = _STICKY_SESSION_RE.match(username)
-    if not m:
-        return url  # rotate 端点或无 session 段：保持原样
-
-    new_user = f"{m.group('head')}-{_derive_session_id(source, rotating)}"
-    netloc = f"{_quote(new_user, safe='')}:{password}@{parsed.hostname}"
-    if parsed.port:
-        netloc += f":{parsed.port}"
-    return _urlunparse(parsed._replace(netloc=netloc))
-
-
-def _personal_proxies() -> list[str]:
-    """``SCRAPE_PROXIES_PERSONAL``：池子里哪些代理是「自己的线路」。
-
-    典型是家里那条反向 SSH 隧道——它不是买来的商业住宅池，而是用户自家的宽带
-    和自家的 IP。把它排在最后（见 SCRAPE_PROXIES_FALLBACK 的顺序）只解决「什么
-    时候用」，不解决「用多狠」：一旦用上，抓取节奏和平时一样是高峰 20–60 秒
-    一轮，全部打在同一个住宅 IP 上。
-
-    2026-08-02 的教训正好说明这有多危险：所有 source 挤在同一个 sticky 出口时，
-    Xior 一轮 12 个请求就触发 429，四栋楼全挂。那还只是商业池里的一个出口，
-    烧了换一个就是；自家 IP 烧了没得换，而且影响的是家里所有上网。
-
-    所以这是**主动降速**，不是故障降级——两者的判据和目的都不同，代码里也分开。
-    """
-    raw = os.environ.get("SCRAPE_PROXIES_PERSONAL", "")
-    return [p.strip() for p in re.split(r"[,\n]", raw) if p.strip()]
-
-
-def is_personal_proxy_active() -> bool:
-    """当前生效的代理是不是「自己的线路」。
-
-    比的是**当前会用哪个**（``get_proxy_url()`` 的返回），不是「池子里有没有」——
-    商业代理还活着的时候不该限速。
-
-    比较前先剥掉 sticky session 改写：``_with_source_session`` 会把用户名换成
-    per-source 的 id，直接字符串相等会漏。个人代理通常没有凭据（``socks5://ip:port``）
-    因而不受改写影响，但不能依赖这一点。
-    """
-    personal = _personal_proxies()
-    if not personal:
-        return False
-    current = get_proxy_url()
-    if not current:
-        return False
-    return any(_same_proxy_endpoint(current, p) for p in personal)
-
-
-def _same_proxy_endpoint(a: str, b: str) -> bool:
-    """两个代理 URL 是否指向同一个端点（忽略用户名里的 session 段与密码）。"""
-    try:
-        pa, pb = _urlparse(a), _urlparse(b)
-    except Exception:
-        return a == b
-    return (pa.scheme, pa.hostname, pa.port) == (pb.scheme, pb.hostname, pb.port)
-
-
-def get_proxy_url(source: str = "", *, rotating: bool = False) -> str:
-    """
-    统一的代理 URL 读取，**带故障切换**。
-
-    返回当前**未在冷却**的第一个代理（主代理优先；主代理被
-    ``report_proxy_failure`` 标记故障后自动落到备用）。全部都在冷却时返回
-    空串，表示抓取临时降级为直连服务器原生 IP。无配置也返回空串。
-
-    所有需要代理的模块（scraper、booker、monitor）均通过此函数获取。
-
-    Parameters
-    ----------
-    source
-        传入 source 名（``holland2stay`` / ``xior`` / ``ourdomain``）时，为该
-        source 派生**独立的 sticky session**，使各平台拥有各自稳定的出口 IP。
-
-        为什么要分开：出口 IP 稳定是 Cloudflare clearance 能复用的前提，但共用
-        一个 IP 就等于共用限流额度。2026-08-02 实测——所有 source 挤在同一个
-        sticky IP 上时，Xior 一轮 12 个请求触发 `429 Too Many Requests`，四栋楼
-        全部失败。各自独立 session 后两者兼得：IP 稳定，额度不互相挤占。
-
-        不传则返回基础 URL（monitor / doctor 只判断有没有配代理，用这个即可）。
-    rotating
-        每次调用换一个新 session（即换出口 IP）。给**不依赖 clearance、反而
-        依赖换 IP 来解 403** 的 source 用。
-
-        OurDomain 就是这种：它没有 clearance 可复用，抗封手段是轮换 TLS 指纹。
-        但那套机制此前是搭了「每请求换 IP」的便车——2026-08-02 把它固定到专属
-        sticky IP 后，同一个 IP 被 CF 盯上时四个指纹轮完全部 403，无法自愈。
-    """
-    pool = _proxy_pool()
-    if not pool:
-        return ""
-    now = _time.monotonic()
-    for p in pool:
-        if _proxy_cooldown_until.get(p, 0.0) <= now:
-            return _with_source_session(p, source, rotating) if source else p
-    # 全在冷却——降级为直连原生 IP；monitor 会降频到最多 10 min 一次。
-    return ""
-
-
-# CONNECT 被拒时代理给的状态码，及其真实含义。Chromium 不会把这些码透出来，
-# 它对任何代理层失败都只报 ERR_TUNNEL_CONNECTION_FAILED。
-_PROXY_REJECT_HINTS: dict[int, str] = {
-    402: "流量配额耗尽或账户欠费",
-    403: "该出口被代理商禁用",
-    407: "代理认证失败，用户名或密码不对",
-    429: "代理侧限流",
-    502: "代理无法连到目标站点",
-    503: "代理服务暂时不可用",
-}
-
-
-def probe_proxy(proxy_url: str, host: str, port: int = 443, timeout: float = 8.0) -> str | None:
-    """向代理发一次 CONNECT，确认它到底能不能用。
-
-    代理正常（回 200）时返回 ``None``；否则返回一句可直接写进日志的原因。
-
-    存在的理由是 Chromium 的错误码没有信息量：配额耗尽（402）、认证失败
-    （407）、代理进程宕机，到了 Playwright 那层一律是
-    ``ERR_TUNNEL_CONNECTION_FAILED``。2026-08-05 线上代理欠费停服，日志里
-    六百多行全写着「CF 挑战可能未通过」，实际和 Cloudflare 毫无关系。
-
-    这里直接跟代理说话，把它自己给的状态码取回来。凭据只用于构造
-    ``Proxy-Authorization`` 头，不进返回值也不进日志。
-    """
-    import base64
-    import socket
-
-    if not proxy_url:
-        return None
-    try:
-        parsed = _urlparse(proxy_url)
-        proxy_host = parsed.hostname
-        proxy_port = parsed.port or 80
-    except Exception:
-        return None
-    if not proxy_host:
-        return None
-
-    target = f"{host}:{port}"
-    lines = [f"CONNECT {target} HTTP/1.1", f"Host: {target}"]
-    if parsed.username:
-        cred = f"{_unquote(parsed.username)}:{_unquote(parsed.password or '')}"
-        token = base64.b64encode(cred.encode("utf-8")).decode("ascii")
-        lines.append(f"Proxy-Authorization: Basic {token}")
-    request = ("\r\n".join(lines) + "\r\n\r\n").encode("utf-8")
-
-    sock = None
-    try:
-        sock = socket.create_connection((proxy_host, proxy_port), timeout=timeout)
-        sock.settimeout(timeout)
-        sock.sendall(request)
-        # 状态行就在第一个 CRLF 之前，读一小段足够，不必等完整响应头
-        raw = sock.recv(256).decode("latin-1", "replace")
-    except OSError as e:
-        return f"连不上代理 {proxy_host}:{proxy_port}（{type(e).__name__}: {e}）"
-    finally:
-        if sock is not None:
-            try:
-                sock.close()
-            except OSError:
-                pass
-
-    status_line = raw.split("\r\n", 1)[0].strip()
-    m = re.match(r"HTTP/\d(?:\.\d)?\s+(\d{3})(?:\s+(.*))?", status_line)
-    if not m:
-        return f"代理返回无法解析的响应: {status_line[:80]!r}"
-    code = int(m.group(1))
-    if code == 200:
-        return None
-    reason = (m.group(2) or "").strip()
-    hint = _PROXY_REJECT_HINTS.get(code)
-    detail = f"{code} {reason}".strip()
-    return f"代理拒绝 CONNECT: {detail}（{hint}）" if hint else f"代理拒绝 CONNECT: {detail}"
-
-
-def is_proxy_native_fallback_active() -> bool:
-    """
-    是否因所有已配置代理都在冷却中而进入直连 fallback。
-
-    注意无代理配置不算 fallback；那是用户主动选择直连。
-    """
-    pool = _proxy_pool()
-    if not pool:
-        return False
-    now = _time.monotonic()
-    return all(_proxy_cooldown_until.get(p, 0.0) > now for p in pool)
-
-
-def report_proxy_failure(
-    url: str = "",
-    *,
-    service_error_confirmed: bool = True,
-    account_level: bool = False,
-) -> str:
-    """
-    记录一次代理故障。``url`` 留空时记录**当前选中**的那个（即刚刚用过、
-    刚失败的那个）。
-
-    只有同一代理在确认窗口内连续失败达到阈值，且本次错误已确认是代理
-    服务端异常时，才把它放入 cooldown。返回下一轮 get_proxy_url 会用的
-    代理；若所有代理都进入冷却则返回空串，表示下一轮将直连服务器原生 IP。
-
-    ``account_level=True``（402 欠费 / 407 认证失败，见
-    ``scrapers.base.is_proxy_account_error``）改用 ``_PROXY_ACCOUNT_COOLDOWN_SEC``
-    这档长冷却——那种故障不会自己好，按 10 分钟回去重试只是反复自伤。
-    """
-    pool = _proxy_pool()
-    target = url.strip() or (pool[0] if pool else "")
-    # 标记当前选中的（不是 pool[0]，因为 pool[0] 可能已在冷却）
-    if not url:
-        target = get_proxy_url()
-    if target and _record_proxy_failure_mark(target) and service_error_confirmed:
-        # 账户级故障用长冷却：它不会自己好，10 分钟就回去敲等于每小时自伤六次。
-        cooldown = (
-            _PROXY_ACCOUNT_COOLDOWN_SEC if account_level else _PROXY_COOLDOWN_SEC
-        )
-        _proxy_cooldown_until[target] = _time.monotonic() + cooldown
-        _proxy_failure_marks.pop(target, None)
-    return get_proxy_url()
-
-
-def is_proxy_in_cooldown(url: str) -> bool:
-    """指定代理是否已进入 cooldown。"""
-    if not url:
-        return False
-    return _proxy_cooldown_until.get(url, 0.0) > _time.monotonic()
-
-
-def proxy_failure_mark_count(url: str) -> int:
-    """指定代理当前确认窗口内的失败标记次数，用于日志/测试。"""
-    if not url:
-        return 0
-    count, first_seen = _proxy_failure_marks.get(url, (0, 0.0))
-    if first_seen and _time.monotonic() - first_seen <= _PROXY_FAILURE_CONFIRM_WINDOW_SEC:
-        return count
-    return 0
-
-
-def _record_proxy_failure_mark(url: str) -> bool:
-    """记录一次故障标记；达到确认阈值返回 True。"""
-    now = _time.monotonic()
-    count, first_seen = _proxy_failure_marks.get(url, (0, 0.0))
-    if not first_seen or now - first_seen > _PROXY_FAILURE_CONFIRM_WINDOW_SEC:
-        count = 0
-        first_seen = now
-    count += 1
-    _proxy_failure_marks[url] = (count, first_seen)
-    return count >= _PROXY_FAILURE_CONFIRM_THRESHOLD
-
-
-def proxy_pool_size() -> int:
-    """配置的代理总数（主 + 备）。0=没配代理，1=只有主代理（无备用）。"""
-    return len(_proxy_pool())
-
-
-def get_impersonate() -> str:
-    """从指纹池中随机选取一个 TLS 指纹（避免连续两次选同一个）。"""
-    import random
-    global _last_impersonate
-    pool = list(_CURL_IMPERSONATE_POOL)
-    weights = list(_POOL_WEIGHTS)
-    # 如果上次选的值在池中且池大小 > 1，排除上次值并同步移除对应权重
-    if _last_impersonate is not None and _last_impersonate in pool and len(pool) > 1:
-        idx = pool.index(_last_impersonate)
-        pool.pop(idx)
-        if idx < len(weights):
-            weights.pop(idx)
-    choice = random.choices(pool, weights=weights, k=1)[0]
-    _last_impersonate = choice
-    return choice
 
 # 所有已知城市及其 GraphQL filter ID。
 # ID 来自 Holland2Stay GraphQL aggregations 接口，city filter 使用字符串形式。
@@ -838,91 +478,6 @@ class XiorCityFilter:
 # 用户少收几条）；逐平台登记则是新平台整条跳过（fail-open）——而
 # allowed_buildings 的语义是「只要这栋楼」，fail-open 会把用户明确排除掉的楼放行。
 # 如果这个过滤器挂在 auto_book 上，那就是替他自动申请一栋他没要的楼。
-_UNIVERSAL_FILTER_DIMS = frozenset({
-    "max_rent", "min_area", "city", "source", "building"})
-_SOURCE_FILTER_DIMS: dict[str, frozenset] = {
-    # tenant 曾在 2026-08-18 被摘出此表：H2S 上线 operation 白名单后我们只能照抄
-    # 它那条 GetCategories，而租客属性不在该查询的字段集里，房源因此不带 Tenant
-    # 标签；而这个维度是 fail-closed 的，缺值即拒绝——留着注册会让勾「仅学生」
-    # 的用户一条 H2S 房源都收不到。
-    #
-    # 2026-08-19 恢复：站点另有一条同样在白名单里的 GetProductDetail，字段集里有
-    # tenant_profile，按需单取即可补齐（scrapers/holland2stay.py 的详情补齐）。
-    # 取值语义从站点详情页正文逐条实测确定，见 _TENANT_PROFILE_LABELS。
-    #
-    # ⚠️ 补齐是**按预算分摊**的（每轮上限 20 条），冷启动后要若干轮才铺满。
-    # 期间未补到的房源没有 Tenant 标签，会被 fail-closed 拒掉——这是有意的取舍：
-    # 宁可少推几条，不可把「不确定能不能租」的房源推给勾了资格限制的用户。
-    "holland2stay": _UNIVERSAL_FILTER_DIMS | {
-        "floor", "occupancy", "type", "neighborhood",
-        "contract", "offer", "finishing", "energy", "tenant",
-    },
-    # finishing 不是抓来的，是 SOURCE_ASSUMED_FEATURES 声明的整栋楼事实。
-    # 登记进来之后该维度不再走 fail-open：勾 Unfurnished 时这些房源会被正确排除，
-    # 而此前 fail-open 会把它们一并放行——它们恰恰不是无家具的。
-    # tenant 同理，不是抓来的：判据只存在于平台官网的 Criteria 页，由
-    # scrapers/ourdomain.py 的 tenant_policy 声明（见 docs/OURDOMAIN.md §5.1）。
-    # **必须登记**，否则 allowed_tenant 对本平台整体跳过——用户勾了「仅学生」
-    # 依然会收到 Young-Professionals-only 的房源，这个维度等于没做。
-    # 代价是 Diemen 偶发拿不到面积的单元（此时不写 Tenant）会在筛选时被排除；
-    # 与 floor 一样取 fail-closed，宁可少推不可错推。
-    "ourdomain": _UNIVERSAL_FILTER_DIMS | {
-        "floor", "occupancy", "type", "finishing", "tenant",
-    },
-    # OurCampus 复用 OurDomain 的解析器，抓得到的维度完全相同；但它至今没返回过
-    # 任何单元，装修档位无从核实，所以不登记 finishing。
-    # tenant 不同：它不依赖单元数据，整栋恒为 student only（官网 criteria 要求
-    # 在校证明，PhD 与博后明确不符合），所以可以登记。
-    "ourcampus": _UNIVERSAL_FILTER_DIMS | {"floor", "occupancy", "type", "tenant"},
-    # xior 的 tenant 来自 SOURCE_ASSUMED_FEATURES，每条房源都带，可安全登记。
-    "xior": _UNIVERSAL_FILTER_DIMS | {"finishing", "tenant"},
-    # magis 的卡片直接给出楼层、户型、装修档位与能耗标签，12/12 条实测都能解析出，
-    # 因此这四个维度都登记。
-    #
-    # tenant 不登记：站点只在部分房源上打「Students only」徽标（12 条里 3 条），
-    # 而「没有徽标」是「不限」还是「未标注」没有证据。这个维度 fail-closed，
-    # 登记之后另外 9 条会被勾了租客条件的用户整体过滤掉。徽标本身仍写进 features，
-    # 通知里看得见，只是不参与筛选。见 scrapers/magis.py 的 TENANT_MAP。
-    "magis": _UNIVERSAL_FILTER_DIMS | {"floor", "type", "finishing", "energy"},
-    # Student Experience 是户型级而非单元级：一条 listing 对应一个户型（多间），
-    # 面积因此是区间。登记的维度只有 type 与 tenant——
-    #
-    #   type    站点全部产品都是 studio，四个档位名（Signature / Essential /
-    #           Prestige / Comfort）是价位分层不是房型，统一写 Type: Studio。
-    #   tenant  来自 SOURCE_ASSUMED_FEATURES，整个 source 恒为 student only
-    #           （FAQ：exclusively available for students，签约需在读证明）。
-    #
-    # finishing **不登记**：规格行只出现在主卡片上，「其它户型」滑块里的紧凑卡片
-    # 没有这一行。该维度 fail-closed，登记之后紧凑卡片那几条会被勾了装修档位的
-    # 用户整体过滤掉——与 magis 的 tenant 同一取舍。值仍写进 features
-    # （Finishing note），通知里看得见，只是不参与筛选。
-    #
-    # floor / energy 站点不给。楼层只在设施行的散文里出现过（"located on
-    # floor 5-8"），那是户型的整体描述而非某一间的楼层。
-    "studentexperience": _UNIVERSAL_FILTER_DIMS | {"type", "tenant"},
-    # Plaza 的 feed 是结构化 JSON，房型、楼层、租客都是主键字段而不是散文，因此
-    # 三个都登记。
-    #
-    # tenant 与 Xior / OurCampus / Student Experience 不同：**不是**整站断言，是
-    # 每条房源自己的 doelgroepen（2026-09-02 快照 student 39 / regulier 16 并存）。
-    # 只有 doelgroepen 恰好等于 {student} 的才写 student only——混合标记的房源
-    # 不写，让该维度对它们 fail-open，而不是替站点断言「学生也能租」。
-    #
-    # energy 不登记：energyLabel 53 条全是空对象。
-    # finishing / occupancy / contract 站点不给（typeContract 53 条全为 null）。
-    "plaza": _UNIVERSAL_FILTER_DIMS | {"type", "floor", "tenant"},
-}
-
-
-#: 取值互斥、必须整体相等才算命中的维度。
-#:
-#: finishing 的四个取值是四档装修程度：Unfurnished / Semi furnished /
-#: Furnished / Fully furnished。它们在下拉里各占一项，选哪一档就是哪一档——
-#: 「半装修」不算「有家具」，「全装修」也不该被「有家具」顺带收走。想要多档
-#: 就多勾几项，这是白名单本来的用法。
-#:
-#: 其余维度不能这么做：房型在 H2S 写 ``1``、在 OurDomain 写
-#: ``1-Bedroom Apartment``，要求整体相等会让跨平台的同一户型对不上。
 _EXACT_MATCH_DIMS = frozenset({"finishing"})
 
 
@@ -952,17 +507,6 @@ def whitelist_matches(pattern: str, value: str, dim: str = "") -> bool:
         return p.casefold() == v.casefold()
     return re.search(rf"(?<!\w){re.escape(p)}(?!\w)", v, re.IGNORECASE) is not None
 
-
-
-def sources_supporting_dim(dim: str) -> list[str]:
-    """哪些平台会对这个维度真正生效，按 KNOWN_SOURCES 的顺序返回。
-
-    给界面用。平台不支持某维度时该条件对它整体跳过（fail-open，见上方注释），
-    这个行为本身是对的——否则一套条件会把整批抓不到该属性的房源误杀——但界面
-    上此前一个字都没提：勾了「能耗 ≥ A」的用户会以为收到的都是 A 级，实际
-    Xior 的房源一条都没过能耗这一关。
-    """
-    return [s for s in KNOWN_SOURCES if dim in _SOURCE_FILTER_DIMS.get(s, _UNIVERSAL_FILTER_DIMS)]
 
 
 def dim_scope_note(dim: str, lang: str = "zh") -> str:
@@ -1057,69 +601,6 @@ def dim_scope_badge(dim: str, lang: str = "zh") -> str:
 #:
 #: OurCampus 不在其中：它至今没有返回过任何可订单元，装修档位无从核实（见
 #: ARCHITECTURE §9）。宁可让它继续走 fail-open，也不要登记一个没验证过的事实。
-SOURCE_ASSUMED_FEATURES: dict[str, dict[str, str]] = {
-    # Xior 是纯学生盘：品牌名就是 Xior Student Housing，官网通篇「Trusted by
-    # 22,000+ students for their university journey」，全站没有任何收入或雇佣
-    # 条款。整个 source 一个值，不需要按楼或按面积切——所以放这里，而不是像
-    # OurDomain 那样在 BUILDINGS 里配 tenant_policy（那边 Diemen 一栋楼内部
-    # 就分两档，非切不可）。
-    #
-    # ⚠️ Finishing 曾经也在这里写着 "Furnished"，2026-08-21 实测发现是错的：
-    # 装修档位**按 room type 变**，同一栋楼内部就分两档。
-    #
-    #     Amsterdam Naritaweg   Deluxe / Unfurnished   站点无任何 furnished 项
-    #     Amsterdam Naritaweg   Deluxe / Furnished     Fully furnished
-    #     Aachen Vaals          Comfy                  Partially furnished
-    #                                                  （床架有、床垫没有）
-    #     Amsterdam Karspeldreef / Eindhoven ×2 /
-    #     Groningen / Utrecht                          Fully furnished
-    #
-    # 生产库 69 条里 41 条被标错（3 条实为无家具、38 条实为半装）。方向是**错推**：
-    # 勾 Furnished 的用户收到它们，勾 Unfurnished / Semi furnished 的反而收不到。
-    #
-    # 现改由 scrapers/xior.py 的 BUILDING_FURNISHING 按楼登记 + 按 floorplan
-    # 名判定，验证过一栋登记一栋；没登记的不写该字段。
-    "xior": {"Tenant": "student only"},
-    "ourdomain": {"Finishing": "Furnished"},
-    # Student Experience 同为纯学生盘，且判据比 Xior 更硬——不是从品牌宣传推断的，
-    # 是 FAQ 的明文规则：「All Student Experience studios are exclusively
-    # available for students」，签约前必须通过服务门户上传在读证明，入住时必须
-    # 是在校注册状态。合格身份含 study programme / internship / PhD research。
-    #
-    # ⚠️ 与 OurCampus 相反：那边的 criteria 明确排除 PhD 与博后。两处都写了
-    # student only，但含义不同——本平台收 PhD，OurCampus 不收。真出现按学位分档
-    # 的筛选需求时，这两个值不能合并处理。
-    #
-    # Finishing 不放这里：它按户型变（Signature 有规格行、Essential 的紧凑卡片
-    # 没有），整个 source 一刀切正是 Xior 2026-08-21 栽过的那个跟头。
-    "studentexperience": {"Tenant": "student only"},
-}
-
-
-# ── 装修档位：按楼登记，验证过一栋登记一栋 ──────────────────────────
-#
-# 这个属性 feed 里不上报，只能从站点房型页读。**不能整个 source 一刀切**——
-# 2026-08-21 实测三种档位并存，同一栋楼内部就分两档：
-#
-#     Amsterdam Naritaweg    Deluxe / Unfurnished    站点无任何 furnished 项
-#     Amsterdam Naritaweg    Deluxe / Furnished      Fully furnished
-#     Aachen Vaals           Comfy                   Partially furnished
-#     Amsterdam Karspeldreef Comfy                   Fully furnished
-#
-# 注意最后两行：**同名的 "Comfy" 在两栋楼里不是一个档位**，所以房型名单独用
-# 不可靠，必须按楼。
-#
-# 判定优先级：
-#   1. floorplan 名里明写 Furnished / Unfurnished  → 以它为准（上游自己的声明）
-#   2. 本表登记的楼栋                              → 用登记值
-#   3. 都没有                                      → **不写该字段**
-#
-# 第 3 条是有意的：`finishing` 在 config._SOURCE_FILTER_DIMS 里给 xior 登记着，
-# 没有值即 fail-closed，勾了装修条件的用户收不到这些房源。宁可少推，不可像
-# 改动前那样把半装/无家具的房源当全装推出去。
-#
-# 取值用 models.py 的规范英文档位（Fully furnished / Semi furnished /
-# Unfurnished），别新造词——过滤下拉是按库里出现过的值去重出来的。
 _FIN_FULLY = "Fully furnished"
 _FIN_FURNISHED = "Furnished"
 _FIN_SEMI = "Semi furnished"
@@ -1159,57 +640,6 @@ def xior_furnishing_for(building_key: str, floorplan_name: str) -> Optional[str]
         # 站点上带 "/ Furnished" 后缀的房型，FEATURES 里写的都是 Fully furnished
         return _FIN_FULLY
     return XIOR_BUILDING_FURNISHING.get(building_key)
-
-
-def assumed_features(source: str) -> list[str]:
-    """该平台恒定成立的 feature 条目，形如 ``["Finishing: Furnished"]``。"""
-    return [f"{k}: {v}" for k, v in SOURCE_ASSUMED_FEATURES.get(source, {}).items()]
-
-
-def source_supports_dim(source: Optional[str], dim: str) -> bool:
-    """公开入口，供浏览页复用同一套 fail-open 判定。
-
-    浏览页此前没有这一层，一条没有该属性的房源必然不匹配，等于因为上游少给一个
-    字段就把整个平台从结果里抹掉。
-    """
-    return _source_supports_dim(source, dim)
-
-
-def filter_dim_sources() -> dict[str, list[str]]:
-    """每个过滤维度实际生效于哪些平台，形如 ``{"contract": ["holland2stay"]}``。
-
-    为什么要把这张表送到客户端
-    --------------------------
-    ``_SOURCE_FILTER_DIMS`` 决定的是**沉默的**行为：用户在筛选表单里勾了
-    "Contract: Indefinite"，对 Holland2Stay 生效，对其余六个平台整条跳过
-    （fail-open，见 ``_source_supports_dim``）。界面上没有任何地方说过这件事，
-    用户会以为自己设了一条全局条件——他设的其实是一条单平台条件。
-
-    这张表是 ``_SOURCE_FILTER_DIMS`` 的转置，不是另抄一份：新增平台或调整维度
-    只改上面那张表，这里跟着变。
-
-    未登记的平台按 ``_UNIVERSAL_FILTER_DIMS`` 处理，与 ``_source_supports_dim``
-    的回退一致——它们不出现在专有维度的列表里。
-    """
-    dims: dict[str, list[str]] = {}
-    for source, caps in _SOURCE_FILTER_DIMS.items():
-        for dim in caps:
-            dims.setdefault(dim, []).append(source)
-    for dim in dims:
-        dims[dim].sort()
-    return dims
-
-
-def _source_supports_dim(source: Optional[str], dim: str) -> bool:
-    """该平台是否稳定提供某过滤维度。
-
-    未登记的平台默认只认通用维度（price/area/city/source），其余平台专有维度
-    一律跳过——多平台场景下宁可放行也别误杀；新平台需要更严的过滤时在
-    ``_SOURCE_FILTER_DIMS`` 里登记。
-    """
-    caps = _SOURCE_FILTER_DIMS.get((source or "holland2stay").strip().lower(),
-                                   _UNIVERSAL_FILTER_DIMS)
-    return dim in caps
 
 
 @dataclass
@@ -1508,161 +938,11 @@ class ListingFilter:
 #: ``ever_evicted`` / ``ever_convicted`` / ``criminal_charges``
 #: ——**犯罪记录在 GDPR 下属第 10 条数据**，比身份证号更该保护，却一直是明文。
 #:
-#: 正向白名单的问题不只是漏了几项：它让「新加字段」的默认行为是**明文**。
-#: 这张表以后还会跟着 RENTCafe 表单变，每加一个字段就要有人记得回来登记一次。
-#: 反过来之后，忘记维护这张表的后果是「多加密了一个不敏感字段」，而不是
-#: 「明文存了一项敏感数据」——两种疏忽的代价不对称。
-#:
-#: 下面三项确实不是个人数据，加密只会让排查变难：
-_PLAINTEXT_PROFILE_FIELDS = frozenset({
-    "no_middle_name",   # 布尔标记：本人没有中间名
-    "min_lease_term",   # 租期偏好，例如 "12 months"
-    "housing_type",     # 房型偏好，不指向具体的人
-})
+def _default_applicant_profile():
+    """延迟导入：bookers 包会 import scrapers→config，不能在 config 顶层导入。"""
+    from bookers.applicant_profile import ApplicantProfile
+    return ApplicantProfile()
 
-
-def profile_field_is_encrypted(name: str) -> bool:
-    """该档案字段是否加密存储。默认加密，见 _PLAINTEXT_PROFILE_FIELDS。"""
-    return name not in _PLAINTEXT_PROFILE_FIELDS
-
-#: RENTCafe 申请表的下拉选项，抄自实测页面（Vaals / Katzensprung）。
-#: 值必须与页面 option 文本完全一致，否则提交时匹配不上。
-APPLICANT_TITLES = ("Mr.", "Ms.", "Mrs.", "Dr.")
-APPLICANT_GENDERS = ("Male", "Female", "Gender Nonbinary", "Prefer Not to Disclose")
-
-
-@dataclass
-class ApplicantProfile:
-    """RENTCafe 申请表（Applicant Info）里的个人资料。
-
-    证件扫描件**不在这里**，但系统确实要存——见 :mod:`applicant_docs`。
-    平台在 `ID/Passport Upload` 到位前拒绝保存申请表的任何内容，而自动预订是
-    异步触发的，所以不存在「用完即走的透传」。这是一个知情的取舍（当前部署
-    只服务少量熟人，自动预订未对外开放）；文件单独加密落盘，不进这个每轮都要
-    加载的配置对象。
-
-    **付款始终不代做。** ``ApplicationCharges`` 那一步要填 IBAN / SWIFT /
-    户名（2026-08-03 侦察确认），代填金融凭据是硬限制。
-
-    字段与实测表单一一对应：
-
-    ==================  ================================================
-    表单字段             说明
-    ==================  ================================================
-    Title               见 :data:`APPLICANT_TITLES`
-    First/Middle/Last   中间名可用 ``no_middle_name`` 勾选「我没有中间名」
-    Phone / Gender      Gender 见 :data:`APPLICANT_GENDERS`
-    Date Of Birth       Screening 区块，`YYYY-MM-DD` 存储，提交时转 `d-m-yyyy`
-    Nationality         国家名（存显示名而非页面的数字 id——id 会随上游改版
-                        失效，显示名更稳，提交时再匹配）
-    Country / Address / Post Code-City
-    University          Xior 特有的必填项（学生住房）
-    min_lease_term      最短租期（月）
-    ==================  ================================================
-    """
-
-    title: str = ""
-    first_name: str = ""
-    middle_name: str = ""
-    no_middle_name: bool = False
-    last_name: str = ""
-    phone: str = ""
-    gender: str = ""
-    date_of_birth: str = ""      # YYYY-MM-DD
-    nationality: str = ""
-    country: str = "Netherlands"
-    address: str = ""
-    postcode_city: str = ""
-    university: str = ""
-    min_lease_term: str = ""
-    #: Screening 区块的两个必填项（实测在页面底部的 Information 小节）。
-    place_of_birth: str = ""
-    #: 护照号 / 身份证号。**加密存储**——它和姓名/生日/地址/国籍凑在一起
-    #: 就是一份完整身份信息包，泄露后果与证件扫描件同级。
-    id_number: str = ""
-    #: 学号，非必填（Xior 是学生住房，填了有助于审核）。
-    student_number: str = ""
-
-    # ------------------------------------------------------------------
-    # 2026-08-03 对着真实表单补的字段。上一版把 15 个字段名全写错了（命中 0），
-    # 修正时才发现表单要的东西比档案里存的多。详见 bookers/rentcafe_form.py。
-    # ------------------------------------------------------------------
-    #: 地址第二行（门牌补充）。表单把地址拆成 Addr1/Addr2/ZipCode/City 四格，
-    #: 原来的 ``postcode_city`` 一格塞两样，对不上。
-    address_line2: str = ""
-    #: 邮编。留空时从旧的 ``postcode_city`` 里拆（见 :meth:`_split_postcode_city`）。
-    postcode: str = ""
-    #: 城市。同上。
-    city: str = ""
-    #: 证件签发国（表单 ``drpDLCountry``，必填）。
-    id_country: str = ""
-    #: 当前住所性质：``Rent`` / ``Own`` / ``Other``（表单 ``OwnerShipType``）。
-    housing_type: str = ""
-
-    # -- 背景调查三问 ---------------------------------------------------
-    # 取值 ``Yes`` / ``No``，**留空表示用户还没回答**。
-    #
-    # 这三项和其它字段有本质区别：它们是关于用户本人的**事实陈述**（是否曾被
-    # 驱逐、是否曾被定罪、是否有未决刑事指控）。系统绝不能默认填 "No"——代勾
-    # 「我授权你做背景调查」是用户授权过的，代答「我没有前科」不是；答错了是
-    # 用户在承担后果。没回答就不提交，让服务端拒绝。
-    ever_evicted: str = ""
-    ever_convicted: str = ""
-    criminal_charges: str = ""
-
-    def _split_postcode_city(self) -> tuple[str, str]:
-        """兼容旧档案里 ``postcode_city`` 一格塞两样的写法。
-
-        荷兰邮编形如 ``6291 AB``，后面跟城市名。新字段有值时一律以新字段为准。
-        """
-        if self.postcode or self.city:
-            return self.postcode.strip(), self.city.strip()
-        raw = (self.postcode_city or "").strip()
-        # 荷兰邮编是 4 位数字 + 2 个字母，城市名跟在后面（可以没有）。
-        # 城市部分为空时**不要**把整串当城市——`5652EN` 是邮编不是城市，
-        # 贴错标签不会报错，只会往申请表的 City 格里填一串邮编。
-        m = re.match(r"^(\d{4}\s*[A-Za-z]{2})\b\s*(.*)$", raw)
-        if m:
-            return m.group(1).strip(), m.group(2).strip()
-        return "", raw
-
-    def is_complete(self) -> bool:
-        """是否够填完 Applicant Info 的全部必填项。
-
-        不完整时不该触发半自动预订——填一半的表单提交不上去，只会白白消耗
-        RENTCafe 的尝试额度，还在用户账号下留一条废弃申请。
-        """
-        return not self.missing_fields()
-
-    def missing_fields(self) -> list[str]:
-        """还缺哪些必填项，给面板提示用。
-
-        这张清单对着 2026-08-03 的真实表单核过一遍。修正字段名时发现表单要的
-        东西比档案里存的多（证件签发国、住所性质、背景调查三问），漏填的后果
-        不是报错——服务端会静默丢弃不认识的字段，提交一份缺项的申请。
-        """
-        postcode, city = self._split_postcode_city()
-        checks = {
-            "first_name": self.first_name, "last_name": self.last_name,
-            "gender": self.gender, "date_of_birth": self.date_of_birth,
-            "country": self.country, "address": self.address,
-            "postcode": postcode, "city": city,
-            "place_of_birth": self.place_of_birth, "id_number": self.id_number,
-            "housing_type": self.housing_type,
-            # 表单上标着「Nationality」的那一格，字段名其实是 drpDLCountry
-            # （见 bookers/rentcafe_applicant._dl_country_attr）
-            "nationality": self.nationality,
-            # 背景调查三问：留空 = 用户还没回答。系统不替他答，所以这里必须
-            # 当成"缺必填项"，而不是当成"答 No"。
-            "ever_evicted": self.ever_evicted,
-            "ever_convicted": self.ever_convicted,
-            "criminal_charges": self.criminal_charges,
-        }
-        out = [k for k, v in checks.items() if not str(v).strip()]
-        # 中间名要么填了，要么显式勾了「没有」——留空且没勾，表单过不了校验
-        if not str(self.middle_name).strip() and not self.no_middle_name:
-            out.append("middle_name")
-        return out
 
 
 @dataclass
@@ -1741,7 +1021,7 @@ class AutoBookConfig:
 
     #: RENTCafe 申请表的个人资料。半自动预订用它自动填 Applicant Info，
     #: 用户只需自己上传证件 + 付款——那两步系统不该代劳。
-    applicant_profile: ApplicantProfile = field(default_factory=ApplicantProfile)
+    applicant_profile: "ApplicantProfile" = field(default_factory=_default_applicant_profile)
 
     #: 用户预先授权系统代勾申请表上那两个法律声明的时间（ISO，UTC）。空 = 未授权。
     #:
@@ -2203,32 +1483,6 @@ def _parse_shard_sizes(raw: str) -> dict[str, int]:
     return out
 
 
-#: 系统支持的全部平台。**新增平台只改这里。**
-#:
-#: 这个常量是补出来的：原先每处各自维护一份平台清单，于是 ``ourcampus``
-#: 被漏了三次——前端的 sourceLabel（三份实现都没有它）、monitoring 页（干脆
-#: 不转换）、以及全局设置的白名单（从面板保存一次就会把它从 SOURCES 里悄悄
-#: 删掉）。漏的都是同一个平台，因为它是最后加的那个。
-KNOWN_SOURCES: tuple[str, ...] = ("holland2stay", "ourdomain", "ourcampus",
-                                  "xior", "magis", "studentexperience", "plaza")
-
-#: 平台显示名。前端另有一份同样的表（static/app.js 的 SOURCE_LABELS），
-#: 因为那边是客户端渲染；两边都从这份注释里的同一个事实来。
-SOURCE_DISPLAY_NAMES: dict[str, str] = {
-    "holland2stay": "Holland2Stay",
-    "ourdomain": "OurDomain",
-    "ourcampus": "OurCampus",
-    "xior": "Xior",
-    "magis": "Magis",
-    "studentexperience": "Student Experience",
-    "plaza": "Plaza",
-}
-
-
-def source_display_name(source: str) -> str:
-    """平台显示名；未知 key 首字母大写后返回，不套用某个已知平台名。"""
-    key = (source or "").strip().lower()
-    return SOURCE_DISPLAY_NAMES.get(key, key.capitalize() if key else "")
 
 
 def _target_parse(key: str, parser, raw: str):

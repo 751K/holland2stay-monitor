@@ -15,13 +15,13 @@ import json
 
 import pytest
 
-from config import (
+from config import AutoBookConfig
+from bookers.applicant_profile import (
     APPLICANT_GENDERS,
     APPLICANT_TITLES,
     _PLAINTEXT_PROFILE_FIELDS,
-    profile_field_is_encrypted,
     ApplicantProfile,
-    AutoBookConfig,
+    profile_field_is_encrypted,
 )
 from crypto import decrypt, encrypt
 from users import UserConfig, _ab_from_dict, _user_to_row
@@ -138,7 +138,7 @@ class TestPersistence:
 
     def test_preference_fields_stay_plain(self):
         """例外清单里的三项确实不是个人数据，加密只会让排查变难。"""
-        from config import _PLAINTEXT_PROFILE_FIELDS
+        from bookers.applicant_profile import _PLAINTEXT_PROFILE_FIELDS
         for f in _PLAINTEXT_PROFILE_FIELDS:
             assert not profile_field_is_encrypted(f)
 
@@ -159,7 +159,7 @@ class TestPersistence:
         属第 10 条数据，比证件号更该保护，却一直是明文。详见
         tests/test_applicant_profile_encryption.py。
         """
-        from config import _PLAINTEXT_PROFILE_FIELDS
+        from bookers.applicant_profile import _PLAINTEXT_PROFILE_FIELDS
         assert profile_field_is_encrypted("criminal_charges")
         assert profile_field_is_encrypted("nationality")
         assert _PLAINTEXT_PROFILE_FIELDS == {

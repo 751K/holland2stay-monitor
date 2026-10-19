@@ -193,7 +193,7 @@ class TestApplicantProfilePanel:
 
     def test_every_missing_field_has_a_readable_label(self):
         """缺项必须用表单上的字段名说。模板里的映射漏一个，就会原样露出 date_of_birth。"""
-        from config import ApplicantProfile
+        from bookers.applicant_profile import ApplicantProfile
         tpl = self._TPL.read_text(encoding="utf-8")
         block = re.search(r"\{% set missing_labels = \{(.*?)\} %\}", tpl, re.S)
         assert block
@@ -202,7 +202,8 @@ class TestApplicantProfilePanel:
         assert missing <= mapped, f"没有显示名的缺项: {sorted(missing - mapped)}"
 
     def test_incomplete_notice_shows_labels_not_field_names(self, admin_client):
-        from config import AutoBookConfig, ApplicantProfile
+        from config import AutoBookConfig
+        from bookers.applicant_profile import ApplicantProfile
         from users import UserConfig, load_users, save_users
 
         u = UserConfig(name="prof-incomplete")

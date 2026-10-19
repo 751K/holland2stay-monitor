@@ -90,7 +90,7 @@ class TestEncryptionClaimsAreTrue:
         assert ("encrypted at rest" in t) or ("加密存储" in t)
 
     def test_the_claim_matches_the_code(self):
-        from config import ApplicantProfile, profile_field_is_encrypted
+        from bookers.applicant_profile import ApplicantProfile, profile_field_is_encrypted
         for f in dataclasses.fields(ApplicantProfile):
             if f.name in ("no_middle_name", "min_lease_term", "housing_type"):
                 continue

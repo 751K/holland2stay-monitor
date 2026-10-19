@@ -709,7 +709,7 @@ class StorageBase:
         import json
 
         try:
-            from config import profile_field_is_encrypted
+            from bookers.applicant_profile import profile_field_is_encrypted
             from crypto import encrypt
         except Exception:
             logger.warning("加载加密依赖失败，跳过申请人档案迁移", exc_info=True)
