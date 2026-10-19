@@ -91,10 +91,11 @@ class TestDiffSecondRun:
         new, changes = temp_db.diff([_l("a", status="Available to book")])
         assert new == []
         assert len(changes) == 1
-        listing, old, new_status = changes[0]
+        listing, old, new_status, event_id = changes[0]
         assert listing.id == "a"
         assert old == "Available in lottery"
         assert new_status == "Available to book"
+        assert isinstance(event_id, int) and event_id > 0
 
     def test_status_change_persists_to_status_changes_table(self, temp_db):
         temp_db.diff([_l("a", status="X")])
@@ -247,7 +248,7 @@ class TestMarkStaleListings:
         assert row["status"] == "Available to book"
         assert row["status_is_inferred"] == 0
         assert len(changes) == 1
-        assert changes[0][1:] == ("Occupied", "Available to book")
+        assert changes[0][1:3] == ("Occupied", "Available to book")
 
 
 # ─── booking hold 本地状态保持 ─────────────────────────────────────
@@ -293,7 +294,7 @@ class TestBookingHoldStatus:
 
         assert new == []
         assert len(changes) == 1
-        assert changes[0][1:] == ("Reserved", "Available to book")
+        assert changes[0][1:3] == ("Reserved", "Available to book")
         row = temp_db.get_listing("a")
         assert row["status"] == "Available to book"
         assert row["status_is_inferred"] == 0
@@ -324,7 +325,7 @@ class TestBookingHoldStatus:
 
         _, changes = temp_db.diff([_l("plaza-2", source="plaza")])
 
-        assert changes and changes[0][1:] == ("Reserved", "Available to book")
+        assert changes and changes[0][1:3] == ("Reserved", "Available to book")
         row = temp_db.get_listing("plaza-2")
         assert row["status"] == "Available to book"
         assert row["status_is_inferred"] == 0
@@ -381,11 +382,13 @@ class TestMarkNotified:
 
     def test_mark_status_change_notified(self, temp_db):
         temp_db.diff([_l("a", status="X")])
-        temp_db.diff([_l("a", status="Y")])
+        _, changes = temp_db.diff([_l("a", status="Y")])
+        event_id = changes[0][3]
         # status_changes 表里现在有一条未 notified
-        temp_db.mark_status_change_notified("a")
+        temp_db.mark_status_change_notified(event_id)
+        assert temp_db.pending_status_changes() == []
         # 再次调用应该幂等（没有未 notified 的就不动）
-        temp_db.mark_status_change_notified("a")
+        temp_db.mark_status_change_notified(event_id)
 
 
 # ─── retry_queue 持久化 ────────────────────────────────────────

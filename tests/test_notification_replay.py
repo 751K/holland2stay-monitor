@@ -100,11 +100,31 @@ class TestPendingIsReadable:
         st.diff([_l("L1", status="Available to book")])
 
         pend = st.pending_status_changes()
-        assert [(l.id, o, n) for l, o, n in pend] == [
+        assert [(t[0].id, t[1], t[2]) for t in pend] == [
             ("L1", "Occupied", "Available to book")
         ]
-        st.mark_status_change_notified_batch(["L1"])
+        st.mark_status_change_notified_batch([t[3] for t in pend])
         assert st.pending_status_changes() == []
+
+    def test_marking_one_event_does_not_retire_its_sibling(self, st):
+        """同一房源的两条迁移各算一条事件，标记一条不能连带划掉另一条。
+
+        旧实现按 listing_id 标记。当本批只处理了其中一条（另一条被 LIMIT
+        截断或落在时间窗外）时，第二条会被静默标成「已处理」——它从未被
+        投递，也不会再被重放。
+        """
+        st.diff([_l("L1", status="Reserved")])
+        st.diff([_l("L1", status="Available to book")])
+        st.diff([_l("L1", status="Occupied")])
+
+        pend = st.pending_status_changes()
+        assert len(pend) == 2, "前提不成立：应有两条未处理事件"
+
+        st.mark_status_change_notified_batch([pend[0][3]])
+        left = st.pending_status_changes()
+        assert [t[3] for t in left] == [pend[1][3]], (
+            "标记一条事件把同一房源的另一条也划掉了"
+        )
 
 
 class TestCrashBetweenDiffAndNotify:
@@ -315,6 +335,26 @@ class TestMergePendingIntoTheRound:
         monitor._merge_pending_events(st, new, [])
         assert new, "没有就地修改，调用方拿到的还是空列表"
 
+    def test_distinct_events_for_same_listing_are_both_replayed(self, st):
+        """去重按事件主键，不按 listing id。
+
+        同一房源可以有多条未投递的迁移（进程死在两轮通知之间）。按 listing
+        id 去重会把第二条当成重复丢掉——它和第一条是新旧状态不同的两条事件。
+        """
+        import monitor
+
+        st.diff([_l("L1", status="Reserved")])
+        st.mark_notified_batch(["L1"])          # 新房源事件先收掉，只看状态变更
+        st.diff([_l("L1", status="Available to book")])
+        st.diff([_l("L1", status="Occupied")])
+
+        new, changes = [], []
+        assert monitor._merge_pending_events(st, new, changes) == 2
+        assert {(c[1], c[2]) for c in changes} == {
+            ("Reserved", "Available to book"),
+            ("Available to book", "Occupied"),
+        }
+
     def test_replayed_events_get_marked_and_stop_replaying(self, st):
         """重放出来的事件走完通知阶段后要被标记，否则会每轮无限重放。"""
         import monitor
@@ -411,10 +451,12 @@ class TestNotifyPhaseMarksEverythingItProcessed:
         st.diff([_l("L1", status="Occupied")])
         st.mark_notified_batch(["L1"])
         st.diff([_l("L1", status="Available to book")])
-        assert len(st.pending_status_changes()) == 1
+        pend = st.pending_status_changes()
+        assert len(pend) == 1
 
+        listing, old, new, event_id = pend[0]
         asyncio.run(monitor._notify_status_changes(
-            [(_l("L1", status="Available to book"), "Occupied", "Available to book")],
+            [(listing, old, new, event_id)],
             [(self._RejectAll(), object())],
             None, st, self._Push,
         ))

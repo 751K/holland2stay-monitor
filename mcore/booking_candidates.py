@@ -194,7 +194,7 @@ def collect_booking_candidates(
             ):
                 ab_candidates[user.id].append(listing)
 
-    for listing, old_status, new_status in status_changes:
+    for listing, old_status, new_status, _event_id in status_changes:
         if new_status.lower() == STATUS_AVAILABLE:
             status_transition[listing.id] = (old_status, new_status)
         for user, _notifier in user_notifiers:

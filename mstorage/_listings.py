@@ -266,11 +266,11 @@ class ListingOps:
 
     def diff(
         self, fresh: list[Listing]
-    ) -> tuple[list[Listing], list[tuple[Listing, str, str]]]:
+    ) -> tuple[list[Listing], list[tuple[Listing, str, str, int]]]:
         now = _now_iso()
         now_dt = datetime.now(timezone.utc)
         new_listings: list[Listing] = []
-        status_changes: list[tuple[Listing, str, str]] = []
+        status_changes: list[tuple[Listing, str, str, int]] = []
 
         fresh = self._dedupe_by_id(fresh)
 
@@ -388,7 +388,14 @@ class ListingOps:
                                VALUES (?,?,?,?)""",
                             (listing.id, old_status, listing.status, now),
                         )
-                        status_changes.append((listing, old_status, listing.status))
+                        # 带上事件主键：标记「已处理」必须精确到这一行。按
+                        # listing_id 标会把同一房源**其它**未处理的事件一起
+                        # 划掉，而那些事件可能根本不在本批（被 LIMIT 截断、
+                        # 或超出时间窗），于是静默丢失。
+                        status_changes.append(
+                            (listing, old_status, listing.status,
+                             int(cur.lastrowid))
+                        )
 
         return new_listings, status_changes
 
@@ -556,12 +563,17 @@ class ListingOps:
         self,
         within_minutes: int | None = None,
         limit: int | None = None,
-    ) -> list[tuple[Listing, str, str]]:
-        """还没走完通知阶段的状态变更，形状与 ``diff()`` 的第二个返回值一致。"""
+    ) -> list[tuple[Listing, str, str, int]]:
+        """还没走完通知阶段的状态变更，形状与 ``diff()`` 的第二个返回值一致。
+
+        元组末位是 ``status_changes.id``（事件主键），标记已处理时用它，
+        不要用 ``listing_id``。
+        """
         win = self.PENDING_WINDOW_MINUTES if within_minutes is None else within_minutes
         lim = self.PENDING_BATCH_LIMIT if limit is None else limit
         rows = self._conn.execute(
-            """SELECT sc.listing_id, sc.old_status, sc.new_status, l.*
+            """SELECT sc.id AS event_id, sc.listing_id, sc.old_status,
+                      sc.new_status, l.*
                 FROM status_changes sc
                 JOIN listings l ON l.id = sc.listing_id
                 WHERE sc.notified = 0
@@ -570,7 +582,8 @@ class ListingOps:
             (_days(win), int(lim)),
         ).fetchall()
         return [
-            (self._row_to_listing(r), r["old_status"] or "", r["new_status"] or "")
+            (self._row_to_listing(r), r["old_status"] or "", r["new_status"] or "",
+             int(r["event_id"]))
             for r in rows
         ]
 
@@ -612,23 +625,28 @@ class ListingOps:
                 listing_ids,
             )
 
-    def mark_status_change_notified(self, listing_id: str) -> None:
+    def mark_status_change_notified(self, event_id: int) -> None:
+        """把**一条**状态变更事件标成已处理。
+
+        参数是 ``status_changes.id``，不是 ``listing_id``。按房源标记会连带
+        划掉同一房源其它尚未处理的迁移——那些迁移可能不在本批里。
+        """
         with self._conn:
             self._conn.execute(
                 """UPDATE status_changes SET notified=1
-                   WHERE listing_id=? AND notified=0""",
-                (listing_id,),
+                   WHERE id=? AND notified=0""",
+                (event_id,),
             )
 
-    def mark_status_change_notified_batch(self, listing_ids: list[str]) -> None:
-        if not listing_ids:
+    def mark_status_change_notified_batch(self, event_ids: list[int]) -> None:
+        if not event_ids:
             return
         with self._conn:
-            placeholders = ",".join("?" for _ in listing_ids)
+            placeholders = ",".join("?" for _ in event_ids)
             self._conn.execute(
                 f"""UPDATE status_changes SET notified=1
-                   WHERE listing_id IN ({placeholders}) AND notified=0""",
-                listing_ids,
+                   WHERE id IN ({placeholders}) AND notified=0""",
+                event_ids,
             )
 
     # ── 状态收敛：从 feed 里消失 = 唯一的下架信号 ────────────────────

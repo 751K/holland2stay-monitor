@@ -180,6 +180,38 @@ class TestRunOnceShadow:
         finally:
             storage.close()
 
+    def test_crash_before_notify_does_not_leak_shadow_events(self, tmp_path):
+        """重放路径也必须过影子过滤。
+
+        「diff 已提交、通知阶段没走完」的旧事件会在下一轮被重放。如果影子
+        过滤排在重放之前，这些事件就绕过保证直接投递——影子源正是不能给
+        用户发通知的那个。
+        """
+        storage = Storage(Path(tmp_path) / "t.db", timezone_str="UTC")
+        try:
+            _round(tmp_path, storage, ["ourcampus"],
+                   [_listing("oc_1", source="ourcampus", status="Occupied")])
+            _round(tmp_path, storage, ["ourcampus"],
+                   [_listing("oc_1", source="ourcampus",
+                             status="Available to book")])
+
+            # 还原成「入库了、还没标记」的崩溃现场
+            storage.conn.execute("UPDATE listings SET notified=0")
+            storage.conn.execute("UPDATE status_changes SET notified=0")
+            storage.conn.commit()
+
+            n = _round(tmp_path, storage, ["ourcampus"], [
+                _listing("oc_1", source="ourcampus",
+                         status="Available to book"),
+            ])
+            assert n.new_listings == [], "影子新房源被重放路径投递了"
+            assert n.status_changes == [], "影子状态变更被重放路径投递了"
+            # 被拦下的事件要标记掉，否则每轮都会重放
+            assert storage.pending_new_listings() == []
+            assert storage.pending_status_changes() == []
+        finally:
+            storage.close()
+
     def test_without_shadow_everything_notifies(self, tmp_path):
         storage = Storage(Path(tmp_path) / "t.db", timezone_str="UTC")
         try:

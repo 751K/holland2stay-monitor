@@ -62,18 +62,6 @@ async def run_post_scrape(
     try:
         new_listings, status_changes = storage.diff(fresh)
 
-        # ── 影子 source：入库了，但不通知 ─────────────────────────────── #
-        # 新平台上线前的静默验证期：先确认它抓得对、数据长什么样，再决定是否
-        # 对用户开放。**必须在 diff() 之后过滤**——diff 要照常执行，房源才会
-        # 进库、状态变更才会被记录；被拦掉的只有「告诉谁」这一步。
-        #
-        # 副作用是这些 listing 的 notified 一直是 0。取消影子后不会补发历史
-        # ——diff() 只对真正的新 id 产出 new_listings，老的不会再冒出来。
-        # 这是想要的：解除影子不该给用户灌一堆积压通知。
-        new_listings, status_changes = drop_shadow_sources(
-            cfg, new_listings, status_changes, storage=storage,
-        )
-
         # ── 重放上一轮没发出去的事件 ─────────────────────────────────── #
         # diff() 检测变更的副作用就是覆盖掉用来检测的旧状态，所以「diff 已提交、
         # 通知还没发」这个窗口里进程一死，事件就永久丢了——下一轮 diff 看到
@@ -98,6 +86,22 @@ async def run_post_scrape(
             except Exception:
                 # 重放是补偿机制，它自己坏掉不该拖垮正常通知
                 logger.warning("未投递事件重放失败（本轮跳过）", exc_info=True)
+
+        # ── 影子 source：入库了，但不通知 ─────────────────────────────── #
+        # 新平台上线前的静默验证期：先确认它抓得对、数据长什么样，再决定是否
+        # 对用户开放。**必须在 diff() 之后过滤**——diff 要照常执行，房源才会
+        # 进库、状态变更才会被记录；被拦掉的只有「告诉谁」这一步。
+        #
+        # 也必须在**重放之后**过滤：重放会把上一轮崩溃前入库、通知阶段没走完
+        # 的旧事件捞回来，它们同样可能属于影子 source。先重放再过滤，这些
+        # 事件才会被一起拦下并标记；顺序反过来，它们会绕过影子保证直接投递。
+        #
+        # 副作用是这些 listing 的 notified 一直是 0。取消影子后不会补发历史
+        # ——diff() 只对真正的新 id 产出 new_listings，老的不会再冒出来。
+        # 这是想要的：解除影子不该给用户灌一堆积压通知。
+        new_listings, status_changes = drop_shadow_sources(
+            cfg, new_listings, status_changes, storage=storage,
+        )
 
         # diff() 成功后再写时间戳，确保面板显示的 last_scrape_at 对应一次完整的
         # "抓取 + 入库" 操作；若 diff() 抛异常，时间戳不会被更新。

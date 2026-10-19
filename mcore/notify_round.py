@@ -25,22 +25,28 @@ def merge_pending_events(
     **就地修改**传入的两个列表——调用方后面还要把它们喂给通知与预订两条路，
     返回新列表会让调用点多出两个容易忘记同步的变量。
 
-    去重按 listing id：本轮 diff 已经产出的不再补一遍（同一条房源刚上架又立刻
-    变状态时会撞上）。
+    去重按**事件主键**：本轮 ``diff()`` 刚插入的 ``status_changes`` 行也会被
+    ``pending_status_changes()`` 查出来（它们同样是 notified=0），按 listing id
+    去重会把「同一房源的两条不同迁移」误判成重复——而它们是两条应当分别
+    投递的事件。新房源仍按 listing id 去重，那本来就是一比一的关系。
     """
     have_new = {l.id for l in new_listings}
-    have_sc = {t[0].id for t in status_changes}
+    have_sc = {t[3] for t in status_changes}
     n = 0
     for l in storage.pending_new_listings():
         if l.id not in have_new:
             new_listings.append(l)
             have_new.add(l.id)
             n += 1
+    replayed: list = []
     for tup in storage.pending_status_changes():
-        if tup[0].id not in have_sc:
-            status_changes.append(tup)
-            have_sc.add(tup[0].id)
+        if tup[3] not in have_sc:
+            replayed.append(tup)
+            have_sc.add(tup[3])
             n += 1
+    # 待重放的事件都早于本轮，放在前面才符合时间顺序（通知文案会带新旧状态）。
+    if replayed:
+        status_changes[:0] = replayed
     return n
 
 
@@ -79,14 +85,13 @@ def drop_shadow_sources(
     kept_sc = [t for t in status_changes if not _shadowed(t[0])]
 
     if storage is not None:
-        dropped_ids = (
-            [l.id for l in new_listings if _shadowed(l)]
-            + [t[0].id for t in status_changes if _shadowed(t[0])]
-        )
-        if dropped_ids:
+        dropped_listing_ids = [l.id for l in new_listings if _shadowed(l)]
+        dropped_event_ids = [t[3] for t in status_changes if _shadowed(t[0])]
+        if dropped_listing_ids or dropped_event_ids:
             try:
-                storage.mark_notified_batch(dropped_ids)
-                storage.mark_status_change_notified_batch(dropped_ids)
+                # 两张表的键不同：listings 按房源 id，status_changes 按事件 id。
+                storage.mark_notified_batch(dropped_listing_ids)
+                storage.mark_status_change_notified_batch(dropped_event_ids)
             except Exception:
                 # 标记失败最多让这几条被重放一次，不该拖垮本轮通知
                 logger.warning("影子 source 事件标记失败（可能被重放一次）", exc_info=True)
@@ -252,9 +257,9 @@ async def notify_status_changes(
     push_tasks: 本段创建的 APNs/FCM asyncio.Task。
     """
     push_tasks: list = []
-    sc_notified_ids: list[str] = []
+    sc_notified_event_ids: list[int] = []
 
-    for listing, old_status, new_status in status_changes:
+    for listing, old_status, new_status, event_id in status_changes:
         for user, notifier in user_notifiers:
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
                 logger.info("[%s] 状态变更跳过通知（过滤条件不符）: %s", user.name, listing.name)
@@ -275,9 +280,10 @@ async def notify_status_changes(
             await web_notifier.send_status_change(listing, old_status, new_status)
 
         # 同上：走完通知阶段就标记，判据是「处理过」不是「投递成功」。
-        sc_notified_ids.append(listing.id)
+        # 标记的是**这一条事件**，不是这套房源的所有事件。
+        sc_notified_event_ids.append(event_id)
 
-    storage.mark_status_change_notified_batch(sc_notified_ids)
+    storage.mark_status_change_notified_batch(sc_notified_event_ids)
     return push_tasks
 
 
