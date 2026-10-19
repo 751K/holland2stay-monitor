@@ -124,7 +124,7 @@ def _run(tmp_path, dispatch_side_effect):
     result: dict = {}
 
     async def go():
-        with patch("monitor.dispatch_scrape_tasks", side_effect=fake_dispatch), \
+        with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=fake_dispatch), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None):
             try:
                 result["completeness"] = await run_once(
@@ -187,7 +187,7 @@ class TestSourceIsolation:
             return side_effect(tasks[0].source, tasks, multi_source)
 
         async def go():
-            with patch("monitor.dispatch_scrape_tasks", side_effect=fake_dispatch), \
+            with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=fake_dispatch), \
                  patch("mcore.prewarm.create_prewarmed_session", return_value=None):
                 await run_once(_cfg(tmp_path), storage, [], dry_run=False)
 
@@ -309,7 +309,7 @@ class TestCompletenessKeyPrefix:
             return _ok(tasks[0].source, tasks, multi_source)
 
         async def go():
-            with patch("monitor.dispatch_scrape_tasks", side_effect=fake_dispatch), \
+            with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=fake_dispatch), \
                  patch("mcore.prewarm.create_prewarmed_session", return_value=None):
                 return await run_once(cfg, storage, [], dry_run=False)
 
@@ -383,7 +383,7 @@ class TestH2SIsolation:
             return side_effect(tasks[0].source, tasks, multi_source)
 
         async def go():
-            with patch("monitor.dispatch_scrape_tasks", side_effect=fake_dispatch), \
+            with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=fake_dispatch), \
                  patch("mcore.prewarm.create_prewarmed_session", return_value=None):
                 await run_once(_cfg(tmp_path), storage, [], dry_run=False)
 
@@ -446,7 +446,7 @@ class TestH2SIsolation:
                 raise BlockedError("Holland2Stay 持续返回 403")
             return _ok(source, tasks, multi_source)
 
-        with patch("monitor._mark_h2s_scrape_blocked") as marked:
+        with patch("mcore.scrape_round.mark_h2s_scrape_blocked") as marked:
             completeness, _, exc = _run(tmp_path, side_effect)
 
         assert exc is None

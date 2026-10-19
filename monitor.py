@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import functools
 import json
 import logging
 import os
@@ -60,12 +59,11 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from booker import PrewarmedSession
 from config import (DATA_DIR, ENV_PATH, get_proxy_url, is_personal_proxy_active,
                     is_proxy_native_fallback_active, load_config)
 from models import Listing
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
-from mcore.health import CIRCUIT_OPEN_ERROR
+from mcore.health import CIRCUIT_OPEN_ERROR  # noqa: F401  （测试从这里取）
 from mcore.state import (
     BLOCK_NOTIFY_INTERVAL as _BLOCK_NOTIFY_INTERVAL,  # noqa: F401
     retry_queue,
@@ -80,22 +78,36 @@ from mcore.throttles import (
 )
 from mcore.h2s_guard import (
     h2s_circuit_remaining as _h2s_circuit_remaining,
-    h2s_login_suppressed_remaining as _h2s_login_suppressed_remaining,
-    mark_h2s_login_blocked as _mark_h2s_login_blocked,
-    mark_h2s_scrape_blocked as _mark_h2s_scrape_blocked,
-    mark_h2s_scrape_recovered as _mark_h2s_scrape_recovered,
+    h2s_login_suppressed_remaining as _h2s_login_suppressed_remaining,  # noqa: F401
 )
 from mcore.interval import apply_jitter, get_interval
+from mcore.prewarm_round import PrewarmRound
+from mcore.post_round import run_post_scrape as _run_post_scrape
 from mcore.h2s_rest import RestTrigger
 from mcore import geocode as _geocode
 # 从 monitor.py 拆出的自包含块。保留带下划线的别名，测试与既有调用点
 # （monitor._apply_source_intervals 等）继续按原名字工作。
 from mcore.dispatch import (
-    PROXYLESS_CAPABLE_SOURCES as _PROXYLESS_CAPABLE_SOURCES,  # noqa: F401
     SHARD_CURSOR_PREFIX as _SHARD_CURSOR_PREFIX,  # noqa: F401
     apply_proxyless_gate as _apply_proxyless_gate,
     apply_task_sharding as _apply_task_sharding,
     shard_source_tasks as _shard_source_tasks,  # noqa: F401
+)
+from mcore.sources import (
+    AUTO_BOOK_SOURCES as _AUTO_BOOK_SOURCES,  # noqa: F401
+    BROWSER_SOURCES as _BROWSER_SOURCES,  # noqa: F401
+    PROXYLESS_CAPABLE_SOURCES as _PROXYLESS_CAPABLE_SOURCES,  # noqa: F401
+    REST_WAKE_SOURCES as _REST_WAKE_SOURCES,
+)
+from mcore.scrape_round import (
+    _ROUND_FAILURE_PRIORITY,  # noqa: F401
+    _SOURCE_DISPATCH_TIMEOUT_SEC,  # noqa: F401
+    dispatch_scrape_tasks_async as _dispatch_scrape_tasks_async,  # noqa: F401
+    dispatch_with_h2s_circuit as _dispatch_with_h2s_circuit,
+    get_browser_executor as _get_browser_executor,  # noqa: F401
+    pick_round_failure as _pick_round_failure,  # noqa: F401
+    report_source_proxy_failure as _report_source_proxy_failure,  # noqa: F401
+    unpack_scrape_result as _unpack_scrape_result,
 )
 from mcore.stale import (
     full_lifecycle_sources as _full_lifecycle_sources,  # noqa: F401
@@ -113,10 +125,7 @@ from mcore.startup import (
     setup_logging as _setup_logging,
     validate_structured_config as _validate_structured_config,  # noqa: F401
 )
-from mcore.telemetry import (
-    completeness_stats as _completeness_stats,
-    record_source_round as _record_source_round,
-)
+from mcore.telemetry import completeness_stats as _completeness_stats  # noqa: F401
 from mcore.outage import (
     OUTAGE_ALERT_BACKOFF as _OUTAGE_ALERT_BACKOFF,  # noqa: F401
     OutageTracker as _OutageTracker,  # noqa: F401
@@ -129,24 +138,22 @@ from mcore.outage import (
 from mcore.notify_round import (
     BATCH_MIN as _BATCH_MIN,  # noqa: F401
     BATCH_SOURCE as _BATCH_SOURCE,  # noqa: F401
-    drop_shadow_sources as _drop_shadow_sources,
-    merge_pending_events as _merge_pending_events,
-    notify_new_listings as _notify_new_listings,
-    notify_status_changes as _notify_status_changes,
+    drop_shadow_sources as _drop_shadow_sources,  # noqa: F401
+    merge_pending_events as _merge_pending_events,  # noqa: F401
+    notify_new_listings as _notify_new_listings,  # noqa: F401
+    notify_status_changes as _notify_status_changes,  # noqa: F401
     split_batchable as _split_batchable,  # noqa: F401
 )
 from mcore.booking_candidates import (
-    AUTO_BOOK_SOURCES as _AUTO_BOOK_SOURCES,  # noqa: F401
     assign_auto_book_candidates as _assign_auto_book_candidates,  # noqa: F401
     can_auto_book as _can_auto_book,  # noqa: F401
     can_reach_user as _can_reach_user,
-    collect_booking_candidates as _collect_booking_candidates,
+    collect_booking_candidates as _collect_booking_candidates,  # noqa: F401
     listing_booking_key as _listing_booking_key,  # noqa: F401
-    listing_source as _listing_source,
 )
 from mcore.booking_round import (
-    process_booking_results as _process_booking_results,
-    submit_bookings as _submit_bookings,
+    process_booking_results as _process_booking_results,  # noqa: F401
+    submit_bookings as _submit_bookings,  # noqa: F401
 )
 
 #: 地图坐标补齐的间隔（秒）。半小时一次乘以每批 30 个地址，足以跟上新房源的
@@ -159,10 +166,8 @@ from scrapers import (
     RateLimitError,
     ScrapeNetworkError,
     UpstreamMaintenanceError,
-    completeness_key,
     dispatch_scrape_tasks,
     is_proxy_account_error,
-    is_proxy_error,
     is_proxy_service_error,
 )
 from update_checker import check_for_updates
@@ -175,94 +180,13 @@ from users import UserConfig, load_users
 _browser_executors: dict[str, ThreadPoolExecutor] = runtime.browser_executors
 
 
-def _get_browser_executor(source: str) -> ThreadPoolExecutor:
-    """取某个浏览器型 source 的**进程级长存**单线程 executor。
-
-    形状由三个约束共同决定：
-
-    1. CloakBrowser 包的是 Playwright 同步 API。在 Linux 容器里从默认
-       executor 启动会继承到 asyncio 状态，被判成 "Sync API inside the
-       asyncio loop" 而拒绝启动——所以不能用默认 executor。
-    2. Playwright 的对象绑定创建它的线程，换线程即失效——所以线程必须活得
-       比一轮长，否则浏览器无法跨轮存活（早先每轮新建又销毁线程，跨轮复用
-       逻辑因此永远命不中，退化成每轮重建浏览器 + 重过一次 CF 挑战）。
-    3. **两个独立的 Playwright sync 实例不能共存于同一线程。** 第一个实例会
-       在该线程装上 event loop，第二个 launch() 随即撞上约束 1 的检查。
-       所以不能让 H2S 和 Xior 共用一个线程——每个 source 一条。
-
-    非浏览器 source（OurDomain）仍走默认 executor：它没有 Playwright 对象，
-    挤进来只会和浏览器抢这唯一的线程。
-    """
-    ex = _browser_executors.get(source)
-    if ex is None:
-        ex = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix=f"{source}-scrape"
-        )
-        _browser_executors[source] = ex
-    return ex
 
 
-async def _dispatch_scrape_tasks_async(
-    loop: asyncio.AbstractEventLoop,
-    selected: list,
-    *,
-    isolated: bool = False,
-    browser_source: str = "",
-    multi_source: bool = False,
-):
-    """
-    Run the synchronous scraper dispatcher from async monitor code.
-
-    浏览器型 source 各自走专属的长存线程（见 ``_get_browser_executor``）；
-    非浏览器 source 继续用默认 executor。
-
-    ``multi_source`` 要透传给 dispatcher：本函数每次只喂一个 source 的任务，
-    dispatcher 自己看不出整轮是不是多源（见 ``scrapers.completeness_key``）。
-    """
-    executor = (
-        _get_browser_executor(browser_source or _H2S_SOURCE) if isolated else None
-    )
-    fut = loop.run_in_executor(
-        executor,
-        lambda: dispatch_scrape_tasks(selected, multi_source=multi_source),
-    )
-    # 墙钟兜底。**没有它的话，渲染器一卡就是整个监控停摆**：
-    # ``page.evaluate`` 在 Playwright 里根本没有 timeout 参数（它等的是 JS
-    # promise，``set_default_timeout`` 也管不到），``page.content()`` 同样。
-    # 一个 wedged 页面会让浏览器线程永远停在那里，而这里的 await 没有上限，
-    # run_once 就不返回了——表现是 last_round_at 不断变老，与「进程挂了」无从区分。
-    #
-    # ⚠️ 超时**救不回那条线程**：run_in_executor 的 future 取消不了底层调用，
-    # 卡住的浏览器线程会一直占着。这里能做到的是让**本轮继续走完**（其余
-    # source 照常入库、通知照发），并把这个 source 报成失败，由既有的隔离 /
-    # 熔断路径处置。真正的修复是让浏览器侧自己有超时；在那之前，这一层保证
-    # 一个源的死锁不会变成全局死锁。
-    try:
-        return await asyncio.wait_for(fut, timeout=_SOURCE_DISPATCH_TIMEOUT_SEC)
-    except asyncio.TimeoutError as e:
-        src = browser_source or (selected[0].source if selected else "?")
-        logger.error(
-            "source %s 抓取超过 %.0f 秒没返回，判为卡死并放弃本轮"
-            "（%d 个任务；该线程可能仍占着，下轮会重建）",
-            src, _SOURCE_DISPATCH_TIMEOUT_SEC, len(selected),
-        )
-        raise ScrapeNetworkError(
-            f"{src} 抓取超时（>{_SOURCE_DISPATCH_TIMEOUT_SEC:.0f}s），疑似渲染器卡死"
-        ) from e
 
 
 logger = logging.getLogger("monitor")
 
 
-def _unpack_scrape_result(result):
-    """兼容测试/旧 monkeypatch 返回 list；真实 scraper 返回 (listings, completeness)。"""
-    if (
-        isinstance(result, tuple)
-        and len(result) == 2
-        and isinstance(result[1], dict)
-    ):
-        return result
-    return result, {}
 
 
 def _log_scrape_completeness(completeness: dict[str, bool]) -> None:
@@ -460,8 +384,6 @@ _PREWARM_CANDIDATE_WAIT_SEC = 2.0  # 有真实候选时最多等 2s 让预登录
 #: 取 600 秒的依据：最慢的 source 是 Xior（实测每栋楼 13.9 秒，分片后每轮
 #: 上限 8 栋 ≈ 112 秒），留出 5 倍余量。比 CHECK_INTERVAL(300) 大是有意的——
 #: 这不是「该多久跑完」的目标，是「卡死了」的判据，宁可宽也不要误杀慢轮。
-_SOURCE_DISPATCH_TIMEOUT_SEC = float(
-    os.environ.get("SOURCE_DISPATCH_TIMEOUT_SEC") or "600")
 _H2S_CIRCUIT_BASE_COOLDOWN = 1800  # H2S 抓取 403 后 30 分钟后做 canary
 _H2S_CIRCUIT_MAX_COOLDOWN = 21600  # H2S 抓取连续 403 时最多暂停 6 小时
 _H2S_LONG_BLOCK_STREAK = 3  # 第 3 次连续 H2S 403 起视为长时间被 block
@@ -524,79 +446,13 @@ def _bind_persistent_state(storage) -> None:
 # 需要浏览器传输层的 source。它们的 Playwright 对象绑定创建线程，因此**必须**
 # 各自跑在 ``_get_browser_executor(source)`` 的专属长存单线程上；放到默认 executor
 # 里会因线程漂移抛 ``greenlet.error: Cannot switch to a different thread``。
-_BROWSER_SOURCES = frozenset({"holland2stay", "xior"})
 
 
-# 全部 source 都失败时，挑一个最有代表性的异常上抛。顺序 = 「哪个根因更值得
-# main_loop 据以决策」：
-#   ProxyError    有明确修复动作（切备用代理 / 降级直连），而且全员失败时它
-#                 大概率就是其它 source 失败的共同根因 —— 排最前
-#   Maintenance   平台自己会恢复，安静长冷却、不告警用户
-#   OperationNotAllowed
-#                 唯一需要**人去改代码**的一条（照抄站点那条 operation）。
-#                 排在 Blocked 前面：两者都是 403，但把后者当前者的代价实测过
-#                 ——2026-08-19 一次自动预订连续两次「重建 CF 会话」各跑一轮
-#                 完整挑战，75 秒、约 3 MB 代理流量，结束时还是同一个 403，
-#                 随后误判触发 1 小时登录链路抑制。同一轮里两种 403 都出现时，
-#                 「这条 operation 没登记」是更具体也更可诉诸行动的诊断。
-#   Blocked       长冷却 + 指数退避
-#   RateLimit     短冷却 + 自适应间隔翻倍
-#   Network       连续失败计数
-# ProxyError 是 ScrapeNetworkError 子类，必须排在它前面才匹配得到。
-_ROUND_FAILURE_PRIORITY: tuple[type[BaseException], ...] = (
-    ProxyError,
-    UpstreamMaintenanceError,
-    OperationNotAllowedError,
-    BlockedError,
-    RateLimitError,
-    ScrapeNetworkError,
-)
 
 
-def _pick_round_failure(failures: list[tuple[str, Exception]]) -> Exception:
-    """从各 source 的失败里挑一个上抛给 main_loop。"""
-    for cls in _ROUND_FAILURE_PRIORITY:
-        for _, exc in failures:
-            if isinstance(exc, cls):
-                return exc
-    return failures[0][1]
 
 
-def _split_h2s_tasks(tasks) -> tuple[list, list]:
-    """拆分 H2S 与其它 source 任务，便于只熔断 H2S。"""
-    h2s_tasks = [t for t in tasks if t.source == _H2S_SOURCE]
-    other_tasks = [t for t in tasks if t.source != _H2S_SOURCE]
-    return other_tasks, h2s_tasks
 
-
-def _select_h2s_tasks_for_circuit(h2s_tasks: list) -> tuple[list, str]:
-    """
-    根据 H2S circuit 状态选择本轮 H2S 任务。
-
-    Returns
-    -------
-    (selected_tasks, mode)
-      normal  : circuit 未打开，抓全部 H2S 城市
-      open    : circuit 冷却中，不抓 H2S
-      canary  : 冷却到期，只抓 1 个 H2S 城市探测恢复
-    """
-    mode, n = _source_circuits.plan(_H2S_SOURCE, n_tasks=len(h2s_tasks))
-    if mode == "none":
-        return [], "none"
-    if mode == "open":
-        logger.warning(
-            "🚫 H2S source 熔断中，跳过 %d 个 H2S 任务，%d 秒后 canary。最近原因: %s",
-            len(h2s_tasks),
-            _source_circuits.remaining(_H2S_SOURCE),
-            _source_circuits.reason(_H2S_SOURCE) or "unknown",
-        )
-        return [], "open"
-    if mode == "canary":
-        logger.warning(
-            "🚫 H2S source 熔断到期，本轮只用 1 个城市做 canary: %s",
-            h2s_tasks[0].city_display,
-        )
-    return h2s_tasks[:n], mode
 
 
 _PID_FILE = DATA_DIR / "monitor.pid"
@@ -610,7 +466,6 @@ _reload_event: asyncio.Event | None = None
 _h2s_wake_event: asyncio.Event | None = None
 
 #: REST 唤醒轮只抓这些 source。
-_REST_WAKE_SOURCES: frozenset[str] = frozenset({"holland2stay"})
 
 #: 两个唤醒轮之间至少隔多久（从上一轮开始算）。一批房陆续放出时几秒内会有好几次
 #: 新 id，一轮 H2S 抓取约 1 秒，没必要每一次都单独跑；也防补抓定时器和新 id
@@ -802,67 +657,12 @@ def _print_dry_run(fresh: list["Listing"], user_notifiers: "UserNotifiers") -> N
     _safe_print('=' * 60, flush=True)
 
 
-def _clear_maintenance_meta_if_recovered(storage: Storage) -> None:
-    """抓取成功后，若之前处于维护态则清掉 maintenance meta，让 dashboard banner 消失。
-
-    写 ended_at 留个最近一次恢复时间戳便于排查；seen_at 清空即"不在维护中"。"""
-    if storage.get_meta("upstream_maintenance_seen_at", default=""):
-        storage.set_meta(
-            "upstream_maintenance_ended_at",
-            datetime.now(timezone.utc).isoformat(),
-        )
-        storage.set_meta("upstream_maintenance_seen_at", "")
-        storage.set_meta("upstream_maintenance_last_at", "")
-        logger.info("🔧→✅ H2S 平台维护已结束，抓取恢复正常")
 
 
 
 
-def _report_source_proxy_failure(source: str, exc: BaseException) -> None:
-    """把单个 source 的代理故障报给代理池（冷却 / 切换 / 降级）。
-
-    和 ``run_once`` 外层那个 ``except ProxyError`` 处理的是同一件事，区别只在
-    触发条件：那里要求整轮全灭，这里只要求「这次失败是代理造成的」。代理坏了
-    就是坏了，与同轮别的 source 走没走运无关。
-
-    刻意**不**在这里发 admin 告警：外层那条已经有 30 分钟节流，而这条每轮每
-    source 都可能触发，加告警只会把真信号淹掉。这里只负责让冷却状态跟上事实。
-
-    任何异常都吞掉：报告失败不该把「隔离这个 source、继续跑别的」这件事一起
-    带崩——那正是这层隔离存在的理由。
-    """
-    from config import (
-        is_proxy_in_cooldown,
-        report_proxy_failure,
-    )
-
-    try:
-        before = get_proxy_url()
-        service_error = is_proxy_service_error(exc)
-        account_level = is_proxy_account_error(exc)
-        after = report_proxy_failure(
-            service_error_confirmed=service_error, account_level=account_level,
-        )
-        if before and is_proxy_in_cooldown(before):
-            logger.warning(
-                "🛰️ [%s] 代理已确认故障并进入冷却%s：%s",
-                source,
-                "（账户级，长冷却）" if account_level else "",
-                _redact_proxy_for_log(before),
-            )
-            if after != before:
-                logger.info(
-                    "🛰️ [%s] 下一轮改用 %s", source,
-                    _redact_proxy_for_log(after) if after else "服务器原生 IP 直连",
-                )
-    except Exception:
-        logger.debug("[%s] 上报代理故障失败（已忽略）", source, exc_info=True)
 
 
-def _redact_proxy_for_log(url: str) -> str:
-    """代理 URL 里带凭据，日志里只留 scheme + host:port。"""
-    import re as _re
-    return _re.sub(r"//[^@]*@", "//", url or "") or "(无)"
 
 
 
@@ -952,467 +752,17 @@ async def run_once(
 
     loop = asyncio.get_running_loop()
 
-    # ── H2S source-level circuit breaker ─────────────────────────── #
-    # H2S GraphQL 403 只应该暂停 H2S；OurDomain / Xior 等其它 source 仍可
-    # 正常抓取、入库、通知。H2S 熔断期间完全跳过 H2S 任务；冷却到期后只放
-    # 1 个城市做 canary，成功后下一轮再恢复完整 H2S 扫描。
-    async def _dispatch_with_h2s_circuit(tasks):
-        other_tasks, h2s_tasks = _split_h2s_tasks(tasks)
-        selected_h2s, h2s_mode = _select_h2s_tasks_for_circuit(h2s_tasks)
+    prewarm = PrewarmRound(loop, storage, user_notifiers, dry_run)
 
-        fresh_all: list[Listing] = []
-        completeness_all: dict[str, bool] = {}
-        #: source → 本轮的熔断模式（normal / canary / open），canary 成功时据此
-        #: 关闭熔断。
-        source_modes: dict[str, str] = {}
-        h2s_blocked: BlockedError | None = None
-        source_failures: list[tuple[str, Exception]] = []
-        succeeded_sources: list[str] = []
-
-        # 整轮是否跨多个 source：用外层按配置算好的 multi_source。dispatcher
-        # 自己看不出来——它每次只收到一个 source 的任务，所以 completeness key
-        # 的 source 前缀得靠这个开关。也不能用这里的 tasks 现算：熔断、节流、
-        # 只抓 H2S 都会让它变少，前缀一消失，同一批 listing 的 key 形态就在两轮
-        # 之间跳变。
-
-        # 整轮共用一个时间戳，各 source 的遥测行靠它分组。用 dispatch 开始的
-        # 时刻而不是各 source 各自的完成时刻——否则同一轮的行会散成好几组。
-        round_at = datetime.now(timezone.utc).isoformat()
-
-        # completeness 的 key 直接用 dispatcher 那份共享实现
-        # （``scrapers.completeness_key``）。这里以前有个本地 ``_ckey``，注释写着
-        # 「与 scrapers._completeness_key 保持一致」——靠注释维持的一致性不是
-        # 一致性，而形态一旦错开症状不是报错，是静默的错误收敛。
-
-        async def _dispatch(selected, *, isolated: bool = False, browser_source: str = ""):
-            result = await _dispatch_scrape_tasks_async(
-                loop,
-                selected,
-                isolated=isolated,
-                browser_source=browser_source,
-                multi_source=multi_source,
-            )
-            return _unpack_scrape_result(result)
-
-        async def _dispatch_isolated(src: str, group: list) -> None:
-            """跑一个 source 的全部任务，失败只影响这个 source。
-
-            浏览器型 source（H2S / Xior）必须绑到各自的长存单线程
-            （见 ``_get_browser_executor``）：Playwright 的对象绑定创建线程，
-            默认 executor 的线程不固定，跨线程调用会抛
-            ``greenlet.error: Cannot switch to a different thread``。
-            """
-            started_at = time.monotonic()
-            try:
-                fresh_part, completeness_part = await _dispatch(
-                    group,
-                    isolated=src in _BROWSER_SOURCES,
-                    browser_source=src,
-                )
-            except Exception as e:
-                source_failures.append((src, e))
-                # 打开这个 source 的熔断（按 source 各自的策略；不该熔断的异常
-                # 会被 trip() 原样忽略）。以前只有 H2S 有这层保护——而实测里
-                # xior 整源 429 失败 147 次、ourdomain / ourcampus 各 60+ 次，
-                # H2S 总共才 6 次。保护装在了最不需要它的那个 source 上。
-                _source_circuits.trip(src, e, storage=None if dry_run else storage)
-                # 只有 429 才拉长节奏。403 / 网络错误 / 平台维护都不是「打得太
-                # 勤」造成的，拉长间隔既治不了它们，又白白拖慢恢复。
-                if isinstance(e, RateLimitError):
-                    _source_pacing.penalize(src, storage=None if dry_run else storage)
-                # 标 ✗ 而不是留空：完整扫描那行日志要看得出「这个 source 塌了」，
-                # 且 False 会正确挡住该城市的 stale 收敛。
-                for t in group:
-                    completeness_all.setdefault(
-                        completeness_key(src, t.city_display,
-                                         multi_source=multi_source), False)
-                logger.error(
-                    "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
-                    src, len(group), type(e).__name__, e,
-                    exc_info=True,
-                )
-                # 代理坏了要**当场报给代理池**，不能等整轮全灭。
-                #
-                # 这层跨源隔离接住异常之后就 return 了，而标记冷却/切换/降级的
-                # 代码住在 run_once 外层的 `except ProxyError`——那里只有整轮
-                # 所有 source 都失败时才够得着。于是形成一个死锁式的循环：
-                #
-                #   H2S 成功（浏览器建在好线路上，缓存 2 小时）
-                #     → 整轮不算全灭 → 外层处理器不触发
-                #     → 代理池永远不知道那个代理挂了
-                #     → OurCampus / Xior 每轮现取代理，拿到没被冷却的死代理
-                #     → 402，循环
-                #
-                # 2026-08-27 实测：08 时（本地）source 级隔离 176 次，真正报给
-                # 代理池只有 4 次；同一小时 H2S 163/167 成功，而 OurCampus 和
-                # Xior 是 0/167。**H2S 的健康恰恰是把另外两家钉死的原因**——
-                # 它越顺，代理池越听不到坏消息。
-                #
-                # 判据也因此换掉了：冷却要回答的是「这个代理还能不能用」，而
-                # 原先拿「整轮有没有全灭」来判，两者不是一回事。
-                #
-                # 误伤由既有的「连续两次确认」阈值挡住（_PROXY_FAILURE_CONFIRM_
-                # THRESHOLD）：单次抖动只留一个 mark，不会真的冷却谁。
-                if not dry_run and is_proxy_error(e):
-                    _report_source_proxy_failure(src, e)
-                if not dry_run:
-                    _record_source_round(
-                        storage, round_at=round_at, source=src,
-                        targets=len(group), started_at=started_at, error=e,
-                        total_targets=source_totals.get(src, len(group)),
-                    )
-                return
-            succeeded_sources.append(src)
-            if source_modes.get(src) == "canary":
-                _source_circuits.recover(src, storage=None if dry_run else storage)
-            # 干净地抓完一轮。攒够连续若干轮才会降一档——降太快会在限流阈值
-            # 附近来回振荡，每振荡一次就要再付一次熔断冷却。
-            #
-            # canary 轮也算数：它只抓 1 个 target，是这个 source 当下能给出的
-            # 最干净的证据。不算的话，熔断频繁的 source 永远攒不满计数，倍率
-            # 只升不降——那正是它最需要降下来的时候。
-            _source_pacing.relax(src, storage=None if dry_run else storage)
-            fresh_all.extend(fresh_part)
-            completeness_all.update(completeness_part)
-            if not dry_run:
-                complete_n, total_n = _completeness_stats(completeness_part)
-                _record_source_round(
-                    storage, round_at=round_at, source=src,
-                    listings=len(fresh_part),
-                    targets=total_n or len(group), complete=complete_n,
-                    started_at=started_at,
-                    total_targets=source_totals.get(src, len(group)),
-                )
-
-        # 逐 source 隔离。dispatcher 内部已经按 task 隔离，但它在「本次调用的
-        # 任务全部失败」时仍会上抛——而 monitor 是按 source 分开调用它的，于是
-        # 那个判定退化成了「单个 source 全失败」，等于没有跨 source 保护。
-        #
-        # 2026-08-03 实测：Xior 四栋楼连续 429 让 RateLimitError 逃出整个
-        # dispatch，同轮 OurDomain 已抓到的结果被丢弃、H2S 排在后面根本没执行、
-        # 每个用户都收到「监控将暂停 5 分钟」。24 小时内三次。
-        for src in sorted({t.source for t in other_tasks}):
-            group = [t for t in other_tasks if t.source == src]
-            mode, n = _source_circuits.plan(src, n_tasks=len(group))
-            source_modes[src] = mode
-            if mode == "open":
-                remaining = _source_circuits.remaining(src)
-                logger.warning(
-                    "🚫 source %s 熔断中，跳过 %d 个任务，%d 秒后做 canary。最近原因: %s",
-                    src, len(group), remaining,
-                    _source_circuits.reason(src) or "unknown",
-                )
-                # 熔断期完全跳过，但**要记一行遥测**：不记的话这个 source 在面板
-                # 上直接消失，只能看到 last_round_at 不断变老——与「进程挂了」
-                # 无从区分。记成一次带 CircuitOpen 标记的失败，让「按设计退避」
-                # 本身可见。这条和 H2S 分支的处理是对齐的。
-                for t in group:
-                    completeness_all.setdefault(
-                        completeness_key(src, t.city_display,
-                                         multi_source=multi_source), False)
-                if not dry_run:
-                    _record_source_round(
-                        storage, round_at=round_at, source=src,
-                        targets=len(group),
-                        total_targets=source_totals.get(src, len(group)),
-                        error_type=CIRCUIT_OPEN_ERROR,
-                        error_msg=_source_circuits.reason(src) or "circuit open",
-                    )
-                continue
-            if mode == "canary":
-                logger.warning(
-                    "🚫 source %s 熔断到期，本轮只用 1 个 target 做 canary: %s",
-                    src, group[0].city_display,
-                )
-                group = group[:n]
-            await _dispatch_isolated(src, group)
-
-        if selected_h2s:
-            started_at = time.monotonic()
-            try:
-                fresh_part, completeness_part = await _dispatch(
-                    selected_h2s, isolated=True, browser_source=_H2S_SOURCE
-                )
-            except BlockedError as e:
-                h2s_blocked = e
-                _mark_h2s_scrape_blocked(e, storage)
-                if not dry_run:
-                    _record_source_round(
-                        storage, round_at=round_at, source=_H2S_SOURCE,
-                        targets=len(selected_h2s), started_at=started_at, error=e,
-                        total_targets=source_totals.get(_H2S_SOURCE, len(selected_h2s)),
-                    )
-            except Exception as e:
-                # 与其它 source 同样只隔离，不上抛。
-                #
-                # 这里原本是 `raise`（注释写的是「按旧契约」——那个契约来自 H2S
-                # 还是唯一 source 的年代）。上面那段 2026-08-03 的跨源隔离**把
-                # H2S 漏在了外面**，于是它成了唯一能一票否决整轮的源：异常穿透
-                # 到 run_once 的 except，同轮已经抓好的 OurDomain / OurCampus /
-                # Xior 结果全部丢弃——不入库、不通知、不做状态变更。
-                #
-                # 2026-08-17 实测代价：H2S 端点迁移后返回 404，13.7 小时里
-                # **118 轮无一轮走完**，而那三个平台每轮都抓成功了（Xior 464 次、
-                # OurDomain 119 次、OurCampus 118 次），全部白抓。
-                #
-                # 该上抛的判定在下面：`source_failures and not succeeded_sources`
-                # ——**所有** source 都失败才算整轮失败。H2S 喂进去即可，不必自己
-                # 决定整轮的生死。403 熔断仍走上面的 BlockedError 分支，不受影响。
-                source_failures.append((_H2S_SOURCE, e))
-                # 下面两件与 _dispatch_isolated 的失败分支保持一致。**H2S 曾经
-                # 两件都没做**：这段是 2026-08-17 把 H2S 从「一票否决整轮」改成
-                # 「只隔离」时照着写的，只搬了隔离那一半。后果是
-                #
-                #   - 429 时不 penalize：H2S 的 pacing 倍率恒为 1.0，自适应节奏
-                #     对它整个不生效（multiplier() 按 source 取，没有排除 H2S）；
-                #   - 代理坏了不上报：而 H2S 又是**最不容易失败的那个 source**
-                #     （浏览器建在好线路上、会话缓存两小时），于是它每成功一轮，
-                #     整轮就不算全灭，外层那个 `except ProxyError` 就够不着——
-                #     同一段注释在 _dispatch_isolated 里已经描述过这个死锁，
-                #     只是当时没意识到 H2S 自己也在环里。
-                if isinstance(e, RateLimitError):
-                    _source_pacing.penalize(_H2S_SOURCE,
-                                            storage=None if dry_run else storage)
-                for t in selected_h2s:
-                    completeness_all.setdefault(
-                        completeness_key(_H2S_SOURCE, t.city_display,
-                                         multi_source=multi_source), False)
-                logger.error(
-                    "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
-                    _H2S_SOURCE, len(selected_h2s), type(e).__name__, e,
-                    exc_info=True,
-                )
-                if not dry_run and is_proxy_error(e):
-                    _report_source_proxy_failure(_H2S_SOURCE, e)
-                if not dry_run:
-                    _record_source_round(
-                        storage, round_at=round_at, source=_H2S_SOURCE,
-                        targets=len(selected_h2s), started_at=started_at, error=e,
-                        total_targets=source_totals.get(_H2S_SOURCE, len(selected_h2s)),
-                    )
-            else:
-                succeeded_sources.append(_H2S_SOURCE)
-                fresh_all.extend(fresh_part)
-                completeness_all.update(completeness_part)
-                if h2s_mode == "canary":
-                    _mark_h2s_scrape_recovered(storage)
-                # 与 _dispatch_isolated 的成功分支一致。只 penalize 不 relax 会让
-                # 倍率只升不降，而 H2S 这边原本两个都没有——补上就要成对补，
-                # 单补一个比一个都不补更糟。
-                _source_pacing.relax(_H2S_SOURCE,
-                                     storage=None if dry_run else storage)
-                if not dry_run:
-                    complete_n, total_n = _completeness_stats(completeness_part)
-                    _record_source_round(
-                        storage, round_at=round_at, source=_H2S_SOURCE,
-                        listings=len(fresh_part),
-                        targets=total_n or len(selected_h2s), complete=complete_n,
-                        started_at=started_at,
-                        total_targets=source_totals.get(_H2S_SOURCE, len(selected_h2s)),
-                    )
-        elif h2s_tasks and h2s_mode == "open" and not dry_run:
-            # 熔断期完全跳过 H2S。不记这一行的话，遥测里 H2S 会直接消失，面板
-            # 只能看到 last_round_at 不断变老——与「进程挂了」无从区分。
-            # 记成一次带 CircuitOpen 标记的失败，让「按设计退避」本身可见。
-            _record_source_round(
-                storage, round_at=round_at, source=_H2S_SOURCE,
-                targets=len(h2s_tasks),
-                total_targets=source_totals.get(_H2S_SOURCE, len(h2s_tasks)),
-                error_type=CIRCUIT_OPEN_ERROR,
-                error_msg=_source_circuits.reason(_H2S_SOURCE) or "circuit open",
-            )
-
-        # 一个都没成功 = 本轮没有任何可用数据，维持旧契约上抛，让 main_loop 走
-        # 冷却而不是原速空转。h2s_blocked 不在此列——H2S 熔断本身就是退避，且
-        # run_once 对它有专门的分支。
-        if source_failures and not succeeded_sources and h2s_blocked is None:
-            raise _pick_round_failure(source_failures)
-
-        return fresh_all, completeness_all, h2s_blocked, h2s_mode
-
-    # ── Candidate-only prewarm：只对本轮真实候选登录 ──────────────── #
-    # 重要：prewarm 不能在 scrape 前启动，也不能每轮给所有自动预订用户刷新。
-    # 当前策略是：先完成只读 scrape + diff，确认本轮确实有 H2S 可订候选后，
-    # 只给被分配到候选的用户准备预登录；没有候选的轮次完全不碰 H2S 登录接口。
-    prewarm_cached: dict[str, "PrewarmedSession"] = {}  # 命中：同步可用
-    prewarm_futures: dict[str, "asyncio.Future"] = {}  # 未命中：后台刷新
-
-    def _heartbeat_warm_browser(user_notifiers) -> None:
-        """维护下单链路的常驻浏览器（见 mcore/warm_browser.py）。
-
-        每轮都调，**和有没有候选无关**——它存在的意义就是在候选出现之前就已经过了
-        CF。等有候选再建，就是 2026-09-08 之前那个每次现过挑战的老样子。
-
-        它只保住浏览器和 clearance，**不碰登录**。「没有候选的轮次完全不碰 H2S
-        登录接口」那条约束原样成立：登录仍然只在 _start_prewarm_for_candidates
-        里发生。
-
-        **必须扔进 executor，不能在这里直接调。** BrowserFetcher 用的是 Playwright
-        的同步 API，而它拒绝在一个正在跑的 asyncio loop 里工作：
-
-            It looks like you are using Playwright Sync API inside the asyncio loop.
-
-        run_once 是协程，直接调就是这个形状。2026-09-08 上线当轮就撞上了——好在
-        fail-safe 生效，退避 5 分钟、下单退回现开浏览器，等于改动之前的行为。
-        prewarm 那条路一直是对的（loop.run_in_executor），心跳漏了。
-
-        也**不 await**：建一次十几秒，await 会把整轮监控卡在这。心跳自己是非阻塞
-        的（拿不到锁就直接返回），所以多轮之间不会堆叠。
-        """
-        if dry_run:
-            return
-        from mcore.warm_browser import lane_enabled, warm_lane
-
-        # 总开关关着时 wanted=False，heartbeat 会把已经建起来的那条关掉——不是
-        # 「不再维护」而是「收干净」。留一个没人维护的 Chromium 在那儿，正是
-        # 2026-09-09 那次泄漏的形状。
-        wanted = lane_enabled() and any(
-            u.auto_book.enabled and u.auto_book.email and u.auto_book.password
-            for u, _ in user_notifiers
-        )
-        # 登录被 CF 熔断期间不新建：正在被拒绝的时候去开浏览器，只会给同一个出口
-        # IP 再添几条失败记录。但**已经健康的那条要继续保活**——它是我们眼下唯一
-        # 还通着的路，丢了就得等熔断结束再从头过挑战。
-        may_rebuild = _h2s_login_suppressed_remaining() <= 0
-
-        def _done(fut) -> None:
-            # 不 await 的 future 会把异常吞进垃圾回收。这里读一次 exception()，
-            # 让它至少留下一行日志。
-            exc = fut.exception()
-            if exc is not None:
-                logger.warning("常驻浏览器心跳异常（已忽略，下单会退回现开浏览器）",
-                               exc_info=exc)
-
-        fut = loop.run_in_executor(
-            None,
-            functools.partial(warm_lane.heartbeat,
-                              wanted=wanted, may_rebuild=may_rebuild),
-        )
-        fut.add_done_callback(_done)
-
-    def _start_prewarm_for_candidates(candidate_user_ids: set[str]) -> None:
-        """只为本轮实际有 H2S 自动预订候选的用户启动预登录。"""
-        if dry_run:
-            return
-        suppressed = _h2s_login_suppressed_remaining()
-        if suppressed > 0:
-            logger.warning(
-                "跳过 H2S prewarm：登录/预订 403 抑制窗口仍剩 %d 秒",
-                suppressed,
-            )
-            return
-
-        # 1) 失效不再合格的缓存（用户被禁用 / 移除自动预订 / 删除账号）
-        active_user_ids = set()
-        for user, _ in user_notifiers:
-            ab = user.auto_book
-            if ab.enabled and ab.email and ab.password:
-                active_user_ids.add(user.id)
-        for stale_uid in set(prewarm_cache.keys()) - active_user_ids:
-            prewarm_cache.invalidate(stale_uid)
-
-        if not candidate_user_ids:
-            return
-
-        # 2) 对合格用户：命中复用，未命中提交刷新。
-        # 给每个 future 加 done_callback：完成后自动写入 prewarm_cache，
-        # 确保慢 future（跨轮完成）的 session 不会泄漏。
-        def _on_prewarm_done(user_id: str, fut) -> None:
-            try:
-                ps = fut.result()
-            except BlockedError as e:
-                # 见上面 pre_fut.result() 处的注释：这里原本也是永远不会命中的
-                # BookingBlockedError。OperationNotAllowedError 不该被接住。
-                _mark_h2s_login_blocked(e, storage)
-                ps = None
-            except Exception:
-                ps = None
-            if ps:
-                prewarm_cache.set(user_id, ps)
-
-        lane_offered = False
-        for user, _ in user_notifiers:
-            if user.id not in active_user_ids:
-                continue
-            if user.id not in candidate_user_ids:
-                continue
-            cached = prewarm_cache.get(user.id)
-            if prewarm_cache.is_valid(cached, user.auto_book.email):
-                prewarm_cached[user.id] = cached
-            else:
-                if cached:
-                    prewarm_cache.invalidate(user.id)
-                # 常驻浏览器**只给本轮优先级最高的那个需要它的用户**。
-                #
-                # 剩下的人照旧自己开浏览器——也就是改动之前所有人的行为，没人变
-                # 差。让他们排队等这一条共用通道才是错的：那个队列在改动之前根本
-                # 不存在（每个用户各开各的，完全并行），而且 threading 的锁是随
-                # 便唤醒一个等待者的，既不 FIFO 更不认 sort_order。用户排序是用
-                # 户明确配的东西，不该被一把锁的唤醒顺序悄悄改写。
-                #
-                # user_notifiers 本身就是 sort_order 序（list_user_config_rows
-                # 的 ORDER BY），所以「循环里第一个」就是「优先级最高的」。
-                may_borrow = not lane_offered and not prewarm_cache.lane_in_use()
-                lane_offered = lane_offered or may_borrow
-                fut = loop.run_in_executor(
-                    None,
-                    functools.partial(prewarm_cache.create, user,
-                                      may_borrow_lane=may_borrow),
-                )
-                prewarm_futures[user.id] = fut
-                fut.add_done_callback(
-                    lambda f, uid=user.id: loop.call_soon_threadsafe(
-                        _on_prewarm_done, uid, f
-                    )
-                )
-
-        if prewarm_cached or prewarm_futures:
-            logger.debug(
-                "prewarm 状态: 命中 %d / 刷新 %d",
-                len(prewarm_cached), len(prewarm_futures),
-            )
-
-    async def _wait_for_candidate_prewarms() -> None:
-        """候选轮次给 prewarm 最多 2 秒赶上快速通道，避免额外正常登录。"""
-        if not prewarm_futures:
-            return
-        done, pending = await asyncio.wait(
-            list(prewarm_futures.values()),
-            timeout=_PREWARM_CANDIDATE_WAIT_SEC,
-        )
-        if done or pending:
-            logger.debug(
-                "candidate prewarm 等待 %.1fs：完成 %d / 未完成 %d",
-                _PREWARM_CANDIDATE_WAIT_SEC,
-                len(done),
-                len(pending),
-            )
-
-    async def _stash_pending_prewarms() -> None:
-        """收集已完成的 prewarm future，供本轮 booking 快速通道使用。
-        未完成的 future 由 done_callback 兜底——完成后自动写入缓存。"""
-        for user_id, fut in list(prewarm_futures.items()):
-            if not fut.done():
-                continue
-            try:
-                ps = fut.result()
-            except BlockedError as e:
-                # 见上面 pre_fut.result() 处的注释：这里原本也是永远不会命中的
-                # BookingBlockedError。OperationNotAllowedError 不该被接住。
-                _mark_h2s_login_blocked(e, storage)
-                ps = None
-            except Exception:
-                ps = None
-            if ps:
-                prewarm_cache.set(user_id, ps)
-            del prewarm_futures[user_id]
-
-    # 注意：每个 except 路径显式调用 _stash_pending_prewarms()。
+    # 注意：每个 except 路径显式调用 prewarm.stash_pending()。
     # 未用 try/finally 统一收尾——因为成功路径上 stash 要延迟到
-    # booking 快速通道之后（line ~530），提前 stash 会导致 booking
-    # 代码无法从 prewarm_futures 中取出刚完成的 session。
+    # booking 快速通道之后，提前 stash 会导致 booking 代码无法从
+    # prewarm.futures 中取出刚完成的 session。
     try:
-        fresh, completeness, h2s_blocked, h2s_mode = await _dispatch_with_h2s_circuit(scrape_tasks)
+        fresh, completeness, h2s_blocked, h2s_mode = await _dispatch_with_h2s_circuit(
+            loop, scrape_tasks, storage=storage, source_totals=source_totals,
+            multi_source=multi_source, dry_run=dry_run,
+        )
         _log_scrape_completeness(completeness)
         if h2s_blocked is not None:
             proxy_on = bool(get_proxy_url())
@@ -1471,7 +821,7 @@ async def run_once(
         # 不换 IP、不熔断、不抑制登录：那三件事对这种 403 一件都不管用
         # （见 scrapers.base.OperationNotAllowedError）。上抛让 main_loop 做限流
         # 冷却，避免在一个必然失败的查询上每轮烧一次代理流量。
-        await _stash_pending_prewarms()
+        await prewarm.stash_pending()
         logger.error(
             "⛔ 上游拒绝了我们发的 GraphQL operation（HTTP 403，非 Cloudflare）"
             " cities=%d users=%d：%s",
@@ -1495,7 +845,7 @@ async def run_once(
     except BlockedError as e:
         # 403 = Cloudflare WAF 屏蔽，等待无法恢复，必须换代理/重启。
         # 给 main_loop 一个长 cooldown（15 min），并节流通知避免刷屏。
-        await _stash_pending_prewarms()
+        await prewarm.stash_pending()
         proxy_on = bool(get_proxy_url())
         logger.error(
             "🚫 抓取被屏蔽 (HTTP 403) cities=%d users=%d proxy=%s: %s",
@@ -1514,7 +864,7 @@ async def run_once(
         raise
     except RateLimitError as e:
         # 429 需要更长冷却，上传给 main_loop 单独处理（不走普通 10s 恢复路径）
-        await _stash_pending_prewarms()
+        await prewarm.stash_pending()
         logger.warning(
             "⚠️  抓取被限流 cities=%d users=%d proxy=%s: %s",
             len(scrape_tasks), len(user_notifiers),
@@ -1536,7 +886,7 @@ async def run_once(
         #   - upstream_maintenance_seen_at：首次探测到维护的时间（持续期间不刷新）
         #   - upstream_maintenance_last_at：最近一次仍在维护的时间（每次都刷新）
         # 等再次抓取成功时清空（在成功路径里做）。
-        await _stash_pending_prewarms()
+        await prewarm.stash_pending()
         logger.info(
             "🔧 H2S 平台维护中，本轮跳过 cities=%d users=%d: %s",
             len(scrape_tasks), len(user_notifiers), e,
@@ -1566,7 +916,7 @@ async def run_once(
         #    （SCRAPE_PROXIES_FALLBACK 配了的话）
         # 2. 给 admin 发一条明确告警（30 min 节流）。不发普通用户——改不了代理
         from config import is_proxy_in_cooldown, proxy_failure_mark_count, report_proxy_failure
-        await _stash_pending_prewarms()
+        await prewarm.stash_pending()
         old_proxy = get_proxy_url()
         service_error = is_proxy_service_error(e)
         # 账户级（402 欠费 / 407 认证失败）走长冷却：那种故障不会自己好，
@@ -1626,7 +976,7 @@ async def run_once(
         # 全部城市第 1 页网络失败 → 不更新 last_scrape_at（非有效抓取），
         # 上传让 main_loop 做连续失败计数和冷却。不发给用户通知——
         # 网络抖动通常几轮后自动恢复，连续失败到阈值才告警。
-        await _stash_pending_prewarms()
+        await prewarm.stash_pending()
         logger.error(
             "抓取全部网络失败 cities=%s users=%d proxy=%s: %s",
             _task_labels(scrape_tasks), len(user_notifiers),
@@ -1638,7 +988,7 @@ async def run_once(
         # 抓取阶段未被归类的异常（不属于 Blocked/RateLimit/Maintenance/Proxy/
         # Network）。普通用户对内部异常无能为力——改为只告警 admin 并加 30 min
         # 节流，避免某个反复抛错的内部 bug 每轮刷屏所有用户渠道。
-        await _stash_pending_prewarms()
+        await prewarm.stash_pending()
         logger.error(
             "抓取阶段未分类错误 cities=%s users=%d: %s",
             _task_labels(scrape_tasks), len(user_notifiers), e,
@@ -1660,143 +1010,11 @@ async def run_once(
         _print_dry_run(fresh, user_notifiers)
         return completeness
 
-    # ── 抓取后管线：对比入库 → 预订 → 通知 → 推送 ─────────────────── #
-    # 这段过去裸跑在 run_once 顶层，没有任何 except——一旦 storage.diff() /
-    # set_meta() / 通知分发抛异常（DB 锁死、磁盘满、schema 损坏等），会一路
-    # 冒泡到 main_loop 的 generic except，只打日志、不通知任何人，等于监控
-    # 静默瘫痪。这里统一兜底：归类为"数据/通知管线错误"，给 admin 发一条
-    # 带类型的告警（30 min 节流），然后 return {} 走正常间隔——避免 re-raise
-    # 触发 main_loop 的 10s 紧重试反复重新抓站。
-    try:
-        new_listings, status_changes = storage.diff(fresh)
-
-        # ── 影子 source：入库了，但不通知 ─────────────────────────────── #
-        # 新平台上线前的静默验证期：先确认它抓得对、数据长什么样，再决定是否
-        # 对用户开放。**必须在 diff() 之后过滤**——diff 要照常执行，房源才会
-        # 进库、状态变更才会被记录；被拦掉的只有「告诉谁」这一步。
-        #
-        # 副作用是这些 listing 的 notified 一直是 0。取消影子后不会补发历史
-        # ——diff() 只对真正的新 id 产出 new_listings，老的不会再冒出来。
-        # 这是想要的：解除影子不该给用户灌一堆积压通知。
-        new_listings, status_changes = _drop_shadow_sources(
-            cfg, new_listings, status_changes, storage=storage,
-        )
-
-        # ── 重放上一轮没发出去的事件 ─────────────────────────────────── #
-        # diff() 检测变更的副作用就是覆盖掉用来检测的旧状态，所以「diff 已提交、
-        # 通知还没发」这个窗口里进程一死，事件就永久丢了——下一轮 diff 看到
-        # old_status == new_status，什么都不产出。触发条件很日常：2026-08-20
-        # 一天之内部署了 12 次，每次 --force-recreate 都在打断正在跑的轮次。
-        #
-        # 这里把 notified=0 的事件捞回来（有时间窗、有条数上限，见
-        # mstorage/_listings.py），交付语义从 at-most-once 变成 at-least-once。
-        #
-        # **重复通知只是打扰，漏掉通知会让人错过房子** —— 代价不对称，所以选前者。
-        if not dry_run:
-            try:
-                replayed = _merge_pending_events(
-                    storage, new_listings, status_changes,
-                )
-                if replayed:
-                    logger.warning(
-                        "重放 %d 条上一轮未发出的通知事件"
-                        "（上次多半是部署或崩溃打断了通知阶段）", replayed,
-                    )
-                storage.retire_stale_pending()
-            except Exception:
-                # 重放是补偿机制，它自己坏掉不该拖垮正常通知
-                logger.warning("未投递事件重放失败（本轮跳过）", exc_info=True)
-
-        # diff() 成功后再写时间戳，确保面板显示的 last_scrape_at 对应一次完整的
-        # "抓取 + 入库" 操作；若 diff() 抛异常，时间戳不会被更新。
-        # 计数用 fresh（含影子 source）——它回答的是「抓到多少」，不是「通知了多少」。
-        storage.set_meta("last_scrape_at", datetime.now(timezone.utc).isoformat())
-        storage.set_meta("last_scrape_count", str(len(fresh)))
-
-        # 维护态恢复：本轮成功就清掉 maintenance meta，让 dashboard banner 消失。
-        _clear_maintenance_meta_if_recovered(storage)
-
-        # ── 快速候选预扫描：纯内存收集候选，抢在发通知之前提交预订 ──────── #
-        ab_candidates, status_transition = _collect_booking_candidates(
-            new_listings, status_changes, fresh, user_notifiers, storage,
-        )
-        candidate_user_ids = {
-            uid for uid, candidates in ab_candidates.items()
-            if any(_listing_source(listing) == "holland2stay" for listing in candidates)
-        }
-        _heartbeat_warm_browser(user_notifiers)
-        _start_prewarm_for_candidates(candidate_user_ids)
-        await _wait_for_candidate_prewarms()
-
-        # ── 立即将 book_with_fallback() 提交到线程池（快速通道）──────── #
-        # 新上线可预订 / 状态变更 → Available to book 均立即提交 run_in_executor，
-        # 预订请求在发出通知之前就进入 Holland2Stay 服务器（节省 1-3 秒）。
-        ab_futures = _submit_bookings(
-            loop, ab_candidates, user_notifiers,
-            prewarm_cached, prewarm_futures, status_transition, booking_deadline,
-            storage=storage,
-        )
-
-        # 没有候选的用户的 prewarm（如果是新刷新的）存入缓存供下轮复用
-        await _stash_pending_prewarms()
-
-        # ── 新房源通知（预订已在后台线程并行运行）───────────────────── #
-        # 标记策略：任意用户通知成功即标记为"已通知"。若部分用户渠道失败，
-        # 该 listing 不会补发——实际业务中多用户同渠道很少部分失败。
-        # APNs 推送：与现有 4 渠道并行，fire-and-forget；
-        # 同一用户本轮匹配 ≥ push.aggregate_threshold() 套时改聚合一条。
-        from mcore import push as _push  # 局部 import，避免冷启动加载 httpx
-
-        total_notified, new_push = await _notify_new_listings(
-            new_listings, user_notifiers, web_notifier, storage, _push,
-        )
-        sc_push = await _notify_status_changes(
-            status_changes, user_notifiers, web_notifier, storage, _push,
-        )
-        booking_push = await _process_booking_results(
-            ab_futures, web_notifier, storage, _push,
-        )
-        push_tasks = [*new_push, *sc_push, *booking_push]
-
-        # ── 等待本轮所有 APNs 推送完成 ───────────────────────────────── #
-        # asyncio.create_task() 的 fire-and-forget 任务，在 run_once 返回前等齐；
-        # 否则下一轮可能在 APNs 网络 IO 完成前重叠开始。各 task 自身吞异常。
-        if push_tasks:
-            try:
-                results = await asyncio.gather(*push_tasks, return_exceptions=True)
-                sent = sum(r for r in results if isinstance(r, int))
-                errs = sum(1 for r in results if isinstance(r, Exception))
-                logger.info("APNs 本轮推送结果: %d 设备成功 / %d 任务异常", sent, errs)
-            except Exception:
-                logger.exception("等待 push tasks 异常")
-
-        # ── 持久化重试队列（仅在变更时写入）─────────────────────────── #
-        retry_queue.save(storage)
-
-        logger.info(
-            "本轮结束: %d 新房源（已通知 %d），%d 状态变更，数据库共 %d 条",
-            len(new_listings), total_notified, len(status_changes), storage.count_all(),
-        )
-        return completeness
-    except Exception as e:
-        # 抓取已成功、但入库/通知管线挂了。给 admin 一条带类型的告警，return {}
-        # 走正常间隔，避免对已抓到的数据做无意义的 10s 紧重试。
-        await _stash_pending_prewarms()
-        logger.error(
-            "抓取后管线错误（入库/通知）listings=%d: %s",
-            len(fresh), e, exc_info=True,
-        )
-        if _should_notify_internal():
-            await _notify_admin_only(
-                storage, web_notifier,
-                f"数据/通知管线错误\n\n{type(e).__name__}: {e}\n\n"
-                f"房源已抓到 {len(fresh)} 条，但写库或发通知阶段失败"
-                f"（如数据库锁死/磁盘满）。请尽快查看服务器日志与磁盘。"
-                f"30 分钟内不重复通知。",
-                kind="error",
-            )
-        return {}
-
+    return await _run_post_scrape(
+        cfg, storage, user_notifiers, fresh, completeness,
+        web_notifier=web_notifier, dry_run=dry_run,
+        booking_deadline=booking_deadline, loop=loop, prewarm=prewarm,
+    )
 
 def _build_user_notifiers(users: list[UserConfig]) -> UserNotifiers:
     """

@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from storage import Storage
+from mcore.sources import PROXYLESS_CAPABLE_SOURCES
 
 logger = logging.getLogger("monitor")
 
@@ -39,23 +40,7 @@ def shard_source_tasks(
     return [tasks[i] for i in idx], (start + size) % n
 
 
-#: 代理全挂、降级直连原生 IP 时，哪些 source 还能抓。
-#:
-#: 2026-08-26 在生产服务器上逐个实测（webshare 两个账号同时 402，正好是干净的
-#: 直连环境）：
-#:
-#:     OurDomain    HTTP 200,  8.9 KB      ✅
-#:     OurCampus    HTTP 200, 62.8 KB      ✅
-#:     H2S          真浏览器解 CF 挑战，90 秒未解开 ×3   ❌
-#:     Xior         同上，停在挑战页                    ❌
-#:
-#: 判据是**实测**不是猜的：两家 RENTCafe 站点在机房 IP 上根本没有 Cloudflare
-#: 挑战，而 H2S / Xior 是硬挡——不是慢，是挑战解不开。
-#:
-#: 名单写死而不是自动探测：自动探测意味着每轮都要先打一次试探请求，代价是
-#: 额外流量和额外的被封面。上游哪天变了，这里会表现为「降级期间某个 source
-#: 一直失败」，日志里看得见。
-PROXYLESS_CAPABLE_SOURCES: frozenset[str] = frozenset({"ourdomain", "ourcampus"})
+
 
 
 def apply_proxyless_gate(tasks: list) -> list:

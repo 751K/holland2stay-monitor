@@ -10,21 +10,10 @@ from __future__ import annotations
 import logging
 
 from models import STATUS_AVAILABLE
+from mcore.sources import AUTO_BOOK_SOURCES
 from mcore.state import retry_queue
 
 logger = logging.getLogger("monitor")
-
-# 进这个元组的条件是「用真实账号端到端跑通过」：
-#   holland2stay  2026-05-22 真实下单成功（见 ARCHITECTURE §7）
-#   plaza         2026-09-10 真实应征成功（见 docs/PLAZA.md §6）
-#
-# Plaza 另有一道**用户侧开关** auto_book.plaza_enabled，默认关——进了这个元组
-# 不等于对谁都开。理由见 can_auto_book 里的注释。
-#
-# **Xior 先不放进来**：bookers/rentcafe.py 里第 3 步之后的多步表单是没走过流程
-# 硬猜出来的草稿，放开等于拿用户的真实账号去提交半懂不懂的表单。等流程侦察完
-# 并验证过再加 "xior"。凭据判定（can_auto_book）已经就位，到时只改这个元组。
-AUTO_BOOK_SOURCES: tuple[str, ...] = ("holland2stay", "plaza")
 
 
 def listing_source(listing) -> str:

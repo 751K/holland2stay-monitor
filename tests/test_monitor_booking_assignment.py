@@ -134,7 +134,7 @@ def test_run_once_books_same_listing_once_for_multiple_matching_users(tmp_path):
         )
 
     async def go():
-        with patch("monitor.dispatch_scrape_tasks", return_value=[_listing("shared")]), \
+        with patch("mcore.scrape_round.dispatch_scrape_tasks", return_value=[_listing("shared")]), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
              patch("bookers.holland2stay.try_book", side_effect=fake_try_book):
             await run_once(_cfg(tmp_path), storage, [(u1, n1), (u2, n2)], dry_run=False)
@@ -166,7 +166,7 @@ def test_run_once_web_booking_notification_is_scoped_to_assigned_user(tmp_path):
         )
 
     async def go():
-        with patch("monitor.dispatch_scrape_tasks", return_value=[_listing("shared")]), \
+        with patch("mcore.scrape_round.dispatch_scrape_tasks", return_value=[_listing("shared")]), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
              patch("bookers.holland2stay.try_book", side_effect=fake_try_book):
             await run_once(
@@ -204,7 +204,7 @@ def test_run_once_plaza_application_does_not_mark_listing_reserved(tmp_path):
         )
 
     async def go():
-        with patch("monitor.dispatch_scrape_tasks", return_value=[listing]), \
+        with patch("mcore.scrape_round.dispatch_scrape_tasks", return_value=[listing]), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
              patch("mcore.booking.dispatch_book", side_effect=fake_dispatch):
             await run_once(_cfg(tmp_path), storage, [(user, notifier)], dry_run=False)
@@ -245,7 +245,7 @@ def test_run_once_plaza_applies_to_all_matching_listings_without_h2s_prewarm(tmp
         return None
 
     async def go():
-        with patch("monitor.dispatch_scrape_tasks", return_value=listings), \
+        with patch("mcore.scrape_round.dispatch_scrape_tasks", return_value=listings), \
              patch("mcore.prewarm.create_prewarmed_session", side_effect=fake_prewarm), \
              patch("mcore.booking.dispatch_book", side_effect=fake_dispatch):
             await run_once(_cfg(tmp_path), storage, [(user, notifier)], dry_run=False)

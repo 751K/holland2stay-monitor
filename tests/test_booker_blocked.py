@@ -170,7 +170,7 @@ class TestMonitorRunOnceBlockedAggregation:
 
     def _run(self, cfg, storage, notifs, scrape_fn, try_book_fn):
         async def go():
-            with patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn), \
+            with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=scrape_fn), \
                  patch("bookers.holland2stay.try_book", side_effect=try_book_fn), \
                  patch("mcore.prewarm.create_prewarmed_session",
                        side_effect=lambda e, p, **kw: None):
@@ -264,7 +264,7 @@ class TestPrewarmBlockSuppressesLogin:
             def _boom(email, password, **kw):
                 raise exc
 
-            with patch("monitor.dispatch_scrape_tasks",
+            with patch("mcore.scrape_round.dispatch_scrape_tasks",
                        side_effect=lambda *a, **k: [_make_listing(1)]), \
                  patch("bookers.holland2stay.try_book",
                        side_effect=lambda l, *a, **k: BookingResult(
@@ -338,18 +338,23 @@ class TestNoDeadExceptionClass:
         import ast
         import pathlib
 
-        src = pathlib.Path("monitor.py").read_text(encoding="utf-8")
-        tree = ast.parse(src)
+        paths = [
+            pathlib.Path("monitor.py"),
+            pathlib.Path("mcore/prewarm_round.py"),
+        ]
+        trees = [ast.parse(p.read_text(encoding="utf-8")) for p in paths]
 
         caught: set[str] = set()
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.ExceptHandler):
-                continue
+        excepts = [
+            n for tree in trees for n in ast.walk(tree)
+            if isinstance(n, ast.ExceptHandler)
+        ]
+        for node in excepts:
             calls = [
                 n for n in ast.walk(node)
                 if isinstance(n, ast.Call)
                 and isinstance(n.func, ast.Name)
-                and n.func.id == "_mark_h2s_login_blocked"
+                and n.func.id in ("_mark_h2s_login_blocked", "mark_h2s_login_blocked")
             ]
             if not calls or node.type is None:
                 continue
@@ -359,7 +364,7 @@ class TestNoDeadExceptionClass:
             )
             caught.update(n.id for n in names if isinstance(n, ast.Name))
 
-        assert caught, "找不到调用 _mark_h2s_login_blocked 的 except 分支"
+        assert caught, "找不到调用 _mark_h2s_login_blocked / mark_h2s_login_blocked 的 except 分支"
         assert caught == {"BlockedError"}, (
             f"这些 except 捕获了 {sorted(caught)}。prewarm 上抛的是裸 "
             f"BlockedError；捕获别的类型 = 分支永远不执行"

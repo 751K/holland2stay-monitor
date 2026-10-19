@@ -255,8 +255,9 @@ class TestHungRendererDoesNotStallTheLoop:
 
         async def _run():
             loop = asyncio.get_running_loop()
-            monkey = monitor._SOURCE_DISPATCH_TIMEOUT_SEC
-            monitor._SOURCE_DISPATCH_TIMEOUT_SEC = 0.2
+            from mcore import scrape_round
+            monkey = scrape_round._SOURCE_DISPATCH_TIMEOUT_SEC
+            scrape_round._SOURCE_DISPATCH_TIMEOUT_SEC = 0.2
             try:
                 import scrapers
                 orig = scrapers.dispatch_scrape_tasks
@@ -265,7 +266,7 @@ class TestHungRendererDoesNotStallTheLoop:
                     import time
                     time.sleep(5)          # 模拟 wedged 渲染器
 
-                monitor.dispatch_scrape_tasks = _hang
+                scrape_round.dispatch_scrape_tasks = _hang
                 try:
                     with pytest.raises(ScrapeNetworkError, match="超时"):
                         await monitor._dispatch_scrape_tasks_async(
@@ -274,9 +275,9 @@ class TestHungRendererDoesNotStallTheLoop:
                                         city_display="A")],
                         )
                 finally:
-                    monitor.dispatch_scrape_tasks = orig
+                    scrape_round.dispatch_scrape_tasks = orig
             finally:
-                monitor._SOURCE_DISPATCH_TIMEOUT_SEC = monkey
+                scrape_round._SOURCE_DISPATCH_TIMEOUT_SEC = monkey
 
         asyncio.run(_run())
 

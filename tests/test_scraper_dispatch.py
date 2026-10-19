@@ -74,7 +74,8 @@ def test_monitor_isolated_dispatch_runs_without_thread_asyncio_loop(monkeypatch)
             asyncio.get_running_loop()
         return [], {"holland2stay:Eindhoven": True}
 
-    monkeypatch.setattr(monitor, "dispatch_scrape_tasks", fake_dispatch)
+    from mcore import scrape_round
+    monkeypatch.setattr(scrape_round, "dispatch_scrape_tasks", fake_dispatch)
 
     async def run():
         return await monitor._dispatch_scrape_tasks_async(
@@ -104,7 +105,8 @@ def test_isolated_dispatch_reuses_one_thread_across_rounds(monkeypatch):
         seen.append(threading.get_ident())
         return [], {}
 
-    monkeypatch.setattr(monitor, "dispatch_scrape_tasks", fake_dispatch)
+    from mcore import scrape_round
+    monkeypatch.setattr(scrape_round, "dispatch_scrape_tasks", fake_dispatch)
 
     async def run_rounds():
         loop = asyncio.get_running_loop()
@@ -284,7 +286,8 @@ def test_each_browser_source_gets_its_own_thread(monkeypatch):
         seen.setdefault(src, set()).add(threading.get_ident())
         return [], {}
 
-    monkeypatch.setattr(monitor, "dispatch_scrape_tasks", fake_dispatch)
+    from mcore import scrape_round
+    monkeypatch.setattr(scrape_round, "dispatch_scrape_tasks", fake_dispatch)
 
     async def run():
         loop = asyncio.get_running_loop()
@@ -456,10 +459,10 @@ class TestCompletenessKeyHasOneImplementation:
         )
 
     def test_monitor_imports_the_shared_one(self):
-        import monitor
         import scrapers
 
-        assert monitor.completeness_key is scrapers.completeness_key
+        from mcore import scrape_round
+        assert scrape_round.completeness_key is scrapers.completeness_key
 
     @pytest.mark.parametrize("multi,expected", [
         (True, "holland2stay:Eindhoven"),

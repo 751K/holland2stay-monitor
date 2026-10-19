@@ -103,8 +103,9 @@ class TestSignature:
         assert not hasattr(monitor, "storage")
 
     def test_call_site_passes_it(self):
-        src = inspect.getsource(monitor.run_once)
-        i = src.index("_submit_bookings(")
+        from mcore import post_round
+        src = inspect.getsource(post_round.run_post_scrape)
+        i = src.index("submit_bookings(")
         assert "storage=storage" in src[i:i + 400], "调用点没把 storage 传进去"
 
 

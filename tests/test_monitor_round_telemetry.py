@@ -65,7 +65,7 @@ def _run(tmp_path, side_effect, *, dry_run=False):
         return side_effect(tasks[0].source, tasks, multi_source)
 
     async def go():
-        with patch("monitor.dispatch_scrape_tasks", side_effect=fake_dispatch), \
+        with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=fake_dispatch), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None):
             try:
                 await run_once(_cfg(tmp_path), storage, [], dry_run=dry_run)
@@ -187,7 +187,7 @@ class TestTelemetryWiring:
             return _ok(tasks[0].source, tasks, multi_source)
 
         async def go():
-            with patch("monitor.dispatch_scrape_tasks", side_effect=fake_dispatch), \
+            with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=fake_dispatch), \
                  patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
                  patch.object(type(storage), "record_round_stat", boom):
                 return await run_once(_cfg(tmp_path), storage, [], dry_run=False)

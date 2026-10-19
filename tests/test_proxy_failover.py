@@ -627,7 +627,8 @@ class TestWiredIntoTheIsolationBranch:
     def _isolation_blocks(self) -> list[str]:
         import inspect
         import re
-        src = inspect.getsource(monitor.run_once)
+        from mcore import scrape_round
+        src = inspect.getsource(scrape_round.dispatch_with_h2s_circuit)
         return [src[m.start():m.start() + 1600]
                 for m in re.finditer("整体抓取失败，已隔离该 source", src)]
 
@@ -637,7 +638,7 @@ class TestWiredIntoTheIsolationBranch:
 
     def test_every_isolation_branch_reports_to_the_pool(self):
         for i, block in enumerate(self._isolation_blocks()):
-            assert "_report_source_proxy_failure" in block, (
+            assert "report_source_proxy_failure" in block, (
                 f"第 {i + 1} 处隔离分支又变回「接住就 return」了——代理池永远听不到坏消息")
 
     def test_every_branch_is_guarded_by_is_proxy_error(self):
@@ -649,8 +650,8 @@ class TestWiredIntoTheIsolationBranch:
     def test_reported_before_the_telemetry_write(self):
         """顺序无所谓对错，但要稳定：遥测那行会 return，报告写在它后面就永远不执行。"""
         for i, block in enumerate(self._isolation_blocks()):
-            assert (block.index("_report_source_proxy_failure")
-                    < block.index("_record_source_round")), f"第 {i + 1} 处顺序反了"
+            assert (block.index("report_source_proxy_failure")
+                    < block.index("record_source_round")), f"第 {i + 1} 处顺序反了"
 
     def test_not_in_dry_run(self):
         """dry_run 不该改动全局代理状态。"""

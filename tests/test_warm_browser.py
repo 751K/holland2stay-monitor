@@ -225,9 +225,9 @@ def _call_offset():
     import inspect
     import re
 
-    import monitor
-    m = re.search(r"^\s*_heartbeat_warm_browser\(", inspect.getsource(monitor.run_once),
-                  re.MULTILINE)
+    from mcore import post_round
+    m = re.search(r"^\s*prewarm\.heartbeat\(",
+                  inspect.getsource(post_round.run_post_scrape), re.MULTILINE)
     return m.start() if m else None
 
 
@@ -255,11 +255,11 @@ class TestWiring:
         """
         import inspect
 
-        import monitor
-        src = inspect.getsource(monitor.run_once)
+        from mcore import post_round
+        src = inspect.getsource(post_round.run_post_scrape)
         hb = _call_offset()
         assert hb is not None
-        pw = src.index("_start_prewarm_for_candidates(candidate_user_ids)")
+        pw = src.index("prewarm.start_for_candidates(candidate_user_ids)")
         assert hb < pw, "心跳排在了预登录后面"
 
     def test_process_exit_closes_the_lane(self):
@@ -274,21 +274,17 @@ class TestWiring:
         """熔断期间不新建——正在被拒绝时开浏览器只是再添几条失败记录。"""
         import inspect
 
-        import monitor
-        src = inspect.getsource(monitor.run_once)
-        body = src[src.index("def _heartbeat_warm_browser"):]
-        body = body[:body.index("def _start_prewarm_for_candidates")]
-        assert "_h2s_login_suppressed_remaining()" in body
+        from mcore import prewarm_round
+        body = inspect.getsource(prewarm_round.PrewarmRound.heartbeat)
+        assert "h2s_login_suppressed_remaining()" in body
         assert "may_rebuild" in body
 
     def test_it_is_skipped_in_dry_run(self):
         import inspect
 
-        import monitor
-        src = inspect.getsource(monitor.run_once)
-        body = src[src.index("def _heartbeat_warm_browser"):]
-        body = body[:body.index("def _start_prewarm_for_candidates")]
-        assert "if dry_run:" in body
+        from mcore import prewarm_round
+        body = inspect.getsource(prewarm_round.PrewarmRound.heartbeat)
+        assert "if self.dry_run:" in body
 
 
 class TestKillSwitch:
@@ -338,10 +334,8 @@ class TestKillSwitchWiring:
     def test_the_heartbeat_respects_the_switch(self):
         import inspect
 
-        import monitor
-        src = inspect.getsource(monitor.run_once)
-        body = src[src.index("def _heartbeat_warm_browser"):]
-        body = body[:body.index("def _start_prewarm_for_candidates")]
+        from mcore import prewarm_round
+        body = inspect.getsource(prewarm_round.PrewarmRound.heartbeat)
         assert "lane_enabled()" in body, "心跳没读总开关"
         assert "wanted = lane_enabled() and any(" in body, (
             "开关没有并进 wanted——关掉时必须让 heartbeat 走 wanted=False 那条路，"

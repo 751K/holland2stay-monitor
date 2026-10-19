@@ -142,7 +142,7 @@ def _round(tmp_path, storage, shadow, fresh):
     notifier = _Notifier()
 
     async def go():
-        with patch("monitor.dispatch_scrape_tasks", return_value=(fresh, {"C": True})), \
+        with patch("mcore.scrape_round.dispatch_scrape_tasks", return_value=(fresh, {"C": True})), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None):
             await run_once(_cfg(tmp_path, shadow), storage, [], dry_run=False,
                            web_notifier=notifier)

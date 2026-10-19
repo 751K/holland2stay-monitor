@@ -300,9 +300,9 @@ class TestMonitorWiring:
         """403 / 网络错误 / 维护都不是「打得太勤」造成的，拉长间隔治不了它们。"""
         import ast
         import inspect
-        import monitor
+        from mcore import scrape_round
 
-        src = inspect.getsource(monitor)
+        src = inspect.getsource(scrape_round)
         tree = ast.parse(src)
         guards = []
         for node in ast.walk(tree):
@@ -330,9 +330,9 @@ class TestMonitorWiring:
         """
         import ast
         import inspect
-        import monitor
+        from mcore import scrape_round
 
-        tree = ast.parse(inspect.getsource(monitor))
+        tree = ast.parse(inspect.getsource(scrape_round))
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -340,7 +340,7 @@ class TestMonitorWiring:
             # 记「本轮这个 source 成功了」的那个函数
             if "succeeded_sources" not in body or "append" not in body:
                 continue
-            if "_source_pacing" in body and "relax" in body:
+            if "source_pacing" in body and "relax" in body:
                 return
         pytest.fail(
             "没有任何一个记录 succeeded_sources 的函数调用 _source_pacing.relax()"
@@ -364,8 +364,8 @@ class TestMonitorWiring:
     def _sites(marker: str) -> list[str]:
         import inspect
         import re
-        import monitor
-        src = inspect.getsource(monitor.run_once)
+        from mcore import scrape_round
+        src = inspect.getsource(scrape_round.dispatch_with_h2s_circuit)
         return [src[m.start():m.start() + 1600]
                 for m in re.finditer(re.escape(marker), src)]
 
@@ -376,12 +376,12 @@ class TestMonitorWiring:
 
     def test_every_success_site_relaxes(self):
         for i, block in enumerate(self._sites("succeeded_sources.append(")):
-            assert "_source_pacing.relax" in block, (
+            assert "source_pacing.relax" in block, (
                 f"第 {i + 1} 处「本轮成功」没有 relax——该 source 的倍率只升不降")
 
     def test_every_failure_site_penalizes(self):
         for i, block in enumerate(self._sites("source_failures.append(")):
-            assert "_source_pacing.penalize" in block, (
+            assert "source_pacing.penalize" in block, (
                 f"第 {i + 1} 处「整源失败」没有 penalize——该 source 撞 429 也不会退让")
             assert "RateLimitError" in block, (
                 f"第 {i + 1} 处的 penalize 没有 429 守卫")

@@ -144,7 +144,7 @@ class TestMonitorBlockedHandling:
         storage = Storage(tmp_path / "test.db", timezone_str="UTC")
 
         async def go():
-            with patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn):
+            with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=scrape_fn):
                 await run_once(cfg, storage, notifs, dry_run=False)
 
         try:
@@ -265,7 +265,7 @@ class TestMonitorBlockedHandling:
         )
 
         async def go():
-            with patch("monitor.dispatch_scrape_tasks", side_effect=scrape), \
+            with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=scrape), \
                  patch("mcore.push.dispatch_admin", new=AsyncMock(return_value=1)):
                 for _ in range(3):
                     await run_once(
@@ -510,7 +510,7 @@ class TestMonitorMaintenanceAdminNotify:
 
         async def go():
             with patch(
-                "monitor.dispatch_scrape_tasks",
+                "mcore.scrape_round.dispatch_scrape_tasks",
                 side_effect=UpstreamMaintenanceError("test maintenance"),
             ):
                 await run_once(cfg, storage, notifs, web_notifier=admin, dry_run=False)

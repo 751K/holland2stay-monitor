@@ -70,7 +70,7 @@ def _run(tmp_path, cfg, **kw):
         return _ok(tasks[0].source, tasks, multi_source)
 
     async def go():
-        with patch("monitor.dispatch_scrape_tasks", side_effect=fake_dispatch), \
+        with patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=fake_dispatch), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None):
             return await run_once(cfg, storage, [], **kw)
 

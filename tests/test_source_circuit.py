@@ -208,15 +208,15 @@ class TestMonitorWiring:
         import ast
         import pathlib
 
-        src = pathlib.Path("monitor.py").read_text(encoding="utf-8")
+        src = pathlib.Path("mcore/scrape_round.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         for node in ast.walk(tree):
             if isinstance(node, ast.AsyncFunctionDef) and node.name == "_dispatch_isolated":
                 body = ast.unparse(node)
-                assert "_source_circuits.trip" in body, (
+                assert "runtime.source_circuits.trip" in body, (
                     "通用调度路径没有打开熔断，非 H2S source 依然裸奔"
                 )
-                assert "_source_circuits.recover" in body, (
+                assert "runtime.source_circuits.recover" in body, (
                     "canary 成功后没有关闭熔断，会一直停在 canary 模式"
                 )
                 return
@@ -229,7 +229,7 @@ class TestMonitorWiring:
         """
         import inspect
 
-        import monitor
+        from mcore import h2s_guard
 
-        src = inspect.getsource(monitor._mark_h2s_scrape_blocked)
+        src = inspect.getsource(h2s_guard.mark_h2s_scrape_blocked)
         assert "mark_h2s_login_blocked" in src

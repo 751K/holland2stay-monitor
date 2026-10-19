@@ -122,7 +122,7 @@ class TestPrewarmCacheLifecycle:
         async def go():
             with patch("mcore.prewarm.create_prewarmed_session", side_effect=fake_prewarm), \
                  patch("bookers.holland2stay.try_book", side_effect=try_book_fn), \
-                 patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn):
+                 patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=scrape_fn):
                 await run_once(cfg, storage, notifs, dry_run=False)
 
         asyncio.run(go())
@@ -301,7 +301,7 @@ class TestPhaseBLongRunEconomy:
                 with patch("mcore.prewarm.create_prewarmed_session", side_effect=fake_prewarm), \
                      patch("bookers.holland2stay.try_book", side_effect=lambda l, *a, **k:
                            BookingResult(l, True, "ok", pay_url="x", phase="success")), \
-                     patch("monitor.dispatch_scrape_tasks", side_effect=scrape_fn):
+                     patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=scrape_fn):
                     await run_once(cfg, fake_storage, notifs, dry_run=False)
             asyncio.run(go())
 
@@ -324,7 +324,7 @@ class TestPhaseBLongRunEconomy:
         notifs = [(user_ab, _FakeNotifier())]
 
         async def go():
-            with patch("monitor.dispatch_scrape_tasks", return_value=([listing], {"ourdomain:Amsterdam Diemen": True})), \
+            with patch("mcore.scrape_round.dispatch_scrape_tasks", return_value=([listing], {"ourdomain:Amsterdam Diemen": True})), \
                  patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
                  patch("bookers.holland2stay.try_book") as try_book:
                 await run_once(cfg, fake_storage, notifs, dry_run=False)
@@ -358,7 +358,7 @@ class TestWhoGetsTheWarmLane:
                  patch("bookers.holland2stay.try_book",
                        side_effect=lambda l, *a, **k: BookingResult(
                            l, True, "ok", pay_url="https://p", phase="success")), \
-                 patch("monitor.dispatch_scrape_tasks", side_effect=scrape):
+                 patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=scrape):
                 await run_once(cfg, storage, notifs, dry_run=False)
 
         asyncio.run(go())
@@ -448,7 +448,7 @@ class TestHeartbeatRunsOffTheEventLoop:
                  patch("bookers.holland2stay.try_book",
                        side_effect=lambda l, *a, **k: BookingResult(
                            l, True, "ok", pay_url="https://p", phase="success")), \
-                 patch("monitor.dispatch_scrape_tasks", side_effect=scrape):
+                 patch("mcore.scrape_round.dispatch_scrape_tasks", side_effect=scrape):
                 await run_once(cfg, fake_storage, [(user_ab, _FakeNotifier())],
                                dry_run=False)
                 # 心跳是 fire-and-forget，给 executor 一点时间跑完
