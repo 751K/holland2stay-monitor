@@ -148,7 +148,11 @@ class TestPerUserBookingIsolation:
         import monitor
 
         src = _code(monitor._process_booking_results)
-        i = src.index("await future")
-        window = src[max(0, i - 300):i + 400]
-        assert "try:" in window and "except Exception" in window
-        assert "continue" in window
+        # 必须带墙钟上限：线程卡死时裸 await 会让整轮（以及后面排队的用户）
+        # 永远等下去。异常隔离仍然要在这层 try 里。
+        i = src.index("result = await asyncio.wait_for(")
+        assert src.rindex("try:", 0, i) > src.rindex("def ", 0, i), \
+            "wait_for 不在 try 里"
+        window = src[i:i + 1200]
+        assert "except asyncio.TimeoutError:" in window
+        assert "except Exception:" in window and "continue" in window

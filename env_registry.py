@@ -130,7 +130,7 @@ TUNING_KEYS: frozenset[str] = frozenset({
     "PROXY_ACCOUNT_COOLDOWN_SEC",
     # 状态收敛与预订
     "STALE_RESERVED_HOURS", "STALE_OCCUPIED_HOURS",
-    "BOOKING_STATUS_HOLD_MINUTES",
+    "BOOKING_STATUS_HOLD_MINUTES", "BOOKING_RESULT_TIMEOUT_SEC",
 })
 
 TIERS: dict[str, frozenset[str]] = {

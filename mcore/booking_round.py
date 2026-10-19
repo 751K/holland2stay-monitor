@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 
 from booker import PrewarmedSession
@@ -28,6 +29,21 @@ logger = logging.getLogger("monitor")
 
 # 类型别名：每个用户与其对应通知器的配对列表。
 UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
+
+#: 单个用户预订结果的墙钟上限。见 ``process_booking_results``。
+#:
+#: ``booking_deadline`` 只决定「还要不要再试下一套备选」，它管不了一次调用
+#: 本身卡死：DNS 黑洞、TCP 无响应、CF 挑战页不返回，线程会一直停在那里。
+#: 而结果处理是**串行** await 的——一个用户卡住，排在他后面的所有用户都不再
+#: 处理，run_once 也不返回；更糟的是默认线程池是抓取、prewarm、预订共用的，
+#: 卡死线程攒几个就能把整个监控拖停。
+#:
+#: 与 ``SOURCE_DISPATCH_TIMEOUT_SEC`` 同一个量级：默认 600 秒足够覆盖「登录 +
+#: 多套备选」的正常耗时，只在病理情况下才会触发。超时**杀不掉底层线程**
+#: （executor 的 future 取消不了已在运行的调用），这里保证的是本轮继续走完，
+#: 并把该用户按「本轮未预订」处理。
+_BOOKING_RESULT_TIMEOUT_SEC = float(
+    os.environ.get("BOOKING_RESULT_TIMEOUT_SEC") or "600")
 
 
 def submit_bookings(
@@ -228,7 +244,18 @@ async def process_booking_results(
         # try 外面，构造一抛就是这个形状。根因已修，但**爆炸半径不该由被调用方
         # 来保证**。
         try:
-            result = await future
+            result = await asyncio.wait_for(
+                future, timeout=_BOOKING_RESULT_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            # 底层线程可能仍卡在网络调用里；这里只解除本轮阻塞。不给该用户
+            # 发通知，因为这一轮确实没有得出「订上/没订上」的结论。
+            logger.error(
+                "[%s] 预订任务超过 %.0f 秒没有返回，放弃本轮结果并继续处理其余用户"
+                "（卡住的线程可能仍占用线程池）",
+                user.name, _BOOKING_RESULT_TIMEOUT_SEC,
+            )
+            continue
         except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
             raise
         except Exception:

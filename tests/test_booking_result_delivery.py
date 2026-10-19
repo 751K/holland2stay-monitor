@@ -191,6 +191,56 @@ class TestDeliveredCountsPush:
                    for r in caplog.records if r.levelno == logging.WARNING)
 
 
+class TestHungBookingDoesNotBlockTheRound:
+    """一条卡死的预订不能带走后面的用户。
+
+    ``run_in_executor`` 里的线程可能卡在 DNS / TCP / CF 页面上永远不返回，
+    而结果处理是串行 ``await``：没有墙钟上限时，run_once 再也不返回，后面
+    排队的用户连「订上/没订上」的结果都拿不到。
+    """
+
+    def test_later_users_still_processed_and_hung_user_not_reported(
+        self, monkeypatch, caplog,
+    ):
+        from mcore import booking_round
+
+        monkeypatch.setattr(booking_round, "_BOOKING_RESULT_TIMEOUT_SEC", 0.05)
+        caplog.set_level(logging.ERROR)
+
+        loop = asyncio.new_event_loop()
+        try:
+            hung = loop.create_future()          # 永不 set_result
+            done = loop.create_future()
+            done.set_result(BookingResult(
+                listing=_listing(lid="L2"), success=True, message="m",
+                pay_url="https://pay/x", phase="success"))
+
+            hung_notifier = _Notifier(True)
+            ok_notifier = _Notifier(True)
+            push = _Push()
+
+            async def _go():
+                tasks = await monitor._process_booking_results([
+                    (_User("u-hung", "Hung"), hung_notifier,
+                     [_listing(lid="L1")], hung, None),
+                    (_User("u2", "Second"), ok_notifier,
+                     [_listing(lid="L2")], done, None),
+                ], None, _Storage(), push)
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+            loop.run_until_complete(_go())
+        finally:
+            loop.close()
+
+        assert ok_notifier.success_calls == 1, "卡死用户后面的预订结果没有处理"
+        assert push.calls == [("u2", "L2", "booked")]
+        assert hung_notifier.success_calls == 0, "没得出结果却报了预订成功"
+        assert any(
+            r.levelno == logging.ERROR and "超过" in r.getMessage()
+            for r in caplog.records
+        ), "超时没有留下 ERROR 日志"
+
+
 class TestBookedPushPayload:
     def test_plaza_says_registration_not_payment(self):
         from mcore.push import _fcm_payload_booked, _payload_booked
