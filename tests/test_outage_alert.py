@@ -194,7 +194,7 @@ class TestOutageAlertsAreAdminOnly:
     @pytest.mark.parametrize("fn", ["_alert_outage", "_alert_outage_recovered"])
     def test_goes_through_admin_helper(self, fn):
         src = inspect.getsource(getattr(monitor, fn))
-        assert "_notify_admin_only" in src
+        assert "notify_admin_only(" in src
 
     def test_recovery_uses_a_distinct_kind(self):
         """push 的 dedup 键是 (admin, kind)；同 kind 会把「已恢复」压掉。"""

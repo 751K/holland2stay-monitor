@@ -182,7 +182,8 @@ class TestAutoBookGate:
     def test_credential_check_works_once_source_is_enabled(self, monkeypatch):
         """把闸门打开后，凭据判定必须按楼栋生效。"""
         import monitor
-        monkeypatch.setattr(monitor, "_AUTO_BOOK_SOURCES", ("holland2stay", "xior"))
+        from mcore import booking_candidates
+        monkeypatch.setattr(booking_candidates, "AUTO_BOOK_SOURCES", ("holland2stay", "xior"))
 
         has = _user(xior_accounts={"p0196062": {"email": "a@x.com", "password": "p"}})
         assert monitor._can_auto_book(has, _listing("xior", "Amsterdam Karspeldreef")) is True

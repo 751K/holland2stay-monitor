@@ -63,13 +63,14 @@ from dotenv import load_dotenv
 from booker import PrewarmedSession
 from config import (DATA_DIR, ENV_PATH, get_proxy_url, is_personal_proxy_active,
                     is_proxy_native_fallback_active, load_config)
-from models import BOOKING_HOLD_SOURCES, STATUS_AVAILABLE, is_application_only
+from models import BOOKING_HOLD_SOURCES, is_application_only
 from notifier import BaseNotifier, WebNotifier, create_user_notifier
 from mcore.backoff import PersistedBackoff
 from mcore.circuit import SourceCircuits
 from mcore.health import CIRCUIT_OPEN_ERROR
 from mcore.pacing import AdaptivePacing
-from mcore.booking import RetryQueue, area_key, book_with_fallback
+from mcore.booking import area_key, book_with_fallback
+from mcore.state import retry_queue
 from mcore.interval import apply_jitter, get_interval
 from mcore.h2s_rest import RestTrigger
 from mcore import geocode as _geocode
@@ -102,6 +103,34 @@ from mcore.startup import (
 from mcore.telemetry import (
     completeness_stats as _completeness_stats,
     record_source_round as _record_source_round,
+)
+from mcore.outage import (
+    OUTAGE_ALERT_BACKOFF as _OUTAGE_ALERT_BACKOFF,  # noqa: F401
+    OutageTracker as _OutageTracker,  # noqa: F401
+    alert_outage as _alert_outage,
+    alert_outage_recovered as _alert_outage_recovered,
+    format_duration as _format_duration,
+    notify_admin_only as _notify_admin_only,
+    outage as _outage,
+)
+from mcore.notify_round import (
+    BATCH_MIN as _BATCH_MIN,  # noqa: F401
+    BATCH_SOURCE as _BATCH_SOURCE,  # noqa: F401
+    drop_shadow_sources as _drop_shadow_sources,
+    merge_pending_events as _merge_pending_events,
+    notify_new_listings as _notify_new_listings,
+    notify_status_changes as _notify_status_changes,
+    push_booking_failed as _push_booking_failed,
+    split_batchable as _split_batchable,  # noqa: F401
+)
+from mcore.booking_candidates import (
+    AUTO_BOOK_SOURCES as _AUTO_BOOK_SOURCES,  # noqa: F401
+    assign_auto_book_candidates as _assign_auto_book_candidates,  # noqa: F401
+    can_auto_book as _can_auto_book,  # noqa: F401
+    can_reach_user as _can_reach_user,
+    collect_booking_candidates as _collect_booking_candidates,
+    listing_booking_key as _listing_booking_key,  # noqa: F401
+    listing_source as _listing_source,
 )
 
 #: 地图坐标补齐的间隔（秒）。半小时一次乘以每批 30 个地址，足以跟上新房源的
@@ -342,154 +371,9 @@ def _apply_source_intervals(
     return out
 
 
-def _merge_pending_events(
-    storage: "Storage",
-    new_listings: list["Listing"],
-    status_changes: list[tuple["Listing", str, str]],
-) -> int:
-    """把上一轮没走完通知阶段的事件并进本轮，返回补进来的条数。
-
-    **就地修改**传入的两个列表——调用方后面还要把它们喂给通知与预订两条路，
-    返回新列表会让调用点多出两个容易忘记同步的变量。
-
-    去重按 listing id：本轮 diff 已经产出的不再补一遍（同一条房源刚上架又立刻
-    变状态时会撞上）。
-    """
-    have_new = {l.id for l in new_listings}
-    have_sc = {t[0].id for t in status_changes}
-    n = 0
-    for l in storage.pending_new_listings():
-        if l.id not in have_new:
-            new_listings.append(l)
-            have_new.add(l.id)
-            n += 1
-    for tup in storage.pending_status_changes():
-        if tup[0].id not in have_sc:
-            status_changes.append(tup)
-            have_sc.add(tup[0].id)
-            n += 1
-    return n
-
-
-def _drop_shadow_sources(
-    cfg,
-    new_listings: list["Listing"],
-    status_changes: list[tuple["Listing", str, str]],
-    *,
-    storage: "Storage | None" = None,
-) -> tuple[list["Listing"], list[tuple["Listing", str, str]]]:
-    """滤掉影子 source 的通知事件（房源本身已经入库，这里只拦「告诉谁」）。
-
-    影子 source 用于新平台上线前的静默验证：照常抓取、写库、参与 stale 收敛
-    和面板统计，但不发用户渠道通知、不写面板 notification feed、不推 APNs/FCM。
-
-    ``cfg.shadow_sources`` 为空时零开销直接返回原对象。
-
-    被丢弃的事件会**当场标记成已处理**
-    ----------------------------------
-    这里原本什么都不标，注释写着「副作用是这些 listing 的 notified 一直是 0，
-    取消影子后不会补发历史」。那在 ``notified`` 只写不读的年代是无害的，但**加上
-    未投递事件重放之后会直接翻车**：被静默拦下的房源停在 0，下一轮重放原样捞
-    出来推给用户，影子 source 的整个保证当场失效。
-
-    「丢弃」也是通知阶段的一种结论——决定了「不发」，就该记成已处理。顺带，
-    原注释承诺的「解除影子不补发历史」也因此依然成立。
-    """
-    shadow = {s.lower() for s in getattr(cfg, "shadow_sources", None) or ()}
-    if not shadow:
-        return new_listings, status_changes
-
-    def _shadowed(listing) -> bool:
-        return (getattr(listing, "source", "") or "").lower() in shadow
-
-    kept_new = [l for l in new_listings if not _shadowed(l)]
-    kept_sc = [t for t in status_changes if not _shadowed(t[0])]
-
-    if storage is not None:
-        dropped_ids = (
-            [l.id for l in new_listings if _shadowed(l)]
-            + [t[0].id for t in status_changes if _shadowed(t[0])]
-        )
-        if dropped_ids:
-            try:
-                storage.mark_notified_batch(dropped_ids)
-                storage.mark_status_change_notified_batch(dropped_ids)
-            except Exception:
-                # 标记失败最多让这几条被重放一次，不该拖垮本轮通知
-                logger.warning("影子 source 事件标记失败（可能被重放一次）", exc_info=True)
-
-    dropped_new = len(new_listings) - len(kept_new)
-    dropped_sc = len(status_changes) - len(kept_sc)
-    if dropped_new or dropped_sc:
-        logger.info(
-            "🔇 影子 source %s：%d 条新房源 + %d 条状态变更已入库但不通知",
-            ",".join(sorted(shadow)), dropped_new, dropped_sc,
-        )
-    return kept_new, kept_sc
-
-
 def _task_labels(tasks) -> list[str]:
     return [f"{t.source}:{t.city_display}" for t in tasks]
 
-
-def _listing_booking_key(listing: Listing) -> tuple[str, str]:
-    """自动预订去重键：同 source + id 的房源每轮只允许一个用户尝试。"""
-    return _listing_source(listing), str(listing.id)
-
-
-def _listing_source(listing: Listing) -> str:
-    """返回 listing 的规范化 source；旧数据缺 source 时按 H2S 处理。"""
-    return (getattr(listing, "source", "") or "holland2stay").strip().lower()
-
-
-def _assign_auto_book_candidates(
-    raw_candidates: dict[str, list[Listing]],
-    user_notifiers: UserNotifiers,
-) -> dict[str, list[Listing]]:
-    """
-    把自动预订候选从“每用户匹配”收敛成“每房源唯一归属”。
-
-    多用户模式下，同一套房源可能同时满足多个用户的自动预订条件。直接让所有
-    用户并发预订同一套房源会制造无意义的竞态，也更容易触发平台风控。这里在
-    提交 executor 前做一次进程内分配：同一 listing 每轮只交给一个用户；多套
-    listing 同时出现时按当前已分配数量做简单均衡，平局按用户配置顺序决定。
-    """
-    assigned: dict[str, list[Listing]] = {u.id: [] for u, _ in user_notifiers}
-    user_order = {u.id: idx for idx, (u, _) in enumerate(user_notifiers)}
-    user_names = {u.id: u.name for u, _ in user_notifiers}
-    assigned_count = {u.id: 0 for u, _ in user_notifiers}
-
-    by_listing: dict[tuple[str, str], tuple[Listing, list[str]]] = {}
-    for user, _ in user_notifiers:
-        seen_for_user: set[tuple[str, str]] = set()
-        for listing in raw_candidates.get(user.id, []):
-            key = _listing_booking_key(listing)
-            if key in seen_for_user:
-                continue
-            seen_for_user.add(key)
-            if key not in by_listing:
-                by_listing[key] = (listing, [])
-            by_listing[key][1].append(user.id)
-
-    for listing, user_ids in by_listing.values():
-        eligible = [uid for uid in user_ids if uid in assigned]
-        if not eligible:
-            continue
-        chosen = min(eligible, key=lambda uid: (assigned_count[uid], user_order[uid]))
-        assigned[chosen].append(listing)
-        assigned_count[chosen] += 1
-
-        if len(eligible) > 1:
-            skipped = [user_names[uid] for uid in eligible if uid != chosen]
-            logger.info(
-                "[%s] 自动预订候选去重: %s 同时匹配 %d 个用户，已分配给当前用户，跳过: %s",
-                user_names[chosen],
-                listing.name,
-                len(eligible),
-                ", ".join(skipped),
-            )
-
-    return assigned
 
 # 自适应轮询参数（固定，不需要用户配置）
 # 每轮成功后将当前间隔乘以此系数（5% 缩短），缓慢逼近 min_interval
@@ -687,120 +571,6 @@ def _should_notify_internal() -> bool:
 #
 # 2026-08-05 04:24–09:29 代理断了 5 小时 5 分钟，59 轮全灭，admin 一条告警都没
 # 收到：当时 main_loop 的 network / blocked / 内部异常分支只 logger.error。而
-# run_once 的 ScrapeNetworkError 分支明确写着「让 main_loop 做连续失败计数和冷却」
-# ——交接的另一头是空的。这里就是补上的那一头。
-#
-# 首次达阈值立即发，之后 15 / 30 / 60 分钟递增，封顶 1 小时：全面宕机要立刻知道，
-# 但连续 5 小时不该收 20 条。
-_OUTAGE_ALERT_BACKOFF = (900, 1800, 3600)
-
-
-class _OutageTracker:
-    """全面故障的告警节流与恢复判定。
-
-    只做判定不做 IO，投递交给调用方——这样测试不必搭 push / web_notifier 环境。
-    时间由调用方传入（``time.monotonic()``），测试可直接推进。
-    """
-
-    def __init__(self) -> None:
-        self._started_at: float | None = None
-        self._alerts = 0
-        self._last_alert_at = 0.0
-        self._rounds = 0
-
-    @property
-    def active(self) -> bool:
-        return self._started_at is not None
-
-    @property
-    def rounds(self) -> int:
-        """本次故障已经失败了多少轮。"""
-        return self._rounds
-
-    def elapsed(self, now: float) -> float:
-        """本次故障已持续多少秒；不在故障中时为 0。"""
-        return 0.0 if self._started_at is None else now - self._started_at
-
-    def record_failure(self, now: float) -> bool:
-        """记一次全面失败，返回本次是否该发告警。
-
-        **首次必发。** 调用方只在确认是全面故障时才调进来（网络分支要连续 3 轮、
-        屏蔽分支一轮就是 15 分钟起步的冷却），门槛已经在外面把住了；这里再压一层
-        「先观察几轮」只会推迟通知。恢复告警靠这条性质成立：进入过故障态就一定
-        通知过，不会出现凭空一条「已恢复」。
-        """
-        if self._started_at is None:
-            self._started_at = now
-            self._alerts = 0
-            self._last_alert_at = 0.0
-            self._rounds = 0
-        self._rounds += 1
-        if self._alerts:
-            idx = min(self._alerts - 1, len(_OUTAGE_ALERT_BACKOFF) - 1)
-            if now - self._last_alert_at < _OUTAGE_ALERT_BACKOFF[idx]:
-                return False
-        self._alerts += 1
-        self._last_alert_at = now
-        return True
-
-    def record_success(self, now: float) -> tuple[float, int] | None:
-        """记一次成功。返回 ``(故障持续秒数, 失败轮数)``；本来就没在故障中则 None。
-
-        不在故障中时**必须**返回 None：否则每一轮正常抓取都会发一条「已恢复」。
-        """
-        if self._started_at is None:
-            return None
-        span, rounds = now - self._started_at, self._rounds
-        self._started_at = None
-        self._alerts = 0
-        self._rounds = 0
-        return span, rounds
-
-
-#: 模块级单例。进程重启后清零——重启后若故障仍在，第一轮会重新告警，符合预期。
-_outage = _OutageTracker()
-
-
-def _format_duration(seconds: float) -> str:
-    """把秒数写成「N 小时 M 分钟」。告警里「5 小时 5 分钟」比「18300 秒」有用。"""
-    total = int(seconds)
-    h, m = divmod(total // 60, 60)
-    if h:
-        return f"{h} 小时 {m} 分钟"
-    return f"{m} 分钟" if m else f"{total} 秒"
-
-
-async def _alert_outage(
-    storage: "Storage",
-    web_notifier: "WebNotifier | None",
-    summary: str,
-    detail: str,
-) -> None:
-    """全面故障告警。只发 admin——用户对代理/网络故障无从处置。"""
-    msg = (
-        f"⛔ 全面抓取故障：{summary}\n\n"
-        f"已持续 {_format_duration(_outage.elapsed(time.monotonic()))}，"
-        f"连续 {_outage.rounds} 轮所有 source 均失败。\n\n"
-        f"{detail}\n\n"
-        "监控进程仍在运行并按退避重试；恢复后会再发一条通知。"
-    )
-    await _notify_admin_only(storage, web_notifier, msg, kind="outage")
-
-
-async def _alert_outage_recovered(
-    storage: "Storage",
-    web_notifier: "WebNotifier | None",
-    span: float,
-    rounds: int,
-) -> None:
-    """恢复告警。kind 与故障告警不同，否则会被 push 的 dedup 压掉。"""
-    msg = (
-        f"✅ 抓取已恢复\n\n"
-        f"本次全面故障持续 {_format_duration(span)}，期间 {rounds} 轮全部失败。"
-    )
-    await _notify_admin_only(storage, web_notifier, msg, kind="outage_recovered")
-
-
 def _h2s_login_suppressed_remaining() -> int:
     """H2S 登录/预订链路是否因 403 被临时抑制；返回剩余秒数。"""
     return _h2s_login_block.remaining()
@@ -981,7 +751,6 @@ async def _wait_reload_or_wake(timeout: float) -> str:
 UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
 
 # mcore 服务实例（进程生命周期内单例）
-retry_queue = RetryQueue()
 prewarm_cache = PrewarmCache()
 #: H2S 熔断 / 登录抑制的退避状态。**落库，跨进程重启存活**——见 mcore/backoff.py。
 #:
@@ -1060,30 +829,6 @@ def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
 # run_once() 是一轮「抓取 → 对比 → 通知 → 自动预订」的编排器。各阶段拆成
 # 下面这组 _round_* 辅助函数，run_once 只负责串联与错误分支控制流。
 # 拆分原则：纯/有界副作用的段落抽出去；raise / return 等控制流留在 run_once。
-
-
-async def _notify_admin_only(
-    storage: "Storage",
-    web_notifier: "WebNotifier | None",
-    msg: str,
-    *,
-    kind: str,
-) -> None:
-    """把一条错误只发给 admin（web 面板 + admin push），不打扰普通用户。
-
-    用于普通用户无法采取行动的内部/系统级错误（代理失效、数据库/通知管线
-    故障、未分类异常）。两个渠道各自吞异常——告警通道本身不该再把 run_once
-    带崩。"""
-    if web_notifier:
-        try:
-            await web_notifier.send_error(msg)
-        except Exception:
-            logger.debug("admin web 告警发送失败（已忽略）", exc_info=True)
-    from mcore import push as _push
-    try:
-        await _push.dispatch_admin(storage, msg, kind=kind)
-    except Exception:
-        logger.debug("admin push 告警发送失败（已忽略）", exc_info=True)
 
 
 async def _dispatch_watchdog_alerts(
@@ -1167,194 +912,6 @@ def _clear_maintenance_meta_if_recovered(storage: Storage) -> None:
         storage.set_meta("upstream_maintenance_seen_at", "")
         storage.set_meta("upstream_maintenance_last_at", "")
         logger.info("🔧→✅ H2S 平台维护已结束，抓取恢复正常")
-
-
-# 进这个元组的条件是「用真实账号端到端跑通过」：
-#   holland2stay  2026-05-22 真实下单成功（见 ARCHITECTURE §7）
-#   plaza         2026-09-10 真实应征成功（见 docs/PLAZA.md §6）
-#
-# Plaza 另有一道**用户侧开关** auto_book.plaza_enabled，默认关——进了这个元组
-# 不等于对谁都开。理由见 _can_auto_book 里的注释。
-#
-# **Xior 先不放进来**：bookers/rentcafe.py 里第 3 步之后的多步表单是没走过流程
-# 硬猜出来的草稿，放开等于拿用户的真实账号去提交半懂不懂的表单。等流程侦察完
-# 并验证过再加 "xior"。凭据判定（_can_auto_book）已经就位，到时只改这个元组。
-_AUTO_BOOK_SOURCES: tuple[str, ...] = ("holland2stay", "plaza")
-
-
-def _can_auto_book(user, listing) -> bool:
-    """该用户能不能对这条 listing 触发自动预订。
-
-    除了「这个 source 的预订流程实现了没有」，还要回答「用户有没有**这栋楼**的
-    账号」——Xior 是一栋楼一个账号（每栋楼是独立的 RENTCafe property 门户），
-    没有该楼凭据就不该产生候选。凭据本身就是开关，不需要额外的 per-building 开关。
-    """
-    if listing.source not in _AUTO_BOOK_SOURCES:
-        return False
-    if listing.source == "xior":
-        from scrapers.xior import building_key_for
-        key = building_key_for(listing)
-        if not key:
-            logger.debug("Xior listing %s 无法反查楼栋，跳过自动预订", listing.id)
-            return False
-        email, password = user.auto_book.xior_account_for(key)
-        return bool(email and password)
-    if listing.source == "plaza":
-        # Plaza 要**两道闸**：显式开关 + 凭据。
-        #
-        # 另外三个平台只用凭据当开关，因为它们都还有一步在用户手里（H2S 要付款，
-        # 两个 RENTCafe 停在存草稿）。Plaza 的应征一次 POST 就落地，中间没有任何
-        # 人工关卡——所以「填了凭据」不等于「授权系统替我应征」，要单独点头。
-        #
-        # 凭据那一半仍然重要：没凭据就不产生候选，免得每条新房源都跑一次注定失败
-        # 的登录，而失败会消耗上游的尝试额度。
-        ab = user.auto_book
-        if not ab.plaza_enabled:
-            return False
-        return bool((ab.plaza_username or "").strip() and ab.plaza_password)
-    return True
-
-
-def _can_reach_user(user, notifier, storage) -> bool:
-    """能不能把「抢到了」这件事告诉用户——自动预订的前置条件。
-
-    为什么自动预订要和「能不能通知」绑定
-    ------------------------------------
-    替人下了单却没法告诉他，比不下单更糟：他不知道要去付款、去确认、或者去取消。
-    这条耦合是有意的，不解。
-
-    为什么不能只看 ``notifier.has_channels``
-    ----------------------------------------
-    系统里有**两条**投递路径，而 ``has_channels`` 只认其中一条：
-
-        传统渠道  create_user_notifier 从 user.notification_channels 建
-                  （iMessage / Telegram / WhatsApp / 邮件）→ has_channels
-        推送      mcore.push.dispatch 独立走 APNs，只看 notifications_enabled
-                  与去重，**不看 has_channels**
-
-    也就是说只用 App 的用户照常收到房源推送，却永远开不了自动预订——他配置得再
-    正确也没用，而且界面上没有任何地方说过这件事。2026-09-10 线上撞到一个真实
-    用户：楼盘、城市、平台、凭据、开关全对，候选阶段被这道闸挡掉，`PlazaBooker`
-    一次都没被调用过。
-
-    判据不自己写 SQL
-    ----------------
-    直接调 ``get_active_devices_for_user``。它的条件里有一条容易抄漏的
-    ``expires_at``（``revoked`` 与「自己到期」互不蕴含），
-    ``tools/backfill_push_optin.py`` 就栽在照抄 WHERE 上。判据必须是同一段代码，
-    不是同一段描述。
-
-    取不到设备时 fail-closed
-    ------------------------
-    查不出来 = 不确定能不能通知 = 不自动下单。这道闸存在的意义就是这个。
-    """
-    if notifier.has_channels:
-        return True
-    try:
-        return bool(storage.get_active_devices_for_user(user.id))
-    except Exception:
-        logger.warning("查不到用户 %s 的活跃设备，本轮不产生自动预订候选",
-                       user.id, exc_info=True)
-        return False
-
-
-def _collect_booking_candidates(
-    new_listings: list["Listing"],
-    status_changes: list[tuple["Listing", str, str]],
-    fresh: list["Listing"],
-    user_notifiers: "UserNotifiers",
-    storage: "Storage",
-) -> tuple[dict[str, list["Listing"]], dict[str, tuple[str, str]]]:
-    """收集每个用户的自动预订候选（不发任何通知 / 不触网）。
-
-    「能不能通知到这个用户」每轮每人只算一次（``_can_reach_user``），不在逐条房源
-    的循环里查——那会变成 用户数 × 房源数 次查询。
-
-    三个来源合并：
-    1. new_listings 中新上线即 Available to book 的
-    2. status_changes 中变为 Available to book 的
-    3. 重试队列里上轮 race_lost、本轮仍 Available to book 的（diff() 不产事件，手动补）
-
-    Returns
-    -------
-    (ab_candidates, status_transition)
-      ab_candidates[user_id]   : 该用户的候选 Listing 列表（已去重 + 经分配）
-      status_transition[lid]   : listing.id → (old, new)，供日志区分触发来源
-    """
-    ab_candidates: dict[str, list["Listing"]] = {u.id: [] for u, _ in user_notifiers}
-    status_transition: dict[str, tuple[str, str]] = {}
-    reachable: dict[str, bool] = {
-        u.id: _can_reach_user(u, n, storage) for u, n in user_notifiers
-    }
-
-    for listing in new_listings:
-        for user, _notifier in user_notifiers:
-            if (
-                    user.auto_book.enabled
-                    and user.notifications_enabled
-                    and reachable[user.id]
-                    and _can_auto_book(user, listing)
-                    and listing.status.lower() == STATUS_AVAILABLE
-                    and (user.auto_book.listing_filter.is_empty()
-                         or user.auto_book.listing_filter.passes(listing))
-            ):
-                ab_candidates[user.id].append(listing)
-
-    for listing, old_status, new_status in status_changes:
-        if new_status.lower() == STATUS_AVAILABLE:
-            status_transition[listing.id] = (old_status, new_status)
-        for user, _notifier in user_notifiers:
-            if (
-                    user.auto_book.enabled
-                    and user.notifications_enabled
-                    and reachable[user.id]
-                    and _can_auto_book(user, listing)
-                    and new_status.lower() == STATUS_AVAILABLE
-                    and (user.auto_book.listing_filter.is_empty()
-                         or user.auto_book.listing_filter.passes(listing))
-            ):
-                ab_candidates[user.id].append(listing)
-
-    # 重试队列检查：上次 race_lost 的候选，若仍 Available to book 则补入候选。
-    # 处理"前一个预订者未付款、房子被重新放出"但状态未变的场景：
-    # storage.diff() 对此类房源不产出任何事件，必须从重试队列中手动补入。
-    # 这一层只按 source 粗筛（与用户无关）；「有没有这栋楼的账号」是 per-user
-    # 判定，放在下面的循环里做。
-    _fresh_avail = {
-        l.id: l
-        for l in fresh
-        if l.source in _AUTO_BOOK_SOURCES and l.status.lower() == STATUS_AVAILABLE
-    }
-    for user, _notifier in user_notifiers:
-        if (not user.auto_book.enabled or not user.notifications_enabled
-                or not reachable[user.id]):
-            continue
-        user_retry = retry_queue.get(user.id)
-        if not user_retry:
-            continue
-        gone = user_retry - _fresh_avail.keys()
-        if gone:
-            retry_queue.remove_gone(user.id, gone)
-            logger.info(
-                "[%s] 🗑️  %d 套 race_lost 房源已不可预订，移出重试队列",
-                user.name, len(gone),
-            )
-        existing_ids = {c.id for c in ab_candidates[user.id]}
-        for lid in user_retry & _fresh_avail.keys():
-            if lid in existing_ids:
-                continue  # 已经由 status_changes 路径加入，跳过
-            listing = _fresh_avail[lid]
-            if not _can_auto_book(user, listing):
-                continue
-            if user.auto_book.listing_filter.is_empty() or user.auto_book.listing_filter.passes(listing):
-                ab_candidates[user.id].append(listing)
-                logger.info(
-                    "[%s] 🔁 重试 race_lost 房源（仍可预订）: %s",
-                    user.name, listing.name,
-                )
-
-    ab_candidates = _assign_auto_book_candidates(ab_candidates, user_notifiers)
-    return ab_candidates, status_transition
 
 
 def _submit_bookings(
@@ -1525,47 +1082,6 @@ def _submit_bookings(
     return ab_futures
 
 
-#: 只有这个平台的抽签房源走聚合。写死而不是「所有 source」是因为判据是**平台
-#: 行为**：只有 H2S 会把一批抽签房源在同一轮里一次性放出（2026-08-25 实测一轮
-#: 9 套）。别的平台根本没有抽签状态，写宽了等于给一个不存在的情况留后门。
-_BATCH_SOURCE = "holland2stay"
-
-#: 攒够几套才聚合。1 套时聚合与逐条完全等价，却换来一条信息更少的消息
-#: （聚合版不带类型/楼层/能耗），所以从 2 起。
-_BATCH_MIN = 2
-
-
-def _split_batchable(matched: list["Listing"]) -> tuple[list["Listing"], list["Listing"]]:
-    """把某用户本轮的匹配拆成「聚合发」和「逐条发」两堆。
-
-    只有 **H2S 的抽签房源**进第一堆，而且要够 ``_BATCH_MIN`` 套。
-
-    为什么只聚合抽签
-    ----------------
-    H2S 的抽签池不是先到先得——晚看半小时不影响抽中概率。而「可直接预订」相反，
-    2026-08-25 实测中位窗口 154 分钟、最短 4 分钟，那种房源少发一条就是少一次
-    机会，绝不能为了省配额把它埋进摘要里。
-
-    闸按**平台**开而不是按状态开：OurCampus 也有抽签（Join Lottery），但它
-    2026-09-15 挂出的 #2301 48 分钟就撤了，和可订一样得逐条、立刻发。
-
-    顺序保持原样返回，不排序：调用方的日志和消息都按这个顺序输出，而
-    ``new_listings`` 的顺序来自抓取，重排只会让人对不上号。
-    """
-    from models import is_lottery_status
-
-    batched, singles = [], []
-    for l in matched:
-        if (l.source or "") == _BATCH_SOURCE and is_lottery_status(l.status):
-            batched.append(l)
-        else:
-            singles.append(l)
-    if len(batched) < _BATCH_MIN:
-        # 不够数：原样退回逐条，且要**保持原顺序**，不能把它们甩到队尾。
-        return [], matched
-    return batched, singles
-
-
 def _report_source_proxy_failure(source: str, exc: BaseException) -> None:
     """把单个 source 的代理故障报给代理池（冷却 / 切换 / 降级）。
 
@@ -1611,158 +1127,6 @@ def _redact_proxy_for_log(url: str) -> str:
     """代理 URL 里带凭据，日志里只留 scheme + host:port。"""
     import re as _re
     return _re.sub(r"//[^@]*@", "//", url or "") or "(无)"
-
-
-async def _notify_new_listings(
-    new_listings: list["Listing"],
-    user_notifiers: "UserNotifiers",
-    web_notifier: "WebNotifier | None",
-    storage: Storage,
-    push,
-) -> tuple[int, list]:
-    """发送新房源通知（预订已在后台线程并行运行）。
-
-    标记策略：**走完本阶段的 listing 全部标记**，与「有没有人匹配」「投递成功
-    与否」都无关。``notified=1`` 的语义是「已处理」，不是「已送达」。
-
-    这个区别以前无所谓（没人读这个字段），现在它是未投递事件重放的判据——
-    旧写法（只在至少投递成功时标记）会让无人匹配的房源永远停在 0，生产实测
-    559 条里有 403 条是这么来的，重放信号会被这批噪音淹没。
-
-    Returns
-    -------
-    (total_notified, push_tasks)
-      push_tasks: 本段创建的 APNs/FCM asyncio.Task，由 run_once 末尾统一 gather。
-    """
-    total_notified = 0
-    new_notified_ids: list[str] = []
-    user_round_matches: dict[str, list] = {}  # user_id -> [Listing,...]，用于聚合判定
-    push_tasks: list = []
-
-    for listing in new_listings:
-        for user, _notifier in user_notifiers:
-            if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
-                logger.info("[%s] 跳过通知（过滤条件不符）: %s", user.name, listing.name)
-                continue
-
-            # APNs 推送钩子：现有渠道发送之后追加，独立 task，与其他渠道互不阻塞。
-            user_round_matches.setdefault(user.id, []).append(listing)
-
-        # Web 面板通知（每条新房源写一次，与用户过滤无关）
-        if web_notifier:
-            await web_notifier.send_new_listing(listing)
-
-        # **走完通知阶段就标记，不管有没有人匹配。**
-        #
-        # 旧写法是 `if notified_this`（至少投递给一个用户）。于是没有任何用户
-        # 筛选条件匹配到的房源永远停在 notified=0——2026-08-20 生产实测，559 条
-        # listings 里有 403 条是这么来的。
-        #
-        # 这个语义差别以前无所谓（没人读这个字段），现在它是重放的判据：不修的话
-        # 0 池会立刻重新堆积，重放信号退化成噪音。见
-        # mstorage/_listings.py 的 pending_new_listings。
-        new_notified_ids.append(listing.id)
-
-    # 逐条 / 聚合发送。
-    #
-    # 这一段从上面的 `for listing: for user:` 里拆了出来——聚合必须先把某个用户
-    # 本轮的匹配收齐才能判断，边遍历边发做不到。代价是日志里「新房源」那几行
-    # 现在按用户分组，不再按房源分组。
-    for user, notifier in user_notifiers:
-        matched = user_round_matches.get(user.id) or []
-        batched, singles = _split_batchable(matched)
-        if batched:
-            logger.info(
-                "[%s] %d 套 %s 抽签房源聚合成 1 条（逐条发会占掉当天邮件配额的一大半）",
-                user.name, len(batched), _BATCH_SOURCE,
-            )
-            for l in batched:
-                logger.info("[%s]   ↳ %s (%s)", user.name, l.name, l.status)
-            if await notifier.send_new_listings_batch(batched):
-                # 计的是「这些房源都通知到了这个用户」，语义和拆分前一致；
-                # 实际发出的消息数是 1，那件事由上面那行日志表达。
-                total_notified += len(batched)
-        for listing in singles:
-            logger.info("[%s] 新房源: %s (%s)", user.name, listing.name, listing.status)
-            if await notifier.send_new_listing(listing):
-                total_notified += 1
-
-    # APNs + FCM 发送：本轮每个用户的匹配若 < 阈值，按条推；否则聚合成一条
-    if push.get_client() is not None or push.get_fcm_client() is not None:
-        round_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        user_by_id = {u.id: u for u, _ in user_notifiers}
-        for uid, matched in user_round_matches.items():
-            user_obj = user_by_id.get(uid)
-            if user_obj is None:
-                continue
-            if push.should_aggregate(len(matched)):
-                push_tasks.append(asyncio.create_task(
-                    push.dispatch_aggregate(
-                        storage, user_obj, matched, round_id=round_id,
-                    ),
-                ))
-            else:
-                for l in matched:
-                    push_tasks.append(asyncio.create_task(
-                        push.dispatch(storage, user_obj, l, kind="new"),
-                    ))
-
-    storage.mark_notified_batch(new_notified_ids)
-    return total_notified, push_tasks
-
-
-async def _notify_status_changes(
-    status_changes: list[tuple["Listing", str, str]],
-    user_notifiers: "UserNotifiers",
-    web_notifier: "WebNotifier | None",
-    storage: Storage,
-    push,
-) -> list:
-    """发送状态变更通知（预订已在后台线程并行运行）。
-
-    Returns
-    -------
-    push_tasks: 本段创建的 APNs/FCM asyncio.Task。
-    """
-    push_tasks: list = []
-    sc_notified_ids: list[str] = []
-
-    for listing, old_status, new_status in status_changes:
-        for user, notifier in user_notifiers:
-            if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
-                logger.info("[%s] 状态变更跳过通知（过滤条件不符）: %s", user.name, listing.name)
-                continue
-
-            logger.info("[%s] 状态变更: %s  %s → %s", user.name, listing.name, old_status, new_status)
-            await notifier.send_status_change(listing, old_status, new_status)
-            # APNs + FCM status_change：直接逐条推（变更通常不像新房源那么密集）
-            if push.get_client() is not None or push.get_fcm_client() is not None:
-                push_tasks.append(asyncio.create_task(
-                    push.dispatch_status_change(
-                        storage, user, listing, old_status, new_status,
-                    ),
-                ))
-
-        # Web 面板通知（每次状态变更写一次，与用户过滤无关）
-        if web_notifier:
-            await web_notifier.send_status_change(listing, old_status, new_status)
-
-        # 同上：走完通知阶段就标记，判据是「处理过」不是「投递成功」。
-        sc_notified_ids.append(listing.id)
-
-    storage.mark_status_change_notified_batch(sc_notified_ids)
-    return push_tasks
-
-
-def _push_booking_failed(push, storage, user, listing) -> "asyncio.Task":
-    """给用户推一条「没订上」。丢进 push_tasks，run_once 末尾统一 gather。
-
-    不像成功那条要 await：失败的送达与否不改变任何判断。push.dispatch 自己吞
-    异常、返回 0，不会让 gather 炸。
-    """
-    return asyncio.create_task(
-        push.dispatch(storage, user, listing, kind="booking_failed"),
-    )
 
 
 async def _process_booking_results(

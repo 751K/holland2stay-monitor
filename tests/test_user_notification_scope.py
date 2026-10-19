@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 MONITOR = Path(__file__).resolve().parent.parent / "monitor.py"
+NOTIFY_ROUND = Path(__file__).resolve().parent.parent / "mcore" / "notify_round.py"
 
 #: 允许发给普通用户的推送。都是他要么能行动、要么明确关心的：
 #: 新房源和状态变更是他订阅的内容；预订成功带着付款链接，不发等于白订；
@@ -34,23 +35,26 @@ ALLOWED_USER_SENDS = {
 
 
 def _user_notifier_calls() -> set[str]:
-    """monitor.py 里对**用户** notifier 调用了哪些 send_* 方法。
+    """monitor.py 与 mcore/notify_round.py 里对**用户** notifier 调用了哪些
+    send_* 方法。
 
     按 AST 找 ``<x>.send_*(...)``，排除 web_notifier（那是 admin 面板）。
+    通知阶段已从 monitor.py 拆到 mcore/notify_round.py，两个文件都要扫。
     """
-    tree = ast.parse(MONITOR.read_text())
     found: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        fn = node.func
-        if not isinstance(fn, ast.Attribute) or not fn.attr.startswith("send_"):
-            continue
-        recv = fn.value
-        name = recv.id if isinstance(recv, ast.Name) else getattr(recv, "attr", "")
-        if "web" in name or "admin" in name:
-            continue
-        found.add(fn.attr)
+    for path in (MONITOR, NOTIFY_ROUND):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if not isinstance(fn, ast.Attribute) or not fn.attr.startswith("send_"):
+                continue
+            recv = fn.value
+            name = recv.id if isinstance(recv, ast.Name) else getattr(recv, "attr", "")
+            if "web" in name or "admin" in name:
+                continue
+            found.add(fn.attr)
     return found
 
 

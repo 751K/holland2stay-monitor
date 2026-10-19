@@ -344,7 +344,8 @@ class TestCandidateGating:
     def test_a_source_not_in_the_tuple_is_still_blocked(self, req, monkeypatch):
         """source 级的闸仍在最前面，用户开关翻不过它。"""
         import monitor
-        monkeypatch.setattr(monitor, "_AUTO_BOOK_SOURCES", ("holland2stay",))
+        from mcore import booking_candidates
+        monkeypatch.setattr(booking_candidates, "AUTO_BOOK_SOURCES", ("holland2stay",))
         req.user.auto_book.plaza_enabled = True
         assert not monitor._can_auto_book(req.user, req.listing)
 
