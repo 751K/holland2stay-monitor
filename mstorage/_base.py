@@ -274,6 +274,35 @@ class StorageBase:
                 updated_at TEXT NOT NULL DEFAULT '',
                 updated_by TEXT NOT NULL DEFAULT ''
             );
+
+            -- 管理员公告及其逐用户投递结果。
+            --
+            -- 公告是一次性群发，但投递不是原子的：2026-08-28 那次 FCM 全挂，
+            -- 事后只能从日志里拼「谁收到了」，无法精确补发。announcements
+            -- 保存内容与发送时的目标人数，announcement_deliveries 一行 =
+            -- 一个用户的一个渠道，失败行可以直接重试。
+            CREATE TABLE IF NOT EXISTS announcements (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                title            TEXT    NOT NULL,
+                body             TEXT    NOT NULL DEFAULT '',
+                created_at       TEXT    NOT NULL,
+                recipients       INTEGER NOT NULL DEFAULT 0,
+                skipped_disabled INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS announcement_deliveries (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                announcement_id INTEGER NOT NULL,
+                user_id         TEXT    NOT NULL,
+                channel         TEXT    NOT NULL,   -- external | push
+                status          TEXT    NOT NULL,   -- pending | ok | failed | skipped
+                devices         INTEGER NOT NULL DEFAULT 0,
+                error           TEXT    NOT NULL DEFAULT '',
+                updated_at      TEXT    NOT NULL,
+                UNIQUE (announcement_id, user_id, channel)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ann_deliveries_ann
+                ON announcement_deliveries(announcement_id, status);
         """)
         # 增量列：CREATE TABLE IF NOT EXISTS 不会给老库补字段；
         # ALTER TABLE ADD COLUMN 在 SQLite 上幂等需自己捕获 OperationalError。
@@ -881,7 +910,9 @@ class StorageBase:
             self._conn.execute("DELETE FROM user_configs")
             self._conn.execute("DELETE FROM device_tokens")
             self._conn.execute("DELETE FROM round_stats")
-        logger.info("数据库已清空（全部 9 张表）")
+            self._conn.execute("DELETE FROM announcement_deliveries")
+            self._conn.execute("DELETE FROM announcements")
+        logger.info("业务数据已清空（房源 / 状态变更 / 通知 / 轮次 / 公告）")
 
     def close(self) -> None:
         if not self._teardown_managed:

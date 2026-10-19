@@ -189,6 +189,7 @@ def check_database(_: DoctorContext) -> list[CheckResult]:
         required = {
             "listings", "status_changes", "meta", "web_notifications",
             "geocode_cache", "app_tokens", "device_tokens",
+            "announcements", "announcement_deliveries",
         }
         missing = sorted(required - tables)
         if missing:

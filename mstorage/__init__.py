@@ -8,10 +8,12 @@
   _map_calendar — 地图坐标缓存 + 日历查询
   _retry        — 竞败重试队列持久化
   _rounds       — 抓取轮次遥测（每轮每 source 一行）
+  _announcements— 公告与逐用户投递记录
 
 对外接口不变：from storage import Storage（纯 re-export）。
 """
 
+from mstorage._announcements import AnnouncementOps
 from mstorage._base import StorageBase
 from mstorage._charts import ChartOps
 from mstorage._devices import DeviceOps
@@ -29,6 +31,7 @@ from mstorage._user_configs import UserConfigOps
 class Storage(
     ListingOps,
     NotificationOps,
+    AnnouncementOps,
     ChartOps,
     MapCalendarOps,
     RetryQueueOps,

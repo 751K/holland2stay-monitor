@@ -90,6 +90,57 @@
     </div>
   </div>
 
+  <!-- 公告投递记录 -->
+  <div class="card">
+    <div class="card-header">
+      <span>{{ _('announce_history') }}</span>
+      <span id="ann-retry-status" class="text-xs text-tertiary"></span>
+    </div>
+    {% if info.announcements %}
+    <table class="table-minimal">
+      <thead>
+        <tr>
+          <th>{{ _('announce_col_time') }}</th>
+          <th>{{ _('announce_col_announcement') }}</th>
+          <th>{{ _('announce_col_reach') }}</th>
+          <th>{{ _('announce_col_external') }}</th>
+          <th>{{ _('announce_col_push') }}</th>
+          <th>{{ _('announce_col_failed') }}</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in info.announcements %}
+        <tr>
+          <td class="text-tertiary text-sm">{{ a.created_at | local_time }}</td>
+          <td>{{ a.title }}</td>
+          <td>{{ a.recipients }} / {{ a.skipped_disabled }}</td>
+          <td>{{ a.external_ok }}</td>
+          <td>{{ a.push_devices }}</td>
+          <td>
+            {% if a.failed_users or a.pending_users %}
+              <span class="badge badge-danger">{{ a.failed_users + a.pending_users }}</span>
+            {% else %}0{% endif %}
+          </td>
+          <td>
+            {% if a.failed_users or a.pending_users %}
+              <button type="button" class="btn btn-outline btn-sm"
+                      onclick="retryAnnouncement({{ a.id }})">
+                {{ _('announce_retry') }}
+              </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding:12px;" class="text-xs text-tertiary">
+      {{ _('announce_history_empty') }}
+    </div>
+    {% endif %}
+  </div>
+
   <!-- 数据库 -->
   <div class="card">
     <div class="card-header">{{ _('database_stats') }}</div>
@@ -191,6 +242,29 @@ async function sendAnnouncement(dryRun) {
       document.getElementById('ann-title').value = '';
       document.getElementById('ann-body').value = '';
     }
+  } catch (e) {
+    el.textContent = 'Error: ' + e;
+  }
+}
+
+// ── 补发失败的投递 ──
+async function retryAnnouncement(id) {
+  if (!confirm('{{ _("announce_retry_confirm") }}')) return;
+  var el = document.getElementById('ann-retry-status');
+  el.textContent = '…';
+  try {
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+    var resp = await fetch('/api/announcements/' + id + '/retry', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({}),
+    });
+    var d = await resp.json();
+    if (!d.ok) { el.textContent = 'Error: ' + (d.error || resp.status); return; }
+    el.textContent = '{{ _("announce_retry_done") }} ' + d.channel_ok + '/'
+      + d.recipients + ' · ' + d.push_devices + ' {{ _("announce_devices") }}'
+      + (d.errors && d.errors.length ? ' · ' + d.errors.length + ' err' : '');
+    setTimeout(function () { location.reload(); }, 1500);
   } catch (e) {
     el.textContent = 'Error: ' + e;
   }

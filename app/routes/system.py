@@ -75,6 +75,8 @@ def system_info():
         info["unread_notifications"] = st.count_unread_notifications()
         info["total_changes"] = st.conn.execute("SELECT COUNT(*) FROM status_changes").fetchone()[0]
         info["total_notifications"] = st.conn.execute("SELECT COUNT(*) FROM web_notifications").fetchone()[0]
+        # 最近公告 + 逐用户投递统计：面板据此显示「补发失败」入口
+        info["announcements"] = st.list_announcements(limit=10)
     finally:
         st.close()
 
@@ -477,7 +479,8 @@ def api_logs_clear():
 @csrf_required
 def api_reset_db():
     """
-    清空全部数据表（listings / status_changes / meta / web_notifications）。
+    清空业务数据表（listings / status_changes / meta / web_notifications /
+    公告投递记录等），保留凭据、用户配置与表结构。
 
     需在请求体中传 {"confirm": true} 作为二次确认。
     监控进程运行中也可执行——Storage 使用 WAL 模式，reset 事务与监控写入不冲突。
@@ -640,9 +643,41 @@ def api_announcement():
     return jsonify({"ok": True, "dry_run": dry_run, **res.as_dict()})
 
 
+@admin_api_required
+def api_announcements():
+    """最近的公告及逐用户投递统计。"""
+    from app.db import storage as _storage
+
+    st = _storage()
+    try:
+        rows = st.list_announcements(limit=20)
+    finally:
+        st.close()
+    return jsonify({"ok": True, "announcements": rows})
+
+
+@admin_api_required
+@csrf_required
+def api_announcement_retry(announcement_id: int):
+    """只补发某次公告里失败的投递。"""
+    from app.services.announcement_service import retry_failed
+
+    data = request.get_json(silent=True) or {}
+    dry_run = bool(data.get("dry_run"))
+    try:
+        res = retry_failed(announcement_id, dry_run=dry_run)
+    except ValueError as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    except Exception as e:
+        return legacy_server_error(e, "api_announcement_retry")
+    return jsonify({"ok": True, "dry_run": dry_run, **res.as_dict()})
+
+
 def register(app: Flask) -> None:
     app.add_url_rule("/system",         endpoint="system_info",    view_func=system_info,    methods=["GET"])
     app.add_url_rule("/api/announcement", endpoint="api_announcement", view_func=api_announcement, methods=["POST"])
+    app.add_url_rule("/api/announcements", endpoint="api_announcements", view_func=api_announcements, methods=["GET"])
+    app.add_url_rule("/api/announcements/<int:announcement_id>/retry", endpoint="api_announcement_retry", view_func=api_announcement_retry, methods=["POST"])
     app.add_url_rule("/monitoring",     endpoint="monitoring_view", view_func=monitoring_view, methods=["GET"])
     app.add_url_rule("/api/monitoring", endpoint="api_monitoring",  view_func=api_monitoring,  methods=["GET"])
     app.add_url_rule("/logs",           endpoint="logs_view",      view_func=logs_view,      methods=["GET"])
