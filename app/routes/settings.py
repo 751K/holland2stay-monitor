@@ -48,15 +48,16 @@ SETTINGS_KEYS: list[str] = [
     "MAP_MAX_AGE_DAYS",
     # H2S REST 快速通道（mcore/h2s_rest.py）。monitor 每个 tick 现读，热重载即生效
     "H2S_REST_ENABLED", "H2S_REST_INTERVAL",
-    "H2S_REST_START", "H2S_REST_END", "H2S_REST_WEEKDAYS_ONLY",
+    "H2S_REST_START", "H2S_REST_END", "H2S_REST_WEEKDAYS_ONLY", "H2S_REST_HOME_INTERVAL",
 ]
 
 # 数值型 key：空值或非法值跳过写入，避免 load_config() 中 int("") / int("abc") 抛错
 _NUMERIC_KEYS = frozenset({
     "CHECK_INTERVAL", "PEAK_INTERVAL", "MIN_INTERVAL", "JITTER_RATIO",
     "HEARTBEAT_INTERVAL_MINUTES", "MAP_MAX_AGE_DAYS", "H2S_REST_INTERVAL",
+    "H2S_REST_HOME_INTERVAL",
 })
-_FLOAT_KEYS = frozenset({"JITTER_RATIO", "H2S_REST_INTERVAL"})
+_FLOAT_KEYS = frozenset({"JITTER_RATIO", "H2S_REST_INTERVAL", "H2S_REST_HOME_INTERVAL"})
 
 # HH:MM 型 key：空值或格式不对不写入。monitor 那边读到坏值会回落默认窗口，
 # 但面板上看着是自己填的值、实际跑的是默认值，这种不一致不该进库。

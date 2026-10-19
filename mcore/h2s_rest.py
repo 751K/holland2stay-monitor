@@ -36,7 +36,14 @@ PEAK 那两段（工作日 08:30–10:00 / 13:30–15:00）只覆盖 30 次；�
 的兜底出口。两种情况**宁可不查**，退回主循环的节奏：
 
 - 代理全在冷却（``get_proxy_url`` 返回空）——这时直连等于拿服务器 IP 硬扛
-- 当前生效的是自家线路——家里的 IP 不该被 3 秒一次地磨
+- 当前生效的是自家线路，且没开 ``H2S_REST_HOME_INTERVAL``——家里的 IP 不该被
+  3 秒一次地磨
+
+开了 ``H2S_REST_HOME_INTERVAL`` 时，自家线路上也查，但按这个更慢的间隔（下限
+``HOME_MIN_INTERVAL``）。2026-10-16 起 webshare 一直 402，商业代理整个用不了，
+主循环在自家线路上 120 秒一轮——快速通道整段停掉，正好是最需要它的时候。家宽上
+被 H2S 拒一次（403 / 429 / 503）就在家宽上停 ``HOME_PAUSE_SEC``：自家 IP 同时
+是主循环的出口，烧了没得换，宁可退回主循环的节奏。
 
 REST 自己的失败**不**去标记代理故障：那会让一条只为提速而存在的旁路，把主抓取
 共用的代理池打进冷却。
@@ -78,6 +85,7 @@ INTERVAL_ENV = "H2S_REST_INTERVAL"
 START_ENV = "H2S_REST_START"
 END_ENV = "H2S_REST_END"
 WEEKDAYS_ENV = "H2S_REST_WEEKDAYS_ONLY"
+HOME_INTERVAL_ENV = "H2S_REST_HOME_INTERVAL"
 
 DEFAULT_START = "08:30"
 DEFAULT_END = "17:45"
@@ -87,6 +95,12 @@ _AMS = ZoneInfo("Europe/Amsterdam")
 DEFAULT_INTERVAL = 3.0
 #: 下限。再快没有意义（主循环 1 秒一个 tick），只会给对方的限流递把柄。
 MIN_INTERVAL = 1.0
+
+#: 自家线路上的间隔下限。家宽只有一个 IP，和主循环共用。
+HOME_MIN_INTERVAL = 10.0
+
+#: 家宽上被 H2S 拒绝（403 / 429 / 503）后，家宽上停多久。商业代理恢复了照常查。
+HOME_PAUSE_SEC = 3600.0
 
 #: 窗口外 / 关闭时多久看一眼要不要开始。只是本地判断，不发请求。
 IDLE_CHECK_SEC = 30.0
@@ -116,6 +130,19 @@ def rest_interval() -> float:
         logger.warning("%s=%r 不是数字，按默认 %.0f 秒", INTERVAL_ENV, raw, DEFAULT_INTERVAL)
         val = DEFAULT_INTERVAL
     return max(MIN_INTERVAL, val)
+
+
+def rest_home_interval() -> float:
+    """自家线路上的轮询间隔；0 = 自家线路上不查（默认）。"""
+    raw = (os.environ.get(HOME_INTERVAL_ENV) or "").strip()
+    try:
+        val = float(raw) if raw else 0.0
+    except ValueError:
+        logger.warning("%s=%r 不是数字，自家线路上不查", HOME_INTERVAL_ENV, raw)
+        return 0.0
+    if val <= 0:
+        return 0.0
+    return max(HOME_MIN_INTERVAL, val)
 
 
 def _hhmm(raw: str, default: str, key: str) -> int:
@@ -156,13 +183,28 @@ def in_rest_window(now: Optional[datetime] = None) -> bool:
     return cur >= start or cur <= end
 
 
-def rest_proxy() -> str:
-    """这次 REST 查询用的代理 URL；空串 = 现在不该查（见模块文档「出口」）。"""
+def _personal_active() -> bool:
+    from config import is_personal_proxy_active
+    return is_personal_proxy_active()
+
+
+def rest_proxy(*, home: bool = False) -> str:
+    """这次 REST 查询用的代理 URL；空串 = 现在不该查（见模块文档「出口」）。
+
+    ``home=True``：调用方已确认可以走家宽。当前是自家线路时返回它本身——不带
+    source 取，带 source 可能拿到这个 source 自己还没冷却、实际已经坏掉的商业代理。
+    """
     from config import get_proxy_url, is_personal_proxy_active
 
     if is_personal_proxy_active():
-        return ""
+        return get_proxy_url() if home else ""
     return get_proxy_url(REST_PROXY_SOURCE, rotating=True)
+
+
+def _is_pushback(err: Optional[str]) -> bool:
+    """H2S 明确拒绝了这个出口（不是网络抖动、不是响应变形）。"""
+    return bool(err) and (err.startswith("HTTP 403")
+                          or "HTTP 429" in err or "HTTP 503" in err)
 
 
 def h2s_city_ids(cfg) -> tuple[int, ...]:
@@ -225,6 +267,33 @@ class RestTrigger:
 
         self.fail_streak = 0
 
+        #: 本次查询是否在自家线路上（每个 tick 开头判一次）
+        self.on_home = False
+        self._home_paused_until = float("-inf")
+
+    # ------------------------------------------------------------------ #
+    # 出口
+    # ------------------------------------------------------------------ #
+    def _home_allowed(self) -> bool:
+        return rest_home_interval() > 0 and self._clock() >= self._home_paused_until
+
+    def _proxy(self) -> str:
+        if self.on_home and not self._home_allowed():
+            return ""
+        return rest_proxy(home=self.on_home)
+
+    def _note_exit(self, home: bool) -> None:
+        if home == self.on_home:
+            return
+        self.on_home = home
+        if not home:
+            logger.info("[h2s-rest] 商业代理恢复，回到每 %.0f 秒一次", rest_interval())
+        elif rest_home_interval() > 0:
+            logger.info("[h2s-rest] 当前走自家线路：每 %.0f 秒一次（被 H2S 拒绝就在家宽上停 %d 分钟）",
+                        rest_home_interval(), HOME_PAUSE_SEC // 60)
+        else:
+            logger.info("[h2s-rest] 当前是自家线路，没开 %s，暂停", HOME_INTERVAL_ENV)
+
     # ------------------------------------------------------------------ #
     # 轮询
     # ------------------------------------------------------------------ #
@@ -232,7 +301,7 @@ class RestTrigger:
         if self._watcher_factory is not None:
             return self._watcher_factory(city_ids)
         from scrapers.holland2stay_rest import RestWatcher
-        return RestWatcher(city_ids, proxy=rest_proxy)
+        return RestWatcher(city_ids, proxy=self._proxy)
 
     def _drop_watcher(self, why: str) -> None:
         if self._watcher is None:
@@ -268,11 +337,18 @@ class RestTrigger:
             logger.info("[h2s-rest] 开始轮询：城市 %s，每 %.0f 秒一次",
                         ",".join(map(str, city_ids)), rest_interval())
 
+        self._note_exit(_personal_active())
         interval = rest_interval()
+        if self.on_home:
+            interval = max(interval, rest_home_interval())
         t0 = self._clock()
         watcher = self._watcher
         new = await asyncio.to_thread(watcher.poll)
         self._note_health(watcher)
+        if self.on_home and _is_pushback(getattr(watcher, "last_error", None)):
+            self._home_paused_until = self._clock() + HOME_PAUSE_SEC
+            logger.warning("[h2s-rest] 自家线路被 H2S 拒绝（%s），家宽上暂停 %d 分钟——主循环照常",
+                           watcher.last_error, HOME_PAUSE_SEC // 60)
         if new:
             self.note_new(new)
         return max(0.0, interval - (self._clock() - t0))

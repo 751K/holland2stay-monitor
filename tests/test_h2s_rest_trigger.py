@@ -420,5 +420,110 @@ class TestRestProxy:
             def __init__(self, city_ids, **kw):
                 seen.update(kw)
         monkeypatch.setattr(rest, "RestWatcher", _W)
-        RestTrigger(asyncio.Event())._new_watcher((29,))
-        assert seen.get("proxy") is hr.rest_proxy
+        trig = RestTrigger(asyncio.Event())
+        trig._new_watcher((29,))
+        assert seen.get("proxy") == trig._proxy
+
+    def test_home_returns_the_personal_line_itself(self, monkeypatch):
+        import config
+        calls = []
+        monkeypatch.setattr(config, "is_personal_proxy_active", lambda: True)
+        monkeypatch.setattr(config, "get_proxy_url",
+                            lambda *a, **k: calls.append((a, k)) or "socks5://home:1080")
+        assert hr.rest_proxy(home=True) == "socks5://home:1080"
+        assert calls == [((), {})]          # 不带 source：别拿到 source 级没冷却的坏代理
+
+    def test_home_flag_ignored_when_pool_is_back(self, monkeypatch):
+        import config
+        monkeypatch.setattr(config, "is_personal_proxy_active", lambda: False)
+        monkeypatch.setattr(config, "get_proxy_url", lambda *a, **k: "http://pool")
+        assert hr.rest_proxy(home=True) == "http://pool"
+
+
+# --------------------------------------------------------------------------- #
+# 自家线路
+# --------------------------------------------------------------------------- #
+class TestHomeLine:
+    @pytest.mark.parametrize("raw,want", [
+        ("", 0.0), ("0", 0.0), ("-5", 0.0), ("abc", 0.0), ("5", hr.HOME_MIN_INTERVAL), ("15", 15.0),
+    ])
+    def test_home_interval(self, monkeypatch, raw, want):
+        monkeypatch.setenv(hr.HOME_INTERVAL_ENV, raw)
+        assert hr.rest_home_interval() == want
+
+    @pytest.fixture
+    def home(self, env, monkeypatch):
+        import config
+        state = {"home": True}
+        monkeypatch.setattr(hr, "_personal_active", lambda: state["home"])
+        monkeypatch.setattr(config, "is_personal_proxy_active", lambda: state["home"])
+        monkeypatch.setattr(config, "get_proxy_url",
+                            lambda source="", rotating=False: "socks5://home:1080" if state["home"] else "http://pool")
+        env.home = state
+        return env
+
+    def test_off_by_default_pauses(self, home, caplog):
+        with caplog.at_level(logging.INFO, logger="mcore.h2s_rest"):
+            delay = _tick(home)
+        assert home.trig._proxy() == ""
+        assert delay == pytest.approx(hr.DEFAULT_INTERVAL)
+        assert "没开 H2S_REST_HOME_INTERVAL，暂停" in caplog.text
+
+    def test_enabled_uses_home_at_slower_pace(self, home, monkeypatch, caplog):
+        monkeypatch.setenv(hr.HOME_INTERVAL_ENV, "15")
+        with caplog.at_level(logging.INFO, logger="mcore.h2s_rest"):
+            delay = _tick(home)
+            _tick(home)
+        assert home.trig._proxy() == "socks5://home:1080"
+        assert delay == pytest.approx(15.0)
+        assert caplog.text.count("当前走自家线路：每 15 秒一次") == 1   # 只在切换时说一次
+
+    def test_pushback_pauses_home_for_an_hour(self, home, monkeypatch, caplog):
+        monkeypatch.setenv(hr.HOME_INTERVAL_ENV, "15")
+        _tick(home)
+        _Watcher.instances[0].last_error = "HTTP 429，重试 4 次仍失败"
+        with caplog.at_level(logging.WARNING, logger="mcore.h2s_rest"):
+            _tick(home)
+        assert "家宽上暂停 60 分钟" in caplog.text
+        assert home.trig._proxy() == ""
+        home.clock.t += hr.HOME_PAUSE_SEC - 1
+        assert home.trig._proxy() == ""
+        home.clock.t += 1
+        assert home.trig._proxy() == "socks5://home:1080"
+
+    @pytest.mark.parametrize("err", ["HTTP 403", "HTTP 503，重试 4 次仍失败"])
+    def test_403_and_503_also_pause(self, home, monkeypatch, err):
+        monkeypatch.setenv(hr.HOME_INTERVAL_ENV, "15")
+        _tick(home)
+        _Watcher.instances[0].last_error = err
+        _tick(home)
+        assert home.trig._proxy() == ""
+
+    def test_other_errors_do_not_pause(self, home, monkeypatch):
+        monkeypatch.setenv(hr.HOME_INTERVAL_ENV, "15")
+        _tick(home)
+        _Watcher.instances[0].last_error = "网络错误: timeout，重试 4 次仍失败"
+        _tick(home)
+        assert home.trig._proxy() == "socks5://home:1080"
+
+    def test_pushback_on_pool_does_not_pause_home(self, home, monkeypatch):
+        monkeypatch.setenv(hr.HOME_INTERVAL_ENV, "15")
+        home.home["home"] = False
+        _tick(home)
+        _Watcher.instances[0].last_error = "HTTP 403"
+        _tick(home)
+        assert home.trig._home_paused_until == float("-inf")
+        home.home["home"] = True
+        _Watcher.instances[0].last_error = None      # 真 watcher 每轮重写 last_error
+        _tick(home)
+        assert home.trig._proxy() == "socks5://home:1080"
+
+    def test_pool_recovery_restores_fast_pace(self, home, monkeypatch, caplog):
+        monkeypatch.setenv(hr.HOME_INTERVAL_ENV, "15")
+        _tick(home)
+        home.home["home"] = False
+        with caplog.at_level(logging.INFO, logger="mcore.h2s_rest"):
+            delay = _tick(home)
+        assert delay == pytest.approx(hr.DEFAULT_INTERVAL)
+        assert home.trig._proxy() == "http://pool"
+        assert "商业代理恢复" in caplog.text

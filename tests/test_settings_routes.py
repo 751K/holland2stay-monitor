@@ -13,7 +13,6 @@ v1.16.0 起这些值住在 SQLite 的 app_settings，不再写 .env——.env �
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -344,6 +343,17 @@ class TestH2SRestSettings:
         assert 'id="h2s_rest" ' in html and 'id="h2s_rest" checked' not in html
         assert 'name="H2S_REST_ENABLED" value="false"' in html
         assert 'name="H2S_REST_INTERVAL" value="3"' in html
+        assert 'name="H2S_REST_HOME_INTERVAL" value="0"' in html
+
+    def test_home_interval_is_saved_and_read_by_monitor(self, admin_client,
+                                                        isolated_data_dir, monkeypatch):
+        from mcore.h2s_rest import rest_home_interval
+        self._post(admin_client, H2S_REST_HOME_INTERVAL="15")
+        assert _saved()["H2S_REST_HOME_INTERVAL"] == "15"
+        monkeypatch.setenv("H2S_REST_HOME_INTERVAL", _saved()["H2S_REST_HOME_INTERVAL"])
+        assert rest_home_interval() == 15.0
+        html = admin_client.get("/settings").get_data(as_text=True)
+        assert 'name="H2S_REST_HOME_INTERVAL" value="15"' in html
 
     def test_page_reflects_saved_on(self, admin_client, isolated_data_dir):
         self._post(admin_client, H2S_REST_ENABLED="true", H2S_REST_INTERVAL="5")

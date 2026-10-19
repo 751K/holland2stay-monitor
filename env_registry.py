@@ -89,9 +89,9 @@ RUNTIME_KEYS: frozenset[str] = frozenset({
     "WARM_BROWSER_LANE",
     # H2S REST 触发器总开关（默认关）与轮询间隔，见 mcore/h2s_rest.py。放 RUNTIME：
     # /settings 面板可改、热重载生效；免检路径哪天被收回、或者对方开始限流，
-    # 要能不部署就关掉。
+    # 要能不部署就关掉。HOME_INTERVAL 是自家线路上的间隔（0 = 那时不查）。
     "H2S_REST_ENABLED", "H2S_REST_INTERVAL",
-    "H2S_REST_START", "H2S_REST_END", "H2S_REST_WEEKDAYS_ONLY",
+    "H2S_REST_START", "H2S_REST_END", "H2S_REST_WEEKDAYS_ONLY", "H2S_REST_HOME_INTERVAL",
     # 监控范围（同样由面板写回）
     "SOURCES", "SHADOW_SOURCES",
     "CITIES", "OURDOMAIN_CITIES", "OURCAMPUS_CITIES", "XIOR_CITIES",
