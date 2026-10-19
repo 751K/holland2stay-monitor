@@ -11,7 +11,6 @@ users.set_app_password / verify_app_password 单元测试。
 
 from __future__ import annotations
 
-import pytest
 
 from users import UserConfig, set_app_password, verify_app_password
 

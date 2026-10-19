@@ -85,7 +85,6 @@ class TestMagisCityDispatch:
     """城市认不出 ≠ 哪个城市都算。"""
 
     def _cards_with_unknown_city(self):
-        from scrapers.magis import _split_cards
         page = (FIXTURES / "magis_for_rent_all.html").read_text(
             encoding="utf-8", errors="replace")
         # 把已知城市替换成一个没登记的，模拟站点新开一城
@@ -240,7 +239,6 @@ class TestHungRendererDoesNotStallTheLoop:
     """
 
     def test_dispatch_has_a_wall_clock_timeout(self):
-        import inspect
 
         import monitor
 
@@ -284,12 +282,9 @@ class TestHungRendererDoesNotStallTheLoop:
 
     def test_page_gets_a_default_timeout(self):
         """page.content() 那一半由页面级默认超时兜住。"""
-        import inspect
 
         import browser_fetcher
 
-        src = _code(browser_fetcher.BrowserFetcher._ensure_browser) \
-            if hasattr(browser_fetcher.BrowserFetcher, "_ensure_browser") else ""
         whole = (Path(browser_fetcher.__file__).read_text(encoding="utf-8"))
         assert "set_default_timeout" in whole, "页面没有默认超时"
         assert "_PAGE_DEFAULT_TIMEOUT_MS" in whole

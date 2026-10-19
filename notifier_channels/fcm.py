@@ -443,7 +443,7 @@ class FcmClient:
         raw = await asyncio.gather(*[_one(t) for t in targets],
                                    return_exceptions=True)
         out: list[FcmResult] = []
-        for t, r in zip(targets, raw):
+        for t, r in zip(targets, raw, strict=True):
             if isinstance(r, BaseException):
                 logger.warning("FCM 单设备异常 dev=%s: %s",
                                str(t.get("device_token", ""))[:12], r)

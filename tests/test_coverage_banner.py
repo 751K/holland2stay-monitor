@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -273,7 +272,6 @@ class TestShadowIsVisible:
         同样含有那个字样，grep 抓不到。也不能靠测试自己重算一遍 rows：那样验的是
         测试自己的算法，不是路由的。
         """
-        import re
 
         monkeypatch.setenv("SOURCES", "holland2stay,plaza")
         monkeypatch.setenv("CITIES", "Amsterdam,24")

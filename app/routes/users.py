@@ -36,7 +36,6 @@ from app.auth import (
     check_test_notify_rate,
     current_user_id,
     is_admin,
-    is_user,
     record_test_notify,
     self_or_admin_required,
 )
@@ -73,7 +72,7 @@ def _xior_building_options() -> list[dict]:
 def _run_async(coro: Any) -> Any:
     """安全运行 async 协程，兼容已有 event loop（Gunicorn gevent/asyncio worker）。"""
     try:
-        loop = asyncio.get_running_loop()
+        asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
     # 已有 running loop：在新线程中跑独立的 event loop
@@ -653,7 +652,7 @@ def _test_push_to_devices(user_id: str) -> list[dict]:
         sent = _run_async(_push.dispatch_announcement_to_user(
             st, user_id, "🧪 FlatRadar", "通知配置正确 ✅",
         ))
-    except Exception as e:
+    except Exception:
         logger.exception("测试推送失败 user_id=%s", user_id)
         return [{"channel": "设备推送", "ok": False, "error": "发送失败，请检查日志"}]
     finally:

@@ -29,7 +29,6 @@ Xior 的 WP feed 会把已经订走的单元继续挂着，所以每轮另抓一
 """
 from __future__ import annotations
 
-import pytest
 
 from models import Listing
 

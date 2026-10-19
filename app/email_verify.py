@@ -253,7 +253,6 @@ async def send_verification_email(
         logger.warning("验证邮件被配额拒发: %s", reason)
         return False
 
-    import curl_cffi.requests as req
 
     from net import direct_curl_session
     from config import get_impersonate

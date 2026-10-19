@@ -33,14 +33,12 @@ from __future__ import annotations
 
 import logging
 import time
-from contextlib import contextmanager
 from typing import Optional
 
 from models import Listing, is_sentinel_available_from
 
 from ._browser_backed import BrowserBackedScraper
 from .base import (
-    RATE_LIMIT_BACKOFF,
     BlockedError,
     OperationNotAllowedError,
     RateLimitError,

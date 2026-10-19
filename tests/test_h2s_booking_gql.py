@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
 
 import h2s_booking_gql as m
 

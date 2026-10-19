@@ -69,7 +69,7 @@ def main() -> int:
 
     if args.submit:
         print(f"\n⚠️  --submit 会**真的应征** {args.listing}，和在网站上点 Reply 一样。")
-        if input(f"    再打一次房源 id 确认: ").strip() != args.listing:
+        if input("    再打一次房源 id 确认: ").strip() != args.listing:
             print("对不上，取消。")
             return 1
 

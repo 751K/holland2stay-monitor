@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 
 
 class TestEncryptDecryptRoundtrip:
@@ -109,8 +109,8 @@ class TestKeyMismatch:
         # 模拟密钥变更：重置 _CIPHER 并塞入新密钥
         crypto._CIPHER = Fernet(Fernet.generate_key())
 
-        # decrypt 必须抛异常（cryptography.fernet.InvalidToken 或类似）
-        with pytest.raises(Exception):
+        # decrypt 必须抛 InvalidToken
+        with pytest.raises(InvalidToken):
             decrypt(ciphertext)
 
     def test_corrupted_ciphertext_raises(self, fresh_crypto):
@@ -119,7 +119,7 @@ class TestKeyMismatch:
         ct = encrypt("secret")
         # 改掉一个字符
         bad = ct[:-1] + ("A" if ct[-1] != "A" else "B")
-        with pytest.raises(Exception):
+        with pytest.raises(InvalidToken):
             decrypt(bad)
 
 

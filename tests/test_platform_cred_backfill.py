@@ -26,12 +26,10 @@ import json
 import pytest
 
 import users as users_mod
-from config import AutoBookConfig
 from crypto import encrypt
 from mstorage import Storage
 from users import (
     RENTCAFE_CRED_CLEANUP_META_KEY,
-    UserConfig,
     _ab_from_dict,
     _ensure_rentcafe_creds_unbackfilled,
 )

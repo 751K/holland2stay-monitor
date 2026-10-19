@@ -5,7 +5,6 @@ Starts the web panel directly (no subprocess). Supports --run-monitor
 flag so the web panel can spawn a background monitor process in the
 same frozen bundle.
 """
-import os
 import sys
 import threading
 import webbrowser

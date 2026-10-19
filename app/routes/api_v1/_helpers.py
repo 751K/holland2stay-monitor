@@ -18,7 +18,7 @@ from typing import Optional
 
 from flask import g
 
-from app.services.listing_service import (
+from app.services.listing_service import (  # noqa: F401  （re-export：me.py 从这里取）
     apply_user_filter,
     row_to_listing,
     serialize_filter,

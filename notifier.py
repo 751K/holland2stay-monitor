@@ -1395,12 +1395,12 @@ def _format_new(l: Listing, *, lang: str = "en") -> str:
     source = _source_short(getattr(l, "source", ""))
     lines = [
         f"[{source}] {_tl('New Listing', lang)}",
-        f"",
+        "",
         f"{l.name}",
         f"{_tl('Status', lang)}: {l.status}",
         f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
         f"{_tl('Available', lang)}: {l.available_from or '?'}",
-        f"",
+        "",
     ]
     if fm:
         lines += [
@@ -1409,7 +1409,7 @@ def _format_new(l: Listing, *, lang: str = "en") -> str:
             f"{_tl('Occupancy', lang)}: {fm.get('occupancy', '—')}",
             f"{_tl('Floor', lang)}: {fm.get('floor', '—')}",
             f"{_tl('Energy', lang)}: {fm.get('energy_label', '—')}",
-            f"",
+            "",
         ]
     lines.append(f"{l.url}")
     return "\n".join(lines)
@@ -1451,12 +1451,12 @@ def _format_status_change(l: Listing, old: str, new: str, *, lang: str = "en") -
     source = _source_short(getattr(l, "source", ""))
     return "\n".join([
         f"[{source}] {_tl('Status Change', lang)}",
-        f"",
+        "",
         f"{l.name}",
         f"{old} → {new}",
         f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
         f"{_tl('Available', lang)}: {l.available_from or '?'}",
-        f"",
+        "",
         f"{l.url}",
     ])
 
@@ -1465,16 +1465,16 @@ def _format_application_submitted(l: Listing, *, lang: str = "en") -> str:
     source = _source_short(getattr(l, "source", ""))
     return "\n".join([
         f"[{source}] {_tl('Application Submitted!', lang)}",
-        f"",
+        "",
         f"{l.name}",
         f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
         f"{_tl('Available', lang)}: {l.available_from or '?'}",
-        f"",
+        "",
         _tl("This is not a reservation: the platform screens applicants and "
             "allocates the home. Watch for their message.", lang),
-        f"",
+        "",
         f"{_tl('View listing', lang)}:",
-        f"",
+        "",
         f"{l.url}",
     ])
 
@@ -1497,13 +1497,13 @@ def _format_booking_success(
     source = _source_short(getattr(l, "source", ""))
     lines = [
         f"[{source}] {_tl('Booking Successful!', lang)}",
-        f"",
+        "",
         f"{l.name}",
         f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
         f"{_tl('Move-in', lang)}: {start}",
-        f"",
+        "",
         f"{_tl('Pay now (time-sensitive)', lang)}:",
-        f"",
+        "",
         pay_url if pay_url else detail,
     ]
     return "\n".join(lines)
@@ -1513,10 +1513,10 @@ def _format_booking_failed(l: Listing, reason: str, *, lang: str = "en") -> str:
     source = _source_short(getattr(l, "source", ""))
     return "\n".join([
         f"[{source}] {_tl('Booking Failed', lang)}",
-        f"",
+        "",
         f"{l.name}",
         f"{_tl('Rent', lang)}: {l.price_display}{_tl('/mo', lang)}{_rent_note(l, lang)}",
-        f"",
+        "",
         f"{_tl('Reason', lang)}: {reason}",
         f"{_tl('Manual booking', lang)}: {l.url}",
     ])

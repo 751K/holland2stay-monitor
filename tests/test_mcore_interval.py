@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
-import pytest
 
 from mcore.interval import apply_jitter, get_interval
 

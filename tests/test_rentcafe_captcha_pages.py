@@ -10,7 +10,6 @@ token 服务端不认。
 """
 from __future__ import annotations
 
-import pytest
 
 from captcha import (
     KIND_NONE,

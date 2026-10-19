@@ -225,7 +225,7 @@ class TestContentType:
         """发 JSON 会得到 200 + 没有 result + 零报错。所以编码必须钉住。"""
         _, sess = _run(monkeypatch, req, _routes())
         checked = 0
-        for url, data, js, headers, method in sess.calls:
+        for url, _data, js, headers, method in sess.calls:
             if method != "POST":
                 continue
             if "/portal/object/" in url or "getactievereacties" in url:

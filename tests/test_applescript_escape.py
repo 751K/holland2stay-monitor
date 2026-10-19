@@ -11,7 +11,6 @@ AppleScript 字面量转义 + iMessage notifier 的 _build_applescript。
 """
 from __future__ import annotations
 
-import pytest
 
 from notifier import _build_applescript, _escape_applescript_literal
 

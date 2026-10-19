@@ -77,39 +77,27 @@ def _fail(n, err="RateLimitError"):
 
 
 class TestJudgeStatus:
-    def test_healthy_source_is_ok(self):
-        h = _h(_rows(_ok(10)))
-        assert h.status == health.STATUS_OK
-        assert h.reasons == []
-
-    def test_no_rows_is_unknown(self):
-        h = _h([])
-        assert h.status == health.STATUS_UNKNOWN
-        assert h.rounds == 0
-
-    def test_consecutive_failures_is_down(self):
-        h = _h(_rows(_fail(3) + _ok(5)))
-        assert h.status == health.STATUS_DOWN
-        assert h.fail_streak == 3
-        assert h.last_error == "RateLimitError"
+    @pytest.mark.parametrize("rows, want_status, attrs", [
+        (_rows(_ok(10)), health.STATUS_OK, {"reasons": []}),
+        ([], health.STATUS_UNKNOWN, {"rounds": 0}),
+        (_rows(_fail(3) + _ok(5)), health.STATUS_DOWN,
+         {"fail_streak": 3, "last_error": "RateLimitError"}),
+        # 本来有房、突然全没了——上游改版打坏解析器就是这个特征。
+        (_rows(_zero(3) + _ok(5, listings=284)), health.STATUS_WARN,
+         {"zero_streak": 3, "max_listings": 284}),
+        # Xior / OurCampus 常态零可订，不该被永久钉在告警上。
+        (_rows(_zero(20)), health.STATUS_OK,
+         {"zero_streak": 20, "max_listings": 0}),
+    ])
+    def test_status_rules(self, rows, want_status, attrs):
+        h = _h(rows)
+        assert h.status == want_status
+        for name, want in attrs.items():
+            assert getattr(h, name) == want
 
     def test_below_fail_threshold_is_not_down(self):
         h = _h(_rows(_fail(2) + _ok(5)))
         assert h.status != health.STATUS_DOWN
-
-    def test_zero_after_nonzero_is_warn(self):
-        """本来有房、突然全没了——上游改版打坏解析器就是这个特征。"""
-        h = _h(_rows(_zero(3) + _ok(5, listings=284)))
-        assert h.status == health.STATUS_WARN
-        assert h.zero_streak == 3
-        assert h.max_listings == 284
-
-    def test_always_zero_source_stays_ok(self):
-        """Xior / OurCampus 常态零可订，不该被永久钉在告警上。"""
-        h = _h(_rows(_zero(20)))
-        assert h.status == health.STATUS_OK
-        assert h.zero_streak == 20
-        assert h.max_listings == 0
 
     def test_low_completeness_alone_is_not_warn(self):
         """低完整率**不再**告警——分层抓取让它对 H2S 永久为真。
@@ -163,21 +151,15 @@ class TestFmtTs:
     告警里塞 UTC ISO 的话，收到推送的人还得自己换算才能去日志里对上那一刻。
     """
 
-    def test_converts_utc_to_configured_zone(self, monkeypatch):
-        monkeypatch.setenv("TIMEZONE", "Europe/Amsterdam")
-        assert health.fmt_ts("2026-08-03T12:00:00+00:00") == "08-03 14:00"   # CEST +2
-
-    def test_handles_dst_boundary(self, monkeypatch):
-        monkeypatch.setenv("TIMEZONE", "Europe/Amsterdam")
-        assert health.fmt_ts("2026-01-15T12:00:00+00:00") == "01-15 13:00"   # CET +1
-
-    def test_respects_other_zones(self, monkeypatch):
-        monkeypatch.setenv("TIMEZONE", "UTC")
-        assert health.fmt_ts("2026-08-03T12:00:00+00:00") == "08-03 12:00"
-
-    def test_naive_timestamp_is_treated_as_utc(self, monkeypatch):
-        monkeypatch.setenv("TIMEZONE", "Europe/Amsterdam")
-        assert health.fmt_ts("2026-08-03T12:00:00") == "08-03 14:00"
+    @pytest.mark.parametrize("zone, ts, want", [
+        ("Europe/Amsterdam", "2026-08-03T12:00:00+00:00", "08-03 14:00"),  # CEST +2
+        ("Europe/Amsterdam", "2026-01-15T12:00:00+00:00", "01-15 13:00"),  # CET +1（DST 边界）
+        ("UTC", "2026-08-03T12:00:00+00:00", "08-03 12:00"),
+        ("Europe/Amsterdam", "2026-08-03T12:00:00", "08-03 14:00"),        # 无时区按 UTC
+    ])
+    def test_converts_utc_to_configured_zone(self, monkeypatch, zone, ts, want):
+        monkeypatch.setenv("TIMEZONE", zone)
+        assert health.fmt_ts(ts) == want
 
     def test_empty_uses_fallback(self):
         assert health.fmt_ts("", fallback="窗口内没有") == "窗口内没有"

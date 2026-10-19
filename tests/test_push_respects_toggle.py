@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from unittest.mock import patch
 
 import pytest
@@ -183,7 +183,6 @@ class TestToggleOn:
 class TestDeviceRegistrationOptsIn:
     def test_flips_switch(self, client, test_app):
         from app.services.device_service import _enable_notifications_for
-        from users import load_users, update_users
 
         uid = _make_user(client, test_app, "OptInProbe")
         with test_app.app_context():

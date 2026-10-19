@@ -55,6 +55,7 @@ def energy_rank(label: str) -> int | None:
 
 if TYPE_CHECKING:
     from models import Listing
+    from scrapers.base import ScrapeTask
 
 logger = logging.getLogger(__name__)
 
@@ -1993,7 +1994,7 @@ class Config:
                 out[source] = sorted(names)
         return out
 
-    def scrape_tasks_v2(self) -> list["ScrapeTask"]:  # type: ignore[name-defined]
+    def scrape_tasks_v2(self) -> list["ScrapeTask"]:
         """
         P0 新接口：展开为 source-aware 的 ``ScrapeTask`` 列表。
 
@@ -2418,7 +2419,7 @@ def load_config() -> Config:
     try:
         ZoneInfo(timezone_str)
     except (ZoneInfoNotFoundError, KeyError):
-        raise ValueError(f"无效的 IANA 时区标识符: {timezone_str}")
+        raise ValueError(f"无效的 IANA 时区标识符: {timezone_str}") from None
 
     magis_cities: list[MagisCityFilter] = []
     if "magis" in sources:

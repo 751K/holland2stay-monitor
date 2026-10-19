@@ -193,7 +193,6 @@ def _short_ourdomain_building(building: str) -> str:
 def _xior_display_name(row: dict) -> str:
     """Xior listing display: 'Maastricht Annadal M1.30.53' → 'M1.30.53'"""
     unit = feature_value(row, "Unit") or ""
-    building = feature_value(row, "Building") or ""
     if unit:
         return unit
     # fallback: extract from raw name

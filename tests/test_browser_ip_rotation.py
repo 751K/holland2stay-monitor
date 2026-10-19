@@ -16,7 +16,6 @@ from types import MethodType
 
 import pytest
 
-import browser_fetcher
 from browser_fetcher import H2S_PROFILE, SiteProfile, BrowserFetcher
 from scrapers.base import BlockedError
 
@@ -87,7 +86,7 @@ class TestRebuildRotatesExit:
 class TestInitRetriesOnFreshExit:
     def test_each_failed_attempt_gets_a_new_exit(self, monkeypatch):
         f = BrowserFetcher(profile=H2S_PROFILE)
-        proxies = _stub_launch(f)
+        _stub_launch(f)
         f._launch()
 
         seen: list[str] = []

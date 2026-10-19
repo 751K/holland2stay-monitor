@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from bookers.rentcafe_units import UnitOption, find_unit, parse_unit_options
+from bookers.rentcafe_units import find_unit, parse_unit_options
 
 
 # 实测抄录（缩短了尾部无关参数）

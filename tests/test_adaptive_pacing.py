@@ -27,7 +27,6 @@ from __future__ import annotations
 import pytest
 
 from mcore.pacing import AdaptivePacing
-from scrapers.base import BlockedError, RateLimitError, ScrapeNetworkError
 from storage import Storage
 
 

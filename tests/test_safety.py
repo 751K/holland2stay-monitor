@@ -9,7 +9,6 @@ sanitize_dotenv 阻止 .env 注入（\\n 伪造新键）。
 """
 from __future__ import annotations
 
-import pytest
 
 from app.safety import safe_next_url, sanitize_dotenv
 

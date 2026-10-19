@@ -446,7 +446,7 @@ class AbstractScraper(ABC):
 
     # ── 可选钩子（多数平台不实现，留空 no-op 默认即可）───────────────
 
-    def invalidate_session(self) -> None:
+    def invalidate_session(self) -> None:  # noqa: B027  （故意保留为可选 no-op 钩子）
         """丢弃本 source 持有的长生命周期资源（浏览器 / 会话）。
 
         dispatcher 在三种情况下调用：

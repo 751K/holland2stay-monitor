@@ -206,7 +206,6 @@ class TestMonitorWiring:
         xior 整源 429 失败 147 次正是这么攒出来的。
         """
         import ast
-        import inspect
         import pathlib
 
         src = pathlib.Path("monitor.py").read_text(encoding="utf-8")

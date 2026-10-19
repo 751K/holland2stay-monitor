@@ -37,56 +37,34 @@ def _make_listing(**overrides):
 
 
 class TestParseFloat:
-    def test_plain_int(self):
-        assert parse_float("700") == 700.0
-
-    def test_with_euro_symbol(self):
-        assert parse_float("€707") == 707.0
-
-    def test_with_decimal(self):
-        assert parse_float("26.0 m²") == 26.0
-
-    def test_with_thousands_separator(self):
-        # "1,200.50" → 1200.50
-        assert parse_float("€1,200.50") == 1200.5
-
-    def test_with_euro_dot_thousands_separator(self):
-        assert parse_float("€ 1.587") == 1587.0
-
-    def test_with_euro_decimal_comma(self):
-        assert parse_float("€ 1.587,50") == 1587.5
-
-    def test_empty_returns_none(self):
-        assert parse_float("") is None
-
-    def test_none_returns_none(self):
-        assert parse_float(None) is None
-
-    def test_no_digits_returns_none(self):
-        assert parse_float("abc") is None
-        assert parse_float("Ground floor") is None
-
-    def test_extracts_first_match(self):
-        # 多个数字时取第一个
-        assert parse_float("€700 + €50 fees") == 700.0
+    @pytest.mark.parametrize("raw,want", [
+        ("700", 700.0),                    # 纯整数
+        ("€707", 707.0),                   # 带欧元符号
+        ("26.0 m²", 26.0),                 # 带单位
+        ("€1,200.50", 1200.5),             # 逗号千分位
+        ("€ 1.587", 1587.0),               # 荷兰式点千分位
+        ("€ 1.587,50", 1587.5),            # 荷兰式点千分位 + 逗号小数
+        ("", None),                        # 空串
+        (None, None),                      # None
+        ("abc", None),                     # 没有数字
+        ("Ground floor", None),
+        ("€700 + €50 fees", 700.0),        # 多个数字取第一个
+    ])
+    def test_parse_float(self, raw, want):
+        assert parse_float(raw) == want
 
 
 class TestParseInt:
-    def test_plain(self):
-        assert parse_int("3") == 3
-
-    def test_with_text(self):
-        assert parse_int("Floor 3") == 3
-
-    def test_empty(self):
-        assert parse_int("") is None
-
-    def test_no_digits(self):
-        assert parse_int("Ground floor") is None
-
-    def test_first_integer_only(self):
+    @pytest.mark.parametrize("raw,want", [
+        ("3", 3),
+        ("Floor 3", 3),
+        ("", None),
+        ("Ground floor", None),
         # parse_int 用 \d+，不是 \d+\.\d+，所以 "3.5" 提到 3
-        assert parse_int("3.5") == 3
+        ("3.5", 3),
+    ])
+    def test_parse_int(self, raw, want):
+        assert parse_int(raw) == want
 
 
 class TestParseFeaturesList:

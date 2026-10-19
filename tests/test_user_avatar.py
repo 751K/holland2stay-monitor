@@ -12,9 +12,7 @@ accent、四个语义色和四个渠道品牌色，「每人一个色相」是�
 from __future__ import annotations
 
 import inspect
-import re
 
-import pytest
 
 
 # ── 头像 ────────────────────────────────────────────────────────

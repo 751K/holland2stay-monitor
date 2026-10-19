@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mcore.prewarm import PrewarmCache, _TOKEN_REFRESH_MARGIN
 from booker import PrewarmedSession

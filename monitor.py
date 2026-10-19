@@ -90,7 +90,7 @@ from scrapers import (
 from update_checker import check_for_updates
 from mstorage._notifications import WEB_NOTIFICATIONS_KEEP
 from storage import Storage
-from users import UserConfig, load_users, save_users
+from users import UserConfig, load_users
 from models import Listing
 
 
@@ -1675,7 +1675,7 @@ def _collect_booking_candidates(
     }
 
     for listing in new_listings:
-        for user, notifier in user_notifiers:
+        for user, _notifier in user_notifiers:
             if (
                     user.auto_book.enabled
                     and user.notifications_enabled
@@ -1690,7 +1690,7 @@ def _collect_booking_candidates(
     for listing, old_status, new_status in status_changes:
         if new_status.lower() == STATUS_AVAILABLE:
             status_transition[listing.id] = (old_status, new_status)
-        for user, notifier in user_notifiers:
+        for user, _notifier in user_notifiers:
             if (
                     user.auto_book.enabled
                     and user.notifications_enabled
@@ -1712,7 +1712,7 @@ def _collect_booking_candidates(
         for l in fresh
         if l.source in _AUTO_BOOK_SOURCES and l.status.lower() == STATUS_AVAILABLE
     }
-    for user, notifier in user_notifiers:
+    for user, _notifier in user_notifiers:
         if (not user.auto_book.enabled or not user.notifications_enabled
                 or not reachable[user.id]):
             continue
@@ -2027,7 +2027,7 @@ async def _notify_new_listings(
     push_tasks: list = []
 
     for listing in new_listings:
-        for user, notifier in user_notifiers:
+        for user, _notifier in user_notifiers:
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
                 logger.info("[%s] 跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
@@ -3412,7 +3412,8 @@ async def main_loop(
     # 一个请求都不发，所以无条件启动。lambda 读的是本函数的局部 cfg，热重载
     # 换掉 cfg 之后它自然看到新的。
     rest_trigger = RestTrigger(_h2s_wake_event)
-    rest_task = asyncio.create_task(rest_trigger.run(lambda: cfg))
+    # 保留引用：asyncio 文档要求调用方持有 task 的强引用，否则可能被 GC。
+    _rest_task = asyncio.create_task(rest_trigger.run(lambda: cfg))
 
     round_count = 0
     last_heartbeat_time = time.monotonic()  # 启动时记为刚发过，避免第一轮立即心跳

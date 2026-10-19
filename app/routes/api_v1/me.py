@@ -279,7 +279,6 @@ def _delete_account() -> Any:
 
     admin 不能通过此端点删除（admin 没有 user_id）。
     """
-    role = api_auth.current_role()
     user = get_current_user()
     if user is None:
         return _err.err_unauthorized("用户不存在")

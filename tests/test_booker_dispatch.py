@@ -15,13 +15,11 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 
 from bookers import (
     AbstractBooker,
     BOOKER_REGISTRY,
     BookingRequest,
-    BookingResult,
     HollandStayBooker,
     dispatch_book,
     get_booker,

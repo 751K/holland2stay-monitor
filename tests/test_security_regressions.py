@@ -15,7 +15,6 @@ import inspect
 import re
 from pathlib import Path
 
-import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -84,7 +83,6 @@ class TestSystemPageDoesNotOpenAnAuthWindow:
         这条不测我们的修复，测的是**为什么必须修**——哪天 is_admin 改了实现，
         这条会红，提醒重新评估上面两条还够不够。
         """
-        import os
 
         from app import auth
 

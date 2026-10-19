@@ -3,7 +3,6 @@ import json
 import sys
 import time
 from pathlib import Path
-from urllib.request import Request
 
 from net import direct_urlopen
 from urllib.parse import quote

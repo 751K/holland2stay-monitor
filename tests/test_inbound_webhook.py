@@ -17,9 +17,13 @@ import hashlib
 import hmac
 import json
 import time
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+
+if TYPE_CHECKING:
+    from werkzeug.wrappers import Response
 
 from app.routes.inbound import (
     _decode_secret,
@@ -221,7 +225,7 @@ def flask_client(tmp_path, monkeypatch):
 
 
 def _post(client, body: dict, *, secret=_TEST_SECRET, svix_id="msg_1",
-          ts: int | None = None) -> "FlaskResponse":
+          ts: int | None = None) -> "Response":
     raw = json.dumps(body, separators=(",", ":")).encode()
     svix_ts = str(ts if ts is not None else int(time.time()))
     sig = _make_sig(secret, svix_id, svix_ts, raw)
@@ -256,8 +260,7 @@ def _email_received_payload(**overrides) -> dict:
 
 
 class TestInboundRoute:
-    def test_missing_secret_env_returns_503(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("FLATRADAR_DB", str(tmp_path / "x.db"))
+    def test_missing_secret_env_returns_503(self, monkeypatch):
         monkeypatch.delenv("RESEND_WEBHOOK_SECRET", raising=False)
 
         from flask import Flask

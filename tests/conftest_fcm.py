@@ -46,13 +46,3 @@ def test_service_account_json(tmp_path_factory, test_rsa_key) -> Path:
 def fcm_cfg(test_service_account_json):
     from notifier_channels.fcm import FcmConfig
     return FcmConfig._from_service_account(str(test_service_account_json))
-
-
-@pytest.fixture
-def mock_token_exchange(monkeypatch):
-    """替换 OAuth2 token exchange，避免测试时开网络。"""
-    from notifier_channels.fcm import _AccessTokenCache
-    monkeypatch.setattr(
-        _AccessTokenCache, "_exchange",
-        lambda self, assertion: "fake-access-token-for-test",
-    )

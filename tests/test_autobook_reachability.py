@@ -10,7 +10,6 @@
 只用 App 的用户照常收房源推送，却永远开不了自动预订。这一整个文件在此之前
 **没有任何测试**，所以这个洞没有任何东西挡着。
 """
-import pytest
 
 import monitor
 from config import AutoBookConfig

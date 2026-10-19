@@ -11,7 +11,6 @@ httpx、curl_cffi **三者都默认读这两个环境变量**，于是应用里�
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 

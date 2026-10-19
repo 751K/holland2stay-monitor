@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import logging
 
-import pytest
 
 import monitor
 from target_config import REGISTRY_SEEN_META_KEY, ack_registry, registry_of

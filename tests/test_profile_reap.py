@@ -22,7 +22,6 @@ import subprocess
 import sys
 import time
 
-import pytest
 
 import browser_fetcher as bf
 

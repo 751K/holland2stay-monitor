@@ -77,8 +77,7 @@ def seeded(api_app):
                  _now_iso(), _now_iso(), status, source),
             )
         # 地图坐标缓存：给 id-1 / id-2 加坐标（id-3 没地址匹配，故意不缓存）
-        from mstorage._map_calendar import _CITY_FORMAL
-        for lid, addr in [
+        for _, addr in [
             ("id-1", "Studio Centrum, Eindhoven, Netherlands"),
             ("id-2", "1BR West, Amsterdam, Netherlands"),
         ]:

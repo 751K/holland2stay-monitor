@@ -9,7 +9,6 @@ app/routes/notifications.py 路由测试。
 """
 from __future__ import annotations
 
-import pytest
 
 
 class TestNotificationsAuth:

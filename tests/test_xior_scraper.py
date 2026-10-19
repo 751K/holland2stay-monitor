@@ -320,44 +320,32 @@ def test_to_listing_features_include_unit_sqm_floorplan():
     assert "Essential" in features_str
 
 
-def test_to_listing_zero_deposit_shown():
+@pytest.mark.parametrize("unit, expected", [
+    (SAMPLE_UNIT, "Deposit: €0"),                               # 零押金也要显示
+    (dict(SAMPLE_UNIT, deposit=350), "Deposit: €350"),           # 正押金
+    ({k: v for k, v in SAMPLE_UNIT.items() if k != "deposit"}, "Deposit: €0"),
+    # 缺 deposit → 默认 0 → 显示 €0
+])
+def test_to_listing_deposit_visibility(unit, expected):
     from scrapers.xior import _to_listing
 
-    listing = _to_listing(SAMPLE_UNIT, display="Maastricht Annadal", building_url="https://example.com")
-    assert "Deposit: €0" in listing.features
-
-
-def test_to_listing_positive_deposit_shown():
-    from scrapers.xior import _to_listing
-
-    unit = dict(SAMPLE_UNIT, deposit=350)
     listing = _to_listing(unit, display="Maastricht Annadal", building_url="https://example.com")
-    assert "Deposit: €350" in listing.features
+    assert expected in listing.features
 
 
-def test_to_listing_missing_deposit_defaults_to_zero():
-    from scrapers.xior import _to_listing
-
-    unit = {k: v for k, v in SAMPLE_UNIT.items() if k != "deposit"}
-    listing = _to_listing(unit, display="Maastricht Annadal", building_url="https://example.com")
-    # missing deposit → defaults to 0 → shown as €0
-    assert "Deposit: €0" in listing.features
-
-
-def test_to_listing_uses_url_from_unit():
-    from scrapers.xior import _to_listing
-
-    listing = _to_listing(SAMPLE_UNIT, display="Maastricht Annadal", building_url="https://fallback.example.com")
-    assert "brouwersweg-xiorstudenthousing" in listing.url
-
-
-def test_to_listing_falls_back_to_building_url():
+@pytest.mark.parametrize("drop_unit_url, check", [
+    (False, lambda u: "brouwersweg-xiorstudenthousing" in u),
+    (True, lambda u: u == "https://example.com"),
+])
+def test_to_listing_url_selection(drop_unit_url, check):
     from scrapers.xior import _to_listing
 
     unit = dict(SAMPLE_UNIT)
-    del unit["applyOnlineURL"]
-    listing = _to_listing(unit, display="Maastricht Annadal", building_url="https://example.com")
-    assert listing.url == "https://example.com"
+    if drop_unit_url:
+        del unit["applyOnlineURL"]
+    listing = _to_listing(unit, display="Maastricht Annadal",
+                          building_url="https://example.com")
+    assert check(listing.url)
 
 
 def test_normalise_date_standard():

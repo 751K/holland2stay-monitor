@@ -10,7 +10,6 @@ POST /api/v1/feedback — 提交 bug 报告或功能建议。
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from flask import Blueprint, g, request
 

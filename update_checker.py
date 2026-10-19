@@ -49,7 +49,7 @@ def check_for_updates() -> None:
     print(f"GitHub 上有 {behind} 个新提交：")
     print(f"{'='*60}")
     log_result = subprocess.run(
-        ["git", "log", "--oneline", f"HEAD..@{{upstream}}"],
+        ["git", "log", "--oneline", "HEAD..@{upstream}"],
         capture_output=True, text=True,
     )
     if log_result.returncode == 0 and log_result.stdout:

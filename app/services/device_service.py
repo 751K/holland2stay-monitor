@@ -330,7 +330,7 @@ def send_test_push(
 
                 results = _run_async(_run_apns())
                 sent += sum(1 for r in results if r.ok)
-                for device, result in zip(ios_devices, results):
+                for device, result in zip(ios_devices, results, strict=True):
                     token = device["device_token"]
                     detail.append({
                         "device_token_hint": _token_hint(token),
@@ -374,7 +374,7 @@ def send_test_push(
 
                 results = _run_async(_run_fcm())
                 sent += sum(1 for r in results if r.ok)
-                for device, result in zip(android_devices, results):
+                for device, result in zip(android_devices, results, strict=True):
                     token = device["device_token"]
                     detail.append({
                         "device_token_hint": _token_hint(token),

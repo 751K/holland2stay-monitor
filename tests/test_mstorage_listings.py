@@ -4,7 +4,6 @@ import json
 
 import pytest
 from datetime import datetime, timezone, timedelta
-from models import Listing
 from mstorage import Storage
 
 

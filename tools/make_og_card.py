@@ -72,7 +72,7 @@ def _background() -> Image.Image:
     for y in range(H):
         t = y / (H - 1)
         d.line([(0, y), (W, y)],
-               fill=tuple(round(a + (b - a) * t) for a, b in zip(top, bottom)))
+               fill=tuple(round(a + (b - a) * t) for a, b in zip(top, bottom, strict=True)))
 
     blob = Image.new("RGB", (W, H), (0, 0, 0))
     bd = ImageDraw.Draw(blob)

@@ -11,7 +11,6 @@ import asyncio
 import inspect
 import re
 
-import pytest
 
 
 def _code(fn) -> str:

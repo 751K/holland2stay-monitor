@@ -19,57 +19,30 @@ from models import Listing
 # ── energy_rank ──────────────────────────────────────────
 
 class TestEnergyRank:
-    def test_a_triple_plus(self):
-        assert energy_rank("A+++") == 0
+    @pytest.mark.parametrize("label,want", [
+        ("A+++", 0),
+        ("A++", 1),
+        ("A+", 2),
+        ("A", 3),
+        ("B", 4),
+        ("C", 5),
+        ("D", 6),
+        ("E", 7),
+        ("a", 3),            # 小写归一
+        ("b", 4),
+        ("  A  ", 3),        # 去空白
+    ])
+    def test_known_labels(self, label, want):
+        assert energy_rank(label) == want
 
-    def test_a_double_plus(self):
-        assert energy_rank("A++") == 1
-
-    def test_a_single_plus(self):
-        assert energy_rank("A+") == 2
-
-    def test_a_plain(self):
-        assert energy_rank("A") == 3
-
-    def test_b(self):
-        assert energy_rank("B") == 4
-
-    def test_c(self):
-        assert energy_rank("C") == 5
-
-    def test_d(self):
-        assert energy_rank("D") == 6
-
-    def test_e(self):
-        assert energy_rank("E") == 7
-
-    def test_lowercase_normalized(self):
-        assert energy_rank("a") == 3
-        assert energy_rank("b") == 4
-
-    def test_whitespace_stripped(self):
-        assert energy_rank("  A  ") == 3
-
-    def test_empty_string(self):
-        assert energy_rank("") is None
-
-    def test_non_string_input(self):
-        assert energy_rank(None) is None  # type: ignore[arg-type]
-        assert energy_rank(123) is None   # type: ignore[arg-type]
-
-    def test_only_plus_signs(self):
-        assert energy_rank("+++") is None
-
-    def test_unrecognized_label(self):
-        assert energy_rank("G") is None
-        assert energy_rank("XYZ") is None
-
-    def test_partial_match_rejected(self):
-        """白名单精确匹配，'banana' 不应被当成 B。"""
-        assert energy_rank("banana") is None
-        assert energy_rank("AA") is None
-        assert energy_rank("B++") is None  # 仅 A 有 + 等级
-        assert energy_rank("Z") is None
+    @pytest.mark.parametrize("raw", [
+        "", None, 123, "+++",           # 空 / 非字符串 / 只有加号
+        "G", "XYZ",                     # 不认识的等级
+        # 白名单精确匹配：'banana' 不应被当成 B；仅 A 有 + 等级
+        "banana", "AA", "B++", "Z",
+    ])
+    def test_invalid_returns_none(self, raw):
+        assert energy_rank(raw) is None
 
     def test_ordering_consistency(self):
         """所有已知等级排序应正确：A+++ < A++ < A+ < A < B < C < D"""

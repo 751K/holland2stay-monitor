@@ -9,7 +9,6 @@ magis 的房型写 ``studio``，另外四个平台写 ``Studio``。``canonical_f
 """
 import json
 
-import pytest
 
 from mstorage._listings import _prefer_spelling, dedupe_feature_values
 

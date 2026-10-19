@@ -20,7 +20,6 @@ import pytest
 from app.services.announcement_service import (
     MAX_BODY,
     MAX_TITLE,
-    AnnouncementResult,
     broadcast,
 )
 

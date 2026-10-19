@@ -1,0 +1,12 @@
+# Ruff 配置（v2.0 CI 门禁）
+#
+# 当前门禁只启用 E9 / F / B / PLE，与 docs/FUTURE_PLAN.md「方向一」一致。
+# tests 里的 F811 是 pytest 的正常写法：从别的测试文件导入 fixture，
+# 再在测试函数签名里用同名参数接收。它不是「测试被覆盖」，
+# 也不该通过改参数名或删导入来消除。
+
+[lint]
+select = ["E9", "F", "B", "PLE"]
+
+[lint.per-file-ignores]
+"tests/**" = ["F811"]

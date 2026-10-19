@@ -34,7 +34,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import logging, os, re, html, json, time
 logging.disable(logging.CRITICAL)
-import config
 PX = "socks5://172.19.0.1:1080"
 for k in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"):
     os.environ[k] = PX

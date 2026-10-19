@@ -11,7 +11,6 @@
 """
 from __future__ import annotations
 
-import pytest
 from werkzeug.datastructures import ImmutableMultiDict
 
 from app.forms.user_form import build_user_from_form

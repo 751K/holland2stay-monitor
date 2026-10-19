@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from mcore.booking import RetryQueue, area_key, book_with_fallback
 from models import Listing

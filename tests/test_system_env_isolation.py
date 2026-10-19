@@ -23,6 +23,11 @@ import os
 
 import pytest
 
+import config
+import monitor
+from app import process_ctrl
+from app.services import monitor_service
+
 
 @pytest.fixture
 def env_file(tmp_path, monkeypatch):
@@ -70,3 +75,25 @@ class TestSystemPageDoesNotMutateEnv:
         monkeypatch.delenv("CHECK_INTERVAL", raising=False)
         body = admin_client.get("/system").get_data(as_text=True)
         assert "111" in body
+
+
+# ── 测试不许碰真实 data/ 下的 monitor 控制文件 ─────────────────────
+#
+# 守住 conftest 的 ``_isolate_monitor_control_files``：测试不许碰真实 data/ 下
+# 的 monitor.pid / monitor.reload，且写端和读端仍指向同一个文件。
+
+def test_control_paths_are_not_under_real_data_dir():
+    real = config.DATA_DIR.resolve()
+    for p in (process_ctrl.RELOAD_REQUEST_FILE, process_ctrl.PID_FILE,
+              monitor_service.PID_FILE, monitor._RELOAD_REQUEST_FILE, monitor._PID_FILE):
+        assert real not in p.resolve().parents, p
+
+
+def test_control_writer_and_reader_share_one_file():
+    process_ctrl.write_reload_request()
+    assert monitor._consume_reload_request_file() is True
+    assert monitor._consume_reload_request_file() is False
+
+
+def test_control_pid_paths_agree():
+    assert process_ctrl.PID_FILE == monitor_service.PID_FILE == monitor._PID_FILE

@@ -26,7 +26,7 @@ import re
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from config import AutoBookConfig, ListingFilter, ENERGY_LABELS
+from config import ApplicantProfile, AutoBookConfig, ListingFilter, ENERGY_LABELS
 from users import UserConfig
 
 if TYPE_CHECKING:

@@ -42,7 +42,6 @@ import os
 import time
 from typing import Any, Optional
 
-import curl_cffi.requests as req
 
 from net import direct_curl_session
 from flask import Flask, Response, jsonify, request

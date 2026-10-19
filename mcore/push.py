@@ -25,9 +25,7 @@ mcore.push — APNs + FCM 推送调度
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 import threading
 import time
 from collections import defaultdict, deque

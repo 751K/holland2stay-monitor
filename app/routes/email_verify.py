@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from flask import Flask, flash, jsonify, redirect, render_template_string, request, url_for
+from flask import Flask, jsonify, render_template_string, request
 
 from app.auth import self_or_admin_required, is_admin
 from app.csrf import csrf_required

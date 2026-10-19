@@ -27,7 +27,7 @@ def db(temp_db):
         ("id-2", "1BR West", "Available in lottery", "€950", "2026-07-01", ["Type: 1", "Area: 45.0 m²", "Contract: 6 months max", "Tenant: employed only"], "Amsterdam"),
         ("id-3", "2BR South", "Not available", "€1200", "2026-08-01", ["Type: 2", "Area: 70.0 m²", "Contract: Indefinite", "Tenant: student and employed"], "Eindhoven"),
     ]
-    for i, (lid, name, status, price, avail, features, city) in enumerate(rows):
+    for _, (lid, name, status, price, avail, features, city) in enumerate(rows):
         temp_db.conn.execute(
             "INSERT OR REPLACE INTO listings (id, name, status, price_raw, available_from, features, url, city, first_seen, last_seen, last_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (lid, name, status, price, avail, json.dumps(features), "https://x.com", city, now, now, status),

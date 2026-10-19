@@ -16,9 +16,7 @@ import time
 
 import pytest
 
-from app import api_auth
 from app.api_auth import (
-    _CACHE,
     _PENDING_TOUCH,
     _cache_get,
     _cache_put,

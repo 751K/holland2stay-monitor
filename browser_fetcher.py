@@ -726,7 +726,6 @@ class BrowserFetcher:
     def _launch(self) -> None:
         import os
 
-        from cloakbrowser import launch
 
         if platform.system() == "Darwin" and self._effective_headless:
             logger.info("macOS 本地 CloakBrowser 使用 headed 调试模式，避免 headless SIGABRT")

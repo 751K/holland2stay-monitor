@@ -102,7 +102,7 @@ class TestListingsPage:
         误判哪些平台的房源在按资格过滤。
         """
         admin_client = tenant_seeded
-        from config import dim_scope_badge, dim_scope_note
+        from config import dim_scope_badge
 
         # 语言必须钉死：不带 Accept-Language 时页面回落到 en（2026-08-27 改的，
         # Googlebot 就是这么爬的），而 dim_scope_badge 的默认参数是 zh——不指定

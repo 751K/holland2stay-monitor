@@ -10,7 +10,6 @@ scrapers/holland2stay _to_listing 解析测试。
 """
 from __future__ import annotations
 
-import pytest
 
 from scrapers.holland2stay import _to_listing
 

@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 import monitor
 from monitor import run_once
@@ -167,11 +164,9 @@ def _make_run_once_setup(tmp_path):
 class TestMonitorRunOnceBlockedAggregation:
     def setup_method(self):
         monitor.prewarm_cache.clear()
-        monitor._last_block_notify_at = 0.0
 
     def teardown_method(self):
         monitor.prewarm_cache.clear()
-        monitor._last_block_notify_at = 0.0
 
     def _run(self, cfg, storage, notifs, scrape_fn, try_book_fn):
         async def go():
@@ -260,11 +255,9 @@ class TestPrewarmBlockSuppressesLogin:
 
     def setup_method(self):
         monitor.prewarm_cache.clear()
-        monitor._h2s_login_blocked_until = 0.0
 
     def teardown_method(self):
         monitor.prewarm_cache.clear()
-        monitor._h2s_login_blocked_until = 0.0
 
     def _run_with_prewarm_error(self, cfg, storage, notifs, exc):
         async def go():

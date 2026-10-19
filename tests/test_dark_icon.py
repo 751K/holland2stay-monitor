@@ -16,7 +16,6 @@ PNG 用 zlib + struct 手动解，不引入 Pillow：Pillow 不是本项目的�
 """
 from __future__ import annotations
 
-import json
 import re
 import struct
 import zlib
@@ -127,7 +126,7 @@ def test_dark_keeps_the_same_silhouette(light, dark, decoded):
     """alpha 必须逐像素一致：深色版是同一个形状换色，不是另画一个。"""
     _, _, lpx = decoded[light]
     _, _, dpx = decoded[dark]
-    mismatch = sum(1 for a, b in zip(lpx, dpx) if a[3] != b[3])
+    mismatch = sum(1 for a, b in zip(lpx, dpx, strict=True) if a[3] != b[3])
     assert mismatch == 0, f"{dark} 的 alpha 与 {light} 有 {mismatch} 个像素不同"
 
 

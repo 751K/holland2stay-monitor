@@ -16,7 +16,6 @@ Holland2Stay 返回哪一版取决于房源录入时的语言，与房源本身�
 """
 from __future__ import annotations
 
-import logging
 
 import pytest
 

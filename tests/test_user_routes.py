@@ -13,7 +13,6 @@ isolated_data_dir fixture 把 USERS_FILE / DB_PATH 重定向到 tmp_path，
 """
 from __future__ import annotations
 
-import pytest
 
 
 def _create_user(admin_client, name="Test User", **extra_fields):

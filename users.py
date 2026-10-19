@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field, fields as dc_fields
 from typing import Callable, Optional, TypeVar
 
-from config import AutoBookConfig, DATA_DIR, ListingFilter
+from config import ApplicantProfile, AutoBookConfig, DATA_DIR, ListingFilter
 from crypto import decrypt, encrypt
 
 logger = logging.getLogger(__name__)
@@ -301,9 +301,9 @@ def _user_from_dict(d: dict) -> UserConfig:
         d = {k: v for k, v in d.items() if k in known}
 
     # 解密敏感字段（无 $F$ 前缀的旧明文数据原样通过）
-    for field in ("email_password", "telegram_token", "twilio_token"):
-        if d.get(field):
-            d[field] = decrypt(d[field])
+    for _field_name in ("email_password", "telegram_token", "twilio_token"):
+        if d.get(_field_name):
+            d[_field_name] = decrypt(d[_field_name])
     # 旧 users.json 没有 email_mode 字段：若用户填过 SMTP host 则视为 custom，
     # 否则默认 shared。等价于 _row_to_user 中的同款 fallback，保证两路径一致。
     if not d.get("email_mode"):
@@ -783,7 +783,7 @@ def _bcrypt_hash(plaintext: str) -> str:
     try:
         import bcrypt
     except ImportError:
-        raise RuntimeError("bcrypt 未安装，无法设置 App 密码。请 pip install bcrypt。")
+        raise RuntimeError("bcrypt 未安装，无法设置 App 密码。请 pip install bcrypt。") from None
     return bcrypt.hashpw(
         plaintext.encode("utf-8"), bcrypt.gensalt()
     ).decode("ascii")

@@ -37,6 +37,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from mstorage import Storage
+from models import Listing
 
 
 def _iso(hours_ago: float) -> str:
@@ -338,3 +339,332 @@ class TestMonitorWiring:
         assert _sweep_aging(store, comp) == 1     # → Occupied
         assert _sweep_aging(store, comp) == 0
         assert _sweep_aging(store, comp) == 0
+
+
+# ── 被移出监控的城市也要收敛（原 test_stale_orphan_cities.py） ──────
+#
+# 2026-08-04 发现：``mark_stale_listings`` 的范围限定（只收敛「本轮完整扫描成功
+# 的城市」）有个副作用——一旦某个城市被移出监控，它就再也不会出现在完整扫描
+# 名单里，于是**永远不会被收敛**，老化阈值根本没机会生效。
+#
+# 结果是每改一次监控城市就攒一批鬼影，最后一次见到已是几个月前，却还在列表和
+# 地图上挂着「可订」。
+#
+# 这里盯三件事：
+# 1. 掉出监控范围的确实会收敛（宽限期更长）；
+# 2. **仍在监控、只是这轮没扫到**的不能被误杀——分片和节流会让正常城市这轮
+#    缺席，拿「本轮完整名单」当孤儿判据会误杀一大片；
+# 3. 不知道监控范围时（配置读取失败）整条路径跳过，绝不能把整库判死。
+
+def _iso_days(days_ago: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+
+
+def _add_days(st, lid, *, source, city, status="Available to book", days_ago=90):
+    st.conn.execute(
+        """INSERT INTO listings
+           (id, name, status, price_raw, available_from, features, url, city,
+            first_seen, last_seen, notified, last_status, source, status_is_inferred)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)""",
+        (lid, lid, status, "€1", "", "[]", f"u/{lid}", city,
+         _iso_days(days_ago + 1), _iso_days(days_ago), 0, status, source),
+    )
+    st.conn.commit()
+
+
+MONITORED = [("holland2stay", "Eindhoven"), ("xior", "Amsterdam Naritaweg")]
+
+
+class TestOrphanConvergence:
+    def test_listing_in_dropped_city_converges(self, store):
+        """这就是那批鬼影的处境。"""
+        _add_days(store, "vaals", source="xior", city="Aachen Vaals Katzensprung", days_ago=90)
+
+        n = store.mark_stale_listings(
+            source_city_pairs=MONITORED, monitored_pairs=MONITORED, orphan_days=30,
+        )
+
+        assert n == 1
+        assert _status(store, "vaals") == ("Occupied", 1)
+
+    def test_reserved_also_converges_when_city_is_dropped(self, store):
+        """一个完全不再观察的城市，Reserved 同样无从核实。
+
+        注意这和「仍在监控」那条路径不同——那边 Reserved 是故意不收敛的
+        （H2S 上 Reserved 本来就能挂很久）。
+        """
+        _add_days(store, "res", source="holland2stay", city="Nijmegen",
+                  status="Reserved", days_ago=90)
+
+        store.mark_stale_listings(
+            source_city_pairs=MONITORED, monitored_pairs=MONITORED, orphan_days=30,
+        )
+
+        assert _status(store, "res") == ("Occupied", 1)
+
+    def test_within_grace_period_is_left_alone(self, store):
+        """临时关一天再打开的城市不该被判死。"""
+        _add_days(store, "recent", source="holland2stay", city="Rotterdam", days_ago=5)
+
+        n = store.mark_stale_listings(
+            source_city_pairs=MONITORED, monitored_pairs=MONITORED, orphan_days=30,
+        )
+
+        assert n == 0
+        assert _status(store, "recent") == ("Available to book", 0)
+
+    def test_already_occupied_is_not_touched(self, store):
+        """幂等：跑多少次都不该重复计数。"""
+        _add_days(store, "gone", source="xior", city="Utrecht Willem Dreeslaan",
+                  status="Occupied", days_ago=90)
+
+        n = store.mark_stale_listings(
+            source_city_pairs=MONITORED, monitored_pairs=MONITORED, orphan_days=30,
+        )
+
+        assert n == 0
+
+
+class TestNoFriendlyFire:
+    def test_monitored_city_absent_this_round_is_safe(self, store):
+        """最危险的一种误杀。
+
+        分片和节流会让一个正常监控的城市这轮不出现在「完整扫描」名单里。
+        如果拿那份名单当孤儿判据，Xior 每轮只扫 3/4 栋楼，剩下那栋的房源
+        每轮都会被判成孤儿。
+        """
+        _add_days(store, "naritaweg", source="xior", city="Amsterdam Naritaweg", days_ago=90)
+
+        # 本轮只扫全了 Eindhoven，Naritaweg 缺席——但它仍在 monitored_pairs 里
+        n = store.mark_stale_listings(
+            source_city_pairs=[("holland2stay", "Eindhoven")],
+            monitored_pairs=MONITORED,
+            orphan_days=30,
+        )
+
+        assert n == 0, "仍在监控、只是这轮没扫到的城市被误杀了"
+        assert _status(store, "naritaweg") == ("Available to book", 0)
+
+    def test_same_city_name_on_another_source_is_not_confused(self, store):
+        """孤儿判据必须是 (source, city) 组合，不能只看城市名。"""
+        _add_days(store, "od-diemen", source="ourdomain", city="Amsterdam Diemen", days_ago=90)
+
+        n = store.mark_stale_listings(
+            source_city_pairs=[("ourcampus", "Amsterdam Diemen")],
+            monitored_pairs=[("ourcampus", "Amsterdam Diemen")],
+            orphan_days=30,
+        )
+
+        assert n == 1, "ourdomain 的 Amsterdam Diemen 已不在监控里，应当收敛"
+        assert _status(store, "od-diemen") == ("Occupied", 1)
+
+
+class TestOrphanFailOpen:
+    @pytest.mark.parametrize("monitored", [None, []])
+    def test_unknown_scope_skips_orphan_convergence(self, store, monitored):
+        """不知道监控范围时不能把整库判成孤儿。
+
+        ``_monitored_pairs`` 在读配置失败时返回空列表——那一刻整库看起来
+        「全都不在监控范围内」。这里必须整条路径跳过。
+        """
+        _add_days(store, "anything", source="holland2stay", city="Rotterdam", days_ago=90)
+
+        store.mark_stale_listings(
+            source_city_pairs=MONITORED, monitored_pairs=monitored, orphan_days=30,
+        )
+
+        assert _status(store, "anything") == ("Available to book", 0)
+
+
+class TestAgingPathStillWorks:
+    """孤儿那条分支不能把老化那条带偏——两者范围互斥，各管各的。"""
+
+    def test_monitored_city_still_ages(self, store):
+        _add_days(store, "eind-book", source="holland2stay", city="Eindhoven", days_ago=10)
+        _add_days(store, "eind-lot", source="holland2stay", city="Eindhoven",
+                  status="Available in lottery", days_ago=3)
+        _add_days(store, "eind-fresh", source="holland2stay", city="Eindhoven", days_ago=0)
+
+        store.mark_stale_listings(
+            source_city_pairs=MONITORED, monitored_pairs=MONITORED,
+        )
+
+        assert _status(store, "eind-book") == ("Reserved", 1)
+        assert _status(store, "eind-lot") == ("Reserved", 1)
+        assert _status(store, "eind-fresh") == ("Available to book", 0)
+
+    def test_a_long_vanished_platform_reserved_also_converges(self, store):
+        """前提变了，记一下为什么。
+
+        原来这里断言的是「H2S 的 Reserved 在监控范围内永不收敛」，于是一批
+        消失了好几个月的记录永远卡着。
+
+        现在它也会收敛：H2S 的 Reserved 是真实状态（有人下单未付款），但那个
+        状态**有硬性时限**——官方付款限时 2 小时，超时未付就作废并重新上架。
+        所以一条消失超过 2 小时的 Reserved，必然已经落定。
+        """
+        _add_days(store, "eind-res", source="holland2stay", city="Eindhoven",
+                  status="Reserved", days_ago=90)
+
+        store.mark_stale_listings(
+            source_city_pairs=MONITORED, monitored_pairs=MONITORED,
+        )
+
+        assert _status(store, "eind-res") == ("Occupied", 1)
+
+    def test_no_scope_at_all_behaves_as_before(self, store):
+        """完全不传范围时是老语义：全库按老化阈值收敛。"""
+        _add_days(store, "x", source="holland2stay", city="Wherever", days_ago=90)
+
+        n = store.mark_stale_listings()
+
+        assert n == 1
+
+
+# ── feed 覆盖 Reserved 后的消失语义（原 test_full_lifecycle_states.py） ──
+#
+# H2S 的 ``available_to_book`` 有六个取值，我们原先只抓两个（可订 179、抽签
+# 336）。那种配置下「消失」是**有歧义**的——可能被人下单了（Reserved 6203），
+# 也可能彻底没了（Niet beschikbaar 180），所以先推 Reserved 留出 2 小时付款
+# 窗口，再判终态。
+#
+# 把 Reserved 也抓进来之后，消失就没有歧义了：它已经掉出我们跟踪的全部状态。
+# 此时再推一次 Reserved，是凭空造一个平台从没说过的状态，还会把
+# ``status_is_inferred=1`` 打在一条本可以如实上报的房源上。
+#
+# 其余三个平台的 feed 只列可订单元，没有等价的「已预留」可抓，判据不变。
+
+def _iso_lifecycle(**delta):
+    return (datetime.now(timezone.utc) - timedelta(**delta)).isoformat()
+
+
+@pytest.fixture
+def db(tmp_path):
+    st = Storage(tmp_path / "listings.db")
+    yield st
+    st.close()
+
+
+def _add_lifecycle(st, lid, source, status="Available to book", hours_ago=5.0):
+    st.diff([Listing(id=lid, name=lid, status=status, price_raw="1000",
+                     available_from="", url="", features=[],
+                     city="Eindhoven", source=source)])
+    st.conn.execute("UPDATE listings SET last_seen=? WHERE id=?",
+                    (_iso_lifecycle(hours=hours_ago), lid))
+    st.conn.commit()
+
+
+def _row(st, lid):
+    return dict(st.conn.execute(
+        "SELECT status, status_is_inferred FROM listings WHERE id=?", (lid,)
+    ).fetchone())
+
+
+class TestFullLifecycleSource:
+    def test_disappearing_goes_straight_to_terminal(self, db):
+        """feed 含 Reserved 时，消失只可能是 Niet beschikbaar。"""
+        _add_lifecycle(db, "h1", "holland2stay", hours_ago=5)
+        db.mark_stale_listings(cities=["Eindhoven"],
+                               full_lifecycle_sources={"holland2stay"})
+        assert _row(db, "h1")["status"] == "Occupied"
+
+    def test_no_phantom_reserved_in_between(self, db):
+        """刚过 reserved 窗口、还没到 occupied 窗口时，不该冒出一个推测的
+        Reserved——平台从没说过这条房源被预留了。"""
+        _add_lifecycle(db, "h1", "holland2stay", hours_ago=1.0)  # > 0.5h，< 2h
+        db.mark_stale_listings(cities=["Eindhoven"],
+                               reserved_hours=0.5, occupied_hours=2.0,
+                               full_lifecycle_sources={"holland2stay"})
+        assert _row(db, "h1")["status"] == "Available to book", \
+            "消失 1 小时就被推成了 Reserved"
+
+    def test_terminal_still_waits_out_the_window(self, db):
+        """2 小时的余量是防抓取抖动的，不能因为判据变了就取消。"""
+        _add_lifecycle(db, "h1", "holland2stay", hours_ago=0.1)
+        db.mark_stale_listings(cities=["Eindhoven"], occupied_hours=2.0,
+                               full_lifecycle_sources={"holland2stay"})
+        assert _row(db, "h1")["status"] == "Available to book"
+
+    def test_lottery_converges_the_same_way(self, db):
+        _add_lifecycle(db, "h1", "holland2stay", status="Available in lottery", hours_ago=5)
+        db.mark_stale_listings(cities=["Eindhoven"],
+                               full_lifecycle_sources={"holland2stay"})
+        assert _row(db, "h1")["status"] == "Occupied"
+
+
+class TestOtherSourcesUnchanged:
+    """Xior / OurDomain / OurCampus 的 feed 只列可订单元，判据不变。"""
+
+    @pytest.mark.parametrize("source", ["xior", "ourdomain", "ourcampus"])
+    def test_two_step_inference_preserved(self, db, source):
+        _add_lifecycle(db, "s1", source, hours_ago=1.0)
+        db.mark_stale_listings(cities=["Eindhoven"],
+                               reserved_hours=0.5, occupied_hours=2.0,
+                               full_lifecycle_sources={"holland2stay"})
+        row = _row(db, "s1")
+        assert row["status"] == "Reserved", f"{source} 的中间站被取消了"
+        assert row["status_is_inferred"] == 1
+
+    def test_reserved_still_ages_to_terminal(self, db):
+        _add_lifecycle(db, "x1", "xior", status="Reserved", hours_ago=5)
+        db.mark_stale_listings(cities=["Eindhoven"],
+                               full_lifecycle_sources={"holland2stay"})
+        assert _row(db, "x1")["status"] == "Occupied"
+
+    def test_mixed_round_treats_each_source_by_its_own_rule(self, db):
+        _add_lifecycle(db, "h1", "holland2stay", hours_ago=1.0)
+        _add_lifecycle(db, "x1", "xior", hours_ago=1.0)
+        db.mark_stale_listings(cities=["Eindhoven"],
+                               reserved_hours=0.5, occupied_hours=2.0,
+                               full_lifecycle_sources={"holland2stay"})
+        assert _row(db, "h1")["status"] == "Available to book"
+        assert _row(db, "x1")["status"] == "Reserved"
+
+
+class TestDefaultIsTheOldBehaviour:
+    """不传参数时维持旧判据——升级过程中配置还没改的那一刻不能变行为。"""
+
+    def test_omitted_argument(self, db):
+        _add_lifecycle(db, "h1", "holland2stay", hours_ago=1.0)
+        db.mark_stale_listings(cities=["Eindhoven"],
+                               reserved_hours=0.5, occupied_hours=2.0)
+        assert _row(db, "h1")["status"] == "Reserved"
+
+    def test_empty_set(self, db):
+        _add_lifecycle(db, "h1", "holland2stay", hours_ago=1.0)
+        db.mark_stale_listings(cities=["Eindhoven"],
+                               reserved_hours=0.5, occupied_hours=2.0,
+                               full_lifecycle_sources=set())
+        assert _row(db, "h1")["status"] == "Reserved"
+
+
+class TestConfigDerivesIt:
+    """判据从实际配置推出，不写死平台名——AVAILABILITY_FILTERS 是可改的。"""
+
+    def _cfg(self, ids, sources=("holland2stay",)):
+        from config import AvailabilityFilter, Config
+        from pathlib import Path
+
+        return Config(
+            check_interval=300, cities=[],
+            availability_filters=[AvailabilityFilter(label=str(i), id=i) for i in ids],
+            db_path=Path("x.db"), log_level="INFO", sources=list(sources),
+        )
+
+    def test_reserved_present(self):
+        assert self._cfg([179, 336, 6203]).sources_with_full_lifecycle() == {
+            "holland2stay"}
+
+    def test_reserved_absent(self):
+        assert self._cfg([179, 336]).sources_with_full_lifecycle() == frozenset()
+
+    def test_h2s_not_monitored(self):
+        assert self._cfg([179, 336, 6203],
+                         sources=("xior",)).sources_with_full_lifecycle() == frozenset()
+
+    def test_never_claims_other_sources(self):
+        """Reserved 是 H2S 的属性 ID，不能因为它出现就替别的平台做主。"""
+        got = self._cfg([179, 336, 6203],
+                        sources=("holland2stay", "xior", "ourdomain")
+                        ).sources_with_full_lifecycle()
+        assert got == {"holland2stay"}

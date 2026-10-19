@@ -23,7 +23,6 @@ import time as _time
 import uuid
 from collections import deque
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, g, request

@@ -11,7 +11,6 @@ API v1 鉴权安全回归测试
 
 from __future__ import annotations
 
-import time
 
 import pytest
 from werkzeug.datastructures import ImmutableMultiDict

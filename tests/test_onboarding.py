@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from app.services.onboarding_service import delivery_state, route_labels
+from app.services.onboarding_service import delivery_state
 
 
 class FakeStore:

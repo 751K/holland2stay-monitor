@@ -29,7 +29,7 @@ from urllib.parse import parse_qsl, urljoin, urlparse
 import curl_cffi.requests as req
 
 from bookers.base import AbstractBooker, BookingRequest, BookingResult
-from captcha import CaptchaSolver, CaptchaError, RENTCAFE_V2_SITEKEY, RENTCAFE_V3_SITEKEY
+from captcha import CaptchaSolver, CaptchaError
 from config import get_impersonate
 
 logger = logging.getLogger(__name__)
@@ -1355,7 +1355,6 @@ class OurDomainBooker(RentCafeBooker):
         （FP 是合同类型标签，不是户型过滤器），但反过来不保证第一个 FP 就有它。
         找到即停。
         """
-        from datetime import date
         from bookers.rentcafe_units import find_unit, parse_apply_now_options
         from scrapers.ourdomain import _extract_floorplan_ids, _next_month_first
 

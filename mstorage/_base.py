@@ -670,7 +670,7 @@ class StorageBase:
             if not isinstance(feats, list):
                 continue
 
-            def _val(prefix: str) -> str:
+            def _val(prefix: str, feats=feats) -> str:
                 for f in feats:
                     if isinstance(f, str) and f.startswith(prefix):
                         return f[len(prefix):].strip()

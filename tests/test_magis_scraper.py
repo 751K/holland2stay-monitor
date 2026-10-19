@@ -23,7 +23,6 @@ import pytest
 from scrapers.magis import (
     CITIES,
     FINISHING_MAP,
-    TENANT_MAP,
     MagisScraper,
     _euro,
     _fmt_euro,
@@ -558,7 +557,6 @@ def test_platform_dropdown_lists_every_known_source(admin_client):
     source 却漏掉其中一处，表现是那一页选不到新平台——而另外两页是好的，很容易
     看成「偶尔没刷新」。
     """
-    import re
 
     from config import KNOWN_SOURCES, source_display_name
 

@@ -73,7 +73,6 @@ def fresh_crypto(tmp_path, monkeypatch):
     「首次运行自动生成密钥」这一契约在测试里被正确地拒绝掉。
     库不存在 = 首次部署，正是这些用例要表达的场景。
     """
-    import os
     import crypto
     monkeypatch.setattr(crypto, "_CIPHER", None)
     monkeypatch.setattr(crypto, "ENV_PATH", tmp_path / ".env")

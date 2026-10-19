@@ -306,6 +306,15 @@ class TestCompleteness:
 
 
 class TestCitySplit:
+    @pytest.fixture(autouse=True)
+    def _no_detail_spacing(self, monkeypatch):
+        """详情页之间的节流是生产环境的礼貌；这里抓的是分发逻辑，不该真的等。
+
+        不 patch 的话三个用例各睡 ~8.8 秒（22 个详情 × 0.4s），白占整套 26 秒。
+        """
+        import scrapers.studentexperience as se
+        monkeypatch.setattr(se.time, "sleep", lambda *_a: None)
+
     def test_listings_are_dispatched_by_city(self, page1, page2, monkeypatch):
         s = StudentExperienceScraper()
         monkeypatch.setattr(s, "_session",

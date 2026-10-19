@@ -47,7 +47,6 @@ from __future__ import annotations
 import logging
 import re
 import time
-from contextlib import contextmanager
 from datetime import date
 from threading import Lock
 from typing import Optional
@@ -118,7 +117,7 @@ _VERIFY_TIME_BUDGET = 45.0
 # SOURCE_ASSUMED_FEATURES 同一类），这里只做转发——mstorage 的存量订正也要用，
 # 而 mstorage 不能 import scrapers。
 from config import (  # noqa: E402
-    XIOR_BUILDING_FURNISHING as BUILDING_FURNISHING,
+    XIOR_BUILDING_FURNISHING as BUILDING_FURNISHING,  # noqa: F401  （测试从这里取）
     _FIN_UNFURNISHED,
     xior_furnishing_for as furnishing_for,
 )
@@ -962,8 +961,6 @@ def discover_buildings(
     ``semester_id``, and ``room_type_ids`` — suitable for feeding into
     ``BUILDINGS`` or an ad-hoc ``ScrapeTask.extra``.
     """
-    from html import unescape as _unescape
-    import json as _json
 
     buildings: list[dict] = []
     country_url = f"https://www.xiorstudenthousing.eu/{country}/"
@@ -992,7 +989,6 @@ def _extract_building_meta(
     bldg_url: str,
 ) -> Optional[dict]:
     """Fetch a single building page and return its scrape metadata."""
-    from html import unescape as _unescape
     import json as _json
 
     resp = session.get(bldg_url, timeout=30)

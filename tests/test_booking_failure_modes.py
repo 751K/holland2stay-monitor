@@ -8,7 +8,6 @@ from __future__ import annotations
 import inspect
 import re
 
-import pytest
 
 import booker
 
@@ -135,8 +134,6 @@ class TestRentCafeConstructorInsideTry:
         打断**后续所有用户**的预订结果处理。"""
         from bookers import rentcafe
 
-        src = _code(rentcafe.RentCafeBooker.book) if hasattr(
-            rentcafe, "RentCafeBooker") else ""
         whole = _code(rentcafe)
         i = whole.index("RentCafeSession(self._api_key")
         before = whole[:i]

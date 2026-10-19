@@ -28,7 +28,12 @@ from app.services.device_service import (
 from mcore import push
 from tests.test_api_v1_devices import _bearer, _login, api_app, api_client, two_users  # noqa: F401
 from tests.test_app_accounts_routes import admin, isolated_db, issued_tokens  # noqa: F401
-from tests.test_push_fcm import FakeApns, FakeFcm, FakeListing, FakeStore
+from tests.test_push_dispatcher import (
+    FakeFcm,
+    _FcmApns as FakeApns,
+    _FcmListing as FakeListing,
+    _FcmStore as FakeStore,
+)
 
 _ROOT = Path(__file__).resolve().parent.parent
 
