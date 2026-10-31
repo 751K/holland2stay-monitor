@@ -5,7 +5,6 @@ import logging
 import os
 import threading
 import time
-from types import SimpleNamespace
 
 from mcore.browser_worker import BrowserWorker, _PipeLogHandler, _exception_chain, _restore_exception
 
@@ -48,6 +47,10 @@ def _serve_booking(conn, source):
         action, payload, env = request
         os.environ.clear()
         os.environ.update(env)
+        from settings_store import _round_snapshot, snapshot_from_environment
+        snapshot = snapshot_from_environment(env)
+        _round_snapshot.set(snapshot)
+        logger.info("预订工作进程 %s 配置版本: %s", source, snapshot.version)
         try:
             if action == 'heartbeat':
                 borrowed_fetcher = (session.fetcher if session and
@@ -125,6 +128,9 @@ class BookingWorker(BrowserWorker):
 
     def run(self, action, payload, *, timeout, guard=None, job=None):
         from config import get_proxy_url
+        from settings_store import runtime_environment
+        env = runtime_environment()
+        version = env.get("FLATRADAR_RUNTIME_VERSION")
         deadline = time.monotonic() + timeout
         if action == 'heartbeat':
             acquired = self._operation_lock.acquire(blocking=False)
@@ -135,10 +141,12 @@ class BookingWorker(BrowserWorker):
         if not acquired:
             raise TimeoutError('等待预订浏览器进程超时')
         try:
-            if self.process is not None and not self.process.is_alive():
+            if self.process is not None and (not self.process.is_alive() or
+                                             (version and version != self._runtime_version)):
                 self.stop()
             if self.process is None:
                 self._start()
+            self._runtime_version = version
             conn = self.conn
             if not self._ready:
                 self._receive(conn, deadline, get_proxy_url, expect='ready')
@@ -147,7 +155,7 @@ class BookingWorker(BrowserWorker):
                 guard[0].update(guard[1], child_pid=self.process.pid)
             if job is not None:
                 job.safe = False
-            conn.send((action, payload, dict(os.environ)))
+            conn.send((action, payload, env))
             kind, result, _ = self._receive(conn, deadline, get_proxy_url, expect='result')
             if job is not None:
                 job.safe = True

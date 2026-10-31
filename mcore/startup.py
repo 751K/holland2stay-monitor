@@ -149,7 +149,7 @@ def bootstrap_settings() -> None:
         st = Storage(DB_PATH, timezone_str=TIMEZONE)
         try:
             migrate_env_to_db(st, ENV_PATH)
-            n = hydrate(st)
+            n = hydrate(st, env_path=ENV_PATH, activate=True)
             if n:
                 logger.info("已从 app_settings 载入 %d 项运维配置", n)
             # 迁移之后 .env 里不该再有 runtime 键。有就是被手工加回来了——它会
@@ -170,24 +170,17 @@ def bootstrap_settings() -> None:
         logger.warning("载入 app_settings 失败，本次使用 .env / 默认值", exc_info=True)
 
 
-def reload_settings() -> None:
-    """热重载时重新注水。
+def reload_settings():
+    """Prepare runtime settings without changing the active configuration."""
+    from config import DB_PATH, TIMEZONE
+    from settings_store import prepare_runtime
+    from storage import Storage
 
-    ``load_dotenv(override=True)`` 会把 .env 重放一遍，而 runtime 配置早已不在
-    .env 里；不重新注水的话，面板刚改的值这一程都不会生效。
-    """
+    st = Storage(DB_PATH, timezone_str=TIMEZONE)
     try:
-        from config import DB_PATH, TIMEZONE
-        from settings_store import hydrate
-        from storage import Storage
-
-        st = Storage(DB_PATH, timezone_str=TIMEZONE)
-        try:
-            hydrate(st)
-        finally:
-            st.close()
-    except Exception:
-        logger.warning("热重载时读取 app_settings 失败，沿用当前值", exc_info=True)
+        return prepare_runtime(st, env_path=ENV_PATH)
+    finally:
+        st.close()
 
 
 def apns_startup_diag(st, users: list[UserConfig]) -> None:

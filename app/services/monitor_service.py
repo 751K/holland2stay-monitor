@@ -145,9 +145,11 @@ def start_monitor() -> dict[str, Any]:
         cmd = [sys.executable, "--run-monitor"]
     else:
         cmd = [sys.executable, str(BASE_DIR / "monitor.py")]
+    from settings_store import monitor_child_environment
     subprocess.Popen(
         cmd,
         cwd=str(BASE_DIR),
+        env=monitor_child_environment(),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib as _hashlib
 import itertools as _itertools
-import os
 import re
 import re as _re
 import time as _time
@@ -22,7 +21,7 @@ from urllib.parse import (
     urlunparse as _urlunparse,
 )
 
-from env_utils import env_int
+from env_utils import env_get, env_int
 
 
 # 配合代理使用时每个 IP 随机选取不同指纹，模拟真实多用户浏览器分布。
@@ -105,11 +104,11 @@ _proxy_failure_marks: dict[str, tuple[int, float]] = {}  # proxy_url -> (count, 
 def _proxy_pool() -> list[str]:
     """主代理 + 备用代理，去重保序，去空。"""
     primary = (
-        os.environ.get("HTTPS_PROXY", "")
-        or os.environ.get("HTTP_PROXY", "")
-        or os.environ.get("ALL_PROXY", "")
+        env_get("HTTPS_PROXY", "")
+        or env_get("HTTP_PROXY", "")
+        or env_get("ALL_PROXY", "")
     ).strip()
-    fallback_raw = os.environ.get("SCRAPE_PROXIES_FALLBACK", "")
+    fallback_raw = env_get("SCRAPE_PROXIES_FALLBACK", "")
     pool = [primary] + [p.strip() for p in re.split(r"[,\n]", fallback_raw)]
     return list(dict.fromkeys(p for p in pool if p))  # 去重保序 + 去空
 
@@ -178,7 +177,7 @@ def _personal_proxies() -> list[str]:
 
     所以这是**主动降速**，不是故障降级——两者的判据和目的都不同，代码里也分开。
     """
-    raw = os.environ.get("SCRAPE_PROXIES_PERSONAL", "")
+    raw = env_get("SCRAPE_PROXIES_PERSONAL", "")
     return [p.strip() for p in re.split(r"[,\n]", raw) if p.strip()]
 
 

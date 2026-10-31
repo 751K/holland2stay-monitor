@@ -137,6 +137,9 @@ def resolve_project_path(path_str: str | os.PathLike[str]) -> Path:
     return path if path.is_absolute() else (BASE_DIR / path).resolve()
 
 
+# Preserve genuine process overrides before .env adds its own values.
+from settings_store import capture_external_runtime
+capture_external_runtime()
 load_dotenv(dotenv_path=ENV_PATH)
 
 # DB_PATH / TIMEZONE 在模块级定义，作为唯一来源。
@@ -1530,7 +1533,7 @@ def _target_city_filters(cls, env_key: str, raw: str):
     ]
 
 
-def load_config() -> Config:
+def load_config(*, environ=None) -> Config:
     """
     从环境变量（已由 dotenv 加载）构造并返回 Config 实例。
 
@@ -1562,12 +1565,16 @@ def load_config() -> Config:
     ValueError  若 CITIES 或 AVAILABILITY_FILTERS 中的 ID 不是合法整数
     ValueError  若 TIMEZONE 不是合法的 IANA 时区标识符
     """
+    if environ is None:
+        from settings_store import runtime_environment
+        environ = runtime_environment()
+
     from target_config import (
         parse_availability, parse_cities, parse_sources,
     )
 
-    interval = env_int("CHECK_INTERVAL", 300, strict=True)
-    _raw_sources = os.environ.get("SOURCES", "holland2stay")
+    interval = env_int("CHECK_INTERVAL", 300, strict=True, environ=environ)
+    _raw_sources = environ.get("SOURCES", "holland2stay")
     sources = _target_parse("SOURCES", parse_sources, _raw_sources)
     if not sources and not _raw_sources.strip():
         sources = ["holland2stay"]
@@ -1575,14 +1582,14 @@ def load_config() -> Config:
     cities: list[CityFilter] = [
         CityFilter(name=name, id=city_id)
         for name, city_id in _target_parse(
-            "CITIES", parse_cities, os.environ.get("CITIES", "Eindhoven,29"))
+            "CITIES", parse_cities, environ.get("CITIES", "Eindhoven,29"))
     ]
 
     availability_filters: list[AvailabilityFilter] = [
         AvailabilityFilter(label=label, id=fid)
         for label, fid in _target_parse(
             "AVAILABILITY_FILTERS", parse_availability,
-            os.environ.get(
+            environ.get(
                 "AVAILABILITY_FILTERS",
                 "Available to book,179|Available in lottery,336"))
     ]
@@ -1591,7 +1598,7 @@ def load_config() -> Config:
     if "ourdomain" in sources:
         ourdomain_cities = _target_city_filters(
             OurDomainCityFilter, "OURDOMAIN_CITIES",
-            os.environ.get("OURDOMAIN_CITIES", "Amsterdam Diemen,diemen"))
+            environ.get("OURDOMAIN_CITIES", "Amsterdam Diemen,diemen"))
 
     # 影子 source：抓但不通知。只保留同时也在 sources 里的，否则是配置笔误。
     #
@@ -1601,7 +1608,7 @@ def load_config() -> Config:
     # 而且是从设置面板保存一次（旧版白名单漏了 ourcampus）无声造成的。
     # 所以留一条 WARNING：影子名单里的 source 不在 sources 里，一定要说出来。
     _shadow_raw = _target_parse(
-        "SHADOW_SOURCES", parse_sources, os.environ.get("SHADOW_SOURCES", ""))
+        "SHADOW_SOURCES", parse_sources, environ.get("SHADOW_SOURCES", ""))
     shadow_sources = [s for s in _shadow_raw if s in sources]
     _shadow_dangling = [s for s in _shadow_raw if s not in sources]
     if _shadow_dangling:
@@ -1612,23 +1619,23 @@ def load_config() -> Config:
             ", ".join(sorted(_shadow_dangling)),
         )
 
-    shard_sizes = _parse_shard_sizes(os.environ.get("SHARD_SIZES", ""))
+    shard_sizes = _parse_shard_sizes(environ.get("SHARD_SIZES", ""))
     source_min_intervals = _parse_source_min_intervals(
-        os.environ.get("SOURCE_MIN_INTERVALS", ""))
+        environ.get("SOURCE_MIN_INTERVALS", ""))
     source_peak_min_intervals = _parse_source_min_intervals(
-        os.environ.get("SOURCE_PEAK_MIN_INTERVALS", ""),
+        environ.get("SOURCE_PEAK_MIN_INTERVALS", ""),
         _DEFAULT_SOURCE_PEAK_MIN_INTERVALS)
 
     ourcampus_cities: list[OurCampusCityFilter] = []
     if "ourcampus" in sources:
         ourcampus_cities = _target_city_filters(
             OurCampusCityFilter, "OURCAMPUS_CITIES",
-            os.environ.get("OURCAMPUS_CITIES",
+            environ.get("OURCAMPUS_CITIES",
                            "OurCampus Amsterdam Diemen,diemen"))
 
     xior_cities: list[XiorCityFilter] = []
     if "xior" in sources:
-        raw_xior_cities = os.environ.get("XIOR_CITIES", "")
+        raw_xior_cities = environ.get("XIOR_CITIES", "")
         if not raw_xior_cities:
             # 未显式配置时使用荷兰核心楼栋。
             xior_cities = [
@@ -1642,10 +1649,10 @@ def load_config() -> Config:
             xior_cities = _target_city_filters(
                 XiorCityFilter, "XIOR_CITIES", raw_xior_cities)
 
-    db_path = resolve_project_path(os.environ.get("DB_PATH", "data/listings.db"))
-    log_level = (os.environ.get("LOG_LEVEL") or "INFO").upper()
+    db_path = resolve_project_path(environ.get("DB_PATH", "data/listings.db"))
+    log_level = (environ.get("LOG_LEVEL") or "INFO").upper()
 
-    timezone_str = os.environ.get("TIMEZONE", "Europe/Amsterdam")
+    timezone_str = environ.get("TIMEZONE", "Europe/Amsterdam")
     # 启动时校验时区标识符合法性，失败立即报错而非延迟到首次图表查询
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     try:
@@ -1655,7 +1662,7 @@ def load_config() -> Config:
 
     magis_cities: list[MagisCityFilter] = []
     if "magis" in sources:
-        raw_magis_cities = os.environ.get("MAGIS_CITIES", "")
+        raw_magis_cities = environ.get("MAGIS_CITIES", "")
         if raw_magis_cities:
             magis_cities = _target_city_filters(
                 MagisCityFilter, "MAGIS_CITIES", raw_magis_cities)
@@ -1669,7 +1676,7 @@ def load_config() -> Config:
 
     studentexperience_cities: list[StudentExperienceCityFilter] = []
     if "studentexperience" in sources:
-        raw_se_cities = os.environ.get("STUDENTEXPERIENCE_CITIES", "")
+        raw_se_cities = environ.get("STUDENTEXPERIENCE_CITIES", "")
         if raw_se_cities:
             studentexperience_cities = _target_city_filters(
                 StudentExperienceCityFilter, "STUDENTEXPERIENCE_CITIES",
@@ -1684,7 +1691,7 @@ def load_config() -> Config:
 
     plaza_cities: list[PlazaCityFilter] = []
     if "plaza" in sources:
-        raw_plaza_cities = os.environ.get("PLAZA_CITIES", "")
+        raw_plaza_cities = environ.get("PLAZA_CITIES", "")
         if raw_plaza_cities:
             plaza_cities = _target_city_filters(
                 PlazaCityFilter, "PLAZA_CITIES", raw_plaza_cities)
@@ -1702,16 +1709,16 @@ def load_config() -> Config:
         availability_filters=availability_filters,
         db_path=db_path,
         log_level=log_level,
-        peak_interval=env_int("PEAK_INTERVAL", 60, strict=True),
-        peak_start=os.environ.get("PEAK_START") or "08:30",
-        peak_end=os.environ.get("PEAK_END") or "10:00",
-        peak_start_2=os.environ.get("PEAK_START_2") or "13:30",
-        peak_end_2=os.environ.get("PEAK_END_2") or "15:00",
-        peak_weekdays_only=env_bool("PEAK_WEEKDAYS_ONLY", True),
-        min_interval=env_int("MIN_INTERVAL", 15, minimum=5, strict=True),
-        jitter_ratio=max(0.0, min(0.5, float(os.environ.get("JITTER_RATIO") or "0.20"))),
+        peak_interval=env_int("PEAK_INTERVAL", 60, strict=True, environ=environ),
+        peak_start=environ.get("PEAK_START") or "08:30",
+        peak_end=environ.get("PEAK_END") or "10:00",
+        peak_start_2=environ.get("PEAK_START_2") or "13:30",
+        peak_end_2=environ.get("PEAK_END_2") or "15:00",
+        peak_weekdays_only=env_bool("PEAK_WEEKDAYS_ONLY", True, environ=environ),
+        min_interval=env_int("MIN_INTERVAL", 15, minimum=5, strict=True, environ=environ),
+        jitter_ratio=max(0.0, min(0.5, float(environ.get("JITTER_RATIO") or "0.20"))),
         timezone=timezone_str,
-        heartbeat_interval_minutes=env_int("HEARTBEAT_INTERVAL_MINUTES", 60, minimum=0, strict=True),
+        heartbeat_interval_minutes=env_int("HEARTBEAT_INTERVAL_MINUTES", 60, minimum=0, strict=True, environ=environ),
         sources=sources,
         shadow_sources=shadow_sources,
         shard_sizes=shard_sizes,

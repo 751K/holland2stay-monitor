@@ -204,7 +204,7 @@ class TestHotReloadKeepsChannelsAlive:
         import monitor
 
         src = _code(monitor.main_loop)
-        i = src.index("_build_user_notifiers(users)")
+        i = src.index("await _prepare_reload()")
         j = src.index("await n.close()")
         assert i < j, "先 close 后构造：构造失败会让所有渠道永久哑掉"
 

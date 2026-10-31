@@ -118,6 +118,12 @@ F821 四处，三处在生产代码：`app/forms/user_form.py:121`（`ApplicantP
 
 **2.3 配置不再以 `os.environ` 作总线**（方向三的形态）
 
+> 当前进度：已明确外部环境、`.env`、数据库与默认值的来源优先级；热重载先离线
+> 构造并校验 runtime 候选配置和通知器，准备成功后再发布，失败保留原配置和通知器。
+> 浏览器、代理和预订链路按轮使用不可变配置快照，子进程记录相同的随机版本号；
+> 常驻浏览器工作进程在版本改变时重建。代理选择和冷却状态保留在主进程。
+> deploy / secret / tuning 仍需重启；其他配置读取路径仍可继续迁移。
+
 现在的机制是 `settings_store` 每轮往 `os.environ` 注水，各模块随时
 `os.environ.get`。import 时求值的常量热重载不到、三套布尔解析
 （`config.py:134`、`config.py:2397`、`notifier.py:833`、`app/auth.py:150` 四处
@@ -185,7 +191,7 @@ error 类型。改成 `send_event(event)`，格式化在各渠道内做，渠道
 |---|---|---|
 | Resend 重试无幂等键，而注释已声称有 | `notifier.py:235` / `ResendNotifier._send` | 带 `Idempotency-Key`（按 listing id + 事件类型派生）；否则把那句注释改掉 |
 | `mark_status_change_notified` 按 `listing_id` 而非主键 | `mstorage/_listings.py:590` | 按 `status_changes.id` 标记；`_batch` 同改 |
-| 预订结果等待超时 | `mcore/booking_round.py` / `mcore/booking_guard.py` | 结果等待有时限；Holland2Stay 在提交前持久化账号级保护，超时、进程中断或提交后结果不明时保留记录并提示核实，后台任务结束且用户确认后解除。其他平台的结果不确定保护仍需单独覆盖。 |
+| 预订结果等待超时 | `mcore/booking_round.py` / `mcore/booking_guard.py` | 结果等待有时限；Holland2Stay 在提交前持久化账号级保护，超时、进程中断或提交后结果不明时保留记录并提示核实，后台任务结束且用户确认后解除。Plaza 同样持久化账号与房源级保护；其他尚未开放的平台仍需在开放前单独覆盖。 |
 | geocode 同步跑在事件循环里 | `monitor.py:3367` | 进 executor。Photon 不可达时最坏 150 秒 |
 | `count_all` / `send_heartbeat` / `prune_notifications` 无隔离 | `monitor.py:3332-3341` | 各自 try，与相邻两处 prune 对齐 |
 | `MAX_CONTENT_LENGTH` 未设 | `web.py` | 加上；Caddy 侧同时配 `request_body max_size` |

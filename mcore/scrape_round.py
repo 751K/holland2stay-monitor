@@ -105,8 +105,9 @@ async def dispatch_scrape_tasks_async(
         )
     else:
         job = lambda: dispatch_scrape_tasks(selected, multi_source=multi_source)  # noqa: E731
+    from settings_store import context_job
     fut = loop.run_in_executor(
-        executor, job,
+        executor, context_job(job),
     )
     # 墙钟兜底。**没有它的话，渲染器一卡就是整个监控停摆**：
     # ``page.evaluate`` 在 Playwright 里根本没有 timeout 参数（它等的是 JS

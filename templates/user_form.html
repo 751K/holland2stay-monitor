@@ -47,6 +47,23 @@
 </div>
 {% endif %}
 
+{% for attempt in plaza_attempts %}
+<div class="alert alert-warning mb-4">
+  <strong>{{ _('plaza_review_title') }}</strong>
+  {% if attempt.user_id == u.id %}
+  <p>{{ _('booking_review_listing') }}: {{ attempt.listing }}. {{ _('plaza_review_check') }}</p>
+  <p>{{ _('plaza_review_running') }}</p>
+  <form method="post" action="{{ url_for('user_acknowledge_plaza', user_id=u.id) }}" onsubmit='return confirm({{ _("plaza_review_confirm")|tojson }});'>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="attempt" value="{{ attempt.attempt }}">
+    <button class="btn btn-warning" type="submit">{{ _('plaza_review_action') }}</button>
+  </form>
+  {% else %}
+  <p>{{ _('plaza_review_shared') }}</p>
+  {% endif %}
+</div>
+{% endfor %}
+
 {# enctype 是证件上传必需的；漏了它 request.files 永远是空的，而表单其余部分
    照常保存，看起来完全正常。 #}
 <form method="post" action="{{ action }}" enctype="multipart/form-data"

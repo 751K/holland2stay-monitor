@@ -7,7 +7,15 @@ import logging
 logger = logging.getLogger(__name__)
 
 TRANSLATIONS = {
-    "booking_review_error": {"zh": "无法读取 Holland2Stay 预订保护状态，请稍后重试或联系管理员。", "en": "Unable to read the Holland2Stay booking protection status. Please try again or contact an administrator."},
+    "plaza_review_title": {"zh": "Plaza 应征结果需要核实", "en": "Check your Plaza application"},
+    "plaza_review_check": {"zh": "请登录 Plaza 检查我的应征；确认前系统不会对该房源重复自动应征。", "en": "Sign in to Plaza and check your applications; automatic applications for this listing are paused until review."},
+    "plaza_review_running": {"zh": "后台应征仍在运行时不能解除保护；如已卡住，请先停止监控。", "en": "Protection cannot be cleared while the application is running. Stop monitoring first if it is stuck."},
+    "plaza_review_confirm": {"zh": "你已登录 Plaza 核实这套房源的应征结果，确定恢复该房源的自动应征吗？", "en": "Have you checked this application on Plaza and confirmed that automatic applications for this listing can resume?"},
+    "plaza_review_action": {"zh": "已核实，恢复该房源应征", "en": "Checked; resume applications for this listing"},
+    "plaza_review_shared": {"zh": "该 Plaza 账号有应征待核实，请由发起应征的用户核实并解除保护。", "en": "This Plaza account has an application awaiting review. Ask the user who initiated it to check and clear the protection."},
+    "plaza_review_cleared": {"zh": "已核实，已解除该房源的应征保护。", "en": "Review confirmed; protection for this listing has been cleared."},
+    "plaza_review_missing": {"zh": "未找到可确认的应征记录。", "en": "No application record was found for review."},
+    "booking_review_error": {"zh": "无法读取预订或应征保护状态，请稍后重试或联系管理员。", "en": "Unable to read booking or application protection status. Please try again or contact an administrator."},
     "booking_review_title": {"zh": "Holland2Stay 自动预订已暂停：请核实预订结果", "en": "Holland2Stay auto-booking paused: check your booking"},
     "booking_review_listing": {"zh": "房源", "en": "Listing"},
     "booking_review_check": {"zh": "请登录 Holland2Stay 检查订单或预留，并根据需要付款或取消。", "en": "Sign in to Holland2Stay to check your orders or reservations, then pay or cancel as appropriate."},
@@ -523,8 +531,8 @@ TRANSLATIONS = {
         "en": "Invalid config format, nothing saved:",
     },
     "settings_env_override": {
-        "zh": "以下配置被环境变量覆盖，在这里修改不会生效：",
-        "en": "These settings are overridden by environment variables and cannot be changed here:",
+        "zh": "以下配置被外部环境变量或 .env 覆盖，在这里修改不会生效：",
+        "en": "These settings are overridden by the external environment or .env and cannot be changed here:",
     },
 
     # ── Users ────────────────────────────────────────────

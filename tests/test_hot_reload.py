@@ -21,7 +21,7 @@ _KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]{2,}$")
 #: 读取环境变量的函数名片段，与 tests/test_env_registry.py 保持同步。
 _READER_NAMES = (
     "environ", "getenv", "_env_int", "_env_float", "_env_bool",
-    "env_bool", "env_int", "_env_str", "_read", "_safe_int", "_safe_float",
+    "env_bool", "env_int", "env_get", "_env_str", "_read", "_safe_int", "_safe_float",
 )
 
 _SKIP_DIRS = {"tests", ".venv", "__pycache__", "node_modules", "build", "dist", "tools"}

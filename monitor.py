@@ -51,6 +51,7 @@ from env_utils import env_int
 
 import argparse
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -60,7 +61,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from dotenv import load_dotenv
 
 from config import (DATA_DIR, ENV_PATH, get_proxy_url, is_personal_proxy_active,
                     is_proxy_native_fallback_active, load_config)
@@ -669,7 +669,7 @@ def _print_dry_run(fresh: list["Listing"], user_notifiers: "UserNotifiers") -> N
 
 
 
-async def run_once(
+async def _run_once_snapshot(
         cfg,
         storage: Storage,
         user_notifiers: UserNotifiers,
@@ -789,6 +789,16 @@ async def run_once(
         booking_deadline=booking_deadline, loop=loop, prewarm=prewarm,
     )
 
+@functools.wraps(_run_once_snapshot)
+async def run_once(cfg, storage, user_notifiers, **kwargs):
+    from settings_store import capture_runtime_snapshot, use_runtime_snapshot
+
+    snapshot = capture_runtime_snapshot()
+    logger.info("本轮运行配置版本: %s", snapshot.version)
+    with use_runtime_snapshot(snapshot):
+        return await _run_once_snapshot(cfg, storage, user_notifiers, **kwargs)
+
+
 def _build_user_notifiers(users: list[UserConfig]) -> UserNotifiers:
     """
     为所有 enabled=True 的用户创建对应的 MultiNotifier。
@@ -798,6 +808,46 @@ def _build_user_notifiers(users: list[UserConfig]) -> UserNotifiers:
     UserNotifiers = list[(UserConfig, BaseNotifier)]
     """
     return [(u, create_user_notifier(u)) for u in users if u.enabled]
+
+
+async def _prepare_reload():
+    """Build and validate a reload before publishing any runtime values."""
+    from settings_store import commit_runtime, ensure_runtime_active, runtime_environment
+    from target_config import validate as validate_structured
+
+    ensure_runtime_active()
+    candidate = _reload_settings()
+    problems = validate_structured(dict(candidate.values))
+    fatal = [problem for problem in problems if problem.fatal]
+    if fatal:
+        raise ValueError("；".join(str(problem) for problem in fatal))
+    for problem in problems:
+        logger.warning("配置提示：%s", problem)
+    new_cfg = load_config(environ=runtime_environment(candidate))
+    users = load_users()
+    new_notifiers = []
+    current_channels = []
+    try:
+        for user in users:
+            if user.enabled:
+                current_channels = []
+                notifier = create_user_notifier(user, created_channels=current_channels)
+                new_notifiers.append((user, notifier))
+                current_channels = []
+        commit_runtime(candidate)
+    except BaseException:
+        for channel in current_channels:
+            try:
+                await channel.close()
+            except Exception:
+                logger.warning("关闭未完成的通知渠道失败", exc_info=True)
+        for _, notifier in new_notifiers:
+            try:
+                await notifier.close()
+            except Exception:
+                logger.warning("关闭未生效的通知器失败", exc_info=True)
+        raise
+    return new_cfg, new_notifiers
 
 
 async def main_loop(
@@ -1193,40 +1243,29 @@ async def main_loop(
             if reload_triggered:
                 _reload_event.clear()
                 logger.info("热重载中...")
-                load_dotenv(dotenv_path=ENV_PATH, override=True)
-                # override=True 把 .env 重放了一遍，runtime 配置得跟着刷新，
-                # 否则面板刚改的值这一程都不生效。顺序不能反：先 .env 后数据库。
-                _reload_settings()
                 try:
-                    cfg = load_config()
-                    users = load_users()
-                    # **先构造新的，成功之后再关旧的。** 反过来的话，构造一抛错，
-                    # 下面那个 except 会打印「继续使用旧配置」——而旧的 notifier
-                    # 已经 close 掉了，于是**所有渠道永久哑掉**直到进程重启，
-                    # 日志上还写着一切照旧。
-                    fresh_notifiers = _build_user_notifiers(users)
-                    for _, n in user_notifiers:
+                    new_cfg, fresh_notifiers = await _prepare_reload()
+                except Exception as e:
+                    logger.error("热重载失败，继续使用旧配置: %s", e, exc_info=True)
+                else:
+                    old_notifiers = user_notifiers
+                    cfg, user_notifiers = new_cfg, fresh_notifiers
+                    adaptive_peak = float(cfg.peak_interval)
+                    # Configuration is already committed; cleanup cannot roll it back.
+                    try:
+                        prewarm_cache.clear()
+                    except Exception:
+                        logger.warning("热重载后清理预登录缓存失败", exc_info=True)
+                    for _, n in old_notifiers:
                         try:
                             await n.close()
                         except Exception:
-                            # 关旧的失败最多泄漏一个 session，不该连累这次热重载
                             logger.warning("关闭旧 notifier 失败（忽略）", exc_info=True)
-                    user_notifiers = fresh_notifiers
-                    # 用户可能改了密码/邮箱/账号 → 全量失效 prewarm 缓存。
-                    # 下一轮 run_once 会按需重建（命中策略已对齐 active_user_ids）。
-                    prewarm_cache.clear()
-                    # 热重载后重置自适应间隔（用户可能改了 peak_interval / min_interval）
-                    adaptive_peak = float(cfg.peak_interval)
                     logger.info(
                         "配置已热重载：城市=%s  用户=%d  间隔=%ds  高峰自适应=%d–%ds(%s–%s/%s–%s)",
                         [c.name for c in cfg.cities], len(user_notifiers),
                         cfg.check_interval, cfg.min_interval, cfg.peak_interval,
                         cfg.peak_start, cfg.peak_end, cfg.peak_start_2, cfg.peak_end_2,
-                    )
-                except Exception as e:
-                    logger.error(
-                        "热重载失败，继续使用旧配置: %s",
-                        e, exc_info=True,
                     )
 
         except asyncio.CancelledError:
@@ -1425,9 +1464,7 @@ async def _async_main() -> None:
     parser.add_argument("--reset-db", action="store_true", help="启动前清空数据库（非交互式）")
     args = parser.parse_args()
 
-    # 强制从 .env 文件重新加载（override=True 覆盖继承的环境变量），
-    # 确保子进程启动时使用最新的 .env 配置而非父进程的陈旧值。
-    load_dotenv(dotenv_path=ENV_PATH, override=True)
+    # config has loaded .env without overriding genuine startup environment.
     # 日志必须先配。迁移与键名审计都在 _bootstrap_settings() 里，它们打的
     # logger.info 若无 handler 会被直接丢弃——2026-08-06 上线时实测：迁移正常
     # 完成，日志里却一个字都没有，而文档恰恰让人去日志里核对搬了哪些键。
@@ -1442,6 +1479,8 @@ async def _async_main() -> None:
     # 迁移只在 monitor 这一处做：web 有多个 gunicorn worker，并发改写 .env 会
     # 打架。两个进程读同一个库，monitor 搬完 web 下次注水就看得到。
     _bootstrap_settings()
+    from settings_store import ensure_runtime_active
+    ensure_runtime_active()
 
     cfg = load_config()
     _setup_logging(cfg.log_level)
@@ -1519,6 +1558,9 @@ async def _async_main() -> None:
 
     _write_pid()
     _setup_signals(asyncio.get_running_loop())
+    from mcore.booking_round import notify_interrupted_plaza
+    from mcore import push as booking_push
+    notify_interrupted_plaza(storage, user_notifiers, booking_push)
 
     try:
         if args.once:

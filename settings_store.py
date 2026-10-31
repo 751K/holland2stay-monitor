@@ -4,11 +4,10 @@
 --------
 ::
 
-    真实环境变量  >  app_settings 表  >  代码默认值
+    进程启动时的外部环境变量 > .env 中残留的运行参数 > app_settings > 代码默认值
 
-实现方式是**注水**：启动时把表里的值写进 ``os.environ``，但只写那些环境里还没有
-的键。这样各模块几十处 ``os.environ.get(key, default)`` 一行都不用改，而顺序自动
-成立——环境里已经有的说明是外部强制指定的，不动它。
+运行时参数按来源解析后写入 ``os.environ``，供现有读取路径使用。真正的外部
+覆盖在加载 .env 前捕获；重载只处理运行参数，不改变部署、密钥和调优配置。
 
 为什么保留环境变量这一层
 ------------------------
@@ -28,12 +27,23 @@ CHECK_INTERVAL=30 ...``）。代价是它**看不见**：面板显示一个值�
 from __future__ import annotations
 
 import logging
+import contextvars
+import uuid
+from contextlib import contextmanager
 import os
+import re
 import shutil
 import time
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping
 
-from env_registry import RUNTIME_KEYS
+from dotenv import dotenv_values
+from dotenv.variables import parse_variables
+
+from env_registry import DEPLOY_KEYS, RUNTIME_KEYS, SECRET_KEYS, TUNING_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -44,33 +54,213 @@ logger = logging.getLogger(__name__)
 _hydrated: set[str] = set()
 
 
-def hydrate(storage) -> int:
-    """把 app_settings 表里的 runtime 配置注入 ``os.environ``。返回注入个数。
+# Capture runtime/tuning values and only the *names* of secret/deploy overrides
+# before loading .env. Never copy secrets into this provenance record.
+_external_runtime: dict[str, str] | None = None
+_external_fixed_keys: set[str] = set()
+_runtime_lock = threading.RLock()
+_active_runtime: "RuntimeCandidate | None" = None
 
-    幂等：重复调用会用表里的最新值刷新自己注过的键，但绝不覆盖真实环境变量。
-    SIGHUP 热重载后必须再调一次——``load_dotenv(override=True)`` 会重放 .env，
-    而配置早已不在 .env 里了。
-    """
+
+@dataclass(frozen=True)
+class RuntimeCandidate:
+    """Read-only resolved runtime values and their source, prepared off-line."""
+    values: Mapping[str, str]
+    sources: Mapping[str, str]
+    version: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
+@dataclass(frozen=True)
+class RuntimeSnapshot:
+    """One round’s environment and opaque, non-secret publication identifier."""
+    version: str
+    environment: Mapping[str, str] = field(repr=False)
+
+
+_round_snapshot: contextvars.ContextVar[RuntimeSnapshot | None] = contextvars.ContextVar(
+    "round_runtime_snapshot", default=None
+)
+_VERSION_KEY = "FLATRADAR_RUNTIME_VERSION"
+
+
+def capture_runtime_snapshot() -> RuntimeSnapshot:
+    current = _round_snapshot.get()
+    if current is not None:
+        return current
+    ensure_runtime_active()
+    with _runtime_lock:
+        env = runtime_environment()
+        version = _active_runtime.version
+        env[_VERSION_KEY] = version
+        return RuntimeSnapshot(version, MappingProxyType(env))
+
+
+@contextmanager
+def use_runtime_snapshot(snapshot: RuntimeSnapshot):
+    token = _round_snapshot.set(snapshot)
     try:
-        stored = storage.all_app_settings()
-    except Exception:
-        # 配置读不出来不该让进程起不来：全部回落到代码默认值，照常跑。
-        logger.warning("读取 app_settings 失败，本次全部使用代码默认值", exc_info=True)
-        return 0
+        yield
+    finally:
+        _round_snapshot.reset(token)
 
-    n = 0
-    for key, value in stored.items():
-        if key not in RUNTIME_KEYS:
-            # 表里混进了非 runtime 的键（手工 INSERT / 旧版本残留）。不注水——
-            # 凭据注进环境变量会流进子进程和崩溃报告。
-            logger.warning("app_settings 里的 %s 不属于 runtime 类，已忽略", key)
-            continue
-        if key in os.environ and key not in _hydrated:
-            continue  # 外部强制指定，让它赢
-        os.environ[key] = value
-        _hydrated.add(key)
-        n += 1
-    return n
+
+def snapshot_from_environment(env: Mapping[str, str]) -> RuntimeSnapshot:
+    return RuntimeSnapshot(env.get(_VERSION_KEY, "unversioned"), MappingProxyType(dict(env)))
+
+
+def context_job(fn):
+    """Capture the caller’s round context before queueing a thread job."""
+    context = contextvars.copy_context()
+    return lambda: context.run(fn)
+
+
+def ensure_runtime_active() -> None:
+    """Freeze current runtime settings even if startup hydration was unavailable."""
+    global _active_runtime
+    with _runtime_lock:
+        if _active_runtime is None:
+            values = {key: os.environ[key] for key in RUNTIME_KEYS if key in os.environ}
+            sources = {key: "db" if key in _hydrated else "env" for key in values}
+            _active_runtime = RuntimeCandidate(MappingProxyType(values), MappingProxyType(sources))
+
+
+def runtime_get(key: str, default=None):
+    snapshot = _round_snapshot.get()
+    if snapshot is not None:
+        return snapshot.environment.get(key, default)
+    candidate = _active_runtime
+    if candidate is not None and key in RUNTIME_KEYS:
+        return candidate.values.get(key, default)
+    return os.environ.get(key, default)
+
+
+def runtime_environment(candidate: "RuntimeCandidate | None" = None) -> dict[str, str]:
+    """Copy a coherent environment for parsing or passing to a worker."""
+    snapshot = _round_snapshot.get()
+    if candidate is None and snapshot is not None:
+        return dict(snapshot.environment)
+    with _runtime_lock:
+        env = dict(os.environ)
+        current = candidate if candidate is not None else _active_runtime
+        if current is not None:
+            for key in RUNTIME_KEYS:
+                env.pop(key, None)
+            env.update(current.values)
+        return env
+
+
+def commit_runtime(candidate: RuntimeCandidate, *, activate: bool = True) -> None:
+    """Publish prepared values only after the caller has completed validation."""
+    global _active_runtime
+    if not candidate.values.keys() <= RUNTIME_KEYS:
+        raise ValueError("候选配置包含非运行时参数")
+    with _runtime_lock:
+        old = {key: os.environ[key] for key in RUNTIME_KEYS if key in os.environ}
+        try:
+            for key in RUNTIME_KEYS - candidate.values.keys():
+                os.environ.pop(key, None)
+            for key, value in candidate.values.items():
+                os.environ[key] = value
+        except BaseException:
+            for key in RUNTIME_KEYS - old.keys():
+                os.environ.pop(key, None)
+            for key, value in old.items():
+                os.environ[key] = value
+            raise
+        _hydrated.clear()
+        _hydrated.update(key for key, source in candidate.sources.items() if source == "db")
+        if activate:
+            _active_runtime = candidate
+
+
+def capture_external_runtime() -> None:
+    """Record genuine startup overrides before dotenv or database injection."""
+    global _external_runtime
+    if _external_runtime is None:
+        _external_runtime = {key: os.environ[key] for key in RUNTIME_KEYS | TUNING_KEYS
+                             if key in os.environ}
+        _external_fixed_keys.update(key for key in SECRET_KEYS | DEPLOY_KEYS if key in os.environ)
+
+
+def _runtime_dotenv(env_path: str | Path, stored: dict[str, str] | None = None) -> dict[str, str]:
+    """Read only runtime entries; never log values or inject other categories."""
+    raw = dotenv_values(dotenv_path=env_path, interpolate=False)
+    # Do not interpolate against stale values injected by an earlier reload.
+    # Genuine startup overrides still win, including inside ${...} references.
+    base = runtime_environment()
+    external = _external_runtime or {}
+    for key in RUNTIME_KEYS:
+        if key in external:
+            base[key] = external[key]
+        elif key not in raw and stored is not None and key in stored:
+            base[key] = stored[key]
+        else:
+            base.pop(key, None)
+    resolved: dict[str, str | None] = {}
+    for key, value in raw.items():
+        context = {**resolved, **base}
+        resolved[key] = (None if value is None else
+                         "".join(atom.resolve(context) for atom in parse_variables(value)))
+    return {key: value for key, value in resolved.items()
+            if key in RUNTIME_KEYS and value is not None}
+
+
+def runtime_override_keys(env_path: str | Path) -> set[str]:
+    """Return current external and .env overrides for the settings page."""
+    external = set(_external_runtime or {}) & RUNTIME_KEYS
+    try:
+        raw = dotenv_values(dotenv_path=env_path, interpolate=False)
+        return external | {key for key, value in raw.items()
+                           if key in RUNTIME_KEYS and value is not None}
+    except (OSError, UnicodeError):
+        logger.warning("无法读取 .env 中的运行配置覆盖", exc_info=True)
+        return external
+
+
+def monitor_child_environment() -> dict[str, str]:
+    """Do not promote Web's database/.env values to external monitor overrides."""
+    env = dict(os.environ)
+    if _external_runtime is None:
+        return env
+    for key in RUNTIME_KEYS | TUNING_KEYS:
+        if key in _external_runtime:
+            env[key] = _external_runtime[key]
+        else:
+            env.pop(key, None)
+    for key in SECRET_KEYS | DEPLOY_KEYS:
+        if key not in _external_fixed_keys:
+            env.pop(key, None)
+    return env
+
+
+def prepare_runtime(storage, *, env_path: str | Path) -> RuntimeCandidate:
+    """Resolve runtime sources without touching the active process environment."""
+    stored = storage.all_app_settings()
+    dotenv_runtime = _runtime_dotenv(env_path, stored)
+    external = _external_runtime or {}
+    values: dict[str, str] = {}
+    sources: dict[str, str] = {}
+    for key in RUNTIME_KEYS:
+        if key in external:
+            values[key], sources[key] = external[key], "env"
+        elif key in dotenv_runtime:
+            values[key], sources[key] = dotenv_runtime[key], "env"
+        elif key in stored:
+            values[key], sources[key] = stored[key], "db"
+    for key in stored.keys() - RUNTIME_KEYS:
+        logger.warning("app_settings 里的 %s 不属于 runtime 类，已忽略", key)
+    return RuntimeCandidate(MappingProxyType(values), MappingProxyType(sources))
+
+
+def hydrate(storage, *, env_path: str | Path, activate: bool = False) -> int:
+    """Load runtime settings at startup; on read failure retain current values."""
+    try:
+        candidate = prepare_runtime(storage, env_path=env_path)
+        commit_runtime(candidate, activate=activate)
+    except Exception:
+        logger.warning("读取运行配置失败，沿用当前运行配置", exc_info=True)
+        return 0
+    return sum(source == "db" for source in candidate.sources.values())
 
 
 def source_of(key: str) -> str:
@@ -78,6 +268,8 @@ def source_of(key: str) -> str:
 
     仅在 ``hydrate()`` 之后有意义。
     """
+    if _active_runtime is not None and key in RUNTIME_KEYS:
+        return _active_runtime.sources.get(key, "default")
     if key in _hydrated:
         return "db"
     return "env" if key in os.environ else "default"
@@ -91,18 +283,11 @@ def env_overrides(env_path: str | Path) -> list[str]:
     p = Path(env_path)
     if not p.exists():
         return []
-    found = []
     try:
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key = line.split("=", 1)[0].strip()
-            if key in RUNTIME_KEYS:
-                found.append(key)
-    except OSError:
+        raw = dotenv_values(dotenv_path=p, interpolate=False)
+        return [key for key, value in raw.items() if key in RUNTIME_KEYS and value is not None]
+    except (OSError, UnicodeError):
         return []
-    return found
 
 
 def migrate_env_to_db(storage, env_path: str | Path) -> tuple[list[str], list[str]]:
@@ -127,7 +312,7 @@ def migrate_env_to_db(storage, env_path: str | Path) -> tuple[list[str], list[st
         logger.error("迁移前读取 app_settings 失败，本次不迁移", exc_info=True)
         return [], present
 
-    raw = _read_env_pairs(p)
+    raw = _runtime_dotenv(p, existing)
     moved: dict[str, str] = {}
     skipped: list[str] = []
     for key in present:
@@ -197,31 +382,23 @@ def _forget_migrated(path: Path, keys: list[str], file_values: dict[str, str]) -
     变量，因此若二者不同，说明有个真实的环境变量（docker-compose ``environment:``
     或 shell）正压着 .env 生效——那是有意的强制覆盖，不能动。
 
-    残留的模糊地带：真实环境变量恰好与 .env 写的一样时，这里分辨不出来，会当成
-    来自文件而撤掉。后果是该键此后由数据库接管；值不变，但后续改数据库会生效。
-    要彻底分辨得在 ``load_dotenv()`` 之前抓一份原始环境，代价是 config 的导入
-    顺序要跟着改，不值得。
+    config 加载 .env 前已记录真正的外部运行配置；即使值与文件相同也保留。
     """
     for key in keys:
         if key not in os.environ:
             continue
+        if _external_runtime is not None:
+            if key in _external_runtime:
+                continue
+            del os.environ[key]
+            continue
+        # Compatibility for callers that have not captured startup provenance.
         if os.environ[key] != file_values.get(key, ""):
             logger.info(
                 "%s 有真实环境变量在覆盖 .env，保留该覆盖（面板对它无效）", key,
             )
             continue
         del os.environ[key]
-
-
-def _read_env_pairs(path: Path) -> dict[str, str]:
-    out: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        k, v = line.split("=", 1)
-        out[k.strip()] = v.strip().strip('"').strip("'")
-    return out
 
 
 def _strip_keys(path: Path, keys: set[str]) -> None:
@@ -233,9 +410,8 @@ def _strip_keys(path: Path, keys: set[str]) -> None:
     """
     kept = []
     for line in path.read_text(encoding="utf-8").splitlines(keepends=True):
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            if stripped.split("=", 1)[0].strip() in keys:
-                continue
+        match = re.match(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", line)
+        if match and match.group(1) in keys:
+            continue
         kept.append(line)
     path.write_text("".join(kept), encoding="utf-8")

@@ -68,12 +68,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
-from env_utils import env_bool
+from env_utils import env_bool, env_get
 
 from models import STATUS_AVAILABLE
 
@@ -123,7 +122,7 @@ def rest_enabled() -> bool:
 
 
 def rest_interval() -> float:
-    raw = (os.environ.get(INTERVAL_ENV) or "").strip()
+    raw = (env_get(INTERVAL_ENV) or "").strip()
     try:
         val = float(raw) if raw else DEFAULT_INTERVAL
     except ValueError:
@@ -134,7 +133,7 @@ def rest_interval() -> float:
 
 def rest_home_interval() -> float:
     """自家线路上的轮询间隔；0 = 自家线路上不查（默认）。"""
-    raw = (os.environ.get(HOME_INTERVAL_ENV) or "").strip()
+    raw = (env_get(HOME_INTERVAL_ENV) or "").strip()
     try:
         val = float(raw) if raw else 0.0
     except ValueError:
@@ -160,9 +159,9 @@ def _hhmm(raw: str, default: str, key: str) -> int:
 
 def rest_window() -> tuple[int, int, bool]:
     """(开始分钟, 结束分钟, 仅工作日)。"""
-    start = _hhmm(os.environ.get(START_ENV, ""), DEFAULT_START, START_ENV)
-    end = _hhmm(os.environ.get(END_ENV, ""), DEFAULT_END, END_ENV)
-    weekdays = (os.environ.get(WEEKDAYS_ENV) or "true").strip().lower() not in (
+    start = _hhmm(env_get(START_ENV, ""), DEFAULT_START, START_ENV)
+    end = _hhmm(env_get(END_ENV, ""), DEFAULT_END, END_ENV)
+    weekdays = (env_get(WEEKDAYS_ENV) or "true").strip().lower() not in (
         "0", "false", "no", "off")
     return start, end, weekdays
 

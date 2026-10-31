@@ -383,7 +383,8 @@ def enabled_sources() -> set[str] | None:
     ``config``。``SOURCES`` 由 settings_store 每轮从 app_settings 注水进来，
     monitor 与面板两个进程里都在。切分规则与 ``config._parse_sources_raw`` 对齐。
     """
-    raw = os.environ.get("SOURCES", "")
+    from env_utils import env_get
+    raw = env_get("SOURCES", "")
     values = {p.strip().lower() for p in re.split(r"[,|]", raw) if p.strip()}
     return values or None
 

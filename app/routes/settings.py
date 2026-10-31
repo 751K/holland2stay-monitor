@@ -11,6 +11,8 @@ from typing import Any
 
 from flask import Flask, flash, redirect, render_template, request, url_for
 
+import config
+
 from config import (KNOWN_SOURCES, source_display_name, KNOWN_CITIES,
                     KNOWN_MAGIS_CITIES, KNOWN_OURDOMAIN_CITIES,
                     KNOWN_PLAZA_CITIES,
@@ -23,7 +25,7 @@ from app.i18n import get_lang
 from app.process_ctrl import write_reload_request
 from app.safety import sanitize_dotenv
 from env_registry import RUNTIME_KEYS
-from settings_store import source_of
+from settings_store import runtime_override_keys
 from target_config import validate as validate_structured
 from translations import tr
 
@@ -228,12 +230,12 @@ def settings() -> Any:
         except OSError:
             logger.warning("写热重载请求失败，配置将在 monitor 下次重启后生效", exc_info=True)
 
-        overridden = sorted(k for k in pending if source_of(k) == "env")
+        overridden = sorted(set(pending) & runtime_override_keys(config.ENV_PATH))
         if overridden:
             # 真实环境变量压着数据库，面板显示的和进程实际用的不是一回事。
             # 不说出来就是一次静默失败。
             flash(
-                "以下配置存在环境变量覆盖，本次修改不会生效："
+                "以下配置被外部环境或 .env 覆盖，本次修改不会生效："
                 + "、".join(overridden),
                 "warning",
             )
@@ -245,7 +247,7 @@ def settings() -> Any:
     # 只有写入的那个 worker 注水过，其余的会显示旧值。数据库是唯一都看得到的。
     # 模板对每个键都自带默认值（env.get(key, '300') 之类），缺键即回落到默认。
     env = {k: v for k, v in st.all_app_settings().items() if k in RUNTIME_KEYS}
-    env_overridden = sorted(k for k in RUNTIME_KEYS if source_of(k) == "env")
+    env_overridden = sorted(runtime_override_keys(config.ENV_PATH))
     setting_meta = st.app_settings_meta()
 
     selected_sources = {

@@ -26,6 +26,8 @@ from storage import Storage
 def env_and_db(tmp_path, monkeypatch):
     """一份干净的 .env + 空库，且不碰进程真实的 os.environ。"""
     monkeypatch.setattr(ss, "_hydrated", set())
+    monkeypatch.setattr(ss, "_external_runtime", {})
+    monkeypatch.setattr(ss, "_external_fixed_keys", set())
     env = tmp_path / ".env"
     env.write_text(
         "WEB_PASSWORD=secret\n"
@@ -115,7 +117,7 @@ class TestResolutionOrder:
     def test_table_value_reaches_the_process(self, env_and_db):
         env, st = env_and_db
         ss.migrate_env_to_db(st, env)
-        assert ss.hydrate(st) == 3
+        assert ss.hydrate(st, env_path=env) == 3
         assert os.environ["CHECK_INTERVAL"] == "300"
         assert ss.source_of("CHECK_INTERVAL") == "db"
 
@@ -127,15 +129,16 @@ class TestResolutionOrder:
         """
         env, st = env_and_db
         monkeypatch.setenv("CHECK_INTERVAL", "30")
+        monkeypatch.setitem(ss._external_runtime, "CHECK_INTERVAL", "30")
         ss.migrate_env_to_db(st, env)
-        ss.hydrate(st)
+        ss.hydrate(st, env_path=env)
 
         assert os.environ["CHECK_INTERVAL"] == "30"
         assert ss.source_of("CHECK_INTERVAL") == "env"
 
     def test_unset_key_falls_through_to_code_default(self, env_and_db):
         env, st = env_and_db
-        ss.hydrate(st)
+        ss.hydrate(st, env_path=env)
         assert ss.source_of("MIN_INTERVAL") == "default"
         assert "MIN_INTERVAL" not in os.environ
 
@@ -149,24 +152,24 @@ class TestResolutionOrder:
         # 模拟 config 导入时 load_dotenv 的效果
         os.environ["CHECK_INTERVAL"] = "300"
         ss.migrate_env_to_db(st, env)
-        ss.hydrate(st)
+        ss.hydrate(st, env_path=env)
 
         st.set_app_setting("CHECK_INTERVAL", "45", updated_by="panel")
-        ss.hydrate(st)
+        ss.hydrate(st, env_path=env)
 
         assert os.environ["CHECK_INTERVAL"] == "45", "面板改了不生效"
 
     def test_hydrate_is_idempotent(self, env_and_db):
         env, st = env_and_db
         ss.migrate_env_to_db(st, env)
-        assert ss.hydrate(st) == ss.hydrate(st) == 3
+        assert ss.hydrate(st, env_path=env) == ss.hydrate(st, env_path=env) == 3
 
     def test_non_runtime_rows_are_never_injected(self, env_and_db, caplog):
         """表里混进凭据也不能注入环境变量——它会流进子进程和崩溃报告。"""
         env, st = env_and_db
         st.set_app_setting("WEB_PASSWORD", "leaked")
         with caplog.at_level("WARNING"):
-            ss.hydrate(st)
+            ss.hydrate(st, env_path=env)
         assert os.environ.get("WEB_PASSWORD") != "leaked"
         assert any("WEB_PASSWORD" in r.getMessage() for r in caplog.records)
 
@@ -178,7 +181,7 @@ class TestResolutionOrder:
             def all_app_settings(self):
                 raise RuntimeError("database is locked")
 
-        assert ss.hydrate(Broken()) == 0
+        assert ss.hydrate(Broken(), env_path=env) == 0
 
 
 class TestEnvOverrideIsVisible:
@@ -224,10 +227,9 @@ class TestWiredIntoBothProcesses:
         import monitor
 
         src = inspect.getsource(monitor.main_loop)
-        i = src.index("load_dotenv(dotenv_path=ENV_PATH, override=True)")
-        assert "_reload_settings()" in src[i:i + 400], (
-            "override=True 重放了 .env，不跟着刷新的话面板刚改的值这一程都不生效"
-        )
+        assert "_prepare_reload()" in src
+        assert "_reload_settings()" in inspect.getsource(monitor._prepare_reload)
+        assert "load_dotenv(dotenv_path=ENV_PATH, override=True)" not in src
 
     def test_web_hydrates_at_import_not_in_main(self):
         """gunicorn 加载的是 web:app，根本不经过 main()。"""
@@ -264,7 +266,7 @@ class TestPanelWritesToTheTable:
     def test_route_warns_when_env_overrides(self):
         src = (Path(__file__).resolve().parent.parent
                / "app" / "routes" / "settings.py").read_text(encoding="utf-8")
-        assert "source_of" in src and "env_overridden" in src
+        assert "runtime_override_keys" in src and "env_overridden" in src
 
 
 class TestMigrationBackupSurvivesDocker:

@@ -514,6 +514,10 @@ class PlazaBooker(AbstractBooker):
                 # 信封在前、房源参数在后：万一哪天两边键名撞上，以服务端给这条
                 # 房源的那份为准。
                 payload = {**self._form_envelope(session), **params}
+                # Persist the boundary before the only action that submits an application.
+                # If persistence fails, do not send the request.
+                from mcore.booking_guard import record_mutation
+                record_mutation(listing.name)
                 resp = self._portal_post(session, REACT_URL, payload, expect="")
                 if resp.get("success") is False:
                     return _res(False,

@@ -1057,7 +1057,7 @@ class WebNotifier(BaseNotifier):
 # 工厂函数
 # ------------------------------------------------------------------ #
 
-def create_user_notifier(user) -> BaseNotifier:
+def create_user_notifier(user, *, created_channels=None) -> BaseNotifier:
     """
     根据 UserConfig 创建该用户对应的 MultiNotifier。
 
@@ -1075,7 +1075,9 @@ def create_user_notifier(user) -> BaseNotifier:
     --------
     monitor.py 启动时以及 SIGHUP 热重载后调用一次；web.py 通知测试路由按需调用。
     """
-    notifiers: list[BaseNotifier] = []
+    # The reload coordinator can dispose partially built channels if a later
+    # constructor raises. Existing callers retain the original behavior.
+    notifiers: list[BaseNotifier] = created_channels if created_channels is not None else []
 
     for channel in user.notification_channels:
         ch = channel.strip().lower()

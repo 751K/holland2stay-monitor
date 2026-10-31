@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 
 from models import parse_features_list
 
@@ -30,7 +29,8 @@ _MAP_MAX_AGE_DAYS_DEFAULT = 14
 
 
 def _map_max_age_days() -> int:
-    raw = os.environ.get("MAP_MAX_AGE_DAYS", "")
+    from env_utils import env_get
+    raw = env_get("MAP_MAX_AGE_DAYS", "")
     if not raw.strip():
         return _MAP_MAX_AGE_DAYS_DEFAULT
     try:

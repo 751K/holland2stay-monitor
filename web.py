@@ -106,13 +106,13 @@ from app.routes import api_v1                                    # noqa: E402
 # 搬完这边下次注水就看得到。
 def _hydrate_settings() -> None:
     try:
-        from config import DB_PATH, TIMEZONE
+        from config import DB_PATH, TIMEZONE, ENV_PATH
         from settings_store import hydrate
         from storage import Storage
 
         st = Storage(DB_PATH, timezone_str=TIMEZONE)
         try:
-            hydrate(st)
+            hydrate(st, env_path=ENV_PATH)
         finally:
             st.close()
     except Exception:

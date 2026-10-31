@@ -103,6 +103,10 @@ def _serve(conn: Connection, source: str) -> None:
         _, tasks, multi_source, env, detail_cache = request
         os.environ.clear()
         os.environ.update(env)
+        from settings_store import _round_snapshot, snapshot_from_environment
+        snapshot = snapshot_from_environment(env)
+        _round_snapshot.set(snapshot)
+        logger.info("浏览器工作进程 %s 配置版本: %s", source, snapshot.version)
         if source == "holland2stay":
             h2s.prime_detail_cache(detail_cache)
         try:
@@ -227,6 +231,7 @@ class BrowserWorker:
         self._ready = False
         self._stop_lock = threading.Lock()
         self._closed = False
+        self._runtime_version = None
 
     def _start(self) -> None:
         with self._stop_lock:
@@ -265,17 +270,22 @@ class BrowserWorker:
         from config import get_proxy_url
         import scrapers.holland2stay as h2s
 
-        if self.process is not None and not self.process.is_alive():
+        from settings_store import runtime_environment
+        env = runtime_environment()
+        version = env.get("FLATRADAR_RUNTIME_VERSION")
+        if self.process is not None and (not self.process.is_alive() or
+                                         (version and version != self._runtime_version)):
             self.stop()
         if self.process is None:
             self._start()
+        self._runtime_version = version
         conn = self.conn
         deadline = time.monotonic() + timeout
         try:
             if not self._ready:
                 self._receive(conn, deadline, get_proxy_url, expect="ready")
                 self._ready = True
-            conn.send(("scrape", tasks, multi_source, dict(os.environ),
+            conn.send(("scrape", tasks, multi_source, env,
                        dict(h2s._DETAIL_CACHE) if self.source == "holland2stay" else {}))
             kind, value, detail = self._receive(conn, deadline, get_proxy_url, expect="result")
             if detail is not None:

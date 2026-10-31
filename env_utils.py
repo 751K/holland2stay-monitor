@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import logging
-import os
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
@@ -32,8 +31,15 @@ def parse_bool(raw, default: bool = False) -> bool:
     return default
 
 
-def env_bool(name: str, default: bool = False) -> bool:
-    return parse_bool(os.environ.get(name), default)
+def env_get(name: str, default=None, *, environ=None):
+    if environ is not None:
+        return environ.get(name, default)
+    from settings_store import runtime_get
+    return runtime_get(name, default)
+
+
+def env_bool(name: str, default: bool = False, *, environ=None) -> bool:
+    return parse_bool(env_get(name, environ=environ), default)
 
 
 def env_int(
@@ -44,6 +50,7 @@ def env_int(
     maximum: int | None = None,
     positive: bool = False,
     strict: bool = False,
+    environ=None,
 ) -> int:
     """读一个整数环境变量。
 
@@ -52,7 +59,7 @@ def env_int(
     - ``positive=True``：非正值回落 ``default``（与旧的 _env_int_positive 一致）
     - ``minimum`` / ``maximum``：对有效值做夹取
     """
-    raw = os.environ.get(name)
+    raw = env_get(name, environ=environ)
     text = (raw or "").strip()
     if not text:
         value = default

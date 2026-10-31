@@ -62,9 +62,9 @@ def lane_enabled() -> bool:
     开关放 RUNTIME_KEYS，可以从数据库注水、SIGHUP 热重载——救火用的开关如果关它
     本身要走一次部署，它在最需要的时候就是没用的。
     """
-    import os
+    from env_utils import env_get
 
-    return (os.environ.get("WARM_BROWSER_LANE") or "").strip().lower() in (
+    return (env_get("WARM_BROWSER_LANE") or "").strip().lower() in (
         "1", "true", "yes", "on")
 
 

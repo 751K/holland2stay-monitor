@@ -29,6 +29,8 @@ if str(_ROOT) not in sys.path:
 def _isolate_browser_worker_for_unit_tests(monkeypatch):
     """Keep existing dispatcher stubs in process; subprocess behavior has its own tests."""
     from mcore import scrape_round
+    import settings_store
+    monkeypatch.setattr(settings_store, "_active_runtime", None)
 
     class LocalWorker:
         def execute(self, tasks, *, multi_source, timeout):
@@ -140,6 +142,8 @@ def isolated_data_dir(tmp_path, monkeypatch):
     try:
         import settings_store
         monkeypatch.setattr(settings_store, "_hydrated", set())
+        monkeypatch.setattr(settings_store, "_external_runtime", {})
+        monkeypatch.setattr(settings_store, "_external_fixed_keys", set())
     except ImportError:
         pass
 

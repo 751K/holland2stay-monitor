@@ -74,11 +74,12 @@ class PrewarmRound:
         worker = get_booking_worker(first.id) if wanted else existing_booking_worker(first.id)
         if worker is None or (not wanted and worker.process is None):
             return
+        from settings_store import context_job
         fut = self.loop.run_in_executor(
             None,
-            functools.partial(worker.run, "heartbeat",
+            context_job(functools.partial(worker.run, "heartbeat",
                               {"wanted": wanted, "may_rebuild": may_rebuild},
-                              timeout=PREWARM_WORKER_TIMEOUT_SEC),
+                              timeout=PREWARM_WORKER_TIMEOUT_SEC)),
         )
         fut.add_done_callback(_done)
 
@@ -155,7 +156,8 @@ class PrewarmRound:
                                     "name": u.name, "user_id": u.id},
                         timeout=PREWARM_WORKER_TIMEOUT_SEC)
                     return RemoteSession(w, email, created, expires)
-                fut = self.loop.run_in_executor(None, _remote_prewarm)
+                from settings_store import context_job
+                fut = self.loop.run_in_executor(None, context_job(_remote_prewarm))
                 self.futures[user.id] = fut
                 fut.add_done_callback(
                     lambda f, uid=user.id: self.loop.call_soon_threadsafe(

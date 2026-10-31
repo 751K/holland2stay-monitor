@@ -446,17 +446,20 @@ def user_edit(user_id: str) -> Any:
         device_count = 0
 
     from mcore.booking_guard import BookingGuard
+    from mcore.plaza_guard import PlazaGuard
     booking_guard_error = False
     try:
         guard = BookingGuard(storage())
         booking_attempt = guard.get_user(user_id) or guard.get_account(user.auto_book.email)
+        plaza_attempts = PlazaGuard(storage()).get_visible(user.auto_book.plaza_username, user_id)
     except Exception:
         logger.exception("无法读取预订保护状态 user_id=%s", user_id)
         booking_attempt = None
+        plaza_attempts = []
         booking_guard_error = True
     return render_template(
         "user_form.html", user=user, device_count=device_count, booking_attempt=booking_attempt,
-        booking_guard_error=booking_guard_error,
+        plaza_attempts=plaza_attempts, booking_guard_error=booking_guard_error,
         id_doc=__import__("applicant_docs").info(user_id),
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
@@ -769,10 +772,26 @@ def user_acknowledge_booking(user_id: str) -> Any:
     return redirect(url_for("user_edit", user_id=user_id))
 
 
+@self_or_admin_required
+@csrf_required
+def user_acknowledge_plaza(user_id: str) -> Any:
+    from mcore.plaza_guard import PlazaGuard
+    guard = PlazaGuard(storage())
+    try:
+        if guard.acknowledge(request.form.get("attempt", ""), user_id):
+            flash(tr("plaza_review_cleared", get_lang()), "success")
+        else:
+            flash(tr("plaza_review_missing", get_lang()), "warning")
+    except RuntimeError:
+        flash(tr("plaza_review_running", get_lang()), "warning")
+    return redirect(url_for("user_edit", user_id=user_id))
+
+
 def register(app: Flask) -> None:
     app.add_url_rule("/users",                       endpoint="users_list",       view_func=users_list,       methods=["GET"])
     app.add_url_rule("/users/new",                   endpoint="user_new",         view_func=user_new,         methods=["GET", "POST"])
     app.add_url_rule("/users/<user_id>",             endpoint="user_edit",        view_func=user_edit,        methods=["GET", "POST"])
+    app.add_url_rule("/users/<user_id>/plaza-acknowledge", endpoint="user_acknowledge_plaza", view_func=user_acknowledge_plaza, methods=["POST"])
     app.add_url_rule("/users/<user_id>/booking-acknowledge", endpoint="user_acknowledge_booking", view_func=user_acknowledge_booking, methods=["POST"])
     app.add_url_rule("/users/<user_id>/delete",      endpoint="user_delete",      view_func=user_delete,      methods=["POST"])
     app.add_url_rule("/users/<user_id>/test",        endpoint="user_test_notify", view_func=user_test_notify, methods=["POST"])

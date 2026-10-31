@@ -276,7 +276,7 @@ key names and their groups are registered in `env_registry.py`.
 
 ### Environment variables win over the database
 
-Resolution order is **environment variable > `app_settings` > code default**.
+For runtime settings, precedence is **startup environment > runtime entries left in `.env` > `app_settings` > code default**.
 The environment layer exists as an override hatch for containerised debugging:
 
 ```bash
@@ -287,7 +287,9 @@ The cost is that it is invisible: the dashboard shows one value, the process
 uses another. So the dashboard flags "overridden by an environment variable,
 changes here will not take effect", and the monitor warns at startup about any
 such key left in `.env`. **Use the dashboard for day-to-day changes** — writing
-these keys back into `.env` silently overrides it.
+these keys back into `.env` overrides it. Deployment settings, secrets and tuning
+settings do not hot-reload; restart the affected process after changing them.
+Restart the whole application if the database path changes.
 
 ### Input validation
 
@@ -387,6 +389,10 @@ protection survives monitor restarts and applies to all users sharing the accoun
 For Plaza, users can configure their username and password and separately enable
 automatic applications. The switch is off by default. An application is submitted
 directly and does not guarantee a successful rental. See [Plaza](PLAZA.md).
+If an application outcome is uncertain, check your applications on Plaza and
+select “Checked; resume applications for this listing” in user settings. Only
+that account and listing are paused; other listings can still be processed.
+Protection cannot be removed while the application task is running.
 
 Xior, OurDomain and OurCampus run the same RENTCafe backend and share one
 implementation ([`bookers/rentcafe.py`](../bookers/rentcafe.py)). The code is

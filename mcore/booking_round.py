@@ -20,7 +20,8 @@ from storage import Storage
 from users import UserConfig
 
 from mcore.booking import area_key, book_with_fallback
-from mcore.booking_guard import BookingGuard, process_alive
+from mcore.booking_guard import BookingGuard, attempt_context, process_alive
+from mcore.plaza_guard import PlazaGuard
 from mcore.booking_worker import get_booking_worker
 from mcore.booking_candidates import listing_source
 from mcore.h2s_guard import h2s_login_suppressed_remaining, mark_h2s_login_blocked
@@ -84,6 +85,79 @@ async def _notify_uncertain(storage, push, notifier, user, listing, *, listing_n
         logger.exception("[%s] 推送预订核实通知失败", user.name)
 
 
+def _plaza_uncertain_text(user, listing_name):
+    if getattr(user, "language", "zh") == "en":
+        title = "Check your Plaza application"
+        body = (f"The application for {listing_name} may have been submitted. "
+                "Sign in to Plaza to check your applications, then confirm the review in user "
+                "settings. Automatic applications for this listing are paused until then.")
+    else:
+        title = "Plaza 应征结果需要核实"
+        body = (f"{listing_name} 的应征结果不确定，可能已经提交。请登录 Plaza "
+                "检查我的应征，并在用户设置中确认核实；确认前不会自动重复应征该房源。")
+    return title, body
+
+
+async def _notify_plaza_uncertain(storage, push, notifier, user, listing, *, listing_name=None, save_web=True):
+    title, body = _plaza_uncertain_text(user, listing_name or listing.name)
+    if save_web:
+        try:
+            storage.add_web_notification(type="booking", title=title, body=body,
+                                         user_id=user.id, url=f"/users/{user.id}")
+        except Exception:
+            logger.exception("[%s] 保存 Plaza 核实通知失败", user.name)
+    try:
+        await notifier.send_booking_uncertain(title, body)
+    except Exception:
+        logger.exception("[%s] 发送 Plaza 核实通知失败", user.name)
+    try:
+        await push.dispatch_announcement_to_user(storage, user.id, title, body)
+    except Exception:
+        logger.exception("[%s] 推送 Plaza 核实通知失败", user.name)
+
+
+async def _alert_plaza_attempt(storage, push, notifier, user, listing, guard, attempt):
+    try:
+        row = guard.get_attempt(attempt)
+        if row and row['timed_out']:
+            return
+        listing_name = row['listing'] if row else listing.name
+        title, body = _plaza_uncertain_text(user, listing_name)
+        if row:
+            if guard.claim_notice(attempt, title=title, body=body, user_id=user.id):
+                await _notify_plaza_uncertain(storage, push, notifier, user, listing,
+                                              listing_name=listing_name, save_web=False)
+            return
+    except Exception:
+        logger.exception("[%s] 无法持久化 Plaza 核实通知", user.name)
+    # The durable alert may be unavailable; still attempt the independent channels.
+    await _notify_plaza_uncertain(storage, push, notifier, user, listing)
+
+
+def notify_interrupted_plaza(storage, user_notifiers, push):
+    """Warn owners after a restart even if the listing is no longer available."""
+    owners = {user.id: (user, notifier) for user, notifier in user_notifiers}
+    try:
+        guard = PlazaGuard(storage)
+        rows = guard.get_unnotified()
+    except Exception:
+        logger.exception("无法读取 Plaza 待核实应征")
+        return
+    loop = asyncio.get_running_loop()
+    for row in rows:
+        pair = owners.get(row['user_id'])
+        if not pair or (row['state'] == 'running' and process_alive(row['pid'])):
+            continue
+        try:
+            user, notifier = pair
+            title, body = _plaza_uncertain_text(user, row['listing'])
+            if guard.claim_notice(row['attempt'], title=title, body=body, user_id=user.id):
+                loop.create_task(_notify_plaza_uncertain(
+                    storage, push, notifier, user, SimpleNamespace(name=row['listing']), save_web=False))
+        except Exception:
+            logger.exception("无法恢复 Plaza 待核实通知")
+
+
 def submit_bookings(
     loop: asyncio.AbstractEventLoop,
     ab_candidates: dict[str, list["Listing"]],
@@ -105,6 +179,7 @@ def submit_bookings(
     ab_futures: [(user, notifier, sorted_candidates, Future, prewarmed), ...]
       H2S 的 sorted_candidates 按面积降序；Plaza 每个 tuple 只包含一套房源。
     """
+    from settings_store import context_job
     ab_futures: list[tuple] = []
 
     for user, notifier in user_notifiers:
@@ -132,11 +207,55 @@ def submit_bookings(
                     "[%s] 🚀 Plaza 自动注册（全部符合条件的房源），提交到 executor: %s",
                     user.name, plaza_listing.name,
                 )
-            f = loop.run_in_executor(
-                None,
-                lambda c=plaza_listing, u=user:
-                book_with_fallback([c], u, booking_deadline, prewarmed=None),
-            )
+            plaza_guard = plaza_attempt = None
+            if not user.auto_book.dry_run:
+                try:
+                    plaza_guard = PlazaGuard(storage)
+                    plaza_attempt = plaza_guard.acquire(user.auto_book.plaza_username, user.id,
+                                                        plaza_listing.id, plaza_listing.name)
+                except Exception:
+                    logger.exception("[%s] 无法保存 Plaza 应征保护，已跳过该房源", user.name)
+                if not plaza_attempt:
+                    if plaza_guard:
+                        try:
+                            old = plaza_guard.get_listing(user.auto_book.plaza_username, plaza_listing.id)
+                            if (old and old["user_id"] == user.id and not old["timed_out"]
+                                    and (old["state"] == "finished" or not process_alive(old["pid"]))):
+                                title, body = _plaza_uncertain_text(user, old["listing"])
+                                if plaza_guard.claim_notice(old["attempt"], title=title, body=body,
+                                                            user_id=user.id):
+                                    from mcore import push as push_module
+                                    loop.create_task(_notify_plaza_uncertain(
+                                        storage, push_module, notifier, user, plaza_listing,
+                                        listing_name=old["listing"], save_web=False))
+                        except Exception:
+                            logger.exception("[%s] 恢复 Plaza 核实通知失败", user.name)
+                    logger.warning("[%s] Plaza 应征待核实或保护不可用，跳过 %s", user.name, plaza_listing.name)
+                    continue
+
+            def run_plaza(c=plaza_listing, u=user, g=plaza_guard, a=plaza_attempt):
+                if g is None:
+                    return book_with_fallback([c], u, booking_deadline, prewarmed=None)
+                result = None
+                try:
+                    with attempt_context(g, a):
+                        result = book_with_fallback([c], u, booking_deadline, prewarmed=None)
+                    return result
+                finally:
+                    try:
+                        g.update(a, state="finished", phase=getattr(result, "phase", "exception") or "exception")
+                    except Exception:
+                        logger.exception("[%s] 无法保存 Plaza 应征状态，保护记录保留", u.name)
+
+            try:
+                f = loop.run_in_executor(None, context_job(run_plaza))
+            except Exception:
+                if plaza_guard:
+                    plaza_guard.update(plaza_attempt, state="finished")
+                    plaza_guard.clear_completed(plaza_attempt)
+                raise
+            if plaza_guard:
+                f.plaza_guard = (plaza_guard, plaza_attempt)
             ab_futures.append((user, notifier, [plaza_listing], f, None))
 
         # Plaza 之外的平台仍使用原来的「主候选 + race_lost 回退」策略。这样
@@ -299,7 +418,7 @@ def submit_bookings(
                         logger.exception("[%s] 无法保存预订最终状态，保护记录保留", u.name)
 
         try:
-            f = loop.run_in_executor(None, run_booking)
+            f = loop.run_in_executor(None, context_job(run_booking))
         except Exception:
             if guard:
                 guard.update(attempt, state="finished")
@@ -348,8 +467,12 @@ async def process_booking_results(
         except asyncio.TimeoutError:
             future.add_done_callback(_observe_late_booking)
             logger.error("[%s] 预订任务超过等待时间，后台任务可能仍在运行", user.name)
+            plaza_protected = getattr(future, "plaza_guard", None)
             protected = getattr(future, "booking_guard", None)
-            if protected:
+            if plaza_protected:
+                await _alert_plaza_attempt(storage, push, notifier, user, sorted_cands[0],
+                                           *plaza_protected)
+            elif protected:
                 guard, attempt = protected
                 listing_name = None
                 try:
@@ -366,18 +489,37 @@ async def process_booking_results(
         except Exception:
             if getattr(future, "booking_guard", None):
                 await _notify_uncertain(storage, push, notifier, user, sorted_cands[0])
+            elif getattr(future, "plaza_guard", None):
+                await _alert_plaza_attempt(storage, push, notifier, user, sorted_cands[0],
+                                           *future.plaza_guard)
             logger.error(
                 "[%s] 预订任务抛出未捕获异常，已隔离该用户（其余用户照常处理）",
                 user.name, exc_info=True,
             )
             continue
-        protected = getattr(future, "booking_guard", None)
+        is_plaza_guard = bool(getattr(future, "plaza_guard", None))
+        protected = getattr(future, "booking_guard", None) or getattr(future, "plaza_guard", None)
         if protected:
             guard, attempt = protected
-            row = guard.get_attempt(attempt)
-            if row and row["mutated"] and (result is None or not result.success):
-                await _notify_uncertain(storage, push, notifier, user,
-                                        result.listing if result else sorted_cands[0])
+            try:
+                row = guard.get_attempt(attempt)
+            except Exception:
+                if not is_plaza_guard:
+                    raise
+                logger.exception("[%s] 无法读取 Plaza 应征保护，保留记录并通知用户", user.name)
+                await _notify_plaza_uncertain(storage, push, notifier, user,
+                                              result.listing if result else sorted_cands[0])
+                continue
+            confirmed_plaza_rejection = (is_plaza_guard and result is not None
+                                          and result.phase == "save_rejected")
+            if (row and row["mutated"] and (result is None or not result.success)
+                    and not confirmed_plaza_rejection):
+                if is_plaza_guard:
+                    await _alert_plaza_attempt(storage, push, notifier, user,
+                                               result.listing if result else sorted_cands[0], guard, attempt)
+                else:
+                    await _notify_uncertain(storage, push, notifier, user,
+                                            result.listing if result else sorted_cands[0])
                 continue
             if row and row["timed_out"]:
                 continue
