@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import time
+from types import SimpleNamespace
 
 from booker import PrewarmedSession
 from models import BOOKING_HOLD_SOURCES, Listing, is_application_only
@@ -19,6 +20,8 @@ from storage import Storage
 from users import UserConfig
 
 from mcore.booking import area_key, book_with_fallback
+from mcore.booking_guard import BookingGuard, process_alive
+from mcore.booking_worker import get_booking_worker
 from mcore.booking_candidates import listing_source
 from mcore.h2s_guard import h2s_login_suppressed_remaining, mark_h2s_login_blocked
 from mcore.notify_round import push_booking_failed
@@ -41,9 +44,44 @@ UserNotifiers = list[tuple[UserConfig, BaseNotifier]]
 #: 与 ``SOURCE_DISPATCH_TIMEOUT_SEC`` 同一个量级：默认 600 秒足够覆盖「登录 +
 #: 多套备选」的正常耗时，只在病理情况下才会触发。超时**杀不掉底层线程**
 #: （executor 的 future 取消不了已在运行的调用），这里保证的是本轮继续走完，
-#: 并把该用户按「本轮未预订」处理。
+#: Holland2Stay 保留账号级保护并提示用户核实，不把超时当成预订失败。
 _BOOKING_RESULT_TIMEOUT_SEC = float(
     os.environ.get("BOOKING_RESULT_TIMEOUT_SEC") or "600")
+
+
+def _observe_late_booking(future):
+    """Consume a late worker exception after the timed-out waiter has moved on."""
+    try:
+        future.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("超时后的预订任务最终异常退出")
+
+
+async def _notify_uncertain(storage, push, notifier, user, listing, *, listing_name=None):
+    if getattr(user, "language", "zh") == "en":
+        title = "Check your Holland2Stay booking"
+        body = (f"The result for {listing_name or listing.name} is uncertain and the room may already "
+                "be reserved. Sign in to Holland2Stay to check your orders or reservations, then "
+                "confirm the review in your user settings. Auto-booking is paused for this account until then.")
+    else:
+        title = "Holland2Stay 预订结果需要核实"
+        body = (f"{listing_name or listing.name} 的预订结果不确定，可能已经占房。请登录 Holland2Stay "
+                "检查订单或预留，并在用户设置中确认核实；确认前该账号的自动预订已暂停。")
+    try:
+        storage.add_web_notification(type="booking", title=title, body=body,
+                                     user_id=user.id, url=f"/users/{user.id}")
+    except Exception:
+        logger.exception("[%s] 保存预订核实通知失败", user.name)
+    try:
+        await notifier.send_booking_uncertain(title, body)
+    except Exception:
+        logger.exception("[%s] 发送预订核实通知失败", user.name)
+    try:
+        await push.dispatch_announcement_to_user(storage, user.id, title, body)
+    except Exception:
+        logger.exception("[%s] 推送预订核实通知失败", user.name)
 
 
 def submit_bookings(
@@ -117,6 +155,7 @@ def submit_bookings(
             if listing_source(c) == "holland2stay"
         ]
         prewarmed: PrewarmedSession | None = None
+        prewarm_busy = False
         cache_hit = False
         if h2s_candidates:
             suppressed = h2s_login_suppressed_remaining()
@@ -162,6 +201,7 @@ def submit_bookings(
                 elif pre_fut is not None:
                     # 仍在运行中，放回 futures 让 _stash_pending_prewarms 收尾
                     prewarm_futures[user.id] = pre_fut
+                    prewarm_busy = True
 
             suppressed = h2s_login_suppressed_remaining()
             if suppressed > 0:
@@ -204,11 +244,69 @@ def submit_bookings(
                 "[%s] 🚀 自动预订（新上线可预订），立即提交到 executor: %s",
                 user.name, primary.name,
             )
-        f = loop.run_in_executor(
-            None,
-            lambda cs=sequential_candidates, u=user, pw=prewarmed:
-            book_with_fallback(cs, u, booking_deadline, prewarmed=pw),
-        )
+        guard = attempt = None
+        if h2s_candidates and not user.auto_book.dry_run:
+            try:
+                guard = BookingGuard(storage)
+                attempt = guard.acquire(user.auto_book.email, user.id, h2s_candidates[0].name)
+            except Exception:
+                logger.exception("[%s] 无法保存预订保护记录，已停止 H2S 自动预订", user.name)
+                attempt = None
+            if not attempt:
+                # Recover a warning after a monitor crash or an undelivered result.
+                # Other users sharing this account must not receive the details.
+                if guard:
+                    try:
+                        old = guard.get_account(user.auto_book.email)
+                        if (old and old["user_id"] == user.id and not old["timed_out"]
+                                and (old["state"] == "finished" or not process_alive(old["pid"]))
+                                and guard.claim_notice(old["attempt"])):
+                            from mcore import push as push_module
+                            loop.create_task(_notify_uncertain(storage, push_module, notifier, user, h2s_candidates[0], listing_name=old["listing"]))
+                    except Exception:
+                        logger.exception("[%s] 恢复预订核实通知失败", user.name)
+                logger.warning("[%s] H2S 账号存在待核实的预订或保护不可用，跳过自动预订", user.name)
+                sequential_candidates = [c for c in sequential_candidates if listing_source(c) != "holland2stay"]
+                if not sequential_candidates:
+                    continue
+                guard = None
+
+        use_worker = any(listing_source(c) == "holland2stay" for c in sequential_candidates)
+        worker = get_booking_worker(user.id + ":booking" if prewarm_busy else user.id) if use_worker else None
+        job = SimpleNamespace(safe=True)
+
+        def run_booking(cs=sequential_candidates, u=user, pw=prewarmed, g=guard, a=attempt,
+                        w=worker, job_state=job):
+            result = None
+            try:
+                if w is None:
+                    return book_with_fallback(cs, u, booking_deadline, prewarmed=pw)
+                result = w.run(
+                    "book", {"candidates": cs, "user": u, "deadline": booking_deadline,
+                             "guard": (g.path, a) if g else None,
+                             "use_prewarm": bool(pw and getattr(pw, "worker", None) is w
+                                                 and pw.is_alive())},
+                    timeout=max(0.01, _BOOKING_RESULT_TIMEOUT_SEC - min(2.0, _BOOKING_RESULT_TIMEOUT_SEC * 0.1)),
+                    guard=(g, a) if g else None, job=job_state,
+                )
+                return result
+            finally:
+                if g is not None and job_state.safe:
+                    try:
+                        g.update(a, state="finished", phase=getattr(result, "phase", "exception") or "exception",
+                                 pay_url="available" if getattr(result, "pay_url", "") else "")
+                    except Exception:
+                        logger.exception("[%s] 无法保存预订最终状态，保护记录保留", u.name)
+
+        try:
+            f = loop.run_in_executor(None, run_booking)
+        except Exception:
+            if guard:
+                guard.update(attempt, state="finished")
+                guard.clear_completed(attempt)
+            raise
+        if guard:
+            f.booking_guard = (guard, attempt)
         ab_futures.append((user, notifier, sequential_candidates, f, prewarmed))
 
     return ab_futures
@@ -245,25 +343,46 @@ async def process_booking_results(
         # 来保证**。
         try:
             result = await asyncio.wait_for(
-                future, timeout=_BOOKING_RESULT_TIMEOUT_SEC,
+                asyncio.shield(future), timeout=_BOOKING_RESULT_TIMEOUT_SEC,
             )
         except asyncio.TimeoutError:
-            # 底层线程可能仍卡在网络调用里；这里只解除本轮阻塞。不给该用户
-            # 发通知，因为这一轮确实没有得出「订上/没订上」的结论。
-            logger.error(
-                "[%s] 预订任务超过 %.0f 秒没有返回，放弃本轮结果并继续处理其余用户"
-                "（卡住的线程可能仍占用线程池）",
-                user.name, _BOOKING_RESULT_TIMEOUT_SEC,
-            )
+            future.add_done_callback(_observe_late_booking)
+            logger.error("[%s] 预订任务超过等待时间，后台任务可能仍在运行", user.name)
+            protected = getattr(future, "booking_guard", None)
+            if protected:
+                guard, attempt = protected
+                listing_name = None
+                try:
+                    guard.update(attempt, timed_out=1)
+                    row = guard.get_attempt(attempt)
+                    listing_name = row["listing"] if row else None
+                except Exception:
+                    logger.exception("[%s] 无法标记预订超时；保护记录仍会保留", user.name)
+                await _notify_uncertain(storage, push, notifier, user, sorted_cands[0],
+                                        listing_name=listing_name)
             continue
         except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
             raise
         except Exception:
+            if getattr(future, "booking_guard", None):
+                await _notify_uncertain(storage, push, notifier, user, sorted_cands[0])
             logger.error(
                 "[%s] 预订任务抛出未捕获异常，已隔离该用户（其余用户照常处理）",
                 user.name, exc_info=True,
             )
             continue
+        protected = getattr(future, "booking_guard", None)
+        if protected:
+            guard, attempt = protected
+            row = guard.get_attempt(attempt)
+            if row and row["mutated"] and (result is None or not result.success):
+                await _notify_uncertain(storage, push, notifier, user,
+                                        result.listing if result else sorted_cands[0])
+                continue
+            if row and row["timed_out"]:
+                continue
+            if result is None or not result.success:
+                guard.clear_completed(attempt)
         if result is None:
             continue
         # phase="blocked" 或 unknown_error 都意味着 session 可能已被 H2S 标记，
@@ -342,6 +461,8 @@ async def process_booking_results(
             # 为空、send_booking_success 恒为 False，每次成功都刷一条假 CRITICAL，
             # 真的送不到时反而被淹掉（2026-10-01 一天 5 条，全是误报）。
             delivered = bool(sent) or pushed > 0
+            if protected and delivered:
+                guard.clear_completed(attempt)
             if not delivered and is_application_only(booked_listing):
                 # 注册类没有付款时限，不需要 CRITICAL 去吵醒人——注册已经在平台上了
                 logger.warning(

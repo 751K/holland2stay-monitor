@@ -25,6 +25,18 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_browser_worker_for_unit_tests(monkeypatch):
+    """Keep existing dispatcher stubs in process; subprocess behavior has its own tests."""
+    from mcore import scrape_round
+
+    class LocalWorker:
+        def execute(self, tasks, *, multi_source, timeout):
+            return scrape_round.dispatch_scrape_tasks(tasks, multi_source=multi_source)
+
+    monkeypatch.setattr(scrape_round, "get_browser_worker", lambda source: LocalWorker())
+
+
 @pytest.fixture
 def temp_db(tmp_path):
     """单测试用 Storage，结束后自动 close。SQLite 文件位于 tmp_path 下。"""
@@ -353,3 +365,52 @@ def guest_client(test_app):
 @pytest.fixture
 def test_credentials():
     return {"username": _TEST_USERNAME, "password": _TEST_PASSWORD}
+
+
+@pytest.fixture(autouse=True)
+def _inprocess_booking_worker_for_legacy_monitor_tests(request, monkeypatch):
+    """Keep existing monitor behavior tests offline after moving browsers to children.
+
+    Real spawn, session reuse and process termination are covered separately by
+    test_booking_worker; these tests exercise their existing in-process fakes.
+    """
+    if request.module.__name__.split('.')[-1] not in {'test_booker_blocked', 'test_prewarm_cache'}:
+        yield
+        return
+    from types import SimpleNamespace
+    from mcore import prewarm_round, booking_round
+    from mcore.booking import book_with_fallback
+    from mcore.booking_guard import attempt_context
+    from mcore.state import runtime
+    from mcore.warm_browser import warm_lane
+
+    workers = {}
+    class Worker:
+        process = object()
+        generation = 1
+        session = None
+        def run(self, action, payload, *, timeout, guard=None, job=None):
+            if action == 'heartbeat':
+                return warm_lane.heartbeat(**payload)
+            if action == 'prewarm':
+                user = SimpleNamespace(id=payload['user_id'], name=payload['name'],
+                    auto_book=SimpleNamespace(email=payload['email'], password=payload['password']))
+                self.session = runtime.prewarm_cache.create(user, may_borrow_lane=payload['may_borrow'])
+                if self.session is None:
+                    raise RuntimeError('no prewarm session')
+                return self.session.email, self.session.created_at, self.session.token_expiry
+            session = runtime.prewarm_cache.get(payload['user'].id)
+            if guard:
+                with attempt_context(*guard):
+                    return book_with_fallback(payload['candidates'], payload['user'],
+                                              payload['deadline'], prewarmed=session)
+            return book_with_fallback(payload['candidates'], payload['user'],
+                                      payload['deadline'], prewarmed=session)
+
+    def worker_for(uid):
+        return workers.setdefault(uid, Worker())
+    monkeypatch.setattr(prewarm_round, 'get_booking_worker', worker_for)
+    monkeypatch.setattr(prewarm_round, 'existing_booking_worker', worker_for)
+    monkeypatch.setattr(prewarm_round, 'RemoteSession', lambda worker, *args: worker.session)
+    monkeypatch.setattr(booking_round, 'get_booking_worker', worker_for)
+    yield

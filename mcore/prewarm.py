@@ -47,6 +47,8 @@ class PrewarmCache:
             return False
         if ps.email != expected_email:
             return False
+        if hasattr(ps, "is_alive") and not ps.is_alive():
+            return False
         return ps.token_expiry - time.monotonic() > _TOKEN_REFRESH_MARGIN
 
     def __contains__(self, user_id: str) -> bool:

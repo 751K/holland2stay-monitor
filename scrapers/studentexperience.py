@@ -454,9 +454,9 @@ class StudentExperienceScraper(AbstractScraper):
         import curl_cffi.requests as req
 
         from config import get_impersonate, get_proxy_url
-        from net import NO_PROXY_CURL
+        from net import NO_PROXY_CURL, curl_scrape_proxy
 
-        proxy = get_proxy_url(self.source)
+        proxy = curl_scrape_proxy(get_proxy_url(self.source))
         proxies = {"http": proxy, "https": proxy} if proxy else NO_PROXY_CURL
         return req.Session(impersonate=get_impersonate(), proxies=proxies)
 

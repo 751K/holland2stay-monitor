@@ -300,6 +300,7 @@ def _inject_auth():
 @app.context_processor
 def _inject_translations():
     lang = get_lang()
+    from mcore.sources import SOURCE_DISPLAY_NAMES, SOURCE_SHORT_NAMES
 
     def _(key: str) -> str:
         return _tr(key, lang)
@@ -322,6 +323,8 @@ def _inject_translations():
     return {
         "_": _, "lang": lang,
         "dim_scope": dim_scope, "dim_scope_badge": dim_scope_badge,
+        "source_display_names": SOURCE_DISPLAY_NAMES,
+        "source_short_names": SOURCE_SHORT_NAMES,
     }
 
 

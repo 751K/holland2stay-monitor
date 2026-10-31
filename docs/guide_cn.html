@@ -59,7 +59,7 @@ td{color:var(--text2)}
 </nav>
 
 <h1>FlatRadar — 使用指南</h1>
-<p class="subtitle">跨平台监控 Holland2Stay、OurDomain、OurCampus、Xior、Magis 房源，实时通知，Holland2Stay 支持自动预订。</p>
+<p class="subtitle">跨平台监控七个平台的房源并实时通知，支持 Holland2Stay 自动预订和 Plaza 自动应征。</p>
 
 <!-- ─────────── -->
 <h2 id="start">快速开始</h2>
@@ -219,7 +219,7 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 </div>
 
 <!-- ─────────── -->
-<h2 id="autobook">自动预订（仅 Holland2Stay）</h2>
+<h2 id="autobook">自动预订与应征</h2>
 
 <p>进入<strong>用户管理</strong>，点击目标用户，选择<strong>自动预订</strong>。</p>
 
@@ -228,14 +228,15 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 <p>当 Holland2Stay 房源转为<strong>可预订</strong>且满足所设条件时，系统依次执行：</p>
 <ol>
   <li>登录 Holland2Stay 账号</li>
-  <li>创建新购物车</li>
-  <li>加入房源（<code>addNewBooking</code>）</li>
+  <li>创建购物车并提交占房请求</li>
   <li>提交订单（<code>placeOrder</code>）</li>
   <li>生成直达付款的 URL（<code>idealCheckOut</code>）</li>
   <li>即时发送付款链接</li>
 </ol>
 <p><strong>系统不会自动完成付款</strong>，收到链接后须自行支付。</p>
-<p>OurDomain、OurCampus、Xior 与 Magis 目前仅通知、不预订，原因分两种。OurDomain 与 Xior 的预订链路代码已实现、验证码亦已对接，只是尚未完成端到端验证；OurCampus 与 Magis 的预订流程则从未侦察过。</p>
+<p>如果预订结果不明确，该 Holland2Stay 账号的自动预订会暂停。请先登录 Holland2Stay 核实订单或预留、按需付款或取消，再在用户设置中点击<strong>已核实，恢复自动预订</strong>。后台任务仍在运行时无法解除保护；如已卡住，请先停止监控。</p>
+<p>Plaza 可自动提交符合条件的应征；需要提供 Plaza 用户名与密码，并单独开启默认关闭的 Plaza 自动应征开关。提交即生效，不保证获得房源。</p>
+<p>OurDomain、OurCampus、Xior 与 Magis 目前仅通知、不预订；RENTCafe 预订流程尚未完成端到端验证，Magis 预订流程尚未侦察。</p>
 </div>
 
 <div class="card">
@@ -244,6 +245,7 @@ python monitor.py  # 抓取循环，需另开终端</pre>
   <li><strong>启用自动预订</strong>：总开关</li>
   <li><strong>试运行模式</strong>：建议先行启用，仅验证流程而不实际提交订单</li>
   <li><strong>Holland2Stay 账号邮箱与密码</strong></li>
+  <li><strong>Plaza 用户名与密码及自动应征开关</strong>：使用 Plaza 自动应征时配置，开关默认关闭</li>
   <li><strong>支付方式</strong>：iDEAL（默认）、Visa 或 Mastercard</li>
   <li><strong>预订过滤条件</strong>：可设置较通知条件更为严格的规则</li>
 </ul>

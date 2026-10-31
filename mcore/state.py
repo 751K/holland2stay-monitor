@@ -63,8 +63,10 @@ class RuntimeState:
         #: 供 _should_notify_* 落库用的 Storage 句柄。None = 只活在进程内。
         self.throttle_storage = None
         self.outage = _outage
-        #: source -> 专属长存单线程 executor（见 monitor._get_browser_executor）。
+        #: source -> 专属长存单线程 executor（负责与浏览器 worker 通信）。
         self.browser_executors: dict = {}
+        #: Browser-backed scrapers run in individually terminable processes.
+        self.browser_workers: dict = {}
 
     def bind_storage(self, storage) -> None:
         """把落库句柄接上，并恢复所有退避 / 熔断 / 节流状态。"""

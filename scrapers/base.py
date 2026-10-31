@@ -416,8 +416,8 @@ class AbstractScraper(ABC):
 
     浏览器型 source（H2S / Xior）还有一条更强的约束：Playwright 对象**绑定
     创建它的线程**，换线程即失效，且两个独立的 Playwright sync 实例不能共存
-    于同一线程。因此它们各自恒定跑在 ``monitor._get_browser_executor(source)``
-    的专属长存单线程上。往这类 scraper 里塞自己的线程池会直接抛
+    于同一线程。因此它们各自运行在独立的常驻浏览器工作进程中。往这类
+    scraper 里塞自己的线程池会直接抛
     ``greenlet.error: Cannot switch to a different thread``。
 
     纯 HTTP 的 source（OurDomain）没有这个约束，跑在默认 executor 上。

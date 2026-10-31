@@ -24,6 +24,29 @@
 </div>
 {% endif %}
 
+{% if booking_guard_error %}
+<div class="alert alert-warning mb-4">{{ _('booking_review_error') }}</div>
+{% endif %}
+{% if booking_attempt %}
+<div class="alert alert-warning mb-4">
+  <strong>{{ _('booking_review_title') }}</strong>
+  {% if booking_attempt.user_id == u.id %}
+  <p>{{ _('booking_review_listing') }}: {{ booking_attempt.listing }}. {{ _('booking_review_check') }}</p>
+  {% if booking_attempt.cart %}<p>{{ _('booking_review_cart') }}: {{ booking_attempt.cart }}</p>{% endif %}
+  {% if booking_attempt.order_number %}<p>{{ _('booking_review_order') }}: {{ booking_attempt.order_number }}</p>{% endif %}
+  {% if booking_attempt.pay_url %}<p>{{ _('booking_review_pay') }}</p>{% endif %}
+  <p>{{ _('booking_review_running') }}</p>
+  <form method="post" action="{{ url_for('user_acknowledge_booking', user_id=u.id) }}" onsubmit="return confirm('{{ _('booking_review_confirm') }}');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="attempt" value="{{ booking_attempt.attempt }}">
+    <button class="btn btn-warning" type="submit">{{ _('booking_review_action') }}</button>
+  </form>
+  {% else %}
+  <p>{{ _('booking_review_shared') }}</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {# enctype 是证件上传必需的；漏了它 request.files 永远是空的，而表单其余部分
    照常保存，看起来完全正常。 #}
 <form method="post" action="{{ action }}" enctype="multipart/form-data"

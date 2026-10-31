@@ -30,7 +30,7 @@ import curl_cffi.requests as req
 from config import assumed_features, get_proxy_url
 from models import Listing
 
-from net import NO_PROXY_CURL  # 见下面 proxies 处的注释
+from net import NO_PROXY_CURL, curl_scrape_proxy  # 见下面 proxies 处的注释
 from .base import (
     RATE_LIMIT_BACKOFF,
     AbstractScraper,
@@ -272,7 +272,7 @@ class OurDomainScraper(AbstractScraper):
             #
             # 与 H2S / Xior 相反：它们需要出口 IP 稳定才能复用 clearance，
             # OurDomain 没有 clearance 可复用，换 IP 才是它的恢复手段。
-            proxy = get_proxy_url(self.source, rotating=True)
+            proxy = curl_scrape_proxy(get_proxy_url(self.source, rotating=True))
             # 代理全在冷却时 get_proxy_url 返回空串 = 降级直连原生 IP。
             # 这里**不能传 {}**：curl_cffi 见到空字典会静默回落到
             # HTTP_PROXY / HTTPS_PROXY 环境变量，也就是回落到那个刚被判定为

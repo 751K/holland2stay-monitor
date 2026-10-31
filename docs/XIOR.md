@@ -419,8 +419,7 @@ OurDomain 与 Xior 使用的是**同一套 RENTCafe，契约逐字相同**（202
 >    **不锁定房源**——它比 Holland2Stay 提前一步终止，下一页即需填写 IBAN/SWIFT
 >    （§8.7）。
 >
-> `monitor._AUTO_BOOK_SOURCES` 中仍仅含 `holland2stay`，用户无法在面板上启用
-> 该线。
+> Xior 未列入支持自动预订的平台，用户无法在面板上启用该线。
 
 ### 8.1 预订入口
 

@@ -274,6 +274,8 @@ class RestWatcher:
                 self.last_error = "没有可用代理（全部冷却中或当前是自家线路），本次不查"
                 logger.debug("[h2s-rest] %s", self.last_error)
                 return None
+            from net import curl_scrape_proxy
+            url = curl_scrape_proxy(url)
             self._proxies = {"http": url, "https": url}
         out: list[dict] = []
         for page in range(1, _MAX_PAGES + 1):

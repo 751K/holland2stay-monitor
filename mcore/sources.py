@@ -1,8 +1,8 @@
 """平台能力的单一注册表：SourceSpec。
 
-以前同一份平台差异散在四个平行集合里（浏览器型、可无代理、可自动预订、
-REST 唤醒），加平台时要记得逐个补。现在每个 source 只声明一次，集合由
-注册表派生。
+平台标识、显示名、缩写、抓取器入口与能力在 SPECS 中登记一次；相关名称表、
+抓取器注册表和前端显示名均由它派生。新平台仍须实现 scraper；如果使用新的
+城市配置或过滤维度，也要接入对应的配置解析和过滤规则。
 
 注意：``AUTO_BOOK_SOURCES`` 保持元组顺序，因为用户看到/日志里的顺序曾经
 就是 ("holland2stay", "plaza")。
@@ -16,6 +16,9 @@ from typing import Optional
 @dataclass(frozen=True)
 class SourceSpec:
     name: str
+    display_name: str
+    short_name: str
+    scraper: str
     #: 需要 Playwright 浏览器传输（必须绑专属长存线程）。
     browser_transport: bool = False
     #: 代理全挂、降级直连时还能抓。
@@ -39,16 +42,17 @@ SPECS: dict[str, SourceSpec] = {
     # 侦察完并验证过再加。凭据判定（can_auto_book）已经就位，到时只改这里。
     "holland2stay": SourceSpec(
         "holland2stay",
+        "Holland2Stay", "H2S", "scrapers.holland2stay:HollandStayScraper",
         browser_transport=True,
         auto_bookable=True,
         rest_wake=True,
     ),
-    "xior": SourceSpec("xior", browser_transport=True),
-    "ourdomain": SourceSpec("ourdomain", proxyless_capable=True),
-    "ourcampus": SourceSpec("ourcampus", proxyless_capable=True),
-    "plaza": SourceSpec("plaza", auto_bookable=True),
-    "magis": SourceSpec("magis"),
-    "studentexperience": SourceSpec("studentexperience"),
+    "ourdomain": SourceSpec("ourdomain", "OurDomain", "OD", "scrapers.ourdomain:OurDomainScraper", proxyless_capable=True),
+    "ourcampus": SourceSpec("ourcampus", "OurCampus", "OC", "scrapers.ourcampus:OurCampusScraper", proxyless_capable=True),
+    "xior": SourceSpec("xior", "Xior", "XR", "scrapers.xior:XiorScraper", browser_transport=True),
+    "magis": SourceSpec("magis", "Magis", "MG", "scrapers.magis:MagisScraper"),
+    "studentexperience": SourceSpec("studentexperience", "Student Experience", "SE", "scrapers.studentexperience:StudentExperienceScraper"),
+    "plaza": SourceSpec("plaza", "Plaza", "PZ", "scrapers.plaza:PlazaScraper", auto_bookable=True),
 }
 
 
@@ -74,20 +78,10 @@ AUTO_BOOK_SOURCES: tuple[str, ...] = tuple(
 #: 被漏了三次——前端的 sourceLabel（三份实现都没有它）、monitoring 页（干脆
 #: 不转换）、以及全局设置的白名单（从面板保存一次就会把它从 SOURCES 里悄悄
 #: 删掉）。漏的都是同一个平台，因为它是最后加的那个。
-KNOWN_SOURCES: tuple[str, ...] = ("holland2stay", "ourdomain", "ourcampus",
-                                  "xior", "magis", "studentexperience", "plaza")
+KNOWN_SOURCES: tuple[str, ...] = tuple(SPECS)
 
-#: 平台显示名。前端另有一份同样的表（static/app.js 的 SOURCE_LABELS），
-#: 因为那边是客户端渲染；两边都从这份注释里的同一个事实来。
-SOURCE_DISPLAY_NAMES: dict[str, str] = {
-    "holland2stay": "Holland2Stay",
-    "ourdomain": "OurDomain",
-    "ourcampus": "OurCampus",
-    "xior": "Xior",
-    "magis": "Magis",
-    "studentexperience": "Student Experience",
-    "plaza": "Plaza",
-}
+SOURCE_DISPLAY_NAMES: dict[str, str] = {name: spec.display_name for name, spec in SPECS.items()}
+SOURCE_SHORT_NAMES: dict[str, str] = {name: spec.short_name for name, spec in SPECS.items()}
 
 
 def source_display_name(source: str) -> str:

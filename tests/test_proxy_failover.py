@@ -613,20 +613,7 @@ class TestReportingItself:
 
 
 class TestWiredIntoTheIsolationBranch:
-    """接线断了，上面那些用例一条都不会红——这正是这个 bug 当初的形态。
-
-    ⚠️ ``_isolation_blocks`` 返回**全部**隔离分支，不是第一个。
-
-    上一版用的是 ``src.index("整体抓取失败，已隔离该 source")``——取第一处。可是
-    那句日志在 ``run_once`` 里有两份：跨源隔离的 ``_dispatch_isolated`` 一份，
-    Holland2Stay 走独立熔断路径又抄了一份。``index`` 命中的永远是前者，于是
-    **H2S 那份从 2026-08-17 写下起就没有 `_report_source_proxy_failure`，
-    而这组用例全绿**。
-
-    这正是本文件开头描述的那个死锁里最关键的一环：H2S 是最不容易失败的 source
-    （浏览器建在好线路上、会话缓存两小时），它每成功一轮整轮就不算全灭，外层的
-    `except ProxyError` 就够不着。它自己失败时又不上报——环就闭合了。
-    """
+    """守住统一失败分支的代理接线；行为矩阵见 test_unified_source_dispatch。"""
 
     def _isolation_blocks(self) -> list[str]:
         import inspect
@@ -636,9 +623,9 @@ class TestWiredIntoTheIsolationBranch:
         return [src[m.start():m.start() + 1600]
                 for m in re.finditer("整体抓取失败，已隔离该 source", src)]
 
-    def test_there_is_more_than_one_such_branch(self):
-        """前提本身要钉住：只剩一处时说明有人合并了，上面那些「每一处」就该改写。"""
-        assert len(self._isolation_blocks()) >= 2
+    def test_sources_share_one_isolation_branch(self):
+        """所有平台的普通失败共用一处代理故障处理。"""
+        assert len(self._isolation_blocks()) == 1
 
     def test_every_isolation_branch_reports_to_the_pool(self):
         for i, block in enumerate(self._isolation_blocks()):

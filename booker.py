@@ -207,6 +207,10 @@ def resolve_start_date(*candidates: "str | None") -> "str | None":
     return None
 
 
+class BookingOutcomeUncertain(Exception):
+    """The reservation request may have reached Holland2Stay."""
+
+
 class BookingHeldButIncomplete(Exception):
     """占房已成立，但后续步骤失败。
 
@@ -806,6 +810,7 @@ BookingPhase = Literal[
     # race_lost 或 unknown_error**：房正被这个账号占着，用户以为没抢到就不会去
     # 处理，既不付款也不取消，直到预留超时。必须把 cart/order 号给他。
     "held_incomplete",
+    "uncertain",
 ]
 
 
@@ -1012,11 +1017,21 @@ def try_book(
             # 建车 + 占房合成一步：走站点自己的 /api/booking。
             # 这是唯一的占房入口，没有 fallback——addNewBooking 已被摘出公开
             # API（实测 403），见 _BOOKING_API_PATH 注释。
-            new_cart_id = create_booking(fetcher, token, sku, start_date)
+            from mcore.booking_guard import record_mutation, record_progress
+            guarded = record_mutation(listing.name)
+            try:
+                new_cart_id = create_booking(fetcher, token, sku, start_date)
+            except Exception as exc:
+                if guarded:
+                    # A failed response does not prove the reservation was rejected.
+                    # In particular, do not cancel existing orders and retry here.
+                    raise BookingOutcomeUncertain(str(exc)) from exc
+                raise
             # **从这一行起，这套房已经被这个账号占着了。** 后面任何一步失败都不
             # 改变这个事实，所以先记下来——外层据此告诉用户「房占上了，但流程没
             # 走完」，而不是含糊地报「预订失败」。
             held["cart_id"] = str(new_cart_id or "")
+            record_progress(cart=held["cart_id"])
             # 记下「这个 SKU 是我们占的」。cancel_pending_orders 只敢动记过的，
             # 没记录就一笔都不取消——见它的 docstring。
             remember_our_reservation(email, str(sku))
@@ -1027,6 +1042,7 @@ def try_book(
             tp = time.monotonic()
             order_number = place_order(fetcher, token, new_cart_id)
             held["order_number"] = str(order_number or "")
+            record_progress(order_number=held["order_number"])
             pay_url = _ideal_checkout(fetcher, token, order_number)
             t_pay_val = time.monotonic() - tp
 
@@ -1040,6 +1056,12 @@ def try_book(
             phase = "success"
         except RuntimeError as book_err:
             err_str = str(book_err)
+
+            if held["cart_id"]:
+                raise BookingHeldButIncomplete(
+                    cart_id=held["cart_id"], order_number=held["order_number"],
+                    booking_url=booking_url, original=err_str,
+                ) from book_err
 
             if _is_booked_by_other(err_str):
                 phase = "race_lost"

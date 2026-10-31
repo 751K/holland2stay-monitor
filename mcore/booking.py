@@ -129,6 +129,13 @@ def book_with_fallback(
         )
         last_result = result
 
+        # An error after submitting a reservation is not proof that it failed.
+        # In particular, do not move on to another apartment automatically.
+        from mcore.booking_guard import mutation_started
+        if not result.success and not result.dry_run and mutation_started():
+            result.phase = "uncertain"
+            return result
+
         if result.success or result.dry_run or result.phase != "race_lost":
             return result
 

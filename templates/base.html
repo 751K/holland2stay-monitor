@@ -250,7 +250,11 @@
 <!-- Toast container -->
 <div class="toast-container" id="toast-container"></div>
 
-<script>window._isAdmin = {{ 'true' if is_admin else 'false' }};</script>
+<script>
+window._isAdmin = {{ 'true' if is_admin else 'false' }};
+window.SOURCE_LABELS = {{ source_display_names | tojson }};
+window.SOURCE_SHORT = {{ source_short_names | tojson }};
+</script>
 {# 版本号由 web.asset() 按文件内容自动算，不用再手动 +1。
    之所以要有版本号：新增的函数在浏览器缓存的旧文件里不存在，调用它的页面
    会静默炸掉——2026-08-04 踩过，加了 sourceLabel/sourceShort 忘了改当时

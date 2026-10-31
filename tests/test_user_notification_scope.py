@@ -5,7 +5,7 @@
 把整个通知渠道静音，连真正的房源通知一起埋掉。
 
 这条边界很容易在加新告警时被无意破坏：手边就有 user_notifiers，循环一发就完事。
-所以这里守的是**清单本身**——用户渠道上只允许出现这四个方法。
+所以这里守的是**清单本身**——用户渠道上只允许出现清单中的方法。
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ BOOKING_ROUND = Path(__file__).resolve().parent.parent / "mcore" / "booking_roun
 
 #: 允许发给普通用户的推送。都是他要么能行动、要么明确关心的：
 #: 新房源和状态变更是他订阅的内容；预订成功带着付款链接，不发等于白订；
-#: 预订失败要让他知道得手动补上。
+#: 预订失败要让他知道得手动补上，结果不确定则提醒他核实。
 #:
 #: ``send_new_listings_batch`` 是 ``send_new_listing`` 的聚合版本，内容同属房源，
 #: 只是把 H2S 整批放出的抽签房源收进一条消息（2026-08-25 加）。它进这张清单
@@ -32,6 +32,7 @@ ALLOWED_USER_SENDS = {
     "send_status_change",
     "send_booking_success",
     "send_booking_failed",
+    "send_booking_uncertain",
 }
 
 

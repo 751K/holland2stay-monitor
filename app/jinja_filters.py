@@ -185,30 +185,16 @@ def status_badge(status: str) -> str:
 
 def source_label(source: str) -> str:
     """Source id → user-facing platform label."""
-    mapping = {
-        "holland2stay": "Holland2Stay",
-        "ourdomain": "OurDomain",
-        "ourcampus": "OurCampus",
-        "xior": "Xior",
-        "magis": "Magis",
-        "studentexperience": "Student Experience",
-        "plaza": "Plaza",
-    }
-    return mapping.get((source or "").lower(), source or "Holland2Stay")
+    from mcore.sources import SOURCE_DISPLAY_NAMES
+
+    return SOURCE_DISPLAY_NAMES.get((source or "").lower(), source or "Holland2Stay")
 
 
 def source_short(source: str) -> str:
     """Source id → compact platform label for dense tables."""
-    mapping = {
-        "holland2stay": "H2S",
-        "ourdomain": "OD",
-        "ourcampus": "OC",
-        "xior": "XR",
-        "magis": "MG",
-        "studentexperience": "SE",
-        "plaza": "PZ",
-    }
-    return mapping.get((source or "").lower(), source_label(source))
+    from mcore.sources import SOURCE_SHORT_NAMES
+
+    return SOURCE_SHORT_NAMES.get((source or "").lower(), source_label(source))
 
 
 #: 过滤条件摘要里最多列几项，超过就只报个数。

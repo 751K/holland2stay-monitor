@@ -105,6 +105,8 @@ from mcore.sources import (
 from mcore.scrape_round import (
     _ROUND_FAILURE_PRIORITY,  # noqa: F401
     _SOURCE_DISPATCH_TIMEOUT_SEC,  # noqa: F401
+    close_browser_workers,
+    dispatch_diagnostic,
     dispatch_scrape_tasks_async as _dispatch_scrape_tasks_async,  # noqa: F401
     dispatch_with_h2s_circuit as _dispatch_with_h2s_circuit,
     get_browser_executor as _get_browser_executor,  # noqa: F401
@@ -169,7 +171,6 @@ from scrapers import (
     RateLimitError,
     ScrapeNetworkError,
     UpstreamMaintenanceError,
-    dispatch_scrape_tasks,
 )
 from update_checker import check_for_updates
 from mstorage._notifications import WEB_NOTIFICATIONS_KEEP
@@ -177,7 +178,7 @@ from storage import Storage
 from users import UserConfig, load_users
 
 
-# source -> 该 source 专属的长存单线程 executor（见 _get_browser_executor）
+# source -> 与浏览器子进程通信的专属长存单线程 executor
 _browser_executors: dict[str, ThreadPoolExecutor] = runtime.browser_executors
 
 
@@ -435,9 +436,8 @@ def _bind_persistent_state(storage) -> None:
 #
 # 2026-08-05 04:24–09:29 代理断了 5 小时 5 分钟，59 轮全灭，admin 一条告警都没
 # 收到：当时 main_loop 的 network / blocked / 内部异常分支只 logger.error。而
-# 需要浏览器传输层的 source。它们的 Playwright 对象绑定创建线程，因此**必须**
-# 各自跑在 ``_get_browser_executor(source)`` 的专属长存单线程上；放到默认 executor
-# 里会因线程漂移抛 ``greenlet.error: Cannot switch to a different thread``。
+# 浏览器型 source 的 Playwright 对象各自保存在独立工作进程的主线程；
+# monitor 侧的 executor 只负责与该工作进程通信。
 
 
 
@@ -558,7 +558,7 @@ def _consume_reload_request_file() -> bool:
 
 
 def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
-    """注册 SIGHUP 处理器：收到信号后唤醒热重载事件。"""
+    """Register reload and graceful termination handlers."""
 
     def _handler(_signum: int, _frame: object) -> None:
         if _reload_event is not None:
@@ -569,6 +569,16 @@ def _setup_signals(loop: asyncio.AbstractEventLoop) -> None:
         signal.signal(signal.SIGHUP, _handler)
     except (OSError, AttributeError):
         logger.debug("SIGHUP 不可用（非 Unix 系统），跳过信号注册")
+
+    def _terminate(_signum: int, _frame: object) -> None:
+        # Let asyncio.run cancel the main task and execute its finally block,
+        # which reaps browser workers and their detached Chromium processes.
+        raise KeyboardInterrupt
+
+    try:
+        signal.signal(signal.SIGTERM, _terminate)
+    except (OSError, AttributeError, ValueError):
+        logger.debug("SIGTERM handler 不可用", exc_info=True)
 
 
 # ------------------------------------------------------------------ #
@@ -1451,9 +1461,10 @@ async def _async_main() -> None:
     if args.test:
         logger.info("TEST 模式：只抓取，不发通知")
         scrape_tasks = cfg.scrape_tasks_v2()
-        scrape_result = await asyncio.get_running_loop().run_in_executor(
-            None, lambda: dispatch_scrape_tasks(scrape_tasks)
-        )
+        try:
+            scrape_result = await dispatch_diagnostic(scrape_tasks)
+        finally:
+            close_browser_workers()
         fresh, completeness = _unpack_scrape_result(scrape_result)
         _log_scrape_completeness(completeness)
         print(json.dumps([l.to_dict() for l in fresh], ensure_ascii=False, indent=2))
@@ -1515,6 +1526,9 @@ async def _async_main() -> None:
         else:
             await main_loop(cfg, storage, user_notifiers, web_notifier=web_notifier)
     finally:
+        close_browser_workers()
+        from mcore.booking_worker import close_booking_workers
+        close_booking_workers()
         storage.close()
         for _, n in user_notifiers:
             await n.close()

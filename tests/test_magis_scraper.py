@@ -404,15 +404,15 @@ class TestRegistration:
             assert filled == len(listings), f"{key} 只有 {filled}/{len(listings)} 条"
 
     def test_short_badge_everywhere(self):
-        """通知、Jinja 过滤器、前端 JS 三处各有一份表，缺一处就显示成 Magis 以外的东西。"""
+        """通知和模板使用登记表中的平台缩写。"""
         import notifier
         from app.jinja_filters import source_short
+        from mcore.sources import SOURCE_DISPLAY_NAMES, SOURCE_SHORT_NAMES
 
         assert notifier._source_short("magis") == "MG"
         assert source_short("magis") == "MG"
-        js = (Path(__file__).parent.parent / "static" / "app.js").read_text(encoding="utf-8")
-        assert "magis: 'MG'" in js
-        assert "magis: 'Magis'" in js
+        assert SOURCE_SHORT_NAMES["magis"] == "MG"
+        assert SOURCE_DISPLAY_NAMES["magis"] == "Magis"
 
     def test_city_registry_and_tasks(self):
         from config import KNOWN_MAGIS_CITIES

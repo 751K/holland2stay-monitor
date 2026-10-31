@@ -170,6 +170,10 @@ class BaseNotifier(ABC):
             listing, detail, pay_url, contract_start_date, lang=self.language,
         ))
 
+    async def send_booking_uncertain(self, title: str, detail: str) -> bool:
+        """Tell the affected user to check an unresolved booking."""
+        return await self._send(f"{title}\n{detail}")
+
     async def send_booking_failed(self, listing: Listing, reason: str) -> bool:
         """发送自动预订失败通知，含失败原因和手动预订链接。"""
         return await self._send(_format_booking_failed(listing, reason, lang=self.language))
@@ -1336,16 +1340,10 @@ def _format_email_html(text: str) -> str:
 # ------------------------------------------------------------------ #
 
 def _source_short(source: str | None) -> str:
+    from mcore.sources import SOURCE_SHORT_NAMES
+
     value = (source or "holland2stay").strip().lower()
-    return {
-        "holland2stay": "H2S",
-        "ourdomain": "OD",
-        "ourcampus": "OC",
-        "magis": "MG",
-        "studentexperience": "SE",
-        "plaza": "PZ",
-        "xior": "XR",
-    }.get(value, value.upper() or "H2S")
+    return SOURCE_SHORT_NAMES.get(value, value.upper() or "H2S")
 
 
 # ── 通知标签翻译 ────────────────────────────────────────────────────

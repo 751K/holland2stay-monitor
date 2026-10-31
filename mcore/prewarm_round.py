@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 
 from scrapers import BlockedError
 from mcore.h2s_guard import (
@@ -16,11 +17,13 @@ from mcore.h2s_guard import (
     mark_h2s_login_blocked,
 )
 from mcore.state import runtime
+from mcore.booking_worker import get_booking_worker, existing_booking_worker, prune_booking_workers, RemoteSession
 
 logger = logging.getLogger("monitor")
 
 #: 候选轮次最多等 prewarm 多久，避免额外正常登录。
 PREWARM_CANDIDATE_WAIT_SEC = 2.0
+PREWARM_WORKER_TIMEOUT_SEC = float(os.environ.get("PREWARM_WORKER_TIMEOUT_SEC") or "120")
 
 
 class PrewarmRound:
@@ -35,29 +38,14 @@ class PrewarmRound:
         self.futures: dict[str, asyncio.Future] = {}
 
     def heartbeat(self) -> None:
-        """维护下单链路的常驻浏览器（见 mcore/warm_browser.py）。
+        """在用户专属工作进程维护常驻浏览器，调度线程不会阻塞事件循环。
 
-        每轮都调，**和有没有候选无关**——它存在的意义就是在候选出现之前就已经过了
-        CF。等有候选再建，就是 2026-09-08 之前那个每次现过挑战的老样子。
-
-        它只保住浏览器和 clearance，**不碰登录**。「没有候选的轮次完全不碰 H2S
-        登录接口」那条约束原样成立：登录仍然只在 start_for_candidates 里发生。
-
-        **必须扔进 executor，不能在这里直接调。** BrowserFetcher 用的是 Playwright
-        的同步 API，而它拒绝在一个正在跑的 asyncio loop 里工作：
-
-            It looks like you are using Playwright Sync API inside the asyncio loop.
-
-        run_once 是协程，直接调就是这个形状。2026-09-08 上线当轮就撞上了——好在
-        fail-safe 生效，退避 5 分钟、下单退回现开浏览器，等于改动之前的行为。
-        prewarm 那条路一直是对的（loop.run_in_executor），心跳漏了。
-
-        也**不 await**：建一次十几秒，await 会把整轮监控卡在这。心跳自己是非阻塞
-        的（拿不到锁就直接返回），所以多轮之间不会堆叠。
+        心跳只保活浏览器，不登录；开关关闭时让已有工作进程关闭常驻浏览器。
+        工作进程忙于预登录或预订时跳过心跳，不排队阻塞关键路径。
         """
         if self.dry_run:
             return
-        from mcore.warm_browser import lane_enabled, warm_lane
+        from mcore.warm_browser import lane_enabled
 
         # 总开关关着时 wanted=False，heartbeat 会把已经建起来的那条关掉——不是
         # 「不再维护」而是「收干净」。留一个没人维护的 Chromium 在那儿，正是
@@ -79,10 +67,18 @@ class PrewarmRound:
                 logger.warning("常驻浏览器心跳异常（已忽略，下单会退回现开浏览器）",
                                exc_info=exc)
 
+        first = next((u for u, _ in self.user_notifiers
+                      if u.auto_book.enabled and u.auto_book.email and u.auto_book.password), None)
+        if first is None:
+            return
+        worker = get_booking_worker(first.id) if wanted else existing_booking_worker(first.id)
+        if worker is None or (not wanted and worker.process is None):
+            return
         fut = self.loop.run_in_executor(
             None,
-            functools.partial(warm_lane.heartbeat,
-                              wanted=wanted, may_rebuild=may_rebuild),
+            functools.partial(worker.run, "heartbeat",
+                              {"wanted": wanted, "may_rebuild": may_rebuild},
+                              timeout=PREWARM_WORKER_TIMEOUT_SEC),
         )
         fut.add_done_callback(_done)
 
@@ -106,6 +102,7 @@ class PrewarmRound:
                 active_user_ids.add(user.id)
         for stale_uid in set(runtime.prewarm_cache.keys()) - active_user_ids:
             runtime.prewarm_cache.invalidate(stale_uid)
+        prune_booking_workers(active_user_ids)
 
         if not candidate_user_ids:
             return
@@ -150,11 +147,15 @@ class PrewarmRound:
                 # 的 ORDER BY），所以「循环里第一个」就是「优先级最高的」。
                 may_borrow = not lane_offered and not runtime.prewarm_cache.lane_in_use()
                 lane_offered = lane_offered or may_borrow
-                fut = self.loop.run_in_executor(
-                    None,
-                    functools.partial(runtime.prewarm_cache.create, user,
-                                      may_borrow_lane=may_borrow),
-                )
+                worker = get_booking_worker(user.id)
+                def _remote_prewarm(u=user, w=worker, borrow=may_borrow):
+                    email, created, expires = w.run(
+                        "prewarm", {"email": u.auto_book.email,
+                                    "password": u.auto_book.password, "may_borrow": borrow,
+                                    "name": u.name, "user_id": u.id},
+                        timeout=PREWARM_WORKER_TIMEOUT_SEC)
+                    return RemoteSession(w, email, created, expires)
+                fut = self.loop.run_in_executor(None, _remote_prewarm)
                 self.futures[user.id] = fut
                 fut.add_done_callback(
                     lambda f, uid=user.id: self.loop.call_soon_threadsafe(

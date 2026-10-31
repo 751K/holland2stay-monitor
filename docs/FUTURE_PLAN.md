@@ -103,6 +103,10 @@ F821 四处，三处在生产代码：`app/forms/user_form.py:121`（`ApplicantP
 
 **2.2 source 差异收进一个 `SourceSpec`**（方向四的前置）
 
+> 当前进度：平台名称、显示名、抓取器入口和基础能力已集中登记；各平台现共用
+> 抓取、限流、代理故障及遥测处理。H2S 的屏蔽与恢复仍保留专属登录抑制逻辑。
+> 下文保留重构前的问题背景；新平台的城市配置和特殊过滤规则仍须单独实现。
+
 平台差异现在靠四个集合加分支表达：`KNOWN_SOURCES`、`_BROWSER_SOURCES`
 （`monitor.py:1230`）、`_PROXYLESS_CAPABLE_SOURCES`（`:302`）、
 `_AUTO_BOOK_SOURCES`（`:1508`），外加 run_once 里 H2S 一整段与 `_dispatch_isolated`
@@ -175,19 +179,19 @@ error 类型。改成 `send_event(event)`，格式化在各渠道内做，渠道
 
 ### 方向四：残余的正确性缺陷
 
-复核后仍然成立的只剩下面这些。除超时两条外都不依赖重构，可以随时做。
+下表保留原始问题和当前进度；部分项目已完成，其他项目仍需逐项核查。
 
 | 问题 | 位置 | 修法 |
 |---|---|---|
 | Resend 重试无幂等键，而注释已声称有 | `notifier.py:235` / `ResendNotifier._send` | 带 `Idempotency-Key`（按 listing id + 事件类型派生）；否则把那句注释改掉 |
 | `mark_status_change_notified` 按 `listing_id` 而非主键 | `mstorage/_listings.py:590` | 按 `status_changes.id` 标记；`_batch` 同改 |
-| 预订 future `await` 无超时 | `monitor.py:1999` | `asyncio.wait_for`；`booking_deadline` 只管「要不要试下一套」，管不住这里 |
+| 预订结果等待超时 | `mcore/booking_round.py` / `mcore/booking_guard.py` | 结果等待有时限；Holland2Stay 在提交前持久化账号级保护，超时、进程中断或提交后结果不明时保留记录并提示核实，后台任务结束且用户确认后解除。其他平台的结果不确定保护仍需单独覆盖。 |
 | geocode 同步跑在事件循环里 | `monitor.py:3367` | 进 executor。Photon 不可达时最坏 150 秒 |
 | `count_all` / `send_heartbeat` / `prune_notifications` 无隔离 | `monitor.py:3332-3341` | 各自 try，与相邻两处 prune 对齐 |
 | `MAX_CONTENT_LENGTH` 未设 | `web.py` | 加上；Caddy 侧同时配 `request_body max_size` |
 | bcrypt 72 字节上限未拦 | `users.py:767 _bcrypt_hash` | 超长直接 4xx，而不是让 `hashpw` 抛 `ValueError` 变 500 |
 | SSE 的 `?token=` 是长期 token | `app/routes/api_v1/notifications.py:111` | 换成短期 ticket（长期 token 会落进代理日志与浏览器历史） |
-| `page.evaluate` / `page.content()` 无墙钟超时 | `browser_fetcher.py:1273/1102` | 渲染器卡死时 `_SOURCE_DISPATCH_TIMEOUT_SEC` 能兜住整轮，但单页仍会白等到上限 |
+| 浏览器型抓取的墙钟超时与恢复 | `mcore/browser_worker.py` / `mcore/scrape_round.py` | 浏览器抓取放进按平台隔离的常驻子进程；超时回收工作进程及其子进程后，下轮重建。普通请求、加密请求和公钥读取的响应体也保留请求超时。Holland2Stay 的常驻浏览器、预登录和预订也按用户放入独立进程；超时回收进程树，保留账号级预订保护并要求核实。 |
 | 公告群发没有逐用户投递记录 | `app/services/announcement_service.py` | 2026-08-28 那次 FCM 全挂，事后无法精确补发。落一张投递结果表 |
 | 城市选择器提供未监控的城市 | `app/routes/users.py:277` | `known_city_names()` 收敛到实际启用的城市 |
 
@@ -210,7 +214,8 @@ error 类型。改成 `send_event(event)`，格式化在各渠道内做，渠道
   每加一个 scraper 都是在往一个 CI 不跑测试的仓库里加一份新的「测试全绿但生产
   路径不同」。09-01 至 09-02 连接三个平台之后 `_PARSERS` 漏了三个键，就是证据。
 - **RENTCafe 预订的端到端验证。** 它卡的是真实账号，不是代码。账号到位随时可做，
-  但不作为 v2.0 的发布条件；`_AUTO_BOOK_SOURCES` 保持仅含 `holland2stay`。
+  但不作为 v2.0 的发布条件。已验证的平台包括 Holland2Stay 和 Plaza：前者将预订
+  推进至支付页面，后者提交应征；Plaza 还需要用户单独开启自动应征开关。
 - **可观测性第二批**（遥测进 `/api/v1`、耗时趋势、按城市维度）。留给 v2.1。
 - **客户端功能。** 两个客户端已迁出，本仓库只提供 API。
 

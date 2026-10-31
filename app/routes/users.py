@@ -445,8 +445,18 @@ def user_edit(user_id: str) -> Any:
         logger.warning("读取设备数失败 user_id=%s", user_id, exc_info=True)
         device_count = 0
 
+    from mcore.booking_guard import BookingGuard
+    booking_guard_error = False
+    try:
+        guard = BookingGuard(storage())
+        booking_attempt = guard.get_user(user_id) or guard.get_account(user.auto_book.email)
+    except Exception:
+        logger.exception("无法读取预订保护状态 user_id=%s", user_id)
+        booking_attempt = None
+        booking_guard_error = True
     return render_template(
-        "user_form.html", user=user, device_count=device_count,
+        "user_form.html", user=user, device_count=device_count, booking_attempt=booking_attempt,
+        booking_guard_error=booking_guard_error,
         id_doc=__import__("applicant_docs").info(user_id),
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
@@ -743,10 +753,27 @@ def api_users_reorder() -> Any:
     return jsonify({"ok": True, "count": len(order)})
 
 
+@self_or_admin_required
+@csrf_required
+def user_acknowledge_booking(user_id: str) -> Any:
+    from mcore.booking_guard import BookingGuard
+    guard = BookingGuard(storage())
+    attempt = request.form.get("attempt", "")
+    try:
+        if guard.acknowledge(attempt, user_id):
+            flash("已确认核实预订结果，自动预订保护已解除。", "success")
+        else:
+            flash("未找到可确认的预订记录。", "warning")
+    except RuntimeError as exc:
+        flash(str(exc), "warning")
+    return redirect(url_for("user_edit", user_id=user_id))
+
+
 def register(app: Flask) -> None:
     app.add_url_rule("/users",                       endpoint="users_list",       view_func=users_list,       methods=["GET"])
     app.add_url_rule("/users/new",                   endpoint="user_new",         view_func=user_new,         methods=["GET", "POST"])
     app.add_url_rule("/users/<user_id>",             endpoint="user_edit",        view_func=user_edit,        methods=["GET", "POST"])
+    app.add_url_rule("/users/<user_id>/booking-acknowledge", endpoint="user_acknowledge_booking", view_func=user_acknowledge_booking, methods=["POST"])
     app.add_url_rule("/users/<user_id>/delete",      endpoint="user_delete",      view_func=user_delete,      methods=["POST"])
     app.add_url_rule("/users/<user_id>/test",        endpoint="user_test_notify", view_func=user_test_notify, methods=["POST"])
     app.add_url_rule("/users/<user_id>/toggle",      endpoint="user_toggle",      view_func=user_toggle,      methods=["POST"])

@@ -59,7 +59,7 @@ td{color:var(--text2)}
 </nav>
 
 <h1>FlatRadar — User Guide</h1>
-<p class="subtitle">Monitor listings across Holland2Stay, OurDomain, OurCampus, Xior and Magis. Get instant notifications and auto-book on Holland2Stay.</p>
+<p class="subtitle">Monitor listings across seven platforms, with instant notifications, Holland2Stay auto-booking and Plaza automatic applications.</p>
 
 <!-- ─────────────────────────────────────────────── -->
 <h2 id="start">Quick Start</h2>
@@ -221,7 +221,7 @@ step that is missing.
 </div>
 
 <!-- ─────────────────────────────────────────────── -->
-<h2 id="autobook">Auto-Booking (Holland2Stay only)</h2>
+<h2 id="autobook">Automatic Booking and Applications</h2>
 
 <p>Go to <strong>Users</strong> → click a user → <strong>Auto Booking</strong>.</p>
 
@@ -230,14 +230,15 @@ step that is missing.
 <p>When an H2S listing becomes <strong>Available to book</strong> and matches your filters, the monitor will:</p>
 <ol>
   <li>Log into your Holland2Stay account</li>
-  <li>Create a fresh shopping cart</li>
-  <li>Add the listing (<code>addNewBooking</code>)</li>
+  <li>Create a cart and submit a reservation request</li>
   <li>Place the order (<code>placeOrder</code>)</li>
   <li>Generate a direct payment link (<code>idealCheckOut</code>)</li>
   <li>Send you the payment link immediately</li>
 </ol>
 <p><strong>It does NOT auto-pay.</strong> You receive the payment URL and complete payment manually.</p>
-<p>OurDomain, OurCampus, Xior and Magis are notify-only, for two different reasons. For OurDomain and Xior the booking code is written and reCAPTCHA solving is wired up, but the flow has not been verified end to end, so it is not exposed to users. For OurCampus and Magis the booking flow has never been scouted at all.</p>
+<p>If the booking outcome is uncertain, auto-booking is paused for that Holland2Stay account. Sign in to Holland2Stay to check your orders or reservations and pay or cancel as needed, then choose <strong>Checked; resume auto-booking</strong> in user settings. Protection cannot be removed while the task is running; stop monitoring first if it is stuck.</p>
+<p>For Plaza, the system can submit applications for matching listings. Supply your Plaza username and password and separately enable automatic applications, which are off by default. Submission takes effect immediately and does not guarantee a rental.</p>
+<p>OurDomain, OurCampus, Xior and Magis are notify-only. The RENTCafe booking flows have not been verified end to end, and the Magis booking flow has not been investigated.</p>
 </div>
 
 <div class="card">
@@ -246,6 +247,7 @@ step that is missing.
   <li><strong>Enable auto-booking</strong> — toggle on</li>
   <li><strong>Dry run</strong> — recommended at first: validates login & cart without placing orders</li>
   <li><strong>H2S account email & password</strong> — your Holland2Stay login</li>
+  <li><strong>Plaza username, password and automatic application switch</strong> — configure these to use Plaza applications; the switch is off by default</li>
   <li><strong>Payment method</strong> — iDEAL (default), Visa, or Mastercard</li>
   <li><strong>Auto-booking filters</strong> — optional stricter rules (independent from notification filters)</li>
 </ul>

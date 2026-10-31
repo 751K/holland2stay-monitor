@@ -19,6 +19,7 @@ _base = Path(SPECPATH).resolve().parent  # packaging/ → project root
 _app_modules = collect_submodules("app")
 _mcore_modules = collect_submodules("mcore")
 _mstorage_modules = collect_submodules("mstorage")
+_scraper_modules = collect_submodules("scrapers")
 
 a = Analysis(
     [str(_base / "launcher.py")],
@@ -49,6 +50,7 @@ a = Analysis(
         *_app_modules,
         *_mcore_modules,
         *_mstorage_modules,
+        *_scraper_modules,
     ],
     hookspath=[],
     hooksconfig={},

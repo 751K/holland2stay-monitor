@@ -11,6 +11,7 @@ your criteria it sends a notification through the channels you enabled, with a
 direct link included. For Holland2Stay it goes one step further: it first
 carries the booking through to the payment page, then sends the payment link
 along with the alert, so only the payment itself remains.
+For Plaza, it can submit applications automatically when the user enables it.
 
 **Paying on your behalf is outside what FlatRadar does, and it cannot guarantee
 a booking succeeds.** Whether you get the unit still depends on the competition
@@ -41,7 +42,7 @@ The project runs both locally and on a server.
 | **Filters** | Maximum rent, minimum area, minimum floor, type, occupancy, city, neighbourhood, platform, contract type, tenant requirements, and others |
 | **Views** | List, map, calendar, dashboard and charts, in English or Chinese |
 | **Multiple users** | Supported. Guest, user and admin roles; every user keeps independent filters and credentials |
-| **Auto-booking** | Holland2Stay only, and it stops at the payment page — see [Auto-booking](#auto-booking) |
+| **Automatic booking and applications** | Holland2Stay stops at the payment page; Plaza applications can be submitted automatically and are off by default — see [Auto-booking](#auto-booking) |
 
 ### Platform coverage
 
@@ -53,7 +54,7 @@ The project runs both locally and on a server.
 | OurCampus | Amsterdam Diemen (1 building) | Checked against real markup; very low volume | Notify only |
 | Magis | 17 buildings across 5 cities (9 in Eindhoven) | Added 2026-09-01; plain HTTP, no anti-bot | Notify only |
 | Student Experience | Amsterdam (4 sites) and Leiden | Added 2026-09-02; the listing date lives only on the detail page, so each unit costs an extra request | Notify only |
-| Plaza | 13 Dutch cities | Added 2026-09-02; a paid account (€27.50/yr) is required to *apply*, not to see listings | Notify only |
+| Plaza | 13 Dutch cities | Added 2026-09-02; a paid account (€27.50/yr) is required to *apply*, not to see listings | Automatic applications supported, off by default |
 
 A platform can also run in **shadow mode** (`SHADOW_SOURCES`): scraped and stored
 as usual, but it sends no notifications. That is how a newly added scraper is
@@ -372,9 +373,20 @@ that round. A failed scrape is never read as "the listings are gone".
 
 ## Auto-booking
 
-Enabled for Holland2Stay only. It signs in with the account you configure,
+For Holland2Stay, it signs in with the account you configure,
 attempts eligible directly-bookable listings, and **stops at the payment URL** —
 it never completes a payment.
+
+If the Holland2Stay booking outcome is uncertain, auto-booking is paused for
+that account and the user is asked to check it. Sign in to Holland2Stay to check
+your orders or reservations, pay or cancel as appropriate, then select
+“Checked; resume auto-booking” in user settings. Protection cannot be removed
+while the booking task is running; stop monitoring first if it is stuck. This
+protection survives monitor restarts and applies to all users sharing the account.
+
+For Plaza, users can configure their username and password and separately enable
+automatic applications. The switch is off by default. An application is submitted
+directly and does not guarantee a successful rental. See [Plaza](PLAZA.md).
 
 Xior, OurDomain and OurCampus run the same RENTCafe backend and share one
 implementation ([`bookers/rentcafe.py`](../bookers/rentcafe.py)). The code is

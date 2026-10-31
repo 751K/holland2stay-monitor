@@ -15,7 +15,7 @@ scrapers — 多源抓取层
 新增 scraper 步骤
 -----------------
 1. 在 ``scrapers/{name}.py`` 里实现 ``AbstractScraper`` 子类
-2. 在本文件底部 import 并加入 ``SCRAPER_REGISTRY``
+2. 在 ``mcore.sources.SPECS`` 中登记名称、显示名、能力和 scraper 类路径
 3. 在 ``.env:SOURCES`` 里把它打开
 
 P0 阶段只有 holland2stay 一家——保持现网行为不变。
@@ -23,6 +23,7 @@ P0 阶段只有 holland2stay 一家——保持现网行为不变。
 from __future__ import annotations
 
 import logging
+from importlib import import_module
 from typing import Optional
 
 from .base import (
@@ -43,28 +44,25 @@ from .base import (
     is_proxy_account_error,
     is_proxy_service_error,
 )
-from .holland2stay import HollandStayScraper
-from .magis import MagisScraper
-from .plaza import PlazaScraper
-from .studentexperience import StudentExperienceScraper
-from .ourcampus import OurCampusScraper
-from .ourdomain import OurDomainScraper
-from .xior import XiorScraper
-
-
 logger = logging.getLogger(__name__)
 
-SCRAPER_REGISTRY: dict[str, type[AbstractScraper]] = {
-    cls.source: cls for cls in [
-        HollandStayScraper,
-        MagisScraper,
-        StudentExperienceScraper,
-        PlazaScraper,
-        OurCampusScraper,
-        OurDomainScraper,
-        XiorScraper,
-    ]
-}
+from mcore.sources import SPECS
+
+
+def _load_scrapers(specs) -> dict[str, type[AbstractScraper]]:
+    registry = {}
+    for name, spec in specs.items():
+        module_name, class_name = spec.scraper.split(":", 1)
+        cls = getattr(import_module(module_name), class_name)
+        if not issubclass(cls, AbstractScraper) or cls.source != name or spec.name != name:
+            raise ValueError(f"Invalid scraper registration for {name}: {spec.scraper}")
+        registry[name] = cls
+        # Preserve the existing public class exports.
+        globals()[class_name] = cls
+    return registry
+
+
+SCRAPER_REGISTRY: dict[str, type[AbstractScraper]] = _load_scrapers(SPECS)
 
 
 # source → (注册的类, 实例)。跨轮复用，见 get_scraper 的说明。
@@ -88,10 +86,8 @@ def get_scraper(source: str) -> Optional[AbstractScraper]:
     会让 ``HollandStayScraper`` 的跨轮复用逻辑永远命不中，退化成每轮重建浏览
     器 + 完整重过一次 CF 挑战。
 
-    线程安全：每个浏览器型 source 恒定跑在**自己**的专用长存线程里（monitor
-    ``_get_browser_executor(source)``，每 source 一条——两个 Playwright sync
-    实例不能共存于同一线程），dispatcher 又是逐 source 串行调用，所以缓存实例
-    不会导致 Playwright 对象被跨线程使用。
+    线程安全：每个浏览器型 source 在专属工作进程的主线程里运行，dispatcher
+    逐 source 串行调用，因此缓存实例不会导致 Playwright 对象被跨线程使用。
     """
     cls = SCRAPER_REGISTRY.get(source)
     if cls is None:

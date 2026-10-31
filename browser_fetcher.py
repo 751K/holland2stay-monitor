@@ -15,12 +15,12 @@ profile：``H2S_PROFILE``（GraphQL）和 ``XIOR_PROFILE``（WordPress admin-aja
 线程安全
 --------
 每个 BrowserFetcher 实例**绑定创建它的线程**——Playwright 对象换线程即失效。
-Scraper 侧由 ``monitor._get_browser_executor(source)`` 保证每个浏览器型
-source 恒定跑在自己的长存单线程上；Booker 在自己的线程里另建实例。
+Scraper 侧每个浏览器型 source 运行在独立常驻子进程的主线程中；Booker 在
+自己的线程里另建实例。
 
 两个独立的 Playwright sync 实例**不能共存于同一线程**（第一个会在该线程装上
 event loop，第二个 launch() 随即被判成「在 asyncio loop 里用同步 API」），
-所以 executor 必须按 source 分开，不能共用一条。
+所以不同浏览器型 source 不共用工作进程。
 """
 from __future__ import annotations
 
@@ -1373,7 +1373,6 @@ class BrowserFetcher:
                         init.body = {body_json};
                     }}
                     const resp = await fetch({path_json}, init);
-                    clearTimeout(timeout);
                     const text = await resp.text();
                     const headers = {{}};
                     for (const [key, value] of resp.headers.entries()) {{
@@ -1384,8 +1383,9 @@ class BrowserFetcher:
                     }}
                     return {{ status: resp.status, ok: resp.ok, text: text, headers: headers }};
                 }} catch (err) {{
-                    clearTimeout(timeout);
                     return {{ error: err.message || String(err) }};
+                }} finally {{
+                    clearTimeout(timeout);
                 }}
             }}
         """
@@ -1427,21 +1427,32 @@ class BrowserFetcher:
                     .map(s => s.src);
                 // 先按名字筛；筛不到再退回全量，但正常情况下走不到那一步。
                 const named = all.filter(u => hints.some(h => u.includes(h)));
-                for (const list of [named, all]) {
-                    for (const u of list) {
-                        let t;
-                        try { t = await (await fetch(u)).text(); }
-                        catch (e) { continue; }
-                        if (!t.includes('__enc__')) continue;
-                        const m = t.match(rx);
-                        if (m) return {key: m[1], scanned: list.length,
-                                       fallback: list === all};
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 30000);
+                try {
+                    for (const list of [named, all]) {
+                        for (const u of list) {
+                            if (controller.signal.aborted) return {timedOut: true};
+                            let t;
+                            try { t = await (await fetch(u, {signal: controller.signal})).text(); }
+                            catch (e) { continue; }
+                            if (!t.includes('__enc__')) continue;
+                            const m = t.match(rx);
+                            if (m) return {key: m[1], scanned: list.length,
+                                           fallback: list === all};
+                        }
                     }
+                    return controller.signal.aborted ? {timedOut: true} : null;
+                } finally {
+                    clearTimeout(timer);
                 }
-                return null;
             }""",
             [_ENC_PUBKEY_RE, list(_ENC_CHUNK_HINTS)],
         )
+        if key and key.get("timedOut"):
+            raise _exc("ScrapeNetworkError")(
+                f"{self._profile.name} 获取加密公钥超时，未完成 script 扫描"
+            )
         if not key or not key.get("key"):
             raise _exc("ScrapeNetworkError")(
                 f"{self._profile.name} 找不到加密公钥——bundle 结构可能已变。"
@@ -1523,8 +1534,6 @@ class BrowserFetcher:
                 init.headers = h;
 
                 const resp = await fetch(a.url, init);
-                clearTimeout(timer);
-
                 const raw_text = await resp.text();
                 const out = {};
                 for (const [key, value] of resp.headers.entries()) {
@@ -1543,8 +1552,9 @@ class BrowserFetcher:
                 return {status: resp.status, ok: resp.ok,
                         text: new TextDecoder().decode(plain), headers: out};
             } catch (err) {
-                clearTimeout(timer);
                 return {error: err.message || String(err)};
+            } finally {
+                clearTimeout(timer);
             }
         }
     """

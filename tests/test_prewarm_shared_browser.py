@@ -372,7 +372,7 @@ class TestLanePriorityWiring:
         from mcore import prewarm_round
         body = inspect.getsource(prewarm_round.PrewarmRound.start_for_candidates)
         assert "lane_offered = False" in body, "没有「本轮已经给出去了」这个标记"
-        assert "may_borrow_lane=may_borrow" in body, "创建时没传借用开关"
+        assert "borrow=may_borrow" in body, "创建时没传借用开关"
         assert "prewarm_cache.lane_in_use()" in body, "没考虑跨轮还缓存着的借用者"
         # 循环本身不能被排序/打乱——一 reorder，「第一个」就不再是优先级最高的
         loop_at = body.index("for user, _ in self.user_notifiers:")

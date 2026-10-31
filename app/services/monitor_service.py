@@ -44,13 +44,9 @@ class MonitorServiceError(Exception):
 def terminate_process(pid: int) -> None:
     """Terminate a process cross-platform."""
     if os.name == "nt":
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(1, False, pid)  # PROCESS_TERMINATE = 1
-        if handle:
-            kernel32.TerminateProcess(handle, 0)
-            kernel32.CloseHandle(handle)
+        # TerminateProcess alone leaves worker and Chromium child processes alive.
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                       capture_output=True, timeout=15, check=True)
         return
     os.kill(pid, signal.SIGTERM)
 

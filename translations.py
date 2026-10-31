@@ -7,6 +7,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 TRANSLATIONS = {
+    "booking_review_error": {"zh": "无法读取 Holland2Stay 预订保护状态，请稍后重试或联系管理员。", "en": "Unable to read the Holland2Stay booking protection status. Please try again or contact an administrator."},
+    "booking_review_title": {"zh": "Holland2Stay 自动预订已暂停：请核实预订结果", "en": "Holland2Stay auto-booking paused: check your booking"},
+    "booking_review_listing": {"zh": "房源", "en": "Listing"},
+    "booking_review_check": {"zh": "请登录 Holland2Stay 检查订单或预留，并根据需要付款或取消。", "en": "Sign in to Holland2Stay to check your orders or reservations, then pay or cancel as appropriate."},
+    "booking_review_cart": {"zh": "购物车号", "en": "Cart"},
+    "booking_review_order": {"zh": "订单号", "en": "Order"},
+    "booking_review_pay": {"zh": "支付链接已生成，请登录 Holland2Stay 完成付款。", "en": "A payment link was generated. Sign in to Holland2Stay to complete payment."},
+    "booking_review_running": {"zh": "后台任务运行期间不能解除保护；如果任务卡住，请先停止监控，再核实订单。", "en": "Protection cannot be removed while the booking is running. If it is stuck, stop monitoring before checking the order."},
+    "booking_review_confirm": {"zh": "你已经登录 Holland2Stay 核实订单或预留，并确定可以恢复自动预订吗？", "en": "Have you checked the order or reservation on Holland2Stay and confirmed that auto-booking can resume?"},
+    "booking_review_action": {"zh": "已核实，恢复自动预订", "en": "Checked; resume auto-booking"},
+    "booking_review_shared": {"zh": "该 Holland2Stay 账号有一笔待核实的预订，请由发起预订的用户核实并解除保护。", "en": "This Holland2Stay account has a booking awaiting review. Ask the user who initiated it to check and clear the protection."},
     # ── Layout / Navigation ──────────────────────────────
     "app_title":            {"zh": "FlatRadar",               "en": "FlatRadar"},
     "skip_to_content":      {"zh": "跳到主要内容",               "en": "Skip to content"},

@@ -52,6 +52,21 @@ NO_PROXY_CURL: dict[str, str] = {"http": "", "https": ""}
 NO_PROXY_HTTPX: dict[str, Any] = {"trust_env": False}
 
 
+def curl_scrape_proxy(proxy: str) -> str:
+    """Resolve names at the personal SOCKS proxy, where IPv6 may differ.
+
+    Keep the configured URL unchanged for pool accounting and Chromium, which
+    does not support the curl-specific socks5h scheme.
+    """
+    if not proxy.lower().startswith("socks5://"):
+        return proxy
+    from config import _personal_proxies, _same_proxy_endpoint
+
+    if any(_same_proxy_endpoint(proxy, personal) for personal in _personal_proxies()):
+        return "socks5h://" + proxy[len("socks5://"):]
+    return proxy
+
+
 def direct_curl_session(**kwargs: Any):
     """curl_cffi Session，绕开抓取代理。
 

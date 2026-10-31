@@ -14,8 +14,8 @@ OurDomain / OurCampus 走纯 HTTP，不该因为另外两家用浏览器就被�
 线程模型
 --------
 Playwright 对象**绑定创建它的线程**。每个浏览器型 source 恒定跑在
-``monitor._get_browser_executor(source)`` 的专属长存单线程上，且两个独立的
-Playwright sync 实例不能共存于同一线程——所以 executor 必须按 source 分开。
+各自的常驻浏览器工作进程的主线程上，且两个独立的 Playwright sync 实例
+不能共存于同一线程——所以工作进程必须按 source 分开。
 本类不做任何加锁：dispatcher 逐 source 串行调用，批次内无并发。
 """
 from __future__ import annotations

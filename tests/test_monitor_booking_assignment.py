@@ -84,6 +84,16 @@ def _cfg(tmp_path) -> Config:
     )
 
 
+class _BookingWorkerFake:
+    def run(self, action, payload, *, timeout, guard=None, job=None):
+        if action != "book":
+            raise RuntimeError("prewarm disabled in test")
+        from mcore.booking import book_with_fallback
+        from mcore.booking_guard import attempt_context
+        with attempt_context(*guard):
+            return book_with_fallback(payload["candidates"], payload["user"], payload["deadline"])
+
+
 def test_assign_auto_book_candidates_dedupes_same_listing():
     u1 = _user("u1", "Alice", "a@example.test")
     u2 = _user("u2", "Bob", "b@example.test")
@@ -135,6 +145,8 @@ def test_run_once_books_same_listing_once_for_multiple_matching_users(tmp_path):
 
     async def go():
         with patch("mcore.scrape_round.dispatch_scrape_tasks", return_value=[_listing("shared")]), \
+             patch("mcore.booking_round.get_booking_worker", return_value=_BookingWorkerFake()), \
+             patch("mcore.prewarm_round.get_booking_worker", return_value=_BookingWorkerFake()), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
              patch("bookers.holland2stay.try_book", side_effect=fake_try_book):
             await run_once(_cfg(tmp_path), storage, [(u1, n1), (u2, n2)], dry_run=False)
@@ -167,6 +179,8 @@ def test_run_once_web_booking_notification_is_scoped_to_assigned_user(tmp_path):
 
     async def go():
         with patch("mcore.scrape_round.dispatch_scrape_tasks", return_value=[_listing("shared")]), \
+             patch("mcore.booking_round.get_booking_worker", return_value=_BookingWorkerFake()), \
+             patch("mcore.prewarm_round.get_booking_worker", return_value=_BookingWorkerFake()), \
              patch("mcore.prewarm.create_prewarmed_session", return_value=None), \
              patch("bookers.holland2stay.try_book", side_effect=fake_try_book):
             await run_once(
