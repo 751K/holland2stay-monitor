@@ -34,10 +34,15 @@ jobs:
           name: macOS-dmg
           path: dist/FlatRadar.dmg
 
+      - name: Extract release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python packaging/release_notes.py "${{ github.ref_name }}" dist/release_notes.md
+
       - name: Upload to Release (tag only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          body_path: dist/release_notes.md
           files: dist/FlatRadar.dmg
 
   windows:
@@ -62,8 +67,13 @@ jobs:
           name: windows-exe
           path: dist/FlatRadar.zip
 
+      - name: Extract release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python packaging/release_notes.py "${{ github.ref_name }}" dist/release_notes.md
+
       - name: Upload to Release (tag only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          body_path: dist/release_notes.md
           files: dist/FlatRadar.zip
