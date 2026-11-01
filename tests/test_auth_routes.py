@@ -143,12 +143,12 @@ class TestLoginSuccess:
 
 class TestWebRegister:
     def setup_method(self):
-        from app.auth import _REGISTER_RECORDS
-        _REGISTER_RECORDS.clear()
+        from app.auth import _register_window
+        _register_window.clear_all()
 
     def teardown_method(self):
-        from app.auth import _REGISTER_RECORDS
-        _REGISTER_RECORDS.clear()
+        from app.auth import _register_window
+        _register_window.clear_all()
 
     def test_login_page_can_actually_reach_register(self, client):
         """注册入口必须真的**能到达** /register。
@@ -274,17 +274,17 @@ class TestLoginFailureAndBackoff:
     def test_successful_login_clears_failures(self, client, test_credentials):
         """登录成功后该 IP 的失败计数应该清零。"""
         # Flask test_client 默认 IP = 127.0.0.1
-        from app.auth import _LOGIN_FAILURES, record_login_failure
+        from app.auth import _login_window, record_login_failure
         ip = "127.0.0.1"
         # 制造 3 次失败
         for _ in range(3):
             record_login_failure(ip)
-        assert len(_LOGIN_FAILURES.get(ip, [])) == 3
+        assert len(_login_window.hits(ip)) == 3
 
         # 成功登录
         _login(client, test_credentials["username"], test_credentials["password"])
         # 计数应被清掉
-        assert _LOGIN_FAILURES.get(ip, []) == []
+        assert _login_window.hits(ip) == []
 
 
 # ─── Guest 模式 ─────────────────────────────────────────────────

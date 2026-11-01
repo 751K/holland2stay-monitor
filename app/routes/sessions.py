@@ -12,7 +12,6 @@ from __future__ import annotations
 import hmac
 import logging
 import os
-import time as _time
 from typing import Any
 
 from flask import (
@@ -277,9 +276,11 @@ def set_lang() -> Any:
 
 
 # /check-user 限速：防止批量枚举用户名（按 IP，每分钟最多 30 次）
-_CHECK_USER_RATE: dict[str, list[float]] = {}
+from app.rate_limit import SlidingWindow
+
 _CHECK_USER_MAX_PER_MIN = 30
-_CHECK_USER_WINDOW = 60
+_CHECK_USER_WINDOW_SEC = 60
+_check_user_window = SlidingWindow("check_user", _CHECK_USER_WINDOW_SEC)
 
 
 def check_user() -> Any:
@@ -289,10 +290,7 @@ def check_user() -> Any:
 
     # 限速检查
     ip = request.remote_addr or "0.0.0.0"
-    now = _time.monotonic()
-    window = [t for t in _CHECK_USER_RATE.get(ip, []) if now - t < _CHECK_USER_WINDOW]
-    _CHECK_USER_RATE[ip] = window
-    if len(window) >= _CHECK_USER_MAX_PER_MIN:
+    if not _check_user_window.would_allow(ip, _CHECK_USER_MAX_PER_MIN):
         return jsonify(exists=False, throttled=True)
 
     username = request.args.get("username", "").strip()
@@ -310,7 +308,7 @@ def check_user() -> Any:
         exists = False
 
     # 仅记录有实际查询的请求（排除空用户名和 admin 匹配）
-    _CHECK_USER_RATE.setdefault(ip, []).append(now)
+    _check_user_window.record(ip)
     return jsonify(exists=exists)
 
 

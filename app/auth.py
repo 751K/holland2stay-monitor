@@ -37,22 +37,22 @@ from config import ENV_PATH
 from env_utils import env_bool
 
 from .env_writer import write_env_key
+from .rate_limit import SlidingWindow
 
 # ------------------------------------------------------------------ #
 # 登录爆破防护：按 IP 记录连续失败次数，超阈值后施加指数退避延迟
 # ------------------------------------------------------------------ #
-_LOGIN_FAILURES: dict[str, list[float]] = {}
 LOGIN_MAX_FAILURES = 5       # 连续失败 5 次后开始延迟
 LOGIN_BASE_DELAY   = 1.0     # 首次延迟 1 秒，之后指数增长
 _FAILURE_WINDOW    = 300     # 仅统计最近 5 分钟内的失败
 _MAX_DELAY         = 30.0    # 单次最长 30 秒
 
+_login_window = SlidingWindow("login_failures", _FAILURE_WINDOW)
+
 
 def check_login_rate(ip: str) -> float:
     """返回当前 IP 应等待的秒数（0 表示无需等待）。"""
-    now = _time.monotonic()
-    window = [t for t in _LOGIN_FAILURES.get(ip, []) if now - t < _FAILURE_WINDOW]
-    _LOGIN_FAILURES[ip] = window
+    window = _login_window.hits(ip)
     if len(window) < LOGIN_MAX_FAILURES:
         return 0.0
     extra = len(window) - LOGIN_MAX_FAILURES
@@ -60,12 +60,12 @@ def check_login_rate(ip: str) -> float:
 
 
 def record_login_failure(ip: str) -> None:
-    _LOGIN_FAILURES.setdefault(ip, []).append(_time.monotonic())
+    _login_window.record(ip)
 
 
 def clear_login_failures(ip: str) -> None:
     """登录成功后清除该 IP 的失败记录。"""
-    _LOGIN_FAILURES.pop(ip, None)
+    _login_window.clear(ip)
 
 
 # ------------------------------------------------------------------ #
@@ -76,11 +76,12 @@ def clear_login_failures(ip: str) -> None:
 # - 每天   ≤ TEST_NOTIFY_PER_DAY    次（按滚动 24h 窗口，避开本地时区切换坑）
 #
 # admin 不限流（运维测试需求）。
-_TEST_NOTIFY_TIMES: dict[str, list[float]] = {}
 TEST_NOTIFY_PER_MINUTE = 3
 TEST_NOTIFY_PER_DAY    = 20
 _TEST_NOTIFY_MINUTE    = 60
 _TEST_NOTIFY_DAY       = 86400
+
+_test_notify_window = SlidingWindow("test_notify", _TEST_NOTIFY_DAY)
 
 
 def check_test_notify_rate(user_id: str) -> tuple[bool, str]:
@@ -92,8 +93,7 @@ def check_test_notify_rate(user_id: str) -> tuple[bool, str]:
     if not user_id:
         return True, ""
     now = _time.monotonic()
-    window = [t for t in _TEST_NOTIFY_TIMES.get(user_id, []) if now - t < _TEST_NOTIFY_DAY]
-    _TEST_NOTIFY_TIMES[user_id] = window
+    window = _test_notify_window.hits(user_id)
     if len(window) >= TEST_NOTIFY_PER_DAY:
         return False, f"今日测试次数已达上限（{TEST_NOTIFY_PER_DAY}/天），请明天再试"
     in_minute = sum(1 for t in window if now - t < _TEST_NOTIFY_MINUTE)
@@ -105,15 +105,16 @@ def check_test_notify_rate(user_id: str) -> tuple[bool, str]:
 def record_test_notify(user_id: str) -> None:
     if not user_id:
         return
-    _TEST_NOTIFY_TIMES.setdefault(user_id, []).append(_time.monotonic())
+    _test_notify_window.record(user_id)
 
 
 # ------------------------------------------------------------------ #
 # 注册滥用防护：同 IP 每小时最多 3 个新账号
 # ------------------------------------------------------------------ #
-_REGISTER_RECORDS: dict[str, list[float]] = {}
 REGISTER_MAX_PER_HOUR = 3
-_REGISTER_WINDOW = 3600  # 1 小时
+_REGISTER_WINDOW_SEC = 3600  # 1 小时
+
+_register_window = SlidingWindow("register", _REGISTER_WINDOW_SEC)
 
 
 def check_register_rate(ip: str) -> tuple[bool, str]:
@@ -122,11 +123,10 @@ def check_register_rate(ip: str) -> tuple[bool, str]:
     同 IP 每小时内最多 REGISTER_MAX_PER_HOUR 个新账号。
     """
     now = _time.monotonic()
-    records = [t for t in _REGISTER_RECORDS.get(ip, []) if now - t < _REGISTER_WINDOW]
-    _REGISTER_RECORDS[ip] = records
+    records = _register_window.hits(ip)
     if len(records) >= REGISTER_MAX_PER_HOUR:
         oldest = min(records)
-        remaining = int(_REGISTER_WINDOW - (now - oldest))
+        remaining = int(_REGISTER_WINDOW_SEC - (now - oldest))
         minutes = max(1, remaining // 60)
         return False, f"注册过于频繁，请 {minutes} 分钟后再试"
     return True, ""
@@ -134,7 +134,19 @@ def check_register_rate(ip: str) -> tuple[bool, str]:
 
 def record_registration(ip: str) -> None:
     """记录一次注册。"""
-    _REGISTER_RECORDS.setdefault(ip, []).append(_time.monotonic())
+    _register_window.record(ip)
+
+
+def reset_auth_rate_limits() -> None:
+    """清空本模块的进程内限流状态（测试隔离用）。"""
+    _login_window.clear_all()
+    _test_notify_window.clear_all()
+    _register_window.clear_all()
+
+
+# 兼容旧测试对底层时间戳表的直接 .clear()；新代码请用 reset_auth_rate_limits()。
+_LOGIN_FAILURES = _login_window._hits
+_REGISTER_RECORDS = _register_window._hits
 
 
 # ------------------------------------------------------------------ #

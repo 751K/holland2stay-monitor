@@ -39,24 +39,17 @@ from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
 
-# Simple in-memory IP rate limiter for public endpoints (100 req/min per IP)
-import time as _time
-_guest_rate_map: dict[str, list[float]] = {}
+# Public endpoint rate limit: 100 req/min per IP.
+from app.rate_limit import SlidingWindow
+
 _GUEST_RATE_LIMIT = 100
-_GUEST_RATE_WINDOW = 60.0
+_GUEST_RATE_WINDOW_SEC = 60.0
+_guest_rate_window = SlidingWindow("guest_listings", _GUEST_RATE_WINDOW_SEC)
 
 
 def _check_guest_rate(ip: str) -> bool:
-    """Return True if the IP is within the rate limit. Clean up stale entries inline."""
-    now = _time.monotonic()
-    timestamps = _guest_rate_map.get(ip, [])
-    timestamps = [t for t in timestamps if now - t < _GUEST_RATE_WINDOW]
-    if len(timestamps) >= _GUEST_RATE_LIMIT:
-        _guest_rate_map[ip] = timestamps  # store cleaned list
-        return False
-    timestamps.append(now)
-    _guest_rate_map[ip] = timestamps
-    return True
+    """Return True if the IP is within the rate limit."""
+    return _guest_rate_window.allow(ip, _GUEST_RATE_LIMIT)
 
 
 from app.services.listing_service import (

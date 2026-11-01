@@ -164,17 +164,17 @@ def isolated_data_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _reset_login_failures():
-    """每个测试前后清空登录失败计数，避免测试间互相污染。"""
+def _reset_auth_rate_limits():
+    """每个测试前后清空登录/注册/测试通知的限流状态，避免互相污染。"""
     try:
-        from app.auth import _LOGIN_FAILURES
-        _LOGIN_FAILURES.clear()
+        from app.auth import reset_auth_rate_limits
+        reset_auth_rate_limits()
     except ImportError:
         pass
     yield
     try:
-        from app.auth import _LOGIN_FAILURES
-        _LOGIN_FAILURES.clear()
+        from app.auth import reset_auth_rate_limits
+        reset_auth_rate_limits()
     except ImportError:
         pass
 

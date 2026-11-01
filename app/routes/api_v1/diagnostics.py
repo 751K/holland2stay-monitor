@@ -19,9 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-import time as _time
 import uuid
-from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
@@ -37,21 +35,15 @@ MAX_PAYLOAD_BYTES = 2 * 1024 * 1024  # 2 MB — 实测 MetricKit crash 包可达
 ALLOWED_KINDS = {"crash", "hang", "diskwrite", "cpuexception", "launch", "other"}
 
 # 每 IP 每小时最多上传次数（防滥用）
+from app.rate_limit import SlidingWindow
+
 _RATE_PER_IP_PER_HOUR = 20
-_rate_buckets: dict[str, deque] = {}
+_rate_window = SlidingWindow("diagnostics_crash", 3600)
 
 
 def _rate_check(ip: str) -> bool:
-    """简单滑动窗口：1 小时内同 IP 上传次数限制。返回 True 表示允许。"""
-    now = _time.monotonic()
-    cutoff = now - 3600
-    bucket = _rate_buckets.setdefault(ip, deque())
-    while bucket and bucket[0] < cutoff:
-        bucket.popleft()
-    if len(bucket) >= _RATE_PER_IP_PER_HOUR:
-        return False
-    bucket.append(now)
-    return True
+    """1 小时内同 IP 上传次数限制。返回 True 表示允许。"""
+    return _rate_window.allow(ip, _RATE_PER_IP_PER_HOUR)
 
 
 def _submit() -> Any:
