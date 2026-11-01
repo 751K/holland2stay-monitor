@@ -12,7 +12,7 @@ scrapers.base.OperationNotAllowedError）。白名单比对的是 operationName 
   就是全量 403，理由同 h2s_gql.py 的 media_gallery）；
 - 每个请求都必须带 ``operationName``，缺了同样 403。
 
-**采集方式**（2026-08-19，docs/H2S_BOOKING_OPS.md §2 有完整记录）：这些 operation
+**采集方式**（2026-08-19，docs/H2S_BOOKING_OPS.md §5 有完整记录）：这些 operation
 被构建时内联进站点 JS chunk 的模板字符串（``common-*.js``），静态读取即可，无需登录、
 无需下单。上游改版后重新照抄：到含 ``AddNewBooking`` 的 chunk 里按 ``(0,x.J1)`` 模板
 字符串抽取。``image_manager`` 那段是站点侧的片段常量（chunk 里的 module 1511），这里

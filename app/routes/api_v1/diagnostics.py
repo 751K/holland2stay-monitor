@@ -12,7 +12,7 @@ POST /api/v1/diagnostics/crash — iOS 客户端在用户授权后上传 MetricK
   不进 SQLite —— 诊断 payload 体积不定（可能含完整堆栈、上百帧），
   入库反而拖慢正常查询，且 admin 排查崩溃靠 grep 一搜更直接
 - 速率限制：同 IP 每小时最多 20 条，防止有人把崩溃端点当成日志倾倒口
-- payload 大小硬上限 256 KB —— 苹果实际 crash 包都 < 64 KB
+- payload 大小硬上限 2 MB —— 实测 MetricKit crash 包可达 ~800 KB
 """
 
 from __future__ import annotations

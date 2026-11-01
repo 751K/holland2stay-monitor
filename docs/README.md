@@ -4,25 +4,32 @@
 
 > 中文版：[README_cn.md](README_cn.md)
 
-FlatRadar is a self-hosted monitor for the Dutch rental market. It tracks
+FlatRadar monitors the Dutch rental market. It runs as a hosted service at
+[flatradar.app](https://flatradar.app) and can also be self-hosted. It tracks
 Holland2Stay, OurDomain, OurCampus, Xior, Magis, Student Experience and Plaza,
-and as soon as a listing matches
-your criteria it sends a notification through the channels you enabled, with a
-direct link included. For Holland2Stay it goes one step further: it first
-carries the booking through to the payment page, then sends the payment link
-along with the alert, so only the payment itself remains.
+and as soon as a listing matches your criteria it sends a notification through
+the channels you enabled, with a direct link included. For Holland2Stay it goes
+one step further: it first carries the booking through to the payment page, then
+sends the payment link along with the alert, so only the payment itself remains.
 For Plaza, it can submit applications automatically when the user enables it.
 
 **Paying on your behalf is outside what FlatRadar does, and it cannot guarantee
 a booking succeeds.** Whether you get the unit still depends on the competition
 on the platform.
 
-The project runs both locally and on a server.
+## How to use it
 
-**Website — [flatradar.app](https://flatradar.app)**
+| Path | Best for | Start here |
+|---|---|---|
+| **Hosted service** | Most people | Open [flatradar.app](https://flatradar.app). The first sign-in creates an account automatically; set filters and notification channels in the panel. Nothing to install. |
+| **Mobile apps** | Alerts on your phone | [iOS](https://apps.apple.com/us/app/flarradar/id6769857080) · [Android APK](https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk) |
+| **Desktop builds** | macOS / Windows | Download from [Releases](https://github.com/751K/holland2stay-monitor/releases) |
+| **Self-hosting** | Your own instance, database and delivery | [Quick start](#quick-start) below. Needs Docker and about 2 GB of RAM; depending on your network a residential proxy may be required. |
 
-[User guide](https://flatradar.app/guide) ·
-[Support](https://flatradar.app/support) ·
+The hosted service and self-hosting run the same codebase.
+
+Guide: [flatradar.app/guide](https://flatradar.app/guide) ·
+Support: [flatradar.app/support](https://flatradar.app/support) ·
 [support@flatradar.app](mailto:support@flatradar.app)
 
 > FlatRadar is an independent, unofficial tool. It is not affiliated with,
@@ -84,6 +91,7 @@ Coverage shifts as third-party sites change. The scrapers are documented in
 | Docker | Engine 20.10+ with the Compose plugin | `docker compose`, not the old `docker-compose` script |
 | Python | 3.11+ | Only for running from source. The Docker image ships 3.11; CI and desktop builds use 3.12 |
 | OS | Linux recommended | See the [macOS note](#running-from-source) below |
+| Network | Residential or mobile proxy may be required | Some platforms have returned 403 to datacenter exit IPs. Cloud deployment reads `HTTPS_PROXY`; a proxy account is an extra cost, and none of it is needed for the hosted service |
 | Domain | Optional | Needed only for the HTTPS deployment. The local path below runs without one |
 
 ---
@@ -111,7 +119,9 @@ Holland2Stay in Eindhoven only; enable the rest from the panel.
 
 ### 2. Cloud deployment
 
-Set up the networking side yourself before you begin.
+Set up the networking side yourself before you begin. DNS, firewall ports, TLS
+certificates, client IP handling and replacing Caddy with your own reverse proxy
+are covered in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 **Step 1** — create the config and data directories:
 
@@ -181,6 +191,19 @@ Once signed in, add users and notification channels, then pick the platforms and
 cities to monitor. Both user-level and system-level settings are managed from the
 panel; `.env` only needs editing when credentials, the domain or the timezone
 change.
+
+### First run checklist
+
+1. Sign in to the panel as admin.
+2. Open the Users page and create the user(s) who should receive alerts.
+3. For each user, enable at least one notification channel and send a test.
+4. Open the Settings page and enable the platforms **and** their cities or
+   buildings — both are required; ticking only cities does nothing.
+5. Watch `/monitoring` for the first complete round and confirm that the
+   expected sources report data.
+6. Keep day-to-day changes in the panel. `.env` is only for deployment settings,
+   secrets and proxy configuration; writing runtime keys back into `.env`
+   overrides the dashboard.
 
 ### Running from source
 
@@ -370,7 +393,7 @@ straight to Occupied and then seeing the listing return produces a wave of false
 "back on the market" alerts. Both thresholds are configurable
 (`STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS`); the reasoning and the failure
 modes behind them are in
-[ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-根据-feed-缺失推断房源状态).
+[Architecture: listing status and completeness](ARCHITECTURE.md#status-convergence).
 
 Convergence only runs for source/city pairs that were **completely** scanned
 that round. A failed scrape is never read as "the listings are gone".
@@ -431,11 +454,11 @@ mismatch and would only interrupt a scrape in progress.
 | Symptom | Cause and fix |
 |---|---|
 | No alerts at all, dashboard shows stale listings | The monitor process is down. `supervisorctl status` to confirm, then `supervisorctl start monitor`. `/health` returns 503 once the heartbeat is older than `MONITOR_HEARTBEAT_MAX_AGE`. |
-| A source shows `down` or `warn` on `/monitoring` | The card lists which rule fired. Thresholds and their rationale: [ARCHITECTURE.md §5.12](ARCHITECTURE.md). |
+| A source shows `down` or `warn` on `/monitoring` | The card lists which rule fired. See [health and troubleshooting](ARCHITECTURE.md#health-and-troubleshooting). |
 | Need logs from a specific time window | `/logs` filters server-side by keyword, level and `since`/`until` — it is not limited to what is currently on screen. |
 | Logs repeat `H2S source 熔断` | Cloudflare is blocking your exit IP. The breaker pauses that one source and retries a single city later. If it persists, set `HTTPS_PROXY`. |
 | Logs repeat `CF 挑战 ... 未解开` | Same cause — usually IP reputation rather than anything local. |
-| One platform always returns 0 listings | May be genuine. Check whether the round was marked complete; see [ARCHITECTURE.md §5.7](ARCHITECTURE.md#57-completeness-决定能否做状态收敛). |
+| One platform always returns 0 listings | May be genuine. Check whether the round was marked complete; see [listing status and completeness](ARCHITECTURE.md#status-convergence). |
 | A listing you know is taken still shows as available | Its city was not completely scanned, so it never became eligible for convergence. Check `(complete/targets)` on `/monitoring`. |
 | A batch of listings turned Occupied at once | Expected if they carry the **inferred** badge — that is aging catching up after a restart or a threshold change, and it generates no notifications. Without the badge, the platform actually reported it. |
 | Logs repeat `抓到 0 个单元，第 N/3 轮` | Normal. An empty result from OurDomain/OurCampus has to repeat for 3 rounds before it counts, so a single bad round cannot converge a whole building. |
@@ -455,10 +478,11 @@ own monitoring if you want to be paged.
 | Document | For |
 |---|---|
 | [User Guide](https://flatradar.app/guide) | Panel settings and daily use |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | How the system runs, and every failure mode worth knowing before you debug one |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Docker topology, Caddy and TLS, ports, logs, and using a different reverse proxy |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System architecture, key failure boundaries and troubleshooting entry points |
 | [API.md](API.md) | Backend contracts for mobile and integrations |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
-| [H2S.md](H2S.md) · [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [PLAZA.md](PLAZA.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | Per-platform research; `PLAZA.md` covers booking only — Plaza's scraping side, with Magis and Student Experience, is in `SCRAPING_RECON.md` |
+| [H2S.md](H2S.md) · [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md) · [RENTCAFE.md](RENTCAFE.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [PLAZA.md](PLAZA.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | Per-platform research; `RENTCAFE.md` covers the booking flow shared by Xior, OurDomain and OurCampus, and `PLAZA.md` covers Plaza booking only — Plaza's scraping side, with Magis and Student Experience, is in `SCRAPING_RECON.md` |
 | [iOS_README.md](https://github.com/751K/FlatRadar-iOS/blob/master/docs/iOS_README.md) | iOS client — moved to [FlatRadar-iOS](https://github.com/751K/FlatRadar-iOS) |
 | [ANDROID_PLAN.md](https://github.com/751K/FlatRadar-Android/blob/master/docs/ANDROID_PLAN.md) | Android client — moved to [FlatRadar-Android](https://github.com/751K/FlatRadar-Android) |
 | [dataflow_en.mmd](dataflow_en.mmd) · [dataflow_ch.mmd](dataflow_ch.mmd) | Full scrape/notify flow as a Mermaid diagram |

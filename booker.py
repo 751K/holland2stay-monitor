@@ -11,7 +11,7 @@ booker.py — 自动预订模块（CloakBrowser 版）
 2. login()
        NextAuth 三步握手（csrf → callback/credentials → session）→ accessToken(JWT)
        ——2026-08-19 起 H2S 登录已从 GraphQL mutation 迁到 NextAuth，见
-       docs/H2S_BOOKING_OPS.md §6
+       docs/H2S_BOOKING_OPS.md §3.1
 3. _do_book()（内部子流程，失败时可重试）：
    3a+3b. create_booking()
            POST /api/booking（加密信封 + Bearer）→ {cartId, booking}
@@ -26,7 +26,7 @@ booker.py — 自动预订模块（CloakBrowser 版）
            报文的照抄记录，不是我们的调用清单）。
 
            ⚠️ 这条路径**尚未经过一次真实预订验证**——验证它就等于真占一套房。
-           首次真实自动预订时需要盯着结果。见 docs/H2S_BOOKING_OPS.md §6.10
+           首次真实自动预订时需要盯着结果。见 docs/H2S_BOOKING_OPS.md §3.3
    3c. set_payment_method()
            setPaymentMethodOnCart mutation → code="idealcheckout_ideal"
    3d. _fetch_checkout_agreements()
@@ -145,7 +145,7 @@ _TOKEN_MAX_AGE = 3300
 
 # ── 登录（NextAuth）────────────────────────────────────────────────
 # 2026-08-19 起 H2S 登录不再是 GraphQL ``generateCustomerToken``，换成了
-# 标准 NextAuth credentials 流（docs/H2S_BOOKING_OPS.md §6）。三步握手，全部
+# 标准 NextAuth credentials 流（docs/H2S_BOOKING_OPS.md §3.1）。三步握手，全部
 # 在 www 同源、明文（不走加密信封）：
 #   GET  /api/auth/csrf                 → { csrfToken }
 #   POST /api/auth/callback/credentials → 表单 { email, password, csrfToken, … }
@@ -166,7 +166,7 @@ _AUTH_CALLBACK_URL = "https://www.holland2stay.com/"
 # 即 6 步里只有占房这一步被摘掉。站点自己也不再直接发它，改走服务端代理
 # ``POST /api/booking``（加密信封 + Bearer），一次完成建车 + 占房，返回
 # {cartId, booking}。实测该端点存在（未登录时回 401 Unauthorized，而非 404 /
-# operation_not_allowed）。详见 docs/H2S_BOOKING_OPS.md §6.10。
+# operation_not_allowed）。详见 docs/H2S_BOOKING_OPS.md §3.3。
 _BOOKING_API_PATH = "/api/booking"
 
 
@@ -236,7 +236,7 @@ class TwoFactorRequiredError(Exception):
     """登录成功但账号开了两步验证，需要人工输入验证码，无法全自动下单。
 
     与 AuthError 分开：凭据是对的，只是这个账号过不了全自动。给用户的提示也不同
-    （去关掉 2FA 或改用半自动），见 docs/H2S_BOOKING_OPS.md §6.5。
+    （去关掉 2FA 或改用半自动），见 docs/H2S_BOOKING_OPS.md §2。
     """
 
 
@@ -373,7 +373,7 @@ def login(fetcher: BrowserFetcher, email: str, password: str) -> str:
 
     历史：2026-08-19 前这里是 GraphQL ``generateCustomerToken`` mutation；H2S 把
     登录整体迁到 NextAuth 后，那条 mutation 已不存在（打过去 operation_not_allowed）。
-    见 docs/H2S_BOOKING_OPS.md §6。
+    见 docs/H2S_BOOKING_OPS.md §3.1。
     """
     # 1. CSRF token
     r = fetcher.fetch_plain(_AUTH_CSRF_PATH, method="GET")
@@ -467,7 +467,7 @@ def set_payment_method(
 # ------------------------------------------------------------------ #
 
 # 取消预留：REST，不是 GraphQL。机制 2026-08-19 从租户门户 JS 逐字读出
-# （docs/H2S_BOOKING_OPS.md §6.6），站点原文：
+# （docs/H2S_BOOKING_OPS.md §4），站点原文：
 #     列出预留  GET  /api/rest/V1/newdashboard/contract/me?fields=items[id,sku,status,...]
 #     取消一笔  POST /api/rest/V1/customer/bookingcancel/{sku}   body {}   Bearer
 # 按 **SKU** 取消，不是订单号。旧代码那套 GraphQL customer{orders}+cancelOrder
@@ -1252,7 +1252,7 @@ def _fetch_sku_and_contract(fetcher: BrowserFetcher, url_key: str) -> tuple[str,
     通过 url_key 查询 addNewBooking 所需的三个关键参数（sku / contract_id / 起租日）。
 
     用站点原文 ``GetProductDetail``（照抄品）：白名单只认这个 operation 名与它
-    完整的字段集，旧的自写 ``GetProduct`` 已 403（docs/H2S_BOOKING_OPS.md §2）。
+    完整的字段集，旧的自写 ``GetProduct`` 已 403（docs/H2S_BOOKING_OPS.md §5）。
     我们只用到其中三个字段，但**一个都不能删**——删了就是全量 403。
     过滤走 variables（``$filters``），白名单不管。
 

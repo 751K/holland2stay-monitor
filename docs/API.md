@@ -2,11 +2,17 @@
 
 本文档整理 FlatRadar 移动端和第三方客户端使用的后端 API。当前稳定接口集中在 `/api/v1/*`，Web 后台的 HTML 页面和 `/api/*` 旧接口不作为移动端契约。
 
-机器可读契约版本：openapi.json 1.24.0。接口行为以当前服务实现和契约测试为准。
+机器可读契约版本：openapi.json 1.25.0。接口行为以当前服务实现和契约测试为准。
 
 机器可读契约：
 
 - OpenAPI 3.1 JSON：[openapi.json](openapi.json)
+
+## 目录
+
+[基础约定](#基础约定) · [端点总览](#端点总览) · [Auth](#auth) · [Public Stats](#public-stats) · [Listings](#listings) · [Map](#map) · [Calendar](#calendar) · [Notifications](#notifications)
+
+[Current User](#current-user) · [Filter Options](#filter-options) · [Devices and Push](#devices-and-push) · [Feedback](#feedback) · [Diagnostics](#diagnostics) · [Legal](#legal) · [Admin](#admin) · [Webhooks](#webhooks) · [移动端实现建议](#移动端实现建议) · [兼容性说明](#兼容性说明)
 
 ## 基础约定
 
@@ -109,45 +115,45 @@ SSE 特例：`GET /notifications/stream` 支持 `Authorization` header；不能�
 
 | 方法 | 路径 | 鉴权 | 说明 |
 |---|---|---|---|
-| POST | `/auth/login` | 无 | 登录并签发 Bearer token |
-| POST | `/auth/register` | 无 | 自助注册，注册即登录 |
-| POST | `/auth/logout` | admin/user | 撤销当前 token |
-| GET | `/auth/me` | admin/user | 当前身份摘要 |
-| POST | `/auth/password` | user | 修改当前用户密码 |
-| POST | `/auth/verify` | user | 校验当前密码，不签发 token |
-| GET | `/stats/public/summary` | 可选 | 公开统计概览 |
-| GET | `/stats/public/charts` | 可选 | 图表 key 列表 |
-| GET | `/stats/public/charts/<key>` | 可选 | 图表数据 |
-| GET | `/listings` | 可选 | 房源列表（支持 `sort`） |
-| GET | `/listings/<listing_id>` | 可选 | 房源详情 |
-| GET | `/map` | 可选 | 已缓存坐标的地图房源 |
-| GET | `/map/locate` | 可选 | 按 id 定位单条房源，区分三种「看不到」 |
-| GET | `/calendar` | 可选 | 有入住日期的日历房源 |
-| GET | `/notifications` | admin/user | 通知列表 |
-| POST | `/notifications/read` | admin/user | 标记通知已读 |
-| GET | `/notifications/stream` | admin/user | SSE 通知流 |
-| POST | `/notifications/stream/ticket` | admin/user | 换一枚 60 秒 SSE 票据 |
-| GET | `/me/summary` | admin/user | 当前用户统计 |
-| GET | `/me/filter` | admin/user | 当前用户过滤条件 |
-| PUT | `/me/filter` | user | 更新当前用户过滤条件 |
-| DELETE | `/me` | user | 注销当前账号 |
-| GET | `/me/export` | user | 导出当前用户数据 |
-| GET | `/filter/options` | 可选 | 过滤器候选值 |
-| POST | `/devices/register` | admin/user | 注册/刷新设备推送 token |
-| GET | `/devices` | admin/user | 当前 session 下设备列表 |
-| DELETE | `/devices/<device_id>` | admin/user | 删除当前 session 下设备 |
-| POST | `/devices/test` | admin/user | 测试推送 |
-| POST | `/feedback` | admin/user | 提交反馈 |
-| POST | `/diagnostics/crash` | 可选 | 上传崩溃/性能诊断 |
-| GET | `/legal` | 无 | 服务条款与隐私政策正文 |
-| GET | `/admin/users` | admin | 用户列表 |
-| POST | `/admin/users/<user_id>/toggle` | admin | 启用/停用用户 |
-| DELETE | `/admin/users/<user_id>` | admin | 删除用户 |
-| GET | `/admin/monitor/status` | admin | 监控进程状态 |
-| POST | `/admin/monitor/start` | admin | 启动监控 |
-| POST | `/admin/monitor/stop` | admin | 停止监控 |
-| POST | `/admin/monitor/reload` | admin | 热重载监控配置 |
-| POST | `/admin/monitor/restart` | admin | 重启监控进程 |
+| POST | [`/auth/login`](#post-authlogin) | 无 | 登录并签发 Bearer token |
+| POST | [`/auth/register`](#post-authregister) | 无 | 自助注册，注册即登录 |
+| POST | [`/auth/logout`](#post-authlogout) | admin/user | 撤销当前 token |
+| GET | [`/auth/me`](#get-authme) | admin/user | 当前身份摘要 |
+| POST | [`/auth/password`](#post-authpassword) | user | 修改当前用户密码 |
+| POST | [`/auth/verify`](#post-authverify) | user | 校验当前密码，不签发 token |
+| GET | [`/stats/public/summary`](#get-statspublicsummary) | 可选 | 公开统计概览 |
+| GET | [`/stats/public/charts`](#get-statspubliccharts) | 可选 | 图表 key 列表 |
+| GET | [`/stats/public/charts/<key>`](#get-statspublicchartskey) | 可选 | 图表数据 |
+| GET | [`/listings`](#get-listings) | 可选 | 房源列表（支持 `sort`） |
+| GET | [`/listings/<listing_id>`](#get-listingslisting_id) | 可选 | 房源详情 |
+| GET | [`/map`](#get-map) | 可选 | 已缓存坐标的地图房源 |
+| GET | [`/map/locate`](#get-maplocate) | 可选 | 按 id 定位单条房源，区分三种「看不到」 |
+| GET | [`/calendar`](#get-calendar) | 可选 | 有入住日期的日历房源 |
+| GET | [`/notifications`](#get-notifications) | 可选 | 通知列表（guest 仅 `status_change` / `new_listing`） |
+| POST | [`/notifications/read`](#post-notificationsread) | admin/user | 标记通知已读 |
+| GET | [`/notifications/stream`](#get-notificationsstream) | admin/user | SSE 通知流 |
+| POST | [`/notifications/stream/ticket`](#post-notificationsstreamticket) | admin/user | 换一枚 60 秒 SSE 票据 |
+| GET | [`/me/summary`](#get-mesummary) | admin/user | 当前用户统计 |
+| GET | [`/me/filter`](#get-mefilter) | admin/user | 当前用户过滤条件 |
+| PUT | [`/me/filter`](#put-mefilter) | user | 更新当前用户过滤条件 |
+| DELETE | [`/me`](#delete-me) | user | 注销当前账号 |
+| GET | [`/me/export`](#get-meexport) | user | 导出当前用户数据 |
+| GET | [`/filter/options`](#get-filteroptions) | 可选 | 过滤器候选值 |
+| POST | [`/devices/register`](#post-devicesregister) | admin/user | 注册/刷新设备推送 token |
+| GET | [`/devices`](#get-devices) | admin/user | 当前 session 下设备列表 |
+| DELETE | [`/devices/<device_id>`](#delete-devicesdevice_id) | admin/user | 删除当前 session 下设备 |
+| POST | [`/devices/test`](#post-devicestest) | admin/user | 测试推送 |
+| POST | [`/feedback`](#post-feedback) | admin/user | 提交反馈 |
+| POST | [`/diagnostics/crash`](#post-diagnosticscrash) | 可选 | 上传崩溃/性能诊断 |
+| GET | [`/legal`](#get-legal) | 无 | 服务条款与隐私政策正文 |
+| GET | [`/admin/users`](#get-adminusers) | admin | 用户列表 |
+| POST | [`/admin/users/<user_id>/toggle`](#post-adminusersuser_idtoggle) | admin | 启用/停用用户 |
+| DELETE | [`/admin/users/<user_id>`](#delete-adminusersuser_id) | admin | 删除用户 |
+| GET | [`/admin/monitor/status`](#get-adminmonitorstatus) | admin | 监控进程状态 |
+| POST | [`/admin/monitor/start`](#post-adminmonitorstart) | admin | 启动监控 |
+| POST | [`/admin/monitor/stop`](#post-adminmonitorstop) | admin | 停止监控 |
+| POST | [`/admin/monitor/reload`](#post-adminmonitorreload) | admin | 热重载监控配置 |
+| POST | [`/admin/monitor/restart`](#post-adminmonitorrestart) | admin | 重启监控进程 |
 
 ## Auth
 
@@ -384,6 +390,7 @@ Body：
       "floor_dist",
       "hourly_dist",
       "price_dist",
+      "source_dist",
       "status_dist",
       "tenant_dist",
       "type_dist"
@@ -415,7 +422,23 @@ Query：
 }
 ```
 
-客户端应把 `data` 当作图表专用结构，不同 key 的 shape 可能不同。
+`data[]` 的元素结构按 key 固定：
+
+| key | 元素字段 | 说明 |
+|---|---|---|
+| `daily_new` / `daily_changes` | `{date, count}` | 按天；返回 `days + 1` 个点（含今天），无数据为 0 |
+| `city_dist` | `{city, count}` | 按数量降序 |
+| `source_dist` | `{source, count}` | 按数量降序 |
+| `status_dist` | `{status, count}` | 按数量降序 |
+| `price_dist` | `{range, count}` | 固定 9 个价格档，零值也返回 |
+| `hourly_dist` | `{hour, count}` | 固定 `0`–`23` 共 24 项 |
+| `tenant_dist` / `contract_dist` | `{label, count}` | label 已做同义归一；按数量降序 |
+| `type_dist` | `{label, count}` | 排序：Studio → Loft → 数字房型 → 其他 |
+| `energy_dist` | `{label, count}` | 按能耗等级从高到低排列 |
+| `area_dist` | `{label, count}` | 固定 5 个面积档，零值也返回 |
+| `floor_dist` | `{label, count}` | 固定 4 个楼层档，零值也返回 |
+
+分布类图表只统计 `days` 窗口内 `first_seen` 的房源；`daily_*` 按日期窗口统计。
 
 ## Listings
 
@@ -564,7 +587,7 @@ Occupied / Rented / Not available  → 3
 房源在 feed 中重新出现时，`status` 与该标记会一并复位。推测产生的状态变更
 **不会**触发通知，因此客户端不会因其收到推送。
 
-详见 [ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-根据-feed-缺失推断房源状态)。
+详见[架构总览：房源状态与完整性](ARCHITECTURE.md#status-convergence)。
 
 ### GET `/listings/<listing_id>`
 
@@ -601,8 +624,15 @@ Occupied / Rented / Not available  → 3
         "available_from": "2026-06-22",
         "city": "Eindhoven",
         "address": "Victoriapark 875, Eindhoven",
+        "url": "https://www.holland2stay.com/…",
+        "neighborhood": "Victoriapark",
+        "building": "",
+        "area": "52.5 m²",
         "lat": 51.4416,
-        "lng": 5.4697
+        "lng": 5.4697,
+        "display_lat": 51.4416,
+        "display_lng": 5.4697,
+        "stack_n": 1
       }
     ],
     "uncached": 3
@@ -612,6 +642,8 @@ Occupied / Rented / Not available  → 3
 
 说明：
 
+- **绘制地图请用 `display_lat` / `display_lng`，不要直接用 `lat` / `lng`。** 同一栋楼的所有单元共用街道地址，地理编码后坐标完全重合；服务端把重合点摆成小圈，`display_*` 是摆开后的近似坐标，`lat` / `lng` 是真实坐标。`stack_n` 是该点上的房源数，`> 1` 时界面应说明图钉位置是近似的。
+- `url`、`neighborhood`、`building`、`area` 可能为空字符串。
 - `uncached` 表示有多少房源没有坐标缓存。
 - user 会按 `listing_filter` 过滤。
 - guest 可访问，但只读取缓存，不产生外部请求或写入。
@@ -649,7 +681,12 @@ Occupied / Rented / Not available  → 3
 }
 ```
 
-定位不到时 `data.ok` 为 `false` 并带 `reason`；`listing` 缺省。
+定位不到时 `data.ok` 为 `false` 并带 `reason`：
+
+- `not_found`：不带 `listing`。
+- `no_coords`：**带 `listing`**（房源存在，只是没有坐标）。
+
+成功时 `listing` 同样返回 `display_lat` / `display_lng`，且 `stack_n` 显式为 `1`。
 注意外层信封的 `ok` 和 `data.ok` 是两件事：前者说请求成功，后者说找到没找到。
 
 ## Calendar
@@ -689,7 +726,8 @@ Occupied / Rented / Not available  → 3
 
 分页通知列表。
 
-鉴权：`admin` / `user`
+鉴权：可选。带 token 时按角色过滤；不带 token（guest）时只返回
+`status_change` / `new_listing` 两类，`unread` 恒为 0。
 
 Query：
 
@@ -728,8 +766,13 @@ Query：
 user 视角：
 
 - 只返回自己可见的通知。
-- 只保留 `new_listing`、`status_change`、`booking` 类型。
+- 只保留 `new_listing`、`status_change`、`booking`、`announcement` 类型。
 - 带 `listing_id` 的通知会再次按 `listing_filter` 过滤。
+
+guest 视角：
+
+- 只返回 `status_change`、`new_listing` 两类。
+- `unread` 恒为 0（没有可标记的已读状态）。
 
 ### POST `/notifications/read`
 
@@ -777,10 +820,14 @@ Query：
 ```text
 retry: 2000
 
-data: [{"id":1002,"type":"new_listing"}]
+data: [{"id":1002,"created_at":"2026-05-20T11:09:58Z","type":"new_listing","title":"…","body":"…","url":"","listing_id":"listing-id","read":0,"user_id":""}]
 
 : keepalive
 ```
+
+`data:` 是一个 JSON 数组，元素为通知的完整行，字段与 `GET /notifications` 的
+`items[]` 相同：`id`、`created_at`、`type`、`title`、`body`、`url`、`listing_id`、
+`read`、`user_id`。一次轮询可以返回多条；没有新通知时只发 `: keepalive` 注释行。
 
 客户端建议：
 
@@ -873,6 +920,7 @@ Body 支持字段：
 | `allowed_cities` | string[] | 城市 |
 | `allowed_types` | string[] | 房型 |
 | `allowed_neighborhoods` | string[] | 区域 |
+| `allowed_sources` | string[] | 来源平台（`holland2stay` / `ourdomain` / …） |
 | `allowed_contract` | string[] | 合同类型 |
 | `allowed_tenant` | string[] | 租客类型 |
 | `allowed_offer` | string[] | offer 类型 |
@@ -924,14 +972,20 @@ Body 支持字段：
 
 鉴权：`user`
 
-返回包括：
+返回结构：
 
-- account
-- filter
-- notification_history，最多 500 条
-- active_devices
-- active_tokens
-- exported_at
+- `account`：`id`、`name`、`role`、`created_at`、`enabled`、`notifications_enabled`
+- `filter`：`max_rent`、`min_area`、`min_floor` 及全部 `allowed_*` 字段
+  （`allowed_occupancy`、`allowed_types`、`allowed_neighborhoods`、
+  `allowed_buildings`、`allowed_cities`、`allowed_sources`、`allowed_contract`、
+  `allowed_tenant`、`allowed_offer`、`allowed_finishing`、`allowed_energy`）
+- `notification_history[]`：`id`、`created_at`、`type`、`title`、`body`、`url`、
+  `listing_id`、`read`，最多 500 条
+- `notification_count`：`notification_history` 的条数
+- `active_devices[]`：`id`、`device_token`、`env`、`platform`、`model`、
+  `os_version`、`bundle_id`、`created_at`、`last_seen`
+- `active_tokens[]`：`id`、`device_name`、`created_at`、`last_used_at`、`expires_at`
+- `exported_at`
 
 ## Filter Options
 
@@ -944,17 +998,29 @@ Body 支持字段：
   "ok": true,
   "data": {
     "cities": ["Eindhoven"],
+    "sources": ["holland2stay", "xior"],
     "occupancy": ["One", "Two (only couples)"],
     "types": ["Studio"],
     "neighborhoods": ["Vlootkwartier"],
+    "buildings": ["Amsterdam Diemen"],
     "contract": ["Regular"],
     "tenant": ["Student"],
     "offer": ["Lottery"],
     "finishing": ["Furnished"],
-    "energy": ["A+++", "A++", "A+", "A", "B", "C", "D", "E", "F"]
+    "energy": ["A+++", "A++", "A+", "A", "B", "C", "D", "E", "F"],
+    "dim_sources": {
+      "source": ["holland2stay", "ourdomain", "ourcampus", "xior", "magis", "studentexperience", "plaza"],
+      "contract": ["holland2stay"],
+      "neighborhood": ["holland2stay"],
+      "offer": ["holland2stay"]
+    }
   }
 }
 ```
+
+`dim_sources` 表示每个过滤维度实际对哪些平台生效，客户端据此在筛选表单里提示
+「仅对 X 生效」。它只列出已登记的维度；**缺失的键应视为「未知」，不要当作「对所有
+平台生效」**。
 
 ## Devices and Push
 
@@ -1039,10 +1105,13 @@ Body：
   "data": {
     "device_id": 1,
     "env": "production",
-    "platform": "ios"
+    "platform": "ios",
+    "notifications_enabled": true
   }
 }
 ```
+
+`notifications_enabled` 表示该用户当前是否已有可用的通知渠道：普通用户为布尔值；admin token 注册时为 `null`（不适用）。
 
 ### GET `/devices`
 
@@ -1117,6 +1186,7 @@ Body：
     "results": [
       {
         "device_token_hint": "abcdef123456…7890",
+        "platform": "ios",
         "env": "production",
         "status": 200,
         "reason": "",
@@ -1184,7 +1254,7 @@ Body：
 限制：
 
 - 单 IP 每小时最多 20 条。
-- body 最大 256 KB。
+- body 最大 2 MB。
 
 Body：
 
@@ -1228,6 +1298,8 @@ Body：
 - `hang`
 - `diskwrite`
 - `cpuexception`
+- `launch`
+- `other`
 
 返回状态码：`202`
 
@@ -1270,7 +1342,7 @@ Android 客户端可复用此端点，但建议字段改为：
   "data": {
     "terms": "…",
     "privacy": "…",
-    "updated_at": "2026-08-20"
+    "updated_at": "2026-05-26"
   }
 }
 ```
@@ -1369,10 +1441,13 @@ Android 客户端可复用此端点，但建议字段改为：
     "running": true,
     "pid": 12345,
     "last_scrape": "2026-05-20T11:09:58",
-    "last_count": "11"
+    "last_count": "11",
+    "upstream_maintenance_since": ""
   }
 }
 ```
+
+`upstream_maintenance_since` 非空表示 Holland2Stay 正在维护（首次探测到的时间）。
 
 ### POST `/admin/monitor/start`
 
@@ -1433,6 +1508,8 @@ Android 客户端可复用此端点，但建议字段改为：
 }
 ```
 
+`method` 为 `signal` 或 `file`；SIGHUP 失败后退回文件通知时会额外带 `"fallback": true`。
+
 ### POST `/admin/monitor/restart`
 
 重启 monitor 进程（先 stop 再 start）。
@@ -1445,10 +1522,14 @@ Android 客户端可复用此端点，但建议字段改为：
 {
   "ok": true,
   "data": {
-    "restart": true
+    "restarted": true,
+    "was_running": true,
+    "method": "supervisor"
   }
 }
 ```
+
+`was_running` 表示重启前 monitor 是否在运行；`method` 只在 supervisor 路径出现（未接管时省略）。
 
 ## Webhooks
 
@@ -1555,10 +1636,10 @@ guest 不调用 `/auth/login`。客户端本地标记 guest，然后访问 optio
 - `/map`
 - `/calendar`
 - `/filter/options`
+- `/notifications`（仅 `status_change` / `new_listing`）
 
 guest 不能访问：
 
-- `/notifications`
 - `/devices/*`
 - `/me/*`
 - `/admin/*`

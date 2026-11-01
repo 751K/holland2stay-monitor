@@ -763,7 +763,7 @@ async def process_booking_results(
                 f"{detail}\n\n"
                 f"影响用户: {', '.join(names)}\n\n"
                 "这不是 Cloudflare 屏蔽：换 IP / 换指纹 / 等冷却都无效，必须把站点"
-                "自己发的那条 operation 原样照抄进 booker（见 docs/H2S.md §5.1）。"
+                "自己发的那条 operation 原样照抄进 booker（见 docs/H2S.md §4.1）。"
                 "在那之前每次新房上线都会以同样方式失败。\n"
                 "6 小时内不会重复通知。"
             )

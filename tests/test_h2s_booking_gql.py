@@ -2,7 +2,7 @@
 
 与 tests/test_h2s_query_fields.py 同一个道理：H2S 按 operationName + 归一化字段集
 放行 GraphQL，自写或裁剪的 operation 一律 403 operation_not_allowed。这些 operation
-的原文从站点 JS chunk 逐字抄来（docs/H2S_BOOKING_OPS.md §2），改动只能重新照抄。
+的原文从站点 JS chunk 逐字抄来（docs/H2S_BOOKING_OPS.md §5），改动只能重新照抄。
 """
 from __future__ import annotations
 

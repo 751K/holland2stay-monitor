@@ -38,13 +38,13 @@ Plaza（plaza.newnewnew.space，运营方 Plaza Resident Services）是跑在 **
 ⚠️ 平台**支持但 Plaza 当前一条都没用**的模型：``loting``（截止后电脑抽签）、
 ``inschrijfduur``（按注册时长排队）、``hospiteren``（合租面试）、``woningruil``。
 **这几类推送没有价值**——早知道不提高中签概率，与 Vesteda 被否是同一个理由（见
-``docs/SCRAPING_RECON.md`` §6b）。将来它们可能出现，因此模型是**逐条记录**的，
+``docs/SCRAPING_RECON.md`` 的 Vesteda 历史评估）。将来它们可能出现，因此模型是**逐条记录**的，
 不是整站断言；``ALLOCATION_LABELS`` 里给全了六种的文案。
 
 与 DUWO/ROOM 的区别（这一条决定了能不能接）
 --------------------------------------------
 两者都要花钱注册：ROOM 约 €30/年，Plaza 是 €27.50/年。DUWO 因此被否（见
-``docs/SCRAPING_RECON.md`` §6），但**否决理由不是收费本身**：
+``docs/SCRAPING_RECON.md`` 的 DUWO / ROOM 历史评估），但**否决理由不是收费本身**：
 
 - ROOM 的 ``product-search`` 对匿名请求返回 404，房源**只有登录后才看得见**。要抓
   就得拿一个真实账号维持 session，再把登录后的内容转发给非账户持有者——其 ToS
@@ -184,7 +184,7 @@ _STUDENT_CODE = "student"
 #:
 #: 平台还支持 loting（电脑抽签）、inschrijfduur（按注册时长排队）、hospiteren
 #: （合租面试）、woningruil（换房）——**这几类推送没有价值**（早知道不提高中签
-#: 概率，与 Vesteda 被否的理由同类，见 docs/SCRAPING_RECON.md §6b）。2026-09-02
+#: 概率，与 Vesteda 的历史评估理由同类，见 docs/SCRAPING_RECON.md）。2026-09-02
 #: 快照里 Plaza 一条都没有，但将来可能出现，因此逐条记录而不是整站断言。
 ALLOCATION_LABELS = {
     "dth": "direct booking — first valid response books it outright "

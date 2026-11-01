@@ -1,26 +1,90 @@
-# H2S 预订接口与验证状态
+# Holland2Stay 预订接口与验证状态
 
-本文记录 Holland2Stay 预订实现与 2026-08-19 的站点探测。接口可能变化；运行流程以
-[`booker.py`](../booker.py)、[`h2s_booking_gql.py`](../h2s_booking_gql.py) 和
-[`browser_fetcher.py`](../browser_fetcher.py) 为准。
+本文记录 H2S 自动预订的当前代码路径、已知验证边界，以及 2026-08-19 采集的站点
+operation 原文。上游接口可能变化；抓取、浏览器校验和排障另见 [H2S.md](H2S.md)。
+系统的运行行为以 [booker.py](../booker.py)、[bookers/holland2stay.py](../bookers/holland2stay.py)、
+[h2s_booking_gql.py](../h2s_booking_gql.py) 和 [browser_fetcher.py](../browser_fetcher.py)
+为准。本文保留的接口原文和历史探测记录不能证明线上接口的实时状态。
 
-## 1. 当前实现
+## 1. 当前预订流程
 
-1. 必要时查询 `GetProductDetail`，取得房源 SKU 和入住日期。
-2. 通过 NextAuth 的 `/api/auth/csrf`、`/api/auth/callback/credentials` 和
-   `/api/auth/session` 登录并取得 access token。
-3. 通过加密的 `POST /api/booking` 创建购物车并发起占房。
-4. 调用 `SetPaymentMethodOnCart`、`GetCheckoutAgreements`、`PlaceOrder` 和
-   `IdealCheckOut`，返回支付链接，由用户自行支付。
+预订任务在独立工作进程的浏览器会话中执行；符合条件时，系统可以复用同一账号的预登录
+结果。当前预订流程如下：
 
-`CreateEmptyCart` 和 `AddNewBooking` 的原文保留供研究；当前下单流程不调用它们。
-2026-08-19 的探测中，后者被公开 API 拒绝。历史上曾有旧流程真实预订成功；当前
-`/api/booking` 路径的完整真实下单尚未验证，不能把旧流程的成功当作该路径的验证。
-结果不确定时系统会暂停同账号自动预订，等待用户核实。
+1. 如果房源没有 SKU，系统通过 `GetProductDetail` 补取 SKU 和可用的合同信息。
+2. 系统使用预登录会话，或通过 NextAuth 登录获取访问令牌（access token）。
+3. 系统调用 `POST /api/booking` 建立购物车并发起占房，随后获取 `cartId`。
+4. 系统依次调用 `SetPaymentMethodOnCart`、`GetCheckoutAgreements`、`PlaceOrder`
+   和 `IdealCheckOut`，尝试生成支付链接。如果协议查询失败，系统会记录警告并继续下单。
+5. 系统返回预订结果并通知用户。用户需要自行完成支付；系统不会填写金融凭据或代付。
 
-## 2. 站点 operation 原文（2026-08-19 采集）
+试运行只检查 SKU 和登录等提交前步骤，不发起占房请求，也不创建订单。试运行通过
+不能保证正式提交成功。如果预订请求发出后的结果不确定，系统会保留账号级保护记录并
+通知用户核实；后台任务仍在运行时，用户或管理员不能解除保护。保护规则及用户操作见
+[架构总览](ARCHITECTURE.md) 和
+[使用指南](https://flatradar.app/guide?lang=zh)。
 
-### GetProductDetail
+## 2. 验证状态与限制
+
+| 项目 | 已知状态 |
+|---|---|
+| 旧预订流程 | 项目曾使用真实账号取得订单号和付款链接。 |
+| 当前 `/api/booking` 流程 | 项目已实现该流程，但尚未验证从真实占房到取得付款链接的完整过程。旧流程的成功不能证明当前路径已通过验证。 |
+| NextAuth 登录 | 项目曾于 2026-08-19 使用真实账号登录。上游及账号状态决定是否需要 2FA 或其他验证；遇到 2FA 时，程序返回需要人工处理的结果。 |
+| 2026-08-19 operation 探测 | 测试使用无效参数确认部分操作在当时获得业务响应；`AddNewBooking` 的响应表明该操作不在公开 API 中。这些结果不能保证当前站点仍采用相同规则。 |
+| 取消预留 | 项目已实现取消流程，且仅考虑系统记录的自有预留；真实取消操作尚未验证。 |
+
+探测时，未登录的 `/api/booking` 请求曾返回 401。该响应只能说明当时路由存在，不能
+证明登录后的占房或后续支付流程可用。试运行也无法验证这些会产生副作用的步骤。
+
+## 3. 登录与传输
+
+### 3.1 登录
+
+系统通过浏览器同源请求访问 NextAuth 的 `/api/auth/csrf`、
+`/api/auth/callback/credentials` 和 `/api/auth/session`。session 响应返回访问令牌；
+如果响应要求双因素认证，系统会停止自动预订流程。登录和抓取使用相同的传输实现，
+但预订工作进程维护独立的浏览器会话。
+
+### 3.2 请求传输
+
+| 路径 | 当前实现 |
+|---|---|
+| `/api/auth/*` | 系统使用 `fetch_plain` 发送同源请求，不使用业务加密信封。 |
+| `GET /api/rest/*` | 系统加密路径和查询参数，并通过 `x-enc-q` 将请求发送至 `/api/rest/__enc__`。 |
+| `POST /api/rest/*` | 系统加密请求体，并将请求发送至原 URL。 |
+| GraphQL `/api/__enc__` | 系统加密请求体。 |
+| `POST /api/booking` | 系统加密请求体，并携带 Bearer 令牌。 |
+
+不使用业务加密信封并不意味着网络明文传输：上述请求仍使用 HTTPS。具体实现见
+`BrowserFetcher.fetch_plain()`、`fetch_rest()` 和加密请求方法。
+
+### 3.3 占房入口
+
+当前 `POST /api/booking` 请求包含 `sku`、`contract_startDate`、`challengeToken`、
+`challengeProvider` 等字段；系统使用响应返回的 `cartId` 执行后续步骤。站点可能调整
+接口和校验规则，因此维护者应对照站点当前发送的请求，不能仅依据历史 401 响应或旧
+GraphQL operation 推断当前行为。
+
+## 4. 取消预留
+
+租户门户使用 REST 查询和取消预留：系统通过
+`/api/rest/V1/newdashboard/contract/me` 查询预留，再根据 SKU 调用
+`POST /api/rest/V1/customer/bookingcancel/{sku}`。项目中的 `cancel_pending_orders`
+仅考虑本系统记录的自有预留；如果系统没有相应记录，该函数不会取消预留。预订流程
+和配置决定是否调用该函数。该路径尚未通过真实取消操作验证，代码已经实现不能说明
+该路径已经验证通过。
+
+## 5. Operation 原文与历史参考
+
+以下原文采集于 **2026-08-19**，本文保留这些内容以供核对请求字段；上游可能已经
+调整接口。当前代码使用的定义位于 [h2s_booking_gql.py](../h2s_booking_gql.py)。
+维护者在修改定义前，应重新核实站点发送的 operation。抓取器也使用 `GetProductDetail`
+按需补齐房源详情。
+
+### 5.1 当前链路使用的 operation
+
+#### GetProductDetail
 
 ```graphql
 query GetProductDetail($filters: ProductAttributeFilterInput) {
@@ -67,13 +131,70 @@ query GetProductDetail($filters: ProductAttributeFilterInput) {
 }
 ```
 
-`image_manager` 里那段是站点侧的片段常量（chunk `common-f3956634` 的 module 1511），
-原文就是内联进来的，这里已经展开。
+站点将 `image_manager` 字段定义为片段常量，位于脚本资源 `common-f3956634` 的
+module 1511。站点在请求中内联该片段；上面的查询已将其展开。
 
 这条单房源查询包含 `building_name`、`tenant_profile`、`min_income` 等字段。
-抓取侧按需调用它补充详情，并使用缓存、预算及限速控制请求量；它不替代列表扫描。
+抓取器按需调用该查询补充详情，并使用缓存、请求预算和限速控制请求量。该查询不
+替代列表扫描。
 
-### CreateEmptyCart
+#### SetPaymentMethodOnCart
+
+```graphql
+mutation SetPaymentMethodOnCart(
+  $cartId: String!
+  $paymentMethod: PaymentMethodInput!
+) {
+  setPaymentMethodOnCart(
+    input: { cart_id: $cartId, payment_method: $paymentMethod }
+  ) {
+    cart {
+      selected_payment_method { code title }
+    }
+  }
+}
+```
+
+#### PlaceOrder
+
+```graphql
+mutation PlaceOrder($cartId: String!, $storeId: Int) {
+  placeOrder(input: { cart_id: $cartId, store_id: $storeId }) {
+    orderV2 { order_number }
+    errors { message code }
+  }
+}
+```
+
+#### IdealCheckOut
+
+```graphql
+mutation IdealCheckOut($order_id: String!, $plateform: String) {
+  idealCheckOut(order_id: $order_id, plateform: $plateform) {
+    redirect
+  }
+}
+```
+
+#### GetCheckoutAgreements
+
+```graphql
+query GetCheckoutAgreements {
+  checkoutAgreements {
+    name
+    content
+    checkbox_text
+    mode
+  }
+}
+```
+
+### 5.2 历史操作与其他备查名称
+
+本文保留以下 `CreateEmptyCart` 和 `AddNewBooking` 原文作为历史参考；当前下单流程
+不调用这两个 operation。
+
+#### CreateEmptyCart
 
 ```graphql
 mutation CreateEmptyCart {
@@ -81,7 +202,7 @@ mutation CreateEmptyCart {
 }
 ```
 
-### AddNewBooking
+#### AddNewBooking
 
 ```graphql
 mutation AddNewBooking(
@@ -110,58 +231,10 @@ mutation AddNewBooking(
 }
 ```
 
-### SetPaymentMethodOnCart
+#### 同一脚本资源中记录的其他 operation
 
-```graphql
-mutation SetPaymentMethodOnCart(
-  $cartId: String!
-  $paymentMethod: PaymentMethodInput!
-) {
-  setPaymentMethodOnCart(
-    input: { cart_id: $cartId, payment_method: $paymentMethod }
-  ) {
-    cart {
-      selected_payment_method { code title }
-    }
-  }
-}
-```
-
-### PlaceOrder
-
-```graphql
-mutation PlaceOrder($cartId: String!, $storeId: Int) {
-  placeOrder(input: { cart_id: $cartId, store_id: $storeId }) {
-    orderV2 { order_number }
-    errors { message code }
-  }
-}
-```
-
-### IdealCheckOut
-
-```graphql
-mutation IdealCheckOut($order_id: String!, $plateform: String) {
-  idealCheckOut(order_id: $order_id, plateform: $plateform) {
-    redirect
-  }
-}
-```
-
-### GetCheckoutAgreements
-
-```graphql
-query GetCheckoutAgreements {
-  checkoutAgreements {
-    name
-    content
-    checkbox_text
-    mode
-  }
-}
-```
-
-### 同一 chunk 里还有（暂未用到，登记备查）
+2026-08-19 采集的同一脚本资源还包含以下名称。本文保留这些名称供维护者查询，当前
+流程未使用这些 operation。
 
 `GetCart` · `GetCartItems` · `GetLoginUserCart` · `GetCustomerQuery` ·
 `GetCustomerAddresses` · `GetAvailablePaymentMethods` · `GetCountries` ·
@@ -169,46 +242,3 @@ query GetCheckoutAgreements {
 `SitemapData` · `GetAMastyForm` · `SubmitAmastyForm` · `TruncateCart` ·
 `SetBillingAddressOnCart` · `PayRegFee` · `PlaceOrderMutation` ·
 `PlaceOrderMollie` · `MollieProcessTransaction`
-
----
-
-## 6. 登录与传输
-
-NextAuth 使用同源明文 `/api/auth/*` 请求，均由浏览器发送。2026-08-19 真实账号
-曾通过登录；如果上游要求双因素认证，程序返回需要人工处理的结果。
-
-### 6.5 尚待验证
-
-- 带真实登录态的 `/api/booking` 完整占房及支付链接流程尚未实测。
-- 上游何时要求双因素认证、何时要求额外验证，需在实际条件下重新确认。
-- 接口实测具有时间性，不应据历史白名单结果推断当前服务一定放行。
-
-### 6.6 取消预留
-
-租户门户使用 REST：通过 `/api/rest/V1/newdashboard/contract/me` 查询预留，
-按 SKU 调用 `POST /api/rest/V1/customer/bookingcancel/{sku}`。项目中的
-`cancel_pending_orders` 仅考虑本进程记录的自有预留；无记录则不取消。该取消路径
-尚未用真实取消操作验证。是否会调用由预订流程和配置决定。
-
-### 6.9 REST 与 GraphQL 的加密信封
-
-| 路径 | 实现方式 |
-|---|---|
-| `/api/auth/*` | 明文请求，使用 `fetch_plain` |
-| `GET /api/rest/*` | 加密路径和查询，通过 `x-enc-q` 发送至 `/api/rest/__enc__` |
-| `POST /api/rest/*` | 加密 body，发送至原 URL |
-| GraphQL `/api/__enc__` | 加密 body |
-| `POST /api/booking` | 加密 body，携带 Bearer token |
-
-具体信封实现见 `BrowserFetcher.fetch_rest()`、`fetch_plain()` 和加密请求方法。
-
-### 6.10 预订入口与白名单探测
-
-2026-08-19 使用无效参数探测时，`CreateEmptyCart`、`GetCheckoutAgreements`、
-`SetPaymentMethodOnCart`、`PlaceOrder` 和 `IdealCheckOut` 返回成功或业务错误；
-`AddNewBooking` 返回不在公开 API 中。站点前端使用 `POST /api/booking`，请求体
-包括 `sku`、`contract_startDate`、`challengeToken`、`challengeProvider`；当前实现
-用返回的 `cartId` 继续后续步骤。
-
-未登录访问 `/api/booking` 曾返回 401，说明当时路由存在，不等于已验证真实占房。
-原始 operation 定义见上文及 `h2s_booking_gql.py`；实际运行只调用当前接线的步骤。

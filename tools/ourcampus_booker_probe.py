@@ -263,7 +263,7 @@ def _diagnose(listing) -> int:
     **兜底动作自己造成的**，不是单元真没了（同一时刻抓取侧还列着 16 套）。
 
     所以这里不走兜底，只把三样东西摊开：登录后的落地页、重新 GET 一次
-    oleapplication.aspx、以及（若能取到 ProspectId）按 XIOR.md §8.7 的形状去拉
+    oleapplication.aspx、以及（若能取到 ProspectId）按 RENTCAFE.md §4 的形状去拉
     ApplicantInfo 那段内容。**全程不提交任何东西。**
     """
     import functools
@@ -359,7 +359,7 @@ def _diagnose(listing) -> int:
                           referer=session.ole_url("oleapplication.aspx"))
     dump("oleapplication_get", fresh)
 
-    # XIOR.md §8.7：后续步骤的内容走 rcLoadContent，缺 ProspectId 一律 500。
+    # RENTCAFE.md §4：后续步骤的内容走 rcLoadContent，缺 ProspectId 一律 500。
     pid = ""
     for src in (session.current_page_html(), fresh):
         m = _PID_RE.search(src or "")

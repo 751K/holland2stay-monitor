@@ -31,7 +31,7 @@ class SourceSpec:
 
 SPECS: dict[str, SourceSpec] = {
     # auto_bookable 的进组条件是「用真实账号端到端跑通过」：
-    #   holland2stay  2026-05-22 真实下单成功（见 ARCHITECTURE §7）
+    #   holland2stay  2026-05-22 旧流程真实下单成功；当前路径的验证状态见 H2S_BOOKING_OPS.md
     #   plaza         2026-09-10 真实应征成功（见 docs/PLAZA.md §6）
     #
     # Plaza 另有一道**用户侧开关** auto_book.plaza_enabled，默认关——进了这个

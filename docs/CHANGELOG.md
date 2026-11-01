@@ -1416,7 +1416,7 @@ Chromium，18 小时后拖垮了 Xior 与 Holland2Stay 两个抓取源。第一�
     不写、让该维度 fail-open——替站点断言「只有学生能租」正是 Xior 在 finishing 上
     栽过的那种错。
 
-    完整侦察记录见 `docs/SCRAPING_RECON.md` §5b。
+    完整侦察记录见 `docs/SCRAPING_RECON.md` §1.4。
 
 ### 修复
 
@@ -1567,7 +1567,7 @@ Chromium，18 小时后拖垮了 Xior 与 Holland2Stay 两个抓取源。第一�
     到单元级。2026-09-02 在该区间取样四个 id 复验，全部 404，`canonical` 指向
     `/404`——站点确已迁到户型粒度，现有层级是对的。
 
-    完整侦察记录见 `docs/SCRAPING_RECON.md` §5。
+    完整侦察记录见 `docs/SCRAPING_RECON.md` §1.3。
 
 ### 修复
 
@@ -1672,7 +1672,7 @@ Chromium，18 小时后拖垮了 Xior 与 Holland2Stay 两个抓取源。第一�
     magisrealestate.com，五个城市共十七栋楼，Eindhoven 占九栋——正是本项目的主力
     城市。传输是五个平台里最轻的一个：纯 HTTP、服务端渲染，普通 `Mozilla/5.0`
     直接 200，没有 Cloudflare、没有 JS 挑战，不需要浏览器，也不需要指纹伪装；
-    `robots.txt` 是空 `Disallow:`。完整侦察记录见 `docs/SCRAPING_RECON.md` §0。
+    `robots.txt` 是空 `Disallow:`。完整侦察记录见 `docs/SCRAPING_RECON.md` §1.1。
 
     `/for-rent` 一次返回全部城市的全部单元，因此**每轮只发一次 HTTP**：在
     `batch_session()` 里抓一次并缓存，各城市的 ScrapeTask 从同一份 HTML 里按城市
@@ -2957,7 +2957,7 @@ meta，重启后仍然生效，否则频繁重启会绕过节流，而重启往�
 新增 `mcore/backoff.py:PersistedBackoff`，将「截止时刻 + 连败计数」写入 meta；
 上列 8 处状态全部迁入（其中 H2S 熔断随第 3 项进一步并入 `SourceCircuits`），
 `_async_main` 启动时经 `_bind_persistent_state()` 接管句柄并恢复。两个设计要点见
-[ARCHITECTURE.md §5.5.1](ARCHITECTURE.md)：采用墙钟而非单调钟（须将剩余时间钳制
+[ARCHITECTURE.md](ARCHITECTURE.md)：采用墙钟而非单调钟（须将剩余时间钳制
 至配置上限以承受 NTP 跳变），以及 `expire()` 与 `reset()` 的语义分离（混同会使
 退避永远无法逼近上限）。
 
@@ -3619,7 +3619,7 @@ idealCheckOut            200                            ✅
 
 带真实登录态的完整占房没跑过（跑通=真占一套房）。`challengeToken` 传空串、赌服务端
 按 clearance cookie 判定；若线上要显式 token，需从页面 `window.turnstile` 取。
-会在首次真实预订时见分晓，失败有明确 phase/日志。详见 docs/H2S_BOOKING_OPS.md §6.10。
+会在首次真实预订时见分晓，失败有明确 phase/日志。详见 docs/H2S_BOOKING_OPS.md §3.3。
 
 新增 `TestCreateBooking`(7)，5 个变异全部捕获。全套 2517 通过。
 
@@ -3656,7 +3656,7 @@ v1.16.8 把「operation 未放行」和 CF 屏蔽分了开，但没修预订本�
 - `cancel_pending_orders` 重写：取消预留是 **REST 按 SKU**
   （`POST /api/rest/V1/customer/bookingcancel/{sku}`），不是 GraphQL。旧的自写
   `cancelOrder` mutation 站点根本不用、必然失败，已删。机制从租户门户 JS 静态读出
-  （docs/H2S_BOOKING_OPS.md §6.6），传输层（明文 vs 信封）未验证，边缘场景 + 兜底。
+  （docs/H2S_BOOKING_OPS.md §4），传输层（明文 vs 信封）未验证，边缘场景 + 兜底。
 
 ### 验证边界
 
@@ -3664,7 +3664,7 @@ v1.16.8 把「operation 未放行」和 CF 屏蔽分了开，但没修预订本�
   端点与鉴权（`Bearer accessToken`）、operation 白名单判据。
 - **未经真实下单验证**：`createEmptyCart → … → placeOrder` 只静态照抄了原文、核对了
   端点与鉴权，没真的下过单（下单产生真实订单）。首次真实预订前应先用真实账号跑一次
-  「加购但不 placeOrder」收尾。见 `docs/H2S_BOOKING_OPS.md` §6.5。
+  「加购但不 placeOrder」收尾。见 `docs/H2S_BOOKING_OPS.md` §2。
 - **2FA 是条件触发**：这次登录没触发。若生产账号触发 2FA，全自动到此为止
   （`phase=auth_2fa`），需人工或半自动。
 
@@ -3737,7 +3737,7 @@ GetProduct                        403   operation 未放行
 
 白名单是**逐 operation** 判的，不是端点开关。登录那条被拒 = 预订第一步就断。
 修法与抓取侧相同（钩 `crypto.subtle.encrypt` 截获站点明文后照抄），但需要真实账号
-走完一遍下单流程并产生真实订单，无法靠只读探测完成。见 `docs/H2S.md` §7.1。
+走完一遍下单流程并产生真实订单，无法靠只读探测完成。见 `docs/H2S.md` §7。
 
 本次改的是**误判的代价**，不是预订。8 个开启自动预订的用户在照抄完成前每次新房上线
 仍会失败一次，只是不再拖累抓取和登录链路。
@@ -3907,7 +3907,7 @@ Holland2Stay 将 GraphQL 整体迁入加密信道。接入该信道，恢复抓�
 是 `/api/__enc__`。先盯着前者试了几轮，均为 403 或 400。
 
 判断信封本身是否正确的信号：**响应带 `x-enc: 1` 且能解密**——即使内容是报错，也说明
-服务端已成功解开信封，问题在 payload 而非密码学。这条判据写入了 `docs/H2S.md` §4.3。
+服务端已成功解开信封，问题在 payload 而非密码学。这条判据写入了 `docs/H2S.md` §3.2。
 
 实测恢复：Amsterdam 7 条、Eindhoven 44 条，均 `complete=True`，字段与迁移前一致。
 
@@ -5559,7 +5559,7 @@ Amsterdam）之后，**Xior 反而更慢了**：
 
 修法是给 H2S 也开 `rotating_proxy=True`。关键在于**换 IP 的时机是「建浏览器」而不是「每请求」**：浏览器存活期内 IP 不变，clearance 照常复用；而重建浏览器本来就要重解挑战，那一刻换个新 IP 是免费的。也就是说固定 IP 在重建那一刻省不下任何东西，却让被烧的 IP 永远换不掉。
 
-一般规律记进 ARCHITECTURE §5.11：**任何「为了稳定而固定」的资源，都要想清楚它坏掉之后怎么换。**
+一般规律记进 ARCHITECTURE.md：**任何「为了稳定而固定」的资源，都要想清楚它坏掉之后怎么换。**
 
 顺带修一条误导性日志：熔断期间原本打「H2S source 熔断中且本轮**没有其它 source 任务**」，但触发条件其实是 `not fresh`（本轮一条房源都没抓到）。Xior 分轮抓之后这很常见——某一片正好全是没库存的楼。旧文案会把人引去查 `SOURCES` 配置。
 
@@ -5634,7 +5634,7 @@ v2.0 两个方向之一。起因很直接：这套系统里**每一个 bug 都�
 
 问题在于 `/health` 只回答「循环还活着吗」，`last_scrape_count` 又是个每轮被覆盖的标量。「昨晚 Xior 为什么只有 2/6」这类问题在系统里**没有数据源**，只能翻日志。
 
-方案与验收标准见 OBSERVABILITY_PLAN.md（该文档已于 v1.24.0 并入 ARCHITECTURE §5.12 后删除），判据的设计理由见 ARCHITECTURE §5.12。
+方案与验收标准见 OBSERVABILITY_PLAN.md（该文档已于 v1.24.0 并入 ARCHITECTURE.md 后删除），判据的设计理由见 ARCHITECTURE.md。
 
 **轮次遥测落库。** 新表 `round_stats`，每轮每 source 一行：房源数、任务数、完整数、耗时、错误类型。数据全部来自 `_dispatch_isolated()` 已有的局部变量，不新增任何抓取动作。每个 source 跑完立即写，不攒到整轮结束——「整轮全失败」恰恰是最该留痕的情形，而那条路径会直接上抛。保留 30 天，剪枝自带每小时一次的节流。
 
@@ -5719,7 +5719,7 @@ Greystar 旗下与 OurDomain 同属一家的学生住房品牌，同一套 RentC
 
 **两条要如实说明的局限**：
 
-1. **期望值要放低。** 只有一栋楼，且官网自述等待期 16–18 个月——排队制而非先到先得，「秒级通知」在这里的价值远低于 H2S。接入是产品决策，不是因为投入产出比划算；评估结论见 `docs/SCRAPING_RECON.md` §4。
+1. **期望值要放低。** 只有一栋楼，且官网自述等待期 16–18 个月——排队制而非先到先得，「秒级通知」在这里的价值远低于 H2S。接入是产品决策，不是因为投入产出比划算；评估结论见 `docs/SCRAPING_RECON.md` §1.2。
 2. **单元表 HTML 至今没有真实样本。** 接入时该楼零可订，所以解析器是复用 OurDomain 的、赌两边同模板——依据是两边空响应的结构指纹完全一致。选 POST 同样无法用响应验证（两种形状都只能拿到空面板），依据是「和它自己前端一致」。为此加了下面两道保险。
 
 ### 新增 — 影子 source（`SHADOW_SOURCES`）
@@ -5746,7 +5746,7 @@ RentCafe 在无可用单元时返回的仍是一张**结构完整**的搜索结�
 
 现在零单元时额外检查响应里有没有 `Apartment Search Result` 这个面板标题：有 → 真没房（`complete` 不变）；没有 → 标记 `complete=False`。OurDomain 一并受益。
 
-这是 `ARCHITECTURE.md` §5.10 记录的同一类判据错误的**第四个实例**（前三个：CF 挑战判据、Xior `errorCode`、H2S 分页）——「没拿到数据」不等于「确认没有数据」。
+这是 `ARCHITECTURE.md` 记录的同一类判据错误的**第四个实例**（前三个：CF 挑战判据、Xior `errorCode`、H2S 分页）——「没拿到数据」不等于「确认没有数据」。
 
 ### 文档 — 平台状态文档改为只写当前判断
 

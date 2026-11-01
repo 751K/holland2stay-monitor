@@ -4,21 +4,28 @@
 
 > English version: [README.md](README.md)
 
-FlatRadar 是一套可自部署的荷兰租房监控工具。它同时追踪 Holland2Stay、OurDomain、
-OurCampus、Xior、Magis、Student Experience 与 Plaza 七个平台，一旦出现符合所设条件的
-房源，即通过所选渠道发出通知，
-通知中附有直达链接。对 Holland2Stay 更进一步——先将预订推进至支付页面，再连同
-付款链接一并发出，因此收到通知时仅余付款一步。
+FlatRadar 监控荷兰租房市场，提供托管服务 [flatradar.app](https://flatradar.app)，
+也可以自行部署。它同时追踪 Holland2Stay、OurDomain、OurCampus、Xior、Magis、
+Student Experience 与 Plaza 七个平台，一旦出现符合所设条件的房源，即通过所选渠道
+发出通知，通知中附有直达链接。对 Holland2Stay 更进一步——先将预订推进至支付页面，
+再连同付款链接一并发出，因此收到通知时仅余付款一步。
 Plaza 则可在用户单独启用后自动提交应征。
 
 **FlatRadar 的服务范围不包括自动付款，亦不保证预订成功。** 能否订到仍取决于平台上的实际竞争。
 
-项目支持本地部署与云端部署。
+## 使用方式
 
-**官网 — [flatradar.app](https://flatradar.app)**
+| 方式 | 适合 | 从这里开始 |
+|---|---|---|
+| **托管服务** | 大多数人 | 打开 [flatradar.app](https://flatradar.app)。首次登录会自动创建账户；在面板里设置筛选条件和通知渠道即可，无需安装。 |
+| **移动端 App** | 在手机上接收提醒 | [iOS](https://apps.apple.com/us/app/flarradar/id6769857080) · [Android APK](https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk) |
+| **桌面安装包** | macOS / Windows | 从 [Releases](https://github.com/751K/holland2stay-monitor/releases) 下载 |
+| **自行部署** | 自己掌控数据库与投递 | 见下方[快速开始](#快速开始)。需要 Docker 和约 2 GB 内存；视网络情况可能需要住宅代理。 |
 
-[使用指南](https://flatradar.app/guide?lang=zh) ·
-[支持](https://flatradar.app/support) ·
+托管服务与自行部署运行同一套代码。
+
+使用指南：[flatradar.app/guide?lang=zh](https://flatradar.app/guide?lang=zh) ·
+支持：[flatradar.app/support](https://flatradar.app/support) ·
 [support@flatradar.app](mailto:support@flatradar.app)
 
 > FlatRadar 是独立的第三方工具，与所监控的任何房源平台均无隶属、背书、赞助或
@@ -77,6 +84,7 @@ Plaza 则可在用户单独启用后自动提交应征。
 | Docker | Engine 20.10+，含 Compose 插件 | 使用 `docker compose`，而非旧版 `docker-compose` 脚本 |
 | Python | 3.11+ | 仅从源码运行时需要。Docker 镜像使用 3.11；CI 与桌面版构建使用 3.12 |
 | 系统 | 推荐 Linux | macOS 的限制见下方[从源码运行](#从源码运行) |
+| 网络 | 可能需要住宅或移动代理 | 部分平台会对机房出口 IP 返回 403。云端部署通过 `HTTPS_PROXY` 走代理，代理账号是额外成本；使用托管服务则不需要 |
 | 域名 | 可选 | 仅 HTTPS 部署需要，下文的本地路径无需域名 |
 
 ---
@@ -101,7 +109,8 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
 
 ### 二、云端部署
 
-开始部署前需要自行配置相关网络环境。
+开始部署前需要自行配置相关网络环境。DNS、防火墙端口、TLS 证书、客户端 IP 的处理
+方式，以及如何换用其它反向代理，见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 **第 1 步**，创建配置与数据目录：
 
@@ -163,6 +172,16 @@ docker compose logs -f h2s
 
 登录后在面板中添加用户、通知渠道，并选择待监控的平台与城市。用户级与系统级配置
 均在面板中管理，`.env` 此后只在更换凭据、域名或时区时才需要改动。
+
+### 首次使用清单
+
+1. 以管理员身份登录面板。
+2. 打开「用户」页面，创建需要接收提醒的用户。
+3. 为每个用户启用至少一个通知渠道，并发一条测试通知。
+4. 打开「设置」页面，启用平台**以及**对应的城市或楼盘——两者都要勾选，只勾城市不会生效。
+5. 观察 `/monitoring` 的第一轮完整扫描，确认预期的平台都有数据。
+6. 日常调整都在面板里做。`.env` 只用于部署设置、密钥和代理；把运行参数写回 `.env`
+   会覆盖面板中的值。
 
 ### 从源码运行
 
@@ -332,7 +351,7 @@ stateDiagram-v2
 `Reserved → 可订` 本就是常见迁移；若直接判定为 Occupied 而房源随后回归，则会向
 一批用户推送失实的「重新上架」通知。两个阈值均可配置（`STALE_RESERVED_HOURS` /
 `STALE_OCCUPIED_HOURS`），设计理由与相关教训见
-[ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-根据-feed-缺失推断房源状态)。
+[架构总览：房源状态与完整性](ARCHITECTURE.md#status-convergence)。
 
 收敛**仅对本轮完整扫描成功**的 source×城市执行，抓取失败绝不会被读作「房源已
 下架」。
@@ -386,11 +405,11 @@ Xior、OurDomain、OurCampus 使用 RENTCafe，共用一份实现
 | 现象 | 原因与处理 |
 |---|---|
 | 完全没有通知，面板显示陈旧数据 | monitor 进程已停止。先用 `supervisorctl status` 确认，再执行 `supervisorctl start monitor`。心跳超过 `MONITOR_HEARTBEAT_MAX_AGE` 后 `/health` 将返回 503。 |
-| 某平台在 `/monitoring` 上显示为 `down` / `warn` | 卡片上已注明触发了哪条规则。阈值与设计理由见 [ARCHITECTURE.md §5.12](ARCHITECTURE.md)。 |
+| 某平台在 `/monitoring` 上显示为 `down` / `warn` | 卡片上已注明触发了哪条规则。参见[健康状态与排障](ARCHITECTURE.md#health-and-troubleshooting)。 |
 | 需查询某时间段的日志 | `/logs` 支持关键字、级别与 `since`–`until` 过滤，且在服务端执行，不限于当前屏幕内的内容。 |
 | 日志反复出现 `H2S source 熔断` | Cloudflare 正在拦截该出口 IP。熔断仅暂停该 source，稍后会以单个城市试探恢复。若持续出现，请配置 `HTTPS_PROXY`。 |
 | 日志反复出现 `CF 挑战 ... 未解开` | 同上，通常属 IP 信誉问题，而非本地配置问题。 |
-| 某个平台持续返回 0 条 | 可能确无房源。先查看该轮是否被标记为完整扫描，参考 [ARCHITECTURE.md §5.7](ARCHITECTURE.md#57-completeness-决定能否做状态收敛)。 |
+| 某个平台持续返回 0 条 | 可能确无房源。先查看该轮是否被标记为完整扫描，参考[房源状态与完整性](ARCHITECTURE.md#status-convergence)。 |
 | 已出租的房源仍显示为「可订」 | 该城市未被完整扫描，因而未进入收敛范围。查看 `/monitoring` 轮次表格中的 `(完整/任务)`。 |
 | 一批房源同时转为 Occupied | 若均带**「推测」**徽标则属正常：这是老化收敛的补偿执行（阈值刚调整过，或停机后首轮恢复），该过程**不发送通知**。不带徽标者才是平台实际上报。 |
 | 日志反复出现 `抓到 0 个单元，第 N/3 轮` | 属正常行为。OurDomain / OurCampus 的空结果需连续 3 轮确认，以防单轮抖动收敛整栋楼。 |
@@ -409,10 +428,11 @@ Xior、OurDomain、OurCampus 使用 RENTCafe，共用一份实现
 | 文档 | 用途 |
 |---|---|
 | [使用指南](https://flatradar.app/guide?lang=zh) | 面板设置与日常使用 |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统运行方式，以及排障前应先了解的全部失败模式 |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Docker 拓扑、Caddy 与 TLS、端口、日志、换用其它反向代理 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统架构、关键故障边界与排障入口 |
 | [API.md](API.md) | 面向移动端与外部集成的后端契约 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
-| [H2S.md](H2S.md) · [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [PLAZA.md](PLAZA.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | 各平台抓取侦察；`PLAZA.md` 只写预订侧，抓取侧连同 Magis / Student Experience 都在 `SCRAPING_RECON.md` 里 |
+| [H2S.md](H2S.md) · [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md) · [RENTCAFE.md](RENTCAFE.md) · [XIOR.md](XIOR.md) · [OURDOMAIN.md](OURDOMAIN.md) · [PLAZA.md](PLAZA.md) · [SCRAPING_RECON.md](SCRAPING_RECON.md) | 各平台抓取侦察；`RENTCAFE.md` 写 Xior / OurDomain / OurCampus 共用的预订流程，`PLAZA.md` 只写预订侧，抓取侧连同 Magis / Student Experience 都在 `SCRAPING_RECON.md` 里 |
 | [iOS_README.md](https://github.com/751K/FlatRadar-iOS/blob/master/docs/iOS_README.md) | iOS 客户端 — 已迁至 [FlatRadar-iOS](https://github.com/751K/FlatRadar-iOS) |
 | [ANDROID_PLAN.md](https://github.com/751K/FlatRadar-Android/blob/master/docs/ANDROID_PLAN.md) | Android 客户端 — 已迁至 [FlatRadar-Android](https://github.com/751K/FlatRadar-Android) |
 | [dataflow_ch.mmd](dataflow_ch.mmd) · [dataflow_en.mmd](dataflow_en.mmd) | 完整抓取与通知流程的 Mermaid 图 |

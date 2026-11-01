@@ -19,7 +19,7 @@ H2S 抓取中断。
 - 想省流量，去调查询频率与筛选条件（见 scrapers/holland2stay.py 的分层抓取），
   那些走 variables，白名单不管。
 - 上游改版后需要重新照抄：钩住 ``crypto.subtle.encrypt`` 截获站点加密前的明文
-  即可拿到，步骤见 docs/H2S.md §2。
+  即可拿到，步骤见 docs/H2S.md §4.1。
 
 取自 2026-08-18 的线上明文。
 """

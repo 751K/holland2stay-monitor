@@ -336,7 +336,7 @@ _MAINTENANCE_COOLDOWN = 900  # 15 分钟
 #: 上游按 operation 白名单拒绝后的冷却（秒）。
 #:
 #: 这条**不会自己好**——修法只有一个：把站点自己发的那条 operation 原样照抄
-#: 回来（docs/H2S.md §5.1）。所以冷却在这里不是「等它恢复」，是**限流**：
+#: 回来（docs/H2S.md §4.1）。所以冷却在这里不是「等它恢复」，是**限流**：
 #: 不冷却的话每轮（高峰期约 60 秒）都会重跑一次完整抓取 + 浏览器会话，在一个
 #: 必然失败的查询上反复烧代理流量。
 #:
@@ -1364,7 +1364,7 @@ async def main_loop(
             cooldown = apply_jitter(_OPERATION_REJECTED_COOLDOWN, cfg.jitter_ratio)
             logger.error(
                 "⛔ 上游按 operation 白名单拒绝，冷却 %d 秒。"
-                "这条不会自己恢复，需要照抄站点那条 operation（docs/H2S.md §5.1）。",
+                "这条不会自己恢复，需要照抄站点那条 operation（docs/H2S.md §4.1）。",
                 cooldown,
             )
             await asyncio.sleep(cooldown)

@@ -51,7 +51,7 @@ from config import (
 )
 
 #: 已知的 Holland2Stay 可用状态 ID → 荷兰语标签。取自 AVAILABILITY_FILTERS 的
-#: 六个取值（见 ARCHITECTURE §5.13）。用于校验，不用于产生默认值。
+#: 六个取值（见 ARCHITECTURE 的房源状态与完整性）。用于校验，不用于产生默认值。
 KNOWN_AVAILABILITY_IDS: dict[int, str] = {
     179: "Direct te boeken",
     336: "Beschikbaar in loterij",

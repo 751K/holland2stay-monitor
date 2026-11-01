@@ -24,7 +24,7 @@ studentexperience StudentExperience…  （无）              没探过预订�
 「未开」= 注册了 booker，但 ``monitor._AUTO_BOOK_SOURCES`` 里没有它，用户侧
 这条路是关的。两个 RENTCafe 平台共用 ``RentCafeBooker``，边界都停在 Save
 （往后要填 IBAN，代填金融凭据是硬限制）；开之前各自还差一段端到端验证，
-见 ``docs/XIOR.md`` §8.6 / ``docs/OURDOMAIN.md`` §7。
+见 ``docs/RENTCAFE.md`` / ``docs/OURDOMAIN.md`` §7。
 
 **Plaza 未开的理由和那两个完全不同。** 那两个是**技术上做不完**（往后要填 IBAN，
 代填金融凭据是硬限制）；Plaza 2026-09-10 已用真实账号端到端验证通过——登录、预检、

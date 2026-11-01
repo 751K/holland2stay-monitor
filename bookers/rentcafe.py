@@ -760,8 +760,9 @@ class RentCafeBooker(AbstractBooker):
     def _application_started(self, session, listing, unit) -> BookingResult:
         """``stop_at_applicant_info`` 的终点：服务端已建出申请，其余交给用户。
 
-        文案不说「已锁定」。开始申请能不能占住这个单元**没有验证过**——XIOR.md
-        §8.7 的「锁定发生在付款那一步」是从付款页文字推的，反方向也没人观察过。
+        文案不说「已锁定」。开始申请能不能占住这个单元**没有验证过**——RENTCAFE.md
+        「边界与限制」里的「锁定发生在付款那一步」是从付款页文字推的，反方向也没人
+        观察过。
         说错的代价不对称：用户以为到手了就不急着去填，结果被人抢走。
         """
         resume = self._resume_url(session, listing) or listing.url
@@ -1528,7 +1529,7 @@ class OurCampusBooker(OurDomainBooker):
     走兜底「重选单元」，服务端回 ``Unit is not available. Please select another
     unit.``——而同一时刻抓取侧仍列着这套房，**是这个兜底动作本身把上下文弄坏的**。
     下一批房出来时用 ``tools/ourcampus_booker_probe.py --diagnose`` 把登录后的页面
-    摊开（疑似是 XIOR.md §8.7 说的外壳页，内容要按 ProspectId 走 rcLoadContent 拉）。
+    摊开（疑似是 RENTCAFE.md §4 说的外壳页，内容要按 ProspectId 走 rcLoadContent 拉）。
 
     与 OurDomain 的差别（均有实证）
     -------------------------------

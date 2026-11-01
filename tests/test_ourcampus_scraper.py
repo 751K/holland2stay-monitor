@@ -143,7 +143,7 @@ class TestAvailabilityPanelGuard:
 
     RentCafe 两种情况都回 HTTP 200，只看解析结果为空就会把「响应结构变了 /
     拿到别的页面」误报成「没有房」，进而让 stale 收敛把存量 listing 清掉。
-    见 ARCHITECTURE.md §5.10。
+    见 ARCHITECTURE.md 的房源状态与完整性。
     """
 
     def test_real_empty_panel_passes(self):

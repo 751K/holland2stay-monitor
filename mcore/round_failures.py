@@ -141,7 +141,7 @@ async def handle_scrape_failure(
                 f"这不是 Cloudflare 屏蔽，也不是网络问题——换 IP、重建会话、"
                 f"等冷却都无效。\n"
                 f"唯一的修法是把站点自己发的那条 operation **原样照抄**回来"
-                f"（步骤见 docs/H2S.md §5.1：钩住 crypto.subtle.encrypt 截获"
+                f"（步骤见 docs/H2S.md §4.1：钩住 crypto.subtle.encrypt 截获"
                 f"加密前的明文）。\n"
                 f"注意白名单按 operationName + 归一化字段集比对，删一个字段"
                 f"就是 403。\n"

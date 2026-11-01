@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "FlatRadar Backend API",
-    "version": "1.24.0",
+    "version": "1.25.0",
     "description": "Machine-readable contract for FlatRadar mobile clients. All JSON endpoints use a stable { ok, data | error } envelope."
   },
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
@@ -518,12 +518,7 @@
           "Notifications"
         ],
         "operationId": "listNotifications",
-        "summary": "List visible notifications.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
+        "summary": "List visible notifications. Optional bearer: guests receive only status_change / new_listing.",
         "parameters": [
           {
             "$ref": "#/components/parameters/NotificationLimitQuery"
@@ -1965,6 +1960,58 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "properties": {
+                        "account": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "filter": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "notification_history": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/Notification"
+                          }
+                        },
+                        "notification_count": {
+                          "type": "integer"
+                        },
+                        "active_devices": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {"type": "integer"},
+                              "device_token": {"type": "string"},
+                              "env": {"type": "string"},
+                              "platform": {"type": "string"},
+                              "model": {"type": ["string", "null"]},
+                              "os_version": {"type": ["string", "null"]},
+                              "bundle_id": {"type": ["string", "null"]},
+                              "created_at": {"type": "string"},
+                              "last_seen": {"type": ["string", "null"]}
+                            },
+                            "additionalProperties": true
+                          }
+                        },
+                        "active_tokens": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {"type": "integer"},
+                              "device_name": {"type": ["string", "null"]},
+                              "created_at": {"type": "string"},
+                              "last_used_at": {"type": ["string", "null"]},
+                              "expires_at": {"type": ["string", "null"]}
+                            },
+                            "additionalProperties": true
+                          }
+                        },
+                        "exported_at": {"type": "string"}
+                      },
                       "additionalProperties": true
                     }
                   }
@@ -2436,6 +2483,10 @@
                         },
                         "method": {
                           "type": "string"
+                        },
+                        "fallback": {
+                          "type": "boolean",
+                          "description": "Present and true when SIGHUP failed and the reload was requested via file instead."
                         }
                       }
                     }
@@ -2996,6 +3047,7 @@
           },
           "data": {
             "type": "array",
+            "description": "Item shape depends on key: daily_new/daily_changes -> {date, count}; city_dist -> {city, count}; source_dist -> {source, count}; status_dist -> {status, count}; price_dist -> {range, count}; hourly_dist -> {hour, count}; tenant_dist/contract_dist/type_dist/energy_dist/area_dist/floor_dist -> {label, count}.",
             "items": {
               "type": "object",
               "additionalProperties": true
@@ -3161,6 +3213,18 @@
               "string",
               "null"
             ]
+          },
+          "url": {
+            "type": "string"
+          },
+          "neighborhood": {
+            "type": "string"
+          },
+          "building": {
+            "type": "string"
+          },
+          "area": {
+            "type": "string"
           },
           "lat": {
             "type": "number"
@@ -3462,6 +3526,12 @@
               "type": "string"
             }
           },
+          "buildings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "contract": {
             "type": "array",
             "items": {
@@ -3571,6 +3641,10 @@
           },
           "platform": {
             "type": "string"
+          },
+          "notifications_enabled": {
+            "type": ["boolean", "null"],
+            "description": "Whether the user now has a usable notification channel; null for admin tokens."
           }
         },
         "additionalProperties": true
@@ -3671,6 +3745,26 @@
             "type": "array",
             "items": {
               "type": "object",
+              "properties": {
+                "device_token_hint": {
+                  "type": "string"
+                },
+                "platform": {
+                  "type": "string"
+                },
+                "env": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": ["integer", "string"]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                }
+              },
               "additionalProperties": true
             }
           },
@@ -3725,7 +3819,9 @@
               "crash",
               "hang",
               "diskwrite",
-              "cpuexception"
+              "cpuexception",
+              "launch",
+              "other"
             ]
           },
           "app_version": {
@@ -3843,6 +3939,10 @@
               "integer",
               "null"
             ]
+          },
+          "upstream_maintenance_since": {
+            "type": "string",
+            "description": "First time upstream maintenance was observed; empty when not in maintenance."
           }
         },
         "additionalProperties": true

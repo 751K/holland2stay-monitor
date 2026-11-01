@@ -22,7 +22,7 @@ OurCampus 是 Greystar 的另一个学生住房品牌，与 OurDomain 同属一�
 ``Book Now``，09-15 挂出的是 ``Join Lottery``——同一个页面、同一种按钮，只差
 按钮上的字。所以状态要看按钮文字，见 ``scrapers/ourdomain._extract_status``。
 接入是**产品决策**，不是因为投入产出比划算——文档里对它的评估见
-``docs/SCRAPING_RECON.md`` §4。
+``docs/SCRAPING_RECON.md`` 的 OurCampus 历史资料。
 
 验证状态
 --------

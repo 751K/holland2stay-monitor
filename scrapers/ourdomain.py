@@ -406,7 +406,7 @@ class OurDomainScraper(AbstractScraper):
                 # ``Apartment Search Result`` 标题），只是没有 unitrow——两种
                 # 情况的 HTTP 状态都是 200，只看解析结果为空就会把「响应结构变
                 # 了 / 拿到别的页面」误报成「这栋楼没房」，进而让 stale 收敛把
-                # 存量 listing 全清掉。见 ARCHITECTURE.md §5.10。
+                # 存量 listing 全清掉。见 ARCHITECTURE.md 的房源状态与完整性。
                 if not units and not _looks_like_availability_panel(unit_html):
                     complete = False
                     logger.error(

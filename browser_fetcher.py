@@ -115,7 +115,7 @@ _H2S_MAIN_PAGE = "https://www.holland2stay.com/residences"
 # 2026-08-17 第三次迁移：/api/service/residences 也 404 了，GraphQL 整体搬进
 # 加密信道 /api/__enc__。**schema 一字未改**——截获站点加密前的明文可见，它发的
 # 仍是 GetCategories / products / category_uid:"Nw==" / 同一套 available_to_book
-# ID。变的只有传输层，所以 _GQL_QUERY 与 _to_listing 都不用动。见 docs/H2S.md §4。
+# ID。变的只有传输层，所以 _GQL_QUERY 与 _to_listing 都不用动。见 docs/H2S.md §3.2。
 _H2S_GQL_PATH = "/api/__enc__"
 
 # 信封请求头。值恒为 "1"：请求上表示 body 是信封，响应上表示 body 需要解密。
@@ -521,7 +521,7 @@ def _gql_body(query: str, variables: dict | None, operation_name: str = "") -> s
     """拼 GraphQL 请求体。
 
     ``operationName`` 只在非空时才写进去——H2S 自 2026-08-18 起按 operation
-    白名单放行（见 docs/H2S.md §5），而 Xior 那边根本不发 GraphQL。多塞一个
+    白名单放行（见 docs/H2S.md §4.1），而 Xior 那边根本不发 GraphQL。多塞一个
     ``"operationName": ""`` 会改变请求体，没必要冒这个险。
     """
     body: dict = {"query": query, "variables": variables or {}}
@@ -1666,7 +1666,7 @@ class BrowserFetcher:
         """POST 一个加密信封到任意同源路径，返回解密后的 ``{status, ok, text, headers}``。
 
         给 GraphQL 以外、但同样走信封的站点端点用——目前是 ``/api/booking``
-        （站点自己的占房入口，见 docs/H2S_BOOKING_OPS.md §6.10）。编码与站点的
+        （站点自己的占房入口，见 docs/H2S_BOOKING_OPS.md §3.3）。编码与站点的
         ``zg`` 一致：``JSON → 信封 → body``，头带 ``x-enc: 1``。
 
         不做 403 重建：401/403 在这些业务端点上是语义响应（未登录、参数无效），
@@ -1695,7 +1695,7 @@ class BrowserFetcher:
 
         GET 走 ``x-enc-q``（加密路径），其余走加密 body（形状同 GraphQL）。
         两条规则逐字照抄自站点 module 82361 的 ``H`` / ``J``，见
-        docs/H2S_BOOKING_OPS.md §6.9。
+        docs/H2S_BOOKING_OPS.md §3.2。
 
         **不是 ``fetch_plain``**：那条是给 ``/api/auth/*``（NextAuth）用的，
         站点对它确实不加密（拦截器只对 ``/api/rest/`` 生效）。两者别混。

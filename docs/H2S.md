@@ -1,486 +1,152 @@
-# Holland2Stay — 平台状态
+# Holland2Stay 平台维护手册
 
-本文记录 Holland2Stay（下称 H2S）的抓取现状：端点契约、Cloudflare 与站点自有的两层
-校验、以及自 2026-08-17 起必须走的加密信道。
-
-代码位于 [`scrapers/holland2stay.py`](../scrapers/holland2stay.py) 与
-[`browser_fetcher.py`](../browser_fetcher.py)；浏览器传输由 Holland2Stay 和 Xior 使用。
-
----
+本文说明 Holland2Stay（H2S）的抓取链路、数据处理和排障入口。上游可能调整接口及
+反爬策略；本文仅描述当前仓库实现和注明时间的历史观察，不代表相关行为已在线上重新
+验证。
+自动预订的流程、验证状态与接口原文见 [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md)，
+跨平台调度与状态收敛见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 1. 平台概况
 
-| 项 | 值 |
+| 项目 | 当前实现 |
 |---|---|
-| 官网 | `https://www.holland2stay.com`（Next.js） |
-| 数据形态 | GraphQL JSON（Magento 后端） |
-| 端点 | `https://www.holland2stay.com/api/__enc__`（加密信封，见 §4） |
-| 传输方式 | CloakBrowser（patched Chromium）内 `page.evaluate(fetch)` |
-| 覆盖城市 | 由 `CITIES` 配置，实际范围以部署配置为准 |
-| 自动预订 | 支持预订至支付页面；Plaza 也支持单独启用自动应征 |
+| 官网 | `https://www.holland2stay.com` |
+| 数据来源 | 同源 GraphQL，入口为加密的 `POST /api/__enc__` |
+| 传输 | 系统通过 CloakBrowser 页面内的同源 `fetch` 发起请求 |
+| 抓取范围 | 由 `CITIES` 等运行配置决定 |
+| 自动预订 | 可尝试预订至支付链接；付款由用户完成。当前路径的验证限制见预订文档 |
 
----
+主要代码包括 [scrapers/holland2stay.py](../scrapers/holland2stay.py)、
+[h2s_gql.py](../h2s_gql.py) 和 [browser_fetcher.py](../browser_fetcher.py)。平台可能
+调整端点、验证机制、字段和房源数据；排障时，维护者应首先查看本轮日志及上游的实际
+响应。
 
-## 2. 端点迁移史
+## 2. 抓取链路
 
-该端点已迁移三次，**每次都是静默的**：旧路径不重定向、不返回结构化错误，直接消失。
-后两次相隔仅六天。
+monitor 生成 H2S 城市抓取任务，并根据平台熔断状态和调度规则将任务交给抓取器。
+浏览器工作进程维护会话，在页面中完成站点校验并发送 GraphQL 请求。抓取器为每个
+目标返回房源数据和扫描完整性标记；系统随后将这些结果与其他平台结果一并交给
+入库、事件和通知管线。
 
-| 时间 | 端点 | 旧路径的表现 |
-|---|---|---|
-| — | `api.holland2stay.com/graphql` | 被 Cloudflare 封锁，curl_cffi 直连不再可行 |
-| 2026-06 | `www.holland2stay.com/api/graphql` | 同域，进入 Cloudflare 托管挑战之后 |
-| 2026-08-11 19:34 | `www.holland2stay.com/api/service/residences` | 旧路径返回 **404 + Next.js 错误页**（HTML，非 JSON） |
-| 2026-08-17 08:11 | `www.holland2stay.com/api/__enc__` | 同上 404；且**改为加密信封**，明文请求直接触发 Cloudflare 挑战 |
+抓取采用两层策略（见 `HollandStayScraper`）：
 
-2026-08-18 08:11 又加了一道 **GraphQL operation 白名单**（端点未变）：不在名单里
-的查询一律 `403 {"code":"operation_not_allowed"}`。见 §5。
+- 高频轮查询可订、抽签和即将上线等状态。由于该轮未覆盖全部状态，抓取器将其标记为
+  `complete=False`。
+- 系统定期执行包括 Reserved 在内的全量扫描，默认间隔为 1800 秒。同一批次的城市
+  共享扫描计划；成功完成全量扫描后，抓取器才更新全量扫描计时。如果分页或响应不
+  完整，抓取器不能将扫描标记为完整。
 
-三次迁移中，**GraphQL schema 与查询语句均逐字未变**——变的只有传输层。这不是推测：
-在 `crypto.subtle.encrypt` 上打钩子截获站点加密**之前**的明文，可见它发的仍是
-`GetCategories` / `products` / `category_uid:"Nw=="` 与同一套 `available_to_book` ID。
-因此 `_GQL_QUERY` 与 `_to_listing` 历次迁移一行未改。
+系统只能使用对应目标的完整扫描结果判断房源是否消失。抓取异常、分页信息缺失或某条
+房源未出现在高频轮结果中，都不能证明平台已确认该房源下架。系统在数据库中保存和
+比较 H2S 房源及其状态，并为推断状态设置 `status_is_inferred` 标记。
 
-路径常量为 `browser_fetcher._H2S_GQL_PATH`。
+## 3. 浏览器、校验与加密传输
 
-**下次迁移时怎么找新端点**，按顺序：
+### 3.1 两层校验
 
-1. 以空 body 打候选路径。端点正确时返回 GraphQL 语法错误而非 HTML：
-   `{"errors":[{"message":"Syntax Error: Unexpected <EOF>"...}]}`。
-   注意区分两种 404——JSON 的 `{"error":"Not found"}` 说明该命名空间存在，
-   Next.js 的 HTML 错误页说明整条路径都不在。
-2. 若候选路径全军覆没，**钩住 `crypto.subtle.encrypt` 截明文**（站点自己会加密，
-   钩子能拿到它加密前的完整 payload），再配合 hook `window.fetch` 看它 POST 去哪儿。
-   2026-08-17 就是这么一步定位到 `/api/__enc__` 的。
-3. 不要只盯着 axios 拦截器改写后的 `/api/rest/*`——那是 GET 分支的形状，实际
-   POST 目标是 `/api/__enc__`。当时在这里绕了几轮。
+浏览器导航时先处理 Cloudflare 挑战，再等待 H2S 完成站点自身的访问校验
+（clearance）。历史响应显示，站点校验尚未完成时可能返回 `clearance_required`。
+系统通过页面探测等待站点完成校验，不将此类响应视为房源数据。
 
-> 2026-08-11 的这次迁移导致抓取中断三天。404 当时落在通用的 `status >= 400` 分支，
-> 报为「抓取网络失败 … 请检查代理/网络」，而代理自始至终正常，排查方向被完全带偏。
-> 404 现已单独成支并指明「上游很可能改了 API 路径」。详见 CHANGELOG v1.16.3。
+浏览器会话与代理出口关联；系统需要在会话使用期间保持出口一致，并可在重建会话时
+根据代理配置选择新的代理会话标识。然而，系统只会为代码支持的代理用户名格式改写
+会话标识，因此**重建浏览器不能保证所有代理供应商都会更换出口 IP**。抓取和预订
+分别使用受控浏览器工作进程；任务超时可能触发进程回收。主进程负责代理选择和冷却。
 
----
+### 3.2 加密信封
 
-## 3. 两层校验
+系统通过 `POST /api/__enc__` 发送 H2S GraphQL 请求的加密请求体。页面使用 WebCrypto
+生成 AES-GCM 密钥，并使用站点的 RSA 公钥封装该密钥；加密信封包含版本、封装后的
+密钥、随机数和密文等字段。如果响应带有加密标记，系统使用对应密钥解密；对于未加密
+的错误响应，系统保留原始内容以判断错误类型。
 
-访问 API 需依次通过两道关卡，二者互相独立。
+系统在运行时从站点脚本资源获取并缓存公钥，并随浏览器会话更新公钥；代码不应硬编码
+该公钥。具体协议和路径
+以 [browser_fetcher.py](../browser_fetcher.py) 为准。REST、登录和预订请求的传输区别
+见 [预订文档的登录与传输](H2S_BOOKING_OPS.md#3-登录与传输)。
 
-### 3.1 Cloudflare 托管挑战
+## 4. 查询契约与错误识别
 
-站点整体位于 Cloudflare 托管挑战之后，TLS 指纹伪装无法通过，因此必须使用真实
-Chromium。`BrowserFetcher.ensure_initialized()` 导航至主站
-（`_H2S_MAIN_PAGE = /residences`）完成挑战，取得 `cf_clearance`。
+### 4.1 operation 白名单与排查
 
-`cf_clearance` 与出口 IP 绑定，但**换 IP 的时机是「建浏览器」而不是「每请求」**：
-clearance 本来就只在单个浏览器的生命周期内有效（`_BROWSER_MAX_AGE` 2 小时），而新建
-浏览器无论如何都要重解一次挑战——那一刻用旧 IP 还是新 IP，成本完全一样。因此固定 IP
-在这里省不下任何东西，H2S 的 profile 开 **`rotating_proxy=True`**（与 Xior、OurDomain
-一致）：每次重建浏览器换一个代理 session，浏览器存活期间 IP 与 clearance 仍然稳定。
+抓取器使用 [h2s_gql.py](../h2s_gql.py) 中保存的站点 `GetCategories` 查询和
+`operationName`，并通过变量传入城市、状态和分页等条件。2026-08-18 的探测显示，
+改变字段集或缺少 operation 名称可能触发 `operation_not_allowed`；在该次探测中，
+仅修改空白字符的请求仍然通过。维护者不应仅为了缩短响应而直接增删查询字段；变更
+查询前，应重新核对站点当前发送的请求。
 
-反过来，固定 sticky 有一个真实代价：session id 是 `sha1(source)` 的常量，出口 IP 一旦
-被 CF 盯上就再也换不掉，`_rebuild_browser()` 重建出来的还是同一个 IP，恢复路径形同虚设。
-2026-08-03 生产事故即由此而来——连续 3 次 90s 挑战全部失败，熔断退避 30 分钟。
+如果维护者已确认站点拒绝了 operation，可以按以下步骤排查：
 
-> ⚠️ 轮换并非无条件生效。`config._with_source_session` 只在代理用户名**已经**以
-> `-<数字>` 结尾时才改写 session（webshare sticky 端点的 `{user}-{country}-{session_id}`
-> 形状）；其它形态原样返回，**不报错也不打日志**。用其它代理商时，按 source 隔离与
-> 轮换会双双静默失效，表现就退化成上面那个「IP 换不掉」的死局。
+1. 查看响应正文及 operation 名，区分 Cloudflare 挑战和站点业务拒绝。
+2. 在受控浏览器中观察站点自己的请求；必要时检查 `crypto.subtle.encrypt` 之前的明文
+   和 `fetch` 目标，重新确认当前端点、operation 名、字段集及变量。
+3. 用当前站点请求更新对应查询，并运行查询字段、抓取及错误分类测试。不要将历史
+   探测结果视为上游当前仍然允许该 operation 的证据。
 
-### 3.2 站点自有的 clearance
+列表查询与预订查询分别维护；预订 operation 的采集记录见
+[预订文档的接口原文](H2S_BOOKING_OPS.md#5-operation-原文与历史参考)。
 
-挑战通过之后，站点自身还有一道校验。未通过时 API 返回：
+### 4.2 区分 403 和其他错误
 
-```
-HTTP 403  {"error":"Browser verification required","code":"clearance_required"}
-```
-
-握手由站点前端自行完成，三个接口按序发生：
-
-```
-GET  /api/remote      → {"verified":true,"realClientIp":"…","country":"NL"}
-POST /api/clearance   → {"token":"<Turnstile token>","provider":"turnstile"}
-                        成功后下发 cookie h2s_clr
-```
-
-本项目不复刻该握手，而是**导航后等它自己完成**：`SiteProfile.clearance_probe` 以最小
-查询轮询端点，`clearance_pending_markers` 含 `clearance_required`，直至通过为止。等不
-到则重新导航——token 由导航签发，继续轮询换不出来，只会朝一个拿不到 clearance 的会话
-打一串必然 403 的请求。
-
-该机制历经 2026-08-11 与 08-17 两次改版**未作任何改动**即继续工作。
-
----
-
-## 4. 加密信道（自 2026-08-17 起必经）
-
-GraphQL 请求体须包成加密信封投递，明文请求会直接触发 Cloudflare 挑战。算法照抄站点
-自己的 JS（`_next/static/chunks/common-*.js`，搜 `__enc__`）：
-
-```
-aesKey  = AES-GCM 256，每次请求新生成
-k       = RSA-OAEP(SHA-256) 包裹 aesKey 的裸字节
-iv      = 12 字节随机数
-d       = AES-GCM(aesKey, iv, 明文)
-信封     = {v:1, k, iv, d, ct}        全部 base64
-```
-
-`POST /api/__enc__`，带 `x-enc: 1`。响应带 `x-enc: 1` 时 body 为 `{iv, d, ct}`，用同一个
-`aesKey` 解开即得明文 GraphQL 响应。
-
-实现见 `BrowserFetcher._encrypted_fetch`，由 `SiteProfile.encrypted_envelope` 开关控制
-（仅 H2S 打开）。它**只改传输层**：调用方照旧传明文 body、拿到明文 text，返回形状与
-`_raw_fetch` 完全一致，因此 `fetch_gql` 以上（scraper / booker）一行未改。
-
-响应没有 `x-enc` 头时原样返回明文——403 的 `{"code":"clearance_required"}` 正是这么回
-的，§3.2 的 clearance 探测依赖这一点。
-
-### 4.1 为什么在页面里加密
-
-WebCrypto 就在手边，密钥材料不出浏览器；更重要的是这样能沿用同源 `fetch` 的全部凭据
-（cookies、clearance、TLS 指纹），与既有传输层完全同构。
-
-### 4.2 公钥不写死
-
-公钥是 bundle 里的 SPKI base64 常量（实测 392 字符），由 `_ensure_enc_pubkey` 在**运行
-时**从含 `__enc__` 的 chunk 中抓取，每个浏览器会话一次，随浏览器重建（2 小时）而失效。
-
-写死会在轮换当天变成一次无从下手的解密失败；绑在浏览器生命周期上，则轮换最多废掉一
-个会话。抓不到时抛出的异常会指明去哪个 chunk 找什么常量。
-
-### 4.3 曾经走过的弯路
-
-`/api/rest/*` 是 axios 拦截器 **GET 分支**改写后的形状（把 path+query 加密进 `x-enc-q`
-头，URL 改写为 `/api/rest/__enc__`）。POST 分支**不改写 URL**，实际目标是
-`/api/__enc__`。2026-08-17 定位时先盯着 `/api/rest/*` 试了几轮，均为 403 Cloudflare
-挑战或 400 `Specified request cannot be processed`。
-
-判断信封本身是否正确的信号：响应带 `x-enc: 1` 且能解密——哪怕内容是报错，也说明服务端
-已成功解开信封，问题在 payload 而非密码学。
-
----
-
-## 5. 端点契约
-
-```
-POST https://www.holland2stay.com/api/__enc__
-Content-Type: application/json
-x-enc: 1
-
-<信封，见 §4>  ←  明文为 {"query": "<GraphQL>", "variables": {...}}
-```
-
-查询语句见 `scrapers.holland2stay._GQL_QUERY`。变量形如：
-
-```json
-{"pageSize": 100,
- "currentPage": 1,
- "filters": {"category_uid": {"eq": "Nw=="},
-             "city": {"in": ["29"]},
-             "available_to_book": {"in": ["179", "336", "6203"]}},
- "sort": {"available_startdate": "ASC"}}
-```
-
-`total_pages` 缺失时**必须标记为不完整**——把「没拿到数据」当成「确认没有数据」，正是
-当年那次七周静默故障的判据类型，且这一组合恰好会让 stale 收敛清空整座城市。
-
-**只请求 `_to_listing` 真正读取的字段。** 每轮两个城市、一天数百轮，响应体是按天计的
-代理流量。2026-08-07 实测，`media_gallery`（平均 10.8 条图片 URL，从未被读取）一项即
-占响应体 70%：
-
-```
-完整查询  2,096 B/条    92 MB/天
-裁剪后      583 B/条    26 MB/天
-```
-
-由 `tests/test_h2s_query_fields.py` 守卫：新增字段而不在 `_to_listing` 中读取即失败。
-
-### 5.1 operation 白名单（2026-08-18 起）
-
-查询文本必须与站点自己发的**逐字段一致**。实测判据：
-
-```
-站点原文                            200
-删掉 image_manager 块                403
-加 tenant_profile_restrictions       403
-加 available_startdate               403
-只改空格                             200   ← 空白不敏感，字段集敏感
-```
-
-即白名单比对的是归一化后的**字段集合**，且 `operationName` 缺失同样 403。
-`variables` 不受限制——城市、可用状态、分页、排序都可自由传。
-
-因此查询存于 [`h2s_gql.py`](../h2s_gql.py)，是**照抄品**：
-
-- 不要「优化」它。我们此前为省流量裁掉了 `media_gallery` 等字段，正是那份裁剪版
-  在 2026-08-18 被全量拒绝，抓取中断。
-- 上游改版后重新照抄：钩住 `crypto.subtle.encrypt` 截获站点加密前的明文即可。
-- 由 `tests/test_h2s_query_fields.py` 守卫，字段增删即失败。
-
-#### 5.1.1 被拒的 403 与被屏蔽的 403 不是一回事
-
-两者都是 HTTP 403，但处置**相反**，混为一谈的代价是实打实的：
-
-| | Cloudflare 屏蔽 | operation 未放行 |
-|---|---|---|
-| 正文 | 挑战页 / 屏蔽页 HTML | JSON，`content-type: application/json` |
-| 判据 | `is_cloudflare_body()` | `is_operation_rejected_body()` |
-| 异常 | `BlockedError` | `OperationNotAllowedError`（**不继承前者**） |
-| 换出口 IP | 有意义 | 无意义 —— 同会话换一条已登记的 operation 立刻 200 |
-| 等冷却 | 有意义 | 无意义 —— 不改代码永远不会好 |
-| 修法 | 换 IP / 换指纹 / 等 | 照抄站点自己发的那条 operation |
-
-正文有两种写法，都实测过，判定必须同时认：
-
-```
-抓取侧 2026-08-18  {"code":"operation_not_allowed"}
-预订侧 2026-08-19  {"error":"This operation is not available through the public API"}
-```
-
-**2026-08-19 的代价。** 预订链路的登录 mutation 被拒，而代码把它当成 CF 屏蔽：
-
-```
-11:08:26  开始预订 Victoriahof 36
-11:09:03  403 → 重建浏览器（换出口 IP + 一整轮 CF 挑战）
-11:09:07  403 → 再重建一次
-11:09:41  403 → 抛 BlockedError；75 秒、约 3 MB 白烧
-11:09:41  monitor 据此暂停**整条登录链路** 1 小时
-```
-
-三次重建换了三个出口 IP，拿回的是同一句话——拒绝它的不是 Cloudflare，是上游业务
-后端。误判还把「预订坏了」扩散成了「预订和登录都停了」。
-
-现在的分流（`browser_fetcher.fetch()`）：
-
-- 403 + 正文命中 operation 文案 → 直接抛 `OperationNotAllowedError`，**不重建、
-  不换 IP、不进任何冷却**；
-- 重建之后才露出该文案的，同样改判（挑战没过时看到的是 CF 的 HTML，业务后端那句话
-  要等挑战过了才看得见）；
-- 抓取侧 dispatcher 隔离该任务但**不丢会话**；`scrapers/holland2stay.py` 原样上抛，
-  不再改判成「第 1 页网络错误」；
-- 预订侧是独立的 `phase="operation_rejected"`，不触发登录抑制、不失效 prewarm 缓存，
-  admin 告警 6 小时一条并直接写明「换 IP 无效，去照抄 operation」。
-
-由 `tests/test_operation_not_allowed.py` 守卫。
-
-### 5.2 照抄的代价：三个字段拿不到
-
-白名单那条查询不含以下字段，我们原先在用：
-
-| 字段 | 用途 | 现状 |
-|---|---|---|
-| `tenant_profile_restrictions` | 学生 / 上班族标签 | **2026-08-19 已解决**，见 §5.6。改用 `GetProductDetail` 的 `tenant_profile`，`tenant` 维度已恢复登记 |
-| `building_name` | 展示用 | **2026-08-19 已解决**，见 §5.6 |
-| `available_startdate` | `Listing.available_from` | 已解决，见 §5.5。改用 `next_contract_startdate`——**站点自己就是拿它渲染「Available per …」的** |
-
-`tenant` 曾从 `config._SOURCE_FILTER_DIMS["holland2stay"]` 中摘除（该维度 fail-closed，
-缺值即拒绝，留着会让勾「仅学生」的用户一条 H2S 房源都收不到）。**2026-08-19 已恢复**
-——补齐机制见 §5.6。
-
-### 5.5 `available_from` 的替代来源
-
-`available_startdate` 不在白名单字段集里。替代来源不在别处：**站点自己就是拿
-`next_contract_startdate` 渲染「Available per …」的**——详情页 HTML 里那个日期就是
-这个字段，而它本就在白名单查询里。
-
-一度打算另开一条路：抓详情页解析卡片文案。实测过两种取法（导航 0.90 MB / 3.5s，
-同源 fetch 原始 HTML 0.03 MB / 0.5s），都不必要。
-
-`2050-01-01` 是「没有下一个合同起始日」的哨兵，须过滤，否则用户会看到「2050 年可
-入住」。按**年份** ≥ 2050 判断，而非精确匹配那一天——哨兵换个写法时不至于原样透出。
-
-2026-08-18 实测分布（Eindhoven，46 条）：
-
-```
-抽签      全部有真日期
-Reserved  约半数是哨兵——它们确实没有确定的可入住日
-整体      15% 有日期
-```
-
-占比低是正确的：绝大多数是 Reserved。**用户真正关心的可订 / 抽签房源全都有日期。**
-
-### 5.6 详情补齐：把字段集外的东西按需取回来
-
-白名单那条 `GetCategories` 的字段集是照抄的既成事实，加字段即全量 403。但站点还有
-**另一条同样在白名单里**的 operation —— `GetProductDetail`（原本是 booker 取 sku 用的，
-见 `h2s_booking_gql.py`），它的字段集大得多：
-
-```
-building_name  tenant_profile  neighborhood  min_income  income_requirements
-deposit  pets_allowed  parking_status  storage_available  energy_common_areas …
-```
-
-2026-08-19 实测 200 放行；裁剪它的字段集同样 403（与 `GetCategories` 一条规律）。
-
-#### 代价决定了用法
-
-```
-单条           ≈ 11.4 KB   （aggregations 4 KB + item 7 KB）
-分页           无变量，page_size 固定 20 → 一次 160 KB
-```
-
-**绝不能拿它替代列表抓取** —— 那会把 §5.3 省下的流量原样吐回去。只能**按需单取**：
-
-- 进程内缓存（`_DETAIL_CACHE`）最多保留 10,000 条，按最近使用顺序淘汰；命中时不重复请求详情；
-- **限速**（`_DETAIL_REQUEST_SPACING = 0.6s`）—— 这条比条数上限更要紧：
-  2026-08-20 实测一口气连发 46 条会被打 **429**（46 条里 24 条失败）。
-  429 是按**速率**触发的，光有条数上限挡不住；
-- 撞到 429 **本轮收手**（`_DETAIL_STOP_ON_RATE_LIMIT`）——继续打只会加重限流，
-  而补齐本来就是跨轮渐进的；
-- 条数上限（`_DETAIL_BUDGET_PER_ROUND = 60`）只兜「上游忽然返回几百条」的异常；
-- **fail-open**：任何一条失败只跳过，不拖垮主抓取；失败不缓存，下轮再试。
-  但**失败要在 WARNING 级别聚合报出来**——最初写成 `debug`，结果 46 条只补上 25 条
-  而日志上完全看不出来。fail-open 加看不见的日志就是静默半残，我们栽过。
-
-#### building_name：ID → label 走同一响应
-
-`building_name` 回的是 attribute option ID。因为 filter 收窄到了单个 `url_key`，
-同一响应的 `aggregations` 里那个属性通常只剩这一条选项，正好精确对应 —— 不需要像
-`_labels_from_aggregations` 那样跨轮累积。
-
-#### tenant_profile：三个值，从详情页正文逐条实测确定
-
-`tenant_profile` **不在 aggregations 里**，也**不是可筛选属性**（`filter` 直接报
-invalid value），所以只能写死映射表。取值语义取自站点详情页的明文说明：
-
-| ID | 站点正文 | 我们的取值 |
-|---|---|---|
-| 6213 | `Important: Students only` | `student only` |
-| 6214 | `You can book this residence as a working professional` | `employed only` |
-| 6215 | `You can book this residence as a student or a working professional` | `student or employed` |
-
-> ⚠️ 这里曾判断错一次：从下单向导「同时渲染了 Student 和 Working professional 两个
-> 选项」推断 6214 = 两者皆可。**错的** —— 选项渲染出来了但其中一个是禁用态。后来
-> 直接读详情页正文（`This residence cannot be booked by students.`）才定死。
-> 判枚举语义时以**页面明文**为准，别从控件的存在与否反推。
-
-未知 ID 一律跳过而不是回落到某个默认值 —— 猜错会把房源推给不符合资格的用户。
-
-#### 恢复了什么
-
-`tenant` 维度重新登记进 `config._SOURCE_FILTER_DIMS["holland2stay"]`，四家平台全覆盖，
-范围徽标随之消失（`dim_scope_badge("tenant") == ""`）。仪表盘的「楼盘」列也有值了。
-
-**取舍**：补齐按预算分摊，冷启动后要若干轮才铺满；期间未补到的房源没有 `Tenant`
-标签，会被 fail-closed 拒掉。这是有意的 —— 宁可少推几条，不可把「不确定能不能租」
-的房源推给勾了资格限制的用户。
-
-由 `tests/test_h2s_detail_enrich.py` 守卫。
-
-### 5.3 分层抓取：白名单之后唯一的省流量手段
-
-字段集被锁死，响应体没得裁，能动的只有「查什么」。2026-08-18 实测两城合计、线上
-真实字节（加密响应不可压缩，无 gzip 收益）：
-
-```
-只查 可订 + 抽签 + 即将上线      2.2 KB/轮
-再加上 Reserved               292.2 KB/轮
-```
-
-贵的不是「有没有新房」，是那批已被预订的房源——每轮完整拉一遍，而 Reserved 状态
-几乎不动。故拆成两层（`scrapers/holland2stay.py` 的 `_FRESH_STATUSES` /
-`_ARCHIVE_STATUSES`）：
-
-- **每轮**只查可订类。新房源必然先出现在这里，通知不延迟。
-- **每 `_FULL_SCAN_INTERVAL`（默认 1800 秒）**做一次含 Reserved 的全量。
-
-两条必须守住的性质，均有测试（`tests/test_h2s_tiered_scan.py`）：
-
-1. **高频轮一律 `complete=False`。** 它看不见 Reserved，若标成完整扫描，stale
-   收敛会把那批房源判成「已下架」清掉。
-2. **层级按批次决定，不按城市。** 实现时踩过：在 `_plan_scan` 里直接推进计时器，
-   导致一轮里第一个城市消耗掉「该全量」的标记，其余城市统统被降级。
-
-### 5.4 attribute label 映射
-
-枚举字段返回的是 attribute option ID，须映射为可读 label。以前单独发一条
-`GetAggregations` 查询，2026-08-18 起被白名单挡掉——好在白名单这条 `GetCategories`
-的 ProductsFragment 本就带 `aggregations`，同一响应里即可取（`_labels_from_aggregations`），
-反而省掉一次请求。
-
-`available_to_book` 不在其中，其 ID→label 由 `_STATUS_MAP` 硬编码。
-
-映射需**跨轮累积**：aggregations 是按当前 filters 统计的，高频轮里 Reserved 房源的
-label 根本不出现，覆盖式赋值会让上一轮攒到的映射丢失，features 里就会冒出裸 ID。
-
-上游返回的 label 荷兰语与英语混杂（生产库中 `Finishing: Furnished` 与
-`Finishing: Gemeubileerd` 并存）。归一由 `models.FEATURE_SYNONYMS` 与
-`canonical_feature()` 在过滤层完成，**不在抓取层做**——上游文案随时可能新增写法，
-抓取层归一会把未收录的值直接丢掉。
-
-## 6. 风险
-
-| 风险 | 现状 |
+| 响应或现象 | 含义与处理方向 |
 |---|---|
-| 端点再次迁移 | **已发生三次**，后两次相隔六天，均为静默 404。定位步骤见 §2；404 已单独成支并指向「上游改了路径」 |
-| 加密公钥轮换 | 运行时抓取，绑浏览器生命周期，轮换最多废掉一个会话。见 §4.2 |
-| 信封格式变更（`v` 从 1 起跳） | 目前无版本协商。届时解密会失败，需重读 chunk 里的 `__enc__` 实现 |
-| Turnstile 加码 | 当前由站点前端自动完成，本项目只等待。若改为需要交互，则须接入打码服务 |
-| 出口 IP 被 Cloudflare 盯上 | 挑战连续失败即熔断退避；重建浏览器会更换出口 IP |
-| operation 白名单收紧 | 已发生两次（抓取 2026-08-18、预订 2026-08-19）。查询是照抄品，字段增删即 403。定位与重抄步骤见 §2 / §5.1 |
-| 把 operation 403 误判成 CF 屏蔽 | 已发生一次，代价 75 秒 + 3 MB + 1 小时登录抑制。判据已分开，见 §5.1.1 |
-| 上游把某条 operation 整个摘出公开 API | 已发生一次：`addNewBooking`（占房）。**照抄原文救不了**——只能改走站点自己的新入口。判定方法：用无效参数发一次，看是 403「not available」还是 200 + 业务错误，见 §7.1 |
-| 登录 / 占房路径整体迁移 | 已发生：登录 → NextAuth，占房 → `POST /api/booking`。侦察靠静态读站点 JS chunk（零副作用），见 `H2S_BOOKING_OPS.md` |
-| 白名单查询里的字段被上游删掉 | 我们跟着丢字段，且无从补救（只能另找 SSR 等来源）。§5.2 已有三个先例 |
-| GraphQL schema 变更 | `total_pages` 缺失时标记不完整；字段集由 `tests/test_h2s_query_fields.py` 守卫 |
-| label 出现新的语言写法 | 过滤层归一，未收录的值原样保留而非丢弃；补 `FEATURE_SYNONYMS` 即可 |
+| Cloudflare 挑战或拦截页 | 可能与浏览器会话、出口或站点策略有关；按日志检查代理与冷却状态。 |
+| `clearance_required` | 站点自己的校验尚未完成；检查页面导航和 clearance，不把它当作正常数据。 |
+| `operation_not_allowed` 或 operation 不在公开 API | 站点拒绝查询；检查当前 operation，换代理或等待冷却不能修复查询定义。 |
+| 429 | 请求过快或受到限流；详情补齐会在本批次停止继续请求。 |
+| 404、非预期 HTML 或响应格式变化 | 检查端点与站点是否改版，不直接认定为代理故障或空房源。 |
 
----
+浏览器传输、抓取调度和预订处理共同负责错误分类及平台隔离；对应测试见
+`tests/test_operation_not_allowed.py`、`tests/test_scraper_403.py`。
 
-## 7. 自动预订
+## 5. 字段、详情补齐与筛选
 
-H2S 支持自动预订至支付页面，不代付或填写金融凭据。登录和下单使用预订工作进程中的
-浏览器会话，可复用该账号的预登录结果；抓取工作进程管理独立的浏览器会话。占房通过
-`POST /api/booking`，后续支付方式、协议和订单步骤走加密 GraphQL。Plaza 也支持自动
-应征，需用户单独启用，见 [PLAZA.md](PLAZA.md)。
+### 5.1 列表字段和状态
 
-### 7.1 当前状态（2026-08-19 实测重写）
+`h2s_gql.py` 保存列表查询原文，`scrapers/holland2stay.py` 解析查询结果。
+`aggregations` 提供部分枚举 ID 到标签的映射；抓取器使用代码中的映射处理可用状态。
+抓取器可以跨轮累积标签，过滤层再将常见的中英文标签归一化。
 
-以下是 2026-08-19 的抓包与探测结果；上游接口可能发生变化。
+抓取器使用站点查询中的 `next_contract_startdate` 填充 `available_from`，并过滤表示
+无有效日期的哨兵值。如果响应缺少分页字段 `total_pages` 等必要信息，系统不能将该
+结果视为完整扫描。
 
-#### 实测：白名单放行哪几步
+### 5.2 按需补齐详情
 
-用**故意无效的参数**发每条 operation，靠错误形状区分「网关拒绝」与「业务拒绝」
-（参数是假的，不占房、不产生订单）。同一 clearance 窗口内可复现：
+列表的固定字段集不包含部分楼盘、租客要求、街区和收入信息。抓取器使用
+`GetProductDetail` 按需补充这些信息；该 operation 的原文见
+[h2s_booking_gql.py](../h2s_booking_gql.py) 和[预订文档](H2S_BOOKING_OPS.md)。
 
-| operation | 结果 | 判定 |
-|---|---|---|
-| `createEmptyCart` | 200，真返回 cart id | ✅ 放行 |
-| `GetCheckoutAgreements` | 200，返回条款正文 | ✅ 放行 |
-| **`addNewBooking`** | **403 not available through the public API** | ❌ **被摘出公开 API** |
-| `setPaymentMethodOnCart` | 200 + `Could not find a cart with ID …` | ✅ 放行 |
-| `placeOrder` | 200 + `CART_NOT_FOUND` | ✅ 放行 |
-| `idealCheckOut` | 200 + internal error | ✅ 放行 |
+详情查询的成本与列表查询不同，不能直接替代整个列表查询。抓取器使用最多容纳
+10,000 条记录的进程内缓存，并将每批次的默认请求预算设为 60 条、请求间隔设为
+0.6 秒。如果详情查询收到 429 响应，抓取器停止该批次的详情补齐。系统启动时可以
+使用数据库中已有的详情预热缓存；缓存记录被淘汰不会直接清空数据库中已保存的字段，
+存储层会保留指定详情字段的已有值。单条详情补齐失败不会导致主列表抓取失败，系统
+可以在后续轮次重试。
 
-**6 步里 5 步一直是对的，只有占房那一步被摘掉。**
+抓取器将已知的 `tenant_profile` 值映射为租客要求，不会猜测未知值的含义。H2S 支持
+租客条件过滤，但详情暂未补齐的房源可能因缺少租客要求而被过滤。用户仍需在平台上
+核查实际租住资格。测试见 `tests/test_h2s_detail_enrich.py` 和
+`tests/test_h2s_query_fields.py`。
 
-#### 登录也变了（但没被挡）
+## 6. 排障入口
 
-登录不再是 GraphQL `generateCustomerToken`，换成了 **NextAuth 三步握手**
-（`/api/auth/csrf` → `/api/auth/callback/credentials` → `/api/auth/session` 取
-`accessToken`），端点走**明文**（加密拦截器只对 `/api/rest/` 生效）。真实账号实测走通，
-未触发验证码、未触发 2FA（`requires2fa:false`）。
+| 现象 | 首先检查 |
+|---|---|
+| 连续 403 或挑战无法完成 | 日志中的响应类型、浏览器会话、代理连通性与出口；确认是 Cloudflare 还是站点 clearance。 |
+| `operation_not_allowed` | 按[第 4.1 节](#41-operation-白名单与排查)核对站点当前请求；不要仅靠换 IP 重试。 |
+| 404、解析异常或持续零房源 | 检查端点、响应正文、分页完整性和 `/monitoring`；上游可能调整接口。 |
+| 房源状态长期未收敛 | 确认对应城市是否有成功的全量扫描；高频轮本来不代表完整扫描。 |
+| 租客条件下漏掉房源 | 检查详情补齐、缓存、限速和房源实际租客要求；缺少详情时结果可能被过滤。 |
+| 预订结果不明确 | 登录平台核实订单或预留；保护记录及解除方式见[预订文档](H2S_BOOKING_OPS.md)。 |
 
-#### 占房的替代路径
+历史上端点曾从独立 GraphQL 域名迁到同源路径，后改用加密信封，operation 白名单也曾
+调整。旧路径的 404 或历史上可用的字段不能证明当前站点契约；具体故障和版本历史见
+[CHANGELOG.md](CHANGELOG.md)。
 
-站点自己也不再直接发 `addNewBooking`，改走服务端代理：
+## 7. 预订边界
 
-```
-POST /api/booking          加密信封 + Bearer
-body {sku, contract_startDate, challengeToken, challengeProvider}
-→ { cartId, booking }      一次完成建车 + 占房
-```
-
-已实现为 `booker.create_booking()`。端点实测存在（未登录回 401 Unauthorized，
-而非 404 / operation_not_allowed）。
-
-#### 曾经的误判（留作教训）
-
-一度断言「占房被 Turnstile 挡死、全自动无解」，理由是下单代码里有个 `challengeToken`
-字段。**错的**：那个字段只是被 `JSON.stringify` 进加密信封的普通字段，
-`zg`（信封打包函数）根本不认识它；它来自 `turnstile.render({action:"clearance",
-appearance:"interaction-only"})`——就是 §3.2 那套站点自有 clearance，
-`BrowserFetcher` 早已处理。而且推翻它的证据当时就在：用户当天在自动化浏览器里
-完整走完过一次真实下单。**读到可疑字段时，先问有没有已发生的事实与之矛盾。**
-
-完整侦察记录见 [`H2S_BOOKING_OPS.md`](H2S_BOOKING_OPS.md)。
-
+H2S 预登录和预订使用独立于抓取的浏览器会话。系统尝试取得支付链接，但**不会自动
+付款**。预订结果不确定时，系统按账号保留保护记录并提示用户核实。登录、占房、订单
+及尚未验证的环节见
+[H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md)。

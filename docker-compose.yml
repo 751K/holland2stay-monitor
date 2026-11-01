@@ -27,6 +27,10 @@ services:
       # 让健康检查 + App 内部 localhost 调用直连。外部抓取目标仍走代理不受影响。
       - NO_PROXY=localhost,127.0.0.1,::1
       - no_proxy=localhost,127.0.0.1,::1
+      # 客户端 IP 信任跳数。标准部署是 Caddy → h2s 一跳；不设会让所有请求
+      # 看起来来自 Caddy 容器，IP 限流退化为全局单桶。需要改时在 .env 里写
+      # 同名键：直接暴露端口设 0，Cloudflare → Caddy → h2s 设 2。
+      - TRUSTED_PROXY_HOPS=${TRUSTED_PROXY_HOPS:-1}
       # 本地/隔离网络部署时设为 1 可跳过安全预检
       # - H2S_SKIP_PREFLIGHT=1
       # 代理：将宿主机环境变量传入容器（需同时在 .env 中设置对应的值）。

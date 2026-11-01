@@ -633,8 +633,7 @@ def dim_scope_badge(dim: str, lang: str = "zh") -> str:
 #: **这是运营方给的断言，不是抓来的数据。** 平台改了配置这里不会自动跟着变，
 #: 因此只登记「整栋楼统一、不随房源变化」的属性；随房源变化的一律要抓。
 #:
-#: OurCampus 不在其中：它至今没有返回过任何可订单元，装修档位无从核实（见
-#: ARCHITECTURE §9）。宁可让它继续走 fail-open，也不要登记一个没验证过的事实。
+#: OurCampus 不在其中：整栋楼的装修档位尚未核实，不登记未经验证的事实。
 _FIN_FULLY = "Fully furnished"
 _FIN_FURNISHED = "Furnished"
 _FIN_SEMI = "Semi furnished"
@@ -1095,7 +1094,7 @@ class AutoBookConfig:
     # 与另外三个平台字段名不同是有意的，照着改成 email 会让人以为能填邮箱。
     #
     # 应征本身**不需要任何资料**：提交只有两个 id，没有表单、证件、IBAN 或支付
-    # 方式（见 docs/PLAZA.md §1）。资料在**注册**阶段一次性交给站点（€27.50/年），
+    # 方式（见 docs/PLAZA.md §3.4）。资料在**注册**阶段一次性交给站点（€27.50/年），
     # booker 不碰。
     plaza_username: str = ""
     plaza_password: str = ""
@@ -1229,7 +1228,7 @@ class Config:
         写死会在别人改配置时静默失准。
 
         其余三个平台的 feed 只列可订单元，没有等价的「已预留」状态可抓，
-        因此不在其中（见 ARCHITECTURE §5.13）。
+        因此不在其中（见 ARCHITECTURE 的房源状态与完整性）。
         """
         ids = {af.id for af in self.availability_filters}
         if AVAILABILITY_RESERVED_ID in ids and "holland2stay" in self.sources:

@@ -1,7 +1,7 @@
 """NextAuth 登录流的单测。
 
 2026-08-19 H2S 把登录从 GraphQL ``generateCustomerToken`` 换成 NextAuth
-credentials 三步握手（docs/H2S_BOOKING_OPS.md §6）。这个文件钉住那三步、
+credentials 三步握手（docs/H2S_BOOKING_OPS.md §3.1）。这个文件钉住那三步、
 钉住凭据错误 / 2FA / 明文传输这几条分支。
 """
 from __future__ import annotations

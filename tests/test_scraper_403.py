@@ -301,7 +301,7 @@ class TestOperationNotAllowedHasItsOwnHandling:
                             请查看服务器日志排查"
 
     **它是全系统最可诉诸行动的一条故障**（去照抄站点那条 operation），却被报成
-    「未分类的内部异常」，把排查引向服务器日志而不是 docs/H2S.md §5.1。
+    「未分类的内部异常」，把排查引向服务器日志而不是 docs/H2S.md §4.1。
 
     同一个类在 booker 里有专属 phase ``operation_rejected``，还配了三行注释解释
     为什么不能当 blocked 处理——两边待遇差得离谱。

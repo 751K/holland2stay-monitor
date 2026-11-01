@@ -2,7 +2,7 @@
 API v1 通知端点
 ================
 
-- GET  /api/v1/notifications        分页通知列表（admin/user）
+- GET  /api/v1/notifications        分页通知列表（admin/user；guest 仅 status_change / new_listing）
 - POST /api/v1/notifications/read   标记已读（全部或指定 ids）
 - GET  /api/v1/notifications/stream SSE 推送增量通知
 - POST /api/v1/notifications/stream/ticket 用 Bearer 换短期 SSE 票据
