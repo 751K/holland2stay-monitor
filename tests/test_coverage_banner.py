@@ -273,9 +273,13 @@ class TestShadowIsVisible:
         测试自己的算法，不是路由的。
         """
 
-        monkeypatch.setenv("SOURCES", "holland2stay,plaza")
-        monkeypatch.setenv("CITIES", "Amsterdam,24")
-        monkeypatch.setenv("SHADOW_SOURCES", "plaza")
+        from app.db import storage
+        st = storage()
+        try:
+            st.set_app_settings({"SOURCES": "holland2stay,plaza", "CITIES": "Amsterdam,24",
+                                 "SHADOW_SOURCES": "plaza"})
+        finally:
+            st.close()
 
         from translations import TRANSLATIONS
         badge = TRANSLATIONS["dash_coverage_shadow"]["en"]

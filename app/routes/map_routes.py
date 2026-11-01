@@ -125,7 +125,9 @@ def api_map_geocode():
 
     st = storage()
     try:
-        listings = st.get_map_listings()
+        from app.runtime_config import web_runtime_environment
+        from mstorage._map_calendar import _map_max_age_days
+        listings = st.get_map_listings(max_age_days=_map_max_age_days(environ=web_runtime_environment()))
         uncached = [l for l in listings if not st.get_cached_coords(l["address"])]
     finally:
         st.close()

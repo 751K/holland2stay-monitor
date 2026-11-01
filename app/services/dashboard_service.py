@@ -128,7 +128,12 @@ def _uptime_percent_7d(pid: int | None, st: Any = None) -> int:
 
 def _configured_scope() -> dict[str, int]:
     try:
-        cfg = load_config()
+        from flask import has_request_context
+        if has_request_context():
+            from app.runtime_config import web_runtime_environment
+            cfg = load_config(environ=web_runtime_environment())
+        else:
+            cfg = load_config()
         enabled_sources = {s for s in cfg.sources if s in SUPPORTED_SOURCES}
         targets = {task.city_display for task in cfg.scrape_tasks_v2()}
     except Exception:

@@ -91,7 +91,7 @@ class BaseNotifier(ABC):
     --------
     - 必须实现 `_send(text: str) -> bool`：发送纯文本消息，成功返回 True
     - 必须实现 `close() -> None`：释放资源（HTTP Session 等）
-    - 高层方法（send_new_listing 等）负责消息格式化，子类无需关心
+    - 高层方法默认格式化消息，渠道可覆写以实现特定事件的处理
 
     线程安全
     --------
@@ -214,7 +214,7 @@ class MultiNotifier(BaseNotifier):
         """至少有一个可用的外部通知渠道。"""
         return self._enabled and len(self._notifiers) > 0
 
-    async def _send(self, text: str) -> bool:
+    async def _dispatch(self, method: str, *args) -> bool:
         if not self._enabled:
             logger.debug("通知已全局关闭，跳过发送")
             return False
@@ -242,12 +242,12 @@ class MultiNotifier(BaseNotifier):
             上（见 ResendNotifier 的 Idempotency-Key）。
             """
             try:
-                return await n._send(text)
+                return await getattr(n, method)(*args)
             except (OSError, asyncio.TimeoutError) as e:
                 logger.debug("通知渠道首次发送失败 %s: %s", type(n).__name__, e)
             await asyncio.sleep(3)
             try:
-                return await n._send(text)
+                return await getattr(n, method)(*args)
             except (OSError, asyncio.TimeoutError) as e:
                 logger.debug("通知渠道重试仍失败 %s: %s", type(n).__name__, e)
                 return False
@@ -257,6 +257,42 @@ class MultiNotifier(BaseNotifier):
             return_exceptions=True,
         )
         return any(r is True for r in results)
+
+    async def _send(self, text: str) -> bool:
+        return await self._dispatch("_send", text)
+
+    async def send_new_listing(self, listing: Listing) -> bool:
+        return await self._dispatch("send_new_listing", listing)
+
+    async def send_new_listings_batch(self, listings: list[Listing]) -> bool:
+        if not listings:
+            return False
+        return await self._dispatch("send_new_listings_batch", listings)
+
+    async def send_status_change(self, listing: Listing, old_status: str, new_status: str) -> bool:
+        return await self._dispatch("send_status_change", listing, old_status, new_status)
+
+    async def send_heartbeat(self, total_in_db: int, round_count: int) -> bool:
+        return await self._dispatch("send_heartbeat", total_in_db, round_count)
+
+    async def send_error(self, message: str) -> bool:
+        return await self._dispatch("send_error", message)
+
+    async def send_announcement(self, title: str, body: str = "") -> bool:
+        return await self._dispatch("send_announcement", title, body)
+
+    async def send_booking_success(
+        self, listing: Listing, detail: str, pay_url: str = "", contract_start_date: str = "",
+    ) -> bool:
+        return await self._dispatch(
+            "send_booking_success", listing, detail, pay_url, contract_start_date,
+        )
+
+    async def send_booking_uncertain(self, title: str, detail: str) -> bool:
+        return await self._dispatch("send_booking_uncertain", title, detail)
+
+    async def send_booking_failed(self, listing: Listing, reason: str) -> bool:
+        return await self._dispatch("send_booking_failed", listing, reason)
 
     async def close(self) -> None:
         # 单个 notifier close 抛错不能拖垮其他 close（否则 fd / Session 泄漏）
@@ -1167,6 +1203,8 @@ def create_user_notifier(user, *, created_channels=None) -> BaseNotifier:
 
     n = MultiNotifier(notifiers, enabled=user.notifications_enabled)
     n.language = getattr(user, "language", "en") or "en"
+    for channel in notifiers:
+        channel.language = n.language
     return n
 
 

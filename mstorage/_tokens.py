@@ -19,6 +19,7 @@ Bearer Token 持久化（iOS / 第三方客户端用）
 - last_used_at : ISO8601 UTC；异步批量刷新（见 touch_app_tokens）
 - expires_at   : ISO8601 UTC，NULL = 永不过期
 - revoked      : 0/1，1 表示已撤销（保留行便于审计）
+- revoked_at   : 撤销时间；历史记录从升级时间起计算保留期
 
 设计要点
 --------
@@ -272,9 +273,9 @@ class TokenOps:
 
         ids = [int(r["id"]) for r in surplus]
         self._conn.execute(
-            "UPDATE app_tokens SET revoked = 1 WHERE id IN (%s)"
+            "UPDATE app_tokens SET revoked = 1, revoked_at = ? WHERE id IN (%s)"
             % ",".join("?" * len(ids)),
-            ids,
+            [now, *ids],
         )
         logger.info(
             "会话超额：user_id=%s device_name=%r 撤销 %d 枚旧会话（上限 %d）",
@@ -321,9 +322,9 @@ class TokenOps:
                     continue
                 ids = [int(x["id"]) for x in surplus]
                 self._conn.execute(
-                    "UPDATE app_tokens SET revoked = 1 WHERE id IN (%s)"
+                    "UPDATE app_tokens SET revoked = 1, revoked_at = ? WHERE id IN (%s)"
                     % ",".join("?" * len(ids)),
-                    ids,
+                    [_utc_now_iso(), *ids],
                 )
                 total += len(ids)
                 touched += 1
@@ -436,8 +437,8 @@ class TokenOps:
         """撤销单条 token；返回是否真的修改了一行。"""
         with self._conn:
             cur = self._conn.execute(
-                "UPDATE app_tokens SET revoked = 1 WHERE id = ? AND revoked = 0",
-                (token_id,),
+                "UPDATE app_tokens SET revoked = 1, revoked_at = ? WHERE id = ? AND revoked = 0",
+                (_utc_now_iso(), token_id),
             )
             return cur.rowcount > 0
 
@@ -449,9 +450,9 @@ class TokenOps:
         """
         with self._conn:
             cur = self._conn.execute(
-                "UPDATE app_tokens SET revoked = 1 "
+                "UPDATE app_tokens SET revoked = 1, revoked_at = ? "
                 "WHERE user_id = ? AND revoked = 0",
-                (user_id,),
+                (_utc_now_iso(), user_id),
             )
             return cur.rowcount
 
@@ -465,9 +466,9 @@ class TokenOps:
         """
         with self._conn:
             cur = self._conn.execute(
-                "UPDATE app_tokens SET revoked = 1 "
+                "UPDATE app_tokens SET revoked = 1, revoked_at = ? "
                 "WHERE user_id = ? AND id != ? AND revoked = 0",
-                (user_id, except_token_id),
+                (_utc_now_iso(), user_id, except_token_id),
             )
             return cur.rowcount
 
@@ -521,18 +522,28 @@ class TokenOps:
 
     def cleanup_expired_tokens(self, *, keep_revoked_days: int = 30) -> int:
         """
-        物理删除：1) 已撤销且 > N 天的；2) 已过期且 > N 天的。
+        删除撤销或过期超过保留期的会话及其设备，返回删除的会话数。
 
-        返回删除行数。按需在定时任务中调用，正常运行不需要。
+        撤销会话只按撤销时间计算，即使它在撤销之前就已过期。历史未知撤销
+        时间的行不删除。两表在同一事务清理，失败时全部回滚。
         """
+        if keep_revoked_days < 1:
+            raise ValueError("keep_revoked_days must be at least 1")
         cutoff = (
             datetime.now(timezone.utc) - timedelta(days=keep_revoked_days)
         ).strftime("%Y-%m-%dT%H:%M:%SZ")
         with self._conn:
+            predicate = (
+                "(revoked = 1 AND revoked_at IS NOT NULL AND revoked_at < ?) "
+                "OR (revoked = 0 AND expires_at IS NOT NULL AND expires_at < ?)"
+            )
+            self._conn.execute(
+                f"DELETE FROM device_tokens WHERE app_token_id IN ("
+                f"SELECT id FROM app_tokens WHERE {predicate})",
+                (cutoff, cutoff),
+            )
             cur = self._conn.execute(
-                """DELETE FROM app_tokens
-                   WHERE (revoked = 1 AND created_at < ?)
-                      OR (expires_at IS NOT NULL AND expires_at < ?)""",
+                f"DELETE FROM app_tokens WHERE {predicate}",
                 (cutoff, cutoff),
             )
             return cur.rowcount

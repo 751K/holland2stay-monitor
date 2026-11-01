@@ -39,6 +39,16 @@ def _listing(lid="x-1", features=None):
     )
 
 
+def test_detail_cache_is_bounded_and_keeps_recently_used_entries(monkeypatch):
+    monkeypatch.setattr(h2s, "_DETAIL_CACHE_MAX", 2)
+    h2s.prime_detail_cache({"a": {"Building": "A"}, "b": {"Building": "B"}})
+    listing = _listing("a")
+    h2s._enrich(None, [listing])
+    h2s._cache_detail("c", {"Building": "C"})
+    assert list(h2s._DETAIL_CACHE) == ["a", "c"]
+    assert "Building: A" in listing.features
+
+
 _AGGS = [
     {"attribute_code": "building_name", "label": "Building name",
      "options": [{"label": "Philips Bedrijfsschool", "count": 1, "value": "614"}]},

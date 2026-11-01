@@ -157,14 +157,14 @@ def _labels_from_aggregations(products: dict) -> dict[str, dict[str, str]]:
 # （page_size 固定 20）。所以只能按需单取，绝不能拿它替代列表抓取——
 # 20 条就是 160 KB，全量替换会把 v1.16.6 省下的流量原样吐回去。
 #
-# 策略：进程内缓存 + 批次预算 + 请求限速。同一房源只取一次；冷启动分摊到若干轮。
+# 策略：有上限的进程内缓存 + 批次预算 + 请求限速；冷启动分摊到若干轮。
 #
 # ── 四层机制各管什么（别再加第五层）─────────────────────────────────
 #
 # 「补齐字段不能丢」这件事历史上被四个地方分别处理过，各自的注释都声称自己是
 # 关键的那一层。理清一次，免得下次又长出一层：
 #
-#   1. _DETAIL_CACHE          省流量。同一房源一个进程内只取一次。进程启动时
+#   1. _DETAIL_CACHE          省流量。缓存命中时不重复获取；进程启动时
 #                             由 prime_detail_cache() 用库里已有的值回填，
 #                             否则每次重启头几轮都在重问已知答案（2026-08-25
 #                             那次 429 挤掉新房源就是这么来的）。
@@ -188,12 +188,21 @@ from h2s_booking_gql import (  # noqa: E402
     OP_GETPRODUCTDETAIL as _OP_DETAIL,
 )
 
-#: url_key → 补齐出来的 feature 片段。**进程级，永不过期**——重启即清零，
-#: 每次重建 ≈ 房源数 × 11 KB，按下面的预算分摊到多轮，不会在单轮里炸开。
+#: url_key → 补齐出来的 feature 片段。进程级，容量满时淘汰最久未用项；
+#: 重启清零后可从数据库回填，未命中的请求仍受下方预算和限速保护。
 #:
 #: 空结果也缓存（房源查不到详情，已下架等），否则每轮白打一次。代价是上游
-#: 后来补上数据时本进程不会再去看——重启即自愈，够用。
+#: 后来补上数据时缓存淘汰或进程重启后才会再看。
 _DETAIL_CACHE: dict[str, dict[str, str]] = {}
+_DETAIL_CACHE_MAX = 10_000
+
+
+def _cache_detail(listing_id: str, details: dict[str, str]) -> None:
+    """Keep recently used details bounded; storage retains enriched features."""
+    _DETAIL_CACHE.pop(listing_id, None)
+    _DETAIL_CACHE[listing_id] = details
+    while len(_DETAIL_CACHE) > _DETAIL_CACHE_MAX:
+        del _DETAIL_CACHE[next(iter(_DETAIL_CACHE))]
 
 #: **一个批次**（= 一轮里同一 source 的所有城市合计）最多补齐几条。
 #: 缓存命中后稳态是 0，这个数只影响**冷启动铺满得多快**。
@@ -355,8 +364,7 @@ def prime_detail_cache(snapshot: "dict[str, dict[str, str]]") -> int:
     （纯流量旋钮）在重启后不必从零开始。正确性仍然归第 3 层（storage 的粘性
     合并）管。
 
-    代价：上游若改了某条房源的楼盘名，本进程不会再去核实（缓存本来就"永不过期"，
-    这里只是把这个性质延长到跨重启）。楼盘名基本不变，可以接受。
+    代价：缓存命中期间不会核实上游是否改了楼盘名。楼盘名基本不变，可以接受。
     """
     added = 0
     for listing_id, feats in (snapshot or {}).items():
@@ -364,7 +372,7 @@ def prime_detail_cache(snapshot: "dict[str, dict[str, str]]") -> int:
             continue
         clean = {k: v for k, v in (feats or {}).items() if k and v}
         if clean:
-            _DETAIL_CACHE[listing_id] = clean
+            _cache_detail(listing_id, clean)
             added += 1
     return added
 
@@ -393,6 +401,8 @@ def _enrich(
     first_err: str = ""
     for l in listings:
         extra = _DETAIL_CACHE.get(l.id)
+        if extra is not None:
+            _cache_detail(l.id, extra)
         if extra is None:
             # 本批次已经撞过 429 / 预算已用尽 —— 都不再发请求，但**继续遍历**：
             # 缓存里已有的房源仍要把 feature 贴上去。
@@ -444,7 +454,7 @@ def _enrich(
             budget.started = True
             budget.remaining -= 1
             spent += 1
-            _DETAIL_CACHE[l.id] = extra
+            _cache_detail(l.id, extra)
         if not extra:
             continue
         # 已有同名 feature 的不覆盖：列表查询给的值优先（它是每轮新鲜的）

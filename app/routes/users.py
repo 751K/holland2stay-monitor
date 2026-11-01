@@ -56,7 +56,8 @@ def _city_options() -> list[str]:
     """用户能勾的城市：按全局启用的平台收敛，读配置失败时退回全集。"""
     try:
         from config import load_config
-        return known_city_names(load_config().sources)
+        from app.runtime_config import web_runtime_environment
+        return known_city_names(load_config(environ=web_runtime_environment()).sources)
     except Exception:
         return known_city_names()
 
@@ -69,8 +70,9 @@ def _xior_building_options() -> list[dict]:
     """
     try:
         from config import load_config
+        from app.runtime_config import web_runtime_environment
         from scrapers.xior import XiorScraper
-        cfg = load_config()
+        cfg = load_config(environ=web_runtime_environment())
         out = []
         for c in cfg.xior_cities:
             meta = XiorScraper.BUILDINGS.get(c.key) or {}

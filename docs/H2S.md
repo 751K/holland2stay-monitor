@@ -320,7 +320,7 @@ deposit  pets_allowed  parking_status  storage_available  energy_common_areas �
 
 **绝不能拿它替代列表抓取** —— 那会把 §5.3 省下的流量原样吐回去。只能**按需单取**：
 
-- 进程内缓存（`_DETAIL_CACHE`），同一房源只取一次，稳态开销为 0；
+- 进程内缓存（`_DETAIL_CACHE`）最多保留 10,000 条，按最近使用顺序淘汰；命中时不重复请求详情；
 - **限速**（`_DETAIL_REQUEST_SPACING = 0.6s`）—— 这条比条数上限更要紧：
   2026-08-20 实测一口气连发 46 条会被打 **429**（46 条里 24 条失败）。
   429 是按**速率**触发的，光有条数上限挡不住；

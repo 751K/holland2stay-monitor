@@ -28,9 +28,9 @@ logger = logging.getLogger(__name__)
 _MAP_MAX_AGE_DAYS_DEFAULT = 14
 
 
-def _map_max_age_days() -> int:
+def _map_max_age_days(*, environ=None) -> int:
     from env_utils import env_get
-    raw = env_get("MAP_MAX_AGE_DAYS", "")
+    raw = env_get("MAP_MAX_AGE_DAYS", "", environ=environ)
     if not raw.strip():
         return _MAP_MAX_AGE_DAYS_DEFAULT
     try:

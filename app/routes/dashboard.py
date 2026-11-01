@@ -73,7 +73,7 @@ def index() -> str:
         st.close()
     pid = monitor_pid()
 
-    # 覆盖范围横幅。取自当前生效的配置而非写死——这些值存在 app_settings 里，
+    # 覆盖范围横幅。取自已保存配置；monitor 的应用状态由设置页另行显示。
     # 随时能从「设置」页改；写死的横幅迟早和实际不符，且不会有任何地方报错。
     #
     # **按平台分组**，不是并集：七个平台之后并集是一行十七个城市名，读的人既不知道
@@ -88,8 +88,9 @@ def index() -> str:
     coverage: list[dict] = []
     try:
         from config import load_config, source_display_name
+        from app.runtime_config import web_runtime_environment
 
-        cfg = load_config()
+        cfg = load_config(environ=web_runtime_environment())
         shadow = {s.lower() for s in (cfg.shadow_sources or ())}
         sep = "、" if lang == "zh" else ", "
         coverage = [

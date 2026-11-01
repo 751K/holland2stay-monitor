@@ -306,6 +306,14 @@ class StorageBase:
         """)
         # 增量列：CREATE TABLE IF NOT EXISTS 不会给老库补字段；
         # ALTER TABLE ADD COLUMN 在 SQLite 上幂等需自己捕获 OperationalError。
+        self._add_column_if_missing("app_tokens", "revoked_at", "TEXT")
+        # 历史记录没有撤销时刻，按首次迁移时刻开始保留，不能猜成创建时间。
+        # 每次只补空值，也可恢复加列成功但回填中断的迁移。
+        with self._conn:
+            self._conn.execute(
+                "UPDATE app_tokens SET revoked_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+                "WHERE revoked = 1 AND revoked_at IS NULL"
+            )
         self._add_column_if_missing(
             "web_notifications", "user_id",
             "TEXT NOT NULL DEFAULT ''",

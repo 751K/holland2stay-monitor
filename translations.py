@@ -523,8 +523,8 @@ TRANSLATIONS = {
     # 仪表盘覆盖范围横幅。城市按平台分组渲染（Config.monitored_cities_by_source），
     # 所以这里只剩标题与结尾两句，城市名不再拼进译文。
     "dash_coverage_title": {
-        "zh": "当前监控的平台与城市",
-        "en": "Platforms and cities currently monitored",
+        "zh": "已配置的监控平台与城市",
+        "en": "Configured monitoring platforms and cities",
     },
     "dash_coverage_notice": {
         "zh": "需要其他城市，请",

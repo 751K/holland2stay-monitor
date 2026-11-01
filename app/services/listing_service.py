@@ -629,7 +629,14 @@ def get_map_payload(user: UserConfig | None = None) -> dict[str, Any]:
     results: list[dict] = []
     uncached = 0
     with storage_ctx() as st:
-        listings = _filter_prebuilt_rows_by_user(st, st.get_map_listings(), user)
+        from flask import has_request_context
+        if has_request_context():
+            from app.runtime_config import web_runtime_environment
+            from mstorage._map_calendar import _map_max_age_days
+            listings = st.get_map_listings(max_age_days=_map_max_age_days(environ=web_runtime_environment()))
+        else:
+            listings = st.get_map_listings()
+        listings = _filter_prebuilt_rows_by_user(st, listings, user)
         for listing in listings:
             cached = st.get_cached_coords(listing["address"])
             if cached:

@@ -993,6 +993,8 @@ async def main_loop(
     next_round_rest_wake = False
     planned_deadline: float | None = None
     last_round_started = float("-inf")
+    from mcore.token_maintenance import TokenMaintenance
+    token_maintenance = TokenMaintenance()
     blocked_fail_streak = 0  # Cloudflare 403 连续计数
 
     while True:
@@ -1055,6 +1057,9 @@ async def main_loop(
                 )
             except Exception:
                 logger.debug("写 monitor 心跳失败（已忽略）", exc_info=True)
+
+            # 独立于用户配置的心跳间隔；失败只记录并在下一轮重试。
+            token_maintenance.run_if_due(storage)
 
             # booking_deadline：在此时刻后不再尝试备选房源，让下一轮扫描优先进行
             booking_deadline = time.monotonic() + effective_interval

@@ -121,10 +121,11 @@ def reset() -> None:
         _fcm_client = None
         _fcm_disabled = False
         _fcm_retry_after = 0.0
-    _dedup.clear()
-    for q in _per_user.values():
-        q.clear()
-    _per_user.clear()
+    global _last_state_cleanup
+    with _state_lock:
+        _dedup.clear()
+        _per_user.clear()
+        _last_state_cleanup = None
 
 
 # ── FCM 单例客户端 ────────────────────────────────────────────────────
@@ -191,6 +192,8 @@ _dedup: dict[tuple[str, str, str], float] = {}
 # user_id -> deque[monotonic timestamps]
 _per_user: dict[str, deque] = defaultdict(deque)
 _state_lock = threading.Lock()
+_STATE_CLEANUP_INTERVAL = 60.0
+_last_state_cleanup: Optional[float] = None
 
 
 #: 不受每用户限速约束的 kind。限速是为了防新房源刷屏；预订结果（成功或失败）
@@ -202,9 +205,20 @@ _RATE_EXEMPT_KINDS = frozenset({"booked", "booking_failed"})
 
 def _allow_send(user_id: str, listing_id: str, kind: str) -> bool:
     """同时检查 dedup + per-user rate；返回 True 表示放行。"""
+    global _last_state_cleanup
     now = time.monotonic()
     key = (user_id, listing_id, kind)
     with _state_lock:
+        if _last_state_cleanup is None or now - _last_state_cleanup >= _STATE_CLEANUP_INTERVAL:
+            for old_key, timestamp in list(_dedup.items()):
+                if now - timestamp >= _DEDUP_WINDOW:
+                    del _dedup[old_key]
+            for uid, queue in list(_per_user.items()):
+                while queue and now - queue[0] > _PER_USER_WINDOW:
+                    queue.popleft()
+                if not queue:
+                    del _per_user[uid]
+            _last_state_cleanup = now
         last = _dedup.get(key)
         if last is not None and now - last < _DEDUP_WINDOW:
             return False

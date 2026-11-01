@@ -328,41 +328,6 @@ class RentCafeSession:
         ).text
         return self._handle_response(resp2, "login")
 
-    def submit_step(self, step_name: str, form_data: dict, page_path: str = "") -> dict:
-        """Submit a generic form step and return the response data.
-
-        Parameters
-        ----------
-        step_name : str
-            Human-readable step name for logging.
-        form_data : dict
-            Form fields to POST (hidden fields + visible values).
-        page_path : str
-            The .aspx page name for the Referer header (e.g. ``"ApplicantInfo.aspx"``).
-
-        Returns
-        -------
-        dict — the server's JSON response (``{"type": "success", ...}``) or the
-               hidden fields from the HTML page that follows a redirect.
-        """
-        if not page_path:
-            page_path = "oleapplication.aspx"
-
-        ref = f"{self._base_url}{self._ole_path}/{page_path}"
-        # Always inject cafeportalkey if not present.
-        if "cafeportalkey" not in form_data:
-            form_data["cafeportalkey"] = self._cafeportalkey
-
-        # If this step has reCAPTCHA, solve v2.
-        if self._needs_recaptcha(form_data):
-            v2 = self._solver.solve_v2(page_url=ref)
-            form_data["g-recaptcha-response-v3"] = v2
-            form_data["failed-captcha-3"] = "false"
-
-        logger.info("Submitting step '%s' to %s", step_name, self._post_url)
-        resp = self._post(self._post_url, form_data, referer=ref)
-        return self._handle_response(resp, step_name)
-
     # ------------------------------------------------------------------
     # 半自动预订：条款 → 选房 → 填申请表 → 存草稿
     #
@@ -662,14 +627,6 @@ class RentCafeSession:
         return resp
 
     @staticmethod
-    def _needs_recaptcha(form_data: dict) -> bool:
-        """Return True if the form has reCAPTCHA hidden fields."""
-        return any(
-            k in form_data
-            for k in ("g-recaptcha-response-v3", "g-recaptcha-response", "failed-captcha-3")
-        )
-
-    @staticmethod
     def _handle_response(resp: req.Response, step: str) -> dict:
         """Parse the server response after a form POST.
 
@@ -826,13 +783,13 @@ class RentCafeBooker(AbstractBooker):
     # ------------------------------------------------------------------
 
     def book(self, request: BookingRequest) -> BookingResult:
-        """半自动预订：把申请起草到「只差上传证件和付款」为止。
+        """半自动预订：按平台配置开始申请，或上传证件并保存申请草稿。
 
         为什么不做完整自动化
         --------------------
-        流程里有必填的 ID/Passport 上传，且最后要付款。这两步系统都不该代劳——
-        替一群用户保管护照扫描件是拿一个巨大的泄露责任去换几十秒，替用户付钱
-        更不用说。所以 booker 走到 **Save**（存草稿）就停。
+        草稿路径会读取用户已上传的证件，代为上传并填表，然后在 **Save** 停下；
+        用户仍需自行完成后续操作和付款。只开始申请的路径则在申请人信息页停下，
+        不上传证件或保存草稿。
 
         **它不保证抢到房，锁定发生在付款那一步**（2026-08-03 侦察确认，不再是
         推测）：``ApplicationCharges`` 步骤的表单 ``PaymentApplicationChargeStep1``
@@ -840,8 +797,7 @@ class RentCafeBooker(AbstractBooker):
         「in order to continue the application process, all administration fees
         will need to be paid」。
 
-        **填银行账户是硬限制，不是设计选择**——所以边界只能是 Save，往前一步
-        都没有。返回的 phase 是 ``draft_saved`` 而不是 ``success``，通知文案
+        草稿路径不代填银行账户。返回的 phase 是 ``draft_saved``，通知文案
         明写「房源还没占住，请立刻去付款」：把它当成功报给用户，用户会以为房
         到手了，慢悠悠去付款，结果被别人抢走。
 
