@@ -59,9 +59,9 @@ Support: [flatradar.app/support](https://flatradar.app/support) ·
 | OurDomain | Amsterdam Diemen / South-East | Proven | Notify only (booking flow built, not enabled) |
 | Xior | Any of 30 buildings across 14 cities | Proven | Notify only (booking flow built, not enabled) |
 | OurCampus | Amsterdam Diemen (1 building) | Checked against real markup; very low volume | Notify only |
-| Magis | 17 buildings across 5 cities (9 in Eindhoven) | Added 2026-09-01; plain HTTP, no anti-bot | Notify only |
-| Student Experience | Amsterdam (4 sites) and Leiden | Added 2026-09-02; the listing date lives only on the detail page, so each unit costs an extra request | Notify only |
-| Plaza | 13 Dutch cities | Added 2026-09-02; a paid account (€27.50/yr) is required to *apply*, not to see listings | Automatic applications supported, off by default |
+| Magis | 17 buildings across 5 cities (9 in Eindhoven) | Verified against live data; plain HTTP, no anti-bot | Notify only |
+| Student Experience | Amsterdam (4 sites) and Leiden | Verified against live data; the listing date lives only on the detail page, so each unit costs an extra request | Notify only |
+| Plaza | 13 Dutch cities | Verified against live data; a paid account (€27.50/yr) is required to *apply*, not to see listings | Automatic applications supported, off by default |
 
 A platform can also run in **shadow mode** (`SHADOW_SOURCES`): scraped and stored
 as usual, but it sends no notifications. That is how a newly added scraper is
