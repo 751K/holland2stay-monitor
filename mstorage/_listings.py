@@ -1030,6 +1030,13 @@ class ListingOps:
             ).fetchone()
         return row[0] if row else 0
 
+    def count_status_changes(self) -> int:
+        """全部状态变更事件数（system 信息页用，不按时间窗口过滤）。"""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM status_changes"
+        ).fetchone()
+        return row[0] if row else 0
+
     # ── 面板筛选辅助 ────────────────────────────────────────────────
 
     def get_distinct_statuses(self) -> list[str]:

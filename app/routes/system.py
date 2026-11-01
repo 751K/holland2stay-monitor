@@ -73,8 +73,8 @@ def system_info():
         info["last_scrape"] = st.get_meta("last_scrape_at")
         info["last_count"] = st.get_meta("last_scrape_count")
         info["unread_notifications"] = st.count_unread_notifications()
-        info["total_changes"] = st.conn.execute("SELECT COUNT(*) FROM status_changes").fetchone()[0]
-        info["total_notifications"] = st.conn.execute("SELECT COUNT(*) FROM web_notifications").fetchone()[0]
+        info["total_changes"] = st.count_status_changes()
+        info["total_notifications"] = st.count_web_notifications()
         # 最近公告 + 逐用户投递统计：面板据此显示「补发失败」入口
         info["announcements"] = st.list_announcements(limit=10)
     finally:

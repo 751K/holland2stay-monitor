@@ -39,27 +39,14 @@ def _submit():
 
     st = storage()
     try:
-        st.conn.execute(
-            """CREATE TABLE IF NOT EXISTS feedback (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                kind TEXT NOT NULL,
-                message TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT '',
-                user_id TEXT NOT NULL DEFAULT '',
-                user_name TEXT NOT NULL DEFAULT '',
-                app_version TEXT NOT NULL DEFAULT '',
-                platform TEXT NOT NULL DEFAULT 'ios'
-            )"""
+        st.add_feedback(
+            kind=kind,
+            message=message,
+            role=role,
+            user_id=user_id or "",
+            user_name=str(body.get("user_name", "")).strip(),
+            app_version=str(body.get("app_version", "")).strip(),
         )
-        st.conn.execute(
-            "INSERT INTO feedback (kind, message, role, user_id, user_name, app_version) "
-            "VALUES (?,?,?,?,?,?)",
-            (kind, message, role, user_id or "",
-             str(body.get("user_name", "")).strip(),
-             str(body.get("app_version", "")).strip()),
-        )
-        st.conn.commit()
     except Exception as e:
         logger.exception("反馈写入失败")
         return _err.err_server_error(e, "反馈提交失败，请稍后重试")

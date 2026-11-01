@@ -97,6 +97,13 @@ class NotificationOps:
         ).fetchone()
         return row[0] if row else 0
 
+    def count_web_notifications(self) -> int:
+        """全部站内通知数（system 信息页用，不按已读过滤）。"""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM web_notifications"
+        ).fetchone()
+        return row[0] if row else 0
+
     def mark_notifications_read(self, ids: list[int] | None = None) -> None:
         if ids is not None and not ids:
             return

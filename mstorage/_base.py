@@ -115,6 +115,18 @@ class StorageBase:
             -- web_notifications 还没补字段（_add_column_if_missing 在
             -- executescript 之后跑）。索引创建在 _migrate 末尾完成。
 
+            CREATE TABLE IF NOT EXISTS feedback (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                kind        TEXT NOT NULL,
+                message     TEXT NOT NULL,
+                role        TEXT NOT NULL DEFAULT '',
+                user_id     TEXT NOT NULL DEFAULT '',
+                user_name   TEXT NOT NULL DEFAULT '',
+                app_version TEXT NOT NULL DEFAULT '',
+                platform    TEXT NOT NULL DEFAULT 'ios'
+            );
+
             CREATE TABLE IF NOT EXISTS geocode_cache (
                 address TEXT PRIMARY KEY,
                 lat     REAL NOT NULL,

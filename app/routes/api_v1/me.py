@@ -326,35 +326,7 @@ def _export():
         return _err.err_unauthorized("用户不存在")
 
     with storage_ctx() as st:
-        # 通知历史（该 user_id）
-        notif_rows = st.conn.execute(
-            "SELECT id, created_at, type, title, body, url, listing_id, read "
-            "FROM web_notifications WHERE user_id = ? "
-            "ORDER BY id DESC LIMIT 500",
-            (user.id,)
-        ).fetchall()
-        notifications = [dict(r) for r in notif_rows]
-
-        # 活跃设备令牌
-        device_rows = st.conn.execute(
-            # os_version 也是我们就这台设备收集的个人数据，导出里不能漏。
-            "SELECT dt.id, dt.device_token, dt.env, dt.platform, dt.model, "
-            "       dt.os_version, dt.bundle_id, dt.created_at, dt.last_seen "
-            "FROM device_tokens dt "
-            "JOIN app_tokens at ON dt.app_token_id = at.id "
-            "WHERE at.user_id = ? AND dt.disabled_at IS NULL",
-            (user.id,)
-        ).fetchall()
-        devices = [dict(r) for r in device_rows]
-
-        # 活跃 App 令牌
-        token_rows = st.conn.execute(
-            "SELECT id, device_name, created_at, last_used_at, expires_at "
-            "FROM app_tokens "
-            "WHERE user_id = ? AND revoked = 0",
-            (user.id,)
-        ).fetchall()
-        tokens = [dict(r) for r in token_rows]
+        exported = st.export_user_data(user.id)
 
     data = {
         "account": {
@@ -366,10 +338,10 @@ def _export():
             "notifications_enabled": user.notifications_enabled,
         },
         "filter": asdict(user.listing_filter),
-        "notification_history": notifications,
-        "notification_count": len(notifications),
-        "active_devices": devices,
-        "active_tokens": tokens,
+        "notification_history": exported["notification_history"],
+        "notification_count": len(exported["notification_history"]),
+        "active_devices": exported["active_devices"],
+        "active_tokens": exported["active_tokens"],
         "exported_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
     }
     return _err.ok(data)

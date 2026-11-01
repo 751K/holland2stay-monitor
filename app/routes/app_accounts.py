@@ -110,10 +110,7 @@ def app_accounts_test_push(token_id: int) -> Any:
     """向指定 token 的所有活跃设备发送测试推送（APNs + FCM）。"""
     st = storage()
     try:
-        token_row = st.conn.execute(
-            "SELECT id, role, user_id, device_name FROM app_tokens WHERE id = ?",
-            (token_id,),
-        ).fetchone()
+        token_row = st.find_app_token_by_id(token_id)
         if token_row is None:
             flash("Token 不存在", "warning")
             return redirect(url_for("app_accounts"))
