@@ -1,6 +1,6 @@
 # 候选平台侦察
 
-**本文档仅评估「尚未接入的平台是否值得接入」。** 已接入平台的现状不在此处：
+**本文档记录候选平台的侦察，以及部分已接入平台的历史探测结果。** 当前实现以代码和各平台文档为准：
 
 - Holland2Stay / Xior / OurDomain 的传输方式与反爬对抗见 [ARCHITECTURE.md §3](ARCHITECTURE.md)
 - Xior 的端点契约与自动预订见 [XIOR.md](XIOR.md)
@@ -23,9 +23,9 @@
 | 2 | **HousingAnywhere** | ✅ 完全 | 无 | 页面内嵌结构化 JSON（`__staticRouterHydrationData`） | Amsterdam 207 条，每页 23 条 | 低（`/api/*` 被禁；分页 query 处于灰区） | 🟢🟢🟢 **建议作为下一个接入对象** |
 | 3 | **SSH / SSHXL (sshxl.nl)** | ✅ 完全（API 已定位） | 无 | `POST /api/v1/offering/all`，JSON | 短租按院校配额，实测组合 0 条 | 低 | ❌ **不接**（无 Eindhoven；长租不在 API 内），见 §2 |
 | 3b | **SSH& (sshn.nl)** | ❌ | 无，但 **Keycloak 登录墙 + 注册会员制** | Embrace 平台的 GraphQL 网关 | 未知 | **高**（同 DUWO/ROOM） | ❌ 不接，见 §2b |
-| 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ⚠️ **已接入但从未出过房源**，解析器未经真实数据验证，见 §4 |
-| 5 | **Student Experience** | ✅ 完全 | **无** | 服务端渲染；学期档由 `/locations/getAcademicTerms/<id>` 出 JSON | 5 栋在营（Amsterdam 4 + Leiden），户型级，库存间歇 | 低 | ✅ **已接入**（2026-09-02，影子期），见 §5 |
-| 5b | **Plaza (plaza.newnewnew.space)** | ✅ 完全 | **无** | `POST /portal/object/frontend/getallobjects/format/json`，空 body 出全站 JSON | 荷兰住宅 49 条，其中 31 条当场成交制 | 低（房源公开；ToS 无再分发限制） | ✅ **已接入**（2026-09-02，影子期），见 §5b |
+| 4 | **OurCampus (ourcampus.nl)** | ✅ 完全 | SecureRC CF → curl_cffi 指纹轮换可过 | 与 OurDomain 同栈（RENTCafe HTML） | 1 栋楼 | 低 | ✅ **已接入**，历史单元样本已用于核对解析器，见 §4 |
+| 5 | **Student Experience** | ✅ 完全 | **无** | 服务端渲染；学期档由 `/locations/getAcademicTerms/<id>` 出 JSON | 5 栋在营（Amsterdam 4 + Leiden），户型级，库存间歇 | 低 | ✅ **已接入**（2026-09-02；是否影子运行取决于配置），见 §5 |
+| 5b | **Plaza (plaza.newnewnew.space)** | ✅ 完全 | **无** | `POST /portal/object/frontend/getallobjects/format/json`，空 body 出全站 JSON | 荷兰住宅 49 条，其中 31 条当场成交制 | 低（房源公开；ToS 无再分发限制） | ✅ **已接入**（2026-09-02；是否影子运行取决于配置），见 §5b |
 | 5c | **Vesteda** | ✅ 完全 | **无** | `POST /api/units/search/facet`，空 body 出全站 JSON | 524 套 65 城，可租 113 | 低（`robots.txt` 无 `Disallow`） | ❌ **不接**：打分 + 同分抽签，推送无价值，见 §6b |
 | 5d | **Gapph / Ad Hoc**（antikraak） | ✅ 完全 | 无 | Gapph 服务端渲染；Ad Hoc 走 WP REST `/wp-json/wp/v2/units` | Gapph 46 条、Ad Hoc 住宅 54 条，€150–€774 | 低 | 🟡 **候选**：价位对学生合适，但合同性质须先在 UI 区分，见 §6c |
 | 6 | Pararius | ❌ | **Cloudflare JS challenge** | — | — | — | 🟡 现可采用 CloakBrowser（与 Holland2Stay 同一方案） |
@@ -45,7 +45,7 @@ GET https://magisrealestate.com/for-rent?only_available=0
 ### 关键发现（2026-09-01 探测）
 
 - 普通 `Mozilla/5.0` 直接 200，141 KB / 3.2s。**没有 Cloudflare、没有 JS 挑战、
-  不需要浏览器、不需要代理**——是已接入的四个平台里最轻的一个
+  不需要浏览器、不需要代理**——当时探测中传输方式较轻
 - `server: Apache`，Laravel + Livewire（Flux UI），房源在服务端渲染的 HTML 里
 - `robots.txt` 是空 `Disallow:`，全站允许
 - **query 参数能驱动 Livewire**：`only_available=0` 把结果从 4 条变成 12 条，
@@ -356,59 +356,16 @@ Greystar 旗下的另一个学生住房品牌，与 OurDomain 同属一家公司
 | 反爬 | 普通 curl 返回 403 与挑战页；**curl_cffi 使用 `chrome136`，首个指纹即返回 200** |
 | 已解析 | 3 个 floorplan：`1113259` Standard+ Studio 1P / `1112904` Furnished Student 1P / `1112905` Furnished Student 2P |
 
-### 为什么它的期望值应该放低
+### 覆盖、传输与状态判定
 
-**其一，仅有一栋楼。** `/en/apartments` 全站仅列出 Amsterdam Diemen，地址为
-Dalsteindreef 6002，与 OurDomain South-East（Dalsteindreef 20-40）位于同一街道且
-相邻。接入后仅增加一栋楼。
+2026 年侦察时站点仅列出 Amsterdam Diemen 一栋楼。单元表使用 **POST 与
+`floorPlans[]` 表单体**；OurDomain 使用 GET。实现复用其余 RENTCafe 解析与指纹
+机制，具体行为见 `scrapers/ourcampus.py`。
 
-**其二，等待期为 16–18 个月（官网自述）。** 该平台采用排队制而非先到先得，
-「房源出现即刻推送」这一核心价值并不成立。其否决理由与 DUWO/ROOM 属同一类型，
-区别在于前者是合规问题，此处则是产品问题。
-
-**其三，同栈并不等同于同接口。** 其单元查询采用 **POST 与 `floorPlans[]` 表单体**
-（页面 jQuery 为 `.load(url, {floorPlans: names})`），而 OurDomain 采用 GET 与
-query string。
-
-实现上的处理方式：`OurCampusScraper` 继承 `OurDomainScraper`，仅覆盖
-`_fetch_units_html()` 一个方法，其余部分（指纹池与冷却、每次尝试更换 IP、同一
-session 内 403 重试、单元行解析、状态映射、Occupancy 反推、Listing 映射）全部复用。
-
-> 需注意接入时**无法依据响应判断 GET 与 POST 孰为正确**——该楼零可订，两种请求
-> 形态均只能取得空面板。选择 POST 的依据是「与其自身前端保持一致」，这是唯一有
-> 证据支持的形态。基类的 GET 对 OurDomain 实测有效，未作改动。
-
-### 一条未验证的事
-
-实测时该楼**没有任何可订单元**（floorplans.aspx 上 apply 按钮数量为 0，Get
-Notified 为 6 个；页面中唯一出现的 `applyButton` 字样位于一行被注释掉的 JS 中）。
-因此 `contentclass=availableunits` 返回的是 floorplan 网格而非单元表，**其单元表的
-HTML 结构未经验证**。
-
-判定为「确无房源」而非「解析失败」的依据是对照实验：以同一份代码、同一个指纹请求
-OurDomain Diemen，`unitrow` 分别为 2 与 1，解析正常。缺少该对照即会落入
-「未取得数据不等于确认不存在数据」这一类判据错误（见
-[ARCHITECTURE.md §5.10](ARCHITECTURE.md)）。
-
-**接入后仍然如此：第一次真实有房时必须人工核对一次日志。**
-
-**截至 2026-08-04 该情形尚未出现**：接入以来 `unitrow=yes` 一次都未曾出现，
-`data/ourcampus_capture.txt` 中始终为 `panel=yes unitrow=no parsed=0`。也就是说
-该 source 的解析器、状态映射、阈值，以及「feed 仅列出可订单元」这一前提，至今
-**未经任何真实数据验证**。（本地实例的情况可查阅同一文件。）
-
-> **2026-08-27 更新。** 上述情形已经出现，留档样本也已用于核对解析器。核对结果
-> 是本节的两条前提均不成立：feed 并不只列出可订单元，且置灰的日期单元格表示
-> 「自该日起可订」而非「已出租」，按后者理解会使整批可订单元被判为 Occupied 且
-> 不发通知。判据已改为依据该行是否带有可用的下单按钮，详见 CHANGELOG v1.26.0。
-> 本节以上内容保留为当时的侦察记录，不再代表当前实现。
->
-> **2026-09-15 更新。** 「排队制而非先到先得」也不成立——**两种并存**。留档里
-> 全部 7 个单元：08-10 至 09-02 的 6 个按钮是 `Book Now`，09-15 的 #2301 是
-> `Join Lottery`；两者类名、回调、日期格样式完全一致，只差按钮上的字。原判据只看
-> 按钮是否存在，于是抽签单元以 `Available to book` 推给了用户。判据已补上按钮
-> 文字，见 [OURDOMAIN.md §4](OURDOMAIN.md)。同日留档文件撞上 8 MB 上限停写，
-> 下午 5 个单元没有留下 HTML；已改为只记变化、满了轮转。
+2026-08 的真实单元样本用于核对解析器：feed 不只列出可订单元，置灰日期表示
+「自该日起可订」，不能直接当作已出租。2026-09-15 的样本同时包含 `Book Now` 和
+`Join Lottery`；当前判据结合按钮是否存在及其文字，区分直接可订与抽签。实际
+房源量、排队规则和响应结构可能变化，不能将当时的样本当作当前状态。
 
 为此增设了两道守卫，二者均位于基类中，OurDomain 一并受益：
 
@@ -766,10 +723,11 @@ WARNING 记下城市名，日志里看得见，加进表即可。宁可漏推几
 404 是 158 KB HTML），因此 JSON 解析失败要上抛 `ScrapeNetworkError` 而不是当成空
 结果。
 
-### 不做自动预订
+### 自动应征
 
-应征需要付费账号，流程未侦察，ToS 暴露面未评估。与 OurCampus / Magis /
-Student Experience 一致：只通知，不预订。
+Plaza 自动应征已接入，用户须配置凭据并单独启用；应征不保证获得房源。登录、
+预检及提交的实测范围与不确定结果保护见 [PLAZA.md](PLAZA.md)。账号费用和平台
+条款可能变化，使用前应在官方站点核实。
 
 ---
 
@@ -945,7 +903,7 @@ Emmen 2、Assen 2 这类地方。Eindhoven 0（Waalre、Maarheeze 勉强算周�
 
 ### 接入优先级（按投入产出比排序）
 
-0. ~~**Plaza**~~ —— **已接入**（2026-09-02，影子期），见 §5b
+0. ~~**Plaza**~~ —— **已接入**（2026-09-02；是否影子运行取决于配置），见 §5b
    - 荷兰住宅 49 条，其中 **31 条是当场成交制**——本文档考察过的所有平台里最强的
      形态。另 18 条是「Snelle reageerder」，同样奖励速度
    - 一个匿名 POST 拿全站，字段结构化，工程量与 Magis 同级

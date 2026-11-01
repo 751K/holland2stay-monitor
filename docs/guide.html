@@ -268,13 +268,13 @@ step that is missing.
   <tr><th>Filter</th><th>Example</th><th>Applies to</th><th>How it works</th></tr>
   <tr><td>Max rent</td><td>€1200</td><td>All</td><td>Only listings ≤ €1200/month. <strong>Platforms quote different figures — see below</strong></td></tr>
   <tr><td>Min area</td><td>25 m²</td><td>All</td><td>Only listings ≥ 25 m²</td></tr>
-  <tr><td>Min floor</td><td>1</td><td>All</td><td>Skip ground floor (0)</td></tr>
+  <tr><td>Min floor</td><td>1</td><td>Holland2Stay, OurDomain, OurCampus, Magis, Plaza</td><td>Skip ground floor (0)</td></tr>
   <tr><td>Cities</td><td>Eindhoven, Amsterdam</td><td>All</td><td>Multi-select — any match</td></tr>
   <tr><td>Sources</td><td>H2S, OD</td><td>All</td><td>Multi-select — only notify for these platforms</td></tr>
   <tr><td>Tenant</td><td>student only</td><td>Except Magis</td><td>Multi-select — any match</td></tr>
   <tr><td>Type</td><td>Studio, 1</td><td>Except Xior</td><td>Multi-select — any match</td></tr>
-  <tr><td>Occupancy</td><td>Single</td><td>Except Xior, Magis</td><td>Multi-select — any match</td></tr>
-  <tr><td>Furnishing</td><td>Furnished</td><td>Except OurCampus</td><td>Multi-select — any match</td></tr>
+  <tr><td>Occupancy</td><td>Single</td><td>Holland2Stay, OurDomain, OurCampus</td><td>Multi-select — any match</td></tr>
+  <tr><td>Furnishing</td><td>Furnished</td><td>Holland2Stay, OurDomain, Xior, Magis</td><td>Multi-select — any match</td></tr>
   <tr><td>Contract</td><td>Indefinite</td><td>Holland2Stay only</td><td>Long-term only (skip short-stay)</td></tr>
   <tr><td>Min energy label</td><td>B</td><td>Holland2Stay, Magis</td><td>Only listings rated at or above this label</td></tr>
   <tr><td>Neighborhood</td><td>Centrum</td><td>Holland2Stay only</td><td>Multi-select; options follow the cities you picked</td></tr>
@@ -290,7 +290,7 @@ same scope.</p>
 
 <div class="card">
 <h3>What "rent" means per platform</h3>
-<p>The four platforms do not quote the same number. Read this before setting <em>Max rent</em>:</p>
+<p>Platforms do not all quote the same kind of price. Read this before setting <em>Max rent</em>:</p>
 <table>
   <tr><th>Platform</th><th>Price shown in the panel and notifications</th></tr>
   <tr><td>Holland2Stay</td><td><strong>All-in</strong> — includes service costs and utility prepayment</td></tr>
@@ -298,6 +298,8 @@ same scope.</p>
   <tr><td>OurDomain</td><td><strong>Base rent</strong>; service costs charged separately</td></tr>
   <tr><td>OurCampus</td><td><strong>Base rent</strong>; service costs charged separately</td></tr>
   <tr><td>Magis</td><td><strong>All-in</strong> — base rent plus the service costs printed on each listing</td></tr>
+  <tr><td>Plaza</td><td><strong>Total rent</strong> reported by the platform; net rent is shown separately when available</td></tr>
+  <tr><td>Student Experience</td><td><strong>Starting price</strong> for a room type, rather than the exact rent for an individual unit</td></tr>
 </table>
 <p>For OurDomain and OurCampus, service costs vary by floor plan and the upstream feed does not say which unit
 belongs to which plan, so an all-in figure cannot be derived. Those listings carry an asterisk beside the
@@ -331,8 +333,8 @@ headroom for those two, or separate them out with the platform filter.
 
 <div class="card">
 <h3>Platforms & Cities</h3>
-<p>Enable or disable Holland2Stay, OurDomain, OurCampus and Xior independently. For each platform, select which cities or buildings to monitor. Xior buildings are grouped by city.</p>
-<p>After saving, click <strong>Apply Now</strong> to hot-reload — no restart needed.</p>
+<p>Enable or disable each of the seven platforms and select its cities or buildings. Xior buildings are grouped by city.</p>
+<p>Saving requests a monitor reload. The settings page shows whether the monitor applied the configuration or a value is overridden. Deployment settings, secrets and advanced timeouts still require restarting the affected process.</p>
 </div>
 
 <!-- ─────────────────────────────────────────────── -->

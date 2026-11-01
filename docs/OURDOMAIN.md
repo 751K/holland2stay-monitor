@@ -29,7 +29,7 @@
 
 ## 2. 反爬现状
 
-OurDomain 是四个平台中唯一**无需浏览器**的：SecureRC 前面是 Cloudflare，但不需要
+OurDomain 使用 HTTP 客户端而非浏览器：SecureRC 前面是 Cloudflare，但当时不需要
 执行 JS 解挑战——普通 curl 会拿到 `403 cf-mitigated: challenge`（2026-09-15 在
 OurCampus 的主机上复核），换一个像样的 TLS 指纹即返回 200。它另有一套机制——按
 TLS 指纹与出口 IP 双重跟踪。

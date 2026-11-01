@@ -1,96 +1,25 @@
 flowchart TD
-    A["启动 monitor.py"] --> B["读取配置 .env / SQLite user_configs"]
-    B --> B1["Config.scrape_tasks_v2()\nSOURCES / CITIES / OURDOMAIN_CITIES / XIOR_CITIES"]
-    B1 --> C["创建 Storage / Notifier / WebNotifier"]
-    C --> D["进入 main_loop 轮询"]
-
-    D --> E["run_once()"]
-    E --> G["逐 source 调 dispatch_scrape_tasks(tasks)\n某个 source 失败只隔离它自己"]
-
-    subgraph S["多平台抓取层 scrapers/"]
-        G --> H1["holland2stay:Eindhoven...\nHollandStayScraper\nBrowserFetcher(H2S_PROFILE)"]
-        G --> H2["ourdomain:Diemen / South-East\nOurDomainScraper"]
-        G --> H2C["ourcampus:Diemen\nOurCampusScraper（继承 OurDomain）\n单元查询走 POST + floorPlans[]"]
-        H2C --> H21
-        H2 --> H21["RENTCafe floorplans.aspx\n发现 floorplan ids / names"]
-        H21 --> H22["rcLoadContent.ashx availableunits\n单元级房源"]
-        H22 --> H23["解析 Unit / Area / Floor / Date\nListing.name = Diemen #6045\nsource = ourdomain"]
-        H2 --> H24{"403 Cloudflare?"}
-        H24 -->|是| H25["切换 TLS 指纹重建 session\nOURDOMAIN_IMPERSONATES / OURDOMAIN_WAF_RETRIES"]
-        H25 --> H21
-
-        G --> H3["xior:Eindhoven Kronehoefstraat...\nXiorScraper"]
-        H3 --> H31["BrowserFetcher(XIOR_PROFILE)\n浏览器内 POST admin-ajax.php\nyardi_room_availability"]
-        H31 --> H32["解析 JSON 响应\napartmentId / apartmentName / sqm / rent"]
-        H32 --> H33["单元级房源\nListing.name = M1.30.53\nsource = xior"]
-        H3 --> H34{"CF 挑战\n或限流?"}
-        H34 -->|是| H35["传输层重新导航过挑战；\n429 走退避重试\n请求间 5s 间隔（全局锁）"]
-        H35 --> H31
-    end
-
-    H1 --> I{"抓取结果"}
-    H23 --> I
-    H24 -->|全部指纹失败| I
-    H33 --> I
-    H34 -->|重试耗尽| I
-
-    I -->|至少一个任务成功| J["合并 listings + completeness\nsource:city key 防同名覆盖"]
-    I -->|全部任务网络失败| K["ScrapeNetworkError\n连续失败计数 / cooldown"]
-    I -->|全部任务 403/429| L["BlockedError / RateLimitError\nmain_loop 冷却"]
-    I -->|单平台失败| M["记录 completeness=false\n隔离失败平台，其他平台继续"]
-
-    M --> J
-    J --> N["storage.diff(fresh)\nsource-aware upsert / 状态变化"]
-    N --> O1["① 老化收敛（每轮）\n消失 0.5h → Reserved（推测）\n消失 2h → Occupied（推测）\n仅限本轮完整扫描的 source:city"]
-    O1 --> O2["② 孤儿收敛（每 24h 一次）\n已移出监控的 source:city，宽限 30 天\n无完整城市则推迟且不重置计时器"]
-    O2 --> P["更新 last_scrape_at / last_scrape_count"]
-
-    P --> SH{"source 在 SHADOW_SOURCES 里？"}
-    SH -->|是| SHX["已入库，但不发任何通知\n（新平台静默验证期）"]
-    SH -->|否| Q["发送通知\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
-    Q --> Q1["标题/正文带平台 badge\nH2S / OD / XR"]
-    Q1 --> Q2["Push: mcore/push.py 平台分流\niOS→APNs  Android→FCM data-only"]
-    Q2 --> R["记录已通知状态"]
-
-    P --> T["扫描自动预订候选（纯内存）"]
-    T --> T1["仅对有候选的用户做 H2S 预登录\n无候选的轮次不碰登录接口"]
-    T1 --> U
-    U{"listing.source == holland2stay\n且可直接预订?"}
-    U -->|是| V["立即提交 try_book()\n线程池并发执行"]
-    U -->|否| W["跳过自动预订\nOD / XR 仅通知不预订"]
-
-    V --> X["booker.py\n登录/复用预热 session"]
-    X --> Y["获取 SKU / contract_start_date"]
-    Y --> Z["createEmptyCart"]
-    Z --> AA["addNewBooking"]
-    AA --> AB["setPaymentMethodOnCart"]
-    AB --> AC["placeOrder"]
-    AC --> AD["idealCheckOut 获取付款链接"]
-
-    AD --> AE{"预订结果"}
-    AE -->|成功| AF["发送 Booking 成功通知\n包含付款链接"]
-    AE -->|失败| AG["发送失败原因\n可进入重试队列"]
-    AF --> R
-    AG --> R
-
-    R --> AH["本轮结束"]
-    W --> AH
-    K --> AI["等待下一轮"]
-    L --> AI
-    AH --> AH1["record_uptime_sample()\n存活小时持久化到 SQLite meta\n→ dashboard 7 天 uptime%"]
-    AH1 --> AI
-    AI --> D
-
-    subgraph WEB["网页 / API 读取路径"]
-        N --> WEB1["listings 表含 source 字段"]
-        WEB1 --> WEB2["dashboard / listings / map / calendar\n显示 H2S / OD / XR badge"]
-        WEB1 --> WEB3["/api/v1/listings?source=...\n/filter/options.sources"]
-        WEB1 --> WEB4["stats source_dist 平台分布"]
-        WEB2 --> WEB5["条件缓存中间件\nETag + Cache-Control: max-age=10\nIf-None-Match → 304 Not Modified"]
-        WEB3 --> WEB5
-        WEB4 --> WEB5
-    end
-
-    subgraph INBOUND["入站 Webhook"]
-        IW1["POST /api/inbound/email\nResend email.received webhook\nSvix HMAC-SHA256 签名"] --> IW2["解析入站邮件\n→ 自动回复 / 工单路由"]
-    end
+    A["启动 monitor"] --> B["解析环境、.env 和 SQLite 配置<br/>建立运行快照与通知器"]
+    B --> C["一轮开始：写入心跳并规划抓取"]
+    C --> D["按平台统一调度<br/>熔断、限流、代理和故障隔离"]
+    D --> E["Holland2Stay / Xior<br/>独立浏览器工作进程"]
+    D --> F["OurDomain / OurCampus / Magis<br/>Student Experience / Plaza"]
+    E --> G["合并房源与完整性结果"]
+    F --> G
+    G --> H["对比并写库：新房源与状态变更"]
+    H --> I["重放未处理事件，再过滤影子平台"]
+    I --> J["匹配用户、收集预订候选"]
+    J --> K["Holland2Stay 预登录与预订<br/>Plaza 自动应征需用户启用"]
+    K --> L["提交预订任务，与房源通知并行"]
+    L --> M["新房源 / 状态变更 / 预订结果通知<br/>Web、外部渠道与移动推送"]
+    M --> N["记录事件已处理、保存重试状态"]
+    N --> O["根据完整扫描结果收敛陈旧房源"]
+    O --> P["轮次收尾与维护，等待下一轮"]
+    P --> C
+    K --> Q{"结果是否明确？"}
+    Q -->|否| R["持久化保护并提示用户核实<br/>H2S 按账号；Plaza 按账号和房源"]
+    Q -->|H2S 成功| S["返回支付链接，用户自行支付"]
+    Q -->|Plaza 成功| T["应征已提交，不保证获得房源"]
+    W["Web / API"] <--> DB[("SQLite")]
+    H <--> DB
+    W --> X["地图、首页、表单读取请求级已保存配置<br/>设置页另显示 monitor 应用状态"]

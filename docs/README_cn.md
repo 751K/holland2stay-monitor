@@ -120,8 +120,8 @@ SESSION_COOKIE_SECURE=true
 ```
 
 - `WEB_PASSWORD`——留空时容器拒绝启动。
-- `HTTPS_PROXY`——机房 IP 必须配，而 VPS 给的正是机房 IP。不配则 Holland2Stay 被
-  Cloudflare 403，该 source 会一直停在熔断循环里。仅当服务器为住宅出口时可以不填。
+- `HTTPS_PROXY`——服务器出口被限制时可配置住宅或移动代理。机房出口曾出现 403，
+  是否可用以实际网络和平台响应为准。
 - `PUBLIC_BASE_URL`——验证邮件的链接由它拼出；未设置时程序拒绝发送。
 - `SESSION_COOKIE_SECURE`——`.env.example` 里的默认值是 `false`，HTTPS 部署需改为
   `true`。
@@ -177,7 +177,7 @@ python monitor.py                # 抓取循环，需另开终端
 ```
 
 访问 `http://127.0.0.1:8088`。注意 `web.py` 与 `monitor.py` 是两个**互相独立**的
-进程，仅通过 SQLite 通信：只运行 `web.py` 将得到一个永远不会更新数据的面板。
+进程，共享 SQLite 并通过进程控制请求重载：只运行 `web.py` 不会抓取新房源。
 
 > **macOS**：免费版 CloakBrowser 的 macOS 构建落后于 Linux，且 headless 模式
 > 可能崩溃，因此本地运行会自动退回可见窗口模式。需长期依赖的部署请使用
@@ -189,7 +189,7 @@ python monitor.py                # 抓取循环，需另开终端
 
 ```bash
 cd /path/to/holland2stay-monitor
-cp data/listings.db "data/listings.db.bak.$(date +%Y%m%dT%H%M%S)"
+docker exec h2s python -c "import sqlite3; sqlite3.connect('data/listings.db').execute('VACUUM INTO ?', ('data/listings.db.bak.$(date +%Y%m%dT%H%M%S)',))"
 git pull
 docker compose build h2s
 docker compose up -d --force-recreate h2s
@@ -223,26 +223,26 @@ docker exec h2s python -c "import sqlite3; \
 | 系统级：source、城市、轮询间隔 | SQLite `app_settings` | 面板「设置」页 |
 | 部署级：凭据、路径、时区、对外基址 | `.env` | 文本编辑器 |
 
-**监控范围与轮询节奏不在 `.env` 中。** 自 v1.16.0 起，`SOURCES`、`CITIES`、
-`*_CITIES`、`AVAILABILITY_FILTERS`、`CHECK_INTERVAL`、`PEAK_*` 等 20 个键存于
+监控范围与轮询节奏由数据库管理。`SOURCES`、`CITIES`、
+`*_CITIES`、`AVAILABILITY_FILTERS`、`CHECK_INTERVAL`、`PEAK_*` 等运行参数存于
 数据库，由面板管理。首次启动会自动将其从 `.env` 迁入，迁移前把整份文件备份为
 `.env.bak.<时间戳>`，日志中记有搬入与跳过的明细。
 
-`.env` 中只余三类，共约 28 个键：
+部署参数、服务端密钥和高级调优参数可保留在 `.env`：
 
-| 类别 | 数量 | 说明 |
-|---|---|---|
-| 凭据 | 14 | 密码、API key、加密密钥、代理 URL。**不进数据库**——数据库会被备份、导出、下载 |
-| 部署事实 | 5 | `DB_PATH`、`TIMEZONE`、`PUBLIC_BASE_URL`、`SESSION_COOKIE_SECURE`、`SUPPORT_EMAIL`。其中 `DB_PATH` 必须留在此处——须先找到数据库，才能读取设置表 |
-| 阈值开关 | 9 | 通知渠道开关与配额，均有默认值，多数部署无需填写 |
+| 类别 | 说明 |
+|---|---|
+| 服务端凭据 | 密码、API key、加密密钥和代理 URL；用户的平台与通知渠道凭据另存于加密的用户配置。 |
+| 部署参数 | `DB_PATH`、`TIMEZONE`、`PUBLIC_BASE_URL`、`SESSION_COOKIE_SECURE`、`SUPPORT_EMAIL`；读取数据库前须先取得 `DB_PATH`。 |
+| 阈值开关 | 通知渠道、配额和其他高级设置，多数有默认值。 |
 
 以下几项需优先了解：
 
 | 键 | 默认值 | 作用 |
 |---|---|---|
 | `WEB_PASSWORD` | — | **必填**，留空时容器拒绝启动 |
-| `HTTPS_PROXY` | — | 生产环境必填。机房 IP 抓取 Holland2Stay 会被 Cloudflare 403 |
-| `PUBLIC_BASE_URL` | — | 生产环境必填，否则验证邮件中的链接指向内网 host |
+| `HTTPS_PROXY` | — | 服务器出口被平台限制时使用的抓取代理 |
+| `PUBLIC_BASE_URL` | — | 验证邮件需要有效的 HTTPS 地址；未配置时程序拒绝生成链接 |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | monitor 静默超过该时长后 `/health` 报告 unhealthy |
 | `HEALTH_*` / `WATCHDOG_*` | 见 `.env.example` | `/monitoring` 所依托的数据退化告警阈值 |
 | `STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` | `0.5` / `2` | 房源自 feed 中消失多久后推定为 Reserved，再经多久判定为 Occupied，见[房源状态](#房源状态) |
@@ -300,11 +300,12 @@ python -m tools.doctor --no-network
 
 ## 房源状态
 
-**四个平台均不提供「房源已下架」的显式信号**，只是停止在 feed 中返回该房源。
-Xior 是其中唯一 feed 里确实带有 `Occupied` 的平台，且覆盖并不完整；其余平台的
-终态全部由系统推断得出，而非平台上报。
+平台 feed 可能不明确说明房源何时下架，因此系统还需要根据完整抓取中的缺失情况
+推断状态。部分平台也会直接报告不可用或已占用状态；上游报告和系统推断在面板中
+分别标识。
 
-因此「消失」即为判据，分两段判定：
+对于未覆盖预留状态的 feed，默认先推断 Reserved，再根据消失总时长推断 Occupied；
+如果配置的 Holland2Stay 状态已包含 Reserved，则可跳过中间推断：
 
 ```mermaid
 stateDiagram-v2
@@ -317,6 +318,7 @@ stateDiagram-v2
     [*] --> A: feed 中首次出现
     A --> R: 消失 30 分钟
     R --> O: 消失 2 小时
+    A --> O: feed 已覆盖预留且消失 2 小时
     R --> A: feed 中再次出现
     O --> A: feed 中再次出现
 ```
@@ -325,12 +327,12 @@ stateDiagram-v2
 `status_is_inferred` 字段，使平台上报与系统推断始终可以区分。实际运行中，所见的
 `Occupied` 多数为推断结果。推测转换**不产生通知**。
 
-2 小时并非任意取值，而是 **Holland2Stay 官方的付款限时**：一条消失超过 2 小时的
-预留，其结果必然已经确定。中间态 `Reserved` 的作用是降低判错的代价——
+默认 2 小时参考 Holland2Stay 的付款时限，但状态仍是推断，不能保证与平台实时状态
+一致。中间态 `Reserved` 的作用是降低判错的代价——
 `Reserved → 可订` 本就是常见迁移；若直接判定为 Occupied 而房源随后回归，则会向
 一批用户推送失实的「重新上架」通知。两个阈值均可配置（`STALE_RESERVED_HOURS` /
 `STALE_OCCUPIED_HOURS`），设计理由与相关教训见
-[ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号)。
+[ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-根据-feed-缺失推断房源状态)。
 
 收敛**仅对本轮完整扫描成功**的 source×城市执行，抓取失败绝不会被读作「房源已
 下架」。
@@ -354,14 +356,14 @@ Plaza：配置用户名和密码并单独开启 Plaza 自动应征后，系统�
 选择“已核实，恢复该房源应征”。核实前仅暂停同一账号对这套房源的自动应征，
 其他房源仍可正常应征；后台任务仍在运行时不能解除保护。
 
-Xior、OurDomain、OurCampus 运行的是同一套 RENTCafe 后端，共用一份实现
-（[`bookers/rentcafe.py`](../bookers/rentcafe.py)）。代码已完整，reCAPTCHA 已
-对接，流程亦已对真实站点走通。功能仍处于**关闭**状态。
+Xior、OurDomain、OurCampus 使用 RENTCafe，共用一份实现
+（[`bookers/rentcafe.py`](../bookers/rentcafe.py)）。验证码和部分申请流程已实现，
+但各平台端到端预订尚未验证，功能仍处于**关闭**状态。
 
 | 平台 | 已完成的部分 | 尚待验证的部分 |
 |---|---|---|
-| Xior | 已推进至申请表、保存草稿并代为上传证件（2026-08-03，真实账号） | 代传证件后表单能否正常保存尚未确认。此外 Xior 的草稿**并不锁定房源**——它比 Holland2Stay 提前一步终止，下一页即需填写 IBAN/SWIFT |
-| OurDomain | 入口段已对真实站点走通（2026-08-04）：floorplans → 可用单元 → 条款页 POST，18 个字段全部落位 | 登录之后的环节全部未验证。该流程**不含选房页**，一旦脱离流程便没有重选入口——代码的处理方式为明确报错中止，绝不携带错位的上下文继续执行。验证需要一个真实的 OurDomain 账号 |
+| Xior | 真实账号已推进至申请表并保存草稿（2026-08-03） | 系统代传证件后能否正常保存尚未确认。草稿**不锁定房源**；下一页需填写 IBAN/SWIFT。 |
+| OurDomain | 入口段已对真实站点走通（2026-08-04）：floorplans → 可用单元 → 条款页 POST | 登录之后的环节需要真实账号验证。找不到申请表时，代码会重选一次单元；仍不匹配则中止。 |
 | OurCampus | `OurCampusBooker` 已注册、面板上可填凭据，但**用户侧关闭**（不在 `_AUTO_BOOK_SOURCES`）。真实账号实测：选中单元、条款页、Start Application（v3 一次过）、登录均已跑通 | 登录之后落到 Applicant Info 这一段没通。另外「开始申请能占住单元」已被证伪：站点写明提交只进抽签池、不锁房 |
 | Magis | 无 | 预订流程尚未侦察 |
 

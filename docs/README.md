@@ -130,9 +130,9 @@ SESSION_COOKIE_SECURE=true
 ```
 
 - `WEB_PASSWORD` — the container refuses to start while it is empty.
-- `HTTPS_PROXY` — needed on any datacenter IP, which is what a VPS gives you.
-  Without it Cloudflare 403s Holland2Stay and that source stays in its breaker
-  loop. Skip it only if the server has a residential exit.
+- `HTTPS_PROXY` — configure an appropriate residential or mobile proxy if the
+  server's exit is blocked. Datacenter exits have previously received 403s;
+  availability depends on the actual network and platform response.
 - `PUBLIC_BASE_URL` — verification emails are built from it; unset, the app
   refuses to send them.
 - `SESSION_COOKIE_SECURE` — `.env.example` ships `false`; set it to `true` for
@@ -196,7 +196,8 @@ python monitor.py                # scraper loop, separate terminal
 ```
 
 Open `http://127.0.0.1:8088`. Note that `web.py` and `monitor.py` are two
-independent processes that only talk through SQLite — running just `web.py`
+independent processes that share SQLite and use process-control requests for
+reloads — running just `web.py`
 gives you a panel that never gets new data.
 
 > **macOS**: the free CloakBrowser build for macOS lags the Linux one, and
@@ -209,7 +210,7 @@ gives you a panel that never gets new data.
 
 ```bash
 cd /path/to/holland2stay-monitor
-cp data/listings.db "data/listings.db.bak.$(date +%Y%m%dT%H%M%S)"
+docker exec h2s python -c "import sqlite3; sqlite3.connect('data/listings.db').execute('VACUUM INTO ?', ('data/listings.db.bak.$(date +%Y%m%dT%H%M%S)',))"
 git pull
 docker compose build h2s
 docker compose up -d --force-recreate h2s
@@ -245,28 +246,28 @@ Configuration lives in three places:
 | System: sources, cities, intervals | SQLite `app_settings` | Dashboard → Settings |
 | Deployment: credentials, paths, timezone, base URL | `.env` | Text editor |
 
-**Monitoring scope and polling cadence are not in `.env`.** As of v1.16.0,
-20 keys — `SOURCES`, `CITIES`, `*_CITIES`, `AVAILABILITY_FILTERS`,
+Monitoring scope and polling cadence are managed in the database. Runtime keys —
+`SOURCES`, `CITIES`, `*_CITIES`, `AVAILABILITY_FILTERS`,
 `CHECK_INTERVAL`, `PEAK_*` and friends — live in the database and are managed
 from the dashboard. First start migrates them out of `.env` automatically,
 backing up the whole file to `.env.bak.<timestamp>` beforehand and logging
 exactly what moved.
 
-What remains in `.env` is roughly 28 keys in three groups:
+Deployment configuration, credentials and advanced tuning can remain in `.env`:
 
-| Group | Count | Notes |
-|---|---|---|
-| Credentials | 14 | Passwords, API keys, encryption key, proxy URLs. **Never in the database** — databases get backed up, exported, downloaded |
-| Deployment facts | 5 | `DB_PATH`, `TIMEZONE`, `PUBLIC_BASE_URL`, `SESSION_COOKIE_SECURE`, `SUPPORT_EMAIL`. `DB_PATH` must stay here — you need the database before you can read the settings table |
-| Thresholds and switches | 9 | Notification channel toggles and quotas; all have defaults, most deployments set none |
+| Group | Notes |
+|---|---|
+| Server credentials | Passwords, API keys, encryption key and proxy URLs. Per-user platform and channel credentials are stored encrypted in user configuration. |
+| Deployment facts | `DB_PATH`, `TIMEZONE`, `PUBLIC_BASE_URL`, `SESSION_COOKIE_SECURE`, `SUPPORT_EMAIL`. `DB_PATH` must be available before opening the database. |
+| Thresholds and switches | Notification channel toggles, quotas and other advanced settings; most have defaults. |
 
 The ones worth knowing up front:
 
 | Key | Default | What it controls |
 |---|---|---|
 | `WEB_PASSWORD` | — | **Required.** The container refuses to start without it |
-| `HTTPS_PROXY` | — | Required in production. Datacenter IPs get 403'd by Cloudflare on Holland2Stay |
-| `PUBLIC_BASE_URL` | — | Required in production, or verification emails link to an internal host |
+| `HTTPS_PROXY` | — | Proxy for scraping when the server's exit is blocked |
+| `PUBLIC_BASE_URL` | — | Required for verification emails; without a valid HTTPS URL the service refuses to generate the link |
 | `MONITOR_HEARTBEAT_MAX_AGE` | `900` | How long the monitor may be silent before `/health` reports unhealthy |
 | `HEALTH_*` / `WATCHDOG_*` | see `.env.example` | Thresholds for the data-degradation alerts behind `/monitoring` |
 | `STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS` | `0.5` / `2` | How long a listing must be absent from the feed before it is inferred Reserved, then Occupied — see [Listing status](#listing-status) |
@@ -283,8 +284,8 @@ The environment layer exists as an override hatch for containerised debugging:
 docker compose run -e CHECK_INTERVAL=30 h2s python monitor.py
 ```
 
-The cost is that it is invisible: the dashboard shows one value, the process
-uses another. So the dashboard flags "overridden by an environment variable,
+An override can make the saved value differ from the value in use. The dashboard
+flags "overridden by an environment variable,
 changes here will not take effect", and the monitor warns at startup about any
 such key left in `.env`. **Use the dashboard for day-to-day changes** — writing
 these keys back into `.env` overrides it. Deployment settings, secrets and tuning
@@ -331,12 +332,14 @@ Its `Settings` section answers the most common post-deploy question: whether the
 
 ## Listing status
 
-No platform tells you a unit is gone. They simply stop returning it. Xior is the
-only source whose feed carries a real `Occupied` state, and even there it covers
-just part of the picture. Everywhere else, a terminal status is something the
-system worked out rather than something a platform said.
+Platform feeds do not always say when a listing has been removed. Some report
+unavailable or occupied statuses directly; for other listings the system infers
+state from absence in complete scans. The panel distinguishes inferred states
+from upstream reports.
 
-So absence is the signal, and it is read in two steps:
+For feeds that do not cover reservations, absence normally leads to an inferred
+Reserved state and then Occupied. When the configured Holland2Stay feed includes
+Reserved, the intermediate inference can be skipped:
 
 ```mermaid
 stateDiagram-v2
@@ -349,6 +352,7 @@ stateDiagram-v2
     [*] --> A: first seen in the feed
     A --> R: gone 30 min
     R --> O: gone 2 h
+    A --> O: reservations covered and gone 2 h
     R --> A: seen again
     O --> A: seen again
 ```
@@ -358,15 +362,15 @@ Anything the system inferred carries an **inferred** badge in the panel and a
 never confused — in practice most `Occupied` rows you see will be inferred.
 Inferred transitions do not generate notifications.
 
-Two hours is not arbitrary — it is Holland2Stay's own payment deadline. A
-reservation that has been out of the feed longer than that has resolved one way
-or the other. The intermediate Reserved stop exists so that being wrong is
+The two-hour default is informed by Holland2Stay's payment window; the result
+remains an inference and may differ from the platform's current state. The
+intermediate Reserved stop exists so that being wrong is
 cheap: `Reserved → Available` is an ordinary transition, whereas jumping
 straight to Occupied and then seeing the listing return produces a wave of false
 "back on the market" alerts. Both thresholds are configurable
 (`STALE_RESERVED_HOURS` / `STALE_OCCUPIED_HOURS`); the reasoning and the failure
 modes behind them are in
-[ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号).
+[ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-根据-feed-缺失推断房源状态).
 
 Convergence only runs for source/city pairs that were **completely** scanned
 that round. A failed scrape is never read as "the listings are gone".
@@ -394,15 +398,15 @@ select “Checked; resume applications for this listing” in user settings. Onl
 that account and listing are paused; other listings can still be processed.
 Protection cannot be removed while the application task is running.
 
-Xior, OurDomain and OurCampus run the same RENTCafe backend and share one
-implementation ([`bookers/rentcafe.py`](../bookers/rentcafe.py)). The code is
-complete, reCAPTCHA solving is wired up, and the flow has been walked end-to-end
-against a live site. The feature is still **switched off**.
+Xior, OurDomain and OurCampus use RENTCafe and share an implementation
+([`bookers/rentcafe.py`](../bookers/rentcafe.py)). Captcha solving and parts of
+the application flows are implemented, but their end-to-end booking paths have
+not been verified and remain **switched off**.
 
 | Platform | Reached | Missing |
 |---|---|---|
-| Xior | Applicant form, draft saved, ID document uploaded (2026-08-03, real account) | Whether the form saves cleanly once the system supplies the document. And a Xior draft **does not hold the unit** — it stops a step earlier than Holland2Stay, because the next page asks for IBAN/SWIFT |
-| OurDomain | Entry leg verified against the live site (2026-08-04): floorplans → available units → terms POST, all 18 form fields landing | Everything after login. This flow has no unit-picker page, so falling out of it has no recovery path — the code aborts loudly rather than continuing with a mismatched context. Needs a real OurDomain account |
+| Xior | A real account reached the application form and saved a draft (2026-08-03) | Saving after the system uploads the ID document has not been verified. A draft **does not hold the unit**; the next page asks for IBAN/SWIFT. |
+| OurDomain | Entry leg verified against the live site (2026-08-04): floorplans → available units → terms POST | The post-login path needs real-account verification. If the application form is missing, the implementation retries unit selection once and aborts if the form is still unavailable. |
 | OurCampus | `OurCampusBooker` registered and credentials can be entered in the panel, but **off for users** (not in `_AUTO_BOOK_SOURCES`). Verified with a real account: unit selection, terms page, Start Application (v3 accepted first try) and login all work | Landing on Applicant Info after login does not work yet. The premise that starting an application holds the unit is disproved: the site states it only enters you into the lottery |
 | Magis | Nothing | Booking flow has never been scouted |
 

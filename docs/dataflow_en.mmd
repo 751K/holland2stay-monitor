@@ -1,96 +1,25 @@
 flowchart TD
-    A["Start monitor.py"] --> B["Load config .env / SQLite user_configs"]
-    B --> B1["Config.scrape_tasks_v2()\nSOURCES / CITIES / OURDOMAIN_CITIES / XIOR_CITIES"]
-    B1 --> C["Init Storage / Notifier / WebNotifier"]
-    C --> D["Enter main_loop polling"]
-
-    D --> E["run_once()"]
-    E --> G["dispatch_scrape_tasks(tasks) per source\nOne failing source is isolated, not fatal"]
-
-    subgraph S["Multi-platform scraping layer scrapers/"]
-        G --> H1["holland2stay:Eindhoven...\nHollandStayScraper\nBrowserFetcher(H2S_PROFILE)"]
-        G --> H2["ourdomain:Diemen / South-East\nOurDomainScraper"]
-        G --> H2C["ourcampus:Diemen\nOurCampusScraper (extends OurDomain)\nunit query via POST + floorPlans[]"]
-        H2C --> H21
-        H2 --> H21["RENTCafe floorplans.aspx\nDiscover floorplan ids / names"]
-        H21 --> H22["rcLoadContent.ashx availableunits\nUnit-level listings"]
-        H22 --> H23["Parse Unit / Area / Floor / Date\nListing.name = Diemen #6045\nsource = ourdomain"]
-        H2 --> H24{"403 Cloudflare?"}
-        H24 -->|Yes| H25["Switch TLS fingerprint and rebuild session\nOURDOMAIN_IMPERSONATES / OURDOMAIN_WAF_RETRIES"]
-        H25 --> H21
-
-        G --> H3["xior:Eindhoven Kronehoefstraat...\nXiorScraper"]
-        H3 --> H31["BrowserFetcher(XIOR_PROFILE)\nin-browser POST admin-ajax.php\nyardi_room_availability"]
-        H31 --> H32["Parse JSON response\napartmentId / apartmentName / sqm / rent"]
-        H32 --> H33["Unit-level listings\nListing.name = M1.30.53\nsource = xior"]
-        H3 --> H34{"CF challenge\nor rate limit?"}
-        H34 -->|Yes| H35["Transport re-navigates to clear\nthe challenge; 429 backs off\n5s pacing between requests (global lock)"]
-        H35 --> H31
-    end
-
-    H1 --> I{"Scrape result"}
-    H23 --> I
-    H24 -->|All fingerprints failed| I
-    H33 --> I
-    H34 -->|Retries exhausted| I
-
-    I -->|At least one task succeeded| J["Merge listings + completeness\nsource:city keys avoid name collisions"]
-    I -->|All tasks had network failures| K["ScrapeNetworkError\nFailure streak / cooldown"]
-    I -->|All tasks hit 403/429| L["BlockedError / RateLimitError\nmain_loop cooldown"]
-    I -->|One platform failed| M["Record completeness=false\nIsolate failed platform; keep others running"]
-
-    M --> J
-    J --> N["storage.diff(fresh)\nsource-aware upsert / status changes"]
-    N --> O1["1. Aging sweep (every round)\nGone 0.5h -> Reserved (inferred)\nGone 2h -> Occupied (inferred)\nOnly source:city scanned completely this round"]
-    O1 --> O2["2. Orphan sweep (once per 24h)\nsource:city dropped from monitoring, 30-day grace\nNo complete city: defer, keep the timer"]
-    O2 --> P["Update last_scrape_at / last_scrape_count"]
-
-    P --> SH{"source in SHADOW_SOURCES?"}
-    SH -->|Yes| SHX["Stored, but no notification at all\n(silent validation of a new platform)"]
-    SH -->|No| Q["Send notifications\nWeb / Telegram / Email / WhatsApp / APNs+FCM / iMessage"]
-    Q --> Q1["Title/body include platform badge\nH2S / OD / XR"]
-    Q1 --> Q2["Push: mcore/push.py platform dispatch\niOS→APNs  Android→FCM data-only"]
-    Q2 --> R["Record notified state"]
-
-    P --> T["Scan auto-booking candidates (in-memory)"]
-    T --> T1["Prewarm login only for users with\na real candidate this round"]
-    T1 --> U
-    U{"listing.source == holland2stay\nand directly bookable?"}
-    U -->|Yes| V["Submit try_book() immediately\nvia thread pool (concurrent)"]
-    U -->|No| W["Skip auto-booking\nOD / XR are notify-only"]
-
-    V --> X["booker.py\nLogin / reuse prewarmed session"]
-    X --> Y["Fetch SKU / contract_start_date"]
-    Y --> Z["createEmptyCart"]
-    Z --> AA["addNewBooking"]
-    AA --> AB["setPaymentMethodOnCart"]
-    AB --> AC["placeOrder"]
-    AC --> AD["idealCheckOut — get payment URL"]
-
-    AD --> AE{"Booking result"}
-    AE -->|Success| AF["Send booking success notification\nwith payment URL"]
-    AE -->|Failed| AG["Send failure reason\nMay enter retry queue"]
-    AF --> R
-    AG --> R
-
-    R --> AH["Round complete"]
-    W --> AH
-    K --> AI["Wait for next round"]
-    L --> AI
-    AH --> AH1["record_uptime_sample()\nPersist alive hour to SQLite meta\n→ dashboard 7d uptime%"]
-    AH1 --> AI
-    AI --> D
-
-    subgraph WEB["Web / API read path"]
-        N --> WEB1["listings table includes source"]
-        WEB1 --> WEB2["dashboard / listings / map / calendar\nshow H2S / OD / XR badges"]
-        WEB1 --> WEB3["/api/v1/listings?source=...\n/filter/options.sources"]
-        WEB1 --> WEB4["stats source_dist platform distribution"]
-        WEB2 --> WEB5["Conditional cache middleware\nETag + Cache-Control: max-age=10\nIf-None-Match → 304 Not Modified"]
-        WEB3 --> WEB5
-        WEB4 --> WEB5
-    end
-
-    subgraph INBOUND["Inbound webhooks"]
-        IW1["POST /api/inbound/email\nResend email.received webhook\nSvix HMAC-SHA256 signature"] --> IW2["Parse inbound mail\n→ auto-reply / ticket routing"]
-    end
+    A["Start monitor"] --> B["Resolve environment, .env and SQLite settings<br/>Create runtime snapshot and notifiers"]
+    B --> C["Start round: heartbeat and scrape plan"]
+    C --> D["Unified per-source scheduling<br/>circuit breaking, pacing, proxy and failure isolation"]
+    D --> E["Holland2Stay / Xior<br/>separate browser worker processes"]
+    D --> F["OurDomain / OurCampus / Magis<br/>Student Experience / Plaza"]
+    E --> G["Merge listings and completeness"]
+    F --> G
+    G --> H["Diff and persist new listings and status changes"]
+    H --> I["Replay pending events, then filter shadow sources"]
+    I --> J["Match users and collect booking candidates"]
+    J --> K["Holland2Stay pre-login and booking<br/>Plaza applications require user opt-in"]
+    K --> L["Submit booking tasks in parallel with listing notifications"]
+    L --> M["Deliver listing, status and booking results<br/>Web, external channels and mobile push"]
+    M --> N["Mark events processed and save retry state"]
+    N --> O["Converge stale listings using complete scans"]
+    O --> P["Round cleanup and maintenance; wait for next round"]
+    P --> C
+    K --> Q{"Is the result certain?"}
+    Q -->|No| R["Persist a guard and ask the user to verify<br/>H2S by account; Plaza by account and listing"]
+    Q -->|H2S success| S["Return payment URL; user pays"]
+    Q -->|Plaza success| T["Application submitted; housing is not guaranteed"]
+    W["Web / API"] <--> DB[("SQLite")]
+    H <--> DB
+    W --> X["Map, dashboard and forms read per-request saved settings<br/>Settings page separately shows monitor acknowledgement"]

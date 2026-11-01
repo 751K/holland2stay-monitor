@@ -27,13 +27,14 @@ flowchart LR
     W <--> DB[("SQLite<br/>data/listings.db")]
     M <--> DB
     M --> N["通知渠道<br/>Telegram / Email / APNs / FCM ..."]
-    M --> S["房源平台<br/>H2S / OurDomain / OurCampus / Xior"]
+    M --> S["房源平台<br/>七个平台，见 SourceSpec"]
 ```
 
-两个进程**仅通过 SQLite 通信**，不存在 IPC。由此产生两个后果：
+Web 与 monitor 共享 SQLite，也通过文件和进程控制请求重载或启停；监控还会启动浏览器
+工作进程并与之通信。由此产生两个后果：
 
-- web 故障不影响抓取，monitor 故障不影响面板浏览——但**面板会显示陈旧数据而不
-  报错**。
+- web 故障不影响抓取，monitor 故障时面板仍可读取已保存的数据；这些数据可能陈旧，
+  应结合监控状态与最后抓取时间判断。
 - 因此 `/health` 必须同时检查两者，相关教训见 §5.1。
 
 进程定义位于 [`docker/supervisord.conf`](../docker/supervisord.conf)。两者均为
@@ -44,12 +45,12 @@ flowchart LR
 系统级配置的键分属四种生命周期，登记于 [`env_registry.py`](../env_registry.py)，
 该文件是键名的唯一权威清单：
 
-| 类别 | 数量 | 谁改 | 存放位置 |
-|---|---|---|---|
-| `secret` | 19 | 人，部署时一次 | `.env`。不进数据库——库会被备份、导出、下载 |
-| `deploy` | 9 | 人，换机器或换域名时 | `.env`。部分须在能读数据库**之前**可用，`DB_PATH` 即是 |
-| `runtime` | 20 | **Web 面板，运行时** | SQLite `app_settings` |
-| `tuning` | 30 | 几乎无人改动 | `.env`，均有代码默认值，多数部署一个都不必填 |
+| 类别 | 谁改 | 存放位置 |
+|---|---|---|
+| `secret` | 部署者 | 进程环境或 `.env`；用户自己的平台及通知凭据另存于加密的用户配置 |
+| `deploy` | 部署者 | 进程环境或 `.env`；`DB_PATH` 等须在读取数据库之前可用 |
+| `runtime` | Web 面板或部署者 | SQLite `app_settings`，也可由环境变量或 `.env` 覆盖 |
+| `tuning` | 部署者 | 进程环境或 `.env`，多数配置有默认值 |
 
 `runtime` 一类原先与其余三类同处 `.env`，构成本设计中的矛盾：该文件同时充当
 「人手写的部署产物」与「程序运行时写入的存储」。双重身份在代码中留下两处代价——
@@ -67,8 +68,9 @@ flowchart LR
 ```
 
 当前实现由 [`settings_store.py`](../settings_store.py) 在加载 `.env` 前记录真实的
-外部覆盖，随后按上述顺序解析运行参数并写入 `os.environ`。热重载只刷新 runtime
-参数；部署参数、凭据和 tuning 参数仍需重启。桌面版 Web 启动 monitor 时不会把
+外部覆盖，monitor 按上述顺序解析并发布运行参数。Web 的地图、首页和用户表单按请求
+解析已保存配置，读取或校验失败时沿用本 worker 上次可用的快照，不修改全局环境。
+热重载只刷新 runtime 参数；部署参数、凭据和 tuning 参数仍需重启。桌面版 Web 启动 monitor 时不会把
 数据库注入值误当成外部环境变量。外部环境层可用于容器化排障时的强制覆盖
 （`docker compose run -e CHECK_INTERVAL=30 ...`）。
 
@@ -249,8 +251,9 @@ flowchart TD
     D --> SC["每组用缓存的 scraper 实例<br/>某个 source 抛异常只隔离它自己"]
     SC --> R["合并 listings + completeness"]
     R --> DIFF["storage.diff(fresh)<br/>→ new_listings / status_changes"]
-    DIFF --> BOOK["自动预订候选<br/>（仅 H2S）"]
-    DIFF --> NOTIF["按用户过滤条件分发通知"]
+    DIFF --> REPLAY["重放未处理事件<br/>过滤影子平台"]
+    REPLAY --> BOOK["提交预订候选<br/>H2S / Plaza"]
+    BOOK --> NOTIF["分发房源、状态和预订通知"]
     NOTIF --> CPL{"本轮有完整扫描的城市？"}
     CPL -->|无| SKIP2["两趟收敛均跳过<br/>且不重置 24h 计时器<br/>下轮出现完整城市时补充执行"]
     CPL -->|有| AGE["① 老化收敛（每轮执行）<br/>消失 0.5h → Reserved（推测）<br/>消失 2h → Occupied（推测）"]
@@ -298,8 +301,11 @@ scrapers/
 │                     承载创建 / 存活性检查 / 年龄重建 / 批次会话的生命周期
 ├── holland2stay.py   GraphQL over 浏览器传输层
 ├── ourdomain.py      RENTCafe HTML/AJAX over curl_cffi
-├── ourcampus.py      继承 OurDomain，只换取单元表的请求形状
-└── xior.py           WordPress admin-ajax over 浏览器传输层
+├── ourcampus.py      继承 OurDomain，使用其单元表请求形状
+├── xior.py           WordPress admin-ajax over 浏览器传输层
+├── magis.py          Livewire HTML
+├── studentexperience.py  站点 HTML 与详情页
+└── plaza.py          Plaza 公开房源接口
 ```
 
 各源的传输方式不同，取决于其反爬强度：
@@ -310,6 +316,9 @@ scrapers/
 | Xior | 浏览器（CloakBrowser） | 同上；自 2026-08-02 起 AJAX 端点亦启用了挑战 |
 | OurDomain | curl_cffi + TLS 指纹轮换 | 目前仅有 WAF 级 403，更换指纹即可通过 |
 | OurCampus | 同 OurDomain | 同属 Greystar，使用同一套 RentCafe/SecureRC 后端 |
+| Magis | HTTP | 解析 Livewire 房源页面 |
+| Student Experience | HTTP | 解析列表和详情页面 |
+| Plaza | HTTP | 读取公开房源接口 |
 
 > **`get_scraper()` 返回的是缓存实例，而非新对象。** 浏览器实例挂载在 scraper
 > 实例上，每次新建实例都会使跨轮复用完全失效，见 §5.4。
@@ -549,7 +558,7 @@ profile 位于 `<DATA_DIR>/browser_profiles/`，每槽位磁盘缓存上限 128 
 | `status_hold_until` | `mark_listing_reserved_after_booking()` | 自动预订下单成功后，本地将状态保持为 `Reserved` 的截止时间，默认 120 分钟（`BOOKING_STATUS_HOLD_MINUTES`，对齐 Holland2Stay 的付款限时）。上游 feed 未必立即反映刚提交的订单，若不保持则会被下一轮的「可订」覆盖，并额外产生一条失实的重新上架通知。保持的条件为三项同时成立：状态为**推断的** `Reserved`、feed 上报「可订」、尚未到期；任一项不成立时一律以 feed 为准 |
 | `city_normalized` | `diff()` 写入；`_backfill_city_normalized()` 于每次启动刷新 | 归一后的城市名，供全部城市筛选使用。原始 `city` 保留并照常展示，见 §4.1 |
 
-### 4.1 `city` 在四个平台上不是同一种东西
+### 4.1 `city` 随平台具有不同含义
 
 | Source | `city` 实际存放的内容 |
 |---|---|
@@ -737,20 +746,11 @@ API 永远无法换取新 token，只会持续等待至超时并被误判为屏�
 遭遇十余次此类挑战后，Cloudflare 会提升挑战难度，表现为挑战耗时持续增长直至超时
 熔断。
 
-跨轮复用需要**两个条件同时成立**，缺少任一条件都会静默退化：
-
-1. `get_scraper()` 缓存实例——浏览器实例挂载于 scraper 实例之上。
-2. 每个浏览器型 source 运行在**各自独立的**进程级长存单线程 executor 中
-   （`monitor._get_browser_executor(source)`）。
-
-第 2 条包含两层约束，二者缺一不可：Playwright 对象绑定其创建线程，线程一旦更换，
-浏览器即失效，因此该线程的存活期必须长于单轮；此外，两个独立的 Playwright sync
-实例**不能共存于同一线程**——第一个会在该线程上安装 event loop，第二个的
-`launch()` 随即被判定为「在 asyncio loop 中使用同步 API」，因此 Holland2Stay 与
-Xior 不能共用一条线程。
-
-v1.9.0 声称实现了跨轮复用，但上述两条均未满足，实际从未生效；v1.9.9 修复第一层
-时又一度将两个 source 置于同一线程，触发了第二层约束。
+每个浏览器型 source 由独立的长存工作进程持有 scraper 和 Playwright 浏览器，
+monitor 为其维护单线程 executor 串行通信。浏览器在进程内跨轮复用；进程超时或失效
+时由 monitor 回收，并在后续请求中重建。预登录和预订使用独立的账号工作进程，
+资源切换会等待当前操作结束。实现见 `mcore/browser_worker.py` 与
+`mcore/booking_worker.py`。
 
 ### 5.5 source 级熔断
 
@@ -808,8 +808,8 @@ source 上。推广前对保留日志中「整体抓取失败」的全量统计�
 现由 [`mcore/backoff.py`](../mcore/backoff.py) 的 `PersistedBackoff` 统一承载，
 状态写入 `meta` 表。两个设计要点：
 
-- **采用墙钟而非单调钟。** `monotonic()` 的零点是进程启动，持久化其取值并无
-  意义。代价是须处理 NTP 跳变，处理方式为将剩余时间钳制至配置上限——等待时长
+- **采用墙钟而非单调钟。** `monotonic()` 的参考点未定义，不能将其持久化值当作
+  跨重启的绝对时间。代价是须处理 NTP 跳变，处理方式为将剩余时间钳制至配置上限——等待时长
   永不超过该 source 配置的最长退避。若不钳制，一次时钟回跳足以令该 source 长期
   停摆，且无任何日志可供追溯成因。
 - **`expire()` 与 `reset()` 语义分离。** `reset()` 表示问题已解决（canary
@@ -1078,20 +1078,23 @@ OurCampus 官网自述排队 16–18 个月——仅凭「抓取到 0 条」会�
 答案。同理，日志侧也没有做全文索引——数十 MB 规模的日志，分块反向读取加子串过滤
 已经足够快。
 
-### 5.13 「从 feed 里消失」是唯一的下架信号
+### 5.13 根据 feed 缺失推断房源状态
 
-四个平台均不提供「房源已下架」的显式信号，只是停止在 feed 中返回该房源。
+各平台 feed 的状态覆盖范围不同；没有明确终态的房源需要根据完整抓取中的缺失时间
+推断。系统将推断状态与平台上报状态区分保存。
 
 | Source | feed 中是否存在终态状态 |
 |---|---|
 | Holland2Stay | 存在 `Reserved`（已下单未付款）；下架不作声明，房源直接从 feed 中消失 |
 | OurDomain | 不存在，消失即下架 |
-| OurCampus | 不存在（推断，尚无真实数据佐证） |
-| Xior | **存在** `Occupied`，为四个平台中唯一显式上报者；但覆盖不完整，其余部分仍需依据消失判定 |
+| OurCampus | 对单元可申请状态的解析以实际响应为准，缺失仍需推断 |
+| Xior | 存在 `Occupied`，但覆盖不完整，其余部分仍需依据消失判定 |
+| Magis | 非 Available 状态映射为 `Occupied` |
+| Student Experience | 可用列表映射为 `Available to book`，缺失仍需推断 |
+| Plaza | 映射为 `Available to book` 或 `Not available`，缺失仍需推断 |
 
-因此「未再出现的时长」是唯一可用的判据。此前曾按 (source, 状态类) 分别配置阈值，
-那些差异实际描述的是「feed 是否保留已下架房源」，而四个平台的答案均为否，故收敛为
-一套规则。
+对于缺失的房源，系统按未再出现的时长使用统一阈值；仅完整扫描过的 source / 城市
+参与该轮收敛。
 
 **但「消失」意味着什么，取决于 feed 覆盖了哪些状态。** Holland2Stay 的
 `available_to_book` 共六个取值，抓取范围由 `AVAILABILITY_FILTERS` 决定：
@@ -1120,7 +1123,8 @@ OurCampus 官网自述排队 16–18 个月——仅凭「抓取到 0 条」会�
 `AVAILABILITY_FILTERS` 可变更，硬编会在他人调整配置时静默失准。读取失败时退回前一类
 判据（宁可多一站推测，也不应将仍处于付款窗口内的房源直接判死）。
 
-其余三个平台的 feed 只列可订单元，不存在等价的「已预留」可抓，故始终属于前一类。
+当前实现只根据 Holland2Stay 配置判断是否覆盖完整预留生命周期；其他平台按前一类
+规则处理，具体上游状态仍可能包含不可用或已占用的房源。
 
 统一后的规则：
 
@@ -1295,28 +1299,16 @@ Chromium 将其压缩为 `ERR_TUNNEL_CONNECTION_FAILED`，日志随之写出六�
 同样是通知阶段的一种结论，若不标记，§6.1 的重放会将静默拦下的房源原样推送给
 用户，影子保证当场失效。
 
-### 6.1 交付语义为 at-least-once
+### 6.1 通知处理与有界重放
 
-`run_once` 的顺序是 `diff()` → 通知 → 标记。而 `diff()` 检测变更的副作用正是
-覆盖掉用于检测的那份旧状态，因此「diff 已提交、通知尚未发出」这一窗口内进程
-若终止，事件即永久丢失——下一轮 `diff()` 所见的新旧状态已然相同，不再产出任何
-结果。触发条件相当日常：2026-08-20 当日部署 12 次，每次 `--force-recreate` 都
-在打断正在进行的轮次。
+`diff()` 写入新房源和状态事件，通知阶段完成后按房源 ID 或状态事件 ID 标记
+`notified=1`。标记表示事件已处理，**不表示每位用户的每个渠道都已送达**：没有
+匹配用户、渠道返回失败等情况也可能被标记。推送任务在事件标记后等待完成，不是
+逐设备持久化的送达确认。
 
-`notified` 字段形似一本 at-least-once 的账，实则只写不读：全仓库并无任何
-`SELECT` 读取它，仅有两条 `UPDATE` 将其置 1。
-
-现改为有界重放，三件事须同时成立，缺其一即构成一次面向全体用户的通知轰炸：
-
-| 措施 | 内容 | 缺失的后果 |
-|---|---|---|
-| 语义修正 | `notified=1` 自「至少投递给一个用户」改为「已走完通知阶段」 | 无人匹配的房源永远停留在 0，重放信号被噪音淹没 |
-| 一次性迁移 | 存量 `notified=0` 全部置 1，靠 meta 打标只执行一次 | 历史数据被当作待发事件重放 |
-| 有界重放 | 仅重放 90 分钟窗口内的事件，单轮上限 50 条，超窗者归档 | 0 池只增不减，每轮空扫 |
-
-取舍是非对称的：重复通知仅构成打扰，漏发通知则会令用户错过房源。上线前以真实
-生产库快照预演迁移，403 条 listings 与 204 条 status_changes 的积压全部归档，
-首次部署重放 0 条事件，与生产实测一致。
+进程在标记之前中断时，下一轮会重放未处理事件；只重放 90 分钟内的记录，每类每轮
+最多 50 条，超窗记录归档。重放先于影子平台过滤。因而事件可能重复，也可能因窗口、
+渠道失败等原因未送达，不能将此机制描述为端到端的至少一次送达保证。
 
 永久性失败须与临时故障区分处理。例如：用户屏蔽 Telegram bot 后，每次请求均返回
 `403 bot was blocked by the user`，该状态不会自行恢复。系统现会停止重试并自动关闭
@@ -1325,8 +1317,8 @@ Chromium 将其压缩为 `ERR_TUNNEL_CONNECTION_FAILED`，日志随之写出六�
 
 ### 6.2 普通用户只接收房源相关推送
 
-允许发往用户渠道的仅有四类，其余一律经 `_notify_admin_only()` 发往 admin
-（面板通知 + admin 推送）：
+用户渠道发送房源与预订相关事件，以及管理员主动发布的公告。运维告警通过
+`_notify_admin_only()` 发往 admin（面板通知 + admin 推送）：
 
 | 允许 | 理由 |
 |---|---|
@@ -1334,6 +1326,8 @@ Chromium 将其压缩为 `ERR_TUNNEL_CONNECTION_FAILED`，日志随之写出六�
 | `send_status_change` | 同上 |
 | `send_booking_success` | 附带付款链接，不送达等于自动预订白做 |
 | `send_booking_failed` | 用户需知悉自动预订未完成，应手动补订 |
+| `send_booking_uncertain` | 提醒受影响用户核实结果并解除保护 |
+| `send_announcement` | 管理员主动发布的公告 |
 
 抓取被 403 屏蔽、source 熔断、429 限流、每小时的运行心跳，回答的均是「监控是否
 仍在正常运行」——属于运维问题，普通用户既无从判断也无从处置。而每小时若干条此类
@@ -1345,15 +1339,15 @@ Chromium 将其压缩为 `ERR_TUNNEL_CONNECTION_FAILED`，日志随之写出六�
 调用 `send_booking_failed`，聚合文案仅保留在 admin 一侧。
 
 该边界在新增告警时极易被无意破坏——`user_notifiers` 就在手边，循环一发即可。
-`tests/test_user_notification_scope.py` 以 AST 扫描 `monitor.py`，守住的是**清单
-本身**：用户渠道上只允许出现上表四个方法。
+`tests/test_user_notification_scope.py` 和通知、预订相关行为测试保护用户与管理员
+通知的隔离。
 
 ---
 
 ## 7. 自动预订
 
-Holland2Stay 的流程为 `CreateEmptyCart → AddNewBooking →
-SetPaymentMethodOnCart → GetCheckoutAgreements → PlaceOrder → IdealCheckOut`，
+Holland2Stay 的流程为 `POST /api/booking → SetPaymentMethodOnCart →
+GetCheckoutAgreements → PlaceOrder → IdealCheckOut`，
 **止于支付 URL，不完成支付**。
 
 Plaza 支持自动提交应征，须配置凭据并单独开启默认关闭的用户级开关；应征直接
@@ -1369,7 +1363,7 @@ sequenceDiagram
     autonumber
     participant M as monitor
     participant B as H2SBooker
-    participant G as H2S GraphQL
+    participant G as H2S API
     participant DB as SQLite
     participant N as 通知渠道
 
@@ -1378,8 +1372,7 @@ sequenceDiagram
     M->>B: prewarm，提前登录
 
     M->>B: book(listing)
-    B->>G: CreateEmptyCart
-    B->>G: AddNewBooking
+    B->>G: POST /api/booking（建车并占房）
     B->>G: SetPaymentMethodOnCart
     B->>G: GetCheckoutAgreements
     B->>G: PlaceOrder
@@ -1396,9 +1389,9 @@ sequenceDiagram
 
 三类失败的处置见下文；其中 `blocked` 属 IP 或指纹层面，不改动重试队列。
 
-**已在真实账号上验证通过。** 2026-05-22 05:34:44 成功预订 Eindhoven
-`beukenlaan-143-163`（€1120/月，入住 2026-06-04），取得真实的 order_id 与 iDEAL
-付款链接。
+2026-05-22 曾使用当时的旧流程通过真实账号取得 Eindhoven 房源的订单号与 iDEAL
+付款链接。当前 `/api/booking` 占房路径是在后续接口迁移后实现的，尚不能用这次旧
+流程结果证明它已完成真实下单验证；详见 [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md)。
 
 同一次事件亦暴露了多用户竞争问题：另外两个用户在**同一秒内**尝试了同一套房源，
 分别收到「房源已被他人抢先预订」与「A process is already handling this booking」。
@@ -1434,12 +1427,12 @@ sequenceDiagram
   便没有 Xior 那样的重选入口。代码的处理方式为：核对落地页是否为 Applicant
   Info，若否则重新提交一次 Book now，仍不匹配则明确报错中止，绝不携带错位的
   上下文继续执行。验证该环节需要一个真实的 OurDomain 账号。
-- **OurCampus**：`OurCampusBooker` 已注册、面板上有凭据入口，但**不在 `_AUTO_BOOK_SOURCES` 里**（用户侧关闭）。流程与 OurDomain 相同，
+- **OurCampus**：`OurCampusBooker` 已注册、面板上有凭据入口，但**不在 `_AUTO_BOOK_SOURCES` 里**（用户侧关闭）。流程与 OurDomain 类似，
   止于 Applicant Info（服务端已建出申请，不传证件、不保存）。已对照真实响应的
   部分：单元表只认 POST + `floorPlans[]`、onclick 实参为双引号（旧解析器只认
   单引号，对 OC 每一行都解析不出参数）、条款页 reCAPTCHA 与 Xior 逐字相同、
-  `Join Lottery` 不开始申请。未验证的是端到端流程，以及「开始申请能否占住单元」
-  这一前提本身——验证方法见 `tools/ourcampus_booker_probe.py`。
+  `Join Lottery` 不开始申请。登录后到达申请表的端到端流程尚未验证；站点条款明确
+  应征不保留房源。诊断工具见 `tools/ourcampus_booker_probe.py`。
 
 其边界与 Holland2Stay 相同，止于支付环节：再往前是 `ApplicationCharges`，需填写
 IBAN / SWIFT，代填金融凭据是硬性限制。`draft_saved` **不等同于预订成功**。
@@ -1458,7 +1451,7 @@ IBAN / SWIFT，代填金融凭据是硬性限制。`draft_saved` **不等同于�
 | 日志反复出现 `H2S source 熔断` | 见 §5.5；检查出口 IP 是否已被 Cloudflare 标记，可考虑配置 `HTTPS_PROXY` |
 | 日志反复出现 `CF 挑战 90s 内未解开` | 见 §5.3；多为 IP 信誉问题。系统已在每次重试前更换出口 IP，若三次均失败，说明代理池整体信誉不佳 |
 | 日志出现 `代理拒绝 CONNECT` 或 `连不上代理` | 见 §3.2。原因来自代理自身，与 Cloudflare 无关：402 为配额耗尽或欠费，407 为凭据错误，需登录代理商控制台处置 |
-| 全部 source 同时且持续失败 | 优先怀疑代理而非平台。四个平台同时变更策略的可能性远低于一条共用链路失效；执行下方的代理探测命令即可确认 |
+| 全部 source 同时且持续失败 | 检查代理、网络和 DNS 等共用链路，再结合各平台错误判断；代理探测结果不代表所有平台均可访问 |
 | 勾选了某城市却收不到该市某平台的房源 | §4.1。核对该平台在 `city` 列中存的是城市名还是楼盘名；新楼盘需先补进 `KNOWN_XIOR_CITIES` / `KNOWN_OURDOMAIN_CITIES` 的 `city` 字段，重启后回填即生效 |
 | 某平台持续返回 0 条 | 见 §5.7 与 §5.12；确认属确无房源还是上游查询失败 |
 | 容器内存接近上限 | 每个浏览器常驻约 200–400MB，多 source 部署需 2G |
@@ -1491,8 +1484,7 @@ docker exec h2s python -c "from config import get_proxy_url, probe_proxy; \
 ## 9. 已知限制
 
 - 各 source 是**互不相同的房源池**，彼此不构成冗余；Holland2Stay 故障期间无法
-  从其它 source 获取其房源。且体量极不均衡：Holland2Stay 按城市覆盖，是房源的
-  主要来源，其余三个平台均为单栋楼粒度，合计占比很小。
+  从其它 source 获取其房源。各平台覆盖范围和房源量不同，随上游变化。
 - **OurCampus 出房频率极低。** 接入之后的最初数月，解析器所期待的单元表一次都
   没有出现；该样本此后已经出现，并被用于校准解析器（见 v1.26.0）。校准过程中
   证伪了两条原有前提：feed 并非只列出可订单元，置灰的日期单元格表示「自该日起
@@ -1504,6 +1496,6 @@ docker exec h2s python -c "from config import get_proxy_url, probe_proxy; \
 - Cloudflare 策略随时可能变更，抓取层的稳定性本质上依赖出口 IP 的信誉。
 - 自动操作覆盖 Holland2Stay 预订和 Plaza 应征。RENTCafe 线的代码已完整、reCAPTCHA 已对接、流程
   已侦察，欠缺的是端到端验证与真实账号，见 §7.1。
-- 房源终态主要依赖推断。四个平台均不上报下架事件，`Occupied` 中绝大多数带有
+- 部分房源终态依赖推断，平台状态覆盖不完整；推断的 `Occupied` 带有
   `status_is_inferred=1`，见 §5.13。推断错误的代价已压缩至「显示为 Reserved」
   这一档，但其性质仍是推断而非事实。

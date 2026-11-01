@@ -4,7 +4,7 @@
 校验、以及自 2026-08-17 起必须走的加密信道。
 
 代码位于 [`scrapers/holland2stay.py`](../scrapers/holland2stay.py) 与
-[`browser_fetcher.py`](../browser_fetcher.py)；后者为三个走浏览器的平台共用。
+[`browser_fetcher.py`](../browser_fetcher.py)；浏览器传输由 Holland2Stay 和 Xior 使用。
 
 ---
 
@@ -16,8 +16,8 @@
 | 数据形态 | GraphQL JSON（Magento 后端） |
 | 端点 | `https://www.holland2stay.com/api/__enc__`（加密信封，见 §4） |
 | 传输方式 | CloakBrowser（patched Chromium）内 `page.evaluate(fetch)` |
-| 覆盖城市 | 由 `CITIES` 配置，当前生产为 Amsterdam / Eindhoven |
-| 在本项目中的地位 | 房源量最大的一个源，且是唯一开启自动预订的平台 |
+| 覆盖城市 | 由 `CITIES` 配置，实际范围以部署配置为准 |
+| 自动预订 | 支持预订至支付页面；Plaza 也支持单独启用自动应征 |
 
 ---
 
@@ -428,14 +428,14 @@ label 根本不出现，覆盖式赋值会让上一轮攒到的映射丢失，fe
 
 ## 7. 自动预订
 
-H2S 是当前唯一开启自动预订的平台（`monitor._AUTO_BOOK_SOURCES`）。所有 GraphQL
-mutation 同样经由 `BrowserFetcher`，与抓取共用会话与 clearance。流程止于支付页，不代
-填任何金融凭据。
+H2S 支持自动预订至支付页面，不代付或填写金融凭据。登录和下单使用预订工作进程中的
+浏览器会话，可复用该账号的预登录结果；抓取工作进程管理独立的浏览器会话。占房通过
+`POST /api/booking`，后续支付方式、协议和订单步骤走加密 GraphQL。Plaza 也支持自动
+应征，需用户单独启用，见 [PLAZA.md](PLAZA.md)。
 
 ### 7.1 当前状态（2026-08-19 实测重写）
 
-**这一节此前的内容是错的**：曾写「9 条 operation 都没在上游登记、登录那条被拒导致
-第一步就断」。逐条实测后推翻——真相要窄得多，也具体得多。
+以下是 2026-08-19 的抓包与探测结果；上游接口可能发生变化。
 
 #### 实测：白名单放行哪几步
 

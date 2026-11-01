@@ -1,40 +1,26 @@
-# H2S 预订链路 —— operation 原文与现状
+# H2S 预订接口与验证状态
 
-**采集时间** 2026-08-19，方式：浏览器内读取站点自己的 JS chunk（纯静态读取，
-未登录、未提交任何表单、未产生任何订单）。
+本文记录 Holland2Stay 预订实现与 2026-08-19 的站点探测。接口可能变化；运行流程以
+[`booker.py`](../booker.py)、[`h2s_booking_gql.py`](../h2s_booking_gql.py) 和
+[`browser_fetcher.py`](../browser_fetcher.py) 为准。
 
-采集手法与 `docs/H2S.md` §4.2 找加密公钥是同一套：operation 文档在构建时被内联进
-chunk 的模板字符串里，`fetch(chunkUrl).then(r => r.text())` 就能拿到原文，不必跑一遍
-真实业务流程。
+## 1. 当前实现
 
-- www 侧全部预订/购物车 operation：`_next/static/chunks/common-6710491a-*.js`（16 KB）
-- 租户侧（登录、账单、工单）：`tenant.holland2stay.com` 的 `_app-*.js`
+1. 必要时查询 `GetProductDetail`，取得房源 SKU 和入住日期。
+2. 通过 NextAuth 的 `/api/auth/csrf`、`/api/auth/callback/credentials` 和
+   `/api/auth/session` 登录并取得 access token。
+3. 通过加密的 `POST /api/booking` 创建购物车并发起占房。
+4. 调用 `SetPaymentMethodOnCart`、`GetCheckoutAgreements`、`PlaceOrder` 和
+   `IdealCheckOut`，返回支付链接，由用户自行支付。
 
----
+`CreateEmptyCart` 和 `AddNewBooking` 的原文保留供研究；当前下单流程不调用它们。
+2026-08-19 的探测中，后者被公开 API 拒绝。历史上曾有旧流程真实预订成功；当前
+`/api/booking` 路径的完整真实下单尚未验证，不能把旧流程的成功当作该路径的验证。
+结果不确定时系统会暂停同账号自动预订，等待用户核实。
 
-## 1. 结论先行
+## 2. 站点 operation 原文（2026-08-19 采集）
 
-`booker.py` 那 9 条 operation 与站点实际使用的对照：
-
-| booker 里写的 | 站点实际 | 状态 |
-|---|---|---|
-| `GetProduct` | **`GetProductDetail`** | 名字就不对，字段集也不同。403 的直接原因 |
-| `GenerateCustomerToken` | **已不是 GraphQL** | 见 §3。死路，不是照抄能解决的 |
-| `CreateEmptyCart` | `CreateEmptyCart` | 可照抄，见 §2 |
-| `AddNewBooking` | `AddNewBooking` | 可照抄 |
-| `SetPaymentMethodOnCart` | `SetPaymentMethodOnCart` | 可照抄 |
-| `PlaceOrder` | `PlaceOrder` | 可照抄 |
-| `IdealCheckOut` | `IdealCheckOut` | 可照抄 |
-| `GetCheckoutAgreements` | `GetCheckoutAgreements` | **已经逐字一致** —— 所以它一直 200 |
-| `CancelOrder` | 两个 bundle 里都没有 | 未解决。可能在未加载的租户页 chunk 里 |
-
-**8 条里 7 条能照抄，但没用** —— 登录那条是死的，后面 7 条一条都走不到。
-
----
-
-## 2. 可照抄的 operation 原文（逐字）
-
-### GetProductDetail —— 替代 booker 的 `GetProduct`
+### GetProductDetail
 
 ```graphql
 query GetProductDetail($filters: ProductAttributeFilterInput) {
@@ -84,10 +70,8 @@ query GetProductDetail($filters: ProductAttributeFilterInput) {
 `image_manager` 里那段是站点侧的片段常量（chunk `common-f3956634` 的 module 1511），
 原文就是内联进来的，这里已经展开。
 
-**顺带**：这条查询里有 `building_name`、`tenant_profile`、`min_income`、
-`income_requirements`。`docs/H2S.md` §5.2 记着前者「需要时可经 aggregations 取回」
-—— 实际站点自己有一条现成的、白名单登记过的查询直接给。抓取侧要不要用它是另一个
-话题（它是单房源查询，不适合列表扫描）。
+这条单房源查询包含 `building_name`、`tenant_profile`、`min_income` 等字段。
+抓取侧按需调用它补充详情，并使用缓存、预算及限速控制请求量；它不替代列表扫描。
 
 ### CreateEmptyCart
 
@@ -164,7 +148,7 @@ mutation IdealCheckOut($order_id: String!, $plateform: String) {
 }
 ```
 
-### GetCheckoutAgreements（booker 现有的已经一致）
+### GetCheckoutAgreements
 
 ```graphql
 query GetCheckoutAgreements {
@@ -188,382 +172,43 @@ query GetCheckoutAgreements {
 
 ---
 
-## 3. 登录：不是照抄能解决的
+## 6. 登录与传输
 
-**`generateCustomerToken` 在两个 bundle 里都不存在。** 登录已经整体搬走：
+NextAuth 使用同源明文 `/api/auth/*` 请求，均由浏览器发送。2026-08-19 真实账号
+曾通过登录；如果上游要求双因素认证，程序返回需要人工处理的结果。
 
-- 换了主机 —— `tenant.holland2stay.com`，不再是 `www.holland2stay.com`
-- 换了协议 —— Magento REST，不是 GraphQL：
+### 6.5 尚待验证
 
-```
-GET_TOKEN      /api/rest/en/V1/integration/customer/token
-VERIFY_TOKEN   /api/rest/en/V1/integration/customer/token/verify?token=…
-REFRESH_TOKEN  /api/rest/V1/integration/customer/token/refresh
-LOGOUT         /api/rest/V1/integration/customer/logout
-```
+- 带真实登录态的 `/api/booking` 完整占房及支付链接流程尚未实测。
+- 上游何时要求双因素认证、何时要求额外验证，需在实际条件下重新确认。
+- 接口实测具有时间性，不应据历史白名单结果推断当前服务一定放行。
 
-- 前面加了两道闸：
+### 6.6 取消预留
 
-```
-/api/auth/captcha     POST {token, type, provider, action}   redux thunk "auth/verifyCaptchaToken"
-/api/auth/verify-2fa  POST {...}                             redux thunk "tfa/tfaverify"
-```
+租户门户使用 REST：通过 `/api/rest/V1/newdashboard/contract/me` 查询预留，
+按 SKU 调用 `POST /api/rest/V1/customer/bookingcancel/{sku}`。项目中的
+`cancel_pending_orders` 仅考虑本进程记录的自有预留；无记录则不取消。该取消路径
+尚未用真实取消操作验证。是否会调用由预订流程和配置决定。
 
-登录页（`https://tenant.holland2stay.com/`，根路径，不是 `/customer/account/login`
-——那个 404）实测加载了 **Cloudflare Turnstile**：
+### 6.9 REST 与 GraphQL 的加密信封
 
-```
-https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit
-window.turnstile === "object"
-```
-
-`render=explicit` 说明控件由 JS 按需渲染，页面静态 DOM 里看不到 —— 所以「打开登录页
-没看见验证码」不等于没有。`/api/auth/captcha` 收的那个 `token` 就是 Turnstile token。
-
-**这一步是自动化的硬边界。** 绕过 Turnstile 要么接打码服务，要么用真人。2FA 那条同理。
-不是「照抄 operation」这个层面的问题。
-
-未验证的部分：captcha / 2FA 是否每次登录都触发，还是按风险条件触发。要确认得真的登录
-一次，而那需要真实账号密码。
-
----
-
-## 4. 顺带记下的东西
-
-- 详情页不走 GraphQL 取房源数据 —— 是 Next.js 服务端渲染 + 两个 REST 端点：
-  `/rest/V1/building-housing-permit-info/{code}`、`/api/rest/V1/is-bookview/{sku}`
-- 加密信封的调用结构（hook `crypto.subtle.encrypt` 实测）：
-  `RSA-OAEP` 加密 32 字节 = AES 会话密钥；`AES-GCM` 加密业务载荷。
-  **载荷不止是 GraphQL body，路径本身也走同一条加密信道**
-  （实测捕获到 `/rest/V1/building-housing-permit-info/pbs` 明文）
-- 站点内部把受保护路径写死成 `["/residences", "/checkout"]`，
-  clearance cookie 的常量名是 `h2s_verified`
-  （与我们记录的 `h2s_clr` 不同，可能是新旧两套，待确认）
-- 官网博客有一篇 `holland2stay-becomes-codomo` —— 品牌在改名，
-  可能预示又一轮域名/端点迁移
-
----
-
-## 5. 对 `booker.py` 的建议
-
-按投入产出排：
-
-1. **先别照抄那 7 条。** 登录不通，照抄了也走不到。改完只是让 403 换个位置发生。
-2. **`GetProduct` → `GetProductDetail` 可以单独改**，它不需要登录，是纯公开查询。
-   但它在 booker 里只是 `listing.sku` 为空时的兜底，而抓取侧本来就给了
-   sku / contract_id / start_date —— 现状下这条路几乎不会触发。改它属于收拾整齐，
-   不解决任何用户可见的问题。
-3. **真正的决策是自动预订还要不要留。** Turnstile + 2FA 之后，
-   「后台替用户自动下单」这个形态在 H2S 上已经不成立。
-   要么接打码服务（成本、可靠性、以及是否越界都得单独评估），
-   要么把自动预订降级成「秒级通知 + 一键跳转到已填好的下单页」，让用户自己过验证。
-
----
-
-## 6. 更正（2026-08-19，用户配合实登一次账号后实测）
-
-前面 §3「登录被 Turnstile + 2FA 挡死」的结论**下早了**。用户在浏览器里真实登录一次、
-我全程挂钩抓包（密码强制打码、占房/下单请求硬拦截、`Continue to payment` 由安全分类器
-挡下未点）后，实际链路如下：
-
-### 6.1 登录已换成 NextAuth（不再是 GraphQL mutation）
-
-`generateCustomerToken` 这条 GraphQL mutation 彻底没了。现在是标准 NextAuth credentials 流：
-
-```
-GET  /api/auth/providers            → 确认 credentials provider
-GET  /api/auth/csrf                 → { csrfToken }
-POST /api/auth/callback/credentials → 表单提交 csrfToken + 账号 + 密码；200 → { url }
-GET  /api/auth/session              → 见下
-```
-
-`/api/auth/session` 返回（accessToken 是短期令牌，非密码，未打码）：
-
-```json
-{
-  "user": { ... },
-  "expires": "…",
-  "twoFaPending": false,
-  "requires2fa": false,
-  "accessToken": "<JWT>",
-  "accessTokenExpiry": "…"
-}
-```
-
-JWT payload：`{ "uid": 196098, "utypid": 3, "iat": …, "exp": … }`，**有效期 1 小时**。
-
-**这次登录既没弹验证码，也没触发 2FA**（`twoFaPending:false`、`requires2fa:false`）。
-所以 Turnstile / 2FA 是**条件触发**，不是每次必过。触发条件（新设备？风控评分？多次
-失败？）未知——要摸清得多登几次，超出本次范围。
-
-### 6.2 下单 GraphQL 的端点与鉴权（静态读 JS 确认）
-
-```
-端点   /api/service/graphql        （加密变体 /api/__enc__，x-enc:1）
-鉴权   Authorization: Bearer ${session.accessToken}
-```
-
-即 §6.1 拿到的那个 JWT，直接当 Bearer 用在所有下单 mutation 上。tenant 与 www
-共用它——session cookie 落在 `.holland2stay.com` 顶级域，两个子站都读得到。这也是为什么
-登录 tenant 之后，回 www 点 Book 直接进下单向导、没有再要一次登录。
-
-### 6.3 下单向导是三步，前两步纯前端
-
-```
-Book → 1. Overview（房源/月费概览）
-     → 2. Requirements（选 Student / Working professional ← 就是 tenant_profile）
-     → 3. Payment（点 "Continue to payment" 才首次触网建单）
-```
-
-第 1、2 步不发任何请求，全是前端状态。`createEmptyCart` / `addNewBooking` 要到
-「Continue to payment」才触发——那一步会占房，本次未点（安全分类器挡下，与我们自己的
-红线一致）。
-
-### 6.4 修 booker 的完整清单（更新版）
-
-| 环节 | 旧代码 | 应改为 |
-|---|---|---|
-| 登录 | GraphQL `generateCustomerToken` | NextAuth：csrf → callback/credentials → session 取 `accessToken` |
-| token | mutation 返回的 token | `/api/auth/session` 的 `accessToken`（JWT，1h） |
-| 取房源参数 | `GetProduct` | `GetProductDetail`（§2 有原文） |
-| 端点 | `/api/__enc__`（对） | 不变 |
-| 鉴权头 | `Bearer <token>`（对） | 不变，token 换成 accessToken |
-| 2–7 步 operation | 自写 | 照抄 §2 原文 |
-| 2FA | 无处理 | 需处理 `requires2fa:true` 分支——触发时无法全自动 |
-
-**关键改动是登录那一步**：从「发一条 GraphQL mutation」变成「跑一遍 NextAuth 三步握手」。
-其余基本是照抄 operation + 改个 token 来源。
-
-### 6.5 仍未验证 / 仍是风险
-
-- `createEmptyCart` / `addNewBooking` 的实际端点与鉴权：只从 JS 静态确认了
-  `/api/service/graphql` + `Bearer accessToken`，没有真的发一次（发了就占房）。
-  按 §2 原文 + §6.2 鉴权实现后，需要用真实账号跑一次「加购但不下单」来收尾验证。
-- 2FA 触发条件未知。若生产账号登录会触发 2FA，全自动预订就断在这——除非那些账号
-  能关掉 2FA，或接受半自动（人过 2FA）。
-- NextAuth callback 的确切表单字段名（csrfToken 之外账号字段叫 email 还是 username）
-  没抓到明文——POST body 是 URLSearchParams，我的钩子只记了 `[non-string]`。实现时
-  再定一次即可（或读 provider 配置）。
-
----
-
-## 7. 已实现（v1.16.9，2026-08-19）
-
-§6 的发现已落地到代码。改动清单：
-
-- `browser_fetcher.py`：`_raw_fetch` 加 `encrypted` 覆盖参数；新增 `fetch_plain()`——
-  强制明文、跳过 CF-403 重建，专给 NextAuth 端点用（套加密信封会 400）。
-- `booker.py`：`login()` 重写成 NextAuth 三步握手；`_gql` 与全部下单步骤补 `operation_name`；
-  `GetProduct` → 照抄的 `GetProductDetail`；新增 `AuthError` / `TwoFactorRequiredError`
-  与 phase `auth_failed` / `auth_2fa`。
-- `h2s_booking_gql.py`（新）：7 条下单 operation 逐字原文（照抄品）。
-- 测试：`test_booker_login.py` · `test_h2s_booking_gql.py` · `test_booker_operations.py`
-  · `browser_fetcher` 明文通道。
-
-**仍未收尾**（见 §6.5）：createEmptyCart→…→placeOrder 未经真实下单验证；
-`cancel_pending_orders` 的两条 operation 没照抄（在租户门户 bundle 里），仍是自写版，
-很可能 403，但只在取消旧预留单时触发且有兜底。首次真实预订前，用真实账号跑一次
-「加购但不 placeOrder」即可收尾。
-
----
-
-## 6.6 取消预留的真实机制（2026-08-19，静态读租户门户 JS）
-
-`cancelOrder` 那块之前标「未验证」。用抓下单 operation 的同一招——静态读
-`tenant.holland2stay.com` 的 `_app-*.js`——挖出了真实机制，**零副作用、不碰 Turnstile、
-不用真取消**。
-
-结论：**取消不是 GraphQL，是 REST，按 SKU 取消。**
-
-租户门户里的原文（redux thunk `contracts/cancelReservation`）：
-
-```
-POST {base}/rest/V1/customer/bookingcancel/{sku}
-Body:    {}                         （空）
-Headers: Authorization: Bearer {accessToken}
-         Content-Type: application/json
-```
-
-`{base}` = `/api`。参数是 **sku**，不是订单号 / entity_id。
-
-配套的「列出预留拿 SKU」端点（同一张 REST 端点表里）：
-
-```
-GET /api/rest/V1/newdashboard/contract/me
-    ?fields=items[id,sku,product_name,building_name,status,start_date,customer_id,refund_date]
-```
-
-status 落在 `reserved / pending / pending_payment / processing` 的就是可取消的预留。
-另有 `GET /api/rest/V1/customer/orders?fields=items[increment_id,entity_id,...,status]`
-返回订单视角，但取消要 SKU，所以用 `contract/me` 那条。
-
-所以 booker 旧的 GraphQL `customer{orders}` + `cancelOrder` **整个是错的**——站点根本
-不这么取消。已按上面重写成 REST（`booker.cancel_pending_orders`）。
-
-**仍存的不确定**：租户门户把 REST **路径本身也塞进加密信封**（抓包见过
-`/rest/V1/customer-notifications/me` 作为 encrypt 明文）。www 上这些端点走明文还是
-走信封，静态读不出来。当前实现按明文（`fetch_plain`）；若线上回 400/403，改走信封
-（那需要 REST-over-envelope 的编码，本次没抓）。这条路是 reserved_conflict 边缘场景 +
-try/except 兜底，未验证不影响主流程。
-
-## 6.7 下单每步精确报文：为什么不再单独抓
-
-上次跳转支付页把内存里的抓包冲掉了。要补齐得再走一笔真单（占房+订单），代价不小。
-判断是**不值**：
-
-- 7 条 operation 的**原文已逐字照抄**（§2），请求字段名、响应结构都在原文里。
-- 真实抓包只能再确认几个**值的格式**。逐一核对后，唯一有实质不确定的是
-  `addNewBooking` 的 `contract_startDate` 格式——`booker._to_h2s_date` 转成
-  `DD-MM-YYYY`。这是几个月前 booker 能下单时就在用的格式，暂按其正确；上游若改，
-  真实下单会在这步报错，到时按站点实际发的值改即可。
-- 其余（cart_id/sku 字符串、`paymentMethod {code}` 对象、store_id int）都是标准
-  Magento 形状，原文即可确认。
-
-结论：不为「再确认已知结构」去创建一笔真订单。真正的收尾验证放在首次真实预订那次
-一起做（§6.5）。
-
----
-
-## 6.8 ~~占房迁到 Turnstile 门后~~ —— **该结论是错的，已撤回**
-
-我看到下单代码里有个 `challengeToken` 字段，就断言「占房被 Turnstile 挡住、全自动
-可能无解」。**错了。** 更要命的是，推翻它的证据当时就摆在眼前：用户当天就在
-自动化 CloakBrowser 里完整走完了一次真实下单，一路到 iDEAL 支付页——占房那步分明
-成功了。我拿一个字段名压过了已经发生的事实。
-
-### 真相（逐字读自 module 82361）
-
-`zg` / `Eg` **只是加密信封的打包函数**，不是什么 Turnstile 逻辑：
-
-```js
-async function x(e){                              // = zg
-  let t = JSON.stringify(e);
-  if(!o()) return {body:t, headers:{}};           // 无加密能力就发明文
-  let {envelope:r} = await h(f(t), "application/json");
-  return {body: JSON.stringify(r), headers:{"x-enc":"1"}};
-}
-```
-
-`challengeToken` 只是被 `JSON.stringify` 进去的一个**普通字段**，`zg` 根本不认识它。
-而且**登录用的 `Eg` 是同一套、同样带 `challengeToken`**，登录实测直接过、无验证码。
-
-那个 token 来自：
-
-```js
-turnstile.render(el, { sitekey: "0x4AAAAAADhJiBbYg2OyYwDz",
-                       appearance: "interaction-only",
-                       action: "clearance" })
-```
-
-`action:"clearance"` —— **就是站点自有 clearance 的那套 Turnstile**（docs/H2S.md §3.2），
-`BrowserFetcher` 早就在处理。`interaction-only` = 平时隐形自动发 token。不是新增闸门。
-
-### 仍然确认为真的部分
-
-- **日期格式 `DD-MM-YYYY`** ✓（站点 `getDate-getMonth+1-getFullYear`）
-- **store_id = 54** ✓（站点按 sku 前缀判 `r=54`）
-- 官网前端占房确实改走了服务端代理 `POST /api/booking`，bundle 里
-  `createEmptyCart`/`addNewBooking` 只剩定义无调用点。但这只说明**前端换了入口**，
-  不等于后端拒绝直接 GraphQL——后者仍未验证，留待首次真实预订时观察。
-
-### 教训
-
-读到一个可疑字段时，先问「有没有已发生的事实与之矛盾」。这次有，而且很硬。
-
-## 6.9 `/api/rest/*` 的信封约定（本轮真正的收获）
-
-挖 `challengeToken` 时把传输层规则完整读了出来（module 82361 的 `H` / `J`），
-**修掉了一个真 bug**：`cancel_pending_orders` 之前对 `/api/rest/*` 发明文。
-
-三条路，三种编码，别混：
-
-| 路径 | 编码 |
+| 路径 | 实现方式 |
 |---|---|
-| `/api/auth/*`（NextAuth） | **明文**。拦截器只对 `/api/rest/` 生效 → `fetch_plain` |
-| `GET /api/rest/*` | 加密**路径**（去掉 `/api` 前缀、含 query），base64(JSON(信封)) 塞 `x-enc-q` 头，实际请求 `GET /api/rest/__enc__` |
-| `POST /api/rest/*` | 加密 **body**，POST **原 URL**，`x-enc: 1` |
-| GraphQL `/api/__enc__` | 加密 body（既有实现） |
+| `/api/auth/*` | 明文请求，使用 `fetch_plain` |
+| `GET /api/rest/*` | 加密路径和查询，通过 `x-enc-q` 发送至 `/api/rest/__enc__` |
+| `POST /api/rest/*` | 加密 body，发送至原 URL |
+| GraphQL `/api/__enc__` | 加密 body |
+| `POST /api/booking` | 加密 body，携带 Bearer token |
 
-站点原文：
+具体信封实现见 `BrowserFetcher.fetch_rest()`、`fetch_plain()` 和加密请求方法。
 
-```js
-// H：GET /api/rest/*
-let r = e.slice("/api".length);
-let {envelope:n, aesKey:a} = await h(f(r), "text/plain");   // 注意 ct 是 text/plain
-i.set("x-enc-q", base64(JSON(n)));
-let s = await fetch("/api/rest/__enc__", {...t, method:"GET", headers:i});
+### 6.10 预订入口与白名单探测
 
-// J：POST（加密 body，打原 URL）
-let {envelope:r, aesKey:n} = await h(f(t.body), "application/json");
-a.set("x-enc","1");
-let i = await fetch(e, {...t, headers:a, body:JSON.stringify(r)});
-```
+2026-08-19 使用无效参数探测时，`CreateEmptyCart`、`GetCheckoutAgreements`、
+`SetPaymentMethodOnCart`、`PlaceOrder` 和 `IdealCheckOut` 返回成功或业务错误；
+`AddNewBooking` 返回不在公开 API 中。站点前端使用 `POST /api/booking`，请求体
+包括 `sku`、`contract_startDate`、`challengeToken`、`challengeProvider`；当前实现
+用返回的 `cartId` 继续后续步骤。
 
-已实现为 `BrowserFetcher.fetch_rest()`，`cancel_pending_orders` 改用它。
-GET 那条的 `ct` 必须是 `text/plain`（body 那条是 `application/json`），写混了服务端解不开。
-
-由 `tests/test_browser_fetcher.py::TestRestEnvelope` 与
-`tests/test_booker_operations.py::TestCancelUsesRestEnvelope` 守卫。
-
----
-
-## 6.10 逐条实测：白名单到底放行哪几步（2026-08-19，决定性）
-
-前面几节反复在「照抄了原文，应该没问题吧」上打转。这次做了**直接的实证**：用
-**故意无效的参数**发每条 operation，靠错误的**形状**区分两件事——
-
-- 回 `403 {"error":"...not available through the public API"}` → **网关拒绝**，
-  这条 operation 不在公开 API 里；
-- 回 `200` + 业务错误（`CART_NOT_FOUND` 等） → **过了白名单**，只是参数无效。
-
-参数是假的，不占房、不产生订单。同一 clearance 窗口内连发，结果可复现：
-
-| operation | 结果 | 判定 |
-|---|---|---|
-| `createEmptyCart` | 200，真返回 cart id | ✅ 放行 |
-| `GetCheckoutAgreements` | 200，返回条款正文 | ✅ 放行 |
-| **`addNewBooking`** | **403 not available through the public API** | ❌ **被摘出公开 API** |
-| `setPaymentMethodOnCart` | 200 + `Could not find a cart with ID "INVALID-CART"` | ✅ 放行 |
-| `placeOrder` | 200 + `CART_NOT_FOUND` | ✅ 放行 |
-| `idealCheckOut` | 200 + internal error | ✅ 放行 |
-
-**6 步里 5 步放行，只有占房那一步被摘掉。** 这就是自动预订一直不成的真正原因——
-不是 Turnstile（§6.8 已撤回），不是照抄得不够像，是 H2S 明确把 `addNewBooking`
-从公开 API 移除、改成服务端专用。
-
-### 替代路径：`POST /api/booking`
-
-站点自己也不再直接发 `addNewBooking`，改走服务端代理（§6.8 里读到的那段）：
-
-```js
-const a = await zg({sku, contract_startDate, challengeToken, challengeProvider});
-const r = await fetch("/api/booking", {method:"POST", headers:{...a.headers}, body:a.body});
-const t = await r.json();     // → { cartId, booking }
-```
-
-即：**加密信封 + Bearer，一次完成建车 + 占房**，返回 `cartId` 供后续
-setPaymentMethod / placeOrder / idealCheckOut 使用（那三步都已验证放行）。
-
-实测该端点存在：未登录时回 `401 {"error":"Unauthorized"}`——不是 404、也不是
-operation_not_allowed，说明路由在、只是要登录态。
-
-### 已实现
-
-`booker.create_booking()` 走这条，取代了旧的 `create_empty_cart + add_to_cart`
-两步。**那两个函数 2026-08-20 已删除**——它们一度以「万一要退回去」为名保留，
-但没有任何代码路径会调它们，而「留着但没接线的 fallback」只是错觉（同样的错觉
-让 `BookingBlockedError` 那个 bug 藏了三个月）。要找原文去 git 历史，或看
-`h2s_booking_gql`——那份是**站点报文的照抄记录**，不是我们的调用清单，两个
-operation 仍留在里面。
-
-也就是说：**占房只有这一条路径，没有 fallback。** 守卫见
-`tests/test_booker_operations.py`（`TestCreateBooking` + 一条 AST 测试钉住
-`_do_book` 只调 `create_booking`，`TestNoUnwiredBookingFallback` 钉住那两个
-函数不许回来）。
-
-### 仍未验证的最后一环
-
-**带真实登录态的 `/api/booking` 完整占房没跑过**——跑通就等于真占一套房。
-`challengeToken` 这里传空串，赌服务端按 clearance cookie 判定（我们的浏览器已经
-过了那套 clearance）。若线上回「需要验证」，则需从页面 `window.turnstile` 取真实
-token 再传。这一环会在首次真实预订时见分晓，且失败会以明确的 phase / 日志报出来。
+未登录访问 `/api/booking` 曾返回 401，说明当时路由存在，不等于已验证真实占房。
+原始 operation 定义见上文及 `h2s_booking_gql.py`；实际运行只调用当前接线的步骤。

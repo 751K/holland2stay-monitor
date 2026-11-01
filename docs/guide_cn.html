@@ -266,13 +266,13 @@ python monitor.py  # 抓取循环，需另开终端</pre>
   <tr><th>条件</th><th>示例</th><th>适用平台</th><th>说明</th></tr>
   <tr><td>最高租金</td><td>€1200</td><td>全部</td><td>仅推送不高于 €1200/月的房源。<strong>各平台价格口径不同，见下方</strong></td></tr>
   <tr><td>最小面积</td><td>25 m²</td><td>全部</td><td>仅推送不小于 25 m² 的房源</td></tr>
-  <tr><td>最低楼层</td><td>1</td><td>全部</td><td>排除底层（0 层）</td></tr>
+  <tr><td>最低楼层</td><td>1</td><td>Holland2Stay、OurDomain、OurCampus、Magis、Plaza</td><td>排除底层（0 层）</td></tr>
   <tr><td>城市</td><td>Eindhoven, Amsterdam</td><td>全部</td><td>可多选，满足任一项即匹配</td></tr>
   <tr><td>平台</td><td>H2S, OD</td><td>全部</td><td>可多选，仅推送所选平台的房源</td></tr>
   <tr><td>租客要求</td><td>student only</td><td>Magis 除外</td><td>可多选，满足任一项即匹配</td></tr>
   <tr><td>户型</td><td>Studio, 1</td><td>Xior 除外</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>入住人数</td><td>Single</td><td>Xior、Magis 除外</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>装修类型</td><td>Furnished</td><td>OurCampus 除外</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>入住人数</td><td>Single</td><td>Holland2Stay、OurDomain、OurCampus</td><td>可多选，满足任一项即匹配</td></tr>
+  <tr><td>装修类型</td><td>Furnished</td><td>Holland2Stay、OurDomain、Xior、Magis</td><td>可多选，满足任一项即匹配</td></tr>
   <tr><td>合同类型</td><td>Indefinite</td><td>仅 Holland2Stay</td><td>仅推送长租房源，排除短租</td></tr>
   <tr><td>最低能耗</td><td>B</td><td>仅 Holland2Stay、Magis</td><td>仅推送不低于该等级的房源</td></tr>
   <tr><td>街区</td><td>Strijp, Centrum</td><td>仅 Holland2Stay</td><td>可多选，选项随所选城市变化</td></tr>
@@ -286,7 +286,7 @@ Xior、OurDomain、OurCampus 的房源根本没参与这一关。面板的筛选
 
 <div class="card">
 <h3>租金的口径</h3>
-<p>五个平台报的不是同一个数，设置「最高租金」之前请先看清楚：</p>
+<p>各平台的价格口径不同，设置「最高租金」之前请先看清楚：</p>
 <table>
   <tr><th>平台</th><th>面板与通知里显示的价格</th></tr>
   <tr><td>Holland2Stay</td><td><strong>到手价</strong>：含服务费与水电预付</td></tr>
@@ -294,6 +294,8 @@ Xior、OurDomain、OurCampus 的房源根本没参与这一关。面板的筛选
   <tr><td>OurDomain</td><td><strong>基础租金</strong>，服务费另计</td></tr>
   <tr><td>OurCampus</td><td><strong>基础租金</strong>，服务费另计</td></tr>
   <tr><td>Magis</td><td><strong>到手价</strong>：基础租金加上每条房源自己印着的服务费</td></tr>
+  <tr><td>Plaza</td><td>平台上报的<strong>总租金</strong>；有净租金时会另行显示</td></tr>
+  <tr><td>Student Experience</td><td>户型的<strong>起价</strong>，不一定是某一间的实际租金</td></tr>
 </table>
 <p>OurDomain 与 OurCampus 的服务费按户型变化，而上游不提供单元与户型的对应关系，因此无法合成到手价。
 面板上这类房源的价格右上角带一个星号，悬停可看到该楼盘服务费的区间；通知里的租金行
@@ -326,8 +328,8 @@ Xior、OurDomain、OurCampus 的房源根本没参与这一关。面板的筛选
 
 <div class="card">
 <h3>平台与城市</h3>
-<p>Holland2Stay、OurDomain、OurCampus 与 Xior 可分别启用或禁用，每个平台均可单独选择需监控的城市或楼盘；Xior 的楼盘按城市分组显示。</p>
-<p>修改后点击<strong>保存并生效</strong>即可热重载，无需重启进程。</p>
+<p>七个平台均可分别启用或禁用，并可选择其城市或楼盘；Xior 的楼盘按城市分组显示。</p>
+<p>保存后会请求监控进程重新加载运行配置；设置页显示是否已应用和是否被覆盖。部署参数、密钥和高级超时配置仍需重启相关进程。</p>
 </div>
 
 <!-- ─────────── -->

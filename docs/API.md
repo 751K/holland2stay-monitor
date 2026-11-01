@@ -2,7 +2,7 @@
 
 本文档整理 FlatRadar 移动端和第三方客户端使用的后端 API。当前稳定接口集中在 `/api/v1/*`，Web 后台的 HTML 页面和 `/api/*` 旧接口不作为移动端契约。
 
-最后更新：2026-09-15（openapi.json 1.24.0）
+机器可读契约版本：openapi.json 1.24.0。接口行为以当前服务实现和契约测试为准。
 
 机器可读契约：
 
@@ -173,7 +173,7 @@ Body：
 | `username` | string | 是 | 普通用户名；管理员固定为 `__admin__` |
 | `password` | string | 是 | 账号密码 |
 | `device_name` | string | 否 | 登录设备名，最长 64 字符 |
-| `ttl_days` | int | 否 | token 有效期，1-90 天；默认 90 |
+| `ttl_days` | int | 否 | 初始有效期，1–90 天；默认 90。持续使用时会按服务端滑动续期策略延长。 |
 
 成功：
 
@@ -197,6 +197,7 @@ Body：
 - 普通 user 默认使用本地 app password。
 - H2S 凭据 fallback 默认关闭，只有用户显式允许时才尝试。
 - 登录失败计入 IP 限流。
+- 已撤销的会话从撤销时间起保留 30 天；已过期但未撤销的会话从过期时间起保留 30 天。监控进程定期清理到期记录及其关联设备。
 
 ### POST `/auth/register`
 
@@ -563,7 +564,7 @@ Occupied / Rented / Not available  → 3
 房源在 feed 中重新出现时，`status` 与该标记会一并复位。推测产生的状态变更
 **不会**触发通知，因此客户端不会因其收到推送。
 
-详见 [ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-从-feed-里消失是唯一的下架信号)。
+详见 [ARCHITECTURE.md §5.13](ARCHITECTURE.md#513-根据-feed-缺失推断房源状态)。
 
 ### GET `/listings/<listing_id>`
 
