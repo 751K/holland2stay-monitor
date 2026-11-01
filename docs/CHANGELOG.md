@@ -1,5 +1,127 @@
 # Changelog
 
+## v2.0.0 (2026-11-01)
+
+v2.0 以监控正确性、可维护性和回归保障为目标，不新增平台或客户端功能。主要变化
+是把 monitor 的单体实现按阶段拆成独立模块、统一配置解析与运行时快照、补齐通知与
+预订的故障边界，并把 CI 与文档纳入发布流程。自动预订仍只开放 Holland2Stay 与
+Plaza（Plaza 需用户单独启用）。
+
+### 架构与可维护性
+
+* **monitor 按阶段拆分**（[79e7a0d]、[32207ae]、[57f5afd]、[0ab2195]、[5e4d3f3]）
+
+    `run_once()` 拆成抓取、预热、后处理三段；startup / stale / dispatch / telemetry
+    各自独立；抓取失败处置移到 `round_failures`，预订流程移到 `booking_round`，
+    通知与事件重放移到 `notify_round`。平台标识、显示名、抓取器入口和基础能力统一
+    登记在 `SourceSpec`。`monitor.py` 只剩主循环与阶段编排。
+
+* **运行时状态收进 `RuntimeState`**（[57f5afd]）
+
+    熔断、自适应节流、持久化退避、预加载缓存与竞败重试队列有了单一归属；热重载和
+    测试隔离不再依赖直接修改模块全局。
+
+* **配置解析收口**（[7de759d]、[f65de0f]、[8de2c73]、[38e926f]、[5677216]）
+
+    `load_config()` 改走 `target_config` 严格解析，布尔与整数统一到 `env_utils`，
+    已登记平台的解析器补齐。热重载先构造并校验候选配置，失败保留旧配置；坏配置由
+    测试矩阵覆盖，不再静默回落到默认值。
+
+* **存储层收口**（[25663bf]、[1ebbe4d]）
+
+    路由中散落的 SQL 与 `feedback` 建表移入 `mstorage`；GDPR 导出与反馈写入成为
+    存储层方法。Web 侧的登录、注册、测试通知、访客房源、崩溃上传与用户名枚举统一
+    到 `app/rate_limit.py`，空闲键定期清理。
+
+* **测试与 CI**（[0fa476a]、[f42b0b7]、[4467480]）
+
+    合并重复测试、参数化规则表、清理失效用例；push / PR 运行 Ruff 与 pytest；
+    CI 安装 Node，使浏览器端 JS 的执行路径不再被跳过。
+
+### 监控正确性
+
+* **H2S REST 快速通道**（[09f253e]、[83d3ddb]）
+
+    在自家线路上按可配间隔观察 REST 信号，发现新放出的房源时叫醒主循环，只补抓
+    Holland2Stay，而不是等下一轮全量调度。
+
+* **首次全量扫描计时**（[5dc89ce]）：计时器在全量扫描真正完成后才推进，避免第一轮
+  把「计划做全量」当成「已经做完全量」。
+
+* **阶段边界与故障隔离**（[faaeb55]、[dcba13e]、[c86f8b6]、[dc0d905]）
+
+    抓取、预订提交、通知与收尾的异常不再互相带走；平台调度与浏览器工作进程超时后
+    可回收恢复。
+
+### 通知与预订
+
+* **状态变更按事件主键标记**（[5487294]）：未完成通知可重放，影子平台过滤在重放
+  之后执行，不再依赖 listing 级的 `notified` 标志。
+
+* **SSE 短期票据**（[fdcebbb]）：EventSource 客户端用 60 秒票据连接，不再接受 URL
+  中的长期 token。
+
+* **公告投递记录**（[7d4f9a4]）：逐用户、逐渠道记录投递结果，失败与未完成项可精确
+  补发。
+
+* **预订保护与结果等待**（[002ae15]、[08f6f51]）：Holland2Stay 按账号、Plaza 按
+  账号和房源保留不确定结果保护；预订结果等待增加墙钟上限，后台任务卡住时不会拖住
+  整轮。
+
+* Holland2Stay 当前 `/api/booking` 路径已用真实账号走通到付款链接。Xior /
+  OurDomain / OurCampus 的 RENTCafe 预订仍未对用户开放，验证列入 v2.1。
+
+### 部署与文档
+
+* `docker-compose.yml` 默认传 `TRUSTED_PROXY_HOPS=1`，反代后限流与日志能看到真实
+  客户端 IP；直接暴露端口时应在 `.env` 设为 0。新增
+  [DEPLOYMENT.md](DEPLOYMENT.md) 说明 Caddy、TLS、端口、日志与自有反代。
+* 文档重写：`ARCHITECTURE`、`H2S`、`SCRAPING_RECON`、`XIOR`、`OURDOMAIN`、`PLAZA`
+  改为当前状态；新增 `RENTCAFE.md` 承接三平台共用预订流程；`API.md` 增加目录并
+  修正响应字段漂移，`openapi.json` 升到 1.25.0；`FUTURE_PLAN` 只保留未完成项，
+  并新增 v2.1–v2.5 的 Web 界面规划。
+
+### 升级注意
+
+* 数据库迁移在启动时自动执行（新增 `feedback` 表），无需手工操作。
+* API 契约 1.25.0 为增量变更，既有客户端不受影响。
+* 部署方式与数据库位置未变；仍是单机 SQLite 与 Web / monitor 双进程。
+
+### 已知限制
+
+* Xior、OurDomain、OurCampus 的 RENTCafe 预订未开放，验证在 v2.1 进行。
+* Holland2Stay 的取消预留路径尚未用真实操作验证。
+* Plaza 的 DTH 房源不自动应征（确认框的影响范围未查明）。
+* 单机 SQLite，不支持多实例水平扩展。
+
+[79e7a0d]: https://github.com/751K/holland2stay-monitor/commit/79e7a0d
+[32207ae]: https://github.com/751K/holland2stay-monitor/commit/32207ae
+[57f5afd]: https://github.com/751K/holland2stay-monitor/commit/57f5afd
+[0ab2195]: https://github.com/751K/holland2stay-monitor/commit/0ab2195
+[5e4d3f3]: https://github.com/751K/holland2stay-monitor/commit/5e4d3f3
+[7de759d]: https://github.com/751K/holland2stay-monitor/commit/7de759d
+[f65de0f]: https://github.com/751K/holland2stay-monitor/commit/f65de0f
+[8de2c73]: https://github.com/751K/holland2stay-monitor/commit/8de2c73
+[38e926f]: https://github.com/751K/holland2stay-monitor/commit/38e926f
+[5677216]: https://github.com/751K/holland2stay-monitor/commit/5677216
+[25663bf]: https://github.com/751K/holland2stay-monitor/commit/25663bf
+[1ebbe4d]: https://github.com/751K/holland2stay-monitor/commit/1ebbe4d
+[0fa476a]: https://github.com/751K/holland2stay-monitor/commit/0fa476a
+[f42b0b7]: https://github.com/751K/holland2stay-monitor/commit/f42b0b7
+[4467480]: https://github.com/751K/holland2stay-monitor/commit/4467480
+[09f253e]: https://github.com/751K/holland2stay-monitor/commit/09f253e
+[83d3ddb]: https://github.com/751K/holland2stay-monitor/commit/83d3ddb
+[5dc89ce]: https://github.com/751K/holland2stay-monitor/commit/5dc89ce
+[faaeb55]: https://github.com/751K/holland2stay-monitor/commit/faaeb55
+[dcba13e]: https://github.com/751K/holland2stay-monitor/commit/dcba13e
+[c86f8b6]: https://github.com/751K/holland2stay-monitor/commit/c86f8b6
+[dc0d905]: https://github.com/751K/holland2stay-monitor/commit/dc0d905
+[5487294]: https://github.com/751K/holland2stay-monitor/commit/5487294
+[fdcebbb]: https://github.com/751K/holland2stay-monitor/commit/fdcebbb
+[7d4f9a4]: https://github.com/751K/holland2stay-monitor/commit/7d4f9a4
+[002ae15]: https://github.com/751K/holland2stay-monitor/commit/002ae15
+[08f6f51]: https://github.com/751K/holland2stay-monitor/commit/08f6f51
+
 ## v1.47.0 (2026-10-03)
 
 本次发布让自动预订的结果真正推送到 App。
