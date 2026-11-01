@@ -68,9 +68,10 @@ td{color:var(--text2)}
 <h3><span class="step">1</span> Docker (recommended for VPS)</h3>
 <pre>cp .env.example .env && mkdir -p data logs logs/caddy
 # Edit Caddyfile → replace your.domain.com with your domain
-# Edit .env → set WEB_PASSWORD
+# Edit .env → set WEB_PASSWORD, PUBLIC_BASE_URL and SESSION_COOKIE_SECURE=true
 docker compose up -d</pre>
-<p>Open <code>https://your.domain.com</code>, log in, then click <strong>Start monitor</strong> on the Dashboard.</p>
+<p>Open <code>https://your.domain.com</code>, log in as <code>admin</code> by default, then click <strong>Start monitor</strong> on the Dashboard. See the <a href="https://github.com/751K/holland2stay-monitor">project documentation</a> for deployment, email and proxy settings.</p>
+<p>To try it locally without a domain, run <code>docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s</code> and open <code>http://127.0.0.1:8088</code>. This mode has no HTTPS or login and is for local use only.</p>
 </div>
 
 <div class="card">
@@ -92,23 +93,27 @@ docker compose up -d</pre>
 <div class="card">
 <h3><span class="step">5</span> Run from source</h3>
 <pre>pip install -r requirements.txt
+python -m cloakbrowser install
 cp .env.example .env
-python web.py</pre>
-<p>Open <a href="http://127.0.0.1:8088">http://127.0.0.1:8088</a>.</p>
+python web.py      # web panel
+python monitor.py  # monitoring loop, in a separate terminal</pre>
+<p>Open <a href="http://127.0.0.1:8088">http://127.0.0.1:8088</a>. The panel and monitor are separate processes; running only the panel will not fetch listings.</p>
 </div>
 
 <!-- ─────────────────────────────────────────────── -->
 <h2 id="platforms">Supported Platforms</h2>
 
-<p>FlatRadar monitors four housing platforms. The <strong>Platform</strong> badge (H2S / OD / OC / XR) on each listing shows where it came from.</p>
+<p>FlatRadar supports the seven platforms below. Each listing's <strong>Platform</strong> badge shows its source. Actual coverage depends on your settings and the data available from each platform.</p>
 
 <table>
   <tr><th>Platform</th><th>Coverage</th><th>Data Level</th><th>Auto-Booking</th></tr>
-  <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>26 Dutch cities</td><td>Unit (room number, rent, area)</td><td>✅ Full GraphQL flow</td></tr>
+  <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>Configurable Dutch cities</td><td>Unit (room number, rent, area)</td><td>Auto-booking; payment is manual</td></tr>
   <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam (Diemen + South-East)</td><td>Unit (#6045, sqm, floor, view)</td><td>❌ Notify only</td></tr>
   <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen (1 building)</td><td>Unit (same as OurDomain)</td><td>❌ Notify only</td></tr>
   <tr><td><strong>Xior</strong> (XR)</td><td>30 buildings across 14 Dutch cities</td><td>Unit (M1.30.53, sqm, rent, deposit)</td><td>❌ Notify only</td></tr>
   <tr><td><strong>Magis</strong> (MG)</td><td>17 buildings across 5 cities — 9 in Eindhoven</td><td>Unit (rent, sqm, floor, energy label)</td><td>❌ Notify only</td></tr>
+  <tr><td><strong>Student Experience</strong> (SE)</td><td>Amsterdam and Leiden</td><td>Room type (starting rent and area range)</td><td>Notifications only</td></tr>
+  <tr><td><strong>Plaza</strong> (PZ)</td><td>Several Dutch cities</td><td>Listing (rent, area, floor)</td><td>Automatic applications; off by default</td></tr>
 </table>
 
 <div class="tip">
@@ -122,14 +127,14 @@ python web.py</pre>
 
 <div class="card">
 <h3>Dashboard</h3>
-<p>At-a-glance view: total listings in database, new listings today, status changes today, last scrape time. Shows the newest listings and recent status changes (48h). Each listing row includes a source badge (H2S / OD / OC / XR).</p>
+<p>At-a-glance view: total listings in database, new listings today, status changes today, last scrape time. Shows the newest listings and recent status changes (48h), with a source badge for each listing.</p>
 <p>Click <strong>Start monitor</strong> to begin scraping. The dot turns green when the monitor is running.</p>
 </div>
 
 <div class="card">
 <h3>Listings</h3>
 <p>Browse all listings in the database. Filter by <strong>status</strong>, <strong>city</strong>, <strong>source</strong> (platform), <strong>type</strong>, <strong>max rent</strong>, <strong>min area</strong>, <strong>contract</strong>, <strong>energy</strong>, and more. Click any listing to open its detail page on the source platform.</p>
-<p>A status may carry a small <strong>inferred</strong> badge, meaning <em>we worked this status out ourselves — the platform did not report it</em>. Platforms never announce that a unit is gone; they simply stop listing it. So a listing that disappears from the feed is marked <strong>Reserved</strong> after 30 minutes and <strong>Occupied</strong> after 2 hours (that is Holland2Stay's own payment deadline). The badge clears the moment the listing shows up again. <strong>Always confirm on the platform before acting</strong> — an inferred status is our best guess, not a fact.</p>
+<p>An <strong>inferred</strong> badge means the status was estimated by FlatRadar rather than reported by the platform. When a listing disappears from a completely checked feed, it is inferred as <strong>Reserved</strong> after 30 minutes and <strong>Occupied</strong> after 2 hours by default. These thresholds are configurable, and an incomplete scrape does not support that inference. The badge clears if the listing reappears. <strong>Check the platform before acting.</strong></p>
 </div>
 
 <div class="card">
@@ -175,6 +180,7 @@ usually appear on the map within half an hour. Admins can also trigger a pass by
 You will receive a confirmation email and must <strong>click the link in it</strong> before delivery
 begins; that step exists so nobody can sign someone else's address up. The verification state is shown
 on the user's settings page, where the confirmation can also be re-sent.</p>
+<p>On a self-hosted instance, an administrator must first configure the shared email service and public base URL. Otherwise, use custom SMTP.</p>
 <p><strong>2. Your own SMTP.</strong> Switch the email mode to custom, then fill in server details:</p>
 <table>
   <tr><th>Provider</th><th>SMTP Host</th><th>Port</th><th>Security</th></tr>
@@ -224,6 +230,7 @@ step that is missing.
 <h2 id="autobook">Automatic Booking and Applications</h2>
 
 <p>Go to <strong>Users</strong> → click a user → <strong>Auto Booking</strong>.</p>
+<p>Auto-booking requires notifications to be enabled and at least one usable delivery method. Booking filters are independent of notification filters; an empty filter places no restriction.</p>
 
 <div class="card">
 <h3>How it works</h3>
@@ -239,18 +246,18 @@ step that is missing.
 <p>If the booking outcome is uncertain, auto-booking is paused for that Holland2Stay account. Sign in to Holland2Stay to check your orders or reservations and pay or cancel as needed, then choose <strong>Checked; resume auto-booking</strong> in user settings. Protection cannot be removed while the task is running; stop monitoring first if it is stuck.</p>
 <p>For Plaza, the system can submit applications for matching listings. Supply your Plaza username and password and separately enable automatic applications, which are off by default. Submission takes effect immediately and does not guarantee a rental.</p>
 <p>If a Plaza application outcome is uncertain, check your applications on Plaza and choose <strong>Checked; resume applications for this listing</strong> in user settings. Only that account and listing are paused; other listings are unaffected. Protection cannot be cleared while the application is running.</p>
-<p>OurDomain, OurCampus, Xior and Magis are notify-only. The RENTCafe booking flows have not been verified end to end, and the Magis booking flow has not been investigated.</p>
+<p>OurDomain, OurCampus, Xior, Magis and Student Experience currently provide notifications only.</p>
 </div>
 
 <div class="card">
 <h3>Configuration</h3>
 <ul>
   <li><strong>Enable auto-booking</strong> — toggle on</li>
-  <li><strong>Dry run</strong> — recommended at first: validates login & cart without placing orders</li>
+  <li><strong>Dry run</strong> — recommended at first: checks some steps before submission without placing an order or application; it does not guarantee that a real submission will succeed</li>
   <li><strong>H2S account email & password</strong> — your Holland2Stay login</li>
   <li><strong>Plaza username, password and automatic application switch</strong> — configure these to use Plaza applications; the switch is off by default</li>
   <li><strong>Payment method</strong> — iDEAL (default), Visa, or Mastercard</li>
-  <li><strong>Auto-booking filters</strong> — optional stricter rules (independent from notification filters)</li>
+  <li><strong>Auto-booking filters</strong> — configure separately to match your booking requirements</li>
 </ul>
 </div>
 
@@ -286,6 +293,7 @@ step that is missing.
 "Min energy label: B" therefore does <em>not</em> mean everything you receive is rated B — Xior,
 OurDomain and OurCampus listings never went through that check. The panel labels each filter with the
 same scope.</p>
+<p>Even when a platform supports a filter, an individual listing may lack the relevant data. Missing fields are handled differently depending on the filter, so check the platform before deciding.</p>
 </div>
 
 <div class="card">
@@ -378,9 +386,9 @@ neither per-user nor filtered by your criteria; content in it does not mean your
 <h3>403 Blocked (Cloudflare)</h3>
 <p>If scraping is blocked by Cloudflare WAF:</p>
 <ol>
-  <li>Set up a residential proxy via <code>HTTPS_PROXY</code> in <code>.env</code></li>
-  <li>Restart the monitor to get a new TLS fingerprint</li>
-  <li>Pause monitoring for a few hours to cool off</li>
+  <li>Check the logs for the affected platform and the specific error; not every 403 has the same cause</li>
+  <li>Check the network connection and any configured proxy; if the network is restricted, see the deployment documentation for proxy configuration</li>
+  <li>Allow time for the platform to cool down and watch for recovery; if errors continue, check the platform status and logs</li>
 </ol>
 </div>
 

@@ -454,7 +454,7 @@ own monitoring if you want to be paged.
 
 | Document | For |
 |---|---|
-| [User Guide](https://flatradar.app/guide) | Screenshots and daily use |
+| [User Guide](https://flatradar.app/guide) | Panel settings and daily use |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | How the system runs, and every failure mode worth knowing before you debug one |
 | [API.md](API.md) | Backend contracts for mobile and integrations |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |

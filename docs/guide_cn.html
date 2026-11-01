@@ -68,9 +68,10 @@ td{color:var(--text2)}
 <h3><span class="step">1</span> Docker（推荐，适合 VPS）</h3>
 <pre>cp .env.example .env && mkdir -p data logs logs/caddy
 # 编辑 Caddyfile，将 your.domain.com 替换为实际域名
-# 编辑 .env，设置 WEB_PASSWORD
+# 编辑 .env，设置 WEB_PASSWORD、PUBLIC_BASE_URL 和 SESSION_COOKIE_SECURE=true
 docker compose up -d</pre>
 <p>在浏览器中访问 <code>https://your.domain.com</code>，登录后于仪表盘点击<strong>启动监控</strong>。登录用户名默认为 <code>admin</code>。</p>
+<p>完整部署步骤与邮件、代理等配置见<a href="https://github.com/751K/holland2stay-monitor">项目文档</a>。</p>
 <p>若暂无域名，可先在本机试运行：<code>docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s</code>，随后访问 <code>http://127.0.0.1:8088</code>。该方式不启用 HTTPS 与登录鉴权，仅限本机使用。</p>
 </div>
 
@@ -93,6 +94,7 @@ docker compose up -d</pre>
 <div class="card">
 <h3><span class="step">5</span> 从源码运行</h3>
 <pre>pip install -r requirements.txt
+python -m cloakbrowser install
 cp .env.example .env
 python web.py      # 面板
 python monitor.py  # 抓取循环，需另开终端</pre>
@@ -102,15 +104,17 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 <!-- ─────────── -->
 <h2 id="platforms">支持平台</h2>
 
-<p>FlatRadar 监控四个房源平台。每条房源上的<strong>平台标签</strong>（H2S / OD / OC / XR）标识其来源。</p>
+<p>FlatRadar 支持以下七个平台，房源上的<strong>平台标签</strong>标识其来源。各平台的实际覆盖范围以设置和平台数据为准。</p>
 
 <table>
   <tr><th>平台</th><th>覆盖范围</th><th>数据粒度</th><th>自动预订</th></tr>
-  <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>26 个荷兰城市</td><td>单元级（具体房号、租金、面积）</td><td>✅ 完整 GraphQL 流程</td></tr>
+  <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>可配置的荷兰城市</td><td>单元级（具体房号、租金、面积）</td><td>自动预订，需手动付款</td></tr>
   <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam（Diemen 与 South-East）</td><td>单元级（#6045、面积、楼层、朝向）</td><td>❌ 仅通知</td></tr>
   <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen（1 栋）</td><td>单元级（同 OurDomain）</td><td>❌ 仅通知</td></tr>
   <tr><td><strong>Xior</strong> (XR)</td><td>荷兰 30 栋楼，分布于 14 个城市</td><td>单元级（M1.30.53、面积、租金、押金）</td><td>❌ 仅通知</td></tr>
   <tr><td><strong>Magis</strong> (MG)</td><td>5 个城市共 17 栋楼，Eindhoven 占 9 栋</td><td>单元级（租金、面积、楼层、能耗标签）</td><td>❌ 仅通知</td></tr>
+  <tr><td><strong>Student Experience</strong> (SE)</td><td>Amsterdam 与 Leiden</td><td>户型级（起价与面积范围）</td><td>仅通知</td></tr>
+  <tr><td><strong>Plaza</strong> (PZ)</td><td>荷兰多个城市</td><td>房源级（租金、面积、楼层）</td><td>自动应征，默认关闭</td></tr>
 </table>
 
 <div class="tip">
@@ -124,14 +128,14 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 
 <div class="card">
 <h3>仪表盘</h3>
-<p>提供总览信息：数据库中的房源总数、当日新增、当日变更与最近一次抓取时间，并列出最新房源及近 48 小时内的状态变更。每条房源均带有平台标签（H2S / OD / OC / XR）。</p>
+<p>提供总览信息：数据库中的房源总数、当日新增、当日变更与最近一次抓取时间，并列出最新房源及近 48 小时内的状态变更。房源带有来源平台标签。</p>
 <p>点击<strong>启动监控</strong>即开始抓取，运行期间状态圆点显示为绿色。</p>
 </div>
 
 <div class="card">
 <h3>房源列表</h3>
 <p>用于浏览数据库中的全部房源，支持按<strong>状态</strong>、<strong>城市</strong>、<strong>平台</strong>、<strong>户型</strong>、<strong>最高租金</strong>、<strong>最小面积</strong>、<strong>合同类型</strong>、<strong>能耗等级</strong>等条件筛选。点击房源名称即跳转至源平台的详情页。</p>
-<p>状态旁有时会显示一枚<strong>「推测」</strong>标记，表示<em>该状态由系统推断得出，并非平台上报</em>。各平台均不会公告房源已下架，只是不再将其列出，因此房源从列表中消失 30 分钟后会被推定为 <strong>Reserved</strong>，消失 2 小时后判定为 <strong>Occupied</strong>（2 小时对齐 Holland2Stay 官方的付款限时）。房源重新出现时该标记会自动清除。<strong>做出决定前请以平台页面为准</strong>：带「推测」的状态仅代表本系统的判断。</p>
+<p>状态旁的<strong>「推测」</strong>标记表示状态由系统推断，而非平台上报。对于从已完整检查的房源列表中消失的房源，默认分别在消失 30 分钟和 2 小时后推断为 <strong>Reserved</strong> 和 <strong>Occupied</strong>；阈值可配置，抓取不完整时不会据此推断。房源重新出现时标记会清除。<strong>做出决定前请以平台页面为准。</strong></p>
 </div>
 
 <div class="card">
@@ -175,6 +179,7 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 <p><strong>一、由服务代发（默认）。</strong>只填收件邮箱即可，不需要 SMTP 服务器。
 填好后会收到一封确认邮件，<strong>点击其中的链接完成验证</strong>之后才会开始投递——
 这道确认用于防止把别人的邮箱填进来。验证状态在用户配置页可以看到，也可以重发确认邮件。</p>
+<p>自部署时，管理员须先配置共享邮件服务和公开访问地址；未配置时可使用自建 SMTP。</p>
 <p><strong>二、自建 SMTP。</strong>把邮件模式改为自定义，再填服务器信息。常见服务商如下：</p>
 <table>
   <tr><th>服务商</th><th>SMTP 地址</th><th>端口</th><th>加密</th></tr>
@@ -222,6 +227,7 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 <h2 id="autobook">自动预订与应征</h2>
 
 <p>进入<strong>用户管理</strong>，点击目标用户，选择<strong>自动预订</strong>。</p>
+<p>自动预订需要启用用户通知，并至少有一种可用的接收方式。预订过滤条件独立于通知过滤条件；空条件表示不限制。</p>
 
 <div class="card">
 <h3>工作流程</h3>
@@ -237,18 +243,18 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 <p>如果预订结果不明确，该 Holland2Stay 账号的自动预订会暂停。请先登录 Holland2Stay 核实订单或预留、按需付款或取消，再在用户设置中点击<strong>已核实，恢复自动预订</strong>。后台任务仍在运行时无法解除保护；如已卡住，请先停止监控。</p>
 <p>Plaza 可自动提交符合条件的应征；需要提供 Plaza 用户名与密码，并单独开启默认关闭的 Plaza 自动应征开关。提交即生效，不保证获得房源。</p>
 <p>如果 Plaza 应征结果不明确，请登录 Plaza 核实“我的应征”，再在用户设置中选择<strong>已核实，恢复该房源应征</strong>。核实前只暂停该账号对该房源的自动应征；其他房源不受影响。后台应征仍在运行时不能解除保护。</p>
-<p>OurDomain、OurCampus、Xior 与 Magis 目前仅通知、不预订；RENTCafe 预订流程尚未完成端到端验证，Magis 预订流程尚未侦察。</p>
+<p>OurDomain、OurCampus、Xior、Magis 与 Student Experience 目前仅通知、不自动预订。</p>
 </div>
 
 <div class="card">
 <h3>配置项</h3>
 <ul>
   <li><strong>启用自动预订</strong>：总开关</li>
-  <li><strong>试运行模式</strong>：建议先行启用，仅验证流程而不实际提交订单</li>
+  <li><strong>试运行模式</strong>：建议先行启用，验证提交前的部分步骤，不实际提交订单或应征；通过不代表正式提交一定成功</li>
   <li><strong>Holland2Stay 账号邮箱与密码</strong></li>
   <li><strong>Plaza 用户名与密码及自动应征开关</strong>：使用 Plaza 自动应征时配置，开关默认关闭</li>
   <li><strong>支付方式</strong>：iDEAL（默认）、Visa 或 Mastercard</li>
-  <li><strong>预订过滤条件</strong>：可设置较通知条件更为严格的规则</li>
+  <li><strong>预订过滤条件</strong>：与通知条件分别设置，按自己的预订要求填写</li>
 </ul>
 </div>
 
@@ -282,6 +288,7 @@ python monitor.py  # 抓取循环，需另开终端</pre>
 <p>「适用平台」一列很重要：某个平台不提供该字段时，这个条件<strong>对它整体跳过</strong>，
 而不是把它的房源全部排除。也就是说，勾了「最低能耗 B」并不意味着推来的都是 B 级——
 Xior、OurDomain、OurCampus 的房源根本没参与这一关。面板的筛选项旁也标着同样的范围。</p>
+<p>对于支持该条件的平台，个别房源仍可能缺少相应数据；不同字段的缺失处理不同，筛选结果不能替代对平台页面的核实。</p>
 </div>
 
 <div class="card">
@@ -370,9 +377,9 @@ Xior、OurDomain、OurCampus 的房源根本没参与这一关。面板的筛选
 <div class="card">
 <h3>被 Cloudflare 返回 403</h3>
 <ol>
-  <li>在 <code>.env</code> 中通过 <code>HTTPS_PROXY</code> 配置住宅代理</li>
-  <li>重启监控以更换 TLS 指纹</li>
-  <li>暂停数小时以待冷却</li>
+  <li>查看日志，确认受影响的平台和具体错误；403 不一定都由同一种原因造成</li>
+  <li>检查当前网络和已配置代理是否可用；如果出口被限制，可按部署说明配置代理</li>
+  <li>等待平台冷却后再观察恢复情况，持续失败时检查平台状态和日志</li>
 </ol>
 </div>
 

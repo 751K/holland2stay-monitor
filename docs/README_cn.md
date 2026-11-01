@@ -408,7 +408,7 @@ Xior、OurDomain、OurCampus 使用 RENTCafe，共用一份实现
 
 | 文档 | 用途 |
 |---|---|
-| [使用指南](https://flatradar.app/guide?lang=zh) | 截图与日常使用 |
+| [使用指南](https://flatradar.app/guide?lang=zh) | 面板设置与日常使用 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 系统运行方式，以及排障前应先了解的全部失败模式 |
 | [API.md](API.md) | 面向移动端与外部集成的后端契约 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
