@@ -25,8 +25,8 @@ booker.py — 自动预订模块（CloakBrowser 版）
            2026-08-20 删除，要找原文去 git 历史或 h2s_booking_gql（那份是站点
            报文的照抄记录，不是我们的调用清单）。
 
-           ⚠️ 这条路径**尚未经过一次真实预订验证**——验证它就等于真占一套房。
-           首次真实自动预订时需要盯着结果。见 docs/H2S_BOOKING_OPS.md §3.3
+           这条路径已用真实账号走通完整链路（占房 → 付款链接）；
+           首次在某个新账号或新环境上自动运行时仍应盯结果。见 docs/H2S_BOOKING_OPS.md §3.3
    3c. set_payment_method()
            setPaymentMethodOnCart mutation → code="idealcheckout_ideal"
    3d. _fetch_checkout_agreements()
@@ -55,8 +55,8 @@ docs/H2S_BOOKING_OPS.md 与 scrapers.base.OperationNotAllowedError。
     idealCheckOut            ✅ 200（同上）
     createEmptyCart          ✅ 200（但流程已不用它）
     addNewBooking            ❌ 403「not available through the public API」——已弃用
-    POST /api/booking        ✅ 端点存在（未登录回 401，非 404）；**带真实登录态的
-                                 完整占房未验证**，会在首次真实预订时见分晓
+    POST /api/booking        ✅ 端点存在（未登录回 401）；带真实登录态的完整占房
+                                 已验证（真实账号走通到付款链接）
 """
 from __future__ import annotations
 

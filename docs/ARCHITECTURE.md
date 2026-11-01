@@ -164,8 +164,8 @@ HTTP 传输和浏览器传输处理不同平台的请求。[mcore/browser_worker
 | Plaza | 单独开启后自动提交应征；提交不保证获得房源 | 账号及房源级 |
 | 其他平台 | 不开放自动预订；RENTCafe 流程的验证进度见 [RENTCAFE.md](RENTCAFE.md) | 不适用 |
 
-当存在 Holland2Stay 预订候选时，系统可以提前登录。当前 `/api/booking` 路径的完整真实下单验证
-状态见 [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md)；旧流程的成功不能证明新路径已验证。
+当存在 Holland2Stay 预订候选时，系统可以提前登录。当前 `/api/booking` 路径已用真实
+账号验证，细节见 [H2S_BOOKING_OPS.md](H2S_BOOKING_OPS.md)。
 Plaza 默认关闭自动应征，详见 [PLAZA.md](PLAZA.md)。
 
 真实提交前，系统会持久化保护记录：Holland2Stay 按账号保护，Plaza 按账号和房源保护。如果提交后
