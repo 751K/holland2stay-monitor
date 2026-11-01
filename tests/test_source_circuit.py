@@ -211,7 +211,7 @@ class TestMonitorWiring:
         src = pathlib.Path("mcore/scrape_round.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         for node in ast.walk(tree):
-            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_dispatch_isolated":
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_dispatch_source":
                 body = ast.unparse(node)
                 assert "runtime.source_circuits.trip" in body, (
                     "通用调度路径没有打开熔断，非 H2S source 依然裸奔"
@@ -220,7 +220,7 @@ class TestMonitorWiring:
                     "canary 成功后没有关闭熔断，会一直停在 canary 模式"
                 )
                 return
-        raise AssertionError("找不到 _dispatch_isolated，这条守卫已失效")
+        raise AssertionError("找不到 _dispatch_source，这条守卫已失效")
 
     def test_h2s_still_suppresses_login_on_block(self):
         """反向守卫：熔断推广了，但 H2S 独有的登录抑制不能跟着丢。

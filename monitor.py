@@ -60,6 +60,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 
 from config import (DATA_DIR, ENV_PATH, get_proxy_url, is_personal_proxy_active,
@@ -669,6 +670,53 @@ def _print_dry_run(fresh: list["Listing"], user_notifiers: "UserNotifiers") -> N
 
 
 
+class ScrapePlan(NamedTuple):
+    """Selected tasks and pre-filter totals needed for one scrape round."""
+    tasks: list
+    source_totals: dict[str, int]
+    multi_source: bool
+
+
+def _prepare_scrape_plan(cfg, storage, user_count: int, *, dry_run: bool, only_sources) -> ScrapePlan | None:
+    scrape_tasks = cfg.scrape_tasks_v2()
+    logger.info("开始抓取，任务数: %d，活跃用户数: %d", len(scrape_tasks), user_count)
+
+    if not scrape_tasks:
+        logger.warning("未配置任何抓取任务，本轮不抓取。请检查 .env 中 SOURCES / CITIES / OURDOMAIN_CITIES 设置。")
+        return None
+
+    # 分片**之前**的每 source 总 target 数。遥测要同时记「本轮抓了几个」和
+    # 「一共配了几个」——健康判定靠两者是否相等来区分「这一片没房」和
+    # 「整个 source 没房」（见 mcore/health.py 的 zero_streak 规则）。
+    source_totals: dict[str, int] = {}
+    for _t in scrape_tasks:
+        source_totals[_t.source] = source_totals.get(_t.source, 0) + 1
+
+    # 整轮是否跨多个 source——按**配置**算，在任何筛选之前。completeness key
+    # 的 source 前缀靠它（scrapers.completeness_key）。按筛剩的任务算会出错：
+    # 节流跳过 Xior、或者 REST 唤醒轮只抓 H2S 的时候，剩下只有 H2S，前缀消失，
+    # 「Eindhoven」这个裸 key 让 mark_stale_listings 退化成不带 source 的
+    # ``city IN (...)``，用 H2S 的完整性把同城 Xior 这轮没抓的房源一起老化掉。
+    multi_source = len(source_totals) > 1
+
+    if only_sources is not None:
+        scrape_tasks = [t for t in scrape_tasks if t.source in only_sources]
+        if not scrape_tasks:
+            logger.info("本轮只抓 %s，但它们都不在配置里，跳过", sorted(only_sources))
+            return None
+
+    # 代理全挂时只留下**直连打得通**的 source。放在节流和分片之前：被代理
+    # 挡住的 source 本轮根本不该占分片游标。
+    scrape_tasks = _apply_proxyless_gate(scrape_tasks)
+
+    # 先按 source 节流（多久抓一次），再分片（每轮抓几个）——两者管的不是
+    # 同一件事，顺序不能反：先分片会让被跳过的 source 白白推进分片游标。
+    scrape_tasks = _apply_source_intervals(scrape_tasks, cfg, storage, dry_run=dry_run)
+    scrape_tasks = _apply_task_sharding(scrape_tasks, cfg, storage, dry_run=dry_run)
+
+    return ScrapePlan(scrape_tasks, source_totals, multi_source)
+
+
 async def _run_once_snapshot(
         cfg,
         storage: Storage,
@@ -716,41 +764,12 @@ async def _run_once_snapshot(
     到步骤 6 await 时，booking 往往已经完成，几乎零额外等待。
     预订请求在发出通知之前就已进入 Holland2Stay 服务器，可节省 1-3 秒。
     """
-    scrape_tasks = cfg.scrape_tasks_v2()
-    logger.info("开始抓取，任务数: %d，活跃用户数: %d", len(scrape_tasks), len(user_notifiers))
-
-    if not scrape_tasks:
-        logger.warning("未配置任何抓取任务，本轮不抓取。请检查 .env 中 SOURCES / CITIES / OURDOMAIN_CITIES 设置。")
+    plan = _prepare_scrape_plan(
+        cfg, storage, len(user_notifiers), dry_run=dry_run, only_sources=only_sources,
+    )
+    if plan is None:
         return {}
-
-    # 分片**之前**的每 source 总 target 数。遥测要同时记「本轮抓了几个」和
-    # 「一共配了几个」——健康判定靠两者是否相等来区分「这一片没房」和
-    # 「整个 source 没房」（见 mcore/health.py 的 zero_streak 规则）。
-    source_totals: dict[str, int] = {}
-    for _t in scrape_tasks:
-        source_totals[_t.source] = source_totals.get(_t.source, 0) + 1
-
-    # 整轮是否跨多个 source——按**配置**算，在任何筛选之前。completeness key
-    # 的 source 前缀靠它（scrapers.completeness_key）。按筛剩的任务算会出错：
-    # 节流跳过 Xior、或者 REST 唤醒轮只抓 H2S 的时候，剩下只有 H2S，前缀消失，
-    # 「Eindhoven」这个裸 key 让 mark_stale_listings 退化成不带 source 的
-    # ``city IN (...)``，用 H2S 的完整性把同城 Xior 这轮没抓的房源一起老化掉。
-    multi_source = len(source_totals) > 1
-
-    if only_sources is not None:
-        scrape_tasks = [t for t in scrape_tasks if t.source in only_sources]
-        if not scrape_tasks:
-            logger.info("本轮只抓 %s，但它们都不在配置里，跳过", sorted(only_sources))
-            return {}
-
-    # 代理全挂时只留下**直连打得通**的 source。放在节流和分片之前：被代理
-    # 挡住的 source 本轮根本不该占分片游标。
-    scrape_tasks = _apply_proxyless_gate(scrape_tasks)
-
-    # 先按 source 节流（多久抓一次），再分片（每轮抓几个）——两者管的不是
-    # 同一件事，顺序不能反：先分片会让被跳过的 source 白白推进分片游标。
-    scrape_tasks = _apply_source_intervals(scrape_tasks, cfg, storage, dry_run=dry_run)
-    scrape_tasks = _apply_task_sharding(scrape_tasks, cfg, storage, dry_run=dry_run)
+    scrape_tasks = plan.tasks
 
     loop = asyncio.get_running_loop()
 
@@ -758,8 +777,8 @@ async def _run_once_snapshot(
 
     try:
         fresh, completeness, h2s_blocked, h2s_mode = await _dispatch_with_h2s_circuit(
-            loop, scrape_tasks, storage=storage, source_totals=source_totals,
-            multi_source=multi_source, dry_run=dry_run,
+            loop, scrape_tasks, storage=storage, source_totals=plan.source_totals,
+            multi_source=plan.multi_source, dry_run=dry_run,
         )
         _log_scrape_completeness(completeness)
         stop = await _handle_h2s_blocked(
@@ -848,6 +867,30 @@ async def _prepare_reload():
                 logger.warning("关闭未生效的通知器失败", exc_info=True)
         raise
     return new_cfg, new_notifiers
+
+
+def _invalidate_changed_prewarm(old_notifiers, new_notifiers):
+    """Keep compatible prelogin sessions; forget removed or changed accounts."""
+    def credentials(user):
+        ab = getattr(user, "auto_book", None)
+        return (getattr(ab, "enabled", False), getattr(ab, "email", ""),
+                getattr(ab, "password", ""))
+
+    old = {u.id: credentials(u) for u, _ in old_notifiers}
+    new = {u.id: credentials(u) for u, _ in new_notifiers}
+    for uid in old.keys() | set(prewarm_cache.keys()):
+        if uid not in new or old.get(uid) != new[uid]:
+            prewarm_cache.invalidate(uid)
+
+
+def _record_applied_config(storage):
+    from mcore.config_status import publish
+    from settings_store import _active_runtime
+    try:
+        if _active_runtime is not None:
+            publish(storage, _active_runtime, ENV_PATH)
+    except Exception:
+        logger.warning("无法记录监控配置生效状态", exc_info=True)
 
 
 async def main_loop(
@@ -1250,12 +1293,15 @@ async def main_loop(
                 else:
                     old_notifiers = user_notifiers
                     cfg, user_notifiers = new_cfg, fresh_notifiers
+                    from mcore.startup import apply_logging_level
+                    apply_logging_level(cfg.log_level)
+                    _record_applied_config(storage)
                     adaptive_peak = float(cfg.peak_interval)
                     # Configuration is already committed; cleanup cannot roll it back.
                     try:
-                        prewarm_cache.clear()
+                        _invalidate_changed_prewarm(old_notifiers, user_notifiers)
                     except Exception:
-                        logger.warning("热重载后清理预登录缓存失败", exc_info=True)
+                        logger.warning("热重载后更新预登录缓存失败", exc_info=True)
                     for _, n in old_notifiers:
                         try:
                             await n.close()
@@ -1557,6 +1603,7 @@ async def _async_main() -> None:
     _apns_startup_diag(storage, users)
 
     _write_pid()
+    _record_applied_config(storage)
     _setup_signals(asyncio.get_running_loop())
     from mcore.booking_round import notify_interrupted_plaza
     from mcore import push as booking_push

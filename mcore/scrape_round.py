@@ -11,6 +11,8 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import NamedTuple
+from dataclasses import dataclass, field
 
 from config import get_proxy_url
 from mcore.health import CIRCUIT_OPEN_ERROR
@@ -277,6 +279,92 @@ def redact_proxy_for_log(url: str) -> str:
     return _re.sub(r"//[^@]*@", "//", url or "") or "(无)"
 
 
+class ScrapeRoundResult(NamedTuple):
+    """One monitoring round's data, completeness and H2S circuit outcome."""
+    listings: list[Listing]
+    completeness: dict[str, bool]
+    h2s_blocked: BlockedError | None
+    h2s_mode: str
+
+
+@dataclass(frozen=True)
+class SourceDispatchContext:
+    loop: asyncio.AbstractEventLoop
+    storage: object
+    source_totals: dict[str, int]
+    multi_source: bool
+    dry_run: bool
+    round_at: str
+
+
+@dataclass
+class SourceDispatchResult:
+    source: str
+    listings: list[Listing] = field(default_factory=list)
+    completeness: dict[str, bool] = field(default_factory=dict)
+    error: Exception | None = None
+    h2s_blocked: BlockedError | None = None
+
+
+async def _dispatch_source(
+    src: str, group: list, mode: str, context: SourceDispatchContext,
+) -> SourceDispatchResult:
+    """隔离单个平台；返回该平台结果，熔断、节流和代理仍由主进程管理。"""
+    storage, dry_run = context.storage, context.dry_run
+    started_at = time.monotonic()
+    try:
+        raw = await dispatch_scrape_tasks_async(
+            context.loop, group, isolated=src in BROWSER_SOURCES,
+            browser_source=src, multi_source=context.multi_source,
+        )
+        fresh_part, completeness_part = unpack_scrape_result(raw)
+    except Exception as exc:
+        if src == H2S_SOURCE and isinstance(exc, BlockedError):
+            mark_h2s_scrape_blocked(exc, storage)
+            if not dry_run:
+                record_source_round(
+                    storage, round_at=context.round_at, source=src,
+                    targets=len(group), started_at=started_at, error=exc,
+                    total_targets=context.source_totals.get(src, len(group)),
+                )
+            return SourceDispatchResult(src, h2s_blocked=exc)
+        runtime.source_circuits.trip(src, exc, storage=None if dry_run else storage)
+        if isinstance(exc, RateLimitError):
+            runtime.source_pacing.penalize(src, storage=None if dry_run else storage)
+        completeness = {
+            completeness_key(src, task.city_display, multi_source=context.multi_source): False
+            for task in group
+        }
+        logger.error(
+            "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
+            src, len(group), type(exc).__name__, exc, exc_info=True,
+        )
+        if not dry_run and is_proxy_error(exc):
+            report_source_proxy_failure(src, exc)
+        if not dry_run:
+            record_source_round(
+                storage, round_at=context.round_at, source=src,
+                targets=len(group), started_at=started_at, error=exc,
+                total_targets=context.source_totals.get(src, len(group)),
+            )
+        return SourceDispatchResult(src, completeness=completeness, error=exc)
+
+    if mode == "canary":
+        if src == H2S_SOURCE:
+            mark_h2s_scrape_recovered(storage)
+        else:
+            runtime.source_circuits.recover(src, storage=None if dry_run else storage)
+    runtime.source_pacing.relax(src, storage=None if dry_run else storage)
+    if not dry_run:
+        complete_n, total_n = completeness_stats(completeness_part)
+        record_source_round(
+            storage, round_at=context.round_at, source=src,
+            listings=len(fresh_part), targets=total_n or len(group), complete=complete_n,
+            started_at=started_at, total_targets=context.source_totals.get(src, len(group)),
+        )
+    return SourceDispatchResult(src, fresh_part, completeness_part)
+
+
 async def dispatch_with_h2s_circuit(
     loop, tasks, *, storage, source_totals, multi_source, dry_run,
 ):
@@ -290,7 +378,6 @@ async def dispatch_with_h2s_circuit(
     completeness_all: dict[str, bool] = {}
     #: source → 本轮的熔断模式（normal / canary / open），canary 成功时据此
     #: 关闭熔断。
-    source_modes: dict[str, str] = {}
     h2s_blocked: BlockedError | None = None
     source_failures: list[tuple[str, Exception]] = []
     succeeded_sources: list[str] = []
@@ -304,124 +391,12 @@ async def dispatch_with_h2s_circuit(
     # 整轮共用一个时间戳，各 source 的遥测行靠它分组。用 dispatch 开始的
     # 时刻而不是各 source 各自的完成时刻——否则同一轮的行会散成好几组。
     round_at = datetime.now(timezone.utc).isoformat()
+    context = SourceDispatchContext(loop, storage, source_totals, multi_source, dry_run, round_at)
 
     # completeness 的 key 直接用 dispatcher 那份共享实现
     # （``scrapers.completeness_key``）。这里以前有个本地 ``_ckey``，注释写着
     # 「与 scrapers._completeness_key 保持一致」——靠注释维持的一致性不是
     # 一致性，而形态一旦错开症状不是报错，是静默的错误收敛。
-
-    async def _dispatch(selected, *, isolated: bool = False, browser_source: str = ""):
-        result = await dispatch_scrape_tasks_async(
-            loop,
-            selected,
-            isolated=isolated,
-            browser_source=browser_source,
-            multi_source=multi_source,
-        )
-        return unpack_scrape_result(result)
-
-    async def _dispatch_isolated(src: str, group: list) -> None:
-        """跑一个 source 的全部任务，失败只影响这个 source。
-
-        浏览器型 source（H2S / Xior）使用各自的常驻工作进程，避免共享
-        Playwright 对象并允许在超时后回收卡住的进程树。
-        """
-        nonlocal h2s_blocked
-        started_at = time.monotonic()
-        try:
-            fresh_part, completeness_part = await _dispatch(
-                group,
-                isolated=src in BROWSER_SOURCES,
-                browser_source=src,
-            )
-        except Exception as e:
-            # H2S 的屏蔽还要抑制登录/预订；专用处理保留原来的整轮返回语义。
-            if src == H2S_SOURCE and isinstance(e, BlockedError):
-                h2s_blocked = e
-                mark_h2s_scrape_blocked(e, storage)
-                if not dry_run:
-                    record_source_round(
-                        storage, round_at=round_at, source=src,
-                        targets=len(group), started_at=started_at, error=e,
-                        total_targets=source_totals.get(src, len(group)),
-                    )
-                return
-            source_failures.append((src, e))
-            # 打开这个 source 的熔断（按 source 各自的策略；不该熔断的异常
-            # 会被 trip() 原样忽略）。以前只有 H2S 有这层保护——而实测里
-            # xior 整源 429 失败 147 次、ourdomain / ourcampus 各 60+ 次，
-            # H2S 总共才 6 次。保护装在了最不需要它的那个 source 上。
-            runtime.source_circuits.trip(src, e, storage=None if dry_run else storage)
-            # 只有 429 才拉长节奏。403 / 网络错误 / 平台维护都不是「打得太
-            # 勤」造成的，拉长间隔既治不了它们，又白白拖慢恢复。
-            if isinstance(e, RateLimitError):
-                runtime.source_pacing.penalize(src, storage=None if dry_run else storage)
-            # 标 ✗ 而不是留空：完整扫描那行日志要看得出「这个 source 塌了」，
-            # 且 False 会正确挡住该城市的 stale 收敛。
-            for t in group:
-                completeness_all.setdefault(
-                    completeness_key(src, t.city_display,
-                                     multi_source=multi_source), False)
-            logger.error(
-                "source %s 整体抓取失败，已隔离该 source（%d 个任务）: %s: %s",
-                src, len(group), type(e).__name__, e,
-                exc_info=True,
-            )
-            # 代理坏了要**当场报给代理池**，不能等整轮全灭。
-            #
-            # 这层跨源隔离接住异常之后就 return 了，而标记冷却/切换/降级的
-            # 代码住在 run_once 外层的 `except ProxyError`——那里只有整轮
-            # 所有 source 都失败时才够得着。于是形成一个死锁式的循环：
-            #
-            #   H2S 成功（浏览器建在好线路上，缓存 2 小时）
-            #     → 整轮不算全灭 → 外层处理器不触发
-            #     → 代理池永远不知道那个代理挂了
-            #     → OurCampus / Xior 每轮现取代理，拿到没被冷却的死代理
-            #     → 402，循环
-            #
-            # 2026-08-27 实测：08 时（本地）source 级隔离 176 次，真正报给
-            # 代理池只有 4 次；同一小时 H2S 163/167 成功，而 OurCampus 和
-            # Xior 是 0/167。**H2S 的健康恰恰是把另外两家钉死的原因**——
-            # 它越顺，代理池越听不到坏消息。
-            #
-            # 判据也因此换掉了：冷却要回答的是「这个代理还能不能用」，而
-            # 原先拿「整轮有没有全灭」来判，两者不是一回事。
-            #
-            # 误伤由既有的「连续两次确认」阈值挡住（_PROXY_FAILURE_CONFIRM_
-            # THRESHOLD）：单次抖动只留一个 mark，不会真的冷却谁。
-            if not dry_run and is_proxy_error(e):
-                report_source_proxy_failure(src, e)
-            if not dry_run:
-                record_source_round(
-                    storage, round_at=round_at, source=src,
-                    targets=len(group), started_at=started_at, error=e,
-                    total_targets=source_totals.get(src, len(group)),
-                )
-            return
-        succeeded_sources.append(src)
-        if source_modes.get(src) == "canary":
-            if src == H2S_SOURCE:
-                mark_h2s_scrape_recovered(storage)
-            else:
-                runtime.source_circuits.recover(src, storage=None if dry_run else storage)
-        # 干净地抓完一轮。攒够连续若干轮才会降一档——降太快会在限流阈值
-        # 附近来回振荡，每振荡一次就要再付一次熔断冷却。
-        #
-        # canary 轮也算数：它只抓 1 个 target，是这个 source 当下能给出的
-        # 最干净的证据。不算的话，熔断频繁的 source 永远攒不满计数，倍率
-        # 只升不降——那正是它最需要降下来的时候。
-        runtime.source_pacing.relax(src, storage=None if dry_run else storage)
-        fresh_all.extend(fresh_part)
-        completeness_all.update(completeness_part)
-        if not dry_run:
-            complete_n, total_n = completeness_stats(completeness_part)
-            record_source_round(
-                storage, round_at=round_at, source=src,
-                listings=len(fresh_part),
-                targets=total_n or len(group), complete=complete_n,
-                started_at=started_at,
-                total_targets=source_totals.get(src, len(group)),
-            )
 
     # 逐 source 隔离。dispatcher 内部已经按 task 隔离，但它在「本次调用的
     # 任务全部失败」时仍会上抛——而 monitor 是按 source 分开调用它的，于是
@@ -440,7 +415,6 @@ async def dispatch_with_h2s_circuit(
             mode, n = h2s_mode, len(selected_h2s)
         else:
             mode, n = runtime.source_circuits.plan(src, n_tasks=len(group))
-        source_modes[src] = mode
         if mode == "open":
             remaining = runtime.source_circuits.remaining(src)
             logger.warning(
@@ -472,7 +446,17 @@ async def dispatch_with_h2s_circuit(
                 src, group[0].city_display,
             )
             group = group[:n]
-        await _dispatch_isolated(src, group)
+        result = await _dispatch_source(src, group, mode, context)
+        fresh_all.extend(result.listings)
+        if result.error is not None:
+            for key, complete in result.completeness.items():
+                completeness_all.setdefault(key, complete)
+            source_failures.append((src, result.error))
+        elif result.h2s_blocked is not None:
+            h2s_blocked = result.h2s_blocked
+        else:
+            completeness_all.update(result.completeness)
+            succeeded_sources.append(src)
 
     # 一个都没成功 = 本轮没有任何可用数据，维持旧契约上抛，让 main_loop 走
     # 冷却而不是原速空转。h2s_blocked 不在此列——H2S 熔断本身就是退避，且
@@ -480,4 +464,4 @@ async def dispatch_with_h2s_circuit(
     if source_failures and not succeeded_sources and h2s_blocked is None:
         raise pick_round_failure(source_failures)
 
-    return fresh_all, completeness_all, h2s_blocked, h2s_mode
+    return ScrapeRoundResult(fresh_all, completeness_all, h2s_blocked, h2s_mode)

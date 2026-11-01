@@ -145,9 +145,10 @@ class TestRentCafeConstructorInsideTry:
 class TestPerUserBookingIsolation:
     def test_await_future_is_guarded(self):
         """一个用户的异常不该带走所有人——这个循环还负责发通知、更新重试队列。"""
-        import monitor
+        from mcore import booking_round
 
-        src = _code(monitor._process_booking_results)
+        assert "_process_single_booking(" in _code(booking_round.process_booking_results)
+        src = _code(booking_round._process_single_booking)
         # 必须带墙钟上限：线程卡死时裸 await 会让整轮（以及后面排队的用户）
         # 永远等下去。异常隔离仍然要在这层 try 里。
         i = src.index("result = await asyncio.wait_for(")
@@ -155,4 +156,4 @@ class TestPerUserBookingIsolation:
             "wait_for 不在 try 里"
         window = src[i:i + 1200]
         assert "except asyncio.TimeoutError:" in window
-        assert "except Exception:" in window and "continue" in window
+        assert "except Exception:" in window and "return" in window

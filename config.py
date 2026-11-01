@@ -139,8 +139,17 @@ def resolve_project_path(path_str: str | os.PathLike[str]) -> Path:
 
 # Preserve genuine process overrides before .env adds its own values.
 from settings_store import capture_external_runtime
+from mcore.config_status import capture_startup as _capture_startup_fixed, file_stamp as _config_file_stamp
 capture_external_runtime()
+try:
+    _startup_dotenv_stamp = _config_file_stamp(ENV_PATH)
+except OSError:
+    _startup_dotenv_stamp = None
 load_dotenv(dotenv_path=ENV_PATH)
+try:
+    _capture_startup_fixed(ENV_PATH, expected_stamp=_startup_dotenv_stamp)
+except (OSError, UnicodeError):
+    logging.getLogger(__name__).warning("无法记录启动时部署配置", exc_info=True)
 
 # DB_PATH / TIMEZONE 在模块级定义，作为唯一来源。
 # load_config() 和 web.py 均从此处引用，不再各自读 os.environ。

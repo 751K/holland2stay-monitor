@@ -6,7 +6,8 @@ import os
 import threading
 import time
 
-from mcore.browser_worker import BrowserWorker, _PipeLogHandler, _exception_chain, _restore_exception
+from mcore.browser_worker import (BrowserWorker, _PipeLogHandler, _browser_launch_settings,
+                                  _exception_chain, _restore_exception)
 
 logger = logging.getLogger('monitor')
 
@@ -131,6 +132,7 @@ class BookingWorker(BrowserWorker):
         from settings_store import runtime_environment
         env = runtime_environment()
         version = env.get("FLATRADAR_RUNTIME_VERSION")
+        launch_settings = _browser_launch_settings(env)
         deadline = time.monotonic() + timeout
         if action == 'heartbeat':
             acquired = self._operation_lock.acquire(blocking=False)
@@ -142,11 +144,12 @@ class BookingWorker(BrowserWorker):
             raise TimeoutError('等待预订浏览器进程超时')
         try:
             if self.process is not None and (not self.process.is_alive() or
-                                             (version and version != self._runtime_version)):
+                                             launch_settings != self._launch_settings):
                 self.stop()
             if self.process is None:
                 self._start()
             self._runtime_version = version
+            self._launch_settings = launch_settings
             conn = self.conn
             if not self._ready:
                 self._receive(conn, deadline, get_proxy_url, expect='ready')

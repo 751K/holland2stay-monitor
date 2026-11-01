@@ -506,10 +506,16 @@ class TestSSEAuth:
         r = api_client.post("/api/v1/notifications/stream/ticket",
                             headers=_bearer(admin_token))
         ticket = r.get_json()["data"]["ticket"]
-        tampered = ticket[:-1] + ("A" if ticket[-1] != "A" else "B")
+        # Change the first signature character: the last Base64 character can
+        # differ only in unused padding bits while decoding to the same bytes.
+        head, signature = ticket.rsplit(".", 1)
+        tampered = head + "." + ("A" if signature[0] != "A" else "B") + signature[1:]
         s = api_client.get(
             f"/api/v1/notifications/stream?ticket={tampered}")
-        assert s.status_code == 401
+        try:
+            assert s.status_code == 401
+        finally:
+            s.close()
 
     def test_expired_ticket_is_rejected(
             self, api_client, seeded, admin_token, monkeypatch):

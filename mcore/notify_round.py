@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from dataclasses import dataclass
+from typing import NamedTuple
 
 from models import is_lottery_status
 from storage import Storage
@@ -145,146 +147,113 @@ def split_batchable(matched: list) -> tuple[list, list]:
     return batched, singles
 
 
-async def notify_new_listings(
-    new_listings: list,
-    user_notifiers: list,
-    web_notifier,
-    storage: Storage,
-    push,
-) -> tuple[int, list]:
-    """发送新房源通知（预订已在后台线程并行运行）。
+@dataclass
+class NewListingMatches:
+    """匹配阶段的结果：已遍历房源与每位用户的候选。"""
+    listing_ids: list[str]
+    by_user: dict[str, list]
 
-    标记策略：**走完本阶段的 listing 全部标记**，与「有没有人匹配」「投递成功
-    与否」都无关。``notified=1`` 的语义是「已处理」，不是「已送达」。
 
-    这个区别以前无所谓（没人读这个字段），现在它是未投递事件重放的判据——
-    旧写法（只在至少投递成功时标记）会让无人匹配的房源永远停在 0，生产实测
-    559 条里有 403 条是这么来的，重放信号会被这批噪音淹没。
+class NewListingNotificationResult(NamedTuple):
+    total_notified: int
+    push_tasks: list
 
-    Returns
-    -------
-    (total_notified, push_tasks)
-      push_tasks: 本段创建的 APNs/FCM asyncio.Task，由 run_once 末尾统一 gather。
-    """
-    total_notified = 0
-    new_notified_ids: list[str] = []
-    user_round_matches: dict[str, list] = {}  # user_id -> [Listing,...]，用于聚合判定
-    push_tasks: list = []
 
+async def _match_new_listings(new_listings, user_notifiers, web_notifier) -> NewListingMatches:
+    listing_ids: list[str] = []
+    by_user: dict[str, list] = {}
     for listing in new_listings:
-        for user, _notifier in user_notifiers:
+        for user, _ in user_notifiers:
             if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
                 logger.info("[%s] 跳过通知（过滤条件不符）: %s", user.name, listing.name)
                 continue
-
-            # APNs 推送钩子：现有渠道发送之后追加，独立 task，与其他渠道互不阻塞。
-            user_round_matches.setdefault(user.id, []).append(listing)
-
-        # Web 面板通知（每条新房源写一次，与用户过滤无关）
+            by_user.setdefault(user.id, []).append(listing)
         if web_notifier:
             await web_notifier.send_new_listing(listing)
+        listing_ids.append(listing.id)
+    return NewListingMatches(listing_ids, by_user)
 
-        # **走完通知阶段就标记，不管有没有人匹配。**
-        #
-        # 旧写法是 `if notified_this`（至少投递给一个用户）。于是没有任何用户
-        # 筛选条件匹配到的房源永远停在 notified=0——2026-08-20 生产实测，559 条
-        # listings 里有 403 条是这么来的。
-        #
-        # 这个语义差别以前无所谓（没人读这个字段），现在它是重放的判据：不修的话
-        # 0 池会立刻重新堆积，重放信号退化成噪音。见
-        # mstorage/_listings.py 的 pending_new_listings。
-        new_notified_ids.append(listing.id)
 
-    # 逐条 / 聚合发送。
-    #
-    # 这一段从上面的 `for listing: for user:` 里拆了出来——聚合必须先把某个用户
-    # 本轮的匹配收齐才能判断，边遍历边发做不到。代价是日志里「新房源」那几行
-    # 现在按用户分组，不再按房源分组。
+async def _notify_matching_users(matches: NewListingMatches, user_notifiers) -> int:
+    total = 0
     for user, notifier in user_notifiers:
-        matched = user_round_matches.get(user.id) or []
+        matched = matches.by_user.get(user.id) or []
         batched, singles = split_batchable(matched)
         if batched:
-            logger.info(
-                "[%s] %d 套 %s 抽签房源聚合成 1 条（逐条发会占掉当天邮件配额的一大半）",
-                user.name, len(batched), BATCH_SOURCE,
-            )
-            for l in batched:
-                logger.info("[%s]   ↳ %s (%s)", user.name, l.name, l.status)
+            logger.info("[%s] %d 套 %s 抽签房源聚合成 1 条", user.name, len(batched), BATCH_SOURCE)
+            for listing in batched:
+                logger.info("[%s]   ↳ %s (%s)", user.name, listing.name, listing.status)
             if await notifier.send_new_listings_batch(batched):
-                # 计的是「这些房源都通知到了这个用户」，语义和拆分前一致；
-                # 实际发出的消息数是 1，那件事由上面那行日志表达。
-                total_notified += len(batched)
+                total += len(batched)
         for listing in singles:
             logger.info("[%s] 新房源: %s (%s)", user.name, listing.name, listing.status)
             if await notifier.send_new_listing(listing):
-                total_notified += 1
+                total += 1
+    return total
 
-    # APNs + FCM 发送：本轮每个用户的匹配若 < 阈值，按条推；否则聚合成一条
-    if push.get_client() is not None or push.get_fcm_client() is not None:
-        round_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        user_by_id = {u.id: u for u, _ in user_notifiers}
-        for uid, matched in user_round_matches.items():
-            user_obj = user_by_id.get(uid)
-            if user_obj is None:
-                continue
-            if push.should_aggregate(len(matched)):
-                push_tasks.append(asyncio.create_task(
-                    push.dispatch_aggregate(
-                        storage, user_obj, matched, round_id=round_id,
-                    ),
-                ))
-            else:
-                for l in matched:
-                    push_tasks.append(asyncio.create_task(
-                        push.dispatch(storage, user_obj, l, kind="new"),
-                    ))
 
-    storage.mark_notified_batch(new_notified_ids)
-    return total_notified, push_tasks
+def _schedule_new_listing_pushes(matches: NewListingMatches, user_notifiers, storage, push, tasks) -> None:
+    if push.get_client() is None and push.get_fcm_client() is None:
+        return
+    round_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    users = {u.id: u for u, _ in user_notifiers}
+    for uid, matched in matches.by_user.items():
+        user = users.get(uid)
+        if user is None:
+            continue
+        if push.should_aggregate(len(matched)):
+            tasks.append(asyncio.create_task(push.dispatch_aggregate(storage, user, matched, round_id=round_id)))
+        else:
+            for listing in matched:
+                tasks.append(asyncio.create_task(push.dispatch(storage, user, listing, kind="new")))
+
+
+async def notify_new_listings(
+    new_listings: list, user_notifiers: list, web_notifier, storage: Storage, push,
+    *, task_sink: list | None = None,
+) -> NewListingNotificationResult:
+    """匹配、发送并标记已处理事件；异常时保留未完成事件供重放。
+
+    若提供 task_sink，推送任务创建后立即加入调用方清单；即使本阶段
+    后续抛错，调用方仍可等待已经排队的任务。
+    """
+    tasks = task_sink if task_sink is not None else []
+    matches = await _match_new_listings(new_listings, user_notifiers, web_notifier)
+    total = await _notify_matching_users(matches, user_notifiers)
+    _schedule_new_listing_pushes(matches, user_notifiers, storage, push, tasks)
+    # notified=1 表示处理过，无论是否有人匹配或渠道是否送达。
+    storage.mark_notified_batch(matches.listing_ids)
+    return NewListingNotificationResult(total, tasks)
+
+
+async def _notify_status_event(change, user_notifiers, web_notifier, storage, push, tasks) -> int:
+    listing, old_status, new_status, event_id = change
+    for user, notifier in user_notifiers:
+        if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
+            logger.info("[%s] 状态变更跳过通知（过滤条件不符）: %s", user.name, listing.name)
+            continue
+        logger.info("[%s] 状态变更: %s  %s → %s", user.name, listing.name, old_status, new_status)
+        await notifier.send_status_change(listing, old_status, new_status)
+        if push.get_client() is not None or push.get_fcm_client() is not None:
+            tasks.append(asyncio.create_task(
+                push.dispatch_status_change(storage, user, listing, old_status, new_status),
+            ))
+    if web_notifier:
+        await web_notifier.send_status_change(listing, old_status, new_status)
+    return event_id
 
 
 async def notify_status_changes(
-    status_changes: list,
-    user_notifiers: list,
-    web_notifier,
-    storage: Storage,
-    push,
+    status_changes: list, user_notifiers: list, web_notifier, storage: Storage, push,
+    *, task_sink: list | None = None,
 ) -> list:
-    """发送状态变更通知（预订已在后台线程并行运行）。
-
-    Returns
-    -------
-    push_tasks: 本段创建的 APNs/FCM asyncio.Task。
-    """
-    push_tasks: list = []
-    sc_notified_event_ids: list[int] = []
-
-    for listing, old_status, new_status, event_id in status_changes:
-        for user, notifier in user_notifiers:
-            if not user.listing_filter.is_empty() and not user.listing_filter.passes(listing):
-                logger.info("[%s] 状态变更跳过通知（过滤条件不符）: %s", user.name, listing.name)
-                continue
-
-            logger.info("[%s] 状态变更: %s  %s → %s", user.name, listing.name, old_status, new_status)
-            await notifier.send_status_change(listing, old_status, new_status)
-            # APNs + FCM status_change：直接逐条推（变更通常不像新房源那么密集）
-            if push.get_client() is not None or push.get_fcm_client() is not None:
-                push_tasks.append(asyncio.create_task(
-                    push.dispatch_status_change(
-                        storage, user, listing, old_status, new_status,
-                    ),
-                ))
-
-        # Web 面板通知（每次状态变更写一次，与用户过滤无关）
-        if web_notifier:
-            await web_notifier.send_status_change(listing, old_status, new_status)
-
-        # 同上：走完通知阶段就标记，判据是「处理过」不是「投递成功」。
-        # 标记的是**这一条事件**，不是这套房源的所有事件。
-        sc_notified_event_ids.append(event_id)
-
-    storage.mark_status_change_notified_batch(sc_notified_event_ids)
-    return push_tasks
+    """逐事件发送并按事件主键标记；task_sink 保存异常前已排队的推送。"""
+    tasks = task_sink if task_sink is not None else []
+    ids = []
+    for change in status_changes:
+        ids.append(await _notify_status_event(change, user_notifiers, web_notifier, storage, push, tasks))
+    storage.mark_status_change_notified_batch(ids)
+    return tasks
 
 
 def push_booking_failed(push, storage, user, listing) -> "asyncio.Task":

@@ -18,6 +18,27 @@
 </div>
 {% endif %}
 
+<div class="card mb-4">
+  <div class="section-header"><i class="bi bi-check2-circle mr-2"></i>{{ _('settings_apply_status') }}</div>
+  <div class="card-body">
+    <p>{{ _('settings_apply_' ~ config_status.state) }}</p>
+    {% if config_status.pending %}
+    <p>{{ _('settings_apply_pending_keys') }} <code>{{ config_status.pending | join(' · ') }}</code></p>
+    {% endif %}
+    {% if config_status.overridden %}
+    <p>{{ _('settings_apply_override_keys') }} <code>{{ config_status.overridden | join(' · ') }}</code></p>
+    {% endif %}
+    {% if config_status.fixed_overridden %}
+    <p>{{ _('settings_apply_fixed_override') }} <code>{{ config_status.fixed_overridden | join(' · ') }}</code></p>
+    {% endif %}
+    {% if config_status.restart_required %}
+    <p>{{ _('settings_apply_restart_keys') }} <code>{{ config_status.restart_required | join(' · ') }}</code></p>
+    {% endif %}
+    {% if config_status.restart_unknown %}<p>{{ _('settings_apply_restart_unknown') }}</p>{% endif %}
+    <p class="form-help">{{ _('settings_apply_restart_hint') }}</p>
+  </div>
+</div>
+
 <form method="post" class="settings-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

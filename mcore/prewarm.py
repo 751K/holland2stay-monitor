@@ -35,6 +35,7 @@ class PrewarmCache:
 
     def __init__(self) -> None:
         self._cache: dict[str, "PrewarmedSession"] = {}
+        self._generation: dict[str, int] = {}
 
     # -- 查询 ----------------------------------------------------------
 
@@ -64,6 +65,16 @@ class PrewarmCache:
 
     def set(self, user_id: str, session: "PrewarmedSession") -> None:
         self._cache[user_id] = session
+
+    def generation(self, user_id: str) -> int:
+        return self._generation.get(user_id, 0)
+
+    def set_if_current(self, user_id: str, session: "PrewarmedSession", generation: int) -> bool:
+        if self.generation(user_id) != generation:
+            session.close_if_owned()
+            return False
+        self.set(user_id, session)
+        return True
 
     def lane_in_use(self) -> bool:
         """缓存里已经有人占着常驻浏览器了吗。
@@ -148,6 +159,7 @@ class PrewarmCache:
         会把全进程共用的那一个关掉，而调用方（用户被禁用、改邮箱）完全想不到自己
         顺手废掉了下单通道。
         """
+        self._generation[user_id] = self.generation(user_id) + 1
         ps = self._cache.pop(user_id, None)
         if ps:
             ps.close_if_owned()

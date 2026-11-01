@@ -227,7 +227,7 @@ def _call_offset():
 
     from mcore import post_round
     m = re.search(r"^\s*prewarm\.heartbeat\(",
-                  inspect.getsource(post_round.run_post_scrape), re.MULTILINE)
+                  inspect.getsource(post_round.submit_round_bookings), re.MULTILINE)
     return m.start() if m else None
 
 
@@ -256,7 +256,7 @@ class TestWiring:
         import inspect
 
         from mcore import post_round
-        src = inspect.getsource(post_round.run_post_scrape)
+        src = inspect.getsource(post_round.submit_round_bookings)
         hb = _call_offset()
         assert hb is not None
         pw = src.index("prewarm.start_for_candidates(candidate_user_ids)")

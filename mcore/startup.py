@@ -52,6 +52,7 @@ def setup_logging(level: str) -> None:
     main_fh.setFormatter(logging.Formatter(fmt))
     main_fh.setLevel(getattr(logging, level, "INFO"))
     main_fh._monitor_owned = True
+    main_fh._monitor_main = True
     logging.getLogger().addHandler(main_fh)
 
     # 错误日志（WARNING+）：抓取/下单异常的专用归档
@@ -65,6 +66,16 @@ def setup_logging(level: str) -> None:
     error_fh.setLevel(logging.WARNING)
     error_fh._monitor_owned = True
     logging.getLogger().addHandler(error_fh)
+
+
+def apply_logging_level(level: str) -> None:
+    """Update live logging without reopening files or changing the error threshold."""
+    numeric = getattr(logging, level.upper(), logging.INFO)
+    root = logging.getLogger()
+    root.setLevel(numeric)
+    for handler in root.handlers:
+        if getattr(handler, "_monitor_main", False):
+            handler.setLevel(numeric)
 
 
 def validate_structured_config() -> None:

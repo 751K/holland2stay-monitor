@@ -332,20 +332,9 @@ class TestMonitorWiring:
         import inspect
         from mcore import scrape_round
 
-        tree = ast.parse(inspect.getsource(scrape_round))
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            body = ast.dump(node)
-            # 记「本轮这个 source 成功了」的那个函数
-            if "succeeded_sources" not in body or "append" not in body:
-                continue
-            if "source_pacing" in body and "relax" in body:
-                return
-        pytest.fail(
-            "没有任何一个记录 succeeded_sources 的函数调用 _source_pacing.relax()"
-            "——倍率将只升不降"
-        )
+        body = ast.dump(ast.parse(inspect.getsource(scrape_round._dispatch_source)))
+        assert "SourceDispatchResult" in body and "source_pacing" in body and "relax" in body
+        assert "_dispatch_source" in inspect.getsource(scrape_round.dispatch_with_h2s_circuit)
 
     # ── 逐处检查，不是「有一处就算过」 ───────────────────────────────
     #
@@ -361,22 +350,22 @@ class TestMonitorWiring:
         import inspect
         import re
         from mcore import scrape_round
-        src = inspect.getsource(scrape_round.dispatch_with_h2s_circuit)
+        src = inspect.getsource(scrape_round._dispatch_source)
         return [src[m.start():m.start() + 1600]
                 for m in re.finditer(re.escape(marker), src)]
 
     def test_one_shared_site_of_each(self):
         """各平台共用一处成功/失败处理，避免再次分叉。"""
-        assert len(self._sites("succeeded_sources.append(")) == 1
-        assert len(self._sites("source_failures.append(")) == 1
+        assert len(self._sites("if mode == \"canary\":")) == 1
+        assert len(self._sites("runtime.source_circuits.trip(")) == 1
 
     def test_every_success_site_relaxes(self):
-        for i, block in enumerate(self._sites("succeeded_sources.append(")):
+        for i, block in enumerate(self._sites("if mode == \"canary\":")):
             assert "source_pacing.relax" in block, (
                 f"第 {i + 1} 处「本轮成功」没有 relax——该 source 的倍率只升不降")
 
     def test_every_failure_site_penalizes(self):
-        for i, block in enumerate(self._sites("source_failures.append(")):
+        for i, block in enumerate(self._sites("runtime.source_circuits.trip(")):
             assert "source_pacing.penalize" in block, (
                 f"第 {i + 1} 处「整源失败」没有 penalize——该 source 撞 429 也不会退让")
             assert "RateLimitError" in block, (

@@ -104,7 +104,7 @@ class TestSignature:
 
     def test_call_site_passes_it(self):
         from mcore import post_round
-        src = inspect.getsource(post_round.run_post_scrape)
+        src = inspect.getsource(post_round.submit_round_bookings)
         i = src.index("submit_bookings(")
         assert "storage=storage" in src[i:i + 400], "调用点没把 storage 传进去"
 

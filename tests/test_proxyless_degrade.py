@@ -101,7 +101,8 @@ class TestProxylessGate:
     def test_gate_runs_before_sharding(self):
         """顺序要紧：被代理挡住的 source 不该白白推进分片游标。"""
         import inspect
-        src = inspect.getsource(monitor.run_once)
+        src = inspect.getsource(monitor._prepare_scrape_plan)
+        assert "_prepare_scrape_plan(" in inspect.getsource(monitor.run_once)
         assert src.index("_apply_proxyless_gate") < src.index("_apply_task_sharding")
 
 

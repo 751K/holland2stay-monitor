@@ -619,7 +619,7 @@ class TestWiredIntoTheIsolationBranch:
         import inspect
         import re
         from mcore import scrape_round
-        src = inspect.getsource(scrape_round.dispatch_with_h2s_circuit)
+        src = inspect.getsource(scrape_round._dispatch_source)
         return [src[m.start():m.start() + 1600]
                 for m in re.finditer("整体抓取失败，已隔离该 source", src)]
 
@@ -636,7 +636,7 @@ class TestWiredIntoTheIsolationBranch:
         """只有代理造成的失败才报。403 / 平台维护 / 解析错误跟代理无关，
         拿它们去冷却代理会把好线路误伤下线。"""
         for i, block in enumerate(self._isolation_blocks()):
-            assert "is_proxy_error(e)" in block, f"第 {i + 1} 处没有守卫"
+            assert "is_proxy_error(exc)" in block, f"第 {i + 1} 处没有守卫"
 
     def test_reported_before_the_telemetry_write(self):
         """顺序无所谓对错，但要稳定：遥测那行会 return，报告写在它后面就永远不执行。"""
@@ -647,7 +647,7 @@ class TestWiredIntoTheIsolationBranch:
     def test_not_in_dry_run(self):
         """dry_run 不该改动全局代理状态。"""
         for i, block in enumerate(self._isolation_blocks()):
-            assert "if not dry_run and is_proxy_error(e):" in block, f"第 {i + 1} 处"
+            assert "if not dry_run and is_proxy_error(exc):" in block, f"第 {i + 1} 处"
 
 
 class TestTheScenarioThatCausedIt:

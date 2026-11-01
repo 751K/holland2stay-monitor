@@ -148,3 +148,30 @@ def test_diagnostic_uses_bounded_browser_dispatch_and_isolates_failures(monkeypa
     assert len(fresh) == 1
     assert completeness == {"xior:City": False, "plaza:City": True}
     assert calls == [("xior", True), ("plaza", False)]
+
+
+def test_round_exposes_named_scrape_result(dispatch):
+    outcome = _run([_task("plaza")])
+    assert isinstance(outcome, scrape_round.ScrapeRoundResult)
+    assert len(outcome.listings) == 1
+    assert outcome.completeness == {} and outcome.h2s_blocked is None
+    # Existing tuple consumers remain compatible during the migration.
+    listings, completeness, blocked, mode = outcome
+    assert listings is outcome.listings and completeness is outcome.completeness
+    assert blocked is None and mode == outcome.h2s_mode
+
+
+def test_failed_source_does_not_replace_an_existing_completeness_value(dispatch):
+    _, _, invoke, _, _ = dispatch
+    async def scrape(loop, selected, **kwargs):
+        if selected[0].source == 'xior':
+            raise RateLimitError('limited')
+        return [object()], {'City': True}
+    invoke.side_effect = scrape
+    async def run():
+        return await scrape_round.dispatch_with_h2s_circuit(
+            asyncio.get_running_loop(), [_task('plaza'), _task('xior')], storage=object(),
+            source_totals={'plaza': 1, 'xior': 1}, multi_source=False, dry_run=False,
+        )
+    result = asyncio.run(run())
+    assert result.completeness == {'City': True}

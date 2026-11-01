@@ -68,6 +68,8 @@ class RuntimeCandidate:
     values: Mapping[str, str]
     sources: Mapping[str, str]
     version: str = field(default_factory=lambda: uuid.uuid4().hex)
+    saved_fingerprints: Mapping[str, str] | None = field(default=None, repr=False)
+    dotenv_stamp: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -235,8 +237,12 @@ def monitor_child_environment() -> dict[str, str]:
 
 def prepare_runtime(storage, *, env_path: str | Path) -> RuntimeCandidate:
     """Resolve runtime sources without touching the active process environment."""
+    from mcore.config_status import file_stamp
     stored = storage.all_app_settings()
+    before_stamp = file_stamp(env_path)
     dotenv_runtime = _runtime_dotenv(env_path, stored)
+    if file_stamp(env_path) != before_stamp:
+        raise RuntimeError("读取配置时 .env 已更改，请重试")
     external = _external_runtime or {}
     values: dict[str, str] = {}
     sources: dict[str, str] = {}
@@ -249,7 +255,10 @@ def prepare_runtime(storage, *, env_path: str | Path) -> RuntimeCandidate:
             values[key], sources[key] = stored[key], "db"
     for key in stored.keys() - RUNTIME_KEYS:
         logger.warning("app_settings 里的 %s 不属于 runtime 类，已忽略", key)
-    return RuntimeCandidate(MappingProxyType(values), MappingProxyType(sources))
+    from mcore.config_status import saved_fingerprints
+    return RuntimeCandidate(MappingProxyType(values), MappingProxyType(sources),
+                            saved_fingerprints=MappingProxyType(saved_fingerprints(stored)),
+                            dotenv_stamp=before_stamp)
 
 
 def hydrate(storage, *, env_path: str | Path, activate: bool = False) -> int:

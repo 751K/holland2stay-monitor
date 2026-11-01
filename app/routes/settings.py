@@ -249,6 +249,9 @@ def settings() -> Any:
     env = {k: v for k, v in st.all_app_settings().items() if k in RUNTIME_KEYS}
     env_overridden = sorted(runtime_override_keys(config.ENV_PATH))
     setting_meta = st.app_settings_meta()
+    from app.process_ctrl import monitor_pid
+    from mcore.config_status import read_status
+    config_status = read_status(st, env, config.ENV_PATH, monitor_pid=monitor_pid())
 
     selected_sources = {
         s.strip().lower()
@@ -323,6 +326,7 @@ def settings() -> Any:
         "settings.html",
         env=env,
         env_overridden=env_overridden,
+        config_status=config_status,
         setting_meta=setting_meta,
         known_cities=KNOWN_CITIES,
         known_ourdomain_cities=KNOWN_OURDOMAIN_CITIES,

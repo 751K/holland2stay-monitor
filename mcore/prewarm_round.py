@@ -36,6 +36,7 @@ class PrewarmRound:
         self.cached: dict[str, object] = {}
         #: 未命中：后台刷新
         self.futures: dict[str, asyncio.Future] = {}
+        self.generations: dict[str, int] = {}
 
     def heartbeat(self) -> None:
         """在用户专属工作进程维护常驻浏览器，调度线程不会阻塞事件循环。
@@ -111,7 +112,7 @@ class PrewarmRound:
         # 2) 对合格用户：命中复用，未命中提交刷新。
         # 给每个 future 加 done_callback：完成后自动写入 prewarm_cache，
         # 确保慢 future（跨轮完成）的 session 不会泄漏。
-        def _on_prewarm_done(user_id: str, fut) -> None:
+        def _on_prewarm_done(user_id: str, generation: int, fut) -> None:
             try:
                 ps = fut.result()
             except BlockedError as e:
@@ -122,7 +123,7 @@ class PrewarmRound:
             except Exception:
                 ps = None
             if ps:
-                runtime.prewarm_cache.set(user_id, ps)
+                runtime.prewarm_cache.set_if_current(user_id, ps, generation)
 
         lane_offered = False
         for user, _ in self.user_notifiers:
@@ -159,9 +160,10 @@ class PrewarmRound:
                 from settings_store import context_job
                 fut = self.loop.run_in_executor(None, context_job(_remote_prewarm))
                 self.futures[user.id] = fut
+                self.generations[user.id] = runtime.prewarm_cache.generation(user.id)
                 fut.add_done_callback(
-                    lambda f, uid=user.id: self.loop.call_soon_threadsafe(
-                        _on_prewarm_done, uid, f
+                    lambda f, uid=user.id, gen=self.generations[user.id]: self.loop.call_soon_threadsafe(
+                        _on_prewarm_done, uid, gen, f
                     )
                 )
 
@@ -203,5 +205,5 @@ class PrewarmRound:
             except Exception:
                 ps = None
             if ps:
-                runtime.prewarm_cache.set(user_id, ps)
+                runtime.prewarm_cache.set_if_current(user_id, ps, self.generations[user_id])
             del self.futures[user_id]

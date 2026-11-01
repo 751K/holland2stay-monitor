@@ -21,6 +21,20 @@ from scrapers.base import (
 )
 
 logger = logging.getLogger(__name__)
+# Browser launch settings are fixed at monitor startup; ordinary runtime changes
+# are sent with each request and must not tear down a healthy session.
+_BROWSER_LAUNCH_KEYS = frozenset({
+    "CLOAKBROWSER_HEADLESS", "BROWSER_PERSIST_PROFILE", "BROWSER_BLOCK_RESOURCES",
+    "BROWSER_PAGE_TIMEOUT_MS", "BROWSER_BYTE_ACCOUNTING",
+    "HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "SCRAPE_PROXIES_FALLBACK",
+})
+
+
+def _browser_launch_settings(env):
+    # Kept only in process memory; proxy values may contain credentials.
+    return tuple((key, env.get(key)) for key in sorted(_BROWSER_LAUNCH_KEYS))
+
+
 _ERROR_TYPES = {cls.__name__: cls for cls in (
     BlockedError, OperationNotAllowedError, ProxyError, RateLimitError,
     ScrapeNetworkError, UpstreamMaintenanceError,
@@ -232,6 +246,8 @@ class BrowserWorker:
         self._stop_lock = threading.Lock()
         self._closed = False
         self._runtime_version = None
+        self._launch_settings = None
+        self._operation_lock = threading.Lock()
 
     def _start(self) -> None:
         with self._stop_lock:
@@ -267,18 +283,28 @@ class BrowserWorker:
             self._stop_locked()
 
     def execute(self, tasks, *, multi_source: bool, timeout: float):
+        if not self._operation_lock.acquire(timeout=max(0, timeout)):
+            raise ScrapeNetworkError(f"{self.source} 等待浏览器工作进程超时")
+        try:
+            return self._execute_locked(tasks, multi_source=multi_source, timeout=timeout)
+        finally:
+            self._operation_lock.release()
+
+    def _execute_locked(self, tasks, *, multi_source: bool, timeout: float):
         from config import get_proxy_url
         import scrapers.holland2stay as h2s
 
         from settings_store import runtime_environment
         env = runtime_environment()
         version = env.get("FLATRADAR_RUNTIME_VERSION")
+        launch_settings = _browser_launch_settings(env)
         if self.process is not None and (not self.process.is_alive() or
-                                         (version and version != self._runtime_version)):
+                                         launch_settings != self._launch_settings):
             self.stop()
         if self.process is None:
             self._start()
         self._runtime_version = version
+        self._launch_settings = launch_settings
         conn = self.conn
         deadline = time.monotonic() + timeout
         try:
