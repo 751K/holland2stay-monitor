@@ -35,6 +35,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt -r requirements-dev.txt
 
+      # tests/test_browser_response_timeout.py 用 `node -e` 执行浏览器端 JS；
+      # 没有 node 时该文件整组 skip，CI 里等于没覆盖。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Ruff
         run: ruff check .
 
