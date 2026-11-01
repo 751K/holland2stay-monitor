@@ -38,6 +38,20 @@ def scraper():
 
 
 class TestTierChoice:
+    def test_first_batch_is_full_on_a_freshly_started_machine(self, scraper, monkeypatch):
+        import scrapers.holland2stay as h2s
+
+        clock = [0.0]
+        monkeypatch.setattr(h2s.time, "monotonic", lambda: clock[0])
+        scraper._begin_batch()
+        assert scraper._plan_scan(CONFIGURED)[1]
+        scraper._note_full_scan_done()
+        scraper._begin_batch()
+        assert not scraper._plan_scan(CONFIGURED)[1]
+        clock[0] = _FULL_SCAN_INTERVAL
+        scraper._begin_batch()
+        assert scraper._plan_scan(CONFIGURED)[1]
+
     def test_first_batch_is_full(self, scraper):
         scraper._begin_batch()
         ids, is_full = scraper._plan_scan(CONFIGURED)

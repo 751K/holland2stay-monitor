@@ -877,7 +877,7 @@ class HollandStayScraper(BrowserBackedScraper):
         self._attr_labels: dict[str, dict[str, str]] = {}
         # 上次全量扫描的时刻。**不跟着浏览器重建清零**——浏览器 2 小时一换，
         # 清零会让每次换浏览器都强制一次全量，分层就白做了。
-        self._last_full_scan_at: float = 0.0
+        self._last_full_scan_at: Optional[float] = None
         #: 本批次是否做全量扫描。由 _begin_batch 每轮算一次，见 _plan_scan。
         #: 独立调用（非 dispatcher）路径没有批次，默认全量，行为与旧版一致。
         self._full_this_batch: bool = True
@@ -886,7 +886,7 @@ class HollandStayScraper(BrowserBackedScraper):
         self._detail_budget: Optional[_DetailBudget] = None
         #: _end_batch 用来判断「计划了全量却一条没成」。
         self._batch_planned_full: bool = False
-        self._batch_scan_mark: float = 0.0
+        self._batch_scan_mark: Optional[float] = None
 
     # ── 浏览器生命周期的站点侧钩子 ──────────────────────────────────
 
@@ -916,7 +916,10 @@ class HollandStayScraper(BrowserBackedScraper):
         在全量真的跑完之后推进，理由见那个方法。
         """
         now = time.monotonic()
-        self._full_this_batch = (now - self._last_full_scan_at) >= _FULL_SCAN_INTERVAL
+        self._full_this_batch = (
+            self._last_full_scan_at is None
+            or (now - self._last_full_scan_at) >= _FULL_SCAN_INTERVAL
+        )
         self._detail_budget = _DetailBudget()
         # 给 _end_batch 判断「计划了全量却一条没成」用
         self._batch_planned_full = self._full_this_batch
@@ -975,7 +978,7 @@ class HollandStayScraper(BrowserBackedScraper):
     def scrape(self, task: ScrapeTask) -> ScrapeResult:
         configured = task.extra.get("availability_ids") or ["179", "336"]
         availability_ids, is_full = self._plan_scan(list(configured))
-        if not is_full:
+        if not is_full and self._last_full_scan_at is not None:
             logger.info(
                 "[%s] 高频轮：只查 %s（省去 Reserved 全量），%.0f 秒后做全量",
                 task.city_display, ",".join(availability_ids),
