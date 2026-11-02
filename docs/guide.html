@@ -27,21 +27,19 @@
 
 <h3>Run your own copy</h3>
 <p>FlatRadar is free for personal, non-commercial use. A copy you run yourself shows <strong>Self-hosted</strong> next to its name; you are responsible for running it.</p>
-<p><strong>Docker</strong> (recommended for a VPS):</p>
+<p><strong>On your own computer</strong> (alerts just for you): install Python 3.11+, then</p>
+<pre>git clone https://github.com/751K/holland2stay-monitor.git
+cd holland2stay-monitor
+pip install -r requirements.txt
+python launcher.py</pre>
+<p>The first run downloads the browser engine once; then the panel opens at <code>http://127.0.0.1:8088</code> and monitoring starts on its own. Under <strong>Users</strong>, create a user for yourself, turn on a notification channel (Telegram or your own SMTP email) and send a test. Closing the terminal stops everything. This mode has no password and is for your own machine only; on macOS a browser window may pop up while it checks some sites — leave it open.</p>
+<p><strong>Public deployment</strong> (for other people; Docker recommended):</p>
 <pre>cp .env.example .env &amp;&amp; mkdir -p data logs logs/caddy
 # Caddyfile: replace your.domain.com with your domain
 # .env: set WEB_PASSWORD, PUBLIC_BASE_URL and SESSION_COOKIE_SECURE=true
 docker compose up -d</pre>
 <p>Open <code>https://your.domain.com</code>, sign in as <code>admin</code>, then go to <strong>Administration → System Info</strong> and choose <strong>Start monitor</strong>. Deployment, email and proxy settings are in the <a href="https://github.com/751K/holland2stay-monitor">project documentation</a>.</p>
-<p>To try it locally without a domain: <code>docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s</code>, then open <code>http://127.0.0.1:8088</code>. This mode has no HTTPS or sign-in and is for your own machine only.</p>
-<p><strong>macOS / Windows:</strong> download the <code>.dmg</code> or <code>.zip</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> and run it; the browser opens automatically.</p>
-<p><strong>From source:</strong></p>
-<pre>pip install -r requirements.txt
-python -m cloakbrowser install
-cp .env.example .env
-python web.py      # web panel
-python monitor.py  # monitoring loop, in a separate terminal</pre>
-<p>The panel and the monitor are separate processes. Running only the panel will not fetch listings.</p>
+<p><strong>macOS / Windows installers:</strong> download the <code>.dmg</code> or <code>.zip</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> and run it; the browser opens automatically.</p>
 
 <h2 id="platforms">Supported platforms</h2>
 <p>Each listing shows which platform it came from. What is actually covered depends on the settings of the copy you use and on what each platform publishes.</p>

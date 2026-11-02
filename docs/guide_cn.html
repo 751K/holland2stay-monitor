@@ -26,21 +26,19 @@
 
 <h3>自己部署一份</h3>
 <p>FlatRadar 仅限个人、非商业使用。自己部署的版本会在名称后显示<strong>自部署版本</strong>，运行与后果由部署者负责。</p>
-<p><strong>Docker</strong>（推荐，适合 VPS）：</p>
+<p><strong>在自己电脑上用</strong>（只给自己收提醒）：装好 Python 3.11+，然后</p>
+<pre>git clone https://github.com/751K/holland2stay-monitor.git
+cd holland2stay-monitor
+pip install -r requirements.txt
+python launcher.py</pre>
+<p>第一次会下载一次浏览器内核，之后面板在 <code>http://127.0.0.1:8088</code> 打开，监控自动启动。到<strong>用户</strong>里给自己建一个用户、启用通知渠道（Telegram 或自己的 SMTP 邮箱）并发一条测试即可。关掉终端就同时停止。这种模式没有密码，只能在自己电脑上用；macOS 上抓取时可能弹出一个浏览器窗口，保持打开即可。</p>
+<p><strong>公网部署</strong>（给别人用，推荐 Docker）：</p>
 <pre>cp .env.example .env &amp;&amp; mkdir -p data logs logs/caddy
 # Caddyfile：把 your.domain.com 换成你的域名
 # .env：设置 WEB_PASSWORD、PUBLIC_BASE_URL 和 SESSION_COOKIE_SECURE=true
 docker compose up -d</pre>
 <p>打开 <code>https://your.domain.com</code>，用 <code>admin</code> 登录，到<strong>管理后台 → 系统信息</strong>点<strong>启动监控</strong>。部署、邮件与代理设置见<a href="https://github.com/751K/holland2stay-monitor">项目文档</a>。</p>
-<p>没有域名、只想在本机试用：运行 <code>docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s</code>，然后打开 <code>http://127.0.0.1:8088</code>。这种模式没有 HTTPS 和登录，只能在自己电脑上用。</p>
-<p><strong>macOS / Windows：</strong>从 <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> 下载 <code>.dmg</code> 或 <code>.zip</code> 运行，浏览器会自动打开。</p>
-<p><strong>从源码运行：</strong></p>
-<pre>pip install -r requirements.txt
-python -m cloakbrowser install
-cp .env.example .env
-python web.py      # 网页面板
-python monitor.py  # 监控循环，另开一个终端</pre>
-<p>面板和监控是两个独立进程，只开面板不会抓取房源。</p>
+<p><strong>macOS / Windows 安装包：</strong>从 <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> 下载 <code>.dmg</code> 或 <code>.zip</code> 运行，浏览器会自动打开。</p>
 
 <h2 id="platforms">支持的平台</h2>
 <p>每条房源都会标出来自哪个平台。实际覆盖范围取决于你所用站点的设置，以及各平台公开的数据。</p>

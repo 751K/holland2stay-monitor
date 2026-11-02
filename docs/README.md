@@ -24,7 +24,7 @@ on the platform.
 | **Hosted service** | Most people | Open [flatradar.app](https://flatradar.app). The first sign-in creates an account automatically; set filters and notification channels in the panel. Nothing to install. |
 | **Mobile apps** | Alerts on your phone | [iOS](https://apps.apple.com/us/app/flarradar/id6769857080) · [Android APK](https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk) |
 | **Desktop builds** | macOS / Windows | Download from [Releases](https://github.com/751K/holland2stay-monitor/releases) |
-| **Self-hosting** | Your own instance, database and delivery | [Quick start](#quick-start) below. Needs Docker and about 2 GB of RAM; depending on your network a residential proxy may be required. |
+| **Self-hosting** | Your own instance, database and delivery | [Quick start](#quick-start) below: one Python command on your own computer, or Docker for a public server. About 2 GB of RAM; a public server may also need a residential proxy. |
 
 The hosted service and self-hosting run the same codebase.
 
@@ -88,39 +88,52 @@ Coverage shifts as third-party sites change. The scrapers are documented in
 |---|---|---|
 | RAM | **2 GB** | Each Cloudflare-protected source keeps a headless Chromium resident (~200–400 MB each). 1 GB is only enough for a single source. |
 | Disk | ~1.5 GB | The patched Chromium alone unpacks to ~700 MB |
-| Docker | Engine 20.10+ with the Compose plugin | `docker compose`, not the old `docker-compose` script |
-| Python | 3.11+ | Only for running from source. The Docker image ships 3.11; CI and desktop builds use 3.12 |
-| OS | Linux recommended | See the [macOS note](#running-from-source) below |
+| Docker | Engine 20.10+ with the Compose plugin | Only for the public deployment. `docker compose`, not the old `docker-compose` script |
+| Python | 3.11+ | For running on your own computer. The Docker image ships 3.11; CI and desktop builds use 3.12 |
+| OS | Any for personal use; Linux for a server | See the [macOS note](#1-on-your-own-computer) below |
 | Network | Residential or mobile proxy may be required | Some platforms have returned 403 to datacenter exit IPs. Cloud deployment reads `HTTPS_PROXY`; a proxy account is an extra cost, and none of it is needed for the hosted service |
-| Domain | Optional | Needed only for the HTTPS deployment. The local path below runs without one |
+| Domain | Optional | Needed only for the public deployment |
 
 ---
 
 ## Quick start
 
-### 1. Local deployment
+### 1. On your own computer
 
-No domain and no certificate required. Run:
+For alerts just for you. No Docker, domain, password or proxy:
 
 ```bash
 git clone https://github.com/751K/holland2stay-monitor.git
 cd holland2stay-monitor
-cp .env.example .env
-mkdir -p data logs
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
+pip install -r requirements.txt
+python launcher.py
 ```
 
-The first build takes a few minutes. When it finishes, open
-`http://127.0.0.1:8088` — no login required. Out of the box it monitors
-Holland2Stay in Eindhoven only; enable the rest from the panel.
+The first run creates `.env` with working defaults and downloads the browser
+engine once (~700 MB unpacked). Then the panel opens at `http://127.0.0.1:8088`
+and monitoring starts on its own. Out of the box it watches Holland2Stay in
+Eindhoven; enable other platforms and cities under **Settings**.
 
-> ⚠️ In this mode the panel is plain HTTP with no password and listens on the
-> loopback address only. **Do not use it on a public server.**
+To get alerts, open **Users**, create a user for yourself, turn on a notification
+channel and send a test. Telegram and email through your own SMTP need nothing
+configured in `.env`.
 
-### 2. Cloud deployment
+Closing the terminal (or Ctrl+C) stops both the panel and the monitor. Run
+`python launcher.py` again next time; your data stays in `data/`.
+`python launcher.py --no-monitor` opens only the panel.
 
-Set up the networking side yourself before you begin. DNS, firewall ports, TLS
-certificates, client IP handling and replacing Caddy with your own reverse proxy
+> ⚠️ The panel has no password and listens on this computer only. Do not expose
+> it to a network; for that, use the public deployment below.
+
+> **macOS**: headless Chromium can crash on macOS, so a browser window may pop up
+> while it checks Cloudflare-protected platforms. Leave it open. If you would
+> rather not see it, run the same local setup in Docker Desktop:
+> `cp .env.example .env && mkdir -p data logs && docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s`.
+
+### 2. Public deployment (Docker)
+
+For a server that other people sign in to. Set up the networking side yourself
+before you begin. DNS, firewall ports, TLS certificates, client IP handling and replacing Caddy with your own reverse proxy
 are covered in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 **Step 1** — create the config and data directories:
@@ -205,27 +218,19 @@ change.
    secrets and proxy configuration; writing runtime keys back into `.env`
    overrides the dashboard.
 
-### Running from source
+### Development
 
-For development. Production should use Docker — the container pins the Chromium
-build and the supervisor setup.
+`python launcher.py` runs the panel and the monitor together. While working on
+the code you may want them separately, each in its own terminal:
 
 ```bash
-pip install -r requirements.txt
-python -m cloakbrowser install   # patched Chromium, ~700 MB unpacked
-cp .env.example .env
-python web.py                    # panel only
-python monitor.py                # scraper loop, separate terminal
+python web.py       # panel only
+python monitor.py   # scraper loop
 ```
 
-Open `http://127.0.0.1:8088`. Note that `web.py` and `monitor.py` are two
-independent processes that share SQLite and use process-control requests for
-reloads — running just `web.py`
-gives you a panel that never gets new data.
-
-> **macOS**: the free CloakBrowser build for macOS lags the Linux one, and
-> headless mode can abort, so local runs fall back to a visible browser window.
-> Use Linux/Docker for anything you actually depend on.
+They are independent processes that share SQLite and use process-control
+requests for reloads — running just `web.py` gives you a panel that never gets
+new data.
 
 ---
 

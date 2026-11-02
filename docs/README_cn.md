@@ -20,7 +20,7 @@ Plaza 则可在用户单独启用后自动提交应征。
 | **托管服务** | 大多数人 | 打开 [flatradar.app](https://flatradar.app)。首次登录会自动创建账户；在面板里设置筛选条件和通知渠道即可，无需安装。 |
 | **移动端 App** | 在手机上接收提醒 | [iOS](https://apps.apple.com/us/app/flarradar/id6769857080) · [Android APK](https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk) |
 | **桌面安装包** | macOS / Windows | 从 [Releases](https://github.com/751K/holland2stay-monitor/releases) 下载 |
-| **自行部署** | 自己掌控数据库与投递 | 见下方[快速开始](#快速开始)。需要 Docker 和约 2 GB 内存；视网络情况可能需要住宅代理。 |
+| **自行部署** | 自己掌控数据库与投递 | 见下方[快速开始](#快速开始)：自己电脑上一条 Python 命令，或用 Docker 部署到公网服务器。约需 2 GB 内存；公网服务器可能还需要住宅代理。 |
 
 托管服务与自行部署运行同一套代码。
 
@@ -81,34 +81,47 @@ Plaza 则可在用户单独启用后自动提交应征。
 |---|---|---|
 | 内存 | **2 GB** | 每个受 Cloudflare 保护的 source 会常驻一个 headless Chromium（各约 200–400 MB）。1 GB 仅够运行单个 source。 |
 | 磁盘 | 约 1.5 GB | 仅 patched Chromium 解压后即约 700 MB |
-| Docker | Engine 20.10+，含 Compose 插件 | 使用 `docker compose`，而非旧版 `docker-compose` 脚本 |
-| Python | 3.11+ | 仅从源码运行时需要。Docker 镜像使用 3.11；CI 与桌面版构建使用 3.12 |
-| 系统 | 推荐 Linux | macOS 的限制见下方[从源码运行](#从源码运行) |
+| Docker | Engine 20.10+，含 Compose 插件 | 仅公网部署需要。使用 `docker compose`，而非旧版 `docker-compose` 脚本 |
+| Python | 3.11+ | 在自己电脑上运行时需要。Docker 镜像使用 3.11；CI 与桌面版构建使用 3.12 |
+| 系统 | 自用不限；服务器推荐 Linux | macOS 的限制见下方[在自己电脑上用](#一在自己电脑上用) |
 | 网络 | 可能需要住宅或移动代理 | 部分平台会对机房出口 IP 返回 403。云端部署通过 `HTTPS_PROXY` 走代理，代理账号是额外成本；使用托管服务则不需要 |
-| 域名 | 可选 | 仅 HTTPS 部署需要，下文的本地路径无需域名 |
+| 域名 | 可选 | 仅公网部署需要 |
 
 ---
 
 ## 快速开始
 
-### 一、本地部署
+### 一、在自己电脑上用
 
-不需要域名和证书。依次执行：
+只给自己收提醒。不需要 Docker、域名、密码或代理：
 
 ```bash
 git clone https://github.com/751K/holland2stay-monitor.git
 cd holland2stay-monitor
-cp .env.example .env
-mkdir -p data logs
-docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s
+pip install -r requirements.txt
+python launcher.py
 ```
 
-首次构建需数分钟。完成后访问 `http://127.0.0.1:8088`，无需登录。默认只监控 Holland2Stay 的 Eindhoven，其余平台在面板中按需启用。
+第一次运行会自动生成可直接使用的 `.env`，并下载一次浏览器内核（解压后约 700 MB）。
+随后面板在 `http://127.0.0.1:8088` 打开，监控也会自动启动。默认只监控 Holland2Stay
+的 Eindhoven，其余平台和城市在「设置」里启用。
 
-> ⚠️ 该模式下面板是明文 HTTP、且没有密码，只监听本机地址。**请勿用于公网服务器**。
+要收到提醒：打开「用户」，给自己建一个用户，启用一个通知渠道并发一条测试。
+Telegram 和自己的 SMTP 邮箱都不需要改 `.env`。
 
-### 二、云端部署
+关掉终端（或按 Ctrl+C）会同时停掉面板和监控。下次再运行 `python launcher.py` 即可，
+数据保存在 `data/`。`python launcher.py --no-monitor` 只打开面板。
 
+> ⚠️ 面板没有密码，只监听本机。不要把它暴露到网络上；需要的话请用下面的公网部署。
+
+> **macOS**：macOS 上 headless Chromium 可能崩溃，所以检查受 Cloudflare 保护的平台时
+> 可能会弹出一个浏览器窗口，保持打开即可。不想看到它的话，可以用 Docker Desktop 跑同样的
+> 本地模式：
+> `cp .env.example .env && mkdir -p data logs && docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s`。
+
+### 二、公网部署（Docker）
+
+给其他人登录使用的服务器。
 开始部署前需要自行配置相关网络环境。DNS、防火墙端口、TLS 证书、客户端 IP 的处理
 方式，以及如何换用其它反向代理，见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
@@ -183,24 +196,17 @@ docker compose logs -f h2s
 6. 日常调整都在面板里做。`.env` 只用于部署设置、密钥和代理；把运行参数写回 `.env`
    会覆盖面板中的值。
 
-### 从源码运行
+### 开发
 
-仅供开发使用。生产环境应采用 Docker：容器已固定 Chromium 版本与 supervisor 配置。
+`python launcher.py` 会同时运行面板和监控。改代码时可能想把两者分开，各开一个终端：
 
 ```bash
-pip install -r requirements.txt
-python -m cloakbrowser install   # patched Chromium，解压后约 700 MB
-cp .env.example .env
-python web.py                    # 仅启动面板
-python monitor.py                # 抓取循环，需另开终端
+python web.py       # 仅启动面板
+python monitor.py   # 抓取循环
 ```
 
-访问 `http://127.0.0.1:8088`。注意 `web.py` 与 `monitor.py` 是两个**互相独立**的
-进程，共享 SQLite 并通过进程控制请求重载：只运行 `web.py` 不会抓取新房源。
-
-> **macOS**：免费版 CloakBrowser 的 macOS 构建落后于 Linux，且 headless 模式
-> 可能崩溃，因此本地运行会自动退回可见窗口模式。需长期依赖的部署请使用
-> Linux 或 Docker。
+两者是**互相独立**的进程，共享 SQLite 并通过进程控制请求重载：只运行 `web.py`
+不会抓取新房源。
 
 ---
 
