@@ -1,4 +1,4 @@
-Last updated: August 24, 2026
+Last updated: November 2, 2026
 
 These Terms of Use govern your access to and use of FlatRadar.
 
@@ -19,6 +19,8 @@ FlatRadar does not guarantee that any listing will remain available, that listin
 FlatRadar is provided for personal, non-commercial use only.
 
 You may not use FlatRadar for resale, commercial monitoring, mass scraping, unauthorized data extraction, or any activity that abuses, overloads, interferes with, or attempts to bypass the services of any housing platform or third party.
+
+Without written permission, you may not use FlatRadar or any part of it for commercial purposes, including but not limited to: offering paid listing alerts, booking or application services; incorporating FlatRadar into a paid product or service; providing listing monitoring to agencies, landlords, or other businesses; or deploying and operating FlatRadar yourself for profit.
 
 3. User Account
 
@@ -47,6 +49,8 @@ Listing data shown in FlatRadar may be fetched from publicly accessible sources,
 Listing information may be delayed, incomplete, inaccurate, duplicated, outdated, or changed without notice.
 
 All listing data, names, trademarks, service marks, logos, and related content belong to their respective owners.
+
+Without written permission, you may not copy, export, compile, publish, sell, rent, or otherwise redistribute listing data obtained through FlatRadar (whether from the app, the website, the API, notifications, or export files), or use that data to build or populate another database, website, or service. Sharing individual listings with others for your own housing search, for example with the in-app share link, is not restricted by this section.
 
 FlatRadar is not responsible for listing availability, price changes, booking results, eligibility requirements, lottery outcomes, account restrictions, or any decision made by any housing platform or provider.
 
@@ -89,7 +93,7 @@ FlatRadar is not responsible for account restrictions, login issues, access limi
 You agree not to:
 
 - Use FlatRadar for unlawful, harmful, fraudulent, abusive, or unauthorized purposes.
-- Reverse engineer, modify, resell, sublicense, or redistribute FlatRadar.
+- Modify, resell, sublicense, or redistribute FlatRadar for commercial purposes.
 - Use FlatRadar to overload, attack, disrupt, or interfere with any server, network, API, website, or service.
 - Use automated scripts, bots, or external tools to abuse FlatRadar.
 - Attempt to gain unauthorized access to FlatRadar, its servers, other users' accounts, or third-party systems.

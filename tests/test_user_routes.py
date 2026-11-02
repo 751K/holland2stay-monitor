@@ -13,6 +13,7 @@ isolated_data_dir fixture 把 USERS_FILE / DB_PATH 重定向到 tmp_path，
 """
 from __future__ import annotations
 
+from pathlib import Path
 
 
 def _create_user(admin_client, name="Test User", **extra_fields):
@@ -94,8 +95,7 @@ class TestUserNew:
         assert r.status_code == 200
         html = r.data.decode()
         # 卡片灰掉 + 不可点击
-        assert "opacity:0.45" in html
-        assert "pointer-events:none" in html
+        assert " is-disabled\"" in html
         # checkbox disabled
         assert 'data-ch="imessage"' in html
         assert "disabled" in html
@@ -103,6 +103,11 @@ class TestUserNew:
         assert "Unavailable" in html or "不可用" in html
         # 没有 onclick（不会展开输入框）
         assert 'onclick="toggleChannel(\'imessage\')"' not in html
+
+    def test_disabled_channel_card_is_not_interactive(self):
+        """灰掉的样式在 user_form.css 里：不能点、看起来不可用。"""
+        css = (Path(__file__).parent.parent / "static" / "user_form.css").read_text(encoding="utf-8")
+        assert ".channel-card.is-disabled{opacity:.45;pointer-events:none" in css
 
     def test_imessage_enabled_on_macos(self, admin_client, monkeypatch):
         """macOS 服务器上 iMessage 应正常可用。"""
@@ -112,8 +117,7 @@ class TestUserNew:
         r = admin_client.get("/users/new")
         assert r.status_code == 200
         html = r.data.decode()
-        assert "opacity:0.45" not in html
-        assert "pointer-events:none" not in html
+        assert "is-disabled" not in html
         assert 'onclick="toggleChannel(\'imessage\')"' in html
         assert "Unavailable" not in html
         assert "iMessage requires macOS" not in html
@@ -139,8 +143,7 @@ class TestUserEdit:
         assert r.status_code == 200
         html = r.data.decode()
         # 卡片灰掉
-        assert "opacity:0.45" in html
-        assert "pointer-events:none" in html
+        assert " is-disabled\"" in html
         # checkbox 保持 checked + disabled
         assert 'data-ch="imessage"' in html
         assert "checked" in html

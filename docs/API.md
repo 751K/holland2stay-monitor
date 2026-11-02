@@ -201,7 +201,7 @@ Body：
 
 - `__admin__` 使用 Web 后台密码。
 - 普通 user 默认使用本地 app password。
-- H2S 凭据 fallback 默认关闭，只有用户显式允许时才尝试。
+- 只认本地 App 密码；不支持用 Holland2Stay 网站的账号密码登录。
 - 登录失败计入 IP 限流。
 - 已撤销的会话从撤销时间起保留 30 天；已过期但未撤销的会话从过期时间起保留 30 天。监控进程定期清理到期记录及其关联设备。
 
@@ -982,6 +982,7 @@ Body 支持字段：
 - `notification_history[]`：`id`、`created_at`、`type`、`title`、`body`、`url`、
   `listing_id`、`read`，最多 500 条
 - `notification_count`：`notification_history` 的条数
+- `listing_reads[]`：`listing_id`、`read_at`，仅包含当前用户的房源已读记录
 - `active_devices[]`：`id`、`device_token`、`env`、`platform`、`model`、
   `os_version`、`bundle_id`、`created_at`、`last_seen`
 - `active_tokens[]`：`id`、`device_name`、`created_at`、`last_used_at`、`expires_at`
@@ -1373,7 +1374,6 @@ Android 客户端可复用此端点，但建议字段改为：
         "channels": ["email"],
         "app_login_enabled": true,
         "has_app_password": true,
-        "allow_h2s_login": false,
         "active_devices": 2,
         "auto_book_enabled": false,
         "filter_summary": {

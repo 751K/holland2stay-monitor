@@ -29,6 +29,7 @@ from __future__ import annotations
 from flask import Flask, Response, render_template
 
 from app.i18n import get_lang
+from app.services.inbox_service import building_title
 from app.services.listing_service import get_listing_detail, serialize_listing
 
 
@@ -87,6 +88,8 @@ def listing_share_page(listing_id: str):
                 return str(v)
         return ""
 
+    building = feat("building", "building name", "building_name", "complex")
+    title, address = building_title(data.get("name", ""), building)
     return render_template(
         "share_listing.html",
         lang=lang,
@@ -95,7 +98,8 @@ def listing_share_page(listing_id: str):
         # 模板不做逻辑：要显示什么在这儿算好。
         area=feat("area", "surface", "living area", "m2", "m²"),
         room_type=feat("type", "property type", "apartment type"),
-        building=feat("building", "building name", "building_name", "complex"),
+        title=title,
+        address=address,
         energy=feat("energy", "energy label"),
         tone=_status_tone(data.get("status", "")),
     )

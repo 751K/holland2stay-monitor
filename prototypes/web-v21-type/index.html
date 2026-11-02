@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlatRadar · 文字界面探索</title>
+  <link rel="stylesheet" href="style.css"><script src="app.js" defer></script>
+</head>
+<body>
+<div class="demo-note"><span>设计探索 D</span><span>示例数据 · 不连接实际监控</span></div>
+<div class="shell">
+  <header class="mobile-head"><a class="brand" href="#top"><img src="logo.png" alt=""><span>FlatRadar</span></a><button class="menu-button" type="button" aria-expanded="false" aria-controls="navigation" aria-label="打开导航">☰</button></header>
+  <aside class="sidebar" id="navigation">
+    <a class="brand desktop-brand" href="#top"><img src="logo.png" alt=""><span>FlatRadar</span></a>
+    <div class="workspace-label">工作空间 <span>⌄</span></div>
+    <nav aria-label="主导航">
+      <a class="nav active" href="#top" aria-current="page"><span class="nav-icon">▦</span>概览</a>
+      <a class="nav" href="#listings"><span class="nav-icon">☷</span>最近房源</a>
+      <a class="nav" href="#activity"><span class="nav-icon">◷</span>状态变化</a>
+    </nav>
+    <div class="sidebar-bottom"><div class="aside-label">监控状态</div><div class="aside-status"><span class="dot green"></span><span>监控运行中<small>最近检查 · 2 分钟前</small></span></div><p>仅为布局示例，数据不代表真实状态。</p></div>
+  </aside>
+  <main id="top">
+    <div class="topline"><span>工作空间 <span class="slash">/</span> <strong>概览</strong></span><span class="topline-right"><span class="dot green"></span> 监控运行中</span></div>
+    <div class="content">
+      <header class="page-head"><div><div class="eyebrow"><span class="eyebrow-line"></span> FLATRADAR OVERVIEW</div><h1>房源概览</h1><p>追踪新的房源，掌握每一次变化。</p></div><div class="date-block"><span>最近更新</span><strong>2 分钟前</strong></div></header>
+
+      <section class="summary" aria-label="监控摘要">
+        <div class="summary-lead"><div class="summary-label">最近 24 小时 <span>↗</span></div><div class="summary-value">6 <small>条新房源</small></div><div class="summary-foot"><span class="summary-indicator"></span> 正在持续关注 4 个平台</div><div class="lead-decoration" aria-hidden="true"><span></span><span></span><span></span></div></div>
+        <div class="summary-stat"><div class="summary-label">房源总数</div><div class="stat-value">1,339</div><div class="stat-foot">已收录房源</div></div>
+        <div class="summary-stat"><div class="summary-label">状态变化</div><div class="stat-value">4</div><div class="stat-foot">过去 24 小时</div></div>
+        <div class="summary-stat"><div class="summary-label">监控范围</div><div class="stat-value">8 <small>个城市</small></div><div class="stat-foot">覆盖 4 个平台</div></div>
+      </section>
+
+      <div class="work-grid"><section class="list-section" id="listings" aria-labelledby="list-title">
+        <div class="section-head"><div><div class="section-kicker">LATEST LISTINGS <span> / 01</span></div><h2 id="list-title">最近发现 <span class="count">5</span></h2><p>按发现时间排列的最新房源</p></div></div>
+        <div class="list-panel"><div class="list-toolbar"><div class="tabs" role="group" aria-label="筛选房源状态"><button type="button" class="tab selected" data-filter="all" aria-pressed="true">全部 <span>5</span></button><button type="button" class="tab" data-filter="available" aria-pressed="false">可预订</button><button type="button" class="tab" data-filter="lottery" aria-pressed="false">抽签中</button></div><label class="search"><span aria-hidden="true">⌕</span><span class="sr-only">搜索示例房源</span><input type="search" id="search" placeholder="搜索房源或城市"></label></div>
+          <div class="column-head"><span>房源 / 平台</span><span>状态</span><span>月租</span></div><div id="listing-rows" aria-live="polite"></div><div class="list-footer"><span id="result-count">显示 5 条示例房源</span><span>按发现时间排列 ↓</span></div>
+        </div>
+      </section>
+      <aside class="side-column"><section class="activity" id="activity" aria-labelledby="activity-title"><div class="section-kicker">ACTIVITY <span> / 02</span></div><div class="side-heading"><div><h2 id="activity-title">最近变化</h2><p>过去 48 小时</p></div><span class="activity-icon">↗</span></div><div class="activity-list"><div class="event"><span class="event-dot active-dot"></span><div><div class="event-top"><strong>示例房源 B</strong><time>2 小时前</time></div><p>Utrecht · Plaza</p><div class="change"><span>抽签中</span><b>→</b><strong>可预订</strong></div></div></div><div class="event"><span class="event-dot"></span><div><div class="event-top"><strong>示例房源 E</strong><time>昨天</time></div><p>Eindhoven · Holland2Stay</p><div class="change"><span>状态标记为已预留</span><em>系统推测</em></div></div></div></div><div class="activity-footer">最近的状态记录 <span>↗</span></div></section>
+      <section class="coverage"><div class="coverage-icon">◎</div><div><strong>关注范围</strong><p>4 个平台 · 8 个城市</p><span>示例监控配置</span></div><span class="coverage-arrow">↗</span></section>
+      <div class="side-note"><span>✳</span><p>房源状态来自各平台，实际情况请以来源网站为准。</p></div></aside></div>
+      <footer><span>FlatRadar <span class="footer-dot">●</span> 找房信息，尽在掌握</span><span>设计探索 D · 文字优先</span></footer>
+    </div>
+  </main>
+</div>
+</body></html>

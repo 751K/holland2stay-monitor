@@ -1,374 +1,151 @@
 {% extends "base.html" %}
-{% block title %}{{ _('users') }} · FlatRadar{% endblock %}
+{#
+  管理员的用户列表。与房源收件箱同构：中间是按优先级排列的用户，右侧是选中
+  用户的摘要和操作。选中状态在 ?selected=，脚本只做原地切换。
+  列表顺序就是抢房优先级：可以拖动条目，或在详情里上移 / 下移。
+#}
+{% set selected_id = request.args.get('selected') if request.args.get('selected') in users | map(attribute='id') | list else (users[0].id if users else none) %}
+{% macro channel_list(chs) %}{% set channel_names = {'imessage': 'iMessage', 'telegram': 'Telegram', 'email': 'Email', 'whatsapp': 'WhatsApp'} %}{% for ch in chs %}{{ channel_names.get(ch, ch) }}{% if not loop.last %}, {% endif %}{% endfor %}{% endmacro %}
+{% block title %}{{ _('users') }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page admin-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('account.css') }}">{% endblock %}
+{% block sidebar_navigation %}{% include '_admin_nav.html' %}{% endblock %}
+{% block sidebar_footer %}{% include '_admin_footer.html' %}{% endblock %}
 
 {% block content %}
-
-<div class="page-header">
-  <h1>{{ _('my_account') if is_user else _('users_title') }}</h1>
-  {% if is_admin %}
-  <a href="{{ url_for('user_new') }}" class="btn btn-primary btn-sm">
-    <i class="bi bi-plus-lg mr-1"></i>{{ _('users_new') }}
-  </a>
-  {% endif %}
-</div>
-
-{% if not users %}
-<div class="alert alert-warning mb-4">
-  <i class="bi bi-exclamation-triangle mr-2"></i>
+<section class="inbox-shell account-shell users-shell">
+<header class="mail-toolbar">
   <div>
-    <strong>{{ _('users_empty') }}</strong><br>
-    <span class="text-xs text-secondary">{{ _('users_empty_hint') }}</span>
+    <h1>{{ _('users_title') }}</h1>
+    <p class="mail-summary">
+      {{ '共 %d 人' % users|length if lang == 'zh' else '%d users' % users|length }}
+      · {{ ('已启用 %d' if lang == 'zh' else '%d active') % (users | selectattr('enabled') | list | length) }}
+      · {{ ('自动预订 %d' if lang == 'zh' else '%d auto-booking') % (users | selectattr('auto_book.enabled') | list | length) }}
+    </p>
   </div>
-</div>
-{% endif %}
-
-<div class="user-grid" id="user-grid">
-{% for user in users %}
-<div class="user-card {% if not user.enabled %}disabled{% endif %}" draggable="true" data-user-id="{{ user.id }}">
-
-  <!-- Drag handle -->
-  {% if is_admin %}
-  <div class="drag-handle" title="{{ _('users_drag_hint') }}">
-    <i class="bi bi-grip-vertical"></i>
+  <div class="users-tools">
+    <label class="mail-search" role="search">
+      <span class="sr-only">{{ '搜索用户' if lang == 'zh' else 'Search users' }}</span>
+      <i class="bi bi-search" aria-hidden="true"></i>
+      <input type="search" data-user-search placeholder="{{ '搜索名称、ID 或渠道' if lang == 'zh' else 'Search name, ID or channel' }}">
+    </label>
+    <a href="{{ url_for('user_new') }}" class="users-new">{{ _('users_new') }}</a>
   </div>
-  {% endif %}
+</header>
 
-  <!-- Header -->
-  <div class="user-card-header">
-    <div class="flex items-center gap-2 user-card-identity">
-      {% if is_admin %}
-      <span class="rank-badge" title="{{ _('users_rank_hint') }}">#{{ loop.index }}</span>
+<div class="mail-workspace">
+  <section class="mail-list" aria-label="{{ _('users_title') }}">
+    <div class="mail-groups" id="user-grid">
+      {% if not users %}
+      <div class="mail-empty"><h2>{{ _('users_empty') }}</h2><p>{{ _('users_empty_hint') }}</p></div>
       {% endif %}
-      <div class="user-avatar">
-        {{ user.name[0].upper() }}
-      </div>
-      <div>
-        <div class="user-name">{{ user.name }}</div>
-        <div class="user-id">ID: {{ user.id }}</div>
-      </div>
-    </div>
-    <div class="flex items-center gap-1">
-      {% if is_admin %}
-      <form action="{{ url_for('user_move', user_id=user.id) }}" method="post" class="rank-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="direction" value="up">
-        <button type="submit" class="rank-btn" {% if loop.first %}disabled{% endif %} title="{{ _('users_rank_up') }}">▲</button>
-      </form>
-      <form action="{{ url_for('user_move', user_id=user.id) }}" method="post" class="rank-form">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input type="hidden" name="direction" value="down">
-        <button type="submit" class="rank-btn" {% if loop.last %}disabled{% endif %} title="{{ _('users_rank_down') }}">▼</button>
-      </form>
-      {% endif %}
-      {% if user.enabled %}
-        <span class="badge badge-success">{{ _('users_enabled') }}</span>
-      {% else %}
-        <span class="badge badge-neutral">{{ _('users_disabled') }}</span>
-      {% endif %}
-    </div>
-  </div>
-
-  {# 这个人登录着的 App 客户端。渠道那一排和「测试通知」按钮都要用。 #}
-  {% set uc = (clients or {}).get(user.id) or [] %}
-
-  <!-- Channels + 登录着的客户端 -->
-  <div class="flex flex-wrap items-center gap-1 mb-2">
-    {% if not user.notifications_enabled %}
-      <span class="badge badge-danger">{{ _('users_notif_off') }}</span>
-    {% elif user.notification_channels or uc %}
-      {% for ch in user.notification_channels %}
-        {% if ch == 'imessage' %}
-          <span class="channel-pill imessage"><i class="bi bi-apple mr-1"></i>iMessage</span>
-        {% elif ch == 'telegram' %}
-          <span class="channel-pill telegram"><i class="bi bi-telegram mr-1"></i>Telegram</span>
-        {% elif ch == 'email' %}
-          <span class="channel-pill email"><i class="bi bi-envelope mr-1"></i>Email</span>
-        {% elif ch == 'whatsapp' %}
-          <span class="channel-pill whatsapp"><i class="bi bi-whatsapp mr-1"></i>WhatsApp</span>
-        {% else %}
-          <span class="channel-pill">{{ ch }}</span>
-        {% endif %}
-      {% endfor %}
-      {#
-        登录着的客户端。活跃 token 本身就是一条渠道，和上面四个平级——所以它在
-        同一个分支里，跟着同一个开关走，也一起算进「有没有渠道」。
-
-        判据（Storage.get_active_clients_by_user）和推送那边一致：revoked=0 且
-        未过期。同名归并：同一台设备重装 App / 重新登录各签一枚新 token，线上
-        有人在同一台 vivo 上攒了 7 枚，逐条列就是七个一模一样的 pill。
-      #}
-      {% for c in uc %}
-        <span class="channel-pill app"
-              {% if c.last_used_at %}title="{{ _('users_client_last_used') }}{{ c.last_used_at | time_ago }}"{% endif %}>
-          <i class="bi bi-phone-fill mr-1"></i>{{ c.name }}{% if c.sessions > 1 %} ×{{ c.sessions }}{% endif %}
+      <div class="mail-empty" data-user-no-match hidden><h2>{{ '没有匹配的用户' if lang == 'zh' else 'No matching users' }}</h2></div>
+      {% for user in users %}
+      {% set uc = (clients or {}).get(user.id) or [] %}
+      <a href="{{ url_for('users_list', selected=user.id) }}" draggable="true" data-no-transition
+         class="mail-listing account-row user-row{% if user.id == selected_id %} selected{% endif %}"
+         data-user-id="{{ user.id }}" data-user-row data-search="{{ [user.name, user.id] | join(' ') | lower }} {{ user.notification_channels | join(' ') }} {{ uc | map(attribute='name') | join(' ') | lower }}"{% if user.id == selected_id %} aria-current="true"{% endif %}>
+        <span class="user-rank" title="{{ _('users_rank_hint') }}">{{ loop.index }}</span>
+        <span class="mail-listing-body">
+          <strong>{{ user.name }}</strong>
+          <span class="mail-meta">
+            {%- if not user.notifications_enabled %}{{ _('users_notif_off') }}
+            {%- elif user.notification_channels or uc %}{{ channel_list(user.notification_channels) }}{% if user.notification_channels and uc %} · {% endif %}{{ uc | map(attribute='name') | join(' · ') }}
+            {%- else %}{{ _('users_no_channels') }}{% endif -%}
+          </span>
         </span>
+        <span class="mail-value">
+          <span class="account-state {{ 'tone-ok' if user.enabled else 'tone-attention' }}">{{ _('users_enabled') if user.enabled else _('users_disabled') }}</span>
+          {# 正式预订会真实下单，比试运行醒目一档 #}
+          {% if user.auto_book.enabled %}<small class="user-flag{% if not user.auto_book.dry_run %} is-live{% endif %}">{{ _('badge_dry_run') if user.auto_book.dry_run else _('users_auto_on') }}</small>{% endif %}
+        </span>
+      </a>
       {% endfor %}
-    {% else %}
-      <span class="text-xs text-tertiary">{{ _('users_no_channels') }}</span>
-    {% endif %}
-  </div>
+    </div>
+  </section>
 
-  <!-- Filter summary -->
-  <div class="filter-tags">
-    {% set lf = user.listing_filter %}
-    {% if lf.is_empty() %}
-      <i class="bi bi-funnel mr-1"></i>{{ _('users_no_filter') }}
-    {% else %}
-      <i class="bi bi-funnel-fill mr-1" style="color:var(--warning);"></i>
-      {% if lf.max_rent %}€{{ lf.max_rent | int }}{{ _('per_month') }}{{ _('users_filter_prefix') }} {% endif %}
-      {% if lf.min_area %}≥{{ lf.min_area | int }}m² {% endif %}
-      {% if lf.min_floor %}≥{{ lf.min_floor }}{% if lang=='zh' %}层{% endif %} {% endif %}
-      {#
-        列表只摘前几项，完整清单挂在 title 上。勾了 28 个片区的用户存在，
-        全列出来会把卡片撑成一堵墙，而且没人会在列表页读它——要看有编辑页。
-      #}
-      {% if lf.allowed_types %}<span title="{{ lf.allowed_types | join(' / ') }}">{% if lang=='zh' %}户型{% else %}Type{% endif %}: {{ lf.allowed_types | summarize_list }}</span> {% endif %}
-      {% if lf.allowed_neighborhoods %}<span title="{{ lf.allowed_neighborhoods | join(' / ') }}">{% if lang=='zh' %}片区{% else %}Area{% endif %}: {{ lf.allowed_neighborhoods | summarize_list }}</span>{% endif %}
-    {% endif %}
-  </div>
+  <section class="mail-detail account-detail{% if request.args.get('selected') %} is-open{% endif %}" aria-label="{{ '用户详情' if lang == 'zh' else 'User details' }}" aria-live="polite">
+  {% for user in users %}
+  {% set uc = (clients or {}).get(user.id) or [] %}
+  {% set lf = user.listing_filter %}
+  <div class="account-panel" data-user-panel="{{ user.id }}"{% if user.id != selected_id %} hidden{% endif %}>
+    <a href="{{ url_for('users_list') }}" class="mail-back-list" data-no-transition data-close-detail>{{ '← 返回用户列表' if lang == 'zh' else '← Back to users' }}</a>
+    <div class="mail-detail-heading"><span>{{ '用户详情' if lang == 'zh' else 'User details' }}</span></div>
+    <div class="mail-detail-body">
+      <h2>{{ user.name }}</h2>
+      <p class="mail-location"><span class="account-state {{ 'tone-ok' if user.enabled else 'tone-attention' }}">{{ _('users_enabled') if user.enabled else _('users_disabled') }}</span>ID {{ user.id }} · {{ '优先级' if lang == 'zh' else 'Priority' }} {{ loop.index }}</p>
 
-  <!-- Auto book -->
-  <div class="filter-tags mb-2">
-    {% if user.auto_book.enabled %}
-      <i class="bi bi-cart-check mr-1" style="color:var(--success);"></i>{{ _('users_auto_on') }}
-      {% if user.auto_book.dry_run %}
-        <span class="badge badge-warning ml-1 text-xs">{{ _('badge_dry_run') }}</span>
-      {% endif %}
-      {% if user.auto_book.email %} · {{ user.auto_book.email }}{% endif %}
-    {% else %}
-      <i class="bi bi-cart-x mr-1" style="color:var(--text3);"></i>{{ _('users_auto_off') }}
-    {% endif %}
-  </div>
+      <section class="mail-detail-section"><h3>{{ '通知' if lang == 'zh' else 'Notifications' }}</h3><dl>
+        <div><dt>{{ '状态' if lang == 'zh' else 'Status' }}</dt><dd>{{ ('已开启' if lang == 'zh' else 'On') if user.notifications_enabled else _('users_notif_off') }}</dd></div>
+        <div><dt>{{ '渠道' if lang == 'zh' else 'Channels' }}</dt><dd>{% if user.notification_channels %}{{ channel_list(user.notification_channels) }}{% else %}{{ '无' if lang == 'zh' else 'None' }}{% endif %}</dd></div>
+        <div{% if uc %} class="mail-long-field"{% endif %}><dt>{{ 'App 客户端' if lang == 'zh' else 'App clients' }}</dt><dd>
+          {%- for c in uc %}{{ c.name }}{% if c.sessions > 1 %} ×{{ c.sessions }}{% endif %}{% if c.last_used_at %} · {{ _('users_client_last_used') }}{{ c.last_used_at | time_ago }}{% endif %}{% if not loop.last %}
+{% endif %}{% else %}{{ '未登录' if lang == 'zh' else 'Not signed in' }}{% endfor -%}
+        </dd></div>
+      </dl></section>
 
-  <!-- Actions -->
-  <div class="user-card-actions">
-    <a href="{{ url_for('user_edit', user_id=user.id) }}" class="btn btn-outline btn-sm">
-      <i class="bi bi-pencil mr-1"></i>{{ _('users_edit') }}
-    </a>
-    <button class="btn btn-outline btn-sm js-test-notify"
-            data-user-id="{{ user.id }}"
-            data-user-name="{{ user.name }}"
-            {# 只登录了 App、没配其它渠道的人照样能测：/users/<id>/test 会走
-               设备推送。判据漏掉 uc 的话，这批人的按钮是灰的，而推送其实发得出去。 #}
-            {% if not user.notification_channels and not uc %}disabled{% endif %}>
-      <i class="bi bi-send mr-1"></i>{{ _('users_test_notif') }}
-    </button>
-    {% if is_admin %}
-    <form action="{{ url_for('user_toggle', user_id=user.id) }}" method="post" style="display:inline;">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" class="btn btn-outline btn-sm">
-        <i class="bi bi-{% if user.enabled %}pause{% else %}play{% endif %}-fill mr-1"></i>
-        {{ _('users_toggle_off') if user.enabled else _('users_toggle_on') }}
-      </button>
-    </form>
-    <button class="btn btn-outline btn-sm danger ml-auto js-delete-user"
-            data-user-id="{{ user.id }}"
-            data-user-name="{{ user.name }}">
-      <i class="bi bi-trash mr-1"></i>{{ _('users_delete') }}
-    </button>
-    {% endif %}
-  </div>
+      <section class="mail-detail-section"><h3>{{ '房源条件' if lang == 'zh' else 'Listing filters' }}</h3><dl>
+        {% if lf.is_empty() %}
+        <div><dt>{{ '范围' if lang == 'zh' else 'Scope' }}</dt><dd>{{ _('users_no_filter') }}</dd></div>
+        {% else %}
+        {% if lf.max_rent %}<div><dt>{{ _('user_form_max_rent') }}</dt><dd>€{{ lf.max_rent | int }}</dd></div>{% endif %}
+        {% if lf.min_area %}<div><dt>{{ _('user_form_min_area') }}</dt><dd>{{ lf.min_area | int }} m²</dd></div>{% endif %}
+        {% if lf.min_floor %}<div><dt>{{ _('user_form_min_floor') }}</dt><dd>{{ lf.min_floor }}</dd></div>{% endif %}
+        {% if lf.allowed_cities %}<div><dt>{{ _('user_form_cities') }}</dt><dd title="{{ lf.allowed_cities | join(' / ') }}">{{ lf.allowed_cities | summarize_list }}</dd></div>{% endif %}
+        {% if lf.allowed_types %}<div><dt>{{ _('user_form_types') }}</dt><dd title="{{ lf.allowed_types | join(' / ') }}">{{ lf.allowed_types | summarize_list }}</dd></div>{% endif %}
+        {% if lf.allowed_neighborhoods %}<div><dt>{{ _('user_form_hoods') }}</dt><dd title="{{ lf.allowed_neighborhoods | join(' / ') }}">{{ lf.allowed_neighborhoods | summarize_list }}</dd></div>{% endif %}
+        {% endif %}
+      </dl></section>
 
-</div>
-{% endfor %}
-</div>
+      <section class="mail-detail-section"><h3>{{ '自动预订' if lang == 'zh' else 'Auto-booking' }}</h3><dl>
+        <div><dt>{{ '状态' if lang == 'zh' else 'Status' }}</dt><dd>{% if user.auto_book.enabled %}{{ _('badge_dry_run') if user.auto_book.dry_run else _('users_auto_on') }}{% else %}{{ _('users_auto_off') }}{% endif %}</dd></div>
+        {% if user.auto_book.email %}<div><dt>Holland2Stay</dt><dd>{{ user.auto_book.email }}</dd></div>{% endif %}
+      </dl></section>
 
-<!-- Delete modal -->
-<div class="modal-overlay hidden" id="deleteModal">
-  <div class="modal-box" style="border-color:var(--danger);">
-    <h3 style="color:var(--danger);"><i class="bi bi-exclamation-triangle mr-2"></i>{{ _('users_delete_confirm') }}</h3>
-    <p>{{ _('users_delete_msg') }}<strong id="deleteUserName"></strong>？{{ _('users_delete_warn') }}</p>
-    <div class="modal-actions">
-      <button class="btn btn-outline btn-sm" onclick="document.getElementById('deleteModal').classList.add('hidden')">{{ _('settings_cancel') }}</button>
-      <form id="deleteForm" method="post">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-danger btn-sm">{{ _('users_delete') }}</button>
-      </form>
+      <div class="account-panel-actions">
+        <a class="mail-primary users-action" href="{{ url_for('user_edit', user_id=user.id) }}">{{ _('users_edit') }}</a>
+        <button type="button" class="js-test-notify" data-user-id="{{ user.id }}" data-user-name="{{ user.name }}"
+                {# 只登录了 App、没配其它渠道的人照样能测：/users/<id>/test 会走设备推送 #}
+                {% if not user.notification_channels and not uc %}disabled title="{{ _('users_no_channels') }}"{% endif %}>{{ _('users_test_notif') }}</button>
+      </div>
+      <div class="account-test-result" data-test-result role="status" hidden></div>
+
+      <section class="mail-detail-section"><h3>{{ '管理' if lang == 'zh' else 'Manage' }}</h3>
+        <div class="users-manage">
+          <form action="{{ url_for('user_move', user_id=user.id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="direction" value="up">
+            <button type="submit" title="{{ _('users_rank_up') }}"{% if loop.first %} disabled{% endif %}>{{ '上移' if lang == 'zh' else 'Move up' }}</button>
+          </form>
+          <form action="{{ url_for('user_move', user_id=user.id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="direction" value="down">
+            <button type="submit" title="{{ _('users_rank_down') }}"{% if loop.last %} disabled{% endif %}>{{ '下移' if lang == 'zh' else 'Move down' }}</button>
+          </form>
+          <form action="{{ url_for('user_toggle', user_id=user.id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">{{ _('users_toggle_off') if user.enabled else _('users_toggle_on') }}</button>
+          </form>
+          <button type="button" class="users-danger js-delete-user" data-user-id="{{ user.id }}" data-user-name="{{ user.name }}">{{ _('users_delete') }}</button>
+        </div>
+      </section>
     </div>
   </div>
+  {% endfor %}
+  {% if not users %}<div class="mail-detail-empty">{{ _('users_empty_hint') }}</div>{% endif %}
+  </section>
 </div>
+</section>
+
+<dialog id="deleteModal" aria-labelledby="delete-title">
+  <h2 id="delete-title">{{ _('users_delete_confirm') }}</h2>
+  <p>{{ _('users_delete_msg') }}<strong id="deleteUserName"></strong>{{ '？' if lang == 'zh' else '? ' }}{{ _('users_delete_warn') }}</p>
+  <form id="deleteForm" method="post" class="mail-dialog-actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="button" data-close-dialog>{{ _('settings_cancel') }}</button>
+    <button type="submit" class="mail-primary">{{ _('users_delete') }}</button>
+  </form>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
-<script>
-// ── Drag-and-drop user reorder ──
-(function(){
-  var grid = document.getElementById('user-grid');
-  if (!grid) return;
-
-  var cards = grid.querySelectorAll('.user-card[draggable]');
-  var draggedEl = null;
-  var placeholder = document.createElement('div');
-  placeholder.className = 'user-card drag-placeholder';
-  placeholder.style.cssText = 'border:2px dashed var(--border);background:var(--bg);min-height:120px;opacity:.5;pointer-events:none;';
-
-  cards.forEach(function(card){
-    card.addEventListener('dragstart', function(e){
-      if (e.target.closest('a, button, input, form, .btn, .rank-btn')) {
-        e.preventDefault(); return;
-      }
-      draggedEl = card;
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', card.dataset.userId || '');
-      // Hide ghost image for cleaner look
-      var ghost = card.cloneNode(true);
-      ghost.style.position = 'absolute'; ghost.style.top = '-9999px';
-      document.body.appendChild(ghost);
-      e.dataTransfer.setDragImage(ghost, 0, 0);
-      setTimeout(function(){ document.body.removeChild(ghost); }, 0);
-    });
-
-    card.addEventListener('dragend', function(){
-      card.classList.remove('dragging');
-      draggedEl = null;
-      grid.querySelectorAll('.user-card').forEach(function(c){ c.classList.remove('drag-over','drag-over-top','drag-over-bottom'); });
-      if (placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
-    });
-
-    card.addEventListener('dragover', function(e){
-      e.preventDefault();
-      if (!draggedEl || draggedEl === card) return;
-      e.dataTransfer.dropEffect = 'move';
-      var rect = card.getBoundingClientRect();
-      var midY = rect.top + rect.height / 2;
-      card.classList.remove('drag-over-top','drag-over-bottom');
-      if (e.clientY < midY) {
-        card.classList.add('drag-over-top');
-      } else {
-        card.classList.add('drag-over-bottom');
-      }
-    });
-
-    card.addEventListener('dragleave', function(){
-      card.classList.remove('drag-over-top','drag-over-bottom');
-    });
-
-    card.addEventListener('drop', function(e){
-      e.preventDefault();
-      card.classList.remove('drag-over-top','drag-over-bottom');
-      if (!draggedEl || draggedEl === card) return;
-
-      // Move card in DOM
-      var rect = card.getBoundingClientRect();
-      var midY = rect.top + rect.height / 2;
-      if (e.clientY < midY) {
-        grid.insertBefore(draggedEl, card);
-      } else {
-        grid.insertBefore(draggedEl, card.nextSibling);
-      }
-
-      // Send new order to server
-      var orderedIds = [];
-      grid.querySelectorAll('.user-card[draggable]').forEach(function(c){
-        orderedIds.push(c.dataset.userId || '');
-      });
-      updateRankBadges();
-      saveOrder(orderedIds);
-    });
-  });
-
-  function updateRankBadges() {
-    grid.querySelectorAll('.user-card .rank-badge').forEach(function(badge, i){
-      badge.textContent = '#' + (i + 1);
-    });
-  }
-
-  function saveOrder(orderedIds) {
-    var csrf = document.querySelector('meta[name="csrf-token"]');
-    fetch('/api/users/reorder', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrf ? csrf.getAttribute('content') : '',
-      },
-      body: JSON.stringify({order: orderedIds}),
-    }).then(function(r){ return r.json(); }).then(function(d){
-      if (d.ok) {
-        var wrap = document.getElementById('toast-container');
-        if (wrap) {
-          var div = document.createElement('div');
-          div.className = 'toast toast-success';
-          var langMeta = document.querySelector('meta[name="lang"]');
-          var zh = langMeta && langMeta.getAttribute('content') === 'zh';
-          div.textContent = zh ? '优先级已更新' : 'Priority updated';
-          wrap.appendChild(div);
-          setTimeout(function(){ div.style.opacity='0'; div.style.transition='opacity .3s'; setTimeout(function(){ div.remove(); }, 300); }, 2000);
-        }
-      }
-    });
-  }
-})();
-
-// ── Delete modal ──
-function confirmDelete(userId, userName) {
-  document.getElementById('deleteUserName').textContent = userName;
-  document.getElementById('deleteForm').action = '/users/' + encodeURIComponent(userId) + '/delete';
-  document.getElementById('deleteModal').classList.remove('hidden');
-}
-
-document.querySelectorAll('.js-delete-user').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    confirmDelete(btn.dataset.userId || '', btn.dataset.userName || '');
-  });
-});
-
-function appendIcon(parent, ok) {
-  var icon = document.createElement('i');
-  icon.className = ok ? 'bi bi-check-circle-fill' : 'bi bi-x-circle-fill';
-  icon.style.color = ok ? 'var(--success)' : 'var(--danger)';
-  parent.appendChild(icon);
-  parent.appendChild(document.createTextNode(' '));
-}
-
-function sendTestNotify(btn) {
-  var userId = btn.dataset.userId || '';
-  var userName = btn.dataset.userName || '';
-  var orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>';
-
-  fetch('/users/' + encodeURIComponent(userId) + '/test', {
-    method: 'POST',
-    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
-  })
-    .then(function(r){ return r.json(); })
-    .then(function(data) {
-      var wrap = document.getElementById('toast-container');
-      if(!wrap) return;
-      var div = document.createElement('div');
-      div.className = 'toast';
-      if(data.error && !data.results.length) {
-        var title = document.createElement('div');
-        title.className = 'toast-title';
-        title.textContent = userName + '：' + data.error;
-        div.appendChild(title);
-      } else {
-        var langMeta = document.querySelector('meta[name="lang"]');
-        var zh = langMeta && langMeta.getAttribute('content') === 'zh';
-        var heading = document.createElement('div');
-        heading.className = 'toast-title';
-        heading.textContent = userName + (zh ? ' 通知测试结果' : ' notification test');
-        div.appendChild(heading);
-        (data.results||[]).forEach(function(r) {
-          var body = document.createElement('div');
-          body.className = 'toast-body';
-          appendIcon(body, !!r.ok);
-          body.appendChild(document.createTextNode(String(r.channel || '')));
-          if (r.error) {
-            body.appendChild(document.createTextNode(' — ' + String(r.error)));
-          }
-          div.appendChild(body);
-        });
-      }
-      wrap.appendChild(div);
-      setTimeout(function(){ div.style.opacity='0'; div.style.transition='opacity .3s'; setTimeout(function(){ div.remove(); }, 300); }, 6000);
-    })
-    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
-}
-
-document.querySelectorAll('.js-test-notify').forEach(function(btn) {
-  btn.addEventListener('click', function() { sendTestNotify(btn); });
-});
-</script>
+<script src="{{ asset('users.js') }}"></script>
 {% endblock %}

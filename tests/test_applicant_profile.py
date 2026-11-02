@@ -335,7 +335,7 @@ class TestNoFieldSilentlyDropped:
         from users import _user_to_row
 
         probe = {
-            "enabled": True, "dry_run": False, "cancel_enabled": True,
+            "enabled": True, "dry_run": False,
             "email": "h@x.com", "password": "pw-h",
             "payment_method": "idealcheckout_visa",
             "xior_email": "x@x.com", "xior_password": "pw-x",

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}{{ '公告' if lang == 'zh' else 'Announcements' }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page admin-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('admin.css') }}">{% endblock %}
+{% block sidebar_navigation %}{% include '_admin_nav.html' %}{% endblock %}
+{% block sidebar_footer %}{% include '_admin_footer.html' %}{% endblock %}
+
+{% block content %}
+<section class="inbox-shell admin-shell">
+<header class="mail-toolbar">
+  <div>
+    <h1>{{ '公告' if lang == 'zh' else 'Announcements' }}</h1>
+    <p class="mail-summary"><span>{{ _('announce_hint') }}</span></p>
+  </div>
+</header>
+
+<div class="admin-body">
+  <section class="admin-section">
+    <div class="admin-section-head"><h2>{{ _('announce_title') }}</h2></div>
+    <div class="admin-form">
+      <input type="text" id="ann-title" class="admin-input" placeholder="{{ _('announce_title_ph') }}" maxlength="120" autocomplete="off">
+      <textarea id="ann-body" class="admin-input" rows="4" placeholder="{{ _('announce_body_ph') }}" maxlength="1000"></textarea>
+      <div class="admin-row-actions">
+        <button type="button" class="admin-button" onclick="sendAnnouncement(true)">{{ _('announce_preview') }}</button>
+        <button type="button" class="admin-button is-primary" onclick="sendAnnouncement(false)">{{ _('announce_send') }}</button>
+        <span id="ann-status" class="admin-muted"></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="admin-section">
+    <div class="admin-section-head"><h2>{{ _('announce_history') }}</h2><span id="ann-retry-status"></span></div>
+    {% if announcements %}
+    <div class="admin-scroll">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>{{ _('announce_col_time') }}</th>
+            <th>{{ _('announce_col_announcement') }}</th>
+            <th class="num">{{ _('announce_col_reach') }}</th>
+            <th class="num">{{ _('announce_col_external') }}</th>
+            <th class="num">{{ _('announce_col_push') }}</th>
+            <th class="num">{{ _('announce_col_failed') }}</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in announcements %}
+          <tr>
+            <td class="nowrap muted">{{ a.created_at | local_time }}</td>
+            <td>{{ a.title }}</td>
+            <td class="num">{{ a.recipients }} / {{ a.skipped_disabled }}</td>
+            <td class="num">{{ a.external_ok }}</td>
+            <td class="num">{{ a.push_devices }}</td>
+            <td class="num">{% if a.failed_users or a.pending_users %}<span class="admin-tag is-bad">{{ a.failed_users + a.pending_users }}</span>{% else %}0{% endif %}</td>
+            <td class="end">{% if a.failed_users or a.pending_users %}<button type="button" class="admin-link" onclick="retryAnnouncement({{ a.id }})">{{ _('announce_retry') }}</button>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="admin-empty">{{ _('announce_history_empty') }}</p>
+    {% endif %}
+  </section>
+</div>
+</section>
+
+<script>
+// ── 公告群发 ──
+async function sendAnnouncement(dryRun) {
+  var title = document.getElementById('ann-title').value.trim();
+  var body  = document.getElementById('ann-body').value.trim();
+  var el    = document.getElementById('ann-status');
+  if (!title) { el.textContent = '{{ _("announce_need_title") }}'; return; }
+
+  // 真发之前二次确认——群发不可撤回
+  if (!dryRun && !confirm('{{ _("announce_confirm") }}\n\n' + title + '\n' + body)) return;
+
+  el.textContent = '…';
+  try {
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+    var resp = await fetch('/api/announcement', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({title: title, body: body, dry_run: !!dryRun}),
+    });
+    var d = await resp.json();
+    if (!d.ok) { el.textContent = 'Error: ' + (d.error || resp.status); return; }
+    if (d.dry_run) {
+      el.textContent = '{{ _("announce_preview_result") }} ' + d.recipients
+        + ' / {{ _("announce_skipped") }} ' + d.skipped_disabled;
+    } else {
+      el.textContent = '{{ _("announce_sent") }} ' + d.channel_ok + '/' + d.recipients
+        + ' · ' + d.push_devices + ' {{ _("announce_devices") }}'
+        + (d.errors && d.errors.length ? ' · ' + d.errors.length + ' err' : '');
+      document.getElementById('ann-title').value = '';
+      document.getElementById('ann-body').value = '';
+    }
+  } catch (e) {
+    el.textContent = 'Error: ' + e;
+  }
+}
+
+// ── 补发失败的投递 ──
+async function retryAnnouncement(id) {
+  if (!confirm('{{ _("announce_retry_confirm") }}')) return;
+  var el = document.getElementById('ann-retry-status');
+  el.textContent = '…';
+  try {
+    var csrf = document.querySelector('meta[name="csrf-token"]').content;
+    var resp = await fetch('/api/announcements/' + id + '/retry', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+      body: JSON.stringify({}),
+    });
+    var d = await resp.json();
+    if (!d.ok) { el.textContent = 'Error: ' + (d.error || resp.status); return; }
+    el.textContent = '{{ _("announce_retry_done") }} ' + d.channel_ok + '/'
+      + d.recipients + ' · ' + d.push_devices + ' {{ _("announce_devices") }}'
+      + (d.errors && d.errors.length ? ' · ' + d.errors.length + ' err' : '');
+    setTimeout(function () { location.reload(); }, 1500);
+  } catch (e) {
+    el.textContent = 'Error: ' + e;
+  }
+}
+</script>
+{% endblock %}

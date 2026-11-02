@@ -139,7 +139,7 @@ python monitor.py  # monitoring loop, in a separate terminal</pre>
 
 <div class="card">
 <h3>Map</h3>
-<p>Listings plotted on an interactive map. Green = available to book, orange = lottery, grey = not available. Markers show platform badges. Requires <code>GOOGLE_MAPS_API_KEY</code>.</p>
+<p>The Google Maps view shares the listing filters, platform groups and search scope. Individual locations show prices; shared locations show listing counts. Select a marker to browse listings and full details in the side panel. Unlocated listings remain in a separate group. The map defaults to recent records and offers an all-records view. The base map requires <code>GOOGLE_MAPS_API_KEY</code>; the listing panel remains available if the key is missing or the map cannot load.</p>
 <p>The map <strong>only shows listings still seen recently</strong> — fourteen days by default,
 adjustable under <em>Map age limit</em> in Settings, or 0 to show everything. "Not available" is a
 terminal state, so those records stay in the database indefinitely; without this limit, units delisted

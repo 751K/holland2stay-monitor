@@ -85,60 +85,6 @@ def _dummy_bcrypt_verify(password: str) -> None:
         pass  # 任何异常都吞掉，这只是用于时序对齐
 
 
-# ── H2S 凭据验证 ──────────────────────────────────────────────────────
-
-_GQL_LOGIN_MUTATION = """
-mutation($email: String!, $password: String!) {
-  generateCustomerToken(email: $email, password: $password) {
-    token
-  }
-}
-"""
-
-_GQL_HEADERS = {
-    "Content-Type": "application/json",
-    "Origin": "https://www.holland2stay.com",
-    "Referer": "https://www.holland2stay.com/",
-    "Accept": "application/json",
-}
-
-
-def verify_h2s_credentials(email: str, password: str) -> bool:
-    """调用 H2S GraphQL generateCustomerToken 验证凭据。"""
-    import curl_cffi.requests as _req
-    from config import get_impersonate as _get_impersonate
-
-    try:
-        with _req.Session(impersonate=_get_impersonate()) as session:
-            resp = session.post(
-                "https://api.holland2stay.com/graphql/",
-                json={
-                    "query": _GQL_LOGIN_MUTATION,
-                    "variables": {"email": email, "password": password},
-                },
-                headers=_GQL_HEADERS,
-                timeout=15,
-            )
-    except Exception:
-        logger.exception("H2S 凭据验证网络异常")
-        return False
-
-    if resp.status_code != 200:
-        logger.info("H2S 凭据验证 HTTP %d", resp.status_code)
-        return False
-
-    try:
-        body = resp.json()
-        token = (
-            (body.get("data") or {})
-            .get("generateCustomerToken") or {}
-        ).get("token")
-        return bool(token)
-    except Exception:
-        logger.exception("H2S 凭据验证 JSON 解析失败")
-        return False
-
-
 def verify_user_password(user: UserConfig, password: str) -> bool:
     """user 的密码是否正确。``/auth/login`` 与 ``/auth/verify`` **共用这一份**。
 
@@ -151,28 +97,14 @@ def verify_user_password(user: UserConfig, password: str) -> bool:
       Face ID 卡住，而且看不出为什么；
     - verify 比 login 严 → 明明能登录的密码被告知"密码错误"。
 
-    抄第二份最可能漏掉的就是下面这个 fallback——它默认关闭，测试环境几乎
-    永远走不到，抄漏了不会有任何症状，直到某个开了它的用户来报障。
-
-    H2S fallback 是历史遗留的"用 H2S 邮箱+密码登录本地账号"快捷路径。若本地
-    用户名 == 用户的 H2S 邮箱，且攻击者通过钓鱼/撞库/泄露拿到 H2S 那边的密码，
-    就能直接以受害者身份签出 role=user 的 Bearer token。因此默认 fail-closed，
-    只在用户记录显式 ``allow_h2s_login=True`` 时才允许。
+    只认本地 app_password。曾经的「用 H2S 邮箱+密码登录」fallback 已删除：
+    H2S 那边的密码一旦泄露，就能借它签出本地 token。
     """
-    authed = False
-    if user.app_login_enabled:
-        authed = verify_app_password(user, password)
-    if not authed and user.allow_h2s_login:
-        logger.info(
-            "app_password 校验失败，尝试 H2S 凭据 fallback（用户显式允许）user=%s",
-            user.name,
-        )
-        authed = verify_h2s_credentials(user.name, password)
-    elif not authed:
-        logger.info(
-            "app_password 校验失败 user=%s，H2S fallback 未启用，拒绝",
-            user.name,
-        )
+    if not user.app_login_enabled:
+        return False
+    authed = verify_app_password(user, password)
+    if not authed:
+        logger.info("app_password 校验失败 user=%s", user.name)
     return authed
 
 

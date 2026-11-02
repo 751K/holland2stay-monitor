@@ -113,7 +113,6 @@ class TestDispatchBook:
         args, kwargs = mock.call_args
         assert args[0] is listing
         assert kwargs["dry_run"] is False
-        assert "cancel_enabled" in kwargs
         assert "payment_method" in kwargs
         # 返回值完整透传
         assert result is expected
@@ -227,7 +226,6 @@ class TestHollandStayBookerForwarding:
             name="b", id="b1b1b1b1",
             auto_book=AutoBookConfig(
                 enabled=True, email="b@b.com", password="bpw",
-                cancel_enabled=True,
                 payment_method="custom_method",
                 dry_run=False,
             ),
@@ -243,7 +241,6 @@ class TestHollandStayBookerForwarding:
         assert args[1] == "b@b.com"
         assert args[2] == "bpw"
         assert kwargs["dry_run"] is False
-        assert kwargs["cancel_enabled"] is True
         assert kwargs["payment_method"] == "custom_method"
 
     def test_request_dry_run_is_authoritative(self):

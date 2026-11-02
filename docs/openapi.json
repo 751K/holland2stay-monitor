@@ -1978,6 +1978,17 @@
                         "notification_count": {
                           "type": "integer"
                         },
+                        "listing_reads": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "listing_id": {"type": "string"},
+                              "read_at": {"type": "string"}
+                            },
+                            "required": ["listing_id", "read_at"]
+                          }
+                        },
                         "active_devices": {
                           "type": "array",
                           "items": {
@@ -3892,9 +3903,6 @@
             "type": "boolean"
           },
           "has_app_password": {
-            "type": "boolean"
-          },
-          "allow_h2s_login": {
             "type": "boolean"
           },
           "active_devices": {

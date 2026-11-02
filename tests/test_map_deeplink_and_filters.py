@@ -207,8 +207,8 @@ class TestMapAppliesUserFilter:
                 session["role"] = role
                 assert _current_map_user() is None
 
-    def test_helper_degrades_instead_of_raising(self, app_ctx, monkeypatch):
-        """取用户失败时返回 None。地图少一层筛选是退化，整页 500 才是故障。"""
+    def test_helper_rejects_instead_of_widening_scope(self, app_ctx, monkeypatch):
+        """读取个人条件失败时返回服务不可用，不能改为展示全量房源。"""
         import users
         from flask import session
 
@@ -221,7 +221,9 @@ class TestMapAppliesUserFilter:
             session["authenticated"] = True
             session["role"] = "user"
             session["user_id"] = "u1"
-            assert _current_map_user() is None
+            from werkzeug.exceptions import ServiceUnavailable
+            with pytest.raises(ServiceUnavailable):
+                _current_map_user()
 
 
 class TestListingsEntryPoint:
@@ -266,10 +268,6 @@ class TestSharedFrontendHelpers:
     def _mapjs(self) -> str:
         return _js(TEMPLATES / "map.html")
 
-    def test_map_uses_the_shared_helpers(self):
-        m = self._mapjs()
-        assert "window.statusBucket" in m
-        assert "window.mapDisplayCoord" in m
 
     def test_map_does_not_reimplement_bucketing(self):
         """map.html 里不许再出现第二套判据。
@@ -293,19 +291,7 @@ class TestSharedFrontendHelpers:
         assert body.rstrip().rstrip("}").rstrip().endswith("return 'other';"), (
             "兜底分支必须是 'other'，不是 'occupied'")
 
-    def test_other_is_on_by_default(self):
-        """而且默认是**开**的，否则等于没分出来。"""
-        m = self._mapjs()
-        i = m.index('data-bucket="other"')
-        assert 'aria-pressed="true"' in m[i:i + 120]
 
-    def test_occupied_is_off_by_default(self):
-        """生产实测 235 条里 117 条是 Occupied——默认全开等于把地图淹掉。"""
-        m = self._mapjs()
-        for bucket, expected in (("occupied", "false"), ("reserved", "false"),
-                                 ("book", "true"), ("lottery", "true")):
-            i = m.index('data-bucket="%s"' % bucket)
-            assert 'aria-pressed="%s"' % expected in m[i:i + 120], bucket
 
 
 class TestTranslations:
@@ -368,7 +354,13 @@ class TestSentinelDateNeverShownAsADate:
 
         src = _code(jinja_filters.available_display)
         assert "is_sentinel_available_from" in src
-        assert "2050" not in src, "又写死了一个 2050"
+        # Inspect executable statements; dates in the explanatory docstring
+        # do not constitute a second implementation of the sentinel rule.
+        import ast
+        function = ast.parse(src).body[0]
+        if ast.get_docstring(function):
+            function.body = function.body[1:]
+        assert "2050" not in ast.unparse(function), "又写死了一个 2050"
 
     @pytest.mark.parametrize("template", ["listings.html", "index.html"])
     def test_templates_use_the_filter(self, template):
@@ -384,10 +376,11 @@ class TestSentinelDateNeverShownAsADate:
 
         assert ("window.SENTINEL_AVAILABLE_FROM_YEAR = %d" % SENTINEL_AVAILABLE_FROM_YEAR) in js
 
-    def test_map_and_calendar_both_guard(self):
-        """两个 JS 页面都要挡，只挡一个等于没挡——日历那处更严重。"""
-        for name in ("map.html", "calendar.html"):
-            assert "isSentinelDate" in _js(TEMPLATES / name), f"{name} 没挡哨兵日期"
+    def test_calendar_service_guards_sentinel_dates(self):
+        """Web 视图在服务端展示日期；地图行为由 test_web_map 覆盖。"""
+        from app.services.calendar_service import availability_date
+        from models import SENTINEL_AVAILABLE_FROM_YEAR
+        assert availability_date(f"{SENTINEL_AVAILABLE_FROM_YEAR}-01-01") is None
 
 
 class TestSpreadIsComputedOnce:

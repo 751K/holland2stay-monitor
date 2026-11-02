@@ -1,0 +1,173 @@
+/* Self-service account page (account.html). Layout, list rows, detail pane and
+   toolbar come from inbox.css (.mail-*); this file only adds what settings need:
+   saved-state text, field groups, switches and per-panel actions. */
+
+.account-shell>.alert{flex:none;margin:0 40px 12px;font-size:14px;line-height:1.6;display:block}
+.account-shell>.alert p{margin:6px 0 0}
+.account-shell>.alert form{margin-top:10px}
+
+/* Row list */
+.account-section-note{margin:0;padding:7px 16px 12px;font-size:13px;line-height:1.6;color:var(--mail-muted)}
+.account-row .mail-value{display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:45%}
+.account-state{font-size:13px;font-weight:500;color:var(--mail-muted);text-align:right}
+.account-state.tone-ok{color:var(--mail-text)}
+.account-state.tone-attention{color:var(--mail-accent);font-weight:650}
+.account-dirty{font-size:11px;font-weight:500;color:var(--mail-accent)}
+.account-row.is-dirty .mail-listing-body>strong::after{content:" •";color:var(--mail-accent)}
+
+/* Onboarding status (_onboarding.html) at the top of the row list.
+   Reads like the inbox: title, one reason, two facts, one next step. Blocked =
+   warm surface + brick reason + the only filled button; otherwise neutral. */
+.account-page .onb-card{margin:0 0 18px;padding:18px 18px 16px;border:0;border-radius:10px;background:var(--mail-hover);box-shadow:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+.account-page .onb-card.onb-blocked{background:var(--mail-selected)}
+.account-page .onb-card h2{margin:0;font-size:15px;font-weight:650;line-height:1.4;letter-spacing:-.01em;color:var(--mail-text)}
+.account-page .onb-lead{margin:6px 0 0;font-size:13px;line-height:1.65;color:var(--mail-muted)}
+.account-page .onb-lead.onb-step-blocked{color:var(--mail-accent)}
+.account-page .onb-facts{margin:16px 0 0}
+.account-page .onb-facts>div{display:flex;justify-content:space-between;gap:16px;padding:7px 0;font-size:13px;line-height:1.5}
+.account-page .onb-facts dt{color:var(--mail-muted)}
+.account-page .onb-facts dd{margin:0;text-align:right;color:var(--mail-text);overflow-wrap:anywhere}
+.account-page .onb-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px;margin-top:16px}
+.account-page .onb-btn{margin:0;border:0;border-radius:6px;padding:8px 14px;font:inherit;font-size:13px;font-weight:550;line-height:1.4;background:var(--mail-bg);color:var(--mail-text);text-decoration:none;cursor:pointer}
+.account-page .onb-btn:hover{color:var(--mail-accent)}
+.account-page .onb-btn.onb-primary{background:#98443a;color:#fff}
+.account-page .onb-btn.onb-primary:hover{background:#7c352d;color:#fff}
+.account-page .onb-btn:disabled{opacity:.6;cursor:default}
+.account-page .onb-link{font-size:13px;color:var(--mail-accent);text-decoration:none}
+.account-page .onb-link:hover{text-decoration:underline}
+.account-page .onb-guide{margin-left:auto;color:var(--mail-muted)}
+.account-page .onb-test{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.account-page .onb-test-result{font-size:13px;line-height:1.6;color:var(--mail-text)}
+.account-page .onb-test-ok,.account-page .onb-test-fail{color:var(--mail-text)}
+
+/* Detail pane */
+.account-detail .mail-location .account-state{display:inline;margin-right:8px;font-size:13px}
+.account-detail .mail-detail-body{padding-bottom:40px}
+.account-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-top:24px}
+.account-field{display:flex;flex-direction:column;gap:7px;min-width:0;margin:22px 0 0;padding:0;border:0;font-size:13px;color:var(--mail-muted)}
+.account-fields .account-field{margin:0}
+.account-field legend{padding:0;margin-bottom:12px;font-size:13px;font-weight:600;color:var(--mail-text)}
+.account-field>span{font-weight:600;color:var(--mail-text)}
+.account-field input:not([type=checkbox]):not([type=radio]),.account-field select{
+  width:100%;height:36px;border:1px solid var(--mail-border);border-radius:6px;padding:7px 10px;
+  font:inherit;font-size:14px;background:var(--mail-bg);color:var(--mail-text);
+}
+.account-field select{appearance:none;background-image:var(--caret);background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+.account-field input[readonly]{background:var(--mail-field);color:var(--mail-muted)}
+.account-field input:focus,.account-field select:focus{outline:2px solid var(--mail-accent);outline-offset:1px;border-color:transparent}
+/* The list scrolls, which clips anything drawn outside it: leave room for the
+   focus ring around the edge checkboxes without shifting the alignment. */
+/* A class that sets display would otherwise win over the hidden attribute */
+.account-fields[hidden],.account-help[hidden]{display:none}
+.account-options{max-height:260px;overflow:auto;scrollbar-width:thin;padding:5px;margin:-5px}
+.account-options label{align-items:flex-start;line-height:1.4;overflow-wrap:anywhere}
+.account-options input{flex:none;margin-top:1px}
+.account-options:empty::before{content:attr(data-empty);font-size:13px;color:var(--mail-muted)}
+.account-scope{margin-left:8px;font-size:11px;font-weight:400;padding:2px 5px;border-radius:4px;background:var(--mail-field);color:var(--mail-muted)}
+.account-help{margin:14px 0 0;font-size:13px;line-height:1.7;color:var(--mail-muted)}
+.account-steps{margin:16px 0 0;padding-left:18px;font-size:13px;line-height:1.8;color:var(--mail-muted)}
+.account-detail code{font-size:12px;padding:1px 4px;border-radius:4px;background:var(--mail-field);color:var(--mail-text);overflow-wrap:anywhere}
+.account-links{display:flex;flex-direction:column;gap:12px;margin-top:22px}
+.account-links a{font-size:14px;color:var(--mail-accent);text-decoration:none}
+.account-links a:hover{text-decoration:underline}
+.account-facts{margin-top:18px}
+.account-verify{margin-top:10px;font-size:13px;line-height:1.6;color:var(--mail-muted)}
+.account-verify:empty{display:none}
+.account-text-button{border:0;background:none;padding:0;font:inherit;color:var(--mail-accent);cursor:pointer}
+.account-check{display:flex;gap:8px;align-items:center;margin-top:14px;font-size:13px;color:var(--mail-muted)}
+.account-check input{accent-color:var(--mail-accent)}
+
+/* Switch: native checkbox stays focusable and is what gets submitted */
+/* A settings row: label left, switch right. The row is as wide as its container,
+   so the switch's right edge lines up with the fields (or buttons) below it */
+.account-switch{display:flex;align-items:center;gap:16px;margin-top:20px;font-size:15px;color:var(--mail-text);cursor:pointer;position:relative}
+.account-switch+.account-switch,.account-switch+input[type=hidden]+.account-switch{margin-top:12px}
+.account-switch input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+/* Off | On as a small segmented control, like the scope switch: a block slides to
+   the chosen side (brick red when on); the other side keeps its label visible */
+.account-switch .toggle-track{order:2;margin-left:auto;flex:none;position:relative;display:grid;grid-template-columns:1fr 1fr;width:76px;height:28px;padding:2px;border-radius:7px;background:#0000000d;font-size:12px;line-height:24px;text-align:center;color:var(--mail-muted);transition:none}
+[data-theme=dark] .account-switch .toggle-track{background:#ffffff12}
+.account-switch .toggle-track::before{content:attr(data-on);grid-column:2}
+.account-switch input:checked+.toggle-track::before{content:attr(data-off);grid-column:1}
+.account-switch .toggle-track::after{content:attr(data-off);position:absolute;top:2px;left:2px;width:36px;height:24px;border-radius:5px;background:var(--mail-bg);color:var(--mail-text);font-weight:600;box-shadow:0 1px 2px #0000001f;transition:transform .16s ease,background .16s}
+.account-switch input:checked+.toggle-track{background:#0000000d}
+[data-theme=dark] .account-switch input:checked+.toggle-track{background:#ffffff12}
+.account-switch input:checked+.toggle-track::after{content:attr(data-on);transform:translateX(36px);background:var(--mail-accent);color:#fff}
+[data-theme=dark] .account-switch input:checked+.toggle-track::after{background:#98443a}
+.account-switch-text{display:flex;flex-direction:column;gap:3px;min-width:0}
+.account-switch-text small{font-size:13px;line-height:1.55;color:var(--mail-muted)}
+/* The applicant-profile consent toggle sits inside its own row: keep it bare */
+.account-switch.prof-toggle{margin-top:0}
+/* Shrink-wrap a short panel (one switch + actions) to its widest line, the
+   button row, so the switch ends exactly where the last button ends */
+.account-fit{display:inline-flex;flex-direction:column;max-width:100%}
+
+.account-switch input:focus-visible+.toggle-track{outline:2px solid var(--mail-accent);outline-offset:2px}
+.account-switch input:disabled+.toggle-track,.account-switch input:disabled~span{opacity:.5;cursor:not-allowed}
+
+/* Appearance: three-way segmented choice built from real radios */
+.account-segment{display:inline-flex;align-self:flex-start;gap:2px;margin-top:6px;padding:3px;border-radius:8px;background:var(--mail-field)}
+.account-segment label{position:relative;display:block;cursor:pointer}
+.account-segment input{position:absolute;opacity:0;width:1px;height:1px;margin:0}
+.account-segment label{padding:7px 16px;border-radius:6px;font-size:14px;color:var(--mail-muted);transition:background .12s,color .12s}
+.account-segment label:hover{color:var(--mail-text)}
+.account-segment label:has(input:checked){background:var(--mail-bg);color:var(--mail-text);font-weight:600;box-shadow:0 1px 2px #0000001a}
+.account-segment label:has(input:focus-visible){outline:2px solid var(--mail-accent);outline-offset:1px}
+
+/* Actions */
+.account-panel-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}
+/* Buttons and button-like links share one fixed height; line-height differs between them otherwise */
+.account-panel-actions button,.account-panel-actions a.users-action{display:inline-flex;align-items:center;height:40px;line-height:1;border:0;border-radius:6px;padding:0 15px;background:var(--mail-bg);box-shadow:inset 0 0 0 1px var(--mail-border);color:var(--mail-text);font-size:14px;cursor:pointer}
+/* Secondary actions: white with a hairline, like the search field. Hover tints the
+   fill, not the outline: a coloured outline on one half of a joined pair leaves the
+   shared seam in the neutral colour and the button looks broken. */
+.account-panel-actions button:hover:not(:disabled){background:var(--mail-hover);color:var(--mail-accent)}
+.account-panel-actions .mail-primary,.account-panel-actions a.mail-primary{background:#98443a;color:#fff;box-shadow:none}
+.account-panel-actions .mail-primary:hover:not(:disabled),.account-panel-actions a.mail-primary:hover{background:#7c352d;color:#fff;box-shadow:none}
+.account-panel-actions button:disabled{color:var(--mail-muted);box-shadow:inset 0 0 0 1px var(--mail-border);opacity:.6;cursor:default}
+.account-test-result{margin-top:14px;padding:12px 14px;border-radius:6px;background:var(--mail-hover);font-size:13px;line-height:1.7;color:var(--mail-text)}
+.account-test-result ul{margin:6px 0 0;padding-left:18px}
+
+@media(max-width:1100px){.account-shell>.alert{margin-left:26px;margin-right:26px}}
+@media(max-width:650px){
+  .account-shell>.alert{margin-left:20px;margin-right:20px}
+  .account-row .mail-value{max-width:40%}
+}
+
+/* Fields and committing actions use the body size */
+.account-field input:not([type=checkbox]):not([type=radio]),.account-field select,.account-panel-actions button,.account-page .onb-btn{font-size:15px}
+.account-field input:not([type=checkbox]):not([type=radio]),.account-field select{height:40px}
+
+/* Admin user list (users.html) */
+.users-new{flex:none;display:inline-flex;align-items:center;height:40px;line-height:1;border-radius:6px;padding:0 16px;font-size:15px;font-weight:550;background:#98443a;color:#fff;text-decoration:none}
+.users-new:hover{background:#7c352d;color:#fff}
+.user-row{align-items:center;cursor:grab}
+.user-row.dragging{opacity:.4}
+/* Insertion point while dragging: a grey line in the gap between rows */
+#user-grid{position:relative}
+.user-drop-line{position:absolute;left:8px;right:8px;height:2px;border-radius:1px;background:var(--mail-muted);pointer-events:none}
+.user-drop-line::before{content:"";position:absolute;left:-4px;top:-3px;width:8px;height:8px;border-radius:50%;background:var(--mail-muted)}
+.user-drop-line[hidden]{display:none}
+.user-rank{flex:none;width:22px;font-size:13px;font-variant-numeric:tabular-nums;color:var(--mail-muted);text-align:right}
+.user-flag{font-size:12px;color:var(--mail-muted)}
+.user-flag.is-live{color:var(--mail-accent);font-weight:600}
+.user-row[hidden]{display:none}
+.users-tools{display:flex;align-items:center;gap:12px;flex:none}
+.users-tools .mail-search{width:280px;height:40px}
+@media(max-width:900px){.users-tools .mail-search{width:200px}}
+@media(max-width:650px){.users-tools{flex-direction:column;align-items:stretch}.users-tools .mail-search{width:100%}}
+.account-panel-actions a.users-action{font-size:15px;text-decoration:none}
+.account-panel-actions a.users-action:hover{background:#7c352d;color:#fff}
+/* Manage: up / down read as one joined control; disable is a plain outline; delete is
+   a quiet text action set apart on the right, so it is never hit by accident */
+.users-manage{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.users-manage form{margin:0}
+.users-manage button{display:inline-flex;align-items:center;height:36px;line-height:1;border:0;border-radius:6px;padding:0 14px;font-size:14px;background:var(--mail-bg);box-shadow:inset 0 0 0 1px var(--mail-border);color:var(--mail-text);cursor:pointer}
+.users-manage button:hover:not(:disabled){background:var(--mail-hover);color:var(--mail-accent)}
+.users-manage button:disabled{color:var(--mail-muted);opacity:.6;cursor:default}
+.users-manage form:first-child button{border-radius:6px 0 0 6px}
+.users-manage form:nth-child(2){margin-left:-9px}
+.users-manage form:nth-child(2) button{border-radius:0 6px 6px 0}
+.users-manage .users-danger{margin-left:auto;padding:0 4px;box-shadow:none;background:none;color:var(--mail-accent)}
+.users-manage .users-danger:hover:not(:disabled){background:none;text-decoration:underline}
+.mail-page dialog .mail-dialog-actions button{cursor:pointer}

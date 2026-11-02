@@ -1,0 +1,44 @@
+/* Global settings (settings.html). Layout, rows and fields come from inbox.css and
+   account.css; this file covers what only this page has. */
+
+/* Show every city at once: the detail pane scrolls, a list inside it shouldn't */
+.settings-options{grid-template-columns:repeat(auto-fill,minmax(170px,1fr));margin-top:20px;max-height:none;overflow:visible}
+.settings-options label{font-size:14px;color:var(--mail-text)}
+.settings-options input,.xior-list input{accent-color:var(--mail-accent)}
+.settings-list-tools{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:14px;font-size:13px;color:var(--mail-muted)}
+.settings-list-tools button{margin-left:auto;font-size:13px}
+
+.settings-state{margin:20px 0 0;font-size:15px;line-height:1.6;color:var(--mail-text)}
+.settings-status{margin:20px 0 0;display:flex;flex-direction:column;gap:12px}
+.settings-status div{display:flex;flex-direction:column;gap:4px}
+.settings-status dt{font-size:13px;color:var(--mail-muted)}
+.settings-status dd{margin:0;font-size:14px;color:var(--mail-text);overflow-wrap:anywhere}
+.settings-status code,.settings-page .alert code{font-size:12px}
+
+/* Xior: cities fold open to their buildings; no boxes or fills, just the list */
+.xior-list{display:flex;flex-direction:column;margin-top:16px}
+.xior-city-row{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 8px;margin:0 -8px;border-radius:6px;font-size:14px;color:var(--mail-text);cursor:pointer;list-style:none}
+.xior-city-row::-webkit-details-marker{display:none}
+.xior-city-row:hover{background:var(--mail-hover)}
+.xior-city-row input{margin:0}
+.xior-city-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xior-tally{font-size:12px;color:var(--mail-muted);font-variant-numeric:tabular-nums}
+.xior-chev{font-size:11px;color:var(--mail-muted);transition:transform .18s}
+.xior-group[open] .xior-chev{transform:rotate(180deg)}
+.xior-bldgs{display:flex;flex-direction:column;padding:2px 0 8px 26px}
+.xior-bldg{display:flex;align-items:center;gap:8px;min-height:30px;font-size:13px;color:var(--mail-muted);cursor:pointer}
+.xior-bldg input{margin:0}
+
+/* Danger: a text action in the panel, a solid button only inside the confirmation */
+.account-panel-actions .settings-danger{color:#b3261e}
+.account-panel-actions .settings-danger:hover:not(:disabled){color:#b3261e;background:#b3261e0f}
+.mail-dialog-actions .settings-danger-solid{background:#b3261e;color:#fff}
+[data-theme=dark] .account-panel-actions .settings-danger{color:#f2928a}
+
+/* A time window on one line: [label] start – end */
+.settings-range{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--mail-text)}
+.settings-range+.settings-range{margin-top:10px}
+.settings-range>span:first-child:not([aria-hidden]){width:4em;flex:none;color:var(--mail-muted)}
+.account-field .settings-range input:not([type=checkbox]){width:6.5em;flex:none;text-align:center;font-variant-numeric:tabular-nums}
+.settings-range span[aria-hidden]{color:var(--mail-muted)}
+

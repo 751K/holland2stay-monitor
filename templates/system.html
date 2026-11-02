@@ -1,289 +1,94 @@
 {% extends "base.html" %}
-{% block title %}{{ _('system_info') }} · FlatRadar{% endblock %}
-{# 原来是 <meta http-equiv="refresh" content="30">。改成 JS 定时刷新，因为公告
-   表单在这一页上——meta refresh 会在管理员打字打到一半时把整页刷掉，输入全丢。
-   下面的 scheduleReload() 在表单有内容时不刷新。 #}
-{% block head %}{% endblock %}
+{% block title %}{{ _('system_info') }} · {{ brand_name }}{% endblock %}
+{# 每 30 秒整页刷新一次（页底脚本）。公告表单已经挪到 /announcements，
+   这一页没有输入框，不会把打到一半的内容刷掉。 #}
+{% block body_class %}mail-page admin-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('admin.css') }}">{% endblock %}
+{% block sidebar_navigation %}{% include '_admin_nav.html' %}{% endblock %}
+{% block sidebar_footer %}{% include '_admin_footer.html' %}{% endblock %}
 
 {% block content %}
+<section class="inbox-shell admin-shell">
+<header class="mail-toolbar">
+  <div>
+    <h1>{{ _('system_info') }}</h1>
+    <p class="mail-summary"><span>{{ _('auto_refresh') }}</span></p>
+  </div>
+</header>
 
-<div class="page-header">
-  <h1><i class="bi bi-info-circle mr-2"></i>{{ _('system_info') }}</h1>
-  <span class="meta">{{ _('auto_refresh') }}</span>
-</div>
-
-<div class="grid-7-5">
-
-  <!-- 进程状态 -->
-  <div class="card">
-    <div class="card-header">
-      <span>{{ _('process_status') }}</span>
-      <span class="text-xs text-tertiary">{{ _('monitor_control_hint') }}</span>
-    </div>
-    <table class="table-minimal">
-      <tr><td class="text-tertiary" style="width:140px;">{{ _('monitor_process') }}</td>
-        <td id="system-monitor-status-cell">
+<div class="admin-body">
+<div class="admin-grid">
+  <div>
+    <section class="admin-section">
+      <div class="admin-section-head"><h2>{{ _('process_status') }}</h2></div>
+      <dl class="admin-kv">
+        <div><dt>{{ _('monitor_process') }}</dt><dd id="system-monitor-status-cell">
           {% if info.monitor_running %}
             <span class="badge badge-success">{{ _('monitor_running') }} (PID {{ info.monitor_pid }})</span>
           {% else %}
             <span class="badge badge-danger">{{ _('monitor_paused_short') }}</span>
           {% endif %}
-        </td></tr>
-      <tr><td class="text-tertiary">{{ _('web_process') }}</td><td>PID {{ info.web_pid }}</td></tr>
-      <tr class="monitor-control-row">
-        <td class="text-tertiary"></td>
-        <td>
-          <div class="monitor-control-panel" data-monitor-running="{{ '1' if info.monitor_running else '0' }}">
-            <button type="button"
-                    id="monitor-start-btn"
-                    class="btn btn-primary btn-sm{% if info.monitor_running %} hidden{% endif %}"
-                    onclick="controlMonitor(this, 'start')">
-              <i class="bi bi-play-fill mr-1"></i>{{ _('monitor_start') }}
-            </button>
-            <button type="button"
-                    id="monitor-stop-btn"
-                    class="btn btn-outline btn-sm{% if not info.monitor_running %} hidden{% endif %}"
-                    onclick="controlMonitor(this, 'stop')">
-              <i class="bi bi-pause-fill mr-1"></i>{{ _('monitor_stop') }}
-            </button>
-            <button type="button"
-                    id="monitor-restart-btn"
-                    class="btn btn-outline btn-sm"
-                    onclick="controlMonitor(this, 'restart')">
-              <i class="bi bi-arrow-repeat mr-1"></i>{{ _('settings_restart') }}
-            </button>
-          </div>
-        </td>
-      </tr>
-      <tr id="system-monitor-paused-note-row" class="{% if info.monitor_running %}hidden{% endif %}">
-        <td class="text-tertiary"></td>
-        <td>
-          <div id="system-monitor-paused-note" class="monitor-paused-inline">
-            <i class="bi bi-exclamation-triangle"></i>
-            <span>{{ _('monitor_paused_hint') }}</span>
-          </div>
-        </td>
-      </tr>
-    </table>
-  </div>
-
-  <!-- 公告群发 -->
-  <div class="card">
-    <div class="card-header">
-      <span>{{ _('announce_title') }}</span>
-      <span class="text-xs text-tertiary">{{ _('announce_hint') }}</span>
-    </div>
-    <div style="padding:12px;display:flex;flex-direction:column;gap:8px;">
-      <input type="text" id="ann-title" class="ann-input"
-             placeholder="{{ _('announce_title_ph') }}" maxlength="120" autocomplete="off">
-      <textarea id="ann-body" class="ann-input" rows="3"
-                placeholder="{{ _('announce_body_ph') }}" maxlength="1000"></textarea>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <button type="button" class="btn btn-outline btn-sm" onclick="sendAnnouncement(true)">
-          {{ _('announce_preview') }}
-        </button>
-        <button type="button" class="btn btn-primary btn-sm" onclick="sendAnnouncement(false)">
-          {{ _('announce_send') }}
-        </button>
-        <span id="ann-status" class="text-xs text-tertiary"></span>
+        </dd></div>
+        <div><dt>{{ _('web_process') }}</dt><dd>PID {{ info.web_pid }}</dd></div>
+      </dl>
+      <div class="admin-row-actions monitor-control-panel" data-monitor-running="{{ '1' if info.monitor_running else '0' }}">
+        <button type="button" id="monitor-start-btn" class="admin-button is-primary{% if info.monitor_running %} hidden{% endif %}" onclick="controlMonitor(this, 'start')">{{ _('monitor_start') }}</button>
+        <button type="button" id="monitor-stop-btn" class="admin-button{% if not info.monitor_running %} hidden{% endif %}" onclick="controlMonitor(this, 'stop')">{{ _('monitor_stop') }}</button>
+        <button type="button" id="monitor-restart-btn" class="admin-button" onclick="controlMonitor(this, 'restart')">{{ _('settings_restart') }}</button>
       </div>
-    </div>
+    </section>
+
+    <section class="admin-section">
+      <div class="admin-section-head"><h2>{{ _('database_stats') }}</h2></div>
+      <dl class="admin-kv">
+        <div><dt>{{ _('total_listings') }}</dt><dd>{{ info.total_listings }}</dd></div>
+        <div><dt>{{ _('last_scrape') }}</dt><dd>{{ info.last_scrape | local_time }}</dd></div>
+        <div><dt>{{ _('last_count') }}</dt><dd>{{ info.last_count }}</dd></div>
+        <div><dt>{{ _('status_changes') }}</dt><dd>{{ info.total_changes }}</dd></div>
+        <div><dt>{{ _('web_notifications') }}</dt><dd>{{ info.total_notifications }} · {{ info.unread_notifications }} {{ _('unread') }}</dd></div>
+      </dl>
+    </section>
+
   </div>
 
-  <!-- 公告投递记录 -->
-  <div class="card">
-    <div class="card-header">
-      <span>{{ _('announce_history') }}</span>
-      <span id="ann-retry-status" class="text-xs text-tertiary"></span>
-    </div>
-    {% if info.announcements %}
-    <table class="table-minimal">
-      <thead>
-        <tr>
-          <th>{{ _('announce_col_time') }}</th>
-          <th>{{ _('announce_col_announcement') }}</th>
-          <th>{{ _('announce_col_reach') }}</th>
-          <th>{{ _('announce_col_external') }}</th>
-          <th>{{ _('announce_col_push') }}</th>
-          <th>{{ _('announce_col_failed') }}</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for a in info.announcements %}
-        <tr>
-          <td class="text-tertiary text-sm">{{ a.created_at | local_time }}</td>
-          <td>{{ a.title }}</td>
-          <td>{{ a.recipients }} / {{ a.skipped_disabled }}</td>
-          <td>{{ a.external_ok }}</td>
-          <td>{{ a.push_devices }}</td>
-          <td>
-            {% if a.failed_users or a.pending_users %}
-              <span class="badge badge-danger">{{ a.failed_users + a.pending_users }}</span>
-            {% else %}0{% endif %}
-          </td>
-          <td>
-            {% if a.failed_users or a.pending_users %}
-              <button type="button" class="btn btn-outline btn-sm"
-                      onclick="retryAnnouncement({{ a.id }})">
-                {{ _('announce_retry') }}
-              </button>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div style="padding:12px;" class="text-xs text-tertiary">
-      {{ _('announce_history_empty') }}
-    </div>
-    {% endif %}
+  <div>
+    <section class="admin-section">
+      <div class="admin-section-head"><h2>{{ _('configuration') }}</h2></div>
+      <dl class="admin-kv">
+        <div><dt>{{ _('cities') }}</dt><dd>{{ info.cities | join(', ') }}</dd></div>
+        <div><dt>{{ _('check_interval') }}</dt><dd>{{ info.check_interval }}s</dd></div>
+        <div><dt>{{ _('peak_interval') }}</dt><dd>{{ info.peak_interval }}s · {{ info.peak_start }}–{{ info.peak_end }}</dd></div>
+        <div><dt>{{ _('min_interval') }}</dt><dd>{{ info.min_interval }}s</dd></div>
+        <div><dt>{{ _('log_level') }}</dt><dd>{{ info.log_level }}</dd></div>
+      </dl>
+    </section>
+
+    <section class="admin-section">
+      <div class="admin-section-head"><h2>{{ _('users') }}</h2></div>
+      <dl class="admin-kv">
+        <div><dt>{{ _('total_users') }}</dt><dd>{{ info.users_total }}</dd></div>
+        <div><dt>{{ _('active_users') }}</dt><dd>{{ info.users_active }}</dd></div>
+      </dl>
+    </section>
+
+    <section class="admin-section">
+      <div class="admin-section-head"><h2>{{ _('environment') }}</h2></div>
+      <dl class="admin-kv">
+        <div><dt>Python</dt><dd>{{ info.python.split('\\n')[0] if info.python else '—' }}</dd></div>
+        <div><dt>{{ _('platform') }}</dt><dd>{{ info.platform }}</dd></div>
+        <div><dt>BASE_DIR</dt><dd class="admin-mono">{{ info.base_dir }}</dd></div>
+        <div><dt>DATA_DIR</dt><dd class="admin-mono">{{ info.data_dir }}</dd></div>
+        <div><dt>Git</dt><dd>{{ info.git_hash }} · {{ info.git_date }}</dd></div>
+      </dl>
+    </section>
   </div>
 
-  <!-- 数据库 -->
-  <div class="card">
-    <div class="card-header">{{ _('database_stats') }}</div>
-    <table class="table-minimal">
-      <tr><td class="text-tertiary">{{ _('total_listings') }}</td><td>{{ info.total_listings }}</td></tr>
-      <tr><td class="text-tertiary">{{ _('last_scrape') }}</td><td>{{ info.last_scrape | local_time }}</td></tr>
-      <tr><td class="text-tertiary">{{ _('last_count') }}</td><td>{{ info.last_count }}</td></tr>
-      <tr><td class="text-tertiary">{{ _('status_changes') }}</td><td>{{ info.total_changes }}</td></tr>
-      <tr><td class="text-tertiary">{{ _('web_notifications') }}</td><td>{{ info.total_notifications }} ({{ info.unread_notifications }} {{ _('unread') }})</td></tr>
-    </table>
-  </div>
 </div>
-
-<div class="grid-7-5" style="margin-top:20px;">
-
-  <!-- 配置 -->
-  <div class="card">
-    <div class="card-header">{{ _('configuration') }}</div>
-    <div style="overflow-x:auto;">
-    <table class="table-minimal">
-      <tr><td class="text-tertiary" style="width:140px;">{{ _('cities') }}</td><td class="cell-break">{{ info.cities | join(', ') }}</td></tr>
-      <tr><td class="text-tertiary">{{ _('check_interval') }}</td><td>{{ info.check_interval }}s</td></tr>
-      <tr><td class="text-tertiary">{{ _('peak_interval') }}</td><td>{{ info.peak_interval }}s ({{ info.peak_start }}–{{ info.peak_end }})</td></tr>
-      <tr><td class="text-tertiary">{{ _('min_interval') }}</td><td>{{ info.min_interval }}s</td></tr>
-      <tr><td class="text-tertiary">{{ _('log_level') }}</td><td>{{ info.log_level }}</td></tr>
-    </table>
-    </div>
-  </div>
-
-  <!-- 用户 -->
-  <div class="card">
-    <div class="card-header">{{ _('users') }}</div>
-    <table class="table-minimal">
-      <tr><td class="text-tertiary" style="width:140px;">{{ _('total_users') }}</td><td>{{ info.users_total }}</td></tr>
-      <tr><td class="text-tertiary">{{ _('active_users') }}</td><td>{{ info.users_active }}</td></tr>
-    </table>
-  </div>
 </div>
-
-<div class="grid-7-5" style="margin-top:20px;">
-
-  <!-- 环境 -->
-  <div class="card">
-    <div class="card-header">{{ _('environment') }}</div>
-    <div style="overflow-x:auto;">
-    <table class="table-minimal">
-      <tr><td class="text-tertiary" style="width:140px;">Python</td><td>{{ info.python.split('\\n')[0] if info.python else '—' }}</td></tr>
-      <tr><td class="text-tertiary">{{ _('platform') }}</td><td>{{ info.platform }}</td></tr>
-      <tr><td class="text-tertiary">BASE_DIR</td><td class="cell-break text-mono text-sm">{{ info.base_dir }}</td></tr>
-      <tr><td class="text-tertiary">DATA_DIR</td><td class="cell-break text-mono text-sm">{{ info.data_dir }}</td></tr>
-      <tr><td class="text-tertiary">Git</td><td>{{ info.git_hash }} ({{ info.git_date }})</td></tr>
-    </table>
-    </div>
-  </div>
-</div>
+</section>
 
 <script>
 // ── 定时刷新（替代原来的 meta refresh）──
-// 公告表单在这一页上，打字打到一半被整页刷掉会丢输入，所以有内容时不刷新。
-function annHasDraft() {
-  return !!(document.getElementById('ann-title').value.trim()
-         || document.getElementById('ann-body').value.trim());
-}
-function scheduleReload() {
-  setTimeout(function () {
-    if (annHasDraft()) { scheduleReload(); return; }   // 有草稿就再等一轮
-    location.reload();
-  }, 30000);
-}
-scheduleReload();
-
-// ── 公告群发 ──
-async function sendAnnouncement(dryRun) {
-  var title = document.getElementById('ann-title').value.trim();
-  var body  = document.getElementById('ann-body').value.trim();
-  var el    = document.getElementById('ann-status');
-  if (!title) { el.textContent = '{{ _("announce_need_title") }}'; return; }
-
-  // 真发之前二次确认——群发不可撤回
-  if (!dryRun && !confirm('{{ _("announce_confirm") }}\n\n' + title + '\n' + body)) return;
-
-  el.textContent = '…';
-  try {
-    var csrf = document.querySelector('meta[name="csrf-token"]').content;
-    var resp = await fetch('/api/announcement', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
-      body: JSON.stringify({title: title, body: body, dry_run: !!dryRun}),
-    });
-    var d = await resp.json();
-    if (!d.ok) { el.textContent = 'Error: ' + (d.error || resp.status); return; }
-    if (d.dry_run) {
-      el.textContent = '{{ _("announce_preview_result") }} ' + d.recipients
-        + ' / {{ _("announce_skipped") }} ' + d.skipped_disabled;
-    } else {
-      el.textContent = '{{ _("announce_sent") }} ' + d.channel_ok + '/' + d.recipients
-        + ' · ' + d.push_devices + ' {{ _("announce_devices") }}'
-        + (d.errors && d.errors.length ? ' · ' + d.errors.length + ' err' : '');
-      document.getElementById('ann-title').value = '';
-      document.getElementById('ann-body').value = '';
-    }
-  } catch (e) {
-    el.textContent = 'Error: ' + e;
-  }
-}
-
-// ── 补发失败的投递 ──
-async function retryAnnouncement(id) {
-  if (!confirm('{{ _("announce_retry_confirm") }}')) return;
-  var el = document.getElementById('ann-retry-status');
-  el.textContent = '…';
-  try {
-    var csrf = document.querySelector('meta[name="csrf-token"]').content;
-    var resp = await fetch('/api/announcements/' + id + '/retry', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
-      body: JSON.stringify({}),
-    });
-    var d = await resp.json();
-    if (!d.ok) { el.textContent = 'Error: ' + (d.error || resp.status); return; }
-    el.textContent = '{{ _("announce_retry_done") }} ' + d.channel_ok + '/'
-      + d.recipients + ' · ' + d.push_devices + ' {{ _("announce_devices") }}'
-      + (d.errors && d.errors.length ? ' · ' + d.errors.length + ' err' : '');
-    setTimeout(function () { location.reload(); }, 1500);
-  } catch (e) {
-    el.textContent = 'Error: ' + e;
-  }
-}
+setTimeout(function () { location.reload(); }, 30000);
 </script>
-
-<style>
-.ann-input {
-  width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
-  color: var(--text);
-  font-family: inherit;
-  resize: vertical;
-}
-.ann-input::placeholder { color: var(--text3); }
-</style>
-
 {% endblock %}

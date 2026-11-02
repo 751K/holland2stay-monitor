@@ -1,4 +1,4 @@
-"""GDPR 用户数据导出：一次取回通知历史、活跃设备与活跃会话。
+"""GDPR 用户数据导出：取回通知历史、房源已读记录、活跃设备与活跃会话。
 
 导出语义与 API 的分页查询刻意不同，改动时不要直接复用筛选逻辑：
 
@@ -20,7 +20,7 @@ class ExportOps:
     """依赖 self._conn。"""
 
     def export_user_data(self, user_id: str) -> dict:
-        """返回 ``{notification_history, active_devices, active_tokens}``。"""
+        """返回通知历史、房源已读记录、活跃设备与活跃会话。"""
         notif_rows = self._conn.execute(
             "SELECT id, created_at, type, title, body, url, listing_id, read "
             "FROM web_notifications WHERE user_id = ? "
@@ -45,7 +45,12 @@ class ExportOps:
             (user_id,),
         ).fetchall()
 
+        read_rows = self._conn.execute(
+            "SELECT listing_id, read_at FROM listing_reads WHERE user_id = ? ORDER BY read_at, listing_id",
+            (user_id,),
+        ).fetchall()
         return {
+            "listing_reads": [dict(r) for r in read_rows],
             "notification_history": [dict(r) for r in notif_rows],
             "active_devices": [dict(r) for r in device_rows],
             "active_tokens": [dict(r) for r in token_rows],

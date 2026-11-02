@@ -92,20 +92,25 @@ def chart_data(key: str, *, days: int = DEFAULT_STATS_DAYS) -> list[dict]:
         return getter(st, days)
 
 
-def charts_payload(*, days: int = DEFAULT_STATS_DAYS) -> dict:
-    """Return the Web `/api/charts` payload shape."""
+def charts_payload(*, days: int = DEFAULT_STATS_DAYS, ids=None) -> dict:
+    """Return the Web `/api/charts` payload shape.
+
+    ``ids`` limits every chart and counter to those listings (the Web stats page
+    passes the inbox scope); ``None`` keeps the site-wide numbers.
+    """
     days = normalize_days(days)
     getters = _chart_getters()
-    with storage_ctx() as st:
-        payload = {
-            "summary": {
-                "days": days,
+    with storage_ctx() as st, st.chart_scope(ids):
+        if ids is None:
+            summary = {
                 "total": st.count_all(),
                 "new_24h": st.count_new_since(hours=24),
                 "new_range": st.count_new_since(hours=24 * days),
                 "changes_range": st.count_changes_since(hours=24 * days),
-            },
-        }
+            }
+        else:
+            summary = st.chart_scope_summary(days)
+        payload = {"summary": {"days": days, **summary}}
         for key in CHART_KEYS:
             payload[key] = getters[key](st, days)
     return payload

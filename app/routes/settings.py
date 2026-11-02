@@ -204,7 +204,7 @@ def settings() -> Any:
                 tr("settings_invalid_value", lang) + " " + "；".join(str(p) for p in fatal),
                 "error",
             )
-            return redirect(url_for("settings"))
+            return redirect(_settings_url())
         for p in problems:
             # 非致命的（ID 不在已知表里）照常保存——官方注册表会更新，写死拒绝
             # 会让一个新上线的城市变成保存失败。但要说出来。
@@ -241,7 +241,7 @@ def settings() -> Any:
             )
 
         flash(tr("settings_config_saved", lang), "success")
-        return redirect(url_for("settings"))
+        return redirect(_settings_url())
 
     # 从数据库读，不从 os.environ 读：gunicorn 多个 worker 各有自己的 os.environ，
     # 只有写入的那个 worker 注水过，其余的会显示旧值。数据库是唯一都看得到的。
@@ -322,8 +322,7 @@ def settings() -> Any:
     for city, buildings in xior_by_city.items():
         xior_city_all_checked[city] = any(b["key"] in selected_xior_keys for b in buildings)
 
-    return render_template(
-        "settings.html",
+    ctx = dict(
         env=env,
         env_overridden=env_overridden,
         config_status=config_status,
@@ -345,6 +344,19 @@ def settings() -> Any:
         selected_plaza_keys=selected_plaza_keys,
         selected_xior_keys=selected_xior_keys,
     )
+    # 分组 / 条目 / 详情工作区：中间列出各项已保存的值，右侧编辑选中的一项
+    from app.services.settings_view import resolve_settings_selection, settings_sections
+
+    sections = settings_sections(ctx, zh=lang == "zh")
+    section, item = resolve_settings_selection(
+        sections, request.args.get("section"), request.args.get("item"))
+    return render_template("settings.html", **ctx, sections=sections, section=section, item=item)
+
+
+def _settings_url():
+    """保存后回到刚才编辑的那一项（表单里带着 section / item）。"""
+    return url_for("settings", section=request.form.get("section") or None,
+                   item=request.form.get("item") or None)
 
 
 def register(app: Flask) -> None:

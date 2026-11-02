@@ -1,0 +1,7 @@
+{% macro filter_action(text=none, class_name='') -%}
+  {%- if inbox_user -%}
+  <a href="{{ url_for('user_edit',user_id=inbox_user.id,section='filters') }}" class="{{ class_name }}">{% if caller is defined %}{{ caller() }}{% else %}{{ text or ('调整筛选' if lang == 'zh' else 'Edit filters') }}{% endif %}</a>
+  {%- else -%}
+  <button type="button" class="{{ class_name }}" data-open-filter>{% if caller is defined %}{{ caller() }}{% else %}{{ text or ('调整筛选' if lang == 'zh' else 'Edit filters') }}{% endif %}</button>
+  {%- endif -%}
+{%- endmacro %}

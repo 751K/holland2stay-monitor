@@ -154,7 +154,7 @@ def test_dashboard_shows_paused_banner_to_logged_in_users(admin_client, monkeypa
 
     monkeypatch.setattr(dashboard_route, "monitor_pid", lambda: None)
 
-    r = admin_client.get("/")
+    r = admin_client.get("/dashboard")
     assert r.status_code == 200
     html = r.data.decode()
     assert 'id="monitor-paused-banner"' in html
@@ -174,7 +174,7 @@ def test_dashboard_renders_upstream_maintenance_banner(admin_client, isolated_da
     if hasattr(web._inject_upstream_maintenance, "_cache"):
         delattr(web._inject_upstream_maintenance, "_cache")
 
-    r = admin_client.get("/")
+    r = admin_client.get("/dashboard")
     assert r.status_code == 200
     html = r.data.decode()
     assert 'id="upstream-maintenance-banner"' in html
@@ -193,3 +193,9 @@ def test_system_info_has_admin_monitor_controls(admin_client, monkeypatch):
     assert 'id="monitor-stop-btn"' in html
     assert 'id="monitor-restart-btn"' in html
     assert "系统暂停" in html or "System paused" in html
+
+
+def test_dashboard_city_filter_stays_on_dashboard(admin_client):
+    r = admin_client.get("/dashboard")
+    assert r.status_code == 200
+    assert '<form method="get" action="/dashboard"' in r.data.decode()

@@ -356,9 +356,6 @@ def build_user_from_form(
     # 2. 填了新密码                                    → bcrypt 重新哈希
     # 3. 勾了 "清除密码" checkbox                       → hash="" 强制下次登录失败
     app_login_enabled = form.get("app_login_enabled") == "true"
-    # H2S 凭据 fallback —— 默认关。仅在管理员/用户显式勾选时打开；fail-closed
-    # 防止 H2S 站点密码泄露被借用来登录本地账号（详见 UserConfig 注释）。
-    allow_h2s_login = form.get("allow_h2s_login") == "true"
     new_app_pw = form.get("app_password", "")
     clear_app_pw = form.get("app_password_clear") == "true"
 
@@ -427,7 +424,6 @@ def build_user_from_form(
         auto_book=ab,
         app_password_hash=app_password_hash,
         app_login_enabled=app_login_enabled,
-        allow_h2s_login=allow_h2s_login,
     )
     return new_user
 
@@ -451,7 +447,6 @@ def build_user_from_form_self(
     - ``id`` / ``name``                 — 名称不可改
     - ``auto_book``                     — 自动预订仅 admin 可设
     - ``app_login_enabled``             — 客户端登录开关仅 admin 可改（防自锁/自开）
-    - ``allow_h2s_login``               — H2S 凭据 fallback 仅 admin 可设
 
     即使 user 用 DevTools 在 POST 里塞 ``AUTO_BOOK_*`` / ``name`` / ``app_login_enabled``
     等字段也会被丢弃。
@@ -557,7 +552,6 @@ def build_user_from_form_self(
         name=existing.name,
         auto_book=existing.auto_book,
         app_login_enabled=existing.app_login_enabled,
-        allow_h2s_login=existing.allow_h2s_login,
         # 可改：账户启用（前端 confirm 兜底）
         enabled=form.get("enabled") == "true",
         # 可改：通知段

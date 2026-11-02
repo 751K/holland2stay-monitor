@@ -207,7 +207,7 @@ class TestUpdateSetCoversEveryColumn:
                 __import__("mstorage._user_configs", fromlist=["x"]).USER_CONFIG_COLUMNS}
         base.update(id="u1", name="U", enabled=1, notifications_enabled=1,
                     email_smtp_port=587, email_verified=0, app_login_enabled=0,
-                    allow_h2s_login=0, sort_order=0, language="zh")
+                    sort_order=0, language="zh")
         temp_db.replace_user_config_rows(list([base]))
         assert temp_db.list_user_config_rows()[0]["language"] == "zh"
 

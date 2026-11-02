@@ -340,6 +340,7 @@ def _export():
         "filter": asdict(user.listing_filter),
         "notification_history": exported["notification_history"],
         "notification_count": len(exported["notification_history"]),
+        "listing_reads": exported["listing_reads"],
         "active_devices": exported["active_devices"],
         "active_tokens": exported["active_tokens"],
         "exported_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),

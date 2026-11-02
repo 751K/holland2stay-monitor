@@ -1,0 +1,3 @@
+<input type="hidden" name="screen" value="{{ 'calendar' if calendar_mode else ('map' if map_mode else 'index') }}">
+{% if calendar_mode %}<input type="hidden" name="month" value="{{ calendar_month }}">{% if undated %}<input type="hidden" name="undated" value="1">{% else %}<input type="hidden" name="date" value="{{ selected_date }}">{% endif %}{% endif %}
+{% if map_mode %}{% if map_history %}<input type="hidden" name="history" value="1">{% endif %}<input type="hidden" name="positions" value="{{ map_positions }}">{% if map_location %}<input type="hidden" name="location" value="{{ map_location }}">{% endif %}{% endif %}

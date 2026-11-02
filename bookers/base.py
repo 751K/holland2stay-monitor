@@ -19,7 +19,7 @@ P1 引入：把 H2S 的电商式 checkout 从 ``booker.try_book`` 单源耦合�
 ----------
 - 复用 ``booker.BookingResult`` 作为统一返回类型——这样 ``notifier.py`` /
   ``monitor.py`` 那些读 ``result.pay_url`` / ``result.phase`` 的代码完全不动
-- H2S 现有所有行为（dry_run / cancel_enabled / prewarmed session 复用 / 各种
+- H2S 现有所有行为（dry_run / prewarmed session 复用 / 各种
   phase 分类）通过 ``HollandStayBooker`` thin-wrapper 原样转发
 - 不支持下单的 source 走 ``phase="unsupported"`` 分支，``book_with_fallback``
   会过滤掉这些候选，不会产生误报"失败"通知

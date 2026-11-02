@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{#
+  普通用户的账号设置。与房源收件箱同构：侧栏是设置分组，中间是该分组的条目及
+  已保存状态，右侧编辑选中的条目。选中状态在 ?section=&item= 里，脚本只做原地切换。
+
+  所有编辑器都在同一个 <form> 里：build_user_from_form_self 按整份 POST 重建配置，
+  只提交一个面板会清掉其余字段。未选中的面板用 hidden 隐藏，仍随表单提交。
+#}
+{% import '_settings_macros.html' as ui with context %}
+{% set current = sections | selectattr('key', 'equalto', section) | first %}
+{% block title %}{{ _('my_account') }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page account-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('account.css') }}">{% endblock %}
+
+{% block sidebar_navigation %}
+<nav class="sidebar-nav mail-nav" aria-label="{{ '账号设置' if lang == 'zh' else 'Account settings' }}">
+  <a href="{{ url_for('index') }}"><i class="bi bi-inbox" aria-hidden="true"></i><span>{{ '我的房源' if lang == 'zh' else 'My listings' }}</span></a>
+  <div class="mail-label">{{ _('my_account') }}</div>
+  {{ ui.section_links(sections) }}
+</nav>
+{% endblock %}
+{% block sidebar_footer %}
+<nav class="sidebar-footer mail-footer" aria-label="{{ '设置与帮助' if lang == 'zh' else 'Settings & help' }}">
+  <a href="{{ url_for('user_edit', user_id=user.id) }}" aria-current="page">{{ _('my_account') }}</a>
+  <a href="{{ url_for('support_page') }}">{{ '帮助与支持' if lang == 'zh' else 'Help & support' }}</a>
+  {% include '_theme_toggle.html' %}
+  {% include '_logout.html' %}
+</nav>
+{% endblock %}
+
+{% block content %}
+{% set u = user %}
+{% set lf = u.listing_filter %}
+<section class="inbox-shell account-shell" data-account
+         data-user-id="{{ u.id }}">
+<header class="mail-toolbar">
+  <div>
+    <h1 data-account-title>{{ current.title }}</h1>
+    <p class="mail-summary" data-account-summary>{{ current.summary }}</p>
+  </div>
+</header>
+{{ ui.section_heads(sections) }}
+
+{% if booking_guard_error %}<div class="alert alert-warning">{{ _('booking_review_error') }}</div>{% endif %}
+{% if booking_attempt and booking_attempt.user_id == u.id %}
+<div class="alert alert-warning">
+  <strong>{{ _('booking_review_title') }}</strong>
+  <p>{{ _('booking_review_listing') }}: {{ booking_attempt.listing }}. {{ _('booking_review_check') }}</p>
+  {% if booking_attempt.cart %}<p>{{ _('booking_review_cart') }}: {{ booking_attempt.cart }}</p>{% endif %}
+  {% if booking_attempt.order_number %}<p>{{ _('booking_review_order') }}: {{ booking_attempt.order_number }}</p>{% endif %}
+  {% if booking_attempt.pay_url %}<p>{{ _('booking_review_pay') }}</p>{% endif %}
+  <p>{{ _('booking_review_running') }}</p>
+  <form method="post" action="{{ url_for('user_acknowledge_booking', user_id=u.id) }}" data-confirm="{{ _('booking_review_confirm') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="attempt" value="{{ booking_attempt.attempt }}">
+    <button class="btn btn-warning" type="submit">{{ _('booking_review_action') }}</button>
+  </form>
+</div>
+{% elif booking_attempt %}
+<div class="alert alert-warning"><strong>{{ _('booking_review_title') }}</strong><p>{{ _('booking_review_shared') }}</p></div>
+{% endif %}
+{% for attempt in plaza_attempts %}
+<div class="alert alert-warning">
+  <strong>{{ _('plaza_review_title') }}</strong>
+  {% if attempt.user_id == u.id %}
+  <p>{{ _('booking_review_listing') }}: {{ attempt.listing }}. {{ _('plaza_review_check') }}</p>
+  <p>{{ _('plaza_review_running') }}</p>
+  <form method="post" action="{{ url_for('user_acknowledge_plaza', user_id=u.id) }}" data-confirm="{{ _('plaza_review_confirm') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="attempt" value="{{ attempt.attempt }}">
+    <button class="btn btn-warning" type="submit">{{ _('plaza_review_action') }}</button>
+  </form>
+  {% else %}<p>{{ _('plaza_review_shared') }}</p>{% endif %}
+</div>
+{% endfor %}
+
+{# 退出登录不能嵌套在设置表单里；按钮通过 form= 指向这里 #}
+{% if auth_enabled %}<form id="logout-form" method="POST" action="{{ url_for('logout') }}" hidden><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"></form>{% endif %}
+
+{# enctype 保持与原表单一致；本页没有文件字段，但 user_edit 两种角色共用解析流程 #}
+<form method="post" action="{{ action }}" enctype="multipart/form-data" class="mail-workspace account-workspace" id="account-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="section" value="{{ section }}" data-selected-section>
+  <input type="hidden" name="item" value="{{ item }}" data-selected-item>
+  <input type="hidden" name="EMAIL_MODE" value="shared">
+  <input type="hidden" id="channels_hidden" name="NOTIFICATION_CHANNELS" value="{{ u.notification_channels | join(',') }}">
+
+  <section class="mail-list" aria-label="{{ '设置条目' if lang == 'zh' else 'Settings' }}">
+    <div class="mail-groups">
+      {% include '_onboarding.html' %}
+      {{ ui.row_lists(sections) }}
+    </div>
+  </section>
+
+  <section class="mail-detail account-detail{% if request.args.get('item') %} is-open{% endif %}" aria-label="{{ '设置详情' if lang == 'zh' else 'Setting details' }}" aria-live="polite">
+  {% for s in sections %}{% for row in s.rows %}
+  {% call ui.panel(s, row) %}
+
+  {# ── 房源条件 ───────────────────────────────────── #}
+  {% if s.key == 'filters' %}
+    {{ ui.filter_fields(row.key, lf) }}
+    {{ ui.save_actions() }}
+
+  {# ── 通知 ───────────────────────────────────────── #}
+  {% elif s.key == 'notifications' and row.key == 'delivery' %}
+    {# 未勾选时浏览器不提交复选框；解析器把缺失当作开启，所以 off_value 紧跟一个 false 兜底 #}
+    <div class="account-fit">
+    {{ ui.switch('NOTIFICATIONS_ENABLED', '接收房源提醒' if lang == 'zh' else 'Listing alerts', u.notifications_enabled, off_value='false') }}
+    {{ ui.save_actions(test=true) }}
+    </div>
+  {% elif s.key == 'notifications' and row.key == 'apppush' %}
+    <p class="account-help">{{ _('channel_app_push_help') }}</p>
+    <div class="account-links">
+      <a href="https://apps.apple.com/us/app/flarradar/id6769857080" target="_blank" rel="noopener noreferrer"><i class="bi bi-apple" aria-hidden="true"></i> iOS / Mac App ↗</a>
+      <a href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk" target="_blank" rel="noopener noreferrer"><i class="bi bi-android2" aria-hidden="true"></i> Android App ↗</a>
+    </div>
+    <p class="account-help">{{ '推送由 App 登录时登记的设备决定，不需要在这里开启。' if lang == 'zh' else 'Push follows the devices registered when you sign in to the app; nothing to turn on here.' }}</p>
+  {% elif s.key == 'notifications' and row.key == 'telegram' %}
+    {{ ui.channel_toggle('telegram', '通过 Telegram 接收' if lang == 'zh' else 'Receive via Telegram') }}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_bot_token') }}</span><input type="text" name="TELEGRAM_BOT_TOKEN" value="{{ u.telegram_token }}" placeholder="123456:ABC-DEF..." autocomplete="off"></label>
+      <label class="account-field"><span>{{ _('user_form_chat_id') }}</span><input type="text" name="TELEGRAM_CHAT_ID" value="{{ u.telegram_chat_id }}" placeholder="123456789" autocomplete="off"></label>
+    </div>
+    <ol class="account-steps">
+      {% if lang == 'zh' %}
+      <li>向 <code>@BotFather</code> 发送 <code>/newbot</code>，记下 Token。</li>
+      <li>给你的机器人发任意一条消息。</li>
+      <li>访问 <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>，把 <code>"chat": {"id": …}</code> 里的数字填入 Chat ID。</li>
+      {% else %}
+      <li>Send <code>/newbot</code> to <code>@BotFather</code> and save the token.</li>
+      <li>Send any message to your bot.</li>
+      <li>Open <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> and paste the number in <code>"chat": {"id": …}</code> as Chat ID.</li>
+      {% endif %}
+    </ol>
+    {{ ui.save_actions(test=true) }}
+  {% elif s.key == 'notifications' and row.key == 'email' %}
+    {{ ui.channel_toggle('email', '通过邮件接收' if lang == 'zh' else 'Receive by email') }}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_to') }}</span>
+        <input type="email" name="EMAIL_TO" id="email_to_input" value="{{ u.email_to }}" placeholder="alice@example.com" autocomplete="email" aria-describedby="email_verify_area">
+      </label>
+    </div>
+    <div id="email_verify_area" class="account-verify" data-saved-email="{{ u.email_to }}" role="status">
+      {% if u.email_to %}
+        {% if u.email_verified %}{{ _('user_form_email_verified') }}
+        {% else %}{{ _('user_form_email_unverified') }} · <button type="button" class="account-text-button" data-send-verification>{{ _('user_form_email_resend_verify') }}</button>{% endif %}
+      {% endif %}
+    </div>
+    <p class="account-help">{{ _('user_form_email_shared_hint') }}</p>
+    {{ ui.save_actions(test=true) }}
+  {% elif s.key == 'notifications' and row.key == 'whatsapp' %}
+    {{ ui.channel_toggle('whatsapp', '通过 WhatsApp 接收' if lang == 'zh' else 'Receive via WhatsApp') }}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_account_sid') }}</span><input type="text" name="TWILIO_ACCOUNT_SID" value="{{ u.twilio_sid }}" autocomplete="off"></label>
+      <label class="account-field"><span>{{ _('user_form_auth_token') }}</span><input type="password" name="TWILIO_AUTH_TOKEN" placeholder="{{ _('user_form_token_keep') if u.twilio_token else '' }}" autocomplete="new-password"></label>
+      <label class="account-field"><span>{{ _('user_form_from') }}</span><input type="text" name="TWILIO_FROM" value="{{ u.twilio_from or 'whatsapp:+14155238886' }}"></label>
+      <label class="account-field"><span>{{ _('user_form_to') }}</span><input type="text" name="TWILIO_TO" value="{{ u.twilio_to }}" placeholder="whatsapp:+31612345678"></label>
+    </div>
+    <p class="account-help">{{ '需要你自己的 Twilio 账号，按 Twilio 计费。' if lang == 'zh' else 'Requires your own Twilio account; Twilio charges apply.' }}</p>
+    {{ ui.save_actions(test=true) }}
+  {% elif s.key == 'notifications' and row.key == 'imessage' %}
+    {{ ui.channel_toggle('imessage', '通过 iMessage 接收' if lang == 'zh' else 'Receive via iMessage', disabled=not is_macos) }}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_recipient') }}</span><input type="text" name="IMESSAGE_RECIPIENT" value="{{ u.imessage_recipient }}" placeholder="+31612345678"{% if not is_macos %} readonly{% endif %}></label>
+    </div>
+    <p class="account-help">{{ 'iMessage 仅在本地 macOS 部署时可用；服务器、Linux 或 Docker 部署无法使用。' if lang == 'zh' else 'iMessage only works when FlatRadar runs locally on macOS. It does not work on servers, Linux, or Docker deployments.' }}</p>
+    {% if is_macos %}{{ ui.save_actions(test=true) }}{% endif %}
+
+  {# ── 账号与登录 ─────────────────────────────────── #}
+  {% elif s.key == 'account' and row.key == 'status' %}
+    {# 只读。账号启用和客户端登录由管理员管理，用户不能在这里自己停用账号。
+       自助保存会读 enabled，缺失就当作停用，所以固定提交 true。 #}
+    <input type="hidden" name="enabled" value="true">
+    <dl class="account-facts">
+      <div><dt>{{ '账号' if lang == 'zh' else 'Account' }}</dt><dd>{{ _('users_enabled') if u.enabled else _('users_disabled') }}</dd></div>
+      <div><dt>{{ 'App 与网页登录' if lang == 'zh' else 'App & web sign-in' }}</dt><dd>{{ _('users_enabled') if u.app_login_enabled else _('users_disabled') }}</dd></div>
+    </dl>
+  {% elif s.key == 'account' and row.key == 'password' %}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ '新密码' if lang == 'zh' else 'New password' }}</span>
+        <input type="password" name="app_password" autocomplete="new-password" placeholder="{{ _('user_form_pw_keep') if u.app_password_hash else _('user_form_app_password_set') }}">
+      </label>
+    </div>
+    {% if u.app_password_hash %}
+    <label class="account-check"><input type="checkbox" name="app_password_clear" value="true"> {{ _('user_form_app_password_clear') }}</label>
+    {% endif %}
+    <p class="account-help">{{ _('user_form_app_login_hint') }} {{ '修改或清除密码后，已登录的 App 需要重新登录。' if lang == 'zh' else 'Changing or clearing the password signs out the app.' }}</p>
+    {{ ui.save_actions() }}
+
+  {# ── 偏好 ───────────────────────────────────────── #}
+  {% elif s.key == 'preferences' and row.key == 'language' %}
+    <label class="account-field"><span>{{ _('user_form_language') }}</span>
+      <select name="LANGUAGE">
+        <option value="en"{% if (u.language or 'en') != 'zh' %} selected{% endif %}>English</option>
+        <option value="zh"{% if (u.language or 'en') == 'zh' %} selected{% endif %}>中文</option>
+      </select>
+    </label>
+    <p class="account-help">{{ '保存后界面语言随之切换，房源通知和验证邮件也使用这个语言。' if lang == 'zh' else 'After saving, the interface switches language; alerts and verification email use it too.' }}</p>
+    {{ ui.save_actions() }}
+  {% elif s.key == 'preferences' and row.key == 'appearance' %}
+    {# 外观只存在本浏览器（localStorage h2s-theme），不随表单提交，也不算未保存的修改 #}
+    <fieldset class="account-field">
+      <legend class="sr-only">{{ row.title }}</legend>
+      <div class="account-segment" data-theme-choice>
+        <label><input type="radio" name="theme_choice" value="auto" form="theme-choice-local" data-local-pref> {{ '跟随系统' if lang == 'zh' else 'System' }}</label>
+        <label><input type="radio" name="theme_choice" value="light" form="theme-choice-local" data-local-pref> {{ '浅色' if lang == 'zh' else 'Light' }}</label>
+        <label><input type="radio" name="theme_choice" value="dark" form="theme-choice-local" data-local-pref> {{ '深色' if lang == 'zh' else 'Dark' }}</label>
+      </div>
+    </fieldset>
+    <p class="account-help">{{ '跟随系统时，随设备的浅色或深色设置切换。' if lang == 'zh' else 'System follows your device’s light or dark setting.' }}</p>
+  {% elif s.key == 'preferences' and row.key == 'legal' %}
+    <div class="account-links">
+      <a href="{{ url_for('privacy_page') }}" target="_blank" rel="noopener noreferrer">{{ '隐私条款' if lang == 'zh' else 'Privacy policy' }} ↗</a>
+      <a href="{{ url_for('terms_page') }}" target="_blank" rel="noopener noreferrer">{{ '使用条款' if lang == 'zh' else 'Terms of use' }} ↗</a>
+      <a href="{{ url_for('donate_page') }}" target="_blank" rel="noopener noreferrer">{{ _('donate') }} ↗</a>
+    </div>
+  {% elif s.key == 'preferences' and row.key == 'signout' %}
+    {% if auth_enabled %}
+    <div class="account-panel-actions"><button type="submit" form="logout-form">{{ _('logout') }}</button></div>
+    <p class="account-help">{{ '退出不会丢弃已保存的设置；未保存的修改会丢失。' if lang == 'zh' else 'Signing out keeps saved settings; unsaved changes are lost.' }}</p>
+    {% endif %}
+  {% endif %}
+
+  {% endcall %}
+  {% endfor %}{% endfor %}
+  </section>
+</form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ asset('account.js') }}"></script>
+{% endblock %}

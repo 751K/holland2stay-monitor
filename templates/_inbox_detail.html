@@ -1,0 +1,13 @@
+<a href="{{ inbox_url(selected=None) }}" class="mail-back-list" data-no-transition data-close-detail>{{ ('← 返回房源列表' if calendar_mode or map_mode else '← 返回列表') if lang == 'zh' else ('← Back to listings' if calendar_mode else '← Back to listings') }}</a>
+<div class="mail-detail-heading"><span>{{ '房源详情' if lang == 'zh' else 'Listing details' }}</span>{% if item.url %}<a class="mail-original-link" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ '原网页 ↗' if lang == 'zh' else 'Original listing ↗' }}</a>{% endif %}</div>
+<div class="mail-detail-body">
+<h2>{{ item.display_title }}</h2><p class="mail-location">{% if item.display_address %}{{ item.display_address }} · {% endif %}{{ item.city }} · {{ item.display_source }}</p>
+<div class="mail-price">{{ item.price_raw or ('价格未提供' if lang == 'zh' else 'Price unavailable') }} </div>
+<div class="mail-status">{{ item.display_status }}{% if item.status_is_inferred %}<small>{{ '系统推测' if lang == 'zh' else 'Inferred' }}</small>{% endif %}</div>
+{% if item.price_note %}<p class="mail-price-note">{{ item.price_note }}</p>{% endif %}
+{% for section in item.detail_sections %}
+<section class="mail-detail-section"><h3>{{ section.title }}</h3><dl>
+{% for field in section.fields %}<div{% if field.long %} class="mail-long-field"{% endif %}><dt>{{ field.label }}</dt><dd>{{ field.value }}</dd></div>{% endfor %}
+</dl></section>
+{% endfor %}
+</div>

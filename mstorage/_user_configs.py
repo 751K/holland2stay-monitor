@@ -40,7 +40,6 @@ USER_CONFIG_COLUMNS = (
     "auto_book_json",
     "app_password_hash",
     "app_login_enabled",
-    "allow_h2s_login",
     "sort_order",
     "language",
     "created_at",

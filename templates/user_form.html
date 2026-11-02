@@ -1,34 +1,58 @@
 {% extends "base.html" %}
-{% block title %}{{ title }} · FlatRadar{% endblock %}
+{#
+  管理员新建 / 编辑用户。与账号设置页同一套「分组 / 条目 / 详情」工作区，
+  多出自动预订和申请人档案两个分组。普通用户编辑自己走 account.html。
+
+  所有编辑器都在同一个 <form> 里：build_user_from_form 按整份 POST 重建配置，
+  缺一个字段就等于把它清空。未选中的面板用 hidden 隐藏，仍随表单提交。
+  上下文 u 是正在编辑的用户；新建时是一份空白 UserConfig（is_new 为真）。
+#}
+{% import '_settings_macros.html' as ui with context %}
+{% set current = sections | selectattr('key', 'equalto', section) | first %}
+{% block title %}{{ title }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page account-page admin-user-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('account.css') }}"><link rel="stylesheet" href="{{ asset('user_form.css') }}">{% endblock %}
+
+{% block sidebar_navigation %}
+<nav class="sidebar-nav mail-nav" aria-label="{{ title }}">
+  <a href="{{ url_for('users_list', selected=none if is_new else u.id) }}"><i class="bi bi-arrow-left" aria-hidden="true"></i><span>{{ _('users_title') }}</span></a>
+  <div class="mail-label">{{ ('新增用户' if lang == 'zh' else 'New user') if is_new else u.name }}</div>
+  {{ ui.section_links(sections) }}
+</nav>
+{% endblock %}
+{% block sidebar_footer %}{% include '_admin_footer.html' %}{% endblock %}
+
+{#- 申请人档案的文本与下拉字段，name 与 app/forms/user_form.parse_applicant_profile 一一对应 -#}
+{% macro pf_text(label, key, value, required=false, type='text', example='', autocomplete='') %}
+<label class="account-field"><span>{{ _(label) }}{% if required %} <span class="prof-req">*</span>{% endif %}</span>
+  <input type="{{ type }}" name="AUTO_BOOK_PROFILE_{{ key }}" value="{{ value }}"
+         {% if example %}placeholder="{{ _('profile_eg') }}{{ example }}"{% endif %}{% if autocomplete %} autocomplete="{{ autocomplete }}"{% endif %}>
+</label>
+{% endmacro %}
+{% macro pf_select(label, key, value, options, required=false) %}
+<label class="account-field"><span>{{ _(label) }}{% if required %} <span class="prof-req">*</span>{% endif %}</span>
+  <select name="AUTO_BOOK_PROFILE_{{ key }}">
+    <option value=""></option>
+    {% for v in options %}<option value="{{ v }}"{% if value == v %} selected{% endif %}>{{ v }}</option>{% endfor %}
+  </select>
+</label>
+{% endmacro %}
 
 {% block content %}
+{% set ab = u.auto_book %}
+{% set prof = ab.applicant_profile %}
+<section class="inbox-shell account-shell" data-account data-user-id="{{ '' if is_new else u.id }}">
+<header class="mail-toolbar">
+  <div>
+    <h1 data-account-title>{{ current.title }}</h1>
+    <p class="mail-summary" data-account-summary>{{ current.summary }}</p>
+  </div>
+</header>
+{{ ui.section_heads(sections) }}
 
-{% set u = user %}
-{% set is_edit = u is not none %}
-
-{% if is_admin %}
-<nav class="breadcrumb">
-  <a href="{{ url_for('users_list') }}">{{ _('users_title') }}</a>
-  <span class="sep">/</span>
-  <span>{{ title }}</span>
-</nav>
-{% endif %}
-
-<div class="page-header">
-  <h1>{{ _('my_account') if is_user else title }}</h1>
-</div>
-
-{% if is_user %}
-<div class="alert alert-info mb-4">
-  <i class="bi bi-info-circle mr-2"></i>{{ _('user_form_self_only_hint') }}
-</div>
-{% endif %}
-
-{% if booking_guard_error %}
-<div class="alert alert-warning mb-4">{{ _('booking_review_error') }}</div>
-{% endif %}
+{% if booking_guard_error %}<div class="alert alert-warning">{{ _('booking_review_error') }}</div>{% endif %}
 {% if booking_attempt %}
-<div class="alert alert-warning mb-4">
+<div class="alert alert-warning">
   <strong>{{ _('booking_review_title') }}</strong>
   {% if booking_attempt.user_id == u.id %}
   <p>{{ _('booking_review_listing') }}: {{ booking_attempt.listing }}. {{ _('booking_review_check') }}</p>
@@ -36,1383 +60,403 @@
   {% if booking_attempt.order_number %}<p>{{ _('booking_review_order') }}: {{ booking_attempt.order_number }}</p>{% endif %}
   {% if booking_attempt.pay_url %}<p>{{ _('booking_review_pay') }}</p>{% endif %}
   <p>{{ _('booking_review_running') }}</p>
-  <form method="post" action="{{ url_for('user_acknowledge_booking', user_id=u.id) }}" onsubmit="return confirm('{{ _('booking_review_confirm') }}');">
+  <form method="post" action="{{ url_for('user_acknowledge_booking', user_id=u.id) }}" data-confirm="{{ _('booking_review_confirm') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="attempt" value="{{ booking_attempt.attempt }}">
     <button class="btn btn-warning" type="submit">{{ _('booking_review_action') }}</button>
   </form>
-  {% else %}
-  <p>{{ _('booking_review_shared') }}</p>
-  {% endif %}
+  {% else %}<p>{{ _('booking_review_shared') }}</p>{% endif %}
 </div>
 {% endif %}
-
-{% for attempt in plaza_attempts %}
-<div class="alert alert-warning mb-4">
+{% for attempt in plaza_attempts or [] %}
+<div class="alert alert-warning">
   <strong>{{ _('plaza_review_title') }}</strong>
   {% if attempt.user_id == u.id %}
   <p>{{ _('booking_review_listing') }}: {{ attempt.listing }}. {{ _('plaza_review_check') }}</p>
   <p>{{ _('plaza_review_running') }}</p>
-  <form method="post" action="{{ url_for('user_acknowledge_plaza', user_id=u.id) }}" onsubmit='return confirm({{ _("plaza_review_confirm")|tojson }});'>
+  <form method="post" action="{{ url_for('user_acknowledge_plaza', user_id=u.id) }}" data-confirm="{{ _('plaza_review_confirm') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="attempt" value="{{ attempt.attempt }}">
     <button class="btn btn-warning" type="submit">{{ _('plaza_review_action') }}</button>
   </form>
-  {% else %}
-  <p>{{ _('plaza_review_shared') }}</p>
-  {% endif %}
+  {% else %}<p>{{ _('plaza_review_shared') }}</p>{% endif %}
 </div>
 {% endfor %}
 
-{# enctype 是证件上传必需的；漏了它 request.files 永远是空的，而表单其余部分
-   照常保存，看起来完全正常。 #}
-<form method="post" action="{{ action }}" enctype="multipart/form-data"
-      onsubmit="return confirmSelfDisable();">
+{# enctype 是证件上传必需的；漏了它 request.files 永远是空的，而表单其余部分照常保存 #}
+<form method="post" action="{{ action }}" enctype="multipart/form-data" class="mail-workspace account-workspace" id="account-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="section" value="{{ section }}" data-selected-section>
+  <input type="hidden" name="item" value="{{ item }}" data-selected-item>
+  <input type="hidden" id="channels_hidden" name="NOTIFICATION_CHANNELS" value="{{ u.notification_channels | join(',') }}">
 
-  <!-- Step 1: Basic info -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <span class="step-num">1</span>
-      {{ _('user_form_section1') }}
+  <section class="mail-list" aria-label="{{ '设置条目' if lang == 'zh' else 'Settings' }}">
+    <div class="mail-groups">{{ ui.row_lists(sections) }}</div>
+  </section>
+
+  <section class="mail-detail account-detail{% if request.args.get('item') %} is-open{% endif %}" aria-label="{{ '设置详情' if lang == 'zh' else 'Setting details' }}" aria-live="polite">
+  {% set save_label = ('创建用户' if lang == 'zh' else 'Create user') if is_new else none %}
+  {% set subheads = {'rent': '租金与面积', 'location': '城市与位置', 'sources': '平台', 'home': '房型与入住人数', 'terms': '合同与租客', 'extras': '标签、装修与能耗'} if lang == 'zh' else {'rent': 'Rent and size', 'location': 'Cities and location', 'sources': 'Platforms', 'home': 'Home type and occupancy', 'terms': 'Contract and tenant', 'extras': 'Labels, finishing and energy'} %}
+  {% for s in sections %}{% for row in s.rows %}
+  {% call ui.panel(s, row) %}
+
+  {# ── 基本信息 ───────────────────────────────────── #}
+  {% if s.key == 'basic' and row.key == 'identity' %}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_name') }}</span><input type="text" name="name" required value="{{ u.name }}" placeholder="Alice"></label>
     </div>
-    <div class="card-body">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_name') }}</label>
-          {% if is_user %}
-            {# user 自助模式：name 锁死，不允许改 #}
-            <input type="text" class="form-input" value="{{ u.name }}" readonly
-                   style="background:var(--surface2);cursor:not-allowed;color:var(--text2);">
-          {% else %}
-            <input type="text" class="form-input" name="name" required value="{{ u.name if is_edit else '' }}" placeholder="Alice">
-          {% endif %}
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_status') }}</label>
-          <label class="toggle">
-            <input type="checkbox" id="enabled_chk" {% if not is_edit or u.enabled %}checked{% endif %}
-                   onchange="document.getElementById('enabled_h').value=this.checked?'true':'false'">
-            <span class="toggle-track"></span>
-            {{ _('user_form_enable') }}
-          </label>
-          <input type="hidden" id="enabled_h" name="enabled" value="{{ 'true' if not is_edit or u.enabled else 'false' }}">
-        </div>
-        {#
-          语言。此前 UserConfig.language 没有任何入口，所有人恒为 en——而验证
-          邮件、房源通知都按它出文案。自助模式下也可改：这是本人的偏好。
-
-          保存自己的账号时界面语言跟着走（见 app/routes/users.py 的
-          _own_language_cookie）。选项写各自的母语名，中英界面下都是
-          "English" 和「中文」——翻成 "Chinese" 反而让只看得懂中文的人找不到
-          自己那一项。
-        #}
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_language') }}</label>
-          <select class="form-select" name="LANGUAGE">
-            <option value="en" {% if not is_edit or (u.language or 'en') != 'zh' %}selected{% endif %}>English</option>
-            <option value="zh" {% if is_edit and (u.language or 'en') == 'zh' %}selected{% endif %}>中文</option>
-          </select>
-        </div>
-      </div>
-
-      <!-- 登录（iOS App / Web 共用） -->
-      <div class="mt-4" style="padding-top:14px;border-top:1px solid var(--border);">
-        <div class="flex items-center gap-2 mb-2">
-          <i class="bi bi-phone" style="color:var(--accent);"></i>
-          <span class="text-sm font-semibold">{{ _('user_form_app_login') }}</span>
-        </div>
-        <div class="text-xs text-secondary mb-3">{{ _('user_form_app_login_hint') }}</div>
-        <div class="form-row">
-          <div class="form-group">
-            {% if is_admin %}
-            <label class="toggle">
-              <input type="checkbox" id="app_login_chk"
-                     {% if is_edit and u.app_login_enabled %}checked{% endif %}
-                     onchange="document.getElementById('app_login_h').value=this.checked?'true':'false'">
-              <span class="toggle-track"></span>{{ _('user_form_app_login_enable') }}
-            </label>
-            <input type="hidden" id="app_login_h" name="app_login_enabled"
-                   value="{{ 'true' if is_edit and u.app_login_enabled else 'false' }}">
-            {% else %}
-            {# user 自助模式：登录开关只能由 admin 切换，这里只显示状态。
-               用徽章而不是「图标 + 一行文字」——「已启用 / 已停用」在用户卡上
-               本来就是徽章，同一个状态两种画法只会让人以为它们不是一回事。 #}
-            <label class="form-label">{{ _('user_form_app_login_enable') }}</label>
-            <div style="padding-top:2px;">
-              {% if u.app_login_enabled %}
-                <span class="badge badge-success">{{ _('users_enabled') }}</span>
-              {% else %}
-                <span class="badge badge-neutral">{{ _('users_disabled') }}</span>
-              {% endif %}
-            </div>
-            {% endif %}
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_app_password') }}</label>
-            <input type="password" class="form-input" name="app_password"
-                   autocomplete="new-password"
-                   placeholder="{{ _('user_form_pw_keep') if is_edit and u.app_password_hash else _('user_form_app_password_set') }}">
-            <div class="form-help">
-              {% if is_edit and u.app_password_hash %}
-                <span style="color:var(--success);"><i class="bi bi-check-circle mr-1"></i>{{ _('user_form_app_password_set_label') }}</span>
-                · <label style="cursor:pointer;"><input type="checkbox" name="app_password_clear" value="true" style="vertical-align:middle;"> {{ _('user_form_app_password_clear') }}</label>
-              {% else %}
-                <span style="color:var(--text-muted);">{{ _('user_form_app_password_unset_label') }}</span>
-              {% endif %}
-            </div>
-          </div>
-        </div>
-      </div>
+    {{ ui.switch('enabled', _('user_form_enable'), u.enabled) }}
+    <p class="account-help">{{ '停用后这个用户的监控、通知和自动预订都会停止。' if lang == 'zh' else 'Disabling stops monitoring, alerts and auto-booking for this user.' }}</p>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'basic' and row.key == 'login' %}
+    <p class="account-help">{{ _('user_form_app_login_hint') }}</p>
+    {{ ui.switch('app_login_enabled', _('user_form_app_login_enable'), u.app_login_enabled) }}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_app_password') }}</span>
+        <input type="password" name="app_password" autocomplete="new-password" placeholder="{{ _('user_form_pw_keep') if u.app_password_hash else _('user_form_app_password_set') }}">
+      </label>
     </div>
-  </div>
+    {% if u.app_password_hash %}<label class="account-check"><input type="checkbox" name="app_password_clear" value="true"> {{ _('user_form_app_password_clear') }}</label>{% endif %}
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'basic' and row.key == 'language' %}
+    <label class="account-field"><span>{{ _('user_form_language') }}</span>
+      <select name="LANGUAGE">
+        <option value="en"{% if (u.language or 'en') != 'zh' %} selected{% endif %}>English</option>
+        <option value="zh"{% if (u.language or 'en') == 'zh' %} selected{% endif %}>中文</option>
+      </select>
+    </label>
+    <p class="account-help">{{ '房源通知和验证邮件使用这个语言。' if lang == 'zh' else 'Listing alerts and verification email use this language.' }}</p>
+    {{ ui.save_actions(label=save_label) }}
 
-  <!-- Step 2: Notification channels -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <span class="step-num">2</span>
-      {{ _('user_form_section2') }}
+  {# ── 通知 ───────────────────────────────────────── #}
+  {% elif s.key == 'notifications' and row.key == 'delivery' %}
+    {# 未勾选时浏览器不提交复选框；解析器把缺失当作开启，所以带一个 false 兜底 #}
+    {{ ui.switch('NOTIFICATIONS_ENABLED', _('user_form_notif_on'), u.notifications_enabled, off_value='false') }}
+    <p class="account-help">{{ '关闭后这个用户不会再收到任何渠道的房源提醒。' if lang == 'zh' else 'When off, this user gets no listing alerts on any channel.' }}</p>
+    {{ ui.save_actions(test=not is_new, label=save_label) }}
+  {% elif s.key == 'notifications' and row.key == 'apppush' %}
+    <p class="account-help">{{ _('channel_app_push_help') }}</p>
+    <div class="account-links">
+      <a href="https://apps.apple.com/us/app/flarradar/id6769857080" target="_blank" rel="noopener noreferrer">iOS / Mac App ↗</a>
+      <a href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk" target="_blank" rel="noopener noreferrer">Android App ↗</a>
     </div>
-    <div class="card-body">
-      <div class="mb-3">
-        <label class="toggle">
-          <input type="checkbox" id="notif_enabled" {% if not is_edit or u.notifications_enabled %}checked{% endif %}
-                 onchange="document.getElementById('notif_enabled_h').value=this.checked?'true':'false'">
-          <span class="toggle-track"></span>
-          {{ _('user_form_notif_on') }}
-        </label>
-        <input type="hidden" id="notif_enabled_h" name="NOTIFICATIONS_ENABLED" value="{{ 'true' if not is_edit or u.notifications_enabled else 'false' }}">
-      </div>
-
-      <input type="hidden" id="channels_hidden" name="NOTIFICATION_CHANNELS" value="{{ u.notification_channels | join(',') if is_edit else '' }}">
-
-      <!-- App 推送 —— 放在 .form-row **之外**。
-           它没有输入框，展开后是两个按钮加一段说明，挤在一个网格列里说明文字
-           只有几十像素宽。但也不能用 grid-column:1/-1 让它横跨：.form-row 是
-           repeat(auto-fit, minmax(160px,1fr))，而 1/-1 要求解析出完整的轨道
-           列表，auto-fit 于是不再折叠空轨道——四个渠道会被压回 160px 的格子，
-           挤在左边。移出网格是唯一不动其余四张卡的做法。
-
-           另注意：这不是 notification_channels 里的一个值。推送走 device_tokens，
-           由 App 登录时登记；给它加一个真的 checkbox 会往那个字段写进一个
-           create_user_notifier 不认识的值（日志里是「未知通知渠道」），而且永远
-           不会投递。所以它只展开、不勾选，用 toggleInfoCard。 -->
-      <div class="form-group">
-        <label class="channel-card{% if device_count %} selected{% endif %}" style="display:block;cursor:pointer;"
-               onclick="toggleInfoCard('apppush')">
-          <div class="flex items-center justify-between mb-1">
-            <div class="flex items-center gap-2">
-              <i class="bi bi-phone" style="font-size:15px;"></i>
-              <span class="font-medium text-sm">{{ _('channel_app_push') }}</span>
-            </div>
-            <span class="badge badge-success text-xs">{{ _('channel_app_push_badge') }}</span>
-          </div>
-          <div class="text-xs text-secondary">
-            {% if device_count %}
-              {{ _('channel_app_push_active') % {'n': device_count} }}
-            {% else %}
-              {{ _('channel_app_push_hint') }}
-            {% endif %}
-          </div>
-        </label>
-        <div id="sec_apppush" class="mt-2" style="display:none;">
-          <div class="flex items-center gap-2" style="flex-wrap:wrap;">
-            <a class="btn-download btn-dl-ios" target="_blank" rel="noopener noreferrer"
-               href="https://apps.apple.com/us/app/flarradar/id6769857080">
-              <i class="bi bi-apple"></i>iOS / Mac App
-            </a>
-            <a class="btn-download btn-dl-android" target="_blank" rel="noopener noreferrer"
-               href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk">
-              <i class="bi bi-android2"></i>Android App
-            </a>
-          </div>
-          <div class="form-help mt-2" style="line-height:1.6;">
-            {{ _('channel_app_push_help') }}
-          </div>
-        </div>
-      </div>
-
-      <div class="form-row">
-        <!-- iMessage -->        <!-- iMessage -->
-        <div class="form-group">
-          <label class="channel-card {% if is_edit and 'imessage' in u.notification_channels %}selected{% endif %}"
-                 style="display:block;{% if not is_macos %}opacity:0.45;pointer-events:none;cursor:not-allowed;{% endif %}"
-                 {% if is_macos %}onclick="toggleChannel('imessage')"{% endif %}>
-            <div class="flex items-center justify-between mb-1">
-              <div class="flex items-center gap-2">
-                <input type="checkbox" class="channel-chk" data-ch="imessage"
-                       {% if is_edit and 'imessage' in u.notification_channels %}checked{% endif %}
-                       {% if not is_macos %}disabled{% endif %}>
-                <span class="font-medium text-sm">iMessage</span>
-              </div>
-              <span class="badge badge-neutral text-xs">{{ _('badge_macos') }}</span>
-            </div>
-            <div class="text-xs text-secondary">
-              {% if not is_macos %}
-                {{ 'Unavailable — iMessage requires macOS' if lang == 'en' else '不可用 — iMessage 需要 macOS 环境' }}
-              {% else %}
-                {{ _('user_form_notif_on') }}
-              {% endif %}
-            </div>
-          </label>
-          <div id="sec_imessage" class="mt-2" style="{% if not is_edit or 'imessage' not in u.notification_channels %}display:none;{% endif %}">
-            <label class="form-label">{{ _('user_form_recipient') }}</label>
-            <input type="text" class="form-input" name="IMESSAGE_RECIPIENT" value="{{ u.imessage_recipient if is_edit else '' }}" placeholder="+31612345678">
-            <div class="form-help mt-2" style="line-height:1.6;">
-              {% if lang == 'en' %}
-                iMessage is only available when FlatRadar runs locally on macOS. It does not work on servers, Linux, or Docker deployments.
-              {% else %}
-                iMessage 仅在本地 macOS 部署时可用；服务器、Linux 或 Docker 部署无法使用。
-              {% endif %}
-            </div>
-          </div>
-        </div>
-
-        <!-- Telegram -->
-        <div class="form-group">
-          <label class="channel-card {% if is_edit and 'telegram' in u.notification_channels %}selected{% endif %}" style="display:block;" onclick="toggleChannel('telegram')">
-            <div class="flex items-center justify-between mb-1">
-              <div class="flex items-center gap-2">
-                <input type="checkbox" class="channel-chk" data-ch="telegram" {% if is_edit and 'telegram' in u.notification_channels %}checked{% endif %}>
-                <span class="font-medium text-sm">Telegram</span>
-              </div>
-              <span class="badge badge-info text-xs">{{ _('badge_free') }}</span>
-            </div>
-            <div class="text-xs text-secondary">Bot API</div>
-          </label>
-          <div id="sec_telegram" class="mt-2" style="{% if not is_edit or 'telegram' not in u.notification_channels %}display:none;{% endif %}">
-            <label class="form-label">{{ _('user_form_bot_token') }}</label>
-            <input type="text" class="form-input mb-2" name="TELEGRAM_BOT_TOKEN" value="{{ u.telegram_token if is_edit else '' }}" placeholder="123456:ABC-DEF...">
-            <label class="form-label">{{ _('user_form_chat_id') }}</label>
-            <input type="text" class="form-input" name="TELEGRAM_CHAT_ID" value="{{ u.telegram_chat_id if is_edit else '' }}" placeholder="123456789">
-            <div class="form-help mt-2" style="line-height:1.6;">
-              {% if lang == 'en' %}
-                Setup: send <code>/newbot</code> to <code>@BotFather</code> and save the Token; send any message to your bot; open <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>; find <code>"chat": {"id": 123456789}</code> and paste that value as Chat ID.
-              {% else %}
-                配置方式：向 <code>@BotFather</code> 发送 <code>/newbot</code>，记下 Token；向你的机器人发任意一条消息；访问 <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>；找到 <code>"chat": {"id": 123456789}</code>，把这个数字填入 Chat ID。
-              {% endif %}
-            </div>
-          </div>
-        </div>
-
-        <!-- Email -->
-        <div class="form-group">
-          <label class="channel-card {% if is_edit and 'email' in u.notification_channels %}selected{% endif %}" style="display:block;" onclick="toggleChannel('email')">
-            <div class="flex items-center justify-between mb-1">
-              <div class="flex items-center gap-2">
-                <input type="checkbox" class="channel-chk" data-ch="email" {% if is_edit and 'email' in u.notification_channels %}checked{% endif %}>
-                <span class="font-medium text-sm">Email</span>
-              </div>
-              <span class="badge badge-info text-xs">{{ _('badge_cross_platform') }}</span>
-            </div>
-            <div class="text-xs text-secondary">SMTP</div>
-          </label>
-          <div id="sec_email" class="mt-2" style="{% if not is_edit or 'email' not in u.notification_channels %}display:none;{% endif %}">
-            {% set current_mode = 'shared' if is_user else (u.email_mode if is_edit and u.email_mode else 'shared') %}
-            {% if is_user %}
-              <input type="hidden" name="EMAIL_MODE" value="shared">
-            {% else %}
-            <div class="mb-3" style="display:flex;gap:8px;flex-wrap:wrap;">
-              <label class="channel-card" style="flex:1;min-width:160px;display:block;cursor:pointer;" onclick="setEmailMode('shared')">
-                <div class="flex items-center gap-2">
-                  <input type="radio" name="EMAIL_MODE" value="shared" id="email_mode_shared"
-                         {% if current_mode == 'shared' %}checked{% endif %}>
-                  <span class="font-medium text-sm">{{ _('user_form_email_shared') }}</span>
-                </div>
-                <div class="text-xs text-secondary mt-1">{{ _('user_form_email_shared_hint') }}</div>
-              </label>
-              <label class="channel-card" style="flex:1;min-width:160px;display:block;cursor:pointer;" onclick="setEmailMode('custom')">
-                <div class="flex items-center gap-2">
-                  <input type="radio" name="EMAIL_MODE" value="custom" id="email_mode_custom"
-                         {% if current_mode == 'custom' %}checked{% endif %}>
-                  <span class="font-medium text-sm">{{ _('user_form_email_custom') }}</span>
-                </div>
-                <div class="text-xs text-secondary mt-1">{{ _('user_form_email_custom_hint') }}</div>
-              </label>
-            </div>
-            {% endif %}
-
-            <!-- 收件邮箱（两种模式都需要） -->
-            <label class="form-label">{{ _('user_form_to') }}</label>
-            <input type="text" class="form-input" name="EMAIL_TO" id="email_to_input"
-                   value="{{ u.email_to if is_edit else '' }}" placeholder="alice@example.com"
-                   oninput="onEmailInput()">
-            <!-- 验证状态 / 即时验证按钮 -->
-            <div id="email_verify_area" class="mb-2" style="margin-top:6px;font-size:12px;{% if not is_edit or current_mode != 'shared' or not u.email_to %}display:none;{% endif %}">
-              {% if is_edit and current_mode == 'shared' and u.email_to %}
-                {% if u.email_verified %}
-                  <span style="color:var(--success);"><i class="bi bi-check-circle-fill mr-1"></i>{{ _('user_form_email_verified') }}</span>
-                {% else %}
-                  <span style="color:var(--warning);"><i class="bi bi-exclamation-triangle-fill mr-1"></i>{{ _('user_form_email_unverified') }}</span>
-                  ·
-                  <a href="#" onclick="resendVerification('{{ u.id }}', this); return false;" style="color:var(--accent);text-decoration:none;">
-                    <i class="bi bi-envelope-arrow-up mr-1"></i>{{ _('user_form_email_resend_verify') }}
-                  </a>
-                {% endif %}
-              {% endif %}
-            </div>
-
-            <!-- SMTP 字段：仅 admin + custom 模式展开 -->
-            {% if is_admin %}
-            <div id="sec_email_custom" style="{% if current_mode != 'custom' %}display:none;{% endif %}">
-              <label class="form-label">{{ _('user_form_smtp_host') }}</label>
-              <input type="text" class="form-input mb-2" name="EMAIL_SMTP_HOST" value="{{ u.email_smtp_host if is_edit else '' }}" placeholder="smtp.gmail.com">
-              <div class="form-row">
-                <div class="form-group">
-                  <label class="form-label">{{ _('user_form_port') }}</label>
-                  <input type="number" class="form-input" name="EMAIL_SMTP_PORT" value="{{ u.email_smtp_port if is_edit and u.email_smtp_port else 587 }}" placeholder="587">
-                </div>
-                <div class="form-group">
-                  <label class="form-label">{{ _('user_form_security') }}</label>
-                  {% set email_security = u.email_smtp_security if is_edit and u.email_smtp_security else 'starttls' %}
-                  <select class="form-select" name="EMAIL_SMTP_SECURITY">
-                    <option value="starttls" {% if email_security=='starttls' %}selected{% endif %}>STARTTLS</option>
-                    <option value="ssl" {% if email_security=='ssl' %}selected{% endif %}>SSL/TLS</option>
-                    <option value="none" {% if email_security=='none' %}selected{% endif %}>None</option>
-                  </select>
-                </div>
-              </div>
-              <label class="form-label">{{ _('user_form_smtp_user') }}</label>
-              <input type="text" class="form-input mb-2" name="EMAIL_USERNAME" value="{{ u.email_username if is_edit else '' }}" placeholder="your@email.com">
-              <label class="form-label">{{ _('user_form_smtp_pass') }}</label>
-              <input type="password" class="form-input mb-2" name="EMAIL_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and u.email_password else '' }}" autocomplete="new-password">
-              <label class="form-label">{{ _('user_form_from') }}</label>
-              <input type="email" class="form-input mb-2" name="EMAIL_FROM" value="{{ u.email_from if is_edit else '' }}" placeholder="alerts@example.com">
-              <div class="form-help">{{ _('user_form_smtp_hint') }}</div>
-            </div>
-            {% endif %}
-          </div>
-        </div>
-
-        <!-- WhatsApp -->
-        <div class="form-group">
-          <label class="channel-card {% if is_edit and 'whatsapp' in u.notification_channels %}selected{% endif %}" style="display:block;" onclick="toggleChannel('whatsapp')">
-            <div class="flex items-center justify-between mb-1">
-              <div class="flex items-center gap-2">
-                <input type="checkbox" class="channel-chk" data-ch="whatsapp" {% if is_edit and 'whatsapp' in u.notification_channels %}checked{% endif %}>
-                <span class="font-medium text-sm">WhatsApp</span>
-              </div>
-              <span class="badge badge-warning text-xs">{{ _('badge_twilio') }}</span>
-            </div>
-            <div class="text-xs text-secondary">Twilio REST API</div>
-          </label>
-          <div id="sec_whatsapp" class="mt-2" style="{% if not is_edit or 'whatsapp' not in u.notification_channels %}display:none;{% endif %}">
-            <label class="form-label">{{ _('user_form_account_sid') }}</label>
-            <input type="text" class="form-input mb-2" name="TWILIO_ACCOUNT_SID" value="{{ u.twilio_sid if is_edit else '' }}">
-            <label class="form-label">{{ _('user_form_auth_token') }}</label>
-            <input type="password" class="form-input mb-2" name="TWILIO_AUTH_TOKEN" placeholder="{{ _('user_form_token_keep') if is_edit and u.twilio_token else '' }}" autocomplete="new-password">
-            <label class="form-label">{{ _('user_form_from') }}</label>
-            <input type="text" class="form-input mb-2" name="TWILIO_FROM" value="{{ u.twilio_from if is_edit else 'whatsapp:+14155238886' }}">
-            <label class="form-label">{{ _('user_form_to') }}</label>
-            <input type="text" class="form-input" name="TWILIO_TO" value="{{ u.twilio_to if is_edit else '' }}" placeholder="whatsapp:+31612345678">
-          </div>
-        </div>
-      </div>
+    <p class="account-help">{{ '推送由 App 登录时登记的设备决定，不是可以在这里勾选的渠道。' if lang == 'zh' else 'Push follows devices registered at app sign-in; it is not a channel to switch on here.' }}</p>
+  {% elif s.key == 'notifications' and row.key == 'telegram' %}
+    {{ ui.channel_toggle('telegram', '通过 Telegram 接收' if lang == 'zh' else 'Receive via Telegram') }}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_bot_token') }}</span><input type="text" name="TELEGRAM_BOT_TOKEN" value="{{ u.telegram_token }}" placeholder="123456:ABC-DEF..." autocomplete="off"></label>
+      <label class="account-field"><span>{{ _('user_form_chat_id') }}</span><input type="text" name="TELEGRAM_CHAT_ID" value="{{ u.telegram_chat_id }}" placeholder="123456789" autocomplete="off"></label>
     </div>
-  </div>
-
-  <!-- Step 3: Filter -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <span class="step-num">3</span>
-      {{ _('user_form_section3') }}
-      <span class="text-xs" style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text3);margin-left:.5rem;">{{ _('user_form_filter_hint') }}</span>
+    <ol class="account-steps">
+      {% if lang == 'zh' %}
+      <li>向 <code>@BotFather</code> 发送 <code>/newbot</code>，记下 Token。</li>
+      <li>给机器人发任意一条消息。</li>
+      <li>访问 <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>，把 <code>"chat": {"id": …}</code> 里的数字填入 Chat ID。</li>
+      {% else %}
+      <li>Send <code>/newbot</code> to <code>@BotFather</code> and save the token.</li>
+      <li>Send any message to the bot.</li>
+      <li>Open <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> and paste the number in <code>"chat": {"id": …}</code> as Chat ID.</li>
+      {% endif %}
+    </ol>
+    {{ ui.save_actions(test=not is_new, label=save_label) }}
+  {% elif s.key == 'notifications' and row.key == 'email' %}
+    {{ ui.channel_toggle('email', '通过邮件接收' if lang == 'zh' else 'Receive by email') }}
+    <fieldset class="account-field">
+      <legend>{{ '发信方式' if lang == 'zh' else 'Sending' }}</legend>
+      <div class="account-radios" data-email-mode>
+        <label><input type="radio" name="EMAIL_MODE" value="shared"{% if u.email_mode != 'custom' %} checked{% endif %}> <span><b>{{ _('user_form_email_shared') }}</b><small>{{ _('user_form_email_shared_hint') }}</small></span></label>
+        <label><input type="radio" name="EMAIL_MODE" value="custom"{% if u.email_mode == 'custom' %} checked{% endif %}> <span><b>{{ _('user_form_email_custom') }}</b><small>{{ _('user_form_email_custom_hint') }}</small></span></label>
+      </div>
+    </fieldset>
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_to') }}</span><input type="email" name="EMAIL_TO" id="email_to_input" value="{{ u.email_to }}" placeholder="alice@example.com"></label>
     </div>
-    <div class="card-body">
-      {# 平台适用范围只说一次。逐字段各写一遍的话，同一句话在这一页要出现八遍，
-         其中六遍一字不差。各字段留小徽标 + tooltip，和列表页保持一致。 #}
-      <div class="text-xs text-secondary mb-3" style="line-height:1.6;">
-        <i class="bi bi-info-circle mr-1"></i>{{ _('user_form_dim_scope_intro') }}
-      </div>
-      {% set lf = u.listing_filter if is_edit else none %}
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-        <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="MAX_RENT" value="{{ lf.max_rent | int if lf and lf.max_rent else '' }}" placeholder="1500"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="MIN_AREA" value="{{ lf.min_area | int if lf and lf.min_area else '' }}" placeholder="20"></div>
-        <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="MIN_FLOOR" value="{{ lf.min_floor if lf and lf.min_floor is not none else '' }}" placeholder="0"></div>
-        <div class="form-group" style="grid-column:span 2;">
-          <label class="form-label">{{ _('user_form_occupancy') }}{% set _b = dim_scope_badge('occupancy') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('occupancy') }}">{{ _b }}</span>{% endif %}</label>
-          <div class="multi-select">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown">{% set sel_occ = lf.allowed_occupancy if lf else [] %}{% for val, label in occupancy_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_OCCUPANCY" value="{{ val }}"{% if val in sel_occ %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group" style="grid-column:span 2;">
-          <label class="form-label">{{ _('user_form_types') }}{% set _b = dim_scope_badge('type') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('type') }}">{{ _b }}</span>{% endif %}</label>
-          <div class="multi-select">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown">{% set sel_type = lf.allowed_types if lf else [] %}{% for val, label in type_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_TYPES" value="{{ val }}"{% if val in sel_type %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
-          </div>
-        </div>
-      </div>
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_sources') }}</label>
-          <div class="multi-select">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown">{% set sel_src = lf.allowed_sources if lf else [] %}{% for key, label in source_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_SOURCES" value="{{ key }}"{% if key in sel_src %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_cities') }}</label>
-          <div class="multi-select">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown">{% set sel_city = lf.allowed_cities if lf else [] %}{% for c in city_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_CITIES" value="{{ c }}"{% if c in sel_city %} checked{% endif %}> {{ c }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_hoods') }}{% set _b = dim_scope_badge('neighborhood') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('neighborhood') }}">{{ _b }}</span>{% endif %}</label>
-          <div class="multi-select" id="ms-neighborhood">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown" id="neighborhood-dropdown">{% set sel_nbhd = lf.allowed_neighborhoods if lf else [] %}{% for n in sel_nbhd %}<label class="ms-option"><input type="checkbox" name="ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_buildings') }}</label>
-          <div class="multi-select" id="ms-building">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown" id="building-dropdown">{% set sel_bld = lf.allowed_buildings if lf else [] %}{% for b in sel_bld %}<label class="ms-option"><input type="checkbox" name="ALLOWED_BUILDINGS" value="{{ b }}" checked> {{ b }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_offer') }}{% set _b = dim_scope_badge('contract') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('contract') }}">{{ _b }}</span>{% endif %}</label>
-          <div class="multi-select">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown">{% set sel_contract = lf.allowed_contract if lf else [] %}{% for val, label in contract_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_CONTRACT" value="{{ val }}"{% if val in sel_contract %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_tenant') }}{% set _b = dim_scope_badge('tenant') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('tenant') }}">{{ _b }}</span>{% endif %}</label>
-          <div class="multi-select">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown">{% set sel_tenant = lf.allowed_tenant if lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_TENANT" value="{{ val }}"{% if val in sel_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div>
-          </div>
-        </div>
-      </div>
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
-        <div class="form-group">
-          <label class="form-label">{{ _('user_form_promo') }}{% set _b = dim_scope_badge('offer') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('offer') }}">{{ _b }}</span>{% endif %}</label>
-          <div class="multi-select">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown">{% set sel_offer = lf.allowed_offer if lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_OFFER" value="{{ o }}"{% if o in sel_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('filter_finishing') }}{% set _b = dim_scope_badge('finishing') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('finishing') }}">{{ _b }}</span>{% endif %}</label>
-          <div class="multi-select">
-            <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-            <div class="ms-dropdown">{% set sel_fin = lf.allowed_finishing if lf else [] %}{% for f in finishing_options %}<label class="ms-option"><input type="checkbox" name="ALLOWED_FINISHING" value="{{ f }}"{% if f in sel_fin %} checked{% endif %}> {{ f }}</label>{% endfor %}</div>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('filter_energy') }}{% set _b = dim_scope_badge('energy') %}{% if _b %}<span class="badge badge-neutral" style="margin-left:6px;font-size:10px;font-weight:400;" title="{{ dim_scope('energy') }}">{{ _b }}</span>{% endif %}</label>
-          {% set cur_en = lf.allowed_energy if lf else '' %}
-          <select name="ALLOWED_ENERGY" class="form-select" style="font-size:14px;">
-            <option value="">{{ _('filter_min_energy') }}</option>
-            {% for e in energy_options %}
-              <option value="{{ e }}" {% if e == cur_en %}selected{% endif %}>{{ e }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
+    {% if not is_new %}
+    <div id="email_verify_area" class="account-verify" data-saved-email="{{ u.email_to }}" role="status">
+      {% if u.email_to and u.email_mode != 'custom' %}
+        {% if u.email_verified %}{{ _('user_form_email_verified') }}
+        {% else %}{{ _('user_form_email_unverified') }} · <button type="button" class="account-text-button" data-send-verification>{{ _('user_form_email_resend_verify') }}</button>{% endif %}
+      {% endif %}
     </div>
-  </div>
-
-  <!-- Step 4: Auto book — 仅 admin 可见可编辑 -->
-  {% if is_admin %}
-  <div class="card mb-4">
-    <div class="section-header">
-      <span class="step-num">4</span>
-      {{ _('user_form_section4') }}
+    {% endif %}
+    <div class="account-fields" data-email-custom{% if u.email_mode != 'custom' %} hidden{% endif %}>
+      <label class="account-field"><span>{{ _('user_form_smtp_host') }}</span><input type="text" name="EMAIL_SMTP_HOST" value="{{ u.email_smtp_host }}" placeholder="smtp.gmail.com"></label>
+      <label class="account-field"><span>{{ _('user_form_port') }}</span><input type="number" name="EMAIL_SMTP_PORT" value="{{ u.email_smtp_port or 587 }}"></label>
+      <label class="account-field"><span>{{ _('user_form_security') }}</span>
+        <select name="EMAIL_SMTP_SECURITY">
+          {% for v, l in [('starttls', 'STARTTLS'), ('ssl', 'SSL/TLS'), ('none', 'None')] %}<option value="{{ v }}"{% if (u.email_smtp_security or 'starttls') == v %} selected{% endif %}>{{ l }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="account-field"><span>{{ _('user_form_smtp_user') }}</span><input type="text" name="EMAIL_USERNAME" value="{{ u.email_username }}" placeholder="your@email.com"></label>
+      <label class="account-field"><span>{{ _('user_form_smtp_pass') }}</span><input type="password" name="EMAIL_PASSWORD" placeholder="{{ _('user_form_pw_keep') if u.email_password else '' }}" autocomplete="new-password"></label>
+      <label class="account-field"><span>{{ _('user_form_from') }}</span><input type="email" name="EMAIL_FROM" value="{{ u.email_from }}" placeholder="alerts@example.com"></label>
     </div>
-    <div class="card-body">
-      {% set ab = u.auto_book if is_edit else none %}
-      <div class="flex flex-wrap gap-4 mb-3">
-        <label class="toggle">
-          <input type="checkbox" id="ab_enabled" {% if ab and ab.enabled %}checked{% endif %}
-                 onchange="document.getElementById('ab_enabled_h').value=this.checked?'true':'false'">
-          <span class="toggle-track"></span>{{ _('user_form_ab_enable') }}
-        </label>
-        <input type="hidden" id="ab_enabled_h" name="AUTO_BOOK_ENABLED" value="{{ 'true' if ab and ab.enabled else 'false' }}">
-        <label class="toggle">
-          <input type="checkbox" id="ab_dry" {% if not ab or ab.dry_run %}checked{% endif %}
-                 onchange="document.getElementById('ab_dry_h').value=this.checked?'true':'false'">
-          <span class="toggle-track"></span>{{ _('user_form_ab_dry') }}
-          <span class="badge badge-warning ml-1 text-xs">{{ _('badge_recommend') }}</span>
-        </label>
-        <input type="hidden" id="ab_dry_h" name="AUTO_BOOK_DRY_RUN" value="{{ 'false' if ab and not ab.dry_run else 'true' }}">
+    <p class="account-help" data-email-custom{% if u.email_mode != 'custom' %} hidden{% endif %}>{{ _('user_form_smtp_hint') }}</p>
+    {{ ui.save_actions(test=not is_new, label=save_label) }}
+  {% elif s.key == 'notifications' and row.key == 'whatsapp' %}
+    {{ ui.channel_toggle('whatsapp', '通过 WhatsApp 接收' if lang == 'zh' else 'Receive via WhatsApp') }}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_account_sid') }}</span><input type="text" name="TWILIO_ACCOUNT_SID" value="{{ u.twilio_sid }}" autocomplete="off"></label>
+      <label class="account-field"><span>{{ _('user_form_auth_token') }}</span><input type="password" name="TWILIO_AUTH_TOKEN" placeholder="{{ _('user_form_token_keep') if u.twilio_token else '' }}" autocomplete="new-password"></label>
+      <label class="account-field"><span>{{ _('user_form_from') }}</span><input type="text" name="TWILIO_FROM" value="{{ u.twilio_from or ('whatsapp:+14155238886' if is_new else '') }}"></label>
+      <label class="account-field"><span>{{ _('user_form_to') }}</span><input type="text" name="TWILIO_TO" value="{{ u.twilio_to }}" placeholder="whatsapp:+31612345678"></label>
+    </div>
+    {{ ui.save_actions(test=not is_new, label=save_label) }}
+  {% elif s.key == 'notifications' and row.key == 'imessage' %}
+    {{ ui.channel_toggle('imessage', '通过 iMessage 接收' if lang == 'zh' else 'Receive via iMessage', disabled=not is_macos) }}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_recipient') }}</span><input type="text" name="IMESSAGE_RECIPIENT" value="{{ u.imessage_recipient }}" placeholder="+31612345678"{% if not is_macos %} readonly{% endif %}></label>
+    </div>
+    <p class="account-help">{{ 'iMessage 仅在本地 macOS 部署时可用；服务器、Linux 或 Docker 部署无法使用。' if lang == 'zh' else 'iMessage is only available when FlatRadar runs locally on macOS. It does not work on servers, Linux, or Docker deployments.' }}</p>
+    {% if is_macos %}{{ ui.save_actions(test=not is_new, label=save_label) }}{% endif %}
+
+  {# ── 房源条件 ───────────────────────────────────── #}
+  {% elif s.key == 'filters' %}
+    {{ ui.filter_fields(row.key, u.listing_filter) }}
+    {{ ui.save_actions(label=save_label) }}
+
+  {# ── 自动预订 ───────────────────────────────────── #}
+  {% elif s.key == 'autobook' and row.key == 'switch' %}
+    {{ ui.switch('AUTO_BOOK_ENABLED', _('user_form_ab_enable'), ab.enabled) }}
+    {# 缺失视为试运行，所以关掉时要明确提交 false #}
+    {{ ui.switch('AUTO_BOOK_DRY_RUN', _('user_form_ab_dry'), ab.dry_run, off_value='false') }}
+    <p class="account-help">{{ '试运行会走完登录和选房流程，但不提交订单。确认账号和条件无误后再关闭试运行。' if lang == 'zh' else 'A dry run signs in and picks a home but never submits an order. Turn it off once the accounts and filters are right.' }}</p>
+    <p class="account-help">{{ _('user_form_ab_safety') }}</p>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'autobook' and row.key == 'abfilter' %}
+    <div class="account-panel-actions"><button type="button" onclick="copyNotifFilters()">{{ _('user_form_copy_filter') }}</button></div>
+    {% for key in ['rent', 'location', 'sources', 'home', 'terms', 'extras'] %}
+    <h3 class="account-subhead">{{ subheads[key] }}</h3>
+    {{ ui.filter_fields(key, ab.listing_filter, prefix='AUTO_BOOK_') }}
+    {% endfor %}
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'autobook' and row.key == 'h2s' %}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_ab_email') }}</span><input type="email" name="AUTO_BOOK_EMAIL" value="{{ ab.email }}"></label>
+      <label class="account-field"><span>{{ _('user_form_ab_pass') }}</span><input type="password" name="AUTO_BOOK_PASSWORD" placeholder="{{ _('user_form_pw_keep') if ab.password else '' }}" autocomplete="new-password"></label>
+      <label class="account-field"><span>{{ _('user_form_ab_payment') }}</span>
+        <select name="AUTO_BOOK_PAYMENT_METHOD">
+          {% for v, l in [('idealcheckout_ideal', 'user_form_ab_ideal'), ('idealcheckout_visa', 'user_form_ab_visa'), ('idealcheckout_mastercard', 'user_form_ab_mc')] %}<option value="{{ v }}"{% if ab.payment_method == v %} selected{% endif %}>{{ _(l) }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'autobook' and row.key == 'xior' %}
+    <p class="account-help">{{ _('user_form_xior_note') }}</p>
+    {% set accts = ab.xior_accounts or {} %}
+    <div id="xior-accts" class="xior-list">
+      {% for b in xior_buildings if b.key in accts %}
+      <div class="xior-row" data-key="{{ b.key }}">
+        <input type="hidden" name="AUTO_BOOK_XIOR_KEY" value="{{ b.key }}">
+        <span class="xior-bldg" title="{{ b.key }}">{{ b.display }}</span>
+        <input type="email" name="AUTO_BOOK_XIOR_EMAIL" value="{{ accts[b.key].email }}" placeholder="{{ _('user_form_ab_email') }}" aria-label="{{ b.display }} {{ _('user_form_ab_email') }}">
+        <input type="password" name="AUTO_BOOK_XIOR_PW" placeholder="{{ _('user_form_pw_keep') if accts[b.key].password else _('user_form_ab_pass') }}" autocomplete="new-password" aria-label="{{ b.display }} {{ _('user_form_ab_pass') }}">
+        <button type="button" class="xior-del" onclick="removeXiorRow(this)">{{ _('user_form_xior_remove') }}</button>
       </div>
+      {% endfor %}
+    </div>
+    <div class="xior-add">
+      <select id="xior-add-select" aria-label="{{ _('user_form_xior_pick') }}">
+        <option value="">{{ _('user_form_xior_pick') }}</option>
+        {% for b in xior_buildings if b.key not in accts %}<option value="{{ b.key }}" data-display="{{ b.display }}">{{ b.display }}</option>{% endfor %}
+      </select>
+      <button type="button" onclick="addXiorRow()">{{ _('user_form_xior_add') }}</button>
+    </div>
+    {% if not xior_buildings %}<p class="account-help">{{ _('user_form_xior_none_monitored') }}</p>{% endif %}
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'autobook' and row.key in ('ourdomain', 'ourcampus') %}
+    {% set key = row.key | upper %}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_ab_email') }}</span><input type="email" name="AUTO_BOOK_{{ key }}_EMAIL" value="{{ ab[row.key ~ '_email'] }}"></label>
+      <label class="account-field"><span>{{ _('user_form_ab_pass') }}</span><input type="password" name="AUTO_BOOK_{{ key }}_PASSWORD" placeholder="{{ _('user_form_pw_keep') if ab[row.key ~ '_password'] else '' }}" autocomplete="new-password"></label>
+    </div>
+    {# OurCampus 不在 monitor._AUTO_BOOK_SOURCES 里：填了凭据也不会自动跑，入口只为验证方便 #}
+    <p class="account-help">{{ _('badge_wip') }} · {{ '申请人信息在「申请人档案」分组里填写。' if lang == 'zh' else 'Applicant details are under Applicant profile.' }}</p>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'autobook' and row.key == 'plaza' %}
+    <div class="account-fields">
+      <label class="account-field"><span>{{ _('user_form_ab_username') }}</span><input type="text" name="AUTO_BOOK_PLAZA_USERNAME" value="{{ ab.plaza_username }}" autocomplete="off"></label>
+      <label class="account-field"><span>{{ _('user_form_ab_pass') }}</span><input type="password" name="AUTO_BOOK_PLAZA_PASSWORD" placeholder="{{ _('user_form_pw_keep') if ab.plaza_password else '' }}" autocomplete="new-password"></label>
+    </div>
+    {# 单独的开关：Plaza 的应征一次提交就落地，填了凭据不等于授权自动应征 #}
+    {{ ui.switch('AUTO_BOOK_PLAZA_ENABLED', _('user_form_ab_plaza_on'), ab.plaza_enabled) }}
+    {{ ui.save_actions(label=save_label) }}
 
-      {# 过滤条件放在最上面：先决定「抢哪些房」，再配「用哪个账号去抢」。
-         不是平台面板，所以不用 .ab-platform（测试按它数平台面板），样式共用。 #}
-      <div class="ab-filter">
-        <div class="ab-platform-head">
-          <span class="ab-platform-name">{{ _('user_form_ab_filter') }}</span>
-          <button type="button" class="btn btn-ghost btn-sm ml-auto" onclick="copyNotifFilters()" style="font-size:12px;">
-            <i class="bi bi-copy mr-1"></i>{{ _('user_form_copy_filter') }}
-          </button>
-        </div>
-        {% set ab_lf = ab.listing_filter if ab else none %}
-        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-          <div class="form-group"><label class="form-label">{{ _('user_form_max_rent') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MAX_RENT" value="{{ ab_lf.max_rent | int if ab_lf and ab_lf.max_rent else '' }}"></div>
-          <div class="form-group"><label class="form-label">{{ _('user_form_min_area') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_AREA" value="{{ ab_lf.min_area | int if ab_lf and ab_lf.min_area else '' }}"></div>
-          <div class="form-group"><label class="form-label">{{ _('user_form_min_floor') }}</label><input type="number" class="form-input" name="AUTO_BOOK_MIN_FLOOR" value="{{ ab_lf.min_floor if ab_lf and ab_lf.min_floor is not none else '' }}"></div>
-          <div class="form-group" style="grid-column:span 2;">
-            <label class="form-label">{{ _('user_form_occupancy') }}</label>
-            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_occ = ab_lf.allowed_occupancy if ab_lf else [] %}{% for val, label in occupancy_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OCCUPANCY" value="{{ val }}"{% if val in ab_occ %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
-          <div class="form-group" style="grid-column:span 2;">
-            <label class="form-label">{{ _('user_form_types') }}</label>
-            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_type = ab_lf.allowed_types if ab_lf else [] %}{% for val, label in type_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TYPES" value="{{ val }}"{% if val in ab_type %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
-        </div>
-        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_cities') }}</label>
-            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_city = ab_lf.allowed_cities if ab_lf else [] %}{% for c in city_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CITIES" value="{{ c }}"{% if c in ab_city %} checked{% endif %}> {{ c }}</label>{% endfor %}</div></div></div>
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_sources') }}</label>
-            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_src = ab_lf.allowed_sources if ab_lf else [] %}{% for key, label in source_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_SOURCES" value="{{ key }}"{% if key in ab_src %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_hoods') }}</label>
-            <div class="multi-select" id="ms-ab-neighborhood">
-              <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-              <div class="ms-dropdown" id="ab-neighborhood-dropdown">{% set ab_nbhd = ab_lf.allowed_neighborhoods if ab_lf else [] %}{% for n in ab_nbhd %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}</div>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_buildings') }}</label>
-            <div class="multi-select" id="ms-ab-building">
-              <div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div>
-              <div class="ms-dropdown" id="ab-building-dropdown">{% set ab_bld = ab_lf.allowed_buildings if ab_lf else [] %}{% for b in ab_bld %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_BUILDINGS" value="{{ b }}" checked> {{ b }}</label>{% endfor %}</div>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_offer') }}</label>
-            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_contract = ab_lf.allowed_contract if ab_lf else [] %}{% for val, label in contract_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_CONTRACT" value="{{ val }}"{% if val in ab_contract %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_tenant') }}</label>
-            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_tenant = ab_lf.allowed_tenant if ab_lf else [] %}{% for val, label in tenant_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_TENANT" value="{{ val }}"{% if val in ab_tenant %} checked{% endif %}> {{ label }}</label>{% endfor %}</div></div></div>
-        </div>
-        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-top:8px;">
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_promo') }}</label>
-            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_offer = ab_lf.allowed_offer if ab_lf else [] %}{% for o in offer_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_OFFER" value="{{ o }}"{% if o in ab_offer %} checked{% endif %}> {{ o }}</label>{% endfor %}</div></div></div>
-          <div class="form-group">
-            <label class="form-label">{{ _('filter_finishing') }}</label>
-            <div class="multi-select"><div class="ms-trigger form-input" tabindex="0"><span class="ms-text">{{ _('multi_select_placeholder') }}</span><span class="ms-arrow">▾</span></div><div class="ms-dropdown">{% set ab_fin = ab_lf.allowed_finishing if ab_lf else [] %}{% for f in finishing_options %}<label class="ms-option"><input type="checkbox" name="AUTO_BOOK_ALLOWED_FINISHING" value="{{ f }}"{% if f in ab_fin %} checked{% endif %}> {{ f }}</label>{% endfor %}</div></div></div>
-          <div class="form-group">
-            <label class="form-label">{{ _('filter_energy') }}</label>
-            {% set ab_en = ab_lf.allowed_energy if ab_lf else '' %}
-            <select name="AUTO_BOOK_ALLOWED_ENERGY" class="form-select" style="font-size:14px;">
-              <option value="">{{ _('filter_min_energy') }}</option>
-              {% for e in energy_options %}
-                <option value="{{ e }}" {% if e == ab_en %}selected{% endif %}>{{ e }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="ab-platform">
-        <div class="ab-platform-head">
-          <span class="badge badge-neutral">H2S</span>
-          <span class="ab-platform-name">{{ _('user_form_ab_h2s') }}</span>
-        </div>
-        <!-- ── H2S ── -->
-        <div class="form-row mb-3" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-          <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_EMAIL" value="{{ ab.email if ab else '' }}"></div>
-          <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.password else '' }}" autocomplete="new-password"></div>
-          <div class="form-group">
-            <label class="form-label">{{ _('user_form_ab_payment') }}</label>
-            {% set cur_pm = ab.payment_method if ab else 'idealcheckout_ideal' %}
-            <select class="form-select" name="AUTO_BOOK_PAYMENT_METHOD">
-              <option value="idealcheckout_ideal" {% if cur_pm=='idealcheckout_ideal' %}selected{% endif %}>{{ _('user_form_ab_ideal') }}</option>
-              <option value="idealcheckout_visa" {% if cur_pm=='idealcheckout_visa' %}selected{% endif %}>{{ _('user_form_ab_visa') }}</option>
-              <option value="idealcheckout_mastercard" {% if cur_pm=='idealcheckout_mastercard' %}selected{% endif %}>{{ _('user_form_ab_mc') }}</option>
-            </select>
-          </div>
-        </div>
-
-      </div>
-
-      <div class="ab-platform">
-        <div class="ab-platform-head">
-          <span class="badge badge-neutral">Xior</span>
-          <span class="ab-platform-name">{{ _('user_form_ab_xior') }}</span>
-          <span class="badge badge-warning text-xs">{{ _('badge_wip') }}</span>
-        </div>
-        <!-- ── Xior（RENTCafe）：一栋楼一个账号 ── -->
-        <div class="xior-note">{{ _('user_form_xior_note') }}</div>
-
-        <div id="xior-accts" class="mb-2">
-          {% set accts = (ab.xior_accounts if ab else {}) or {} %}
-          {% for b in xior_buildings %}
-            {% if b.key in accts %}
-            <div class="xior-row" data-key="{{ b.key }}">
-              <input type="hidden" name="AUTO_BOOK_XIOR_KEY" value="{{ b.key }}">
-              <span class="xior-bldg" title="{{ b.key }}">{{ b.display }}</span>
-              <input type="email" class="form-input" name="AUTO_BOOK_XIOR_EMAIL"
-                     value="{{ accts[b.key].email }}" placeholder="{{ _('user_form_ab_email') }}">
-              <input type="password" class="form-input" name="AUTO_BOOK_XIOR_PW"
-                     placeholder="{{ _('user_form_pw_keep') if is_edit and accts[b.key].password else _('user_form_ab_pass') }}"
-                     autocomplete="new-password">
-              <button type="button" class="btn btn-ghost btn-sm xior-del"
-                      onclick="removeXiorRow(this)" title="{{ _('user_form_xior_remove') }}">✕</button>
-            </div>
-            {% endif %}
-          {% endfor %}
-        </div>
-
-        <div class="xior-add mb-3">
-          <select id="xior-add-select" class="form-select">
-            <option value="">{{ _('user_form_xior_pick') }}</option>
-            {% for b in xior_buildings %}
-              {% if b.key not in accts %}
-              <option value="{{ b.key }}" data-display="{{ b.display }}">{{ b.display }}</option>
-              {% endif %}
-            {% endfor %}
-          </select>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="addXiorRow()">
-            <i class="bi bi-plus-lg mr-1"></i>{{ _('user_form_xior_add') }}
-          </button>
-          {% if not xior_buildings %}
-          <span class="text-xs text-tertiary">{{ _('user_form_xior_none_monitored') }}</span>
-          {% endif %}
-        </div>
-
-      </div>
-
-      <div class="ab-platform">
-        <div class="ab-platform-head">
-          <span class="badge badge-neutral">OurDomain</span>
-          <span class="ab-platform-name">{{ _('user_form_ab_ourdomain') }}</span>
-          <span class="badge badge-warning text-xs">{{ _('badge_wip') }}</span>
-        </div>
-        <!-- ── OurDomain（RENTCafe）── -->
-        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-          <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_OURDOMAIN_EMAIL" value="{{ ab.ourdomain_email if ab else '' }}"></div>
-          <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_OURDOMAIN_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.ourdomain_password else '' }}" autocomplete="new-password"></div>
-        </div>
-
-      </div>
-
-      <div class="ab-platform">
-        <div class="ab-platform-head">
-          <span class="badge badge-neutral">OurCampus</span>
-          <span class="ab-platform-name">{{ _('user_form_ab_ourcampus') }}</span>
-          <span class="badge badge-warning text-xs">{{ _('badge_wip') }}</span>
-        </div>
-        <!-- ── OurCampus（RENTCafe，与 OurDomain 同一套流程，另一个租户）──
-             填了凭据也不会自动跑：ourcampus 不在 monitor._AUTO_BOOK_SOURCES 里。
-             入口先放出来，是为了验证时不必每次在终端里手打账号。 -->
-        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-          <div class="form-group"><label class="form-label">{{ _('user_form_ab_email') }}</label><input type="email" class="form-input" name="AUTO_BOOK_OURCAMPUS_EMAIL" value="{{ ab.ourcampus_email if ab else '' }}"></div>
-          <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_OURCAMPUS_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.ourcampus_password else '' }}" autocomplete="new-password"></div>
-        </div>
-
-      </div>
-
-      <div class="ab-platform">
-        <div class="ab-platform-head">
-          <span class="badge badge-neutral">Plaza</span>
-          <span class="ab-platform-name">{{ _('user_form_ab_plaza') }}</span>
-        </div>
-        <!-- ── Plaza（Zig/Hexia）：用户名登录，不是邮箱 ── -->
-        <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-          <div class="form-group"><label class="form-label">{{ _('user_form_ab_username') }}</label><input type="text" class="form-input" name="AUTO_BOOK_PLAZA_USERNAME" value="{{ ab.plaza_username if ab else '' }}" autocomplete="off"></div>
-          <div class="form-group"><label class="form-label">{{ _('user_form_ab_pass') }}</label><input type="password" class="form-input" name="AUTO_BOOK_PLAZA_PASSWORD" placeholder="{{ _('user_form_pw_keep') if is_edit and ab and ab.plaza_password else '' }}" autocomplete="new-password"></div>
-        </div>
-        <!-- 单独的开关：Plaza 的应征一次提交就落地，填了凭据不等于授权自动应征 -->
-        <label class="toggle mt-2">
-          <input type="checkbox" id="ab_plaza_on" {% if ab and ab.plaza_enabled %}checked{% endif %}
-                 onchange="document.getElementById('ab_plaza_on_h').value=this.checked?'true':'false'">
-          <span class="toggle-track"></span>{{ _('user_form_ab_plaza_on') }}
-        </label>
-        <input type="hidden" id="ab_plaza_on_h" name="AUTO_BOOK_PLAZA_ENABLED" value="{{ 'true' if ab and ab.plaza_enabled else 'false' }}">
-
-      </div>
-
-      <div class="ab-platform ab-platform-shared">
-        <div class="ab-platform-head">
-          <span class="badge badge-neutral">Xior + OurDomain</span>
-          <span class="ab-platform-name">{{ _('user_form_profile') }}</span>
-          <span class="text-xs text-tertiary">{{ _('user_form_profile_scope') }}</span>
-        </div>
-        <!-- ── 申请人档案（RENTCafe Applicant Info 自动填）──
-             按表单上的分组排：姓名 / 国籍与证件 / 住址 / 学业 / 背景调查。
-             字段 name 与 app/forms/user_form.parse_applicant_profile 一一对应，改排版别改名。 -->
-        {% set prof = (ab.applicant_profile if ab else None) %}
-
-        {% macro pf_text(label, name, value, required=False, span=False, type='text', example='', autocomplete='') %}
-          <label class="form-group{% if span %} prof-span2{% endif %}">
-            <span class="form-label">{{ _(label) }}{% if required %} <span class="prof-req">*</span>{% endif %}</span>
-            <input type="{{ type }}" class="form-input" name="{{ name }}" value="{{ value }}"
-                   {% if example %}placeholder="{{ _('profile_eg') }}{{ example }}"{% endif %}
-                   {% if autocomplete %}autocomplete="{{ autocomplete }}"{% endif %}>
-          </label>
-        {% endmacro %}
-        {% macro pf_select(label, name, current, options, required=False) %}
-          <label class="form-group">
-            <span class="form-label">{{ _(label) }}{% if required %} <span class="prof-req">*</span>{% endif %}</span>
-            <select class="form-select" name="{{ name }}">
-              <option value=""></option>
-              {% for v in options %}
-              <option value="{{ v }}" {% if current == v %}selected{% endif %}>{{ v }}</option>
-              {% endfor %}
-            </select>
-          </label>
-        {% endmacro %}
-
-        <section class="prof-sec">
-          <h4 class="prof-sec-title">{{ _('profile_sec_name') }}</h4>
-          <div class="prof-grid">
-            {{ pf_select('profile_title', 'AUTO_BOOK_PROFILE_TITLE', prof.title if prof else '', applicant_titles) }}
-            {{ pf_text('profile_first_name', 'AUTO_BOOK_PROFILE_FIRST_NAME', prof.first_name if prof else '', required=True) }}
-            {{ pf_text('profile_last_name', 'AUTO_BOOK_PROFILE_LAST_NAME', prof.last_name if prof else '', required=True) }}
-            <div class="form-group">
-              <label class="form-label" for="prof_middle">{{ _('profile_middle_name') }}</label>
-              <input id="prof_middle" type="text" class="form-input" name="AUTO_BOOK_PROFILE_MIDDLE_NAME"
-                     value="{{ prof.middle_name if prof else '' }}">
-              <label class="prof-check prof-subcheck">
-                <input type="checkbox" name="AUTO_BOOK_PROFILE_NO_MIDDLE_NAME" value="true"
-                       {% if prof and prof.no_middle_name %}checked{% endif %}>
-                <span>{{ _('profile_no_middle_name') }}</span>
-              </label>
-            </div>
-            {{ pf_select('profile_gender', 'AUTO_BOOK_PROFILE_GENDER', prof.gender if prof else '', applicant_genders, required=True) }}
-            {{ pf_text('profile_dob', 'AUTO_BOOK_PROFILE_DOB', prof.date_of_birth if prof else '', required=True, type='date') }}
-            {{ pf_text('profile_phone', 'AUTO_BOOK_PROFILE_PHONE', prof.phone if prof else '', example='+31 6 12345678', type='tel') }}
-          </div>
-        </section>
-
-        <section class="prof-sec">
-          <h4 class="prof-sec-title">{{ _('profile_sec_identity') }}</h4>
-          <div class="prof-grid">
-            {{ pf_text('profile_nationality', 'AUTO_BOOK_PROFILE_NATIONALITY', prof.nationality if prof else '', required=True, example='China') }}
-            {{ pf_text('profile_place_of_birth', 'AUTO_BOOK_PROFILE_PLACE_OF_BIRTH', prof.place_of_birth if prof else '', required=True, example='China') }}
-            {{ pf_text('profile_id_number', 'AUTO_BOOK_PROFILE_ID_NUMBER', prof.id_number if prof else '', required=True, autocomplete='off') }}
-            {{ pf_text('profile_id_country', 'AUTO_BOOK_PROFILE_ID_COUNTRY', prof.id_country if prof else '', required=True, example='China') }}
-          </div>
-        </section>
-
-        <section class="prof-sec">
-          <h4 class="prof-sec-title">{{ _('profile_sec_address') }}</h4>
-          <div class="prof-grid">
-            {{ pf_text('profile_address', 'AUTO_BOOK_PROFILE_ADDRESS', prof.address if prof else '', required=True, span=True, example='Dorpsstraat 1') }}
-            {{ pf_text('profile_address_line2', 'AUTO_BOOK_PROFILE_ADDRESS_LINE2', prof.address_line2 if prof else '', span=True) }}
-            {{ pf_text('profile_postcode', 'AUTO_BOOK_PROFILE_POSTCODE', prof.postcode if prof else '', required=True, example='5612 AB') }}
-            {{ pf_text('profile_city', 'AUTO_BOOK_PROFILE_CITY', prof.city if prof else '', required=True, example='Eindhoven') }}
-            {{ pf_text('profile_country', 'AUTO_BOOK_PROFILE_COUNTRY', prof.country if prof else 'Netherlands', required=True) }}
-            {{ pf_select('profile_housing_type', 'AUTO_BOOK_PROFILE_HOUSING_TYPE', prof.housing_type if prof else '', ['Rent', 'Own', 'Other'], required=True) }}
-          </div>
-        </section>
-
-        <section class="prof-sec">
-          <h4 class="prof-sec-title">{{ _('profile_sec_study') }}</h4>
-          <div class="prof-grid">
-            {{ pf_text('profile_university', 'AUTO_BOOK_PROFILE_UNIVERSITY', prof.university if prof else '', required=True, span=True, example='TU Eindhoven') }}
-            {{ pf_text('profile_student_number', 'AUTO_BOOK_PROFILE_STUDENT_NUMBER', prof.student_number if prof else '') }}
-            {{ pf_text('profile_min_lease_term', 'AUTO_BOOK_PROFILE_MIN_LEASE_TERM', prof.min_lease_term if prof else '', example='12') }}
-          </div>
-        </section>
-
-        {# 背景调查三问。和上面那些字段有本质区别：这是关于你本人的**事实陈述**，
-           系统不会替你答——留空就不提交，宁可存不上申请。 #}
-        <section class="prof-sec">
-          <h4 class="prof-sec-title">{{ _('profile_sec_screening') }}</h4>
-          <div class="prof-grid prof-grid-3">
-            {% for name, label in [
-                 ('EVER_EVICTED', 'profile_ever_evicted'),
-                 ('EVER_CONVICTED', 'profile_ever_convicted'),
-                 ('CRIMINAL_CHARGES', 'profile_criminal_charges')] %}
-            {{ pf_select(label, 'AUTO_BOOK_PROFILE_' ~ name, (prof|attr(name.lower())) if prof else '', ['No', 'Yes'], required=True) }}
-            {% endfor %}
-          </div>
-        </section>
-
-        {# 证件。平台在这份文档到位前**拒绝保存申请表的任何内容**，而自动预订是
-           异步触发的，所以文件必须先存在系统里——没有「用完即走的透传」。
-           与授权一起排成「左说明、右控件」的两行，和上面几组同一种版式。 #}
-        <section class="prof-sec">
-          <h4 class="prof-sec-title">{{ _('profile_sec_docs') }}</h4>
-
-          <div class="prof-row prof-row-file">
-            <div class="prof-row-main">
-              <div class="prof-row-label">{{ _('profile_id_doc') }} <span class="prof-req">*</span></div>
-              <div class="prof-hint">{{ _('profile_id_doc_hint') }}</div>
-              {% if id_doc %}
-              <div class="prof-file-current">
-                <span><i class="bi bi-file-earmark-check"></i> {{ id_doc[0] }}（{{ '%.1f'|format(id_doc[1] / 1048576) }} MB）</span>
-                <label class="prof-check">
-                  <input type="checkbox" name="AUTO_BOOK_ID_DOC_DELETE" value="true">
-                  <span>{{ _('profile_id_doc_delete') }}</span>
-                </label>
-              </div>
-              {% endif %}
-              <div id="prof-file-picked" class="prof-file-picked" hidden></div>
-            </div>
-            <label class="btn btn-ghost btn-sm prof-file-btn">
-              <i class="bi bi-upload"></i>
-              <span>{{ _('profile_id_doc_replace') if id_doc else _('profile_id_doc_choose') }}</span>
-              <input type="file" class="prof-file-input" name="AUTO_BOOK_ID_DOC"
-                     accept=".gif,.jpeg,.jpg,.png,.bmp,.pdf,.doc,.docx,.xlsx"
-                     onchange="showPickedIdDoc(this)">
-            </label>
-          </div>
-
-          <div class="prof-row">
-            <div class="prof-row-main">
-              <div class="prof-row-label" id="prof-consent-label">{{ _('profile_consent_label') }}</div>
-              {% if ab and ab.has_screening_consent() %}
-              <div class="prof-hint prof-when">{{ _('profile_consent_given_at') }}
-                {{ ab.screening_consent_at | local_time }}</div>
-              {% endif %}
-            </div>
-            <label class="toggle prof-toggle">
-              <input type="checkbox" name="AUTO_BOOK_SCREENING_CONSENT" value="true"
-                     aria-labelledby="prof-consent-label"
-                     {% if ab and ab.has_screening_consent() %}checked{% endif %}>
-              <span class="toggle-track"></span>
-            </label>
-          </div>
-        </section>
-
-        {% if prof and not prof.is_complete() %}
-        {# 缺项用表单上的字段名说，不用代码里的 first_name——用户在页面上找不到 first_name。 #}
-        {% set missing_labels = {
-             'first_name': 'profile_first_name', 'last_name': 'profile_last_name',
-             'middle_name': 'profile_middle_name', 'gender': 'profile_gender',
-             'date_of_birth': 'profile_dob', 'nationality': 'profile_nationality',
-             'place_of_birth': 'profile_place_of_birth', 'id_number': 'profile_id_number',
-             'address': 'profile_address', 'postcode': 'profile_postcode', 'city': 'profile_city',
-             'country': 'profile_country', 'housing_type': 'profile_housing_type',
-             'ever_evicted': 'profile_ever_evicted', 'ever_convicted': 'profile_ever_convicted',
-             'criminal_charges': 'profile_criminal_charges'} %}
-        <div class="prof-incomplete mb-3">
-          <div><i class="bi bi-exclamation-triangle mr-1"></i>{{ _('profile_incomplete') }}</div>
-          <ul class="prof-missing">
-            {% for f in prof.missing_fields() %}
-            <li>{{ _(missing_labels[f]) if f in missing_labels else f }}</li>
-            {% endfor %}
-          </ul>
+  {# ── 申请人档案 ─────────────────────────────────── #}
+  {% elif s.key == 'profile' and row.key == 'name' %}
+    <div class="account-fields">
+      {{ pf_select('profile_title', 'TITLE', prof.title, applicant_titles) }}
+      {{ pf_text('profile_first_name', 'FIRST_NAME', prof.first_name, required=true) }}
+      {{ pf_text('profile_last_name', 'LAST_NAME', prof.last_name, required=true) }}
+      {{ pf_text('profile_middle_name', 'MIDDLE_NAME', prof.middle_name) }}
+    </div>
+    <label class="account-check"><input type="checkbox" name="AUTO_BOOK_PROFILE_NO_MIDDLE_NAME" value="true"{% if prof.no_middle_name %} checked{% endif %}> {{ _('profile_no_middle_name') }}</label>
+    <div class="account-fields">
+      {{ pf_select('profile_gender', 'GENDER', prof.gender, applicant_genders, required=true) }}
+      {{ pf_text('profile_dob', 'DOB', prof.date_of_birth, required=true, type='date') }}
+      {{ pf_text('profile_phone', 'PHONE', prof.phone, type='tel', example='+31 6 12345678') }}
+    </div>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'profile' and row.key == 'identity' %}
+    <div class="account-fields">
+      {{ pf_text('profile_nationality', 'NATIONALITY', prof.nationality, required=true, example='China') }}
+      {{ pf_text('profile_place_of_birth', 'PLACE_OF_BIRTH', prof.place_of_birth, required=true, example='China') }}
+      {{ pf_text('profile_id_number', 'ID_NUMBER', prof.id_number, required=true, autocomplete='off') }}
+      {{ pf_text('profile_id_country', 'ID_COUNTRY', prof.id_country, required=true, example='China') }}
+    </div>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'profile' and row.key == 'address' %}
+    <div class="account-fields">
+      {{ pf_text('profile_address', 'ADDRESS', prof.address, required=true, example='Dorpsstraat 1') }}
+      {{ pf_text('profile_address_line2', 'ADDRESS_LINE2', prof.address_line2) }}
+      {{ pf_text('profile_postcode', 'POSTCODE', prof.postcode, required=true, example='5612 AB') }}
+      {{ pf_text('profile_city', 'CITY', prof.city, required=true, example='Eindhoven') }}
+      {{ pf_text('profile_country', 'COUNTRY', 'Netherlands' if is_new else prof.country, required=true) }}
+      {{ pf_select('profile_housing_type', 'HOUSING_TYPE', prof.housing_type, ['Rent', 'Own', 'Other'], required=true) }}
+    </div>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'profile' and row.key == 'study' %}
+    <div class="account-fields">
+      {{ pf_text('profile_university', 'UNIVERSITY', prof.university, required=true, example='TU Eindhoven') }}
+      {{ pf_text('profile_student_number', 'STUDENT_NUMBER', prof.student_number) }}
+      {{ pf_text('profile_min_lease_term', 'MIN_LEASE_TERM', prof.min_lease_term, example='12') }}
+    </div>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'profile' and row.key == 'screening' %}
+    {# 关于本人的事实陈述，系统不会替他答——留空就不提交申请 #}
+    <p class="account-help">{{ _('profile_sec_screening') }}</p>
+    <div class="account-fields">
+      {% for key, label in [('EVER_EVICTED', 'profile_ever_evicted'), ('EVER_CONVICTED', 'profile_ever_convicted'), ('CRIMINAL_CHARGES', 'profile_criminal_charges')] %}
+      {{ pf_select(label, key, prof | attr(key.lower()), ['No', 'Yes'], required=true) }}
+      {% endfor %}
+    </div>
+    {{ ui.save_actions(label=save_label) }}
+  {% elif s.key == 'profile' and row.key == 'docs' %}
+    <div class="prof-row prof-row-file">
+      <div class="prof-row-main">
+        <div class="prof-row-label">{{ _('profile_id_doc') }} <span class="prof-req">*</span></div>
+        <div class="prof-hint">{{ _('profile_id_doc_hint') }}</div>
+        {% if id_doc %}
+        <div class="prof-file-current">
+          <span>{{ id_doc[0] }}（{{ '%.1f'|format(id_doc[1] / 1048576) }} MB）</span>
+          <label class="account-check"><input type="checkbox" name="AUTO_BOOK_ID_DOC_DELETE" value="true"> {{ _('profile_id_doc_delete') }}</label>
         </div>
         {% endif %}
-
+        <div id="prof-file-picked" class="prof-file-picked" hidden></div>
       </div>
-
-      <div class="alert alert-info mt-4">
-        <i class="bi bi-shield-check mr-2" style="color:var(--success);"></i>{{ _('user_form_ab_safety') }}
-      </div>
+      <label class="prof-file-btn">
+        <span>{{ _('profile_id_doc_replace') if id_doc else _('profile_id_doc_choose') }}</span>
+        <input type="file" class="prof-file-input" name="AUTO_BOOK_ID_DOC"
+               accept=".gif,.jpeg,.jpg,.png,.bmp,.pdf,.doc,.docx,.xlsx"
+               onchange="showPickedIdDoc(this)">
+      </label>
     </div>
-  </div>
-  {% endif %}{# end is_admin → Step 4 #}
+    <div class="prof-row">
+      <div class="prof-row-main">
+        <div class="prof-row-label" id="prof-consent-label">{{ _('profile_consent_label') }}</div>
+        {% if ab.has_screening_consent() %}<div class="prof-hint prof-when">{{ _('profile_consent_given_at') }} {{ ab.screening_consent_at | local_time }}</div>{% endif %}
+      </div>
+      <label class="account-switch prof-toggle">
+        <input type="checkbox" name="AUTO_BOOK_SCREENING_CONSENT" value="true" aria-labelledby="prof-consent-label"{% if ab.has_screening_consent() %} checked{% endif %}>
+        <span class="toggle-track" aria-hidden="true" data-off="{{ '关' if lang == 'zh' else 'Off' }}" data-on="{{ '开' if lang == 'zh' else 'On' }}"></span>
+      </label>
+    </div>
+    {{ ui.save_actions(label=save_label) }}
+  {% endif %}
 
-  <div class="flex items-center gap-2 flex-wrap">
-    <button type="submit" class="btn btn-primary">
-      <i class="bi bi-save mr-1"></i>{{ _('user_form_save') if is_edit else _('user_form_create') }}
-    </button>
-    <a href="{{ url_for('index') if is_user else url_for('users_list') }}" class="btn btn-ghost">{{ _('user_form_cancel') }}</a>
-    {% if is_edit %}
-    <button type="button" class="btn btn-ghost btn-sm" id="testBtn" onclick="testNotify('{{ u.id }}', this)">
-      <i class="bi bi-send mr-1"></i>{{ _('user_form_test') }}
-    </button>
-    <div id="testResult" class="w-full mt-2" style="display:none;"></div>
-    <span class="ml-auto text-xs text-secondary"><i class="bi bi-info-circle mr-1"></i>{{ _('user_form_reload_hint') }}</span>
-    {% endif %}
-  </div>
-
+  {% endcall %}
+  {% endfor %}{% endfor %}
+  </section>
 </form>
-
-<style>
-.xior-note { font-size: 11.5px; color: var(--text2); margin-bottom: 8px; line-height: 1.5; }
-.xior-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1.1fr) minmax(140px, 1.4fr) minmax(120px, 1fr) auto;
-  gap: 8px; align-items: center; margin-bottom: 6px;
-}
-.xior-bldg {
-  font-size: 12px; font-weight: 500; color: var(--text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.xior-row .form-input { margin: 0; }
-.xior-del { color: var(--danger); padding: 4px 8px; line-height: 1; }
-.xior-add { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.xior-add .form-select { width: auto; min-width: 190px; margin: 0; }
-.prof-sec { margin-bottom: 18px; }
-.prof-sec-title {
-  font-size: 12px; font-weight: 650; color: var(--text2); letter-spacing: .02em;
-  margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border);
-}
-/* 固定列数而不是 auto-fit：auto-fit 在宽屏上会排出 6 列，同一行里标签和框对不齐，
-   分组也看不出来（2026-09-15 截图就是这个样子）。 */
-.prof-grid {
-  display: grid; gap: 12px 14px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-.prof-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.prof-grid .form-group { margin: 0; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.prof-grid .form-label { font-size: 12.5px; margin: 0; }
-.prof-span2 { grid-column: span 2; }
-.prof-req { color: var(--danger); font-weight: 600; }
-.prof-check { display: flex; flex-direction: row !important; align-items: center; gap: 6px !important; font-size: 12.5px; }
-.prof-subcheck { color: var(--text2); margin-top: 2px; }
-/* 证件 / 授权：左说明、右控件的行，行间一条细分隔线——不再用带色条的卡片 */
-.prof-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px 20px;
-  padding: 12px 0; border-top: 1px solid var(--border);
-}
-.prof-sec-title + .prof-row { border-top: none; padding-top: 2px; }
-.prof-row-main { min-width: 0; flex: 1; }
-.prof-row-label { font-size: 13.5px; font-weight: 550; color: var(--text); }
-.prof-hint { font-size: 12px; color: var(--text2); line-height: 1.5; margin-top: 3px; }
-.prof-when { color: var(--text3); font-variant-numeric: tabular-nums; }
-.prof-file-current, .prof-file-picked:not([hidden]) {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 8px; font-size: 13px;
-}
-.prof-file-current .bi { color: var(--success, #2e9e5b); }
-.prof-file-picked .bi { color: var(--accent); }
-/* 原生文件框藏起来但保留可聚焦：键盘仍能 Tab 到它，焦点框画在外面的按钮上 */
-.prof-file-btn { position: relative; flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.prof-file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.prof-file-btn:focus-within { box-shadow: 0 0 0 2px var(--accent); }
-.prof-toggle { flex-shrink: 0; }
-.prof-incomplete {
-  font-size: 12.5px; color: var(--warning, #f0a040);
-  background: var(--bg2); border: 1px solid var(--border);
-  border-radius: 6px; padding: 8px 12px;
-}
-.prof-missing {
-  display: flex; flex-wrap: wrap; gap: 4px 6px; list-style: none; margin: 6px 0 0; padding: 0;
-}
-.prof-missing li {
-  color: var(--text); background: var(--surface); border: 1px solid var(--border);
-  border-radius: 999px; padding: 1px 8px; font-size: 12px;
-}
-@media (max-width: 1000px) {
-  .prof-grid, .prof-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 560px) {
-  .prof-grid, .prof-grid-3 { grid-template-columns: minmax(0, 1fr); }
-  .prof-span2 { grid-column: auto; }
-  .prof-row { align-items: flex-start; }
-  /* 按钮在右边会把说明挤成一个字宽的窄列：窄屏换到说明下面 */
-  .prof-row-file { flex-wrap: wrap; }
-  .prof-row-file .prof-row-main { flex-basis: 100%; }
-}
-@media (max-width: 640px) {
-  .xior-row { grid-template-columns: 1fr auto; }
-  .xior-bldg { grid-column: 1 / -1; }
-}
-</style>
+</section>
 {% endblock %}
 
 {% block scripts %}
+<script src="{{ asset('account.js') }}"></script>
 <script>
-// ── 证件：原生文件框藏在按钮里，选中后把文件名写出来，否则用户看不到选了什么 ──
+// 证件：原生文件框藏在按钮里，选中后把文件名写出来，否则看不到选了什么
 function showPickedIdDoc(input) {
   var out = document.getElementById('prof-file-picked');
   if (!out) return;
   var f = input.files && input.files[0];
-  if (!f) { out.hidden = true; out.textContent = ''; return; }
-  out.textContent = '';
-  var icon = document.createElement('i');
-  icon.className = 'bi bi-file-earmark-arrow-up';
-  var text = document.createElement('span');
-  text.textContent = ' ' + {{ _('profile_id_doc_picked') | tojson }} + f.name +
-    '（' + (f.size / 1048576).toFixed(1) + ' MB）';
-  out.appendChild(icon); out.appendChild(text);
-  out.hidden = false;
+  out.hidden = !f;
+  out.textContent = f ? {{ _('profile_id_doc_picked') | tojson }} + f.name + '（' + (f.size / 1048576).toFixed(1) + ' MB）' : '';
 }
-// ── Xior 按楼栋账号 ──
-// Xior 每栋楼是独立的 RENTCafe 门户、独立账号，所以凭据一栋楼一套。
-// 下拉里只有「监控中且还没配」的楼；配上的从下拉移走，删掉再放回去。
+
+// Xior 每栋楼一个账号。下拉里只有「监控中且还没配」的楼；配上的移出下拉，删掉再放回去。
 function addXiorRow() {
   var sel = document.getElementById('xior-add-select');
   var opt = sel.options[sel.selectedIndex];
   if (!sel.value || !opt) return;
-
   var row = document.createElement('div');
   row.className = 'xior-row';
   row.dataset.key = sel.value;
   row.innerHTML =
     '<input type="hidden" name="AUTO_BOOK_XIOR_KEY">' +
     '<span class="xior-bldg"></span>' +
-    '<input type="email" class="form-input" name="AUTO_BOOK_XIOR_EMAIL" placeholder="{{ _("user_form_ab_email") }}">' +
-    '<input type="password" class="form-input" name="AUTO_BOOK_XIOR_PW" placeholder="{{ _("user_form_ab_pass") }}" autocomplete="new-password">' +
-    '<button type="button" class="btn btn-ghost btn-sm xior-del" onclick="removeXiorRow(this)" title="{{ _("user_form_xior_remove") }}">✕</button>';
+    '<input type="email" name="AUTO_BOOK_XIOR_EMAIL" placeholder="{{ _("user_form_ab_email") }}">' +
+    '<input type="password" name="AUTO_BOOK_XIOR_PW" placeholder="{{ _("user_form_ab_pass") }}" autocomplete="new-password">' +
+    '<button type="button" class="xior-del" onclick="removeXiorRow(this)">{{ _("user_form_xior_remove") }}</button>';
   // 用 DOM 赋值而不是拼进 HTML 字符串——楼栋名来自配置，拼字符串等于给 XSS 开门
   row.querySelector('input[name="AUTO_BOOK_XIOR_KEY"]').value = sel.value;
   var label = row.querySelector('.xior-bldg');
   label.textContent = opt.dataset.display || opt.textContent;
   label.title = sel.value;
-
   document.getElementById('xior-accts').appendChild(row);
   row.querySelector('input[type="email"]').focus();
   opt.remove();
   sel.value = '';
 }
-
 function removeXiorRow(btn) {
   var row = btn.closest('.xior-row');
   if (!row) return;
-  // 放回下拉，方便误删后加回来
-  var sel = document.getElementById('xior-add-select');
   var o = document.createElement('option');
   o.value = row.dataset.key;
   o.textContent = row.querySelector('.xior-bldg').textContent;
   o.dataset.display = o.textContent;
-  sel.appendChild(o);
+  document.getElementById('xior-add-select').appendChild(o);
   row.remove();
 }
 
-// 提交前自我禁用确认：user 角色把 enabled 关掉时，弹一次 confirm 兜底。
-// admin 永远直接放行；user 仅在确实把开关切到关闭时才询问。
-window._isSelfUser = {{ 'true' if is_user else 'false' }};
-window._origEnabled = {{ 'true' if (is_edit and u.enabled) else 'false' }};
-function confirmSelfDisable() {
-  if (!window._isSelfUser) return true;
-  var h = document.getElementById('enabled_h');
-  if (!h) return true;
-  var willDisable = (h.value !== 'true');
-  if (window._origEnabled && willDisable) {
-    var msg = (document.documentElement.lang === 'zh')
-      ? '确定要停用自己的账户吗？\n停用后监控/通知会立刻全部停止，仅 admin 能重新启用。'
-      : 'Disable your own account?\nMonitoring and notifications will stop immediately. Only admin can re-enable.';
-    return confirm(msg);
-  }
-  return true;
-}
-
-function updateChannelsInput() {
-  var checked = [].map.call(document.querySelectorAll('.channel-chk:checked'), function(el){ return el.dataset.ch; });
-  document.getElementById('channels_hidden').value = checked.join(',');
-}
-
-function escapeHtml(value) {
-  return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
-    return ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
-    })[ch];
+// 发信方式：自定义 SMTP 时才显示服务器字段
+document.querySelectorAll('[data-email-mode] input').forEach(function (radio) {
+  radio.addEventListener('change', function () {
+    var custom = document.querySelector('[data-email-mode] input:checked').value === 'custom';
+    document.querySelectorAll('[data-email-custom]').forEach(function (el) { el.hidden = !custom; });
   });
-}
-
-function resendVerification(userId, el) {
-  // 重发邮箱验证邮件。复用 test-notify 限流通道。
-  var orig = el.innerHTML;
-  el.innerHTML = '<i class="bi bi-hourglass-split mr-1"></i>发送中...';
-  el.style.pointerEvents = 'none';
-  var csrf = document.querySelector('input[name="csrf_token"]').value;
-  var emailInput = document.getElementById('email_to_input');
-  var body = 'csrf_token=' + encodeURIComponent(csrf);
-  if (emailInput && emailInput.value.trim()) {
-    body += '&email=' + encodeURIComponent(emailInput.value.trim());
-  }
-  fetch('/users/' + encodeURIComponent(userId) + '/resend-verify', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body,
-  })
-  .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
-  .then(function(arr){
-    var status = arr[0], j = arr[1];
-    if (status === 200 && j.ok) {
-      el.innerHTML = '<i class="bi bi-check-circle mr-1"></i>已发送，请查收邮箱';
-      el.style.color = 'var(--success)';
-    } else {
-      el.innerHTML = '<i class="bi bi-x-circle mr-1"></i>' + escapeHtml(j.error || '发送失败');
-      el.style.color = 'var(--danger)';
-      setTimeout(function(){ el.innerHTML = orig; el.style.color = ''; el.style.pointerEvents=''; }, 4000);
-    }
-  })
-  .catch(function(){
-    el.innerHTML = '<i class="bi bi-x-circle mr-1"></i>网络错误';
-    el.style.color = 'var(--danger)';
-    setTimeout(function(){ el.innerHTML = orig; el.style.color = ''; el.style.pointerEvents=''; }, 4000);
-  });
-}
-
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
-function onEmailInput() {
-  var input = document.getElementById('email_to_input');
-  var area = document.getElementById('email_verify_area');
-  if (!input || !area) return;
-  var email = input.value.trim();
-
-  if (!email) {
-    area.style.display = 'none';
-    return;
-  }
-
-  area.style.display = 'block';
-
-  if (!isValidEmail(email)) {
-    var zh = document.documentElement.lang === 'zh';
-    area.innerHTML = '<span style="color:var(--danger);"><i class="bi bi-exclamation-circle mr-1"></i>' +
-      (zh ? '邮箱格式不正确' : 'Invalid email format') + '</span>';
-    return;
-  }
-
-  // 合法邮箱：显示验证按钮
-  var zh = document.documentElement.lang === 'zh';
-  area.innerHTML = '<button type="button" class="btn btn-sm" style="background:var(--accent);color:#fff;font-size:12px;" onclick="verifyEmail()">' +
-    '<i class="bi bi-envelope-arrow-up mr-1"></i>' +
-    (zh ? '发送验证邮件' : 'Send verification') + '</button>';
-}
-
-function verifyEmail() {
-  var input = document.getElementById('email_to_input');
-  var area = document.getElementById('email_verify_area');
-  var email = input.value.trim();
-  var userId = '{{ u.id if is_edit else '' }}';
-  if (!userId || !email) return;
-  var csrf = document.querySelector('input[name="csrf_token"]').value;
-  var zh = document.documentElement.lang === 'zh';
-
-  area.innerHTML = '<span style="color:var(--text2);"><span class="spinner mr-1"></span>' +
-    (zh ? '发送中…' : 'Sending…') + '</span>';
-
-  fetch('/users/' + encodeURIComponent(userId) + '/resend-verify', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'csrf_token=' + encodeURIComponent(csrf) + '&email=' + encodeURIComponent(email),
-  })
-  .then(function(r){ return r.json().then(function(j){ return [r.status, j]; }); })
-  .then(function(arr){
-    var status = arr[0], j = arr[1];
-    if (status === 200 && j.ok) {
-      area.innerHTML = '<span style="color:var(--success);"><i class="bi bi-check-circle mr-1"></i>' +
-        escapeHtml(j.msg || (zh ? '验证邮件已发送，请查收邮箱' : 'Verification email sent, check inbox')) +
-        '</span>';
-    } else {
-      area.innerHTML = '<span style="color:var(--danger);"><i class="bi bi-x-circle mr-1"></i>' +
-        escapeHtml(j.error || (zh ? '发送失败' : 'Send failed')) + '</span>';
-      setTimeout(function(){ onEmailInput(); }, 3000);
-    }
-  })
-  .catch(function(){
-    area.innerHTML = '<span style="color:var(--danger);"><i class="bi bi-x-circle mr-1"></i>' +
-      (zh ? '网络错误' : 'Network error') + '</span>';
-    setTimeout(function(){ onEmailInput(); }, 3000);
-  });
-}
-
-function setEmailMode(mode) {
-  // 切换 shared / custom：勾上对应 radio，展开/收起 SMTP 字段块。
-  var sharedR = document.getElementById('email_mode_shared');
-  var customR = document.getElementById('email_mode_custom');
-  var smtp = document.getElementById('sec_email_custom');
-  if (!sharedR || !customR || !smtp) return;
-  if (mode === 'custom') {
-    customR.checked = true;
-    smtp.style.display = 'block';
-  } else {
-    sharedR.checked = true;
-    smtp.style.display = 'none';
-  }
-}
-
-function syncEmailRequirement() {
-  // Email 区域默认可能被隐藏；隐藏 required input 会让浏览器阻止整个表单提交。
-  // 只在用户实际启用 Email 通道时启用浏览器必填校验。
-  var emailTo = document.getElementById('email_to_input');
-  var emailChk = document.querySelector('.channel-chk[data-ch="email"]');
-  if (!emailTo) return;
-  var required = !!(emailChk && emailChk.checked);
-  emailTo.required = required;
-  emailTo.setAttribute('aria-required', required ? 'true' : 'false');
-}
-
-/* 只展开说明区，不碰 channels_hidden。
-   给「App 推送」这类**不是通知渠道**的卡片用：它反映的是设备有没有登记，
-   不是一个可以在这里勾选的设置。 */
-function toggleInfoCard(name) {
-  var sec = document.getElementById('sec_' + name);
-  if (!sec) return;
-  sec.style.display = (sec.style.display === 'none' || !sec.style.display) ? 'block' : 'none';
-}
-
-function toggleChannel(ch) {
-  var chk = document.querySelector('.channel-chk[data-ch="' + ch + '"]');
-  var sec = document.getElementById('sec_' + ch);
-  var card = chk.closest('.channel-card');
-  setTimeout(function() {
-    sec.style.display = chk.checked ? 'block' : 'none';
-    if(card) { if(chk.checked) card.classList.add('selected'); else card.classList.remove('selected'); }
-    updateChannelsInput();
-    if (ch === 'email') syncEmailRequirement();
-  }, 0);
-}
-document.getElementById('notif_enabled').addEventListener('change', function() {
-  document.getElementById('notif_enabled_h').value = this.checked ? 'true' : 'false';
 });
-updateChannelsInput();
-syncEmailRequirement();
 
-function testNotify(userId, btn) {
-  var orig = btn.innerHTML;
-  var langMeta = document.querySelector('meta[name="lang"]');
-  var zh = langMeta && langMeta.getAttribute('content') === 'zh';
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner mr-1"></span>' + (zh ? '发送中…' : 'Sending…');
-  var resultDiv = document.getElementById('testResult');
-  if(resultDiv) resultDiv.style.display = 'none';
-
-  fetch('/users/' + encodeURIComponent(userId) + '/test', {
-    method: 'POST',
-    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
-  })
-    .then(function(r){ return r.json(); })
-    .then(function(data) {
-      var rows = '';
-      if(data.error && !data.results.length) {
-        rows = '<span style="color:var(--warning);"><i class="bi bi-exclamation-circle mr-1"></i>' + escapeHtml(data.error) + '</span>';
-      } else {
-        rows = (data.results||[]).map(function(r) {
-          var icon = r.ok ? '<i class="bi bi-check-circle-fill mr-1" style="color:var(--success);"></i>' : '<i class="bi bi-x-circle-fill mr-1" style="color:var(--danger);"></i>';
-          var err = r.error ? ' <span class="text-xs" style="color:var(--danger);">— ' + escapeHtml(r.error) + '</span>' : '';
-          return '<div class="mb-1">' + icon + '<span class="text-sm">' + escapeHtml(r.channel) + err + '</span></div>';
-        }).join('');
-      }
-      if(resultDiv) {
-        resultDiv.innerHTML = '<div class="p-2" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);">' +
-          '<div class="text-xs font-semibold text-secondary mb-1"><i class="bi bi-bell mr-1"></i>' + (zh ? '测试结果' : 'Test result') + '</div>' + rows + '</div>';
-        resultDiv.style.display = 'block';
-      }
-    })
-    .catch(function(e) {
-      if(resultDiv) {
-        resultDiv.innerHTML = '<div class="text-xs" style="color:var(--danger);"><i class="bi bi-exclamation-triangle mr-1"></i>' + (zh ? '请求失败：' : 'Request failed: ') + escapeHtml(e.message) + '</div>';
-        resultDiv.style.display = 'block';
-      }
-    })
-    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
-}
-
-// ── 片区 / 楼盘动态加载（根据所选城市）────────────────────────
-// 楼盘同样按城市收窄：库里近百个楼盘（2026-09-10：H2S 58、Plaza 24），
-// 不收窄的下拉没法用。
-var selNbh = {{ (lf.allowed_neighborhoods if lf else []) | tojson }};
-var selAbNbh = {{ (ab_lf.allowed_neighborhoods if ab_lf else []) | tojson }};
-var selBld = {{ (lf.allowed_buildings if lf else []) | tojson }};
-var selAbBld = {{ (ab_lf.allowed_buildings if ab_lf else []) | tojson }};
-
-function loadBuildings() {
-  var curSel = [];
-  document.querySelectorAll('input[name="ALLOWED_BUILDINGS"]:checked').forEach(function(cb){ curSel.push(cb.value); });
-  var curAbSel = [];
-  document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_BUILDINGS"]:checked').forEach(function(cb){ curAbSel.push(cb.value); });
-
-  var cities = [];
-  document.querySelectorAll('input[name="ALLOWED_CITIES"]:checked').forEach(function(cb){ cities.push(cb.value); });
-  var url = '/api/buildings';
-  if(cities.length > 0) url += '?cities=' + encodeURIComponent(cities.join(','));
-  fetch(url).then(function(r){ return r.json(); }).then(function(d){
-    renderHoods('building-dropdown', 'ALLOWED_BUILDINGS', d.buildings, curSel.length ? curSel : selBld);
-  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
-
-  var abCities = [];
-  document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_CITIES"]:checked').forEach(function(cb){ abCities.push(cb.value); });
-  var abUrl = '/api/buildings';
-  if(abCities.length > 0) abUrl += '?cities=' + encodeURIComponent(abCities.join(','));
-  fetch(abUrl).then(function(r){ return r.json(); }).then(function(d){
-    renderHoods('ab-building-dropdown', 'AUTO_BOOK_ALLOWED_BUILDINGS', d.buildings, curAbSel.length ? curAbSel : selAbBld);
-  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
-}
-
-function loadNeighborhoods() {
-  // 先读取当前 DOM 中的勾选状态，避免重新渲染时丢失用户刚刚的选择
-  var curSel = [];
-  document.querySelectorAll('input[name="ALLOWED_NEIGHBORHOODS"]:checked').forEach(function(cb){ curSel.push(cb.value); });
-  var curAbSel = [];
-  document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_NEIGHBORHOODS"]:checked').forEach(function(cb){ curAbSel.push(cb.value); });
-
-  var cities = [];
-  document.querySelectorAll('input[name="ALLOWED_CITIES"]:checked').forEach(function(cb){ cities.push(cb.value); });
-  var url = '/api/neighborhoods';
-  if(cities.length > 0) url += '?cities=' + encodeURIComponent(cities.join(','));
-  fetch(url).then(function(r){ return r.json(); }).then(function(d){
-    renderHoods('neighborhood-dropdown', 'ALLOWED_NEIGHBORHOODS', d.neighborhoods, curSel.length ? curSel : selNbh);
-  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
-  // Auto-book
-  var abCities = [];
-  document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_CITIES"]:checked').forEach(function(cb){ abCities.push(cb.value); });
-  var abUrl = '/api/neighborhoods';
-  if(abCities.length > 0) abUrl += '?cities=' + encodeURIComponent(abCities.join(','));
-  fetch(abUrl).then(function(r){ return r.json(); }).then(function(d){
-    renderHoods('ab-neighborhood-dropdown', 'AUTO_BOOK_ALLOWED_NEIGHBORHOODS', d.neighborhoods, curAbSel.length ? curAbSel : selAbNbh);
-  }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
-}
-
-function renderHoods(dropId, inputName, hoods, selected) {
-  var drop = document.getElementById(dropId);
-  if(!drop) return;
-  var html = '';
-  hoods.forEach(function(h){
-    var checked = selected.indexOf(h) >= 0 ? ' checked' : '';
-    html += '<label class="ms-option"><input type="checkbox" name="' + inputName + '" value="' + h.replace(/"/g, '&quot;') + '"' + checked + '> ' + escapeHtml(h) + '</label>';
-  });
-  drop.innerHTML = html || '<div class="ms-option" style="color:var(--text3);cursor:default">' + (document.documentElement.lang === 'zh' ? '请先选择城市' : 'Select a city first') + '</div>';
-  // Re-init multi-select — retry once if not yet initialised
-  var ms = drop.closest('.multi-select');
-  if (ms) {
-    if (ms._update) { ms._update(); }
-    else { setTimeout(function(){ if(ms._update) ms._update(); }, 150); }
-  }
-}
-
-// Init when DOM is ready (no dependency on script execution order)
-function _initNeighborhoods() {
-  loadNeighborhoods();
-  loadBuildings();
-  ['ALLOWED_CITIES','AUTO_BOOK_ALLOWED_CITIES'].forEach(function(name){
-    document.querySelectorAll('input[name="' + name + '"]').forEach(function(cb){
-      cb.addEventListener('change', loadNeighborhoods);
-      cb.addEventListener('change', loadBuildings);
-    });
-  });
-}
-// 使用 requestIdleCallback 延迟到多选组件初始化之后执行
-if (window.requestIdleCallback) {
-  requestIdleCallback(function() { _initNeighborhoods(); });
-} else {
-  setTimeout(function() { _initNeighborhoods(); }, 200);
-}
-
-// ── 复制通知过滤条件到自动预订 ────────────────────────────
+// 把通知条件复制到自动预订条件。片区和楼盘按城市动态加载，所以连同选项一起复制，
+// 再让自动预订那边按新的城市重新加载（已勾选的会保留）。
 function copyNotifFilters() {
-  // 数值字段 + 能耗（单选）
-  ['MAX_RENT','MIN_AREA','MIN_FLOOR'].forEach(function(name){
-    var src = document.querySelector('input[name="' + name + '"]');
-    var dst = document.querySelector('input[name="AUTO_BOOK_' + name + '"]');
-    if(src && dst) dst.value = src.value;
+  ['MAX_RENT', 'MIN_AREA', 'MIN_FLOOR', 'ALLOWED_ENERGY'].forEach(function (name) {
+    var src = document.querySelector('[name="' + name + '"]');
+    var dst = document.querySelector('[name="AUTO_BOOK_' + name + '"]');
+    if (src && dst) dst.value = src.value;
   });
-  var srcEn = document.querySelector('select[name="ALLOWED_ENERGY"]');
-  var dstEn = document.querySelector('select[name="AUTO_BOOK_ALLOWED_ENERGY"]');
-  if(srcEn && dstEn) dstEn.value = srcEn.value;
-  // 多选字段：静默复制 checked 状态（不触发 change 事件，避免 loadNeighborhoods
-  // 用服务器初始值覆盖当前 DOM 中的片区勾选）
-  ['OCCUPANCY','TYPES','CITIES','NEIGHBORHOODS','CONTRACT','TENANT','OFFER','FINISHING'].forEach(function(suffix){
-    var srcCbs = document.querySelectorAll('input[name="ALLOWED_' + suffix + '"]');
-    var dstCbs = document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_' + suffix + '"]');
-    srcCbs.forEach(function(scb){
-      dstCbs.forEach(function(dcb){
-        if(dcb.value === scb.value) dcb.checked = scb.checked;
-      });
+  ['OCCUPANCY', 'TYPES', 'CITIES', 'SOURCES', 'CONTRACT', 'TENANT', 'OFFER', 'FINISHING'].forEach(function (suffix) {
+    var checked = {};
+    document.querySelectorAll('input[name="ALLOWED_' + suffix + '"]').forEach(function (cb) { checked[cb.value] = cb.checked; });
+    document.querySelectorAll('input[name="AUTO_BOOK_ALLOWED_' + suffix + '"]').forEach(function (cb) {
+      if (cb.value in checked) cb.checked = checked[cb.value];
     });
   });
-  // 刷新每个自动预订 multi-select 的标签显示
-  document.querySelectorAll('.multi-select').forEach(function(ms){
-    var cbs = ms.querySelectorAll('input[type="checkbox"]');
-    var hasAb = false;
-    cbs.forEach(function(cb){ if(cb.name.indexOf('AUTO_BOOK_') === 0) hasAb = true; });
-    if (hasAb) window.refreshMultiSelect(ms);
+  ['NEIGHBORHOODS', 'BUILDINGS'].forEach(function (suffix) {
+    var src = document.querySelector('[data-name="ALLOWED_' + suffix + '"]');
+    var dst = document.querySelector('[data-name="AUTO_BOOK_ALLOWED_' + suffix + '"]');
+    if (!src || !dst) return;
+    dst.innerHTML = '';
+    src.querySelectorAll('input:checked').forEach(function (cb) {
+      var label = document.createElement('label');
+      var input = document.createElement('input');
+      input.type = 'checkbox'; input.name = 'AUTO_BOOK_ALLOWED_' + suffix; input.value = cb.value; input.checked = true;
+      label.appendChild(input);
+      label.appendChild(document.createTextNode(' ' + cb.value));
+      dst.appendChild(label);
+    });
   });
+  var city = document.querySelector('input[name="AUTO_BOOK_ALLOWED_CITIES"]');
+  if (city) city.dispatchEvent(new Event('change', {bubbles: true}));
 }
 </script>
 {% endblock %}

@@ -133,14 +133,8 @@ class UserConfig:
     # app_password_hash : bcrypt(password).decode()；空字符串=未设置
     # app_login_enabled : False 时即使 hash 存在也拒绝 App 登录
     #                     默认 False（fail-closed，老用户不会意外打开 App 入口）
-    # allow_h2s_login   : 是否允许 H2S 站点凭据作为 fallback 登录此本地账号。
-    #                     默认 False（fail-closed）。开关意义：如果用户名恰好
-    #                     等于其 H2S 邮箱、且 H2S 那边密码被泄露/撞库/钓鱼，
-    #                     本字段为 False 时攻击者无法借用 H2S 凭据冒登本地账号。
-    #                     仅当用户显式知情、信任该桥接时再开启。
     app_password_hash: str = ""
     app_login_enabled: bool = False
-    allow_h2s_login: bool = False
 
 
 # ------------------------------------------------------------------ #
@@ -245,7 +239,6 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         enabled=d.get("enabled", False),
         dry_run=d.get("dry_run", True),
         listing_filter=_lf_from_dict(d.get("listing_filter", {})),
-        cancel_enabled=d.get("cancel_enabled", False),
         # H2S
         email=old_email,
         password=old_password,
@@ -423,7 +416,6 @@ def _user_to_row(u: UserConfig) -> dict:
         "auto_book_json": UserConfigOps.dumps_json(ab),
         "app_password_hash": d.get("app_password_hash", ""),
         "app_login_enabled": 1 if d.get("app_login_enabled") else 0,
-        "allow_h2s_login": 1 if d.get("allow_h2s_login") else 0,
         "language": (d.get("language") or "en").lower()[:8],
     }
 
@@ -485,7 +477,6 @@ def _row_to_user(row: dict) -> UserConfig:
         auto_book=ab,
         app_password_hash=row.get("app_password_hash", ""),
         app_login_enabled=bool(row.get("app_login_enabled")),
-        allow_h2s_login=bool(row.get("allow_h2s_login")),
         language=(row.get("language") or "en").lower()[:8],
     )
 

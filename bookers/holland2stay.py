@@ -3,7 +3,7 @@ bookers/holland2stay.py — Holland2Stay 自动下单实现
 ====================================================
 
 Thin wrapper：直接转发给 ``booker.try_book``。零行为变更——所有 H2S 现有
-路径（dry_run / cancel_enabled / payment_method / prewarmed 复用 / blocked /
+路径（dry_run / payment_method / prewarmed 复用 / blocked /
 race_lost 等 phase）原样保留。
 
 将来如果要把 H2S checkout 实现从 ``booker.py`` 重构进这里，可以独立做——
@@ -41,7 +41,6 @@ class HollandStayBooker(AbstractBooker):
             ab.email,
             ab.password,
             dry_run=request.dry_run,
-            cancel_enabled=ab.cancel_enabled,
             payment_method=ab.payment_method,
             prewarmed=request.prewarmed,
         )

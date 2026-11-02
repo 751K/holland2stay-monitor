@@ -992,9 +992,6 @@ class AutoBookConfig:
     password        : Holland2Stay 账号密码（加密后存储于 SQLite user_configs）
     listing_filter  : 独立于通知过滤的预订条件，可以设置比通知更严格的门槛；
                       is_empty() 为 True 时对所有 Available to book 房源都会触发
-    cancel_enabled  : 是否启用自动取消旧订单功能。False 时 placeOrder 返回
-                      "another unit reserved" 会直接通知用户（不尝试取消），
-                      因为 H2S 平台的 cancelOrder mutation 默认未启用
     payment_method  : setPaymentMethodOnCart 使用的支付方式代码。
                       可选值（均来自浏览器抓包）：
                         "idealcheckout_ideal"       → iDEAL（荷兰网银，推荐）
@@ -1041,7 +1038,6 @@ class AutoBookConfig:
     enabled: bool = False
     dry_run: bool = True
     listing_filter: ListingFilter = field(default_factory=ListingFilter)
-    cancel_enabled: bool = False
 
     # ── H2S ──
     email: str = ""

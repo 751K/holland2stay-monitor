@@ -68,19 +68,6 @@ function escapeHtml(s) {
   return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-function timeAgo(iso) {
-  if(!iso) return '';
-  try {
-    var d = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
-    var secs = Math.floor((Date.now() - d.getTime()) / 1000);
-    var zh = getLang() === 'zh';
-    if(secs < 60) return secs + (zh ? '秒前' : 's ago');
-    if(secs < 3600) return Math.floor(secs / 60) + (zh ? '分钟前' : 'm ago');
-    if(secs < 86400) return Math.floor(secs / 3600) + (zh ? '小时前' : 'h ago');
-    return Math.floor(secs / 86400) + (zh ? '天前' : 'd ago');
-  } catch(e) { return iso; }
-}
-
 function resultToast(ok, msg) {
   var wrap = document.getElementById('toast-container');
   if(!wrap) return;
@@ -112,15 +99,6 @@ document.addEventListener('click', function(e) {
 // 把定时器引用挂模块作用域，pagehide 时能 clearInterval ——和 SSE 同样的
 // 道理：活跃定时器在某些浏览器（Safari 尤甚）会阻止 bfcache。
 var _monitorTimer = null;
-
-function updateMonitorPausedBanner(d) {
-  var banner = document.getElementById('monitor-paused-banner');
-  if(banner) banner.classList.toggle('hidden', !!d.running);
-  var row = document.getElementById('system-monitor-paused-note-row');
-  if(row) row.classList.toggle('hidden', !!d.running);
-  var inline = document.getElementById('system-monitor-paused-note');
-  if(inline) inline.classList.toggle('hidden', !!d.running);
-}
 
 function updateMaintenanceBanner(d) {
   var banner = document.getElementById('upstream-maintenance-banner');
@@ -164,18 +142,10 @@ function updateSystemMonitorControls(d) {
   }
 }
 
+// 每 15 秒拉一次 /api/status：平台维护横幅和系统信息页的启停按钮
+// 都靠它更新。controlMonitor 点完后也会立刻调一次。
 function updateMonitorBadge() {
-  var badge = document.getElementById('mon-badge');
-  if(!badge) return;
   fetch('/api/status').then(function(r){ return r.json(); }).then(function(d){
-    badge.classList.remove('running','stopped');
-    badge.classList.add(d.running ? 'running' : 'stopped');
-    var txt = badge.querySelector('.mon-text');
-    if(txt) {
-      var zh = getLang() === 'zh';
-      txt.textContent = d.running ? (zh ? '监控运行中' : 'Monitor running') : (zh ? '系统暂停' : 'System paused');
-    }
-    updateMonitorPausedBanner(d);
     updateMaintenanceBanner(d);
     updateSystemMonitorControls(d);
   }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
@@ -244,20 +214,6 @@ startMonitorPoll();
 
 // ── Notification System ───────────────────────────────────────────
 var _notifLastId = 0;
-var _notifUnread = 0;
-var _notifPanelOpen = false;
-
-function updateNotifBadge(count) {
-  var b = document.getElementById('notif-badge');
-  if(!b) return;
-  _notifUnread = Math.max(0, count);
-  if(_notifUnread > 0) {
-    b.style.display = 'block';
-    b.textContent = _notifUnread > 99 ? '99+' : _notifUnread;
-  } else {
-    b.style.display = 'none';
-  }
-}
 
 function showToast(n) {
   var wrap = document.getElementById('toast-container');
@@ -275,72 +231,14 @@ function showToast(n) {
   }, 5000);
 }
 
-function renderNotifications(items) {
-  var list = document.getElementById('notif-list');
-  if(!list) return;
-  if(!items || !items.length) {
-    var noNotifs = getLang() === 'zh' ? '暂无通知' : 'No notifications';
-    list.innerHTML = '<div class="notif-empty">' + noNotifs + '</div>';
-    return;
-  }
-  list.innerHTML = '';
-  items.forEach(function(n) {
-    var div = document.createElement('div');
-    div.className = 'notif-item' + (n.read ? '' : ' unread');
-    if (n.url) {
-      div.style.cursor = 'pointer';
-      div.addEventListener('click', function() { window.open(n.url, '_blank'); });
-    }
-    div.innerHTML =
-      '<div class="notif-item-title">' + escapeHtml(n.title) + '</div>' +
-      (n.body ? '<div class="notif-item-body">' + escapeHtml(n.body) + '</div>' : '') +
-      '<div class="notif-item-time">' + timeAgo(n.created_at) + '</div>';
-    list.appendChild(div);
-  });
-}
-
+// SSE 从最新一条之后开始推，先取一次最新 id，免得把旧通知当新的弹出来
 function loadNotifications() {
-  return fetch('/api/notifications?limit=20')
+  return fetch('/api/notifications?limit=1')
     .then(function(r){ return r.json(); })
     .then(function(d) {
-      if(!d.ok) return;
-      renderNotifications(d.notifications);
-      updateNotifBadge(d.unread);
-      if(d.notifications.length)
-        _notifLastId = Math.max.apply(null, d.notifications.map(function(n){ return n.id; }));
+      if(d.ok && d.notifications.length) _notifLastId = d.notifications[0].id;
     }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
 }
-
-function toggleNotifications() {
-  var panel = document.getElementById('notif-panel');
-  if(!panel) return;
-  _notifPanelOpen = !_notifPanelOpen;
-  if(_notifPanelOpen) { panel.classList.add('open'); loadNotifications(); }
-  else { panel.classList.remove('open'); }
-}
-
-function markAllRead(e) {
-  if(e) e.stopPropagation();
-  var csrf = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
-  fetch('/api/notifications/read', {
-    method: 'POST',
-    headers: { 'X-CSRF-Token': csrf, 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
-  }).then(function(r){ return r.json(); })
-    .then(function(){ updateNotifBadge(0); loadNotifications(); })
-    .catch(function(e){ console.error('FlatRadar fetch error:', e); });
-}
-
-// Close panel when clicking outside
-document.addEventListener('click', function(e) {
-  var panel = document.getElementById('notif-panel');
-  if(!panel || !_notifPanelOpen) return;
-  var trigger = document.querySelector('.notif-trigger');
-  if(!panel.contains(e.target) && (!trigger || !trigger.contains(e.target))) {
-    panel.classList.remove('open');
-    _notifPanelOpen = false;
-  }
-});
 
 // ── SSE ───────────────────────────────────────────────────────────
 //
@@ -369,11 +267,6 @@ function connectSSE() {
     _notifLastId = items[items.length - 1].id;
     // 只对未读通知弹 toast（新标签页不会重复弹已读的）
     items.filter(function(n){ return !n.read; }).slice(0, 3).forEach(showToast);
-    // 从服务端同步真实未读数，避免本地计数不准
-    fetch('/api/notifications?limit=1').then(function(r){ return r.json(); }).then(function(d){
-      if(d.ok && typeof d.unread === 'number') updateNotifBadge(d.unread);
-    }).catch(function(e){ console.error('FlatRadar fetch error:', e); });
-    if(_notifPanelOpen) loadNotifications();
   };
   src.onerror = function() {
     try { src.close(); } catch(_){}
@@ -436,152 +329,15 @@ document.addEventListener('DOMContentLoaded', function() {
     if(e.key === 'Escape') closeSidebar();
   });
 
-  // ── Multi-select dropdown ──
-  document.querySelectorAll('.multi-select').forEach(function(ms) {
-    var trigger  = ms.querySelector('.ms-trigger');
-    var dropdown = ms.querySelector('.ms-dropdown');
-    var textEl   = ms.querySelector('.ms-text');
-    var checkboxes = ms.querySelectorAll('input[type="checkbox"]');
-    var placeholder = textEl.textContent.trim() || textEl.getAttribute('data-placeholder') || '';
-
-    // a11y: aria attributes for screen readers
-    trigger.setAttribute('aria-haspopup', 'listbox');
-    trigger.setAttribute('role', 'combobox');
-    dropdown.setAttribute('role', 'listbox');
-    checkboxes.forEach(function(cb) { cb.closest('label')?.setAttribute('role', 'option'); });
-
-	    function position() {
-	      dropdown.style.minWidth = Math.max(trigger.offsetWidth, 180) + 'px';
-	    }
-
-    function update() {
-      var sel = [];
-      checkboxes.forEach(function(cb) {
-        if (cb.checked) sel.push(cb.parentElement.textContent.trim());
-      });
-      trigger.querySelectorAll('.ms-tag').forEach(function(t) { t.remove(); });
-      if (sel.length === 0) {
-        textEl.textContent = placeholder;
-        textEl.style.display = '';
-      } else {
-        textEl.textContent = '';
-        textEl.style.display = 'none';
-        sel.forEach(function(label, i) {
-          var tag = document.createElement('span');
-          tag.className = 'ms-tag';
-          tag.textContent = label;
-          var rm = document.createElement('span');
-          rm.className = 'ms-rm';
-          rm.textContent = '×';
-          rm.onclick = function(e) {
-            e.stopPropagation();
-            // 找到对应的 checkbox 并取消勾选
-            checkboxes.forEach(function(cb) {
-              if (cb.parentElement.textContent.trim() === label) cb.checked = false;
-            });
-            update();
-          };
-          tag.appendChild(rm);
-          trigger.insertBefore(tag, textEl);
-        });
-      }
-    }
-
-    ms._update = function() {
-      checkboxes = ms.querySelectorAll('input[type="checkbox"]');
-      checkboxes.forEach(function(cb) { cb.addEventListener('change', update); });
-      update();
-    };
-
-    update();
-
-    function flipDropdown() {
-      var rect = trigger.getBoundingClientRect();
-      var spaceBelow = window.innerHeight - rect.bottom;
-      var spaceAbove = rect.top;
-      // Reset to CSS defaults
-      dropdown.style.top = '';
-      dropdown.style.bottom = '';
-      // Flip upward if insufficient space below and more room above
-      if (spaceBelow < 240 && spaceAbove > spaceBelow) {
-        dropdown.style.top = 'auto';
-        dropdown.style.bottom = 'calc(100% + 4px)';
-      }
-    }
-
-    trigger.addEventListener('click', function(e) {
-      e.stopPropagation();
-      position();
-      ms.classList.toggle('open');
-      if (ms.classList.contains('open')) flipDropdown();
-    });
-
-    window.addEventListener('resize', function() {
-      if (ms.classList.contains('open')) { position(); flipDropdown(); }
-    });
-
-    checkboxes.forEach(function(cb) {
-      cb.addEventListener('change', update);
-    });
-
-    document.addEventListener('click', function(e) {
-      if (!ms.contains(e.target)) ms.classList.remove('open');
-    });
-
-    // 防止滚轮事件穿透到页面
-    dropdown.addEventListener('wheel', function(e) {
-      var atTop = dropdown.scrollTop <= 0;
-      var atBottom = dropdown.scrollTop + dropdown.clientHeight >= dropdown.scrollHeight - 1;
-      if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
-        e.preventDefault();
-      }
-    }, {passive: false});
-  });
 });
-
-// ── 公共：手动刷新一个 multi-select 的标签显示 ────────────
-// 供 copyNotifFilters 等外部调用，不依赖 init 闭包中的旧 checkbox 引用
-window.refreshMultiSelect = function(ms) {
-  var cbs = ms.querySelectorAll('input[type="checkbox"]');
-  var trigger = ms.querySelector('.ms-trigger');
-  var textEl  = ms.querySelector('.ms-text');
-  if (!trigger || !textEl) return;
-  trigger.querySelectorAll('.ms-tag').forEach(function(t){ t.remove(); });
-  var sel = [];
-  cbs.forEach(function(cb){
-    if (cb.checked) sel.push({label: cb.parentElement.textContent.trim(), cb: cb});
-  });
-  if (sel.length === 0) {
-    textEl.style.display = '';
-  } else {
-    textEl.style.display = 'none';
-    sel.forEach(function(item){
-      var tag = document.createElement('span');
-      tag.className = 'ms-tag';
-      tag.textContent = item.label;
-      var rm = document.createElement('span');
-      rm.className = 'ms-rm';
-      rm.textContent = '×';
-      rm.onclick = function(e){
-        e.stopPropagation();
-        item.cb.checked = false;
-        window.refreshMultiSelect(ms);
-      };
-      tag.appendChild(rm);
-      trigger.insertBefore(tag, textEl);
-    });
-  }
-};
 
 /* ── 平台显示名 ────────────────────────────────────────────────────
  * 原本 map / calendar / stats 各写了一份 sourceLabel，**三份都漏了
  * ourcampus**，于是它在界面上以裸的 source key 露出来（monitoring 页更
  * 直接，连转换都没有，四个平台全是小写 key）。名称由服务端平台登记表注入。
  *
- * 两种写法都要：全名给卡片/徽章，缩写给图表轴（轴上放全名会挤成一团）。
  */
 window.SOURCE_LABELS = window.SOURCE_LABELS || {};
-window.SOURCE_SHORT = window.SOURCE_SHORT || {};
 
 /** 平台全名。认不出的 key 首字母大写后返回，而不是硬套一个默认平台名——
  *  把未知 source 显示成 "Holland2Stay" 会让人以为数据是那边来的。 */
@@ -589,68 +345,6 @@ window.sourceLabel = function (source) {
   var key = String(source || '').toLowerCase();
   if (window.SOURCE_LABELS[key]) return window.SOURCE_LABELS[key];
   return key ? key.charAt(0).toUpperCase() + key.slice(1) : '';
-};
-
-/* ── 房源状态分桶 ──────────────────────────────────────────────────
- * 判据抄自 app/jinja_filters.py 的 status_capsule。地图从前只分三档，把
- * Reserved 和 Occupied 并进「其他」——一个可能回来、一个永远不会，正是最该
- * 分开的一对。
- *
- * 与 status_capsule 有一处**故意的不同**：认不出的状态归 'other'，不归
- * 'occupied'。徽章那边把两者都画成灰色无所谓，地图这边不行——'occupied'
- * 在筛选栏里默认是关的，认不出的状态要是掉进去，新平台冒出的新状态会**从
- * 地图上静默消失**，而这正是这个仓库反复出现的那个形状：把「不知道」当成
- * 一个确定的答案。'other' 默认开着，且只在真的有这种房源时才显示出来。
- *
- * 放在这里而不是 map.html 里，是因为日历页迟早要用同一套颜色；上面那段
- * sourceLabel 的注释记着三处各写一份、三份都漏掉 ourcampus 的教训。
- */
-window.STATUS_BUCKETS = ['book', 'lottery', 'reserved', 'other', 'occupied'];
-
-window.statusBucket = function (status) {
-  var s = String(status || '').toLowerCase();
-  if (s.indexOf('book') !== -1) return 'book';
-  if (s.indexOf('lottery') !== -1) return 'lottery';
-  if (s.indexOf('reserved') !== -1 || s.indexOf('in process') !== -1 ||
-      s.indexOf('pending') !== -1) return 'reserved';
-  if (s.indexOf('occupied') !== -1 || s.indexOf('rented') !== -1 ||
-      s.indexOf('not available') !== -1) return 'occupied';
-  return 'other';
-};
-
-/* ── 哨兵入住日 ──────────────────────────────────────────────────
- * H2S 在「入住日未定」时发的是 2050-01-01。scraper / 存储层 / booker 都认得
- * 它，唯独界面把它原样当日期显示：地图弹窗写「2050-01-01」，日历更离谱——
- * 那套房会被排到 2050 年那一格里去。
- *
- * 判据与 models.is_sentinel_available_from、app/jinja_filters.available_display
- * 保持一致：按**年份**判而不是精确匹配那一天，哨兵改成 2099 时不至于漏。
- */
-window.SENTINEL_AVAILABLE_FROM_YEAR = 2050;
-
-window.isSentinelDate = function (value) {
-  var v = String(value || '').trim();
-  var y = parseInt(v.slice(0, 4), 10);
-  return !!v && /^\d{4}/.test(v) && y >= window.SENTINEL_AVAILABLE_FROM_YEAR;
-};
-
-/* ── 同址散开 ──────────────────────────────────────────────────────
- * 几何已经**挪到服务端**（app/services/listing_service.spread_stacked_coords）。
- * 载荷里直接带 display_lat / display_lng / stack_n 三个字段，Web / iOS / Android
- * 三端都只是照着画。
- *
- * 为什么挪走：圆环本身只有十几行，但三份实现迟早分叉，而分叉的表现是同一套房
- * 在不同端显示在不同位置——没有任何地方会报错。
- *
- * 客户端剩下的责任只有一条：stack_n > 1 时必须说明位置是近似值。
- */
-window.mapDisplayCoord = function (l) {
-  var lat = Number(l.display_lat), lng = Number(l.display_lng);
-  // 服务端没给（老版本 / locate 兜底）就退回真实坐标，而不是丢掉这个点。
-  if (!isFinite(lat) || !isFinite(lng)) {
-    lat = Number(l.lat); lng = Number(l.lng);
-  }
-  return isFinite(lat) && isFinite(lng) ? {lat: lat, lng: lng} : null;
 };
 
 document.addEventListener('click', function (e) {

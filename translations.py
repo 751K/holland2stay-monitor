@@ -731,6 +731,8 @@ TRANSLATIONS = {
 
     "user_form_token_keep": {"zh": "已保存，留空保留原令牌",    "en": "Saved, leave empty to keep"},
     "user_form_result":     {"zh": "测试结果",                "en": "Test result"},
+    "user_saved_self":      {"zh": "设置已保存。",                 "en": "Settings saved."},
+    "user_saved_other":     {"zh": "已保存 {name} 的设置。",        "en": "Saved settings for {name}."},
     "user_form_reload_hint":{"zh": "保存后点击「立即生效」按钮通知 monitor.py 热重载。", "en": "After saving, click 'Apply Now' to hot-reload monitor.py."},
 
     # ── Guest mode ───────────────────────────────────────
@@ -804,8 +806,13 @@ TRANSLATIONS = {
         "en": "Filters",
     },
     "onb_filter_empty": {
-        "zh": "未设置——当前会把全部城市、全部价位的房源都推给你",
-        "en": "Not set — you'll be alerted about every listing, any city, any price",
+        "zh": "还没设置，所有城市、所有价位的新房源都会推给你",
+        "en": "Not set yet, so you'll hear about every listing in any city, at any price",
+    },
+    #: 引导里「已能收到、未设筛选」时的原因句，接在「提醒已开启」标题下面
+    "onb_filter_empty_lead": {
+        "zh": "还没有设置房源条件，所有城市、所有价位的新房源都会推送给你。",
+        "en": "No filters yet, so you'll be alerted about every new listing in any city, at any price.",
     },
     "onb_filter_set": {
         "zh": "已设置 %(n)s 项",
@@ -817,16 +824,16 @@ TRANSLATIONS = {
         "en": "How you get alerted",
     },
     "onb_route_none": {
-        "zh": "没有任何接收方式——你现在收不到通知",
-        "en": "No delivery route — you are not receiving anything",
+        "zh": "无接收方式",
+        "en": "No delivery method",
     },
     "onb_route_toggle_off": {
-        "zh": "通知总开关是关着的——你现在收不到通知",
-        "en": "Notifications are switched off — you are not receiving anything",
+        "zh": "通知未启用",
+        "en": "Notifications are off",
     },
     "onb_route_account_off": {
-        "zh": "账号已停用——所有通知都已停止",
-        "en": "Account is disabled — all alerts are stopped",
+        "zh": "账号已停用",
+        "en": "Account disabled",
     },
     "onb_route_ok": {
         "zh": "已启用：",
@@ -887,7 +894,7 @@ TRANSLATIONS = {
     "login_error":          {"zh": "用户名或密码错误",          "en": "Invalid username or password"},
 
     # ── Multi-role (admin / user / guest) ────────────────
-    "my_account":           {"zh": "我的账号",                 "en": "My Account"},
+    "my_account":           {"zh": "账号设置",                 "en": "Account settings"},
     "user_form_self_only_hint": {
         "zh": "你正在编辑自己的账号。可调整通知渠道与过滤条件；账户名、客户端登录开关及自动预订仅 admin 可修改。",
         "en": "You are editing your own account. You can adjust notification channels and filters. Account name, client login switch, and auto-booking can only be changed by admin.",

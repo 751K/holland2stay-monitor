@@ -129,7 +129,7 @@ _ENC_HEADER = "x-enc"
 #                    base64(JSON(信封)) 塞进 x-enc-q 头，
 #                    实际请求 GET /api/rest/__enc__
 #
-# 之前 cancel_pending_orders 直接发明文 /api/rest/...，两条都不对。
+# 直接发明文 /api/rest/... 两种都会被拒。
 _ENC_QUERY_HEADER = "x-enc-q"
 _REST_ENC_PATH = "/api/rest/__enc__"
 _REST_API_PREFIX = "/api"

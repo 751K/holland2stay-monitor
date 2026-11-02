@@ -1,4 +1,4 @@
-Last updated: August 24, 2026
+Last updated: November 2, 2026
 
 This Privacy Policy explains how FlatRadar collects, uses, stores, and protects your data.
 
@@ -35,7 +35,8 @@ Authentication and Session Data
 - Failed login attempts or other security events, where necessary to protect the service.
 
 Device and Notification Data
-- Apple Push Notification service device token.
+- Apple Push Notification service (APNs) or Firebase Cloud Messaging (FCM) device token.
+- Device name (the name you gave the device in its settings, which may include your name), used to tell apart the devices signed in to your account.
 - Device type, app version, operating system version, and notification settings where necessary for app functionality.
 - Basic device or app diagnostic information used to maintain and debug the service.
 
@@ -54,6 +55,7 @@ Saved Preferences and Alert Data
 - Saved filters, city, price range, availability, listing type, listing status, and other search preferences.
 - Notification preferences.
 - Alert history, including matched listings, alert timestamps, and delivery status where needed to operate notifications.
+- Read status: the listings you have opened or marked as read while signed in, used to separate read from unread listings.
 
 Auto-Booking Applicant Data (only if you enable auto-booking)
 
@@ -73,12 +75,19 @@ You can leave any field blank, clear the form at any time, or turn auto-booking 
 
 Crash and Diagnostic Reports
 
-- If the mobile app crashes, it may send a crash report containing the error, a stack trace, app version, operating system version, and device model.
+- If the mobile app crashes, it may send a crash report containing the error, a stack trace, app version, operating system version, and device model; if you are signed in, it also includes your account identifier and account type.
 - Crash reports are used only to find and fix defects.
 
 Usage, Network, and Technical Data
 - Basic app usage events, server logs, request timestamps, error logs, IP address, device information, app version, and diagnostic information.
 - Security-related logs used to prevent abuse, spam, unauthorized access, scraping abuse, or service disruption.
+
+Cookies and Browser Storage (web)
+
+The web version uses only the cookies and browser storage it needs to work, never for tracking or advertising:
+- Session cookie: keeps you signed in, keeps a visitor's browsing session when you are not signed in, and protects forms against cross-site request forgery. Visitors who are not signed in also receive this cookie when they open the listings pages.
+- h2s-lang cookie: remembers the interface language you chose.
+- h2s-theme in browser local storage: remembers whether you chose dark or light mode. It stays in your browser and is never sent to our servers.
 
 Feedback Data
 - When you submit feedback or report a bug through the app, we collect your feedback type (bug report / suggestion / other), your message content, your account identifier, your username, your app version, and your device platform.
@@ -96,7 +105,7 @@ FlatRadar does not use your personal data for third-party advertising or cross-a
 
 4. How We Use Your Data
 
-We use your data for: creating and managing your account, authenticating you, saving your filters and preferences, sending push notifications for matching listings, recording alert history, displaying listing information, synchronizing data, operating and securing the service, debugging and maintaining the service, preventing abuse, and complying with legal obligations.
+We use your data for: creating and managing your account, authenticating you, saving your filters and preferences, sending push notifications for matching listings, sending service announcements (such as feature changes or maintenance notices) to the notification channels you have turned on, recording alert history, displaying listing information, synchronizing data, operating and securing the service, debugging and maintaining the service, preventing abuse, and complying with legal obligations.
 
 5. Legal Basis for Processing
 
@@ -104,7 +113,7 @@ Where applicable under GDPR or similar data protection laws, we process your dat
 
 6. Data Storage
 
-FlatRadar stores data on your device (app preferences, local cache, authentication state, Keychain credentials) and on FlatRadar servers (account data, bcrypt-hashed passwords, session tokens, saved filters, push tokens, alert history, server logs, and security logs). FlatRadar may use third-party infrastructure providers to operate the service.
+FlatRadar stores data on your device (app preferences, local cache, authentication state, Keychain credentials, and on the web, cookies and browser local storage) and on FlatRadar servers (account data, bcrypt-hashed passwords, session tokens, saved filters, push tokens, alert history, server logs, and security logs). FlatRadar may use third-party infrastructure providers to operate the service.
 
 Passwords are not stored in plain text on FlatRadar servers.
 
@@ -124,6 +133,8 @@ FlatRadar may fetch listing information from publicly accessible services, APIs,
 
 FlatRadar may interact with: housing platforms (listing data), Apple Push Notification service (iOS notifications), Firebase Cloud Messaging (Android notifications), Cloudflare (DNS and security), Apple Maps (iOS map), Google Maps (Android and web map), Resend (transactional email such as address verification and email alerts), Photon by Komoot (converting listing addresses into map coordinates), and Hetzner (server hosting, Germany).
 
+The fonts, icons, and chart scripts used by the web version are served from FlatRadar's own servers, so browsing the website sends no requests to Google Fonts, public CDNs, or similar third parties. Google Maps is loaded only when you open the map (see "Location Data" in section 2).
+
 If you configure your own Telegram bot, Twilio account, or SMTP mail server to receive alerts, FlatRadar sends your alerts through those services on your behalf. Those services are chosen and controlled by you.
 
 Donations are handled entirely by the payment provider you choose (for example GitHub Sponsors, Alipay, or WeChat Pay). FlatRadar does not receive, process, or store your payment details.
@@ -134,7 +145,7 @@ We do not sell your personal data. We do not use your personal data for third-pa
 
 12. Data Retention
 
-We keep your data only as long as necessary. Account data is retained while your account remains active. Server access logs are rotated and retained for roughly 30 days. Auto-booking applicant details are kept until you clear them or delete your account. When you delete your account, we will delete or anonymize associated personal data unless retention is required for legal, security, or legitimate operational reasons.
+We keep your data only as long as necessary. Account data is retained while your account remains active. Server access logs are retained for roughly 30 days. Application logs are rotated by file size and older files are overwritten automatically, usually after a few weeks. Crash reports are kept until the related issue is resolved and then deleted. Auto-booking applicant details are kept until you clear them or delete your account. When you delete your account, we will delete or anonymize associated personal data unless retention is required for legal, security, or legitimate operational reasons.
 
 13. Account Deletion
 

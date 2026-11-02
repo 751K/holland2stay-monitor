@@ -1,562 +1,210 @@
 {% extends "base.html" %}
-{% block title %}{{ _('settings') }} · FlatRadar{% endblock %}
+{#
+  全局设置（管理员）。与账号设置同一套工作区：中间按分组列出每一项已保存的值，
+  右侧编辑选中的一项；选中状态在 ?section=&item=，account.js 负责原地切换和
+  「未保存」标记。
+
+  所有编辑器都在同一个 <form> 里：设置路由按整份 POST 重建 SOURCES 和各城市
+  列表，只提交一个面板会把其余的清空。未选中的面板用 hidden 隐藏，仍随表单提交。
+  维护（立即生效 / 重启 / 清空数据库）走各自的 API，不经过这个表单。
+#}
+{% import '_settings_macros.html' as ui with context %}
+{% set zh = lang == 'zh' %}
+{% block title %}{{ _('settings') }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page account-page settings-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('account.css') }}"><link rel="stylesheet" href="{{ asset('settings.css') }}">{% endblock %}
+{% block sidebar_navigation %}{% include '_admin_nav.html' %}{% endblock %}
+{% block sidebar_footer %}{% include '_admin_footer.html' %}{% endblock %}
+
+{#- 一组平台城市复选框。value 是「名称,ID」，勾选状态按 ID 判断（与设置路由的解析一致） -#}
+{% macro city_checks(name, cities, id_key, selected) %}
+<div class="mail-options account-options settings-options" data-check-group>
+  {% for city in cities %}
+  <label><input type="checkbox" name="{{ name }}" value="{{ city.name }},{{ city[id_key] }}"{% if city[id_key] in selected %} checked{% endif %}> {{ city.name }}</label>
+  {% endfor %}
+</div>
+<div class="settings-list-tools"><button type="button" class="account-text-button" data-toggle-all>{{ '全选' if zh else 'Select all' }}</button></div>
+{% endmacro %}
+
+{#- 数值 / 时间字段；默认值写在标签后面，空着保存会保留旧值（设置路由的约定） -#}
+{% macro field(label, key, default, type='number', min=none, max=none, step=none) %}
+<label class="account-field"><span>{{ label }}</span>
+  <input type="{{ type }}" name="{{ key }}" value="{{ env.get(key, default) }}"{% if min is not none %} min="{{ min }}"{% endif %}{% if max is not none %} max="{{ max }}"{% endif %}{% if step is not none %} step="{{ step }}"{% endif %}>
+</label>
+{% endmacro %}
+
+{#- 一个时段：开始 – 结束，24 小时制文本框（服务器端按 HH:MM 校验，不合法的不写入） -#}
+{% macro window(label, start, start_default, end, end_default) %}
+<div class="settings-range">
+  {% if label %}<span>{{ label }}</span>{% endif %}
+  {% for key, default in [(start, start_default), (end, end_default)] %}
+  {% if not loop.first %}<span aria-hidden="true">–</span>{% endif %}
+  <input type="text" name="{{ key }}" value="{{ env.get(key, default) }}" inputmode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" placeholder="{{ default }}" aria-label="{{ key }}">
+  {% endfor %}
+</div>
+{% endmacro %}
 
 {% block content %}
+<section class="inbox-shell account-shell" data-account data-user-id="">
+<header class="mail-toolbar">
+  <h1>{{ _('settings') }}</h1>
+</header>
 
-<div class="page-header">
-  <h1>{{ _('settings_title') }}</h1>
-  <span class="meta">{{ _('settings_meta') }}</span>
-</div>
-
-{# 真实环境变量压着数据库时，面板显示的和进程实际用的不是一回事。
-   不说出来就是一次静默失败：改了、保存成功了、什么都没发生。 #}
+{# 真实环境变量压着数据库时，面板显示的和进程实际用的不是一回事。不说出来就是一次静默失败。 #}
 {% if env_overridden %}
-<div class="alert alert-warning mb-4">
-  <i class="bi bi-exclamation-triangle mr-2"></i>
-  {{ _('settings_env_override') }}
-  <code>{{ env_overridden | join(' · ') }}</code>
-</div>
+<div class="alert alert-warning">{{ _('settings_env_override') }} <code>{{ env_overridden | join(' · ') }}</code></div>
 {% endif %}
 
-<div class="card mb-4">
-  <div class="section-header"><i class="bi bi-check2-circle mr-2"></i>{{ _('settings_apply_status') }}</div>
-  <div class="card-body">
-    <p>{{ _('settings_apply_' ~ config_status.state) }}</p>
-    {% if config_status.pending %}
-    <p>{{ _('settings_apply_pending_keys') }} <code>{{ config_status.pending | join(' · ') }}</code></p>
-    {% endif %}
-    {% if config_status.overridden %}
-    <p>{{ _('settings_apply_override_keys') }} <code>{{ config_status.overridden | join(' · ') }}</code></p>
-    {% endif %}
-    {% if config_status.fixed_overridden %}
-    <p>{{ _('settings_apply_fixed_override') }} <code>{{ config_status.fixed_overridden | join(' · ') }}</code></p>
-    {% endif %}
-    {% if config_status.restart_required %}
-    <p>{{ _('settings_apply_restart_keys') }} <code>{{ config_status.restart_required | join(' · ') }}</code></p>
-    {% endif %}
-    {% if config_status.restart_unknown %}<p>{{ _('settings_apply_restart_unknown') }}</p>{% endif %}
-    <p class="form-help">{{ _('settings_apply_restart_hint') }}</p>
-  </div>
-</div>
-
-<form method="post" class="settings-form">
+<form method="post" action="{{ url_for('settings') }}" class="mail-workspace account-workspace" id="account-form">
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="section" value="{{ section }}" data-selected-section>
+  <input type="hidden" name="item" value="{{ item }}" data-selected-item>
 
-  <!-- Section 1: Scrape config -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <i class="bi bi-clock mr-2" style="color:var(--accent);"></i>{{ _('settings_scrape') }}
+  <section class="mail-list" aria-label="{{ '设置条目' if zh else 'Settings' }}">
+    <div class="mail-groups">
+      {% for s in sections %}
+      <div class="mail-date">{{ s.title }}</div>
+      {% for row in s.rows %}
+      {% set selected = s.key == section and row.key == item %}
+      <a href="{{ url_for('settings', section=s.key, item=row.key) }}"
+         class="mail-listing account-row{% if selected %} selected{% endif %}"
+         data-account-item="{{ s.key }}:{{ row.key }}" data-no-transition{% if selected %} aria-current="true"{% endif %}>
+        <span class="mail-listing-body"><strong>{{ row.title }}</strong><span class="mail-meta">{{ row.summary }}</span></span>
+        <span class="mail-value">
+          {% if row.state %}<span class="account-state tone-{{ row.tone }}">{{ row.state }}</span>{% endif %}
+          <small class="account-dirty" hidden>{{ '未保存' if zh else 'Unsaved' }}</small>
+        </span>
+      </a>
+      {% endfor %}
+      {% endfor %}
     </div>
-    <div class="card-body">
+  </section>
 
-      <div class="form-row mb-4">
-        <div class="form-group">
-          <label class="form-label">{{ _('settings_interval') }}</label>
-          <input type="number" class="form-input" name="CHECK_INTERVAL" value="{{ env.get('CHECK_INTERVAL','300') }}" min="1">
-          {# 警告另起一行：原来紧跟在上一句句号后面，⚠ 图标直接贴着"（5 分钟）。"，
-             看着像少打了一个空格 #}
-          <div class="form-help">{{ _('settings_interval_hint') }}</div>
-          <div class="form-help" style="color:var(--warning);"><i class="bi bi-exclamation-triangle mr-1"></i>{{ _('settings_interval_warn') }}</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('settings_log_level') }}</label>
-          <select class="form-select" name="LOG_LEVEL">
-            {% for lvl in ['DEBUG','INFO','WARNING','ERROR'] %}
-              <option {% if env.get('LOG_LEVEL','INFO') == lvl %}selected{% endif %}>{{ lvl }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
+  <section class="mail-detail account-detail{% if request.args.get('item') %} is-open{% endif %}" aria-label="{{ '设置详情' if zh else 'Setting details' }}" aria-live="polite">
+  {% for s in sections %}{% for row in s.rows %}
+  {% call ui.panel(s, row) %}
 
-      <!-- Smart poll -->
-      <div class="flex items-center gap-2 mb-3" style="color:var(--text3);">
-        <div style="height:1px;flex:1;background:var(--border);"></div>
-        <span class="text-xs font-semibold" style="text-transform:uppercase;letter-spacing:.06em;"><i class="bi bi-graph-up mr-1"></i>{{ _('settings_smart_poll') }}</span>
-        <div style="height:1px;flex:1;background:var(--border);"></div>
-      </div>
+  {# ── 运行状态 ─────────────────────────────────────── #}
+  {% if s.key == 'status' %}
+    <p class="settings-state">{{ _('settings_apply_' ~ config_status.state) }}</p>
+    <dl class="settings-status">
+      {% if config_status.pending %}<div><dt>{{ _('settings_apply_pending_keys') }}</dt><dd><code>{{ config_status.pending | join(' · ') }}</code></dd></div>{% endif %}
+      {% if config_status.overridden %}<div><dt>{{ _('settings_apply_override_keys') }}</dt><dd><code>{{ config_status.overridden | join(' · ') }}</code></dd></div>{% endif %}
+      {% if config_status.fixed_overridden %}<div><dt>{{ _('settings_apply_fixed_override') }}</dt><dd><code>{{ config_status.fixed_overridden | join(' · ') }}</code></dd></div>{% endif %}
+      {% if config_status.restart_required %}<div><dt>{{ _('settings_apply_restart_keys') }}</dt><dd><code>{{ config_status.restart_required | join(' · ') }}</code></dd></div>{% endif %}
+    </dl>
 
-      <div class="alert" style="background:var(--accent-soft);color:var(--accent);margin-bottom:16px;">
-        <i class="bi bi-lightning-charge mr-1"></i>
-        <strong>{{ _('settings_smart_poll') }}：</strong>{{ _('settings_smart_desc') }}
-      </div>
-
-      <div class="form-row mb-3">
-        <div class="form-group">
-          <label class="form-label">{{ _('settings_peak_max') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_peak_max_default') }}</span></label>
-          <input type="number" class="form-input" name="PEAK_INTERVAL" value="{{ env.get('PEAK_INTERVAL','60') }}" min="1" max="300">
-          <div class="form-help">{{ _('settings_peak_max_hint') }}</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('settings_peak_min') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_peak_min_default') }}</span></label>
-          <input type="number" class="form-input" name="MIN_INTERVAL" value="{{ env.get('MIN_INTERVAL','15') }}" min="5" max="300">
-          <div class="form-help">{{ _('settings_peak_min_hint') }}</div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('settings_peak_start') }}</label>
-          <input type="time" class="form-input" name="PEAK_START" value="{{ env.get('PEAK_START','08:30') }}">
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('settings_peak_end') }}</label>
-          <input type="time" class="form-input" name="PEAK_END" value="{{ env.get('PEAK_END','10:00') }}">
-        </div>
-        <div class="form-group">
-          <label class="form-label">{{ _('settings_jitter') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_jitter_default') }}</span></label>
-          <input type="number" class="form-input" name="JITTER_RATIO" value="{{ env.get('JITTER_RATIO','0.20') }}" min="0" max="0.5" step="0.05">
-          <div class="form-help">{{ _('settings_jitter_hint') }}</div>
-        </div>
-      </div>
-
-      <div class="form-row mb-3" style="align-items:center;">
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">{{ _('settings_peak_start_2') }}</label>
-          <input type="time" class="form-input" name="PEAK_START_2" value="{{ env.get('PEAK_START_2','13:30') }}">
-        </div>
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">{{ _('settings_peak_end_2') }}</label>
-          <input type="time" class="form-input" name="PEAK_END_2" value="{{ env.get('PEAK_END_2','15:00') }}">
-        </div>
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">{{ _('settings_heartbeat_interval') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_heartbeat_default') }}</span></label>
-          <input type="number" class="form-input" name="HEARTBEAT_INTERVAL_MINUTES" value="{{ env.get('HEARTBEAT_INTERVAL_MINUTES','60') }}" min="0" max="1440">
-          <div class="form-help">{{ _('settings_heartbeat_hint') }}</div>
-        </div>
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">{{ _('settings_map_max_age') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_map_max_age_default') }}</span></label>
-          <input type="number" class="form-input" name="MAP_MAX_AGE_DAYS" value="{{ env.get('MAP_MAX_AGE_DAYS','14') }}" min="0" max="3650">
-          <div class="form-help">{{ _('settings_map_max_age_hint') }}</div>
-        </div>
-      </div>
-
-      <div>
-        <label class="toggle">
-          <input type="checkbox" id="peak_weekdays" {% if env.get('PEAK_WEEKDAYS_ONLY','true') != 'false' %}checked{% endif %}
-                 onchange="document.getElementById('peak_weekdays_h').value=this.checked?'true':'false'">
-          <span class="toggle-track"></span>
-          {{ _('settings_weekdays') }}
-        </label>
-        <input type="hidden" id="peak_weekdays_h" name="PEAK_WEEKDAYS_ONLY" value="{{ env.get('PEAK_WEEKDAYS_ONLY','true') }}">
-        <div class="form-help mt-1"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_weekdays_hint') }}</div>
-      </div>
-
-      <!-- H2S fast lane -->
-      <div class="flex items-center gap-2 mb-3 mt-4" style="color:var(--text3);">
-        <div style="height:1px;flex:1;background:var(--border);"></div>
-        <span class="text-xs font-semibold" style="text-transform:uppercase;letter-spacing:.06em;"><i class="bi bi-lightning mr-1"></i>{{ _('settings_h2s_rest') }}</span>
-        <div style="height:1px;flex:1;background:var(--border);"></div>
-      </div>
-
-      {# 默认关。值的判据与 mcore.h2s_rest.rest_enabled 一致：1/true/yes/on 算开。 #}
-      {% set h2s_rest_on = (env.get('H2S_REST_ENABLED','') | lower) in ['1','true','yes','on'] %}
-      <div class="form-row mb-2" style="align-items:center;">
-        <div class="form-group" style="margin:0;">
-          <label class="toggle">
-            <input type="checkbox" id="h2s_rest" {% if h2s_rest_on %}checked{% endif %}
-                   onchange="document.getElementById('h2s_rest_h').value=this.checked?'true':'false'">
-            <span class="toggle-track"></span>
-            {{ _('settings_h2s_rest_toggle') }}
-          </label>
-          <input type="hidden" id="h2s_rest_h" name="H2S_REST_ENABLED" value="{{ 'true' if h2s_rest_on else 'false' }}">
-        </div>
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">{{ _('settings_h2s_rest_interval') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_h2s_rest_interval_default') }}</span></label>
-          <input type="number" class="form-input" name="H2S_REST_INTERVAL" value="{{ env.get('H2S_REST_INTERVAL','3') }}" min="1" max="60" step="0.5">
-          <div class="form-help">{{ _('settings_h2s_rest_interval_hint') }}</div>
-        </div>
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">{{ _('settings_h2s_rest_home_interval') }}<span class="text-tertiary" style="font-weight:400;"> — {{ _('settings_h2s_rest_home_interval_default') }}</span></label>
-          <input type="number" class="form-input" name="H2S_REST_HOME_INTERVAL" value="{{ env.get('H2S_REST_HOME_INTERVAL','0') }}" min="0" max="600" step="1">
-          <div class="form-help">{{ _('settings_h2s_rest_home_interval_hint') }}</div>
-        </div>
-      </div>
-      <div class="form-help mb-3"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_h2s_rest_hint') }}</div>
-
-      {# 默认值与 mcore.h2s_rest 的 DEFAULT_START / DEFAULT_END 保持一致 #}
-      {% set h2s_rest_wd = (env.get('H2S_REST_WEEKDAYS_ONLY','true') | lower) not in ['0','false','no','off'] %}
-      <div class="form-row mb-2" style="align-items:center;">
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">{{ _('settings_h2s_rest_start') }}</label>
-          <input type="time" class="form-input" name="H2S_REST_START" value="{{ env.get('H2S_REST_START','08:30') }}">
-        </div>
-        <div class="form-group" style="margin:0;">
-          <label class="form-label">{{ _('settings_h2s_rest_end') }}</label>
-          <input type="time" class="form-input" name="H2S_REST_END" value="{{ env.get('H2S_REST_END','17:45') }}">
-        </div>
-        <div class="form-group" style="margin:0;">
-          <label class="toggle">
-            <input type="checkbox" id="h2s_rest_wd" {% if h2s_rest_wd %}checked{% endif %}
-                   onchange="document.getElementById('h2s_rest_wd_h').value=this.checked?'true':'false'">
-            <span class="toggle-track"></span>
-            {{ _('settings_h2s_rest_weekdays') }}
-          </label>
-          <input type="hidden" id="h2s_rest_wd_h" name="H2S_REST_WEEKDAYS_ONLY" value="{{ 'true' if h2s_rest_wd else 'false' }}">
-        </div>
-      </div>
-      <div class="form-help"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_h2s_rest_window_hint') }}</div>
-
+  {# ── 抓取节奏 ─────────────────────────────────────── #}
+  {% elif s.key == 'scrape' and row.key == 'interval' %}
+    <div class="account-fields">
+      {{ field(_('settings_interval'), 'CHECK_INTERVAL', '300', min=1) }}
+      <label class="account-field"><span>{{ _('settings_log_level') }}</span>
+        <select name="LOG_LEVEL">{% for lvl in ['DEBUG','INFO','WARNING','ERROR'] %}<option{% if env.get('LOG_LEVEL','INFO') == lvl %} selected{% endif %}>{{ lvl }}</option>{% endfor %}</select>
+      </label>
+      {{ field(_('settings_heartbeat_interval'), 'HEARTBEAT_INTERVAL_MINUTES', '60', min=0, max=1440) }}
+      {{ field(_('settings_map_max_age'), 'MAP_MAX_AGE_DAYS', '14', min=0, max=3650) }}
     </div>
-  </div>
+    {{ ui.save_actions() }}
+  {% elif s.key == 'scrape' and row.key == 'peak' %}
+    <fieldset class="account-field">
+      <legend>{{ '高峰时段（荷兰时间）' if zh else 'Peak windows (NL time)' }}</legend>
+      {{ window('第一段' if zh else 'First', 'PEAK_START', '08:30', 'PEAK_END', '10:00') }}
+      {{ window('第二段' if zh else 'Second', 'PEAK_START_2', '13:30', 'PEAK_END_2', '15:00') }}
+    </fieldset>
+    <div class="account-fields">
+      {{ field(_('settings_peak_max'), 'PEAK_INTERVAL', '60', min=1, max=300) }}
+      {{ field(_('settings_peak_min'), 'MIN_INTERVAL', '15', min=5, max=300) }}
+      {{ field(_('settings_jitter'), 'JITTER_RATIO', '0.20', min=0, max=0.5, step=0.05) }}
+    </div>
+    {{ ui.switch('PEAK_WEEKDAYS_ONLY', _('settings_weekdays'), env.get('PEAK_WEEKDAYS_ONLY','true') != 'false', off_value='false') }}
+    {{ ui.save_actions() }}
+  {% elif s.key == 'scrape' and row.key == 'h2s_rest' %}
+    {# 判据与 mcore.h2s_rest 一致：1/true/yes/on 算开；工作日默认开 #}
+    {{ ui.switch('H2S_REST_ENABLED', _('settings_h2s_rest_toggle'), (env.get('H2S_REST_ENABLED','') | lower) in ['1','true','yes','on'], off_value='false') }}
+    <div class="account-fields">
+      {{ field(_('settings_h2s_rest_interval'), 'H2S_REST_INTERVAL', '3', min=1, max=60, step=0.5) }}
+      {{ field(_('settings_h2s_rest_home_interval'), 'H2S_REST_HOME_INTERVAL', '0', min=0, max=600, step=1) }}
+    </div>
+    <fieldset class="account-field">
+      <legend>{{ '运行时段（荷兰时间）' if zh else 'Active hours (NL time)' }}</legend>
+      {{ window(none, 'H2S_REST_START', '08:30', 'H2S_REST_END', '17:45') }}
+    </fieldset>
+    {{ ui.switch('H2S_REST_WEEKDAYS_ONLY', _('settings_h2s_rest_weekdays'), (env.get('H2S_REST_WEEKDAYS_ONLY','true') | lower) not in ['0','false','no','off'], off_value='false') }}
+    {{ ui.save_actions() }}
 
-  <!-- Section 2: Sources -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <i class="bi bi-broadcast-pin mr-2" style="color:var(--accent);"></i>{{ _('settings_sources') }}
+  {# ── 平台与城市 ───────────────────────────────────── #}
+  {# 平台清单来自 config.KNOWN_SOURCES；写死过三个平台，保存一次就把漏掉的那个删了 #}
+  {% elif s.key == 'platforms' and row.key == 'sources' %}
+    <div class="mail-options account-options settings-options">
+      {% for key, label in source_options %}<label><input type="checkbox" name="source_selected" value="{{ key }}"{% if key in selected_sources %} checked{% endif %}> {{ label }}</label>{% endfor %}
     </div>
-    <div class="card-body">
-      {# 从 config.KNOWN_SOURCES 渲染。原先这里写死了三个平台，漏掉 ourcampus，
-         从面板保存一次就会把它从 SOURCES 里悄悄删掉。 #}
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
-        {% for key, label in source_options %}
-        <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="source_selected" value="{{ key }}" {% if key in selected_sources %}checked{% endif %}>
-          {{ label }}
-        </label>
-        {% endfor %}
-      </div>
-      <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_sources_hint') }}</div>
+    {{ ui.save_actions() }}
+  {% elif s.key == 'platforms' and row.key == 'h2s' %}
+    {{ city_checks('city_selected', known_cities, 'id', selected_city_ids) }}
+    {{ ui.save_actions() }}
+  {% elif s.key == 'platforms' and row.key == 'ourdomain' %}
+    {{ city_checks('ourdomain_city_selected', known_ourdomain_cities, 'key', selected_ourdomain_keys) }}
+    {{ ui.save_actions() }}
+  {% elif s.key == 'platforms' and row.key == 'magis' %}
+    {{ city_checks('magis_city_selected', known_magis_cities, 'key', selected_magis_keys) }}
+    {{ ui.save_actions() }}
+  {% elif s.key == 'platforms' and row.key == 'se' %}
+    {{ city_checks('se_city_selected', known_se_cities, 'key', selected_se_keys) }}
+    {{ ui.save_actions() }}
+  {% elif s.key == 'platforms' and row.key == 'plaza' %}
+    {{ city_checks('plaza_city_selected', known_plaza_cities, 'key', selected_plaza_keys) }}
+    {{ ui.save_actions() }}
+  {% elif s.key == 'platforms' and row.key == 'xior' %}
+    {# 三十来栋按城市折叠：勾城市 = 整城全选，点名字展开；计数让折叠时也看得出选了几栋 #}
+    <div class="xior-list" data-xior>
+      {% for city, buildings in xior_by_city | dictsort %}
+      <details class="xior-group">
+        <summary class="xior-city-row">
+          <input type="checkbox" class="xior-city" aria-label="{{ city }}">
+          <span class="xior-city-name">{{ city }}</span>
+          <span class="xior-tally"></span>
+          <i class="bi bi-chevron-down xior-chev" aria-hidden="true"></i>
+        </summary>
+        <div class="xior-bldgs">
+          {% for b in buildings %}
+          <label class="xior-bldg"><input type="checkbox" name="xior_city_selected" value="{{ city }} {{ b.bldg }},{{ b.key }}"{% if b.key in selected_xior_keys %} checked{% endif %}> {{ b.bldg }}</label>
+          {% endfor %}
+        </div>
+      </details>
+      {% endfor %}
     </div>
-  </div>
+    <div class="settings-list-tools"><span data-xior-count></span><button type="button" class="account-text-button" data-xior-toggle>{{ '全选' if zh else 'Select all' }}</button></div>
+    {{ ui.save_actions() }}
 
-  <!-- Section 3: Cities -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <i class="bi bi-geo-alt mr-2" style="color:var(--success);"></i>{{ _('settings_h2s_cities') }}
-      <button type="button" class="btn btn-ghost btn-sm" onclick="var cbs=this.parentElement.nextElementSibling.querySelectorAll('input[type=checkbox]');var all=Array.from(cbs).every(c=>c.checked);cbs.forEach(c=>c.checked=!all);this.textContent=all?'{{ _('select_all') }}':'{{ _('deselect_all') }}'" style="margin-left:auto;">{{ _('select_all') }}</button>
+  {# ── 维护：走各自的 API，不提交设置表单 ───────────────── #}
+  {% elif s.key == 'maintenance' and row.key == 'apply' %}
+    <div class="account-panel-actions">
+      <button type="button" class="mail-primary" data-monitor-action="reload">{{ _('settings_apply') }}</button>
+      <button type="button" data-monitor-action="restart">{{ _('settings_restart') }}</button>
     </div>
-    <div class="card-body">
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));">
-        {% for city in known_cities %}
-        <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="city_selected" value="{{ city.name }},{{ city.id }}" {% if city.id in selected_city_ids %}checked{% endif %}>
-          {{ city.name }}
-        </label>
-        {% endfor %}
-      </div>
-      <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_cities_hint') }}</div>
+  {% elif s.key == 'maintenance' and row.key == 'reset' %}
+    <div class="account-panel-actions">
+      <button type="button" class="settings-danger" data-open-reset>{{ _('settings_reset_btn') }}</button>
     </div>
-  </div>
+  {% endif %}
 
-  <!-- Section 4: OurDomain buildings -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <i class="bi bi-building mr-2" style="color:var(--warning);"></i>{{ _('settings_ourdomain_cities') }}
-    </div>
-    <div class="card-body">
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
-        {% for city in known_ourdomain_cities %}
-        <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="ourdomain_city_selected" value="{{ city.name }},{{ city.key }}" {% if city.key in selected_ourdomain_keys %}checked{% endif %}>
-          {{ city.name }}
-        </label>
-        {% endfor %}
-      </div>
-      <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_ourdomain_hint') }}</div>
-    </div>
-  </div>
-
-  <!-- Section 4b: Magis cities -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <i class="bi bi-building mr-2" style="color:var(--warning);"></i>{{ _('settings_magis_cities') }}
-    </div>
-    <div class="card-body">
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
-        {% for city in known_magis_cities %}
-        <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="magis_city_selected" value="{{ city.name }},{{ city.key }}" {% if city.key in selected_magis_keys %}checked{% endif %}>
-          {{ city.name }}
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-
-  <!-- Section 4c: Student Experience cities -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <i class="bi bi-building mr-2" style="color:var(--success);"></i>{{ _('settings_se_cities') }}
-    </div>
-    <div class="card-body">
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
-        {% for city in known_se_cities %}
-        <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="se_city_selected" value="{{ city.name }},{{ city.key }}" {% if city.key in selected_se_keys %}checked{% endif %}>
-          {{ city.name }}
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-
-  <!-- Section 4d: Plaza cities -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <i class="bi bi-building mr-2" style="color:var(--info);"></i>{{ _('settings_plaza_cities') }}
-    </div>
-    <div class="card-body">
-      <div class="form-row" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));">
-        {% for city in known_plaza_cities %}
-        <label class="checkbox" style="white-space:nowrap;">
-          <input type="checkbox" name="plaza_city_selected" value="{{ city.name }},{{ city.key }}" {% if city.key in selected_plaza_keys %}checked{% endif %}>
-          {{ city.name }}
-        </label>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-
-  <!-- Section 5: Xior buildings -->
-  <div class="card mb-4">
-    <div class="section-header">
-      <i class="bi bi-building mr-2" style="color:var(--accent);"></i>{{ _('settings_xior_cities') }}
-      <span id="xiorCount" class="text-tertiary" style="margin-left:10px;font-weight:400;font-size:12.5px;"></span>
-      <button type="button" id="xiorToggleAll" class="btn btn-ghost btn-sm"
-              style="margin-left:auto;">{{ _('select_all') }}</button>
-    </div>
-    <div class="card-body">
-      <style>
-        /* 折叠是必要的：30 栋太多，而多数人只关心自己那座城市。
-           但视觉要跟同页的「H2S 监控城市」一致——朴素清单，**不做卡片**。
-
-           上一版把每个城市做成描边+染色的块，而全选是默认状态，于是 14 个块
-           一起高亮，整片都在喊。这一版一个色块都没有：选没选中只由复选框和
-           右侧计数表达，颜色不参与。 */
-        /* 网格而不是多列：多列下展开一个城市会把后面的城市挤到别的列去，
-           点几下整块就乱了——动的全是你没在操作的东西。网格里各归各位，
-           展开只增高自己那一格。
-           当初改用多列是为了躲「展开撑高整行、旁边留空洞」，但那个洞之所以
-           显眼是因为当时每个城市都是带边框的卡片；现在没有边框和填色，多出来
-           的空白就只是空白。 */
-        .xior-list{
-          /* 列间距也跟 .form-row 一致（14px）。列数一样但 gap 不同的话，
-             两块的列位置仍然对不上——差 8px，并排看得出来。 */
-          display:grid; gap:0 14px; align-items:start;
-          /* 与同页「H2S 监控城市」同一个下限（180px），两块的列数才对得上；
-             用 210px 时上面 6 列、这里 5 列，并排看是错位的。
-             城市名有 flex:1 + ellipsis，窄一点也不会挤坏。 */
-          grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
-        }
-        .xior-city-row{
-          display:flex; align-items:center; gap:8px;
-          /* 负外边距抵掉左右内边距：内边距是为了 hover 底色不贴着字，但它同时
-             把复选框往右推了 6px，与上面「H2S 监控城市」那一列对不齐。
-             往外拉 6px 后，复选框回到列的左边界，hover 底色仍有留白。
-             gap 是 14px，两侧各探出 6px 仍落在间距内，不会互相压到。 */
-          padding:5px 6px; margin:0 -6px; border-radius:var(--radius);
-          /* 16px 对齐 .checkbox（同页 H2S 城市清单用的就是它），
-             否则两块并排看字号明显不一样 */
-          font-size:16px; cursor:pointer; list-style:none;
-        }
-        .xior-city-row::-webkit-details-marker{ display:none; }
-        /* 唯一的视觉反馈是 hover 时的浅底——静态时整块是干净的 */
-        .xior-city-row:hover{ background:var(--surface-hover); }
-        /* accent-color 跟 .checkbox input 一致。漏了它复选框会回落到浏览器
-           默认的蓝色，和同页其它清单一眼看出两种颜色。 */
-        .xior-city-row input{ margin:0; accent-color:var(--accent); }
-        .xior-city-name{ flex:1; min-width:0; overflow:hidden;
-          text-overflow:ellipsis; white-space:nowrap; }
-        /* 折叠状态下靠它知道这座城市选了几栋，不用展开去找 */
-        .xior-tally{ font-size:12.5px; color:var(--text3);
-          font-variant-numeric:tabular-nums; }
-        .xior-chev{ font-size:11px; color:var(--text3); transition:transform .18s; }
-        .xior-group[open] .xior-chev{ transform:rotate(180deg); }
-        .xior-bldgs{ padding:1px 0 8px 30px; }
-        .xior-bldg{
-          display:flex; align-items:center; gap:8px; margin:0;
-          padding:3px 0; font-size:15px; color:var(--text2); cursor:pointer;
-        }
-        .xior-bldg input{ margin:0; accent-color:var(--accent); }
-      </style>
-
-      <div class="xior-list">
-        {% for city, buildings in xior_by_city | dictsort %}
-        <details class="xior-group">
-          <summary class="xior-city-row">
-            {# 点复选框只选中整座城市，不展开；点名字才展开 #}
-            <input type="checkbox" class="xior-city" onclick="event.stopPropagation();">
-            <span class="xior-city-name">{{ city }}</span>
-            <span class="xior-tally"></span>
-            <i class="bi bi-chevron-down xior-chev"></i>
-          </summary>
-          <div class="xior-bldgs">
-            {% for b in buildings %}
-            <label class="xior-bldg">
-              <input type="checkbox" name="xior_city_selected"
-                     value="{{ city }} {{ b.bldg }},{{ b.key }}"
-                     {% if b.key in selected_xior_keys %}checked{% endif %}>
-              {{ b.bldg }}
-            </label>
-            {% endfor %}
-          </div>
-        </details>
-        {% endfor %}
-      </div>
-      <div class="form-help mt-2"><i class="bi bi-info-circle mr-1"></i>{{ _('settings_xior_hint') }}</div>
-    </div>
-  </div>
-
-  <div class="flex items-center gap-2 flex-wrap">
-    <button type="submit" class="btn btn-primary">
-      <i class="bi bi-save mr-1"></i>{{ _('settings_save') }}
-    </button>
-    <button type="button" id="btn-reload" class="btn btn-ghost" onclick="reloadMonitor(this)"
-            title="{{ _('settings_apply_hint') }}">
-      <i class="bi bi-arrow-clockwise mr-1"></i>{{ _('settings_apply') }}
-    </button>
-    <button type="button" id="btn-restart" class="btn btn-ghost" onclick="restartMonitor(this)"
-            title="{{ _('settings_restart_hint') }}">
-      <i class="bi bi-arrow-repeat mr-1"></i>{{ _('settings_restart') }}
-    </button>
-    <a href="{{ url_for('index') }}" class="btn btn-ghost">{{ _('settings_cancel') }}</a>
-  </div>
-
+  {% endcall %}
+  {% endfor %}{% endfor %}
+  </section>
 </form>
+</section>
 
-<!-- Danger zone -->
-<div class="danger-zone">
-  <h3><i class="bi bi-exclamation-triangle mr-2"></i>{{ _('settings_danger_zone') }}</h3>
-  <p class="text-sm text-secondary mb-3">{{ _('settings_danger_desc') }}</p>
-  <button type="button" class="btn btn-danger-ghost btn-sm" onclick="showResetModal()">
-    <i class="bi bi-trash mr-1"></i>{{ _('settings_reset_btn') }}
-  </button>
-</div>
-
-<!-- Reset confirm modal -->
-<div class="modal-overlay hidden" id="resetModal">
-  <div class="modal-box">
-    <h3 style="color:var(--danger);"><i class="bi bi-exclamation-triangle mr-2"></i>{{ _('settings_reset_confirm') }}</h3>
-    <p>{{ _('settings_reset_warn') }}</p>
-    <div class="modal-actions">
-      <button class="btn btn-ghost btn-sm" onclick="hideResetModal()">{{ _('settings_cancel') }}</button>
-      <button class="btn btn-danger btn-sm" id="btn-reset-confirm" onclick="resetDatabase(this)">
-        <i class="bi bi-trash mr-1"></i>{{ _('confirm') }}
-      </button>
-    </div>
+<dialog id="reset-dialog" aria-labelledby="reset-title">
+  <h2 id="reset-title">{{ _('settings_reset_confirm') }}</h2>
+  <p>{{ _('settings_reset_warn') }}</p>
+  <div class="mail-dialog-actions">
+    <button type="button" data-close-dialog>{{ _('settings_cancel') }}</button>
+    <button type="button" class="settings-danger-solid" data-confirm-reset>{{ _('settings_reset_btn') }}</button>
   </div>
-</div>
+</dialog>
 {% endblock %}
 
 {% block scripts %}
-<script>
-function showResetModal() { document.getElementById('resetModal').classList.remove('hidden'); }
-function hideResetModal() { document.getElementById('resetModal').classList.add('hidden'); }
-
-function showResultToast(ok, msg) {
-  var wrap = document.getElementById('toast-container');
-  if(!wrap) return;
-  var div = document.createElement('div');
-  div.className = 'toast';
-  div.style.cssText = ok ? 'border-color:var(--success);' : 'border-color:var(--danger);';
-  div.innerHTML = (ok ? '<i class="bi bi-check-circle-fill mr-1" style="color:var(--success);"></i> ' : '<i class="bi bi-x-circle-fill mr-1" style="color:var(--danger);"></i> ') + msg;
-  wrap.appendChild(div);
-  setTimeout(function(){ div.style.opacity='0'; div.style.transition='opacity .3s'; setTimeout(function(){ div.remove(); }, 300); }, 4000);
-}
-
-function resetDatabase(btn) {
-  var lang = document.querySelector('meta[name="lang"]').getAttribute('content');
-  var resetting = lang === 'zh' ? '清空中...' : 'Resetting...';
-  var orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner mr-1"></span>' + resetting;
-  fetch('/api/reset-db', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': '{{ csrf_token() }}' },
-    body: JSON.stringify({ confirm: true }),
-  })
-    .then(function(r){ return r.json(); })
-    .then(function(d) {
-      hideResetModal();
-      showResultToast(d.ok, d.ok ? d.message : (d.error || (lang === 'zh' ? '未知错误' : 'Unknown error')));
-    })
-    .catch(function() { showResultToast(false, lang === 'zh' ? '请求失败' : 'Request failed'); })
-    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
-}
-
-function reloadMonitor(btn) {
-  var lang = document.querySelector('meta[name="lang"]').getAttribute('content');
-  var sending = lang === 'zh' ? '发送中...' : 'Sending...';
-  var orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner mr-1"></span>' + sending;
-  fetch('/api/reload', {
-    method: 'POST',
-    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
-  })
-    .then(function(r){ return r.json(); })
-    .then(function(d) { showResultToast(d.ok, d.ok ? d.message : (d.error || (lang === 'zh' ? '未知错误' : 'Unknown error'))); })
-    .catch(function() { showResultToast(false, lang === 'zh' ? '请求失败' : 'Request failed'); })
-    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
-}
-
-function restartMonitor(btn) {
-  var lang = document.querySelector('meta[name="lang"]').getAttribute('content');
-  var confirmMsg = lang === 'zh'
-    ? '确定要重启监控进程吗？\n\n这会中断本轮抓取并 stop + start 进程；只在改了代码后需要。'
-    : 'Restart the monitor process?\n\nThis interrupts the current scrape and does a full stop + start; only needed after code changes.';
-  if (!confirm(confirmMsg)) return;
-  var restarting = lang === 'zh' ? '重启中...' : 'Restarting...';
-  var orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner mr-1"></span>' + restarting;
-  fetch('/api/monitor/restart', {
-    method: 'POST',
-    headers: { 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').getAttribute('content') },
-  })
-    .then(function(r){ return r.json(); })
-    .then(function(d) { showResultToast(d.ok, d.ok ? d.message : (d.error || (lang === 'zh' ? '未知错误' : 'Unknown error'))); })
-    .catch(function() { showResultToast(false, lang === 'zh' ? '请求失败' : 'Request failed'); })
-    .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
-}
-
-/* ── Xior 楼盘选择 ───────────────────────────────────────────────
-   折叠状态下也要能看出「这座城市选了几栋」，否则只能一个个展开去找——
-   所以每个城市带一个计数，标题栏带总计。 */
-(function () {
-  var list = document.querySelector('.xior-list');
-  if (!list) return;
-  var groups = [].slice.call(list.querySelectorAll('.xior-group'));
-  var total = list.querySelectorAll('.xior-bldg input').length;
-  var countEl = document.getElementById('xiorCount');
-  var toggleBtn = document.getElementById('xiorToggleAll');
-  var zh = (document.documentElement.lang === 'zh');
-
-  function boxesOf(el) { return [].slice.call(el.querySelectorAll('.xior-bldg input')); }
-
-  function sync() {
-    var on = 0;
-    groups.forEach(function (g) {
-      var boxes = boxesOf(g);
-      var n = boxes.filter(function (b) { return b.checked; }).length;
-      on += n;
-      g.querySelector('.xior-tally').textContent = n + '/' + boxes.length;
-      var city = g.querySelector('.xior-city');
-      city.checked = n === boxes.length && n > 0;
-      /* 部分选中用 indeterminate——否则勾了一半的城市和一栋没勾长得一样 */
-      city.indeterminate = n > 0 && n < boxes.length;
-    });
-    countEl.textContent = zh ? ('已选 ' + on + ' / ' + total + ' 栋')
-                             : (on + ' of ' + total + ' selected');
-    toggleBtn.textContent = (on === total)
-      ? (zh ? '清空' : 'Clear all')
-      : (zh ? '全选' : 'Select all');
-  }
-
-  list.addEventListener('change', function (e) {
-    if (e.target.classList.contains('xior-city')) {
-      /* indeterminate 时点它按「整城全选」处理——那是此时最可能想要的 */
-      var want = e.target.checked;
-      boxesOf(e.target.closest('.xior-group')).forEach(function (b) { b.checked = want; });
-    }
-    sync();
-  });
-
-  toggleBtn.addEventListener('click', function () {
-    var boxes = boxesOf(list);
-    var allOn = boxes.every(function (b) { return b.checked; });
-    boxes.forEach(function (b) { b.checked = !allOn; });
-    sync();
-  });
-
-  sync();
-})();
-</script>
+<script src="{{ asset('account.js') }}"></script>
+<script src="{{ asset('settings.js') }}"></script>
 {% endblock %}

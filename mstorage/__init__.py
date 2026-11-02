@@ -3,6 +3,7 @@
 从 storage.py 拆分而来，按领域组织为多个 mixin：
   _base          — 连接 / schema / meta / 生命周期
   _listings      — diff / mark_notified / 面板查询
+  _listing_reads — 按用户保存的房源已读记录
   _charts        — 统计图表
   _notifications — web_notifications CRUD
   _map_calendar  — 地图坐标缓存 + 日历查询
@@ -28,6 +29,7 @@ from mstorage._email_verify import EmailVerifyOps
 from mstorage._export import ExportOps
 from mstorage._feedback import FeedbackOps
 from mstorage._listings import ListingOps
+from mstorage._listing_reads import ListingReadOps
 from mstorage._map_calendar import MapCalendarOps
 from mstorage._notifications import NotificationOps
 from mstorage._retry import RetryQueueOps
@@ -39,6 +41,7 @@ from mstorage._user_configs import UserConfigOps
 
 class Storage(
     ListingOps,
+    ListingReadOps,
     NotificationOps,
     AnnouncementOps,
     ChartOps,

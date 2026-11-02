@@ -1,5 +1,5 @@
 {#
-  新用户引导清单。
+  新用户引导：账号设置列表顶部的一段状态说明。
 
   只对 user 角色渲染（admin / guest 没有 UserConfig 行，onb 会是 None）。
 
@@ -7,103 +7,63 @@
   ------------
   「收不到通知」**或**「筛选为空」。两者都配好就整块消失——引导不是常驻装饰。
 
-  两档措辞，不混成一个进度条
-  --------------------------
-  - 收不到通知：红。这是个故障状态，用户做了事却没有结果。
-  - 筛选为空：灰。这是**合法状态**，意思是「什么都推给我」。把它算成未完成
-    会对着一半只想随便看看的人天天报警，所以措辞是「会发生什么」而不是
-    「你还没做什么」。
+  写法
+  ----
+  按收件箱的读法排：一句标题、一句原因、两条事实、一个下一步。不用图标和
+  勾叉——每一项的状态都已经用文字写明。
 
-  第三步「确认能收到」只在前两步的闸过了才出现——没有接收方式的时候让人去点
-  「发送测试通知」，只会得到一次失败，那不叫引导。
+  - 收不到通知：故障状态，用户做了事却没有结果。整块用暖色底，原因用砖红，
+    下一步是唯一的实心按钮。
+  - 筛选为空：**合法状态**，意思是「什么都推给我」。中性底色，措辞是「会发生
+    什么」而不是「你还没做什么」，下一步只是文字链接。
+  - 「发送测试通知」只在接收方式通了以后出现——没有接收方式时让人去发测试，
+    只会得到一次失败。
 #}
 {% if onb and (not onb.reachable or onb.filter_empty) %}
-{# 外壳两种状态一模一样，和面板上其它卡片同一套玻璃质感。轻重差别全部由
-   内容承担：标题、图标、以及那一步自己的颜色。给整张卡描边或加色条会让它
-   压过下面真正的故障横幅。 #}
-<section class="onb-card" aria-labelledby="onb-title">
-  <div class="onb-head">
-    <i class="bi {% if onb.reachable %}bi-info-circle{% else %}bi-bell-slash{% endif %}"
-       aria-hidden="true"></i>
-    <h2 id="onb-title">
-      {{ _('onb_title_done') if onb.reachable else _('onb_title') }}
-    </h2>
-  </div>
+<section class="onb-card{% if not onb.reachable %} onb-blocked{% endif %}" aria-labelledby="onb-title">
+  <h2 id="onb-title">{{ _('onb_title_done') if onb.reachable else _('onb_title') }}</h2>
 
-  <ol class="onb-steps">
-    {# ── 接收方式排第一：它是唯一真正挡住通知的东西 ── #}
-    <li class="onb-step {% if onb.reachable %}onb-step-done{% else %}onb-step-blocked{% endif %}">
-      <span class="onb-mark" aria-hidden="true">
-        <i class="bi {% if onb.reachable %}bi-check-lg{% else %}bi-x-lg{% endif %}"></i>
-      </span>
-      <div class="onb-body">
-        <div class="onb-step-name">{{ _('onb_step_route') }}</div>
-        <div class="onb-step-note">
-          {% if onb.reachable %}
-            {{ _('onb_route_ok') }}{{ onb.route_labels | join('、' if lang == 'zh' else ', ') }}
-          {% elif onb.blocked_by == 'account' %}
-            {{ _('onb_route_account_off') }}
-          {% elif onb.blocked_by == 'toggle' %}
-            {{ _('onb_route_toggle_off') }}
-          {% else %}
-            {{ _('onb_route_none') }}
-          {% endif %}
-        </div>
-        {% if not onb.reachable and current_user_id %}
-        <a class="btn btn-primary onb-btn"
-           href="{{ url_for('user_edit', user_id=current_user_id) }}">
-          {{ _('onb_go_settings') }}
-        </a>
-        {% endif %}
-      </div>
-    </li>
-
-    {# ── 筛选条件：空是合法的，所以是灰的「–」不是红的「✗」 ── #}
-    <li class="onb-step {% if onb.filter_empty %}onb-step-note-only{% else %}onb-step-done{% endif %}">
-      <span class="onb-mark" aria-hidden="true">
-        <i class="bi {% if onb.filter_empty %}bi-dash{% else %}bi-check-lg{% endif %}"></i>
-      </span>
-      <div class="onb-body">
-        <div class="onb-step-name">{{ _('onb_step_filter') }}</div>
-        <div class="onb-step-note">
-          {% if onb.filter_empty %}
-            {{ _('onb_filter_empty') }}
-          {% else %}
-            {{ _('onb_filter_set') % {'n': onb.filter_count} }}
-          {% endif %}
-        </div>
-        {% if onb.filter_empty and current_user_id %}
-        <a class="btn btn-ghost onb-btn"
-           href="{{ url_for('user_edit', user_id=current_user_id) }}#filter">
-          {{ _('onb_go_filter') }}
-        </a>
-        {% endif %}
-      </div>
-    </li>
-
-    {# ── 确认能收到：只有接收方式通了才有意义 ── #}
-    {% if onb.reachable and current_user_id %}
-    <li class="onb-step onb-step-note-only">
-      <span class="onb-mark" aria-hidden="true"><i class="bi bi-dash"></i></span>
-      <div class="onb-body">
-        <div class="onb-step-name">{{ _('onb_step_verify') }}</div>
-        <div class="onb-step-note">{{ _('onb_verify_hint') }}</div>
-        <button type="button"
-                class="btn btn-ghost onb-btn"
-                data-onb-test="{{ url_for('user_test_notify', user_id=current_user_id) }}">
-          {{ _('onb_verify_btn') }}
-        </button>
-        <div class="onb-test-result" role="status" aria-live="polite" hidden></div>
-      </div>
-    </li>
-    {% endif %}
-  </ol>
-
-  <p class="onb-foot">
-    {{ _('onb_bell_note') }}
-    <a href="{{ url_for('guide_page') }}" target="_blank" rel="noopener">
-      {{ _('onb_guide_link') }}
-    </a>
+  {% if not onb.reachable %}
+  <p class="onb-lead onb-step-blocked">
+    {%- if onb.blocked_by == 'account' %}{{ _('onb_route_account_off') }}
+    {%- elif onb.blocked_by == 'toggle' %}{{ _('onb_route_toggle_off') }}
+    {%- else %}{{ _('onb_route_none') }}{% endif -%}
   </p>
+  {% else %}
+  <p class="onb-lead">{{ _('onb_filter_empty_lead') }}</p>
+  {% endif %}
+
+  <dl class="onb-facts">
+    <div>
+      <dt>{{ '通知' if lang == 'zh' else 'Notifications' }}</dt>
+      <dd>{% if onb.reachable %}{{ onb.route_labels | join('、' if lang == 'zh' else ', ') }}
+        {%- elif onb.blocked_by == 'account' %}{{ '已停止' if lang == 'zh' else 'Stopped' }}
+        {%- elif onb.blocked_by == 'toggle' %}{{ '已关闭' if lang == 'zh' else 'Off' }}
+        {%- else %}{{ '未设置' if lang == 'zh' else 'Not set up' }}{% endif %}</dd>
+    </div>
+    <div>
+      <dt>{{ _('onb_step_filter') }}</dt>
+      <dd>{% if onb.filter_empty %}{{ '不限' if lang == 'zh' else 'Any listing' }}{% else %}{{ _('onb_filter_set') % {'n': onb.filter_count} }}{% endif %}</dd>
+    </div>
+  </dl>
+
+  {% if current_user_id %}
+  <div class="onb-actions">
+    {% if not onb.reachable %}
+    <a class="onb-btn onb-primary" data-no-transition
+       href="{{ url_for('user_edit', user_id=current_user_id, section='account', item='status') if onb.blocked_by == 'account' else url_for('user_edit', user_id=current_user_id, section='notifications', item='delivery' if onb.blocked_by == 'toggle' else 'telegram') }}">{{ _('onb_go_settings') }}</a>
+    {% else %}
+    <span class="onb-test">
+      <button type="button" class="onb-btn" data-onb-test="{{ url_for('user_test_notify', user_id=current_user_id) }}">{{ _('onb_verify_btn') }}</button>
+      <span class="onb-test-result" role="status" aria-live="polite" hidden></span>
+    </span>
+    {% endif %}
+    {% if onb.filter_empty %}
+    <a class="onb-link" data-no-transition
+       href="{{ url_for('user_edit', user_id=current_user_id, section='filters', item='rent') }}">{{ _('onb_go_filter') }}</a>
+    {% endif %}
+    <a class="onb-link onb-guide" href="{{ url_for('guide_page') }}" target="_blank" rel="noopener">{{ _('onb_guide_link') }} ↗</a>
+  </div>
+  {% endif %}
 </section>
 {% endif %}

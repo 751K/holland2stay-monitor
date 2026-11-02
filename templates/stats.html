@@ -1,358 +1,88 @@
 {% extends "base.html" %}
-{% block title %}{{ _('stats_title') }} · FlatRadar{% endblock %}
-
-{% block head %}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-{% endblock %}
+{#
+  统计，收件箱外壳。范围跟着侧栏：我的匹配只统计自己的匹配，全部房源统计全部（含临时筛选）。顶部四个关键数字，然后是两条趋势线，再往下是所选时间
+  范围内新上架房源的构成。名目类分布（平台、城市、状态……）画成排序横条，
+  有序分桶（租金、面积、楼层、时段）画成柱状；全部只用一个颜色，长度就是数量。
+  数据来自 /stats/data（带上当前的范围参数），切换时间范围时原地重画。
+#}
+{% set zh = lang == 'zh' %}
+{% from '_inbox_actions.html' import filter_action with context %}
+{% macro ranked(key, title) %}
+<section class="stats-card" aria-labelledby="stats-{{ key }}-title">
+  <h3 id="stats-{{ key }}-title">{{ title }}</h3>
+  <ol class="stats-ranked" data-ranked="{{ key }}"></ol>
+</section>
+{% endmacro %}
+{% macro columns(key, title, wide=false) %}
+<section class="stats-card{% if wide %} is-wide{% endif %}" aria-labelledby="stats-{{ key }}-title">
+  <h3 id="stats-{{ key }}-title">{{ title }}</h3>
+  <div class="stats-plot"><canvas data-columns="{{ key }}" role="img" aria-label="{{ title }}"></canvas></div>
+</section>
+{% endmacro %}
+{% block title %}{{ '统计' if zh else 'Statistics' }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page stats-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('stats.css') }}">
+<script src="{{ asset('vendor/chart.umd.min.js') }}"></script>{% endblock %}
+{% block sidebar_navigation %}{% include '_inbox_nav.html' %}{% endblock %}
+{% block sidebar_footer %}{% include '_workspace_footer.html' %}{% endblock %}
 
 {% block content %}
+<section class="inbox-shell stats-shell">
+<header class="mail-toolbar">
+  <div>
+    <h1>{{ ('我的匹配 · 统计' if inbox_user else '全部房源 · 统计') if zh else ('My matches · Statistics' if inbox_user else 'All listings · Statistics') }}</h1>
+    {# 范围说明：我的匹配可直接去改通知筛选；全部房源的临时筛选在列表页调整 #}
+    {% if inbox_user %}{% call filter_action(class_name='mail-summary') %}{{ filter_summary }} <span>{{ '调整筛选 ↗' if zh else 'Edit filters ↗' }}</span>{% endcall %}
+    {% else %}<p class="mail-summary">{{ filter_summary }}</p>{% endif %}
+  </div>
+  <div class="stats-range" role="group" aria-label="{{ '时间范围' if zh else 'Time range' }}">
+    {% for d in (7, 30, 90) %}<button type="button" data-days="{{ d }}"{% if d == default_days %} aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ ('近 %d 天' % d) if zh else ('%d days' % d) }}</button>{% endfor %}
+  </div>
+</header>
 
-<div class="page-header">
-  <h1>{{ _('stats_title') }}</h1>
-  <div class="flex items-center gap-2">
-    <span class="text-sm text-secondary">{{ _('stats_range') }}</span>
-    <select id="days-select" class="form-select" style="width:auto;font-size:12px;" onchange="loadCharts(this.value)">
-      <option value="7">{{ _('stats_7d') }}</option>
-      <option value="30" selected>{{ _('stats_30d') }}</option>
-      <option value="90">{{ _('stats_90d') }}</option>
-    </select>
+<div class="stats-body">
+  <dl class="stats-kpis">
+    <div><dt>{{ ('匹配房源' if zh else 'Matching listings') if inbox_user else ('房源总数' if zh else 'Listings') }}</dt><dd data-kpi="total">–</dd></div>
+    <div><dt>{{ '24 小时新增' if zh else 'New in 24 hours' }}</dt><dd data-kpi="new_24h">–</dd></div>
+    <div><dt data-kpi-label="new_range">{{ ('近 %d 天新增' % default_days) if zh else ('New in %d days' % default_days) }}</dt><dd data-kpi="new_range">–</dd></div>
+    <div><dt data-kpi-label="changes_range">{{ ('近 %d 天状态变更' % default_days) if zh else ('Status changes in %d days' % default_days) }}</dt><dd data-kpi="changes_range">–</dd></div>
+  </dl>
+
+  <h2 class="stats-heading">{{ '每日趋势' if zh else 'Daily trend' }}</h2>
+  <div class="stats-grid is-pair">
+    <section class="stats-card" aria-labelledby="stats-new-title">
+      <h3 id="stats-new-title">{{ '新增房源' if zh else 'New listings' }}</h3>
+      <div class="stats-plot"><canvas data-line="daily_new" role="img" aria-label="{{ '每日新增房源' if zh else 'New listings per day' }}"></canvas></div>
+    </section>
+    <section class="stats-card" aria-labelledby="stats-changes-title">
+      <h3 id="stats-changes-title">{{ '状态变更' if zh else 'Status changes' }}</h3>
+      <div class="stats-plot"><canvas data-line="daily_changes" role="img" aria-label="{{ '每日状态变更' if zh else 'Status changes per day' }}"></canvas></div>
+    </section>
+  </div>
+
+  <div class="stats-grid">
+    {{ ranked('source_dist', '平台' if zh else 'Platform') }}
+    {{ ranked('city_dist', '城市' if zh else 'City') }}
+    {{ ranked('status_dist', '当前状态' if zh else 'Current status') }}
+    {{ ranked('type_dist', '房型' if zh else 'Type') }}
+    {{ ranked('tenant_dist', '租客要求' if zh else 'Tenant requirement') }}
+    {{ ranked('contract_dist', '合同类型' if zh else 'Contract') }}
+    {{ ranked('energy_dist', '能效等级' if zh else 'Energy label') }}
+    {{ columns('price_dist', '租金' if zh else 'Rent') }}
+    {{ columns('area_dist', '面积' if zh else 'Area') }}
+    {{ columns('floor_dist', '楼层' if zh else 'Floor') }}
+    {{ columns('hourly_dist', '上架时段 · 荷兰时间' if zh else 'Time first seen · NL time', wide=true) }}
   </div>
 </div>
-
-<!-- Trend charts -->
-<div class="grid-7-5 mb-4">
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-graph-up mr-1" style="color:var(--success);"></i>{{ _('stats_new_trend') }}</div>
-    <div class="chart-wrap" style="height:220px;"><canvas id="chartDailyNew"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-arrow-left-right mr-1" style="color:var(--warning);"></i>{{ _('stats_change_trend') }}</div>
-    <div class="chart-wrap" style="height:220px;"><canvas id="chartDailyChanges"></canvas></div>
-  </div>
-</div>
-
-<!-- Distribution charts -->
-<div class="grid-4 mb-4">
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-diagram-3 mr-1" style="color:var(--accent);"></i>{{ _('stats_source_dist') }}</div>
-    <div class="chart-wrap" style="height:220px;"><canvas id="chartSource"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-geo-alt mr-1" style="color:var(--accent);"></i>{{ _('stats_city_dist') }}</div>
-    <div class="chart-wrap" style="height:220px;"><canvas id="chartCity"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-tag mr-1" style="color:var(--accent);"></i>{{ _('stats_status_dist') }}</div>
-    <div class="chart-wrap" style="height:220px;"><canvas id="chartStatus"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-currency-euro mr-1" style="color:var(--success);"></i>{{ _('stats_price_dist') }}</div>
-    <div class="chart-wrap" style="height:220px;"><canvas id="chartPrice"></canvas></div>
-  </div>
-</div>
-
-<!-- Hourly distribution (full width) -->
-<div class="grid-1 mb-4">
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-clock mr-1" style="color:var(--accent);"></i>{{ _('stats_hourly_dist') }}</div>
-    <div class="chart-wrap" style="height:200px;"><canvas id="chartHourly"></canvas></div>
-  </div>
-</div>
-
-<!-- Tenant / Contract / Type / Energy — 4 in a row -->
-<div class="grid-4 mb-4">
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-person-check mr-1" style="color:var(--accent);"></i>{{ _('stats_tenant_dist') }}</div>
-    <div class="chart-wrap" style="height:200px;"><canvas id="chartTenant"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-file-text mr-1" style="color:var(--accent);"></i>{{ _('stats_contract_dist') }}</div>
-    <div class="chart-wrap" style="height:200px;"><canvas id="chartContract"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-house-door mr-1" style="color:var(--accent);"></i>{{ _('stats_type_dist') }}</div>
-    <div class="chart-wrap" style="height:200px;"><canvas id="chartType"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-lightning-charge mr-1" style="color:var(--warning);"></i>{{ _('stats_energy_dist') }}</div>
-    <div class="chart-wrap" style="height:200px;"><canvas id="chartEnergy"></canvas></div>
-  </div>
-</div>
-
-<!-- Area + Floor distribution -->
-<div class="grid-2 mb-4">
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-arrows-angle-expand mr-1" style="color:var(--success);"></i>{{ _('stats_area_dist') }}</div>
-    <div class="chart-wrap" style="height:220px;"><canvas id="chartArea"></canvas></div>
-  </div>
-  <div class="chart-card">
-    <div class="chart-title"><i class="bi bi-building mr-1" style="color:var(--accent);"></i>{{ _('stats_floor_dist') }}</div>
-    <div class="chart-wrap" style="height:220px;"><canvas id="chartFloor"></canvas></div>
-  </div>
-</div>
-
+</section>
+<script type="application/json" id="stats-config">{{ {
+  'lang': lang, 'days': default_days, 'empty': _('chart_no_data'),
+  'features': {
+    'indefinite': _('feat_indefinite'), '6 months max': _('feat_6_months_max'), '4 months max': _('feat_4_months_max'),
+    'employed only': _('feat_employed_only'), 'student and employed': _('feat_student_employed'),
+    'student only': _('feat_student_only'), 'custom': _('feat_custom'),
+  },
+} | tojson }}</script>
 {% endblock %}
 
-{% block scripts %}
-<script>
-var LANG = '{{ lang }}';
-var PALETTE = ['#10b981','#0284c7','#f59e0b','#ef4444','#0f766e','#38bdf8','#34d399','#fbbf24','#f87171','#2dd4bf'];
-
-function colors(n) {
-  // 生成 n 种不重复的颜色（HSL 色相均匀分布，饱和度/亮度固定）
-  var c = [];
-  for(var i=0; i<n; i++) c.push('hsl(' + Math.round(i*360/n) + ', 60%, 55%)');
-  return c;
-}
-
-function statusColor(s) {
-  var sl = (s||'').toLowerCase();
-  if(sl.indexOf('book') !== -1) return '#10b981';
-  if(sl.indexOf('lottery') !== -1) return '#f59e0b';
-  return 'rgba(128,128,128,.6)';
-}
-
-// 图表轴用缩写（全名会挤成一团）；实现见 static/app.js。
-// 带兜底：app.js 若因浏览器缓存是旧版本，这里抛异常会让 render() 整个中断，
-// 页面上**所有**图表一起空白——一个标签函数不该有这种影响半径。
-/* 图表里的 feature 取值是上游返回的**数据**，不是界面文案，所以原本一直以
-   英文/荷兰语原样显示。这里按取值查显示名，查不到就原样输出——新出现的取值
-   不该变成空白。同义值（Indefinite / Onbepaalde tijd）已在读取层合并。 */
-var FEATURE_LABELS = {
-  'indefinite':           '{{ _("feat_indefinite") }}',
-  '6 months max':         '{{ _("feat_6_months_max") }}',
-  '4 months max':         '{{ _("feat_4_months_max") }}',
-  'employed only':        '{{ _("feat_employed_only") }}',
-  'student and employed': '{{ _("feat_student_employed") }}',
-  'student only':         '{{ _("feat_student_only") }}',
-  'custom':               '{{ _("feat_custom") }}',
-};
-function featLabel(v) {
-  return FEATURE_LABELS[String(v || '').toLowerCase().trim()] || v;
-}
-
-function srcLabel(s) {
-  return window.sourceShort ? window.sourceShort(s) : String(s || '').toUpperCase();
-}
-
-function themeColors() {
-  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  return {
-    text: isDark ? '#fafafa' : '#0a0a0a',
-    muted: isDark ? '#8b8b8b' : '#6b6b6b',
-    border: isDark ? '#2a2a2a' : '#e5e5e5',
-    surface: isDark ? '#1a1a1a' : '#ffffff',
-  };
-}
-
-var charts = {};
-function destroyChart(id) { if(charts[id]) { charts[id].destroy(); delete charts[id]; } }
-
-function setText(id, value) {
-  var el = document.getElementById(id);
-  if(el) el.textContent = value == null ? '0' : String(value);
-}
-
-function rangeText(prefixEn, prefixZh, days) {
-  return (LANG === 'zh' ? prefixZh + ' · ' + days + '天' : prefixEn + ' · ' + days + 'd');
-}
-
-function renderSummary(summary) {
-  if(!summary) return;
-  var days = summary.days || Number(document.getElementById('days-select').value || 30);
-  setText('kpi-total', summary.total);
-  setText('kpi-new-24h', summary.new_24h);
-  setText('kpi-new-range', summary.new_range);
-  setText('kpi-changes-range', summary.changes_range);
-  setText('kpi-new-range-label', rangeText('New', '新增', days));
-  setText('kpi-changes-range-label', rangeText('Changes', '变更', days));
-}
-
-function buildLineChart(id, label, data, color) {
-  destroyChart(id);
-  var c = themeColors();
-  Chart.defaults.color = c.muted;
-  charts[id] = new Chart(document.getElementById(id), {
-    type: 'line',
-    data: {
-      labels: data.map(function(d){ return d.date; }),
-      datasets: [{
-        label: label,
-        data: data.map(function(d){ return d.count; }),
-        borderColor: color,
-        backgroundColor: color + '18',
-        fill: true, tension: .35,
-        pointRadius: data.length > 20 ? 2 : 4,
-        pointHoverRadius: 6,
-        borderWidth: 2,
-      }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: c.surface, titleColor: c.muted, bodyColor: c.text,
-          borderColor: c.border, borderWidth: 1,
-        },
-      },
-      scales: {
-        x: { grid: { color: c.border + '55' }, ticks: { color: c.muted, maxTicksLimit: 8, font: { size: 11 } } },
-        y: { beginAtZero: true, grid: { color: c.border + '55' }, ticks: { color: c.muted, precision: 0, font: { size: 11 } } },
-      },
-    },
-  });
-}
-
-function buildDoughnutChart(id, labels, data, colors) {
-  destroyChart(id);
-  /* 没数据时画一张空图，卡片里只剩标题，看起来和「坏了」一模一样。
-     2026-08-04：「租客要求分布」就是这样——窗口内的房源全来自不提供该字段的
-     平台，图是真空的，但用户没法从界面上知道这一点。 */
-  if (!showEmptyIfNoData(id, data)) return;
-  var c = themeColors();
-  Chart.defaults.color = c.muted;
-  charts[id] = new Chart(document.getElementById(id), {
-    type: 'doughnut',
-    data: {
-      labels: labels,
-      datasets: [{ data: data, backgroundColor: colors, borderColor: c.surface, borderWidth: 3, hoverOffset: 8 }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, cutout: '62%',
-      plugins: {
-        legend: { position: 'right', labels: { color: c.text, boxWidth: 10, padding: 10, font: { size: 11 } } },
-        tooltip: { backgroundColor: c.surface, titleColor: c.muted, bodyColor: c.text, borderColor: c.border, borderWidth: 1 },
-      },
-    },
-  });
-}
-
-/** 数据为空时在画布位置显示一行说明；返回 false 表示不必再画图。 */
-function showEmptyIfNoData(id, data) {
-  var el = document.getElementById(id);
-  if (!el) return false;
-  var box = el.parentElement;
-  var old = box.querySelector('.chart-empty');
-  if (old) old.remove();
-  var total = (data || []).reduce(function (a, b) { return a + (Number(b) || 0); }, 0);
-  if (total > 0) { el.style.display = ''; return true; }
-  el.style.display = 'none';
-  var msg = document.createElement('div');
-  msg.className = 'chart-empty text-tertiary';
-  msg.style.cssText = 'display:flex;align-items:center;justify-content:center;'
-    + 'height:100%;min-height:120px;font-size:13px;';
-  msg.textContent = '{{ _("chart_no_data") }}';
-  box.appendChild(msg);
-  return false;
-}
-
-function buildBarChart(id, labels, data, color) {
-  destroyChart(id);
-  var c = themeColors();
-  Chart.defaults.color = c.muted;
-  charts[id] = new Chart(document.getElementById(id), {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [{ data: data, backgroundColor: color + 'bb', borderColor: color, borderWidth: 1, borderRadius: 4 }],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { backgroundColor: c.surface, titleColor: c.muted, bodyColor: c.text, borderColor: c.border, borderWidth: 1 } },
-      scales: {
-        x: { grid: { display: false }, ticks: { color: c.muted, font: { size: 11 } } },
-        y: { beginAtZero: true, grid: { color: c.border + '55' }, ticks: { color: c.muted, precision: 0, font: { size: 11 } } },
-      },
-    },
-  });
-}
-
-var _cachedData = null;
-function renderCharts(d) {
-  if(!d) return;
-  _cachedData = d;
-  renderSummary(d.summary);
-  var zh = LANG === 'zh';
-  buildLineChart('chartDailyNew', zh ? '新增房源' : 'New listings', d.daily_new, '#10b981');
-  buildLineChart('chartDailyChanges', zh ? '状态变更' : 'Status changes', d.daily_changes, '#f59e0b');
-
-  var sourceDist = d.source_dist || [];
-  var srcLabels = sourceDist.map(function(r){ return srcLabel(r.source); });
-  var srcCounts = sourceDist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartSource', srcLabels, srcCounts, ['#10b981', '#0284c7', '#f59e0b', '#ef4444']);
-
-  var cityLabels = d.city_dist.map(function(r){ return r.city; });
-  var cityCounts = d.city_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartCity', cityLabels, cityCounts, colors(cityLabels.length));
-
-  var stLabels = d.status_dist.map(function(r){ return r.status; });
-  var stCounts = d.status_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartStatus', stLabels, stCounts, colors(stLabels.length));
-
-  var prLabels = d.price_dist.map(function(r){ return r.range; });
-  var prCounts = d.price_dist.map(function(r){ return r.count; });
-  buildBarChart('chartPrice', prLabels, prCounts, '#0284c7');
-
-  var hrLabels = d.hourly_dist.map(function(r){ return r.hour + ':00'; });
-  var hrCounts = d.hourly_dist.map(function(r){ return r.count; });
-  buildBarChart('chartHourly', hrLabels, hrCounts, '#0f766e');
-
-  var tnLabels = d.tenant_dist.map(function(r){ return featLabel(r.label); });
-  var tnCounts = d.tenant_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartTenant', tnLabels, tnCounts, colors(tnLabels.length));
-
-  var ctLabels = d.contract_dist.map(function(r){ return featLabel(r.label); });
-  var ctCounts = d.contract_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartContract', ctLabels, ctCounts, colors(ctLabels.length));
-
-  var tpLabels = d.type_dist.map(function(r){ return r.label; });
-  var tpCounts = d.type_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartType', tpLabels, tpCounts, colors(tpLabels.length));
-
-  var enLabels = d.energy_dist.map(function(r){ return r.label; });
-  var enCounts = d.energy_dist.map(function(r){ return r.count; });
-  buildDoughnutChart('chartEnergy', enLabels, enCounts, enLabels.map(function(l){ var v=(l||'').toUpperCase(); if(v.indexOf('A')===0)return'#10b981'; if(v==='B')return'#0284c7'; if(v==='C')return'#f59e0b'; if(v==='D')return'#f97316'; if(v==='E')return'#ef4444'; return'#9ca3af'; }));
-
-  var arLabels = d.area_dist.map(function(r){ return r.label; });
-  var arCounts = d.area_dist.map(function(r){ return r.count; });
-  buildBarChart('chartArea', arLabels, arCounts, '#10b981');
-
-  var flLabels = d.floor_dist.map(function(r){ return r.label; });
-  var flCounts = d.floor_dist.map(function(r){ return r.count; });
-  buildBarChart('chartFloor', flLabels, flCounts, '#0284c7');
-}
-
-function loadCharts(days) {
-  fetch('/api/charts?days=' + encodeURIComponent(days || 30), { cache: 'no-store' })
-    .then(function(r){ return r.json(); })
-    .then(function(d){ renderCharts(d); })
-    .catch(function(err){ console.error('Charts load error:', err); });
-}
-
-renderSummary({
-  days: {{ default_days }},
-  total: {{ total }},
-  new_24h: {{ new_24h }},
-  new_range: {{ new_range }},
-  changes_range: {{ changes_range }},
-});
-loadCharts({{ default_days }});
-
-// 窗口缩放时刷新所有图表尺寸（CSS 媒体查询改变网格列数后需要）
-var _resizeTimer;
-window.addEventListener('resize', function() {
-  clearTimeout(_resizeTimer);
-  _resizeTimer = setTimeout(function() {
-    Object.values(charts).forEach(function(c) { c.resize(); });
-  }, 150);
-});
-
-new MutationObserver(function(mutations) {
-  for(var i = 0; i < mutations.length; i++) {
-    if(mutations[i].attributeName === 'data-theme') { renderCharts(_cachedData); }
-  }
-}).observe(document.documentElement, { attributes: true });
-</script>
-{% endblock %}
+{% block scripts %}<script src="{{ asset('stats.js') }}" defer></script>{% endblock %}

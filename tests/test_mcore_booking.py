@@ -175,7 +175,7 @@ class TestBookWithFallback:
             notification_channels=[],
             auto_book=AutoBookConfig(
                 enabled=True, email="a@x.com", password="pw",
-                dry_run=False, cancel_enabled=False, payment_method="ideal",
+                dry_run=False, payment_method="ideal",
             ),
         )
 

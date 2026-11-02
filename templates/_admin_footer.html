@@ -1,0 +1,6 @@
+{# 管理工作区侧栏底部：帮助与退出登录。管理员不经过账号设置页，退出入口留在这里。 #}
+<nav class="sidebar-footer mail-footer" aria-label="{{ '帮助与登录' if lang == 'zh' else 'Help and sign-in' }}">
+  <a href="{{ url_for('support_page') }}">{{ '帮助与支持' if lang == 'zh' else 'Help & support' }}</a>
+  {% include '_theme_toggle.html' %}
+  {% include '_logout.html' %}
+</nav>

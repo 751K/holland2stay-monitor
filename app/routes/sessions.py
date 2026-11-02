@@ -32,8 +32,10 @@ from app.auth import (
     guest_mode_enabled,
     record_registration,
     record_login_failure,
+    start_guest_session,
 )
 from app.csrf import csrf_required
+from app.i18n import get_lang
 from app.safety import safe_next_url
 
 logger = logging.getLogger(__name__)
@@ -87,7 +89,7 @@ def login() -> Any:
     if not auth_enabled():
         return redirect(url_for("index"))
     # 已登录也跳首页
-    if session.get("authenticated"):
+    if session.get("authenticated") and session.get("role") != "guest":
         return redirect(url_for("index"))
 
     if request.method == "POST":
@@ -162,7 +164,7 @@ def register_user() -> Any:
     """Web 注册：创建普通 user，设置 App/Web 登录密码，并直接登录。"""
     if not auth_enabled():
         return redirect(url_for("index"))
-    if session.get("authenticated"):
+    if session.get("authenticated") and session.get("role") != "guest":
         return redirect(url_for("index"))
 
     next_value = request.form.get("next", "")
@@ -209,6 +211,9 @@ def register_user() -> Any:
                 enabled=True,
                 notifications_enabled=False,
                 app_login_enabled=True,
+                # 跟随注册时的界面语言。默认的 en 会在第一次保存账号设置时
+                # 经 _own_language_cookie 把中文界面切成英文。
+                language=get_lang(),
             )
             set_app_password(user, password)
             users.append(user)
@@ -239,7 +244,8 @@ def register_user() -> Any:
     session["authenticated"] = True
     session["role"] = "user"
     session["user_id"] = user.id
-    return redirect(safe_next_url(next_value))
+    # 新账号先去账号设置：通知默认关着，引导卡在那一页告诉他还差什么
+    return redirect(url_for("user_edit", user_id=user.id))
 
 
 @csrf_required
@@ -254,9 +260,7 @@ def guest_login() -> Any:
     # 已登录的 admin 不允许被降级为 guest（防止误操作或 CSRF 降级攻击）
     if session.get("role") == "admin":
         return redirect(url_for("index"))
-    session.permanent = True
-    session["authenticated"] = True
-    session["role"] = "guest"
+    start_guest_session()
     return redirect(url_for("index"))
 
 

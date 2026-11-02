@@ -643,7 +643,7 @@ class TestRestEnvelope:
         POST /api/rest/X  → 加密 **body**，POST 原 URL，x-enc: 1
         /api/auth/*       → 完全不加密（拦截器只对 /api/rest/ 生效）
 
-    cancel_pending_orders 曾经对 /api/rest/* 直接发明文，两条都不对。
+    直接对 /api/rest/* 发明文，两种请求都会被拒。
     """
 
     def test_get_encrypts_the_path_into_x_enc_q(self):

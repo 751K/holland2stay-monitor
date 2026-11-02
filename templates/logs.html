@@ -1,58 +1,56 @@
 {% extends "base.html" %}
-{% block title %}{{ _('log_viewer') }} · FlatRadar{% endblock %}
+{% block title %}{{ _('log_viewer') }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page admin-page logs-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('admin.css') }}">{% endblock %}
+{% block sidebar_navigation %}{% include '_admin_nav.html' %}{% endblock %}
+{% block sidebar_footer %}{% include '_admin_footer.html' %}{% endblock %}
 
 {% block content %}
+<section class="inbox-shell admin-shell">
+<header class="mail-toolbar">
+  <div>
+    <h1>{{ _('log_viewer') }}</h1>
+    <p class="mail-summary"><span id="log-info">—</span></p>
+  </div>
+  <div class="admin-head-tools">
+    <label class="admin-check"><input type="checkbox" id="pause-check" onchange="togglePause()"> {{ _('pause') }}</label>
+    <label class="admin-check"><input type="checkbox" id="autoscroll-check" checked> {{ _('logs_auto_scroll') }}</label>
+    <button type="button" onclick="clearLogs()" class="admin-link is-danger">{{ _('clear_logs') }}</button>
+  </div>
+</header>
 
-<div class="page-header">
-  <h1><i class="bi bi-terminal mr-2"></i>{{ _('log_viewer') }}</h1>
-  <span class="meta" style="display:flex;align-items:center;gap:12px;">
-    <span id="log-info">—</span>
-    <label style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;">
-      <input type="checkbox" id="pause-check" onchange="togglePause()">
-      {{ _('pause') }}
-    </label>
-    <label style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;">
-      <input type="checkbox" id="autoscroll-check" checked>
-      {{ _('logs_auto_scroll') }}
-    </label>
-    <button onclick="clearLogs()" class="btn btn-ghost btn-sm" style="color:var(--danger);">{{ _('clear_logs') }}</button>
-  </span>
+<div class="mail-tools">
+  <nav class="admin-tabs" id="log-tabs">
+    <button type="button" class="log-tab active" data-file="monitor">{{ _('logs_monitor') }}</button>
+    <button type="button" class="log-tab" data-file="errors">{{ _('logs_errors') }}</button>
+  </nav>
+  <span id="search-count" style="display:none;"></span>
 </div>
 
-<!-- File tabs -->
-<div class="log-tabs" id="log-tabs">
-  <button class="log-tab active" data-file="monitor">{{ _('logs_monitor') }}</button>
-  <button class="log-tab" data-file="errors">{{ _('logs_errors') }}</button>
-</div>
-
-<!-- Search bar：服务端过滤。以前这里是纯前端过滤，只能在已拉取的 500 行里找，
+<!-- 服务端过滤。以前这里是纯前端过滤，只能在已拉取的 500 行里找，
      所以"凌晨三点发生了什么"这类问题仍然只能 ssh 上去 grep。 -->
-<div class="log-search-bar">
-  <i class="bi bi-search"></i>
-  <input type="text" id="log-search" placeholder="{{ _('logs_search') }}"
-         oninput="scheduleSearch()" autocomplete="off">
-  <select id="log-level" onchange="applySearch()" class="log-filter-input" style="width:auto;">
+<div class="log-filters">
+  <label class="mail-search" role="search">
+    <span class="sr-only">{{ _('logs_search') }}</span>
+    <i class="bi bi-search" aria-hidden="true"></i>
+    <input type="text" id="log-search" placeholder="{{ _('logs_search') }}" oninput="scheduleSearch()" autocomplete="off">
+  </label>
+  <select id="log-level" onchange="applySearch()" class="admin-input" aria-label="Level">
     <option value="">{{ _('logs_level_all') }}</option>
     <option value="ERROR,CRITICAL">ERROR</option>
     <option value="WARNING">WARNING</option>
     <option value="INFO">INFO</option>
     <option value="DEBUG">DEBUG</option>
   </select>
-  <input type="text" id="log-since" class="log-filter-input" style="width:150px;"
-         placeholder="{{ _('logs_since_hint') }}" oninput="scheduleSearch()" autocomplete="off">
-  <input type="text" id="log-until" class="log-filter-input" style="width:150px;"
-         placeholder="{{ _('logs_until_hint') }}" oninput="scheduleSearch()" autocomplete="off">
-  <button type="button" class="btn btn-ghost btn-sm" onclick="resetSearch()">{{ _('logs_filter_reset') }}</button>
-  <span id="search-count" style="display:none;font-size:11px;color:var(--text2);margin-left:8px;"></span>
+  <input type="text" id="log-since" class="admin-input log-time" placeholder="{{ _('logs_since_hint') }}" oninput="scheduleSearch()" autocomplete="off">
+  <input type="text" id="log-until" class="admin-input log-time" placeholder="{{ _('logs_until_hint') }}" oninput="scheduleSearch()" autocomplete="off">
+  <button type="button" class="admin-link" onclick="resetSearch()">{{ _('logs_filter_reset') }}</button>
 </div>
 
-<div class="card" style="padding:0;overflow:hidden;">
-  <div id="log-view" style="
-    background:#1e1e1e;color:#0f0;font-family:SF Mono,Menlo,Monaco,monospace;
-    font-size:12px;line-height:1.5;padding:0;margin:0;overflow:auto;
-    max-height:calc(100dvh - 260px);counter-reset:line;
-  ">{{ _('loading') }}...</div>
+<div class="log-frame">
+  <div id="log-view">{{ _('loading') }}…</div>
 </div>
+</section>
 
 <script>
 // ── State ──
@@ -62,16 +60,7 @@ let timer = null;
 let lastSize = 0;
 let logFiles = [];
 
-// ── Log level → CSS color ──
-const LEVEL_COLORS = {
-  'CRITICAL': '#ff4444',
-  'ERROR':    '#ff6b6b',
-  'WARNING':  '#f0a040',
-  'INFO':     '#4fc3f7',
-  'DEBUG':    '#888',
-};
-const DEFAULT_COLOR = '#b0b0b0';
-
+// ── Log level → CSS class（颜色在 admin.css 里随深浅色主题走）──
 function getLevel(line) {
   const m = line.match(/\[([A-Z]+)\]/);
   return m ? m[1] : '';
@@ -80,11 +69,6 @@ function getLevel(line) {
 function getLineClass(line) {
   const level = getLevel(line);
   return 'level-' + level.toLowerCase();
-}
-
-function getLineColor(line) {
-  const level = getLevel(line);
-  return LEVEL_COLORS[level] || DEFAULT_COLOR;
 }
 
 // ── File tabs ──
@@ -153,12 +137,12 @@ async function fetchLogs() {
     const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
 
     if (data.error) {
-      container.innerHTML = '<span style="color:#ff6b6b">Error: ' + esc(data.error) + '</span>';
+      container.innerHTML = '<span class="log-note level-error">Error: ' + esc(data.error) + '</span>';
       return;
     }
 
     if (data.note) {
-      container.innerHTML = '<span style="color:#888">' + esc(data.note) + '</span>';
+      container.innerHTML = '<span class="log-note">' + esc(data.note) + '</span>';
       info.textContent = '0 lines · 0 KB';
       return;
     }
@@ -166,7 +150,7 @@ async function fetchLogs() {
     const lines = data.lines;
     if (!lines.length) {
       // 用发起请求时的过滤条件判断文案，不用当前输入框的值——两者可能已经不同了
-      container.innerHTML = '<span style="color:#888">'
+      container.innerHTML = '<span class="log-note">'
         + (myFilter ? '{{ _("logs_no_match") }}' : '{{ _("no_logs_yet") }}') + '</span>';
       info.textContent = '0 lines · ' + kb + ' KB';
       lastSize = data.size;
@@ -176,13 +160,12 @@ async function fetchLogs() {
 
     // Build HTML with line numbers and level coloring
     const html = lines.map((line, i) => {
-      const color = getLineColor(line);
       const cls = getLineClass(line);
       // Global line number = total lines - visible lines + i + 1
       const num = i + 1;
       return '<span class="log-line ' + cls + '" data-line="' + num + '">' +
         '<span class="ln">' + num + '</span>' +
-        '<span class="lt" style="color:' + color + '">' + esc(line) + '</span>' +
+        '<span class="lt">' + esc(line) + '</span>' +
         '</span>';
     }).join('\n');
 
@@ -313,99 +296,4 @@ fetchLogFiles();
 fetchLogs();
 timer = setInterval(fetchLogs, 3000);
 </script>
-
-<style>
-/* ── Log tabs ── */
-.log-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 12px;
-  border-bottom: 2px solid var(--border);
-}
-.log-tab {
-  padding: 8px 20px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text2);
-  cursor: pointer;
-  transition: color .15s, border-color .15s;
-}
-.log-tab:hover { color: var(--text); }
-.log-tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-
-/* ── Search bar ── */
-.log-search-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 8px 12px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.log-search-bar i {
-  color: var(--text2);
-  font-size: 14px;
-}
-.log-search-bar input {
-  flex: 1;
-  background: transparent;
-  border: none;
-  outline: none;
-  font-size: 13px;
-  color: var(--text);
-  font-family: inherit;
-}
-.log-search-bar input::placeholder {
-  color: var(--text3);
-}
-/* 级别 / 时间范围过滤控件：不像关键字输入框那样 flex:1 撑满 */
-.log-search-bar .log-filter-input {
-  flex: 0 0 auto;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-  color: var(--text);
-  font-family: inherit;
-}
-@media (max-width: 780px) {
-  .log-search-bar { flex-wrap: wrap; }
-  .log-search-bar .log-filter-input { flex: 1 1 120px; width: auto !important; }
-}
-
-/* ── Log lines ── */
-.log-line {
-  display: flex;
-  padding: 0 16px;
-  min-height: 20px;
-}
-.log-line:hover {
-  background: rgba(255,255,255,0.03);
-}
-.log-line .ln {
-  flex: 0 0 48px;
-  text-align: right;
-  padding-right: 16px;
-  color: #555;
-  user-select: none;
-  font-size: 11px;
-  line-height: 1.6;
-}
-.log-line .lt {
-  flex: 1;
-  white-space: pre-wrap;
-  word-break: break-all;
-  line-height: 1.6;
-}
-</style>
 {% endblock %}

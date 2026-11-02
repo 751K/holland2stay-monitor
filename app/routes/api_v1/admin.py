@@ -52,7 +52,6 @@ def _summarize_user(u, app_token_count: int) -> dict:
         "channels": u.notification_channels,
         "app_login_enabled": u.app_login_enabled,
         "has_app_password": bool(u.app_password_hash),
-        "allow_h2s_login": u.allow_h2s_login,
         "active_devices": app_token_count,
         "auto_book_enabled": u.auto_book.enabled,
         "filter_summary": {

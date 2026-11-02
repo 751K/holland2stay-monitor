@@ -1,0 +1,41 @@
+<!doctype html>
+{#
+  邮箱验证结果页：用户点验证邮件里的链接后落到这里。成功、失败共用一页，
+  和登录页、分享页同一套外壳（public.css）。不需要登录，链接本身就是凭据。
+#}
+{% set zh = lang == 'zh' %}
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ heading }} · {{ brand_name }}</title>
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('h2s-theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ asset('public.css') }}">
+</head>
+<body class="public-page">
+  <div class="public-wrap share-wrap">
+    <header class="public-top">
+      <a class="public-brand" href="/">FlatRadar{% if self_hosted_label %}<small class="brand-selfhost">{{ self_hosted_label }}</small>{% endif %}</a>
+    </header>
+
+    <main class="share verify">
+      <h1>{{ heading }}</h1>
+      <p class="share-where">{{ message }}</p>
+      {% if email %}<p class="verify-email">{{ email }}</p>{% endif %}
+      <div class="share-actions">
+        <a class="{{ 'public-primary' if success else 'share-secondary' }}" href="/">{{ '返回 FlatRadar' if zh else 'Back to FlatRadar' }}</a>
+      </div>
+    </main>
+  </div>
+{% include '_self_hosted.html' %}
+</body>
+</html>

@@ -1,0 +1,26 @@
+{#
+  收件箱侧栏：浏览范围、视图与平台计数、统计。列表、日历、地图和统计页共用，
+  所以在统计页打开时侧栏不变。统计页上没有「当前视图」，不高亮视图项，
+  链接经 inbox_url 回到列表（统计路由把它的默认目标设成 index）。
+#}
+{% set on_stats = request.endpoint == 'stats' %}
+<nav class="sidebar-nav mail-nav" aria-label="{{ '房源收件箱' if lang == 'zh' else 'Housing inbox' }}">
+  {% if account_user %}{# 切换范围时丢掉另一边的条件：临时筛选只在全部房源里有效，未读只在我的匹配里有效 #}
+  <div class="mail-scope" role="group" aria-label="{{ '浏览范围' if lang == 'zh' else 'Browsing scope' }}">
+    <a href="{{ inbox_url(scope=None,view=None,city=None,source=None,max_rent=None,min_area=None,page=None,selected=None) }}"{% if scope == 'mine' %} aria-current="page"{% endif %}>{{ '我的匹配' if lang == 'zh' else 'My matches' }}</a>
+    <a href="{{ inbox_url(scope='all',view=None,page=None,selected=None) }}"{% if scope == 'all' %} aria-current="page"{% endif %}>{{ '全部房源' if lang == 'zh' else 'All listings' }}</a>
+  </div>
+  {% endif %}
+  <div class="mail-label">{{ ('我的房源' if inbox_user else '房源浏览') if lang == 'zh' else ('My listings' if inbox_user else 'Browse listings') }}</div>
+  {% set current = none if on_stats else view %}
+  <a href="{{ inbox_url(view='all',page=None,selected=None) }}" class="{% if current=='all' %}active{% endif %}" {% if current=='all' %}aria-current="page"{% endif %}><span>{{ ('全部匹配' if inbox_user else '全部房源') if lang == 'zh' else ('All matches' if inbox_user else 'All listings') }}</span><b>{{ total }}</b></a>
+  <a href="{{ inbox_url(view='available',page=None,selected=None) }}" class="{% if current=='available' %}active{% endif %}" {% if current=='available' %}aria-current="page"{% endif %}><span>{{ '可预订' if lang == 'zh' else 'Available to book' }}</span><b>{{ available_count }}</b></a>
+  {# 全部房源里也显示，点了回到我的匹配的未读，侧栏条目数不随范围变化 #}
+  {% if account_user %}<a href="{{ inbox_url(view='unread',page=None,selected=None) if inbox_user else inbox_url(scope=None,view='unread',city=None,source=None,max_rent=None,min_area=None,page=None,selected=None,q=None) }}" class="{% if current=='unread' %}active{% endif %}" {% if current=='unread' %}aria-current="page"{% endif %}><span>{{ '未读房源' if lang == 'zh' else 'Unread listings' }}</span><b id="inbox-unread-count">{{ unread_count }}</b></a>{% endif %}
+  {# 统计跟着当前范围：我的匹配下统计自己的匹配，全部房源下统计全部（含临时筛选） #}
+  <a href="{{ inbox_url(endpoint='stats',page=None,selected=None) }}"{% if on_stats %} class="active" aria-current="page"{% endif %}><span>{{ '统计' if lang == 'zh' else 'Statistics' }}</span></a>
+  <div class="mail-label">{{ '平台' if lang == 'zh' else 'Platforms' }}</div>
+  {% for source,spec in source_specs.items() %}
+  <a href="{{ inbox_url(view=source,page=None,selected=None) }}" class="{% if current==source %}active{% endif %}" {% if current==source %}aria-current="page"{% endif %}><span>{{ spec.display_name }}</span><b>{{ source_counts[source] }}</b></a>
+  {% endfor %}
+</nav>

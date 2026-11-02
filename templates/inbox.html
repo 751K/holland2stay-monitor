@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% set zh = lang == 'zh' %}
+{% from '_inbox_actions.html' import filter_action with context %}
+{% block title %}{{ ('我的房源' if inbox_user else '全部房源') if lang == 'zh' else ('My listings' if inbox_user else 'All listings') }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page{% if calendar_mode %} calendar-page{% endif %}{% if map_mode %} map-page{% endif %}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}">{% endblock %}
+{% block sidebar_navigation %}
+{% include '_inbox_nav.html' %}
+{% endblock %}
+{% block sidebar_footer %}
+<nav class="sidebar-footer mail-footer" aria-label="{{ '设置与帮助' if lang == 'zh' else 'Settings & help' }}">
+  {% if is_admin %}<a href="{{ url_for('users_list') }}">{{ '管理后台' if lang == 'zh' else 'Administration' }} <span aria-hidden="true">↗</span></a>{% endif %}
+  {% if account_user %}<a href="{{ url_for('user_edit',user_id=account_user.id) }}">{{ _('my_account') }}</a>{% elif not is_admin %}<a href="{{ url_for('login',next=inbox_url()) }}">{{ '登录 / 注册' if lang == 'zh' else 'Sign in / Register' }}</a>{% endif %}
+  <a href="{{ url_for('support_page') }}">{{ '帮助与支持' if lang == 'zh' else 'Help & support' }}</a>
+  {% include '_theme_toggle.html' %}
+  {% include '_logout.html' %}
+</nav>
+{% endblock %}
+{% block content %}
+<section class="inbox-shell">
+<header class="mail-toolbar is-split"><div><h1>{% block workspace_title %}{% if view=='all' %}{{ ('我的房源' if inbox_user else '全部房源') if lang == 'zh' else ('My listings' if inbox_user else 'All listings') }}{% elif view=='available' %}{{ '可预订' if lang == 'zh' else 'Available to book' }}{% elif view=='unread' %}{{ '未读房源' if lang == 'zh' else 'Unread listings' }}{% else %}{{ source_specs[view].display_name }}{% endif %}{% endblock %}</h1>{% call filter_action(class_name='mail-summary') %}{{ filter_summary }} <span>{{ '调整筛选 ↗' if lang == 'zh' else 'Edit filters ↗' }}</span>{% endcall %}</div>
+<form method="get" action="{{ url_for(request.endpoint) }}" class="mail-search" role="search">
+  {% for key,values in request.args.lists() %}{% if key not in (['q','page','selected','month','date','undated'] if calendar_mode else ['q','page','selected']) %}{% for value in values %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}{% endif %}{% endfor %}
+  {% if calendar_mode %}<input type="hidden" name="month" value="{{ calendar_month }}">{% if undated %}<input type="hidden" name="undated" value="1">{% else %}<input type="hidden" name="date" value="{{ selected_date }}">{% endif %}{% endif %}
+  <label for="mail-search" class="sr-only">{{ '搜索当前范围内的房源' if lang == 'zh' else 'Search within this inbox' }}</label><i class="bi bi-search" aria-hidden="true"></i><input id="mail-search" name="q" type="search" value="{{ search }}" placeholder="{{ '搜索房源、城市或平台' if lang == 'zh' else 'Search listings, cities or platforms' }}"><button type="submit">{{ '搜索' if lang == 'zh' else 'Search' }}</button>
+</form></header>
+<div class="mail-tools"><nav aria-label="{{ '房源视图' if lang == 'zh' else 'Listing views' }}"><a href="{{ inbox_url(endpoint='index',page=None,selected=None) }}"{% if not calendar_mode and not map_mode %} aria-current="page"{% endif %}>{{ '列表' if lang == 'zh' else 'List' }}</a><a href="{{ inbox_url(endpoint='calendar',page=None,selected=None) }}"{% if calendar_mode %} aria-current="page"{% endif %}>{{ _('calendar') }}</a><a href="{{ inbox_url(endpoint='map_view',page=None,selected=None) }}"{% if map_mode %} aria-current="page"{% endif %}>{{ _('map_title') }}</a></nav>{% if not calendar_mode and not map_mode and inbox_user and visible_total and unread_count %}<form method="post" action="{{ url_for('inbox_mark_all_read') }}" class="mail-read-all"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="q" value="{{ search }}"><button type="submit">{{ '将当前范围标为已读' if lang == 'zh' else 'Mark this view as read' }}</button></form>{% endif %}{% if last_scrape %}<span>{{ '更新于' if lang == 'zh' else 'Updated' }} {{ last_scrape | time_ago }}</span>{% endif %}</div>
+<p class="mail-read-feedback" id="mail-read-feedback" role="status"></p>
+{% block workspace %}
+<div class="mail-workspace">
+<section class="mail-list" aria-label="{{ '房源列表' if lang == 'zh' else 'Listings' }}"><div class="mail-list-heading"><span>{{ '房源' if lang == 'zh' else 'Listings' }} <b>{{ visible_total }}</b></span></div>
+<div class="mail-groups">
+{% set ns=namespace(day='') %}
+{% for item in items %}
+  {% if item.day != ns.day %}<div class="mail-date">{{ item.day }}</div>{% set ns.day=item.day %}{% endif %}
+  {% include '_inbox_listing.html' %}
+{% else %}
+  <div class="mail-empty"><h2>{{ '目前没有符合条件的房源' if lang == 'zh' else 'No matching listings' }}</h2><p>{{ '可以调整筛选、清除搜索或切换平台。' if lang == 'zh' else 'Adjust your filters, clear search, or choose another platform.' }}</p>{{ filter_action() }}{% if search %}<a href="{{ inbox_url(q=None,page=None) }}">{{ '清除搜索' if lang == 'zh' else 'Clear search' }}</a>{% endif %}</div>
+{% endfor %}
+</div>
+{% if pages>1 %}<footer class="mail-results"><nav aria-label="{{ '分页' if lang == 'zh' else 'Pagination' }}">{% if page>1 %}<a href="{{ inbox_url(page=page-1,selected=None) }}">←</a>{% endif %}<span>{{ page }} / {{ pages }}</span>{% if page<pages %}<a href="{{ inbox_url(page=page+1,selected=None) }}">→</a>{% endif %}</nav></footer>{% endif %}
+</section>
+<aside class="mail-detail" aria-label="{{ '房源详情' if lang == 'zh' else 'Listing details' }}" id="mail-detail">
+{% if selected %}{% with item=selected %}{% include '_inbox_detail.html' %}{% endwith %}{% else %}<p class="mail-detail-empty">{{ '选择一条房源查看详情。' if lang == 'zh' else 'Select a listing to view its details.' }}</p>{% endif %}
+</aside>
+</div>
+{% endblock %}
+</section>
+{% if not inbox_user %}
+<dialog id="mail-filter" aria-labelledby="mail-filter-title"><form method="get" action="{{ url_for(request.endpoint) }}">
+  <input type="hidden" name="q" value="{{ search }}"><input type="hidden" name="view" value="{{ view }}">{% if scope == 'all' %}<input type="hidden" name="scope" value="all">{% endif %}{% include '_workspace_fields.html' %}
+  <h2 id="mail-filter-title">{{ '临时筛选' if lang == 'zh' else 'Temporary filters' }}</h2><p>{% if account_user %}{{ '这些条件只影响当前浏览，不会改动你的通知筛选。' if lang == 'zh' else 'These filters affect only what you browse now, not your notification filters.' }}{% else %}{{ '这些条件仅调整当前浏览范围。' if lang == 'zh' else 'These filters affect only your current browsing scope.' }}{% endif %}</p>
+  <div class="mail-filter-fields"><label>{{ '最高租金 · €/月' if lang == 'zh' else 'Maximum rent · €/month' }}<input type="number" name="max_rent" min="0" max="999999999" step="0.01" value="{{ inbox_filter.max_rent if inbox_filter.max_rent is not none else '' }}" placeholder="{{ '不限' if lang == 'zh' else 'Any' }}"></label><label>{{ '最小面积 · m²' if lang == 'zh' else 'Minimum area · m²' }}<input type="number" name="min_area" min="0" max="999999999" step="0.01" value="{{ inbox_filter.min_area if inbox_filter.min_area is not none else '' }}" placeholder="{{ '不限' if lang == 'zh' else 'Any' }}"></label></div>
+  <fieldset><legend>{{ '城市' if lang == 'zh' else 'Cities' }}</legend><div class="mail-options cities">{% for city in cities %}<label><input type="checkbox" name="city" value="{{ city }}" {% if city in inbox_filter.allowed_cities %}checked{% endif %}>{{ city }}</label>{% endfor %}</div></fieldset>
+  <fieldset><legend>{{ '平台' if lang == 'zh' else 'Platforms' }}</legend><div class="mail-options">{% for source,spec in source_specs.items() %}<label><input type="checkbox" name="source" value="{{ source }}" {% if source in inbox_filter.allowed_sources %}checked{% endif %}>{{ spec.display_name }}</label>{% endfor %}</div></fieldset>
+  <p class="mail-form-note">{{ '城市或平台不勾选表示不限。价格与面积缺失的房源不能通过对应数值筛选。' if lang == 'zh' else 'Leave cities or platforms unchecked for all. Missing prices or areas cannot match numeric filters.' }}</p>
+  <div class="mail-dialog-actions"><a class="mail-filter-reset" href="{{ inbox_url(city=None,source=None,max_rent=None,min_area=None,page=None,selected=None) }}">{{ '重置' if lang == 'zh' else 'Reset' }}</a><button type="button" data-close-filter>{{ '取消' if lang == 'zh' else 'Cancel' }}</button><button type="submit" class="mail-primary">{{ '应用临时筛选' if lang == 'zh' else 'Apply filters' }}</button></div>
+</form></dialog>
+{% endif %}
+<script type="application/json" id="mail-items">{{ items | tojson }}</script>
+{% endblock %}
+{% block scripts %}<script src="{{ asset('inbox.js') }}" defer></script>{% endblock %}

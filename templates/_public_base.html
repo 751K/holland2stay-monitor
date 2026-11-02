@@ -1,0 +1,62 @@
+<!doctype html>
+{#
+  公开阅读页（帮助与支持、隐私政策、使用条款、赞助）的外壳。
+
+  这几页不需要登录，App Store 审核员和未登录的人都会直接打开，所以不继承
+  base.html（侧栏、CSRF、监控状态都不适用），只沿用收件箱的配色和字体：
+  顶部是品牌与语言切换，下面一排页签串起这四页，正文是一栏限宽的文字。
+  子模板在顶层 set zh 与 social_desc（不在 block 里，block 内的赋值传不到这里）。
+  深浅色先看本浏览器在应用里选过的主题（localStorage h2s-theme），没有再跟随系统。
+#}
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ page_title }} · {{ brand_name }}</title>
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  {% set social_title = page_title ~ ' · ' ~ brand_name %}
+  {% include '_social_meta.html' %}
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('h2s-theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ asset('public.css') }}">
+</head>
+<body class="public-page">
+  <div class="public-wrap">
+    <header class="public-top">
+      <a class="public-brand" href="/">FlatRadar{% if self_hosted_label %}<small class="brand-selfhost">{{ self_hosted_label }}</small>{% endif %}</a>
+      <nav class="public-lang" aria-label="Language">
+        <a href="?lang=zh"{% if zh %} aria-current="true"{% endif %}>中文</a>
+        <a href="?lang=en"{% if not zh %} aria-current="true"{% endif %}>EN</a>
+      </nav>
+    </header>
+
+    <nav class="public-tabs" aria-label="{{ '帮助与条款' if zh else 'Help and policies' }}">
+      {% for endpoint, title in [
+           ('support_page', '帮助与支持' if zh else 'Support'),
+           ('privacy_page', '隐私政策' if zh else 'Privacy'),
+           ('terms_page', '使用条款' if zh else 'Terms'),
+           ('donate_page', '赞助' if zh else 'Donate')] %}
+      <a href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint %} aria-current="page"{% endif %}>{{ title }}</a>
+      {% endfor %}
+    </nav>
+
+    <main class="public-main">
+      <h1>{{ page_title }}</h1>
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="public-footer">
+      <a href="/">{{ '← 返回 FlatRadar' if zh else '← Back to FlatRadar' }}</a>
+      <span>© FlatRadar</span>
+    </footer>
+  </div>
+{% include '_self_hosted.html' %}
+</body>
+</html>

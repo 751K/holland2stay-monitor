@@ -1,0 +1,127 @@
+/* Admin report pages (App accounts, monitoring, logs, crashes, system): the inbox
+   shell with one scrolling column of sections. Tables are plain text on the page
+   background, rows split by a dashed rule; state is a small tag, never a colour block. */
+.admin-page{--admin-rule:#e8e8e8}
+[data-theme=dark] .admin-page{--admin-rule:#34312e}
+
+.admin-shell{display:flex;flex-direction:column;flex:1;min-height:0}
+.admin-shell .mail-toolbar{min-height:96px}
+.admin-shell .mail-summary span{font-size:13px;color:var(--mail-muted);white-space:normal}
+.admin-head-tools{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:flex-end;font-size:13px;color:var(--mail-muted)}
+.admin-check{display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+.admin-check input{margin:0;width:14px;height:14px;accent-color:var(--mail-accent)}
+.admin-body{flex:1;min-height:0;overflow-y:auto;padding:0 40px 48px;scrollbar-width:thin}
+.admin-shell .mail-tools{padding-bottom:6px}
+
+/* Sections */
+.admin-section+.admin-section{margin-top:18px}
+.admin-section-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:18px 0 10px}
+.admin-section-head h2{margin:0;font-size:12px;font-weight:650;color:var(--mail-ochre)}
+.admin-section-head span{font-size:12px;color:var(--mail-muted)}
+.admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 48px}
+.admin-empty{padding:28px 0;font-size:13px;color:var(--mail-muted)}
+
+/* Tables */
+.admin-scroll{overflow-x:auto;scrollbar-width:thin}
+.admin-table{width:100%;border-collapse:collapse;font-size:13px;color:var(--mail-text)}
+.admin-table th{padding:0 16px 10px 0;font-size:12px;font-weight:500;color:var(--mail-muted);text-align:left;white-space:nowrap}
+.admin-table td{padding:11px 16px 11px 0;border-top:1px dashed var(--admin-rule);vertical-align:top}
+.admin-table th:last-child,.admin-table td:last-child{padding-right:0}
+.admin-table .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.admin-table .end{text-align:right;white-space:nowrap}
+.admin-table .nowrap{white-space:nowrap}
+.admin-table .muted,.admin-muted{color:var(--mail-muted)}
+.admin-table tr.is-off td{color:var(--mail-muted)}
+.admin-table tr.is-off td strong{font-weight:500}
+.admin-table strong{font-weight:600}
+.admin-table code,.admin-mono{font-family:"SF Mono",Menlo,Monaco,monospace;font-size:12px}
+.admin-table tbody tr:hover td{background:var(--mail-hover)}
+.admin-table .admin-note{display:block;margin-top:4px;font-size:12px;color:var(--mail-muted);white-space:normal}
+
+/* Key/value lists */
+.admin-kv{margin:0}
+.admin-kv>div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-top:1px dashed var(--admin-rule);font-size:13px;line-height:1.5}
+.admin-kv dt{flex:none;color:var(--mail-muted)}
+.admin-kv dd{margin:0;min-width:0;text-align:right;overflow-wrap:anywhere;color:var(--mail-text)}
+
+/* State tags */
+.admin-tag{display:inline-block;padding:2px 6px;border-radius:4px;background:var(--mail-field);font-size:12px;line-height:1.5;color:var(--mail-muted);white-space:nowrap}
+.admin-tag.is-ok{color:var(--mail-text)}
+.admin-tag.is-warn{color:var(--mail-ochre)}
+.admin-tag.is-bad{color:var(--mail-accent);font-weight:600}
+
+/* Buttons */
+.admin-button{display:inline-flex;align-items:center;justify-content:center;height:32px;padding:0 12px;border:0;border-radius:6px;background:var(--mail-field);color:var(--mail-text);font:inherit;font-size:13px;text-decoration:none;cursor:pointer;white-space:nowrap}
+.admin-button:hover{background:var(--mail-hover);color:var(--mail-text)}
+.admin-button.is-primary{background:#98443a;color:#fff;font-weight:600}
+.admin-button.is-primary:hover{background:#87392f}
+.admin-button:disabled{opacity:.5;cursor:default}
+.admin-link{padding:0;border:0;background:none;color:var(--mail-accent);font:inherit;font-size:13px;text-decoration:none;cursor:pointer;white-space:nowrap}
+.admin-link:hover{text-decoration:underline}
+.admin-link:disabled{color:var(--mail-muted);text-decoration:none;cursor:default}
+.admin-link.is-danger{color:var(--mail-accent)}
+.admin-actions{display:inline-flex;gap:14px;align-items:center}
+.admin-actions form{margin:0;display:inline}
+.admin-row-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:14px}
+
+/* Inputs */
+.admin-input{width:100%;height:36px;padding:0 10px;border:1px solid transparent;border-radius:6px;background:var(--mail-field);color:var(--mail-text);font:inherit;font-size:13px}
+textarea.admin-input{height:auto;padding:8px 10px;resize:vertical;line-height:1.6}
+.admin-input:focus{outline:none;border-color:var(--mail-accent)}
+.admin-input::placeholder{color:var(--mail-muted)}
+select.admin-input{width:auto;padding-right:28px}
+
+/* Alerts at the top of a page */
+.admin-alerts{display:flex;flex-direction:column;gap:8px;padding-top:4px}
+.admin-alerts:empty{display:none}
+.admin-alert{padding:10px 14px;border-radius:8px;background:var(--mail-field);font-size:13px;line-height:1.6}
+.admin-alert strong{color:var(--mail-ochre)}
+.admin-alert.is-bad strong{color:var(--mail-accent)}
+.admin-alert strong{display:block;font-weight:600}
+.admin-alert span{display:block;color:var(--mail-muted);white-space:pre-wrap}
+
+/* Dialogs reuse .mail-page dialog; wide ones for raw reports */
+.mail-page dialog.admin-wide{width:min(900px,calc(100vw - 40px))}
+.admin-pre{margin:0;max-height:60vh;overflow:auto;padding:14px;border-radius:8px;background:var(--mail-field);font:12px/1.55 "SF Mono",Menlo,Monaco,monospace;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--mail-text)}
+
+@media(max-width:1100px){.admin-grid{grid-template-columns:1fr}}
+@media(max-width:650px){
+  .admin-body{padding:0 20px 40px}
+  .admin-head-tools{justify-content:flex-start}
+  /* 标题右边的说明太长时整段换到下一行，别把标题挤成两行 */
+  .admin-section-head{flex-wrap:wrap;row-gap:4px}
+  .admin-section-head h2{flex:none}
+}
+
+/* Logs: file tabs, one filter row, then the log fills the rest of the page */
+.admin-tabs{display:flex;gap:4px;min-width:0;overflow-x:auto;scrollbar-width:none}
+.admin-tabs button{flex:none;white-space:nowrap;padding:6px 12px;border:0;border-radius:5px;background:none;color:var(--mail-muted);font:inherit;font-size:13px;cursor:pointer}
+.admin-tabs button:hover{color:var(--mail-text)}
+.admin-tabs button.active{background:var(--mail-field);color:var(--mail-text);font-weight:600}
+.log-filters{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 40px 14px}
+.log-filters .mail-search{flex:1 1 260px;width:auto;height:36px}
+.log-filters .log-time{width:180px}
+.log-filters .admin-link{margin-left:6px}
+.log-frame{flex:1;min-height:0;margin:0 40px 32px;border-radius:8px;background:var(--mail-field);overflow:hidden;display:flex}
+#log-view{flex:1;overflow:auto;padding:10px 0;font:12px/1.6 "SF Mono",Menlo,Monaco,monospace;color:var(--mail-text);scrollbar-width:thin}
+.log-note{display:block;padding:0 16px;color:var(--mail-muted)}
+.log-line{display:flex;padding:0 16px;min-height:19px}
+.log-line:hover{background:var(--mail-hover)}
+.log-line .ln{flex:0 0 40px;padding-right:14px;text-align:right;color:var(--mail-muted);opacity:.6;user-select:none;font-size:11px}
+.log-line .lt{flex:1;white-space:pre-wrap;word-break:break-all}
+.level-debug .lt{color:var(--mail-muted)}
+.level-warning .lt{color:var(--mail-ochre)}
+.level-error .lt,.level-critical .lt,.log-note.level-error{color:var(--mail-accent)}
+.level-critical .lt{font-weight:600}
+@media(max-width:650px){.log-filters{padding:6px 20px 14px}.log-frame{margin:0 12px 20px}.log-filters .log-time{flex:1 1 120px;width:auto}}
+.admin-box{margin:0;width:14px;height:14px;accent-color:var(--mail-accent);vertical-align:middle}
+.mail-page dialog .admin-pre+.mail-dialog-actions{margin-top:18px}
+
+/* System: monitor state text written by app.js (.badge) reads as a tag here */
+.admin-page .admin-kv .badge{display:inline-block;padding:2px 6px;border:0;border-radius:4px;background:var(--mail-field);color:var(--mail-text);font-size:12px;font-weight:500;line-height:1.5}
+.admin-page .admin-kv .badge-danger{color:var(--mail-accent);font-weight:600}
+.admin-form{display:flex;flex-direction:column;gap:8px}
+.admin-form .admin-row-actions{margin-top:4px}
+.admin-page .hidden{display:none!important}
+.admin-form{max-width:640px}
+.admin-clip{display:block;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

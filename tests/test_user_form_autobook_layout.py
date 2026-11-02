@@ -155,6 +155,8 @@ class TestApplicantProfilePanel:
     背景调查三问各占一整行、缺项显示成 first_name 这种代码字段名。"""
 
     _TPL = Path(__file__).resolve().parent.parent / "templates" / "user_form.html"
+    # 档案面板的样式从模板内联 <style> 挪到了 user_form.css
+    _ACCOUNT_CSS = Path(__file__).resolve().parent.parent / "static" / "user_form.css"
 
     def _css(self) -> str:
         return re.sub(r"/\*.*?\*/", "", _CSS.read_text(encoding="utf-8"), flags=re.S)
@@ -170,8 +172,8 @@ class TestApplicantProfilePanel:
 
     def test_profile_grid_has_fixed_columns(self):
         """auto-fit 在宽屏上排出 6 列，标签和框对不齐、分组也看不出来。"""
-        tpl = self._TPL.read_text(encoding="utf-8")
-        m = re.search(r"\.prof-grid\s*\{(.*?)\}", tpl, re.S)
+        css = self._ACCOUNT_CSS.read_text(encoding="utf-8")
+        m = re.search(r"\.prof-grid\s*\{(.*?)\}", css, re.S)
         assert m and "repeat(4" in m.group(1) and "auto-fit" not in m.group(1)
 
     def test_every_profile_class_used_is_defined(self):
@@ -179,7 +181,7 @@ class TestApplicantProfilePanel:
         名字对不上，三问各占一整行，也没人报错。"""
         tpl = self._TPL.read_text(encoding="utf-8")
         used = set(re.findall(r'class="[^"]*?\b(prof(?:ile)?-[a-z0-9-]+)', tpl))
-        defined = set(re.findall(r"\.(prof(?:ile)?-[a-z0-9-]+)\s*[{,.: ]", tpl + self._css()))
+        defined = set(re.findall(r"\.(prof(?:ile)?-[a-z0-9-]+)\s*[{,.: ]", self._ACCOUNT_CSS.read_text(encoding="utf-8") + self._css()))
         assert used and not (used - defined), f"模板用了但没有样式的 class: {sorted(used - defined)}"
 
     def test_sections_render_in_form_order(self, form_html):

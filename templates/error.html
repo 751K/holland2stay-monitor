@@ -1,0 +1,45 @@
+<!doctype html>
+{#
+  出错页（403 / 404 / 500 …），app/error_pages.py 渲染。和登录页、分享页同一套外壳；
+  只给一句说明和回首页的出口，不露异常内容。
+#}
+{% set zh = lang == 'zh' %}
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ title }} · {{ brand_name }}</title>
+  <link rel="icon" href="/static/favicon.png" type="image/png">
+  <script>
+    (function () {
+      var t = null;
+      try { t = localStorage.getItem('h2s-theme'); } catch (e) {}
+      if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ asset('public.css') }}">
+</head>
+<body class="public-page">
+  <div class="public-wrap share-wrap">
+    <header class="public-top">
+      <a class="public-brand" href="/">FlatRadar{% if self_hosted_label %}<small class="brand-selfhost">{{ self_hosted_label }}</small>{% endif %}</a>
+    </header>
+
+    <main class="share">
+      <p class="error-code">{{ code }}</p>
+      <h1>{{ title }}</h1>
+      <p class="share-where">{{ message }}</p>
+      <div class="share-actions">
+        {% if code == 401 %}
+        <a class="public-primary" href="{{ url_for('login', next=request.full_path) }}">{{ '登录' if zh else 'Sign in' }}</a>
+        {% else %}
+        <a class="public-primary" href="/">{{ '返回 FlatRadar' if zh else 'Back to FlatRadar' }}</a>
+        {% endif %}
+      </div>
+    </main>
+  </div>
+{% include '_self_hosted.html' %}
+</body>
+</html>

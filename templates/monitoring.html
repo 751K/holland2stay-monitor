@@ -1,45 +1,47 @@
 {% extends "base.html" %}
-{% block title %}{{ _('monitoring_title') }} · FlatRadar{% endblock %}
+{% block title %}{{ _('monitoring_title') }} · {{ brand_name }}{% endblock %}
+{% block body_class %}mail-page admin-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}"><link rel="stylesheet" href="{{ asset('admin.css') }}">{% endblock %}
+{% block sidebar_navigation %}{% include '_admin_nav.html' %}{% endblock %}
+{% block sidebar_footer %}{% include '_admin_footer.html' %}{% endblock %}
 
 {% block content %}
-
-<div class="page-header">
-  <h1><i class="bi bi-activity mr-2"></i>{{ _('monitoring_title') }}</h1>
-  <span class="meta" style="display:flex;align-items:center;gap:12px;">
-    <span id="mon-updated">—</span>
-    <label style="cursor:pointer;font-size:13px;display:flex;align-items:center;gap:4px;">
-      <input type="checkbox" id="mon-pause"> {{ _('pause') }}
-    </label>
-  </span>
-</div>
-
-<!-- 活跃告警 -->
-<div id="mon-alerts" class="mon-alerts"></div>
-
-<!-- 分 source 健康卡 -->
-<div class="card">
-  <div class="card-header">
-    <span>{{ _('monitoring_sources') }}</span>
-    <span class="text-xs text-tertiary" id="mon-window">—</span>
+<section class="inbox-shell admin-shell">
+<header class="mail-toolbar">
+  <div>
+    <h1>{{ _('monitoring_title') }}</h1>
+    <p class="mail-summary"><span id="mon-updated">—</span></p>
   </div>
-  <div id="mon-cards" class="mon-cards">{{ _('loading') }}...</div>
-</div>
+  <div class="admin-head-tools">
+    <label class="admin-check"><input type="checkbox" id="mon-pause"> {{ _('pause') }}</label>
+  </div>
+</header>
 
-<!-- 最近轮次明细 -->
-<div class="card" style="margin-top:16px;">
-  <div class="card-header">
-    <span>{{ _('monitoring_recent_rounds') }}</span>
-    <span class="text-xs text-tertiary">
-      {{ _('monitoring_cell_hint') }} · {{ _('monitoring_times_in') }} {{ tz }}
-    </span>
-  </div>
-  <div style="overflow-x:auto;">
-    <table class="table-minimal" id="mon-rounds">
-      <thead><tr><th>{{ _('monitoring_round') }}</th></tr></thead>
-      <tbody><tr><td>{{ _('loading') }}...</td></tr></tbody>
-    </table>
-  </div>
+<div class="admin-body">
+  <div id="mon-alerts" class="admin-alerts"></div>
+
+  <section class="admin-section">
+    <div class="admin-section-head"><h2>{{ _('monitoring_sources') }}</h2><span id="mon-window">—</span></div>
+    <div class="admin-scroll">
+      <table class="admin-table" id="mon-cards">
+        <tbody><tr><td class="muted">{{ _('loading') }}…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="admin-section">
+    <div class="admin-section-head">
+      <h2>{{ _('monitoring_recent_rounds') }}</h2>
+      <span>{{ _('monitoring_cell_hint') }} · {{ _('monitoring_times_in') }} {{ tz }}</span>
+    </div>
+    <div class="admin-scroll">
+      <table class="admin-table" id="mon-rounds">
+        <tbody><tr><td class="muted">{{ _('loading') }}…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
 </div>
+</section>
 
 <script>
 const STATUS_LABEL = {
@@ -99,49 +101,52 @@ function renderAlerts(alerts) {
   const box = document.getElementById('mon-alerts');
   if (!alerts || !alerts.length) { box.innerHTML = ''; return; }
   box.innerHTML = alerts.map(a =>
-    '<div class="mon-alert mon-alert-' + esc(a.level) + '">'
-    + '<div class="mon-alert-title">' + esc(a.title) + '</div>'
-    + '<div class="mon-alert-body">' + esc(a.body) + '</div>'
+    '<div class="admin-alert' + (a.level === 'down' ? ' is-bad' : '') + '">'
+    + '<strong>' + esc(a.title) + '</strong>'
+    + '<span>' + esc(a.body) + '</span>'
     + '</div>'
   ).join('');
 }
 
+// 每个平台一行；告警原因跟在名字下面，不另起一张卡片
+const STATUS_TONE = {ok: 'is-ok', warn: 'is-warn', down: 'is-bad', unknown: ''};
+
 function renderCards(sources) {
-  const box = document.getElementById('mon-cards');
+  const table = document.getElementById('mon-cards');
   if (!sources || !sources.length) {
-    box.innerHTML = '<div class="text-tertiary" style="padding:16px;">'
-      + '{{ _("monitoring_no_data") }}</div>';
+    table.innerHTML = '<tbody><tr><td class="muted">{{ _("monitoring_no_data") }}</td></tr></tbody>';
     return;
   }
-  box.innerHTML = sources.map(s => {
-    const reasons = (s.reasons || []).length
-      ? '<ul class="mon-reasons">' + s.reasons.map(r => '<li>' + esc(r) + '</li>').join('') + '</ul>'
-      : '';
-    return '<div class="mon-card mon-' + esc(s.status) + '">'
-      + '<div class="mon-card-head">'
-      +   '<span class="mon-src">' + esc(window.sourceLabel(s.source)) + '</span>'
-      +   '<span class="badge mon-badge-' + esc(s.status) + '">'
-      +     esc(STATUS_LABEL[s.status] || s.status) + '</span>'
-      + '</div>'
-      + '<table class="mon-kv">'
-      +   '<tr><td>{{ _("monitoring_last_round") }}</td><td>' + esc(shortTime(s.last_round_at)) + '</td></tr>'
-      +   '<tr><td>{{ _("monitoring_last_listings") }}</td><td>' + s.last_listings
-      +       ' <span class="text-tertiary">(avg ' + s.avg_listings + ')</span></td></tr>'
-      +   '<tr><td>{{ _("monitoring_completeness") }}</td><td>' + pct(s.completeness_rate) + '</td></tr>'
-      +   '<tr><td>{{ _("monitoring_fail_streak") }}</td><td>' + s.fail_streak + '</td></tr>'
-      +   '<tr><td>{{ _("monitoring_zero_streak") }}</td><td>' + s.zero_streak + '</td></tr>'
-      +   '<tr><td>{{ _("monitoring_last_success") }}</td><td>' + esc(shortTime(s.last_success_at)) + '</td></tr>'
-      + '</table>'
-      + reasons
-      + '</div>';
-  }).join('');
+  const head = '<thead><tr>'
+    + '<th>{{ "平台" if lang == "zh" else "Platform" }}</th><th></th>'
+    + '<th>{{ _("monitoring_last_round") }}</th>'
+    + '<th class="num">{{ _("monitoring_last_listings") }}</th>'
+    + '<th class="num">{{ _("monitoring_completeness") }}</th>'
+    + '<th class="num">{{ _("monitoring_fail_streak") }}</th>'
+    + '<th class="num">{{ _("monitoring_zero_streak") }}</th>'
+    + '<th>{{ _("monitoring_last_success") }}</th>'
+    + '</tr></thead>';
+  const body = '<tbody>' + sources.map(s => {
+    const reasons = ({{ 'true' if lang == 'zh' else 'false' }} ? s.reasons : (s.reasons_en || s.reasons) || []).map(r => '<span class="admin-note">' + esc(r) + '</span>').join('');
+    return '<tr>'
+      + '<td><strong>' + esc(window.sourceLabel(s.source)) + '</strong>' + reasons + '</td>'
+      + '<td><span class="admin-tag ' + (STATUS_TONE[s.status] || '') + '">'
+      +   esc(STATUS_LABEL[s.status] || s.status) + '</span></td>'
+      + '<td class="nowrap">' + esc(shortTime(s.last_round_at)) + '</td>'
+      + '<td class="num">' + s.last_listings + ' <span class="muted">/ ' + s.avg_listings + '</span></td>'
+      + '<td class="num">' + pct(s.completeness_rate) + '</td>'
+      + '<td class="num">' + s.fail_streak + '</td>'
+      + '<td class="num">' + s.zero_streak + '</td>'
+      + '<td class="nowrap">' + esc(shortTime(s.last_success_at)) + '</td>'
+      + '</tr>';
+  }).join('') + '</tbody>';
+  table.innerHTML = head + body;
 }
 
 function renderRounds(rounds) {
   const table = document.getElementById('mon-rounds');
   if (!rounds || !rounds.length) {
-    table.innerHTML = '<tbody><tr><td class="text-tertiary">'
-      + '{{ _("monitoring_no_data") }}</td></tr></tbody>';
+    table.innerHTML = '<tbody><tr><td class="muted">{{ _("monitoring_no_data") }}</td></tr></tbody>';
     return;
   }
   // 列 = 出现过的 source 并集。某轮缺某个 source 时留空——那本身就是信息
@@ -152,24 +157,24 @@ function renderRounds(rounds) {
   cols.sort();
 
   const head = '<thead><tr><th>{{ _("monitoring_round") }}</th>'
-    + cols.map(c => '<th>' + esc(window.sourceLabel(c)) + '</th>').join('') + '</tr></thead>';
+    + cols.map(c => '<th class="num">' + esc(window.sourceLabel(c)) + '</th>').join('') + '</tr></thead>';
 
   const body = '<tbody>' + rounds.map(r => {
     const bySrc = {};
     (r.sources || []).forEach(s => { bySrc[s.source] = s; });
     const cells = cols.map(c => {
       const s = bySrc[c];
-      if (!s) return '<td class="text-tertiary">—</td>';
+      if (!s) return '<td class="num muted">—</td>';
       if (s.error_type) {
-        return '<td class="mon-cell-err" title="' + esc(s.error_msg) + '">'
-          + esc(s.error_type) + '</td>';
+        return '<td class="num" title="' + esc(s.error_msg) + '">'
+          + '<span class="admin-tag is-bad">' + esc(s.error_type) + '</span></td>';
       }
       const incomplete = s.complete < s.targets;
-      return '<td class="' + (incomplete ? 'mon-cell-warn' : '') + '">'
-        + s.listings + ' <span class="text-tertiary">('
-        + s.complete + '/' + s.targets + ')</span></td>';
+      return '<td class="num">' + s.listings + ' <span class="'
+        + (incomplete ? 'admin-tag is-warn' : 'muted') + '">'
+        + s.complete + '/' + s.targets + '</span></td>';
     }).join('');
-    return '<tr><td class="mon-ts">' + esc(shortTime(r.round_at)) + '</td>' + cells + '</tr>';
+    return '<tr><td class="nowrap">' + esc(shortTime(r.round_at)) + '</td>' + cells + '</tr>';
   }).join('') + '</tbody>';
 
   table.innerHTML = head + body;
@@ -200,47 +205,4 @@ async function fetchMonitoring() {
 fetchMonitoring();
 setInterval(fetchMonitoring, 30000);
 </script>
-
-<style>
-.mon-alerts { display:flex; flex-direction:column; gap:8px; margin-bottom:16px; }
-.mon-alert {
-  border:1px solid var(--border); border-left-width:3px;
-  border-radius:8px; padding:10px 14px; background:var(--bg2);
-}
-.mon-alert-down { border-left-color: var(--danger); }
-.mon-alert-warn { border-left-color: var(--warning, #f0a040); }
-.mon-alert-title { font-weight:600; font-size:14px; margin-bottom:4px; }
-.mon-alert-body { font-size:12.5px; color:var(--text2); white-space:pre-wrap; }
-
-.mon-cards {
-  display:grid; gap:12px; padding:12px;
-  grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));
-}
-.mon-card {
-  border:1px solid var(--border); border-top-width:3px;
-  border-radius:8px; padding:12px;
-}
-.mon-ok      { border-top-color: var(--success, #3fb950); }
-.mon-warn    { border-top-color: var(--warning, #f0a040); }
-.mon-down    { border-top-color: var(--danger); }
-.mon-unknown { border-top-color: var(--border); }
-
-.mon-card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
-.mon-src { font-weight:600; font-size:14px; }
-.mon-badge-ok      { background:var(--success, #3fb950); color:#fff; }
-.mon-badge-warn    { background:var(--warning, #f0a040); color:#fff; }
-.mon-badge-down    { background:var(--danger); color:#fff; }
-.mon-badge-unknown { background:var(--border); color:var(--text2); }
-
-.mon-kv { width:100%; font-size:12px; }
-.mon-kv td { padding:2px 0; }
-.mon-kv td:first-child { color:var(--text2); width:52%; }
-.mon-reasons { margin:8px 0 0; padding-left:16px; font-size:12px; color:var(--text2); }
-
-.mon-ts { white-space:nowrap; font-variant-numeric:tabular-nums; }
-.mon-cell-err  { color:var(--danger); }
-.mon-cell-warn { color:var(--warning, #f0a040); }
-#mon-rounds td, #mon-rounds th { font-size:12px; white-space:nowrap; }
-</style>
-
 {% endblock %}

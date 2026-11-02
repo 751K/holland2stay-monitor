@@ -18,9 +18,9 @@ import logging
 import os
 import threading
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request
 
-from app.auth import admin_api_required, api_login_required, login_required
+from app.auth import admin_api_required, api_login_required, browse_required
 from app.csrf import csrf_required
 from app.db import storage
 from app.services.listing_service import get_map_payload, locate_map_listing
@@ -56,38 +56,42 @@ def _run_geocode_worker(addresses: list[str]) -> None:
             _geocode_status["errors"] = errors[:20]   # 最多保留 20 条
 
 
-@login_required
+@browse_required
 def map_view() -> str:
-    return render_template(
-        "map.html",
-        google_maps_key=os.environ.get("GOOGLE_MAPS_API_KEY", ""),
-    )
+    from app.i18n import get_lang
+    from app.services.inbox_service import workspace_url
+    from app.services.map_workspace import map_context
+    from app.services.web_identity import current_listing_user
+
+    zh=get_lang()=='zh'
+    try:
+        context=map_context(current_listing_user(),request.args,zh=zh)
+    except ValueError as error:
+        abort(400,description=str(error))
+    def map_url(endpoint=None,**changes):
+        defaults=dict(history='1' if context['map_history'] else None,
+            positions=context['map_positions'],location=context['map_location'] or None,focus=None)
+        if 'view' in changes or 'q' in changes:
+            defaults['location']=None
+        defaults.update(changes)
+        return workspace_url(endpoint=endpoint,**defaults)
+    context.update(inbox_url=map_url,zh=zh,google_maps_key=os.environ.get("GOOGLE_MAPS_API_KEY", ""))
+    if request.accept_mimetypes.best=='application/json':
+        response=jsonify(html=render_template('_map_side.html',**context),items=context['items'],
+            markers=context['map_markers'],notice=context['map_notice'],
+            selection=dict(history='1' if context['map_history'] else None,positions=context['map_positions'],
+                location=context['map_location'] or None,page=context['page'],selected=context['selected']['id'] if context['selected'] else None),
+            counts=dict(located=context['map_located_count'],unlocated=context['map_unlocated_count'],older=context['map_older_count']),
+            unread_count=context['unread_count'])
+        response.headers['Cache-Control']='no-store'
+        return response
+    return render_template('map.html',**context)
 
 
 def _current_map_user():
-    """当前登录用户的 UserConfig；admin / guest / 匿名返回 None。
+    from app.services.web_identity import current_listing_user
 
-    地图此前一律走 ``get_map_payload()`` 不带 user，于是用户在设置里配好的
-    listing_filter 对地图完全不生效——列表页按他的条件筛过，地图上却是全量。
-    ``/api/v1/map`` 早就按角色区分了，这里跟上。
-
-    算不出来时返回 None（= 不额外筛）而不是抛：地图少一层筛选是退化，
-    整页 500 才是故障。
-    """
-    from app.auth import current_user_id, is_user
-
-    if not is_user():
-        return None
-    uid = current_user_id()
-    if not uid:
-        return None
-    try:
-        from users import load_users
-
-        return next((u for u in load_users() if u.id == uid), None)
-    except Exception:
-        logger.warning("地图取用户筛选失败 user_id=%s", uid, exc_info=True)
-        return None
+    return current_listing_user()
 
 
 @api_login_required

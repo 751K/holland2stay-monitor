@@ -1,0 +1,20 @@
+:root{--color-brand:#147867;--color-brand-hover:#0e6254;--color-brand-soft:#e8f4f1;--color-text:#202020;--color-text-secondary:#666;--color-border:#dedede;--color-surface:#fff;--color-success:#176842;--color-warning:#86530d;--color-danger:#ab332b;color:var(--color-text);background:var(--color-surface)}
+.preview{background:#fff;color:#666;border-bottom:1px solid #e9e9e9}
+.preview strong{color:#333}.preview span{border-color:#dedede}
+.sidebar,.main{background:#fff}.sidebar{border-color:#e8e8e8}.appbar{border-color:#ebebeb;color:#777}.appbar strong{color:#424242}.appbar-note{color:#737373}.chevron{color:#bbb}
+.brand{color:#202020}.brand small,.side-section,.platform-heading,.platform-heading small{color:#757575}
+.nav{color:#515151}.nav:hover{background:#f4f4f4}.nav.active{background:var(--color-brand-soft);color:var(--color-brand)}.nav-icon{color:#777}.nav.active .nav-icon{color:var(--color-brand)}.nav b{color:#737373}
+.platform-icon{background:#f1f1f1;color:#686868}.platform-nav.active .platform-icon{background:#d2eae4;color:var(--color-brand)}
+.side-bottom{color:#4a4a4a}.side-bottom small{color:#757575}.side-dot{background:#999}
+.caption{color:#707070!important}.heading h1{color:#202020}.heading p{color:#666}.sample{color:#777}.sample strong{color:#4b4b4b}
+.inbox,.detail{border-color:#e8e8e8;box-shadow:0 2px 12px rgba(0,0,0,.035)}
+.list-heading h2,.detail-name{color:#242424}.list-heading h2 span,.detail-snapshot{color:#666;background:#f2f2f2}.list-heading p,.list-footer{color:#707070}
+.search{border-color:#ddd;background:#fff}.search svg{stroke:#858585}.search input{color:#303030}.search input::placeholder{color:#858585}
+.group-label{background:#fafafa;border-color:#efefef;color:#666}.group-label span{color:#858585}
+.listing{background:#fff}.listing+.listing{border-color:#f0f0f0}.listing:hover{background:#fafafa}.listing.selected{background:var(--color-brand-soft)}.listing.selected:before{background:var(--color-brand)}
+.listing-title,.listing-value strong,.detail-price{color:#252525}.listing-meta{color:#666}.listing-meta i{color:#b0b0b0}.listing-value small,.time{color:#777}.inferred,.detail-inferred{background:#f0f0f0;color:#666}
+.status-text{color:#686868}.status-text.available{color:var(--color-success)}.status-text.reserved{color:#666}.status-icon.available{border-color:var(--color-success)}.status-icon.reserved{border-color:#777}
+.detail-top{border-color:#ededed;color:#555}.detail-location{color:#6d6d6d}.detail-location span{color:#aaa}.detail-price span{color:#777}.detail-status{color:#555}.separator{background:#ededed}.detail h3{color:#555}.detail dt{color:#737373}.detail dd{color:#333}
+.detail-note{background:#f7f7f7;color:#666}.detail-snapshot{color:#666}.detail-empty,.note{color:#737373}
+.source-link{border-color:var(--color-brand);background:#fff;color:var(--color-brand)}.source-link:hover{border-color:var(--color-brand-hover);background:var(--color-brand-soft);color:var(--color-brand-hover)}.empty{color:#555}.empty span{color:#777}
+:focus-visible{outline-color:var(--color-brand)}

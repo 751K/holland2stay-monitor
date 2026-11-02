@@ -28,8 +28,7 @@
 凡是**不在跟房源平台说话**的出站请求，都走这里的入口。
 
 跟房源平台说话的保持原样——它们本来就该走代理，而且都是显式传 ``proxies=``
-的：``scrapers/``、``bookers/rentcafe.py``、``app/routes/api_v1/auth.py`` 里
-校验 H2S 凭据的那处。
+的：``scrapers/``、``bookers/rentcafe.py``。
 
 ⚠️ 一个不显然的坑
 -----------------

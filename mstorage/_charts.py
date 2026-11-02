@@ -2,14 +2,60 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from models import canonical_feature, parse_float, parse_int
 
 
 class ChartOps:
-    """依赖 self._conn / self._tz。"""
+    """依赖 self._conn / self._tz。
+
+    默认统计全部房源。Web 统计页要按收件箱的范围（我的匹配 / 带临时筛选的
+    全部房源）统计时，用 ``chart_scope(ids)`` 包住查询：房源 id 写进本连接的
+    临时表，每个查询多一个 ``id IN (…)`` 条件，SQL 本身不必再写一份。
+    """
+
+    _chart_scoped = False
+
+    @contextmanager
+    def chart_scope(self, ids):
+        """在 with 块内只统计 ``ids`` 里的房源；``ids`` 为 None 时不限制。"""
+        if ids is None:
+            yield
+            return
+        self._conn.execute("CREATE TEMP TABLE IF NOT EXISTS chart_scope (id TEXT PRIMARY KEY)")
+        self._conn.execute("DELETE FROM temp.chart_scope")
+        self._conn.executemany("INSERT OR IGNORE INTO temp.chart_scope (id) VALUES (?)",
+                               ((str(i),) for i in ids))
+        self._chart_scoped = True
+        try:
+            yield
+        finally:
+            self._chart_scoped = False
+            self._conn.execute("DELETE FROM temp.chart_scope")
+            self._conn.commit()
+
+    def _scope_condition(self, column: str = "listings.id") -> list[str]:
+        """范围条件（列表形式，方便拼进各查询的 conditions）。"""
+        return [f"{column} IN (SELECT id FROM temp.chart_scope)"] if self._chart_scoped else []
+
+    def chart_scope_summary(self, days: int) -> dict:
+        """范围内的关键数字，口径与 count_all / count_new_since / count_changes_since 相同。"""
+        scope = " AND ".join(self._scope_condition()) or "1"
+        now = datetime.now(timezone.utc)
+        def since(hours: int) -> str:
+            return (now - timedelta(hours=hours)).isoformat()
+        one = lambda sql, *params: (self._conn.execute(sql, params).fetchone() or (0,))[0]
+        return {
+            "total": one(f"SELECT COUNT(*) FROM listings WHERE {scope}"),
+            "new_24h": one(f"SELECT COUNT(*) FROM listings WHERE first_seen > ? AND {scope}", since(24)),
+            "new_range": one(f"SELECT COUNT(*) FROM listings WHERE first_seen > ? AND {scope}", since(24 * days)),
+            "changes_range": one(
+                "SELECT COUNT(*) FROM status_changes WHERE changed_at > ? AND "
+                + (" AND ".join(self._scope_condition("listing_id")) or "1"), since(24 * days)),
+        }
 
     def _listing_cutoff(self, days: int | None) -> str | None:
         """返回按 first_seen 过滤的 UTC cutoff；days=None 表示全量。"""
@@ -24,9 +70,14 @@ class ChartOps:
 
     def _listing_where(self, days: int | None) -> tuple[str, tuple]:
         cutoff = self._listing_cutoff(days)
-        if cutoff is None:
+        conditions = self._scope_condition()
+        params: tuple = ()
+        if cutoff is not None:
+            conditions.insert(0, "first_seen >= ?")
+            params = (cutoff,)
+        if not conditions:
             return "", ()
-        return " WHERE first_seen >= ?", (cutoff,)
+        return " WHERE " + " AND ".join(conditions), params
 
     # ── 趋势（折线图）────────────────────────────────────────────────
 
@@ -38,7 +89,8 @@ class ChartOps:
         cutoff_utc = (start_local - timedelta(days=1)).isoformat()
 
         rows = self._conn.execute(
-            "SELECT first_seen FROM listings WHERE first_seen >= ?", (cutoff_utc,)
+            "SELECT first_seen FROM listings WHERE "
+            + " AND ".join(["first_seen >= ?", *self._scope_condition()]), (cutoff_utc,)
         ).fetchall()
 
         day_counts: dict[str, int] = {}
@@ -61,7 +113,8 @@ class ChartOps:
         cutoff_utc = (start_local - timedelta(days=1)).isoformat()
 
         rows = self._conn.execute(
-            "SELECT changed_at FROM status_changes WHERE changed_at >= ?", (cutoff_utc,)
+            "SELECT changed_at FROM status_changes WHERE "
+            + " AND ".join(["changed_at >= ?", *self._scope_condition("listing_id")]), (cutoff_utc,)
         ).fetchall()
 
         day_counts: dict[str, int] = {}
@@ -106,7 +159,8 @@ class ChartOps:
         return [{"status": r["status"], "count": r["cnt"]} for r in rows]
 
     def chart_price_dist(self, days: int | None = None) -> list[dict]:
-        where = "WHERE price_raw IS NOT NULL AND price_raw != ''"
+        where = "WHERE price_raw IS NOT NULL AND price_raw != ''" + "".join(
+            " AND " + c for c in self._scope_condition())
         params: tuple = ()
         cutoff = self._listing_cutoff(days)
         if cutoff is not None:
@@ -140,7 +194,7 @@ class ChartOps:
 
     def chart_hourly_dist(self, days: int | None = None) -> list[dict]:
         tz = ZoneInfo(self._tz)
-        where = "WHERE first_seen IS NOT NULL"
+        where = "WHERE first_seen IS NOT NULL" + "".join(" AND " + c for c in self._scope_condition())
         params: tuple = ()
         cutoff = self._listing_cutoff(days)
         if cutoff is not None:
@@ -168,7 +222,8 @@ class ChartOps:
         消除 Python 侧逐行 json.loads() 的开销。
         """
         conditions = ["features IS NOT NULL", "features != '[]'",
-                       "json_valid(features)"]  # 跳过损坏的 JSON（json_each 遇非法 JSON 会抛错）
+                       "json_valid(features)",  # 跳过损坏的 JSON（json_each 遇非法 JSON 会抛错）
+                       *self._scope_condition()]
         params: list = []
         cutoff = self._listing_cutoff(days)
         if cutoff is not None:
@@ -207,7 +262,7 @@ class ChartOps:
         classifier 回调的灵活性，同时避免了全量 json.loads()）。
         """
         conditions = ["features IS NOT NULL", "features != '[]'",
-                       "json_valid(features)"]
+                       "json_valid(features)", *self._scope_condition()]
         params: list = []
         cutoff = self._listing_cutoff(days)
         if cutoff is not None:

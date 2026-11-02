@@ -73,8 +73,8 @@ SECTIONS_EN: list[tuple[str, str]] = [
     ),
     (
         "Privacy and Terms",
-        "Your use of FlatRadar is governed by our Privacy Policy and Terms of "
-        "Use. See the links in the footer.",
+        "Using FlatRadar means you agree to our Privacy Policy and Terms of "
+        "Use.",
     ),
 ]
 
@@ -121,6 +121,6 @@ SECTIONS_ZH: list[tuple[str, str]] = [
     ),
     (
         "隐私与条款",
-        "你对 FlatRadar 的使用同时受隐私政策和使用条款约束。底部有链接。",
+        "使用 FlatRadar 即表示你同意隐私政策和使用条款。",
     ),
 ]

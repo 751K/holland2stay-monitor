@@ -463,170 +463,6 @@ def set_payment_method(
 
 
 # ------------------------------------------------------------------ #
-# 取消 pending 订单
-# ------------------------------------------------------------------ #
-
-# 取消预留：REST，不是 GraphQL。机制 2026-08-19 从租户门户 JS 逐字读出
-# （docs/H2S_BOOKING_OPS.md §4），站点原文：
-#     列出预留  GET  /api/rest/V1/newdashboard/contract/me?fields=items[id,sku,status,...]
-#     取消一笔  POST /api/rest/V1/customer/bookingcancel/{sku}   body {}   Bearer
-# 按 **SKU** 取消，不是订单号。旧代码那套 GraphQL customer{orders}+cancelOrder
-# 是自写的，站点根本不这么做，必然失败——已删除。
-_REST_LIST_RESERVATIONS = (
-    "/api/rest/V1/newdashboard/contract/me"
-    "?fields=items[id,sku,product_name,building_name,status,start_date]"
-)
-_REST_BOOKING_CANCEL = "/api/rest/V1/customer/bookingcancel/{sku}"
-_CANCEL_STATUSES = {"pending", "pending_payment", "reserved", "processing", "reservation"}
-
-
-#: 「这笔预留是我们下的」记录的 meta 键前缀。按账号分开存。
-_OUR_RESERVATIONS_META = "booking:our_skus:"
-#: 每个账号最多记多少条。预留是短命的，留太多只会让旧记录误伤。
-_OUR_RESERVATIONS_CAP = 20
-
-
-def _account_key(email: str) -> str:
-    import hashlib
-    return hashlib.sha1((email or "").strip().lower().encode()).hexdigest()[:16]
-
-
-def _meta_storage():
-    """惰性拿一个 Storage。拿不到返回 None（调用方据此 fail-safe）。
-
-    booker 与它上面两层（``book_with_fallback`` / ``dispatch_book``）都没有
-    storage 参数，而把它一路穿下来会改三个签名。这里按 crypto.py 同一个办法
-    自己开一个只读/写 meta 的连接——记录的量极小，不值得为它改调用链。
-    """
-    try:
-        from pathlib import Path
-
-        from config import load_config
-        from storage import Storage
-        return Storage(Path(load_config().db_path))
-    except Exception:
-        logger.warning("拿不到 storage，无法记录/读取自有预留", exc_info=True)
-        return None
-
-
-def remember_our_reservation(email: str, sku: str) -> None:
-    """记下「这个 SKU 是我们替这个账号占的」。
-
-    ``cancel_pending_orders`` 只取消记在这里的那些——见它的 docstring。
-    记不下来不影响下单，只会让将来那次取消变保守（不敢动）。
-    """
-    if not sku:
-        return
-    st = _meta_storage()
-    if st is None:
-        return
-    import json as _j
-    key = _OUR_RESERVATIONS_META + _account_key(email)
-    try:
-        cur = _j.loads(st.get_meta(key, "") or "[]")
-        if not isinstance(cur, list):
-            cur = []
-    except Exception:
-        cur = []
-    if sku in cur:
-        return
-    cur.append(sku)
-    try:
-        st.set_meta(key, _j.dumps(cur[-_OUR_RESERVATIONS_CAP:]))
-    except Exception:
-        logger.warning("记录自有预留失败（下次取消会变保守）", exc_info=True)
-
-
-def _our_reservations(email: str) -> set[str]:
-    st = _meta_storage()
-    if st is None:
-        return set()
-    import json as _j
-    try:
-        cur = _j.loads(st.get_meta(_OUR_RESERVATIONS_META + _account_key(email), "")
-                       or "[]")
-        return {str(x) for x in cur} if isinstance(cur, list) else set()
-    except Exception:
-        return set()
-
-
-def cancel_pending_orders(fetcher: BrowserFetcher, token: str,
-                          email: str = "") -> int:
-    """取消**我们自己下的**待处理预留，返回取消成功的笔数。
-
-    ⚠️ 判据不能只看 status
-    ----------------------
-    原实现按 ``status in _CANCEL_STATUSES`` 取消账号下的**全部**待处理预留。
-    那里面完全可能有用户自己在站点上手动订的房——为了抢另一套，把人家看中的
-    那套取消掉，而且**不可逆**。
-
-    现在只取消 ``remember_our_reservation`` 记过的 SKU。没有记录时**一笔都不
-    取消**（fail-safe）：宁可这次抢不到，也不能动用户自己的预留。记录会在进程
-    重启后保留（存在 meta 里），但更早的、或别的部署下的预留仍然认不出——那种
-    情况下保守是对的。
-
-    传输层已确定（2026-08-19 逐字读自站点 module 82361，见 §6.9）：
-    ``/api/rest/*`` **走加密信封**——GET 把路径塞进 ``x-enc-q``，POST 加密 body。
-    所以这里用 ``fetch_rest``，不是 ``fetch_plain``（后者只对 ``/api/auth/*`` 正确）。
-
-    ⚠️ 仍未经真实取消验证：这条路只在 reserved_conflict + cancel_enabled 时触发
-    （边缘场景），且整体 try/except 兜底——取消失败只是救不回旧预留，不连累主流程。
-    """
-    import json as _j
-
-    hdr = {"Authorization": f"Bearer {token}"}
-    try:
-        r = fetcher.fetch_rest(_REST_LIST_RESERVATIONS, method="GET", headers=hdr)
-        items = (_j.loads(r["text"]) or {}).get("items") or []
-    except Exception as e:
-        logger.warning("查询预留列表失败（忽略，机制见 §6.6/§6.9）: %s", e)
-        return 0
-
-    ours = _our_reservations(email)
-    pending = [
-        (it.get("sku"), it.get("product_name") or it.get("sku"))
-        for it in items
-        if it.get("sku") and str(it.get("status", "")).lower() in _CANCEL_STATUSES
-    ]
-    to_cancel = [(sku, name) for sku, name in pending if str(sku) in ours]
-
-    skipped = [name for sku, name in pending if str(sku) not in ours]
-    if skipped:
-        # **必须吵一声。** 静默跳过会让人以为「取消功能坏了」，进而去把判据放宽
-        # 回原样——而那正是会误删用户手动预留的写法。
-        logger.warning(
-            "账号下有 %d 笔待处理预留不是我们下的，已跳过不取消：%s。"
-            "如需释放请自行到站点操作", len(skipped), skipped,
-        )
-    if not to_cancel:
-        logger.info("没有可安全取消的自有预留（待处理 %d 笔，其中自有 0 笔）",
-                    len(pending))
-        return 0
-
-    logger.info("发现 %d 笔待处理预留，准备取消: %s",
-                len(to_cancel), [n for _, n in to_cancel])
-
-    cancelled = 0
-    for sku, name in to_cancel:
-        try:
-            resp = fetcher.fetch_rest(
-                _REST_BOOKING_CANCEL.format(sku=sku),
-                method="POST", body="{}",
-                headers={**hdr, "Content-Type": "application/json"},
-            )
-            if 200 <= resp.get("status", 0) < 300:
-                logger.info("已取消预留 %s (%s)", name, sku)
-                cancelled += 1
-            else:
-                logger.warning("取消预留 %s 返回 HTTP %s: %s",
-                               sku, resp.get("status"), resp.get("text", "")[:200])
-        except Exception as e:
-            logger.warning("取消预留 %s 失败: %s", sku, e)
-
-    return cancelled
-
-
-# ------------------------------------------------------------------ #
 # 加入购物车（预占位）
 # ------------------------------------------------------------------ #
 
@@ -783,7 +619,7 @@ def _ideal_checkout(fetcher: BrowserFetcher, token: str, order_number: str) -> s
 
 BookingPhase = Literal[
     "", "dry_run", "success", "race_lost",
-    "reserved_conflict", "cancel+retry", "unknown_error",
+    "reserved_conflict", "unknown_error",
     "blocked",
     # 403，但正文是上游应用说「这条 GraphQL operation 没登记」，不是 CF 屏蔽。
     # 和 blocked 分开的理由是上层动作完全相反：blocked 要换 IP、失效 session、
@@ -900,7 +736,6 @@ def try_book(
     password: str,
     *,
     dry_run: bool = False,
-    cancel_enabled: bool = False,
     payment_method: str = _PAYMENT_METHOD,
     prewarmed: "PrewarmedSession | None" = None,
 ) -> BookingResult:
@@ -914,14 +749,12 @@ def try_book(
     重试策略
     --------
     placeOrder 返回「房源已被他人预订」→ 竞争失败，立即通知用户（不重试）。
-    placeOrder 返回「账号已有预留单」且 cancel_enabled=True
-      → cancel_pending_orders() → 重新执行 _do_book()。
+    placeOrder 返回「账号已有预留单」→ 通知用户自行到站点处理（不自动取消）。
     """
     if listing.status.lower() != STATUS_AVAILABLE:
         return BookingResult(listing, False, f"状态不是 Available to book: {listing.status}")
 
     t0 = time.monotonic()
-    t_cancel = 0.0
     t_login = 0.0
     t_sku = 0.0
     phase: BookingPhase = ""
@@ -1032,9 +865,6 @@ def try_book(
             # 走完」，而不是含糊地报「预订失败」。
             held["cart_id"] = str(new_cart_id or "")
             record_progress(cart=held["cart_id"])
-            # 记下「这个 SKU 是我们占的」。cancel_pending_orders 只敢动记过的，
-            # 没记录就一笔都不取消——见它的 docstring。
-            remember_our_reservation(email, str(sku))
             set_payment_method(fetcher, token, new_cart_id, code=payment_method)
             _fetch_checkout_agreements(fetcher, token)
             t_add_val = time.monotonic() - ta
@@ -1073,25 +903,14 @@ def try_book(
                 ) from book_err
 
             elif _is_reserved_by_user(err_str):
-                if not cancel_enabled:
-                    phase = "reserved_conflict"
-                    logger.warning("[%s] 预留单冲突，原始错误: %s",
-                                   listing.name, err_str)
-                    raise RuntimeError(
-                        "该账号尚有未完成的预留订单，请登录 Holland2Stay 手动取消后再试。\n\n"
-                        f"📋 原始错误：{err_str}\n\n"
-                        f"💡 手动预订入口：\n{booking_url}"
-                    ) from book_err
-
-                phase = "cancel+retry"
-                logger.info("[%s] 账号已有预留单（%s），正在取消后重试...",
-                            listing.name, err_str)
-                tc1 = time.monotonic()
-                cancelled = cancel_pending_orders(fetcher, token, email)
-                t_cancel = time.monotonic() - tc1
-                logger.info("[%s] 已取消 %d 笔旧订单 (%.2fs)，重新预订...",
-                            listing.name, cancelled, t_cancel)
-                pay_url, t_add, t_pay = _do_book()
+                phase = "reserved_conflict"
+                logger.warning("[%s] 预留单冲突，原始错误: %s",
+                               listing.name, err_str)
+                raise RuntimeError(
+                    "该账号尚有未完成的预留订单，请登录 Holland2Stay 手动取消后再试。\n\n"
+                    f"📋 原始错误：{err_str}\n\n"
+                    f"💡 手动预订入口：\n{booking_url}"
+                ) from book_err
 
             else:
                 phase = "unknown_error"
@@ -1131,8 +950,6 @@ def try_book(
         )
         parts = (f"sku={t_sku:.2f}s login={t_login:.2f}s "
                  f"add={t_add:.2f}s pay={t_pay:.2f}s")
-        if t_cancel:
-            parts += f" cancel={t_cancel:.2f}s"
         logger.info(
             "[%s] 预订成功  入住:%s | 耗时 total=%.1fs (%s)",
             listing.name, start_date, total, parts,
@@ -1220,7 +1037,7 @@ def try_book(
         ctx = (
             f"listing_id={listing.id} sku={listing.sku or 'N/A'} "
             f"email={_mask_email(email)} dry_run={dry_run} prewarmed={'yes' if prewarmed else 'no'} "
-            f"timings={{sku:{t_sku:.2f}s login:{t_login:.2f}s cancel:{t_cancel:.2f}s total:{total:.2f}s}}"
+            f"timings={{sku:{t_sku:.2f}s login:{t_login:.2f}s total:{total:.2f}s}}"
         )
         if phase in ("race_lost", "reserved_conflict"):
             logger.warning(

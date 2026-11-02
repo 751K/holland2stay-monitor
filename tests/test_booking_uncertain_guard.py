@@ -112,7 +112,7 @@ def test_mutation_failure_does_not_try_fallback(db, monkeypatch):
     assert len(calls) == 1
 
 
-def test_uncertain_create_does_not_cancel_existing_orders(db, monkeypatch):
+def test_uncertain_create_is_reported_without_retrying(db, monkeypatch):
     import time
     from unittest.mock import MagicMock
     import booker
@@ -122,19 +122,18 @@ def test_uncertain_create_does_not_cancel_existing_orders(db, monkeypatch):
     now = time.monotonic()
     session = booker.PrewarmedSession(fetcher=MagicMock(), token='token', created_at=now,
                                      token_expiry=now + 100, email='x@example.com')
-    cancel = MagicMock()
+    calls = []
     def rejected(*args):
+        calls.append(args)
         raise RuntimeError('account already has a reserved booking')
     monkeypatch.setattr(booker, 'create_booking', rejected)
-    monkeypatch.setattr(booker, 'cancel_pending_orders', cancel)
     guard = BookingGuard(db)
     attempt = guard.acquire('x@example.com', 'u1', 'Room')
     with attempt_context(guard, attempt):
-        result = booker.try_book(listing, 'x@example.com', 'pw', prewarmed=session,
-                                 cancel_enabled=True)
+        result = booker.try_book(listing, 'x@example.com', 'pw', prewarmed=session)
     assert not result.success
     assert guard.get_attempt(attempt)['mutated'] == 1
-    cancel.assert_not_called()
+    assert len(calls) == 1
 
 
 def test_review_page_requires_explicit_confirmation(admin_client, test_app):

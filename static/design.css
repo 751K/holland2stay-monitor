@@ -1,6 +1,4 @@
-/* ===================================================================
-   FlatRadar — Design System (minimal, low-line)
-   =================================================================== */
+
 
 /* ── CSS Reset ─────────────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -14,16 +12,16 @@ a{color:inherit;text-decoration:none}
   /* 下拉箭头。原生 <select> 和自定义多选（.ms-arrow）共用同一张图，
      否则一行里两种控件一个是描边 chevron、一个是实心 ▾ 三角，大小还不一样。 */
   --caret:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239b9b9b' stroke-width='1.5'/%3E%3C/svg%3E");
-  --bg:#fafafa;
-  --surface:#fff;
-  --surface-hover:#f5f5f5;
-  --border:#e8e8e8;
-  --text:#0a0a0a;
-  --text2:#6b6b6b;
-  --text3:#9b9b9b;
-  --accent:#0f6b7a;
-  --accent-hover:#0b5a66;
-  --accent-soft:rgba(15,107,122,.09);
+  --bg:#f3f6f5;
+  --surface:#ffffff;
+  --surface-hover:#f0f5f3;
+  --border:#dce6e2;
+  --text:#18332e;
+  --text2:#526c65;
+  --text3:#6c827c;
+  --accent:#147867;
+  --accent-hover:#0e6254;
+  --accent-soft:rgba(20,120,103,.10);
   --metric-blue:#0284c7;
   --metric-teal:#0f766e;
   --success:#0eb478;
@@ -37,20 +35,17 @@ a{color:inherit;text-decoration:none}
   --shadow-sm:0 1px 3px rgba(0,0,0,.05);
   --shadow-md:0 4px 16px rgba(0,0,0,.07);
   --shadow-lg:0 16px 48px rgba(0,0,0,.1);
-  --glass-bg:rgba(255, 255, 255, 0.7);
-  --glass-border:rgba(255, 255, 255, 0.6);
-  --glass-shadow:0 8px 32px rgba(0, 0, 0, 0.04);
-  --glass-blur:blur(24px) saturate(180%);
-  --app-bg-gradient:radial-gradient(circle at 10% 40%, rgba(2, 132, 199, 0.12), transparent 60%),
-                     radial-gradient(circle at 90% 30%, rgba(14, 180, 120, 0.12), transparent 60%),
-                     radial-gradient(circle at 50% 90%, rgba(245, 158, 11, 0.12), transparent 60%),
-                     var(--bg);
+  --glass-bg:#ffffff;
+  --glass-border:#dce6e2;
+  --glass-shadow:0 4px 18px rgba(28,62,51,.045);
+  --glass-blur:none;
+  --app-bg-gradient:var(--bg);
   --radius-sm:4px;
-  --radius:6px;
-  --radius-lg:10px;
+  --radius:8px;
+  --radius-lg:12px;
   --radius-xl:16px;
-  --sidebar-w:236px;
-  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --sidebar-w:232px;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
   --font-mono:'JetBrains Mono','SF Mono','Fira Code',monospace;
   --grad-green:linear-gradient(135deg, #10b981, #059669);
   --grad-amber:linear-gradient(135deg, #f59e0b, #d97706);
@@ -66,25 +61,25 @@ a{color:inherit;text-decoration:none}
 }
 
 [data-theme="dark"]{
-  --bg:#0d0d0d;
-  --surface:#141414;
-  --surface-hover:#1e1e1e;
-  --border:#242424;
-  --text:#fafafa;
-  --text2:#8b8b8b;
-  --text3:#888;
-  --accent:#38bdf8;
-  --accent-hover:#67d4ff;
-  --accent-soft:rgba(56,189,248,.12);
+  --bg:#101b19;
+  --surface:#192825;
+  --surface-hover:#223632;
+  --border:#31443f;
+  --text:#eaf3ef;
+  --text2:#b2c6be;
+  --text3:#98b0a7;
+  --accent:#6ad0b6;
+  --accent-hover:#94e6cf;
+  --accent-soft:rgba(106,208,182,.13);
   --metric-blue:#38bdf8;
   --metric-teal:#2dd4bf;
   --shadow-sm:0 1px 3px rgba(0,0,0,.3);
   --shadow-md:0 4px 16px rgba(0,0,0,.4);
   --shadow-lg:0 16px 48px rgba(0,0,0,.6);
-  --glass-bg:rgba(20, 20, 20, 0.6);
-  --glass-border:rgba(255, 255, 255, 0.06);
-  --glass-shadow:0 8px 32px rgba(0, 0, 0, 0.3);
-  --app-bg-gradient:radial-gradient(circle at 70% 15%, #1e293b 0%, #0f172a 55%, #020617 100%);
+  --glass-bg:#192825;
+  --glass-border:#31443f;
+  --glass-shadow:0 4px 18px rgba(0,0,0,.18);
+  --app-bg-gradient:var(--bg);
   --grad-green:linear-gradient(135deg, #34d399, #10b981);
   --grad-amber:linear-gradient(135deg, #fbbf24, #f59e0b);
   --grad-red:linear-gradient(135deg, #f87171, #ef4444);
@@ -94,20 +89,6 @@ a{color:inherit;text-decoration:none}
   --pill-email:#93c5fd;
   --pill-app-bg:rgba(167,139,250,.15);
   --pill-app:#c4b5fd;
-}
-
-/* ── Dark mode overrides — kill hardcoded white lines ──────────── */
-[data-theme="dark"] .listing-filter-card{
-  border-color:color-mix(in srgb, var(--border) 78%, var(--surface));
-}
-[data-theme="dark"] .listing-filter-card .form-input,
-[data-theme="dark"] .listing-filter-card .form-select,
-[data-theme="dark"] .listing-filter-card .ms-trigger{
-  box-shadow:0 1px 0 rgba(255,255,255,.08) inset;
-}
-[data-theme="dark"] .settings-form .form-input,
-[data-theme="dark"] .settings-form .form-select{
-  box-shadow:0 1px 0 rgba(255,255,255,.08) inset;
 }
 
 /* ── Base ──────────────────────────────────────────────────────── */
@@ -128,9 +109,9 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 /* ── Layout ────────────────────────────────────────────────────── */
 .app-layout{display:flex;min-height:100vh}
 
-/* Sidebar — floating glass card */
+/* Sidebar */
 .sidebar{
-  position:fixed;top:24px;left:24px;bottom:24px;z-index:100;
+  position:fixed;top:16px;left:16px;bottom:16px;z-index:100;
   width:var(--sidebar-w);
   background:var(--glass-bg);
   backdrop-filter:var(--glass-blur);
@@ -143,85 +124,44 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 }
 .sidebar-brand{
   display:flex;align-items:center;gap:10px;
-  padding:20px 18px 16px;
+  padding:24px 18px 20px;
   font-weight:700;font-size:18px;letter-spacing:-.02em;
   color:var(--text);flex-shrink:0;
-}
-/* 品牌 mark 用 background-image 而不是 <img>：深浅两版是两个文件，主题靠
-   data-theme 切换（不是 prefers-color-scheme），<picture media> 那套用不上，
-   而两个 <img> 互相 display:none 会白下载一张。 */
-.sidebar-brand .brand-mark{
-  width:28px;height:28px;border-radius:7px;
-  box-shadow:0 8px 20px rgba(56,189,248,.18);flex-shrink:0;
-  background:url("/static/logo-small.png") center/100% 100% no-repeat;
-}
-[data-theme="dark"] .sidebar-brand .brand-mark{
-  background-image:url("/static/logo-small-dark.png");
 }
 .sidebar-nav{flex:1;padding:4px 8px;display:flex;flex-direction:column;gap:1px}
 .sidebar-nav a{
   display:flex;align-items:center;gap:10px;
   padding:9px 12px;border-radius:var(--radius);
-  font-size:16px;font-weight:450;color:var(--text2);
+  font-size:14px;font-weight:500;color:var(--text2);
   transition:color .12s,background .12s;
 }
 .sidebar-nav a:hover{color:var(--text);background:var(--accent-soft)}
-.sidebar-nav a.active{color:var(--text);background:var(--accent-soft);font-weight:550}
-.sidebar-nav a i{font-size:18px;width:22px;text-align:center;flex-shrink:0;opacity:.7}
+.sidebar-nav a.active{color:var(--accent);background:var(--accent-soft);font-weight:650}
+.sidebar-nav a i{font-size:17px;width:22px;text-align:center;flex-shrink:0;opacity:.8}
 .sidebar-nav a.active i{opacity:1;color:var(--accent)}
-.sidebar-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);padding:12px 12px 4px}
+
 .sidebar-footer{
   padding:10px;display:flex;flex-direction:column;gap:2px;flex-shrink:0;
 }
-/* 按钮与链接共用一套外观。原先三个 <a>（语言 / 隐私 / 条款）各自内联写了
-   一份等价的 style + onmouseover/onmouseout，改一处就得改三处，而且第四个
-   链接一加就是第四份复制。收进这条规则，行为不变。 */
 .sidebar-footer button,.sidebar-footer form button,.sidebar-footer a{
   display:flex;align-items:center;gap:8px;width:100%;
   padding:8px 12px;border-radius:var(--radius);
   border:none;background:transparent;
-  font-size:15px;color:var(--text2);cursor:pointer;
+  font-size:14px;color:var(--text2);cursor:pointer;
   transition:color .12s,background .12s;
   text-decoration:none;
 }
 .sidebar-footer button:hover,.sidebar-footer a:hover{
   color:var(--text);background:var(--accent-soft);
 }
-/* 赞助入口：图标给一点暖色，和其它中性项区分开，但不做成整行高亮——
-   它是次要入口，不该比「通知」「设置」更抢眼。 */
-.sidebar-footer a.donate-link i{color:var(--warning, #e8a33d)}
-/* 图标列宽只在这里定义一次。原先 7 个 <i> 各自内联写了一份等价的
-   font-size/width/text-align——和上面那段注释说的三个 <a> 是同一个毛病，
-   而且圆点对不齐正是因为这个数字散在模板里、CSS 这边无从对齐。 */
-.sidebar-footer i{font-size:15px;width:18px;text-align:center;flex-shrink:0}
 
-/* Monitor badge in sidebar */
-.mon-badge{
-  display:flex;align-items:center;gap:8px;
-  padding:8px 12px;font-size:15px;color:var(--text2);
-}
-/* 圆点要和下面几行的图标**同一条中线**。
-   图标列宽 18px（见上面 .sidebar-footer i），而圆点本身只有 6px：不给它同宽的
-   盒子，中心就比图标左偏 (18-6)/2 = 6px——2026-08-25 反馈的正是这个。
-   做法是外面套一个 18px 的盒子、圆点画在 ::before 上，这样 18 这个数只写在
-   .sidebar-footer i 一处，改图标列宽时不会两边脱节。 */
-.mon-dot{
-  width:18px;height:18px;flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;
-}
-.mon-dot::before{
-  content:"";width:6px;height:6px;border-radius:50%;
-  background:var(--text2);
-}
-.mon-badge.running .mon-dot::before{background:var(--success);animation:breathe 1.6s ease-in-out infinite}
-.mon-badge.stopped .mon-dot::before{background:var(--danger)}
-@keyframes breathe{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(2.2);opacity:.35}}
+.sidebar-footer i{font-size:15px;width:18px;text-align:center;flex-shrink:0}
 
 /* Main content */
 .main-content{
   margin-left:calc(var(--sidebar-w) + 48px);
   flex:1;min-width:0;
-  padding:36px 40px 60px 0;
+  padding:40px 40px 64px 0;
   /* 默认：移动端无需限制（已在媒体查询中设 max-width:100%） */
 }
 
@@ -237,83 +177,6 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 }
 .sidebar-overlay{display:none;position:fixed;inset:0;z-index:99;background:rgba(0,0,0,.3);backdrop-filter:blur(2px)}
 
-/* ── Cards ─────────────────────────────────────────────────────── */
-.card{
-  background:var(--glass-bg);
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-  border:1px solid var(--glass-border);
-  border-radius:var(--radius-xl);
-  box-shadow:var(--glass-shadow);
-  overflow:hidden;
-}
-.card-header{
-  padding:16px 22px;
-  font-size:15px;font-weight:600;display:flex;align-items:center;justify-content:space-between;
-  color:var(--text);
-  border-bottom:1px solid var(--border);
-}
-.card-body{padding:22px}
-
-/* KPI card — glassmorphism */
-.kpi-card{
-  background:var(--glass-bg);
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-  border:1px solid var(--glass-border);
-  border-radius:var(--radius-xl);
-  padding:20px 22px;
-  display:flex;align-items:flex-start;gap:16px;
-  box-shadow:var(--glass-shadow);
-  position:relative;overflow:hidden;
-}
-.kpi-icon{
-  width:42px;height:42px;border-radius:var(--radius-lg);flex-shrink:0;
-  display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;
-  box-shadow:0 6px 16px rgba(0,0,0,0.1);
-}
-.kpi-num{font-size:36px;font-weight:700;letter-spacing:-.04em;line-height:1;margin-bottom:6px;font-variant-numeric:tabular-nums}
-.kpi-label{font-size:14px;color:var(--text2);font-weight:500}
-
-/* Text Gradients */
-.text-gradient-green {
-  background: var(--grad-green);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.text-gradient-amber {
-  background: var(--grad-amber);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.text-gradient-blue {
-  background: linear-gradient(135deg, var(--metric-blue), var(--metric-teal));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-.text-gradient-red {
-  background: var(--grad-red);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
-/* ── Tables — minimal, single header underline ─────────────────── */
-.table-minimal{width:100%;border-collapse:collapse}
-.table-minimal th{
-  text-align:left;padding:8px 16px;
-  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
-  color:var(--text3);border-bottom:1px solid var(--border);
-  white-space:nowrap;
-}
-.table-minimal td{
-  padding:13px 16px;font-size:15px;vertical-align:middle;
-}
-.table-minimal tbody tr:hover td{background:var(--accent-soft);border-radius:6px}
-.table-minimal .cell-name{font-weight:550;color:var(--text)}
-.table-minimal .cell-secondary{font-size:14px;color:var(--text2)}
-.table-minimal .cell-mono{font-family:var(--font-mono);font-size:14px}
-
-/* ── Badges — soft, no border ─────────────────────────────────── */
 /* 徽章不再是胶囊形。
    站里有两套形状语言：圆角矩形是「操作」，徽章是「状态」。徽章原本走 100px
    胶囊，在房源表那种夹在文字里的场合没问题，但一旦和尺寸相近的按钮上下相邻
@@ -326,64 +189,6 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   white-space:nowrap;
 }
 .badge-success{background:var(--success-soft);color:var(--success)}
-.badge-warning{background:var(--warning-soft);color:var(--warning)}
-.badge-danger{background:var(--danger-soft);color:var(--danger)}
-.badge-info{background:var(--info-soft);color:var(--info)}
-.badge-neutral{background:var(--accent-soft);color:var(--text2)}
-/* status-specific aliases — listings 页面状态列用 */
-.badge-book{background:var(--success-soft);color:var(--success)}
-.badge-lottery{background:var(--warning-soft);color:var(--warning)}
-/* 之前 status_badge() 已经返回 "secondary" / "info" 给 Occupied / Reserved，
-   但 .badge-secondary 一直没定义 → 胶囊有形状无颜色看不见。补两个语义色：
-   - secondary: 中性灰，用于 Occupied / Rented / 终态不可订
-   - reserved:  蓝色，用于 Reserved / In Process 等过渡态 */
-/* secondary: 浅灰底（用 surface-hover，与表格 row hover 同色系，融洽不刺眼）
-   border-color 保持透明，跟 success/warning/info 一致 */
-.badge-secondary{background:var(--surface-hover);color:var(--text2)}
-.badge-reserved{background:var(--info-soft);color:var(--info)}
-/* inferred: 「这个状态是我们猜的」。
-   刻意做成描边而非实底——它不是第五种状态，是贴在状态旁边的一个限定词，
-   实底会和左边那颗状态胶囊抢视觉权重，看起来像两个并列的状态。
-   也刻意不进 .badge-status 的等宽体系：那套是给四个互斥状态对齐用的，
-   这个只在少数行出现，硬塞进去会在没有它的行留下一列空洞。 */
-.badge-inferred{
-  background:transparent;
-  color:var(--text3,var(--text2));
-  box-shadow:inset 0 0 0 1px var(--border);
-  margin-left:4px;
-  cursor:help;
-}
-
-/* ── Status badge：四态严格等宽 ─────────────────────────────────
-   listings / 首页用 .badge-status 把 4 种状态胶囊（Book / Lottery /
-   Reserved / Occupied）固定到同一宽度。
-
-   关键点
-   ------
-   - 用 `width` 而非 `min-width`：letter-spacing 会撑大 inline-flex 容器，
-     min-width 守不住边界
-   - `box-sizing: border-box` + 在本类里重申 padding：让 84px 是含 padding
-     的"总外宽"，不会因为字间距把宽度拱出去
-   - `overflow: hidden`：双重保险，万一字间距 + 渲染差异让某字符溢出，
-     也不影响盒子尺寸
-   - letter-spacing 只控制视觉拉伸；text-indent 抵消末字符后的幽灵空白
-
-   只命中带 .badge-status 修饰的状态胶囊；其它地方的 .badge-secondary
-   等仍按 inline-flex 自然宽度走（监控停止徽标等）。 */
-.badge-status{
-  width:72px;
-  padding:3px 6px;
-  box-sizing:border-box;
-  justify-content:center;
-  text-align:center;
-  overflow:hidden;
-  font-variant-numeric:tabular-nums;
-}
-/* 曾经用 letter-spacing 把短文案拉开去"填满"文字区（Book 拉到 .5em）。
-   实测的结果是 "B o o k"——看着像渲染坏了，而不像排版。等宽由上面的
-   width:72px 保证，字本身居中就够，不需要拉伸。 */
-.badge-status{letter-spacing:.01em}
-
 /* ── Buttons ───────────────────────────────────────────────────── */
 .btn{
   display:inline-flex;align-items:center;justify-content:center;gap:6px;
@@ -394,237 +199,6 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
   background:transparent;color:var(--text2);
 }
 .btn:disabled{opacity:.4;pointer-events:none}
-.btn-sm{padding:6px 12px;font-size:14px;border-radius:var(--radius-sm)}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-primary:hover{background:var(--accent-hover)}
-.btn-ghost{background:var(--surface-hover);color:var(--text2)}
-.btn-ghost:hover{background:var(--accent-soft);color:var(--text)}
-.btn-danger{background:var(--danger);color:#fff}
-.btn-danger:hover{opacity:.9}
-.btn-danger-ghost{background:var(--danger-soft);color:var(--danger)}
-.btn-danger-ghost:hover{opacity:.8}
-
-/* App 下载入口。
-   登录页与用户配置页都要用，此前只在 login.html 的内联 <style> 里有一份，
-   于是面板那边只能拿 .btn-outline 凑合——同一个动作两种画法。
-   保留按平台着色（iOS 走 accent，Android 走绿），那是有用的区分；圆角跟着
-   按钮走 --radius，不再是胶囊：它是操作，不是状态。 */
-.btn-download{
-  display:inline-flex;align-items:center;justify-content:center;gap:8px;
-  padding:9px 16px;border-radius:var(--radius);
-  font-size:14px;font-weight:600;text-decoration:none;
-  transition:all .14s;cursor:pointer;white-space:nowrap;
-}
-.btn-dl-ios{
-  border:1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
-  background:color-mix(in srgb, var(--accent) 10%, transparent);
-  color:var(--accent);
-}
-.btn-dl-ios:hover{background:color-mix(in srgb, var(--accent) 18%, transparent)}
-.btn-dl-android{
-  border:1px solid color-mix(in srgb, var(--success) 28%, var(--border));
-  background:color-mix(in srgb, var(--success) 10%, transparent);
-  color:var(--success);
-}
-.btn-dl-android:hover{background:color-mix(in srgb, var(--success) 18%, transparent)}
-
-/* 描边式：透明底 + 一条发丝边。
-   给「一排并列的次要操作」用。.btn-ghost 是实心灰底（--surface-hover），单独
-   放在控制栏里没问题，但成排落进以文字为主的卡片时，几块实心色块比它们要表达
-   的重要性重得多——进程状态卡和用户卡都是这个情形。
-   .danger 变体给删除这类不可逆操作：它此前和「编辑」长得一模一样，因为
-   .btn-ghost.danger 从来没有过对应规则。 */
-.btn-outline{
-  background:transparent;
-  border:1px solid var(--border);
-  color:var(--text2);
-}
-.btn-outline:hover{
-  background:var(--surface-hover);
-  border-color:color-mix(in srgb, var(--text3) 40%, var(--border));
-  color:var(--text);
-}
-.btn-outline.danger{color:var(--danger)}
-.btn-outline.danger:hover{
-  background:var(--danger-soft);
-  border-color:color-mix(in srgb, var(--danger) 40%, var(--border));
-  color:var(--danger);
-}
-.btn-icon{
-  width:34px;height:34px;padding:0;border-radius:var(--radius);
-  border:none;background:transparent;color:var(--text2);
-  cursor:pointer;transition:all .12s;font-size:16px;
-  display:inline-flex;align-items:center;justify-content:center;
-}
-.btn-icon:hover{background:var(--surface-hover);color:var(--text)}
-.btn-icon.danger:hover{background:var(--danger-soft);color:var(--danger)}
-
-/* ── Forms — borderless, background-based ──────────────────────── */
-.form-group{margin-bottom:18px}
-.form-label{
-  display:block;font-size:14px;font-weight:550;color:var(--text2);
-  margin-bottom:6px;
-}
-.form-input,.form-select{
-  width:100%;padding:9px 12px;
-  font-size:15px;border:none;
-  border-radius:var(--radius);background-color:var(--bg);color:var(--text);
-  transition:box-shadow .12s,background-color .12s;outline:none;
-}
-/* ⚠️ 这一节里凡是给 .form-select 改底色的，一律用 `background-color` 而不是
-   `background` 简写。简写会把 background-image 一并重置成 none，而下拉箭头
-   正是 .form-select 的 background-image（见下）——2026-08 实测：筛选卡片和
-   设置页的 <select> 因此完全没有箭头，看上去和文本框一模一样。 */
-.form-input:focus,.form-select:focus{
-  background-color:var(--surface);
-  box-shadow:0 0 0 2px var(--accent-soft),0 0 0 1px var(--accent);
-}
-.form-input::placeholder{color:var(--text3)}
-.form-select{appearance:none;background-image:var(--caret);background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
-.form-help{font-size:12px;color:var(--text3);margin-top:4px}
-.form-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px}
-.form-inline{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-
-/* Listings filter panel: higher contrast than the ambient glass cards. */
-.listing-filter-card{
-  background:color-mix(in srgb, var(--surface) 86%, transparent);
-  border-color:color-mix(in srgb, var(--border) 78%, #fff);
-  overflow:visible;
-  position:relative;
-  z-index:20;
-}
-.listing-filter-card .card-body{padding:26px;overflow:visible}
-.listing-filter-card .form-label{
-  color:var(--text2);
-  font-size:14px;
-  font-weight:650;
-  margin-bottom:8px;
-}
-/* 一行里 <select>/<input> 和多选（.ms-trigger）并排，三者必须同高，否则
-   整个筛选网格的标签基线会一行高一行低——实测原生控件 40px、多选 42px。
-   两种控件要用不同的属性才压得住：
-   - input/select：min-height 拦不住它们自带的 padding + line-height，得用 height；
-   - .ms-trigger：基础样式是 min-height:42px（min-height 优先于 height），
-     且里面是 flex-wrap，写死 height 会把内容裁掉——所以改写 min-height。 */
-.listing-filter-card .form-input,
-.listing-filter-card .form-select,
-.listing-filter-card .ms-trigger{
-  --filter-control-h:38px;
-  box-sizing:border-box;
-  border:1px solid color-mix(in srgb, var(--border) 78%, var(--surface));
-  background-color:color-mix(in srgb, var(--surface) 92%, var(--bg));
-  color:var(--text);
-  font-size:13px!important;
-  box-shadow:0 1px 0 rgba(255,255,255,.5) inset;
-}
-/* :not(.ms-trigger) 是必需的——多选的触发器同时挂着 form-input 类，会被上面
-   这条 height 钉死在 38px。选中两个长值时内容需要 74px，标签就溢出到框外面
-   去了（实测 Occupancy 勾 Family + Two (only couples)）。下一行的 min-height
-   本来是为它写的，但 height 已经生效，min-height 在这种情况下拦不住。 */
-.listing-filter-card .form-input:not(.ms-trigger),
-.listing-filter-card .form-select{height:var(--filter-control-h)}
-.listing-filter-card .ms-trigger{min-height:var(--filter-control-h);height:auto}
-.listing-filter-card .form-select{
-  background-position:right 8px center;
-  padding-left:10px;
-  padding-right:24px;
-}
-.listing-filter-card .form-input::placeholder{color:var(--text3)}
-.listing-filter-card .form-input:hover,
-.listing-filter-card .form-select:hover,
-.listing-filter-card .ms-trigger:hover{
-  border-color:color-mix(in srgb, var(--accent) 28%, var(--border));
-  background-color:var(--surface);
-}
-.listing-filter-card .ms-text{color:var(--text2)!important}
-/* .ms-arrow 现在是背景图（见 --caret），改 color 已经不起作用；
-   箭头颜色由 SVG 里的 stroke 决定，和 <select> 保持一致。 */
-.listing-filter-card .filter-actions{align-self:end}
-
-/* 筛选卡内所有控件共用一个高度。此前按钮走 .btn-sm（26px），而输入框由内边距
-   撑到 38px——同一行里两种高度，肉眼看得出，但没有任何地方会报错。写成一个
-   变量而不是两处各写一个数值：两处迟早分叉，而分叉的表现就是现在这样。 */
-.listing-filter-card{--filter-control-h:38px}
-.listing-filter-card .form-input,
-.listing-filter-card .form-select,
-.listing-filter-card .ms-trigger,
-.listing-filter-card .filter-actions .btn{
-  min-height:var(--filter-control-h);
-}
-.listing-filter-card .filter-actions .btn{
-  padding-top:0;padding-bottom:0;
-  font-size:13px;
-}
-
-/* Settings forms need stronger input contrast on large glass panels. */
-.settings-form .form-input,
-.settings-form .form-select{
-  min-height:40px;
-  border:1px solid color-mix(in srgb, var(--border) 80%, var(--surface));
-  background-color:color-mix(in srgb, var(--surface) 94%, var(--bg));
-  color:var(--text);
-  font-size:15px;
-  box-shadow:0 1px 0 rgba(255,255,255,.55) inset;
-}
-.settings-form .form-input:hover,
-.settings-form .form-select:hover{
-  border-color:color-mix(in srgb, var(--accent) 26%, var(--border));
-  background-color:var(--surface);
-}
-.settings-form .form-input::placeholder{color:var(--text3)}
-.settings-form .form-help{color:var(--text3)}
-.settings-form .form-row{align-items:start!important}
-.settings-form .form-label{
-  min-height:38px;
-  display:flex;
-  align-items:flex-end;
-}
-.settings-form .form-row:has([name="PEAK_INTERVAL"]) .form-label,
-.settings-form .form-row:has([name="MIN_INTERVAL"]) .form-label{
-  min-height:64px;
-}
-.settings-form .form-row:has([name="HEARTBEAT_INTERVAL_MINUTES"]) .form-label{
-  min-height:58px;
-}
-
-/* ── Multi-select dropdown ── */
-.multi-select{position:relative;user-select:none}
-.ms-trigger{display:flex;align-items:center;justify-content:space-between;cursor:pointer;min-height:42px;padding:6px 10px;gap:6px;flex-wrap:wrap}
-.ms-trigger:focus{outline:none;box-shadow:0 0 0 2px var(--accent-soft),0 0 0 1px var(--accent)}
-.ms-text{color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ms-tag{display:inline-flex;align-items:center;gap:4px;background:var(--accent-soft);color:var(--accent);font-size:12px;font-weight:500;padding:2px 8px;border-radius:4px;line-height:1.5}
-.ms-tag .ms-rm{font-size:14px;cursor:pointer;opacity:.6;line-height:1}
-.ms-tag .ms-rm:hover{opacity:1}
-/* 元素里写的是字面量 ▾，这里用背景图盖掉它（font-size:0 藏字符），
-   好让多选和 <select> 用同一个箭头。 */
-.ms-arrow{
-  width:12px;height:12px;font-size:0;flex-shrink:0;
-  background-image:var(--caret);background-repeat:no-repeat;background-position:center;
-  transition:transform .15s;
-}
-.multi-select.open .ms-arrow{transform:rotate(180deg)}
-/* .card 有 overflow:hidden（为了让内容贴合圆角），会把绝对定位的下拉裁掉——
-   卡片最后一行的多选展开后只能看见半截。只给含多选的卡片放开裁剪，其它卡片
-   的圆角裁切行为不变。 */
-.card:has(.multi-select){overflow:visible}
-.ms-dropdown{display:none;position:absolute;top:calc(100% + 4px);left:0;right:auto;z-index:999;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);min-width:max(100%,180px);max-height:220px;overflow-y:auto;padding:6px 0}
-.multi-select.open .ms-dropdown{display:block}
-/* 展开时把整张卡提到后面几张卡之上。
-   .card 有 backdrop-filter，那会让每张卡都成为**层叠上下文**——下拉的
-   z-index:999 因此被困在自己那张卡里，够不着卡外面。而后面的卡是更晚的兄弟、
-   同样是层叠上下文，于是整个盖在下拉上：看得见（卡是半透明的），点不到。
-   命中测试实测：Magis 那一行返回的是下一张卡的 .section-header。
-
-   只在窄屏之外犯，是因为 .form-row 是 auto-fit——窄屏时字段各占一行，下拉伸不
-   出本卡；拉宽之后字段并排、平台那格贴着卡底，下拉才会探进下一张卡。所以这个
-   问题和「平台从四个变五个」无关，只是列表变长之后第五项恰好落在重叠区里。
-
-   提整张卡而不是提下拉：下拉的 z-index 在卡内部已经够高了，问题出在卡这一层。 */
-.card:has(.multi-select.open){position:relative;z-index:50}
-.ms-option{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:14px;color:var(--text2);cursor:pointer;transition:background .1s}
-.ms-option:hover{background:var(--bg)}
-.ms-option input[type="checkbox"]{accent-color:var(--accent);width:16px;height:16px;margin:0;cursor:pointer}
-.ms-option:has(input:checked){color:var(--text);font-weight:500}
 
 /* Toggle switch */
 .toggle{
@@ -644,10 +218,6 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .toggle input:checked+.toggle-track{background:var(--accent)}
 .toggle input:checked+.toggle-track::after{transform:translateX(16px)}
 
-/* Checkbox */
-.checkbox{display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:16px;color:var(--text)}
-.checkbox input{accent-color:var(--accent)}
-
 /* ── Alerts ────────────────────────────────────────────────────── */
 .alert{
   padding:12px 16px;border-radius:var(--radius-lg);
@@ -658,66 +228,6 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .alert-warning{background:var(--warning-soft);color:var(--warning)}
 .alert-info{background:var(--info-soft);color:var(--info)}
 .alert-dismiss{background:none;border:none;color:inherit;opacity:.6;cursor:pointer;margin-left:auto;font-size:18px;padding:0 4px}
-
-/* ── Coverage banner ───────────────────────────────────────────────
-   「当前监控的平台与城市」。**不能用 .alert**：那个类是
-   `display:flex; align-items:center`，塞进标题、表格、联系方式三个子元素会被
-   排成一行并垂直居中——标题贴左、联系方式飘到最右、中间一大片空白。
-   2026-09-02 就是这么渲染出来的。
-
-   与 .maintenance-banner 同一套结构（图标 + 纵向 body），但语气更淡：这是常驻
-   的信息说明，不是状态告警，所以不描边、字号更小。 */
-.coverage-banner{
-  display:flex;align-items:flex-start;gap:10px;
-  padding:14px 16px;margin-bottom:20px;
-  background:var(--info-soft);border-radius:var(--radius-lg);
-  font-size:15px;line-height:1.55;
-}
-.coverage-banner > i{font-size:17px;line-height:1.4;color:var(--info);flex-shrink:0}
-.coverage-body{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1}
-.coverage-title{
-  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--text3);
-}
-/* 平台名一列、城市一列。max-content 让平台名列刚好贴合最长的那个名字，
-   城市列拿走剩下的宽度并在内部换行——城市多的平台（Plaza 十二个）才不会把
-   平台名那一列撑开。 */
-.coverage-grid{
-  display:grid;grid-template-columns:max-content minmax(0,1fr);
-  gap:7px 20px;align-items:baseline;
-}
-/* nowrap 只加在平台名那个 span 上，容器本身要能换行：窄屏英文下
-   「Student Experience」+「trial run — no alerts yet」在 375px 里放不下，
-   容器 nowrap 会让角标顶穿右边距。 */
-.coverage-src{
-  display:flex;align-items:center;gap:6px;flex-wrap:wrap;
-  font-weight:600;color:var(--text1);min-width:0;
-}
-.coverage-src > span:first-child{white-space:nowrap}
-.coverage-cities{color:var(--text2);min-width:0}
-/* 影子来源的角标。
-   第一版做成了 --text3 + 细边框——全站最淡的一组，理由写的是「实底会和平台名抢
-   视觉权重」。那个理由对这个语义是错的：它说的是「**这个平台不会给你发通知**」，
-   本来就该抢。看不见的警示等于没有警示。
-   所以用 warning 语义色实底，并带一个 bell-slash 图标——图标让人不必读完文字就
-   知道是「没有提醒」。 */
-.coverage-shadow{
-  display:inline-flex;align-items:center;gap:4px;
-  font-size:12px;font-weight:600;line-height:1.7;
-  padding:1px 8px;border-radius:var(--radius-lg);
-  background:var(--warning-soft);color:var(--warning);
-  white-space:nowrap;
-}
-.coverage-shadow i{font-size:11px;line-height:1}
-.coverage-foot{font-size:13.5px;color:var(--text3)}
-.coverage-foot a{color:var(--text2);text-decoration:underline;text-underline-offset:2px}
-.coverage-foot a:hover{color:var(--accent)}
-
-/* 窄屏：平台名与城市改为上下两行，否则 max-content 那一列会把城市挤成一条缝 */
-@media (max-width:640px){
-  .coverage-grid{grid-template-columns:1fr;gap:2px}
-  .coverage-cities{margin-bottom:8px}
-}
 
 /* ── Upstream maintenance banner ───────────────────────────────────
    平台维护态——比 .alert 更温和，专门用于"对方运维窗口、我们什么都不用做"
@@ -736,199 +246,9 @@ h4{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--text
 .maintenance-banner-hint{color:var(--text2);font-size:13px}
 .maintenance-banner-since{color:var(--text3);font-variant-numeric:tabular-nums}
 
-.monitor-paused-banner{
-  display:flex;align-items:flex-start;gap:12px;
-  padding:14px 16px;margin-bottom:20px;
-  background:var(--danger-soft);color:var(--danger);
-  border:1px solid color-mix(in srgb, var(--danger) 25%, transparent);
-  border-radius:var(--radius-lg);
-  font-size:14px;line-height:1.45;
-}
-.monitor-paused-banner.hidden{display:none}
-.monitor-paused-banner i{font-size:20px;line-height:1;flex-shrink:0;margin-top:1px}
-.monitor-paused-title{font-weight:650;font-size:15px}
-.monitor-paused-text{color:var(--text2);font-size:13px}
-.monitor-paused-inline{
-  margin-top:0;padding:10px 12px;border-radius:var(--radius);
-  display:flex;align-items:flex-start;gap:8px;
-  background:var(--danger-soft);color:var(--danger);
-  font-size:13px;line-height:1.4;
-}
-.monitor-paused-inline span{color:var(--text2)}
 .monitor-control-panel{
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;
 }
-.monitor-control-row td{padding-top:10px}
-
-/* 尺寸由面板统一给，颜色走 .btn-outline。
-   .btn-primary（监控停着时的「启动」）保持实心，那一刻它确实是主操作。 */
-.monitor-control-panel .btn{
-  padding:7px 13px;
-  font-size:13px;
-  border-radius:var(--radius);
-}
-.monitor-control-panel .btn i{font-size:13px}
-
-/* ── Page Header ───────────────────────────────────────────────── */
-.page-header{
-  display:flex;align-items:flex-start;justify-content:space-between;
-  margin-bottom:32px;gap:16px;flex-wrap:wrap;
-}
-.page-header h1{font-size:26px;font-weight:600;letter-spacing:-.03em}
-.page-header .meta{font-size:14px;color:var(--text3)}
-
-/* Section header — no bottom border */
-.section-header{
-  display:flex;align-items:center;gap:10px;
-  padding:14px 20px;
-  font-size:14px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--text2);
-}
-.step-num{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:24px;height:24px;border-radius:var(--radius-sm);
-  background:var(--accent);color:#fff;font-size:12px;font-weight:700;flex-shrink:0;
-}
-
-/* ── Listing Cards (mobile) ─────────────────────────────────── */
-.listing-card-item{
-  display:block;
-  background:var(--surface);border-radius:var(--radius-lg);
-  padding:16px;box-shadow:var(--shadow-sm);
-  transition:box-shadow .15s;
-}
-.listing-card-item:active{box-shadow:var(--shadow-md)}
-.lc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:6px}
-.lc-name{font-weight:600;font-size:16px;color:var(--text);line-height:1.3;flex:1;min-width:0}
-.lc-building{font-size:13px;color:var(--text3);margin-bottom:8px}
-.lc-details{display:flex;flex-wrap:wrap;gap:6px 12px;margin-bottom:8px;font-size:14px;color:var(--text2)}
-.lc-rent{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
-.lc-footer{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--text3);padding-top:8px;padding-right:30px}
-
-/* 「在地图上查看」入口。
-   卡片整张是一个 <a>，<a> 里不能再套 <a>——所以图钉必须是卡片的**兄弟**，
-   靠 .lc-wrap 定位盖在右下角。写在卡片里会被浏览器拆成两个相邻链接，
-   点哪儿都跳外部预订页。 */
-.lc-wrap{position:relative}
-.lc-map-pin{position:absolute;right:8px;bottom:8px;display:flex;align-items:center;
-  justify-content:center;width:30px;height:30px;border-radius:8px;
-  color:var(--text3);background:var(--surface-hover);font-size:14px;
-  text-decoration:none;transition:color .12s,background .12s}
-.lc-map-pin:active,.lc-map-pin:hover{color:var(--accent);background:var(--accent-soft)}
-
-/* 表格里的同一个入口。默认淡，悬停整行时才显出来——它是次要动作，
-   常驻高对比会跟房源名抢注意力。 */
-.cell-map-pin{margin-left:6px;color:var(--text3);opacity:.45;text-decoration:none;
-  font-size:12px;transition:opacity .12s,color .12s}
-tr:hover .cell-map-pin{opacity:1}
-.cell-map-pin:hover{color:var(--accent);opacity:1}
-
-/* ── KPI Grid ──────────────────────────────────────────────────── */
-.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:32px}
-
-/* ── Dashboard hero ────────────────────────────────────────────── */
-.dashboard-actions{display:flex;align-items:center;gap:12px}
-.dashboard-control{
-  min-height:34px;
-  border:1px solid var(--glass-border)!important;
-  border-radius:10px!important;
-  background:var(--glass-bg)!important;
-  color:var(--text)!important;
-  box-shadow:var(--glass-shadow)!important;
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-  font-size:13px!important;
-  font-weight:550!important;
-}
-.dashboard-select{width:auto;padding:7px 34px 7px 12px!important}
-.dashboard-refresh{display:flex;align-items:center;gap:6px;padding:7px 16px!important}
-.dashboard-control:hover{background:var(--surface-hover)!important}
-.dashboard-hero-card{
-  flex:3;min-width:320px;
-  background:var(--glass-bg);
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-  border:1px solid var(--glass-border);
-  border-radius:var(--radius-lg);
-  box-shadow:var(--shadow-sm);
-  padding:24px;
-  display:flex;justify-content:space-between;align-items:flex-start;
-  gap:16px;position:relative;overflow:hidden;
-}
-.dashboard-hero-copy{flex:0 0 154px;padding:28px 0 0 24px;position:relative;z-index:1}
-.dashboard-hero-chart{
-  width:clamp(140px,calc(100% - 186px),360px);height:118px;flex-shrink:0;
-  align-self:center;
-  margin:8px 0 0 0;
-  transform:translate(-14px,-16px);
-}
-
-/* ── Grid layouts ──────────────────────────────────────────────── */
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-.grid-7-5{display:grid;grid-template-columns:7fr 5fr;gap:24px}
-.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
-
-/* ── Notifications ─────────────────────────────────────────────── */
-.notif-trigger{
-  display:flex;align-items:center;gap:8px;width:100%;
-  padding:8px 12px;border-radius:var(--radius);
-  border:none;background:transparent;
-  font-size:15px;color:var(--text2);cursor:pointer;
-  transition:color .12s,background .12s;
-  position:relative;
-}
-.notif-trigger:hover{color:var(--text);background:var(--accent-soft)}
-.notif-badge{
-  /* 垂直居中用 50% + translateY，不要写死像素偏移。
-     按钮高度不是固定值：桌面端是 8px padding 加行高（实测 39.25px），
-     移动端还叠了 min-height:44px（见文件末尾的 @media）。原先写死 4px，
-     浏览器实测角标中心比按钮中心高 6.63px（桌面）/ 9px（移动）——正是
-     2026-08-21 反馈的「没对齐」。改法见 tests/test_notif_badge_alignment.py。 */
-  /* right 与这一行的 padding-left 同为 12px。原先是 8：角标离右边缘比图标离
-     左边缘近 4px，整行看着往右歪——纵向是正的（下面那段），但眼睛把这份不对称
-     读成了「没居中」。 */
-  position:absolute;top:50%;right:12px;transform:translateY(-50%);
-  min-width:18px;height:18px;border-radius:9px;
-  background:var(--danger);color:#fff;
-  font-size:11px;font-weight:700;line-height:18px;text-align:center;padding:0 5px;
-  display:none;
-}
-.notif-wrap{position:fixed;z-index:200;pointer-events:none}
-.notif-panel{
-  position:fixed;bottom:80px;left:236px;width:380px;max-width:calc(100vw - 252px);
-  bottom:calc(80px + env(safe-area-inset-bottom, 0px));
-  left:236px;
-  max-height:420px;
-  background:var(--surface);border-radius:var(--radius-xl);
-  box-shadow:var(--shadow-lg);pointer-events:all;
-  display:flex;flex-direction:column;overflow:hidden;
-  animation:slideUp .2s cubic-bezier(.16,1,.3,1);
-}
-.notif-panel:not(.open){display:none}
-.notif-panel-header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:13px 16px;
-  font-size:15px;font-weight:600;flex-shrink:0;
-}
-.notif-list{flex:1;overflow-y:auto;overflow-x:hidden;min-height:0}
-.notif-item{
-  display:flex;flex-direction:column;gap:3px;
-  padding:13px 16px;cursor:pointer;transition:background .1s;color:inherit;
-}
-.notif-item:hover{background:var(--accent-soft)}
-.notif-item.unread{background:var(--accent-soft)}
-.notif-item-title{font-size:15px;font-weight:550}
-/* 通知正文不一定是人写的句子——"Monitor Error" 这类会把整段异常栈塞进来。
-   实测一条 TargetClosedError 的堆栈把 .notif-list 撑到 2632px（面板才 365px），
-   整个通知面板出现横向滚动条。anywhere 让没有空格的长串也能断行；
-   再截到 6 行，免得一条错误占满整个面板。 */
-.notif-item-body{
-  font-size:14px;color:var(--text2);
-  overflow-wrap:anywhere;
-  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;
-  overflow:hidden;
-}
-.notif-item-time{font-size:12px;color:var(--text3);margin-top:3px}
-.notif-empty{padding:36px 16px;text-align:center;font-size:15px;color:var(--text3)}
 
 /* ── Toasts ────────────────────────────────────────────────────── */
 .toast-container{
@@ -949,312 +269,6 @@ tr:hover .cell-map-pin{opacity:1}
 .toast-body{font-size:14px;color:var(--text2)}
 @keyframes toastIn{from{opacity:0;transform:translateX(20px) scale(.96)}}
 
-/* ── Modals ────────────────────────────────────────────────────── */
-.modal-overlay{
-  position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
-  background:rgba(0,0,0,.4);backdrop-filter:blur(4px);
-  animation:fadeIn .15s ease;
-}
-.modal-overlay.hidden{display:none}
-.modal-box{
-  background:var(--surface);border-radius:var(--radius-xl);
-  box-shadow:var(--shadow-lg);
-  width:90%;max-width:460px;padding:28px;
-  animation:slideUp .2s cubic-bezier(.16,1,.3,1);
-}
-.modal-box h3{font-size:18px;margin-bottom:8px}
-.modal-box p{font-size:15px;color:var(--text2);margin-bottom:16px}
-.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
-
-/* ── User Cards — borderless, shadow-only ─────────────────────── */
-.user-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px}
-.user-card{
-  background:var(--surface);border-radius:var(--radius-lg);
-  padding:20px;transition:box-shadow .15s;box-shadow:var(--shadow-sm);
-}
-.user-card:hover{box-shadow:var(--shadow-md)}
-.user-card.disabled{opacity:.5}
-.user-card-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px}
-/* 头像。此前是饱和渐变加白字，在一张以文字和软色标签为主的卡片上，它是最重的
-   一块——比它要表达的东西（一个首字母）重得多。
-
-   也不再按人分色。全站的颜色只有一个 accent、四个语义色和四个渠道品牌色；
-   「每人一个色相」是一套别处都不用的调色板，本身就是不协调的来源，而识别靠的
-   是紧挨着的用户名，颜色从来没承担过这件事。改用 accent 的软底加 accent 的字，
-   和侧栏选中态、主按钮同一个色系。
-
-   两个值都是主题变量，深色下自动跟随，不需要 [data-theme] 覆盖。
-   圆角走 --radius-lg：6px 是操作，10px 是状态，头像属于后者。 */
-.user-avatar{
-  width:36px;height:36px;border-radius:var(--radius-lg);
-  display:flex;align-items:center;justify-content:center;
-  font-size:15px;font-weight:650;flex-shrink:0;letter-spacing:.01em;
-  background:var(--accent-soft);color:var(--accent);
-}
-/* 用户名可能是一整个邮箱地址——没有空格，断不开。flex 项默认 min-width:auto
-   会撑着不缩，于是右边的 ▲▼ 和状态胶囊被顶到卡片外面（2026-08-25 实测：
-   qijunhuang1221@gmail.com 把「启用」顶出卡片右缘 83px）。
-
-   浏览器实测各条的作用（卡片 364px，逐条关掉看后果）：
-
-     三条都在                     好
-     只关 overflow-wrap           好（min-width 兜住）
-     关 wrap + identity 的 minw   胶囊被顶出卡片 89px
-     关 wrap + 名字列的 minw      名字压到胶囊上 37px
-
-   所以两级 min-width 各管一件事：外层管「别把右边顶出去」，名字那一列管
-   「别压到右边身上」。曾经还给右侧加过 flex-shrink:0，实测**毫无影响**
-   （胶囊和 ▲▼ 本来就缩不动），已删——留着只会让人以为它在起作用。 */
-.user-card-identity{min-width:0}
-.user-card-identity > div{min-width:0}
-.user-name{font-weight:600;font-size:16px;overflow-wrap:anywhere}
-.user-id{font-size:12px;color:var(--text3);overflow-wrap:anywhere}
-/* rank badge + move buttons (user list) */
-/* 抢房优先级序号。两处改动，都是为了让它别和紧挨着的头像打架：
-   - 圆角由 50% 收成 --radius-lg。它是这一簇里最后一个正圆，而旁边的头像是
-     10px 方圆——两个同色小块、一圆一方并排，是「形状不成套」最直接的样子。
-     按站里那条语言：6px 是操作，10px 是状态，序号是状态。
-   - 文字由 accent 降为 text3。序号是给管理员看的排序元数据，不该和头像抢
-     同一个强调色；底色仍用 accent-soft，两者还是一家人，只是头像是被强调的
-     那个。 */
-.rank-badge{
-  display:inline-flex;align-items:center;justify-content:center;
-  min-width:24px;height:24px;padding:0 5px;border-radius:var(--radius-lg);
-  background:var(--accent-soft);color:var(--text3);
-  font-size:11px;font-weight:700;flex-shrink:0;
-}
-.rank-form{display:inline-flex;line-height:0}
-.rank-btn{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:22px;height:22px;padding:0;border:none;border-radius:var(--radius-sm);
-  background:transparent;color:var(--text3);font-size:10px;cursor:pointer;
-  transition:color .15s,background .15s;line-height:1;
-}
-.rank-btn:hover:not(:disabled){color:var(--accent);background:var(--accent-soft)}
-.rank-btn:disabled{color:var(--text4);cursor:default;opacity:.35}
-/* drag-and-drop reorder */
-.drag-handle{
-  position:absolute;left:0;top:0;bottom:0;width:32px;
-  display:flex;align-items:center;justify-content:center;
-  color:var(--text4);cursor:grab;font-size:18px;
-  transition:color .15s;user-select:none;-webkit-user-select:none;
-}
-.drag-handle:hover{color:var(--accent)}
-.drag-handle:active{cursor:grabbing}
-.user-card{position:relative}
-.user-card:has(.drag-handle){padding-left:44px}
-.user-card.dragging{opacity:.4;box-shadow:var(--shadow-lg)}
-.user-card.drag-over{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent),var(--shadow-md)}
-.user-card.drag-over-top::before,
-.user-card.drag-over-bottom::after{
-  content:'';position:absolute;left:8px;right:8px;height:3px;
-  background:var(--accent);border-radius:3px;z-index:2;pointer-events:none;
-}
-.user-card.drag-over-top::before{top:-2px}
-.user-card.drag-over-bottom::after{bottom:-2px}
-/* 渠道标签和 .badge 同属状态语言，跟着走同一档——否则用户卡上会同时出现
-   胶囊（Telegram）和圆角矩形（启用）两种形状。 */
-.channel-pill{
-  display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;
-  padding:3px 10px;border-radius:var(--radius-lg);
-}
-.channel-pill.imessage{background:var(--accent-soft);color:var(--accent)}
-.channel-pill.telegram{background:var(--pill-telegram-bg);color:var(--pill-telegram)}
-.channel-pill.email{background:var(--pill-email-bg);color:var(--pill-email)}
-.channel-pill.whatsapp{background:var(--success-soft);color:var(--success)}
-.channel-pill.app{background:var(--pill-app-bg);color:var(--pill-app)}
-/* 兜底：过滤条件摘要里可能出现没有空格的长串（片区名用 / 连接、长邮箱），
-   没有断行机会就会溢出卡片。摘要已经截断到前几项，这里再保一道。 */
-.filter-tags{font-size:12px;color:var(--text2);margin:8px 0;line-height:1.6;overflow-wrap:anywhere}
-/* 四个按钮（编辑 / 测试通知 / 停用 / 删除）在窄列里放不下。卡片列是
-   minmax(360px,1fr)，带拖拽手柄时内容区只剩 360-44-20=296px，而中文标签
-   一行就要 350px——不换行的话「删除」被卡片裁掉一半。 */
-.user-card-actions{
-  display:flex;flex-wrap:wrap;gap:6px;padding-top:14px;margin-top:14px;
-}
-.user-card-actions .btn{
-  padding:7px 13px;
-  font-size:13px;
-  border-radius:var(--radius);
-}
-.user-card-actions .btn i{font-size:13px}
-
-/* ── 自动预订：每个平台一块 ────────────────────────────────────
-   三个平台（H2S / Xior / OurDomain）原先各只有一行灰色小标题，中间还夹着
-   一大块申请人档案，看上去就是一整条没有边界的表单——2026-08-25 反馈
-   「三个平台之间区分不明显」。改成每个平台一块内嵌面板，视觉语言跟这个
-   表单里已有的 .channel-card 一致（surface 里嵌一层 bg）。
-   申请人档案挪到两个 RENTCafe 平台之后：它归 Xior 和 OurDomain 共用
-   （bookers/rentcafe.py 一份代码填），夹在中间会让人以为它只属于 Xior。 */
-/* .ab-filter：自动预订专用过滤，排在各平台账号之前，同一种面板样式 */
-.ab-filter,.ab-platform{
-  /* 面板用 surface + 描边，**不能**用 var(--bg) 填充：.form-input 的底色正是
-     var(--bg) 且既无边框也无阴影，同色一填输入框就整个隐形了（实测过）。 */
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:14px;
-}
-.ab-platform-head{
-  display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;
-}
-.ab-platform-name{font-size:14px;font-weight:600;color:var(--text)}
-/* 共用块：不是第四个平台，只用虚线边框区分。**填充必须和平台面板一样**——
-   这里曾写 background:transparent，透过去是页面底色 var(--bg)，正是上面那条注释
-   说的「同色一填输入框就整个隐形」：2026-09-15 截图里整块档案的输入框全看不见。 */
-.ab-platform-shared{border-style:dashed}
-
-/* ── Channel Card (user form) — border only on select ──────────── */
-.channel-card{
-  border-radius:var(--radius-lg);padding:16px;cursor:pointer;
-  transition:background .12s;background:var(--bg);
-}
-.channel-card:hover{background:var(--surface-hover)}
-.channel-card.selected{background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent)}
-
-/* ── Calendar — glass surfaces ─────────────────────────────────── */
-.city-filter{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:24px}
-.city-btn{
-  display:inline-flex;align-items:center;gap:5px;
-  font-size:14px;font-weight:550;padding:5px 14px;border-radius:100px;
-  background:var(--glass-bg);color:var(--text2);
-  cursor:pointer;transition:all .12s;user-select:none;
-  border:1px solid var(--glass-border);
-  box-shadow:var(--glass-shadow);
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-}
-.city-btn:hover{color:var(--accent);box-shadow:var(--shadow-md)}
-.city-btn.active{background:var(--accent);color:#fff;box-shadow:none}
-.city-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-
-/* gap 不能省：末尾的视图切换带 margin-left:auto，会把 space-between 的余量
-   全部吃掉，于是「‹ 2026 年 八月 ›」三个元素紧贴在一起。 */
-.cal-nav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
-.cal-nav-btn{
-  width:36px;height:36px;border-radius:var(--radius);
-  background:var(--glass-bg);color:var(--text2);cursor:pointer;transition:all .12s;
-  display:flex;align-items:center;justify-content:center;font-size:18px;
-  border:1px solid var(--glass-border);
-  box-shadow:var(--glass-shadow);
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-}
-.cal-nav-btn:hover{color:var(--accent);box-shadow:var(--shadow-md)}
-.cal-month-label{font-size:17px;font-weight:600}
-
-/* Calendar view toggle (month / list) */
-.cal-view-toggle{display:flex;margin-left:auto;gap:2px}
-.cal-view-btn{
-  width:32px;height:32px;border-radius:var(--radius);border:none;
-  background:transparent;color:var(--text3);cursor:pointer;font-size:16px;
-  display:flex;align-items:center;justify-content:center;transition:all .12s;
-}
-.cal-view-btn:hover{color:var(--text);background:var(--surface-hover)}
-.cal-view-btn.active{color:var(--accent);background:var(--accent-soft)}
-
-/* Calendar list view (mobile) */
-.cal-list{display:none}
-.cal-list-month{font-size:14px;font-weight:600;color:var(--text);padding:12px 0 4px}
-.cal-list-month:first-child{padding-top:0}
-.cal-list-group{margin-bottom:8px}
-.cal-list-date{display:flex;align-items:center;gap:6px;padding:8px 0 4px;font-size:13px;font-weight:550;color:var(--text)}
-.cal-list-daynum{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:700}
-.cal-list-item{display:block;padding:10px 12px;border-radius:var(--radius);transition:background .1s;color:inherit}
-.cal-list-item:hover{background:var(--accent-soft)}
-.cal-list-item:active{background:var(--accent-soft)}
-.cal-list-name{
-  display:flex;align-items:center;gap:8px;
-  font-size:14px;font-weight:550;
-}
-/* name 文字撑左半行，过长会省略号截断（避免把 badges 挤出可视区） */
-.cal-list-name-text{
-  min-width:0;flex:1 1 auto;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-}
-/* badges 永远右对齐成一组；flex-shrink:0 防止它们被名字挤变形 */
-.cal-list-name-meta{
-  margin-left:auto;display:inline-flex;align-items:center;gap:6px;
-  flex-shrink:0;
-}
-
-.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
-#cal-grid-col{min-width:0}
-.cal-dow{text-align:center;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--text3);padding:5px 0}
-.cal-dow:first-child{color:var(--danger)}
-.cal-dow:last-child{color:var(--accent)}
-
-.cal-day{
-  min-height:80px;border-radius:var(--radius);
-  background:color-mix(in srgb, var(--glass-bg) 78%, var(--surface));
-  border:1px solid var(--glass-border);
-  box-shadow:var(--shadow-sm);
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-  padding:6px 7px;transition:background .12s,box-shadow .12s,border-color .12s;
-  cursor:default;position:relative;min-width:0;overflow:hidden;
-}
-.cal-day.has-listings{cursor:pointer}
-.cal-day.has-listings:hover{
-  background:color-mix(in srgb, var(--accent-soft) 58%, var(--surface));
-  border-color:color-mix(in srgb, var(--accent) 24%, var(--glass-border));
-}
-.cal-day.today{box-shadow:inset 0 0 0 1px var(--accent)}
-.cal-day.other-month{opacity:.3}
-.cal-day.selected{box-shadow:inset 0 0 0 2px var(--accent)}
-
-.day-num{font-size:14px;font-weight:600;color:var(--text3);margin-bottom:4px}
-.cal-day.today .day-num{color:var(--accent)}
-.cal-pill{
-  display:flex;align-items:center;width:100%;box-sizing:border-box;
-  font-size:11px;line-height:1.5;border-radius:3px;
-  padding:1px 5px;margin-bottom:2px;
-  min-width:0;
-}
-.cal-pill-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.cal-pill.book{background:var(--success-soft);color:var(--success)}
-.cal-pill.lottery{background:var(--warning-soft);color:var(--warning)}
-.cal-pill.more{color:var(--text3);font-style:italic}
-.cal-pill-dot{width:6px;height:6px;border-radius:50%;margin-right:4px;flex-shrink:0}
-
-.detail-panel{
-  background:var(--glass-bg);border-radius:var(--radius-lg);
-  border:1px solid var(--glass-border);
-  min-height:160px;overflow:hidden;box-shadow:var(--glass-shadow);
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-  position:sticky;top:24px;
-}
-.detail-header{padding:13px 16px;display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:600}
-.detail-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;height:140px;color:var(--text3);font-size:15px;gap:8px}
-.listing-row{padding:12px 16px;transition:background .1s}
-.listing-row:hover{background:var(--accent-soft)}
-
-/* ── Chart Cards (stats) ───────────────────────────────────────── */
-.chart-card{
-  background:var(--glass-bg);
-  border:1px solid var(--glass-border);
-  border-radius:var(--radius-lg);
-  padding:20px;box-shadow:var(--glass-shadow);
-  backdrop-filter:var(--glass-blur);
-  -webkit-backdrop-filter:var(--glass-blur);
-  min-width:0;overflow:hidden;
-}
-.chart-title{
-  font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:14px;
-}
-.chart-wrap{position:relative;overflow:hidden}
-.chart-wrap canvas{max-width:100%!important}
-
-/* ── Danger Zone ───────────────────────────────────────────────── */
-.danger-zone{margin-top:44px;padding-top:24px;}
-.danger-zone h3{color:var(--danger);margin-bottom:8px;font-size:17px}
-
-/* ── Breadcrumb ────────────────────────────────────────────────── */
-.breadcrumb{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text3);margin-bottom:14px}
-.breadcrumb a{color:var(--text2)}
-.breadcrumb a:hover{color:var(--text)}
-.breadcrumb .sep{color:var(--text3)}
-
-/* ── Skip link ───────────────────────────────────────────────── */
 /* 默认完全藏到视口外（top:-100px）。原本用 translateY(-120%) 隐藏，但元素
    实高 ≈ 36px，-120% = -43.2px，叠加 top:8px 后底边落在 y≈0.8，泄漏 1-2px
    accent 色到顶端，看起来像 FlatRadar 图标上方一条横线。改用 top 切换更稳。
@@ -1267,68 +281,8 @@ tr:hover .cell-map-pin{opacity:1}
 }
 .skip-link:focus{top:8px}
 
-/* ── Login ─────────────────────────────────────────────────────── */
-.login-page{
-  min-height:100vh;display:flex;align-items:center;justify-content:center;
-  background:var(--bg);padding:24px;
-}
-.login-card{
-  width:100%;max-width:380px;background:var(--surface);
-  border-radius:var(--radius-xl);padding:36px 32px;box-shadow:var(--shadow-lg);
-  animation:scaleIn .3s cubic-bezier(.16,1,.3,1);
-}
-.login-card h1{text-align:center;font-size:20px;margin-bottom:4px}
-.login-card .sub{text-align:center;font-size:15px;color:var(--text2);margin-bottom:28px}
-.login-icon{
-  width:52px;height:52px;border-radius:var(--radius-lg);background:var(--accent);color:#fff;
-  display:flex;align-items:center;justify-content:center;font-size:22px;margin:0 auto 16px;
-}
-/* 同 .brand-mark：深浅两版走 background-image，由 data-theme 切换。
-   但这里用的是**无底色**的一版：登录页背景是一层黄色渐变，带奶油底色的图落上去
-   是一块边界分明的浅色方砖。去掉底色，房子就直接坐在页面上。
-
-   连带去掉 box-shadow 和 .login-icon 继承来的圆角/底色：阴影跟的是元素盒子而不
-   是图的 alpha，配一张透明图就是一个框着空气的圆角矩形阴影。 */
-.login-logo{
-  display:block;box-shadow:none;border-radius:0;background-color:transparent;
-  background:url("/static/logo-bare.png") center/100% 100% no-repeat;
-}
-[data-theme="dark"] .login-logo{background-image:url("/static/logo-bare-dark.png")}
-.login-field{margin-bottom:16px}
-.login-field label{display:block;font-size:14px;font-weight:550;color:var(--text2);margin-bottom:6px}
-.login-field input{
-  width:100%;padding:10px 14px;font-size:16px;border:none;border-radius:var(--radius);
-  background:var(--bg);color:var(--text);outline:none;transition:box-shadow .12s;
-}
-.login-field input:focus{box-shadow:0 0 0 2px var(--accent-soft),0 0 0 1px var(--accent)}
-.login-btn{
-  width:100%;padding:11px;border:none;border-radius:var(--radius);background:var(--accent);
-  color:#fff;font-size:16px;font-weight:550;cursor:pointer;transition:background .12s;margin-top:8px;
-}
-.login-btn:hover{background:var(--accent-hover)}
-.login-footer{text-align:center;font-size:12px;color:var(--text3);margin-top:24px}
-.login-theme-btn{
-  position:fixed;top:16px;right:16px;
-  top:calc(16px + env(safe-area-inset-top, 0px));
-  right:calc(16px + env(safe-area-inset-right, 0px));
-  width:36px;height:36px;border-radius:var(--radius);border:none;
-  background:var(--surface);color:var(--text2);cursor:pointer;font-size:18px;
-  display:flex;align-items:center;justify-content:center;transition:all .12s;
-  box-shadow:var(--shadow-sm);
-}
-.login-theme-btn:hover{color:var(--text);box-shadow:var(--shadow-md)}
-.login-lang-btn{right:62px;right:calc(62px + env(safe-area-inset-right, 0px))}
-
-/* Password eye */
-.pw-wrap{position:relative}
-.pw-wrap input{padding-right:40px}
-.pw-eye{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;padding:2px}
-.pw-eye:hover{color:var(--text)}
-
 /* ── Animations ────────────────────────────────────────────────── */
 @keyframes fadeIn{from{opacity:0}}
-@keyframes slideUp{from{opacity:0;transform:translateY(12px) scale(.98)}}
-@keyframes scaleIn{from{opacity:0;transform:scale(.96)}}
 
 /* Reduced motion */
 @media(prefers-reduced-motion:reduce){
@@ -1336,13 +290,9 @@ tr:hover .cell-map-pin{opacity:1}
   html{scroll-behavior:auto}
 }
 
-/* Theme transition */
 /* 切日夜主题时给 400ms 窗口（JS 那边 setTimeout 400ms 移除该 class）期间统一过渡。
-   - 所有属性统一 .3s ease：之前 color .25s / bg .35s 不一致——大数字（KPI / .lc-rent）
-     在 250ms 就跑完，背景还在 350ms 内继续走，中间帧看起来像"数字晚一点"才同步上
-     新底色。统一节奏后所有像素都在同一时间点完成切换。
-   - 覆盖 border-color / outline-color：否则 <hr> / table 分割线 / card 外框 / sidebar-label
-     下划线等"横线"会瞬间跳变。
+   - 所有属性统一 .3s ease：节奏不一致时，文字和底色会一前一后切换。
+   - 覆盖 border-color / outline-color：否则分割线会瞬间跳变。
    - 覆盖 fill / stroke：inline SVG（chart 轴线、icon）跟随主题。 */
 html.theme-transitioning *,
 html.theme-transitioning *::before,
@@ -1370,61 +320,9 @@ html.theme-transitioning *::after{
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── Utilities ─────────────────────────────────────────────────── */
-.text-secondary{color:var(--text2)}
-.text-tertiary{color:var(--text3)}
-.text-sm{font-size:14px}
-.text-xs{font-size:12px}
-.text-mono{font-family:var(--font-mono)}
-.text-center{text-align:center}
-.text-right{text-align:right}
-.font-medium{font-weight:550}
-.font-semibold{font-weight:600}
-.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.cell-break{word-break:break-all;overflow-wrap:break-word}
-.mt-1{margin-top:4px}
-.mt-2{margin-top:8px}
-.mt-3{margin-top:12px}
-.mt-4{margin-top:16px}
-.mt-6{margin-top:24px}
-.mb-1{margin-bottom:4px}
-.mb-2{margin-bottom:8px}
-.mb-3{margin-bottom:12px}
-.mb-4{margin-bottom:16px}
-.mb-6{margin-bottom:24px}
-.pt-2{padding-top:8px}
-.pt-4{padding-top:16px}
-.py-1{padding-top:4px;padding-bottom:4px}
-.py-2{padding-top:8px;padding-bottom:8px}
-.py-3{padding-top:12px;padding-bottom:12px}
-.py-4{padding-top:16px;padding-bottom:16px}
-.py-5{padding-top:20px;padding-bottom:20px}
-.pl-1{padding-left:4px}
-.px-1{padding-left:4px;padding-right:4px}
-.px-2{padding-left:8px;padding-right:8px}
-.ml-1{margin-left:4px}
-.ml-2{margin-left:8px}
 .mr-1{margin-right:4px}
-.mr-2{margin-right:8px}
-.ml-auto{margin-left:auto}
-.gap-1{gap:4px}
-.gap-2{gap:8px}
-.gap-3{gap:12px}
-.gap-4{gap:16px}
-.flex{display:flex}
-.flex-col{flex-direction:column}
-.items-center{align-items:center}
-.items-start{align-items:flex-start}
-.items-end{align-items:flex-end}
-.justify-between{justify-content:space-between}
-.justify-end{justify-content:flex-end}
-.flex-wrap{flex-wrap:wrap}
-.flex-1{flex:1}
-.w-full{width:100%}
-.hidden{display:none}
-.relative{position:relative}
 
-/* 房源卡片默认隐藏（桌面显示表格） */
-.listing-cards{display:none}
+.hidden{display:none}
 
 /* ── Responsive ────────────────────────────────────────────────── */
 @media(max-width:768px){
@@ -1433,27 +331,12 @@ html.theme-transitioning *::after{
   .sidebar-overlay.show{display:block}
   .nav-toggle{display:flex}
   .main-content{margin-left:0;padding:24px 16px 44px;max-width:100%}
-  .page-header{padding-left:48px;min-height:44px;align-items:center}
-  .page-header h1{font-size:22px}
-  .kpi-grid{grid-template-columns:repeat(2,1fr)}
-  .grid-2,.grid-7-5,.grid-3{grid-template-columns:1fr}
-  .chart-card .chart-wrap{height:180px!important}
-  .dashboard-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}
-  .dashboard-hero-card{flex-direction:column;align-items:stretch}
-  .dashboard-hero-copy{padding:0}
-  .dashboard-hero-chart{width:100%;height:96px;margin:0;transform:none}
-  .user-grid{grid-template-columns:1fr}
-  .cal-day{min-height:64px;padding:4px 5px}
-  .day-num{font-size:12px}
-  .cal-pill{font-size:10px;padding:1px 4px}
-  .listing-table-card{display:none}
-  .listing-cards{display:flex;flex-direction:column;gap:10px}
+  
+  
+  
+  
+  
   .toast{min-width:0;max-width:calc(100vw - 32px)}
-}
-
-@media(max-width:1100px){
-  .grid-2,.grid-7-5,.grid-3{grid-template-columns:1fr}
-  .grid-4{grid-template-columns:repeat(2,1fr)}
 }
 
 /* ── Desktop breakpoints ──────────────────────────────────────────── */
@@ -1469,48 +352,24 @@ html.theme-transitioning *::after{
   }
 }
 
-/* ── 4-column grid (stats) ───────────────────────────────────── */
-.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
-@media(max-width:768px){
-  .grid-4{grid-template-columns:1fr}
-}
-
 /* ── Touch device tweaks ──────────────────────────────────────── */
 @media(hover:none){
   /* 取消 hover 动画，避免 tap 时闪烁 */
-  .table-minimal tbody tr:hover td{background:transparent}
   .sidebar-nav a:hover{color:var(--text2);background:transparent}
   .sidebar-nav a.active:hover{color:var(--text);background:var(--accent-soft)}
-  .cal-day.has-listings:hover{background:var(--surface)}
-  .listing-row:hover{background:transparent}
-  .notif-item:hover{background:transparent}
-  .notif-item.unread:hover{background:var(--accent-soft)}
+  
+  
 }
 
 @media(pointer:coarse){
   /* 增大交互元素点击区域 */
   .sidebar-nav a{min-height:44px;padding:12px 12px}
-  .btn-sm{min-height:36px;padding:8px 14px}
-  .form-input,.form-select{min-height:44px}
-  .ms-option{min-height:42px;padding:10px 14px}
-  .cal-pill{padding:3px 6px;font-size:12px}
-  .checkbox,.toggle{min-height:44px}
-  .city-btn{min-height:36px;padding:7px 16px}
+  
+  
+  .toggle{min-height:44px}
   .nav-toggle{width:44px;height:44px}
   /* 侧边栏底部按钮 */
   .sidebar-footer button,.sidebar-footer form button,.sidebar-footer a{min-height:44px}
-  .notif-trigger{min-height:44px}
-}
-
-/* 租金口径星号。OurDomain / OurCampus 报的是基础租金，服务费另计——
-   星号本身要不显眼（价格才是主体），但必须可点/可悬停拿到说明。 */
-.rent-basis{
-  color:var(--text3);
-  font-size:11px;
-  vertical-align:super;
-  line-height:0;
-  margin-left:1px;
-  cursor:help;
 }
 
 /* ── 新用户引导清单（templates/_onboarding.html）─────────────────
@@ -1528,34 +387,6 @@ html.theme-transitioning *::after{
   border-radius:var(--radius-xl);
   box-shadow:var(--glass-shadow);
 }
-.onb-head{display:flex;align-items:center;gap:9px;margin-bottom:16px}
-.onb-head i{font-size:16px;color:var(--text3);flex-shrink:0}
-.onb-head h2{margin:0;font-size:15px;font-weight:650}
-
-.onb-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px}
-.onb-step{display:flex;align-items:flex-start;gap:10px}
-.onb-mark{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:20px;height:20px;border-radius:50%;flex-shrink:0;margin-top:1px;
-  font-size:11px;
-}
-.onb-step-blocked .onb-mark{background:var(--danger-soft);color:var(--danger)}
-.onb-step-done .onb-mark{background:var(--success-soft);color:var(--success)}
-.onb-step-note-only .onb-mark{background:var(--surface-hover);color:var(--text3)}
-
-.onb-body{min-width:0}
-.onb-step-name{font-size:14px;font-weight:600;line-height:1.3}
-.onb-step-note{font-size:13px;color:var(--text2);line-height:1.45;margin-top:2px}
-.onb-step-blocked .onb-step-note{color:var(--danger)}
-.onb-btn{margin-top:8px}
-
-.onb-foot{
-  margin:16px 0 0;padding-top:13px;
-  border-top:1px solid var(--border);
-  font-size:12px;color:var(--text3);line-height:1.5;
-}
-.onb-foot a{color:var(--text2);text-decoration:underline}
-.onb-foot a:hover{color:var(--text)}
 
 .onb-test-result{margin-top:8px;font-size:13px;line-height:1.45}
 .onb-test-result[hidden]{display:none}

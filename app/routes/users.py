@@ -45,6 +45,7 @@ from app.db import storage
 from app.forms.user_form import build_user_from_form, build_user_from_form_self
 from app.i18n import DEFAULTS, get_lang, localize_options
 from app.process_ctrl import write_reload_request
+from app.services.onboarding_service import delivery_state
 from config import ENERGY_LABELS, energy_rank
 from translations import tr
 
@@ -125,7 +126,7 @@ def _log_user_change(action: str, user: "UserConfig") -> None:  # noqa: F821
     ab = user.auto_book
     ab_info = ""
     if ab and ab.enabled:
-        ab_info = f" 自动预订=开启(dry={ab.dry_run} 取消={ab.cancel_enabled} 支付={ab.payment_method})"
+        ab_info = f" 自动预订=开启(dry={ab.dry_run} 支付={ab.payment_method})"
     f = user.listing_filter
     filters = []
     if f.max_rent is not None: filters.append(f"租金≤{f.max_rent:.0f}")
@@ -179,6 +180,17 @@ def _own_language_cookie(resp, user_id: str, language: str):
         resp.set_cookie("h2s-lang", language,
                         max_age=_LANG_COOKIE_MAX_AGE, samesite="Lax")
     return resp
+
+
+def _edit_url(user_id: str) -> str:
+    """保存后回到原来的位置。账号页按 section / item 选中条目，值只认已知键。"""
+    from app.services.account_view import ADMIN_SECTION_KEYS, SECTION_KEYS
+
+    section = request.form.get("section", "")
+    item = request.form.get("item", "")
+    if section not in (*SECTION_KEYS, *ADMIN_SECTION_KEYS) or not item.isidentifier() or len(item) > 20:
+        return url_for("user_edit", user_id=user_id)
+    return url_for("user_edit", user_id=user_id, section=section, item=item)
 
 
 def users_list() -> Any:
@@ -287,6 +299,26 @@ def _flash_verification_email(user) -> None:
         flash("⚠️ 邮箱已保存但验证邮件发送失败，请稍后重试", "warning")
 
 
+def _admin_editor_context(user, *, is_new, device_count, id_doc, opts):
+    """管理员新建 / 编辑用户的三栏工作区：分组、条目摘要与当前选中。"""
+    from app.services.account_view import admin_sections, resolve_selection
+    from users import UserConfig
+
+    zh = get_lang() == "zh"
+    form_user = user or UserConfig(name="")
+    sections = admin_sections(
+        form_user, is_new=is_new, device_count=device_count, is_macos=sys.platform == "darwin",
+        id_doc=id_doc, zh=zh, options=dict(
+            occupancy=localize_options("Occupancy", opts["Occupancy"]),
+            type=localize_options("Type", opts["Type"]),
+            contract=localize_options("Contract", opts["Contract"]),
+            tenant=localize_options("Tenant", opts["Tenant"])),
+    )
+    section, item = resolve_selection(sections, request.args.get("section"),
+                                      request.args.get("item"), default_section="basic")
+    return dict(u=form_user, is_new=is_new, sections=sections, section=section, item=item)
+
+
 @admin_required
 @csrf_required
 def user_new() -> Any:
@@ -319,7 +351,7 @@ def user_new() -> Any:
         # user_new 是 @admin_required，不需要 user_edit 那道给普通用户的限流。
         if _needs_email_verification(user):
             _flash_verification_email(user)
-        return redirect(url_for("users_list"))
+        return redirect(url_for("users_list", selected=user.id))
     # GET：空白表单
     # 全平台归一后的城市并集。只用 KNOWN_CITIES 会漏掉 Xior 独有的
     # Wageningen / Venlo / Breda / Leeuwarden——用户既选不到，一旦设了
@@ -328,6 +360,7 @@ def user_new() -> Any:
     opts = _get_all_filter_options()
     return render_template(
         "user_form.html", user=None, id_doc=None, device_count=0,
+        **_admin_editor_context(None, is_new=True, device_count=0, id_doc=None, opts=opts),
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
         applicant_genders=APPLICANT_GENDERS,
@@ -345,6 +378,40 @@ def user_new() -> Any:
         tenant_options=localize_options("Tenant", opts["Tenant"]),
         offer_options=opts["Offer"],
         finishing_options=opts["Finishing"],
+        energy_options=sorted(
+            [x for x in opts["Energy"] if x.upper() in ENERGY_LABELS] or ENERGY_LABELS,
+            key=_energy_rank_or_99),
+    )
+
+
+def _render_account(user, *, device_count, onb, booking_attempt, plaza_attempts,
+                    booking_guard_error, opts, city_names):
+    """普通用户的账号页：与房源收件箱同构的「分组 / 条目 / 详情」工作区。"""
+    from app.services.account_view import account_sections, resolve_selection
+
+    zh = get_lang() == "zh"
+    occupancy = localize_options("Occupancy", opts["Occupancy"])
+    types = localize_options("Type", opts["Type"])
+    contract = localize_options("Contract", opts["Contract"])
+    tenant = localize_options("Tenant", opts["Tenant"])
+    is_macos = sys.platform == "darwin"
+    sections = account_sections(
+        user, device_count=device_count, is_macos=is_macos, zh=zh,
+        options=dict(occupancy=occupancy, type=types, contract=contract, tenant=tenant),
+    )
+    # 收不到通知时先打开通知分组，这是页面上最需要处理的事
+    default = "notifications" if onb and not onb.get("reachable") else "filters"
+    section, item = resolve_selection(sections, request.args.get("section"),
+                                      request.args.get("item"), default_section=default)
+    return render_template(
+        "account.html", user=user, sections=sections, section=section, item=item,
+        device_count=device_count, onb=onb, booking_attempt=booking_attempt,
+        plaza_attempts=plaza_attempts, booking_guard_error=booking_guard_error,
+        action=url_for("user_edit", user_id=user.id), is_macos=is_macos,
+        occupancy_options=occupancy, type_options=types, contract_options=contract,
+        tenant_options=tenant, city_options=city_names,
+        source_options=[(k, source_display_name(k)) for k in KNOWN_SOURCES],
+        offer_options=opts["Offer"], finishing_options=opts["Finishing"],
         energy_options=sorted(
             [x for x in opts["Energy"] if x.upper() in ENERGY_LABELS] or ENERGY_LABELS,
             key=_energy_rank_or_99),
@@ -418,15 +485,19 @@ def user_edit(user_id: str) -> Any:
                 if not allowed:
                     flash(reason, "warning")
                     return _own_language_cookie(
-                        redirect(url_for("user_edit", user_id=user_id)),
+                        redirect(_edit_url(user_id)),
                         user_id, updated.language,
                     )
                 record_test_notify(user_id)
             _flash_verification_email(updated)
         else:
-            flash(f"✅ 用户「{updated.name}」已保存", "success")
+            if is_admin():
+                flash(tr("user_saved_other", get_lang()).format(name=updated.name), "success")
+            else:
+                # 保存后界面语言跟着本人的语言设置走（_own_language_cookie），提示也用它
+                flash(tr("user_saved_self", updated.language or get_lang()), "success")
         return _own_language_cookie(
-            redirect(url_for("user_edit", user_id=user_id)),
+            redirect(_edit_url(user_id)),
             user_id, updated.language,
         )
 
@@ -459,10 +530,26 @@ def user_edit(user_id: str) -> Any:
         booking_attempt = None
         plaza_attempts = []
         booking_guard_error = True
+    onb = None
+    if not is_admin():
+        try:
+            st_onb = storage()
+            try:
+                onb = delivery_state(st_onb, user, get_lang())
+            finally:
+                st_onb.close()
+        except Exception:
+            logger.warning("计算通知配置引导失败 user_id=%s", user_id, exc_info=True)
+    if not is_admin():
+        return _render_account(user, device_count=device_count, onb=onb,
+                               booking_attempt=booking_attempt, plaza_attempts=plaza_attempts,
+                               booking_guard_error=booking_guard_error, opts=opts, city_names=city_names)
+    id_doc = __import__("applicant_docs").info(user_id)
     return render_template(
-        "user_form.html", user=user, device_count=device_count, booking_attempt=booking_attempt,
+        "user_form.html", user=user, device_count=device_count, onb=onb, booking_attempt=booking_attempt,
+        **_admin_editor_context(user, is_new=False, device_count=device_count, id_doc=id_doc, opts=opts),
         plaza_attempts=plaza_attempts, booking_guard_error=booking_guard_error,
-        id_doc=__import__("applicant_docs").info(user_id),
+        id_doc=id_doc,
         xior_buildings=_xior_building_options(),
         applicant_titles=APPLICANT_TITLES,
         applicant_genders=APPLICANT_GENDERS,

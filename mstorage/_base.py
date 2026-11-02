@@ -180,7 +180,6 @@ class StorageBase:
                 auto_book_json             TEXT NOT NULL DEFAULT '{}',
                 app_password_hash          TEXT NOT NULL DEFAULT '',
                 app_login_enabled          INTEGER NOT NULL DEFAULT 0,
-                allow_h2s_login            INTEGER NOT NULL DEFAULT 0,
                 sort_order                 INTEGER NOT NULL DEFAULT 0,
                 language                   TEXT NOT NULL DEFAULT 'en',
                 created_at                 TEXT NOT NULL,
@@ -315,6 +314,22 @@ class StorageBase:
             );
             CREATE INDEX IF NOT EXISTS idx_ann_deliveries_ann
                 ON announcement_deliveries(announcement_id, status);
+
+            CREATE TABLE IF NOT EXISTS listing_reads (
+                user_id    TEXT NOT NULL,
+                listing_id TEXT NOT NULL,
+                read_at    TEXT NOT NULL,
+                PRIMARY KEY (user_id, listing_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_listing_reads_listing ON listing_reads(listing_id);
+            CREATE TRIGGER IF NOT EXISTS listing_reads_user_deleted
+                AFTER DELETE ON user_configs BEGIN
+                    DELETE FROM listing_reads WHERE user_id = OLD.id;
+                END;
+            CREATE TRIGGER IF NOT EXISTS listing_reads_listing_deleted
+                AFTER DELETE ON listings BEGIN
+                    DELETE FROM listing_reads WHERE listing_id = OLD.id;
+                END;
         """)
         # 增量列：CREATE TABLE IF NOT EXISTS 不会给老库补字段；
         # ALTER TABLE ADD COLUMN 在 SQLite 上幂等需自己捕获 OperationalError。
@@ -377,6 +392,9 @@ class StorageBase:
             "user_configs", "language",
             "TEXT NOT NULL DEFAULT 'en'",
         )
+
+        # allow_h2s_login：「用 H2S 账号密码登录本系统」的开关，功能已删除。
+        self._drop_column_if_present("user_configs", "allow_h2s_login")
 
         # status_is_inferred：标识 listing.status 是否由系统推测产生。
         # 老库默认 0（都是 API 真实数据），mark_stale_listings 触发时才置 1。
@@ -840,6 +858,31 @@ class StorageBase:
                 return False
             raise
         logger.info("schema 升级: %s.%s 已添加", table, column)
+        return True
+
+    def _drop_column_if_present(self, table: str, column: str) -> bool:
+        """幂等 ALTER TABLE DROP COLUMN——列不存在时静默跳过。
+
+        需要 SQLite 3.35+。更老的 SQLite 不支持时只记一条警告、保留这一列：
+        代码已不再读写它，留着不影响运行，不值得为它整表重建。
+        """
+        cols = {
+            r[1] for r in self._conn.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()
+        }
+        if column not in cols:
+            return False
+        try:
+            with self._conn:
+                self._conn.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        except sqlite3.OperationalError as e:
+            # 并发首启时另一个连接可能已经删掉了
+            if "no such column" in str(e).lower():
+                return False
+            logger.warning("schema 升级: 无法删除 %s.%s（%s），保留不用", table, column, e)
+            return False
+        logger.info("schema 升级: %s.%s 已删除", table, column)
         return True
 
     # ── Meta ────────────────────────────────────────────────────────

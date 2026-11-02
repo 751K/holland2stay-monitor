@@ -284,7 +284,7 @@ class TestShadowIsVisible:
         from translations import TRANSLATIONS
         badge = TRANSLATIONS["dash_coverage_shadow"]["en"]
 
-        html = admin_client.get("/").get_data(as_text=True)
+        html = admin_client.get("/dashboard").get_data(as_text=True)
         i = html.index(TRANSLATIONS["dash_coverage_title"]["en"])
         block = html[i:i + 3000]
 

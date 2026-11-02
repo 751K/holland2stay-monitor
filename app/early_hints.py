@@ -48,13 +48,10 @@ from __future__ import annotations
 import re
 from flask import Flask, Response
 
-#: 跨域字体域名。用 preconnect 而不是 preload——见模块 docstring。
-#: gstatic 那条必须带 crossorigin：字体请求是匿名 CORS 的，不带的话浏览器会
-#: 另开一条连接，preconnect 白做。
-_PRECONNECT = (
-    "<https://fonts.googleapis.com>; rel=preconnect",
-    "<https://fonts.gstatic.com>; rel=preconnect; crossorigin",
-)
+#: 跨域预连接。原来是 Google Fonts 的两个域名；字体改为自托管（static/vendor）
+#: 之后清空了——preconnect 本身就会让浏览器去连第三方、交出访客 IP，没有在用的
+#: 域名不该再预连。以后真要加跨域资源，在这里登记。
+_PRECONNECT: tuple[str, ...] = ()
 
 #: 单页最多播几条 preload。上限存在的理由不是头部大小，而是**Early Hints 抢的是
 #: 带宽**：列太多会和 HTML 本身争抢，首屏反而更慢。六条足够覆盖 design.css +

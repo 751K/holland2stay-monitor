@@ -1,0 +1,7 @@
+{# 收件箱外壳侧栏底部的退出登录。只给真正登录的人（管理员或用户）；访客和未登录时侧栏里是「登录 / 注册」。 #}
+{% if auth_enabled and (is_admin or is_user) %}
+<form method="POST" action="{{ url_for('logout') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit">{{ _('logout') }}</button>
+</form>
+{% endif %}

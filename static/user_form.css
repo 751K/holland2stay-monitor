@@ -1,0 +1,49 @@
+/* Admin user editor (user_form.html). Layout and fields come from inbox.css and
+   account.css; this file covers what only the admin editor has: auto-booking
+   subheads, the email mode choice, Xior building rows and the applicant
+   document / consent rows. */
+
+.account-detail .account-subhead{margin:32px 0 0;font-size:14px;font-weight:650;color:var(--mail-ochre)}
+
+/* Email: shared sender vs. custom SMTP */
+.account-radios{display:flex;flex-direction:column;gap:10px}
+.account-radios label{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid var(--mail-border);border-radius:8px;cursor:pointer}
+.account-radios label:has(input:checked){border-color:var(--mail-accent);background:var(--mail-selected)}
+.account-radios input{margin-top:3px;accent-color:var(--mail-accent)}
+.account-radios span{display:flex;flex-direction:column;gap:3px}
+.account-radios b{font-size:14px;font-weight:600;color:var(--mail-text)}
+.account-radios small{font-size:13px;line-height:1.5;color:var(--mail-muted)}
+
+/* Xior: one account per building */
+.xior-list{display:flex;flex-direction:column;gap:12px;margin-top:20px}
+.xior-list:empty{display:none}
+.xior-row{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center}
+.xior-bldg{grid-column:1/-1;font-size:14px;font-weight:600;color:var(--mail-text);overflow-wrap:anywhere}
+.xior-row input,.xior-add select{height:40px;min-width:0;border:1px solid var(--mail-border);border-radius:6px;padding:7px 10px;font:inherit;font-size:15px;background:var(--mail-bg);color:var(--mail-text)}
+.xior-add{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.xior-add select{flex:1;min-width:180px;appearance:none;background-image:var(--caret);background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+.xior-row button,.xior-add button{border:0;border-radius:6px;padding:9px 14px;font-size:14px;background:var(--mail-field);color:var(--mail-text);cursor:pointer}
+.xior-row button:hover,.xior-add button:hover{background:var(--mail-nav);color:var(--mail-accent)}
+
+/* Applicant profile */
+.prof-req{color:var(--mail-accent);font-weight:600}
+.prof-row{display:flex;align-items:center;justify-content:space-between;gap:12px 20px;padding:18px 0;margin-top:8px}
+.prof-row + .prof-row{border-top:1px solid var(--mail-border)}
+.prof-row-main{min-width:0;flex:1}
+.prof-row-label{font-size:14px;font-weight:600;color:var(--mail-text)}
+.prof-hint{font-size:13px;line-height:1.6;color:var(--mail-muted);margin-top:4px}
+.prof-when{font-variant-numeric:tabular-nums}
+.prof-file-current,.prof-file-picked:not([hidden]){display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;margin-top:10px;font-size:13px;color:var(--mail-text)}
+.prof-file-current .account-check{margin-top:0}
+/* The native file input stays focusable inside the visible button */
+.prof-file-btn{position:relative;flex:none;border-radius:6px;padding:9px 14px;font-size:14px;background:var(--mail-field);color:var(--mail-text);cursor:pointer}
+.prof-file-btn:hover{background:var(--mail-nav);color:var(--mail-accent)}
+.prof-file-btn:focus-within{outline:2px solid var(--mail-accent);outline-offset:2px}
+.prof-file-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.prof-toggle{margin-top:0;flex:none}
+
+@media(max-width:650px){
+  .prof-row-file{flex-wrap:wrap}
+  .prof-row-file .prof-row-main{flex-basis:100%}
+  .xior-row{grid-template-columns:1fr}
+}

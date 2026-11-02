@@ -224,7 +224,6 @@ class TestLaneLockIsAlwaysReleased:
         # 整条下单链路都换成桩：这里测的是「锁有没有放」，不是下单本身。
         monkeypatch.setattr(booker, "create_booking",
                             _boom if blow_up else (lambda *a, **kw: "cart-1"))
-        monkeypatch.setattr(booker, "remember_our_reservation", lambda *a, **kw: None)
         monkeypatch.setattr(booker, "set_payment_method", lambda *a, **kw: None)
         monkeypatch.setattr(booker, "_fetch_checkout_agreements", lambda *a, **kw: None)
         monkeypatch.setattr(booker, "place_order", lambda *a, **kw: "ORD-1")

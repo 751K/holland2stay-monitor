@@ -123,6 +123,8 @@ class SourceHealth:
     source: str
     status: str = STATUS_UNKNOWN
     reasons: list[str] = field(default_factory=list)
+    # 同一组原因的英文版，给英文后台面板用；告警和日志仍用中文 reasons
+    reasons_en: list[str] = field(default_factory=list)
 
     rounds: int = 0                 # 窗口内实际有几行遥测
     last_round_at: str = ""
@@ -154,6 +156,7 @@ class SourceHealth:
             "source": self.source,
             "status": self.status,
             "reasons": list(self.reasons),
+            "reasons_en": list(self.reasons_en),
             "rounds": self.rounds,
             "last_round_at": self.last_round_at,
             "last_success_at": self.last_success_at,
@@ -176,6 +179,7 @@ class SourceHealth:
 def _judge(h: SourceHealth) -> None:
     """按指标定级，就地写回 status / reasons。"""
     reasons: list[str] = []
+    reasons_en: list[str] = []
 
     # 停用的 source 不定级。它的遥测行会在库里留满保留期（30 天），照旧判定
     # 就是对着一个根本没在跑的东西报警——2026-08-24 实测：OurDomain 在 08-21
@@ -186,11 +190,13 @@ def _judge(h: SourceHealth) -> None:
     if not h.enabled:
         h.status = STATUS_UNKNOWN
         h.reasons = ["该 source 当前未启用，窗口内的遥测是停用前留下的"]
+        h.reasons_en = ["Source is disabled; telemetry in this window predates that"]
         return
 
     if h.rounds == 0:
         h.status = STATUS_UNKNOWN
         h.reasons = ["窗口内没有遥测数据"]
+        h.reasons_en = ["No telemetry in this window"]
         return
 
     down = False
@@ -199,6 +205,10 @@ def _judge(h: SourceHealth) -> None:
         reasons.append(
             f"连续 {h.fail_streak} 轮抓取失败"
             + (f"（{h.last_error}）" if h.last_error else "")
+        )
+        reasons_en.append(
+            f"{h.fail_streak} failed rounds in a row"
+            + (f" ({h.last_error})" if h.last_error else "")
         )
 
     # 「抓到 0 条」单独看没有意义——Xior 常态零可订，OurCampus 官网自述排队
@@ -217,6 +227,10 @@ def _judge(h: SourceHealth) -> None:
         reasons.append(
             f"连续 {h.zero_streak} 轮零房源，但窗口内曾抓到 {h.max_listings} 条"
         )
+        reasons_en.append(
+            f"{h.zero_streak} rounds in a row with no listings, "
+            f"though this window had up to {h.max_listings}"
+        )
 
     # 完整扫描率**不再**作为告警判据，只作为面板指标保留。分层抓取让它对 H2S
     # 结构性地停在 10% 上下，阈值永久为真。判据换成「多久没有完整轮」——量的是
@@ -230,8 +244,15 @@ def _judge(h: SourceHealth) -> None:
             + (f"，最近一次 {fmt_ts(h.last_complete_at)}" if h.last_complete_at
                else "，库里没有任何完整轮的记录")
         )
+        reasons_en.append(
+            f"No full scan for {mins:.0f} min"
+            f" (limit {STALE_FULL_SCAN_SECONDS / 60:.0f} min)"
+            + (f"; last one {fmt_ts(h.last_complete_at)}" if h.last_complete_at
+               else "; no full round on record")
+        )
 
     h.reasons = reasons
+    h.reasons_en = reasons_en
     if down:
         h.status = STATUS_DOWN
     elif reasons:

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="53.7 37.7 804.6 804.6"><rect id="canal-line" x="89.5" y="659" width="733" height="30" rx="15" fill="#293B49"></rect><g id="reflections">
+    <g id="ochre-reflections" fill="#B39168">
+      <rect x="127.5" y="703" width="197" height="35" rx="17.5"></rect>
+      <rect x="145" y="751.5" width="165" height="35" rx="17.5"></rect>
+    </g>
+    <g id="red-reflections" fill="#B56562">
+      <rect x="344.5" y="703" width="226.5" height="35" rx="17.5"></rect>
+      <rect x="358" y="751.5" width="198.5" height="35" rx="17.5"></rect>
+    </g>
+    <g id="navy-reflections" fill="#697680">
+      <rect x="591" y="703" width="193.5" height="35" rx="17.5"></rect>
+      <rect x="605.5" y="751.5" width="160" height="35" rx="17.5"></rect>
+    </g>
+  </g><g id="houses">
+    <path id="ochre-house" fill="#9F7646" d="M127.5 645.5V341.5H147V259.5H174.5V301L201.5 270H294.5L319 327.5H334.5V645.5Z"></path>
+    <path id="red-house" fill="#AD3E39" d="M345.5 645.5V216.5H366.5V193C398 191 416.5 173 416.5 144V126C416.5 121 420 120 429.5 120V93.5H483.5V120H486C493 120 496 123 496 129V144C496 173 514.5 191 546.5 193V216.5H567.5V645.5Z"></path>
+    <path id="navy-house" fill="#293B49" d="M578.5 645.5V313H587.5L613 255.5V217.5H637.5V241.5H726V217.5H750.5V256L776 313.5H786.5V645.5Z"></path>
+  </g><g id="windows" fill="#F3F0E8">
+    <g id="ochre-windows">
+      <rect id="ochre-window-1-1" x="170" y="374" width="38" height="52" rx="3"></rect>
+      <rect id="ochre-window-1-2" x="254" y="374" width="38" height="52" rx="3"></rect>
+      <rect id="ochre-window-2-1" x="170" y="462" width="38" height="52" rx="3"></rect>
+      <rect id="ochre-window-2-2" x="254" y="462" width="38" height="52" rx="3"></rect>
+      <rect id="ochre-window-3-1" x="170" y="550" width="38" height="52" rx="3"></rect>
+      <rect id="ochre-window-3-2" x="254" y="550" width="38" height="52" rx="3"></rect>
+    </g>
+    <g id="red-windows">
+      <rect id="red-window-1-1" x="394" y="286" width="38" height="52" rx="3"></rect>
+      <rect id="red-window-1-2" x="479" y="286" width="38" height="52" rx="3"></rect>
+      <rect id="red-window-2-1" x="394" y="374" width="38" height="52" rx="3"></rect>
+      <rect id="red-window-2-2" x="479" y="374" width="38" height="52" rx="3"></rect>
+      <rect id="red-window-3-1" x="394" y="462" width="38" height="52" rx="3"></rect>
+      <rect id="red-window-3-2" x="479" y="462" width="38" height="52" rx="3"></rect>
+      <rect id="red-window-4-1" x="394" y="550" width="38" height="52" rx="3"></rect>
+      <rect id="red-window-4-2" x="479" y="550" width="38" height="52" rx="3"></rect>
+    </g>
+    <g id="navy-windows">
+      <rect id="navy-window-1-1" x="621" y="374" width="38" height="52" rx="3"></rect>
+      <rect id="navy-window-1-2" x="705" y="374" width="38" height="52" rx="3"></rect>
+      <rect id="navy-window-2-1" x="621" y="462" width="38" height="52" rx="3"></rect>
+      <rect id="navy-window-2-2" x="705" y="462" width="38" height="52" rx="3"></rect>
+      <rect id="navy-window-3-1" x="621" y="550" width="38" height="52" rx="3"></rect>
+      <rect id="navy-window-3-2" x="705" y="550" width="38" height="52" rx="3"></rect>
+    </g>
+  </g></svg>

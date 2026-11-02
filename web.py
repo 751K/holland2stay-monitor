@@ -63,6 +63,7 @@ logging.getLogger("werkzeug").setLevel(logging.WARNING)
 # app/ 子包
 from app import csrf as _csrf                                    # noqa: E402
 from app import early_hints                                      # noqa: E402
+from app import error_pages                                      # noqa: E402
 from app import jinja_filters                                    # noqa: E402
 from app.auth import (                                            # noqa: E402
     auth_enabled,
@@ -72,6 +73,7 @@ from app.auth import (                                            # noqa: E402
     is_admin,
     is_user,
 )
+from app.deployment import is_official_site                      # noqa: E402
 from app.i18n import get_lang                                     # noqa: E402
 from app.routes import (                                          # noqa: E402
     app_accounts,
@@ -80,6 +82,7 @@ from app.routes import (                                          # noqa: E402
     dashboard,
     email_verify as email_verify_routes,
     inbound,
+    inbox,
     legal,
     map_routes,
     notifications,
@@ -196,14 +199,16 @@ def _add_security_headers(resp):
     resp.headers.setdefault("Referrer-Policy",        "strict-origin-when-cross-origin")
     resp.headers.setdefault("Strict-Transport-Security",
                             "max-age=63072000; includeSubDomains; preload")
-    # CSP: allow self, inline styles (design.css vars), Google Fonts, CDN (icons + charts), maps.
+    # CSP: allow self, inline styles (design.css vars) and Google Maps. Fonts, icons
+    # and Chart.js are self-hosted under static/vendor; the Google Fonts hosts stay
+    # only because the Maps JS loads its own Roboto from them.
     resp.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net https://unpkg.com; "
-        "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-        "img-src 'self' data: https://*.tile.openstreetmap.org https://maps.googleapis.com https://maps.gstatic.com; "
-        "script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://maps.googleapis.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https://maps.googleapis.com https://maps.gstatic.com; "
+        "script-src 'self' 'unsafe-inline' https://maps.googleapis.com; "
         "connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com; "
         "worker-src 'self' blob:; "
         "frame-ancestors 'none'; "
@@ -256,6 +261,7 @@ def _add_security_headers(resp):
 jinja_filters.register(app)
 _csrf.register(app)
 early_hints.register(app)
+error_pages.register(app)
 
 
 _ASSET_VERSIONS: dict[str, str] = {}
@@ -287,6 +293,18 @@ def asset(path: str) -> str:
 
 
 @app.context_processor
+def _inject_deployment():
+    # 不是 flatradar.app：品牌名后面标「自部署版本」，页面弹一次免责提示（_self_hosted.html）
+    official = is_official_site()
+    label = "" if official else ("自部署版本" if get_lang() == "zh" else "Self-hosted")
+    return {
+        "official_site":     official,
+        "self_hosted_label": label,
+        "brand_name":        "FlatRadar" if official else f"FlatRadar · {label}",
+    }
+
+
+@app.context_processor
 def _inject_auth():
     return {
         "auth_enabled":    auth_enabled(),
@@ -300,7 +318,7 @@ def _inject_auth():
 @app.context_processor
 def _inject_translations():
     lang = get_lang()
-    from mcore.sources import SOURCE_DISPLAY_NAMES, SOURCE_SHORT_NAMES
+    from mcore.sources import SOURCE_DISPLAY_NAMES
 
     def _(key: str) -> str:
         return _tr(key, lang)
@@ -324,7 +342,6 @@ def _inject_translations():
         "_": _, "lang": lang,
         "dim_scope": dim_scope, "dim_scope_badge": dim_scope_badge,
         "source_display_names": SOURCE_DISPLAY_NAMES,
-        "source_short_names": SOURCE_SHORT_NAMES,
     }
 
 
@@ -355,7 +372,8 @@ def _inject_upstream_maintenance():
 # 路由：每个 app.routes.* 模块挂自己的 endpoint，扁平命名（A 方案）
 # ------------------------------------------------------------------ #
 sessions.register(app)         # /login /logout /guest /set-lang
-dashboard.register(app)        # / /listings
+dashboard.register(app)        # /api/dashboard/summary
+inbox.register(app)            # / /inbox/filter
 users.register(app)            # /users*
 email_verify_routes.register(app)  # /verify-email/<token> /users/<id>/resend-verify
 settings_routes.register(app)  # /settings

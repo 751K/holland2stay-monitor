@@ -117,15 +117,11 @@ class TestHeldButIncomplete:
     def test_does_not_auto_cancel(self):
         """刻意不回滚：取消不可逆，而失败可能只是支付链接超时（房还好好占着）。
 
-        只看 held_incomplete **这个分支自己**——同一个函数里另有一条
-        reserved_conflict 的路径会正当地调 cancel_pending_orders，把窗口开大
-        就会咬到它（第一版就是这样）。
+        自动取消已整体删除；这里守住它不再出现在 try_book 里。
         """
         src = _code(booker.try_book)
-        i = src.index('if held["cart_id"]:')
-        j = src.index("BookingHeldButIncomplete(", i)
-        assert "cancel_pending_orders" not in src[i:j], (
-            "held_incomplete 分支里在自动取消——那是不可逆的")
+        assert "cancel" not in src.replace("do not cancel", ""), (
+            "try_book 里出现了取消逻辑——取消不可逆，项目不自动取消预留")
 
 
 class TestRentCafeConstructorInsideTry:

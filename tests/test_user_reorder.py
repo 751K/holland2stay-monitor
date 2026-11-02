@@ -42,7 +42,6 @@ def _make_user_row(uid: str, name: str, sort_order: int = 0) -> dict:
         "auto_book_json": '{"enabled":true,"email":"test@test.test","password":"pw","dry_run":false}',
         "app_password_hash": "",
         "app_login_enabled": 0,
-        "allow_h2s_login": 0,
         "sort_order": sort_order,
         "language": "en",
         "created_at": "2026-01-01T00:00:00",

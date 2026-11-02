@@ -1,0 +1,20 @@
+{#
+  管理工作区侧栏（收件箱外壳 .mail-page）。所有管理页面共用，入口和顺序
+  与 base.html 的管理分组一致。
+#}
+<nav class="sidebar-nav mail-nav" aria-label="{{ '管理后台' if lang == 'zh' else 'Administration' }}">
+  <a href="{{ url_for('index') }}"><span>{{ '全部房源' if lang == 'zh' else 'All listings' }}</span></a>
+  <div class="mail-label">{{ '管理后台' if lang == 'zh' else 'Administration' }}</div>
+  {% for endpoint, icon, label, also in [
+       ('users_list', 'bi-people', _('users'), ['user_new', 'user_edit']),
+       ('announcements_view', 'bi-megaphone', '公告' if lang == 'zh' else 'Announcements', []),
+       ('settings', 'bi-gear', _('settings'), []),
+       ('app_accounts', 'bi-phone', _('app_accounts_title'), []),
+       ('monitoring_view', 'bi-activity', _('monitoring_title'), []),
+       ('logs_view', 'bi-terminal', _('log_viewer'), []),
+       ('crashes_view', 'bi-bug', _('crashes_title'), []),
+       ('system_info', 'bi-info-circle', _('system_info'), [])] %}
+  {% set active = request.endpoint == endpoint or request.endpoint in also %}
+  <a href="{{ url_for(endpoint) }}" class="{% if active %}active{% endif %}"{% if active %} aria-current="page"{% endif %}><span>{{ label }}</span></a>
+  {% endfor %}
+</nav>

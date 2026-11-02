@@ -142,7 +142,12 @@ class TestLabels:
 
 # ── 面板上的呈现 ────────────────────────────────────────────────
 
-class TestDashboardRendering:
+class TestAccountSettingsRendering:
+    @staticmethod
+    def _settings_url(client):
+        with client.session_transaction() as session:
+            return f"/users/{session['user_id']}"
+
     def _login_as_new_user(self, client, name="OnbUser", lang="en"):
         """注册并登录。
 
@@ -169,11 +174,11 @@ class TestDashboardRendering:
     def test_new_user_sees_the_card(self, client, lang, phrase):
         """刚注册的用户：开关 False、无渠道、无设备 → 红卡。
 
-        两种语言都测：这条卡是新用户看到的第一样东西，缺一套文案就等于对
+        两种语言都测：这条卡说明新用户的通知配置状态，缺一套文案就等于对
         那半边用户什么都没说。
         """
         self._login_as_new_user(client, f"OnbFresh{lang}", lang=lang)
-        html = client.get("/").get_data(as_text=True)
+        html = client.get(self._settings_url(client)).get_data(as_text=True)
         assert 'id="onb-title"' in html, "新用户没看到引导卡"
         assert "onb-step-blocked" in html
         # 「收不到通知」这件事必须写出来，不能只给个待办勾
@@ -184,7 +189,7 @@ class TestDashboardRendering:
         with test_app.app_context():
             from users import load_users
             uid = next(u.id for u in load_users() if u.name == "OnbLink")
-        html = client.get("/").get_data(as_text=True)
+        html = client.get(self._settings_url(client)).get_data(as_text=True)
         assert f"/users/{uid}" in html, "「去设置」没指向他自己的配置页"
 
     def test_admin_does_not_see_it(self, admin_client):
@@ -214,7 +219,7 @@ class TestDashboardRendering:
 
             update_users(_cfg)
 
-        html = client.get("/").get_data(as_text=True)
+        html = client.get(self._settings_url(client)).get_data(as_text=True)
         assert 'id="onb-title"' not in html, "都配好了还在显示引导"
 
     def test_reachable_but_empty_filter_is_soft(self, client, test_app):
@@ -232,27 +237,27 @@ class TestDashboardRendering:
 
             update_users(_cfg)
 
-        html = client.get("/").get_data(as_text=True)
+        html = client.get(self._settings_url(client)).get_data(as_text=True)
         # 判据是「有没有报红」，不是某个 class 名——外壳在两种状态下是同一套
         # 样式，区别只在标题和那一步自己的颜色。
         assert "onb-step-blocked" not in html, "已经能收到了却还在报红"
         assert "Alerts are on" in html
         assert "every listing" in html, "没说清楚「筛选为空」会导致什么"
 
-    def test_dashboard_survives_a_broken_onboarding_state(self, client, monkeypatch):
-        """引导算不出来时首页照常打开。
+    def test_settings_survive_a_broken_onboarding_state(self, client, monkeypatch):
+        """引导算不出来时账号设置照常打开。
 
         一块辅助信息不该把主页面拖下水——尤其是这块只对新用户显示，
         坏了的话恰好打在最不该被劝退的那批人身上。
         """
         self._login_as_new_user(client, "OnbBroken")
-        from app.routes import dashboard
+        from app.routes import users as user_routes
 
         def _boom(*_a, **_kw):
             raise RuntimeError("nope")
 
-        monkeypatch.setattr(dashboard, "delivery_state", _boom)
-        r = client.get("/")
+        monkeypatch.setattr(user_routes, "delivery_state", _boom)
+        r = client.get(self._settings_url(client))
         assert r.status_code == 200
         assert 'id="onb-title"' not in r.get_data(as_text=True)
 

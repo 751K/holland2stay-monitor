@@ -221,6 +221,31 @@ def login_required(f: Callable) -> Callable:
     return decorated
 
 
+def start_guest_session() -> None:
+    """以只读访客身份建立会话（登录页的访客入口和浏览页的自动访客共用）。"""
+    session.permanent = True
+    session["authenticated"] = True
+    session["role"] = "guest"
+
+
+def browse_required(f: Callable) -> Callable:
+    """浏览房源的页面（收件箱、日历、地图、统计）用的装饰器。
+
+    访客模式开启时，没登录的人直接以访客身份进来看房源，需要个人功能时再去
+    登录；关闭时和 login_required 一样跳登录页。只给**完全没登录**的请求建访客
+    会话，已登录的 admin / user 不会被降级，所以这里不需要 guest_login 那道
+    POST + CSRF。
+    """
+    guarded = login_required(f)
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if auth_enabled() and not session.get("authenticated") and guest_mode_enabled():
+            start_guest_session()
+        return guarded(*args, **kwargs)
+    return decorated
+
+
 def api_login_required(f: Callable) -> Callable:
     """API 路由装饰器：未登录时返回 401 JSON。"""
     @wraps(f)

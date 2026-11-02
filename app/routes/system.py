@@ -75,8 +75,6 @@ def system_info():
         info["unread_notifications"] = st.count_unread_notifications()
         info["total_changes"] = st.count_status_changes()
         info["total_notifications"] = st.count_web_notifications()
-        # 最近公告 + 逐用户投递统计：面板据此显示「补发失败」入口
-        info["announcements"] = st.list_announcements(limit=10)
     finally:
         st.close()
 
@@ -137,6 +135,18 @@ def system_info():
         info["git_date"] = "—"
 
     return render_template("system.html", info=info)
+
+
+@admin_required
+def announcements_view():
+    """群发公告：写一条、先看送达范围再发，下面是最近的投递记录。"""
+    st = storage()
+    try:
+        # 最近公告 + 逐用户投递统计：页面据此显示「补发失败」入口
+        announcements = st.list_announcements(limit=20)
+    finally:
+        st.close()
+    return render_template("announcements.html", announcements=announcements)
 
 
 @admin_required
@@ -675,6 +685,7 @@ def api_announcement_retry(announcement_id: int):
 
 def register(app: Flask) -> None:
     app.add_url_rule("/system",         endpoint="system_info",    view_func=system_info,    methods=["GET"])
+    app.add_url_rule("/announcements",  endpoint="announcements_view", view_func=announcements_view, methods=["GET"])
     app.add_url_rule("/api/announcement", endpoint="api_announcement", view_func=api_announcement, methods=["POST"])
     app.add_url_rule("/api/announcements", endpoint="api_announcements", view_func=api_announcements, methods=["GET"])
     app.add_url_rule("/api/announcements/<int:announcement_id>/retry", endpoint="api_announcement_retry", view_func=api_announcement_retry, methods=["POST"])

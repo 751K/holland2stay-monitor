@@ -9,81 +9,42 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template, request
 
 from app.auth import self_or_admin_required, is_admin
 from app.csrf import csrf_required
 from app.db import storage
+from app.i18n import get_lang
 from users import get_user, load_users, update_users
 
 logger = logging.getLogger(__name__)
 
 
-_VERIFY_RESULT_HTML = """<!doctype html>
-<html lang="{{ lang }}">
-<head>
-<meta charset="utf-8">
-<title>{{ title }}</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, Inter, sans-serif;
-         background:#0f1115; color:#e6e8eb;
-         display:flex; align-items:center; justify-content:center;
-         min-height:100vh; margin:0; padding:24px; }
-  .card { max-width: 460px; padding:28px; border-radius:14px;
-          background:#171a21; border:1px solid #242832;
-          text-align:center; box-shadow:0 4px 30px rgba(0,0,0,.4); }
-  .icon { font-size: 48px; margin-bottom:12px; }
-  h1 { font-size:20px; margin: 0 0 8px; }
-  p  { color:#9aa3ad; line-height:1.6; margin: 6px 0; }
-  a  { color:#38bdf8; text-decoration:none; }
-  .ok { color:#3eb877; }
-  .err { color:#e26a6a; }
-</style>
-</head>
-<body>
-  <div class="card">
-    <div class="icon">{{ icon }}</div>
-    <h1 class="{{ status_class }}">{{ heading }}</h1>
-    <p>{{ message }}</p>
-    {% if email %}<p style="font-size:13px;color:#7c8593;">{{ email }}</p>{% endif %}
-    <p style="margin-top:18px;"><a href="/">{{ home_link }}</a></p>
-  </div>
-</body>
-</html>
-"""
-
-
 def _render_result(*, success: bool, email: str = "", lang: str = "zh") -> Any:
-    """统一渲染验证结果页（成功/失败一致 UI 风格）。"""
+    """统一渲染验证结果页（templates/verify_email.html，成功/失败同一页）。"""
     is_zh = lang == "zh"
     if success:
-        return render_template_string(
-            _VERIFY_RESULT_HTML,
+        return render_template(
+            "verify_email.html",
             lang=lang,
-            title="邮箱已确认" if is_zh else "Email confirmed",
-            icon="✅",
+            success=True,
             heading="邮箱已确认" if is_zh else "Email confirmed",
             message=("从现在起，FlatRadar 会把房源通知发到这个邮箱。"
                      if is_zh else
                      "FlatRadar will now send notifications to this address."),
             email=email,
-            status_class="ok",
-            home_link="返回首页" if is_zh else "Back to home",
         )
-    return render_template_string(
-        _VERIFY_RESULT_HTML,
+    return render_template(
+        "verify_email.html",
         lang=lang,
-        title="链接已失效" if is_zh else "Link expired",
-        icon="⚠️",
-        heading="链接已失效或无效" if is_zh else "Link expired or invalid",
-        message=("这个验证链接可能已过期（24h）或已被消费过。"
-                 "请到 FlatRadar 用户设置页重新触发验证邮件。"
+        success=False,
+        heading="链接已失效" if is_zh else "Link expired",
+        message=("这个验证链接已过期（24 小时）或已经用过。"
+                 "请在 FlatRadar 的账户设置里重新发送验证邮件。"
                  if is_zh else
-                 "This link may have expired (24h) or already been used. "
-                 "Re-trigger verification from the FlatRadar user settings."),
+                 "This link has expired (24 hours) or was already used. "
+                 "Send a new one from your FlatRadar account settings."),
         email="",
-        status_class="err",
-        home_link="返回首页" if is_zh else "Back to home",
     )
 
 
@@ -94,8 +55,8 @@ def email_verify(token: str) -> Any:
     不需要登录：token 本身就是 auth 凭据。验证逻辑是 fail-closed：
     任何异常 / token 无效 / 过期 → 渲染失败页。
     """
-    lang_cookie = request.cookies.get("h2s-lang", "zh")
-    lang = lang_cookie if lang_cookie in ("zh", "en") else "zh"
+    # 和其他页面同一套语言判定：cookie → 浏览器语言，不再一律默认中文
+    lang = get_lang()
 
     if not token or len(token) < 16 or len(token) > 128:
         return _render_result(success=False, lang=lang)

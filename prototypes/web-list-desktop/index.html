@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>房源列表 · FlatRadar 桌面探索</title>
+  <link rel="stylesheet" href="style.css"><script src="app.js" defer></script>
+</head>
+<body>
+  <div class="preview-note"><strong>桌面列表探索</strong><span>服务器房源快照 · 非实时数据</span><span>采样于 2026 年 11 月 2 日</span></div>
+  <main class="page">
+    <header class="top"><div class="identity"><img src="../web-v21-type/logo.png" alt=""><span>FlatRadar</span><span class="divider"></span><span class="location">房源列表</span></div><span class="snapshot"><i></i> 数据快照</span></header>
+    <section class="intro"><div><p class="breadcrumb">工作空间 <span>/</span> 房源</p><h1>房源</h1><p class="subtitle">查看采样时的房源及其状态</p></div><div class="intro-meta"><span>样本范围</span><strong>3 个平台 <span>·</span> 4 个城市</strong></div></section>
+    <section class="results" aria-labelledby="results-title">
+      <div class="results-title"><div><h2 id="results-title">全部房源 <span class="total" id="total">8</span></h2><p>按发现时间排序</p></div><span class="disclaimer">展示的是历史快照，实际状态请以来源平台为准</span></div>
+      <div class="panel">
+        <div class="toolbar"><label class="search"><svg aria-hidden="true" viewBox="0 0 20 20"><circle cx="8.6" cy="8.6" r="5.4"/><path d="m12.6 12.6 3.8 3.8"/></svg><span class="visually-hidden">搜索房源名称、城市或平台</span><input type="search" id="search" placeholder="搜索房源、城市或平台"></label><div class="filter-controls"><label><span class="visually-hidden">平台</span><select id="source"><option value="">所有平台</option><option>Holland2Stay</option><option>Student Experience</option><option>Plaza</option></select></label><label><span class="visually-hidden">状态</span><select id="status"><option value="">所有状态</option><option value="available">可预订</option><option value="reserved">已预留</option><option value="occupied">已入住</option></select></label></div></div>
+        <div class="table-scroll"><table><thead><tr><th scope="col">房源</th><th scope="col">平台</th><th scope="col">状态</th><th scope="col" class="numeric">价格</th><th scope="col" class="numeric">面积</th><th scope="col">可入住</th><th scope="col" class="last">发现时间</th></tr></thead><tbody id="rows"></tbody></table><p class="empty" id="empty" hidden>没有符合条件的房源。试试调整搜索或筛选条件。</p></div>
+        <div class="panel-footer"><span id="result-count">显示 8 条房源</span><span>推测状态已单独标注</span></div>
+      </div>
+      <p class="footnote"><span>i</span> 价格和房源状态来自采样时的来源数据，实际信息可能已经发生变化。</p>
+    </section>
+    <footer><span>FlatRadar</span><span>桌面列表设计探索</span></footer>
+  </main>
+</body>
+</html>

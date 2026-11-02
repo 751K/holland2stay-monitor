@@ -71,10 +71,10 @@ GraphQL operation 推断当前行为。
 
 租户门户使用 REST 查询和取消预留：系统通过
 `/api/rest/V1/newdashboard/contract/me` 查询预留，再根据 SKU 调用
-`POST /api/rest/V1/customer/bookingcancel/{sku}`。项目中的 `cancel_pending_orders`
-仅考虑本系统记录的自有预留；如果系统没有相应记录，该函数不会取消预留。预订流程
-和配置决定是否调用该函数。该路径尚未通过真实取消操作验证，代码已经实现不能说明
-该路径已经验证通过。
+`POST /api/rest/V1/customer/bookingcancel/{sku}`。本项目不自动取消预留：账号已有
+预留单时，预订流程以 `reserved_conflict` 结束并通知用户自行到站点处理。曾经的
+自动取消实现（`cancel_enabled` / `cancel_pending_orders`）从未经过真实取消验证，
+已删除。`BrowserFetcher.fetch_rest` 保留了 `/api/rest/*` 的信封编码，目前没有调用方。
 
 ## 5. Operation 原文与历史参考
 

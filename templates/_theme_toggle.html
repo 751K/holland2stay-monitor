@@ -1,0 +1,5 @@
+{# 收件箱外壳侧栏底部的深浅色切换。显示的是点了会切到哪一种，文字随 data-theme 由 CSS 切换，不依赖脚本改字。 #}
+<button type="button" class="mail-theme" onclick="toggleTheme()">
+  <span class="mail-theme-dark">{{ '深色模式' if lang == 'zh' else 'Dark mode' }}</span><span class="mail-theme-light">{{ '浅色模式' if lang == 'zh' else 'Light mode' }}</span>
+  <i class="bi bi-moon mail-theme-dark" aria-hidden="true"></i><i class="bi bi-sun mail-theme-light" aria-hidden="true"></i>
+</button>

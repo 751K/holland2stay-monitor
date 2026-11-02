@@ -1,0 +1,154 @@
+{#
+  设置工作区（账号页 account.html、管理员用户编辑 user_form.html）共用的片段。
+  用 {% import '_settings_macros.html' as ui with context %} 引入：宏要读
+  section / item / lang 和 dim_scope 等上下文。
+#}
+
+{#- 当前页面换一组 section / item 参数的地址（账号页和新建用户页都适用） -#}
+{% macro here() -%}
+{{ url_for(request.endpoint, **dict(request.view_args or {}, **kwargs)) }}
+{%- endmacro %}
+
+{% macro panel(s, row) %}
+<div class="account-panel" id="panel-{{ s.key }}-{{ row.key }}" data-panel="{{ s.key }}:{{ row.key }}"{% if not (s.key == section and row.key == item) %} hidden{% endif %}>
+  <a href="{{ here(section=s.key) }}" class="mail-back-list" data-no-transition data-close-detail>{{ ('← 返回' ~ s.title) if lang == 'zh' else ('← Back to ' ~ s.title) }}</a>
+  <div class="mail-detail-heading"><span>{{ s.title }}</span></div>
+  <div class="mail-detail-body">
+    <h2>{{ row.title }}</h2>
+    {#- quiet：面板正文自己就说明了状态（比如一个开关），不再重复状态行 #}
+    {% if not row.quiet %}<p class="mail-location">{% if row.state %}<span class="account-state tone-{{ row.tone }}">{{ row.state }}</span>{% endif %}{{ row.summary }}</p>{% endif %}
+    {{ caller() }}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro save_actions(test=false, label=none) %}
+<div class="account-panel-actions">
+  <button type="submit" class="mail-primary">{{ label or ('保存修改' if lang == 'zh' else 'Save changes') }}</button>
+  {% if test %}<button type="button" data-test-notify>{{ _('user_form_test') }}</button>{% endif %}
+</div>
+{% if test %}<div class="account-test-result" data-test-result role="status" hidden></div>{% endif %}
+{% endmacro %}
+
+{% macro scope(dim) %}{% set b = dim_scope_badge(dim) %}{% if b %}<small class="account-scope" title="{{ dim_scope(dim) }}">{{ b }}</small>{% endif %}{% endmacro %}
+
+{% macro checks(legend, name, options, selected, dim=none, pairs=true) %}
+<fieldset class="account-field">
+  <legend>{{ legend }}{% if dim %}{{ scope(dim) }}{% endif %}</legend>
+  <div class="mail-options account-options">
+    {% for option in options %}
+    {% set value = option[0] if pairs else option %}
+    <label><input type="checkbox" name="{{ name }}" value="{{ value }}"{% if value in selected %} checked{% endif %}> {{ option[1] if pairs else option }}</label>
+    {% endfor %}
+    {# 已保存但当前不在选项里的值（例如暂时没有房源的城市）也要留着，否则保存一次就丢了 #}
+    {% set known = options | map(attribute=0) | list if pairs else options %}
+    {% for value in selected if value not in known %}
+    <label><input type="checkbox" name="{{ name }}" value="{{ value }}" checked> {{ value }}</label>
+    {% endfor %}
+  </div>
+</fieldset>
+{% endmacro %}
+
+{#- 开关。勾上提交 true；off_value 给「缺失即视为开启」的字段兜底一个 false。 -#}
+{% macro switch(name, label, checked, off_value=none, id=none, disabled=false, desc=none) %}
+<label class="account-switch">
+  <input type="checkbox" name="{{ name }}" value="true"{% if id %} id="{{ id }}"{% endif %}{% if checked %} checked{% endif %}{% if disabled %} disabled{% endif %}>
+  <span class="toggle-track" aria-hidden="true" data-off="{{ '关' if lang == 'zh' else 'Off' }}" data-on="{{ '开' if lang == 'zh' else 'On' }}"></span><span class="account-switch-text">{{ label }}{% if desc %}<small>{{ desc }}</small>{% endif %}</span>
+</label>
+{% if off_value is not none %}<input type="hidden" name="{{ name }}" value="{{ off_value }}">{% endif %}
+{% endmacro %}
+
+{#- 房源条件的六个面板，prefix 区分通知条件（''）和自动预订条件（'AUTO_BOOK_'） -#}
+{% macro filter_fields(key, lf, prefix='') %}
+{% set any = '不限' if lang == 'zh' else 'Any' %}
+{% if key == 'rent' %}
+  <div class="account-fields account-fields-3">
+    <label class="account-field"><span>{{ _('user_form_max_rent') }}</span><input type="number" name="{{ prefix }}MAX_RENT" min="0" step="any" inputmode="decimal" value="{{ lf.max_rent | int if lf.max_rent else '' }}" placeholder="{{ any }}"></label>
+    <label class="account-field"><span>{{ _('user_form_min_area') }}</span><input type="number" name="{{ prefix }}MIN_AREA" min="0" step="any" inputmode="decimal" value="{{ lf.min_area | int if lf.min_area else '' }}" placeholder="{{ any }}"></label>
+    <label class="account-field"><span>{{ _('user_form_min_floor') }}</span><input type="number" name="{{ prefix }}MIN_FLOOR" min="0" max="200" inputmode="numeric" value="{{ lf.min_floor if lf.min_floor is not none else '' }}" placeholder="{{ any }}"></label>
+  </div>
+{% elif key == 'location' %}
+  {{ checks(_('user_form_cities'), prefix ~ 'ALLOWED_CITIES', city_options, lf.allowed_cities, pairs=false) }}
+  <fieldset class="account-field">
+    <legend>{{ _('user_form_hoods') }}{{ scope('neighborhood') }}</legend>
+    <div class="mail-options account-options" data-dynamic-options="neighborhoods" data-name="{{ prefix }}ALLOWED_NEIGHBORHOODS" data-cities="{{ prefix }}ALLOWED_CITIES">
+      {% for n in lf.allowed_neighborhoods %}<label><input type="checkbox" name="{{ prefix }}ALLOWED_NEIGHBORHOODS" value="{{ n }}" checked> {{ n }}</label>{% endfor %}
+    </div>
+  </fieldset>
+  <fieldset class="account-field">
+    <legend>{{ _('user_form_buildings') }}</legend>
+    <div class="mail-options account-options" data-dynamic-options="buildings" data-name="{{ prefix }}ALLOWED_BUILDINGS" data-cities="{{ prefix }}ALLOWED_CITIES">
+      {% for b in lf.allowed_buildings %}<label><input type="checkbox" name="{{ prefix }}ALLOWED_BUILDINGS" value="{{ b }}" checked> {{ b }}</label>{% endfor %}
+    </div>
+  </fieldset>
+  <p class="account-help">{{ '片区和楼盘按所选城市列出；未选城市时列出全部。' if lang == 'zh' else 'Neighbourhoods and buildings follow the selected cities, or list everything when no city is selected.' }}</p>
+{% elif key == 'sources' %}
+  {{ checks(_('user_form_sources'), prefix ~ 'ALLOWED_SOURCES', source_options, lf.allowed_sources) }}
+  <p class="account-help">{{ '不选择表示关注全部平台。' if lang == 'zh' else 'Select none to follow every platform.' }}</p>
+{% elif key == 'home' %}
+  <p class="account-help">{{ _('user_form_dim_scope_intro') }}</p>
+  {{ checks(_('user_form_types'), prefix ~ 'ALLOWED_TYPES', type_options, lf.allowed_types, dim='type') }}
+  {{ checks(_('user_form_occupancy'), prefix ~ 'ALLOWED_OCCUPANCY', occupancy_options, lf.allowed_occupancy, dim='occupancy') }}
+{% elif key == 'terms' %}
+  <p class="account-help">{{ _('user_form_dim_scope_intro') }}</p>
+  {{ checks(_('user_form_offer'), prefix ~ 'ALLOWED_CONTRACT', contract_options, lf.allowed_contract, dim='contract') }}
+  {{ checks(_('user_form_tenant'), prefix ~ 'ALLOWED_TENANT', tenant_options, lf.allowed_tenant, dim='tenant') }}
+{% elif key == 'extras' %}
+  <p class="account-help">{{ _('user_form_dim_scope_intro') }}</p>
+  {{ checks(_('user_form_promo'), prefix ~ 'ALLOWED_OFFER', offer_options, lf.allowed_offer, dim='offer', pairs=false) }}
+  {{ checks(_('filter_finishing'), prefix ~ 'ALLOWED_FINISHING', finishing_options, lf.allowed_finishing, dim='finishing', pairs=false) }}
+  <label class="account-field"><span>{{ _('filter_energy') }}{{ scope('energy') }}</span>
+    <select name="{{ prefix }}ALLOWED_ENERGY">
+      <option value="">{{ _('filter_min_energy') }}</option>
+      {% for e in energy_options %}<option value="{{ e }}"{% if e == lf.allowed_energy %} selected{% endif %}>{{ e }}</option>{% endfor %}
+    </select>
+  </label>
+{% endif %}
+{% endmacro %}
+
+{#- 中间一栏：每个分组一组条目 -#}
+{% macro row_lists(sections) %}
+{% for s in sections %}
+<div class="account-rows" data-section-rows="{{ s.key }}"{% if s.key != section %} hidden{% endif %}>
+  {% if s.note %}<p class="account-section-note">{{ s.note }}</p>{% endif %}
+  {% for row in s.rows %}
+  {% set selected = s.key == section and row.key == item %}
+  <a href="{{ here(section=s.key, item=row.key) }}"
+     class="mail-listing account-row{% if selected %} selected{% endif %}"
+     data-account-item="{{ s.key }}:{{ row.key }}" data-no-transition{% if selected %} aria-current="true"{% endif %}>
+    <span class="mail-listing-body"><strong>{{ row.title }}</strong><span class="mail-meta">{{ row.summary }}</span></span>
+    <span class="mail-value">
+      {% if row.state %}<span class="account-state tone-{{ row.tone }}">{{ row.state }}</span>{% endif %}
+      <small class="account-dirty" hidden>{{ '未保存' if lang == 'zh' else 'Unsaved' }}</small>
+    </span>
+  </a>
+  {% endfor %}
+</div>
+{% endfor %}
+{% endmacro %}
+
+{#- 侧栏里的分组链接 -#}
+{% macro section_links(sections) %}
+{% for s in sections %}
+{% set attention = s.rows | selectattr('tone', 'equalto', 'attention') | list | length %}
+<a href="{{ here(section=s.key) }}" data-account-section="{{ s.key }}" data-no-transition
+   class="{% if s.key == section %}active{% endif %}"{% if s.key == section %} aria-current="page"{% endif %}>
+  <i class="bi {{ s.icon }}" aria-hidden="true"></i><span>{{ s.title }}</span>
+  {% if attention %}<b title="{{ '需要处理' if lang == 'zh' else 'Needs attention' }}">{{ attention }}</b>{% endif %}
+</a>
+{% endfor %}
+{% endmacro %}
+
+{#- 工具栏标题随分组切换，脚本从这些模板读 -#}
+{% macro section_heads(sections) %}
+{% for s in sections %}<template data-section-head="{{ s.key }}" data-title="{{ s.title }}" data-summary="{{ s.summary }}"></template>{% endfor %}
+{% endmacro %}
+
+{#- 通知渠道开关。勾选结果由脚本汇总进隐藏的 NOTIFICATION_CHANNELS，本身不带 name -#}
+{% macro channel_toggle(ch, label, disabled=false) %}
+{% set owner = u if u is defined else user %}
+<label class="account-switch">
+  <input type="checkbox" class="channel-chk" data-ch="{{ ch }}"{% if ch in owner.notification_channels %} checked{% endif %}{% if disabled %} disabled{% endif %}>
+  <span class="toggle-track" aria-hidden="true" data-off="{{ '关' if lang == 'zh' else 'Off' }}" data-on="{{ '开' if lang == 'zh' else 'On' }}"></span><span class="account-switch-text">{{ label }}</span>
+</label>
+{% endmacro %}

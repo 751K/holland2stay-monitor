@@ -1,0 +1,131 @@
+/* Public reading pages (support, privacy, terms, donate). Same palette and type
+   as the inbox shell, without its sidebar: a narrow column of text. */
+:root{--bg:#fff;--text:#272727;--muted:#707070;--accent:#98443a;--ochre:#80613f;--field:#f5f5f5;--hover:#f0f0f0;--rule:#e4e4e4;color-scheme:light}
+[data-theme=dark]{--bg:#181818;--text:#ece9e6;--muted:#b2aaa3;--accent:#d69a8f;--ochre:#c7ab8a;--field:#262423;--hover:#2e2b29;--rule:#34312e;color-scheme:dark}
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;font-size:16px;line-height:1.7;-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+
+.public-wrap{max-width:720px;margin:0 auto;padding:40px 24px 64px}
+
+/* Brand and language */
+.public-top{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.public-brand{font-size:16px;font-weight:650;color:var(--text);text-decoration:none}
+.public-lang{display:inline-flex;gap:2px;padding:3px;border-radius:8px;background:var(--field)}
+.public-lang a{padding:4px 12px;border-radius:6px;font-size:13px;line-height:1.6;color:var(--muted);text-decoration:none}
+.public-lang a:hover{color:var(--text)}
+.public-lang a[aria-current]{background:var(--bg);color:var(--text);font-weight:600;box-shadow:0 1px 2px #0000001a}
+
+/* The four pages as tabs */
+.public-tabs{display:flex;flex-wrap:wrap;gap:4px;margin:28px 0 0;padding-bottom:14px;border-bottom:1px solid var(--rule)}
+.public-tabs a{padding:6px 12px;border-radius:6px;font-size:14px;color:var(--muted);text-decoration:none}
+.public-tabs a:hover{background:var(--hover);color:var(--text)}
+.public-tabs a[aria-current]{background:var(--field);color:var(--text);font-weight:600}
+
+.public-main h1{margin:40px 0 12px;font-size:28px;line-height:1.25;letter-spacing:-.03em;font-weight:700}
+.public-lead{margin:0 0 28px;font-size:15px;color:var(--muted)}
+.public-lead strong{color:var(--text);font-weight:600}
+
+/* Running text keeps the source line breaks (legal texts and FAQ answers are plain text) */
+.public-text{white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.8;color:var(--muted)}
+.public-doc{color:var(--text)}
+.public-doc .public-text{margin:0 0 16px;color:var(--text)}
+.public-doc h2{margin:36px 0 12px;padding-top:24px;border-top:1px dashed var(--rule);font-size:17px;font-weight:600}
+
+.public-section{padding:24px 0;border-top:1px dashed var(--rule)}
+.public-section h2{margin:0 0 10px;font-size:17px;font-weight:600;color:var(--text)}
+
+/* Support: contact tile */
+.public-contact{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px;margin:8px 0 28px;padding:20px 22px;border-radius:10px;background:var(--field)}
+.public-contact>div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.public-label{font-size:13px;color:var(--muted)}
+.public-email{font-size:17px;font-weight:600;color:var(--text);text-decoration:none;overflow-wrap:anywhere}
+.public-email:hover{color:var(--accent)}
+.public-primary{display:inline-flex;align-items:center;height:40px;padding:0 18px;border-radius:6px;background:#98443a;color:#fff;font-size:14px;font-weight:600;text-decoration:none}
+.public-primary:hover{background:#87392f}
+
+/* Donate */
+.public-qr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:6px}
+.public-qr figure{margin:0;padding:18px;border-radius:10px;background:var(--field);text-align:center}
+.public-qr img,.public-qr-empty{display:block;width:100%;max-width:220px;aspect-ratio:1;margin:0 auto;border-radius:6px;background:#fff;object-fit:contain}
+.public-qr-empty{display:flex;align-items:center;justify-content:center;background:var(--bg);font-size:13px;color:var(--muted)}
+.public-qr figcaption{display:flex;flex-direction:column;margin-top:12px}
+.public-qr figcaption b{font-size:15px;font-weight:600}
+.public-qr figcaption span{font-size:13px;color:var(--muted)}
+.public-link-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 18px;border-radius:10px;background:var(--field);color:var(--text);font-size:15px;text-decoration:none}
+.public-link-row:hover{background:var(--hover);color:var(--accent)}
+.public-note{margin:8px 0 0;padding-top:24px;border-top:1px dashed var(--rule);font-size:14px;color:var(--muted)}
+
+.public-footer{display:flex;justify-content:space-between;gap:16px;margin-top:48px;padding-top:18px;border-top:1px solid var(--rule);font-size:13px;color:var(--muted)}
+.public-footer a{color:var(--muted);text-decoration:none}
+.public-footer a:hover{color:var(--accent)}
+
+@media(max-width:600px){
+  .public-wrap{padding:24px 16px 48px}
+  .public-main h1{margin-top:28px;font-size:24px}
+  .public-qr{grid-template-columns:1fr}
+}
+
+/* Login: the same shell, one narrow form column in the middle */
+.login-wrap{display:flex;flex-direction:column;min-height:100dvh}
+.login{width:100%;max-width:360px;margin:auto;padding:48px 0}
+.login-logo{display:block;width:44px;height:44px;margin-bottom:20px;background:url("/static/logo-bare.png") center/contain no-repeat}
+[data-theme=dark] .login-logo{background-image:url("/static/logo-bare-dark.png")}
+.login h1{margin:0;font-size:26px;line-height:1.25;letter-spacing:-.03em;font-weight:700}
+.login-sub{margin:8px 0 28px;font-size:14px;color:var(--muted)}
+.login-error{margin:-12px 0 20px;font-size:14px;line-height:1.5;color:var(--accent)}
+.login-field{display:flex;flex-direction:column;gap:7px;margin-bottom:16px;font-size:13px;color:var(--muted)}
+.login-field input{width:100%;height:42px;padding:0 12px;border:1px solid transparent;border-radius:7px;background:var(--field);color:var(--text);font:inherit;font-size:15px}
+.login-field input:focus{outline:none;border-color:var(--accent)}
+.login-pw{position:relative;display:block}
+.login-pw input{padding-right:64px}
+.login-pw button{position:absolute;right:6px;top:50%;transform:translateY(-50%);padding:4px 8px;border:0;border-radius:5px;background:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+.login-pw button:hover{color:var(--text)}
+/* Only once there is something to show */
+.login-pw input:placeholder-shown+button{display:none}
+.login-primary,.login-secondary{width:100%;height:42px;border:0;border-radius:7px;font:inherit;font-size:15px;font-weight:600;cursor:pointer}
+.login-primary{margin-top:8px;background:#98443a;color:#fff}
+.login-primary:hover{background:#87392f}
+.login-primary:disabled{opacity:.6;cursor:default}
+.login-secondary{margin-top:10px;background:var(--field);color:var(--text)}
+.login-secondary:hover{background:var(--hover)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.login-dialog{width:min(420px,calc(100vw - 32px));padding:28px;border:0;border-radius:12px;background:var(--bg);color:var(--text);box-shadow:0 18px 65px #0003}
+.login-dialog::backdrop{background:#0004}
+.login-dialog h2{margin:0 0 12px;font-size:20px;letter-spacing:-.02em}
+.login-dialog p{margin:0;font-size:14px;line-height:1.7;color:var(--muted)}
+.login-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px}
+.login-dialog-actions button{width:auto;height:40px;margin:0;padding:0 16px;border:0;border-radius:6px;background:var(--field);color:var(--text);font:inherit;font-size:14px;cursor:pointer}
+.login-dialog-actions .login-primary{background:#98443a;color:#fff;font-weight:600}
+
+.login-wrap .public-footer{margin-top:0;align-items:center}
+.login-links{display:flex;flex-wrap:wrap;gap:16px}
+.login-theme{padding:0;border:0;background:none;color:var(--muted);font:inherit;font-size:13px;cursor:pointer}
+.login-theme:hover{color:var(--accent)}
+.login-theme-light,[data-theme=dark] .login-theme-dark{display:none}
+[data-theme=dark] .login-theme-light{display:inline}
+@media(max-width:600px){.login{padding:32px 0}.login h1{font-size:23px}}
+
+/* Share landing page: one listing, read like the inbox detail pane */
+.share-wrap{display:flex;flex-direction:column;min-height:100dvh}
+.share{width:100%;max-width:480px;margin:auto;padding:48px 0}
+.share h1{margin:0;font-size:26px;line-height:1.3;letter-spacing:-.03em;font-weight:700;overflow-wrap:anywhere}
+.share-where{margin:8px 0 0;font-size:14px;color:var(--muted);overflow-wrap:anywhere}
+.share-price{margin:22px 0 0;font-size:28px;font-weight:700;letter-spacing:-.035em;font-variant-numeric:tabular-nums}
+.share-status{margin:10px 0 0}
+.share-status small{padding:2px 6px;border-radius:4px;background:var(--field);font-size:12px;color:var(--muted)}
+.share-status small.is-ok{color:var(--accent)}
+.share-facts{margin:26px 0 0}
+.share-facts>div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-top:1px dashed var(--rule);font-size:14px}
+.share-facts dt{color:var(--muted)}
+.share-facts dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.share-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:28px 0 24px}
+.share-secondary{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:6px;background:var(--field);color:var(--text);font-size:14px;text-decoration:none}
+.share-secondary:hover{background:var(--hover)}
+.share code{font-size:13px}
+@media(max-width:600px){.share{padding:32px 0}.share h1{font-size:23px}}
+.verify-email{margin:14px 0 0;font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.error-code{margin:0 0 6px;font-size:13px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}

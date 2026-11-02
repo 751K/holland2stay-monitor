@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>我的房源 · FlatRadar 桌面探索</title>
+<link rel="stylesheet" href="refined.css?v=20261102-personal-inbox-2">
+<script src="data.js" defer></script><script src="inbox-model.js?v=20261102-personal-inbox-2" defer></script><script src="app.js?v=20261102-personal-inbox-2" defer></script>
+</head>
+<body>
+<div class="preview"><strong>设计原型</strong><span>房源快照 · 个人条件为演示设置</span><span id="snapshot-time"></span><label class="role-preview">身份预览 <select id="preview-role"><option value="guest">游客</option><option value="user" selected>正常用户</option><option value="admin">管理员</option></select></label></div>
+<div class="app">
+<aside class="sidebar">
+  <div class="brand">FlatRadar</div>
+  <div class="sidebar-content" id="mail-navigation">
+    <div class="mailbox-label" id="mailbox-label">我的房源</div>
+    <nav aria-label="房源范围">
+      <button class="nav active" data-view="all" aria-pressed="true"><svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="14" height="12" rx="2"/><path d="M3 11h4l1 2h4l1-2h4"/></svg><span id="all-label">全部匹配</span><b id="all-count"></b></button>
+      <button class="nav" data-view="available" aria-pressed="false"><svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 10 4 4 8-8"/></svg><span>可预订</span><b id="available-count"></b></button>
+    </nav>
+    <div class="platform-heading"><span>平台</span><small id="platform-count-label">匹配样本</small></div>
+    <nav id="platforms" aria-label="按平台查看"></nav>
+    <nav class="personal-nav" aria-label="个人功能"><button class="nav" id="filter-entry" type="button">筛选与通知</button><button class="nav" data-entry="stats" type="button">统计</button></nav>
+  </div>
+  <div class="sidebar-content" id="management-navigation" hidden>
+    <button class="back-to-mail" id="back-to-mail" type="button">← 返回我的房源</button>
+    <div class="mailbox-label">管理后台</div><nav id="admin-nav" aria-label="管理后台"></nav>
+  </div>
+  <div class="sidebar-utilities">
+    <button class="nav" id="admin-entry" type="button" hidden>管理后台 <span aria-hidden="true">↗</span></button>
+    <button class="nav" id="account-entry" type="button">我的账号</button>
+    <details><summary>更多 <span aria-hidden="true">⌄</span></summary><nav id="more-nav" aria-label="更多功能"></nav></details>
+    <p class="sidebar-caption" id="identity-caption">个人收件箱 · 本机演示</p>
+  </div>
+</aside>
+<main class="main" id="mail-main">
+  <header class="toolbar"><div class="heading"><h1 id="page-title">我的房源</h1><button class="filter-summary" id="filter-summary" type="button" aria-haspopup="dialog"></button></div><label class="search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.3"/><path d="m12.5 12.5 3.5 3.5"/></svg><span class="sr-only">搜索当前范围内的房源</span><input id="search" type="search" placeholder="搜索匹配房源"></label></header>
+  <div class="view-tools"><nav class="view-switch" aria-label="房源视图"><button class="view-choice active" type="button" aria-current="page">列表</button><button class="view-choice" data-entry="calendar" type="button">日历</button><button class="view-choice" data-entry="map" type="button">地图</button></nav><span id="scope-note">个人条件 · 仅本机演示</span></div>
+  <div class="workspace"><section class="inbox" aria-labelledby="list-title"><div class="list-heading"><h2 id="list-title">房源 <span id="count">0</span></h2><span>按首次发现时间排列</span></div><div id="groups" aria-live="polite"></div><div class="list-footer" id="result-count" role="status"></div></section><aside class="detail" aria-label="房源详情"><div id="detail"></div></aside></div>
+</main>
+<main class="main admin-main" id="management-main" hidden><header class="toolbar"><div class="heading"><p class="admin-eyebrow">FlatRadar 管理工作区</p><h1 id="admin-title">管理后台</h1><p id="admin-description">系统管理与个人房源分开呈现。</p></div></header><div class="admin-content" id="admin-content"></div></main>
+</div>
+<dialog id="filter-dialog" aria-labelledby="filter-title">
+<form id="filter-form">
+  <div class="entry-kicker" id="filter-kicker">个人收件箱</div><h2 id="filter-title">筛选与通知</h2><p class="dialog-intro" id="filter-description">这些条件决定你在各个平台收件箱中看到的房源。</p>
+  <div class="filter-fields"><label class="field full">城市<select name="city" id="city-input"></select></label><label class="field">最低租金 · €/月<input type="number" name="minPrice" min="0" step="0.01" inputmode="decimal" placeholder="不限"></label><label class="field">最高租金 · €/月<input type="number" name="maxPrice" min="0" step="0.01" inputmode="decimal" placeholder="不限"></label><label class="field full">最小面积 · m²<input type="number" name="minArea" min="0" step="0.01" inputmode="decimal" placeholder="不限"></label></div>
+  <fieldset class="source-choices"><legend>关注的平台</legend><div id="source-choices"></div></fieldset>
+  <p class="field-note">设置价格或面积条件后，缺少对应信息的房源不会计入匹配结果。租金按来源记录计算，费用口径以平台为准。</p>
+  <div class="notification-note" id="notification-note"><strong>通知使用同一套房源条件</strong><p>正式接入后，通知与收件箱共用此筛选范围。当前原型不发送通知。</p></div>
+  <p class="form-error" id="filter-error" role="alert" hidden></p>
+  <p class="save-note" id="filter-save-note">仅保存到当前浏览器，不修改服务器上的个人配置。</p>
+  <div class="dialog-actions"><button class="text-button" id="reset-filters" type="button">清除条件</button><div><button class="secondary-button" id="cancel-filters" type="button">取消</button><button class="primary-button" id="apply-filters" type="submit">保存并应用</button></div></div>
+</form>
+</dialog>
+<dialog id="entry-dialog" aria-labelledby="entry-title"><div class="entry-kicker">功能入口预览</div><h2 id="entry-title"></h2><p id="entry-description"></p><p class="entry-status">此功能尚未接入。当前原型仅使用本地房源快照。</p><form method="dialog"><button class="primary-button">返回</button></form></dialog>
+<dialog id="login-dialog" aria-labelledby="login-title"><div class="entry-kicker">身份预览</div><h2 id="login-title">体验个人收件箱</h2><p>此原型没有真实登录。你可以使用演示身份，查看个人筛选如何组织房源。</p><p class="entry-status">游客当前的临时筛选会带入演示收件箱，不会修改真实账号。</p><div class="dialog-actions"><button class="secondary-button" id="cancel-login" type="button">继续以游客浏览</button><button class="primary-button" id="demo-login" type="button">以正常用户预览</button></div></dialog>
+</body></html>

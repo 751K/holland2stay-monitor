@@ -1,0 +1,49 @@
+/* Site statistics (stats.html) inside the inbox shell. One mark colour for every
+   chart: length carries the number, colour carries nothing extra. Values checked
+   against each theme's surface (lightness band, chroma, ≥3:1 contrast). */
+.stats-page{--stat-mark:#a4584c;--stat-wash:#a4584c14;--stat-grid:#ececec;--stat-rule:#d6d6d6}
+[data-theme=dark] .stats-page{--stat-mark:#b45e4e;--stat-wash:#b45e4e22;--stat-grid:#2e2b29;--stat-rule:#3d3936}
+
+/* Range: segmented control in the toolbar */
+.stats-range{display:inline-flex;flex:none;gap:2px;padding:3px;border-radius:8px;background:var(--mail-field)}
+.stats-range button{height:32px;padding:0 14px;border:0;border-radius:6px;background:none;font:inherit;font-size:14px;color:var(--mail-muted);cursor:pointer}
+.stats-range button:hover{color:var(--mail-text)}
+.stats-range button[aria-pressed=true]{background:var(--mail-bg);color:var(--mail-text);font-weight:600;box-shadow:0 1px 2px #0000001a}
+.stats-range button:focus-visible{outline:2px solid var(--mail-accent);outline-offset:1px}
+
+.stats-body{flex:1;min-height:0;overflow-y:auto;padding:4px 40px 48px;scrollbar-width:thin;scrollbar-color:var(--mail-border) transparent}
+.stats-body[aria-busy=true]{opacity:.6;transition:opacity .15s}
+
+/* Key numbers */
+/* Soft filled tiles, the same field tone as the search box and segmented control; no rules */
+.stats-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 8px}
+.stats-kpis div{padding:18px 20px 20px;border-radius:10px;background:var(--mail-field)}
+.stats-kpis dt{font-size:13px;font-weight:500;color:var(--mail-muted)}
+.stats-kpis dd{margin:8px 0 0;font-size:32px;font-weight:650;line-height:1.1;letter-spacing:-.03em;font-variant-numeric:tabular-nums;color:var(--mail-text)}
+
+.stats-heading{margin:36px 0 10px;font-size:13px;font-weight:650;color:var(--mail-ochre)}
+
+/* Cards are open sections: a title and the plot, no frame */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px 40px}
+.stats-grid.is-pair{grid-template-columns:repeat(2,minmax(0,1fr))}
+/* A light dashed rule above each chart separates neighbours without boxing them in */
+.stats-card{min-width:0;padding:20px 0 14px;border-top:1px dashed var(--stat-rule)}
+.stats-card.is-wide{grid-column:1/-1}
+.stats-card h3{margin:0 0 14px;font-size:15px;font-weight:600;color:var(--mail-text)}
+.stats-plot{position:relative;height:200px}
+
+/* Ranked bars: name, then the bar with its count at the end */
+.stats-ranked{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.stats-ranked li{display:grid;grid-template-columns:minmax(0,10em) minmax(0,1fr);align-items:center;gap:16px;min-height:30px;font-size:14px}
+.stats-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mail-text)}
+.stats-bar{display:flex;align-items:center;gap:8px;min-width:0}
+.stats-bar i{flex:none;width:calc((100% - 3em) * var(--share));height:6px;border-radius:0 3px 3px 0;background:var(--stat-mark)}
+.stats-ranked .is-other .stats-name{color:var(--mail-muted)}
+.stats-ranked .is-other .stats-bar i{background:var(--mail-border)}
+.stats-count{font-size:13px;font-weight:500;font-variant-numeric:tabular-nums;color:var(--mail-muted)}
+.stats-empty{display:flex;align-items:center;min-height:30px;margin:0;font-size:14px;color:var(--mail-muted)}
+.stats-plot .stats-empty{position:absolute;inset:0;justify-content:center}
+
+@media(max-width:1100px){.stats-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:900px){.stats-grid.is-pair{grid-template-columns:1fr}}
+@media(max-width:650px){.stats-body{padding:4px 20px 40px}.stats-range{align-self:flex-start}.stats-kpis dd{font-size:26px}.stats-grid{grid-template-columns:1fr}}

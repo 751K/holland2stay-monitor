@@ -1,0 +1,25 @@
+{% from '_inbox_actions.html' import filter_action with context %}
+<div class="calendar-workspace" data-calendar-month="{{ calendar_month }}">
+<section class="calendar-month" aria-label="{{ '按可入住日期浏览' if lang == 'zh' else 'Browse move-in dates' }}">
+  <div class="calendar-month-nav"><div class="calendar-month-title"><h2>{{ month_label }}</h2></div><nav aria-label="{{ '月份导航' if lang == 'zh' else 'Month navigation' }}">
+    {% if prev_month %}<a data-calendar-nav data-no-transition href="{{ inbox_url(month=prev_month,date=None,undated=None,selected=None) }}" aria-label="{{ '上一月' if lang == 'zh' else 'Previous month' }}">‹</a>{% endif %}
+    <a class="calendar-today" href="{{ inbox_url(month=today_month,date=today_date,undated=None,selected=None) }}">{{ '本月' if lang == 'zh' else 'This month' }}</a>
+    {% if next_month %}<a data-calendar-nav data-no-transition href="{{ inbox_url(month=next_month,date=None,undated=None,selected=None) }}" aria-label="{{ '下一月' if lang == 'zh' else 'Next month' }}">›</a>{% endif %}
+  </nav></div>
+  <div class="calendar-grid-scroll"><table class="move-in-calendar"><caption class="sr-only">{{ month_label }} · {{ '可入住日期' if lang == 'zh' else 'Move-in dates' }}</caption><thead><tr>{% for name in weekdays %}<th scope="col">{{ name }}</th>{% endfor %}</tr></thead><tbody>
+  {% for week in weeks %}<tr>{% for day in week %}<td>{% if day %}<a data-calendar-nav data-no-transition href="{{ inbox_url(month=calendar_month,date=day.date,undated=None,selected=None) }}" data-calendar-date="{{ day.date }}" class="calendar-day{% if day.selected %} selected{% endif %}{% if day.today %} today{% endif %}{% if day.count %} has-listings{% endif %}" aria-label="{{ day.label }}"{% if day.selected %} aria-current="date"{% endif %}>
+    <span class="calendar-day-number">{{ day.number }}{% if day.today %}<small>{{ '今天' if lang == 'zh' else 'Today' }}</small>{% endif %}</span>
+    {% if day.count %}<span class="calendar-day-count">{{ day.count }}<span class="calendar-day-unit"> {{ '条房源' if lang == 'zh' else ('listing' if day.count==1 else 'listings') }}</span></span>{% for city in day.cities %}<span class="calendar-day-preview">{{ city }}</span>{% endfor %}{% endif %}
+  </a>{% endif %}</td>{% endfor %}</tr>{% endfor %}
+  </tbody></table></div>
+  <div class="calendar-month-footer"><span>{{ '当前范围' if lang == 'zh' else 'Current scope' }} {{ visible_total }} · {{ '本月' if lang == 'zh' else 'This month' }} {{ month_count }}</span>{% if unknown_count %}<a data-calendar-nav data-no-transition href="{{ inbox_url(month=calendar_month,date=None,undated=1,selected=None) }}"{% if undated %} aria-current="true"{% endif %}>{{ '入住日期未确定' if lang == 'zh' else 'Date unknown' }} <b>{{ unknown_count }}</b> ↗</a>{% endif %}</div>
+  {% if not month_count %}<p class="calendar-month-empty">{{ '本月没有已知可入住日期的匹配房源。可以切换月份，或查看日期未确定的房源。' if lang == 'zh' else 'No matching listings have a known move-in date this month. Browse another month or check undated listings.' }}</p>{% endif %}
+</section>
+<div class="calendar-side">
+  <section id="calendar-agenda" class="calendar-agenda" aria-labelledby="calendar-agenda-title"{% if selected %} hidden{% endif %}>
+    <header class="calendar-agenda-heading"><div><h2 id="calendar-agenda-title">{{ selected_date_label }}</h2><p>{{ items | length }} {{ '条房源' if lang == 'zh' else 'listings' }}{% if not undated %} · {{ '可入住日期' if lang == 'zh' else 'Move-in date' }}{% endif %}</p></div></header>
+    <div class="calendar-agenda-list">{% for item in items %}{% include '_inbox_listing.html' %}{% else %}<div class="calendar-agenda-empty"><h3>{{ ('暂无日期未确定的房源' if undated else '当天没有匹配房源') if lang == 'zh' else ('No undated listings' if undated else 'No matching listings for this date') }}</h3><p>{{ '可以选择其他日期或调整筛选条件。' if lang == 'zh' else 'Choose another date or adjust your filters.' }}</p>{{ filter_action() }}</div>{% endfor %}</div>
+  </section>
+  <aside id="mail-detail" class="mail-detail" aria-label="{{ '房源详情' if lang == 'zh' else 'Listing details' }}"{% if not selected %} hidden{% endif %}>{% if selected %}{% with item=selected %}{% include '_inbox_detail.html' %}{% endwith %}{% endif %}</aside>
+</div>
+</div>
