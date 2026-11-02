@@ -194,30 +194,28 @@ class TestMapAppliesUserFilter:
         src = _code(map_routes.api_map)
         assert "get_map_payload(_current_map_user())" in src, "又变回不传 user 了"
 
-    def test_helper_returns_none_for_admin_and_guest(self, app_ctx):
+    def test_helper_returns_none_for_admin_and_guest(self, test_app):
         """admin / guest 没有 UserConfig，必须是 None（= 不额外筛），不是抛。"""
         from flask import session
 
         from app.routes.map_routes import _current_map_user
-        from web import app
 
         for role in ("admin", "guest"):
-            with app.test_request_context("/api/map"):
+            with test_app.test_request_context("/api/map"):
                 session["authenticated"] = True
                 session["role"] = role
                 assert _current_map_user() is None
 
-    def test_helper_rejects_instead_of_widening_scope(self, app_ctx, monkeypatch):
+    def test_helper_rejects_instead_of_widening_scope(self, test_app, monkeypatch):
         """读取个人条件失败时返回服务不可用，不能改为展示全量房源。"""
         import users
         from flask import session
 
         from app.routes.map_routes import _current_map_user
-        from web import app
 
         monkeypatch.setattr(users, "load_users",
                             lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-        with app.test_request_context("/api/map"):
+        with test_app.test_request_context("/api/map"):
             session["authenticated"] = True
             session["role"] = "user"
             session["user_id"] = "u1"
