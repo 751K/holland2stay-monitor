@@ -26,7 +26,7 @@ Without written permission, you may not use FlatRadar or any part of it for comm
 
 To use certain features, you may need to create a FlatRadar account.
 
-Your FlatRadar account data is stored on FlatRadar servers so that we can provide account-based features such as saved filters, alerts, favorites, notification preferences, and account management.
+Your FlatRadar account data is stored on FlatRadar servers so that we can provide account-based features such as saved filters, alerts, listing read status, notification preferences, and account management.
 
 FlatRadar account passwords are protected using server-side security measures. Passwords are not stored in plain text. Password authentication data is stored using bcrypt hashing.
 

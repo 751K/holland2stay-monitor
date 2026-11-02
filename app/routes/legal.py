@@ -15,7 +15,7 @@
 """
 from __future__ import annotations
 
-from flask import Flask, Response, render_template
+from flask import Flask, render_template
 
 from app.i18n import get_lang
 from app.legal import get_legal
@@ -117,23 +117,22 @@ _GUIDE_META = {
 def guide_page():
     """用户指南——公开，无需登录。
 
-    docs/guide*.html 是**独立的静态文件**，不走 Jinja 继承，所以拿不到
-    templates/_social_meta.html 那一份分享卡片与 canonical。它却同样在 sitemap
-    里，也同样会被贴进聊天窗口，缺了就和其它公开页不一致。
-
-    这里的做法是把那个 partial 单独渲染出来，字符串注入到 ``</head>`` 之前——
-    **不是**把整份文档交给 Jinja 渲染：指南正文里出现 ``{{`` 或 ``{%`` 的话会被
-    当成模板语法，轻则报错重则被静默吃掉。
+    和帮助、条款同一套公共外壳（templates/guide.html 继承 _public_base.html）。
+    正文仍在 docs/guide*.html，作为字符串原样插入，**不**交给 Jinja 求值：
+    指南里出现 ``{{`` 或 ``{%`` 的话，当模板渲染轻则报错重则被静默吃掉。
     """
     from config import BASE_DIR
     lang = get_lang()
     filename = "guide_cn.html" if lang == "zh" else "guide.html"
-    html = (BASE_DIR / "docs" / filename).read_text(encoding="utf-8")
-
-    title, desc = _GUIDE_META["zh" if lang == "zh" else "en"]
-    meta = render_template("_social_meta.html", social_title=title, social_desc=desc)
-    html = html.replace("</head>", f"{meta}\n</head>", 1)
-    return Response(html, mimetype="text/html")
+    body = (BASE_DIR / "docs" / filename).read_text(encoding="utf-8")
+    _, desc = _GUIDE_META["zh" if lang == "zh" else "en"]
+    return render_template(
+        "guide.html",
+        lang=lang,
+        page_title="使用指南" if lang == "zh" else "User Guide",
+        social_desc=desc,
+        guide_body=body,
+    )
 
 
 def register(app: Flask) -> None:

@@ -1,0 +1,7 @@
+{% extends "_public_base.html" %}
+{# 使用指南。正文在 docs/guide*.html，由 legal.guide_page 读成字符串传进来，
+   这里原样输出、不经模板求值——正文里出现 {{ 或 {% 也不会被吃掉。 #}
+{% set zh = lang == 'zh' %}
+{% block content %}
+<article class="guide">{{ guide_body | safe }}</article>
+{% endblock %}

@@ -369,7 +369,7 @@ class TestLlmsTxt:
 
 
 class TestGuideInjection:
-    """/guide 是 docs/ 下的静态文件，卡片是字符串注进去的。"""
+    """/guide 用公共页外壳，正文是 docs/guide*.html 原样插入的字符串。"""
 
     def test_meta_lands_inside_the_head(self, pub):
         body = pub.get("/guide").get_data(as_text=True)
@@ -390,8 +390,7 @@ class TestGuideInjection:
         from config import BASE_DIR
         raw = (BASE_DIR / "docs" / "guide.html").read_text(encoding="utf-8")
         body = pub.get("/guide", headers={"Accept-Language": "en-US"}).get_data(as_text=True)
-        marker = raw[raw.index("</head>") + len("</head>"):]
-        assert marker in body, "指南正文被改写了"
+        assert raw in body, "指南正文被改写了"
 
     def test_language_picks_the_right_file(self, pub):
         zh = pub.get("/guide", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)

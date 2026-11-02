@@ -1,395 +1,201 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FlatRadar — 使用指南</title>
-<link href="/static/vendor/inter/inter.css" rel="stylesheet">
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--text2:#6b7280;--border:#e5e7eb;
-  --accent:#5e6ad2;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;
-  color-scheme:light
-}
-body{font-family:Inter,-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
-.container{max-width:820px;margin:0 auto;padding:48px 24px 80px}
-h1{font-size:32px;font-weight:700;letter-spacing:-0.5px;margin-bottom:6px}
-h2{font-size:22px;font-weight:600;margin:48px 0 16px;padding-bottom:8px;border-bottom:2px solid var(--border)}
-h3{font-size:17px;font-weight:600;margin:28px 0 10px}
-p{margin:10px 0;color:var(--text2)}
-.subtitle{color:var(--text2);font-size:16px;margin-bottom:32px}
-.card{background:var(--surface);border-radius:12px;padding:24px 28px;margin:16px 0;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.card h3{margin-top:0}
-pre{background:#1e1e2e;color:#cdd6f4;padding:14px 18px;border-radius:8px;font-size:13px;overflow-x:auto;margin:12px 0}
-code{font-family:"SF Mono",Menlo,Monaco,monospace;font-size:13px}
-:not(pre)>code{background:#f0f0f3;padding:2px 6px;border-radius:4px;font-size:12px}
-ul,ol{margin:8px 0;padding-left:22px;color:var(--text2)}
-li{margin:4px 0}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
-.badge-green{background:#d1fae5;color:#065f46}
-.badge-amber{background:#fef3c7;color:#92400e}
-.badge-blue{background:#dbeafe;color:#1e40af}
-.step{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:600;margin-right:8px;flex-shrink:0}
-.tip{background:#eef2ff;border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px}
-.tip strong{color:var(--text)}
-.tip.warn{background:#fefce8;border-left:3px solid var(--warning)}
-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
-th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
-th{font-weight:600;color:var(--text);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
-td{color:var(--text2)}
-.nav{position:sticky;top:0;background:var(--bg);padding:12px 0;margin-bottom:24px;border-bottom:1px solid var(--border);z-index:10;display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
-</style>
-</head>
-<body>
-<div class="container">
+<!--
+  FlatRadar 使用指南（中文）。由 app/routes/legal.py 在 /guide 用公共页外壳
+  （templates/guide.html）显示。本文件只放正文：原样插入页面，不经过模板渲染，
+  所以写什么都可以。英文版是 guide.html，两份要一起改。
+-->
+<p class="public-lead">FlatRadar 监控荷兰七个租房平台，把符合你条件的新房源推送给你，还能替你预订 Holland2Stay 的房子、在 Plaza 自动提交申请。</p>
 
-<nav class="nav">
-  <a href="#start">快速开始</a>
-  <a href="#platforms">支持平台</a>
-  <a href="#panel">Web 面板</a>
-  <a href="#notifications">通知推送</a>
+<nav class="guide-nav" aria-label="本页目录">
+  <a href="#start">开始使用</a>
+  <a href="#platforms">支持的平台</a>
+  <a href="#inbox">房源收件箱</a>
+  <a href="#notifications">通知</a>
+  <a href="#filters">筛选条件</a>
   <a href="#autobook">自动预订</a>
-  <a href="#filters">过滤条件</a>
-  <a href="#settings">全局设置</a>
+  <a href="#admin">管理后台</a>
   <a href="#tips">常见问题</a>
 </nav>
 
-<h1>FlatRadar — 使用指南</h1>
-<p class="subtitle">跨平台监控七个平台的房源并实时通知，支持 Holland2Stay 自动预订和 Plaza 自动应征。</p>
+<h2 id="start">开始使用</h2>
 
-<!-- ─────────── -->
-<h2 id="start">快速开始</h2>
+<h3>直接用 flatradar.app</h3>
+<p>打开 <a href="https://flatradar.app">flatradar.app</a>，不注册也能浏览全部房源。想收到提醒，点<strong>登录 / 注册</strong>：未注册的用户名会自动创建账户。注册后会进入<strong>账号设置</strong>，在那里设好筛选条件和接收方式。</p>
 
-<div class="card">
-<h3><span class="step">1</span> Docker（推荐，适合 VPS）</h3>
-<pre>cp .env.example .env && mkdir -p data logs logs/caddy
-# 编辑 Caddyfile，将 your.domain.com 替换为实际域名
-# 编辑 .env，设置 WEB_PASSWORD、PUBLIC_BASE_URL 和 SESSION_COOKIE_SECURE=true
+<h3>iOS 与 Android App</h3>
+<p><strong>iOS：</strong><a href="https://apps.apple.com/us/app/flarradar/id6769857080">App Store</a>。<strong>Android：</strong><a href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk">下载 .apk</a>。用同一个账号登录并允许通知，就能收到推送，不需要其他设置。</p>
+
+<h3>自己部署一份</h3>
+<p>FlatRadar 仅限个人、非商业使用。自己部署的版本会在名称后显示<strong>自部署版本</strong>，运行与后果由部署者负责。</p>
+<p><strong>Docker</strong>（推荐，适合 VPS）：</p>
+<pre>cp .env.example .env &amp;&amp; mkdir -p data logs logs/caddy
+# Caddyfile：把 your.domain.com 换成你的域名
+# .env：设置 WEB_PASSWORD、PUBLIC_BASE_URL 和 SESSION_COOKIE_SECURE=true
 docker compose up -d</pre>
-<p>在浏览器中访问 <code>https://your.domain.com</code>，登录后于仪表盘点击<strong>启动监控</strong>。登录用户名默认为 <code>admin</code>。</p>
-<p>完整部署步骤与邮件、代理等配置见<a href="https://github.com/751K/holland2stay-monitor">项目文档</a>。</p>
-<p>若暂无域名，可先在本机试运行：<code>docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s</code>，随后访问 <code>http://127.0.0.1:8088</code>。该方式不启用 HTTPS 与登录鉴权，仅限本机使用。</p>
-</div>
-
-<div class="card">
-<h3><span class="step">2</span> macOS</h3>
-<p>自 <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> 下载最新的 <code>.dmg</code>，拖入 Applications 目录后双击启动。</p>
-</div>
-
-<div class="card">
-<h3><span class="step">3</span> Windows</h3>
-<p>自 <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> 下载最新的 <code>.zip</code>，解压后双击 <code>flatradar.exe</code> 运行。</p>
-</div>
-
-<div class="card">
-<h3><span class="step">4</span> iOS / Android App</h3>
-<p><strong>iOS：</strong><a href="https://apps.apple.com/us/app/flarradar/id6769857080">在 App Store 下载</a>，为原生 SwiftUI 客户端。</p>
-<p><strong>Android：</strong><a href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk">下载 Android App</a>（<code>.apk</code>），为 Kotlin + Compose 客户端，采用 FCM 推送。</p>
-</div>
-
-<div class="card">
-<h3><span class="step">5</span> 从源码运行</h3>
+<p>打开 <code>https://your.domain.com</code>，用 <code>admin</code> 登录，到<strong>管理后台 → 系统信息</strong>点<strong>启动监控</strong>。部署、邮件与代理设置见<a href="https://github.com/751K/holland2stay-monitor">项目文档</a>。</p>
+<p>没有域名、只想在本机试用：运行 <code>docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s</code>，然后打开 <code>http://127.0.0.1:8088</code>。这种模式没有 HTTPS 和登录，只能在自己电脑上用。</p>
+<p><strong>macOS / Windows：</strong>从 <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> 下载 <code>.dmg</code> 或 <code>.zip</code> 运行，浏览器会自动打开。</p>
+<p><strong>从源码运行：</strong></p>
 <pre>pip install -r requirements.txt
 python -m cloakbrowser install
 cp .env.example .env
-python web.py      # 面板
-python monitor.py  # 抓取循环，需另开终端</pre>
-<p>在浏览器中访问 <a href="http://127.0.0.1:8088">http://127.0.0.1:8088</a>。<code>web.py</code> 与 <code>monitor.py</code> 是两个互相独立的进程，仅运行前者将得到一个不会更新数据的面板。</p>
-</div>
+python web.py      # 网页面板
+python monitor.py  # 监控循环，另开一个终端</pre>
+<p>面板和监控是两个独立进程，只开面板不会抓取房源。</p>
 
-<!-- ─────────── -->
-<h2 id="platforms">支持平台</h2>
-
-<p>FlatRadar 支持以下七个平台，房源上的<strong>平台标签</strong>标识其来源。各平台的实际覆盖范围以设置和平台数据为准。</p>
-
+<h2 id="platforms">支持的平台</h2>
+<p>每条房源都会标出来自哪个平台。实际覆盖范围取决于你所用站点的设置，以及各平台公开的数据。</p>
+<div class="guide-table">
 <table>
-  <tr><th>平台</th><th>覆盖范围</th><th>数据粒度</th><th>自动预订</th></tr>
-  <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>可配置的荷兰城市</td><td>单元级（具体房号、租金、面积）</td><td>自动预订，需手动付款</td></tr>
-  <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam（Diemen 与 South-East）</td><td>单元级（#6045、面积、楼层、朝向）</td><td>❌ 仅通知</td></tr>
-  <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen（1 栋）</td><td>单元级（同 OurDomain）</td><td>❌ 仅通知</td></tr>
-  <tr><td><strong>Xior</strong> (XR)</td><td>荷兰 30 栋楼，分布于 14 个城市</td><td>单元级（M1.30.53、面积、租金、押金）</td><td>❌ 仅通知</td></tr>
-  <tr><td><strong>Magis</strong> (MG)</td><td>5 个城市共 17 栋楼，Eindhoven 占 9 栋</td><td>单元级（租金、面积、楼层、能耗标签）</td><td>❌ 仅通知</td></tr>
-  <tr><td><strong>Student Experience</strong> (SE)</td><td>Amsterdam 与 Leiden</td><td>户型级（起价与面积范围）</td><td>仅通知</td></tr>
-  <tr><td><strong>Plaza</strong> (PZ)</td><td>荷兰多个城市</td><td>房源级（租金、面积、楼层）</td><td>自动应征，默认关闭</td></tr>
+  <thead><tr><th>平台</th><th>覆盖范围</th><th>数据粒度</th><th>预订</th></tr></thead>
+  <tbody>
+  <tr><td><strong>Holland2Stay</strong></td><td>可选的荷兰城市</td><td>单套：房号、租金、面积</td><td>自动预订，付款需本人完成</td></tr>
+  <tr><td><strong>OurDomain</strong></td><td>阿姆斯特丹（Diemen、South-East）</td><td>单套：房号、面积、楼层、朝向</td><td>仅通知</td></tr>
+  <tr><td><strong>OurCampus</strong></td><td>阿姆斯特丹 Diemen（一栋楼）</td><td>单套，同 OurDomain</td><td>仅通知</td></tr>
+  <tr><td><strong>Xior</strong></td><td>14 个城市的 30 栋楼</td><td>单套：房号、面积、租金、押金</td><td>仅通知</td></tr>
+  <tr><td><strong>Magis</strong></td><td>5 个城市的 17 栋楼，其中 9 栋在埃因霍温</td><td>单套：租金、面积、楼层、能耗标签</td><td>仅通知</td></tr>
+  <tr><td><strong>Student Experience</strong></td><td>阿姆斯特丹和莱顿</td><td>房型：起始租金、面积范围</td><td>仅通知</td></tr>
+  <tr><td><strong>Plaza</strong></td><td>荷兰多个城市</td><td>房源：租金、面积、楼层</td><td>自动申请，默认关闭</td></tr>
+  </tbody>
 </table>
-
-<div class="tip">
-<strong>提示：</strong>在<strong>设置 → 平台</strong>中启用或禁用平台，在<strong>设置 → 城市</strong>中选择需监控的城市或楼盘。
 </div>
 
-<!-- ─────────── -->
-<h2 id="panel">Web 面板概览</h2>
+<h2 id="inbox">房源收件箱</h2>
+<p>首页是一个房源收件箱：左边是侧栏，中间是房源列表，右边是选中房源的详情。手机上点左上角的菜单按钮打开侧栏。</p>
+<ul>
+  <li><strong>我的匹配 / 全部房源</strong>：侧栏顶部的切换。「我的匹配」按你保存的筛选条件显示；「全部房源」显示所有房源，其中符合你条件的会带<strong>匹配</strong>标记。</li>
+  <li><strong>可预订</strong>、<strong>未读房源</strong>和各<strong>平台</strong>用来缩小列表。打开一条房源就会标为已读。</li>
+  <li><strong>搜索</strong>会查房源名、城市和平台。标题旁的<strong>调整筛选</strong>会带你去改筛选条件（没登录时则是临时筛选）。</li>
+  <li>详情里有价格、状态、房屋信息和<strong>原网页</strong>链接。行动前请以平台页面为准。</li>
+</ul>
+<p>带<strong>系统推测</strong>标记的状态是 FlatRadar 推算的，不是平台给的。房源从完整检查过的列表里消失后，默认 30 分钟推测为「已预留」，2 小时推测为「已入住」。抓取不完整时不会做这种推测；房源重新出现，标记就会消失。</p>
 
-<p>Web 面板是系统的控制中心，全部功能均可自左侧栏进入。</p>
+<h3>列表、日历和地图</h3>
+<p>列表上方的三个标签用三种方式看同一批房源。<strong>日历</strong>按入住日期排；入住日期未定的房源单独列出。<strong>地图</strong>上单套房源显示价格，同一栋楼有多套时显示数量，点标记即可查看。地图只显示近期还能看到的房源（默认 14 天），也可以切换到全部记录。坐标由监控自动解析，新房源通常半小时内出现在地图上。</p>
 
-<div class="card">
-<h3>仪表盘</h3>
-<p>提供总览信息：数据库中的房源总数、当日新增、当日变更与最近一次抓取时间，并列出最新房源及近 48 小时内的状态变更。房源带有来源平台标签。</p>
-<p>点击<strong>启动监控</strong>即开始抓取，运行期间状态圆点显示为绿色。</p>
-</div>
-
-<div class="card">
-<h3>房源列表</h3>
-<p>用于浏览数据库中的全部房源，支持按<strong>状态</strong>、<strong>城市</strong>、<strong>平台</strong>、<strong>户型</strong>、<strong>最高租金</strong>、<strong>最小面积</strong>、<strong>合同类型</strong>、<strong>能耗等级</strong>等条件筛选。点击房源名称即跳转至源平台的详情页。</p>
-<p>状态旁的<strong>「推测」</strong>标记表示状态由系统推断，而非平台上报。对于从已完整检查的房源列表中消失的房源，默认分别在消失 30 分钟和 2 小时后推断为 <strong>Reserved</strong> 和 <strong>Occupied</strong>；阈值可配置，抓取不完整时不会据此推断。房源重新出现时标记会清除。<strong>做出决定前请以平台页面为准。</strong></p>
-</div>
-
-<div class="card">
-<h3>地图</h3>
-<p>地图使用 Google Maps，与房源列表共用筛选条件、平台分组和搜索范围。单套房源显示价格，同一位置的多套房源显示数量；点击标记可在右侧查看房源和完整详情，未定位的房源单独列出。地图默认显示近期记录，也可切换至全部记录。底图需配置 <code>GOOGLE_MAPS_API_KEY</code>；未配置或加载失败时，右侧列表和详情仍可使用。</p>
-<p>地图<strong>只显示近期还被抓到过的房源</strong>，默认十四天，可在「设置」页的
-「地图显示范围」里改，填 0 显示全部。已入住是状态收敛的终态，那些记录会长期留在
-数据库里；不加这道限制，几个月前就从平台上撤下的单元仍然会钉在图上。</p>
-<p>坐标由监控进程<strong>自动解析并缓存</strong>，无需手动操作；新抓到的房源通常在半小时内出现在图上。
-管理员也可以在地图页手动触发一次，用于排查。</p>
-</div>
-
-<div class="card">
-<h3>日历</h3>
-<p>按月份显示入住日期，可按城市与平台筛选。</p>
-</div>
-
-<div class="card">
 <h3>统计</h3>
-<p>可在 7 / 30 / 90 天之间切换，展示新增趋势、变更趋势，以及城市、状态、平台分布、租金分布与上线时段分布。</p>
-</div>
+<p>最近 7、30、90 天的图表：新增房源、状态变化、城市、平台、状态和租金分布。统计范围跟着侧栏走：「我的匹配」只统计你的匹配，「全部房源」统计全部。</p>
 
-<!-- ─────────── -->
-<h2 id="notifications">通知推送</h2>
+<h2 id="notifications">通知</h2>
+<p>进入<strong>账号设置 → 通知</strong>。最上面的<strong>通知开关</strong>管所有渠道，包括 App 推送：关掉之后什么都不会发。然后至少开一种接收方式。</p>
 
-<p>进入<strong>用户管理</strong>，点击目标用户，选择<strong>通知渠道</strong>。</p>
+<h3>App 推送</h3>
+<p>在 iOS 或 Android App 里用你的账号登录并允许通知，就完成了；App 还会顺便把通知开关打开。推送跟随手机语言显示中文或英文。</p>
 
-<div class="card">
-<h3>Telegram <span class="badge badge-blue">跨平台</span></h3>
-<ol>
-  <li>在 <a href="https://t.me/BotFather">@BotFather</a> 处创建 bot，复制其 token</li>
-  <li>向该 bot 发送一条任意消息</li>
-  <li>访问 <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> 以获取 Chat ID</li>
-  <li>将 <strong>Bot Token</strong> 与 <strong>Chat ID</strong> 填入面板</li>
+<h3>Telegram</h3>
+<ol class="guide-steps">
+  <li>找 <a href="https://t.me/BotFather">@BotFather</a> 创建一个机器人，复制它的 token。</li>
+  <li>给你的新机器人发一条任意消息。</li>
+  <li>打开 <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>，找到你的 chat ID。</li>
+  <li>在 Telegram 一项里填入 token 和 chat ID。</li>
 </ol>
-</div>
 
-<div class="card">
-<h3>Email <span class="badge badge-blue">跨平台</span></h3>
-<p>有两种方式，<strong>默认是第一种</strong>。</p>
-<p><strong>一、由服务代发（默认）。</strong>只填收件邮箱即可，不需要 SMTP 服务器。
-填好后会收到一封确认邮件，<strong>点击其中的链接完成验证</strong>之后才会开始投递——
-这道确认用于防止把别人的邮箱填进来。验证状态在用户配置页可以看到，也可以重发确认邮件。</p>
-<p>自部署时，管理员须先配置共享邮件服务和公开访问地址；未配置时可使用自建 SMTP。</p>
-<p><strong>二、自建 SMTP。</strong>把邮件模式改为自定义，再填服务器信息。常见服务商如下：</p>
+<h3>邮件</h3>
+<p><strong>由 FlatRadar 发信</strong>（默认）：填写邮箱，点确认邮件里的链接。确认之前不会投递，这样别人没法替你订阅。自部署的站点需要管理员先配置共用的发信服务，否则请用自己的 SMTP 服务器。</p>
+<p><strong>自己的 SMTP 服务器</strong>（管理员）：把邮件模式切换为自定义，填写服务器信息。开了两步验证的邮箱要用应用专用密码。</p>
+<div class="guide-table">
 <table>
-  <tr><th>服务商</th><th>SMTP 地址</th><th>端口</th><th>加密</th></tr>
-  <tr><td>Gmail</td><td>smtp.gmail.com</td><td>587</td><td>STARTTLS</td></tr>
-  <tr><td>Outlook</td><td>smtp.office365.com</td><td>587</td><td>STARTTLS</td></tr>
+  <thead><tr><th>服务商</th><th>SMTP 主机</th><th>端口</th><th>加密</th></tr></thead>
+  <tbody>
+  <tr><td>Gmail</td><td><code>smtp.gmail.com</code></td><td>587</td><td>STARTTLS</td></tr>
+  <tr><td>Outlook</td><td><code>smtp.office365.com</code></td><td>587</td><td>STARTTLS</td></tr>
+  </tbody>
 </table>
-<p>账号已开启两步验证时，须使用<strong>应用专用密码</strong>。自建 SMTP 不需要邮箱验证，
-投递结果由你自己的服务器负责。</p>
 </div>
 
-<div class="card">
-<h3>iMessage <span class="badge badge-green">仅 macOS</span></h3>
-<p>填入收件人手机号（如 <code>+31612345678</code>）或 Apple ID 邮箱。该渠道仅在 macOS 上、且 Messages.app 已登录时可用。</p>
+<h3>WhatsApp 与 iMessage</h3>
+<p><strong>WhatsApp</strong> 通过付费的 Twilio 账号发送：需要 Account SID、Auth Token 和 <code>whatsapp:+…</code> 号码。<strong>iMessage</strong> 只在 FlatRadar 本身运行在已登录「信息」的 Mac 上时可用。</p>
+
+<p class="guide-note">点<strong>发送测试通知</strong>检查每个渠道，包括 App 推送，结果会逐个列出。账号收不到任何通知时，账号设置页会显示一张清单，指出缺的是哪一步。</p>
+
+<h2 id="filters">筛选条件</h2>
+<p>进入<strong>账号设置 → 房源条件</strong>。收件箱和通知用的是同一套条件。所有条件同时满足才算匹配；留空表示不限。</p>
+<div class="guide-table">
+<table>
+  <thead><tr><th>条件</th><th>示例</th><th>适用平台</th></tr></thead>
+  <tbody>
+  <tr><td>最高租金</td><td>€1200</td><td>全部（见下方「各平台的租金口径」）</td></tr>
+  <tr><td>最小面积</td><td>25 m²</td><td>全部</td></tr>
+  <tr><td>最低楼层</td><td>1</td><td>Holland2Stay、OurDomain、OurCampus、Magis、Plaza</td></tr>
+  <tr><td>城市</td><td>Eindhoven、Amsterdam</td><td>全部</td></tr>
+  <tr><td>平台</td><td>Holland2Stay、Xior</td><td>全部</td></tr>
+  <tr><td>租客资格</td><td>仅限学生</td><td>除 Magis 外</td></tr>
+  <tr><td>房型</td><td>Studio</td><td>除 Xior 外</td></tr>
+  <tr><td>入住人数</td><td>单人</td><td>Holland2Stay、OurDomain、OurCampus</td></tr>
+  <tr><td>装修</td><td>带家具</td><td>Holland2Stay、OurDomain、Xior、Magis</td></tr>
+  <tr><td>合同</td><td>无固定期限</td><td>仅 Holland2Stay</td></tr>
+  <tr><td>最低能耗标签</td><td>B</td><td>Holland2Stay、Magis</td></tr>
+  <tr><td>片区、楼盘</td><td>Centrum</td><td>跟随所选城市</td></tr>
+  <tr><td>房源类型</td><td>出租</td><td>仅 Holland2Stay</td></tr>
+  </tbody>
+</table>
 </div>
+<p>平台不提供某个字段时，这条条件对该平台整体跳过，而不是把它的房源全部过滤掉。所以「最低能耗标签：B」并不代表你收到的都是 B 级：Xior、OurDomain 和 OurCampus 的房源根本没经过这一关。账号设置里每条条件旁都标着同样的适用范围。</p>
 
-<div class="card">
-<h3>WhatsApp <span class="badge badge-amber">Twilio 付费</span></h3>
-<p>需具备 Twilio 账号，并填入 Account SID、Auth Token 及 <code>whatsapp:+...</code> 格式的号码。</p>
+<h3>各平台的租金口径</h3>
+<div class="guide-table">
+<table>
+  <thead><tr><th>平台</th><th>显示的价格</th></tr></thead>
+  <tbody>
+  <tr><td>Holland2Stay</td><td>全包：含服务费和水电预付</td></tr>
+  <tr><td>Xior</td><td>全包：基础租金加该楼每月预付费用</td></tr>
+  <tr><td>Magis</td><td>全包：基础租金加每条房源标出的服务费</td></tr>
+  <tr><td>OurDomain、OurCampus</td><td>基础租金，服务费另计</td></tr>
+  <tr><td>Plaza</td><td>平台给出的总租金；有净租金时另行显示</td></tr>
+  <tr><td>Student Experience</td><td>房型的起始价格</td></tr>
+  </tbody>
+</table>
 </div>
+<p>OurDomain 和 OurCampus 不说明哪一套对应哪档服务费，算不出全包价。它们的房源会在价格下方注明该楼的服务费区间，通知里也带同样的说明。给这两个平台设最高租金时请留出余量，或者用平台条件把它们分开。</p>
 
-<div class="card">
-<h3>iOS 推送通知</h3>
-<p>使用 <a href="https://apps.apple.com/us/app/flarradar/id6769857080">FlatRadar iOS App</a> 时，APNs 推送自动发送，并按设备语言在中英文之间自动选择。</p>
-</div>
+<h2 id="autobook">自动预订与申请</h2>
+<p>由管理员在<strong>管理后台 → 用户 → 选中用户 → 自动预订</strong>里按用户设置。前提是通知已开启且至少有一种可用的接收方式。预订条件与通知条件相互独立。</p>
+<h3>Holland2Stay</h3>
+<p>符合条件的房源变为「可预订」时，FlatRadar 会登录该用户的 Holland2Stay 账号、预订房子、提交订单，并立刻把付款链接发过去。<strong>它不会付款</strong>：付款需要本人通过那个链接完成。</p>
+<p>结果不确定时，该账号的自动预订会暂停。请到 Holland2Stay 查看订单，按需付款或取消，然后在用户设置里点<strong>已核实，恢复自动预订</strong>。</p>
+<h3>Plaza</h3>
+<p>FlatRadar 可以为符合条件的 Plaza 房源提交申请。填写 Plaza 用户名和密码，并打开默认关闭的自动申请开关。申请提交后立即生效。结果不确定时只暂停这个账号的这一条房源，到 Plaza 核对后点<strong>已核实，恢复该房源应征</strong>即可。</p>
+<h3>申请人档案</h3>
+<p>Xior 和 OurDomain 共用一份申请人档案（姓名、国籍、住址、学业、背景调查和证件）。每组都会显示还缺几项必填。背景调查必须由本人如实回答。</p>
+<p class="guide-note"><strong>先用试运行。</strong>它会在提交前检查部分步骤，但不会真的下单或申请，也不保证真实提交一定成功。确认没问题、准备好真实下单时再关掉。</p>
 
-<div class="card">
-<h3>Android 推送通知</h3>
-<p>使用 <a href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk">FlatRadar Android App</a> 时，FCM 推送自动发送，同样支持中英双语。</p>
-</div>
-
-<div class="card">
-<h3>设备推送与「通知开关」的关系</h3>
-<p>用户配置里那个<strong>通知开关</strong>管住全部渠道，<strong>设备推送也在内</strong>。关掉它，
-手机就不再收到推送。</p>
-<p>在 App 里授权推送权限并登录，会<strong>自动打开这个开关</strong>——在手机上同意接收，就是同意接收，
-不必再去面板点一次。此后你在面板上关掉它，才是真的关掉。</p>
-</div>
-
-<div class="tip">
-<strong>提示：</strong>点击<strong>发送测试通知</strong>可对各渠道逐一验证，设备推送也在测试范围内。
-面板首页会在「你当前收不到任何通知」时给出一张清单，指明缺的是哪一步。
-</div>
-
-<!-- ─────────── -->
-<h2 id="autobook">自动预订与应征</h2>
-
-<p>进入<strong>用户管理</strong>，点击目标用户，选择<strong>自动预订</strong>。</p>
-<p>自动预订需要启用用户通知，并至少有一种可用的接收方式。预订过滤条件独立于通知过滤条件；空条件表示不限制。</p>
-
-<div class="card">
-<h3>工作流程</h3>
-<p>当 Holland2Stay 房源转为<strong>可预订</strong>且满足所设条件时，系统依次执行：</p>
-<ol>
-  <li>登录 Holland2Stay 账号</li>
-  <li>创建购物车并提交占房请求</li>
-  <li>提交订单（<code>placeOrder</code>）</li>
-  <li>生成直达付款的 URL（<code>idealCheckOut</code>）</li>
-  <li>即时发送付款链接</li>
-</ol>
-<p><strong>系统不会自动完成付款</strong>，收到链接后须自行支付。</p>
-<p>如果预订结果不明确，该 Holland2Stay 账号的自动预订会暂停。请先登录 Holland2Stay 核实订单或预留、按需付款或取消，再在用户设置中点击<strong>已核实，恢复自动预订</strong>。后台任务仍在运行时无法解除保护；如已卡住，请先停止监控。</p>
-<p>Plaza 可自动提交符合条件的应征；需要提供 Plaza 用户名与密码，并单独开启默认关闭的 Plaza 自动应征开关。提交即生效，不保证获得房源。</p>
-<p>如果 Plaza 应征结果不明确，请登录 Plaza 核实“我的应征”，再在用户设置中选择<strong>已核实，恢复该房源应征</strong>。核实前只暂停该账号对该房源的自动应征；其他房源不受影响。后台应征仍在运行时不能解除保护。</p>
-<p>OurDomain、OurCampus、Xior、Magis 与 Student Experience 目前仅通知、不自动预订。</p>
-</div>
-
-<div class="card">
-<h3>配置项</h3>
+<h2 id="admin">管理后台</h2>
+<p>在自己部署的站点上，管理员账号的侧栏里有<strong>管理后台</strong>：</p>
 <ul>
-  <li><strong>启用自动预订</strong>：总开关</li>
-  <li><strong>试运行模式</strong>：建议先行启用，验证提交前的部分步骤，不实际提交订单或应征；通过不代表正式提交一定成功</li>
-  <li><strong>Holland2Stay 账号邮箱与密码</strong></li>
-  <li><strong>Plaza 用户名与密码及自动应征开关</strong>：使用 Plaza 自动应征时配置，开关默认关闭</li>
-  <li><strong>支付方式</strong>：iDEAL（默认）、Visa 或 Mastercard</li>
-  <li><strong>预订过滤条件</strong>：与通知条件分别设置，按自己的预订要求填写</li>
+  <li><strong>用户</strong>：所有账号、它们的渠道和已登录的 App；可以编辑、排序、发测试通知。</li>
+  <li><strong>公告</strong>：给所有开着通知的用户发一条消息。</li>
+  <li><strong>设置</strong>：轮询、高峰时段、平台、城市和楼盘。保存后会请监控重新加载，页面会显示是否已生效、哪些值被环境变量覆盖。</li>
+  <li><strong>客户端管理</strong>：App 会话和推送设备，可以撤销或停用。</li>
+  <li><strong>数据健康</strong>、<strong>日志查看</strong>、<strong>崩溃报告</strong>和<strong>系统信息</strong>：各平台的抓取状况、可搜索分级的日志、App 崩溃报告，以及启动或重启监控。</li>
 </ul>
-</div>
-
-<div class="tip warn">
-<strong>注意：</strong>请在试运行模式下确认流程无误后再将其关闭，以免误提交订单。
-</div>
-
-<!-- ─────────── -->
-<h2 id="filters">通知过滤条件</h2>
-
-<p>进入<strong>用户管理</strong>，点击目标用户，选择<strong>过滤条件</strong>。</p>
-
-<div class="card">
+<div class="guide-table">
 <table>
-  <tr><th>条件</th><th>示例</th><th>适用平台</th><th>说明</th></tr>
-  <tr><td>最高租金</td><td>€1200</td><td>全部</td><td>仅推送不高于 €1200/月的房源。<strong>各平台价格口径不同，见下方</strong></td></tr>
-  <tr><td>最小面积</td><td>25 m²</td><td>全部</td><td>仅推送不小于 25 m² 的房源</td></tr>
-  <tr><td>最低楼层</td><td>1</td><td>Holland2Stay、OurDomain、OurCampus、Magis、Plaza</td><td>排除底层（0 层）</td></tr>
-  <tr><td>城市</td><td>Eindhoven, Amsterdam</td><td>全部</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>平台</td><td>H2S, OD</td><td>全部</td><td>可多选，仅推送所选平台的房源</td></tr>
-  <tr><td>租客要求</td><td>student only</td><td>Magis 除外</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>户型</td><td>Studio, 1</td><td>Xior 除外</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>入住人数</td><td>Single</td><td>Holland2Stay、OurDomain、OurCampus</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>装修类型</td><td>Furnished</td><td>Holland2Stay、OurDomain、Xior、Magis</td><td>可多选，满足任一项即匹配</td></tr>
-  <tr><td>合同类型</td><td>Indefinite</td><td>仅 Holland2Stay</td><td>仅推送长租房源，排除短租</td></tr>
-  <tr><td>最低能耗</td><td>B</td><td>仅 Holland2Stay、Magis</td><td>仅推送不低于该等级的房源</td></tr>
-  <tr><td>街区</td><td>Strijp, Centrum</td><td>仅 Holland2Stay</td><td>可多选，选项随所选城市变化</td></tr>
-  <tr><td>供应形式</td><td>Rent</td><td>仅 Holland2Stay</td><td>可多选，用于区分出租与其他挂牌形式</td></tr>
-</table>
-<p>各项条件须<strong>同时满足</strong>才会推送；留空表示该项不作限制。</p>
-<p>「适用平台」一列很重要：某个平台不提供该字段时，这个条件<strong>对它整体跳过</strong>，
-而不是把它的房源全部排除。也就是说，勾了「最低能耗 B」并不意味着推来的都是 B 级——
-Xior、OurDomain、OurCampus 的房源根本没参与这一关。面板的筛选项旁也标着同样的范围。</p>
-<p>对于支持该条件的平台，个别房源仍可能缺少相应数据；不同字段的缺失处理不同，筛选结果不能替代对平台页面的核实。</p>
-</div>
-
-<div class="card">
-<h3>租金的口径</h3>
-<p>各平台的价格口径不同，设置「最高租金」之前请先看清楚：</p>
-<table>
-  <tr><th>平台</th><th>面板与通知里显示的价格</th></tr>
-  <tr><td>Holland2Stay</td><td><strong>到手价</strong>：含服务费与水电预付</td></tr>
-  <tr><td>Xior</td><td><strong>到手价</strong>：基础租金加上该楼盘登记的月度预付费用</td></tr>
-  <tr><td>OurDomain</td><td><strong>基础租金</strong>，服务费另计</td></tr>
-  <tr><td>OurCampus</td><td><strong>基础租金</strong>，服务费另计</td></tr>
-  <tr><td>Magis</td><td><strong>到手价</strong>：基础租金加上每条房源自己印着的服务费</td></tr>
-  <tr><td>Plaza</td><td>平台上报的<strong>总租金</strong>；有净租金时会另行显示</td></tr>
-  <tr><td>Student Experience</td><td>户型的<strong>起价</strong>，不一定是某一间的实际租金</td></tr>
-</table>
-<p>OurDomain 与 OurCampus 的服务费按户型变化，而上游不提供单元与户型的对应关系，因此无法合成到手价。
-面板上这类房源的价格右上角带一个星号，悬停可看到该楼盘服务费的区间；通知里的租金行
-也会附上同样的说明。</p>
-<div class="tip warn">
-<strong>这对筛选意味着什么：</strong>同一个租金上限，在 Holland2Stay 与 Xior 上过滤的是
-你实际要付的钱，在 OurDomain 与 OurCampus 上过滤的是不含服务费的部分。给后两者留出余量，
-或用平台条件把它们分开处理。
-</div>
-</div>
-
-<!-- ─────────── -->
-<h2 id="settings">全局设置</h2>
-
-<p>进入<strong>设置</strong>页面（仅管理员可见）。</p>
-
-<div class="card">
-<h3>轮询参数</h3>
-<table>
-  <tr><th>参数</th><th>默认值</th><th>说明</th></tr>
-  <tr><td>常规间隔</td><td>300s（5 分钟）</td><td>非高峰时段的轮询间隔</td></tr>
-  <tr><td>高峰上限</td><td>60s</td><td>高峰时段的起始间隔（荷兰时间 08:30–10:00）</td></tr>
-  <tr><td>高峰下限</td><td>15s</td><td>自适应收紧后的最小间隔</td></tr>
-  <tr><td>高峰时段</td><td>08:30–10:00、13:30–15:00</td><td>荷兰时间，仅工作日生效</td></tr>
-  <tr><td>抖动比例</td><td>0.20</td><td>每轮间隔在 ±20% 范围内随机浮动</td></tr>
-  <tr><td>心跳间隔</td><td>60 分钟</td><td>向管理员发送存活通知的间隔；设 0 关闭</td></tr>
-  <tr><td>地图显示范围</td><td>14 天</td><td>地图只显示这么多天内还被抓到过的房源；设 0 显示全部</td></tr>
+  <thead><tr><th>设置</th><th>默认值</th><th>作用</th></tr></thead>
+  <tbody>
+  <tr><td>检查间隔</td><td>300 秒</td><td>高峰时段以外的轮询间隔</td></tr>
+  <tr><td>高峰时段</td><td>08:30–10:00、13:30–15:00</td><td>加快轮询的时段（荷兰时间，工作日）</td></tr>
+  <tr><td>高峰间隔</td><td>60 秒，最低 15 秒</td><td>高峰时段的起始和最低间隔</td></tr>
+  <tr><td>随机抖动</td><td>0.20</td><td>每次间隔 ±20% 随机浮动</td></tr>
+  <tr><td>心跳</td><td>60 分钟</td><td>管理员多久收到一次「仍在运行」的消息；0 为关闭</td></tr>
+  <tr><td>地图时间范围</td><td>14 天</td><td>地图只显示这么多天内见过的房源；0 显示全部</td></tr>
+  </tbody>
 </table>
 </div>
+<p>部署设置、密钥和高级超时仍需重启对应进程。</p>
 
-<div class="card">
-<h3>平台与城市</h3>
-<p>七个平台均可分别启用或禁用，并可选择其城市或楼盘；Xior 的楼盘按城市分组显示。</p>
-<p>保存后会请求监控进程重新加载运行配置；设置页显示是否已应用和是否被覆盖。部署参数、密钥和高级超时配置仍需重启相关进程。</p>
-</div>
-
-<!-- ─────────── -->
 <h2 id="tips">常见问题</h2>
-
-<div class="card">
-<h3>监控显示为「已停止」</h3>
-<p>在仪表盘点击<strong>启动监控</strong>。若仍无法启动，请查阅<strong>日志查看器</strong>或执行 <code>docker compose logs h2s</code>。</p>
-</div>
-
-<div class="card">
-<h3>没有房源出现</h3>
+<h3>看不到房源</h3>
 <ul>
-  <li>确认<strong>设置</strong>中已选择城市或楼盘</li>
-  <li>确认相应<strong>平台</strong>已启用</li>
-  <li>查阅<strong>错误日志</strong>，检查是否存在 403 或网络错误</li>
+  <li>确认监控在运行：<strong>管理后台 → 系统信息</strong>。启动不了就看日志查看，或者 <code>docker compose logs h2s</code>。</li>
+  <li>确认平台已启用、并在<strong>设置</strong>里选了它的城市或楼盘。</li>
+  <li><strong>数据健康</strong>会按平台显示最近一次成功的时间和失败原因。</li>
 </ul>
-</div>
-
-<div class="card">
 <h3>收不到通知</h3>
-<p>先看面板首页。<strong>「你现在收不到通知」的时候那里会出现一张清单</strong>，直接指明缺的是哪一步；
-清单消失就说明这条链路是通的。手动排查按下面的顺序：</p>
+<p>打开<strong>账号设置</strong>。账号收不到任何通知时，那里会有一张清单指出缺的一步；清单消失就说明整条链路是通的。手动排查：</p>
 <ul>
-  <li>该用户<strong>已启用</strong>，且<strong>通知开关是开着的</strong>——这个开关同时管住邮件、
-      Telegram 等外部渠道和手机推送，关着的时候一条都不会发</li>
-  <li>至少有<strong>一条接收方式</strong>：配了有效凭据的外部渠道，<strong>或者</strong>登录着 App 的手机。
-      只用 App 的话，「通知渠道」一栏是空的属于正常</li>
-  <li>用邮件且是默认的代发模式时，确认收件邮箱<strong>已完成验证</strong>——未验证不投递</li>
-  <li>点击<strong>发送测试通知</strong>逐一排查，结果按渠道分别列出，设备推送也在内</li>
+  <li>账号是启用状态，通知开关已打开。</li>
+  <li>至少有一种接收方式：填好信息的渠道，或已登录 App 的手机。</li>
+  <li>用 FlatRadar 发信时，邮箱已经确认。</li>
+  <li><strong>发送测试通知</strong>会逐个渠道列出结果。</li>
 </ul>
-<div class="tip">
-<strong>面板上的通知列表不能用来判断这件事。</strong>那是全站流水，不分用户、不按你的过滤条件
-筛选；里面有内容不代表你配好了。只有上面这条链路通了，才会按你的条件推给你。
-</div>
-</div>
-
-<div class="card">
-<h3>被 Cloudflare 返回 403</h3>
-<ol>
-  <li>查看日志，确认受影响的平台和具体错误；403 不一定都由同一种原因造成</li>
-  <li>检查当前网络和已配置代理是否可用；如果出口被限制，可按部署说明配置代理</li>
-  <li>等待平台冷却后再观察恢复情况，持续失败时检查平台状态和日志</li>
-</ol>
-</div>
-
-<div class="card">
-<h3>房源状态与平台页面不一致</h3>
-<p>先检查状态旁是否带有<strong>「推测」</strong>标记。带该标记的状态由系统依据房源从列表中消失的时长推断得出，并非平台上报，因此可能与平台页面存在出入。做出决定前请以平台页面为准。</p>
-</div>
-
-<div class="tip">
-<strong>实用提示：</strong><strong>日志查看器</strong>（管理员 → 侧栏终端图标）支持在 Monitor Log 与 Errors Log 之间切换，并提供关键词搜索、行号显示与级别着色，是排查问题的首选入口。
-</div>
-
-</div>
-</body>
-</html>
+<h3>被 403 拦截</h3>
+<p>部分平台在 Cloudflare 后面，偶尔会拦截请求。先在日志里看是哪个平台、哪种错误（403 的原因不止一种），检查网络和代理，再给平台一段冷却时间。代理设置见部署文档。</p>

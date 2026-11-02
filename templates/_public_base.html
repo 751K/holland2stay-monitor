@@ -40,6 +40,7 @@
     <nav class="public-tabs" aria-label="{{ '帮助与条款' if zh else 'Help and policies' }}">
       {% for endpoint, title in [
            ('support_page', '帮助与支持' if zh else 'Support'),
+           ('guide_page', '使用指南' if zh else 'Guide'),
            ('privacy_page', '隐私政策' if zh else 'Privacy'),
            ('terms_page', '使用条款' if zh else 'Terms'),
            ('donate_page', '赞助' if zh else 'Donate')] %}

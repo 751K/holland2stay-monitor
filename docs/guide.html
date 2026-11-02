@@ -1,399 +1,202 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FlatRadar — User Guide</title>
-<link href="/static/vendor/inter/inter.css" rel="stylesheet">
-<style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --bg:#f8f9fa;--surface:#fff;--text:#1a1a2e;--text2:#6b7280;--border:#e5e7eb;
-  --accent:#5e6ad2;--success:#10b981;--warning:#f59e0b;--danger:#ef4444;
-  color-scheme:light
-}
-body{font-family:Inter,-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
-.container{max-width:820px;margin:0 auto;padding:48px 24px 80px}
-h1{font-size:32px;font-weight:700;letter-spacing:-0.5px;margin-bottom:6px}
-h2{font-size:22px;font-weight:600;margin:48px 0 16px;padding-bottom:8px;border-bottom:2px solid var(--border)}
-h3{font-size:17px;font-weight:600;margin:28px 0 10px}
-p{margin:10px 0;color:var(--text2)}
-.subtitle{color:var(--text2);font-size:16px;margin-bottom:32px}
-.card{background:var(--surface);border-radius:12px;padding:24px 28px;margin:16px 0;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-.card h3{margin-top:0}
-pre{background:#1e1e2e;color:#cdd6f4;padding:14px 18px;border-radius:8px;font-size:13px;overflow-x:auto;margin:12px 0}
-code{font-family:"SF Mono",Menlo,Monaco,monospace;font-size:13px}
-:not(pre)>code{background:#f0f0f3;padding:2px 6px;border-radius:4px;font-size:12px}
-ul,ol{margin:8px 0;padding-left:22px;color:var(--text2)}
-li{margin:4px 0}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500}
-.badge-green{background:#d1fae5;color:#065f46}
-.badge-amber{background:#fef3c7;color:#92400e}
-.badge-blue{background:#dbeafe;color:#1e40af}
-.step{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:600;margin-right:8px;flex-shrink:0}
-.tip{background:#eef2ff;border-left:3px solid var(--accent);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0;font-size:14px}
-.tip strong{color:var(--text)}
-.tip.warn{background:#fefce8;border-left:3px solid var(--warning)}
-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
-th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--border)}
-th{font-weight:600;color:var(--text);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
-td{color:var(--text2)}
-.nav{position:sticky;top:0;background:var(--bg);padding:12px 0;margin-bottom:24px;border-bottom:1px solid var(--border);z-index:10;display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
-</style>
-</head>
-<body>
-<div class="container">
+<!--
+  FlatRadar user guide (English). Served at /guide by app/routes/legal.py inside the
+  public page shell (templates/guide.html). This file is only the body: it is inserted
+  as-is, never evaluated as a template, so it may contain anything. Chinese version:
+  guide_cn.html — keep the two in step.
+-->
+<p class="public-lead">FlatRadar watches seven Dutch housing platforms, sends you new listings that match your filters, and can book Holland2Stay homes and apply on Plaza for you.</p>
 
-<nav class="nav">
-  <a href="#start">Quick Start</a>
+<nav class="guide-nav" aria-label="On this page">
+  <a href="#start">Getting started</a>
   <a href="#platforms">Platforms</a>
-  <a href="#panel">Web Panel</a>
+  <a href="#inbox">The inbox</a>
   <a href="#notifications">Notifications</a>
-  <a href="#autobook">Auto-Booking</a>
   <a href="#filters">Filters</a>
-  <a href="#settings">Settings</a>
-  <a href="#tips">Tips</a>
+  <a href="#autobook">Auto-booking</a>
+  <a href="#admin">Administration</a>
+  <a href="#tips">Troubleshooting</a>
 </nav>
 
-<h1>FlatRadar — User Guide</h1>
-<p class="subtitle">Monitor listings across seven platforms, with instant notifications, Holland2Stay auto-booking and Plaza automatic applications.</p>
+<h2 id="start">Getting started</h2>
 
-<!-- ─────────────────────────────────────────────── -->
-<h2 id="start">Quick Start</h2>
+<h3>Use flatradar.app</h3>
+<p>Open <a href="https://flatradar.app">flatradar.app</a>. You can browse every listing without an account. To get alerts, choose <strong>Sign in / Register</strong>: a new username creates an account. You land in <strong>Account settings</strong>, where you set your filters and how you want to be notified.</p>
 
-<div class="card">
-<h3><span class="step">1</span> Docker (recommended for VPS)</h3>
-<pre>cp .env.example .env && mkdir -p data logs logs/caddy
-# Edit Caddyfile → replace your.domain.com with your domain
-# Edit .env → set WEB_PASSWORD, PUBLIC_BASE_URL and SESSION_COOKIE_SECURE=true
+<h3>iOS and Android apps</h3>
+<p><strong>iOS:</strong> <a href="https://apps.apple.com/us/app/flarradar/id6769857080">App Store</a>. <strong>Android:</strong> <a href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk">download the .apk</a>. Sign in with the same account and allow notifications; the app receives push alerts without any further setup.</p>
+
+<h3>Run your own copy</h3>
+<p>FlatRadar is free for personal, non-commercial use. A copy you run yourself shows <strong>Self-hosted</strong> next to its name; you are responsible for running it.</p>
+<p><strong>Docker</strong> (recommended for a VPS):</p>
+<pre>cp .env.example .env &amp;&amp; mkdir -p data logs logs/caddy
+# Caddyfile: replace your.domain.com with your domain
+# .env: set WEB_PASSWORD, PUBLIC_BASE_URL and SESSION_COOKIE_SECURE=true
 docker compose up -d</pre>
-<p>Open <code>https://your.domain.com</code>, log in as <code>admin</code> by default, then click <strong>Start monitor</strong> on the Dashboard. See the <a href="https://github.com/751K/holland2stay-monitor">project documentation</a> for deployment, email and proxy settings.</p>
-<p>To try it locally without a domain, run <code>docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s</code> and open <code>http://127.0.0.1:8088</code>. This mode has no HTTPS or login and is for local use only.</p>
-</div>
-
-<div class="card">
-<h3><span class="step">2</span> macOS</h3>
-<p>Download the latest <code>.dmg</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a>, drag to Applications, double-click. The browser opens automatically.</p>
-</div>
-
-<div class="card">
-<h3><span class="step">3</span> Windows</h3>
-<p>Download the latest <code>.zip</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a>, extract and run <code>flatradar.exe</code>.</p>
-</div>
-
-<div class="card">
-<h3><span class="step">4</span> iOS / Android Apps</h3>
-<p><strong>iOS:</strong> <a href="https://apps.apple.com/us/app/flarradar/id6769857080">Download on the App Store</a> — native SwiftUI client.</p>
-<p><strong>Android:</strong> <a href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk">Download Android App</a> (.apk) — Kotlin + Compose client with FCM push.</p>
-</div>
-
-<div class="card">
-<h3><span class="step">5</span> Run from source</h3>
+<p>Open <code>https://your.domain.com</code>, sign in as <code>admin</code>, then go to <strong>Administration → System Info</strong> and choose <strong>Start monitor</strong>. Deployment, email and proxy settings are in the <a href="https://github.com/751K/holland2stay-monitor">project documentation</a>.</p>
+<p>To try it locally without a domain: <code>docker compose -f docker-compose.yml -f docker-compose.local.yml up -d h2s</code>, then open <code>http://127.0.0.1:8088</code>. This mode has no HTTPS or sign-in and is for your own machine only.</p>
+<p><strong>macOS / Windows:</strong> download the <code>.dmg</code> or <code>.zip</code> from <a href="https://github.com/751K/holland2stay-monitor/releases">Releases</a> and run it; the browser opens automatically.</p>
+<p><strong>From source:</strong></p>
 <pre>pip install -r requirements.txt
 python -m cloakbrowser install
 cp .env.example .env
 python web.py      # web panel
 python monitor.py  # monitoring loop, in a separate terminal</pre>
-<p>Open <a href="http://127.0.0.1:8088">http://127.0.0.1:8088</a>. The panel and monitor are separate processes; running only the panel will not fetch listings.</p>
-</div>
+<p>The panel and the monitor are separate processes. Running only the panel will not fetch listings.</p>
 
-<!-- ─────────────────────────────────────────────── -->
-<h2 id="platforms">Supported Platforms</h2>
-
-<p>FlatRadar supports the seven platforms below. Each listing's <strong>Platform</strong> badge shows its source. Actual coverage depends on your settings and the data available from each platform.</p>
-
+<h2 id="platforms">Supported platforms</h2>
+<p>Each listing shows which platform it came from. What is actually covered depends on the settings of the copy you use and on what each platform publishes.</p>
+<div class="guide-table">
 <table>
-  <tr><th>Platform</th><th>Coverage</th><th>Data Level</th><th>Auto-Booking</th></tr>
-  <tr><td><strong>Holland2Stay</strong> (H2S)</td><td>Configurable Dutch cities</td><td>Unit (room number, rent, area)</td><td>Auto-booking; payment is manual</td></tr>
-  <tr><td><strong>OurDomain</strong> (OD)</td><td>Amsterdam (Diemen + South-East)</td><td>Unit (#6045, sqm, floor, view)</td><td>❌ Notify only</td></tr>
-  <tr><td><strong>OurCampus</strong> (OC)</td><td>Amsterdam Diemen (1 building)</td><td>Unit (same as OurDomain)</td><td>❌ Notify only</td></tr>
-  <tr><td><strong>Xior</strong> (XR)</td><td>30 buildings across 14 Dutch cities</td><td>Unit (M1.30.53, sqm, rent, deposit)</td><td>❌ Notify only</td></tr>
-  <tr><td><strong>Magis</strong> (MG)</td><td>17 buildings across 5 cities — 9 in Eindhoven</td><td>Unit (rent, sqm, floor, energy label)</td><td>❌ Notify only</td></tr>
-  <tr><td><strong>Student Experience</strong> (SE)</td><td>Amsterdam and Leiden</td><td>Room type (starting rent and area range)</td><td>Notifications only</td></tr>
-  <tr><td><strong>Plaza</strong> (PZ)</td><td>Several Dutch cities</td><td>Listing (rent, area, floor)</td><td>Automatic applications; off by default</td></tr>
+  <thead><tr><th>Platform</th><th>Coverage</th><th>Detail</th><th>Booking</th></tr></thead>
+  <tbody>
+  <tr><td><strong>Holland2Stay</strong></td><td>Configurable Dutch cities</td><td>Unit: room number, rent, area</td><td>Auto-booking; you pay yourself</td></tr>
+  <tr><td><strong>OurDomain</strong></td><td>Amsterdam (Diemen, South-East)</td><td>Unit: number, area, floor, view</td><td>Notifications only</td></tr>
+  <tr><td><strong>OurCampus</strong></td><td>Amsterdam Diemen (one building)</td><td>Unit, as OurDomain</td><td>Notifications only</td></tr>
+  <tr><td><strong>Xior</strong></td><td>30 buildings in 14 cities</td><td>Unit: number, area, rent, deposit</td><td>Notifications only</td></tr>
+  <tr><td><strong>Magis</strong></td><td>17 buildings in 5 cities, 9 in Eindhoven</td><td>Unit: rent, area, floor, energy label</td><td>Notifications only</td></tr>
+  <tr><td><strong>Student Experience</strong></td><td>Amsterdam and Leiden</td><td>Room type: starting rent, area range</td><td>Notifications only</td></tr>
+  <tr><td><strong>Plaza</strong></td><td>Several Dutch cities</td><td>Listing: rent, area, floor</td><td>Automatic applications, off by default</td></tr>
+  </tbody>
 </table>
-
-<div class="tip">
-<strong>Tip:</strong> Go to <strong>Settings → Platforms</strong> to enable or disable platforms, and <strong>Settings → Cities</strong> to pick which buildings to monitor.
 </div>
 
-<!-- ─────────────────────────────────────────────── -->
-<h2 id="panel">Web Panel Overview</h2>
+<h2 id="inbox">The inbox</h2>
+<p>The home page is a housing inbox: a sidebar on the left, the list in the middle, and the selected listing on the right. On a phone, the menu button at the top left opens the sidebar.</p>
+<ul>
+  <li><strong>My matches / All listings</strong> — the switch at the top of the sidebar. <em>My matches</em> uses your saved filters; <em>All listings</em> shows everything, and listings that match your filters carry a <strong>Match</strong> label.</li>
+  <li><strong>Available to book</strong>, <strong>Unread listings</strong> and one entry per <strong>platform</strong> narrow the list. Opening a listing marks it read.</li>
+  <li><strong>Search</strong> looks in listing names, cities and platforms. <strong>Edit filters</strong> next to the title takes you to your filters (or, when browsing without an account, applies a temporary filter).</li>
+  <li>The detail panel shows the price, status, facts about the home and a link to the <strong>Original listing</strong>. Always check the platform before acting.</li>
+</ul>
+<p>An <strong>Inferred</strong> label means FlatRadar estimated the status instead of reading it from the platform. When a listing disappears from a fully checked feed, it becomes <em>Reserved</em> after 30 minutes and <em>Occupied</em> after 2 hours by default. An incomplete scrape never leads to that inference, and the label clears if the listing comes back.</p>
 
-<p>The web panel is your control center. Everything is accessible from the left sidebar.</p>
+<h3>List, Calendar and Map</h3>
+<p>The tabs above the list show the same listings three ways. <strong>Calendar</strong> places them by move-in date; listings without a confirmed date are listed separately. <strong>Map</strong> shows prices for single homes and counts for buildings with several; choose a marker to see its listings. The map only shows listings still seen recently (14 days by default) and offers an all-records view. Coordinates are worked out by the monitor, so new listings usually appear on the map within half an hour.</p>
 
-<div class="card">
-<h3>Dashboard</h3>
-<p>At-a-glance view: total listings in database, new listings today, status changes today, last scrape time. Shows the newest listings and recent status changes (48h), with a source badge for each listing.</p>
-<p>Click <strong>Start monitor</strong> to begin scraping. The dot turns green when the monitor is running.</p>
-</div>
-
-<div class="card">
-<h3>Listings</h3>
-<p>Browse all listings in the database. Filter by <strong>status</strong>, <strong>city</strong>, <strong>source</strong> (platform), <strong>type</strong>, <strong>max rent</strong>, <strong>min area</strong>, <strong>contract</strong>, <strong>energy</strong>, and more. Click any listing to open its detail page on the source platform.</p>
-<p>An <strong>inferred</strong> badge means the status was estimated by FlatRadar rather than reported by the platform. When a listing disappears from a completely checked feed, it is inferred as <strong>Reserved</strong> after 30 minutes and <strong>Occupied</strong> after 2 hours by default. These thresholds are configurable, and an incomplete scrape does not support that inference. The badge clears if the listing reappears. <strong>Check the platform before acting.</strong></p>
-</div>
-
-<div class="card">
-<h3>Map</h3>
-<p>The Google Maps view shares the listing filters, platform groups and search scope. Individual locations show prices; shared locations show listing counts. Select a marker to browse listings and full details in the side panel. Unlocated listings remain in a separate group. The map defaults to recent records and offers an all-records view. The base map requires <code>GOOGLE_MAPS_API_KEY</code>; the listing panel remains available if the key is missing or the map cannot load.</p>
-<p>The map <strong>only shows listings still seen recently</strong> — fourteen days by default,
-adjustable under <em>Map age limit</em> in Settings, or 0 to show everything. "Not available" is a
-terminal state, so those records stay in the database indefinitely; without this limit, units delisted
-months ago would remain pinned on the map.</p>
-<p>Coordinates are resolved and cached <strong>automatically</strong> by the monitor — new listings
-usually appear on the map within half an hour. Admins can also trigger a pass by hand for debugging.</p>
-</div>
-
-<div class="card">
-<h3>Calendar</h3>
-<p>Month-by-month calendar showing move-in dates. Filter by city and platform.</p>
-</div>
-
-<div class="card">
 <h3>Statistics</h3>
-<p>Charts for 7/30/90-day ranges: new listings trend, status change trend, city & status distributions, rent distribution, platform distribution, listing drop time (NL time).</p>
-</div>
+<p>Charts for the last 7, 30 or 90 days: new listings, status changes, cities, platforms, statuses and rent. They follow the sidebar: <em>My matches</em> counts only your matches, <em>All listings</em> counts everything.</p>
 
-<!-- ─────────────────────────────────────────────── -->
-<h2 id="notifications">Setting Up Notifications</h2>
+<h2 id="notifications">Notifications</h2>
+<p>Go to <strong>Account settings → Notifications</strong>. The <strong>Notifications</strong> switch at the top governs every channel, app push included: with it off, nothing is sent at all. Then turn on at least one way to receive alerts.</p>
 
-<p>Go to <strong>Users</strong> → click a user → <strong>Notifications</strong>.</p>
+<h3>App push</h3>
+<p>Sign in to the iOS or Android app with your account and allow notifications. That is all; the app also turns the Notifications switch on for you. Alerts follow your phone's language.</p>
 
-<div class="card">
-<h3>Telegram <span class="badge badge-blue">Cross-platform</span></h3>
-<ol>
-  <li>Create a bot with <a href="https://t.me/BotFather">@BotFather</a> and copy the token</li>
-  <li>Send any message to your new bot</li>
-  <li>Visit <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> to get your chat ID</li>
-  <li>Paste the <strong>Bot Token</strong> and <strong>Chat ID</strong> into the user form</li>
+<h3>Telegram</h3>
+<ol class="guide-steps">
+  <li>Create a bot with <a href="https://t.me/BotFather">@BotFather</a> and copy its token.</li>
+  <li>Send any message to your new bot.</li>
+  <li>Open <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code> to find your chat ID.</li>
+  <li>Enter the bot token and chat ID under Telegram.</li>
 </ol>
-</div>
 
-<div class="card">
-<h3>Email <span class="badge badge-blue">Cross-platform</span></h3>
-<p>Two ways; <strong>the first is the default</strong>.</p>
-<p><strong>1. Sent for you (default).</strong> Enter a recipient address — no SMTP server needed.
-You will receive a confirmation email and must <strong>click the link in it</strong> before delivery
-begins; that step exists so nobody can sign someone else's address up. The verification state is shown
-on the user's settings page, where the confirmation can also be re-sent.</p>
-<p>On a self-hosted instance, an administrator must first configure the shared email service and public base URL. Otherwise, use custom SMTP.</p>
-<p><strong>2. Your own SMTP.</strong> Switch the email mode to custom, then fill in server details:</p>
+<h3>Email</h3>
+<p><strong>Sent by FlatRadar</strong> (default): enter your address and click the link in the confirmation email. Nothing is delivered until the address is confirmed, so nobody can sign up someone else's inbox. A self-hosted copy needs its administrator to set up the shared email service first; otherwise use your own SMTP server.</p>
+<p><strong>Your own SMTP server</strong> (administrators): switch the email mode to custom and enter the server details. With two-factor sign-in, use an app password.</p>
+<div class="guide-table">
 <table>
-  <tr><th>Provider</th><th>SMTP Host</th><th>Port</th><th>Security</th></tr>
-  <tr><td>Gmail</td><td>smtp.gmail.com</td><td>587</td><td>STARTTLS</td></tr>
-  <tr><td>Outlook</td><td>smtp.office365.com</td><td>587</td><td>STARTTLS</td></tr>
+  <thead><tr><th>Provider</th><th>SMTP host</th><th>Port</th><th>Security</th></tr></thead>
+  <tbody>
+  <tr><td>Gmail</td><td><code>smtp.gmail.com</code></td><td>587</td><td>STARTTLS</td></tr>
+  <tr><td>Outlook</td><td><code>smtp.office365.com</code></td><td>587</td><td>STARTTLS</td></tr>
+  </tbody>
 </table>
-<p>Use an <strong>App Password</strong> (not your regular password) if 2FA is enabled. Custom SMTP
-skips the address verification — delivery is your own server's business.</p>
 </div>
 
-<div class="card">
-<h3>iMessage <span class="badge badge-green">macOS only</span></h3>
-<p>Enter the recipient's phone number (e.g. <code>+31612345678</code>) or Apple ID email. Only works when the monitor runs on macOS with Messages.app signed in.</p>
+<h3>WhatsApp and iMessage</h3>
+<p><strong>WhatsApp</strong> goes through a paid Twilio account: Account SID, auth token and <code>whatsapp:+…</code> numbers. <strong>iMessage</strong> only works when FlatRadar itself runs on a Mac signed in to Messages.</p>
+
+<p class="guide-note">Use <strong>Send Test Notification</strong> to check every channel, app push included; the result is listed per channel. While your account cannot receive anything, Account settings shows a short checklist naming the step that is missing.</p>
+
+<h2 id="filters">Filters</h2>
+<p>Go to <strong>Account settings → Listing filters</strong>. The inbox and your notifications use the same filters. Every filter must match; an empty filter places no restriction.</p>
+<div class="guide-table">
+<table>
+  <thead><tr><th>Filter</th><th>Example</th><th>Applies to</th></tr></thead>
+  <tbody>
+  <tr><td>Max rent</td><td>€1200</td><td>All (see “What rent means” below)</td></tr>
+  <tr><td>Min area</td><td>25 m²</td><td>All</td></tr>
+  <tr><td>Min floor</td><td>1</td><td>Holland2Stay, OurDomain, OurCampus, Magis, Plaza</td></tr>
+  <tr><td>Cities</td><td>Eindhoven, Amsterdam</td><td>All</td></tr>
+  <tr><td>Platforms</td><td>Holland2Stay, Xior</td><td>All</td></tr>
+  <tr><td>Tenant</td><td>Students only</td><td>All except Magis</td></tr>
+  <tr><td>Type</td><td>Studio</td><td>All except Xior</td></tr>
+  <tr><td>Occupancy</td><td>Single</td><td>Holland2Stay, OurDomain, OurCampus</td></tr>
+  <tr><td>Furnishing</td><td>Furnished</td><td>Holland2Stay, OurDomain, Xior, Magis</td></tr>
+  <tr><td>Contract</td><td>Indefinite</td><td>Holland2Stay only</td></tr>
+  <tr><td>Min energy label</td><td>B</td><td>Holland2Stay, Magis</td></tr>
+  <tr><td>Neighbourhood, building</td><td>Centrum</td><td>Follow the cities you picked</td></tr>
+  <tr><td>Offer type</td><td>Rent</td><td>Holland2Stay only</td></tr>
+  </tbody>
+</table>
 </div>
+<p>When a platform does not publish a field, that filter is skipped for the platform instead of hiding all its listings. “Min energy label: B” therefore does not mean everything you receive is rated B: Xior, OurDomain and OurCampus never went through that check. Each filter in your settings carries the same scope label.</p>
 
-<div class="card">
-<h3>WhatsApp <span class="badge badge-amber">Twilio paid</span></h3>
-<p>Requires a Twilio account. Fill in Account SID, Auth Token, and the <code>whatsapp:+...</code> numbers.</p>
+<h3>What rent means per platform</h3>
+<div class="guide-table">
+<table>
+  <thead><tr><th>Platform</th><th>Price shown</th></tr></thead>
+  <tbody>
+  <tr><td>Holland2Stay</td><td>All-in: service costs and utility prepayment included</td></tr>
+  <tr><td>Xior</td><td>All-in: base rent plus that building's monthly advance charges</td></tr>
+  <tr><td>Magis</td><td>All-in: base rent plus the service costs on each listing</td></tr>
+  <tr><td>OurDomain, OurCampus</td><td>Base rent; service costs are charged separately</td></tr>
+  <tr><td>Plaza</td><td>Total rent from the platform; net rent shown separately when available</td></tr>
+  <tr><td>Student Experience</td><td>Starting price for the room type</td></tr>
+  </tbody>
+</table>
 </div>
+<p>OurDomain and OurCampus do not say which unit has which service costs, so an all-in price cannot be worked out. Their listings show the building's service-cost range under the price, and notifications carry the same note. Leave some headroom in Max rent for those two, or filter them separately by platform.</p>
 
-<div class="card">
-<h3>iOS Push Notifications</h3>
-<p>If you use the <a href="https://apps.apple.com/us/app/flarradar/id6769857080">FlatRadar iOS app</a>, APNs push notifications are sent automatically. Notifications are bilingual — Chinese or English depending on your device language.</p>
-</div>
+<h2 id="autobook">Auto-booking and applications</h2>
+<p>Administrators set this up per user under <strong>Administration → Users → the user → Auto-booking</strong>. It needs notifications to be on with at least one working channel. Booking filters are separate from notification filters.</p>
+<h3>Holland2Stay</h3>
+<p>When a matching listing becomes <em>Available to book</em>, FlatRadar signs in to the user's Holland2Stay account, reserves the home, places the order and sends a payment link straight away. <strong>It never pays</strong>: payment is done by hand through that link.</p>
+<p>If the outcome is uncertain, auto-booking pauses for that account. Check the orders on Holland2Stay, pay or cancel as needed, then choose <strong>Checked; resume auto-booking</strong> in the user's settings.</p>
+<h3>Plaza</h3>
+<p>FlatRadar can submit applications for matching Plaza listings. Enter the Plaza username and password and turn on automatic applications, which are off by default. An application takes effect immediately. If its outcome is uncertain, only that account and listing pause until you check it on Plaza and choose <strong>Checked; resume applications for this listing</strong>.</p>
+<h3>Applicant profile</h3>
+<p>Xior and OurDomain share one applicant profile (name, nationality, address, study, screening questions and ID document). Each group shows how many required fields are still missing. Screening answers must come from the applicant.</p>
+<p class="guide-note"><strong>Start with Dry run.</strong> It checks the steps before submission without placing an order or application. It does not guarantee a real submission will succeed. Turn it off only when you are ready for real orders.</p>
 
-<div class="card">
-<h3>Android Push Notifications</h3>
-<p>If you use the <a href="https://github.com/751K/FlatRadar-Android/releases/latest/download/app-release.apk">FlatRadar Android app</a>, FCM push notifications are sent automatically. Same bilingual support as iOS.</p>
-</div>
-
-<div class="card">
-<h3>Push and the notifications switch</h3>
-<p>The <strong>notifications switch</strong> in a user's settings governs every channel,
-<strong>device push included</strong>. Turn it off and the phone stops receiving push.</p>
-<p>Granting push permission and signing in from the app <strong>turns that switch on for you</strong> —
-agreeing on the phone is agreeing, you do not have to go and click it again in the panel. Turning it off
-in the panel afterwards is what genuinely turns it off.</p>
-</div>
-
-<div class="tip">
-<strong>Tip:</strong> Click <strong>Send Test Notification</strong> to verify each channel, device push
-included. The dashboard also shows a checklist whenever an account cannot receive anything, naming the
-step that is missing.
-</div>
-
-<!-- ─────────────────────────────────────────────── -->
-<h2 id="autobook">Automatic Booking and Applications</h2>
-
-<p>Go to <strong>Users</strong> → click a user → <strong>Auto Booking</strong>.</p>
-<p>Auto-booking requires notifications to be enabled and at least one usable delivery method. Booking filters are independent of notification filters; an empty filter places no restriction.</p>
-
-<div class="card">
-<h3>How it works</h3>
-<p>When an H2S listing becomes <strong>Available to book</strong> and matches your filters, the monitor will:</p>
-<ol>
-  <li>Log into your Holland2Stay account</li>
-  <li>Create a cart and submit a reservation request</li>
-  <li>Place the order (<code>placeOrder</code>)</li>
-  <li>Generate a direct payment link (<code>idealCheckOut</code>)</li>
-  <li>Send you the payment link immediately</li>
-</ol>
-<p><strong>It does NOT auto-pay.</strong> You receive the payment URL and complete payment manually.</p>
-<p>If the booking outcome is uncertain, auto-booking is paused for that Holland2Stay account. Sign in to Holland2Stay to check your orders or reservations and pay or cancel as needed, then choose <strong>Checked; resume auto-booking</strong> in user settings. Protection cannot be removed while the task is running; stop monitoring first if it is stuck.</p>
-<p>For Plaza, the system can submit applications for matching listings. Supply your Plaza username and password and separately enable automatic applications, which are off by default. Submission takes effect immediately and does not guarantee a rental.</p>
-<p>If a Plaza application outcome is uncertain, check your applications on Plaza and choose <strong>Checked; resume applications for this listing</strong> in user settings. Only that account and listing are paused; other listings are unaffected. Protection cannot be cleared while the application is running.</p>
-<p>OurDomain, OurCampus, Xior, Magis and Student Experience currently provide notifications only.</p>
-</div>
-
-<div class="card">
-<h3>Configuration</h3>
+<h2 id="admin">Administration</h2>
+<p>On a copy you run yourself, the admin account sees <strong>Administration</strong> in the sidebar:</p>
 <ul>
-  <li><strong>Enable auto-booking</strong> — toggle on</li>
-  <li><strong>Dry run</strong> — recommended at first: checks some steps before submission without placing an order or application; it does not guarantee that a real submission will succeed</li>
-  <li><strong>H2S account email & password</strong> — your Holland2Stay login</li>
-  <li><strong>Plaza username, password and automatic application switch</strong> — configure these to use Plaza applications; the switch is off by default</li>
-  <li><strong>Payment method</strong> — iDEAL (default), Visa, or Mastercard</li>
-  <li><strong>Auto-booking filters</strong> — configure separately to match your booking requirements</li>
+  <li><strong>Users</strong> — every account, its channels and signed-in apps; edit, reorder, test notifications.</li>
+  <li><strong>Announcements</strong> — send a message to every user with notifications on.</li>
+  <li><strong>Settings</strong> — polling, peak hours, platforms, cities and buildings. Saving asks the monitor to reload; the page shows whether it was applied and which values the environment overrides.</li>
+  <li><strong>Client Management</strong> — app sessions and push devices; revoke or disable them.</li>
+  <li><strong>Data Health</strong>, <strong>Log Viewer</strong>, <strong>Crash Reports</strong> and <strong>System Info</strong> — scraping health per platform, logs with search and levels, app crash reports, and starting or restarting the monitor.</li>
 </ul>
-</div>
-
-<div class="tip warn">
-<strong>Safety:</strong> Keep <strong>Dry run</strong> on until verified. Turn off only when ready to place real orders.
-</div>
-
-<!-- ─────────────────────────────────────────────── -->
-<h2 id="filters">Notification Filters</h2>
-
-<p>Restrict which listings trigger notifications. Go to <strong>Users</strong> → click a user → <strong>Filters</strong>.</p>
-
-<div class="card">
+<div class="guide-table">
 <table>
-  <tr><th>Filter</th><th>Example</th><th>Applies to</th><th>How it works</th></tr>
-  <tr><td>Max rent</td><td>€1200</td><td>All</td><td>Only listings ≤ €1200/month. <strong>Platforms quote different figures — see below</strong></td></tr>
-  <tr><td>Min area</td><td>25 m²</td><td>All</td><td>Only listings ≥ 25 m²</td></tr>
-  <tr><td>Min floor</td><td>1</td><td>Holland2Stay, OurDomain, OurCampus, Magis, Plaza</td><td>Skip ground floor (0)</td></tr>
-  <tr><td>Cities</td><td>Eindhoven, Amsterdam</td><td>All</td><td>Multi-select — any match</td></tr>
-  <tr><td>Sources</td><td>H2S, OD</td><td>All</td><td>Multi-select — only notify for these platforms</td></tr>
-  <tr><td>Tenant</td><td>student only</td><td>Except Magis</td><td>Multi-select — any match</td></tr>
-  <tr><td>Type</td><td>Studio, 1</td><td>Except Xior</td><td>Multi-select — any match</td></tr>
-  <tr><td>Occupancy</td><td>Single</td><td>Holland2Stay, OurDomain, OurCampus</td><td>Multi-select — any match</td></tr>
-  <tr><td>Furnishing</td><td>Furnished</td><td>Holland2Stay, OurDomain, Xior, Magis</td><td>Multi-select — any match</td></tr>
-  <tr><td>Contract</td><td>Indefinite</td><td>Holland2Stay only</td><td>Long-term only (skip short-stay)</td></tr>
-  <tr><td>Min energy label</td><td>B</td><td>Holland2Stay, Magis</td><td>Only listings rated at or above this label</td></tr>
-  <tr><td>Neighborhood</td><td>Centrum</td><td>Holland2Stay only</td><td>Multi-select; options follow the cities you picked</td></tr>
-  <tr><td>Offer type</td><td>Rent</td><td>Holland2Stay only</td><td>Multi-select — distinguishes rentals from other listing types</td></tr>
-</table>
-<p>All filters are <strong>AND</strong> together. Leave empty = no restriction.</p>
-<p>The <em>Applies to</em> column matters: when a platform does not report a field, the filter is
-<strong>skipped for that platform entirely</strong> rather than excluding all of its listings. Setting
-"Min energy label: B" therefore does <em>not</em> mean everything you receive is rated B — Xior,
-OurDomain and OurCampus listings never went through that check. The panel labels each filter with the
-same scope.</p>
-<p>Even when a platform supports a filter, an individual listing may lack the relevant data. Missing fields are handled differently depending on the filter, so check the platform before deciding.</p>
-</div>
-
-<div class="card">
-<h3>What "rent" means per platform</h3>
-<p>Platforms do not all quote the same kind of price. Read this before setting <em>Max rent</em>:</p>
-<table>
-  <tr><th>Platform</th><th>Price shown in the panel and notifications</th></tr>
-  <tr><td>Holland2Stay</td><td><strong>All-in</strong> — includes service costs and utility prepayment</td></tr>
-  <tr><td>Xior</td><td><strong>All-in</strong> — base rent plus that building's registered monthly advance charges</td></tr>
-  <tr><td>OurDomain</td><td><strong>Base rent</strong>; service costs charged separately</td></tr>
-  <tr><td>OurCampus</td><td><strong>Base rent</strong>; service costs charged separately</td></tr>
-  <tr><td>Magis</td><td><strong>All-in</strong> — base rent plus the service costs printed on each listing</td></tr>
-  <tr><td>Plaza</td><td><strong>Total rent</strong> reported by the platform; net rent is shown separately when available</td></tr>
-  <tr><td>Student Experience</td><td><strong>Starting price</strong> for a room type, rather than the exact rent for an individual unit</td></tr>
-</table>
-<p>For OurDomain and OurCampus, service costs vary by floor plan and the upstream feed does not say which unit
-belongs to which plan, so an all-in figure cannot be derived. Those listings carry an asterisk beside the
-price; hovering shows that building's service-cost range, and the rent line in notifications carries the
-same note.</p>
-<div class="tip warn">
-<strong>What this means for filtering:</strong> the same rent ceiling filters what you actually pay on
-Holland2Stay and Xior, but only the part excluding service costs on OurDomain and OurCampus. Leave
-headroom for those two, or separate them out with the platform filter.
-</div>
-</div>
-
-<!-- ─────────────────────────────────────────────── -->
-<h2 id="settings">Global Settings</h2>
-
-<p>Go to <strong>Settings</strong> (admin only).</p>
-
-<div class="card">
-<h3>Polling</h3>
-<table>
-  <tr><th>Setting</th><th>Default</th><th>What it does</th></tr>
-  <tr><td>Check interval</td><td>300s (5 min)</td><td>Normal polling interval outside peak hours</td></tr>
-  <tr><td>Peak max interval</td><td>60s</td><td>Starting interval during peak (08:30–10:00 NL)</td></tr>
-  <tr><td>Peak min interval</td><td>15s</td><td>Floor — adaptive polling never goes below this</td></tr>
-  <tr><td>Peak hours</td><td>08:30–10:00, 13:30–15:00</td><td>When to accelerate (NL time, weekdays only)</td></tr>
-  <tr><td>Jitter ratio</td><td>0.20</td><td>±20% random variation to avoid detection</td></tr>
-  <tr><td>Heartbeat interval</td><td>60 min</td><td>How often the admin gets a liveness notification; 0 disables it</td></tr>
-  <tr><td>Map age limit</td><td>14 days</td><td>Map shows only listings still seen within this many days; 0 shows everything</td></tr>
+  <thead><tr><th>Setting</th><th>Default</th><th>What it does</th></tr></thead>
+  <tbody>
+  <tr><td>Check interval</td><td>300 s</td><td>Polling interval outside peak hours</td></tr>
+  <tr><td>Peak hours</td><td>08:30–10:00, 13:30–15:00</td><td>When to poll faster (Dutch time, weekdays)</td></tr>
+  <tr><td>Peak interval</td><td>60 s, down to 15 s</td><td>Starting and lowest interval during peak hours</td></tr>
+  <tr><td>Jitter</td><td>0.20</td><td>±20% random variation on every interval</td></tr>
+  <tr><td>Heartbeat</td><td>60 min</td><td>How often the admin gets a “still running” message; 0 turns it off</td></tr>
+  <tr><td>Map age limit</td><td>14 days</td><td>Map shows listings seen within this many days; 0 shows all</td></tr>
+  </tbody>
 </table>
 </div>
+<p>Deployment settings, secrets and advanced timeouts still need the affected process restarted.</p>
 
-<div class="card">
-<h3>Platforms & Cities</h3>
-<p>Enable or disable each of the seven platforms and select its cities or buildings. Xior buildings are grouped by city.</p>
-<p>Saving requests a monitor reload. The settings page shows whether the monitor applied the configuration or a value is overridden. Deployment settings, secrets and advanced timeouts still require restarting the affected process.</p>
-</div>
-
-<!-- ─────────────────────────────────────────────── -->
-<h2 id="tips">Tips & Troubleshooting</h2>
-
-<div class="card">
-<h3>Monitor shows "stopped"</h3>
-<p>Click <strong>Start monitor</strong> on the Dashboard. If it doesn't start, check <strong>Log Viewer</strong> or <code>docker compose logs h2s</code>.</p>
-</div>
-
-<div class="card">
-<h3>No listings appearing</h3>
+<h2 id="tips">Troubleshooting</h2>
+<h3>No listings appear</h3>
 <ul>
-  <li>Make sure cities/buildings are selected in <strong>Settings</strong></li>
-  <li>Make sure the platform is enabled under <strong>Sources</strong></li>
-  <li>Check <strong>Log Viewer → Errors Log</strong> for 403 blocks or network errors</li>
+  <li>The monitor is running: <strong>Administration → System Info</strong>. If it does not start, check the Log Viewer or <code>docker compose logs h2s</code>.</li>
+  <li>The platform is enabled and its cities or buildings are selected in <strong>Settings</strong>.</li>
+  <li><strong>Data Health</strong> shows, per platform, when it last succeeded and why it is failing.</li>
 </ul>
-</div>
-
-<div class="card">
-<h3>Notifications not arriving</h3>
-<p>Start at the dashboard. <strong>A checklist appears there whenever the account cannot receive
-anything</strong> and names the missing step; if it is gone, the chain is intact. To check by hand:</p>
+<h3>Notifications do not arrive</h3>
+<p>Open <strong>Account settings</strong>. While your account cannot receive anything, a checklist there names the missing step; if it is gone, the chain is complete. To check by hand:</p>
 <ul>
-  <li>The user is <strong>enabled</strong> and the <strong>notifications switch is on</strong> — that
-      switch governs both external channels and device push; with it off nothing is sent at all</li>
-  <li>There is <strong>at least one delivery route</strong>: an external channel with valid credentials,
-      <strong>or</strong> a phone signed into the app. If you only use the app, an empty channel list is
-      normal</li>
-  <li>On the default (sent-for-you) email mode, the recipient address is <strong>verified</strong> —
-      unverified addresses are not delivered to</li>
-  <li>Click <strong>Send Test Notification</strong>; results are listed per channel, device push included</li>
+  <li>The account is active and the Notifications switch is on.</li>
+  <li>There is at least one way to receive alerts: a channel with valid details, or a phone signed in to the app.</li>
+  <li>With email sent by FlatRadar, the address is confirmed.</li>
+  <li><strong>Send Test Notification</strong> shows the result per channel.</li>
 </ul>
-<div class="tip">
-<strong>The notification feed in the panel cannot tell you any of this.</strong> It is a site-wide stream,
-neither per-user nor filtered by your criteria; content in it does not mean your setup works.
-</div>
-</div>
-
-<div class="card">
-<h3>403 Blocked (Cloudflare)</h3>
-<p>If scraping is blocked by Cloudflare WAF:</p>
-<ol>
-  <li>Check the logs for the affected platform and the specific error; not every 403 has the same cause</li>
-  <li>Check the network connection and any configured proxy; if the network is restricted, see the deployment documentation for proxy configuration</li>
-  <li>Allow time for the platform to cool down and watch for recovery; if errors continue, check the platform status and logs</li>
-</ol>
-</div>
-
-<div class="tip">
-<strong>Pro tip:</strong> The <strong>Log Viewer</strong> (admin → terminal icon in sidebar) shows Monitor Log (INFO+) and Errors Log (WARNING+) with keyword search, line numbers, and level color highlighting.
-</div>
-
-</div>
-</body>
-</html>
+<h3>Blocked with 403</h3>
+<p>Platforms behind Cloudflare sometimes block requests. Check the log for which platform and which error it is (not every 403 has the same cause), check the network and any proxy, then give the platform time to cool down. The deployment documentation explains proxy settings.</p>

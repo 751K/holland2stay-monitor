@@ -129,3 +129,26 @@ a{color:var(--accent)}
 @media(max-width:600px){.share{padding:32px 0}.share h1{font-size:23px}}
 .verify-email{margin:14px 0 0;font-size:15px;font-weight:600;overflow-wrap:anywhere}
 .error-code{margin:0 0 6px;font-size:13px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* User guide (/guide): body comes from docs/guide*.html. Same reading column as the policies,
+   plus the pieces a manual needs — a contents row, sub-headings, lists, tables and code. */
+.guide{font-size:15px;line-height:1.75;color:var(--text)}
+.guide p{margin:0 0 14px}
+.guide-nav{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 8px;font-size:14px}
+.guide-nav a{color:var(--muted);text-decoration:none}
+.guide-nav a:hover{color:var(--accent)}
+.guide h2{margin:40px 0 14px;padding-top:24px;border-top:1px dashed var(--rule);font-size:19px;font-weight:650;letter-spacing:-.015em;scroll-margin-top:16px}
+.guide h3{margin:26px 0 8px;font-size:15px;font-weight:600}
+.guide ul,.guide ol{margin:0 0 14px;padding-left:22px}
+.guide li{margin:4px 0}
+.guide li::marker{color:var(--muted)}
+.guide code{font:13px/1.5 "SF Mono",Menlo,Monaco,monospace;padding:1px 5px;border-radius:4px;background:var(--field);overflow-wrap:anywhere}
+.guide pre{margin:0 0 14px;padding:14px 16px;border-radius:8px;background:var(--field);overflow-x:auto}
+.guide pre code{padding:0;background:none;overflow-wrap:normal}
+.guide-table{margin:0 0 16px;overflow-x:auto}
+.guide table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.55}
+.guide th,.guide td{padding:9px 12px 9px 0;text-align:left;vertical-align:top;border-bottom:1px solid var(--rule)}
+.guide th{font-size:12px;font-weight:600;color:var(--muted);white-space:nowrap}
+.guide td:first-child{white-space:nowrap}
+.guide-note{padding:14px 16px;border-radius:8px;background:var(--field);color:var(--text)}
+@media(max-width:600px){.guide h2{font-size:18px}.guide th,.guide td{padding-right:10px}.guide td:first-child{white-space:normal;word-break:keep-all}}
