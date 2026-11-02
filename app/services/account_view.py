@@ -87,15 +87,17 @@ def _channel_state(user, channel, configured, zh):
     return _t(zh, '未设置', 'Not set up'), 'muted'
 
 
-def _notification_rows(user, device_count, is_macos, zh):
+def _notification_rows(user, device_count, is_macos, zh, official=True):
     rows = [_row('delivery', _t(zh, '通知开关', 'Notifications'),
                  _t(zh, '新房源符合条件时提醒你', 'Alert me when a matching listing appears'),
                  *((_t(zh, '已开启', 'On'), 'ok') if user.notifications_enabled else (_t(zh, '已关闭', 'Off'), 'attention')),
                  quiet=True)]
-    rows.append(_row('apppush', _t(zh, 'App 推送', 'App push'),
-                     _t(zh, f'{device_count} 台设备已登录', f'{device_count} signed-in device(s)') if device_count
-                     else _t(zh, '安装 App 并用本账号登录', 'Install the app and sign in'),
-                     *((_t(zh, '已连接', 'Connected'), 'ok') if device_count else (_t(zh, '无设备', 'No devices'), 'muted'))))
+    # 官方 App 只连 flatradar.app，推送也要作者的 APNs / FCM 密钥：自部署的站点上这一条走不通
+    if official:
+        rows.append(_row('apppush', _t(zh, 'App 推送', 'App push'),
+                         _t(zh, f'{device_count} 台设备已登录', f'{device_count} signed-in device(s)') if device_count
+                         else _t(zh, '安装 App 并用本账号登录', 'Install the app and sign in'),
+                         *((_t(zh, '已连接', 'Connected'), 'ok') if device_count else (_t(zh, '无设备', 'No devices'), 'muted'))))
     rows.append(_row('telegram', 'Telegram', 'Bot API',
                      *_channel_state(user, 'telegram', bool(user.telegram_token and user.telegram_chat_id), zh)))
     if user.email_to:
@@ -129,7 +131,7 @@ def _notification_summary(user, device_count, zh):
 SECTION_KEYS = ('filters', 'notifications', 'account', 'preferences')
 
 
-def account_sections(user, *, device_count: int, is_macos: bool, options: dict, zh: bool):
+def account_sections(user, *, device_count: int, is_macos: bool, options: dict, zh: bool, official: bool = True):
     lf = user.listing_filter
     return [
         dict(key='filters', icon='bi-funnel', title=_t(zh, '房源条件', 'Listing filters'),
@@ -141,7 +143,7 @@ def account_sections(user, *, device_count: int, is_macos: bool, options: dict, 
              summary=_notification_summary(user, device_count, zh),
              note=_t(zh, '符合房源条件的新房源会通过已启用的方式发给你。',
                      'New listings that match your filters are sent through the methods you turn on.'),
-             rows=_notification_rows(user, device_count, is_macos, zh)),
+             rows=_notification_rows(user, device_count, is_macos, zh, official)),
         dict(key='account', icon='bi-person', title=_t(zh, '账号与登录', 'Account & sign-in'),
              summary=user.name + ' · ' + (_t(zh, '客户端登录已开启', 'App sign-in on') if user.app_login_enabled
                                           else _t(zh, '客户端登录未开启', 'App sign-in off')),
@@ -239,10 +241,11 @@ def _profile_rows(ab, id_doc, zh):
     return rows
 
 
-def admin_sections(user, *, is_new: bool, device_count: int, is_macos: bool, id_doc, options: dict, zh: bool):
+def admin_sections(user, *, is_new: bool, device_count: int, is_macos: bool, id_doc, options: dict, zh: bool,
+                   official: bool = True):
     """Sections for the admin user editor. ``user`` is a blank UserConfig when creating."""
     ab = user.auto_book
-    notification_rows = _notification_rows(user, device_count, is_macos, zh)
+    notification_rows = _notification_rows(user, device_count, is_macos, zh, official)
     if user.email_mode == 'custom':
         for row in notification_rows:
             if row['key'] == 'email':

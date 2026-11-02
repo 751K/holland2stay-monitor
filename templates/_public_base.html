@@ -43,7 +43,7 @@
            ('guide_page', '使用指南' if zh else 'Guide'),
            ('privacy_page', '隐私政策' if zh else 'Privacy'),
            ('terms_page', '使用条款' if zh else 'Terms'),
-           ('donate_page', '赞助' if zh else 'Donate')] %}
+           ('donate_page', '赞助' if zh else 'Donate')] if endpoint != 'donate_page' or official_site %}
       <a href="{{ url_for(endpoint) }}"{% if request.endpoint == endpoint %} aria-current="page"{% endif %}>{{ title }}</a>
       {% endfor %}
     </nav>

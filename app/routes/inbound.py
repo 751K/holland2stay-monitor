@@ -172,6 +172,7 @@ def _forward_inbound(
     text_body: str,
     html_body: str,
     is_dmarc: bool,
+    recipients: list[str] | None = None,
 ) -> None:
     """
     把入站邮件转发到管理员个人邮箱（INBOUND_FORWARD_TO）。
@@ -191,12 +192,14 @@ def _forward_inbound(
         return
 
     fwd_subject = f"Fwd: {subject}" if not subject.startswith("Fwd:") else subject
+    # 收件人取 webhook 里的真实地址：每个部署的入站地址不同，不能写死
+    to_line = ", ".join(recipients or []) or "—"
 
     # 构建转发正文
     fwd_text = (
         f"---------- 转发的邮件 ----------\n"
         f"发件人: {sender}\n"
-        f"收件人: notify@flatradar.app\n"
+        f"收件人: {to_line}\n"
         f"主题: {subject}\n\n"
         f"{text_body or '(无文字内容)'}"
     )
@@ -208,7 +211,7 @@ def _forward_inbound(
             f'padding-bottom:12px;border-bottom:1px solid #e5e7eb;">'
             f'<strong>转发的邮件</strong><br>'
             f'发件人: {html_body_escape(sender)}<br>'
-            f'收件人: notify@flatradar.app<br>'
+            f'收件人: {html_body_escape(to_line)}<br>'
             f'主题: {html_body_escape(subject)}'
             f'</div>'
             f'{html_body}'
@@ -358,7 +361,7 @@ def resend_inbound() -> Any:
         st.close()
 
     # 转发到管理员个人邮箱
-    _forward_inbound(email_id, sender, subject, text_body, html_body, is_dmarc)
+    _forward_inbound(email_id, sender, subject, text_body, html_body, is_dmarc, recipients)
 
     return jsonify(ok=True, email_id=email_id)
 

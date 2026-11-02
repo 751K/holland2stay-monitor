@@ -15,8 +15,9 @@
 """
 from __future__ import annotations
 
-from flask import Flask, render_template
+from flask import Flask, abort, render_template
 
+from app import deployment
 from app.i18n import get_lang
 from app.legal import get_legal
 from support_text import CONTACT_EMAIL, SECTIONS_EN, SECTIONS_ZH
@@ -78,7 +79,12 @@ def donate_page():
 
     QR 图片放 ``static/donate-alipay.{png|jpg|jpeg|webp}``，微信同理。
     自动按优先级探测；都不存在时模板显示 placeholder（管理员重传后即恢复）。
+
+    只在官方站开放：收款码和 Sponsors 都是作者本人的，别人部署的站点不该替作者
+    收钱，也不该让访客以为是在资助那个部署者（判定见 app/deployment.py）。
     """
+    if not deployment.is_official_site():
+        abort(404)
     from pathlib import Path
     from config import BASE_DIR
 

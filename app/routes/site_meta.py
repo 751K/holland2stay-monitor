@@ -33,6 +33,8 @@ import os
 
 from flask import Flask, Response, redirect, request, url_for
 
+from app import deployment
+
 
 #: 拦住的路径分两类，理由不同——混成一条判据的话，哪天某个路径变公开了也看不出来。
 
@@ -128,6 +130,7 @@ def sitemap_xml():
     urls = "".join(
         f"  <url><loc>{root}{url_for(ep)}</loc></url>\n"
         for ep in _PUBLIC_ENDPOINTS
+        if ep != "donate_page" or deployment.is_official_site()   # 赞助页只在官方站开放
     )
     xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -148,6 +151,9 @@ def sitemap_xml():
 #: 链接进去，只会让抓取方拿到 302。
 def _llms_txt() -> str:
     root = site_root()
+    # 赞助页只在官方站开放（见 legal.donate_page）
+    donate = (f"- [Donate]({root}/donate): how to support development.\n"
+              if deployment.is_official_site() else "")
     return f"""# FlatRadar
 
 > Monitors Dutch rental platforms (Holland2Stay, Xior, OurDomain, OurCampus)
@@ -163,8 +169,7 @@ the platforms it monitors, and it does not list or let properties itself.
 - [Sign in / overview]({root}/login): what the service does, and where you sign up.
 - [User guide]({root}/guide): how filters, notifications and auto-booking work.
 - [Support]({root}/support): contact and troubleshooting.
-- [Donate]({root}/donate): how to support development.
-
+{donate}
 ## Legal
 
 - [Privacy policy]({root}/privacy)

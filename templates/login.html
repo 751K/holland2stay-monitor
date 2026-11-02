@@ -94,7 +94,7 @@
         <a href="{{ url_for('support_page') }}">{{ '帮助' if zh else 'Help' }}</a>
         <a href="{{ url_for('privacy_page') }}">{{ '隐私' if zh else 'Privacy' }}</a>
         <a href="{{ url_for('terms_page') }}">{{ '条款' if zh else 'Terms' }}</a>
-        <a href="{{ url_for('donate_page') }}">{{ '赞助' if zh else 'Donate' }}</a>
+        {% if official_site %}<a href="{{ url_for('donate_page') }}">{{ '赞助' if zh else 'Donate' }}</a>{% endif %}
       </nav>
       <button type="button" class="login-theme" onclick="toggleTheme()" title="{{ _('toggle_theme') }}">
         <span class="login-theme-dark">{{ '深色模式' if zh else 'Dark mode' }}</span><span class="login-theme-light">{{ '浅色模式' if zh else 'Light mode' }}</span>

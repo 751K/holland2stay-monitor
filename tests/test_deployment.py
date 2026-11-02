@@ -68,3 +68,50 @@ def test_notice_is_only_for_the_admin(client, admin_client, self_hosted):
     html = admin_client.get("/").get_data(as_text=True)
     assert 'id="selfhost-dialog"' in html
     assert "不允许商用" in html and "不对使用本站产生的任何后果承担责任" in html
+
+
+# ── 自部署不替作者收钱，也不引去装连不上的 App ─────────────────────────
+
+
+def test_official_site_offers_donations(client):
+    client.set_cookie("h2s-lang", "en")
+    assert client.get("/donate").status_code == 200
+    assert 'href="/donate"' in client.get("/support").get_data(as_text=True)
+    assert "/donate" in client.get("/sitemap.xml").get_data(as_text=True)
+
+
+def test_self_hosted_hides_donations(client, self_hosted):
+    """收款码和 Sponsors 是作者本人的：别人部署的站点不显示入口，直接访问也是 404。"""
+    client.set_cookie("h2s-lang", "en")
+    assert client.get("/donate").status_code == 404
+    for path in ("/support", "/login"):
+        assert 'href="/donate"' not in client.get(path).get_data(as_text=True), path
+    assert "/donate" not in client.get("/sitemap.xml").get_data(as_text=True)
+    assert "/donate" not in client.get("/llms.txt").get_data(as_text=True)
+
+
+def _register(client, name):
+    from app.auth import _REGISTER_RECORDS
+    from users import load_users
+    _REGISTER_RECORDS.clear()
+    r = client.post("/register", data={
+        "csrf_token": "test_csrf", "register_username": name,
+        "register_password": "pw1234", "terms_accepted": "1",
+    })
+    assert r.status_code in (302, 303)
+    return next(u.id for u in load_users() if u.name == name)
+
+
+@pytest.mark.parametrize("official", [True, False])
+def test_app_push_only_on_the_official_site(client, admin_client, monkeypatch, official):
+    """官方 App 只连 flatradar.app，推送要作者的密钥：自部署站点上这一条既装不上也收不到。"""
+    monkeypatch.setattr(deployment, "is_official_site", lambda: official)
+    uid = _register(client, f"AppPush{official}")
+    for c, path in ((client, f"/users/{uid}?section=notifications"),
+                    (admin_client, f"/users/{uid}?section=notifications")):
+        html = c.get(path).get_data(as_text=True)
+        assert ('data-panel="notifications:apppush"' in html) is official, path
+        assert ("apps.apple.com" in html) is official, path
+        assert ("app-release.apk" in html) is official, path
+        if not official:
+            assert 'href="/donate"' not in html

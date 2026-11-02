@@ -40,6 +40,7 @@ from app.auth import (
     record_test_notify,
     self_or_admin_required,
 )
+from app import deployment
 from app.csrf import csrf_required
 from app.db import storage
 from app.forms.user_form import build_user_from_form, build_user_from_form_self
@@ -308,7 +309,7 @@ def _admin_editor_context(user, *, is_new, device_count, id_doc, opts):
     form_user = user or UserConfig(name="")
     sections = admin_sections(
         form_user, is_new=is_new, device_count=device_count, is_macos=sys.platform == "darwin",
-        id_doc=id_doc, zh=zh, options=dict(
+        official=deployment.is_official_site(), id_doc=id_doc, zh=zh, options=dict(
             occupancy=localize_options("Occupancy", opts["Occupancy"]),
             type=localize_options("Type", opts["Type"]),
             contract=localize_options("Contract", opts["Contract"]),
@@ -396,7 +397,7 @@ def _render_account(user, *, device_count, onb, booking_attempt, plaza_attempts,
     tenant = localize_options("Tenant", opts["Tenant"])
     is_macos = sys.platform == "darwin"
     sections = account_sections(
-        user, device_count=device_count, is_macos=is_macos, zh=zh,
+        user, device_count=device_count, is_macos=is_macos, zh=zh, official=deployment.is_official_site(),
         options=dict(occupancy=occupancy, type=types, contract=contract, tenant=tenant),
     )
     # 收不到通知时先打开通知分组，这是页面上最需要处理的事

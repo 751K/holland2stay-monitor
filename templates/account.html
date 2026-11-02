@@ -212,7 +212,7 @@
     <div class="account-links">
       <a href="{{ url_for('privacy_page') }}" target="_blank" rel="noopener noreferrer">{{ '隐私条款' if lang == 'zh' else 'Privacy policy' }} ↗</a>
       <a href="{{ url_for('terms_page') }}" target="_blank" rel="noopener noreferrer">{{ '使用条款' if lang == 'zh' else 'Terms of use' }} ↗</a>
-      <a href="{{ url_for('donate_page') }}" target="_blank" rel="noopener noreferrer">{{ _('donate') }} ↗</a>
+      {% if official_site %}<a href="{{ url_for('donate_page') }}" target="_blank" rel="noopener noreferrer">{{ _('donate') }} ↗</a>{% endif %}
     </div>
   {% elif s.key == 'preferences' and row.key == 'signout' %}
     {% if auth_enabled %}
