@@ -58,7 +58,7 @@
           {% if area %}<div><dt>Area</dt><dd>{{ area }}</dd></div>{% endif %}
           {% if room_type %}<div><dt>Type</dt><dd>{{ room_type }}</dd></div>{% endif %}
           {% if energy %}<div><dt>Energy</dt><dd>{{ energy }}</dd></div>{% endif %}
-          {% if listing.available_from %}<div><dt>Available</dt><dd>{{ listing.available_from }}</dd></div>{% endif %}
+          {% set available = listing.available_from | available_display %}{% if available != '—' %}<div><dt>Available</dt><dd>{{ available }}</dd></div>{% endif %}
         </dl>
 
         <div class="share-actions">

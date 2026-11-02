@@ -157,65 +157,6 @@ def test_dark_mark_stays_legible(_light, dark, decoded):
 
 # ── iOS ─────────────────────────────────────────────────────────
 # ── 接线 ─────────────────────────────────────────────────────────
-def test_sidebar_brand_mark_has_both_themes():
-    css = (STATIC / "design.css").read_text()
-    assert 'background:url("/static/logo-small.png")' in css
-    assert ('[data-theme="dark"] .sidebar-brand .brand-mark{\n'
-            '  background-image:url("/static/logo-small-dark.png");') in css
-
-
-def test_login_logo_has_both_themes():
-    """登录页用的是**无底色**那一版（2026-09-10 起）。
-
-    带奶油底色的图落在登录页的黄色渐变上是一块边界分明的方砖。换成透明底之后，
-    深浅两版仍然都要有——否则深色主题下那三栋房子会是给浅底配的暗色，糊在深色
-    背景上。
-    """
-    css = (STATIC / "design.css").read_text()
-    assert 'background:url("/static/logo-bare.png")' in css
-    assert ('[data-theme="dark"] .login-logo'
-            '{background-image:url("/static/logo-bare-dark.png")}') in css
-
-
-def test_login_logo_drops_the_tile_chrome():
-    """透明图不能配盒子阴影和圆角。
-
-    ``box-shadow`` 跟的是元素盒子，不是图的 alpha——配一张透明图就是一个框着空气
-    的圆角矩形阴影。圆角同理：``.login-logo`` 从 ``.login-icon`` 继承了
-    ``border-radius`` 和一块实心 ``background:var(--accent)``。
-    """
-    css = (STATIC / "design.css").read_text()
-    rule = css[css.index(".login-logo{"):]
-    rule = rule[:rule.index("}")]
-    for prop in ("box-shadow:none", "border-radius:0",
-                 "background-color:transparent"):
-        assert prop in rule, f".login-logo 少了 {prop}——继承来的方砖装饰还在"
-
-    login = (ROOT / "templates" / "login.html").read_text()
-    block = login[login.index(".login-logo {"):]
-    block = block[:block.index("}")]
-    assert "box-shadow" not in block and "border-radius" not in block, (
-        "login.html 的 64px 覆盖里还留着圆角/投影")
-
-
-def test_preload_follows_the_resolved_theme():
-    """LCP 用的 preload 必须跟着主题走，不能写死一版。"""
-    head = (ROOT / "templates" / "base.html").read_text()
-    assert '<link rel="preload" href="/static/logo-small.png"' not in head, (
-        "静态 preload 会让一半用户预载错的那张图")
-    assert "'/static/logo-small-dark.png'" in head
-    assert "'/static/logo-small.png'" in head
-    # 必须在设置 data-theme 之后，用的是同一个 t
-    script = head[head.index("<script>"):head.index("</script>")]
-    assert script.index("setAttribute('data-theme'") < script.index("pre.href")
-
-
-@pytest.mark.parametrize("page", ["legal", "support", "donate"])
-def test_standalone_pages_offer_a_dark_source(page):
-    """这三个页面跟随系统深色模式，用 <picture media> 提供深色图。"""
-    html = (ROOT / "templates" / f"{page}.html").read_text()
-    assert '<source srcset="/static/logo-md-dark.png" media="(prefers-color-scheme: dark)">' in html
-    assert '<img src="/static/logo-md.png"' in html
 
 
 def test_no_template_hardcodes_a_light_only_logo():

@@ -17,162 +17,51 @@ def _text(html: str) -> str:
     return re.sub(r"<[^>]+>", " ", html)
 
 
-@pytest.fixture
-def seeded(admin_client):
-    """筛选下拉的选项来自库里已有的取值——空库渲染不出任何 checkbox。"""
-    from app.db import storage
-    from models import Listing
-
-    st = storage()
-    st.diff([
-        Listing(id=f"S{i}", name=f"S{i}", status="Available to book",
-                price_raw="1000", available_from="", url="",
-                city="Eindhoven", source="holland2stay",
-                features=[f"Finishing: {v}", "Occupancy: One", "Type: Studio"])
-        for i, v in enumerate(("Furnished", "Semi furnished", "Fully furnished"))
-    ])
-    st.close()
-    return admin_client
+def _account_html(client, lang_header: str) -> str:
+    """注册一个普通用户，取他的账号页（房源条件分组）。"""
+    from app.auth import _REGISTER_RECORDS
+    from users import load_users
+    _REGISTER_RECORDS.clear()
+    r = client.post("/register", data={
+        "csrf_token": "test_csrf", "register_username": "ScopeUser",
+        "register_password": "pw1234", "terms_accepted": "1",
+    })
+    assert r.status_code in (302, 303)
+    uid = next(u.id for u in load_users() if u.name == "ScopeUser")
+    client.set_cookie("h2s-lang", lang_header[:2])
+    return client.get(f"/users/{uid}?section=filters").get_data(as_text=True)
 
 
-class TestListingsPage:
-    #: /listings 筛选栏渲染徽标的维度，与 templates/listings.html 一一对应。
-    PAGE_DIMS = ("contract", "type", "occupancy", "tenant", "energy", "finishing")
+class TestAccountFilters:
+    #: 账号页房源条件里带范围徽标的维度，与 _settings_macros.filter_fields 一一对应。
+    PAGE_DIMS = ("type", "occupancy", "contract", "tenant", "offer", "finishing", "energy", "neighborhood")
 
     @pytest.mark.parametrize("lang,header", [("zh", "zh-CN"), ("en", "en-US")])
-    def test_badges_match_the_capability_table(self, admin_client, lang, header):
-        """页面上的徽标必须与 _SOURCE_FILTER_DIMS 逐字一致。
+    def test_badges_match_the_capability_table(self, client, lang, header):
+        """页面上的徽标必须与 _SOURCE_FILTER_DIMS 逐字一致，多一个少一个都算错。
 
-        原先这里断言的是「至少 3 个『仅 Holland2Stay』」。写死数字的问题在
-        v1.16.2 暴露了：租客资格扩到四个平台后徽标本该消失，而 `>= 3` 既可能
-        因此变红（实际如此），也可能在别处多出一个徽标时继续变绿——两种都不是
-        在测「说明是对的」。改成从能力表推导，多一个少一个都会失败。
-
-        **两边的语言必须钉死。** 这条原先不传 Accept-Language，靠的是页面默认
-        渲染中文、而 dim_scope_badge 的默认参数也是 zh —— 两个默认值恰好撞上。
-        2026-08-27 把不带 Accept-Language 的回落改成 en（Googlebot 就是这么爬的）
-        之后它立刻变红：页面是英文的，断言拿的还是中文徽标。两种语言都测一遍，
-        顺便守住 badge 的英文分支。
+        语言两边都钉死：页面语言和 dim_scope_badge 的语言参数各有默认值，碰巧撞上
+        时测试会假绿（2026-08-27 回落改成 en 之后就因此变红过一次）。
         """
         from collections import Counter
 
         from config import dim_scope_badge
 
-        html = admin_client.get(
-            "/listings", headers={"Accept-Language": header}).get_data(as_text=True)
+        html = _account_html(client, header)
         assert f'<html lang="{lang}"' in html
-        expected = Counter(
-            b for d in self.PAGE_DIMS if (b := dim_scope_badge(d, lang))
-        )
+        expected = Counter(b for d in self.PAGE_DIMS if (b := dim_scope_badge(d, lang)))
         assert expected, "没有任何维度需要徽标，这条测试已经失去意义"
         for badge, n in expected.items():
-            # 数 `>徽标</span>` 而不是裸的徽标文本：英文版的 tooltip 正文里
-            # 同样含有「Holland2Stay only」这一串，裸数会把 title 属性也数进来
-            # （实测 2 个徽标被数成 4）。中文版碰巧不重叠，纯属侥幸。
-            anchor = f">{badge}</span>"
-            assert html.count(anchor) == n, (
-                f"徽标 {badge!r} 应出现 {n} 次，实际 {html.count(anchor)} 次"
-            )
+            # 数 `>徽标</small>`：英文 tooltip 里也含「Holland2Stay only」，裸数会多算
+            anchor = f">{badge}</small>"
+            assert html.count(anchor) == n, f"徽标 {badge!r} 应出现 {n} 次，实际 {html.count(anchor)} 次"
 
-    @pytest.fixture
-    def tenant_seeded(self, admin_client):
-        """租客筛选的选项来自库里已有取值，空库连 checkbox 都渲染不出来。"""
-        from app.db import storage
-        from models import Listing
-
-        st = storage()
-        st.diff([
-            Listing(id="T1", name="T1", status="Available to book",
-                    price_raw="1000", available_from="", url="",
-                    city="Eindhoven", source="holland2stay",
-                    features=["Tenant: student only"]),
-            Listing(id="T2", name="T2", status="Available to book",
-                    price_raw="1000", available_from="", url="",
-                    city="Amsterdam", source="ourdomain",
-                    features=["Tenant: employed only"]),
-        ])
-        st.close()
-        return admin_client
-
-    def test_tenant_badge_reflects_the_capability_table(self, tenant_seeded):
-        """徽标要如实反映该维度覆盖哪几个平台。
-
-        覆盖范围变过三次：v1.16.2 从「仅 H2S」扩到四家，2026-08-18 因白名单缩回
-        三家，2026-08-19 靠详情补齐恢复四家。徽标错了比没有徽标更糟——用户会据此
-        误判哪些平台的房源在按资格过滤。
-        """
-        admin_client = tenant_seeded
-        from config import dim_scope_badge
-
-        # 语言必须钉死：不带 Accept-Language 时页面回落到 en（2026-08-27 改的，
-        # Googlebot 就是这么爬的），而 dim_scope_badge 的默认参数是 zh——不指定
-        # 就会拿中文徽标去比英文页面。本文件上面那条用例的 docstring 记着同一个坑。
-        html = admin_client.get(
-            "/listings", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
-        assert '<html lang="zh"' in html
-        badge = dim_scope_badge("tenant")
-        assert 'name="tenant"' in html, "租客筛选没渲染出来，这条测试测了个空"
-        head = html[: html.index('name="tenant"')]
-        labels = re.findall(
-            r'<label class="form-label">(.*?)</label>', head, re.S,
-        )
-        assert labels, "找不到租客筛选的 label"
-
-        # 断言的是「页面上的徽标 == 能力表算出的徽标」，不是某个具体字样。
-        # 2026-09-01 接入 Magis 之后 tenant 不再是通用维度（Magis 只在部分房源上
-        # 打「Students only」徽标，语义未定，不登记），徽标从空变成「Magis 除外」。
-        if badge:
-            assert badge in labels[-1], (
-                f"能力表说该有徽标 {badge!r}，页面上没有: {labels[-1]}"
-            )
-        else:
-            assert "仅 " not in labels[-1] and "除外" not in labels[-1], (
-                f"能力表说是通用维度，那一行不该有范围徽标: {labels[-1]}"
-            )
-
-    def test_badge_carries_the_full_note_as_tooltip(self, admin_client):
-        html = admin_client.get(
-            "/listings", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
+    def test_badge_carries_the_full_note_as_tooltip(self, client):
+        html = _account_html(client, "zh-CN")
         assert "其余平台不提供该属性" in html, "徽标没有带完整说明"
-
-    def test_universal_dimensions_have_no_badge(self, admin_client):
-        """全平台生效的维度不该加徽标，否则满屏都是废话。"""
-        html = admin_client.get("/listings").get_data(as_text=True)
-        # 城市/平台/租金/面积四个通用维度所在的 label 里不应出现徽标
-        for chunk in re.findall(r'<label class="form-label">(.*?)</label>', html):
-            if "filter_city" in chunk or "filter_source" in chunk:
-                assert "仅 " not in chunk
-
-    def test_finishing_is_a_multi_select(self, seeded):
-        """四档互斥，单选就只能一次看一档。"""
-        html = seeded.get("/listings").get_data(as_text=True)
-        assert 'name="finishing"' in html
-        assert 'type="checkbox" name="finishing"' in html, "装修还是单选"
-        assert '<select name="finishing"' not in html
-
-    def test_route_reads_every_finishing_value(self, seeded):
-        """路由必须用 getlist。
-
-        只读单值的话，多选在界面上勾得进去、URL 里也带着，后端却只认第一个——
-        用户看到的结果比他勾的少，而且看不出哪里错了。
-        """
-        one = seeded.get("/listings?finishing=Furnished").get_data(as_text=True)
-        two = seeded.get(
-            "/listings?finishing=Furnished&finishing=Fully+furnished"
-        ).get_data(as_text=True)
-        assert "S0" in one and "S2" not in one
-        assert "S0" in two and "S2" in two, "第二个 finishing 值被丢掉了"
-        assert "S1" not in two, "Semi furnished 不该被带进来"
 
 
 class TestUserForm:
-    def test_scope_rule_is_stated_once(self, admin_client):
-        html = admin_client.get(
-            "/users/new", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
-        text = _text(html)
-        assert "带平台标记的条件只对部分平台生效" in text
-        # 整句只出现一次；各字段靠徽标
-        assert text.count("其余平台不提供该属性，它们的房源不受该条件影响") == 1
 
     def test_fields_carry_badges(self, admin_client):
         html = admin_client.get(
@@ -190,9 +79,8 @@ class TestUserForm:
 
 
 class TestEnglishUi:
-    def test_english_badge_and_note(self, admin_client):
-        admin_client.get("/set-lang?lang=en&next=/listings")
-        html = admin_client.get("/listings").get_data(as_text=True)
+    def test_english_badge_and_note(self, client):
+        html = _account_html(client, "en-US")
         assert "Holland2Stay only" in html
         assert "unaffected" in html
         assert "仅 Holland2Stay" not in html

@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import re
+
 
 from app.services.listing_service import serialize_listing
 
@@ -55,32 +57,8 @@ class TestApiExposesIt:
         assert serialize_listing(_row(status_is_inferred=0))["status_is_inferred"] is False
 
 
-class TestListingsPageShowsIt:
-    """模板层：状态胶囊旁边要有个标记。"""
-
-    def _html(self) -> str:
-        return open("templates/listings.html", encoding="utf-8").read()
-
-    def test_table_row_renders_the_marker(self):
-        html = self._html()
-        assert html.count("l.status_is_inferred") >= 2, (
-            "表格和移动端卡片两处都要标——只标一处等于换个设备就看不见"
-        )
-
-    def test_marker_has_an_explanation(self):
-        assert "status_inferred_hint" in self._html(), (
-            "光标一个「推测」没用，得说清楚推测的是什么"
-        )
-
-    def test_marker_is_translated_not_hardcoded(self):
-        html = self._html()
-        assert "推测" not in html and "Inferred" not in html, (
-            "文案要走 translations，别写死在模板里"
-        )
-
-
 class TestRenderedPage:
-    """真渲染一次 /listings——模板里断言字符串只能证明代码写了，证明不了它出得来。"""
+    """真渲染一次收件箱——模板里断言字符串只能证明代码写了，证明不了它出得来。"""
 
     def _seed(self, isolated_data_dir):
         from mstorage import Storage
@@ -106,13 +84,14 @@ class TestRenderedPage:
         self, admin_client, isolated_data_dir,
     ):
         self._seed(isolated_data_dir)
-        resp = admin_client.get("/listings")
+        admin_client.set_cookie("h2s-lang", "en")
+        resp = admin_client.get("/?view=all")
         assert resp.status_code == 200
         html = resp.get_data(as_text=True)
-        # 表格一次 + 移动端卡片一次 = 2；两条房源里只有一条是推测的
-        assert html.count("badge-inferred") == 2, (
-            "推测标记应当只出现在那一条推测状态的房源上（表格 + 卡片各一次）"
-        )
+        rows = dict(re.findall(r'<a [^>]*data-listing-id="(od_\d)"[^>]*>(.*?)</a>', html, re.S))
+        assert set(rows) == {"od_1", "od_2"}
+        marked = sorted(lid for lid, row in rows.items() if "<small>Inferred</small>" in row)
+        assert marked == ["od_1"], "推测标记应当只出现在那一条推测状态的房源上"
 
     def test_no_marker_when_nothing_is_inferred(
         self, admin_client, isolated_data_dir,
@@ -130,8 +109,10 @@ class TestRenderedPage:
         )
         st.conn.commit()
         st.close()
-        html = admin_client.get("/listings").get_data(as_text=True)
-        assert "badge-inferred" not in html
+        admin_client.set_cookie("h2s-lang", "en")
+        html = admin_client.get("/?view=all").get_data(as_text=True)
+        assert 'data-listing-id="od_2"' in html
+        assert "<small>Inferred</small>" not in html
 
 
 class TestTranslations:

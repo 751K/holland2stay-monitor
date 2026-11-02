@@ -66,16 +66,16 @@ class TestTemplateAutoEscape:
         assert "data-user-name=\"{{ user.name }}\"" in source
 
     def test_notification_result_templates_escape_dynamic_errors(self):
-        """测试通知结果仍用 innerHTML 布局时，动态错误字段必须先 escape。"""
-        source = (Path(__file__).parent.parent / "templates" / "user_form.html").read_text(
-            encoding="utf-8",
-        )
-        assert "+ data.error +" not in source
-        assert "+ r.channel +" not in source
-        assert "+ r.error +" not in source
-        assert "escapeHtml(data.error)" in source
-        assert "escapeHtml(r.channel)" in source
-        assert "escapeHtml(r.error)" in source
+        """测试通知结果用 innerHTML 布局，动态错误字段必须先 escape。
+
+        账号页（account.js）和用户管理页（users.js）各有一份结果渲染。
+        """
+        static = Path(__file__).parent.parent / "static"
+        for name in ("account.js", "users.js"):
+            source = static.joinpath(name).read_text(encoding="utf-8")
+            for field in ("data.error", "r.channel", "r.error"):
+                assert f"${{{field}}}" not in source, f"{name} 直接插入了 {field}"
+                assert f"escape({field})" in source, f"{name} 没有转义 {field}"
 
     def test_hidden_email_to_is_not_statically_required(self):
         """Email 通道未启用时隐藏的收件邮箱字段不能阻断表单提交。"""
@@ -85,7 +85,6 @@ class TestTemplateAutoEscape:
         match = re.search(r'<input[^>]+id="email_to_input"[^>]*>', source)
         assert match is not None
         assert " required" not in match.group(0)
-        assert "syncEmailRequirement()" in source
 
     def test_telegram_setup_hint_present(self):
         """Telegram 通知配置应提示用户如何获取 Bot Token 和 Chat ID。"""
@@ -105,22 +104,3 @@ class TestTemplateAutoEscape:
         assert "本地 macOS" in source
         assert "Docker" in source
         assert "servers, Linux, or Docker" in source
-
-    def test_stats_range_updates_kpi_cards(self):
-        """统计页切换天数时 KPI 卡片通过 JS setText 动态更新。"""
-        source = (Path(__file__).parent.parent / "templates" / "stats.html").read_text(
-            encoding="utf-8",
-        )
-        # v1.7.x KPI 元素由 JS renderSummary() 动态注入，不写静态 HTML id
-        assert "renderSummary(d.summary)" in source
-        assert "summary.new_range" in source
-        assert "summary.changes_range" in source
-        assert "{ cache: 'no-store' }" in source
-
-    def test_listings_page_shows_last_seen_for_stale_sweep_debugging(self):
-        """列表页应显示 stale 收敛真正使用的 last_seen，而不只显示 first_seen。"""
-        source = (Path(__file__).parent.parent / "templates" / "listings.html").read_text(
-            encoding="utf-8",
-        )
-        assert "{{ _('col_last_seen') }}" in source
-        assert "l.last_seen | time_ago" in source

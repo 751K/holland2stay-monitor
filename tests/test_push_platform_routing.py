@@ -191,8 +191,8 @@ class TestDispatchRoutesMacos:
 # ── 管理面板 ─────────────────────────────────────────────────────────
 
 
-def test_admin_devices_tab_shows_macos_as_apple(admin, issued_tokens):
-    """原来只有 ``== 'ios'`` 才显示苹果图标，macOS 设备是通用手机图标加灰色 macos 标签。"""
+def test_admin_devices_tab_names_macos_properly(admin, issued_tokens):
+    """平台列要写成 macOS，不是库里的原始值 macos（原来只认 ios，macOS 落进了通用分支）。"""
     (aid, _), _ = issued_tokens
     from app.db import storage
     st = storage()
@@ -207,6 +207,5 @@ def test_admin_devices_tab_shows_macos_as_apple(admin, issued_tokens):
     at = html.find(f'title="{token}"')
     assert at != -1, "设备表里找不到这台 macOS 设备"
     row = html[html.rfind("<tr", 0, at): html.find("</tr>", at)]
-    assert "bi-apple" in row
-    assert ">macOS</span>" in row
-    assert "badge-neutral" not in row
+    assert "<td>macOS</td>" in row
+    assert ">macos<" not in row

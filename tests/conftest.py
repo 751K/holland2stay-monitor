@@ -26,6 +26,15 @@ if str(_ROOT) not in sys.path:
 
 
 @pytest.fixture(autouse=True)
+def _render_as_the_official_site(monkeypatch):
+    """测试客户端的 Host 是 localhost，按 app.deployment 的判定算自部署，
+    页面会多出「自部署版本」后缀和管理员免责弹窗。绝大多数用例断言的是官方站的
+    标题 / 社交卡片，所以默认按官方站渲染；自部署的行为在 test_deployment.py 里单独测。
+    """
+    monkeypatch.setattr("app.deployment.is_official_site", lambda: True)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_browser_worker_for_unit_tests(monkeypatch):
     """Keep existing dispatcher stubs in process; subprocess behavior has its own tests."""
     from mcore import scrape_round

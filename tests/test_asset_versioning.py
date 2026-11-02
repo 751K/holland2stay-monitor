@@ -37,11 +37,17 @@ class TestNoHardcodedVersions:
             + "\n  ".join(offenders)
         )
 
-    def test_every_template_referencing_core_assets_uses_asset(self):
-        """反过来确认 asset() 真的被用上了，别把断言写成永远为真。"""
-        users = [p.name for p in TEMPLATES.glob("*.html")
-                 if "asset('design.css')" in p.read_text(encoding="utf-8")]
-        assert set(users) >= {"base.html", "login.html"}, users
+    def test_no_unversioned_css_or_js(self):
+        """反过来：直接写 /static/xxx.css 也等于没有版本号，改了文件用户拿到的是缓存。"""
+        raw = re.compile(r'(?:href|src)="/static/[^"]+\.(?:css|js)"')
+        offenders = [f"{p.name}: {m.group(0)}" for p in sorted(TEMPLATES.glob("*.html"))
+                     for m in raw.finditer(p.read_text(encoding="utf-8"))]
+        assert not offenders, "这些样式表 / 脚本没走 asset()：\n  " + "\n  ".join(offenders)
+
+    def test_both_shells_use_asset(self):
+        """确认 asset() 真的被用上了，别把上面两条写成永远为真。"""
+        for name, css in (("base.html", "design.css"), ("login.html", "public.css"), ("_public_base.html", "public.css")):
+            assert f"asset('{css}')" in (TEMPLATES / name).read_text(encoding="utf-8"), name
 
 
 class TestAssetHelper:
@@ -77,11 +83,10 @@ class TestAssetHelper:
 
 
 class TestRenderedPages:
-    def test_login_and_dashboard_agree_on_the_css_version(self, admin_client, client):
-        """login.html 和 base.html 各写各的版本号，正是线上那次漂移的成因。"""
+    def test_rendered_pages_carry_versions(self, admin_client, client):
+        """登录页（公共外壳）和收件箱（侧栏外壳）渲染出来的样式表都带版本号。"""
         login = client.get("/login").get_data(as_text=True)
-        dash = admin_client.get("/").get_data(as_text=True)
-        pat = re.compile(r"/static/design\.css\?v=([0-9a-f]+)")
-        assert pat.search(login), "登录页没带版本号"
-        assert pat.search(dash), "仪表盘没带版本号"
-        assert pat.search(login).group(1) == pat.search(dash).group(1)
+        inbox = admin_client.get("/").get_data(as_text=True)
+        assert re.search(r"/static/public\.css\?v=[0-9a-f]+", login), "登录页没带版本号"
+        assert re.search(r"/static/design\.css\?v=[0-9a-f]+", inbox), "收件箱没带版本号"
+        assert re.search(r"/static/inbox\.css\?v=[0-9a-f]+", inbox)

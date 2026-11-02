@@ -167,11 +167,8 @@ class TestAccountSettingsRendering:
         client.set_cookie("h2s-lang", lang)
         return name
 
-    @pytest.mark.parametrize("lang,phrase", [
-        ("zh", "收不到通知"),
-        ("en", "not receiving anything"),
-    ])
-    def test_new_user_sees_the_card(self, client, lang, phrase):
+    @pytest.mark.parametrize("lang", ["zh", "en"])
+    def test_new_user_sees_the_card(self, client, lang):
         """刚注册的用户：开关 False、无渠道、无设备 → 红卡。
 
         两种语言都测：这条卡说明新用户的通知配置状态，缺一套文案就等于对
@@ -181,8 +178,10 @@ class TestAccountSettingsRendering:
         html = client.get(self._settings_url(client)).get_data(as_text=True)
         assert 'id="onb-title"' in html, "新用户没看到引导卡"
         assert "onb-step-blocked" in html
-        # 「收不到通知」这件事必须写出来，不能只给个待办勾
-        assert phrase in html
+        # 为什么收不到必须写出来（新用户是总开关没开），不能只给个待办勾
+        from markupsafe import escape
+        from translations import TRANSLATIONS
+        assert str(escape(TRANSLATIONS["onb_route_toggle_off"][lang])) in html
 
     def test_card_links_to_the_users_own_settings(self, client, test_app):
         self._login_as_new_user(client, "OnbLink")
@@ -242,7 +241,9 @@ class TestAccountSettingsRendering:
         # 样式，区别只在标题和那一步自己的颜色。
         assert "onb-step-blocked" not in html, "已经能收到了却还在报红"
         assert "Alerts are on" in html
-        assert "every listing" in html, "没说清楚「筛选为空」会导致什么"
+        from markupsafe import escape
+        from translations import TRANSLATIONS
+        assert str(escape(TRANSLATIONS["onb_filter_empty_lead"]["en"])) in html, "没说清楚「筛选为空」会导致什么"
 
     def test_settings_survive_a_broken_onboarding_state(self, client, monkeypatch):
         """引导算不出来时账号设置照常打开。

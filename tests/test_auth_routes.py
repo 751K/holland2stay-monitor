@@ -19,13 +19,21 @@ from __future__ import annotations
 
 
 class TestUnauthenticated:
-    def test_root_redirects_to_login(self, client):
+    def test_root_opens_as_guest(self, client):
+        """访客模式默认开着：没登录的人直接以访客身份看收件箱。"""
+        r = client.get("/")
+        assert r.status_code == 200
+        with client.session_transaction() as sess:
+            assert sess.get("role") == "guest"
+
+    def test_root_redirects_to_login_when_guest_mode_is_off(self, client, monkeypatch):
+        monkeypatch.setenv("WEB_GUEST_MODE", "false")
         r = client.get("/")
         assert r.status_code == 302
         assert "/login" in r.headers["Location"]
 
     def test_protected_page_redirects(self, client):
-        r = client.get("/listings")
+        r = client.get("/users")
         assert r.status_code == 302
         assert "/login" in r.headers["Location"]
 
@@ -51,11 +59,6 @@ class TestUnauthenticated:
     def test_login_page_accessible(self, client):
         r = client.get("/login")
         assert r.status_code == 200
-
-    def test_login_page_links_to_ios_app(self, client):
-        r = client.get("/login")
-        assert r.status_code == 200
-        assert b"https://apps.apple.com/us/app/flarradar/id6769857080" in r.data
 
 
 # ─── CSRF 防护 ──────────────────────────────────────────────────
@@ -133,7 +136,7 @@ class TestLoginSuccess:
 
     def test_can_access_protected_pages_after_login(self, client, test_credentials):
         _login(client, test_credentials["username"], test_credentials["password"])
-        for url in ["/", "/listings", "/users", "/settings"]:
+        for url in ["/", "/calendar", "/users", "/settings"]:
             r = client.get(url)
             assert r.status_code == 200, f"{url} = {r.status_code}"
 
@@ -180,7 +183,8 @@ class TestWebRegister:
     def test_register_creates_user_and_logs_in(self, client, isolated_data_dir):
         r = _register_web(client, "alice", "secret123")
         assert r.status_code == 302
-        assert r.headers["Location"].endswith("/")
+        # 新账号直接进账号设置，先把筛选和通知配好
+        assert "/users/" in r.headers["Location"]
 
         from users import load_users, verify_app_password
         users = load_users()
@@ -334,7 +338,7 @@ class TestLogout:
 
     def test_after_logout_protected_pages_redirect(self, admin_client):
         admin_client.post("/logout", data={"csrf_token": "test_csrf"})
-        r = admin_client.get("/")
+        r = admin_client.get("/users")
         assert r.status_code == 302
         assert "/login" in r.headers["Location"]
 

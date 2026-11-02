@@ -13,8 +13,17 @@ isolated_data_dir fixture 把 USERS_FILE / DB_PATH 重定向到 tmp_path，
 """
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 
+
+
+def _imessage_box(html: str) -> str:
+    """iMessage 渠道开关那个 checkbox 的标签本身。"""
+    m = re.search(r'<input type="checkbox" class="channel-chk" data-ch="imessage"[^>]*>', html)
+    assert m, "表单里没有 iMessage 渠道开关"
+    return m.group(0)
 
 def _create_user(admin_client, name="Test User", **extra_fields):
     """通过 POST /users/new 创建用户并返回新 user 实例。"""
@@ -94,20 +103,10 @@ class TestUserNew:
         r = admin_client.get("/users/new")
         assert r.status_code == 200
         html = r.data.decode()
-        # 卡片灰掉 + 不可点击
-        assert " is-disabled\"" in html
-        # checkbox disabled
-        assert 'data-ch="imessage"' in html
-        assert "disabled" in html
-        # 提示文案
+        assert " disabled" in _imessage_box(html)
         assert "Unavailable" in html or "不可用" in html
-        # 没有 onclick（不会展开输入框）
-        assert 'onclick="toggleChannel(\'imessage\')"' not in html
+        assert re.search(r'name="IMESSAGE_RECIPIENT"[^>]* readonly', html)
 
-    def test_disabled_channel_card_is_not_interactive(self):
-        """灰掉的样式在 user_form.css 里：不能点、看起来不可用。"""
-        css = (Path(__file__).parent.parent / "static" / "user_form.css").read_text(encoding="utf-8")
-        assert ".channel-card.is-disabled{opacity:.45;pointer-events:none" in css
 
     def test_imessage_enabled_on_macos(self, admin_client, monkeypatch):
         """macOS 服务器上 iMessage 应正常可用。"""
@@ -117,8 +116,8 @@ class TestUserNew:
         r = admin_client.get("/users/new")
         assert r.status_code == 200
         html = r.data.decode()
-        assert "is-disabled" not in html
-        assert 'onclick="toggleChannel(\'imessage\')"' in html
+        assert " disabled" not in _imessage_box(html)
+        assert not re.search(r'name="IMESSAGE_RECIPIENT"[^>]* readonly', html)
         assert "Unavailable" not in html
         assert "iMessage requires macOS" not in html
         assert "iMessage 需要 macOS" not in html
@@ -142,17 +141,11 @@ class TestUserEdit:
         r = admin_client.get(f"/users/{u.id}")
         assert r.status_code == 200
         html = r.data.decode()
-        # 卡片灰掉
-        assert " is-disabled\"" in html
-        # checkbox 保持 checked + disabled
-        assert 'data-ch="imessage"' in html
-        assert "checked" in html
-        assert "disabled" in html
-        # 文案提示不可用
+        # 开关保持选中但不可操作
+        box = _imessage_box(html)
+        assert " checked" in box and " disabled" in box
         assert "Unavailable" in html or "不可用" in html
-        # 没有 onclick
-        assert 'onclick="toggleChannel(\'imessage\')"' not in html
-        # 但输入框区域显示已有收件人
+        # 已有收件人照样显示出来
         assert "+15551111111" in html
 
     def test_disabled_user_existing_session_redirected_to_login(self, test_app, isolated_data_dir):

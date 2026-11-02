@@ -149,19 +149,7 @@ def test_api_status_exposes_upstream_maintenance(admin_client, isolated_data_dir
     assert body["upstream_maintenance"]["since"] == "2026-06-13T12:54:47+02:00"
 
 
-def test_dashboard_shows_paused_banner_to_logged_in_users(admin_client, monkeypatch):
-    from app.routes import dashboard as dashboard_route
-
-    monkeypatch.setattr(dashboard_route, "monitor_pid", lambda: None)
-
-    r = admin_client.get("/dashboard")
-    assert r.status_code == 200
-    html = r.data.decode()
-    assert 'id="monitor-paused-banner"' in html
-    assert "系统监控已暂停" in html or "Monitoring is paused" in html
-
-
-def test_dashboard_renders_upstream_maintenance_banner(admin_client, isolated_data_dir):
+def test_inbox_renders_upstream_maintenance_banner(admin_client, isolated_data_dir):
     from app.db import storage
     import web
 
@@ -174,10 +162,11 @@ def test_dashboard_renders_upstream_maintenance_banner(admin_client, isolated_da
     if hasattr(web._inject_upstream_maintenance, "_cache"):
         delattr(web._inject_upstream_maintenance, "_cache")
 
-    r = admin_client.get("/dashboard")
+    r = admin_client.get("/")
     assert r.status_code == 200
     html = r.data.decode()
-    assert 'id="upstream-maintenance-banner"' in html
+    banner = html[html.index('id="upstream-maintenance-banner"') - 40:]
+    assert 'class="maintenance-banner"' in banner[:120], "维护中却把横幅渲染成了 hidden"
     assert "Holland2Stay 平台维护中" in html or "Holland2Stay under maintenance" in html
 
 
@@ -193,9 +182,3 @@ def test_system_info_has_admin_monitor_controls(admin_client, monkeypatch):
     assert 'id="monitor-stop-btn"' in html
     assert 'id="monitor-restart-btn"' in html
     assert "系统暂停" in html or "System paused" in html
-
-
-def test_dashboard_city_filter_stays_on_dashboard(admin_client):
-    r = admin_client.get("/dashboard")
-    assert r.status_code == 200
-    assert '<form method="get" action="/dashboard"' in r.data.decode()

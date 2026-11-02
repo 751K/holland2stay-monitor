@@ -89,7 +89,6 @@ class TestQuery:
         assert temp_db.get_active_clients_by_user()["u1"][0]["name"] == "未命名设备"
 
 
-
 class TestActiveCriterion:
     """「活跃」= revoked=0 且未过期。这三条是这次改动唯一可能出错的地方。"""
 
@@ -188,16 +187,27 @@ def _enable_notifications(uid: str) -> None:
     update_users(_on)
 
 
-def _card(html: str, name: str) -> str:
-    """截出某个用户那张卡片的 HTML。
+def _row(html: str, name: str) -> str:
+    """截出某个用户在左侧列表里的那一行。
 
-    断言必须落在单张卡片上：整页搜索的话，隔壁卡片上的 pill 会让「这张卡没有
-    pill」永远成立不了、也永远发现不了。
+    断言必须落在单个用户上：整页搜索的话，隔壁用户的内容会让「这个人没有某样东西」
+    永远成立不了、也永远发现不了。
     """
-    i = html.index(f">{name}<")
-    start = html.rindex('<div class="user-card ', 0, i)
-    nxt = html.find('<div class="user-card ', i)
+    i = html.index(f"<strong>{name}</strong>")
+    start = html.rindex("<a href=", 0, i)
+    return html[start:html.index("</a>", i) + 4]
+
+
+def _panel(html: str, name: str) -> str:
+    """截出右侧详情里该用户的面板（每个用户一块，未选中的带 hidden）。"""
+    uid = _row(html, name).split('data-user-id="', 1)[1].split('"', 1)[0]
+    start = html.index(f'data-user-panel="{uid}"')
+    nxt = html.find("data-user-panel=", start + 1)
     return html[start:nxt if nxt != -1 else len(html)]
+
+
+def _card(html: str, name: str) -> str:
+    return _row(html, name) + _panel(html, name)
 
 
 class TestCard:
@@ -214,8 +224,8 @@ class TestCard:
 
         html = admin_client.get("/users").get_data(as_text=True)
         card = _card(html, "CardWithPhone")
+        assert "iPhone 17 Pro" in _row(html, "CardWithPhone"), "列表行没写出客户端"
         assert "iPhone 17 Pro" in card
-        assert "channel-pill app" in card, "客户端没有做成 pill"
 
     def test_session_count_is_shown_when_merged(self, client, admin_client, test_app):
         uid = _mk_user(client, "CardManySessions")
@@ -230,8 +240,9 @@ class TestCard:
                 st.close()
 
         html = admin_client.get("/users").get_data(as_text=True)
-        assert html.count("vivo V2458A") == 1, "同一台设备被列了多次"
-        assert "×3" in html
+        for part in (_row(html, "CardManySessions"), _panel(html, "CardManySessions")):
+            assert part.count("vivo V2458A") == 1, "同一台设备被列了多次"
+        assert "vivo V2458A ×3" in _panel(html, "CardManySessions")
 
     def test_single_session_has_no_count_suffix(self, client, admin_client, test_app):
         """一枚 token 不该显示「×1」——那是噪音，而且看着像出了什么事。"""
@@ -249,31 +260,6 @@ class TestCard:
         assert "iPad Air" in html
         assert "×1" not in html
 
-    def test_pill_matches_the_channel_pills(self, client, admin_client, test_app):
-        """和 Email / Telegram 是同一套样式：同一个基类，自己一对颜色。
-
-        换成别的类（badge、自定义 span）就会在同一排里高矮不齐——四个渠道 pill
-        的圆角、内边距、字重都来自 .channel-pill。
-        """
-        uid = _mk_user(client, "CardPillStyle")
-        with test_app.app_context():
-            _enable_notifications(uid)      # 注册默认是关的，那条分支不画 pill
-            from app.db import storage
-            st = storage()
-            try:
-                _mk(st, uid, "Pixel 9")
-            finally:
-                st.close()
-
-        card = _card(admin_client.get("/users").get_data(as_text=True), "CardPillStyle")
-        assert 'class="channel-pill app' in card
-
-        css = (Path(__file__).resolve().parent.parent
-               / "static" / "design.css").read_text(encoding="utf-8")
-        assert ".channel-pill.app{" in css, "App pill 没有配色规则，会退成透明底"
-        # 两个主题各要有一份，否则暗色下是亮色主题的紫，对比度不够
-        assert css.count("--pill-app:") == 2, "缺一个主题的 --pill-app"
-        assert css.count("--pill-app-bg:") == 2
 
     def test_active_token_counts_as_a_channel(self, client, admin_client, test_app):
         """有活跃 token 就是有通知渠道，和 Email 一样。
@@ -318,9 +304,10 @@ class TestCard:
 
             update_users(_on)
 
-        card = _card(admin_client.get("/users").get_data(as_text=True), "CardEmailOnly")
-        assert "channel-pill email" in card
-        assert "channel-pill app" not in card
+        html = admin_client.get("/users").get_data(as_text=True)
+        card = _card(html, "CardEmailOnly")
+        assert "Email" in _row(html, "CardEmailOnly")
+        assert "Not signed in" in _panel(html, "CardEmailOnly")
         from translations import TRANSLATIONS
         assert not any(TRANSLATIONS["users_no_channels"][l] in card
                        for l in ("zh", "en"))
@@ -374,22 +361,6 @@ class TestCard:
         from translations import TRANSLATIONS
         assert any(TRANSLATIONS["users_no_channels"][l] in card for l in ("zh", "en"))
 
-    def test_row_centers_pills_against_plain_text(self, client, admin_client,
-                                                  test_app):
-        """这一排里既有 pill（带内边距）又有裸文本 / 徽章。
-
-        不指定 align-items 时 flex 默认 stretch——裸文本被拉满整行高度，文字贴在
-        顶上，和 pill 里居中的文字差半行。四个渠道全是 pill 的时候看不出来，
-        混进一个裸文本就露馅。
-        """
-        uid = _mk_user(client, "CardAlign")
-        with test_app.app_context():
-            _enable_notifications(uid)
-
-        card = _card(admin_client.get("/users").get_data(as_text=True), "CardAlign")
-        row = card[card.index('class="flex flex-wrap'):]
-        row = row[:row.index(">")]
-        assert "items-center" in row, f"渠道那一排没有垂直居中：{row}"
 
     def test_pill_follows_the_master_switch_like_email_does(self, client,
                                                             admin_client, test_app):
@@ -407,10 +378,11 @@ class TestCard:
             finally:
                 st.close()
 
-        card = _card(admin_client.get("/users").get_data(as_text=True), "CardNotifOff")
+        # 列表行跟总开关走；详情里照实列出登录着的客户端，那是事实不是渠道
+        row = _row(admin_client.get("/users").get_data(as_text=True), "CardNotifOff")
         from translations import TRANSLATIONS
-        assert any(TRANSLATIONS["users_notif_off"][l] in card for l in ("zh", "en"))
-        assert "Xperia 1" not in card
+        assert any(TRANSLATIONS["users_notif_off"][l] in row for l in ("zh", "en"))
+        assert "Xperia 1" not in row
 
     def test_last_used_tooltip_is_relative_not_raw_utc(self, client, admin_client,
                                                         test_app):
@@ -435,14 +407,12 @@ class TestCard:
         assert "3d ago" in html or "3天前" in html
         assert "iPhone SE" in html
 
-    def test_user_without_a_token_has_no_pill(self, client, admin_client):
-        """没登录就没有 pill——不是一个「未登录」占位。
-
-        渠道那一排的语义是「有什么」，四个渠道也都是没有就不画。
-        """
+    def test_user_without_a_token_shows_not_signed_in(self, client, admin_client):
+        """没登录 App：详情里明说「未登录」，列表行不凭空写出客户端。"""
         _mk_user(client, "CardNoPhone")
         html = admin_client.get("/users").get_data(as_text=True)
-        assert _card(html, "CardNoPhone").count("channel-pill app") == 0
+        assert "Not signed in" in _panel(html, "CardNoPhone")
+        assert " · " not in _row(html, "CardNoPhone").split('class="mail-meta">', 1)[1].split("</span>", 1)[0]
 
     def test_revoked_does_not_show_on_the_card(self, client, admin_client, test_app):
         uid = _mk_user(client, "CardRevoked")

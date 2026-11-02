@@ -34,22 +34,37 @@ def account(client, test_app):
     return client, user
 
 
-def test_every_field_the_self_parser_reads_is_in_the_form():
+def _self_parser_fields() -> set[str]:
     parser = (Path(__file__).resolve().parent.parent / "app" / "forms" / "user_form.py").read_text(encoding="utf-8")
     body = parser[parser.index("def build_user_from_form_self"):]
     body = body[:body.index("\ndef ", 10)] if "\ndef " in body[10:] else body
-    read = set(re.findall(r'(?:form\.get|_fv|_iv|_lv|_secret|_sanitize_energy)\(\s*"([A-Za-z_]+)"', body))
-    read |= {"LANGUAGE"}
-    tpl = (Path(__file__).resolve().parent.parent / "templates" / "account.html").read_text(encoding="utf-8")
-    # 复选组经由 checks() 宏渲染，字段名作为参数出现
-    missing = sorted(name for name in read if f'name="{name}"' not in tpl and f"'{name}'" not in tpl)
+    return set(re.findall(r'(?:form\.get|_fv|_iv|_lv|_secret|_sanitize_energy)\(\s*"([A-Za-z_]+)"', body)) | {"LANGUAGE"}
+
+
+def test_every_field_the_self_parser_reads_is_in_the_form(account):
+    """看渲染后的页面而不是模板源码：字段大多由 _settings_macros 的宏生成。
+
+    片区 / 楼盘的其余选项由前端按城市加载，服务端只渲染已保存的值，所以先存上。
+    """
+    client, user = account
+    from users import update_users, get_user
+
+    def change(all_users):
+        lf = get_user(all_users, user.id).listing_filter
+        lf.allowed_neighborhoods = ["Strijp"]
+        lf.allowed_buildings = ["Tower"]
+    update_users(change)
+    html = client.get(f"/users/{user.id}").get_data(as_text=True)
+    rendered = set(re.findall(r'<(?:input|select|textarea)\b[^>]*\bname="([A-Za-z_]+)"', html))
+    missing = sorted(_self_parser_fields() - rendered)
     assert not missing, f"账号页缺这些字段，保存一次就会被清空: {missing}"
 
 
-def test_notifications_off_is_submitted_explicitly():
+def test_notifications_off_is_submitted_explicitly(account):
     """未勾选的复选框不提交，而解析器把缺失当作开启——必须有 false 兜底。"""
-    tpl = (Path(__file__).resolve().parent.parent / "templates" / "account.html").read_text(encoding="utf-8")
-    assert '<input type="hidden" name="NOTIFICATIONS_ENABLED" value="false">' in tpl
+    client, user = account
+    html = client.get(f"/users/{user.id}").get_data(as_text=True)
+    assert '<input type="hidden" name="NOTIFICATIONS_ENABLED" value="false">' in html
 
 
 def test_selection_comes_from_the_query(account):
@@ -94,8 +109,9 @@ def test_bad_return_target_is_ignored(account):
 
 
 def test_admin_still_gets_the_full_user_form(admin_client):
+    """管理员新建 / 编辑用户用 user_form.html，带自动预订；普通用户的账号页没有。"""
     html = admin_client.get("/users/new").get_data(as_text=True)
-    assert "AUTO_BOOK_ENABLED" in html and "account-workspace" not in html
+    assert 'name="AUTO_BOOK_ENABLED"' in html
 
 
 def test_saved_values_missing_from_options_survive(account, test_app):

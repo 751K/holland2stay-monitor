@@ -118,8 +118,8 @@ def test_unknown_source_rejected_without_saving(inbox_client,inbox_users):
     assert get_user(load_users(),inbox_users[0].id).listing_filter == before
 
 
-def test_legacy_listing_page_and_calendar_use_personal_filter(inbox_client):
-    html = inbox_client.get('/listings').get_data(as_text=True)
+def test_inbox_and_calendar_api_use_personal_filter(inbox_client):
+    html = inbox_client.get('/').get_data(as_text=True)
     assert 'Matching home' in html and 'Outside budget' not in html and 'Different city' not in html
     response = inbox_client.get('/api/calendar')
     assert response.status_code == 200
@@ -130,9 +130,11 @@ def test_guest_can_open_real_login_page(guest_client):
     assert guest_client.get('/login').status_code == 200
 
 
-def test_management_dashboard_stays_admin_only(inbox_users,inbox_client,admin_client):
-    assert admin_client.get('/dashboard').status_code == 200
-    assert inbox_client.get('/dashboard').status_code == 302
+def test_management_pages_stay_admin_only(inbox_users,inbox_client,admin_client):
+    # 旧的 /dashboard 已删除，后台入口是用户管理
+    assert inbox_client.get('/dashboard').status_code == 404
+    assert admin_client.get('/users').status_code == 200
+    assert inbox_client.get('/users').status_code == 302
 
 
 def test_old_matching_listing_not_lost_after_candidate_window(inbox_client):

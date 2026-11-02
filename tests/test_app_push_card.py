@@ -21,23 +21,19 @@ def _form_html(client, path="/users/new"):
 
 
 class TestNotAChannel:
+    @staticmethod
+    def _apppush_panel(html: str) -> str:
+        start = html.index('data-panel="notifications:apppush"')
+        return html[start:html.index('data-panel=', start + 1)]
+
     def test_card_is_present(self, admin_client):
-        html = _form_html(admin_client)
-        assert 'id="sec_apppush"' in html
+        assert 'data-panel="notifications:apppush"' in _form_html(admin_client)
 
     def test_card_has_no_checkbox(self, admin_client):
-        """卡片本体不能带 checkbox。
-
-        带了就会被 updateChannelsInput() 收进 NOTIFICATION_CHANNELS。
-        """
-        html = _form_html(admin_client)
-        i = html.index('toggleInfoCard(\'apppush\')')
-        # 取这张卡的 label 区块：从 <label 到最近的 </label>
-        start = html.rindex("<label", 0, i)
-        end = html.index("</label>", i)
-        card = html[start:end]
-        assert "<input" not in card, "「App 推送」卡片里出现了输入控件"
-        assert "channel-chk" not in card
+        """这一块不能带渠道开关：带了就会被收进 NOTIFICATION_CHANNELS。"""
+        panel = self._apppush_panel(_form_html(admin_client))
+        assert "channel-chk" not in panel, "「App 推送」里出现了渠道开关"
+        assert 'type="checkbox"' not in panel
 
     def test_it_is_not_in_the_channel_list(self, admin_client):
         """data-ch 的取值只能是后端认得的那四个。"""
@@ -96,30 +92,25 @@ class TestContent:
         admin_client.set_cookie("h2s-lang", lang)
         assert needle in _form_html(admin_client)
 
-    def test_device_count_shown_when_present(self, admin_client, test_app, monkeypatch):
+    def test_device_count_shown_when_present(self, admin_client, test_app):
         """已连接设备时显示台数，而不是继续劝人去安装。"""
-        from app.routes import users as users_routes
-
-        class FakeStore:
-            def get_active_devices_for_user(self, uid):
-                return [{"id": 1}, {"id": 2}]
-
-            def close(self):
-                pass
-
-        from app.auth import _REGISTER_RECORDS
-        _REGISTER_RECORDS.clear()
         r = admin_client.post("/users/new", data={
             "csrf_token": "test_csrf", "name": "AppPushProbe",
             "enabled": "true", "NOTIFICATIONS_ENABLED": "true",
         }, follow_redirects=False)
         assert r.status_code == 302, f"建用户失败 {r.status_code}"
-
         from users import load_users
         with test_app.app_context():
             uid = next(u.id for u in load_users() if u.name == "AppPushProbe")
-
-        monkeypatch.setattr(users_routes, "storage", lambda: FakeStore())
+            from app.db import storage
+            st = storage()
+            try:
+                for n in (1, 2):
+                    tid, _ = st.create_app_token(role="user", user_id=uid, device_name=f"Phone {n}", ttl_days=90)
+                    st.register_device(app_token_id=tid, device_token=f"{n:064x}")
+            finally:
+                st.close()
         admin_client.set_cookie("h2s-lang", "zh")
         html = _form_html(admin_client, f"/users/{uid}")
-        assert "已连接 2 台设备" in html, "有设备时仍在劝人去安装"
+        assert "2 台设备已登录" in html, "有设备时仍在劝人去安装"
+

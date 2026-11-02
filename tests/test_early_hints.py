@@ -80,18 +80,10 @@ class TestExtraction:
 
 class TestRenderedPages:
     @pytest.mark.parametrize("path", PUBLIC_PATHS)
-    def test_preconnects_to_both_font_hosts(self, client, path):
-        links = _links(client.get(path))
-        assert "<https://fonts.googleapis.com>; rel=preconnect" in links
-        assert "<https://fonts.gstatic.com>; rel=preconnect; crossorigin" in links
-
-    def test_gstatic_preconnect_is_crossorigin(self, client):
-        """字体请求是匿名 CORS 的。不带 crossorigin，浏览器会另开一条连接，
-        preconnect 等于白做——而且不会有任何报错。
-        """
-        links = _links(client.get("/login"))
-        gstatic = [h for h in links if "fonts.gstatic.com" in h]
-        assert gstatic and all("crossorigin" in h for h in gstatic)
+    def test_hints_stay_on_this_site(self, client, path):
+        """字体和图标都自托管了（static/vendor），预载 / 预连接不该再指向第三方。"""
+        for h in _links(client.get(path)):
+            assert h.startswith("</"), f"{path} 的 Link 头指向了外站：{h}"
 
     @pytest.mark.parametrize("path", PUBLIC_PATHS)
     def test_every_preload_is_actually_used_by_the_page(self, client, path):
@@ -116,21 +108,14 @@ class TestRenderedPages:
     def test_pages_differ_from_each_other(self, client):
         """判据是「这一页真正加载了什么」，不是一份统一清单。
 
-        /login 有 design.css 和图标字体；donate / legal 刻意不引 design.css。
+        登录页走公共外壳 public.css，不引 design.css；收件箱走 design.css。
         两边播一样的东西，说明实现退化成了写死的清单。
         """
         login = set(_preloaded(client.get("/login")))
-        donate = set(_preloaded(client.get("/donate")))
-        assert any("design.css" in u for u in login)
-        assert not any("design.css" in u for u in donate)
-
-    def test_font_weights_follow_the_page(self, client):
-        """连字重参数都不一样：base/login 是 400;450;500;550;600;700，
-        donate 是 400;500;600;700。播错等于预载一份用不上的 CSS。
-        """
-        def font(resp):
-            return [u for u in _preloaded(resp) if "fonts.googleapis.com" in u]
-        assert font(client.get("/login")) != font(client.get("/donate"))
+        inbox = set(_preloaded(client.get("/")))
+        assert any("public.css" in u for u in login)
+        assert not any("design.css" in u for u in login)
+        assert any("design.css" in u for u in inbox)
 
     @pytest.mark.parametrize("path", PUBLIC_PATHS)
     def test_no_html_entities_leak_into_headers(self, client, path):
@@ -150,8 +135,8 @@ class TestRenderedPages:
 
 class TestScope:
     def test_not_added_to_redirects(self, client):
-        """``/`` 对匿名访客 302 到登录页。那个路径的资源该由目标页自己声明。"""
-        r = client.get("/")
+        """管理页对匿名访客 302 到登录页。那个路径的资源该由目标页自己声明。"""
+        r = client.get("/users")
         assert r.status_code == 302
         assert not _links(r)
 

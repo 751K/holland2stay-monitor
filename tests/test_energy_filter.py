@@ -210,23 +210,3 @@ class TestLfFromDictRoundTrip:
 
 
 # ── /listings?energy=... API ─────────────────────────────
-
-class TestListingsEnergyFilter:
-    def test_energy_param_passed(self, admin_client):
-        """验证 energy filter 至少不 500。"""
-        r = admin_client.get("/listings?energy=B")
-        assert r.status_code == 200
-
-    def test_energy_and_finishing_combined(self, admin_client):
-        r = admin_client.get("/listings?energy=A&finishing=Upholstered")
-        assert r.status_code == 200
-
-    def test_invalid_energy_no_crash(self, admin_client):
-        """非法能耗值不抛 500。"""
-        for e in ["INVALIDGRADE", "Z", "banana", "AA"]:
-            r = admin_client.get(f"/listings?energy={e}")
-            assert r.status_code == 200, f"?energy={e} returned {r.status_code}"
-
-    def test_energy_empty_select_shows_all(self, admin_client):
-        r = admin_client.get("/listings?energy=")
-        assert r.status_code == 200

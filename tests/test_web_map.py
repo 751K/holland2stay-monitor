@@ -145,7 +145,7 @@ def test_native_mark_read_and_filter_save_return_to_map(map_client,map_user):
     assert {item['id'] for item in partial(map_client)['items']}=={'map-a'}
 
 
-def test_roles_keep_personal_and_browsing_boundaries(map_user,admin_client,guest_client,client):
+def test_roles_keep_personal_and_browsing_boundaries(map_user,admin_client,guest_client,client,monkeypatch):
     for browser in (admin_client,guest_client):
         data=partial(browser)
         assert 'map-outside' in {item['id'] for item in data['items']}
@@ -154,6 +154,12 @@ def test_roles_keep_personal_and_browsing_boundaries(map_user,admin_client,guest
         assert data['unread_count'] is None
         assert browser.get('/map?view=unread').status_code==403
         assert 'map-outside' not in {item['id'] for item in partial(browser,'?max_rent=1000')['items']}
+    # 没登录 = 访客（默认开着访客模式）；关掉访客模式才跳登录页
+    assert 'map-outside' in {item['id'] for item in partial(client)['items']}
+    assert partial(client)['unread_count'] is None
+    monkeypatch.setenv('WEB_GUEST_MODE','false')
+    with client.session_transaction() as sess:
+        sess.clear()
     assert client.get('/map').status_code==302
 
 

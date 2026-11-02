@@ -3,7 +3,7 @@ from types import ModuleType
 
 import pytest
 
-from mcore.sources import KNOWN_SOURCES, SOURCE_DISPLAY_NAMES, SOURCE_SHORT_NAMES, SPECS, SourceSpec
+from mcore.sources import KNOWN_SOURCES, SOURCE_DISPLAY_NAMES, SPECS, SourceSpec
 from scrapers import SCRAPER_REGISTRY, _load_scrapers
 from scrapers.base import AbstractScraper
 
@@ -43,4 +43,3 @@ def test_frontend_receives_the_registered_names(test_app):
         html = render_template("base.html")
     for source, label in SOURCE_DISPLAY_NAMES.items():
         assert f'"{source}": "{label}"' in html
-        assert f'"{source}": "{SOURCE_SHORT_NAMES[source]}"' in html

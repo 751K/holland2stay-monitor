@@ -85,7 +85,7 @@ _BLANKED = [
 
 #: 行内双语三元式：``{{ 'X' if lang == 'en' else '中文' }}`` / ``zh ? '中文' : 'X'``。
 #: 这种写法本来就要两种语言各写一遍，中文出现在里面是正常的。
-_BILINGUAL = re.compile(r"\blang\s*==|\bzh\s*\?|\?\s*['\"][^'\"]*[一-鿿]")
+_BILINGUAL = re.compile(r"\blang\s*==|\bif\s+(?:not\s+)?zh\b|\bzh\s*\?|\?\s*['\"][^'\"]*[一-鿿]")
 
 #: 语言选单里的语言名。
 #:
@@ -93,7 +93,7 @@ _BILINGUAL = re.compile(r"\blang\s*==|\bzh\s*\?|\?\s*['\"][^'\"]*[一-鿿]")
 #: 都该是 "English" 和「中文」。翻译它才是错的——英文界面上写 "Chinese" 的话，
 #: 只看得懂中文的人反而找不到自己那一项。侧栏那个语言开关里的 "English" 是同
 #: 一回事，只是它是 ASCII，本来就落不到这条规则上。
-_LANGUAGE_ENDONYM = re.compile(r'<option value="zh"[^>]*>\s*中文')
+_LANGUAGE_ENDONYM = re.compile(r'<option value="zh"[^>]*>\s*中文|>中文</a>')
 
 _JINJA_COMMENT_LINE = re.compile(r"^\s*(#|//|/\*|\*)")
 
@@ -114,14 +114,14 @@ def _strip_ignorable(text: str) -> list[tuple[int, str]]:
 
 
 def _lang_branch_lines(text: str) -> set[int]:
-    """``{% if lang == 'en' %} ... {% endif %}`` 之间的行号。
+    """``{% if lang == 'en' %}`` / ``{% if zh %}`` ... ``{% endif %}`` 之间的行号。
 
     这种结构本来就要两种语言各写一遍，里面的中文是正常的。
     """
     lines = text.splitlines()
     inside, depth, out = False, 0, set()
     for i, line in enumerate(lines, 1):
-        if re.search(r"\{%-?\s*if\s+lang\s*==", line):
+        if re.search(r"\{%-?\s*if\s+(?:lang\s*==|zh\s*-?%\})", line):
             inside, depth = True, 1
             out.add(i)
             continue

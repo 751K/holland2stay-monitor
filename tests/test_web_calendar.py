@@ -115,12 +115,18 @@ def test_calendar_applies_platform_search_and_availability(calendar_client):
     assert '当天没有匹配房源' in html
 
 
-def test_admin_guest_and_anonymous_keep_existing_role_boundaries(calendar_user,admin_client,guest_client,client):
+def test_admin_guest_and_anonymous_keep_existing_role_boundaries(calendar_user,admin_client,guest_client,client,monkeypatch):
     for browser in (admin_client,guest_client):
         html=browser.get('/calendar?month=2026-12&date=2026-12-01').get_data(as_text=True)
         assert 'Outside personal budget' in html
         assert 'inbox-unread-count' not in html
         assert browser.get('/calendar?view=unread').status_code==403
+    # 没登录 = 访客（默认开着访客模式）；关掉访客模式才跳登录页
+    html=client.get('/calendar?month=2026-12&date=2026-12-01').get_data(as_text=True)
+    assert 'Outside personal budget' in html and 'inbox-unread-count' not in html
+    monkeypatch.setenv('WEB_GUEST_MODE','false')
+    with client.session_transaction() as sess:
+        sess.clear()
     assert client.get('/calendar').status_code==302
 
 
@@ -201,9 +207,11 @@ def test_partial_undated_and_empty_days_keep_normal_calendar_semantics(calendar_
     assert '当天没有匹配房源' in empty['html']
 
 
-def test_partial_request_keeps_auth_and_filter_boundaries(calendar_client,calendar_user,client,guest_client):
+def test_partial_request_keeps_auth_and_filter_boundaries(calendar_client,calendar_user,client,guest_client,monkeypatch):
     headers={'Accept':'application/json'}
+    monkeypatch.setenv('WEB_GUEST_MODE','false')
     assert client.get('/calendar?month=2026-12',headers=headers).status_code==302
+    monkeypatch.delenv('WEB_GUEST_MODE')
     assert guest_client.get('/calendar?view=unread',headers=headers).status_code==403
     assert calendar_client.get('/calendar?month=bad',headers=headers).status_code==400
     data=calendar_client.get('/calendar?month=2026-12&date=2026-12-01&view=plaza',headers=headers).json

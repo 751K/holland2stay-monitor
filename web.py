@@ -73,7 +73,7 @@ from app.auth import (                                            # noqa: E402
     is_admin,
     is_user,
 )
-from app.deployment import is_official_site                      # noqa: E402
+from app import deployment                                       # noqa: E402
 from app.i18n import get_lang                                     # noqa: E402
 from app.routes import (                                          # noqa: E402
     app_accounts,
@@ -295,7 +295,7 @@ def asset(path: str) -> str:
 @app.context_processor
 def _inject_deployment():
     # 不是 flatradar.app：品牌名后面标「自部署版本」，页面弹一次免责提示（_self_hosted.html）
-    official = is_official_site()
+    official = deployment.is_official_site()
     label = "" if official else ("自部署版本" if get_lang() == "zh" else "Self-hosted")
     return {
         "official_site":     official,

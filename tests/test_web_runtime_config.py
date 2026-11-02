@@ -57,17 +57,14 @@ def test_real_map_requests_use_updated_saved_age(admin_client, monkeypatch):
     assert os.environ["MAP_MAX_AGE_DAYS"] == "14"
 
 
-def test_dashboard_and_user_options_update_without_monitor_or_web_restart(admin_client, test_app):
+def test_user_options_update_without_monitor_or_web_restart(admin_client, test_app):
     from app.routes.users import _city_options
 
     _save({"SOURCES": "holland2stay", "CITIES": "Eindhoven,29"})
-    assert "Plaza" not in admin_client.get("/dashboard").get_data(as_text=True).split('class="coverage-grid"')[1].split('</div>')[0]
     with test_app.test_request_context("/users/new"):
         before = _city_options()
     _save({"SOURCES": "holland2stay,plaza", "PLAZA_CITIES": "Groot-Ammers,groot-ammers"})
-    html = admin_client.get("/dashboard").get_data(as_text=True)
-    assert "Configured monitoring platforms and cities" in html
-    assert "Groot-Ammers" in html
+    assert "Groot-Ammers" in admin_client.get("/users/new").get_data(as_text=True)
     with test_app.test_request_context("/users/new"):
         after = _city_options()
     assert "Groot-Ammers" not in before and "Groot-Ammers" in after

@@ -13,6 +13,8 @@ v1.16.0 起这些值住在 SQLite 的 app_settings，不再写 .env——.env �
 """
 from __future__ import annotations
 
+import re
+
 
 import pytest
 
@@ -340,8 +342,10 @@ class TestH2SRestSettings:
 
     def test_page_defaults_to_off(self, admin_client, isolated_data_dir):
         html = admin_client.get("/settings").get_data(as_text=True)
-        assert 'id="h2s_rest" ' in html and 'id="h2s_rest" checked' not in html
-        assert 'name="H2S_REST_ENABLED" value="false"' in html
+        box = re.search(r'<input type="checkbox" name="H2S_REST_ENABLED" value="true"[^>]*>', html)
+        assert box and " checked" not in box.group(0)
+        # 不勾选时复选框不提交，靠紧跟的 false 兜底
+        assert '<input type="hidden" name="H2S_REST_ENABLED" value="false">' in html
         assert 'name="H2S_REST_INTERVAL" value="3"' in html
         assert 'name="H2S_REST_HOME_INTERVAL" value="0"' in html
 
@@ -358,8 +362,8 @@ class TestH2SRestSettings:
     def test_page_reflects_saved_on(self, admin_client, isolated_data_dir):
         self._post(admin_client, H2S_REST_ENABLED="true", H2S_REST_INTERVAL="5")
         html = admin_client.get("/settings").get_data(as_text=True)
-        assert 'id="h2s_rest" checked' in html
-        assert 'name="H2S_REST_ENABLED" value="true"' in html
+        box = re.search(r'<input type="checkbox" name="H2S_REST_ENABLED" value="true"[^>]*>', html)
+        assert box and " checked" in box.group(0)
         assert 'name="H2S_REST_INTERVAL" value="5"' in html
 
     def test_window_is_saved(self, admin_client, isolated_data_dir):

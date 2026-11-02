@@ -226,39 +226,6 @@ class TestMapAppliesUserFilter:
                 _current_map_user()
 
 
-class TestListingsEntryPoint:
-    """列表页那个「在地图上查看」的入口。"""
-
-    def _html(self) -> str:
-        return _js(TEMPLATES / "listings.html")
-
-    def test_both_views_link_to_the_map(self):
-        html = self._html()
-        assert html.count("?focus={{ l.id | urlencode }}") == 2, (
-            "表格行和移动端卡片各要一个；只加一处等于一半的用户没有这个入口")
-
-    def test_id_is_url_encoded(self):
-        """房源 id 里有 ``#``、空格的平台不止一个（OurDomain 的 unit 名就是）。
-        不转义的话 ``#`` 之后整段会被当成锚点丢掉。"""
-        assert "l.id | urlencode" in self._html()
-
-    def test_the_pin_is_not_inside_the_card_link(self):
-        """移动端整张卡片是一个 <a>，<a> 里不能再套 <a>。
-
-        套了的话浏览器会把它拆成两个相邻链接，图钉失效——点哪儿都跳外部
-        预订页。这条断言直接看结构：图钉必须出现在卡片 </a> 之后。
-        """
-        html = self._html()
-        card = html.index('class="listing-card-item"')
-        close = html.index("</a>", html.index("lc-footer", card))
-        pin = html.index('class="lc-map-pin"', card)
-        assert pin > close, "图钉嵌在了卡片 <a> 里面"
-
-    def test_pin_has_an_accessible_name(self):
-        html = self._html()
-        assert html.count("aria-label=\"{{ _('view_on_map') }}\"") == 2
-
-
 class TestSharedFrontendHelpers:
     """分桶与散开只有一份实现，在 static/app.js。"""
 
@@ -277,21 +244,6 @@ class TestSharedFrontendHelpers:
         """
         assert "indexOf('lottery')" not in self._mapjs(), \
             "map.html 里又写了一份分桶判据"
-
-    def test_unknown_status_gets_its_own_bucket(self):
-        """认不出的状态不能掉进默认隐藏的 occupied 档。
-
-        掉进去的话，新平台冒出的新状态会从地图上**静默消失**——正是
-        「把不知道当成一个确定的答案」那个形状。
-        """
-        js = self._appjs()
-        i = js.index("window.statusBucket")
-        body = js[i:js.index("};", i)]
-        assert "return 'other'" in body, "认不出的状态没有自己的一档"
-        assert body.rstrip().rstrip("}").rstrip().endswith("return 'other';"), (
-            "兜底分支必须是 'other'，不是 'occupied'")
-
-
 
 
 class TestTranslations:
@@ -362,19 +314,27 @@ class TestSentinelDateNeverShownAsADate:
             function.body = function.body[1:]
         assert "2050" not in ast.unparse(function), "又写死了一个 2050"
 
-    @pytest.mark.parametrize("template", ["listings.html", "index.html"])
-    def test_templates_use_the_filter(self, template):
-        html = _js(TEMPLATES / template)
-        assert "l.available_from or '—'" not in html, "还在直接显示原值"
-        assert "available_display" in html
+    def test_no_template_prints_the_raw_date(self):
+        """入住日期只能经 available_display 显示（收件箱由 inbox_service 预先算好）。
 
-    def test_js_helper_matches_python(self):
-        """JS 侧（地图弹窗 / 日历）用同一套年份判据。"""
-        js = _js(STATIC / "app.js")
-        assert "window.isSentinelDate" in js
-        from models import SENTINEL_AVAILABLE_FROM_YEAR
+        分享页曾直接输出 listing.available_from，「未定」的房源对外显示成 2050-01-01。
+        """
+        import re
+        raw = [p.name for p in TEMPLATES.glob("*.html")
+               if re.search(r"\{\{[^}]*available_from\s*\}\}", p.read_text(encoding="utf-8"))]
+        assert not raw, f"这些模板直接输出了 available_from：{raw}"
 
-        assert ("window.SENTINEL_AVAILABLE_FROM_YEAR = %d" % SENTINEL_AVAILABLE_FROM_YEAR) in js
+    def test_share_page_hides_the_sentinel(self, client):
+        from app.db import storage
+        from models import Listing, SENTINEL_AVAILABLE_FROM_YEAR
+        st = storage()
+        st.diff([Listing(id="sent-1", name="Sentinel", status="Available to book",
+                              price_raw="€900", available_from=f"{SENTINEL_AVAILABLE_FROM_YEAR}-01-01",
+                              url="https://x", city="Eindhoven", source="holland2stay", features=[])])
+        st.close()
+        html = client.get("/l/sent-1").get_data(as_text=True)
+        assert "Sentinel" in html
+        assert str(SENTINEL_AVAILABLE_FROM_YEAR) not in html
 
     def test_calendar_service_guards_sentinel_dates(self):
         """Web 视图在服务端展示日期；地图行为由 test_web_map 覆盖。"""

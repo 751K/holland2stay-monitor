@@ -165,7 +165,7 @@ class TestItDoesNotPolluteTheFilters:
         assert "service_costs" not in DEFAULTS
 
 
-class TestListingsPageRendering:
+class TestInboxDetailRendering:
     """标注要真的渲染到页面上。
 
     属性写对了、模板没接，用户还是只看到一个裸价格。这一层单独守。
@@ -189,27 +189,23 @@ class TestListingsPageRendering:
         st.close()
         return admin_client
 
-    def test_the_star_carries_the_range_in_its_tooltip(self, seeded):
+    @staticmethod
+    def _note(client, listing_id: str, lang: str) -> str:
+        """收件箱详情里价格下方的口径说明；没有就是空串。"""
         import re
-        html = seeded.get("/listings", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
-        tips = set(re.findall(r'class="rent-basis"[^>]*title="([^"]*)"', html))
-        assert tips, "OurDomain 的价格旁没有渲染出口径标注"
-        assert all("248" in t and "361" in t for t in tips), tips
+        client.set_cookie("h2s-lang", lang)
+        html = client.get(f"/?view=all&selected={listing_id}").get_data(as_text=True)
+        m = re.search(r'<p class="mail-price-note">(.*?)</p>', html, re.S)
+        return m.group(1) if m else ""
 
-    def test_all_in_sources_get_no_star(self, seeded):
-        """H2S 的价格已经是到手价，标"基础租金"是假话。
+    def test_detail_shows_the_range(self, seeded):
+        note = self._note(seeded, "od_1", "zh")
+        assert note, "OurDomain 的价格下方没有渲染出口径说明"
+        assert "248" in note and "361" in note, note
 
-        判据不能只数星号总数——列表页同时渲染桌面表格行和移动端卡片，一条房源
-        本来就出现两处。所以断言的是"星号只出现在 OurDomain 那条附近"。
-        """
-        import re
-        html = seeded.get("/listings", headers={"Accept-Language": "zh-CN"}).get_data(as_text=True)
-        for m in re.finditer(r'class="rent-basis"', html):
-            around = html[max(0, m.start() - 600):m.start()]
-            assert "Beukenlaan" not in around.split("Diemen")[-1], "H2S 的价格被标成了基础租金"
+    def test_all_in_sources_get_no_note(self, seeded):
+        """H2S 的价格已经是到手价，标「基础租金」是假话。"""
+        assert self._note(seeded, "h2s_1", "zh") == ""
 
-    def test_english_tooltip_too(self, seeded):
-        import re
-        html = seeded.get("/listings", headers={"Accept-Language": "en-US"}).get_data(as_text=True)
-        tips = set(re.findall(r'class="rent-basis"[^>]*title="([^"]*)"', html))
-        assert tips and all("Base rent" in t for t in tips), tips
+    def test_english_note_too(self, seeded):
+        assert "Base rent" in self._note(seeded, "od_1", "en")

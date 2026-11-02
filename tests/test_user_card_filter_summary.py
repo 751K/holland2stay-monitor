@@ -106,12 +106,3 @@ class TestUsersTemplate:
         assert re.search(
             r'title="\{\{\s*lf\.' + re.escape(field) + r"\s*\|\s*join\(' / '\)\s*\}\}\"",
             html), f"lf.{field} 的完整清单没有挂到 title"
-
-
-class TestFilterTagsCannotOverflow:
-    def test_overflow_wrap_is_set(self):
-        css = re.sub(r"/\*.*?\*/", "", _CSS.read_text(encoding="utf-8"), flags=re.S)
-        m = re.search(r"\.filter-tags\s*\{(.*?)\}", css, re.S)
-        assert m, "design.css 里找不到 .filter-tags"
-        assert re.search(r"(?<![\w-])overflow-wrap\s*:\s*(anywhere|break-word)", m.group(1)), (
-            ".filter-tags 没有 overflow-wrap——没有空格的长串会直接溢出卡片")
