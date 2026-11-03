@@ -125,7 +125,9 @@ class TestLoginDoesNotAutoRegister:
         from app.routes import sessions
 
         src = _code(sessions.login)
-        assert src.count("用户名或密码错误") >= 2
+        # 两条失败分支用同一个翻译键；实际文案两种语言都由
+        # test_auth_routes.test_login_failure_uses_selected_language 对比
+        assert src.count('tr("login_error"') >= 2
 
     def test_registration_still_checks_terms(self):
         """正规注册那条路不能跟着一起松。"""
