@@ -29,15 +29,35 @@ function toggleSidebar() {
   var sb = document.querySelector('.sidebar');
   var ov = document.querySelector('.sidebar-overlay');
   if(!sb) return;
-  sb.classList.toggle('open');
-  if(ov) ov.classList.toggle('show');
+  if(sb.classList.contains('open')) { closeSidebar(); return; }
+  sb.classList.add('open');
+  if(ov) ov.classList.add('show');
+  var toggle = document.querySelector('.nav-toggle');
+  if(toggle) toggle.setAttribute('aria-expanded', 'true');
+  var main = document.getElementById('main-content');
+  if(main && sidebarIsMobile()) main.inert = true;
+  var first = sb.querySelector('a[href], button:not([disabled])');
+  if(first) first.focus();
 }
 
-function closeSidebar() {
+function sidebarIsMobile() {
+  return window.matchMedia(document.body.classList.contains('mail-page') ?
+    '(max-width:900px)' : '(max-width:768px)').matches;
+}
+
+function closeSidebar(restoreFocus) {
   var sb = document.querySelector('.sidebar');
   var ov = document.querySelector('.sidebar-overlay');
+  var wasOpen = sb && sb.classList.contains('open');
   if(sb) sb.classList.remove('open');
   if(ov) ov.classList.remove('show');
+  var main = document.getElementById('main-content');
+  if(main) main.inert = false;
+  var toggle = document.querySelector('.nav-toggle');
+  if(toggle) {
+    toggle.setAttribute('aria-expanded', 'false');
+    if(wasOpen && restoreFocus !== false && sidebarIsMobile()) toggle.focus();
+  }
 }
 
 // ── Page Transitions ──────────────────────────────────────────────
@@ -326,7 +346,26 @@ document.addEventListener('DOMContentLoaded', function() {
 
   // Close sidebar on Escape
   document.addEventListener('keydown', function(e) {
-    if(e.key === 'Escape') closeSidebar();
+    var sidebar = document.querySelector('.sidebar');
+    if(!sidebar || !sidebar.classList.contains('open') || !sidebarIsMobile()) return;
+    if(e.key === 'Escape') { e.preventDefault(); closeSidebar(); return; }
+    if(e.key !== 'Tab') return;
+    var toggle = document.querySelector('.nav-toggle');
+    var controls = [toggle].concat(Array.from(sidebar.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), [tabindex="0"]'
+    ))).filter(function(el) { return el && el.getClientRects().length; });
+    var first = controls[0], last = controls[controls.length - 1];
+    if(e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if(!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  window.addEventListener('resize', function() {
+    if(!sidebarIsMobile()) closeSidebar(false);
+    else {
+      var sidebar = document.querySelector('.sidebar');
+      if(sidebar && !sidebar.classList.contains('open') && sidebar.contains(document.activeElement)) {
+        document.querySelector('.nav-toggle')?.focus();
+      }
+    }
   });
 
 });

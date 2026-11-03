@@ -299,3 +299,28 @@ def test_detail_renders_full_features_and_shares_the_client_schema(inbox_client)
     assert fields['New field'] == '<script>alert(1)</script>'
     assert '合同类型' in html and '服务费' in html and '最后出现' in html
     assert '<script>alert(1)</script>' not in html
+
+
+def test_explicit_detail_selection_survives_mobile_reload(inbox_client,guest_client):
+    from html.parser import HTMLParser
+
+    class DetailPanel(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.classes = set()
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if tag == 'aside' and attrs.get('id') == 'mail-detail':
+                self.classes = set(attrs.get('class', '').split())
+
+    for browser in (inbox_client, guest_client):
+        initial = DetailPanel()
+        initial.feed(browser.get('/').get_data(as_text=True))
+        assert 'is-open' not in initial.classes
+        selected = DetailPanel()
+        selected.feed(browser.get('/?selected=match').get_data(as_text=True))
+        assert 'is-open' in selected.classes
+        invalid = DetailPanel()
+        invalid.feed(browser.get('/?selected=missing').get_data(as_text=True))
+        assert 'is-open' not in invalid.classes

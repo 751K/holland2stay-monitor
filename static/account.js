@@ -8,6 +8,7 @@
   const zh = document.documentElement.lang === 'zh';
   const label = (cn, en) => zh ? cn : en;
   const userId = root.dataset.userId;
+  const titleSuffix = document.title.includes(' · ') ? document.title.slice(document.title.indexOf(' · ')) : '';
   const csrf = form.querySelector('input[name="csrf_token"]').value;
   const detail = form.querySelector('.account-detail');
   const remembered = {};
@@ -55,12 +56,14 @@
     });
     document.querySelector('[data-account-title]').textContent = head.dataset.title;
     document.querySelector('[data-account-summary]').textContent = head.dataset.summary;
-    document.title = `${head.dataset.title} · FlatRadar`;
+    document.title = `${head.dataset.title}${titleSuffix}`;
     const first = rows.querySelector('[data-account-item]');
     const item = remembered[section] || (first && first.dataset.accountItem.split(':')[1]);
     if (item) selectItem(section, item, {open: false});
-    document.querySelector('.sidebar')?.classList.remove('open');
-    document.querySelector('.sidebar-overlay')?.classList.remove('active');
+    closeSidebar(false);
+    const title = document.querySelector('[data-account-title]');
+    title.tabIndex = -1;
+    title.focus({preventScroll:true});
   }
 
   document.addEventListener('click', event => {

@@ -60,13 +60,13 @@
           <input id="username" type="text" name="username" autocomplete="username" required autofocus>
         </label>
 
-        <label class="login-field">
-          <span>{{ _('login_password') }}</span>
+        <div class="login-field">
+          <label for="password">{{ _('login_password') }}</label>
           <span class="login-pw">
             <input id="password" type="password" name="password" autocomplete="current-password" placeholder=" " required>
-            <button type="button" id="pw-toggle" onclick="togglePw()" aria-pressed="false">{{ '显示' if zh else 'Show' }}</button>
+            <button type="button" id="pw-toggle" onclick="togglePw()" aria-controls="password" aria-pressed="false">{{ '显示' if zh else 'Show' }}</button>
           </span>
-        </label>
+        </div>
 
         <button type="submit" class="login-primary" id="login-btn">{{ '登录 / 注册' if zh else 'Sign in / Register' }}</button>
       </form>

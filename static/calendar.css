@@ -10,6 +10,6 @@
 
 .calendar-load-status{margin:0;padding:0 40px 12px;color:var(--mail-muted);font-size:13px;line-height:1.6}.calendar-load-status button{border:0;background:none;color:var(--mail-accent);font:inherit;cursor:pointer;padding:0 8px}.calendar-workspace[aria-busy=true]{cursor:progress}@media(max-width:750px){.calendar-load-status{padding-left:20px;padding-right:20px}}
 /* 手机上格子只有 ~45px 宽，「N 条房源」放不下，只留数字（aria-label 里仍是完整说法） */
-@media(max-width:520px){.calendar-day-unit{display:none}.calendar-day-count{font-size:12px}.calendar-day-number{gap:3px}.calendar-day-number small{white-space:nowrap}}
+@media(max-width:520px){.calendar-day{padding-left:3px;padding-right:3px}.calendar-day-unit{display:none}.calendar-day-count{font-size:12px}.calendar-day-number{gap:3px;flex-wrap:wrap}.calendar-day-number small{white-space:nowrap}}
 /* 650px 以下工具栏竖排，搜索框和收件箱一样占满整行 */
 @media(max-width:650px){.calendar-page .mail-toolbar.is-split .mail-search{width:100%}}

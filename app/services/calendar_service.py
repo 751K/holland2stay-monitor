@@ -73,6 +73,8 @@ def calendar_context(rows, args, *, zh, today=None):
             day = date(month.year,month.month,number)
             entries = by_day.get(day,[])
             label = (f'{day.year}年{day.month}月{day.day}日' if zh else f'{day.day:02d} {_MONTHS[day.month-1]} {day.year}')
+            if day == today:
+                label += '，今天' if zh else ', today'
             cells.append(dict(number=number,date=day.isoformat(),count=len(entries),
                 cities=list(dict.fromkeys(row.get('city') or '' for row in entries if row.get('city')))[:2],selected=not undated and day==selected,today=day==today,
                 label=label+ (f'，{len(entries)} 条房源' if zh else f', {len(entries)} listings')))

@@ -216,3 +216,10 @@ def test_partial_request_keeps_auth_and_filter_boundaries(calendar_client,calend
     assert calendar_client.get('/calendar?month=bad',headers=headers).status_code==400
     data=calendar_client.get('/calendar?month=2026-12&date=2026-12-01&view=plaza',headers=headers).json
     assert data['items']==[]
+
+
+@pytest.mark.parametrize('zh,word',[(True,'今天'),(False,'today')])
+def test_today_is_named_for_assistive_technology(zh,word):
+    context=calendar_context([],dict(month='2026-11'),zh=zh,today=date(2026,11,3))
+    today=next(day for week in context['weeks'] for day in week if day and day['today'])
+    assert word in today['label']

@@ -40,7 +40,7 @@
 </div>
 {% if pages>1 %}<footer class="mail-results"><nav aria-label="{{ '分页' if lang == 'zh' else 'Pagination' }}">{% if page>1 %}<a href="{{ inbox_url(page=page-1,selected=None) }}">←</a>{% endif %}<span>{{ page }} / {{ pages }}</span>{% if page<pages %}<a href="{{ inbox_url(page=page+1,selected=None) }}">→</a>{% endif %}</nav></footer>{% endif %}
 </section>
-<aside class="mail-detail" aria-label="{{ '房源详情' if lang == 'zh' else 'Listing details' }}" id="mail-detail">
+<aside class="mail-detail{% if selected and request.args.get('selected') == selected.id %} is-open{% endif %}" aria-label="{{ '房源详情' if lang == 'zh' else 'Listing details' }}" id="mail-detail">
 {% if selected %}{% with item=selected %}{% include '_inbox_detail.html' %}{% endwith %}{% else %}<p class="mail-detail-empty">{{ '选择一条房源查看详情。' if lang == 'zh' else 'Select a listing to view its details.' }}</p>{% endif %}
 </aside>
 </div>

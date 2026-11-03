@@ -425,7 +425,7 @@ def user_edit(user_id: str) -> Any:
     users = load_users()
     user = get_user(users, user_id)
     if user is None:
-        flash("用户不存在", "danger")
+        flash(tr("users_not_found", get_lang()), "danger")
         return redirect(url_for("users_list"))
 
     if request.method == "POST":
@@ -452,7 +452,7 @@ def user_edit(user_id: str) -> Any:
 
             update_users(_replace)
         except LookupError:
-            flash("用户不存在", "danger")
+            flash(tr("users_not_found", get_lang()), "danger")
             return redirect(url_for("users_list"))
         except ValueError as e:
             flash(str(e), "danger")
@@ -588,7 +588,7 @@ def user_delete(user_id: str) -> Any:
 
         name, remaining_count = update_users(_delete)
     except LookupError:
-        flash("用户不存在", "warning")
+        flash(tr("users_not_found", get_lang()), "warning")
         return redirect(url_for("users_list"))
     # 连带撤销该用户的所有 App Bearer token
     from app.api_auth import invalidate_token_cache
@@ -787,8 +787,8 @@ def user_move(user_id: str) -> Any:
     """调整用户在自动预订中的优先级（上移/下移）。"""
     direction = (request.form.get("direction") or "").strip().lower()
     if direction not in ("up", "down"):
-        flash("无效的移动方向", "warning")
-        return redirect(url_for("users_list"))
+        flash(tr("users_move_invalid", get_lang()), "warning")
+        return redirect(url_for("users_list", selected=user_id))
 
     from app.db import storage
     st = storage()
@@ -798,12 +798,11 @@ def user_move(user_id: str) -> Any:
         st.close()
 
     if ok:
-        direction_label = "上移" if direction == "up" else "下移"
         _request_monitor_reload("调整优先级")
-        flash(f"用户优先级已{direction_label}", "success")
+        flash(tr("users_move_up_done" if direction == "up" else "users_move_down_done", get_lang()), "success")
     else:
-        flash("已在边界，无法移动", "info")
-    return redirect(url_for("users_list"))
+        flash(tr("users_move_boundary", get_lang()), "info")
+    return redirect(url_for("users_list", selected=user_id))
 
 
 @admin_required
@@ -821,8 +820,8 @@ def user_toggle(user_id: str) -> Any:
         user = update_users(_toggle)
         logger.info("用户「%s」(id=%s) 已%s", user.name, user.id, "启用" if user.enabled else "停用")
     except LookupError:
-        flash("用户不存在", "warning")
-    return redirect(url_for("users_list"))
+        flash(tr("users_not_found", get_lang()), "warning")
+    return redirect(url_for("users_list", selected=user_id))
 
 
 @admin_required

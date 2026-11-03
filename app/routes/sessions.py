@@ -37,6 +37,7 @@ from app.auth import (
 from app.csrf import csrf_required
 from app.i18n import get_lang
 from app.safety import safe_next_url
+from translations import tr
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,7 @@ def login() -> Any:
         client_ip = request.remote_addr or "0.0.0.0"
         delay = check_login_rate(client_ip)
         if delay > 0:
-            flash(f"尝试过于频繁，请 {int(delay) + 1} 秒后再试", "danger")
+            flash(tr("login_retry_after", get_lang()).format(seconds=int(delay) + 1), "danger")
             return _render_login(next_value=request.form.get("next", ""),
                                  status=429)
 
@@ -141,7 +142,7 @@ def login() -> Any:
                 return redirect(next_url)
             else:
                 record_login_failure(client_ip)
-                flash("用户名或密码错误", "danger")
+                flash(tr("login_error", get_lang()), "danger")
         else:
             # **不再自动注册。** 原先这里「用户不存在就建一个」，有三个问题：
             #
@@ -154,9 +155,10 @@ def login() -> Any:
             # 注册走 register_user（同一个页面上就有表单），那里校验齐全。
             # 这里的文案与「密码错误」保持一致，不透露用户是否存在。
             record_login_failure(client_ip)
-            flash("用户名或密码错误", "danger")
+            flash(tr("login_error", get_lang()), "danger")
 
-    return _render_login(next_value=request.args.get("next", ""))
+    next_value = request.form.get("next", "") if request.method == "POST" else request.args.get("next", "")
+    return _render_login(next_value=next_value)
 
 
 @csrf_required

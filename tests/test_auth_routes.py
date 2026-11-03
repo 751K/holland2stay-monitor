@@ -13,6 +13,10 @@
 """
 from __future__ import annotations
 
+import re
+from html import unescape
+
+import pytest
 
 
 # ─── 未登录态 ───────────────────────────────────────────────────
@@ -139,6 +143,63 @@ class TestLoginSuccess:
         for url in ["/", "/calendar", "/users", "/settings"]:
             r = client.get(url)
             assert r.status_code == 200, f"{url} = {r.status_code}"
+
+
+class TestLoginRetryDestination:
+    def test_failed_login_preserves_destination_for_retry(self, client, test_credentials):
+        target = "/stats?view=plaza&max_rent=1000"
+        r = client.post("/login", data={
+            "csrf_token": "test_csrf", "username": test_credentials["username"],
+            "password": "incorrect-test-password", "next": target,
+        })
+        assert r.status_code == 200
+        m = re.search(r'name="next" value="([^"]*)"', r.get_data(as_text=True))
+        assert m is not None
+        retained = unescape(m.group(1))
+        assert retained == target
+        retry = client.post("/login", data={
+            "csrf_token": "test_csrf", "username": test_credentials["username"],
+            "password": test_credentials["password"], "next": retained,
+        })
+        assert retry.status_code == 302 and retry.location == target
+
+    def test_failed_login_does_not_make_external_destination_safe(self, client, test_credentials):
+        client.post("/login", data={
+            "csrf_token": "test_csrf", "username": test_credentials["username"],
+            "password": "incorrect-test-password", "next": "https://example.com/redirect",
+        })
+        retry = client.post("/login", data={
+            "csrf_token": "test_csrf", "username": test_credentials["username"],
+            "password": test_credentials["password"], "next": "https://example.com/redirect",
+        })
+        assert retry.status_code == 302 and retry.location == "/"
+
+
+@pytest.mark.parametrize("lang,phrase", [("zh", "用户名或密码错误"), ("en", "Invalid username or password")])
+@pytest.mark.parametrize("known_user", [True, False])
+def test_login_failure_uses_selected_language(client, test_credentials, lang, phrase, known_user):
+    from app.auth import clear_login_failures
+    clear_login_failures("127.0.0.1")
+    client.set_cookie("h2s-lang", lang)
+    try:
+        r = client.post("/login", data={
+            "csrf_token": "test_csrf",
+            "username": test_credentials["username"] if known_user else "unknown-audit-user",
+            "password": "incorrect-test-password",
+        })
+        assert r.status_code == 200
+        assert phrase in r.get_data(as_text=True)
+    finally:
+        clear_login_failures("127.0.0.1")
+
+
+def test_login_rate_limit_uses_selected_language(client, monkeypatch):
+    from app.routes import sessions
+    client.set_cookie("h2s-lang", "en")
+    monkeypatch.setattr(sessions, "check_login_rate", lambda ip: 3)
+    r = client.post("/login", data={"csrf_token": "test_csrf", "next": "/stats"})
+    assert r.status_code == 429
+    assert "Try again in 4 seconds" in r.get_data(as_text=True)
 
 
 # ─── Web 注册路径 ───────────────────────────────────────────────

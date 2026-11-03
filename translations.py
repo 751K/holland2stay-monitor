@@ -570,6 +570,11 @@ TRANSLATIONS = {
     "users_delete_confirm": {"zh": "确认删除",                "en": "Confirm delete"},
     "users_delete_msg":     {"zh": "确定要删除用户",           "en": "Delete user "},
     "users_delete_warn":    {"zh": "此操作无法撤销。",          "en": "This cannot be undone."},
+    "users_not_found":      {"zh": "用户不存在", "en": "User not found"},
+    "users_move_invalid":   {"zh": "无效的移动方向", "en": "Invalid move direction"},
+    "users_move_up_done":   {"zh": "用户优先级已上移", "en": "User priority moved up"},
+    "users_move_down_done": {"zh": "用户优先级已下移", "en": "User priority moved down"},
+    "users_move_boundary":  {"zh": "已在边界，无法移动", "en": "This user is already at the edge of the list"},
     "users_rank_hint":      {"zh": "自动预订优先级（越小越优先）", "en": "Auto-book priority (lower = higher priority)"},
     "users_rank_up":        {"zh": "上移（提高优先级）",          "en": "Move up (higher priority)"},
     "users_rank_down":      {"zh": "下移（降低优先级）",          "en": "Move down (lower priority)"},
@@ -892,6 +897,7 @@ TRANSLATIONS = {
     "login_footer":         {"zh": "通过 WEB_USERNAME / WEB_PASSWORD 在 .env 中配置凭据",
                              "en": "Configure credentials via WEB_USERNAME / WEB_PASSWORD in .env"},
     "login_error":          {"zh": "用户名或密码错误",          "en": "Invalid username or password"},
+    "login_retry_after":    {"zh": "尝试过于频繁，请 {seconds} 秒后再试", "en": "Too many attempts. Try again in {seconds} seconds."},
 
     # ── Multi-role (admin / user / guest) ────────────────
     "my_account":           {"zh": "账号设置",                 "en": "Account settings"},

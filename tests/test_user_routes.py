@@ -14,8 +14,9 @@ isolated_data_dir fixture 把 USERS_FILE / DB_PATH 重定向到 tmp_path，
 from __future__ import annotations
 
 import re
+from urllib.parse import parse_qs, urlsplit
 
-
+import pytest
 
 
 def _imessage_box(html: str) -> str:
@@ -305,3 +306,18 @@ class TestUserDelete:
         u = _create_user(admin_client, name="Liam")
         r = admin_client.post(f"/users/{u.id}/delete")
         assert r.status_code == 403
+
+
+@pytest.mark.parametrize("action,fields", [("toggle", {}), ("move", {"direction": "up"})])
+def test_user_list_action_retains_target_selection(admin_client, action, fields):
+    """启停、调整优先级之后，列表仍选中刚操作的那个用户，而不是跳回第一个。"""
+    from users import UserConfig, save_users
+
+    first = UserConfig(name="First audit user", notifications_enabled=False)
+    target = UserConfig(name="Selected audit user", notifications_enabled=False)
+    save_users([first, target])
+    r = admin_client.post(f"/users/{target.id}/{action}", data={"csrf_token": "test_csrf", **fields})
+    assert r.status_code == 302
+    assert parse_qs(urlsplit(r.location).query)["selected"] == [target.id]
+    html = admin_client.get(r.location).get_data(as_text=True)
+    assert f'href="/users?selected={target.id}"' in html

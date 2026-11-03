@@ -34,6 +34,10 @@
     if (!event.target.closest('[data-close-detail]')) return;
     event.preventDefault();
     detail.classList.remove('is-open');
+    const url = new URL(location.href);
+    url.searchParams.delete('selected');
+    history.replaceState(null, '', url);
+    grid.querySelector('[data-user-row][aria-current="true"]')?.focus({preventScroll:true});
   });
 
   // Search filters the list in place; priority numbers stay those of the full list
