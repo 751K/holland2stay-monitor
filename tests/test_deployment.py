@@ -76,7 +76,8 @@ def test_notice_is_only_for_the_admin(client, admin_client, self_hosted):
 def test_official_site_offers_donations(client):
     client.set_cookie("h2s-lang", "en")
     assert client.get("/donate").status_code == 200
-    assert 'href="/donate"' in client.get("/support").get_data(as_text=True)
+    for path in ("/support", "/", "/stats"):
+        assert 'href="/donate"' in client.get(path).get_data(as_text=True), path
     assert "/donate" in client.get("/sitemap.xml").get_data(as_text=True)
 
 
@@ -84,7 +85,7 @@ def test_self_hosted_hides_donations(client, self_hosted):
     """收款码和 Sponsors 是作者本人的：别人部署的站点不显示入口，直接访问也是 404。"""
     client.set_cookie("h2s-lang", "en")
     assert client.get("/donate").status_code == 404
-    for path in ("/support", "/login"):
+    for path in ("/support", "/login", "/", "/stats"):
         assert 'href="/donate"' not in client.get(path).get_data(as_text=True), path
     assert "/donate" not in client.get("/sitemap.xml").get_data(as_text=True)
     assert "/donate" not in client.get("/llms.txt").get_data(as_text=True)

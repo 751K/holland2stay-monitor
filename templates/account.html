@@ -23,6 +23,7 @@
 <nav class="sidebar-footer mail-footer" aria-label="{{ '设置与帮助' if lang == 'zh' else 'Settings & help' }}">
   <a href="{{ url_for('user_edit', user_id=user.id) }}" aria-current="page">{{ _('my_account') }}</a>
   <a href="{{ url_for('support_page') }}">{{ '帮助与支持' if lang == 'zh' else 'Help & support' }}</a>
+  {% include '_donate_link.html' %}
   {% include '_theme_toggle.html' %}
   {% include '_logout.html' %}
 </nav>

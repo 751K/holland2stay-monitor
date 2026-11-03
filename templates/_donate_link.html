@@ -1,0 +1,2 @@
+{# 侧栏底部的赞助入口，收件箱、账号设置和其他工作区页面共用。收款渠道是作者本人的，只在官方站显示。 #}
+{% if official_site %}<a href="{{ url_for('donate_page') }}" class="mail-footer-donate">{{ _('donate') }}</a>{% endif %}

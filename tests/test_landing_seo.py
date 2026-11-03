@@ -100,7 +100,8 @@ class TestRendered:
                 for line in txt.splitlines():
                     if "login_title" not in line:
                         continue
-                    if "<title>" in line or "set social_title" in line:
+                    # 继承 base.html 的页面用 {% block title %} 写 <title>
+                    if "<title>" in line or "block title" in line or "set social_title" in line:
                         continue
                     hits.append(f"{f.name}: {line.strip()[:60]}")
         assert not hits, "login_title 被用在了 <title> / og:title 之外：\n" + "\n".join(hits)

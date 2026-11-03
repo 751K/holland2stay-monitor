@@ -1,11 +1,12 @@
 {#
-  收件箱外壳（.mail-page）侧栏底部：管理入口、我的账户或登录、帮助。
+  收件箱外壳（.mail-page）侧栏底部：管理入口、我的账户或登录、帮助、赞助。
   统计页等不带收件箱上下文的页面共用；收件箱自己有同样的一份。
 #}
 <nav class="sidebar-footer mail-footer" aria-label="{{ '设置与帮助' if lang == 'zh' else 'Settings & help' }}">
   {% if is_admin %}<a href="{{ url_for('users_list') }}">{{ '管理后台' if lang == 'zh' else 'Administration' }} <span aria-hidden="true">↗</span></a>{% endif %}
   {% if is_user and current_user_id %}<a href="{{ url_for('user_edit',user_id=current_user_id) }}">{{ _('my_account') }}</a>{% elif not is_admin %}<a href="{{ url_for('login',next=request.full_path) }}">{{ '登录 / 注册' if lang == 'zh' else 'Sign in / Register' }}</a>{% endif %}
   <a href="{{ url_for('support_page') }}">{{ '帮助与支持' if lang == 'zh' else 'Help & support' }}</a>
+  {% include '_donate_link.html' %}
   {% include '_theme_toggle.html' %}
   {% include '_logout.html' %}
 </nav>

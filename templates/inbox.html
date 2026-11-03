@@ -1,9 +1,16 @@
 {% extends "base.html" %}
 {% set zh = lang == 'zh' %}
 {% from '_inbox_actions.html' import filter_action with context %}
-{% block title %}{{ ('我的房源' if inbox_user else '全部房源') if lang == 'zh' else ('My listings' if inbox_user else 'All listings') }} · {{ brand_name }}{% endblock %}
+{# 没登录的人打开首页看到的是这一页，搜索引擎和聊天软件的预览也是：标题和分享卡片
+   用登录页那套产品介绍，而不是「全部房源」。登录后标题照旧。 #}
+{% block title %}{% if request.endpoint == 'index' and not (is_admin or is_user) %}{{ _('login_title') }}{% if self_hosted_label %} · {{ self_hosted_label }}{% endif %}{% else %}{{ ('我的房源' if inbox_user else '全部房源') if lang == 'zh' else ('My listings' if inbox_user else 'All listings') }} · {{ brand_name }}{% endif %}{% endblock %}
 {% block body_class %}mail-page{% if calendar_mode %} calendar-page{% endif %}{% if map_mode %} map-page{% endif %}{% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}">{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ asset('inbox.css') }}">
+{%- if request.endpoint == 'index' and not (is_admin or is_user) %}
+  {% set social_title = _('login_title') %}
+  {% set social_desc  = _('login_meta_description') %}
+  {% include '_social_meta.html' %}
+{%- endif %}{% endblock %}
 {% block sidebar_navigation %}
 {% include '_inbox_nav.html' %}
 {% endblock %}
@@ -12,6 +19,7 @@
   {% if is_admin %}<a href="{{ url_for('users_list') }}">{{ '管理后台' if lang == 'zh' else 'Administration' }} <span aria-hidden="true">↗</span></a>{% endif %}
   {% if account_user %}<a href="{{ url_for('user_edit',user_id=account_user.id) }}">{{ _('my_account') }}</a>{% elif not is_admin %}<a href="{{ url_for('login',next=inbox_url()) }}">{{ '登录 / 注册' if lang == 'zh' else 'Sign in / Register' }}</a>{% endif %}
   <a href="{{ url_for('support_page') }}">{{ '帮助与支持' if lang == 'zh' else 'Help & support' }}</a>
+  {% include '_donate_link.html' %}
   {% include '_theme_toggle.html' %}
   {% include '_logout.html' %}
 </nav>

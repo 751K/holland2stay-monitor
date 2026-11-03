@@ -10,7 +10,7 @@
   且不带 referer，正是被人传人带来的那批。
 - 不带 ``Accept-Language`` 的客户端（Googlebot 就是这么爬的）拿到中文页 ——
   整个站在被当成中文站收录。
-- 没有 ``canonical``：``/`` 302 到 ``/login?next=/``，每个 next 取值都是一份
+- 没有 ``canonical``：当时 ``/`` 302 到 ``/login?next=/``，每个 next 取值都是一份
   重复内容。
 """
 from __future__ import annotations
@@ -24,7 +24,7 @@ from app.routes.site_meta import _PUBLIC_ENDPOINTS
 #: 与 sitemap 同源的公开页清单。判据也一样：**匿名访客真的能拿到 200**。
 #: 写死一份 path 而不是 url_for，是为了让「某天某个页面悄悄要登录了」这件事
 #: 在这里也断得出来，而不是跟着路由一起改。
-PUBLIC_PATHS = ("/login", "/guide", "/donate", "/support", "/privacy", "/terms")
+PUBLIC_PATHS = ("/", "/login", "/guide", "/donate", "/support", "/privacy", "/terms")
 
 BASE = "https://flatradar.test"
 
@@ -56,6 +56,35 @@ class TestPublicPathsMatchSitemap:
     @pytest.mark.parametrize("path", PUBLIC_PATHS)
     def test_reachable_anonymously(self, pub, path):
         assert pub.get(path).status_code == 200
+
+    def test_home_is_dropped_without_guest_mode(self, pub, monkeypatch):
+        """关掉访客模式，首页对匿名访客又是 302 到登录页，不能再列进 sitemap。"""
+        monkeypatch.setenv("WEB_GUEST_MODE", "false")
+        assert pub.get("/").status_code == 302
+        sitemap = pub.get("/sitemap.xml").get_data(as_text=True)
+        assert f"<loc>{BASE}/</loc>" not in sitemap and f"<loc>{BASE}/login</loc>" in sitemap
+        assert f"({BASE}/)" not in pub.get("/llms.txt").get_data(as_text=True)
+
+
+class TestHomepage:
+    """首页对没登录的人是落地页，对登录的人是收件箱。"""
+
+    def test_anonymous_visitors_get_the_landing_title(self, pub):
+        from translations import TRANSLATIONS
+        pub.set_cookie("h2s-lang", "en")
+        body = pub.get("/").get_data(as_text=True)
+        assert f"<title>{TRANSLATIONS['login_title']['en']}</title>" in body
+        assert _link(body, "canonical") == [f"{BASE}/"]
+
+    def test_signed_in_users_keep_the_inbox_title(self, admin_client):
+        admin_client.set_cookie("h2s-lang", "en")
+        body = admin_client.get("/").get_data(as_text=True)
+        assert "<title>All listings · FlatRadar</title>" in body
+        assert 'property="og:title"' not in body
+
+    def test_browsing_parameters_share_one_canonical(self, pub):
+        body = pub.get("/?view=plaza&page=2").get_data(as_text=True)
+        assert _link(body, "canonical") == [f"{BASE}/"]
 
 
 class TestShareCard:
@@ -103,14 +132,15 @@ class TestShareCard:
         body = pub.get(path).get_data(as_text=True)
         assert _meta(body, "name", "description") == _meta(body, "property", "og:description")
 
-    def test_title_matches_the_page_title(self, pub):
+    @pytest.mark.parametrize("path", ["/login", "/"])
+    def test_title_matches_the_page_title(self, pub, path):
         """og:title 与 <title> 必须是同一句。
 
         写成两份只会各自漂移：改了搜索标题、忘了改分享卡片，两个入口从此说
         不一样的话。tests/test_landing_seo.py 那条「login_title 只用于标题」
         的规则因此显式放行 og:title 复用它。
         """
-        body = pub.get("/login").get_data(as_text=True)
+        body = pub.get(path).get_data(as_text=True)
         title = re.search(r"<title>([^<]*)</title>", body).group(1)
         assert _meta(body, "property", "og:title") == [title]
         assert _meta(body, "name", "twitter:title") == [title]

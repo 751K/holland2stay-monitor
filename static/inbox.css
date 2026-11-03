@@ -76,3 +76,5 @@
 .mail-page .mail-footer form button:hover{background:var(--mail-hover);color:var(--mail-text);border-radius:5px}
 /* Mobile: the fixed menu button stays on top of the open sidebar, so the brand sits beside it, centred on the same line */
 @media(max-width:900px){.mail-page .sidebar{padding-top:12px}.mail-page .sidebar-brand{display:flex;align-items:center;min-height:44px;padding:0 10px 0 52px}}
+/* 赞助入口用强调色，和其他灰色的底部链接区分开 */
+.mail-page .mail-footer a.mail-footer-donate,.mail-page .mail-footer a.mail-footer-donate:hover{color:var(--mail-accent)}

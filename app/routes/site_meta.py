@@ -75,12 +75,11 @@ _DISALLOW = _DISALLOW_NEEDS_AUTH + _DISALLOW_SENSITIVE
 #:     /login 26.9KB   /guide 17KB   /privacy 13.2KB
 #:     /terms 11.4KB   /support 8.6KB   /donate 7.4KB
 #:
-#: 注意 ``/`` **不在其中**：它对匿名访客 302 到 ``/login``，而 sitemap 里列
-#: 重定向 URL 是坏习惯，列真正返回 200 的那个。
-#:
-#: 也注意 **guest mode 不改变这份名单**：它是 ``POST /guest`` 的交互式开关，
-#: 靠 session 生效，爬虫既不会 POST 也不带 session，看到的和匿名访客一样。
+#: v2.1 起首页 ``/`` 也在其中：开着访客模式时，没登录的人（包括爬虫）直接以
+#: 访客身份进收件箱，拿到 200。关掉访客模式它仍 302 到 ``/login``——sitemap
+#: 里列重定向 URL 是坏习惯，所以那时把它剔掉，见 ``_listed_endpoints``。
 _PUBLIC_ENDPOINTS = (
+    "index",
     "login",
     "guide_page",
     "donate_page",
@@ -88,6 +87,14 @@ _PUBLIC_ENDPOINTS = (
     "privacy_page",
     "terms_page",
 )
+
+def _listed_endpoints() -> list[str]:
+    """此刻匿名访客真能打开的公开页：赞助页只在官方站开放，首页要开着访客模式。"""
+    from app.auth import guest_mode_enabled
+    return [ep for ep in _PUBLIC_ENDPOINTS
+            if (ep != "donate_page" or deployment.is_official_site())
+            and (ep != "index" or guest_mode_enabled())]
+
 
 _ROBOTS = ("User-agent: *\n"
            + "".join(f"Disallow: {p}\n" for p in _DISALLOW))
@@ -129,8 +136,7 @@ def sitemap_xml():
     root = site_root()
     urls = "".join(
         f"  <url><loc>{root}{url_for(ep)}</loc></url>\n"
-        for ep in _PUBLIC_ENDPOINTS
-        if ep != "donate_page" or deployment.is_official_site()   # 赞助页只在官方站开放
+        for ep in _listed_endpoints()
     )
     xml = ('<?xml version="1.0" encoding="UTF-8"?>\n'
            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -152,8 +158,11 @@ def sitemap_xml():
 def _llms_txt() -> str:
     root = site_root()
     # 赞助页只在官方站开放（见 legal.donate_page）
+    listed = _listed_endpoints()
     donate = (f"- [Donate]({root}/donate): how to support development.\n"
-              if deployment.is_official_site() else "")
+              if "donate_page" in listed else "")
+    listings = (f"- [Listings]({root}/): current listings across all monitored platforms; no sign-in needed.\n"
+                if "index" in listed else "")
     return f"""# FlatRadar
 
 > Monitors Dutch rental platforms (Holland2Stay, Xior, OurDomain, OurCampus)
@@ -166,7 +175,7 @@ the platforms it monitors, and it does not list or let properties itself.
 
 ## Pages
 
-- [Sign in / overview]({root}/login): what the service does, and where you sign up.
+{listings}- [Sign in / overview]({root}/login): what the service does, and where you sign up.
 - [User guide]({root}/guide): how filters, notifications and auto-booking work.
 - [Support]({root}/support): contact and troubleshooting.
 {donate}
@@ -194,9 +203,8 @@ def social_meta() -> dict:
     """给模板算好一份分享卡片 / 规范化链接要用的绝对 URL。
 
     **canonical 只用 ``request.path``，丢掉全部查询参数**（``lang`` 除外）。
-    落地页尤其需要这一条：``/`` 对匿名访客 302 到 ``/login?next=/``，爬虫顺着
-    过来看到的就是带 ``next=`` 的那个 URL；不收敛的话每一个 ``next`` 取值都是
-    一份重复内容。
+    落地页尤其需要这一条：首页 ``/`` 带着 ``view`` / ``page`` / ``selected`` 等
+    浏览参数，``/login`` 带着 ``next=``；不收敛的话每一种取值都是一份重复内容。
 
     hreflang 指向 ``?lang=xx``：``get_lang()`` 读的就是这个查询参数，所以这两个
     URL 是真能拿到对应语言的——指一个不生效的 URL 比不写还糟。``x-default``
