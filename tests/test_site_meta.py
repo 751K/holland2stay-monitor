@@ -135,9 +135,11 @@ class TestSitemap:
             )
 
     def test_does_not_list_redirects(self, client):
-        """``/`` 对匿名访客 302 到 /login，列它属于坏习惯：列真正 200 的那个。"""
+        """列重定向的 URL 是坏习惯：sitemap 里每一条匿名访客都要直接拿到 200。"""
+        import re
         body = client.get("/sitemap.xml").get_data(as_text=True)
-        assert "<loc>http://localhost/</loc>" not in body
+        for path in re.findall(r"<loc>http://localhost(/[^<]*)</loc>", body):
+            assert client.get(path).status_code == 200, f"sitemap 列了 {path}，它却不是 200"
 
     def test_does_not_contradict_robots(self, client):
         """sitemap 里的页面不能同时被自己的 robots.txt 拦着。"""
