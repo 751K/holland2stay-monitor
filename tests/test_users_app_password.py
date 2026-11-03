@@ -99,22 +99,6 @@ class TestSerializationRoundTrip:
         # 校验仍然通过
         assert verify_app_password(u2, "round-trip") is True
 
-    def test_old_users_json_without_fields_defaults_to_disabled(self, isolated_data_dir, tmp_path):
-        """老 users.json 没有 app_login_enabled / app_password_hash → 默认禁用。"""
-        import json
-        from users import USERS_FILE, load_users
-        # 写一份不带新字段的老数据
-        legacy = [{
-            "name": "legacy", "id": "legacy01", "enabled": True,
-            "notifications_enabled": True, "notification_channels": [],
-            "listing_filter": {}, "auto_book": {},
-        }]
-        USERS_FILE.write_text(json.dumps(legacy), encoding="utf-8")
-        users = load_users()
-        assert len(users) == 1
-        assert users[0].app_login_enabled is False
-        assert users[0].app_password_hash == ""
-        assert verify_app_password(users[0], "anything") is False
 
 def test_password_over_72_bytes_is_rejected():
     """bcrypt 只接受 72 字节；超长要抛 ValueError，由调用方转 4xx。"""

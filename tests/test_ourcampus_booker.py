@@ -256,7 +256,7 @@ class TestUnitTable403RotatesFingerprint:
 
     def _run(self, blocked):
         cooled = []
-        with patch("scrapers.ourdomain._mark_fingerprint_blocked", cooled.append):
+        with patch("scrapers.rentcafe_fingerprint._mark_fingerprint_blocked", cooled.append):
             r = _book(session_cls=self._session(blocked))
         return r, cooled, _FakeSession.instances[0]
 

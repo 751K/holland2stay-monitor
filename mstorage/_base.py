@@ -577,14 +577,14 @@ class StorageBase:
     def _backfill_city_normalized(self) -> None:
         """按当前的归一表刷新 city_normalized。
 
-        每次启动都跑，而不是只在建列时跑一次：楼盘归属写在 config 的表里，
+        每次启动都跑，而不是只在建列时跑一次：楼盘归属写在 mcore.registry 的表里，
         新增楼盘或改了归属之后，存量行必须跟着走，否则老房源会一直挂在旧城市
         下——而这种错在页面上看不出来。
 
         逐个 distinct city 处理（实际只有几十个值），且只更新与目标值不同的行，
         因此重复执行不会产生写入。
         """
-        from config import canonical_city
+        from mcore.registry import canonical_city
 
         try:
             cities = [
@@ -711,14 +711,15 @@ class StorageBase:
         """
         import json
 
-        from config import (
+        from mcore.registry import (
             KNOWN_XIOR_CITIES,
+            target_name,
             xior_furnishing_for,
         )
 
         # Building feature 里存的是 display 名，反查成注册表 key
         by_display = {
-            (c.get("name") or f"{c.get('city','')} {c.get('bldg','')}".strip()): c["key"]
+            target_name(c): c["key"]
             for c in KNOWN_XIOR_CITIES
         }
         try:

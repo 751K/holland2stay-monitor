@@ -68,6 +68,12 @@ def _scan_source_keys() -> dict[str, set[str]]:
                 if any(r in fn for r in _READER_NAMES) and isinstance(first, ast.Constant):
                     if isinstance(first.value, str):
                         note(first.value, path)
+                # mcore/registry.py 的 TargetSpec(source, env_key, ...)：键名登记在
+                # 这里，由 config._load_targets 按 spec.env_key 读取。
+                if fn.endswith("TargetSpec") and len(node.args) >= 2:
+                    key = node.args[1]
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        note(key.value, path)
             elif isinstance(node, ast.Subscript) and "environ" in ast.unparse(node.value):
                 if isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
                     note(node.slice.value, path)

@@ -10,7 +10,6 @@ from app.auth import browse_required, is_user, login_required
 from app.csrf import csrf_required
 from app.db import storage
 from app.i18n import get_lang
-from app.process_ctrl import write_reload_request
 from app.services.inbox_service import (
     build_inbox_scope, filter_view_rows, matching_rows, parse_basic_filter,
     present_listing, workspace_return_url, workspace_url,
@@ -63,8 +62,7 @@ def inbox_filter_update():
         # Replace only fields in this editor. Preserve advanced filter dimensions,
         # notification credentials, booking settings and concurrent account edits.
         target.listing_filter = replace(target.listing_filter, **basic)
-    update_users(update)
-    write_reload_request()
+    update_users(update)   # 热重载请求由 update_users 统一发
     flash('个人筛选已保存；通知将在监控下一轮使用新条件。' if get_lang() == 'zh' else 'Filters saved. Notifications will use them on the next monitoring round.', 'success')
     return redirect(workspace_return_url(request.form))
 

@@ -30,8 +30,9 @@ from crypto import encrypt
 from mstorage import Storage
 from users import (
     RENTCAFE_CRED_CLEANUP_META_KEY,
+    USERS_MIGRATION_META_KEY,
     _ab_from_dict,
-    _ensure_rentcafe_creds_unbackfilled,
+    check_legacy_migrations,
 )
 
 H2S_EMAIL = "me@h2s.example"
@@ -67,13 +68,15 @@ class TestNoFallbackOnLoad:
         """只动另外两个平台，H2S 自己那对不受影响。"""
         ab = _ab_from_dict({"email": H2S_EMAIL, "password": encrypt(H2S_PW)})
         assert (ab.email, ab.password) == (H2S_EMAIL, H2S_PW)
-
-
-# ── 存量数据：库里那份也要洗 ──────────────────────────────────────────
+# ── 存量数据：旧版一次性清理已删除，只剩启动检查 ──────────────────────
+#
+# 库里那份回填值由 v2.1 及以前的一次性清理洗掉。清理代码删了之后，没洗过的旧库
+# 必须被挡在门外，而不是悄悄带着别人的 H2S 密码跑起来。
 
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path, monkeypatch):
+    monkeypatch.setattr(users_mod, "USERS_FILE", tmp_path / "users.json")
     s = Storage(tmp_path / "t.db")
     yield s
     s.close()
@@ -82,127 +85,49 @@ def store(tmp_path):
 NOW = "2026-08-04T12:00:00+00:00"
 
 
-def _seed(st, uid: str, ab, *, raw: str = "") -> None:
+def _seed(st, uid: str) -> None:
     st.conn.execute(
         "INSERT INTO user_configs (id, name, auto_book_json, created_at, updated_at) "
         "VALUES (?,?,?,?,?)",
-        (uid, uid, raw or json.dumps(ab), NOW, NOW),
+        (uid, uid, json.dumps({"email": H2S_EMAIL, "password": encrypt(H2S_PW)}), NOW, NOW),
     )
     st.conn.commit()
 
 
-def _read(st, uid: str) -> dict:
-    row = st.conn.execute(
-        "SELECT auto_book_json FROM user_configs WHERE id=?", (uid,)
-    ).fetchone()
-    return json.loads(row[0])
+def _flags(st) -> list[str]:
+    return [st.get_meta(k, default="")
+            for k in (USERS_MIGRATION_META_KEY, RENTCAFE_CRED_CLEANUP_META_KEY)]
 
 
-def _backfilled(**over) -> dict:
-    """线上那 41 行长的样子：三个平台的凭据一模一样。"""
-    ab = {
-        "email": H2S_EMAIL, "password": encrypt(H2S_PW),
-        "xior_email": H2S_EMAIL, "xior_password": encrypt(H2S_PW),
-        "ourdomain_email": H2S_EMAIL, "ourdomain_password": encrypt(H2S_PW),
-    }
-    ab.update(over)
-    return ab
+class TestLegacyMigrationCheck:
+    def test_fresh_install_gets_both_flags(self, store):
+        check_legacy_migrations(store)
+        assert _flags(store) == ["1", "1"]
 
+    def test_migrated_database_passes(self, store):
+        _seed(store, "u1")
+        for k in (USERS_MIGRATION_META_KEY, RENTCAFE_CRED_CLEANUP_META_KEY):
+            store.set_meta(k, "1")
+        users_mod.USERS_FILE.write_text("[]")   # 迁移后 users.json 原样留着
+        check_legacy_migrations(store)
 
-class TestStoredCleanup:
-    """光改加载层不够——回填过的值已经固化进 ``auto_book_json`` 了。"""
+    def test_never_imported_users_json_is_refused(self, store):
+        users_mod.USERS_FILE.write_text("[]")
+        with pytest.raises(RuntimeError, match="v2.1"):
+            check_legacy_migrations(store)
+        assert _flags(store) == ["", ""], "拒绝时不能顺手补标记"
 
-    def test_clears_both_platforms(self, store):
-        _seed(store, "u1", _backfilled())
-        _ensure_rentcafe_creds_unbackfilled(store)
-        ab = _read(store, "u1")
-        assert ab["ourdomain_email"] == "" and ab["ourdomain_password"] == ""
-        assert ab["xior_email"] == "" and ab["xior_password"] == ""
+    def test_users_json_with_migration_backup_counts_as_imported(self, store):
+        """导入过、之后整库清空（reset_all 连标记一起删）——按全新安装处理。"""
+        users_mod.USERS_FILE.write_text("[]")
+        backup = users_mod.USERS_FILE.with_name("users.json.migrated.20260516T000000Z.bak")
+        backup.write_text("[]")
+        check_legacy_migrations(store)
+        assert _flags(store) == ["1", "1"]
 
-    def test_h2s_pair_is_never_touched(self, store):
-        """清理的是被回填的那两个平台，不是用户真配了的 H2S。"""
-        _seed(store, "u1", _backfilled())
-        _ensure_rentcafe_creds_unbackfilled(store)
-        ab = _read(store, "u1")
-        assert ab["email"] == H2S_EMAIL
-        assert ab["password"], "H2S 密码被误删了"
-
-    def test_genuinely_configured_platform_creds_survive(self, store):
-        _seed(store, "u1", _backfilled(
-            ourdomain_email="me@od.example",
-            ourdomain_password=encrypt("od-secret"),
-        ))
-        _ensure_rentcafe_creds_unbackfilled(store)
-        ab = _read(store, "u1")
-        assert ab["ourdomain_email"] == "me@od.example"
-        assert ab["xior_email"] == "", "Xior 那对仍是回填的，该清"
-
-    def test_same_email_different_password_is_left_alone(self, store):
-        """只对上一半不算回填指纹——多半是用户两边用了同一个邮箱。"""
-        _seed(store, "u1", _backfilled(ourdomain_password=encrypt("different")))
-        _ensure_rentcafe_creds_unbackfilled(store)
-        assert _read(store, "u1")["ourdomain_email"] == H2S_EMAIL
-
-    def test_encrypted_passwords_are_compared_as_plaintext(self, store):
-        """Fernet 不是确定性加密：同一明文两次密文不同，比密文永远不相等。
-
-        直接比密文的话这条清理会一条都清不掉，而且完全不报错。
-        """
-        ab = _backfilled()
-        assert ab["password"] != ab["ourdomain_password"], "前提：密文本就不同"
-        _seed(store, "u1", ab)
-        _ensure_rentcafe_creds_unbackfilled(store)
-        assert _read(store, "u1")["ourdomain_password"] == ""
-
-    def test_user_without_h2s_creds_is_skipped(self, store):
-        """没配过 H2S 就谈不上被回填，别去动人家的数据。"""
-        ab = {"email": "", "password": "",
-              "ourdomain_email": "me@od.example",
-              "ourdomain_password": encrypt("od-secret")}
-        _seed(store, "u1", ab)
-        _ensure_rentcafe_creds_unbackfilled(store)
-        assert _read(store, "u1")["ourdomain_email"] == "me@od.example"
-
-    def test_runs_once_and_stays_out_of_the_way(self, store):
-        """清完之后用户填什么就是什么——包括故意两边同密码。"""
-        _seed(store, "u1", _backfilled())
-        _ensure_rentcafe_creds_unbackfilled(store)
-        assert store.get_meta(RENTCAFE_CRED_CLEANUP_META_KEY, default="") == "1"
-
-        # 用户重新填了，而且真的用了和 H2S 一样的邮箱密码
-        store.conn.execute(
-            "UPDATE user_configs SET auto_book_json=? WHERE id=?",
-            (json.dumps(_backfilled()), "u1"),
-        )
-        store.conn.commit()
-        _ensure_rentcafe_creds_unbackfilled(store)      # 第二次是 no-op
-        assert _read(store, "u1")["ourdomain_email"] == H2S_EMAIL
-
-    def test_broken_json_does_not_abort_the_whole_cleanup(self, store):
-        """一行坏数据不该让其他用户的清理全部落空。"""
-        _seed(store, "bad", None, raw="{not json")
-        _seed(store, "u1", _backfilled())
-        _ensure_rentcafe_creds_unbackfilled(store)
-        assert _read(store, "u1")["ourdomain_email"] == ""
-
-    def test_no_users_still_sets_the_flag(self, store):
-        _ensure_rentcafe_creds_unbackfilled(store)
-        assert store.get_meta(RENTCAFE_CRED_CLEANUP_META_KEY, default="") == "1"
-
-
-class TestEndToEnd:
-    def test_load_users_returns_no_phantom_platform_accounts(self, store, monkeypatch):
-        """走完整 load_users：加载层 + 存量清理一起生效。"""
-        _seed(store, "u1", _backfilled())
-        store.conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            (users_mod.USERS_MIGRATION_META_KEY, "1"),
-        )
-        store.conn.commit()
-        monkeypatch.setattr(users_mod, "_open_storage", lambda: store)
-        monkeypatch.setattr(store, "close", lambda: None)
-
-        (u,) = users_mod.load_users()
-        assert u.auto_book.ourdomain_email == ""
-        assert u.auto_book.xior_account_for("p0196062") == ("", "")
-        assert u.auto_book.email == H2S_EMAIL, "H2S 那对该留着"
+    def test_users_without_flags_are_refused(self, store):
+        """v2.1 之前的库：用户在，回填的凭据可能还没洗。"""
+        _seed(store, "u1")
+        store.set_meta(USERS_MIGRATION_META_KEY, "1")
+        with pytest.raises(RuntimeError):
+            check_legacy_migrations(store)

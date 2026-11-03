@@ -2,20 +2,27 @@
 bookers/holland2stay.py — Holland2Stay 自动下单实现
 ====================================================
 
-Thin wrapper：直接转发给 ``booker.try_book``。零行为变更——所有 H2S 现有
-路径（dry_run / payment_method / prewarmed 复用 / blocked /
-race_lost 等 phase）原样保留。
-
-将来如果要把 H2S checkout 实现从 ``booker.py`` 重构进这里，可以独立做——
-当前阶段只关心架构清洁，业务逻辑不动。
+Thin wrapper：直接转发给 ``bookers.h2s_checkout.try_book``（H2S 结账流程本身
+在那个文件里）。零行为变更——所有 H2S 现有路径（dry_run / payment_method /
+prewarmed 复用 / blocked / race_lost 等 phase）原样保留。
 """
 from __future__ import annotations
 
 import logging
 
-from booker import try_book
-
 from .base import AbstractBooker, BookingRequest, BookingResult
+
+
+def try_book(*args, **kwargs) -> BookingResult:
+    """转发给 ``bookers.h2s_checkout.try_book``。
+
+    调用时才 import：h2s_checkout 会 import 浏览器层，而 bookers/__init__ 加载本
+    文件时它可能还没初始化完（先 import h2s_checkout → bookers/__init__ → 本文件）。
+    保留这个模块级名字，测试照旧 patch ``bookers.holland2stay.try_book``。
+    """
+    from bookers.h2s_checkout import try_book as _try_book
+
+    return _try_book(*args, **kwargs)
 
 
 logger = logging.getLogger(__name__)

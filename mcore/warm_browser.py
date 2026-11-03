@@ -8,7 +8,7 @@
     NextAuth 登录 ~1.5s                      ← 属于**用户**
 
 而 ``try_book`` 的每个调用都用 ``Authorization: Bearer <JWT>`` 认证，浏览器只是
-一条过了 CF 的 HTTP 通道，和是谁登录的无关（见 booker.py 的 ``login`` 与
+一条过了 CF 的 HTTP 通道，和是谁登录的无关（见 bookers/h2s_checkout.py 的 ``login`` 与
 ``_gql``）。也就是说贵的那一半是可以**所有用户共用一份**的。
 
 2026-09-08 之前不是这么做的：预登录只在「本轮出现候选」时才启动，而候选的定义

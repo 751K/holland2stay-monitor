@@ -9,7 +9,7 @@ import inspect
 import re
 
 
-import booker
+import bookers.h2s_checkout as booker
 
 
 def _code(fn) -> str:

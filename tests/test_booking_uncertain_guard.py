@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from booker import BookingResult
+from bookers.h2s_checkout import BookingResult
 from mcore import booking_round
 from mcore.booking_guard import BookingGuard, attempt_context, record_mutation
 from models import Listing
@@ -115,7 +115,7 @@ def test_mutation_failure_does_not_try_fallback(db, monkeypatch):
 def test_uncertain_create_is_reported_without_retrying(db, monkeypatch):
     import time
     from unittest.mock import MagicMock
-    import booker
+    import bookers.h2s_checkout as booker
     listing = Listing(id='1', name='Room', status='Available to book', price_raw='€1',
                       available_from='', features=[], url='', city='', source='holland2stay',
                       sku='SKU1')

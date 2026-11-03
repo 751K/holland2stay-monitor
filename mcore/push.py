@@ -16,7 +16,7 @@ mcore.push — APNs + FCM 推送调度
 4. **运行时单例客户端**：第一次调用时构造（含 .p8 / service account 加载），
    后续复用；同进程内多协程并发安全。
 5. **平台分离**：按 device_tokens.platform 字段分流到 APNs（iOS / macOS）或 FCM（Android），
-   规则只在 ``app.services.device_service.push_channel`` 一处（白名单）。
+   规则只在 ``notifier_channels.routing.push_channel`` 一处（白名单）。
 6. **尊重用户的通知开关**：``UserConfig.notifications_enabled=False`` 时不推。
    这条以前不成立——外部渠道被 ``MultiNotifier(enabled=…)`` 挡着，推送却从
    旁边绕了过去，于是面板上那个写着「通知」的开关关掉后手机照响。公告路径
@@ -31,6 +31,8 @@ import time
 from collections import defaultdict, deque
 from typing import Optional, Sequence
 
+from mcore.sources import source_short_name
+from notifier_channels.routing import push_channel
 from notifier_channels.apns import (
     ApnsClient,
     ApnsConfig,
@@ -48,12 +50,8 @@ logger = logging.getLogger(__name__)
 def _devices_for(devices: list[dict], channel: str) -> list[dict]:
     """筛出走 ``channel``（``"apns"`` / ``"fcm"``）的设备。
 
-    分流规则在 ``app.services.device_service.push_channel``。**延迟导入**：
-    ``device_service`` 顶层会拉进 Flask 与 ``app.db``，mcore 在模块级不依赖 ``app.*``，
-    monitor 进程启动时不该为一个判断函数加载整个 web 栈。
+    分流规则在 ``notifier_channels.routing.push_channel``（白名单）。
     """
-    from app.services.device_service import push_channel
-
     return [d for d in devices if push_channel(d.get("platform")) == channel]
 
 
@@ -307,15 +305,67 @@ def _trim(text: str, n: int) -> str:
 
 
 def _source_short(source: str | None) -> str:
-    value = (source or "holland2stay").strip().lower()
+    # 与文本通知同一张缩写表；这里曾手写一份只认 H2S / OD，其余平台在推送
+    # 标题里显示成大写原名（XIOR、STUDENTEXPERIENCE）。
+    return source_short_name(source)
+
+
+# 每种事件的标题和正文只生成一次（``_*_text``），APNs / FCM 两边只负责包装。
+# 这两份 payload 原先是逐行复制的，2026-09 的「状态重复一次」就是两边一起错。
+
+
+def _listing_source(listing) -> str:
+    return getattr(listing, "source", "") or "holland2stay"
+
+
+def _deep_link(listing) -> str:
+    return f"h2smonitor://listing/{listing.id}"
+
+
+def _apns_listing(listing, kind: str, title: str, body: str, *, thread: str,
+                  trim_title: bool = True, mutable: bool = False) -> dict:
+    """单条房源事件的 APNs payload。"""
+    aps = {
+        "alert": {
+            "title": _trim(title, 64) if trim_title else title,
+            "body": _trim(body, 180),
+        },
+        "sound": "default",
+        "thread-id": thread,
+    }
+    if mutable:
+        aps["mutable-content"] = 1
     return {
-        "holland2stay": "H2S",
-        "ourdomain": "OD",
-    }.get(value, value.upper() or "H2S")
+        "aps": aps,
+        "kind": kind,
+        "listing_id": listing.id,
+        "source": _listing_source(listing),
+        "deep_link": _deep_link(listing),
+    }
 
 
-def _payload_new_listing(listing, *, lang: str = "en") -> dict:
-    """单条新房源。"""
+def _fcm_message(data: dict, *, collapse_key: str, priority: str = "high") -> dict:
+    return {
+        "message": {
+            "data": data,
+            "android": {
+                "priority": priority,
+                "collapse_key": collapse_key[:64],
+            },
+        },
+    }
+
+
+def _fcm_listing(listing, kind: str, title: str, body: str, *, collapse_prefix: str) -> dict:
+    """单条房源事件的 FCM payload（data-only，见下方说明）。"""
+    data = _fcm_data(listing, listing.id, kind, _deep_link(listing), title, body)
+    return _fcm_message(data, collapse_key=collapse_prefix + listing.id)
+
+
+# ── 各事件的标题与正文 ──────────────────────────────────────────────
+
+
+def _new_listing_text(listing, lang: str) -> tuple[str, str]:
     city = listing.city or "New City"
     source = _source_short(getattr(listing, "source", ""))
     price = getattr(listing, "price_display", "") or "?"
@@ -331,42 +381,14 @@ def _payload_new_listing(listing, *, lang: str = "en") -> dict:
         body_parts.append(area)
     if listing.available_from:
         body_parts.append(_t("{date} move-in", lang).format(date=listing.available_from))
-    body = " · ".join(body_parts)
-    title_tmpl = _t("[{source}] {city} new listing", lang)
-    return {
-        "aps": {
-            "alert": {
-                "title": _trim(title_tmpl.format(source=source, city=city), 64),
-                "body": _trim(body, 180),
-            },
-            "sound": "default",
-            "thread-id": "listings",
-            "mutable-content": 1,
-        },
-        "kind": "new",
-        "listing_id": listing.id,
-        "source": getattr(listing, "source", "") or "holland2stay",
-        "deep_link": f"h2smonitor://listing/{listing.id}",
-    }
+    title = _t("[{source}] {city} new listing", lang).format(source=source, city=city)
+    return title, " · ".join(body_parts)
 
 
-def _payload_status_change(listing, old_status: str, new_status: str, *, lang: str = "en") -> dict:
+def _status_change_text(listing, old_status: str, new_status: str, lang: str) -> tuple[str, str]:
     source = _source_short(getattr(listing, "source", ""))
-    status_text = _t("{old} → {new}", lang).format(old=old_status, new=new_status)
-    return {
-        "aps": {
-            "alert": {
-                "title": _trim(f"[{source}] {listing.name}", 64),
-                "body": _trim(status_text, 180),
-            },
-            "sound": "default",
-            "thread-id": "listings",
-        },
-        "kind": "status_change",
-        "listing_id": listing.id,
-        "source": getattr(listing, "source", "") or "holland2stay",
-        "deep_link": f"h2smonitor://listing/{listing.id}",
-    }
+    return (f"[{source}] {listing.name}",
+            _t("{old} → {new}", lang).format(old=old_status, new=new_status))
 
 
 def _booked_text(listing, lang: str) -> tuple[str, str]:
@@ -382,26 +404,27 @@ def _booked_text(listing, lang: str) -> tuple[str, str]:
             _t("{name} added to cart, please pay promptly", lang).format(name=listing.name))
 
 
-def _payload_booked(listing, *, lang: str = "en") -> dict:
-    title, body = _booked_text(listing, lang)
-    return {
-        "aps": {
-            "alert": {
-                "title": title,
-                "body": _trim(body, 180),
-            },
-            "sound": "default",
-            "thread-id": "booking",
-        },
-        "kind": "booked",
-        "listing_id": listing.id,
-        "source": getattr(listing, "source", "") or "holland2stay",
-        "deep_link": f"h2smonitor://listing/{listing.id}",
-    }
+def _booking_failed_text(listing, lang: str) -> tuple[str, str]:
+    """预订失败推送的 (title, body)。
+
+    不带失败原因：booker 给的原因只有中文、且多是技术细节（403、原因码），
+    英文用户的锁屏上不该出现一段中文。原因照旧写进站内通知和文本渠道，推送
+    只负责让人知道「没订上、要自己去」，点开就是房源页。
+    """
+    from models import is_application_only
+
+    source = _source_short(getattr(listing, "source", ""))
+    if is_application_only(listing):
+        return (f"[{source}] {_t('Registration failed', lang)}",
+                _t("{name}: auto-registration did not go through, tap to register manually",
+                   lang).format(name=listing.name))
+    return (f"[{source}] {_t('Booking failed', lang)}",
+            _t("{name}: auto-booking did not go through, tap to book manually",
+               lang).format(name=listing.name))
 
 
-def _payload_round_aggregate(listings, round_id: str, *, lang: str = "en") -> dict:
-    """≥3 套聚合，避免锁屏刷屏。"""
+def _round_aggregate_text(listings, lang: str) -> tuple[str, str, dict[str, int]]:
+    """≥3 套聚合的 (title, body, 各平台套数)，避免锁屏刷屏。"""
     by_city: dict[str, int] = defaultdict(int)
     by_source: dict[str, int] = defaultdict(int)
     for l in listings:
@@ -410,11 +433,41 @@ def _payload_round_aggregate(listings, round_id: str, *, lang: str = "en") -> di
     parts = [f"{city} {cnt}" for city, cnt in sorted(by_city.items(), key=lambda kv: -kv[1])]
     sources = ", ".join(f"{source} {cnt}" for source, cnt in sorted(by_source.items()))
     body = f"{sources} · " + " · ".join(parts) + f" · {_t('tap to view', lang)}"
-    title_tmpl = _t("this round {n} new listings", lang)
+    title = _t("this round {n} new listings", lang).format(n=len(listings))
+    return title, body, dict(by_source)
+
+
+# ── APNs Payload ────────────────────────────────────────────────────
+
+
+def _payload_new_listing(listing, *, lang: str = "en") -> dict:
+    """单条新房源。"""
+    title, body = _new_listing_text(listing, lang)
+    return _apns_listing(listing, "new", title, body, thread="listings", mutable=True)
+
+
+def _payload_status_change(listing, old_status: str, new_status: str, *, lang: str = "en") -> dict:
+    title, body = _status_change_text(listing, old_status, new_status, lang)
+    return _apns_listing(listing, "status_change", title, body, thread="listings")
+
+
+def _payload_booked(listing, *, lang: str = "en") -> dict:
+    title, body = _booked_text(listing, lang)
+    return _apns_listing(listing, "booked", title, body, thread="booking", trim_title=False)
+
+
+def _payload_booking_failed(listing, *, lang: str = "en") -> dict:
+    title, body = _booking_failed_text(listing, lang)
+    return _apns_listing(listing, "booking_failed", title, body, thread="booking",
+                         trim_title=False)
+
+
+def _payload_round_aggregate(listings, round_id: str, *, lang: str = "en") -> dict:
+    title, body, by_source = _round_aggregate_text(listings, lang)
     return {
         "aps": {
             "alert": {
-                "title": _trim(title_tmpl.format(n=len(listings)), 64),
+                "title": _trim(title, 64),
                 "body": _trim(body, 180),
             },
             "sound": "default",
@@ -422,7 +475,7 @@ def _payload_round_aggregate(listings, round_id: str, *, lang: str = "en") -> di
         },
         "kind": "round",
         "round_id": round_id,
-        "sources": dict(by_source),
+        "sources": by_source,
     }
 
 
@@ -445,23 +498,6 @@ def _payload_announcement(title: str, body: str, *, lang: str = "en") -> dict:
     }
 
 
-def _fcm_payload_announcement(title: str, body: str, *, lang: str = "en") -> dict:
-    return {
-        "message": {
-            "data": {
-                "title": _trim(title, 64),
-                "body": _trim(body, 180),
-                "kind": "announcement",
-                "deep_link": "",
-            },
-            "android": {
-                "priority": "normal",   # 公告不是紧急事件
-                "collapse_key": "announcement",
-            },
-        },
-    }
-
-
 def _payload_error(text: str, kind: str = "blocked", *, lang: str = "en") -> dict:
     return {
         "aps": {
@@ -476,7 +512,7 @@ def _payload_error(text: str, kind: str = "blocked", *, lang: str = "en") -> dic
     }
 
 
-# ── FCM Payload 构造 ─────────────────────────────────────────────────
+# ── FCM Payload ─────────────────────────────────────────────────────
 
 # FCM 使用 data-only 消息：全部走 data payload，由 Android FcmService
 # 统一创建展示通知 + PendingIntent deep link。
@@ -495,163 +531,53 @@ def _fcm_data(listing, listing_id: str, kind: str, deep_link: str,
 
 
 def _fcm_payload_new_listing(listing, *, lang: str = "en") -> dict:
-    city = listing.city or "New City"
-    source = _source_short(getattr(listing, "source", ""))
-    price = getattr(listing, "price_display", "") or "?"
-    area = ""
-    try:
-        fm = listing.feature_map()
-        area = fm.get("area", "")
-    except Exception:
-        pass
-    body_parts = [_t("{status} · {price}/mo", lang).format(
-        status=listing.status, price=price)]
-    if area:
-        body_parts.append(area)
-    if listing.available_from:
-        body_parts.append(_t("{date} move-in", lang).format(date=listing.available_from))
-    body = " · ".join(body_parts)
-    title = _t("[{source}] {city} new listing", lang).format(source=source, city=city)
-    data = _fcm_data(listing, listing.id, "new",
-                     f"h2smonitor://listing/{listing.id}", title, body)
-    return {
-        "message": {
-            "data": data,
-            "android": {
-                "priority": "high",
-                "collapse_key": ("new_" + listing.id)[:64],
-            },
-        },
-    }
+    title, body = _new_listing_text(listing, lang)
+    return _fcm_listing(listing, "new", title, body, collapse_prefix="new_")
 
 
 def _fcm_payload_status_change(listing, old_status: str, new_status: str,
                                *, lang: str = "en") -> dict:
-    source = _source_short(getattr(listing, "source", ""))
-    status_text = _t("{old} → {new}", lang).format(old=old_status, new=new_status)
-    title = f"[{source}] {listing.name}"
-    body = status_text
-    data = _fcm_data(listing, listing.id, "status_change",
-                     f"h2smonitor://listing/{listing.id}", title, body)
-    return {
-        "message": {
-            "data": data,
-            "android": {
-                "priority": "high",
-                "collapse_key": ("sc_" + listing.id)[:64],
-            },
-        },
-    }
+    title, body = _status_change_text(listing, old_status, new_status, lang)
+    return _fcm_listing(listing, "status_change", title, body, collapse_prefix="sc_")
 
 
 def _fcm_payload_booked(listing, *, lang: str = "en") -> dict:
     title, body = _booked_text(listing, lang)
-    data = _fcm_data(listing, listing.id, "booked",
-                     f"h2smonitor://listing/{listing.id}", title, body)
-    return {
-        "message": {
-            "data": data,
-            "android": {
-                "priority": "high",
-                "collapse_key": ("booked_" + listing.id)[:64],
-            },
-        },
-    }
-
-
-def _booking_failed_text(listing, lang: str) -> tuple[str, str]:
-    """预订失败推送的 (title, body)。
-
-    不带失败原因：booker 给的原因只有中文、且多是技术细节（403、原因码），
-    英文用户的锁屏上不该出现一段中文。原因照旧写进站内通知和文本渠道，推送
-    只负责让人知道「没订上、要自己去」，点开就是房源页。
-    """
-    from models import is_application_only
-
-    source = _source_short(getattr(listing, "source", ""))
-    if is_application_only(listing):
-        return (f"[{source}] {_t('Registration failed', lang)}",
-                _t("{name}: auto-registration did not go through, tap to register manually",
-                   lang).format(name=listing.name))
-    return (f"[{source}] {_t('Booking failed', lang)}",
-            _t("{name}: auto-booking did not go through, tap to book manually",
-               lang).format(name=listing.name))
-
-
-def _payload_booking_failed(listing, *, lang: str = "en") -> dict:
-    title, body = _booking_failed_text(listing, lang)
-    return {
-        "aps": {
-            "alert": {"title": title, "body": _trim(body, 180)},
-            "sound": "default",
-            "thread-id": "booking",
-        },
-        "kind": "booking_failed",
-        "listing_id": listing.id,
-        "source": getattr(listing, "source", "") or "holland2stay",
-        "deep_link": f"h2smonitor://listing/{listing.id}",
-    }
+    return _fcm_listing(listing, "booked", title, body, collapse_prefix="booked_")
 
 
 def _fcm_payload_booking_failed(listing, *, lang: str = "en") -> dict:
     title, body = _booking_failed_text(listing, lang)
-    data = _fcm_data(listing, listing.id, "booking_failed",
-                     f"h2smonitor://listing/{listing.id}", title, body)
-    return {
-        "message": {
-            "data": data,
-            "android": {
-                "priority": "high",
-                "collapse_key": ("bookfail_" + listing.id)[:64],
-            },
-        },
-    }
+    return _fcm_listing(listing, "booking_failed", title, body, collapse_prefix="bookfail_")
 
 
 def _fcm_payload_round_aggregate(listings, round_id: str, *, lang: str = "en") -> dict:
-    by_city: dict[str, int] = defaultdict(int)
-    by_source: dict[str, int] = defaultdict(int)
-    for l in listings:
-        by_city[l.city or "?"] += 1
-        by_source[_source_short(getattr(l, "source", ""))] += 1
-    parts = [f"{city} {cnt}" for city, cnt in sorted(by_city.items(), key=lambda kv: -kv[1])]
-    sources = ", ".join(f"{source} {cnt}" for source, cnt in sorted(by_source.items()))
-    body = f"{sources} · " + " · ".join(parts) + f" · {_t('tap to view', lang)}"
-    title = _t("this round {n} new listings", lang).format(n=len(listings))
-    title_trimmed = _trim(title, 64)
-    return {
-        "message": {
-            "data": {
-                "title": title_trimmed,
-                "body": _trim(body, 180),
-                "kind": "round",
-                "round_id": round_id,
-                "deep_link": "",
-            },
-            "android": {
-                "priority": "high",
-                "collapse_key": round_id[:64],
-            },
-        },
-    }
+    title, body, _by_source = _round_aggregate_text(listings, lang)
+    return _fcm_message({
+        "title": _trim(title, 64),
+        "body": _trim(body, 180),
+        "kind": "round",
+        "round_id": round_id,
+        "deep_link": "",
+    }, collapse_key=round_id)
+
+
+def _fcm_payload_announcement(title: str, body: str, *, lang: str = "en") -> dict:
+    return _fcm_message({
+        "title": _trim(title, 64),
+        "body": _trim(body, 180),
+        "kind": "announcement",
+        "deep_link": "",
+    }, collapse_key="announcement", priority="normal")   # 公告不是紧急事件
 
 
 def _fcm_payload_error(text: str, kind: str = "blocked", *, lang: str = "en") -> dict:
-    title = _t("Monitor error", lang)
-    return {
-        "message": {
-            "data": {
-                "title": _trim(title, 64),
-                "body": _trim(text, 180),
-                "kind": kind,
-                "deep_link": "",
-            },
-            "android": {
-                "priority": "high",
-                "collapse_key": kind[:64],
-            },
-        },
-    }
+    return _fcm_message({
+        "title": _trim(_t("Monitor error", lang), 64),
+        "body": _trim(text, 180),
+        "kind": kind,
+        "deep_link": "",
+    }, collapse_key=kind)
 
 
 # ── 发送 ────────────────────────────────────────────────────────────

@@ -34,7 +34,7 @@ def derived_from_features(features_json: str | None) -> tuple[float | None, int 
     参数收的是**已经序列化好的那个字符串**，而不是列表——五个写入点写进列里的都
     是它，收同一个东西才能保证「列里的值」和「features 列的内容」永远一致。
     """
-    from config import energy_rank
+    from filters import energy_rank
     from models import parse_features_list, parse_float
 
     try:

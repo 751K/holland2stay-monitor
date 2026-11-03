@@ -38,6 +38,7 @@ import re
 import smtplib
 import sys
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from email.message import EmailMessage
 from functools import partial
 from html import escape as html_escape
@@ -419,9 +420,9 @@ def _disable_telegram_channel(user_id: str, user_name: str, reason: str) -> None
 
     # 用户在 Telegram 上已经收不到任何东西了，只能从别的地方告诉他
     try:
-        from app.db import storage  # 延迟 import：notifier 也被 CLI 场景复用
+        from storage import open_storage
 
-        st = storage()
+        st = open_storage()
         try:
             st.add_web_notification(
                 type="channel_disabled",
@@ -792,9 +793,9 @@ def _today_key() -> str:
 
 
 def _open_storage_for_quota():
-    """延迟 import 避免循环依赖 / module load 时形成 DB 连接。"""
-    from app.db import storage
-    return storage()
+    """见 ``storage.open_storage``：Web 进程里与请求共用连接，其余进程新开。"""
+    from storage import open_storage
+    return open_storage()
 
 
 def check_resend_quota(user_id: str) -> tuple[bool, str]:
@@ -1093,6 +1094,114 @@ class WebNotifier(BaseNotifier):
 # 工厂函数
 # ------------------------------------------------------------------ #
 
+@dataclass
+class ChannelBuild:
+    """按用户配置构造一个渠道的结果。
+
+    monitor 的 :func:`create_user_notifier` 和面板的「发送测试通知」都用它，
+    「这个渠道配全了没有」只判断一次。以前测试通知那边逐个渠道另写了一份，
+    判据和这里对不齐，测试能发、真实投递却跳过（或者反过来）。
+    """
+    #: 用户配置里写的渠道名（小写）。
+    channel: str
+    #: 给人看的渠道名，配置不全时也有，例如 ``"Email (shared)"``。
+    display: str
+    notifier: "BaseNotifier | None" = None
+    #: 渠道 + 收件方，例如 ``"Telegram → 999"``。只在构造成功时有值。
+    target: str = ""
+    #: 构造失败的原因代码，见 :data:`CHANNEL_PROBLEMS`。
+    problem: str = ""
+
+
+#: 原因代码 → 日志文案。面板测试通知有自己的用户文案（app/routes/users.py）。
+CHANNEL_PROBLEMS: dict[str, str] = {
+    "imessage_not_macos": "iMessage 仅支持 macOS，当前平台已跳过。请改用 Telegram / Email 等渠道，或通过 Web 面板查看通知。",
+    "imessage_no_recipient": "iMessage 渠道缺少收件人，跳过",
+    "telegram_incomplete": "Telegram 渠道 TOKEN 或 CHAT_ID 为空，跳过",
+    "email_shared_no_recipient": "Email(shared) 收件人为空，跳过",
+    "email_shared_backend": "Email(shared) 后端未配置 (SHARED_EMAIL_ENABLED / RESEND_API_KEY / RESEND_FROM 至少一项缺失)，跳过",
+    "email_shared_unverified": "Email(shared) 邮箱未验证，跳过（请到设置页完成邮箱验证）",
+    "email_smtp_incomplete": "Email(custom) SMTP 参数不完整，跳过",
+    "email_smtp_auth_half": "Email(custom) SMTP 用户名和密码需要同时填写，跳过",
+    "whatsapp_incomplete": "WhatsApp 渠道 Twilio 参数不完整，跳过",
+    "unknown": "未知通知渠道",
+}
+
+
+def build_channel_notifier(
+    user, channel: str, *, on_telegram_permanent_failure: "Callable[[str], None] | None" = None,
+) -> ChannelBuild:
+    """按 ``user`` 的配置构造 ``channel`` 对应的 notifier；配置不全时返回原因代码。"""
+    ch = (channel or "").strip().lower()
+    if ch == "imessage":
+        b = ChannelBuild(ch, "iMessage")
+        if not is_macos():
+            b.problem = "imessage_not_macos"
+        elif not user.imessage_recipient:
+            b.problem = "imessage_no_recipient"
+        else:
+            b.notifier = IMessageNotifier(user.imessage_recipient)
+            b.target = f"iMessage → {user.imessage_recipient}"
+        return b
+    if ch == "telegram":
+        b = ChannelBuild(ch, "Telegram")
+        if not (user.telegram_token and user.telegram_chat_id):
+            b.problem = "telegram_incomplete"
+        else:
+            b.notifier = TelegramNotifier(
+                user.telegram_token, user.telegram_chat_id,
+                on_permanent_failure=on_telegram_permanent_failure,
+            )
+            b.target = f"Telegram → {user.telegram_chat_id}"
+        return b
+    if ch == "email":
+        mode = (getattr(user, "email_mode", "shared") or "shared").lower()
+        if mode == "shared":
+            # 共享 Resend：用户只填 email_to，凭据在 .env
+            b = ChannelBuild(ch, "Email (shared)")
+            shared_ok, shared_key, shared_from = get_shared_email_config()
+            if not user.email_to:
+                b.problem = "email_shared_no_recipient"
+            elif not shared_ok:
+                b.problem = "email_shared_backend"
+            elif not bool(getattr(user, "email_verified", False)):
+                # 收件邮箱未通过 double opt-in：拒发，防 shared 模式被滥用为代发服务。
+                b.problem = "email_shared_unverified"
+            else:
+                b.notifier = ResendNotifier(shared_key, shared_from, user.email_to, user_id=user.id)
+                b.target = f"Email (shared) → {user.email_to}"
+            return b
+        # 自建 SMTP
+        b = ChannelBuild(ch, "Email")
+        has_auth = bool(user.email_username or user.email_password)
+        if not (user.email_smtp_host and user.email_to and (user.email_from or user.email_username)):
+            b.problem = "email_smtp_incomplete"
+        elif has_auth and not (user.email_username and user.email_password):
+            b.problem = "email_smtp_auth_half"
+        else:
+            b.notifier = EmailNotifier(
+                user.email_smtp_host,
+                user.email_smtp_port,
+                user.email_smtp_security,
+                user.email_username,
+                user.email_password,
+                user.email_from,
+                user.email_to,
+            )
+            b.target = f"Email → {user.email_to}"
+        return b
+    if ch == "whatsapp":
+        b = ChannelBuild(ch, "WhatsApp")
+        if not (user.twilio_sid and user.twilio_token and user.twilio_from and user.twilio_to):
+            b.problem = "whatsapp_incomplete"
+        else:
+            b.notifier = WhatsAppNotifier(
+                user.twilio_sid, user.twilio_token, user.twilio_from, user.twilio_to)
+            b.target = f"WhatsApp → {user.twilio_to}"
+        return b
+    return ChannelBuild(ch, ch, problem="unknown")
+
+
 def create_user_notifier(user, *, created_channels=None) -> BaseNotifier:
     """
     根据 UserConfig 创建该用户对应的 MultiNotifier。
@@ -1109,97 +1218,28 @@ def create_user_notifier(user, *, created_channels=None) -> BaseNotifier:
 
     调用时机
     --------
-    monitor.py 启动时以及 SIGHUP 热重载后调用一次；web.py 通知测试路由按需调用。
+    monitor.py 启动时以及 SIGHUP 热重载后调用一次。逐渠道的构造见
+    :func:`build_channel_notifier`，面板的测试通知也走它。
     """
     # The reload coordinator can dispose partially built channels if a later
     # constructor raises. Existing callers retain the original behavior.
     notifiers: list[BaseNotifier] = created_channels if created_channels is not None else []
 
     for channel in user.notification_channels:
-        ch = channel.strip().lower()
-        if ch == "imessage":
-            if not is_macos():
-                logger.warning(
-                    "[%s] iMessage 仅支持 macOS，当前平台（%s）已跳过。"
-                    " 请改用 Telegram / Email 等渠道，或通过 Web 面板查看通知。",
-                    user.name, sys.platform,
-                )
-            elif user.imessage_recipient:
-                notifiers.append(IMessageNotifier(user.imessage_recipient))
-                logger.info("[%s] 通知渠道: iMessage → %s", user.name, user.imessage_recipient)
-            else:
-                logger.warning("[%s] iMessage 渠道缺少收件人，跳过", user.name)
-        elif ch == "telegram":
-            if user.telegram_token and user.telegram_chat_id:
-                notifiers.append(TelegramNotifier(
-                    user.telegram_token,
-                    user.telegram_chat_id,
-                    on_permanent_failure=partial(
-                        _disable_telegram_channel, user.id, user.name
-                    ),
-                ))
-                logger.info("[%s] 通知渠道: Telegram → chat_id=%s", user.name, user.telegram_chat_id)
-            else:
-                logger.warning("[%s] Telegram 渠道 TOKEN 或 CHAT_ID 为空，跳过", user.name)
-        elif ch == "email":
-            mode = (getattr(user, "email_mode", "shared") or "shared").lower()
-            if mode == "shared":
-                # 共享 Resend：用户只填 email_to，凭据在 .env
-                shared_ok, shared_key, shared_from = get_shared_email_config()
-                email_verified = bool(getattr(user, "email_verified", False))
-                if not user.email_to:
-                    logger.warning("[%s] Email(shared) 收件人为空，跳过", user.name)
-                elif not shared_ok:
-                    logger.warning(
-                        "[%s] Email(shared) 后端未配置 (SHARED_EMAIL_ENABLED / "
-                        "RESEND_API_KEY / RESEND_FROM 至少一项缺失)，跳过",
-                        user.name,
-                    )
-                elif not email_verified:
-                    # 收件邮箱未通过 double opt-in：拒发，防 shared 模式被滥用为代发服务。
-                    # 用户需到 user_edit 页点"重发验证邮件"并完成验证。
-                    logger.warning(
-                        "[%s] Email(shared) 邮箱未验证，跳过（请到设置页完成邮箱验证）",
-                        user.name,
-                    )
-                else:
-                    notifiers.append(
-                        ResendNotifier(shared_key, shared_from, user.email_to, user_id=user.id)
-                    )
-                    logger.info("[%s] 通知渠道: Email(shared) → %s", user.name, _redact_email(user.email_to))
-            else:
-                # 自建 SMTP
-                has_auth = bool(user.email_username or user.email_password)
-                if (
-                    user.email_smtp_host
-                    and user.email_to
-                    and (user.email_from or user.email_username)
-                    and ((not has_auth) or (user.email_username and user.email_password))
-                ):
-                    notifiers.append(
-                        EmailNotifier(
-                            user.email_smtp_host,
-                            user.email_smtp_port,
-                            user.email_smtp_security,
-                            user.email_username,
-                            user.email_password,
-                            user.email_from,
-                            user.email_to,
-                        )
-                    )
-                    logger.info("[%s] 通知渠道: Email(custom) → %s", user.name, _redact_email(user.email_to))
-                else:
-                    logger.warning("[%s] Email(custom) SMTP 参数不完整，跳过", user.name)
-        elif ch == "whatsapp":
-            if user.twilio_sid and user.twilio_token and user.twilio_from and user.twilio_to:
-                notifiers.append(
-                    WhatsAppNotifier(user.twilio_sid, user.twilio_token, user.twilio_from, user.twilio_to)
-                )
-                logger.info("[%s] 通知渠道: WhatsApp → %s", user.name, user.twilio_to)
-            else:
-                logger.warning("[%s] WhatsApp 渠道 Twilio 参数不完整，跳过", user.name)
-        else:
-            logger.warning("[%s] 未知通知渠道: %s", user.name, channel)
+        b = build_channel_notifier(
+            user, channel,
+            on_telegram_permanent_failure=partial(_disable_telegram_channel, user.id, user.name),
+        )
+        if b.notifier is None:
+            detail = f"：{channel}" if b.problem == "unknown" else ""
+            logger.warning("[%s] %s%s", user.name, CHANNEL_PROBLEMS[b.problem], detail)
+            continue
+        notifiers.append(b.notifier)
+        target = b.target
+        if b.channel == "email":
+            # 日志里的邮箱打码
+            target = target.rsplit("→", 1)[0] + "→ " + _redact_email(user.email_to)
+        logger.info("[%s] 通知渠道: %s", user.name, target)
 
     n = MultiNotifier(notifiers, enabled=user.notifications_enabled)
     n.language = getattr(user, "language", "en") or "en"
@@ -1380,10 +1420,9 @@ def _format_email_html(text: str) -> str:
 # ------------------------------------------------------------------ #
 
 def _source_short(source: str | None) -> str:
-    from mcore.sources import SOURCE_SHORT_NAMES
+    from mcore.sources import source_short_name
 
-    value = (source or "holland2stay").strip().lower()
-    return SOURCE_SHORT_NAMES.get(value, value.upper() or "H2S")
+    return source_short_name(source)
 
 
 # ── 通知标签翻译 ────────────────────────────────────────────────────

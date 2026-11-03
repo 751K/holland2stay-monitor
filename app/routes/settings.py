@@ -13,10 +13,10 @@ from flask import Flask, flash, redirect, render_template, request, url_for
 
 import config
 
-from config import (KNOWN_SOURCES, source_display_name, KNOWN_CITIES,
-                    KNOWN_MAGIS_CITIES, KNOWN_OURDOMAIN_CITIES,
-                    KNOWN_PLAZA_CITIES,
-                    KNOWN_STUDENTEXPERIENCE_CITIES, KNOWN_XIOR_CITIES)
+from config import KNOWN_SOURCES, source_display_name
+from mcore.registry import (KNOWN_CITIES, KNOWN_MAGIS_CITIES, KNOWN_OURDOMAIN_CITIES,
+                            KNOWN_PLAZA_CITIES, KNOWN_STUDENTEXPERIENCE_CITIES,
+                            KNOWN_XIOR_CITIES, TARGET_SPECS)
 
 from app.auth import admin_required
 from app.csrf import csrf_required
@@ -135,13 +135,14 @@ def settings() -> Any:
         #
         # 这里刻意不写具体数目：注册表会长（2026-09-08 Plaza 从 12 加到 13），
         # 写死的数字过一阵就是错的，而注释错了没有任何东西会发现。这四个键的
-        # 权威清单是 target_config._ALL_WHEN_EMPTY。
+        # 权威清单是 mcore.registry.TARGET_SPECS 的 all_when_empty。
         #
         # 所以 xior / magis / studentexperience / plaza 不在下面这张表里：它们
         # 空着不是「没目标」，恰恰是「全都要」，对它们报「不会抓取」是错的。
         _no_target_when_empty = {
             "CITIES": "holland2stay",
-            "OURDOMAIN_CITIES": "ourdomain",
+            **{spec.env_key: src for src, spec in TARGET_SPECS.items()
+               if not spec.all_when_empty and spec.env_key in city_lists},
         }
         empty_enabled = sorted(
             source_display_name(src)
@@ -267,53 +268,13 @@ def settings() -> Any:
         if len(parts) >= 2:
             selected_city_ids.add(parts[-1].strip())
 
-    selected_ourdomain_keys: set[str] = set()
-    for entry in env.get("OURDOMAIN_CITIES", "Amsterdam Diemen,diemen").split("|"):
-        parts = entry.strip().split(",")
-        if len(parts) >= 2:
-            selected_ourdomain_keys.add(parts[-1].strip())
-
-    # 空 = 全部（与 XIOR_CITIES 同一约定），所以未配置时全部勾上，
+    # 空串对 all_when_empty 的平台是「全部」，所以未配置时全部勾上，
     # 而不是一个都不勾——后者会让用户以为默认什么都不抓。
-    selected_magis_keys: set[str] = set()
-    raw_magis = env.get("MAGIS_CITIES", "")
-    if raw_magis:
-        for entry in raw_magis.split("|"):
-            parts = entry.strip().split(",")
-            if len(parts) >= 2:
-                selected_magis_keys.add(parts[-1].strip())
-    else:
-        selected_magis_keys = {c["key"] for c in KNOWN_MAGIS_CITIES}
-
-    selected_se_keys: set[str] = set()
-    raw_se = env.get("STUDENTEXPERIENCE_CITIES", "")
-    if raw_se:
-        for entry in raw_se.split("|"):
-            parts = entry.strip().split(",")
-            if len(parts) >= 2:
-                selected_se_keys.add(parts[-1].strip())
-    else:
-        selected_se_keys = {c["key"] for c in KNOWN_STUDENTEXPERIENCE_CITIES}
-
-    selected_plaza_keys: set[str] = set()
-    raw_plaza = env.get("PLAZA_CITIES", "")
-    if raw_plaza:
-        for entry in raw_plaza.split("|"):
-            parts = entry.strip().split(",")
-            if len(parts) >= 2:
-                selected_plaza_keys.add(parts[-1].strip())
-    else:
-        selected_plaza_keys = {c["key"] for c in KNOWN_PLAZA_CITIES}
-
-    selected_xior_keys: set[str] = set()
-    raw_xior = env.get("XIOR_CITIES", "")
-    if raw_xior:
-        for entry in raw_xior.split("|"):
-            parts = entry.strip().split(",")
-            if len(parts) >= 2:
-                selected_xior_keys.add(parts[-1].strip())
-    else:
-        selected_xior_keys = {c["key"] for c in KNOWN_XIOR_CITIES}
+    selected_ourdomain_keys = _selected_target_keys(env, "ourdomain")
+    selected_magis_keys = _selected_target_keys(env, "magis")
+    selected_se_keys = _selected_target_keys(env, "studentexperience")
+    selected_plaza_keys = _selected_target_keys(env, "plaza")
+    selected_xior_keys = _selected_target_keys(env, "xior")
 
     xior_by_city: dict[str, list[dict]] = {}
     xior_city_all_checked: dict[str, bool] = {}
@@ -351,6 +312,20 @@ def settings() -> Any:
     section, item = resolve_settings_selection(
         sections, request.args.get("section"), request.args.get("item"))
     return render_template("settings.html", **ctx, sections=sections, section=section, item=item)
+
+
+def _selected_target_keys(env, source: str) -> set[str]:
+    """设置页回显：某平台订阅串里勾中的 key。留空的含义见 ``TargetSpec``。"""
+    spec = TARGET_SPECS[source]
+    raw = env.get(spec.env_key, spec.default_raw)
+    if not raw and spec.all_when_empty:
+        return {c["key"] for c in spec.registry}
+    keys: set[str] = set()
+    for entry in raw.split("|"):
+        parts = entry.strip().split(",")
+        if len(parts) >= 2:
+            keys.add(parts[-1].strip())
+    return keys
 
 
 def _settings_url():

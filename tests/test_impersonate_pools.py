@@ -67,7 +67,9 @@ def test_attempts_do_not_start_with_a_global_pool_pick(monkeypatch):
     """全局池里有实测 403 的桌面 Chrome。插到 SecureRC 尝试列表最前，冷启动第一发就是 403。"""
     monkeypatch.delenv("OURDOMAIN_IMPERSONATES", raising=False)
     monkeypatch.delenv("OURDOMAIN_WAF_RETRIES", raising=False)
-    monkeypatch.setattr(od, "_FINGERPRINT_STATE", {})
+    # 状态住在 rentcafe_fingerprint；替换 od 上的别名不会影响 _impersonate_attempts
+    from scrapers import rentcafe_fingerprint
+    monkeypatch.setattr(rentcafe_fingerprint, "_FINGERPRINT_STATE", {})
     monkeypatch.setattr(config, "get_impersonate", lambda: "chrome146")
     attempts = od._impersonate_attempts()
     assert attempts == list(od._DEFAULT_IMPERSONATES[:4])

@@ -61,9 +61,8 @@ from ._browser_backed import BrowserBackedScraper
 # floorplans.aspx 在 *.securerc.co.uk 上，和 OurDomain / OurCampus 同一套
 # RentCafe + Cloudflare。取数打法（浏览器 header、同 session 403 重试、TLS 指纹
 # 冷却状态机）都在那边，直接复用——ourcampus 也是这么接的。
-from .ourdomain import (
-    _get_text,
-    _headers_for,
+from .ourdomain import _get_text, _headers_for
+from .rentcafe_fingerprint import (
     _impersonate_attempts,
     _mark_fingerprint_blocked,
     _mark_fingerprint_good,
@@ -113,12 +112,12 @@ _MIN_REQUEST_INTERVAL = 5.0
 # 到点就 fail-open。
 _VERIFY_TIME_BUDGET = 45.0
 
-# 装修档位的登记表与判定住在 config（它是「平台事实」，和
+# 装修档位的登记表与判定住在 mcore.registry（它是「平台事实」，和
 # SOURCE_ASSUMED_FEATURES 同一类），这里只做转发——mstorage 的存量订正也要用，
 # 而 mstorage 不能 import scrapers。
-from config import (  # noqa: E402
+from mcore.registry import (  # noqa: E402
     XIOR_BUILDING_FURNISHING as BUILDING_FURNISHING,  # noqa: F401  （测试从这里取）
-    _FIN_UNFURNISHED,
+    FIN_UNFURNISHED,
     xior_furnishing_for as furnishing_for,
 )
 
@@ -769,9 +768,9 @@ def _is_candidate_available(unit: dict, today: date) -> bool:
     return not (days is not None and days > _AVAILABLE_HORIZON_DAYS)
 
 
-#: 「无家具」那一档的字面值。与 config._FIN_UNFURNISHED 同源——
+#: 「无家具」那一档的字面值。与 mcore.registry.FIN_UNFURNISHED 同源——
 #: ``xior_furnishing_for()`` 返回的就是它，比在这里另写一个字符串安全。
-_UNFURNISHED = _FIN_UNFURNISHED
+_UNFURNISHED = FIN_UNFURNISHED
 
 
 def _all_in_price(

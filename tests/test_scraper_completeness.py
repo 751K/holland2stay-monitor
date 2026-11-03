@@ -115,7 +115,7 @@ class TestScrapeCityCompleteness:
     def test_partial_errors_with_usable_data_are_not_thrown_away(self):
         """GraphQL 的 NON_NULL 传播会**同时**给出 errors 和部分 data。
 
-        整页丢掉等于把能用的数据也扔了。booker.py 的 add_to_cart 早就按这个
+        整页丢掉等于把能用的数据也扔了。bookers/h2s_checkout.py 的 add_to_cart 早就按这个
         规律处理（「有 errors 且没有可用 data 才算致命」），抓取侧一直没有。
         """
         page = _page(1, 1, [{"id": "a"}])

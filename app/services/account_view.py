@@ -9,7 +9,7 @@ Summaries describe what is saved, never unsaved edits in the browser.
 from __future__ import annotations
 
 from app.services.inbox_service import filter_summary
-from config import ListingFilter
+from filters import ListingFilter
 from mcore.sources import SPECS
 
 

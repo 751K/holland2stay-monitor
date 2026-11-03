@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import DATA_DIR, resolve_project_path  # noqa: E402
+from users import RENTCAFE_CRED_CLEANUP_META_KEY, USERS_MIGRATION_META_KEY  # noqa: E402
 
 DB_PATH  = DATA_DIR / "listings.db"
 PID_FILE = DATA_DIR / "monitor.pid"
@@ -73,11 +74,14 @@ def reset_tables(db_path: Path, dry_run: bool = False) -> None:
         conn.close()
         return
 
-    cur.executescript("""
-        DELETE FROM listings;
-        DELETE FROM status_changes;
-        DELETE FROM meta;
-    """)
+    cur.execute("DELETE FROM listings")
+    cur.execute("DELETE FROM status_changes")
+    # 用户表不清，所以用户数据的迁移标记也得留着，否则下次启动会被
+    # users.check_legacy_migrations 当成没迁移过的旧库拒绝。
+    cur.execute(
+        "DELETE FROM meta WHERE key NOT IN (?, ?)",
+        (USERS_MIGRATION_META_KEY, RENTCAFE_CRED_CLEANUP_META_KEY),
+    )
     conn.commit()
     conn.close()
 

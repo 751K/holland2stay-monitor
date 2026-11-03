@@ -7,7 +7,7 @@
 
 依赖
 ----
-- config.AutoBookConfig / ListingFilter
+- filters.AutoBookConfig / ListingFilter
 - users.UserConfig
 - 标准库：uuid / logging
 - werkzeug.datastructures.ImmutableMultiDict（仅类型注解）
@@ -26,7 +26,7 @@ import re
 import uuid
 from typing import TYPE_CHECKING, Optional
 
-from config import AutoBookConfig, ListingFilter, ENERGY_LABELS
+from filters import AutoBookConfig, ListingFilter, ENERGY_LABELS
 from users import UserConfig
 
 if TYPE_CHECKING:

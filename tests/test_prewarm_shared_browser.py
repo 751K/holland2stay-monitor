@@ -14,7 +14,7 @@ import threading
 
 import pytest
 
-import booker
+import bookers.h2s_checkout as booker
 from mcore.prewarm import PrewarmCache
 
 

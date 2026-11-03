@@ -10,12 +10,11 @@ from __future__ import annotations
 
 import pytest
 
+from app.filter_scope import dim_scope_badge, dim_scope_note
 from config import (
     KNOWN_SOURCES,
     ListingFilter,
-    dim_scope_badge,
     source_display_name,
-    dim_scope_note,
     sources_supporting_dim,
 )
 from models import Listing

@@ -120,7 +120,7 @@ import re
 from contextlib import contextmanager
 from typing import Optional
 
-from config import KNOWN_PLAZA_CITIES
+from mcore.registry import KNOWN_PLAZA_CITIES
 from models import Listing
 
 from .base import AbstractScraper, ScrapeNetworkError, ScrapeResult, ScrapeTask
@@ -144,7 +144,7 @@ NL_LAND_ID = "524"
 HOUSING_CATEGORY = "woning"
 
 
-#: 荷兰城市清单，从 ``config.KNOWN_PLAZA_CITIES`` 派生——**不要在这里另抄一份**。
+#: 荷兰城市清单，从 ``mcore.registry.KNOWN_PLAZA_CITIES`` 派生——**不要在这里另抄一份**。
 #:
 #: 这两处曾经是两份手写清单。它们分工不同：config 那份决定用户能勾哪些城市、
 #: 因而决定 ``scrape()`` 拿得到哪些 task；这份只决定下面那条 WARNING 报不报。
@@ -574,7 +574,7 @@ class PlazaScraper(AbstractScraper):
         if unknown:
             logger.warning(
                 "Plaza 出现未登记的城市 %s——这些房源不会分派给任何 task，"
-                "把它们加进 config.KNOWN_PLAZA_CITIES 即可", unknown)
+                "把它们加进 mcore.registry.KNOWN_PLAZA_CITIES 即可", unknown)
 
         logger.info("[%s] Plaza 共 %d 条房源（全站 %d 条）",
                     task.city_display, len(mine), len(self._listings))

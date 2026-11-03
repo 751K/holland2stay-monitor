@@ -19,7 +19,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from booker import PrewarmedSession, create_prewarmed_session
+from bookers.h2s_checkout import create_prewarmed_session
+from bookers.base import PrewarmedSession
 from scrapers.base import BlockedError
 
 if TYPE_CHECKING:

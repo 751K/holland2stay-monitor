@@ -17,6 +17,9 @@ _FALSE = frozenset({"0", "false", "no", "off"})
 
 logger = logging.getLogger("env_utils")
 
+#: ``TIMEZONE`` 未配置时的时区。config 与不依赖 config 的 mcore 模块共用这一个值。
+DEFAULT_TIMEZONE = "Europe/Amsterdam"
+
 
 def parse_bool(raw, default: bool = False) -> bool:
     if raw is None:

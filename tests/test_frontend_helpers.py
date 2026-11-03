@@ -17,19 +17,19 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 class TestMaskEmail:
     def test_normal_email(self):
-        from booker import _mask_email
+        from bookers.h2s_checkout import _mask_email
         assert _mask_email("test@example.com") == "tes***@example.com"
 
     def test_short_local(self):
-        from booker import _mask_email
+        from bookers.h2s_checkout import _mask_email
         assert _mask_email("ab@x.com") == "***@x.com"
 
     def test_empty(self):
-        from booker import _mask_email
+        from bookers.h2s_checkout import _mask_email
         assert _mask_email("") == "***"
 
     def test_no_at_sign(self):
-        from booker import _mask_email
+        from bookers.h2s_checkout import _mask_email
         result = _mask_email("noatsign")
         assert "***" in result
 

@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from booker import PrewarmedSession
+from bookers.base import PrewarmedSession
 from models import BOOKING_HOLD_SOURCES, Listing, is_application_only
 from notifier import BaseNotifier, WebNotifier
 from scrapers import BlockedError

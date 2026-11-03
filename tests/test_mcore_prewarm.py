@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 
 from mcore.prewarm import PrewarmCache, _TOKEN_REFRESH_MARGIN
-from booker import PrewarmedSession
+from bookers.h2s_checkout import PrewarmedSession
 
 
 def _make_fake_prewarmed(email: str, ttl: float = 3300):

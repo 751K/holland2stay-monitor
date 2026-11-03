@@ -10,8 +10,10 @@ users.py — 多用户配置管理
 存储格式
 --------
 运行时存储在 SQLite `user_configs` 表。
-旧版 `data/users.json` 只作为一次性迁移输入；迁移状态由 SQLite `meta`
-表中的 `users_storage_migrated_v1` 控制，迁移后会永久保留 `.bak` 备份。
+
+旧版的两个一次性迁移（`data/users.json` 导入 SQLite、清理被回填的平台凭据）
+已在 v2.2 删除，只保留启动检查 :func:`check_legacy_migrations`：没跑过迁移的
+旧库会被拒绝启动，提示先升级到 v2.1.x。
 
 与 config.py 的分工
 --------------------
@@ -20,19 +22,19 @@ users.py — 多用户配置管理
 
 依赖
 ----
-标准库 + config.py（ListingFilter, AutoBookConfig）+ app.db 延迟导入。
+标准库 + filters.py（ListingFilter, AutoBookConfig）+ storage。Web 进程通过
+``storage.set_storage_factory`` 注入请求内共用的连接。
 """
 from __future__ import annotations
 
 import json
 import logging
-import shutil
 import uuid
-from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field, fields as dc_fields
 from typing import TYPE_CHECKING, Callable, Optional, TypeVar
 
-from config import AutoBookConfig, DATA_DIR, ListingFilter
+from config import DATA_DIR
+from filters import AutoBookConfig, ListingFilter
 from crypto import decrypt, encrypt
 
 if TYPE_CHECKING:
@@ -40,10 +42,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: 旧版用户文件。不再读取，只用来在启动检查里识别「没迁移过的旧部署」。
 USERS_FILE = DATA_DIR / "users.json"
+#: v2.1 及以前的两个一次性迁移在库里留下的完成标记，见 :func:`check_legacy_migrations`。
 USERS_MIGRATION_META_KEY = "users_storage_migrated_v1"
-#: 一次性清理：把当年被回填进 Xior / OurDomain 的 H2S 凭据抹掉。
-#: 详见 :func:`_ensure_rentcafe_creds_unbackfilled`。
 RENTCAFE_CRED_CLEANUP_META_KEY = "rentcafe_creds_unbackfilled_v1"
 DEFAULT_EMAIL_SMTP_PORT = 587
 _T = TypeVar("_T")
@@ -229,8 +231,8 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
     ``xior_email`` 与 H2S 的**逐字相同**，全是这么来的。两个平台当时都没开
     （``monitor._AUTO_BOOK_SOURCES`` 里只有 holland2stay），所以没爆。
 
-    现在缺失一律取空串 = 未配置。存量数据的清理见
-    :func:`_ensure_rentcafe_creds_unbackfilled`。
+    现在缺失一律取空串 = 未配置。存量数据由 v2.1 及以前的一次性清理处理过，
+    见 :func:`check_legacy_migrations`。
     """
     old_email = d.get("email", "")
     old_password = decrypt(d.get("password", ""))
@@ -254,10 +256,10 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
         # OurDomain
         ourdomain_email=d.get("ourdomain_email", ""),
         ourdomain_password=decrypt(d.get("ourdomain_password", "")),
-        # OurCampus。与 Plaza 同理不进 _BACKFILLED_CRED_PAIRS 的回退链。
+        # OurCampus。与 Plaza 同理，不回退到 H2S 凭据。
         ourcampus_email=d.get("ourcampus_email", ""),
         ourcampus_password=decrypt(d.get("ourcampus_password", "")),
-        # Plaza。**不参与 _BACKFILLED_CRED_PAIRS 那套回退**——那是当年把 H2S 凭据
+        # Plaza。**不回退到 H2S 凭据**——那是当年把 H2S 凭据
         # 抄给 Xior / OurDomain 留下的历史包袱，Plaza 从一开始就独立，别把新平台
         # 接进旧的回退链里。而且 Plaza 用的是用户名不是邮箱，抄过来必然登录失败，
         # 失败还会消耗上游的尝试额度。
@@ -267,93 +269,76 @@ def _ab_from_dict(d: dict) -> AutoBookConfig:
     )
 
 
-def _user_from_dict(d: dict) -> UserConfig:
-    """
-    从 dict 构造 UserConfig，处理嵌套的 listing_filter 和 auto_book。
-    兼容旧版本数据（缺失字段使用 dataclass 默认值）。
-
-    未知字段处理
-    ------------
-    直接用 `UserConfig(**d)` 展开时，任何 UserConfig 不认识的 key 都会抛
-    TypeError，导致整个 load_users() 失败（所有用户都无法加载）。
-
-    此处先用 `dataclasses.fields()` 取出合法字段集合，剔除多余 key 并
-    记录 WARNING，再展开剩余字段。典型场景：
-    - 旧版 users.json 存有已被删除的字段
-    - 未来版本新增字段后回滚到旧版代码
-    - 手动编辑 users.json 时误加了多余 key
-    """
-    d = dict(d)
-    lf = _lf_from_dict(d.pop("listing_filter", {}))
-    ab = _ab_from_dict(d.pop("auto_book", {}))
-
-    known   = {f.name for f in dc_fields(UserConfig)}
-    unknown = set(d) - known
-    if unknown:
-        logger.warning(
-            "用户 %r 包含未知字段，已忽略（可能来自旧版或新版 users.json）: %s",
-            d.get("name", "?"), sorted(unknown),
-        )
-        d = {k: v for k, v in d.items() if k in known}
-
-    # 解密敏感字段（无 $F$ 前缀的旧明文数据原样通过）
-    for _field_name in ("email_password", "telegram_token", "twilio_token"):
-        if d.get(_field_name):
-            d[_field_name] = decrypt(d[_field_name])
-    # 旧 users.json 没有 email_mode 字段：若用户填过 SMTP host 则视为 custom，
-    # 否则默认 shared。等价于 _row_to_user 中的同款 fallback，保证两路径一致。
-    if not d.get("email_mode"):
-        d["email_mode"] = "custom" if d.get("email_smtp_host") else "shared"
-    return UserConfig(**d, listing_filter=lf, auto_book=ab)
-
-
 # ------------------------------------------------------------------ #
 # 读写接口
 # ------------------------------------------------------------------ #
 
 
 def _open_storage():
-    """延迟打开 Storage，避免 users.py import 阶段形成循环依赖。"""
-    from app.db import storage
+    """见 ``storage.open_storage``：Web 进程里与请求共用连接，其余进程新开。"""
+    from storage import open_storage
 
-    return storage()
+    return open_storage()
 
 
-def _load_legacy_users_file() -> list[UserConfig]:
-    """
-    从旧版 `data/users.json` 加载用户列表，仅供一次性迁移使用。
+def check_legacy_migrations(st) -> None:
+    """启动检查：v2.1 及以前的一次性迁移已经在这个库上跑过。
 
-    Returns
-    -------
-    list[UserConfig]
-    - 文件不存在 → 返回空列表（首次运行，请在 Web 面板添加用户）
-    - 文件存在且合法 → 返回解析结果（可能为空列表，表示有意清空）
+    那两个迁移已删除，代码不再读 ``users.json``，也不再清理回填的凭据。没跑过
+    迁移的旧库直接拿来用会出两种安静的错：``users.json`` 里的用户不会被导入，
+    monitor 读到空用户表，所有通知停掉；被回填成 Xior / OurDomain 账号的 H2S
+    密码留在库里，等这两个平台开放自动预订时就会被拿去登录。所以这里拒绝启动。
+
+    判据
+    ----
+    - ``users.json`` 存在，旁边却没有 ``users.json.migrated.*.bak``：旧迁移每次
+      导入前都会留这份备份，没有它就是从没导入过。有备份说明导入过，之后只是
+      清过库（``Storage.reset_all`` 连标记带用户一起删），按全新安装处理。
+    - 库里已有用户却缺标记：v2.1 之前的库，回填的凭据还没清理。
+
+    其余情况（全新安装、清空过的库）直接补上两个标记。
 
     Raises
     ------
     RuntimeError
-        文件存在但 JSON 解析失败（损坏/截断/写入中断）时抛出，
-        而不是静默返回 []。调用方必须显式处理此异常，
-        禁止在此情况下覆盖文件（会导致数据丢失）。
+        命中上面任一判据。
     """
-    if not USERS_FILE.exists():
-        return []
-    try:
-        data = json.loads(USERS_FILE.read_text(encoding="utf-8"))
-        return [_user_from_dict(u) for u in data]
-    except Exception as e:
+    if all(st.get_meta(k, default="") == "1"
+           for k in (USERS_MIGRATION_META_KEY, RENTCAFE_CRED_CLEANUP_META_KEY)):
+        return
+    never_imported = USERS_FILE.exists() and not any(
+        USERS_FILE.parent.glob(f"{USERS_FILE.name}.migrated.*.bak"))
+    if never_imported or st.list_user_config_rows():
         raise RuntimeError(
-            f"{USERS_FILE} 存在但解析失败，请手动修复或从备份恢复后重启。\n"
-            f"原因: {e}"
-        ) from e
+            "这个数据库来自 v2.1 之前的版本，还没有完成用户数据迁移。"
+            "请先升级到 v2.1.x 并启动一次（monitor 和 Web 面板都可以），"
+            "确认用户都在之后，再升级到本版本。"
+        )
+    for key in (USERS_MIGRATION_META_KEY, RENTCAFE_CRED_CLEANUP_META_KEY):
+        st.set_meta(key, "1")
+
+
+def user_login_allowed(user_id: str) -> bool:
+    """该用户是否仍可登录：账号启用，且开了 App / Web 登录。
+
+    已登录的 Web 会话和 Bearer token 每个请求都要确认一次（admin 停用后立即
+    失效），所以只读这一行的两个开关，不像 :func:`load_users` 那样读全表、
+    解密所有凭据。
+    """
+    if not user_id:
+        return False
+    st = _open_storage()
+    try:
+        row = st.get_user_config_row(user_id)
+    finally:
+        st.close()
+    return bool(row and row["enabled"] and row["app_login_enabled"])
 
 
 def load_users() -> list[UserConfig]:
     """从 SQLite `user_configs` 加载用户列表。"""
     st = _open_storage()
     try:
-        _ensure_sqlite_users_migrated(st)
-        _ensure_rentcafe_creds_unbackfilled(st)
         return _rows_to_users(st.list_user_config_rows())
     finally:
         st.close()
@@ -489,170 +474,12 @@ def _rows_to_users(rows: list[dict]) -> list[UserConfig]:
     return [_row_to_user(r) for r in rows]
 
 
-def _backup_legacy_users_file() -> None:
-    """永久保留 users.json 迁移备份；不覆盖旧备份。"""
-    if not USERS_FILE.exists():
-        return
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base = USERS_FILE.with_name(f"{USERS_FILE.name}.migrated.{stamp}.bak")
-    target = base
-    i = 1
-    while target.exists():
-        target = USERS_FILE.with_name(
-            f"{USERS_FILE.name}.migrated.{stamp}.{i}.bak"
-        )
-        i += 1
-    shutil.copy2(USERS_FILE, target)
-    logger.info("users.json 已备份到 %s", target)
-
-
-def _ensure_sqlite_users_migrated(st) -> None:
-    """
-    用 meta flag 控制 users.json -> SQLite 迁移。
-
-    只要 meta flag 已设置，运行期永远只读 SQLite，即使 users.json 仍存在。
-    """
-    if st.get_meta(USERS_MIGRATION_META_KEY, default="") == "1":
-        return
-
-    conn = st.conn
-    started = not conn.in_transaction
-    if started:
-        conn.execute("BEGIN IMMEDIATE")
-    try:
-        # 可能另一个进程刚刚迁移完成，拿到锁后再检查一次。
-        row = conn.execute(
-            "SELECT value FROM meta WHERE key = ?",
-            (USERS_MIGRATION_META_KEY,),
-        ).fetchone()
-        if row and row[0] == "1":
-            if started:
-                conn.commit()
-            return
-
-        if USERS_FILE.exists():
-            legacy_users = _load_legacy_users_file()
-            _backup_legacy_users_file()
-            st.replace_user_config_rows_unlocked(_users_to_rows(legacy_users))
-            logger.info("已从 users.json 迁移 %d 个用户到 SQLite", len(legacy_users))
-
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            (USERS_MIGRATION_META_KEY, "1"),
-        )
-        if started:
-            conn.commit()
-    except Exception:
-        if started:
-            conn.rollback()
-        raise
-
-
-#: 被回填的平台凭据字段，按 (邮箱字段, 密码字段) 成对处理。
-_BACKFILLED_CRED_PAIRS = (
-    ("xior_email", "xior_password"),
-    ("ourdomain_email", "ourdomain_password"),
-)
-
-
-def _ensure_rentcafe_creds_unbackfilled(st) -> None:
-    """一次性清理：抹掉当年被回填进 Xior / OurDomain 的 H2S 凭据。
-
-    为什么光改 :func:`_ab_from_dict` 不够
-    ------------------------------------
-    回填只在**加载时**发生，但之后任何一次保存都会把回填出来的值**固化到库
-    里**。2026-08-04 实测：全部用户的 ``ourdomain_email`` / ``xior_email``
-    都已经存盘了。所以去掉加载时的回退只能防住以后，存量的
-    那份还躺在 ``auto_book_json`` 里，一旦哪天把这两个 source 加进
-    ``_AUTO_BOOK_SOURCES``，它们立刻就会被拿去登录。
-
-    判据：**整对**与 H2S 那对逐字相同才清
-    ------------------------------------
-    邮箱和密码两者都相同，才是回填留下的指纹。只对上一半的不动——那多半是
-    用户自己填的（比如两个平台用同一个邮箱、不同密码）。
-
-    这条判据会误伤一种情况：用户在两个平台上**真的**用了完全相同的邮箱和
-    密码。代价是他要重新填一次，而这是安全的方向——凭据要发给第三方站点，
-    宁可当成没配。清理是一次性的（meta flag），清完之后用户填什么就是什么，
-    不会再被比对。
-
-    密码在库里是 Fernet 加密的，而 Fernet **不是确定性加密**（同一明文每次
-    密文都不同），所以必须解密后再比，不能直接比密文。
-    """
-    if st.get_meta(RENTCAFE_CRED_CLEANUP_META_KEY, default="") == "1":
-        return
-
-    conn = st.conn
-    started = not conn.in_transaction
-    if started:
-        conn.execute("BEGIN IMMEDIATE")
-    try:
-        row = conn.execute(
-            "SELECT value FROM meta WHERE key = ?",
-            (RENTCAFE_CRED_CLEANUP_META_KEY,),
-        ).fetchone()
-        if row and row[0] == "1":      # 另一个进程刚清完
-            if started:
-                conn.commit()
-            return
-
-        cleaned = 0
-        for uid, raw in conn.execute(
-            "SELECT id, auto_book_json FROM user_configs"
-        ).fetchall():
-            try:
-                ab = json.loads(raw or "{}")
-            except (TypeError, ValueError):
-                logger.warning("用户 %s 的 auto_book_json 解析失败，跳过凭据清理", uid)
-                continue
-            h2s_email = ab.get("email", "")
-            h2s_pw = decrypt(ab.get("password", ""))
-            if not (h2s_email or h2s_pw):
-                continue               # 没配过 H2S，谈不上被回填
-            touched = False
-            for email_key, pw_key in _BACKFILLED_CRED_PAIRS:
-                if email_key not in ab and pw_key not in ab:
-                    continue
-                same_email = ab.get(email_key, "") == h2s_email
-                same_pw = decrypt(ab.get(pw_key, "")) == h2s_pw
-                if same_email and same_pw:
-                    ab[email_key] = ""
-                    ab[pw_key] = ""
-                    touched = True
-            if touched:
-                cleaned += 1
-                conn.execute(
-                    "UPDATE user_configs SET auto_book_json = ? WHERE id = ?",
-                    (json.dumps(ab, ensure_ascii=False), uid),
-                )
-
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            (RENTCAFE_CRED_CLEANUP_META_KEY, "1"),
-        )
-        if started:
-            conn.commit()
-        if cleaned:
-            logger.warning(
-                "已清理 %d 个用户被回填的 Xior / OurDomain 凭据（原值是他们的 "
-                "H2S 账号密码）。这两个平台需要在各自网站上单独注册账号，"
-                "请到面板的自动预订设置里重新填写。",
-                cleaned,
-            )
-    except Exception:
-        if started:
-            conn.rollback()
-        raise
-
-
 def save_users(users: list[UserConfig]) -> None:
     """将用户列表完整覆盖写入 SQLite `user_configs`。"""
     st = _open_storage()
     conn = st.conn
     try:
         conn.execute("BEGIN IMMEDIATE")
-        _ensure_sqlite_users_migrated(st)
-        _ensure_rentcafe_creds_unbackfilled(st)
         st.replace_user_config_rows_unlocked(_users_to_rows(users))
         conn.commit()
     except Exception:
@@ -712,8 +539,6 @@ def update_users(mutator: Callable[[list[UserConfig]], _T]) -> _T:
     conn = st.conn
     try:
         conn.execute("BEGIN IMMEDIATE")
-        _ensure_sqlite_users_migrated(st)
-        _ensure_rentcafe_creds_unbackfilled(st)
         users = _rows_to_users(st.list_user_config_rows())
         result = mutator(users)
         st.replace_user_config_rows_unlocked(_users_to_rows(users))

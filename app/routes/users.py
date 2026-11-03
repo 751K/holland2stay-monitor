@@ -47,7 +47,8 @@ from app.forms.user_form import build_user_from_form, build_user_from_form_self
 from app.i18n import DEFAULTS, get_lang, localize_options
 from app.process_ctrl import write_reload_request
 from app.services.onboarding_service import delivery_state
-from config import ENERGY_LABELS, energy_rank
+from app.services.user_admin_service import UserNotFound, delete_user, toggle_user
+from filters import ENERGY_LABELS, energy_rank
 from translations import tr
 
 logger = logging.getLogger(__name__)
@@ -577,50 +578,46 @@ def user_edit(user_id: str) -> Any:
 @csrf_required
 def user_delete(user_id: str) -> Any:
     try:
-        def _delete(users):
-            user = get_user(users, user_id)
-            name = user.name if user else user_id
-            new_users = [u for u in users if u.id != user_id]
-            if len(new_users) == len(users):
-                raise LookupError("missing")
-            users[:] = new_users
-            return name, len(users)
-
-        name, remaining_count = update_users(_delete)
-    except LookupError:
+        deleted = delete_user(user_id)
+    except UserNotFound:
         flash(tr("users_not_found", get_lang()), "warning")
         return redirect(url_for("users_list"))
-    # 连带撤销该用户的所有 App Bearer token
-    from app.api_auth import invalidate_token_cache
-    from app.db import storage
-    st = storage()
-    try:
-        revoked = st.revoke_user_tokens(user_id)
-    finally:
-        st.close()
-    if revoked:
-        invalidate_token_cache()
-    logger.info(
-        "用户「%s」已删除 (id=%s)，剩余 %d 个用户，连带撤销 %d 个 App 会话",
-        name, user_id, remaining_count, revoked,
-    )
-    flash(f"用户「{name}」已删除", "success")
+    flash(f"用户「{deleted.name}」已删除", "success")
     return redirect(url_for("users_list"))
+
+
+#: 测试通知里「这个渠道为什么没发」的用户文案。原因代码见 notifier.CHANNEL_PROBLEMS。
+_TEST_NOTIFY_PROBLEMS = {
+    "imessage_not_macos": "iMessage 只能在 macOS 上发送，当前服务器不支持",
+    "imessage_no_recipient": "收件人未配置",
+    "telegram_incomplete": "Token 或 Chat ID 未配置",
+    "email_shared_no_recipient": "收件邮箱未配置",
+    "email_shared_unverified": "收件邮箱未验证，请到设置页完成 double-opt-in 验证",
+    "email_smtp_incomplete": "SMTP 主机、发件人或收件人未配置",
+    "email_smtp_auth_half": "SMTP 用户名和密码需要同时填写",
+    "whatsapp_incomplete": "Twilio 参数不完整",
+    "unknown": "未知渠道",
+}
+
+
+def _test_notify_problem_text(problem: str) -> str:
+    if problem == "email_shared_backend":
+        # 后端配置只对 admin 说清楚；普通用户看到的是「暂不可用」
+        return ("服务器未配置 Resend (admin 需设 RESEND_API_KEY / RESEND_FROM)"
+                if is_admin() else "邮件服务暂不可用")
+    return _TEST_NOTIFY_PROBLEMS.get(problem, "配置不完整")
 
 
 @self_or_admin_required
 @csrf_required
 def user_test_notify(user_id: str) -> Any:
-    """逐渠道发送一条测试消息，返回每个渠道的成功/失败详情。"""
+    """逐渠道发送一条测试消息，返回每个渠道的成功/失败详情。
+
+    渠道怎么构造、配全了没有，和 monitor 真实投递用同一个
+    ``notifier.build_channel_notifier``——测试通过就意味着真实投递也会发。
+    """
     from datetime import datetime as _dt
-    from notifier import (
-        EmailNotifier,
-        IMessageNotifier,
-        ResendNotifier,
-        TelegramNotifier,
-        WhatsAppNotifier,
-        get_shared_email_config,
-    )
+    from notifier import build_channel_notifier
 
     users = load_users()
     user = get_user(users, user_id)
@@ -651,77 +648,12 @@ def user_test_notify(user_id: str) -> Any:
             await notifier_obj.close()
 
     for channel in user.notification_channels:
-        ch = channel.strip().lower()
-
-        if ch == "imessage":
-            if not user.imessage_recipient:
-                results.append({"channel": "iMessage", "ok": False, "error": "收件人未配置"})
-                continue
-            notifier_obj = IMessageNotifier(user.imessage_recipient)
-            label = f"iMessage → {user.imessage_recipient}"
-
-        elif ch == "telegram":
-            if not user.telegram_token or not user.telegram_chat_id:
-                results.append({"channel": "Telegram", "ok": False, "error": "Token 或 Chat ID 未配置"})
-                continue
-            notifier_obj = TelegramNotifier(user.telegram_token, user.telegram_chat_id)
-            label = f"Telegram → {user.telegram_chat_id}"
-
-        elif ch == "email":
-            mode = (getattr(user, "email_mode", "shared") or "shared").lower()
-            if mode == "shared":
-                if not user.email_to:
-                    results.append({"channel": "Email (shared)", "ok": False, "error": "收件邮箱未配置"})
-                    continue
-                shared_ok, shared_key, shared_from = get_shared_email_config()
-                if not shared_ok:
-                    results.append({
-                        "channel": "Email (shared)",
-                        "ok": False,
-                        "error": "邮件服务暂不可用" if not is_admin()
-                                 else "服务器未配置 Resend (admin 需设 RESEND_API_KEY / RESEND_FROM)",
-                    })
-                    continue
-                if not user.email_verified:
-                    results.append({
-                        "channel": "Email (shared)",
-                        "ok": False,
-                        "error": "收件邮箱未验证，请到设置页完成 double-opt-in 验证",
-                    })
-                    continue
-                notifier_obj = ResendNotifier(shared_key, shared_from, user.email_to, user_id=user.id)
-                label = f"Email (shared) → {user.email_to}"
-            else:
-                has_auth = bool(user.email_username or user.email_password)
-                if not user.email_smtp_host or not user.email_to or not (user.email_from or user.email_username):
-                    results.append({"channel": "Email", "ok": False, "error": "SMTP 主机、发件人或收件人未配置"})
-                    continue
-                if has_auth and not (user.email_username and user.email_password):
-                    results.append({"channel": "Email", "ok": False, "error": "SMTP 用户名和密码需要同时填写"})
-                    continue
-                notifier_obj = EmailNotifier(
-                    user.email_smtp_host,
-                    user.email_smtp_port,
-                    user.email_smtp_security,
-                    user.email_username,
-                    user.email_password,
-                    user.email_from,
-                    user.email_to,
-                )
-                label = f"Email → {user.email_to}"
-
-        elif ch == "whatsapp":
-            if not all([user.twilio_sid, user.twilio_token, user.twilio_from, user.twilio_to]):
-                results.append({"channel": "WhatsApp", "ok": False, "error": "Twilio 参数不完整"})
-                continue
-            notifier_obj = WhatsAppNotifier(
-                user.twilio_sid, user.twilio_token, user.twilio_from, user.twilio_to
-            )
-            label = f"WhatsApp → {user.twilio_to}"
-
-        else:
-            results.append({"channel": ch, "ok": False, "error": "未知渠道"})
+        built = build_channel_notifier(user, channel)
+        if built.notifier is None:
+            results.append({"channel": built.display, "ok": False,
+                            "error": _test_notify_problem_text(built.problem)})
             continue
+        notifier_obj, label, ch = built.notifier, built.target, built.channel
 
         try:
             ok = _run_async(_send_and_close(notifier_obj, test_msg))
@@ -810,16 +742,8 @@ def user_move(user_id: str) -> Any:
 def user_toggle(user_id: str) -> Any:
     """快速开关用户启用状态。"""
     try:
-        def _toggle(users):
-            for u in users:
-                if u.id == user_id:
-                    u.enabled = not u.enabled
-                    return u
-            raise LookupError("missing")
-
-        user = update_users(_toggle)
-        logger.info("用户「%s」(id=%s) 已%s", user.name, user.id, "启用" if user.enabled else "停用")
-    except LookupError:
+        toggle_user(user_id)
+    except UserNotFound:
         flash(tr("users_not_found", get_lang()), "warning")
     return redirect(url_for("users_list", selected=user_id))
 

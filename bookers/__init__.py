@@ -59,9 +59,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from booker import BookingResult
-
-from .base import AbstractBooker, BookingRequest
+from .base import AbstractBooker, BookingRequest, BookingResult
 from .holland2stay import HollandStayBooker
 from .plaza import PlazaBooker
 from .rentcafe import XiorBooker, OurCampusBooker, OurDomainBooker

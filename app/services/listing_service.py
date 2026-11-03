@@ -93,7 +93,7 @@ def feature_contains(row: dict, category: str, value: str) -> bool:
     之后，浏览页仍然按老规矩走：勾「装修 = Furnished」页面回 251 条，其中含
     Semi / Fully / Unfurnished，而通知只发 187 条真正的 Furnished。
     """
-    from config import whitelist_matches
+    from filters import whitelist_matches
 
     dim = _FEATURE_CATEGORY_DIMS.get(category, "")
     for item in safe_features(row):
@@ -206,7 +206,7 @@ def _xior_display_name(row: dict) -> str:
 
 def feature_rank_ok(row: dict, min_rank: int) -> bool:
     """Return whether the listing energy rank is at least as good as min_rank."""
-    from config import energy_rank
+    from filters import energy_rank
 
     val = feature_value(row, "Energy")
     if val is None:
@@ -455,7 +455,7 @@ def query_listing_rows(
     Single-city filters are pushed into SQL; multi-city filters are applied in
     Python to preserve the existing route behavior.
     """
-    from config import energy_rank
+    from filters import energy_rank
     from models import parse_features_list, parse_float
 
     cities = cities or []
@@ -481,7 +481,7 @@ def query_listing_rows(
         # 和单选那条路（SQL 里的 city_normalized）保持同一套判据。
         # 用原始 city 比会让多选和单选给出不同结果——单选「Utrecht」命中 Xior
         # 的楼盘，多选「Utrecht + Rotterdam」反而漏掉。
-        from config import canonical_city
+        from mcore.registry import canonical_city
 
         city_set = {canonical_city(c).lower() for c in cities}
         rows = [
@@ -583,7 +583,7 @@ def get_filter_options() -> dict[str, Any]:
         occupancies = st.get_feature_values("Occupancy")
         contracts = st.get_feature_values("Contract")
         tenants = st.get_feature_values("Tenant")
-        from config import ENERGY_LABELS, energy_rank
+        from filters import ENERGY_LABELS, energy_rank
 
         raw_energy = st.get_feature_values("Energy")
         energies = sorted(

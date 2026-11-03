@@ -19,11 +19,11 @@ class _Session:
 
 
 def _entry(conn, source):
-    import booker
+    import bookers.h2s_checkout as booker
     import mcore.booking
     from mcore.booking_guard import record_mutation
     from mcore.booking_worker import _serve_booking
-    from booker import BookingResult
+    from bookers.h2s_checkout import BookingResult
     booker.create_prewarmed_session = lambda *a, **kw: _Session()
     def book(candidates, user, deadline, prewarmed=None):
         record_mutation('Room')
@@ -154,7 +154,7 @@ def test_heartbeat_rebuild_invalidates_cached_remote_session():
 
 def test_pending_prewarm_uses_independent_booking_worker(tmp_path, monkeypatch):
     import asyncio
-    from booker import BookingResult
+    from bookers.h2s_checkout import BookingResult
     from models import Listing
     from mcore import booking_round
     storage = Storage(tmp_path / 'test.db')

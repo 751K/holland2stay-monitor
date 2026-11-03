@@ -99,7 +99,7 @@ class TestBookerImportsMatch:
     """booker 引用的常量必须真的存在于本模块，别改名漏一处。"""
 
     def test_booker_uses_these_operations(self):
-        import booker  # noqa: F401
+        import bookers.h2s_checkout as booker  # noqa: F401
         # 引用即导入成功；这里再核一遍名字对得上
         assert booker._OP_PRODUCT_DETAIL == "GetProductDetail"
         assert booker._OP_PLACE_ORDER == "PlaceOrder"
@@ -111,7 +111,7 @@ class TestBookerImportsMatch:
     def test_booker_does_not_import_the_retired_cart_operations(self):
         """AddNewBooking / CreateEmptyCart 留在本模块（照抄记录），但 booker
         不该再引用——占房已改走 ``POST /api/booking``，那两步没有调用者。"""
-        import booker  # noqa: F401
+        import bookers.h2s_checkout as booker  # noqa: F401
         for name in ("_OP_ADD_BOOKING", "_GQL_ADD_BOOKING",
                      "_OP_CREATE_CART", "_GQL_CREATE_CART"):
             assert not hasattr(booker, name), (

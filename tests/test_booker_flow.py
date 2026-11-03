@@ -1,5 +1,5 @@
 """
-booker.py try_book 链路测试（BrowserFetcher 版）。
+bookers/h2s_checkout.py try_book 链路测试（BrowserFetcher 版）。
 """
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from booker import (
+from bookers.h2s_checkout import (
     BookingResult,
     PrewarmedSession,
     _TOKEN_MAX_AGE,
@@ -93,7 +93,7 @@ class TestBookingResult:
 class TestPrewarmedFallback:
     def test_expired_prewarmed_closes_old_fetcher(self):
         """过期 prewarmed → 关闭旧 fetcher。"""
-        with patch("booker.BrowserFetcher") as MockFetcher:
+        with patch("bookers.h2s_checkout.BrowserFetcher") as MockFetcher:
             new_mock = MockFetcher.return_value
             new_mock.__enter__.return_value = new_mock
             new_mock.__exit__.return_value = False

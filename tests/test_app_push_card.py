@@ -52,7 +52,7 @@ class TestNotAChannel:
 
         import notifier
 
-        src = inspect.getsource(notifier.create_user_notifier)
+        src = inspect.getsource(notifier.build_channel_notifier)   # 渠道分派在这里
         for known in ("imessage", "telegram", "email", "whatsapp"):
             assert f'"{known}"' in src or f"'{known}'" in src, known
         assert "apppush" not in src

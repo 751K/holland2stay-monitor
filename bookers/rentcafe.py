@@ -118,11 +118,11 @@ class RentCafeSession:
         而 ``chrome131`` / ``edge101`` 返 403。``get_impersonate()`` 是从池里
         随机取的，所以不轮换的话每次预订都有约四分之一的概率一上来就 403。
 
-        直接复用 ``scrapers.ourdomain`` 那套指纹冷却状态机——**打的是同一个
+        直接复用 ``scrapers.rentcafe_fingerprint`` 那套指纹冷却状态机——**打的是同一个
         SecureRC 集群**，某个指纹被烧对抓取和预订同时生效，共享状态等于互相
         提供情报，各记一套反而会重复踩同一个坑。
         """
-        from scrapers.ourdomain import (
+        from scrapers.rentcafe_fingerprint import (
             _impersonate_attempts, _mark_fingerprint_blocked, _mark_fingerprint_good,
         )
 
@@ -1313,7 +1313,7 @@ class OurDomainBooker(RentCafeBooker):
         找到即停。
         """
         from bookers.rentcafe_units import find_unit, parse_apply_now_options
-        from scrapers.ourdomain import _extract_floorplan_ids, _next_month_first
+        from scrapers.rentcafe_parse import _extract_floorplan_ids, _next_month_first
 
         floorplans_url = session.ole_url("floorplans.aspx")
         fp_ids = _extract_floorplan_ids(session.current_page_html())
@@ -1354,7 +1354,7 @@ class OurDomainBooker(RentCafeBooker):
         预订每次都先拿它开会话。所以 403 时要把它**记进冷却**，下一次
         ``open()`` 才会排到别的指纹——不记的话重开多少次都是同一个。
         """
-        from scrapers.ourdomain import _mark_fingerprint_blocked
+        from scrapers.rentcafe_fingerprint import _mark_fingerprint_blocked
 
         entry = self._floorplans_url(building)
         tried: list[str] = []
@@ -1391,12 +1391,12 @@ class OurDomainBooker(RentCafeBooker):
     def _check_still_direct_booking(self, html: str, unit) -> None:
         """单元还在，但点下去还是不是「直接订」？不是就抛 :class:`RentCafeNotBookableError`。
 
-        判据与抓取侧**同一个函数**（``scrapers.ourdomain._extract_status``）：
+        判据与抓取侧**同一个函数**（``scrapers.rentcafe_parse._extract_status``）：
         按钮存在且文字不是抽签。另写一份的话，两边迟早对「这是不是抽签」给出
         不同答案——2026-09-15 抓取侧就是只看了按钮在不在，把 Join Lottery 报成
         了可订。
         """
-        from scrapers.ourdomain import _extract_units
+        from scrapers.rentcafe_parse import _extract_units
 
         for u in _extract_units(html):
             if u["unit_id"] == unit.unit_id:

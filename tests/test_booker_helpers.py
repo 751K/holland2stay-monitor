@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from booker import _is_booked_by_other, _is_reserved_by_user, _to_h2s_date
+from bookers.h2s_checkout import _is_booked_by_other, _is_reserved_by_user, _to_h2s_date
 
 
 # ── _is_booked_by_other ────────────────────────────────────

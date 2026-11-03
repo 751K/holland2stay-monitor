@@ -380,7 +380,7 @@ class Listing:
         注意
         ----
         结果在首次调用后缓存于 _feature_map_cache，后续调用直接返回缓存。
-        config.py 的 ListingFilter.passes() 和 web.py 的 parse_features
+        filters.py 的 ListingFilter.passes() 和 web.py 的 parse_features
         过滤器都依赖本方法返回的 key 名，修改 LISTING_KEY_MAP 时需同步检查。
         """
         if self._feature_map_cache is None:

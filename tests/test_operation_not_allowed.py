@@ -232,7 +232,7 @@ class TestBookerPhase:
     def test_try_book_returns_operation_rejected(self):
         from unittest.mock import patch
 
-        from booker import try_book
+        from bookers.h2s_checkout import try_book
         from models import Listing
 
         listing = Listing(
@@ -253,7 +253,7 @@ class TestBookerPhase:
             }[path]
             return {"status": 200, "ok": True, "text": _j.dumps(body), "headers": {}}
 
-        with patch("booker.BrowserFetcher") as MockFetcher:
+        with patch("bookers.h2s_checkout.BrowserFetcher") as MockFetcher:
             mock = MockFetcher.return_value
             mock.__enter__.return_value = mock
             mock.__exit__.return_value = False
@@ -277,7 +277,7 @@ class TestBookerPhase:
         """phase 是 Literal，写错字符串在运行时不会报错，只会静默走进 else 分支。"""
         from typing import get_args
 
-        from booker import BookingPhase
+        from bookers.h2s_checkout import BookingPhase
 
         assert "operation_rejected" in get_args(BookingPhase)
         assert "blocked" in get_args(BookingPhase)

@@ -84,6 +84,13 @@ SOURCE_DISPLAY_NAMES: dict[str, str] = {name: spec.display_name for name, spec i
 SOURCE_SHORT_NAMES: dict[str, str] = {name: spec.short_name for name, spec in SPECS.items()}
 
 
+def source_short_name(source: Optional[str]) -> str:
+    """平台缩写，给通知和推送标题用。缺省按 H2S（旧数据没有 source 字段）；
+    未登记的平台大写原名返回。"""
+    value = (source or "holland2stay").strip().lower()
+    return SOURCE_SHORT_NAMES.get(value, value.upper() or "H2S")
+
+
 def source_display_name(source: str) -> str:
     """平台显示名；未知 key 首字母大写后返回，不套用某个已知平台名。"""
     key = (source or "").strip().lower()
@@ -190,6 +197,19 @@ def sources_supporting_dim(dim: str) -> list[str]:
     return [s for s in KNOWN_SOURCES if dim in _SOURCE_FILTER_DIMS.get(s, _UNIVERSAL_FILTER_DIMS)]
 
 
+#: 平台整体成立、但 feed 里不上报的属性。
+#:
+#: Xior 与 OurDomain 的房源全部带家具（床、桌、椅、衣柜），也就是 H2S 口径下的
+#: ``Furnished``；它们的 feed 只是没有这个字段。此前靠 fail-open 兜底——「平台不
+#: 提供该维度就整体放行」——那条规则不区分用户勾的是哪一档，于是勾
+#: ``Unfurnished`` 时这些房源也会出现，而它们恰恰不是无家具的。
+#:
+#: 把事实直接写出来，fail-open 对该维度就不再需要，两个方向都对。
+#:
+#: **这是运营方给的断言，不是抓来的数据。** 平台改了配置这里不会自动跟着变，
+#: 因此只登记「整栋楼统一、不随房源变化」的属性；随房源变化的一律要抓。
+#:
+#: OurCampus 不在其中：整栋楼的装修档位尚未核实，不登记未经验证的事实。
 SOURCE_ASSUMED_FEATURES: dict[str, dict[str, str]] = {
     # Xior 是纯学生盘：品牌名就是 Xior Student Housing，官网通篇「Trusted by
     # 22,000+ students for their university journey」，全站没有任何收入或雇佣

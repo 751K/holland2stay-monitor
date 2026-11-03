@@ -129,9 +129,7 @@ import logging
 from typing import Any, Optional
 from urllib.parse import parse_qsl
 
-from booker import BookingResult
-
-from .base import AbstractBooker, BookingRequest
+from .base import AbstractBooker, BookingRequest, BookingResult
 
 logger = logging.getLogger(__name__)
 

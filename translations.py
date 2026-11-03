@@ -616,7 +616,7 @@ TRANSLATIONS = {
     #
     # 不要在这里复述徽标的具体措辞（原先写的是「带『仅 …』标记的」）：徽标现在
     # 两种形态并存——「Xior 除外」与「仅 Holland2Stay」，哪种取决于点名哪一边
-    # 更短，见 config.dim_scope_badge。写死一种会和另一种对不上。
+    # 更短，见 app.filter_scope.dim_scope_badge。写死一种会和另一种对不上。
     "user_form_dim_scope_intro": {
         "zh": "带平台标记的条件只对部分平台生效：其余平台不提供该属性，"
               "它们的房源不受该条件影响，会照常通知。悬停标记可看具体平台。",

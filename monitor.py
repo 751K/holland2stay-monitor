@@ -176,7 +176,7 @@ from scrapers import (
 from update_checker import check_for_updates
 from mstorage._notifications import WEB_NOTIFICATIONS_KEEP
 from storage import Storage
-from users import UserConfig, load_users
+from users import UserConfig, check_legacy_migrations, load_users
 
 
 # source -> 与浏览器子进程通信的专属长存单线程 executor
@@ -1583,12 +1583,13 @@ async def _async_main() -> None:
     retry_queue.load(storage)
     _bind_persistent_state(storage)
 
-    # 加载用户配置；旧 users.json 迁移损坏时硬停止，避免忽略或覆盖现有数据
+    # 没完成旧版用户迁移的库直接拒绝启动，见 users.check_legacy_migrations
     try:
-        users = load_users()
+        check_legacy_migrations(storage)
     except RuntimeError as e:
-        logger.critical("❌ 无法加载用户配置，进程终止以防数据丢失:\n  %s", e)
+        logger.critical("❌ %s", e)
         sys.exit(1)
+    users = load_users()
 
     if not users:
         logger.warning(

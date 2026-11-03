@@ -197,11 +197,10 @@ def _session_user_still_allowed() -> bool:
     if not user_id:
         return False
     try:
-        from users import get_user, load_users
-        user = get_user(load_users(), user_id)
+        from users import user_login_allowed
+        return user_login_allowed(user_id)
     except Exception:
         return False
-    return bool(user and user.enabled and user.app_login_enabled)
 
 
 # ------------------------------------------------------------------ #

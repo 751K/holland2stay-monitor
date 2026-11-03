@@ -1,5 +1,5 @@
 """
-booker.py — 自动预订模块（CloakBrowser 版）
+bookers/h2s_checkout.py — Holland2Stay 自动预订（CloakBrowser 版）
 ==============================================
 
 对 "Available to book" 的房源执行完整的自动化预订流程，最终生成可直接支付的链接。
@@ -62,9 +62,8 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
 from datetime import datetime as _dt
-from typing import Literal, Optional
+from typing import Optional
 
 import json as _json
 from urllib.parse import urlencode as _urlencode
@@ -85,53 +84,11 @@ from h2s_booking_gql import (
 from models import STATUS_AVAILABLE, Listing
 from scrapers.base import BlockedError, OperationNotAllowedError
 
+# 跨平台共用的结果类型住在 bookers/base.py，这里 re-export。
+from bookers.base import BookingPhase, BookingResult, PrewarmedSession  # noqa: E402,F401
+
 logger = logging.getLogger(__name__)
 
-
-class PrewarmedSession:
-    """
-    预认证的 BrowserFetcher + token，供 try_book() 直接复用。
-
-    Attributes
-    ----------
-    fetcher    : 已过 CF 挑战的 BrowserFetcher 实例
-    token      : NextAuth session 的 accessToken(JWT)，用作下单的 Bearer
-    created_at : time.monotonic() 创建时刻
-    email      : 对应的 H2S 账号邮箱
-    owns_fetcher : 这个 fetcher 归本 session 所有吗。
-
-        False 表示借的是常驻浏览器（mcore/warm_browser.py）。**借来的一律不许
-        关**——它是全进程共用的那一个，关掉之后下一个用它的人拿到的是空壳，而
-        且没人会察觉，只会看到「莫名其妙又要过一次挑战」。
-
-    use_lock   : 借来时是那条常驻的锁，自有时为 None。
-
-        一个 BrowserFetcher 不能被多线程同时使唤。持有者在整段 I/O 期间握着它，
-        所以多个用户同时下单会串行——每笔下单是秒级，而实测可订窗口 p10 约 10
-        分钟，这个代价换得起。
-    """
-
-    __slots__ = ("fetcher", "token", "created_at", "token_expiry", "email",
-                 "owns_fetcher", "use_lock")
-
-    def __init__(self, fetcher, token: str, created_at: float, token_expiry: float,
-                 email: str, owns_fetcher: bool = True, use_lock=None):
-        self.fetcher = fetcher
-        self.token = token
-        self.created_at = created_at
-        self.token_expiry = token_expiry
-        self.email = email
-        self.owns_fetcher = owns_fetcher
-        self.use_lock = use_lock
-
-    def close_if_owned(self) -> None:
-        """只关自己的。借来的常驻浏览器留给下一个人。"""
-        if not self.owns_fetcher:
-            return
-        try:
-            self.fetcher.close()
-        except Exception:
-            pass
 
 
 # Magento store_id
@@ -616,57 +573,6 @@ def _ideal_checkout(fetcher: BrowserFetcher, token: str, order_number: str) -> s
 # ------------------------------------------------------------------ #
 # 主入口
 # ------------------------------------------------------------------ #
-
-BookingPhase = Literal[
-    "", "dry_run", "success", "race_lost",
-    "reserved_conflict", "unknown_error",
-    "blocked",
-    # 403，但正文是上游应用说「这条 GraphQL operation 没登记」，不是 CF 屏蔽。
-    # 和 blocked 分开的理由是上层动作完全相反：blocked 要换 IP、失效 session、
-    # 暂停登录链路；这个换多少 IP 都一样，只能改代码把站点原文照抄回来。
-    # 混在一起的代价见 OperationNotAllowedError 的 docstring。
-    "operation_rejected",
-    "unsupported",
-    # 半自动预订：申请已起草并存在用户账号下，但**没有占住房**——
-    # 还差用户自己上传证件和付款。与 "success" 必须分开：把它当成功报给
-    # 用户，用户会以为房到手了、慢悠悠去传证件，结果被别人抢走。
-    "draft_saved",
-    # 前置校验没过（缺凭据 / 档案不完整），压根没触网。
-    "not_configured",
-    # 凭据被平台拒了。和 not_configured 分开：那个是"没填"，这个是"填了但不对"，
-    # 用户看到的提示不一样；也和 blocked 分开——重试和换 IP 都救不回来。
-    "auth_failed",
-    # 凭据对，但账号开了两步验证，无法全自动（需人工输验证码）。和 auth_failed
-    # 分开：不是账号密码的问题，提示用户去关 2FA 或改半自动。
-    "auth_2fa",
-    # 走到了最后一步但服务端拒绝保存。**绝不能报成 draft_saved**——那条消息
-    # 让用户以为表单已填好、安心去传证件，而实际上什么都没存下。
-    "save_rejected",
-    # 占房已成立，但后续（支付方式 / 下单 / 支付链接）某一步失败。**绝不能报成
-    # race_lost 或 unknown_error**：房正被这个账号占着，用户以为没抢到就不会去
-    # 处理，既不付款也不取消，直到预留超时。必须把 cart/order 号给他。
-    "held_incomplete",
-    "uncertain",
-]
-
-
-@dataclass
-class BookingResult:
-    listing: Listing
-    success: bool
-    message: str
-    dry_run: bool = False
-    pay_url: str = ""
-    contract_start_date: str = ""
-    phase: BookingPhase = ""
-    #: 占房已经成立、但后续步骤失败时的凭据。**必须交给用户。**
-    #:
-    #: create_booking 一旦返回，这套房就被这个账号占着了。此后
-    #: set_payment_method / place_order / _ideal_checkout 任一失败，原实现只报
-    #: 「预订失败」——用户以为没抢到，实际房在自己名下挂着，既不知道去哪付款，
-    #: 也不知道要去取消，直到预留超时自动释放（或者更糟：一直占着）。
-    held_cart_id: str = ""
-    held_order_number: str = ""
 
 
 def _mark_lane_used() -> None:

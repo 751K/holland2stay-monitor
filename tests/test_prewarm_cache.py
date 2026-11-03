@@ -21,7 +21,7 @@ import pytest
 import monitor
 from monitor import run_once
 
-from booker import BookingResult, PrewarmedSession
+from bookers.h2s_checkout import BookingResult, PrewarmedSession
 from notifier import BaseNotifier
 from users import UserConfig
 from config import AutoBookConfig, Config, CityFilter, AvailabilityFilter

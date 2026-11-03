@@ -97,7 +97,7 @@ class TestBackfill:
 
     def test_backfill_follows_the_current_mapping(self, tmp_path, monkeypatch):
         """改了楼盘归属之后，存量行要跟着走，而不是停在建列那天的值。"""
-        import config
+        from mcore import registry
 
         path = tmp_path / "listings.db"
         st = Storage(path)
@@ -105,7 +105,7 @@ class TestBackfill:
         st.close()
 
         monkeypatch.setattr(
-            config, "canonical_city",
+            registry, "canonical_city",
             lambda v: "Diemen" if v == "Amsterdam Diemen" else v,
         )
         st2 = _reopen(path)

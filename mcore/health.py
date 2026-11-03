@@ -19,11 +19,10 @@
 """
 from __future__ import annotations
 
-from env_utils import env_int
+from env_utils import DEFAULT_TIMEZONE, env_int
 
 
 import os
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -94,14 +93,14 @@ def fmt_ts(iso: str, *, fallback: str = "") -> str:
     日志的 asctime 就是那个时区。告警里塞一个 UTC ISO，收到推送的人还得自己
     换算才能去日志里对上那一刻。
 
-    这里直接读环境变量而不是 import config：``mcore`` 至今没有依赖 ``config``，
-    为了一个时区名破坏这个边界不值当。默认值与 ``config.TIMEZONE`` 保持一致。
+    这里直接读环境变量而不是 import config：为了一个时区名把 config 的整套
+    启动引导拉进来不值当。默认值与 config 共用 ``env_utils.DEFAULT_TIMEZONE``。
     """
     if not iso:
         return fallback
     try:
         from zoneinfo import ZoneInfo
-        tz = ZoneInfo(os.environ.get("TIMEZONE") or "Europe/Amsterdam")
+        tz = ZoneInfo(os.environ.get("TIMEZONE") or DEFAULT_TIMEZONE)
         dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -400,14 +399,15 @@ def enabled_sources() -> set[str] | None:
     留下的痕迹一模一样，都是「不再有新行」。而 round_stats 的保留期是 30 天，
     停用之后那些行还会在窗口里躺很久。
 
-    直接读环境变量而不是 import config，理由同 :func:`fmt_ts`：``mcore`` 不依赖
-    ``config``。``SOURCES`` 由 settings_store 每轮从 app_settings 注水进来，
-    monitor 与面板两个进程里都在。切分规则与 ``config._parse_sources_raw`` 对齐。
+    直接读环境变量而不是调 ``load_config``，理由同 :func:`fmt_ts`。``SOURCES`` 由
+    settings_store 每轮从 app_settings 注水进来，monitor 与面板两个进程里都在。
+    解析交给 ``target_config.parse_sources``——与 ``load_config`` 同一个实现，
+    不认识的平台名同样被丢掉。
     """
     from env_utils import env_get
-    raw = env_get("SOURCES", "")
-    values = {p.strip().lower() for p in re.split(r"[,|]", raw) if p.strip()}
-    return values or None
+    from target_config import parse_sources
+    values, _problems = parse_sources(env_get("SOURCES", ""))
+    return set(values) or None
 
 
 def source_health(storage, *, window: int = DEFAULT_WINDOW) -> list[SourceHealth]:

@@ -1,5 +1,5 @@
 """
-booker.py Cloudflare 403 → phase="blocked" 测试（BrowserFetcher 版）。
+bookers/h2s_checkout.py Cloudflare 403 → phase="blocked" 测试（BrowserFetcher 版）。
 
 旧 curl_cffi _check_blocked / _gql 已删除；403 检测现在在 BrowserFetcher 内部。
 本测试在 try_book / book_with_fallback / monitor run_once 级别验证 blocked 契约。
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import monitor
 from monitor import run_once
-from booker import BookingResult, PrewarmedSession, try_book
+from bookers.h2s_checkout import BookingResult, PrewarmedSession, try_book
 from mcore.booking import book_with_fallback
 from notifier import BaseNotifier
 from users import UserConfig
@@ -41,7 +41,7 @@ class TestTryBookBlocked:
         listing = _make_listing(1)
 
         # BrowserFetcher 在 login 时抛 BlockedError
-        with patch("booker.BrowserFetcher") as MockFetcher:
+        with patch("bookers.h2s_checkout.BrowserFetcher") as MockFetcher:
             mock_fetcher = MockFetcher.return_value
             mock_fetcher.__enter__.return_value = mock_fetcher
             mock_fetcher.__exit__.return_value = False
@@ -329,7 +329,7 @@ class TestNoDeadExceptionClass:
     """
 
     def test_booker_no_longer_exports_it(self):
-        import booker
+        import bookers.h2s_checkout as booker
         assert not hasattr(booker, "BookingBlockedError")
 
     def test_monitor_handlers_reference_a_live_exception(self):

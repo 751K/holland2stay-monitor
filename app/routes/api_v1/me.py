@@ -26,8 +26,8 @@ from typing import Any
 from flask import Blueprint, request
 
 from app import api_auth, api_errors as _err
-from app.process_ctrl import write_reload_request
-from config import ENERGY_LABELS, ListingFilter, filter_dim_sources
+from filters import ENERGY_LABELS, ListingFilter
+from mcore.sources import filter_dim_sources
 from users import update_users
 
 from ._helpers import (
@@ -160,9 +160,8 @@ def _filter_update():
     幂等：完整覆盖式更新（缺省字段保留 ListingFilter 默认值，**不**保留旧值）。
 
     业务效果：
-    - 立即写回 SQLite ``user_configs``（``save_users`` 事务写入）
-    - 下一轮 ``monitor.run_once`` 检测到文件 mtime 变化会自动 reload 用户配置
-      （现有 _load_users_if_changed 逻辑，不需要这里显式触发）
+    - 立即写回 SQLite ``user_configs``（``update_users`` 事务写入）
+    - ``update_users`` 提交后会请求 monitor 热重载，下一轮即按新 filter 匹配
     - APNs 设备绑定不动；推送策略下轮即按新 filter 决定
 
     Body: ListingFilter 的字段子集，例如
@@ -211,9 +210,6 @@ def _filter_update():
         user.id,
         {k: v for k, v in cleaned.items() if v not in (None, [], "")},
     )
-
-    # 通知 monitor 进程热重载用户配置，使新 filter 在下一轮抓取生效
-    write_reload_request()
 
     # 重新读 / serialize 后返回，保证客户端与服务端状态一致
     return _err.ok({

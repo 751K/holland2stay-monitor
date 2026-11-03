@@ -59,12 +59,11 @@ import curl_cffi.requests as req
 from .base import ScrapeTask
 from .ourdomain import (
     OurDomainScraper,
-    _CONTROL_LABEL_RE,
-    _extract_units,
     _get_text,
     _headers_for,
     _looks_like_availability_panel,
 )
+from .rentcafe_parse import _CONTROL_LABEL_RE, _extract_units
 
 logger = logging.getLogger(__name__)
 

@@ -22,7 +22,6 @@ import logging
 from flask import Blueprint
 
 from app import api_auth, api_errors as _err
-from app.api_auth import invalidate_token_cache
 from app.db import storage
 from app.services.monitor_service import (
     MonitorServiceError,
@@ -32,7 +31,8 @@ from app.services.monitor_service import (
     start_monitor,
     stop_monitor,
 )
-from users import get_user, load_users, update_users
+from app.services.user_admin_service import UserNotFound, delete_user, toggle_user
+from users import load_users
 
 logger = logging.getLogger(__name__)
 
@@ -88,49 +88,24 @@ def _users_list():
 def _user_toggle(user_id: str):
     """翻转 enabled —— 立刻生效（下一轮 monitor.run_once 跳过该用户）。"""
     try:
-        def _toggle(users):
-            user = get_user(users, user_id)
-            if user is None:
-                raise LookupError("missing")
-            user.enabled = not user.enabled
-            return user
-
-        user = update_users(_toggle)
+        user = toggle_user(user_id)
     except RuntimeError as e:
         return _err.err_server_error(e, "用户配置文件损坏")
-    except LookupError:
+    except UserNotFound:
         return _err.err_not_found("用户不存在")
-    logger.info("admin toggled user=%s enabled=%s", user.name, user.enabled)
     return _err.ok({"id": user.id, "enabled": user.enabled})
 
 
 def _user_delete(user_id: str):
     """删除用户 + 连带撤销其 App Bearer token（避免 token 失主）。"""
     try:
-        def _delete(users):
-            user = get_user(users, user_id)
-            name = user.name if user else user_id
-            new_users = [u for u in users if u.id != user_id]
-            if len(new_users) == len(users):
-                raise LookupError("missing")
-            users[:] = new_users
-            return name
-
-        name = update_users(_delete)
+        deleted = delete_user(user_id)
     except RuntimeError as e:
         return _err.err_server_error(e, "用户配置文件损坏")
-    except LookupError:
+    except UserNotFound:
         return _err.err_not_found("用户不存在")
-
-    st = storage()
-    try:
-        revoked = st.revoke_user_tokens(user_id)
-    finally:
-        st.close()
-    if revoked:
-        invalidate_token_cache()
-    logger.info("admin deleted user=%s; revoked %d App sessions", name, revoked)
-    return _err.ok({"deleted": True, "name": name, "revoked_sessions": revoked})
+    return _err.ok({"deleted": True, "name": deleted.name,
+                    "revoked_sessions": deleted.revoked_sessions})
 
 
 # ── Monitor process control ────────────────────────────────────────

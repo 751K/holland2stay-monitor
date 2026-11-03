@@ -72,7 +72,7 @@ def _preflight(listing) -> int:
         # 预检没有副作用，抽签单元也照样走到条款页——那页上写着「提交意味着
         # 什么」，正是要看的东西。booker 真跑时会在这里停。
         lottery_note = str(exc)
-        from scrapers.ourdomain import _extract_floorplan_ids
+        from scrapers.rentcafe_parse import _extract_floorplan_ids
 
         parser = functools.partial(parse_apply_now_options, id_prefix=booker.id_prefix)
         unit = None
@@ -284,7 +284,7 @@ def _diagnose(listing) -> int:
     )
     from bookers.rentcafe_form import parse_applicant_form
     from bookers.rentcafe_units import find_unit, parse_apply_now_options
-    from scrapers.ourdomain import _extract_floorplan_ids
+    from scrapers.rentcafe_parse import _extract_floorplan_ids
 
     if not os.environ.get("CAPTCHA_API_KEY"):
         print("没有 CAPTCHA_API_KEY。到服务器容器里跑。")

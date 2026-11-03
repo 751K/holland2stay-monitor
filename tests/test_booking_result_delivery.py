@@ -20,7 +20,7 @@ import logging
 import pytest
 
 import monitor
-from booker import BookingResult
+from bookers.h2s_checkout import BookingResult
 from models import Listing
 
 

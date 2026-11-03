@@ -19,7 +19,7 @@ from bookers import BookingRequest, dispatch_book, supports_booking
 from models import parse_float
 
 if TYPE_CHECKING:
-    from booker import PrewarmedSession
+    from bookers.base import PrewarmedSession
     from users import UserConfig
 
 logger = logging.getLogger("monitor")

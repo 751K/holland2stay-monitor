@@ -10,7 +10,7 @@ CF clearance token，无需手动管理会话。
 / 维护检测钩子 / 是否轮换出口 IP），其余流程对所有站点通用。当前有两个
 profile：``H2S_PROFILE``（GraphQL）和 ``XIOR_PROFILE``（WordPress admin-ajax）。
 
-使用者：``scrapers/holland2stay.py``、``scrapers/xior.py``、``booker.py``。
+使用者：``scrapers/holland2stay.py``、``scrapers/xior.py``、``bookers/h2s_checkout.py``。
 
 线程安全
 --------

@@ -2,7 +2,7 @@
 
 本文记录 H2S 自动预订的当前代码路径、已知验证边界，以及 2026-08-19 采集的站点
 operation 原文。上游接口可能变化；抓取、浏览器校验和排障另见 [H2S.md](H2S.md)。
-系统的运行行为以 [booker.py](../booker.py)、[bookers/holland2stay.py](../bookers/holland2stay.py)、
+系统的运行行为以 [bookers/h2s_checkout.py](../bookers/h2s_checkout.py)、[bookers/holland2stay.py](../bookers/holland2stay.py)、
 [h2s_booking_gql.py](../h2s_booking_gql.py) 和 [browser_fetcher.py](../browser_fetcher.py)
 为准。本文保留的接口原文和历史探测记录不能证明线上接口的实时状态。
 

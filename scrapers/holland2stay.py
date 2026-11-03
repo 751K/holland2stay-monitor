@@ -566,7 +566,7 @@ def _to_listing(
         raw_next = item.get("next_contract_startdate") or ""
         contract_start_date = raw_next.strip()[:10] if raw_next.strip() else None
         # **同一个字段，同一道哨兵检查。** 上面 available_from 过了，这里没过——
-        # 而 booker 优先用 contract_start_date（booker.py 的 Step 1：
+        # 而 booker 优先用 contract_start_date（bookers/h2s_checkout.py 的 Step 1：
         # ``listing.contract_start_date or listing.available_from``），它那道
         # ``>= today`` 的守卫对 2050 恰好放行。于是「没有下一个合同起始日」这个
         # 哨兵会被当成真日期，带着 01-01-2050 去占房。
@@ -749,7 +749,7 @@ def _scrape_city_pages(
         if "errors" in data:
             # **有 errors 且没有可用 data 才算致命。** GraphQL 的 NON_NULL 传播
             # 会同时给出 errors 和部分 data，站点自己的前端就靠这个继续渲染；
-            # 整页丢掉等于把能用的数据也一起扔了。booker.py 早就按这个规律处理，
+            # 整页丢掉等于把能用的数据也一起扔了。bookers/h2s_checkout.py 早就按这个规律处理，
             # 抓取侧一直没有。
             msgs = "; ".join(
                 str(e.get("message", e)) if isinstance(e, dict) else str(e)

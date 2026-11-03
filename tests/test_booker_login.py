@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from booker import AuthError, TwoFactorRequiredError, login
+from bookers.h2s_checkout import AuthError, TwoFactorRequiredError, login
 
 
 class _FakeFetcher:

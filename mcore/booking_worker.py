@@ -23,7 +23,7 @@ def _serve_booking(conn, source):
     root.addHandler(handler)
     root.setLevel(logging.INFO)
     import config
-    from booker import create_prewarmed_session
+    from bookers.h2s_checkout import create_prewarmed_session
     from mcore.warm_browser import warm_lane
     from mcore.booking import book_with_fallback
     from mcore.booking_guard import BookingGuard, attempt_context

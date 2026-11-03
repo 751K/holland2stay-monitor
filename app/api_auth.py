@@ -320,15 +320,11 @@ def _user_token_still_allowed(row: dict) -> bool:
     if not user_id:
         return False
     try:
-        from users import load_users
-        users = load_users()
+        from users import user_login_allowed
+        return user_login_allowed(user_id)
     except Exception:
-        logger.exception("load_users failed while validating bearer user")
+        logger.exception("user_login_allowed failed while validating bearer user")
         return False
-    user = next((u for u in users if u.id == user_id), None)
-    if user is None:
-        return False
-    return bool(user.enabled and user.app_login_enabled)
 
 
 # ── 装饰器 ──────────────────────────────────────────────────────────

@@ -25,7 +25,7 @@ from app.api_auth import (
     invalidate_token_cache,
 )
 from mstorage._tokens import hash_token
-from users import UserConfig
+from users import UserConfig, save_users
 
 
 @pytest.fixture
@@ -101,7 +101,7 @@ class TestUserTokenStillAllowed:
         from app.db import storage
 
         user = UserConfig(name="disabled", id="deadbeef", enabled=False, app_login_enabled=True)
-        monkeypatch.setattr("users.load_users", lambda: [user])
+        save_users([user])
 
         st = storage()
         try:
@@ -117,7 +117,7 @@ class TestUserTokenStillAllowed:
         from app.db import storage
 
         user = UserConfig(name="no-login", id="cafebabe", enabled=True, app_login_enabled=False)
-        monkeypatch.setattr("users.load_users", lambda: [user])
+        save_users([user])
 
         st = storage()
         try:

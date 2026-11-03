@@ -64,7 +64,7 @@ from typing import Optional
 
 from models import Listing, parse_float
 
-from config import _FIN_FULLY, _FIN_FURNISHED, _FIN_SEMI, _FIN_UNFURNISHED
+from mcore.registry import FIN_FULLY, FIN_FURNISHED, FIN_SEMI, FIN_UNFURNISHED
 
 from .base import AbstractScraper, ScrapeNetworkError, ScrapeResult, ScrapeTask
 
@@ -107,10 +107,10 @@ CITIES = ("'s-Hertogenbosch", "Amersfoort", "Eindhoven", "Rijswijk", "Tilburg")
 #: 取值用 config 的规范常量，不在这里新造词——过滤下拉是按库里出现过的值去重
 #: 出来的，多一个写法就多一个选项。
 FINISHING_MAP = {
-    "fully furnished": _FIN_FULLY,
-    "furnished": _FIN_FURNISHED,
-    "semi furnished": _FIN_SEMI,
-    "not furnished": _FIN_UNFURNISHED,
+    "fully furnished": FIN_FULLY,
+    "furnished": FIN_FURNISHED,
+    "semi furnished": FIN_SEMI,
+    "not furnished": FIN_UNFURNISHED,
 }
 
 #: 站点的租客徽标 → 本项目的 tenant 词表。

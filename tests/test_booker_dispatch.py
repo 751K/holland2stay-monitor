@@ -25,7 +25,7 @@ from bookers import (
     get_booker,
     supports_booking,
 )
-from booker import BookingResult as RawBookingResult
+from bookers.h2s_checkout import BookingResult as RawBookingResult
 from mcore.booking import book_with_fallback
 from models import Listing
 from users import AutoBookConfig, UserConfig

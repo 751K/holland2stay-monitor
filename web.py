@@ -47,10 +47,9 @@ from translations import tr as _tr  # noqa: E402
 # 注意：此文件记录 Flask 应用自身的日志（请求处理、配置变更等），
 # 与 supervisord 重定向的 Gunicorn stdout（/app/logs/web.log）是不同文件。
 # Web 面板「日志查看」页面读取的是本文件。
-_DATA_DIR = Path(os.environ.get("DATA_DIR", str(DATA_DIR)))
-_DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 _fh = logging.handlers.RotatingFileHandler(
-    str(_DATA_DIR / "web.log"),
+    str(DATA_DIR / "web.log"),
     maxBytes=2 * 1024 * 1024, backupCount=3, encoding="utf-8",
 )
 _fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
@@ -125,6 +124,32 @@ def _hydrate_settings() -> None:
 
 
 _hydrate_settings()
+
+
+def _check_legacy_migrations() -> None:
+    """没完成旧版用户迁移的库，Web 面板同样拒绝启动。见 users.check_legacy_migrations。
+
+    与上面的注水不同，这里**不吞异常**：带着这样的库跑起来，面板上看到的是一张
+    空用户表，管理员顺手新建用户只会让旧数据更难找回。
+    """
+    from config import DB_PATH, TIMEZONE
+    from storage import Storage
+    from users import check_legacy_migrations
+
+    st = Storage(DB_PATH, timezone_str=TIMEZONE)
+    try:
+        check_legacy_migrations(st)
+    finally:
+        st.close()
+
+
+_check_legacy_migrations()
+
+# users.py / notifier.py 在请求内复用路由的那个 Storage 连接，见 storage.set_storage_factory。
+from app.db import storage as _request_storage  # noqa: E402
+from storage import set_storage_factory  # noqa: E402
+
+set_storage_factory(_request_storage)
 
 # ------------------------------------------------------------------ #
 # Flask app
@@ -330,12 +355,12 @@ def _inject_translations():
         「能耗 ≥ A」的用户会以为收到的都是 A 级，而 Xior 的房源一条都没过
         这一关。
         """
-        from config import dim_scope_note
+        from app.filter_scope import dim_scope_note
         return dim_scope_note(dim, lang)
 
     def dim_scope_badge(dim: str) -> str:
         """紧凑版标记，配合 dim_scope() 当 tooltip 使用。"""
-        from config import dim_scope_badge as _badge
+        from app.filter_scope import dim_scope_badge as _badge
         return _badge(dim, lang)
 
     return {

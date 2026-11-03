@@ -39,16 +39,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from config import (
-    KNOWN_CITIES,
-    KNOWN_OURCAMPUS_CITIES,
-    KNOWN_OURDOMAIN_CITIES,
-    KNOWN_SOURCES,
-    KNOWN_MAGIS_CITIES,
-    KNOWN_PLAZA_CITIES,
-    KNOWN_STUDENTEXPERIENCE_CITIES,
-    KNOWN_XIOR_CITIES,
-)
+from mcore.registry import KNOWN_CITIES, TARGET_SPECS, target_name
+from mcore.sources import KNOWN_SOURCES
 
 #: 已知的 Holland2Stay 可用状态 ID → 荷兰语标签。取自 AVAILABILITY_FILTERS 的
 #: 六个取值（见 ARCHITECTURE 的房源状态与完整性）。用于校验，不用于产生默认值。
@@ -135,7 +127,7 @@ def parse_cities(raw: str) -> tuple[list[tuple[str, int]], list[Problem]]:
         if city_id not in known_ids:
             problems.append(Problem(
                 "CITIES", entry,
-                f"ID {city_id} 不在已知城市表里（config.KNOWN_CITIES）",
+                f"ID {city_id} 不在已知城市表里（mcore.registry.KNOWN_CITIES）",
                 fatal=False,
             ))
         elif known_by_id[city_id] != name:
@@ -150,23 +142,13 @@ def parse_cities(raw: str) -> tuple[list[tuple[str, int]], list[Problem]]:
 
 #: 各平台的 target 注册表：key → 显示名。
 _KNOWN_TARGETS: dict[str, dict[str, str]] = {
-    "ourdomain": {c["key"]: c["name"] for c in KNOWN_OURDOMAIN_CITIES},
-    "ourcampus": {c["key"]: c["name"] for c in KNOWN_OURCAMPUS_CITIES},
-    "xior": {c["key"]: f"{c['city']} {c['bldg']}" for c in KNOWN_XIOR_CITIES},
-    "magis": {c["key"]: c["name"] for c in KNOWN_MAGIS_CITIES},
-    "studentexperience": {c["key"]: c["name"]
-                          for c in KNOWN_STUDENTEXPERIENCE_CITIES},
-    "plaza": {c["key"]: c["name"] for c in KNOWN_PLAZA_CITIES},
+    source: {c["key"]: target_name(c) for c in spec.registry}
+    for source, spec in TARGET_SPECS.items()
 }
 
 #: 环境变量名 → 它描述的是哪个平台。
 TARGET_KEYS: dict[str, str] = {
-    "OURDOMAIN_CITIES": "ourdomain",
-    "OURCAMPUS_CITIES": "ourcampus",
-    "XIOR_CITIES": "xior",
-    "MAGIS_CITIES": "magis",
-    "STUDENTEXPERIENCE_CITIES": "studentexperience",
-    "PLAZA_CITIES": "plaza",
+    spec.env_key: source for source, spec in TARGET_SPECS.items()
 }
 
 
@@ -326,11 +308,11 @@ STRUCTURED_KEYS = frozenset(_PARSERS)
 # 所以判的是**增量**：与上次看到的注册表相比新出现、且没进订阅的那些。第一次运行
 # （没有快照）只记录不报，否则升级上来的头一轮就是那 50 条。
 
-#: 空串含义是「全选」的键。见 app/routes/settings.py 里的同一张表——那边说的是
-#: 保存时怎么解释空串，这边说的是算订阅集时怎么解释，必须一致。
-_ALL_WHEN_EMPTY = frozenset({
-    "XIOR_CITIES", "MAGIS_CITIES", "STUDENTEXPERIENCE_CITIES", "PLAZA_CITIES",
-})
+#: 空串含义是「全选」的键。由 ``TargetSpec.all_when_empty`` 派生，config 的解析
+#: 与设置页的保存也读同一个字段，三处不会再各写一份。
+_ALL_WHEN_EMPTY = frozenset(
+    spec.env_key for spec in TARGET_SPECS.values() if spec.all_when_empty
+)
 
 #: 参与漂移检查的键：形如「一张注册表 + 一条订阅串」的那些。
 DRIFT_KEYS: tuple[str, ...] = ("CITIES", *TARGET_KEYS)

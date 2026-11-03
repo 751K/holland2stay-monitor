@@ -5,7 +5,7 @@ import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
-from booker import BookingResult
+from bookers.h2s_checkout import BookingResult
 from config import AutoBookConfig, AvailabilityFilter, CityFilter, Config
 from models import Listing
 from monitor import _assign_auto_book_candidates, run_once

@@ -11,7 +11,7 @@ from app.db import storage
 from app.jinja_filters import available_display, local_time, status_short
 from app.services.listing_service import get_filter_options, query_listing_rows, serialize_listing, sort_listing_rows, status_rank
 from app.services.listing_detail import detail_sections, price_note
-from config import ListingFilter
+from filters import ListingFilter
 from mcore.sources import SPECS
 
 def _number(raw: str, label: str):

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from booker import BookingResult
+from bookers.h2s_checkout import BookingResult
 from models import Listing
 from mcore import booking_round, post_round
 

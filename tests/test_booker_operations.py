@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-import booker
+import bookers.h2s_checkout as booker
 import h2s_booking_gql as gql
 
 
@@ -113,14 +113,14 @@ class TestCreateBooking:
             raise AssertionError("占房不该再走 GraphQL —— addNewBooking 已被 403")
 
     def test_posts_to_api_booking_and_returns_cart_id(self):
-        import booker
+        import bookers.h2s_checkout as booker
         f = self._F()
         assert booker.create_booking(f, "tok", "r-x-1", "2026-09-03") == "CART-1"
         assert f.calls[0]["path"] == "/api/booking"
 
     def test_payload_matches_the_site(self):
         import json
-        import booker
+        import bookers.h2s_checkout as booker
         f = self._F()
         booker.create_booking(f, "tok", "r-x-1", "2026-09-03")
         body = json.loads(f.calls[0]["body"])
@@ -132,14 +132,14 @@ class TestCreateBooking:
         assert "challengeToken" in body and "challengeProvider" in body
 
     def test_sends_bearer(self):
-        import booker
+        import bookers.h2s_checkout as booker
         f = self._F()
         booker.create_booking(f, "the-jwt", "r-x-1", None)
         assert f.calls[0]["headers"].get("Authorization") == "Bearer the-jwt"
 
     def test_401_is_auth_error(self):
         import pytest as _p
-        import booker
+        import bookers.h2s_checkout as booker
         f = self._F(status=401, text='{"error":"Unauthorized"}')
         with _p.raises(booker.AuthError):
             booker.create_booking(f, "stale", "r-x-1", None)
@@ -147,7 +147,7 @@ class TestCreateBooking:
     def test_missing_cart_id_raises(self):
         """没 cartId = 没占到房。绝不能当成功往下走 placeOrder。"""
         import pytest as _p
-        import booker
+        import bookers.h2s_checkout as booker
         f = self._F(text='{"ok":true}')
         with _p.raises(RuntimeError, match="cartId"):
             booker.create_booking(f, "tok", "r-x-1", None)
@@ -155,7 +155,7 @@ class TestCreateBooking:
     def test_missing_booking_field_raises(self):
         """站点前端也检查 booking 字段——车建了但没占上房，同样是失败。"""
         import pytest as _p
-        import booker
+        import bookers.h2s_checkout as booker
         f = self._F(text='{"cartId":"CART-1"}')
         with _p.raises(RuntimeError):
             booker.create_booking(f, "tok", "r-x-1", None)
@@ -164,7 +164,7 @@ class TestCreateBooking:
         """回归：_do_book 里不能再出现 create_empty_cart / add_to_cart 的调用。"""
         import ast
         import pathlib
-        src = pathlib.Path("booker.py").read_text(encoding="utf-8")
+        src = pathlib.Path("bookers/h2s_checkout.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "_do_book":

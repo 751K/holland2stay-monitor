@@ -45,7 +45,7 @@ class TestAccountFilters:
         """
         from collections import Counter
 
-        from config import dim_scope_badge
+        from app.filter_scope import dim_scope_badge
 
         html = _account_html(client, header)
         assert f'<html lang="{lang}"' in html

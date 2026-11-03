@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from collections.abc import Iterable
 from typing import Optional
 
-from config import canonical_city
+from mcore.registry import canonical_city
 
 from ._derived import derived_from_features
 from models import (
@@ -202,7 +202,7 @@ def dedupe_feature_values(raw_values: Iterable[str]) -> list[str]:
        大小写不同的同一个词会原样放行：magis 的房型写 ``studio``，另外四个
        平台写 ``Studio``，下拉里于是并排出现两个字面完全一样的 "Studio"。
 
-    第二层不影响过滤结果——``config.whitelist_matches`` 两个分支都大小写不
+    第二层不影响过滤结果——``filters.whitelist_matches`` 两个分支都大小写不
     敏感，勾哪个都命中全部房源；坏的只是候选列表本身。
 
     为什么是独立的纯函数
